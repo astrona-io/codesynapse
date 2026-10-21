@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../schema.json
+id: k8s-privilege-escalation
+title: Privilege escalation allowed
+severity: high
+cwe: [CWE-269]
+category: config
+languages: [yaml]
+why: Allowing privilege escalation lets setuid binaries regain root inside the container.
+fix: 'Set allowPrivilegeEscalation: false.'
+references:
+  - https://cwe.mitre.org/data/definitions/269.html
+examples:
+  - language: yaml
+    vulnerable: 'allowPrivilegeEscalation: true'
+    fixed: 'allowPrivilegeEscalation: false'

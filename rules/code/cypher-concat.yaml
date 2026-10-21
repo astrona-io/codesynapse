@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../schema.json
+id: cypher-concat
+title: Cypher query built from non-constant strings
+severity: high
+cwe: [CWE-943]
+category: code
+languages: [go]
+why: Cypher built from strings is injectable just like SQL, and labels or relationship types cannot be parameterised.
+fix: Pass values as parameters; allowlist labels and relationship types.
+references:
+  - https://cwe.mitre.org/data/definitions/943.html
+examples:
+  - language: go
+    vulnerable: 'session.Run(ctx, "MATCH (u:User {name: ''"+name+"''}) RETURN u", nil)'
+    fixed: 'session.Run(ctx, "MATCH (u:User {name: $name}) RETURN u", map[string]any{"name": name})'

@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../schema.json
+id: unsafe-pointer
+title: unsafe package used
+severity: low
+cwe: [CWE-242]
+category: code
+languages: [go]
+why: unsafe bypasses memory safety; mistakes become memory corruption instead of panics.
+fix: Justify each use; check alignment and lifetime assumptions.
+references:
+  - https://cwe.mitre.org/data/definitions/242.html
+examples:
+  - language: go
+    vulnerable: s := *(*string)(unsafe.Pointer(&b))
+    fixed: s := string(b) // copy; or strings.Clone when ownership is unclear

@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../schema.json
+id: dom-xss
+title: HTML injected from a dynamic value
+severity: high
+cwe: [CWE-79]
+category: code
+languages: [javascript, typescript, vue]
+why: Assigning untrusted strings as HTML lets attackers inject script into the page.
+fix: Use textContent / framework bindings; sanitise with DOMPurify when HTML is required.
+references:
+  - https://cwe.mitre.org/data/definitions/79.html
+examples:
+  - language: typescript
+    vulnerable: el.innerHTML = userBio
+    fixed: |-
+      el.textContent = userBio
+      // or, when HTML is required:
+      el.innerHTML = DOMPurify.sanitize(userBio)

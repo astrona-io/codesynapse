@@ -1,0 +1,116 @@
+# Local stack: Neo4j + API + MCP + web dashboard.
+#   cp .env.example .env   # set passwords/tokens
+#   just up                # or: docker compose up -d --build
+# Repositories to index live under ${SOURCES_DIR} (default ./sources) and are
+# mounted read-only. All ports bind to 127.0.0.1 only.
+name: codesynapse
+
+services:
+  neo4j:
+    image: docker.io/library/neo4j:5.26-community
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP:-1G}
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-512M}
+    ports:
+      - "127.0.0.1:7474:7474" # browser
+      - "127.0.0.1:7687:7687" # bolt
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: cmd/codesynapse-api/Dockerfile
+    environment:
+      CODESYNAPSE_NEO4J_URI: neo4j://neo4j:7687
+      CODESYNAPSE_NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      CODESYNAPSE_API_TOKEN: ${CODESYNAPSE_API_TOKEN:?set CODESYNAPSE_API_TOKEN in .env}
+      # Module downloads during ingest. Keep false for repositories you do not trust.
+      CODESYNAPSE_ALLOW_NETWORK: ${CODESYNAPSE_ALLOW_NETWORK:-false}
+      # Check go.mod dependencies against osv.dev (sends module paths + versions only).
+      CODESYNAPSE_VULN_SCAN: ${CODESYNAPSE_VULN_SCAN:-true}
+      # Repositories added by URL are cloned here; "Sync" fetches into them.
+      CODESYNAPSE_WORKSPACE: /workspace
+      # Optional token for private repositories on one host (never logged).
+      CODESYNAPSE_GIT_TOKEN: ${CODESYNAPSE_GIT_TOKEN:-}
+      CODESYNAPSE_GIT_TOKEN_HOST: ${CODESYNAPSE_GIT_TOKEN_HOST:-github.com}
+      CODESYNAPSE_ALLOW_PRIVATE_GIT: ${CODESYNAPSE_ALLOW_PRIVATE_GIT:-false}
+    volumes:
+      - ${SOURCES_DIR:-./sources}:/sources:ro
+      - workspace:/workspace
+      - go-cache:/cache
+    ports:
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    # Declared here as well as in the Dockerfile: Podman's default OCI image
+    # format drops Dockerfile HEALTHCHECKs.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      neo4j:
+        condition: service_healthy
+
+  mcp:
+    build:
+      context: .
+      dockerfile: cmd/codesynapse-mcp/Dockerfile
+    environment:
+      CODESYNAPSE_NEO4J_URI: neo4j://neo4j:7687
+      CODESYNAPSE_NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      CODESYNAPSE_MCP_TOKEN: ${CODESYNAPSE_MCP_TOKEN:?set CODESYNAPSE_MCP_TOKEN in .env}
+    volumes:
+      # Same paths as in the api container, so impact-by-git-refs can find checkouts.
+      - ${SOURCES_DIR:-./sources}:/sources:ro
+      - workspace:/workspace:ro
+    ports:
+      - "127.0.0.1:8090:8090"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      neo4j:
+        condition: service_healthy
+
+  web:
+    build:
+      context: web
+    environment:
+      NUXT_API_BASE: http://api:8080
+      NUXT_API_TOKEN: ${CODESYNAPSE_API_TOKEN}
+    ports:
+      - "127.0.0.1:3000:3000"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  neo4j-data:
+  workspace:
+  go-cache:

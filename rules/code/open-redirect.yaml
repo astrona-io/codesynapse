@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../schema.json
+id: open-redirect
+title: Redirect target from request input
+severity: medium
+cwe: [CWE-601]
+category: code
+languages: [javascript, typescript]
+why: Redirecting to a URL from the request lets phishing links borrow your domain.
+fix: Redirect only to allowlisted, relative destinations.
+references:
+  - https://cwe.mitre.org/data/definitions/601.html
+examples:
+  - language: typescript
+    vulnerable: res.redirect(req.query.next)
+    fixed: |-
+      const next = String(req.query.next ?? '/')
+      res.redirect(next.startsWith('/') && !next.startsWith('//') ? next : '/')

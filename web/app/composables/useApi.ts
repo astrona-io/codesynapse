@@ -1,0 +1,22 @@
+// All data flows through the Nuxt server proxy at /api/cg, never directly to
+// the Go API, so the API token stays on the server.
+export function apiPath(path: string): string {
+  return `/api/cg/${path.replace(/^\/+/, '')}`
+}
+
+export function useApiGet<T>(path: MaybeRefOrGetter<string>, opts: { immediate?: boolean } = {}) {
+  return useFetch<T>(() => apiPath(toValue(path)), { key: toValue(path), immediate: opts.immediate ?? true })
+}
+
+export function apiPost<T>(path: string, body: unknown): Promise<T> {
+  return $fetch(apiPath(path), { method: 'POST', body: body as Record<string, unknown> }) as Promise<T>
+}
+
+export function apiErrorMessage(err: unknown): string {
+  const e = err as { data?: { detail?: string; statusMessage?: string }; message?: string }
+  return e?.data?.detail ?? e?.data?.statusMessage ?? e?.message ?? String(err)
+}
+
+export function repoPath(repo: string, rest: string): string {
+  return `repos/${encodeURIComponent(repo)}/${rest}`
+}

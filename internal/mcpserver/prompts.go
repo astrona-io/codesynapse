@@ -1,0 +1,125 @@
+package mcpserver
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// taskPrompt is one of the guided workflows from docs/AGENT_GUIDE.md,
+// exposed as an MCP prompt so clients can offer them as slash commands.
+type taskPrompt struct {
+	name, description, arg, argDescription string
+	render                                 func(value string) string
+}
+
+var taskPrompts = []taskPrompt{
+	{
+		name: "refactor-analysis", arg: "symbol",
+		description:    "Analyzes blast radius, caller impact, and test coverage prior to modifying a symbol.",
+		argDescription: "Qualified symbol name (e.g., store.(*Store).Get)",
+		render: func(sym string) string {
+			return fmt.Sprintf(`I am planning to refactor the symbol %s. Before changing any code, use CodeSynapse to:
+1. Retrieve its signature, doc summary and risk score with get_symbol_context (verbosity: "full").
+2. List all direct and transitive callers (get_call_graph, direction: callers), highlighting exported or security-sensitive symbols affected.
+3. Identify the unit tests covering this symbol and report untested public callers (untested_public_callers).
+4. If it is an interface or interface method, list implementations with get_implementations.
+5. Outline a safe, minimal plan for making this change without breaking callers, and name the exact file:line ranges to edit.`, sym)
+		},
+	},
+	{
+		name: "pr-impact-review", arg: "files",
+		description:    "Generates a security and risk-scored review pack for modified files.",
+		argDescription: "Comma-separated list of modified file paths",
+		render: func(files string) string {
+			return fmt.Sprintf(`Review the changes to these files using CodeSynapse: %s
+1. Call get_pr_context with files: [%s] (or pass the unified diff if you have it) to compute blast radius and risk for every modified symbol.
+2. Check whether any modified symbol touches security-tagged APIs (sensitive_touched, External nodes) or carries findings; call security_report with min_severity: "medium" for context.
+3. Verify that new or modified public functions have unit tests (exported_untested lists the gaps).
+4. Summarize high-risk changes, missing test coverage, and potential architectural side effects, citing file:line.`, files, quoteList(files))
+		},
+	},
+	{
+		name: "package-onboarding", arg: "package",
+		description:    "Explains how a package fits into the codebase: API, dependencies, hubs.",
+		argDescription: "Package path or name (e.g., internal/store)",
+		render: func(pkg string) string {
+			return fmt.Sprintf(`I want to understand how package %s fits into this codebase. Use CodeSynapse to:
+1. Call get_symbol_context with symbol: %q for its exported structs, interfaces, entry points and hub symbols.
+2. Show its key dependency edges: imports and imported_by from that answer, and get_call_graph on the top hub for CALLS into other packages.
+3. For each central interface, list implementations with get_implementations.
+4. Summarize the package's architecture in 3-4 bullet points based on graph data only.`, pkg, pkg)
+		},
+	},
+	{
+		name: "bug-investigation", arg: "symbol",
+		description:    "Traces callers, interface dispatch and recent churn around a suspected bug location.",
+		argDescription: "Symbol or file location where the bug appears",
+		render: func(sym string) string {
+			return fmt.Sprintf(`I am investigating a bug originating around %s. Use CodeSynapse to:
+1. Trace the upstream caller chain with get_call_graph (direction: callers, depth: 3) and list the entry points that reach it.
+2. Identify interface dispatches (DISPATCHES_TO) in the chain and confirm the concrete implementations with get_implementations.
+3. Check recent churn with get_symbol_context (verbosity: "full", churn) and file_history on the affected files to spot recent regressions.
+4. Give me a focused list of only the exact files and symbol line ranges I need to inspect.`, sym)
+		},
+	},
+}
+
+func quoteList(csv string) string {
+	var out []string
+	for _, f := range strings.Split(csv, ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, fmt.Sprintf("%q", f))
+		}
+	}
+	return strings.Join(out, ", ")
+}
+
+func registerPrompts(s *mcp.Server) {
+	for _, p := range taskPrompts {
+		s.AddPrompt(&mcp.Prompt{
+			Name: p.name, Description: p.description,
+			Arguments: []*mcp.PromptArgument{{Name: p.arg, Description: p.argDescription, Required: true}},
+		}, func(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+			v := strings.TrimSpace(req.Params.Arguments[p.arg])
+			if v == "" {
+				return nil, fmt.Errorf("argument %q is required", p.arg)
+			}
+			if len(v) > 2000 {
+				return nil, fmt.Errorf("argument %q is too long", p.arg)
+			}
+			return &mcp.GetPromptResult{
+				Description: p.description,
+				Messages:    []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: p.render(v)}}},
+			}, nil
+		})
+	}
+}
+
+// registerReviewPrompt adds the guided code-review workflow (only when the
+// review tools are enabled).
+func registerReviewPrompt(s *mcp.Server) {
+	s.AddPrompt(&mcp.Prompt{
+		Name:        "code-review",
+		Description: "Review a change or area of the code with CodeSynapse and submit the review so it appears in the UI.",
+		Arguments:   []*mcp.PromptArgument{{Name: "target", Description: "What to review: a diff, base..head refs, file paths, or a package", Required: true}},
+	}, func(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		target := strings.TrimSpace(req.Params.Arguments["target"])
+		if target == "" || len(target) > 4000 {
+			return nil, fmt.Errorf("argument %q is required (max 4000 characters)", "target")
+		}
+		text := fmt.Sprintf(`Review %s using CodeSynapse, then submit the review.
+
+1. Scope: call get_pr_context (diff, files or base/head) to get changed symbols, risk, blast radius, tests and findings. For a package or area, use get_symbol_context and minimal_context instead.
+2. Security: call security_report (min_severity: "medium") and check findings in the changed code. For each, call rule_guide with its rule and language.
+3. Read only the line ranges you need (file_outline / locations). Look for bugs, security issues, missing tests (exported_untested), performance traps and maintainability problems.
+4. Submit with submit_review:
+   - title and a short summary of your overall assessment
+   - verdict: approve, comment, or request_changes if anything high/critical must be fixed first
+   - one comment per issue, anchored to file and line, with severity, category, a clear message and a concrete suggestion (replacement code when you can)
+5. Reply with the review page returned by submit_review and the top three issues.`, target)
+		return &mcp.GetPromptResult{Description: "Guided code review", Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: text}}}}, nil
+	})
+}

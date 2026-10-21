@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../schema.json
+id: code-injection
+title: Dynamic code evaluation
+severity: high
+cwe: [CWE-95]
+category: code
+languages: [python, javascript, typescript]
+why: eval and friends execute whatever string they receive; an attacker who controls part of it controls the process.
+fix: Remove eval/exec/new Function; parse data with a real parser.
+references:
+  - https://cwe.mitre.org/data/definitions/95.html
+examples:
+  - language: python
+    vulnerable: value = eval(request.args["expr"])
+    fixed: |-
+      import ast
+      value = ast.literal_eval(request.args["expr"])  # literals only
+  - language: typescript
+    vulnerable: const fn = new Function('x', body)
+    fixed: |-
+      const ops = { double: (x: number) => x * 2 }
+      const fn = ops[name as keyof typeof ops]

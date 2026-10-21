@@ -1,0 +1,342 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
+	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+
+	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/parisnakitakejser/codesynapse/internal/reviews"
+	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
+	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
+)
+
+func newTestServer(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+	sources := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(sources, "proj"), 0o750))
+	srv := New(ctx, Config{SourcesRoot: sources, Version: "test"}, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+	return ts, sources
+}
+
+func get(t *testing.T, ts *httptest.Server, path string, out any) int {
+	t.Helper()
+	res, err := http.Get(ts.URL + path) //nolint:noctx // test
+	require.NoError(t, err)
+	defer res.Body.Close() //nolint:errcheck // test
+	if out != nil && res.StatusCode == 200 {
+		require.NoError(t, json.NewDecoder(res.Body).Decode(out))
+	}
+	return res.StatusCode
+}
+
+func post(t *testing.T, ts *httptest.Server, path, body string) int {
+	t.Helper()
+	res, err := http.Post(ts.URL+path, "application/json", strings.NewReader(body)) //nolint:noctx // test
+	require.NoError(t, err)
+	defer res.Body.Close() //nolint:errcheck // test
+	return res.StatusCode
+}
+
+func TestReadEndpoints(t *testing.T) {
+	ts, _ := newTestServer(t)
+	base := "/api/v1/repos/" + storetest.Repo
+
+	var dash Dashboard
+	require.Equal(t, get(t, ts, base+"/dashboard", &dash), 200)
+	assert.Equal(t, dash.Stats.Tests, 1)
+	require.NotEmpty(t, dash.MostCalled)
+	assert.Equal(t, dash.MostCalled[0].Node.Name, "Handler")
+	assert.Len(t, dash.Security, 1)
+
+	var graph GraphView
+	require.Equal(t, get(t, ts, base+"/graph?id=Handler", &graph), 200)
+	assert.Greater(t, len(graph.Nodes), 3)
+	assert.Greater(t, len(graph.Edges), 2)
+
+	tests := []struct {
+		path string
+		want int
+	}{
+		{"/healthz", 200},
+		{"/api/v1/repos", 200},
+		{base + "/overview", 200},
+		{base + "/search?q=do", 200},
+		{base + "/search", 400},
+		{base + "/search?q=x&kind=Nope", 400},
+		{base + "/symbol?id=Do", 409}, // ambiguous: interface and concrete method
+		{base + "/symbol?id=" + url.QueryEscape(storetest.ID("Function", "app.Handler")), 200},
+		{base + "/outline?file=app/app.go", 200},
+		{base + "/list?kind=Function&metric=complexity", 200},
+		{base + "/list?metric=bogus", 400},
+		{base + "/hotspots", 200},
+		{base + "/packages/graph", 200},
+		{"/api/v1/repos/nope/dashboard", 404},
+		{"/api/v1/sources", 200},
+		{"/api/v1/settings", 200},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			assert.Equal(t, get(t, ts, tt.path, nil), tt.want)
+		})
+	}
+}
+
+func TestImpact(t *testing.T) {
+	ts, _ := newTestServer(t)
+	diff := "diff --git a/app/app.go b/app/app.go\n--- a/app/app.go\n+++ b/app/app.go\n@@ -10 +10 @@\n"
+	body, err := json.Marshal(map[string]string{"diff": diff})
+	require.NoError(t, err)
+	assert.Equal(t, post(t, ts, "/api/v1/repos/"+storetest.Repo+"/impact", string(body)), 200)
+	assert.Equal(t, post(t, ts, "/api/v1/repos/"+storetest.Repo+"/impact", `{"diff":"x","extra":1}`), 400)
+}
+
+func TestIngestRejectsEscapes(t *testing.T) {
+	ts, sources := newTestServer(t)
+	outside := t.TempDir()
+	require.NoError(t, os.Symlink(outside, filepath.Join(sources, "link")))
+	for _, body := range []string{
+		`{"source":"../etc"}`,
+		`{"source":"/etc"}`,
+		`{"source":"link"}`,
+		`{"source":"missing"}`,
+		`{"source":"proj","repo":"bad name"}`,
+		`{"source":""}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			assert.Equal(t, post(t, ts, "/api/v1/ingest", body), 400)
+		})
+	}
+}
+
+func TestValidRepoName(t *testing.T) {
+	assert.True(t, validRepoName("codesynapse_v1.2"))
+	assert.False(t, validRepoName(".hidden"))
+	assert.False(t, validRepoName("a/b"))
+	assert.False(t, validRepoName(strings.Repeat("a", 101)))
+}
+
+func TestGraphExplorerEndpoints(t *testing.T) {
+	ts, _ := newTestServer(t)
+	base := "/api/v1/repos/" + storetest.Repo
+
+	var overview GraphView
+	require.Equal(t, get(t, ts, base+"/graph/overview?limit=10", &overview), 200)
+	assert.Greater(t, len(overview.Nodes), 2)
+	assert.NotEmpty(t, overview.Edges)
+
+	var expanded GraphView
+	require.Equal(t, get(t, ts, base+"/graph/expand?id=Handler", &expanded), 200)
+	names := map[string]bool{}
+	for _, n := range expanded.Nodes {
+		names[n.Name] = true
+	}
+	assert.True(t, names["app.main"], "caller")
+	assert.True(t, names["Usage"], "mentioning doc section")
+	assert.True(t, names["app.go"], "defining file")
+
+	assert.Equal(t, get(t, ts, base+"/graph/overview?edge=BOGUS", nil), 400)
+
+	ids, err := json.Marshal(map[string]any{"ids": []string{storetest.ID("Function", "app.main"), storetest.ID("Function", "app.Handler")}})
+	require.NoError(t, err)
+	assert.Equal(t, post(t, ts, base+"/graph/edges", string(ids)), 200)
+	assert.Equal(t, post(t, ts, base+"/graph/edges", `{"ids":["other|Function|x"]}`), 400)
+}
+
+func TestScanContent(t *testing.T) {
+	dir := t.TempDir()
+	for p, body := range map[string]string{
+		"main.go": "package main", "svc/app.py": "", "web/a.ts": "", "web/a.d.ts": "", "web/node_modules/x/i.js": "",
+		"chart/Chart.yaml": "", "chart/templates/d.yaml": "", "README.md": "", ".github/workflows/ci.yml": "", "docker-compose.yml": "",
+	} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(dir, p)), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, p), []byte(body), 0o600))
+	}
+	c, truncated := scanContent(dir)
+	assert.False(t, truncated)
+	assert.Equal(t, c["go"], 1)
+	assert.Equal(t, c["python"], 1)
+	assert.Equal(t, c["typescript"], 1, ".d.ts and node_modules skipped")
+	assert.Equal(t, c["javascript"], 0)
+	assert.Equal(t, c["helm"], 1)
+	assert.Equal(t, c["markdown"], 1)
+	assert.Equal(t, c["github-actions"], 1)
+	assert.Equal(t, c["compose"], 1)
+	assert.Equal(t, c["yaml"], 4)
+}
+
+func TestSyncAndRegister(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sources := t.TempDir()
+	proj := filepath.Join(sources, "proj")
+	require.NoError(t, os.Mkdir(proj, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(proj, "README.md"), []byte("# Proj\n"), 0o600))
+
+	st := memory.New()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("proj", model.KindRepository, "proj"), Kind: model.KindRepository, Repo: "proj", Name: "proj", Root: proj, Branch: "main"})
+	require.NoError(t, st.ReplaceRepo(ctx, "proj", g))
+	srv := New(ctx, Config{SourcesRoot: sources, Workspace: t.TempDir()}, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	assert.Equal(t, post(t, ts, "/api/v1/repos/proj/sync", `{}`), http.StatusAccepted, "mounted source re-ingests")
+	assert.Equal(t, post(t, ts, "/api/v1/repos/proj/sync", `{"branch":"feature"}`), 400, "cannot switch branch of a mount")
+	assert.Equal(t, post(t, ts, "/api/v1/repos/nope/sync", `{}`), 404)
+
+	for _, body := range []string{
+		`{"url":"http://github.com/a/b"}`,
+		`{"url":"file:///etc/passwd"}`,
+		`{"url":"https://user:pw@github.com/a/b"}`,
+		`{"url":"https://127.0.0.1/a/b"}`,
+		`{"url":"https://github.com/a/b","branch":"--upload-pack=x"}`,
+	} {
+		assert.Equal(t, post(t, ts, "/api/v1/repos", body), 400, body)
+	}
+}
+
+func TestWorkspaceOverview(t *testing.T) {
+	ts, _ := newTestServer(t)
+	var ov Overview
+	require.Equal(t, get(t, ts, "/api/v1/overview", &ov), 200)
+	assert.Equal(t, ov.Totals.Repos, 1)
+	require.Len(t, ov.Repos, 1)
+	assert.Equal(t, ov.Repos[0].Name, storetest.Repo)
+	assert.Greater(t, ov.Totals.Nodes, 5)
+	assert.Equal(t, ov.Totals.NodeKinds["Function"], 3)
+	assert.Equal(t, ov.Repos[0].Grade, "A")
+}
+
+func TestJobHealth(t *testing.T) {
+	h := jobHealth([]Job{
+		{State: JobSucceeded, StartedAt: "2026-01-01T00:00:00Z", FinishedAt: "2026-01-01T00:00:10Z"},
+		{State: JobFailed, StartedAt: "2026-01-01T00:00:00Z", FinishedAt: "2026-01-01T00:00:30Z", Error: "boom"},
+		{State: JobRunning, StartedAt: "2026-01-01T00:01:00Z"},
+	})
+	assert.Equal(t, h.Succeeded, 1)
+	assert.Equal(t, h.Failed, 1)
+	assert.Equal(t, h.Running, 1)
+	assert.Equal(t, h.AvgDurationSec, 20.0)
+	assert.Equal(t, h.MaxDurationSec, 30.0)
+	assert.Len(t, h.RecentFailures, 1)
+}
+
+func put(t *testing.T, ts *httptest.Server, path, body string) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPut, ts.URL+path, strings.NewReader(body)) //nolint:noctx // test
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer res.Body.Close() //nolint:errcheck // test
+	return res.StatusCode
+}
+
+func del(t *testing.T, ts *httptest.Server, path string) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+path, nil) //nolint:noctx // test
+	require.NoError(t, err)
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer res.Body.Close() //nolint:errcheck // test
+	return res.StatusCode
+}
+
+func TestScheduleAndDelete(t *testing.T) {
+	ts, _ := newTestServer(t)
+	base := "/api/v1/repos/" + storetest.Repo
+	var sc struct {
+		State           string `json:"state"`
+		IntervalMinutes int    `json:"interval_minutes"`
+		NextRun         string `json:"next_run"`
+	}
+	require.Equal(t, get(t, ts, base+"/schedule", &sc), 200)
+	assert.Equal(t, sc.State, "manual")
+
+	assert.Equal(t, put(t, ts, base+"/schedule", `{"interval_minutes":60}`), 200)
+	require.Equal(t, get(t, ts, base+"/schedule", &sc), 200)
+	assert.Equal(t, sc.State, "active")
+	assert.NotEqual(t, sc.NextRun, "")
+
+	assert.Equal(t, put(t, ts, base+"/schedule", `{"interval_minutes":60,"paused":true}`), 200)
+	require.Equal(t, get(t, ts, base+"/schedule", &sc), 200)
+	assert.Equal(t, sc.State, "paused")
+	assert.Equal(t, put(t, ts, base+"/schedule", `{"interval_minutes":7}`), 400, "only allowed intervals")
+	assert.Equal(t, put(t, ts, "/api/v1/repos/nope/schedule", `{"interval_minutes":60}`), 404)
+
+	assert.Equal(t, del(t, ts, base), 204)
+	assert.Equal(t, get(t, ts, base+"/dashboard", nil), 404)
+	require.Equal(t, get(t, ts, base+"/schedule", &sc), 200)
+	assert.Equal(t, sc.State, "manual", "schedule removed with the repo")
+}
+
+func TestSchedulesPersistAndDue(t *testing.T) {
+	dir := t.TempDir()
+	s, err := loadSchedules(dir)
+	require.NoError(t, err)
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	_, err = s.set("a", 15, false, now)
+	require.NoError(t, err)
+	_, err = s.set("b", 60, true, now)
+	require.NoError(t, err)
+	assert.Len(t, s.due(now.Add(10*time.Minute)), 0)
+	assert.Equal(t, s.due(now.Add(16*time.Minute)), []string{"a"}, "paused schedules never run")
+	s.started("a", now.Add(16*time.Minute), nil)
+	assert.Len(t, s.due(now.Add(20*time.Minute)), 0)
+
+	again, err := loadSchedules(dir)
+	require.NoError(t, err)
+	assert.Equal(t, again.get("b").State(), "paused", "persisted to disk")
+}
+
+func TestReviewsAPI(t *testing.T) {
+	ctx := context.Background()
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+	rv, err := reviews.Prepare(reviews.Review{Repo: storetest.Repo, Title: "T", Comments: []reviews.CommentItem{{File: "app/app.go", Line: 9, Message: "m"}}}, time.Now())
+	require.NoError(t, err)
+	require.NoError(t, st.SaveReview(ctx, rv))
+	srv := New(ctx, Config{}, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	var list struct{ Reviews []reviews.Summary }
+	require.Equal(t, get(t, ts, "/api/v1/repos/"+storetest.Repo+"/reviews", &list), 200)
+	require.Len(t, list.Reviews, 1)
+	assert.Equal(t, list.Reviews[0].Counts.Open, 1)
+
+	patch := func(path, body string) int {
+		req, err := http.NewRequest(http.MethodPatch, ts.URL+path, strings.NewReader(body)) //nolint:noctx // test
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer res.Body.Close() //nolint:errcheck // test
+		return res.StatusCode
+	}
+	cpath := "/api/v1/reviews/" + rv.ID + "/comments/" + rv.Comments[0].ID
+	assert.Equal(t, patch(cpath, `{"status":"resolved","note":"done"}`), 200)
+	assert.Equal(t, patch(cpath, `{"status":"maybe"}`), 400)
+	assert.Equal(t, patch("/api/v1/reviews/nope/comments/x", `{"status":"resolved"}`), 404)
+	assert.Equal(t, del(t, ts, "/api/v1/reviews/"+rv.ID), 204)
+	assert.Equal(t, get(t, ts, "/api/v1/reviews/"+rv.ID, nil), 404)
+}

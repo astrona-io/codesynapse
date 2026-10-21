@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../schema.json
+id: template-unescaped
+title: Non-constant value marked safe for html/template
+severity: high
+cwe: [CWE-79]
+category: code
+languages: [go]
+why: Marking data as safe HTML turns off html/template's escaping; untrusted content then runs as script in users' browsers.
+fix: Do not convert untrusted data to template.HTML/JS/URL; let the template escape it.
+references:
+  - https://cwe.mitre.org/data/definitions/79.html
+examples:
+  - language: go
+    vulnerable: template.HTML(comment.Body)
+    fixed: |-
+      // pass the string and let the template escape it
+      tpl.Execute(w, map[string]string{"Body": comment.Body})

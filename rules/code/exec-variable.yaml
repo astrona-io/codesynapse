@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../schema.json
+id: exec-variable
+title: Process started from a non-constant program name
+severity: medium
+cwe: [CWE-78]
+category: code
+languages: [go, python, javascript, typescript]
+why: Starting a program whose name or command line comes from data lets that data choose what runs.
+fix: Allowlist the binary; never take it from user input.
+references:
+  - https://cwe.mitre.org/data/definitions/78.html
+examples:
+  - language: go
+    vulnerable: exec.Command(req.Tool, args...)
+    fixed: |-
+      tools := map[string]string{"fmt": "/usr/bin/gofmt"}
+      bin, ok := tools[req.Tool]
+      if !ok { return errUnknownTool }
+      exec.CommandContext(ctx, bin, args...)
+  - language: python
+    vulnerable: os.system("tar xzf " + path)
+    fixed: subprocess.run(["tar", "xzf", path], check=True)
+  - language: typescript
+    vulnerable: 'spawn(cmd, { shell: true })'
+    fixed: spawn('/usr/bin/tar', ['xzf', path])

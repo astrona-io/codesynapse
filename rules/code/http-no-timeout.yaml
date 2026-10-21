@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../schema.json
+id: http-no-timeout
+title: HTTP server without timeouts
+severity: medium
+cwe: [CWE-400]
+category: code
+languages: [go]
+why: A server without read timeouts can be exhausted by clients that send headers slowly (Slowloris).
+fix: Use http.Server with ReadHeaderTimeout (and Read/Write/Idle timeouts).
+references:
+  - https://cwe.mitre.org/data/definitions/400.html
+examples:
+  - language: go
+    vulnerable: http.ListenAndServe(":8080", mux)
+    fixed: |-
+      srv := &http.Server{Addr: ":8080", Handler: mux,
+      	ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second}
+      srv.ListenAndServe()

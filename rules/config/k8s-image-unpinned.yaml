@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../schema.json
+id: k8s-image-unpinned
+title: Container image not pinned
+severity: low
+cwe: [CWE-1104]
+category: config
+languages: [yaml]
+why: latest and untagged images change underneath you; a compromised or broken push is deployed silently.
+fix: Pin images by digest or a specific version tag, never latest.
+references:
+  - https://cwe.mitre.org/data/definitions/1104.html
+examples:
+  - language: yaml
+    vulnerable: 'image: nginx:latest'
+    fixed: 'image: nginx:1.27.2@sha256:<digest>'

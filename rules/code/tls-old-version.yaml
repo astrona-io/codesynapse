@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../schema.json
+id: tls-old-version
+title: TLS minimum version below 1.2
+severity: medium
+cwe: [CWE-326]
+category: code
+languages: [go]
+why: TLS 1.0 and 1.1 have known weaknesses and are disabled by modern clients and compliance baselines.
+fix: 'Set MinVersion: tls.VersionTLS12 or higher.'
+references:
+  - https://cwe.mitre.org/data/definitions/326.html
+examples:
+  - language: go
+    vulnerable: '&tls.Config{MinVersion: tls.VersionTLS10}'
+    fixed: '&tls.Config{MinVersion: tls.VersionTLS12}'

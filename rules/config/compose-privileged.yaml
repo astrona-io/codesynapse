@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../schema.json
+id: compose-privileged
+title: Compose service is privileged or uses host network
+severity: high
+cwe: [CWE-250]
+category: config
+languages: [yaml]
+why: Privileged services and host networking remove container isolation on the Docker host.
+fix: 'Remove privileged: true / network_mode: host.'
+references:
+  - https://cwe.mitre.org/data/definitions/250.html
+examples:
+  - language: yaml
+    vulnerable: |-
+      services:
+        tool:
+          privileged: true
+          network_mode: host
+    fixed: |-
+      services:
+        tool:
+          cap_drop: [ALL]
+          security_opt: ["no-new-privileges:true"]

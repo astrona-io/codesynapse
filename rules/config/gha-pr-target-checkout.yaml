@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../schema.json
+id: gha-pr-target-checkout
+title: pull_request_target checks out the PR head
+severity: critical
+cwe: [CWE-829]
+category: config
+languages: [github-actions]
+why: pull_request_target runs with a write token and secrets; checking out the PR head runs untrusted code with them.
+fix: Do not run untrusted PR code with a privileged token; use pull_request or split the workflow.
+references:
+  - https://cwe.mitre.org/data/definitions/829.html
+examples:
+  - language: github-actions
+    vulnerable: |-
+      on: pull_request_target
+      steps:
+        - uses: actions/checkout@v4
+          with: {ref: "${{ github.event.pull_request.head.sha }}"}
+    fixed: 'on: pull_request   # untrusted code gets a read-only token, no secrets'

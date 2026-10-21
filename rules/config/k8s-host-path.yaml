@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../schema.json
+id: k8s-host-path
+title: hostPath volume
+severity: medium
+cwe: [CWE-668]
+category: config
+languages: [yaml]
+why: hostPath mounts give the pod direct access to the node filesystem.
+fix: Use a PVC, configMap or emptyDir instead of hostPath.
+references:
+  - https://cwe.mitre.org/data/definitions/668.html
+examples:
+  - language: yaml
+    vulnerable: |-
+      volumes:
+        - name: data
+          hostPath: {path: /var/lib/data}
+    fixed: |-
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: data}

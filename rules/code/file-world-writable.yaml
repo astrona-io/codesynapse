@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../schema.json
+id: file-world-writable
+title: File or directory created world-writable
+severity: medium
+cwe: [CWE-732]
+category: code
+languages: [go]
+why: World-writable files and directories let any local user or compromised process tamper with them.
+fix: Use 0o600/0o640 for files and 0o750 for directories.
+references:
+  - https://cwe.mitre.org/data/definitions/732.html
+examples:
+  - language: go
+    vulnerable: os.WriteFile(path, data, 0o777)
+    fixed: os.WriteFile(path, data, 0o600)

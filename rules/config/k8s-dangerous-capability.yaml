@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../schema.json
+id: k8s-dangerous-capability
+title: Dangerous Linux capability added
+severity: high
+cwe: [CWE-250]
+category: config
+languages: [yaml]
+why: Capabilities like SYS_ADMIN and NET_ADMIN are close to full root on the node.
+fix: Drop ALL and add back only what is needed; never SYS_ADMIN or NET_ADMIN casually.
+references:
+  - https://cwe.mitre.org/data/definitions/250.html
+examples:
+  - language: yaml
+    vulnerable: |-
+      capabilities:
+        add: ["SYS_ADMIN"]
+    fixed: |-
+      capabilities:
+        drop: ["ALL"]
+        add: ["NET_BIND_SERVICE"]  # only what is needed

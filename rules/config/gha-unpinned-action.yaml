@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../schema.json
+id: gha-unpinned-action
+title: Third-party action not pinned to a commit
+severity: low
+cwe: [CWE-829]
+category: config
+languages: [github-actions]
+why: A tag can be moved to malicious code; pinning to a commit SHA freezes what runs.
+fix: Pin actions to a full commit SHA.
+references:
+  - https://cwe.mitre.org/data/definitions/829.html
+examples:
+  - language: github-actions
+    vulnerable: '- uses: someone/tool@v1'
+    fixed: '- uses: someone/tool@3f1c2a9b8e7d6c5b4a39281706f5e4d3c2b1a090 # v1.4.2'

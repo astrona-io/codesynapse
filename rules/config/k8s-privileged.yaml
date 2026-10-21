@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../schema.json
+id: k8s-privileged
+title: Privileged container
+severity: critical
+cwe: [CWE-250]
+category: config
+languages: [yaml]
+why: 'A privileged container has root on the node: escaping it is trivial.'
+fix: 'Remove privileged: true; grant only the capabilities needed.'
+references:
+  - https://cwe.mitre.org/data/definitions/250.html
+examples:
+  - language: yaml
+    vulnerable: |-
+      securityContext:
+        privileged: true
+    fixed: |-
+      securityContext:
+        privileged: false
+        allowPrivilegeEscalation: false
+        capabilities: {drop: ["ALL"]}

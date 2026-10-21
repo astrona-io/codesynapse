@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  template:
+    spec:
+      hostNetwork: true
+      containers:
+        - name: api
+          image: nginx:latest
+          securityContext:
+            privileged: true
+          env:
+            - name: DB_PASSWORD
+              value: "hunter2-very-secret"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: creds
+stringData:
+  token: abcdefgh12345

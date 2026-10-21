@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../schema.json
+id: k8s-run-as-root
+title: Container runs as root
+severity: medium
+cwe: [CWE-250]
+category: config
+languages: [yaml]
+why: Running as UID 0 turns any container escape or file-write bug into root access.
+fix: 'Set runAsNonRoot: true and a non-zero runAsUser.'
+references:
+  - https://cwe.mitre.org/data/definitions/250.html
+examples:
+  - language: yaml
+    vulnerable: |-
+      securityContext:
+        runAsUser: 0
+    fixed: |-
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001

@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../schema.json
+id: k8s-host-namespace
+title: Pod shares a host namespace
+severity: high
+cwe: [CWE-653]
+category: config
+languages: [yaml]
+why: Sharing the host network, PID or IPC namespace exposes node services and other pods' processes.
+fix: Remove hostNetwork/hostPID/hostIPC.
+references:
+  - https://cwe.mitre.org/data/definitions/653.html
+examples:
+  - language: yaml
+    vulnerable: |-
+      spec:
+        hostNetwork: true
+    fixed: |-
+      spec:
+        hostNetwork: false   # expose through a Service instead

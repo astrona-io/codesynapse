@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CodeSynapse security rule",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "severity", "category", "languages", "why", "fix", "examples"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "Must equal the file name without .yaml" },
+    "title": { "type": "string", "description": "One line, shown in reports" },
+    "severity": { "enum": ["info", "low", "medium", "high", "critical"] },
+    "cwe": { "type": "array", "items": { "type": "string", "pattern": "^CWE-[0-9]+$" } },
+    "category": { "enum": ["code", "config"], "description": "Must equal the directory" },
+    "languages": { "type": "array", "items": { "enum": ["go", "python", "javascript", "typescript", "vue", "yaml", "github-actions"] } },
+    "why": { "type": "string", "description": "Why it matters: the attack, in one or two sentences" },
+    "fix": { "type": "string", "description": "What to do instead, in one sentence" },
+    "references": { "type": "array", "items": { "type": "string", "format": "uri" } },
+    "examples": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["language", "vulnerable", "fixed"],
+        "properties": {
+          "language": { "type": "string" },
+          "vulnerable": { "type": "string" },
+          "fixed": { "type": "string" }
+        }
+      }
+    }
+  }
+}

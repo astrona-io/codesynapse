@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../schema.json
+id: http-client-default
+title: HTTP request through the default client (no timeout)
+severity: low
+cwe: [CWE-400]
+category: code
+languages: [go]
+why: The default client never times out, so one slow upstream can pile up goroutines until the service falls over.
+fix: Use an http.Client with Timeout, or a context deadline.
+references:
+  - https://cwe.mitre.org/data/definitions/400.html
+examples:
+  - language: go
+    vulnerable: resp, err := http.Get(url)
+    fixed: |-
+      client := &http.Client{Timeout: 10 * time.Second}
+      resp, err := client.Get(url)

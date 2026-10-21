@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../schema.json
+id: tls-insecure
+title: TLS certificate verification disabled
+severity: high
+cwe: [CWE-295]
+category: code
+languages: [go, python, javascript, typescript]
+why: Without certificate verification anyone on the network path can impersonate the server and read or change traffic.
+fix: Remove InsecureSkipVerify; configure RootCAs for private CAs.
+references:
+  - https://cwe.mitre.org/data/definitions/295.html
+examples:
+  - language: go
+    vulnerable: '&tls.Config{InsecureSkipVerify: true}'
+    fixed: |-
+      pool := x509.NewCertPool()
+      pool.AppendCertsFromPEM(caPEM)
+      &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+  - language: python
+    vulnerable: requests.get(url, verify=False)
+    fixed: requests.get(url, verify="/etc/ssl/internal-ca.pem")
+  - language: typescript
+    vulnerable: 'new https.Agent({ rejectUnauthorized: false })'
+    fixed: 'new https.Agent({ ca: fs.readFileSync(''internal-ca.pem'') })'

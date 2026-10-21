@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../schema.json
+id: ssrf-from-request
+title: Outbound request URL from HTTP request input
+severity: high
+cwe: [CWE-918]
+category: code
+languages: [go]
+why: Fetching URLs chosen by the client lets attackers reach internal services and cloud metadata endpoints.
+fix: Allowlist hosts and block internal address ranges.
+references:
+  - https://cwe.mitre.org/data/definitions/918.html
+examples:
+  - language: go
+    vulnerable: http.Get(r.URL.Query().Get("url"))
+    fixed: |-
+      u, err := url.Parse(r.URL.Query().Get("url"))
+      if err != nil || !allowedHosts[u.Hostname()] { return errForbidden }
+      client.Get(u.String())

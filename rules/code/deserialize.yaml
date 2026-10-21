@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../schema.json
+id: deserialize
+title: Unsafe deserialisation
+severity: high
+cwe: [CWE-502]
+category: code
+languages: [python]
+why: Deserialising untrusted pickle or unsafe YAML can execute arbitrary code.
+fix: Use json or yaml.safe_load; never unpickle untrusted data.
+references:
+  - https://cwe.mitre.org/data/definitions/502.html
+examples:
+  - language: python
+    vulnerable: |-
+      data = pickle.loads(blob)
+      cfg = yaml.load(text)
+    fixed: |-
+      data = json.loads(blob)
+      cfg = yaml.safe_load(text)

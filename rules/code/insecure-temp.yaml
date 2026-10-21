@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../schema.json
+id: insecure-temp
+title: Insecure temporary file
+severity: low
+cwe: [CWE-377]
+category: code
+languages: [python]
+why: mktemp returns a name that another process can create first (race), hijacking the file.
+fix: Use tempfile.mkstemp / NamedTemporaryFile.
+references:
+  - https://cwe.mitre.org/data/definitions/377.html
+examples:
+  - language: python
+    vulnerable: path = tempfile.mktemp()
+    fixed: fd, path = tempfile.mkstemp()

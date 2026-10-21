@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../schema.json
+id: insecure-rand
+title: math/rand used where crypto/rand may be needed
+severity: low
+cwe: [CWE-338]
+category: code
+languages: [go, python, javascript, typescript]
+why: math/rand and Math.random are predictable; tokens or IDs generated with them can be guessed.
+fix: Use crypto/rand for tokens, keys, nonces and IDs that must be unguessable.
+references:
+  - https://cwe.mitre.org/data/definitions/338.html
+examples:
+  - language: go
+    vulnerable: token := fmt.Sprint(rand.Int63())
+    fixed: |-
+      b := make([]byte, 32)
+      _, _ = crand.Read(b)
+      token := base64.RawURLEncoding.EncodeToString(b)
+  - language: python
+    vulnerable: token = str(random.getrandbits(64))
+    fixed: |-
+      import secrets
+      token = secrets.token_urlsafe(32)
+  - language: typescript
+    vulnerable: const token = Math.random().toString(36)
+    fixed: const token = crypto.randomBytes(32).toString('base64url')

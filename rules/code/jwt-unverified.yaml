@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../schema.json
+id: jwt-unverified
+title: JWT parsed without signature verification
+severity: high
+cwe: [CWE-347]
+category: code
+languages: [go, python, javascript, typescript]
+why: A JWT that is decoded without checking its signature can be forged by anyone.
+fix: Use Parse with a key function and validate alg, iss, aud and exp.
+references:
+  - https://cwe.mitre.org/data/definitions/347.html
+examples:
+  - language: go
+    vulnerable: tok, _, _ := new(jwt.Parser).ParseUnverified(raw, claims)
+    fixed: |-
+      tok, err := jwt.ParseWithClaims(raw, claims, keyfunc,
+      	jwt.WithValidMethods([]string{"RS256"}), jwt.WithIssuer(iss), jwt.WithAudience(aud))
+  - language: python
+    vulnerable: 'jwt.decode(token, options={"verify_signature": False})'
+    fixed: jwt.decode(token, key, algorithms=["RS256"], audience=AUD, issuer=ISS)
+  - language: typescript
+    vulnerable: const claims = jwt.decode(token)
+    fixed: 'const claims = jwt.verify(token, publicKey, { algorithms: [''RS256''], audience: AUD, issuer: ISS })'

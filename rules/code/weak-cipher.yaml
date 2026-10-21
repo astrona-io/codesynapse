@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../schema.json
+id: weak-cipher
+title: DES or RC4 used
+severity: high
+cwe: [CWE-327]
+category: code
+languages: [go]
+why: DES and RC4 are broken; encrypted data can be recovered.
+fix: Use AES-GCM or ChaCha20-Poly1305.
+references:
+  - https://cwe.mitre.org/data/definitions/327.html
+examples:
+  - language: go
+    vulnerable: block, _ := des.NewCipher(key)
+    fixed: |-
+      block, _ := aes.NewCipher(key) // 32-byte key
+      aead, _ := cipher.NewGCM(block)

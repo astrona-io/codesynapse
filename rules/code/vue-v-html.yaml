@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../schema.json
+id: vue-v-html
+title: v-html renders raw HTML
+severity: medium
+cwe: [CWE-79]
+category: code
+languages: [vue]
+why: v-html renders raw HTML without escaping; untrusted values become stored XSS.
+fix: Render text with {{ }}; sanitise before v-html.
+references:
+  - https://cwe.mitre.org/data/definitions/79.html
+examples:
+  - language: vue
+    vulnerable: <div v-html="bio" />
+    fixed: |-
+      <div>{{ bio }}</div>
+      <!-- or v-html="sanitize(bio)" with DOMPurify -->

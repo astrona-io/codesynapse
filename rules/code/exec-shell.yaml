@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../schema.json
+id: exec-shell
+title: Shell invoked with a non-constant command string
+severity: critical
+cwe: [CWE-78]
+category: code
+languages: [go, python, javascript, typescript]
+why: A shell parses the whole string, so any input containing ; | $( ) or backticks runs extra commands with the service's privileges.
+fix: Avoid sh -c; pass an explicit argv and validate every argument.
+references:
+  - https://cwe.mitre.org/data/definitions/78.html
+examples:
+  - language: go
+    vulnerable: exec.Command("sh", "-c", "convert "+name+" out.png")
+    fixed: exec.CommandContext(ctx, "convert", "--", name, "out.png")
+  - language: python
+    vulnerable: subprocess.run(f"convert {name} out.png", shell=True)
+    fixed: subprocess.run(["convert", "--", name, "out.png"], check=True)
+  - language: typescript
+    vulnerable: exec(`convert ${name} out.png`)
+    fixed: execFile('convert', ['--', name, 'out.png'])

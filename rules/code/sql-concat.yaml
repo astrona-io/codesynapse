@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../schema.json
+id: sql-concat
+title: SQL query built from non-constant strings
+severity: high
+cwe: [CWE-89]
+category: code
+languages: [go, python, javascript, typescript]
+why: 'Building SQL from strings lets input change the query itself: read other rows, bypass auth, drop tables.'
+fix: Use placeholders ($1, ?) and pass values as arguments.
+references:
+  - https://cwe.mitre.org/data/definitions/89.html
+examples:
+  - language: go
+    vulnerable: db.QueryContext(ctx, "SELECT * FROM users WHERE name = '"+name+"'")
+    fixed: db.QueryContext(ctx, "SELECT * FROM users WHERE name = $1", name)
+  - language: python
+    vulnerable: cur.execute(f"SELECT * FROM users WHERE name = '{name}'")
+    fixed: cur.execute("SELECT * FROM users WHERE name = %s", (name,))
+  - language: typescript
+    vulnerable: db.query(`SELECT * FROM users WHERE name = '${name}'`)
+    fixed: db.query('SELECT * FROM users WHERE name = $1', [name])

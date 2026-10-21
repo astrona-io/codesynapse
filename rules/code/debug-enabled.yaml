@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../schema.json
+id: debug-enabled
+title: Debug mode enabled
+severity: medium
+cwe: [CWE-489]
+category: code
+languages: [python]
+why: Debug mode exposes stack traces, internals and sometimes an interactive console.
+fix: Never enable framework debug mode outside local development.
+references:
+  - https://cwe.mitre.org/data/definitions/489.html
+examples:
+  - language: python
+    vulnerable: app.run(debug=True)
+    fixed: app.run(debug=os.environ.get("FLASK_DEBUG") == "1")
