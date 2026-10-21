@@ -44,7 +44,7 @@ services/api/           API service: cmd/codesynapse-api, Dockerfile, and packag
 services/mcp/           MCP service: cmd/codesynapse-mcp, Dockerfile
   internal/mcpserver/   MCP tools, prompts (prompts.go) and server instructions
 services/web/           Nuxt 4 dashboard (app/ pages+components, server/api/cg proxy, Dockerfile)
-deploy/k8s/             Kubernetes manifests (docker-compose.yml stays at the repo root)
+deploy/k8s/             Kustomize manifests (base + dev/prod overlays); docker-compose.yml stays at the repo root
 internal/model/         Node/Edge kinds, Graph, IDs. The schema lives here.
 internal/ingest/        Pipeline: golang/ (go/packages + go/types; security rules in findings.go),
                         lang/ (Python, JS/TS, Vue: pure-Go structural parsers + rules),
@@ -84,8 +84,11 @@ just up         # full stack in docker compose (creates .env with random secrets
 just db         # only Neo4j; then just dev-api / just dev-mcp / just dev-web
 just test-integration   # store contract tests against the compose Neo4j
 just review     # offline review pack for the current branch
+just image-build  # api, mcp and web images; then just k8s-secrets/k8s-apply (see deploy/k8s/README.md)
 just mcp        # register the MCP server with Claude Code, Codex, Gemini, OpenCode, Cursor
 ```
+
+Test Kubernetes manifests only on a throwaway kind cluster, with `--context` set explicitly; never on a shared or production cluster.
 
 Run `just test` and `just lint` before you call a Go change done, and `just web-check` for anything under `services/web/`.
 

@@ -1,0 +1,36 @@
+# Real cluster: images from your registry, an Ingress for the dashboard and
+# the MCP endpoint. Edit the registry, tag, hosts and storage class below.
+#   just image-push && just k8s-secrets prod && just k8s-apply prod
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Set here too: the base namespace does not reach resources this overlay generates.
+namespace: codesynapse
+resources:
+  - ../../base
+  - ingress.yaml
+images:
+  - name: codesynapse-api
+    newName: ghcr.io/parisnakitakejser/codesynapse-api
+    newTag: latest # pin to a version tag, e.g. v0.3.0
+  - name: codesynapse-mcp
+    newName: ghcr.io/parisnakitakejser/codesynapse-mcp
+    newTag: latest
+  - name: codesynapse-web
+    newName: ghcr.io/parisnakitakejser/codesynapse-web
+    newTag: latest
+secretGenerator:
+  - name: codesynapse-secrets
+    envs: [secrets.env]
+    options: {disableNameSuffixHash: true}
+# Uncomment to name a storage class for the volumes:
+# patches:
+#   - target: {kind: PersistentVolumeClaim, name: workspace}
+#     patch: |-
+#       - op: add
+#         path: /spec/storageClassName
+#         value: fast-ssd
+#   - target: {kind: StatefulSet, name: neo4j}
+#     patch: |-
+#       - op: add
+#         path: /spec/volumeClaimTemplates/0/spec/storageClassName
+#         value: fast-ssd

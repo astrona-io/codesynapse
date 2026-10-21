@@ -103,6 +103,59 @@ mcp:
 mcp-config:
     @echo '{ "mcpServers": { "codesynapse": { "type": "http", "url": "http://localhost:8090/mcp", "headers": { "Authorization": "Bearer '"$CODESYNAPSE_MCP_TOKEN"'" } } } }'
 
+# --- container images and Kubernetes --------------------------------------
+
+registry := env("REGISTRY", "ghcr.io/parisnakitakejser")
+platform := env("PLATFORM", "")
+engine := env("CONTAINER_ENGINE", `if command -v docker >/dev/null 2>&1; then echo docker; elif command -v podman >/dev/null 2>&1; then echo podman; else echo missing-container-runtime; fi`)
+
+# Build the api, mcp and web images, tagged codesynapse-<svc>:<tag> and <registry>/codesynapse-<svc>:<tag>. PLATFORM=linux/amd64 for a cluster of another architecture.
+image-build tag="dev":
+    #!/usr/bin/env sh
+    set -eu
+    p="{{platform}}"; plat=""; [ -z "$p" ] || plat="--platform $p"
+    for svc in api mcp; do
+        {{engine}} build $plat --build-arg VERSION={{version}} -f services/$svc/Dockerfile \
+            -t codesynapse-$svc:{{tag}} -t {{registry}}/codesynapse-$svc:{{tag}} .
+    done
+    {{engine}} build $plat -t codesynapse-web:{{tag}} -t {{registry}}/codesynapse-web:{{tag}} services/web
+
+# Push the images to REGISTRY (log in first: docker login ghcr.io)
+image-push tag="dev":
+    #!/usr/bin/env sh
+    set -eu
+    for svc in api mcp web; do {{engine}} push {{registry}}/codesynapse-$svc:{{tag}}; done
+
+# Load the dev images into a local kind cluster
+image-load-kind tag="dev" cluster="kind":
+    #!/usr/bin/env sh
+    set -eu
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    for svc in api mcp web; do
+        {{engine}} save -o "$tmp/$svc.tar" {{registry}}/codesynapse-$svc:{{tag}}
+        kind load image-archive "$tmp/$svc.tar" --name {{cluster}}
+    done
+
+# Create deploy/k8s/overlays/<overlay>/secrets.env with random secrets if it does not exist
+k8s-secrets overlay="dev":
+    #!/usr/bin/env sh
+    set -eu
+    dir=deploy/k8s/overlays/{{overlay}}
+    if [ -f "$dir/secrets.env" ]; then echo "$dir/secrets.env exists, leaving it alone"; exit 0; fi
+    sed -e "s/change-me-please/$(openssl rand -hex 24)/" \
+        -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
+        -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" "$dir/secrets.env.example" > "$dir/secrets.env"
+    echo "wrote $dir/secrets.env (git-ignored); add CODESYNAPSE_GIT_TOKEN etc. there if you need them"
+
+# Print the manifests an overlay produces
+k8s-render overlay="dev":
+    kustomize build deploy/k8s/overlays/{{overlay}}
+
+# Apply an overlay to the current kubectl context
+k8s-apply overlay="dev":
+    kubectl apply -k deploy/k8s/overlays/{{overlay}}
+    @echo "kubectl -n codesynapse get pods · kubectl -n codesynapse port-forward svc/web 3000:80"
+
 # --- local development (no containers except Neo4j) ------------------------
 
 # Run the API against the compose Neo4j, serving ./sources

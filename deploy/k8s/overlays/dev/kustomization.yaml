@@ -1,0 +1,43 @@
+# Local cluster (kind, minikube, Docker Desktop): images built with
+# `just image-build` and loaded into the cluster, small volumes, no ingress.
+#   just k8s-secrets dev && just k8s-apply dev
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Set here too: the base namespace does not reach resources this overlay generates.
+namespace: codesynapse
+resources:
+  - ../../base
+# Same names as the base (images from `just image-build dev`), tag dev. The
+# registry prefix is kept so docker and podman both resolve the loaded images.
+images:
+  - name: ghcr.io/parisnakitakejser/codesynapse-api
+    newTag: dev
+  - name: ghcr.io/parisnakitakejser/codesynapse-mcp
+    newTag: dev
+  - name: ghcr.io/parisnakitakejser/codesynapse-web
+    newTag: dev
+secretGenerator:
+  - name: codesynapse-secrets
+    envs: [secrets.env]
+    options: {disableNameSuffixHash: true}
+patches:
+  - target: {kind: Deployment, name: api}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target: {kind: Deployment, name: mcp}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target: {kind: Deployment, name: web}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target: {kind: PersistentVolumeClaim, name: workspace}
+    patch: |-
+      - op: replace
+        path: /spec/resources/requests/storage
+        value: 5Gi

@@ -6,3 +6,6 @@
 coverage.*
 .DS_Store
 /config/llm.yaml
+
+# Kubernetes secrets
+/deploy/k8s/overlays/*/secrets.env
