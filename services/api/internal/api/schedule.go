@@ -18,7 +18,11 @@ import (
 
 // Allowed auto-sync intervals in minutes. A short list keeps the UI simple
 // and stops anyone from hammering a git host.
-var allowedIntervals = []int{0, 15, 60, 360, 1440}
+var allowedIntervals = []int{0, 5, 15, 60, 360, 1440}
+
+// defaultInterval is the auto-sync interval of a repository nobody has
+// configured: new repositories stay fresh without a visit to the settings.
+const defaultInterval = 5
 
 // Schedule is the auto-sync setting of one repository.
 type Schedule struct {
@@ -123,7 +127,20 @@ func (s *schedules) get(repo string) Schedule {
 	if sc, ok := s.all[repo]; ok {
 		return *sc
 	}
-	return Schedule{Repo: repo}
+	return Schedule{Repo: repo, IntervalMinutes: defaultInterval}
+}
+
+// ensure stores the default schedule for repo when it has none, so the
+// scheduler has a next run to count down to.
+func (s *schedules) ensure(repo string, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.all[repo]; ok {
+		return
+	}
+	s.all[repo] = &Schedule{Repo: repo, IntervalMinutes: defaultInterval,
+		NextRun: now.Add(defaultInterval * time.Minute).UTC().Format(time.RFC3339)}
+	_ = s.save() //nolint:errcheck // best effort; the next tick retries
 }
 
 func (s *schedules) set(repo string, interval int, paused, autoReview, autoTriage bool, now time.Time) (Schedule, error) {
@@ -193,8 +210,18 @@ func (s *Server) runScheduler(ctx context.Context, logger *slog.Logger) {
 		case <-ctx.Done():
 			return
 		case now := <-t.C:
+			if repos, err := s.st.Repos(ctx); err != nil {
+				logger.Warn("listing repositories for auto-sync", "error", err)
+			} else {
+				for _, n := range repos {
+					s.sched.ensure(n.Name, now)
+				}
+			}
 			for _, repo := range s.sched.due(now) {
 				_, err := s.startSync(ctx, repo, "")
+				if errors.Is(err, errConflict) {
+					continue // a sync is already running; try again next interval
+				}
 				if err != nil {
 					logger.Warn("scheduled sync not started", "repo", repo, "error", err)
 				}

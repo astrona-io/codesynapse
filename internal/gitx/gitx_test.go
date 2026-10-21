@@ -210,3 +210,22 @@ func TestHTTPSRemote(t *testing.T) {
 		assert.Equal(t, HTTPSRemote(in), want, in)
 	}
 }
+
+func TestLocalBranchesIncludesRemoteTracking(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"-c", "user.name=t", "-c", "user.email=t@x", "commit", "-q", "--allow-empty", "-m", "init"},
+		{"branch", "feature"},
+		{"update-ref", "refs/remotes/origin/main", "HEAD"},
+		{"update-ref", "refs/remotes/origin/HEAD", "HEAD"},
+		{"update-ref", "refs/remotes/origin/release", "HEAD"},
+	} {
+		_, err := Run(ctx, dir, args...)
+		require.NoError(t, err)
+	}
+	got, err := LocalBranches(ctx, dir)
+	require.NoError(t, err)
+	assert.Equal(t, got, []string{"feature", "main", "release"}, "local and origin-only branches, no duplicates, no HEAD")
+}

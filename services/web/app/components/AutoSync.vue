@@ -6,7 +6,7 @@ const { data: sc, refresh } = useApiGet<Schedule>(() => repoPath(props.repo, 'sc
 const { data: ai } = useApiGet<{ providers: unknown[] }>('ai/providers')
 const hasAI = computed(() => (ai.value?.providers.length ?? 0) > 0)
 const OPTIONS = [
-  { v: 0, label: 'Off (manual)' }, { v: 15, label: 'Every 15 min' }, { v: 60, label: 'Every hour' },
+  { v: 0, label: 'Off (manual)' }, { v: 5, label: 'Every 5 min' }, { v: 15, label: 'Every 15 min' }, { v: 60, label: 'Every hour' },
   { v: 360, label: 'Every 6 hours' }, { v: 1440, label: 'Daily' },
 ]
 const error = ref('')

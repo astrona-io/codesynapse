@@ -295,7 +295,11 @@ func TestScheduleAndDelete(t *testing.T) {
 		NextRun         string `json:"next_run"`
 	}
 	require.Equal(t, get(t, ts, base+"/schedule", &sc), 200)
-	assert.Equal(t, sc.State, "manual")
+	assert.Equal(t, sc.State, "active", "syncs every 5 minutes unless configured")
+	assert.Equal(t, sc.IntervalMinutes, 5)
+	assert.Equal(t, put(t, ts, base+"/schedule", `{"interval_minutes":0}`), 200)
+	require.Equal(t, get(t, ts, base+"/schedule", &sc), 200)
+	assert.Equal(t, sc.State, "manual", "turning it off sticks")
 
 	assert.Equal(t, put(t, ts, base+"/schedule", `{"interval_minutes":60}`), 200)
 	require.Equal(t, get(t, ts, base+"/schedule", &sc), 200)
@@ -311,7 +315,8 @@ func TestScheduleAndDelete(t *testing.T) {
 	assert.Equal(t, del(t, ts, base), 204)
 	assert.Equal(t, get(t, ts, base+"/dashboard", nil), 404)
 	require.Equal(t, get(t, ts, base+"/schedule", &sc), 200)
-	assert.Equal(t, sc.State, "manual", "schedule removed with the repo")
+	assert.Equal(t, sc.State, "active", "schedule removed with the repo; back to the default")
+	assert.Equal(t, sc.IntervalMinutes, 5)
 }
 
 func TestSchedulesPersistAndDue(t *testing.T) {
@@ -331,6 +336,18 @@ func TestSchedulesPersistAndDue(t *testing.T) {
 	again, err := loadSchedules(dir)
 	require.NoError(t, err)
 	assert.Equal(t, again.get("b").State(), "paused", "persisted to disk")
+}
+
+func TestSchedulesDefaultEveryFiveMinutes(t *testing.T) {
+	s, err := loadSchedules("")
+	require.NoError(t, err)
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	s.ensure("a", now)
+	_, err = s.set("b", 0, false, false, false, now)
+	require.NoError(t, err)
+	s.ensure("b", now)
+	assert.Len(t, s.due(now.Add(4*time.Minute)), 0)
+	assert.Equal(t, s.due(now.Add(5*time.Minute)), []string{"a"}, "default repos sync after 5 minutes; manual ones never")
 }
 
 func TestReviewsAPI(t *testing.T) {

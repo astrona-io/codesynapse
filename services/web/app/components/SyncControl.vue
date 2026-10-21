@@ -50,8 +50,8 @@ const running = computed(() => job.value?.state === 'running')
 
 <template>
   <div class="sync">
-    <select v-if="info?.managed && info.branches.length" v-model="branch" :disabled="running" aria-label="Branch">
-      <option v-for="b in info.branches" :key="b" :value="b">{{ b }}</option>
+    <select v-if="info?.branches.length" v-model="branch" :disabled="running" aria-label="Branch" :title="info.managed ? '' : 'Mounted source: only the checked-out branch can be synced'">
+      <option v-for="b in info.branches" :key="b" :value="b" :disabled="!info.managed && b !== info.current">{{ b }}{{ b === info.current ? ' (indexed)' : '' }}</option>
     </select>
     <span v-else-if="info?.current" class="badge badge--violet" title="Mounted source: follows the checkout on disk">{{ info.current }}</span>
     <button :disabled="running" :title="info?.managed ? `Fetch ${branch} from ${info.remote} and re-index` : 'Re-index the mounted checkout'" @click="sync">

@@ -160,17 +160,22 @@ func RemoteBranches(ctx context.Context, remote string, auth Auth) ([]string, er
 	return branches, nil
 }
 
-// LocalBranches lists branches of a local repository.
+// LocalBranches lists the branches of a local repository: local ones plus
+// those only known from origin's remote-tracking refs, without duplicates.
 func LocalBranches(ctx context.Context, dir string) ([]string, error) {
-	out, err := Run(ctx, dir, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+	out, err := Run(ctx, dir, "for-each-ref", "--format=%(refname)", "refs/heads/", "refs/remotes/origin/")
 	if err != nil {
 		return nil, err
 	}
 	var branches []string
-	for _, b := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if b != "" {
-			branches = append(branches, b)
+	seen := map[string]bool{}
+	for _, ref := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		b := strings.TrimPrefix(strings.TrimPrefix(ref, "refs/heads/"), "refs/remotes/origin/")
+		if b == "" || b == "HEAD" || seen[b] {
+			continue
 		}
+		seen[b] = true
+		branches = append(branches, b)
 	}
 	return branches, nil
 }
