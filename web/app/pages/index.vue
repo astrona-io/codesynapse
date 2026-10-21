@@ -83,7 +83,10 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
             <br>
             <span :class="`sync sync--${r.schedule?.state ?? 'manual'}`">{{ syncText(r.schedule) }}</span>
           </p>
-          <RemoveRepo :repo="r.name" :managed="r.managed" small @removed="refreshOverview" />
+          <span class="row tight-actions">
+            <SwitchToRemote v-if="!r.managed" :repo="r.name" :remote="r.remote" :branch="r.branch" small @switched="refreshOverview" />
+            <RemoveRepo :repo="r.name" :managed="r.managed" small @removed="refreshOverview" />
+          </span>
         </div>
       </NuxtLink>
     </section>
@@ -196,4 +199,5 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
 .job:last-child { border-bottom: 0; }
 .right { margin-left: auto; }
 .job-error { flex-basis: 100%; margin-left: 17px; }
+.tight-actions { gap: 6px; flex-wrap: nowrap; }
 </style>

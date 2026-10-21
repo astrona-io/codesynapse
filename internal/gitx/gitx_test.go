@@ -198,3 +198,15 @@ func TestPushBranchRefusesUnsafeTargets(t *testing.T) {
 		assert.Error(t, PushBranch(ctx, t.TempDir(), tc.remote, tc.branch, Auth{}))
 	}
 }
+
+func TestHTTPSRemote(t *testing.T) {
+	for in, want := range map[string]string{
+		"git@github.com:owner/repo.git":         "https://github.com/owner/repo.git",
+		"ssh://git@github.com/owner/repo":       "https://github.com/owner/repo",
+		"ssh://git@gitlab.example:2222/g/r.git": "https://gitlab.example/g/r.git",
+		"https://github.com/owner/repo.git":     "https://github.com/owner/repo.git",
+		"":                                      "",
+	} {
+		assert.Equal(t, HTTPSRemote(in), want, in)
+	}
+}

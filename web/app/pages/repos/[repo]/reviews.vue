@@ -21,7 +21,7 @@ const fixBlocked = computed(() => {
   if (!settings.value.push_allowed) return 'Fix branches are off. Set CODESYNAPSE_ALLOW_PUSH=true in .env and restart the API.'
   if (!settings.value.push_enabled) return 'Configure an AI model first (AI models page).'
   if (!settings.value.git_token_configured) return 'Add a git token with write access: just git-token'
-  if (repoInfo.value && !repoInfo.value.managed) return 'Only repositories added by URL can get fix branches.'
+  if (repoInfo.value && !repoInfo.value.managed) return 'This repository is read from ./sources. Use “Switch to clone” on its summary page to enable fix branches.'
   return ''
 })
 

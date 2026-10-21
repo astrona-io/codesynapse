@@ -130,6 +130,8 @@ func TestIngestRejectsEscapes(t *testing.T) {
 func TestValidRepoName(t *testing.T) {
 	assert.True(t, validRepoName("codesynapse_v1.2"))
 	assert.False(t, validRepoName(".hidden"))
+	assert.False(t, validRepoName("."))
+	assert.False(t, validRepoName(".."))
 	assert.False(t, validRepoName("a/b"))
 	assert.False(t, validRepoName(strings.Repeat("a", 101)))
 }
@@ -212,6 +214,29 @@ func TestSyncAndRegister(t *testing.T) {
 	} {
 		assert.Equal(t, post(t, ts, "/api/v1/repos", body), 400, body)
 	}
+}
+
+func TestSwitchToRemoteRefusals(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sources, ws := t.TempDir(), t.TempDir()
+	st := memory.New()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("proj", model.KindRepository, "proj"), Kind: model.KindRepository, Repo: "proj", Name: "proj", Root: filepath.Join(sources, "proj"), Branch: "main"})
+	require.NoError(t, st.ReplaceRepo(ctx, "proj", g))
+	g2 := model.NewGraph()
+	g2.AddNode(model.Node{ID: model.NodeID("cloned", model.KindRepository, "cloned"), Kind: model.KindRepository, Repo: "cloned", Name: "cloned", Root: filepath.Join(ws, "cloned"), URL: "https://github.com/a/cloned"})
+	require.NoError(t, st.ReplaceRepo(ctx, "cloned", g2))
+	srv := New(ctx, Config{SourcesRoot: sources, Workspace: ws}, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	assert.Equal(t, post(t, ts, "/api/v1/repos/proj/remote", `{}`), 400, "no origin and no URL")
+	assert.Equal(t, post(t, ts, "/api/v1/repos/proj/remote", `{"url":"http://github.com/a/b"}`), 400, "https only")
+	assert.Equal(t, post(t, ts, "/api/v1/repos/proj/remote", `{"url":"https://127.0.0.1/a/b"}`), 400, "no internal hosts")
+	assert.Equal(t, post(t, ts, "/api/v1/repos/cloned/remote", `{}`), 400, "already a clone")
+	require.NoError(t, os.Mkdir(filepath.Join(ws, "proj"), 0o750))
+	assert.Equal(t, post(t, ts, "/api/v1/repos/proj/remote", `{"url":"https://github.com/a/proj"}`), http.StatusConflict, "folder exists")
 }
 
 func TestWorkspaceOverview(t *testing.T) {

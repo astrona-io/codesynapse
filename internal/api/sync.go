@@ -82,6 +82,87 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, job)
 }
 
+type switchRequest struct {
+	URL    string `json:"url"`
+	Branch string `json:"branch"`
+}
+
+// handleSwitchToRemote turns a mounted repository into a clone managed by
+// CodeSynapse: it clones the remote (default: the checkout's origin, ssh
+// rewritten to https) into the workspace under the same name and re-indexes
+// it there. Reviews and the schedule are keyed by name, so they carry over;
+// the mounted folder is not touched. Clones can sync branches and push fix
+// branches.
+func (s *Server) handleSwitchToRemote(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Workspace == "" {
+		s.problem(w, http.StatusNotImplemented, errors.New("no workspace configured (CODESYNAPSE_WORKSPACE)"))
+		return
+	}
+	repo := r.PathValue("repo")
+	n, err := s.st.Node(r.Context(), model.NodeID(repo, model.KindRepository, repo))
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	if s.inWorkspace(n.Root) {
+		s.problem(w, 400, fmt.Errorf("%q is already cloned from %s", repo, gitx.SanitizeURL(n.URL)))
+		return
+	}
+	var req switchRequest
+	if r.ContentLength != 0 {
+		if err := decodeJSON(w, r, &req); err != nil {
+			s.problem(w, 400, err)
+			return
+		}
+	}
+	if !validRepoName(repo) {
+		s.problem(w, 400, errors.New("repository name must match [A-Za-z0-9._-]+ to be cloned"))
+		return
+	}
+	dir := filepath.Join(s.cfg.Workspace, repo)
+	if _, err := os.Stat(dir); err == nil { //nolint:gosec // repo passed validRepoName: one path element, no dots first
+		s.problem(w, http.StatusConflict, fmt.Errorf("the workspace already has a folder named %q; remove it first", repo))
+		return
+	}
+	if req.URL == "" {
+		req.URL = gitx.SanitizeURL(gitx.HTTPSRemote(n.URL))
+	}
+	if req.URL == "" {
+		s.problem(w, 400, errors.New("this checkout has no origin remote; enter the repository URL"))
+		return
+	}
+	remote, err := gitx.ValidateRemote(r.Context(), req.URL, gitx.RemoteOptions{AllowPrivate: s.cfg.AllowPrivateGit})
+	if err != nil {
+		s.problem(w, 400, err)
+		return
+	}
+	if req.Branch == "" {
+		req.Branch = n.Branch
+	}
+	if req.Branch != "" {
+		if err := gitx.ValidateRev(req.Branch); err != nil {
+			s.problem(w, 400, err)
+			return
+		}
+	}
+	auth, branch := s.cfg.GitAuth, req.Branch
+	job, err := s.jobs.Start(repo, dir, JobOptions{ //nolint:contextcheck // jobs outlive the request
+		Kind: "clone", Branch: branch,
+		Prepare: func(ctx context.Context) error {
+			if err := gitx.Clone(ctx, remote, branch, dir, auth); err != nil {
+				_ = os.RemoveAll(dir) //nolint:errcheck,gosec // best-effort cleanup; dir is a validated workspace child
+				return err
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		s.problem(w, http.StatusConflict, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
 type syncRequest struct {
 	Branch string `json:"branch"`
 }

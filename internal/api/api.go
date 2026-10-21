@@ -143,6 +143,7 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /api/v1/reviews/{id}", s.handleDeleteReview)
 	m.HandleFunc("PATCH /api/v1/reviews/{id}/comments/{comment}", s.handleUpdateReviewComment)
 	m.HandleFunc("POST /api/v1/reviews/{id}/fix", s.handleFixReview)
+	m.HandleFunc("POST /api/v1/repos/{repo}/remote", s.handleSwitchToRemote)
 	m.HandleFunc("GET /api/v1/ai/providers", s.handleAIProviders)
 	m.HandleFunc("PUT /api/v1/ai/routing", s.handlePutRouting)
 	m.HandleFunc("POST /api/v1/ai/providers/{name}/test", s.handleAITest)
@@ -600,7 +601,9 @@ type ingestRequest struct {
 
 // validRepoName restricts repo names to a safe, URL-friendly alphabet.
 func validRepoName(name string) bool {
-	if name == "" || len(name) > 100 {
+	// A leading dot would allow "." and "..", and collide with the
+	// workspace's .codesynapse state directory.
+	if name == "" || len(name) > 100 || strings.HasPrefix(name, ".") {
 		return false
 	}
 	for _, c := range name {

@@ -14,6 +14,8 @@ const canConfirm = computed(() => !props.busy && (!props.confirmText || typed.va
 </script>
 
 <template>
+  <!-- Teleported so dialogs inside links (repository cards) do not trigger them. -->
+  <Teleport to="#teleports">
   <dialog ref="dialog" class="confirm" @cancel.prevent="emit('cancel')" @close="emit('cancel')">
     <form method="dialog" class="body" @submit.prevent="canConfirm && emit('confirm')">
       <h2>{{ title }}</h2>
@@ -27,6 +29,7 @@ const canConfirm = computed(() => !props.busy && (!props.confirmText || typed.va
       </div>
     </form>
   </dialog>
+  </Teleport>
 </template>
 
 <style scoped>

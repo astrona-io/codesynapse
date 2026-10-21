@@ -65,7 +65,7 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	repoNode := g.AddNode(model.Node{
 		ID: model.NodeID(opts.Repo, model.KindRepository, opts.Repo), Kind: model.KindRepository,
 		Repo: opts.Repo, Name: opts.Repo, Root: root, Head: gitx.HeadCommit(ctx, root),
-		Time: start.UTC().Format(time.RFC3339), URL: gitx.SanitizeURL(gitx.OriginURL(ctx, root)),
+		Time: start.UTC().Format(time.RFC3339), URL: gitx.SanitizeURL(gitx.HTTPSRemote(gitx.OriginURL(ctx, root))),
 		Branch: opts.Branch,
 	})
 	if repoNode.Branch == "" {

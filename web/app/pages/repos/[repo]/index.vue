@@ -10,8 +10,9 @@ const { data: clean } = useApiGet<CleanupReport>(() => repoPath(repo.value, 'cle
 const { data: met } = useApiGet<MetricsReport>(() => repoPath(repo.value, 'metrics'))
 
 const explore = (id: string) => ({ path: `${base.value}/explore`, query: { id } })
-const { data: repos } = useApiGet<{ repos: { name: string; managed?: boolean }[] }>('repos')
-const isManaged = computed(() => repos.value?.repos.find((r) => r.name === repo.value)?.managed ?? false)
+const { data: repos, refresh: refreshRepos } = useApiGet<{ repos: { name: string; managed?: boolean; remote?: string; branch?: string }[] }>('repos')
+const repoInfo = computed(() => repos.value?.repos.find((r) => r.name === repo.value))
+const isManaged = computed(() => repoInfo.value?.managed ?? false)
 const ageDays = computed(() => (d.value?.ingested_at ? (Date.now() - Date.parse(d.value.ingested_at)) / 86_400_000 : 0))
 
 // --- health cards ---------------------------------------------------------
@@ -94,6 +95,7 @@ const steps = computed<Step[]>(() => {
         </p>
       </template>
       <SyncControl :repo="repo" />
+      <SwitchToRemote v-if="repos && !isManaged" :repo="repo" :remote="repoInfo?.remote" :branch="repoInfo?.branch" @switched="refreshRepos" />
       <RemoveRepo :repo="repo" :managed="isManaged" @removed="navigateTo('/')" />
     </PageHeader>
     <div class="panel panel--glass autosync-bar"><AutoSync :repo="repo" /></div>

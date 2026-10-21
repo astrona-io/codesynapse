@@ -202,3 +202,26 @@ func SanitizeURL(raw string) string {
 	u.User = nil
 	return u.String()
 }
+
+// HTTPSRemote rewrites ssh remotes (git@host:owner/repo.git,
+// ssh://git@host/owner/repo) to their https form, which is the only scheme
+// CodeSynapse clones from. Other URLs are returned unchanged.
+func HTTPSRemote(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if rest, ok := strings.CutPrefix(raw, "ssh://"); ok {
+		if _, after, found := strings.Cut(rest, "@"); found {
+			rest = after
+		}
+		host, p, _ := strings.Cut(rest, "/")
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		return "https://" + host + "/" + p
+	}
+	if user, rest, ok := strings.Cut(raw, "@"); ok && !strings.Contains(user, "/") && !strings.Contains(raw, "://") {
+		if host, p, ok := strings.Cut(rest, ":"); ok {
+			return "https://" + host + "/" + strings.TrimPrefix(p, "/")
+		}
+	}
+	return raw
+}
