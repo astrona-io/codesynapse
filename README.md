@@ -63,6 +63,22 @@ Non-Go call edges are name-based (imports, enclosing class, names unique in the 
 
 Ask your agent to review a change ("review my changes with CodeSynapse and submit the review", or the `code-review` MCP prompt). It analyses the change with the graph and calls `submit_review`; the review appears on the **Reviews** page with a verdict, a summary and comments on exact lines, each with severity, category, the symbol it points at and a suggested fix. Resolve comments in the UI, or let the agent mark them fixed with `update_review_comment`. These are the only MCP tools that write, and they write only to the review store (disable with `CODESYNAPSE_MCP_REVIEWS=false`).
 
+Every comment needs a decision: **Accept** (agreed, to fix), **Reject** (disagree or false positive), **Defer** (later) or **Mark fixed**. The Reviews page filters on "To decide", "Accepted" and "Deferred"; agents record the same decisions with `update_review_comment`.
+
+## AI models (local or cloud)
+
+CodeSynapse can ask a model to triage security findings, review changes and write briefings. Providers live in `config/llm.yaml` (copy `config/llm.example.yaml`; it is gitignored):
+
+- `kind: openai` covers anything with an OpenAI-compatible `/v1/chat/completions`: MLX (`mlx_lm.server`), Ollama, vLLM, LM Studio, llama.cpp, OpenRouter. An API key is optional (`api_key_env` names the environment variable).
+- `kind: anthropic` uses the official SDK; the key comes from `ANTHROPIC_API_KEY`.
+- The compose API container reaches services on your Mac through `host.docker.internal` (for example `http://host.docker.internal:9080/v1`).
+- `disable_thinking: true` turns off reasoning for Qwen-style models, which otherwise spend the whole output budget thinking.
+- `max_input_tokens` / `max_output_tokens` are a **budget per request** (default 32k in, 8k out), not the model's context window. Security triage sends findings in batches of 6 so local models stay fast.
+
+On the **AI models** page you pick a **global** model, the fallback for everything, and optionally a different one per area: code review, security analysis and briefings. The choice is saved in `workspace/.codesynapse/llm-routes.json`. Remote providers never receive source code beyond the diff you ask them to review; local providers also get short snippets around findings. Model answers are treated as untrusted text and redacted before they are stored.
+
+**Background reviews:** in a repository's auto-sync settings, turn on "AI-review new commits" and "AI-triage new findings". After each successful sync (manual or scheduled) CodeSynapse reviews the commits that arrived and triages security findings of medium severity or above that are new since the previous sync. Results appear as reviews waiting for your decisions.
+
 ## Keeping repositories up to date
 
 - **Sync** fetches the chosen branch (cloned repositories) or re-indexes the folder (mounted sources).

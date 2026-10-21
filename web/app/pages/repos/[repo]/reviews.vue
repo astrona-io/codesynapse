@@ -28,12 +28,12 @@ watch(list, (l) => {
   if (!selectedId.value && l?.reviews.length) router.replace({ query: { id: l.reviews[0]!.id } })
 })
 
-const statusFilter = ref<'open' | 'all'>('open')
+const statusFilter = ref<'open' | 'accepted' | 'deferred' | 'all'>('open')
 const SEV = ['critical', 'high', 'medium', 'low', 'info']
 const byFile = computed(() => {
   const groups = new Map<string, ReviewComment[]>()
   for (const c of review.value?.comments ?? []) {
-    if (statusFilter.value === 'open' && c.status !== 'open') continue
+    if (statusFilter.value !== 'all' && c.status !== statusFilter.value) continue
     if (!groups.has(c.file)) groups.set(c.file, [])
     groups.get(c.file)!.push(c)
   }
@@ -70,6 +70,13 @@ async function removeReview() {
   }
 }
 
+const STATUS: Record<string, { label: string; cls: string }> = {
+  accepted: { label: 'Accepted', cls: 'badge--orange' },
+  rejected: { label: 'Rejected', cls: '' },
+  wontfix: { label: 'Rejected', cls: '' },
+  deferred: { label: 'Deferred', cls: 'badge--amber' },
+  resolved: { label: 'Fixed', cls: 'badge--green' },
+}
 const verdictText: Record<string, { label: string; cls: string }> = {
   approve: { label: 'Approved', cls: 'badge--green' },
   comment: { label: 'Comments', cls: 'badge--cyan' },
@@ -99,10 +106,10 @@ const explore = (id: string) => ({ path: `${base.value}/explore`, query: { id } 
       <aside class="panel list">
         <p class="eyebrow">Reviews · {{ list.reviews.length }}</p>
         <button v-for="r in list.reviews" :key="r.id" class="item" :class="{ 'is-active': r.id === selectedId }" @click="router.replace({ query: { id: r.id } })">
-          <span class="item-title">{{ r.title }}</span>
+          <span class="item-title">{{ r.title }} <span v-if="r.kind === 'report'" class="badge badge--violet">report</span></span>
           <span class="row tight">
             <span class="badge" :class="verdictText[r.verdict]?.cls">{{ verdictText[r.verdict]?.label ?? r.verdict }}</span>
-            <span class="muted small">{{ r.counts.open }} open · {{ r.counts.resolved }} resolved</span>
+            <span class="muted small">{{ r.counts.open }} to decide · {{ r.counts.accepted ?? 0 }} accepted · {{ r.counts.resolved }} fixed</span>
           </span>
           <span class="dim small">{{ r.author }} · {{ relTime(r.created_at) }}</span>
         </button>
@@ -119,21 +126,25 @@ const explore = (id: string) => ({ path: `${base.value}/explore`, query: { id } 
               </div>
               <span class="badge big" :class="verdictText[review.verdict]?.cls">{{ verdictText[review.verdict]?.label ?? review.verdict }}</span>
             </div>
-            <p v-if="review.summary" class="summary">{{ review.summary }}</p>
+            <!-- eslint-disable-next-line vue/no-v-html -- renderMarkdown escapes all HTML first -->
+            <div v-if="review.summary && review.kind === 'report'" class="report" v-html="renderMarkdown(review.summary)" />
+            <p v-else-if="review.summary" class="summary">{{ review.summary }}</p>
             <div class="row">
-              <span class="pill"><span class="dot" :class="counts.open ? 'dot--warn' : 'dot--ok'" />{{ counts.open ? `${plural(counts.open, 'comment')} to address` : 'All comments addressed' }}</span>
+              <span class="pill"><span class="dot" :class="counts.open ? 'dot--warn' : 'dot--ok'" />{{ counts.open ? `${plural(counts.open, 'recommendation')} to decide` : 'Everything decided' }}<template v-if="counts.accepted"> · {{ counts.accepted }} accepted to fix</template></span>
               <SevBadge v-for="s in SEV.filter((x) => counts!.by_severity[x])" :key="s" :severity="s" />
               <span class="spacer" />
-              <button class="chip" :class="{ active: statusFilter === 'open' }" @click="statusFilter = 'open'">Open · {{ counts.open }}</button>
+              <button class="chip" :class="{ active: statusFilter === 'open' }" @click="statusFilter = 'open'">To decide · {{ counts.open }}</button>
+              <button class="chip" :class="{ active: statusFilter === 'accepted' }" @click="statusFilter = 'accepted'">Accepted · {{ counts.accepted ?? 0 }}</button>
+              <button class="chip" :class="{ active: statusFilter === 'deferred' }" @click="statusFilter = 'deferred'">Deferred · {{ counts.deferred ?? 0 }}</button>
               <button class="chip" :class="{ active: statusFilter === 'all' }" @click="statusFilter = 'all'">All · {{ counts.total }}</button>
               <button class="secondary tiny" @click="confirmDelete = true">Delete review</button>
             </div>
           </div>
 
-          <div v-if="!byFile.length" class="empty"><strong>Nothing open</strong>Every comment in this review is resolved. Switch to “All” to see them.</div>
+          <div v-if="!byFile.length" class="empty"><strong>Nothing here</strong>No recommendations in this view. Switch to “All” to see every one.</div>
           <section v-for="[file, cs] in byFile" :key="file" class="panel file">
             <p class="mono file-name">{{ file }}</p>
-            <article v-for="c in cs" :key="c.id" class="comment" :class="[`sev-${c.severity}`, { done: c.status !== 'open' }]">
+            <article v-for="c in cs" :key="c.id" class="comment" :class="[`sev-${c.severity}`, `status-${c.status}`, { done: c.status === 'resolved' || c.status === 'rejected' || c.status === 'wontfix' }]">
               <header class="row tight">
                 <SevBadge :severity="c.severity" />
                 <span class="tag">{{ c.category }}</span>
@@ -141,7 +152,7 @@ const explore = (id: string) => ({ path: `${base.value}/explore`, query: { id } 
                 <NuxtLink v-if="c.symbol_id" :to="explore(c.symbol_id)" class="mono small">{{ c.symbol }}</NuxtLink>
                 <NuxtLink v-if="c.rule" :to="`${base}/security`" class="tag sec">{{ ruleTitle(c.rule) ?? c.rule }}</NuxtLink>
                 <span class="spacer" />
-                <span v-if="c.status !== 'open'" class="badge" :class="c.status === 'resolved' ? 'badge--green' : ''">{{ c.status === 'resolved' ? 'Resolved' : 'Won’t fix' }}<template v-if="c.status_by"> by {{ c.status_by }}</template></span>
+                <span v-if="c.status !== 'open'" class="badge" :class="STATUS[c.status]?.cls">{{ STATUS[c.status]?.label ?? c.status }}<template v-if="c.status_by"> by {{ c.status_by }}</template></span>
               </header>
               <p class="message">{{ c.message }}</p>
               <div v-if="c.suggestion">
@@ -149,10 +160,16 @@ const explore = (id: string) => ({ path: `${base.value}/explore`, query: { id } 
                 <pre class="code">{{ c.suggestion }}</pre>
               </div>
               <p v-if="c.status_note" class="muted small">Note: {{ c.status_note }}</p>
-              <footer class="row tight">
-                <template v-if="c.status === 'open'">
-                  <button class="tiny" :disabled="busy === c.id" @click="setStatus(c, 'resolved')">Mark resolved</button>
-                  <button class="secondary tiny" :disabled="busy === c.id" @click="setStatus(c, 'wontfix')">Won’t fix</button>
+              <footer class="row tight decide">
+                <template v-if="c.status === 'open' || c.status === 'deferred'">
+                  <button class="tiny" :disabled="busy === c.id" title="Agree — this should be fixed" @click="setStatus(c, 'accepted')">Accept</button>
+                  <button class="secondary tiny" :disabled="busy === c.id" title="Disagree or false positive" @click="setStatus(c, 'rejected')">Reject</button>
+                  <button v-if="c.status === 'open'" class="secondary tiny" :disabled="busy === c.id" title="Decide later" @click="setStatus(c, 'deferred')">Defer</button>
+                  <button class="secondary tiny" :disabled="busy === c.id" title="Already fixed" @click="setStatus(c, 'resolved')">Mark fixed</button>
+                </template>
+                <template v-else-if="c.status === 'accepted'">
+                  <button class="tiny" :disabled="busy === c.id" @click="setStatus(c, 'resolved')">Mark fixed</button>
+                  <button class="secondary tiny" :disabled="busy === c.id" @click="setStatus(c, 'open')">Undo</button>
                 </template>
                 <button v-else class="secondary tiny" :disabled="busy === c.id" @click="setStatus(c, 'open')">Reopen</button>
               </footer>
@@ -180,6 +197,11 @@ const explore = (id: string) => ({ path: `${base.value}/explore`, query: { id } 
 .detail { display: grid; gap: 16px; min-width: 0; }
 .title { font-size: 20px; }
 .summary { white-space: pre-wrap; line-height: 1.6; }
+.report :deep(h3), .report :deep(h4) { margin: 14px 0 6px; font-size: 16px; }
+.report :deep(p) { margin: 0 0 8px; line-height: 1.65; }
+.report :deep(ul), .report :deep(ol) { margin: 0 0 8px; padding-left: 20px; display: grid; gap: 4px; }
+.report :deep(code) { font-family: var(--font-mono); font-size: 12.5px; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+.report :deep(pre) { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-xs); padding: 10px 12px; overflow-x: auto; }
 .big { font-size: 11px; padding: 5px 12px; }
 .tight { gap: 6px; }
 .spacer { flex: 1; }
@@ -192,6 +214,7 @@ const explore = (id: string) => ({ path: `${base.value}/explore`, query: { id } 
 .comment.sev-medium { border-left-color: var(--amber); }
 .comment.sev-low { border-left-color: var(--cyan); }
 .comment.done { opacity: 0.6; }
+.comment.status-accepted { opacity: 1; border-color: rgba(255, 122, 24, 0.35); }
 .message { white-space: pre-wrap; }
 .code { margin: 4px 0 0; padding: 10px 12px; border-radius: var(--radius-xs); font: 12.5px/1.5 var(--font-mono); white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--line); border-left: 3px solid var(--green); }
 .label.good { color: var(--green); }

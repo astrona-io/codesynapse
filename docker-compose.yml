@@ -41,12 +41,22 @@ services:
       CODESYNAPSE_GIT_TOKEN: ${CODESYNAPSE_GIT_TOKEN:-}
       CODESYNAPSE_GIT_TOKEN_HOST: ${CODESYNAPSE_GIT_TOKEN_HOST:-github.com}
       CODESYNAPSE_ALLOW_PRIVATE_GIT: ${CODESYNAPSE_ALLOW_PRIVATE_GIT:-false}
+      # AI providers (local MLX/Ollama/vLLM or cloud): see config/llm.example.yaml.
+      CODESYNAPSE_LLM_CONFIG: /config/llm.yaml
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
     volumes:
       - ${SOURCES_DIR:-./sources}:/sources:ro
       - workspace:/workspace
       - go-cache:/cache
+      - ./config:/config:ro
+    # Reach model servers running on this machine (e.g. MLX on :9080) as
+    # host.docker.internal. The default network is a normal NAT'd bridge, so
+    # machines on your LAN and the internet are reachable too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${CODESYNAPSE_API_PORT:-8080}:8080"
     read_only: true
     tmpfs: [/tmp]
     security_opt: ["no-new-privileges:true"]

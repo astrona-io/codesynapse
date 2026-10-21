@@ -28,11 +28,21 @@ const (
 	RequestChanges = "request_changes"
 )
 
-// Comment statuses.
+// Kinds of review document.
 const (
-	Open     = "open"
-	Resolved = "resolved"
-	WontFix  = "wontfix"
+	KindReview = "review"
+	// KindReport is a generated report (a briefing) with no comments.
+	KindReport = "report"
+)
+
+// Comment statuses: the decisions a developer takes on a recommendation.
+const (
+	Open     = "open"     // not decided yet
+	Accepted = "accepted" // agreed, to be fixed
+	Rejected = "rejected" // disagreed or false positive
+	Deferred = "deferred" // later
+	Resolved = "resolved" // fixed
+	WontFix  = "wontfix"  // legacy alias of rejected
 )
 
 // Limits on submitted reviews.
@@ -49,7 +59,7 @@ var (
 	verdicts   = []string{Approve, Comment, RequestChanges}
 	severities = []string{"info", "low", "medium", "high", "critical"}
 	categories = []string{"security", "bug", "performance", "maintainability", "style", "test", "docs", "other"}
-	statuses   = []string{Open, Resolved, WontFix}
+	statuses   = []string{Open, Accepted, Rejected, Deferred, Resolved, WontFix}
 )
 
 // ErrInvalid wraps validation errors.
@@ -80,6 +90,7 @@ type CommentItem struct {
 // Review is a submitted review.
 type Review struct {
 	ID        string        `json:"id"`
+	Kind      string        `json:"kind"`
 	Repo      string        `json:"repo"`
 	Title     string        `json:"title"`
 	Summary   string        `json:"summary"`
@@ -96,9 +107,14 @@ type Review struct {
 
 // Counts summarises a review's comments.
 type Counts struct {
-	Total      int            `json:"total"`
-	Open       int            `json:"open"`
-	Resolved   int            `json:"resolved"`
+	Total int `json:"total"`
+	// Open counts comments without a decision.
+	Open     int `json:"open"`
+	Accepted int `json:"accepted"`
+	Rejected int `json:"rejected"`
+	Deferred int `json:"deferred"`
+	Resolved int `json:"resolved"`
+	// WontFix is kept for older clients; it equals Rejected.
 	WontFix    int            `json:"wontfix"`
 	BySeverity map[string]int `json:"by_severity"`
 }
@@ -110,12 +126,17 @@ func (r Review) Counts() Counts {
 		switch cm.Status {
 		case Resolved:
 			c.Resolved++
-		case WontFix:
+		case WontFix, Rejected:
+			c.Rejected++
 			c.WontFix++
+		case Accepted:
+			c.Accepted++
+		case Deferred:
+			c.Deferred++
 		default:
 			c.Open++
 		}
-		if cm.Status == Open {
+		if cm.Status == Open || cm.Status == Accepted {
 			c.BySeverity[cm.Severity]++
 		}
 	}
@@ -125,6 +146,7 @@ func (r Review) Counts() Counts {
 // Summary is a review without its comments, for lists.
 type Summary struct {
 	ID        string `json:"id"`
+	Kind      string `json:"kind"`
 	Repo      string `json:"repo"`
 	Title     string `json:"title"`
 	Verdict   string `json:"verdict"`
@@ -138,7 +160,7 @@ type Summary struct {
 
 // SummaryOf builds the list view of r.
 func SummaryOf(r Review) Summary {
-	return Summary{ID: r.ID, Repo: r.Repo, Title: r.Title, Verdict: r.Verdict, Author: r.Author, Source: r.Source,
+	return Summary{ID: r.ID, Kind: r.Kind, Repo: r.Repo, Title: r.Title, Verdict: r.Verdict, Author: r.Author, Source: r.Source,
 		Commit: r.Commit, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, Counts: r.Counts()}
 }
 
@@ -175,6 +197,12 @@ func Prepare(r Review, now time.Time) (Review, error) {
 	}
 	if len(r.Comments) > MaxComments {
 		return r, fmt.Errorf("%w: at most %d comments per review", ErrInvalid, MaxComments)
+	}
+	if r.Kind == "" {
+		r.Kind = KindReview
+	}
+	if r.Kind != KindReview && r.Kind != KindReport {
+		return r, fmt.Errorf("%w: kind must be %s or %s", ErrInvalid, KindReview, KindReport)
 	}
 	r.Summary = clean(r.Summary, maxSummary)
 	r.Author = clean(r.Author, 100)
@@ -223,6 +251,9 @@ func Prepare(r Review, now time.Time) (Review, error) {
 func ApplyStatus(r *Review, commentID, status, note, by string, now time.Time) error {
 	if !slices.Contains(statuses, status) {
 		return fmt.Errorf("%w: status must be one of %v", ErrInvalid, statuses)
+	}
+	if status == WontFix {
+		status = Rejected
 	}
 	for i := range r.Comments {
 		if r.Comments[i].ID == commentID {

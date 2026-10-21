@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
 
+	"github.com/parisnakitakejser/codesynapse/internal/aitasks"
 	"github.com/parisnakitakejser/codesynapse/internal/ingest"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 )
@@ -42,6 +44,9 @@ type Job struct {
 	Nodes      int      `json:"nodes,omitempty"`
 	Edges      int      `json:"edges,omitempty"`
 	Error      string   `json:"error,omitempty"`
+	// Task and Result are set for AI jobs: the task name and the review id.
+	Task   string `json:"task,omitempty"`
+	Result string `json:"result,omitempty"`
 }
 
 // Jobs runs ingest jobs, at most one per repository at a time and one
@@ -70,8 +75,15 @@ type JobOptions struct {
 	Prepare func(ctx context.Context) error
 	// Branch is recorded on the Repository node.
 	Branch string
-	// Kind labels the job in the UI: ingest, clone or sync.
+	// Kind labels the job in the UI: ingest, clone, sync or ai.
 	Kind string
+	// Task names the AI task for display.
+	Task string
+	// After runs in the background once an ingest succeeded (automation).
+	After func(ctx context.Context)
+	// Run replaces ingest with arbitrary work (AI tasks); its result (a
+	// review id) is stored on the job.
+	Run func(ctx context.Context) (string, error)
 }
 
 // Start queues an ingest of root into repo.
@@ -91,7 +103,7 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 	if kind == "" {
 		kind = "ingest"
 	}
-	job := &Job{ID: hex.EncodeToString(b), Repo: repo, Kind: kind, Branch: opts.Branch, State: JobRunning, StartedAt: time.Now().UTC().Format(time.RFC3339)}
+	job := &Job{ID: hex.EncodeToString(b), Repo: repo, Kind: kind, Branch: opts.Branch, State: JobRunning, StartedAt: time.Now().UTC().Format(time.RFC3339), Task: opts.Task}
 	j.jobs[job.ID] = job
 	j.prune()
 	go j.run(job, root, opts)
@@ -107,6 +119,17 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 		return
 	}
 	ctx := logx.WithLogger(j.ctx, j.logger.With("job", job.ID, "repo", job.Repo))
+	if opts.Run != nil {
+		result, err := opts.Run(ctx)
+		if errors.Is(err, aitasks.ErrNothingToDo) {
+			err = nil // nothing new to analyse is a normal outcome
+		}
+		j.mu.Lock()
+		job.Result = result
+		j.mu.Unlock()
+		j.finish(job, 0, 0, err)
+		return
+	}
 	if opts.Prepare != nil {
 		if err := opts.Prepare(ctx); err != nil {
 			j.finish(job, 0, 0, err)
@@ -125,6 +148,9 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 		nodes, edges = len(g.Nodes()), len(g.Edges())
 	}
 	j.finish(job, nodes, edges, err)
+	if err == nil && opts.After != nil {
+		go opts.After(j.ctx)
+	}
 }
 
 func (j *Jobs) finish(job *Job, nodes, edges int, err error) {

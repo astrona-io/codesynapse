@@ -13,6 +13,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/api"
 	"github.com/parisnakitakejser/codesynapse/internal/app"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
+	"github.com/parisnakitakejser/codesynapse/internal/llm"
 )
 
 var version = "dev"
@@ -34,6 +35,7 @@ type serveOptions struct {
 	network     bool
 	vulnScan    bool
 	workspace   string
+	llmConfig   string
 }
 
 func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -42,6 +44,7 @@ func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.addr, "addr", app.Getenv("CODESYNAPSE_API_ADDR", "127.0.0.1:8080"), "Listen address")
 	f.StringVar(&o.sources, "sources-root", app.Getenv("CODESYNAPSE_SOURCES_ROOT", ""), "Directory whose subdirectories may be ingested")
 	f.IntVar(&o.commitLimit, "commits", 500, "Commits to index per ingest")
+	f.StringVar(&o.llmConfig, "llm-config", app.Getenv("CODESYNAPSE_LLM_CONFIG", "config/llm.yaml"), "AI provider configuration (YAML); optional")
 	f.StringVar(&o.workspace, "workspace", app.Getenv("CODESYNAPSE_WORKSPACE", ""), "Writable directory for repositories registered by git URL")
 	f.BoolVar(&o.vulnScan, "vulns", app.Getenv("CODESYNAPSE_VULN_SCAN", "") == "true", "Check dependencies against osv.dev on ingest (sends module paths and versions)")
 	f.BoolVar(&o.network, "allow-network", app.Getenv("CODESYNAPSE_ALLOW_NETWORK", "") == "true", "Let ingest download Go modules (trusted repos only)")
@@ -81,7 +84,16 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err := st.EnsureSchema(ctx); err != nil {
 		return err
 	}
-	srv := api.New(ctx, api.Config{SourcesRoot: o.sources, CommitLimit: o.commitLimit, AllowNetwork: o.network, VulnScan: o.vulnScan, Version: version,
+	llmCfg, err := llm.Load(o.llmConfig, os.Getenv)
+	if err != nil {
+		return fmt.Errorf("AI provider config: %w", err)
+	}
+	var registry *llm.Registry
+	if len(llmCfg.Providers) > 0 {
+		registry = llm.NewRegistry(llmCfg)
+		o.EC.Logger.Info("AI providers configured", "providers", len(llmCfg.Providers), "default", llmCfg.Default)
+	}
+	srv := api.New(ctx, api.Config{LLM: registry, SourcesRoot: o.sources, CommitLimit: o.commitLimit, AllowNetwork: o.network, VulnScan: o.vulnScan, Version: version,
 		Workspace: o.workspace, AllowPrivateGit: app.Getenv("CODESYNAPSE_ALLOW_PRIVATE_GIT", "") == "true",
 		GitAuth: gitx.Auth{Host: app.Getenv("CODESYNAPSE_GIT_TOKEN_HOST", "github.com"), Token: os.Getenv("CODESYNAPSE_GIT_TOKEN")}}, st, o.EC.Logger)
 	o.EC.Logger.Info("api listening", "addr", o.addr, "sources_root", o.sources, "auth", os.Getenv(EnvToken) != "")

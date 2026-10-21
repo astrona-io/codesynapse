@@ -25,6 +25,7 @@ const repoGroups = computed(() => {
       { to: `${base}/security`, label: 'Security', hint: 'Findings and vulnerable dependencies' },
       { to: `${base}/cleanup`, label: 'Cleanup', hint: 'Unused code to remove' },
       { to: `${base}/metrics`, label: 'Quality metrics', hint: 'Complexity, tests, token savings' },
+      { to: `${base}/ai`, label: 'AI assistant', hint: 'Triage, review and briefings by a model' },
     ] },
     { label: 'Change', links: [
       { to: `${base}/reviews`, label: 'Reviews', hint: 'Code reviews submitted by agents' },
@@ -55,6 +56,7 @@ const isActive = (to: string) => route.path === to
           <p class="nav-label">Workspace</p>
           <NuxtLink to="/" class="nav-link" :class="{ 'is-active': route.path === '/' }" title="Your indexed repositories and what to add">Repositories</NuxtLink>
           <NuxtLink to="/overview" class="nav-link" :class="{ 'is-active': route.path === '/overview' }" title="Everything at a glance, worst first">Workspace health</NuxtLink>
+          <NuxtLink to="/ai" class="nav-link" :class="{ 'is-active': route.path === '/ai' }" title="Local and cloud language models">AI models</NuxtLink>
         </div>
         <template v-if="repo">
           <div class="nav-repo-head">

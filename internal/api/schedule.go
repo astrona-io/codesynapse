@@ -24,12 +24,16 @@ var allowedIntervals = []int{0, 15, 60, 360, 1440}
 type Schedule struct {
 	Repo string `json:"repo"`
 	// IntervalMinutes is 0 for manual-only.
-	IntervalMinutes int    `json:"interval_minutes"`
-	Paused          bool   `json:"paused"`
-	LastRun         string `json:"last_run,omitempty"`
-	LastStatus      string `json:"last_status,omitempty"`
-	LastError       string `json:"last_error,omitempty"`
-	NextRun         string `json:"next_run,omitempty"`
+	IntervalMinutes int  `json:"interval_minutes"`
+	Paused          bool `json:"paused"`
+	// AutoReview asks the AI to review commits that arrive with a sync.
+	AutoReview bool `json:"auto_review"`
+	// AutoTriage asks the AI to triage security findings new since the previous sync.
+	AutoTriage bool   `json:"auto_triage"`
+	LastRun    string `json:"last_run,omitempty"`
+	LastStatus string `json:"last_status,omitempty"`
+	LastError  string `json:"last_error,omitempty"`
+	NextRun    string `json:"next_run,omitempty"`
 }
 
 // State is "manual", "paused" or "active".
@@ -122,7 +126,7 @@ func (s *schedules) get(repo string) Schedule {
 	return Schedule{Repo: repo}
 }
 
-func (s *schedules) set(repo string, interval int, paused bool, now time.Time) (Schedule, error) {
+func (s *schedules) set(repo string, interval int, paused, autoReview, autoTriage bool, now time.Time) (Schedule, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sc, ok := s.all[repo]
@@ -130,7 +134,7 @@ func (s *schedules) set(repo string, interval int, paused bool, now time.Time) (
 		sc = &Schedule{Repo: repo}
 		s.all[repo] = sc
 	}
-	sc.IntervalMinutes, sc.Paused = interval, paused
+	sc.IntervalMinutes, sc.Paused, sc.AutoReview, sc.AutoTriage = interval, paused, autoReview, autoTriage
 	sc.NextRun = ""
 	if sc.State() == "active" {
 		sc.NextRun = now.Add(time.Duration(interval) * time.Minute).UTC().Format(time.RFC3339)
@@ -203,6 +207,8 @@ func (s *Server) runScheduler(ctx context.Context, logger *slog.Logger) {
 type scheduleRequest struct {
 	IntervalMinutes int  `json:"interval_minutes"`
 	Paused          bool `json:"paused"`
+	AutoReview      bool `json:"auto_review"`
+	AutoTriage      bool `json:"auto_triage"`
 }
 
 func (s *Server) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
@@ -224,7 +230,7 @@ func (s *Server) handlePutSchedule(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, fmt.Errorf("interval_minutes must be one of %v", allowedIntervals))
 		return
 	}
-	sc, err := s.sched.set(repo, req.IntervalMinutes, req.Paused, time.Now())
+	sc, err := s.sched.set(repo, req.IntervalMinutes, req.Paused, req.AutoReview, req.AutoTriage, time.Now())
 	if err != nil {
 		s.problem(w, 500, err)
 		return

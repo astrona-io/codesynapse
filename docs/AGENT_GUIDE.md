@@ -63,7 +63,7 @@ Each prompt is also served natively as an MCP prompt (see section 4), so clients
 ### G. Code review that shows up in CodeSynapse — prompt `code-review`
 > "Review `<TARGET>` (a diff, base..head, files or a package) with CodeSynapse: use `get_pr_context`, `security_report` and `rule_guide`, read only the lines you need, then call `submit_review` with a title, summary, verdict and one comment per issue anchored to file:line, with severity, category and a concrete suggestion. Reply with the review page."
 >
-> After fixing comments: "Call `get_review` with status "open" for review `<ID>`, fix each comment, and mark it with `update_review_comment` (status "resolved", note = what changed)."
+> After fixing comments: "Call `get_review` with status "open" for review `<ID>`, fix each accepted comment, and mark it with `update_review_comment` (status "resolved", note = what changed). Reject false positives with status "rejected" and a reason."
 
 ### F. Dead-code cleanup (CodeSynapse addition)
 > "Use `unused_code` (security_only first, then min_confidence "high") to list code nothing reaches. Remove security-relevant items first, then unused go.mod modules (and confirm with `security_report` that their CVEs are gone). For exported or low-confidence items, check for reflection and external consumers before deleting."

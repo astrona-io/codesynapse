@@ -23,8 +23,8 @@ func registerReviewTools(s *mcp.Server, h *handlers, rs store.ReviewStore) {
 	notDestructive := false
 	write := &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: &notDestructive}
 	mcp.AddTool(s, &mcp.Tool{Name: "submit_review", Annotations: write, Description: "Submit a code review to CodeSynapse so people see it in the UI: title, summary, verdict (approve, comment, request_changes) and comments anchored to file:line with severity, category, message and an optional suggested fix. Writes only to the review store; code is never changed. Returns the review id and its page."}, h.submitReview)
-	mcp.AddTool(s, &mcp.Tool{Name: "update_review_comment", Annotations: write, Description: "Mark a review comment resolved, wontfix or open again, with a short note (e.g. the commit that fixed it)."}, h.updateReviewComment)
-	mcp.AddTool(s, &mcp.Tool{Name: "list_reviews", Annotations: read, Description: "List reviews of a repository, newest first, with open/resolved counts."}, h.listReviews)
+	mcp.AddTool(s, &mcp.Tool{Name: "update_review_comment", Annotations: write, Description: "Record a decision on a review comment: accepted (agreed, to fix), rejected (disagree or false positive), deferred, resolved (fixed) or open again, with a short note such as the commit that fixed it."}, h.updateReviewComment)
+	mcp.AddTool(s, &mcp.Tool{Name: "list_reviews", Annotations: read, Description: "List reviews of a repository, newest first, with counts of open, accepted and resolved comments."}, h.listReviews)
 	mcp.AddTool(s, &mcp.Tool{Name: "get_review", Annotations: read, Description: "Get one review with its comments; status=open returns only comments still to address."}, h.getReview)
 }
 
@@ -128,7 +128,7 @@ func dedupeStrings(in []string) []string {
 type updateCommentIn struct {
 	ReviewID  string `json:"review_id"`
 	CommentID string `json:"comment_id"`
-	Status    string `json:"status" jsonschema:"resolved, wontfix or open"`
+	Status    string `json:"status" jsonschema:"open, accepted, rejected, deferred or resolved (wontfix is accepted as rejected)"`
 	Note      string `json:"note,omitempty" jsonschema:"why, or the commit that fixed it"`
 }
 

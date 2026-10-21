@@ -125,6 +125,14 @@ Agents submit structured reviews with `submit_review` (title, summary, verdict, 
 
 Follow-ups: link comments to the diff hunk they were made on and flag them "outdated" when that code changes; per-review export to Markdown or a GitHub PR review.
 
+## AI providers and background work
+
+`internal/llm` holds providers (`openai`-compatible HTTP and the Anthropic SDK), a registry with per-task routing (global default plus `review`, `security-triage`, `briefing`; editable through `PUT /api/v1/ai/routing`, persisted in the workspace) and usage counters. `internal/aitasks` turns tasks into review documents: triage in batches of 6 findings (max 18, partial results kept), review of a diff (comments only on files in the diff), and briefings (`kind: report`). After a successful sync, `Server.automation` compares the old and new head and finding IDs and, if the schedule asks for it, runs one background job that triages new medium+ findings and reviews `old..new`. Comment decisions are open, accepted, rejected, deferred and resolved.
+
+Decisions: model output is untrusted (redacted, size-limited, validated against known files and enums); remote providers get no source beyond a requested diff; budgets are per request and small by default because local hardware is slow; jobs share one semaphore with ingest so a laptop is never running two heavy things at once.
+
+Next: Postgres for reviews, decisions with an audit trail, a persistent job queue, finding/score history and AI usage; an in-process TTL cache for overview/security/metrics invalidated on ingest; container security (Dockerfile rules and opt-in Trivy image scans).
+
 ## Repository lifecycle
 
 Repositories are added by URL (cloned into the workspace volume) or mounted under `./sources`. **Auto-sync** schedules (off, 15 min, 1 h, 6 h, daily; pausable) are stored in `workspace/.codesynapse/schedules.json` and run by a scheduler in the API; the next run and last result show in the UI. Removing a repository deletes its graph, schedule and optionally its clone. Private repositories use a server-side token set with `just git-token`; `GET /api/v1/settings` reports whether one is configured, never the value.
@@ -151,6 +159,7 @@ Done:
 - API with dashboard, operator overview, graph explorer endpoints, ingest/clone/sync jobs
 - Nuxt 4 dashboard in the Astrona style: overview, repositories, dashboard, security (clickable rules, fix examples), cleanup, graph, explorer, metrics, docs, packages, review
 - docker compose (Docker or Podman), justfile, golangci-lint clean, race tests, fuzzers
+- AI providers (MLX/Ollama/vLLM/OpenAI-compatible, Anthropic) with global + per-area routing, AI triage/review/briefing jobs, background review and triage after sync, accept/reject/defer/fixed decisions
 
 ## Roadmap
 

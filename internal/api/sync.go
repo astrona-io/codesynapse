@@ -9,8 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/parisnakitakejser/codesynapse/internal/aitasks"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/parisnakitakejser/codesynapse/internal/store"
 )
 
 // inWorkspace reports whether root is a clone managed by the API.
@@ -147,11 +149,89 @@ func (s *Server) startSync(ctx context.Context, repo, branch string) (Job, error
 			return Job{}, fmt.Errorf("%w: mounted sources follow the checkout on disk; switch branches there, or register the repository by URL", errBadRequest)
 		}
 	}
+	opts.After = s.automation(ctx, repo, n)
 	job, err := s.jobs.Start(repo, n.Root, opts) //nolint:contextcheck // jobs outlive the request
 	if err != nil {
 		return Job{}, fmt.Errorf("%w: %w", errConflict, err)
 	}
 	return job, nil
+}
+
+// automation returns the post-sync hook for repo, or nil when no automation
+// is enabled. It snapshots the current head and findings now, so the hook can
+// review exactly the commits and triage exactly the findings that are new.
+func (s *Server) automation(ctx context.Context, repo string, before model.Node) func(context.Context) {
+	sc := s.sched.get(repo)
+	if s.cfg.LLM == nil || (!sc.AutoReview && !sc.AutoTriage) {
+		return nil
+	}
+	oldFindings := map[string]bool{}
+	if list, err := s.st.List(ctx, repo, store.Filter{Kinds: []model.NodeKind{model.KindFinding}}, store.ByName, store.MaxLimit); err == nil {
+		for _, f := range list {
+			oldFindings[f.Node.ID] = true
+		}
+	}
+	oldHead := before.Head
+	return func(ctx context.Context) {
+		after, err := s.st.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
+		if err != nil {
+			return
+		}
+		runner := aitasks.Runner{St: s.st, LLM: s.cfg.LLM}
+		var newFindings []string
+		if sc.AutoTriage {
+			if list, err := s.st.List(ctx, repo, store.Filter{Kinds: []model.NodeKind{model.KindFinding}}, store.ByName, store.MaxLimit); err == nil {
+				for _, f := range list {
+					if !oldFindings[f.Node.ID] && model.SeverityRank(f.Node.Severity) >= model.SeverityRank("medium") {
+						newFindings = append(newFindings, f.Node.ID)
+					}
+				}
+			}
+		}
+		var diff []byte
+		if sc.AutoReview && oldHead != "" && after.Head != "" && oldHead != after.Head {
+			if d, err := gitx.Diff(ctx, after.Root, oldHead, after.Head); err == nil {
+				diff = d
+			} else {
+				s.logger.Warn("auto-review: diff of new commits failed", "repo", repo, "error", err)
+			}
+		}
+		if len(newFindings) == 0 && len(diff) == 0 {
+			return
+		}
+		_, err = s.jobs.Start(repo, "", JobOptions{Kind: "ai", Task: "automatic", Run: func(ctx context.Context) (string, error) { //nolint:contextcheck // runs as its own job
+			var last string
+			var errs []error
+			if len(newFindings) > 0 {
+				id, err := runner.Run(ctx, "security-triage", aitasks.Input{Repo: repo, OnlyFindings: newFindings})
+				if err == nil {
+					last = id
+				} else if !errors.Is(err, aitasks.ErrNothingToDo) {
+					errs = append(errs, fmt.Errorf("triage: %w", err))
+				}
+			}
+			if len(diff) > 0 {
+				title := fmt.Sprintf("AI review of new commits %s..%s", short(oldHead), short(after.Head))
+				id, err := runner.Run(ctx, "review", aitasks.Input{Repo: repo, Diff: diff, Title: title})
+				if err == nil {
+					last = id
+				} else if !errors.Is(err, aitasks.ErrNothingToDo) {
+					errs = append(errs, fmt.Errorf("review: %w", err))
+				}
+			}
+			return last, errors.Join(errs...)
+		}})
+		if err != nil {
+			s.logger.Warn("auto-review not started", "repo", repo, "error", err)
+		}
+	}
+}
+
+func short(h string) string {
+	if len(h) > 8 {
+		return h[:8]
+	}
+	return h
 }
 
 // handleBranches lists branches: remote heads for workspace clones, local

@@ -54,7 +54,7 @@ export interface Dashboard {
 }
 export interface RepoInfo { name: string; head?: string; ingested_at?: string; root?: string; branch?: string; remote?: string; managed?: boolean }
 export interface Source { name: string; is_git: boolean; is_go: boolean; content?: Record<string, number>; truncated?: boolean }
-export interface Job { id: string; repo: string; kind?: string; branch?: string; state: 'running' | 'succeeded' | 'failed'; started_at: string; finished_at?: string; nodes?: number; edges?: number; error?: string }
+export interface Job { id: string; repo: string; kind?: string; branch?: string; task?: string; result?: string; state: 'running' | 'succeeded' | 'failed'; started_at: string; finished_at?: string; nodes?: number; edges?: number; error?: string }
 export interface SymbolCard { symbol: GraphNodeData; callers: NodeRef[]; callees: NodeRef[]; tests: NodeRef[]; implementations?: NodeRef[]; docs?: NodeRef[] }
 export interface ViewNode extends NodeRef { complexity?: number; security_tags?: string[]; is_test?: boolean }
 export interface ViewEdge { from: string; to: string; kind: string; count?: number }
@@ -139,9 +139,15 @@ export interface CleanupReport {
 
 export interface ReviewComment {
   id: string; file: string; line?: number; end_line?: number; severity: string; category: string; message: string
-  suggestion?: string; rule?: string; symbol?: string; symbol_id?: string; status: 'open' | 'resolved' | 'wontfix'
+  suggestion?: string; rule?: string; symbol?: string; symbol_id?: string; status: 'open' | 'accepted' | 'rejected' | 'deferred' | 'resolved' | 'wontfix'
   status_note?: string; status_by?: string; updated_at?: string
 }
-export interface ReviewCounts { total: number; open: number; resolved: number; wontfix: number; by_severity: Record<string, number> }
-export interface ReviewSummary { id: string; repo: string; title: string; verdict: string; author: string; source: string; commit?: string; created_at: string; updated_at: string; counts: ReviewCounts }
+export interface ReviewCounts { total: number; open: number; accepted?: number; rejected?: number; deferred?: number; resolved: number; wontfix: number; by_severity: Record<string, number> }
+export interface ReviewSummary { id: string; kind?: string; repo: string; title: string; verdict: string; author: string; source: string; commit?: string; created_at: string; updated_at: string; counts: ReviewCounts }
 export interface Review extends Omit<ReviewSummary, 'counts'> { summary: string; base?: string; head?: string; comments: ReviewComment[] }
+
+export interface AIProvider {
+  name: string; kind: string; model: string; endpoint: string; local: boolean; has_key: boolean; key_env?: string
+  sends_source: boolean; max_output_tokens: number; max_input_tokens: number; tasks: string[]
+  usage: { requests: number; failures: number; input_tokens: number; output_tokens: number; avg_seconds: number; last_error?: string }
+}

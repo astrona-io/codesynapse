@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
+	"github.com/parisnakitakejser/codesynapse/internal/llm"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/query"
 	"github.com/parisnakitakejser/codesynapse/internal/review"
@@ -45,7 +46,9 @@ type Config struct {
 	GitAuth gitx.Auth
 	// AllowPrivateGit permits remotes on private networks.
 	AllowPrivateGit bool
-	Version         string
+	// LLM holds configured AI providers; nil disables AI tasks.
+	LLM     *llm.Registry
+	Version string
 }
 
 // Server is the API handler.
@@ -69,6 +72,7 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 		sched, _ = loadSchedules("") //nolint:errcheck // in-memory fallback cannot fail
 	}
 	s.sched = sched
+	s.loadRoutes()
 	go s.runScheduler(ctx, logger)
 	s.routes()
 	return s
@@ -131,6 +135,10 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/reviews/{id}", s.handleGetReview)
 	m.HandleFunc("DELETE /api/v1/reviews/{id}", s.handleDeleteReview)
 	m.HandleFunc("PATCH /api/v1/reviews/{id}/comments/{comment}", s.handleUpdateReviewComment)
+	m.HandleFunc("GET /api/v1/ai/providers", s.handleAIProviders)
+	m.HandleFunc("PUT /api/v1/ai/routing", s.handlePutRouting)
+	m.HandleFunc("POST /api/v1/ai/providers/{name}/test", s.handleAITest)
+	m.HandleFunc("POST /api/v1/repos/{repo}/ai/{task}", s.handleAITask)
 	m.HandleFunc("GET /api/v1/jobs", s.handleJobs)
 	m.HandleFunc("GET /api/v1/jobs/{id}", s.handleJob)
 }

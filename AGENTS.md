@@ -56,7 +56,10 @@ internal/review/        Diff → impact report, risk scoring, Markdown renderer
 internal/mcpserver/     MCP tools, prompts (prompts.go) and server instructions
 internal/agentcfg/      `codesynapse mcp install`: registers the MCP server with local agents
 internal/api/           HTTP handlers, jobs (ingest/clone/sync), auto-sync scheduler, reviews, dashboard and overview
-internal/reviews/       Code reviews: model, validation, redaction, comment status
+internal/reviews/       Code reviews: model, validation, redaction, comment decisions
+internal/llm/           Model providers (OpenAI-compatible, Anthropic SDK), per-task routing, usage
+internal/aitasks/       AI tasks (security triage, review, briefing) that produce reviews
+config/                 llm.example.yaml (committed); llm.yaml is local and gitignored
 internal/app/           Shared wiring: Neo4j flags, bearer auth, HTTP server, cobra CLI bootstrap
 internal/logx/          slog logger carried in contexts
 internal/testutil/      assert/require helpers for tests
@@ -125,6 +128,7 @@ This tool reads untrusted repositories and serves their contents to LLMs. Keep i
 - **Destructive API actions** (delete repository, delete review) are confirmed in the UI; deleting cloned files is limited to a single directory inside the workspace, and mounted sources are never deleted.
 - **Network services** refuse to bind a non-loopback address without a bearer token (`app.ErrTokenRequired`). The web app keeps the API token server-side, and its proxy rejects cross-origin mutating requests.
 - **Limits everywhere:** `store.MaxLimit`, `store.MaxDepth`, request body caps, query timeouts. New endpoints keep them.
+- **LLM calls:** only through `internal/llm`. Model output is untrusted: parse it defensively, validate enums and file paths, redact before storing. Never send source to a non-local provider except a diff the user asked to review. API keys come from `api_key_env`, never from `config/llm.yaml` itself.
 - Secrets come from the environment (`CODESYNAPSE_NEO4J_PASSWORD`, `*_TOKEN`), never flags, never logs.
 
 ## Web (Nuxt 4)
