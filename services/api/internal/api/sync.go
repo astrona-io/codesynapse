@@ -59,27 +59,39 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	dir := filepath.Join(s.cfg.Workspace, req.Name)
-	if _, err := os.Stat(dir); err == nil {
-		s.problem(w, http.StatusConflict, fmt.Errorf("%q already exists; use sync", req.Name))
-		return
+	job, err := s.startClone(remote, req.Name, req.Branch) //nolint:contextcheck // jobs outlive the request
+	switch {
+	case errors.Is(err, errConflict):
+		s.problem(w, http.StatusConflict, err)
+	case err != nil:
+		s.problem(w, 500, err)
+	default:
+		writeJSON(w, http.StatusAccepted, job)
+	}
+}
+
+// startClone queues a clone of an already validated remote into the
+// workspace under name, then indexes it.
+func (s *Server) startClone(remote, name, branch string) (Job, error) {
+	dir := filepath.Join(s.cfg.Workspace, name)
+	if _, err := os.Stat(dir); err == nil { //nolint:gosec // name passed validRepoName: one path element, no leading dot
+		return Job{}, fmt.Errorf("%w: %q already exists; use sync", errConflict, name)
 	}
 	auth := s.cfg.GitAuth
-	job, err := s.jobs.Start(req.Name, dir, JobOptions{ //nolint:contextcheck // jobs outlive the request
-		Kind: "clone", Branch: req.Branch,
+	job, err := s.jobs.Start(name, dir, JobOptions{
+		Kind: "clone", Branch: branch,
 		Prepare: func(ctx context.Context) error {
-			if err := gitx.Clone(ctx, remote, req.Branch, dir, auth); err != nil {
-				_ = os.RemoveAll(dir) //nolint:errcheck // best-effort cleanup of a partial clone
+			if err := gitx.Clone(ctx, remote, branch, dir, auth); err != nil {
+				_ = os.RemoveAll(dir) //nolint:errcheck,gosec // best-effort cleanup of a partial clone; dir is workspace/<validated name>
 				return err
 			}
 			return nil
 		},
 	})
 	if err != nil {
-		s.problem(w, http.StatusConflict, err)
-		return
+		return Job{}, fmt.Errorf("%w: %w", errConflict, err)
 	}
-	writeJSON(w, http.StatusAccepted, job)
+	return job, nil
 }
 
 type switchRequest struct {

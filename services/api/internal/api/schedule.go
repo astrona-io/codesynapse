@@ -217,6 +217,7 @@ func (s *Server) runScheduler(ctx context.Context, logger *slog.Logger) {
 					s.sched.ensure(n.Name, now)
 				}
 			}
+			s.scanDue(ctx, now, logger)
 			for _, repo := range s.sched.due(now) {
 				_, err := s.startSync(ctx, repo, "")
 				if errors.Is(err, errConflict) {

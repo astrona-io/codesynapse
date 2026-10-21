@@ -51,6 +51,9 @@ type Config struct {
 	AllowPush bool
 	// GitAuthor signs fix commits.
 	GitAuthor gitx.Author
+	// GitHubAPI overrides the GitHub REST endpoint used to list organisations
+	// (tests only; empty means api.github.com).
+	GitHubAPI string
 	// LLM holds configured AI providers; nil disables AI tasks.
 	LLM     *llm.Registry
 	Version string
@@ -63,8 +66,11 @@ type Server struct {
 	svc    query.Service
 	jobs   *Jobs
 	sched  *schedules
+	orgs   *orgs
 	logger *slog.Logger
 	mux    *http.ServeMux
+	// cloneHook replaces the clone job for organisation repositories (tests).
+	cloneHook func(remote, name string) (Job, error)
 }
 
 // New builds the API. Jobs run on ctx and stop when it is cancelled.
@@ -77,6 +83,11 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 		sched, _ = loadSchedules("") //nolint:errcheck // in-memory fallback cannot fail
 	}
 	s.sched = sched
+	s.orgs, err = loadOrgs(cfg.Workspace)
+	if err != nil {
+		logger.Error("watched organisations unreadable; starting with none", "error", err)
+		s.orgs, _ = loadOrgs("") //nolint:errcheck // in-memory fallback cannot fail
+	}
 	s.loadRoutes()
 	go s.recoverFixes(ctx)
 	go s.runScheduler(ctx, logger)
@@ -132,6 +143,12 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/sources", s.handleSources)
 	m.HandleFunc("POST /api/v1/ingest", s.handleIngest)
 	m.HandleFunc("POST /api/v1/repos", s.handleRegister)
+	m.HandleFunc("GET /api/v1/orgs", s.handleListOrgs)
+	m.HandleFunc("POST /api/v1/orgs", s.handleAddOrg)
+	m.HandleFunc("PUT /api/v1/orgs/{org}", s.handleUpdateOrg)
+	m.HandleFunc("DELETE /api/v1/orgs/{org}", s.handleDeleteOrg)
+	m.HandleFunc("POST /api/v1/orgs/{org}/scan", s.handleScanOrg)
+	m.HandleFunc("POST /api/v1/orgs/{org}/repos/{name}/index", s.handleIndexOrgRepo)
 	m.HandleFunc("POST /api/v1/repos/{repo}/sync", s.handleSync)
 	m.HandleFunc("GET /api/v1/repos/{repo}/schedule", s.handleGetSchedule)
 	m.HandleFunc("PUT /api/v1/repos/{repo}/schedule", s.handlePutSchedule)

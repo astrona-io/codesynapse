@@ -53,6 +53,7 @@ internal/cleanup/       Liveness (reachability from entry points), unused code/m
 internal/vuln/          go.mod and npm/PyPI lockfiles + OSV lookups, called/imported/required reachability
 internal/security/      Security report: grading, exposure, prioritisation, Markdown; rule guides (guides.go)
 internal/metrics/       Repository metrics and the token benchmark (computed at ingest)
+internal/forge/         GitHub organisation listing (api.github.com only) for the Organisations feature
 internal/gitx/          Hardened git runner, diff/log parsers, clone/fetch with SSRF checks
 internal/redact/        Secret redaction for every stored summary
 internal/store/         Store interface; memory/ and neo4jstore/ implementations; storetest/ contract
@@ -125,6 +126,7 @@ This tool reads untrusted repositories and serves their contents to LLMs. Keep i
 - **Filesystem:** API ingest is confined to `CODESYNAPSE_SOURCES_ROOT` after symlink resolution (`insideSources`). Docs walking never follows symlinks.
 - **No source bodies or YAML values in the graph.** Store hashes, signatures, key paths, line ranges and short summaries. Every summary passes through `redact.Summary`. Author e-mails are stored only as hashes. Security findings describe the problem, never the secret.
 - **Remote git:** only `gitx.Clone`/`FetchCheckout`/`RemoteBranches`. Remotes go through `gitx.ValidateRemote` (https only, no credentials in URLs, no private/loopback hosts unless `CODESYNAPSE_ALLOW_PRIVATE_GIT`). Tokens are passed as `GIT_CONFIG_*` environment, never argv, and only to their configured host.
+- **Organisations:** repositories are listed only through `internal/forge` (api.github.com, no redirects, token sent only there and only when `CODESYNAPSE_GIT_TOKEN_HOST` is github.com). Clone URLs are built as `https://github.com/<login>/<name>.git` from an allowlisted login and a `validRepoName` name, never taken from the API answer. Scans queue at most 10 clones each and back off an hour after a failure.
 - **Vulnerability data:** only module paths and versions leave the machine (osv.dev). Keep it that way.
 - **MCP tools are read-only** and annotated `ReadOnlyHint`, with one exception: the review tools (`submit_review`, `update_review_comment`) write to the review store only (`store.ReviewStore`, `:Review` nodes), never to code or the graph. Review text is size-limited and secret-redacted (`reviews.Prepare`), file paths are repo-relative with no `..`, and `--allow-reviews=false` disables them. There is deliberately no raw-Cypher tool (read transactions still allow `LOAD CSV`, an SSRF and exfiltration path). Do not add other write tools without discussing it first.
 - **Destructive API actions** (delete repository, delete review) are confirmed in the UI; deleting cloned files is limited to a single directory inside the workspace, and mounted sources are never deleted.

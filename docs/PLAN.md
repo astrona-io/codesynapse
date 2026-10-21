@@ -193,3 +193,7 @@ What would put security more in front of developers, ordered by value for the ef
 10. **Ownership.** Parse `CODEOWNERS` and route findings to owning teams on the overview.
 11. **Agent workflow.** A `security-review` MCP prompt (guide prompt E) and a `security_context` view in `get_symbol_context` showing sensitive calls, reaching routes and findings before an agent edits a symbol.
 12. **Pre-commit gate.** `codesynapse audit --changed --fail-on high` limited to staged files, fast enough for a hook.
+
+## Organisations
+
+`internal/forge` lists a GitHub organisation's (or user's) repositories. The API keeps watched organisations in `<workspace>/.codesynapse/orgs.json` (`services/api/internal/api/orgs.go`), rescans each every 5 minutes, and with `auto_index` on queues clone + index jobs for repositories that are not indexed yet (archived repositories and forks only when asked for). Cloned repositories then follow the default 5-minute auto-sync. Endpoints: `GET/POST /api/v1/orgs`, `PUT/DELETE /api/v1/orgs/{org}`, `POST /api/v1/orgs/{org}/scan`, `POST /api/v1/orgs/{org}/repos/{name}/index`. Stopping to watch an organisation keeps its indexed repositories. The dashboard page is `/orgs`.
