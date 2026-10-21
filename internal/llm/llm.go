@@ -32,7 +32,7 @@ const (
 )
 
 // Tasks a provider can be routed to.
-var Tasks = []string{"security-triage", "review", "briefing"}
+var Tasks = []string{"security-triage", "review", "briefing", "fix"}
 
 // Request is one completion request.
 type Request struct {
@@ -57,6 +57,33 @@ type Provider interface {
 	Models(ctx context.Context) ([]string, error)
 }
 
+// contextMargin leaves room for the system prompt and chat template.
+const contextMargin = 1024
+
+// budgets fills in token budgets and the timeout. Without a context window
+// the defaults are conservative, because CodeSynapse cannot know what an
+// unknown server accepts.
+func budgets(p *ProviderConfig) {
+	if p.MaxOutputTokens <= 0 {
+		p.MaxOutputTokens = 8192
+	}
+	if p.ContextWindow > 0 {
+		p.MaxOutputTokens = min(p.MaxOutputTokens, p.ContextWindow/2)
+		room := p.ContextWindow - p.MaxOutputTokens - contextMargin
+		if p.MaxInputTokens <= 0 || p.MaxInputTokens > room {
+			p.MaxInputTokens = room
+		}
+	}
+	if p.MaxInputTokens <= 0 {
+		p.MaxInputTokens = 32_000
+	}
+	if p.TimeoutSeconds <= 0 {
+		// Prefill on local hardware runs at hundreds of tokens a second, so
+		// large prompts need minutes.
+		p.TimeoutSeconds = max(300, p.MaxInputTokens/100)
+	}
+}
+
 // ProviderConfig configures one provider.
 type ProviderConfig struct {
 	Name    string `yaml:"name" json:"name"`
@@ -69,7 +96,11 @@ type ProviderConfig struct {
 	// MaxOutputTokens caps each answer; reasoning models need headroom.
 	MaxOutputTokens int `yaml:"max_output_tokens" json:"max_output_tokens"`
 	// MaxInputTokens caps the context CodeSynapse packs into a prompt.
+	// Defaults to the context window minus the output budget.
 	MaxInputTokens int `yaml:"max_input_tokens" json:"max_input_tokens"`
+	// ContextWindow is the model's total context (prompt + answer). Input
+	// and output budgets are kept inside it.
+	ContextWindow  int `yaml:"context_window" json:"context_window"`
 	TimeoutSeconds int `yaml:"timeout_seconds" json:"timeout_seconds"`
 	// SendSource allows short source snippets in prompts. Defaults to true
 	// for local providers and false for remote ones.
@@ -141,6 +172,12 @@ func (c *Config) normalise(getenv func(string) string) error {
 			if p.Model == "" {
 				p.Model = "claude-opus-5-5"
 			}
+			if p.ContextWindow <= 0 {
+				p.ContextWindow = 200_000
+			}
+			if p.MaxOutputTokens <= 0 {
+				p.MaxOutputTokens = 32_000
+			}
 			if p.APIKeyEnv == "" {
 				p.APIKeyEnv = "ANTHROPIC_API_KEY"
 			}
@@ -151,15 +188,7 @@ func (c *Config) normalise(getenv func(string) string) error {
 			return fmt.Errorf("provider %q: base_url must be http(s)", p.Name)
 		}
 		p.BaseURL = strings.TrimRight(p.BaseURL, "/")
-		if p.MaxOutputTokens <= 0 {
-			p.MaxOutputTokens = 4096
-		}
-		if p.MaxInputTokens <= 0 {
-			p.MaxInputTokens = 32000
-		}
-		if p.TimeoutSeconds <= 0 {
-			p.TimeoutSeconds = 300
-		}
+		budgets(p)
 		if p.APIKeyEnv != "" {
 			p.apiKey = getenv(p.APIKeyEnv)
 		}

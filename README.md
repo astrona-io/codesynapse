@@ -63,7 +63,16 @@ Non-Go call edges are name-based (imports, enclosing class, names unique in the 
 
 Ask your agent to review a change ("review my changes with CodeSynapse and submit the review", or the `code-review` MCP prompt). It analyses the change with the graph and calls `submit_review`; the review appears on the **Reviews** page with a verdict, a summary and comments on exact lines, each with severity, category, the symbol it points at and a suggested fix. Resolve comments in the UI, or let the agent mark them fixed with `update_review_comment`. These are the only MCP tools that write, and they write only to the review store (disable with `CODESYNAPSE_MCP_REVIEWS=false`).
 
-Every comment needs a decision: **Accept** (agreed, to fix), **Reject** (disagree or false positive), **Defer** (later) or **Mark fixed**. The Reviews page filters on "To decide", "Accepted" and "Deferred"; agents record the same decisions with `update_review_comment`.
+Every comment needs a decision: **Accept** (agreed, to fix), **Reject** (disagree or false positive, with an optional reason), **Defer** (later) or **Mark fixed**. The Reviews page shows progress and tabs for To decide, To fix, Later and Done; agents record the same decisions with `update_review_comment` and read the to-do list with `get_review` status "accepted".
+
+**Fix branches.** For an accepted comment, **Create fix branch & PR** asks the model routed to "Fixes" to rewrite the affected file, commits it to a new `codesynapse/fix-…` branch, pushes it and opens a draft pull request, so your CI/CD pipeline runs on it. You review and merge the PR, then mark the comment fixed. "Fix all on one branch" does the same for every accepted item. It is off by default:
+
+```sh
+# .env
+CODESYNAPSE_ALLOW_PUSH=true
+```
+
+and needs a token (`just git-token`) with **Contents** and **Pull requests** read and write. Safety rails: work happens in a separate git worktree (the indexed checkout never changes); only files named in the comments may change; CI definitions (`.github/`, `.gitlab-ci.yml`, Jenkinsfile, …) and git config are never touched; pushes go only to new `codesynapse/*` branches and are never forced; answers that are empty, unchanged or wildly different in size are refused. The fix needs source, so route "Fixes" to a local model (remote providers need `send_source: true`). Workflows that run on every push run before anyone reviews the change; if that matters, limit them to pull requests.
 
 ## AI models (local or cloud)
 
@@ -73,7 +82,7 @@ CodeSynapse can ask a model to triage security findings, review changes and writ
 - `kind: anthropic` uses the official SDK; the key comes from `ANTHROPIC_API_KEY`.
 - The compose API container reaches services on your Mac through `host.docker.internal` (for example `http://host.docker.internal:9080/v1`).
 - `disable_thinking: true` turns off reasoning for Qwen-style models, which otherwise spend the whole output budget thinking.
-- `max_input_tokens` / `max_output_tokens` are a **budget per request** (default 32k in, 8k out), not the model's context window. Security triage sends findings in batches of 6 so local models stay fast.
+- Set `context_window` to the model's real context (for MLX models it is `max_position_embeddings` in the model's `config.json`). CodeSynapse then gives each request everything up to the window minus `max_output_tokens`, and the amount of work per request grows with it: more findings per triage batch, more changed symbols and longer code excerpts per review. Without `context_window` it stays at a safe 32k in / 8k out. Lower `max_input_tokens` if answers get too slow; the timeout scales with the budget.
 
 On the **AI models** page you pick a **global** model, the fallback for everything, and optionally a different one per area: code review, security analysis and briefings. The choice is saved in `workspace/.codesynapse/llm-routes.json`. Remote providers never receive source code beyond the diff you ask them to review; local providers also get short snippets around findings. Model answers are treated as untrusted text and redacted before they are stored.
 

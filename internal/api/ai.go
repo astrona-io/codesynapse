@@ -29,6 +29,7 @@ type ProviderInfo struct {
 	SendsSource bool      `json:"sends_source"`
 	MaxOutput   int       `json:"max_output_tokens"`
 	MaxInput    int       `json:"max_input_tokens"`
+	Context     int       `json:"context_window,omitempty"`
 	Tasks       []string  `json:"tasks"`
 	Usage       llm.Usage `json:"usage"`
 }
@@ -58,7 +59,7 @@ func (s *Server) handleAIProviders(w http.ResponseWriter, _ *http.Request) {
 			out = append(out, ProviderInfo{
 				Name: p.Name, Kind: p.Kind, Model: p.Model, Endpoint: endpointHost(p.BaseURL), Local: p.Local(),
 				HasKey: p.HasKey(), KeyEnv: p.APIKeyEnv, SendsSource: p.AllowsSource(),
-				MaxOutput: p.MaxOutputTokens, MaxInput: p.MaxInputTokens, Tasks: append([]string{}, tasks...),
+				MaxOutput: p.MaxOutputTokens, MaxInput: p.MaxInputTokens, Context: p.ContextWindow, Tasks: append([]string{}, tasks...),
 				Usage: s.cfg.LLM.Usage(p.Name),
 			})
 		}
@@ -159,7 +160,7 @@ type aiTaskRequest struct {
 // handleAITask queues an AI task; the job result is the review id.
 func (s *Server) handleAITask(w http.ResponseWriter, r *http.Request) {
 	repo, task := r.PathValue("repo"), r.PathValue("task")
-	if !slices.Contains(llm.Tasks, task) {
+	if !slices.Contains(llm.Tasks, task) || task == "fix" {
 		s.problem(w, 400, errors.New("task must be one of security-triage, review, briefing"))
 		return
 	}

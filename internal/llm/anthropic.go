@@ -45,8 +45,15 @@ func (a *anthropicProvider) Complete(ctx context.Context, req Request) (Response
 	if a.cfg.Effort != "" {
 		params.OutputConfig = anthropic.BetaOutputConfigParam{Effort: anthropic.BetaOutputConfigEffort(a.cfg.Effort)}
 	}
-	msg, err := a.client.Beta.Messages.New(ctx, params)
-	if err != nil {
+	// Streamed so long answers are not cut by request timeouts.
+	stream := a.client.Beta.Messages.NewStreaming(ctx, params)
+	var msg anthropic.BetaMessage
+	for stream.Next() {
+		if err := msg.Accumulate(stream.Current()); err != nil {
+			return Response{}, fmt.Errorf("%s: %w", a.cfg.Name, err)
+		}
+	}
+	if err := stream.Err(); err != nil {
 		var apiErr *anthropic.Error
 		if errors.As(err, &apiErr) {
 			return Response{}, fmt.Errorf("%s: HTTP %d: %s", a.cfg.Name, apiErr.StatusCode, strings.TrimSpace(apiErr.Error()))

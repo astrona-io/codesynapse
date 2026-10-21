@@ -41,6 +41,10 @@ services:
       CODESYNAPSE_GIT_TOKEN: ${CODESYNAPSE_GIT_TOKEN:-}
       CODESYNAPSE_GIT_TOKEN_HOST: ${CODESYNAPSE_GIT_TOKEN_HOST:-github.com}
       CODESYNAPSE_ALLOW_PRIVATE_GIT: ${CODESYNAPSE_ALLOW_PRIVATE_GIT:-false}
+      # Push fix branches for accepted review comments and open draft PRs.
+      CODESYNAPSE_ALLOW_PUSH: ${CODESYNAPSE_ALLOW_PUSH:-false}
+      CODESYNAPSE_GIT_AUTHOR_NAME: ${CODESYNAPSE_GIT_AUTHOR_NAME:-CodeSynapse}
+      CODESYNAPSE_GIT_AUTHOR_EMAIL: ${CODESYNAPSE_GIT_AUTHOR_EMAIL:-codesynapse@localhost}
       # AI providers (local MLX/Ollama/vLLM or cloud): see config/llm.example.yaml.
       CODESYNAPSE_LLM_CONFIG: /config/llm.yaml
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

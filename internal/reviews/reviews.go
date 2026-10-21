@@ -85,6 +85,28 @@ type CommentItem struct {
 	StatusNote string `json:"status_note,omitempty"`
 	StatusBy   string `json:"status_by,omitempty"`
 	UpdatedAt  string `json:"updated_at,omitempty"`
+	// Fix is set by CodeSynapse when it pushes a fix branch for this comment.
+	Fix *Fix `json:"fix,omitempty"`
+}
+
+// Fix states.
+const (
+	FixRunning = "running"
+	FixPushed  = "pushed"
+	FixFailed  = "failed"
+)
+
+// Fix is a generated fix pushed to a branch, where CI runs and a person
+// reviews it before merging.
+type Fix struct {
+	State      string `json:"state"`
+	Branch     string `json:"branch,omitempty"`
+	Commit     string `json:"commit,omitempty"`
+	PRURL      string `json:"pr_url,omitempty"`
+	CompareURL string `json:"compare_url,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Error      string `json:"error,omitempty"`
+	At         string `json:"at"`
 }
 
 // Review is a submitted review.
@@ -243,8 +265,22 @@ func Prepare(r Review, now time.Time) (Review, error) {
 		c.ID = newID()
 		c.Status = Open
 		c.StatusNote, c.StatusBy, c.UpdatedAt = "", "", ts
+		c.Fix = nil // only CodeSynapse records fixes
 	}
 	return r, nil
+}
+
+// SetFix records fix state on the given comments.
+func SetFix(r *Review, ids []string, f Fix, now time.Time) {
+	f.At = now.UTC().Format(time.RFC3339)
+	f.Error = clean(f.Error, maxNote)
+	for i := range r.Comments {
+		if slices.Contains(ids, r.Comments[i].ID) {
+			fx := f
+			r.Comments[i].Fix = &fx
+		}
+	}
+	r.UpdatedAt = f.At
 }
 
 // ApplyStatus changes one comment's status.

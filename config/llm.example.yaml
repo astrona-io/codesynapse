@@ -13,10 +13,11 @@ providers:
     kind: openai
     base_url: http://host.docker.internal:9080/v1
     model: mlx-community/Qwen3.8-27B-4bit
-    max_output_tokens: 8000   # reasoning models think before answering; leave headroom
+    context_window: 262144    # the model's full context (max_position_embeddings in its config.json)
+    max_output_tokens: 32768  # longest answer; also sets how many findings go into one triage request
     disable_thinking: true    # Qwen3/R1-style models: skip the reasoning phase for fast JSON answers
-    max_input_tokens: 32000   # budget per request, not the model's window: larger is slower on a Mac
-    timeout_seconds: 600
+    # max_input_tokens:       # defaults to context_window - max_output_tokens; lower it for faster answers
+    # timeout_seconds:        # defaults to max(300, max_input_tokens/100) seconds: big prompts take minutes on a Mac
     # send_source: true       # default for local providers: short code snippets allowed
 
   # Example cloud provider (uncomment, set ANTHROPIC_API_KEY in .env).
@@ -26,6 +27,8 @@ providers:
   #   model: claude-opus-5-5
   #   api_key_env: ANTHROPIC_API_KEY
   #   effort: medium
+  #   context_window: 200000  # default; raise it if your account has a larger window
+  #   max_output_tokens: 32000
 
   # Example OpenAI-compatible cloud endpoint with a key.
   # - name: openrouter
@@ -39,4 +42,5 @@ tasks:
   security-triage: local-mlx
   review: local-mlx
   briefing: local-mlx
+  fix: local-mlx         # writes fixes for accepted review comments (needs source access: use a local model)
 default: local-mlx

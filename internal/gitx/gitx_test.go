@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -164,4 +166,35 @@ func TestRemoteEnvScopesToken(t *testing.T) {
 
 func TestSanitizeURL(t *testing.T) {
 	assert.Equal(t, SanitizeURL("https://x:y@github.com/a/b"), "https://github.com/a/b")
+}
+
+func TestWorktreeCommit(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"-c", "user.name=t", "-c", "user.email=t@x", "commit", "-q", "--allow-empty", "-m", "init"}} {
+		_, err := Run(ctx, dir, args...)
+		require.NoError(t, err)
+	}
+	head := HeadCommit(ctx, dir)
+	wt := filepath.Join(t.TempDir(), "wt")
+	require.NoError(t, AddWorktree(ctx, dir, wt, head))
+	require.NoError(t, os.WriteFile(filepath.Join(wt, "a.go"), []byte("package a\n"), 0o600))
+	id, err := CommitFiles(ctx, wt, []string{"a.go"}, "fix: add a", Author{Name: "CodeSynapse", Email: "codesynapse@localhost"})
+	require.NoError(t, err)
+	assert.True(t, id != "" && id != head)
+	_, err = CommitFiles(ctx, wt, []string{"../x"}, "m", Author{})
+	assert.Error(t, err)
+	require.NoError(t, RemoveWorktree(ctx, dir, wt))
+	assert.Equal(t, HeadCommit(ctx, dir), head) // the indexed checkout is untouched
+}
+
+func TestPushBranchRefusesUnsafeTargets(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct{ remote, branch string }{
+		{"https://github.com/o/r", "main"},
+		{"https://github.com/o/r", "codesynapse/../main"},
+		{"file:///tmp/r", "codesynapse/fix-1"},
+	} {
+		assert.Error(t, PushBranch(ctx, t.TempDir(), tc.remote, tc.branch, Auth{}))
+	}
 }

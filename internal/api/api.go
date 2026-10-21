@@ -46,6 +46,11 @@ type Config struct {
 	GitAuth gitx.Auth
 	// AllowPrivateGit permits remotes on private networks.
 	AllowPrivateGit bool
+	// AllowPush lets CodeSynapse push fix branches for accepted review
+	// comments and open pull requests. Off by default.
+	AllowPush bool
+	// GitAuthor signs fix commits.
+	GitAuthor gitx.Author
 	// LLM holds configured AI providers; nil disables AI tasks.
 	LLM     *llm.Registry
 	Version string
@@ -99,6 +104,8 @@ func (s *Server) routes() {
 			"clone_enabled":        s.cfg.Workspace != "",
 			"allow_private_git":    s.cfg.AllowPrivateGit,
 			"vuln_scan":            s.cfg.VulnScan,
+			"push_enabled":         s.cfg.AllowPush && s.cfg.LLM != nil,
+			"push_allowed":         s.cfg.AllowPush,
 			"sources_root":         s.cfg.SourcesRoot != "",
 		})
 	})
@@ -135,6 +142,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/reviews/{id}", s.handleGetReview)
 	m.HandleFunc("DELETE /api/v1/reviews/{id}", s.handleDeleteReview)
 	m.HandleFunc("PATCH /api/v1/reviews/{id}/comments/{comment}", s.handleUpdateReviewComment)
+	m.HandleFunc("POST /api/v1/reviews/{id}/fix", s.handleFixReview)
 	m.HandleFunc("GET /api/v1/ai/providers", s.handleAIProviders)
 	m.HandleFunc("PUT /api/v1/ai/routing", s.handlePutRouting)
 	m.HandleFunc("POST /api/v1/ai/providers/{name}/test", s.handleAITest)

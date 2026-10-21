@@ -25,7 +25,7 @@ func registerReviewTools(s *mcp.Server, h *handlers, rs store.ReviewStore) {
 	mcp.AddTool(s, &mcp.Tool{Name: "submit_review", Annotations: write, Description: "Submit a code review to CodeSynapse so people see it in the UI: title, summary, verdict (approve, comment, request_changes) and comments anchored to file:line with severity, category, message and an optional suggested fix. Writes only to the review store; code is never changed. Returns the review id and its page."}, h.submitReview)
 	mcp.AddTool(s, &mcp.Tool{Name: "update_review_comment", Annotations: write, Description: "Record a decision on a review comment: accepted (agreed, to fix), rejected (disagree or false positive), deferred, resolved (fixed) or open again, with a short note such as the commit that fixed it."}, h.updateReviewComment)
 	mcp.AddTool(s, &mcp.Tool{Name: "list_reviews", Annotations: read, Description: "List reviews of a repository, newest first, with counts of open, accepted and resolved comments."}, h.listReviews)
-	mcp.AddTool(s, &mcp.Tool{Name: "get_review", Annotations: read, Description: "Get one review with its comments; status=open returns only comments still to address."}, h.getReview)
+	mcp.AddTool(s, &mcp.Tool{Name: "get_review", Annotations: read, Description: "Get one review with its comments. status=accepted returns the comments a person agreed should be fixed (your to-do list); status=open returns those not decided yet."}, h.getReview)
 }
 
 type reviewCommentIn struct {
@@ -172,7 +172,7 @@ func (h *handlers) listReviews(ctx context.Context, _ *mcp.CallToolRequest, in l
 
 type getReviewIn struct {
 	ID     string `json:"id"`
-	Status string `json:"status,omitempty" jsonschema:"open to return only comments still to address"`
+	Status string `json:"status,omitempty" jsonschema:"accepted (agreed, to fix), open (undecided), deferred, rejected or resolved"`
 }
 
 func (h *handlers) getReview(ctx context.Context, _ *mcp.CallToolRequest, in getReviewIn) (*mcp.CallToolResult, reviews.Review, error) {

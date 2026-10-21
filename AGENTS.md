@@ -59,6 +59,7 @@ internal/api/           HTTP handlers, jobs (ingest/clone/sync), auto-sync sched
 internal/reviews/       Code reviews: model, validation, redaction, comment decisions
 internal/llm/           Model providers (OpenAI-compatible, Anthropic SDK), per-task routing, usage
 internal/aitasks/       AI tasks (security triage, review, briefing) that produce reviews
+internal/fixes/         Fix branches for accepted review comments: worktree, model rewrite, push, draft PR
 config/                 llm.example.yaml (committed); llm.yaml is local and gitignored
 internal/app/           Shared wiring: Neo4j flags, bearer auth, HTTP server, cobra CLI bootstrap
 internal/logx/          slog logger carried in contexts
@@ -128,6 +129,7 @@ This tool reads untrusted repositories and serves their contents to LLMs. Keep i
 - **Destructive API actions** (delete repository, delete review) are confirmed in the UI; deleting cloned files is limited to a single directory inside the workspace, and mounted sources are never deleted.
 - **Network services** refuse to bind a non-loopback address without a bearer token (`app.ErrTokenRequired`). The web app keeps the API token server-side, and its proxy rejects cross-origin mutating requests.
 - **Limits everywhere:** `store.MaxLimit`, `store.MaxDepth`, request body caps, query timeouts. New endpoints keep them.
+- **Pushing:** only `internal/fixes` pushes, only when `CODESYNAPSE_ALLOW_PUSH=true`, only through `gitx.PushBranch` (new `codesynapse/*` branches, never forced) from a separate worktree, and never edits CI or git configuration (`fixes.protected`). Keep those rails.
 - **LLM calls:** only through `internal/llm`. Model output is untrusted: parse it defensively, validate enums and file paths, redact before storing. Never send source to a non-local provider except a diff the user asked to review. API keys come from `api_key_env`, never from `config/llm.yaml` itself.
 - Secrets come from the environment (`CODESYNAPSE_NEO4J_PASSWORD`, `*_TOKEN`), never flags, never logs.
 

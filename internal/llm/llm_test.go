@@ -108,3 +108,27 @@ func TestOpenAICompatible(t *testing.T) {
 	assert.Equal(t, u.InputTokens, 11)
 	assert.Equal(t, u.OutputTokens, 7)
 }
+
+func TestBudgets(t *testing.T) {
+	tests := []struct {
+		name            string
+		in              ProviderConfig
+		wantIn, wantOut int
+		wantTimeout     int
+	}{
+		{"defaults without a window", ProviderConfig{}, 32_000, 8192, 320},
+		{"input fills the window", ProviderConfig{ContextWindow: 262_144, MaxOutputTokens: 32_768}, 262_144 - 32_768 - contextMargin, 32_768, 2283},
+		{"too large input is clamped", ProviderConfig{ContextWindow: 32_768, MaxInputTokens: 100_000, MaxOutputTokens: 8192}, 32_768 - 8192 - contextMargin, 8192, 300},
+		{"output at most half the window", ProviderConfig{ContextWindow: 16_384, MaxOutputTokens: 16_000}, 16_384 - 8192 - contextMargin, 8192, 300},
+		{"explicit values win inside the window", ProviderConfig{ContextWindow: 262_144, MaxInputTokens: 50_000, MaxOutputTokens: 4000, TimeoutSeconds: 60}, 50_000, 4000, 60},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := tt.in
+			budgets(&p)
+			assert.Equal(t, p.MaxInputTokens, tt.wantIn)
+			assert.Equal(t, p.MaxOutputTokens, tt.wantOut)
+			assert.Equal(t, p.TimeoutSeconds, tt.wantTimeout)
+		})
+	}
+}

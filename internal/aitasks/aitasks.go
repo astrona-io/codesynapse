@@ -69,16 +69,16 @@ func (r Runner) Run(ctx context.Context, task string, in Input) (string, error) 
 		return "", err
 	}
 	src := sourceReader{root: repoNode.Root, enabled: cfg.AllowsSource()}
-	budget := cfg.MaxInputTokens * 4 // characters
+	lim := limitsFor(cfg)
 
 	var rv reviews.Review
 	switch task {
 	case "security-triage":
-		rv, err = r.securityTriage(ctx, provider, in, src, budget)
+		rv, err = r.securityTriage(ctx, provider, in, src, lim)
 	case "review":
-		rv, err = r.codeReview(ctx, provider, in, src, budget)
+		rv, err = r.codeReview(ctx, provider, in, src, lim)
 	case "briefing":
-		rv, err = r.briefing(ctx, provider, in, budget)
+		rv, err = r.briefing(ctx, provider, in, lim)
 	default:
 		return "", fmt.Errorf("unknown task %q", task)
 	}
@@ -99,6 +99,36 @@ func (r Runner) Run(ctx context.Context, task string, in Input) (string, error) 
 	return rv.ID, nil
 }
 
+// limits sizes a task to the provider's budgets, so a model with a large
+// context window gets more findings, more symbols and longer snippets per
+// request instead of the minimum.
+type limits struct {
+	chars       int // prompt budget in characters (about 4 per token)
+	findings    int // findings triaged per run
+	batch       int // findings per triage request
+	symbols     int // changed symbols reviewed
+	hotspots    int // hotspots reviewed when there is no diff
+	symbolLines int // source lines shown per symbol
+	padLines    int // lines shown on each side of a finding
+	briefItems  int // findings and documents listed in a briefing
+}
+
+func limitsFor(cfg llm.ProviderConfig) limits {
+	in, out := cfg.MaxInputTokens, cfg.MaxOutputTokens
+	return limits{
+		chars:       in * 4,
+		findings:    clamp(in/1500, 18, reviews.MaxComments),
+		batch:       clamp(out/600, 6, 40),
+		symbols:     clamp(in/2500, 10, 100),
+		hotspots:    clamp(in/5000, 8, 50),
+		symbolLines: clamp(in/400, 80, 400),
+		padLines:    clamp(in/8000, 6, 20),
+		briefItems:  clamp(in/2000, 5, 50),
+	}
+}
+
+func clamp(v, lo, hi int) int { return max(lo, min(v, hi)) }
+
 func (r Runner) ask(ctx context.Context, provider, system, user string) (llm.Response, error) {
 	return r.LLM.Complete(ctx, provider, llm.Request{System: system, User: user})
 }
@@ -117,10 +147,6 @@ For each finding decide: "likely-exploitable", "needs-review" or "false-positive
 Answer with one JSON object only, no prose before or after:
 {"summary": "<two to four sentences>", "items": [{"index": <number>, "verdict": "<verdict>", "explanation": "<text>", "suggestion": "<fix>"}]}`
 
-// triageBatch is how many findings go into one request: small enough that a
-// local model answers quickly, large enough to keep request count low.
-const triageBatch = 6
-
 type triageItem struct {
 	Index       int    `json:"index"`
 	Verdict     string `json:"verdict"`
@@ -128,7 +154,7 @@ type triageItem struct {
 	Suggestion  string `json:"suggestion"`
 }
 
-func (r Runner) securityTriage(ctx context.Context, provider string, in Input, src sourceReader, budget int) (reviews.Review, error) {
+func (r Runner) securityTriage(ctx context.Context, provider string, in Input, src sourceReader, lim limits) (reviews.Review, error) {
 	rep, err := security.Build(ctx, r.St, in.Repo, security.Options{MinSeverity: "medium"})
 	if err != nil {
 		return reviews.Review{}, err
@@ -140,16 +166,16 @@ func (r Runner) securityTriage(ctx context.Context, provider string, in Input, s
 	if len(findings) == 0 {
 		return reviews.Review{}, ErrNothingToDo
 	}
-	findings = findings[:min(len(findings), 18)]
+	findings = findings[:min(len(findings), lim.findings)]
 	rv := reviews.Review{Title: "AI security triage", Verdict: reviews.Comment}
 	if len(in.OnlyFindings) > 0 {
 		rv.Title = fmt.Sprintf("AI triage of %d new security finding(s)", len(findings))
 	}
 	var summaries []string
 	var lastResp llm.Response
-	for start := 0; start < len(findings); start += triageBatch {
-		batch := findings[start:min(start+triageBatch, len(findings))]
-		prompt, used := triagePrompt(in.Repo, batch, src, budget)
+	for start := 0; start < len(findings); start += lim.batch {
+		batch := findings[start:min(start+lim.batch, len(findings))]
+		prompt, used := triagePrompt(in.Repo, batch, src, lim)
 		resp, err := r.ask(ctx, provider, triageSystem, prompt)
 		if err != nil {
 			if len(rv.Comments) > 0 {
@@ -183,7 +209,7 @@ func (r Runner) securityTriage(ctx context.Context, provider string, in Input, s
 	return rv, nil
 }
 
-func triagePrompt(repo string, findings []security.Finding, src sourceReader, budget int) (string, []security.Finding) {
+func triagePrompt(repo string, findings []security.Finding, src sourceReader, lim limits) (string, []security.Finding) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Repository %s. Findings, most important first:\n", repo)
 	var used []security.Finding
@@ -197,10 +223,10 @@ func triagePrompt(repo string, findings []security.Finding, src sourceReader, bu
 		if f.Owner != nil {
 			fmt.Fprintf(&part, "in: %s %s\n", f.Owner.Name, f.Owner.Location)
 		}
-		if snip := src.around(f.Location, 6); snip != "" {
+		if snip := src.around(f.Location, lim.padLines); snip != "" {
 			fmt.Fprintf(&part, "code:\n```\n%s\n```\n", snip)
 		}
-		if b.Len()+part.Len() > budget && len(used) > 0 {
+		if b.Len()+part.Len() > lim.chars && len(used) > 0 {
 			break
 		}
 		b.WriteString(part.String())
@@ -232,7 +258,7 @@ const reviewSystem = `You are a meticulous senior engineer doing code review. Lo
 Answer with one JSON object only:
 {"summary": "<overall assessment>", "verdict": "approve" | "comment" | "request_changes", "comments": [{"file": "<path as given>", "line": <number>, "severity": "info|low|medium|high|critical", "category": "security|bug|performance|maintainability|style|test|docs|other", "message": "<what and why>", "suggestion": "<concrete fix or replacement code>"}]}`
 
-func (r Runner) codeReview(ctx context.Context, provider string, in Input, src sourceReader, budget int) (reviews.Review, error) {
+func (r Runner) codeReview(ctx context.Context, provider string, in Input, src sourceReader, lim limits) (reviews.Review, error) {
 	ac := agentctx.Service{R: r.St}
 	var targets []model.Node
 	title := "AI review of the riskiest code"
@@ -245,14 +271,14 @@ func (r Runner) codeReview(ctx context.Context, provider string, in Input, src s
 		if err != nil {
 			return reviews.Review{}, err
 		}
-		for _, c := range rep.Changes[:min(len(rep.Changes), 10)] {
+		for _, c := range rep.Changes[:min(len(rep.Changes), lim.symbols)] {
 			if n, err := r.St.Node(ctx, c.ID); err == nil {
 				targets = append(targets, n)
 			}
 		}
 		title = "AI review of a change"
 	} else {
-		hs, err := query.Service{R: r.St}.Hotspots(ctx, in.Repo, 8)
+		hs, err := query.Service{R: r.St}.Hotspots(ctx, in.Repo, lim.hotspots)
 		if err != nil {
 			return reviews.Review{}, err
 		}
@@ -285,10 +311,10 @@ func (r Runner) codeReview(ctx context.Context, provider string, in Input, src s
 		for _, f := range card.Findings {
 			fmt.Fprintf(&part, "finding: %s\n", f.QualifiedID)
 		}
-		if snip := src.lines(n.File, n.StartLine, min(n.EndLine, n.StartLine+80)); snip != "" {
+		if snip := src.lines(n.File, n.StartLine, min(n.EndLine, n.StartLine+lim.symbolLines)); snip != "" {
 			fmt.Fprintf(&part, "code (line numbers prefixed):\n```\n%s\n```\n", snip)
 		}
-		if b.Len()+part.Len() > budget && len(files) > 0 {
+		if b.Len()+part.Len() > lim.chars && len(files) > 0 {
 			break
 		}
 		b.WriteString(part.String())
@@ -326,7 +352,7 @@ func (r Runner) codeReview(ctx context.Context, provider string, in Input, src s
 
 const briefingSystem = `You write concise technical briefings for engineers joining a codebase. Use only the facts given. Write Markdown with these sections: "What this is", "Architecture", "Quality and risk", "Recommended next steps" (a numbered list of at most five concrete actions). At most 450 words.`
 
-func (r Runner) briefing(ctx context.Context, provider string, in Input, budget int) (reviews.Review, error) {
+func (r Runner) briefing(ctx context.Context, provider string, in Input, lim limits) (reviews.Review, error) {
 	ov, err := query.Service{R: r.St}.Overview(ctx, in.Repo)
 	if err != nil {
 		return reviews.Review{}, err
@@ -340,19 +366,19 @@ func (r Runner) briefing(ctx context.Context, provider string, in Input, budget 
 	fmt.Fprintf(&b, "Repository: %s\nFiles by format: %v\nLines of code: %d; functions: %d; tests: %d; average complexity %.1f\n", in.Repo, st.Formats, st.TotalLOC, st.Nodes[model.KindFunction]+st.Nodes[model.KindMethod], st.Tests, st.AvgComplexity)
 	fmt.Fprintf(&b, "Documented public API: %d of %d. Kubernetes resources: %d. Helm charts: %d.\n", st.Documented, st.Exported, st.K8sResources, st.HelmCharts)
 	fmt.Fprintf(&b, "Security grade %s (%d/100); findings %v; vulnerabilities %v.\n", sec.Grade, sec.Score, sec.FindingCounts, sec.VulnCounts)
-	for _, f := range sec.Findings[:min(len(sec.Findings), 5)] {
+	for _, f := range sec.Findings[:min(len(sec.Findings), lim.briefItems)] {
 		fmt.Fprintf(&b, "- finding: %s at %s\n", f.Title, f.Location)
 	}
 	b.WriteString("\nPackages:\n")
 	for _, p := range ov.Packages {
 		line := fmt.Sprintf("- %s: %s\n", p.Name, p.Summary)
-		if b.Len()+len(line) > budget {
+		if b.Len()+len(line) > lim.chars {
 			break
 		}
 		b.WriteString(line)
 	}
 	b.WriteString("\nDocuments:\n")
-	for _, d := range ov.Docs[:min(len(ov.Docs), 20)] {
+	for _, d := range ov.Docs[:min(len(ov.Docs), lim.briefItems)] {
 		fmt.Fprintf(&b, "- %s: %s\n", d.Name, d.Summary)
 	}
 	resp, err := r.ask(ctx, provider, briefingSystem, b.String())

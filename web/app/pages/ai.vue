@@ -6,6 +6,7 @@ const AREAS = [
   { task: 'review', label: 'Code review', hint: 'Reviews of changes and risky code' },
   { task: 'security-triage', label: 'Security analysis', hint: 'Triage of findings and fixes' },
   { task: 'briefing', label: 'Briefings', hint: 'Architecture and risk overviews' },
+  { task: 'fix', label: 'Fixes', hint: 'Writes fix branches for accepted review comments (needs source: use a local model)' },
 ]
 const routing = reactive<{ default: string; tasks: Record<string, string> }>({ default: '', tasks: {} })
 watch(() => data.value?.routing, (r) => {
@@ -30,7 +31,7 @@ async function saveRouting() {
     saving.value = false
   }
 }
-const TASK_LABEL: Record<string, string> = { 'security-triage': 'Security triage', review: 'Code review', briefing: 'Briefing' }
+const TASK_LABEL: Record<string, string> = { 'security-triage': 'Security triage', review: 'Code review', briefing: 'Briefing', fix: 'Fixes' }
 interface TestResult { ok: boolean; error?: string; reply?: string; models?: string[]; seconds?: number; model?: string }
 const tests = ref<Record<string, TestResult | 'running'>>({})
 async function test(name: string) {
@@ -102,7 +103,8 @@ const resultOf = (n: string) => tests.value[n]
           <dt>Endpoint</dt><dd class="mono">{{ p.endpoint }}</dd>
           <dt>API key</dt><dd>{{ p.has_key ? `set (${p.key_env})` : p.key_env ? `missing — set ${p.key_env}` : 'none needed' }}</dd>
           <dt>Code snippets</dt><dd><span class="badge" :class="p.sends_source ? 'badge--amber' : 'badge--green'">{{ p.sends_source ? 'sent (short excerpts)' : 'never sent' }}</span></dd>
-          <dt>Budget per request<InfoTip text="How much context CodeSynapse packs into one prompt and how long an answer may be. This is not the model's context window: larger budgets mean slower answers on local hardware. Change max_input_tokens / max_output_tokens in config/llm.yaml." /></dt><dd>{{ fmtInt(p.max_input_tokens) }} tokens in · {{ fmtInt(p.max_output_tokens) }} out</dd>
+          <dt>Context window<InfoTip text="The most the model can read and write in one request. Set context_window in config/llm.yaml; CodeSynapse then fills it." /></dt><dd>{{ p.context_window ? `${fmtInt(p.context_window)} tokens` : 'not set — using a safe 32k budget' }}</dd>
+          <dt>Budget per request<InfoTip text="How much CodeSynapse packs into one prompt (findings, symbols, code) and how long an answer may be. Bigger budgets give the model more context per request but take longer on local hardware. Lower max_input_tokens in config/llm.yaml for faster answers." /></dt><dd>{{ fmtInt(p.max_input_tokens) }} tokens in · {{ fmtInt(p.max_output_tokens) }} out</dd>
           <dt>Used for</dt><dd><span v-for="t in p.tasks" :key="t" class="tag">{{ TASK_LABEL[t] ?? t }}</span><span v-if="!p.tasks.length" class="muted">no tasks (only by explicit choice)</span></dd>
           <dt>Usage</dt>
           <dd>{{ plural(p.usage.requests, 'request') }} · {{ fmtInt(p.usage.input_tokens) }} in / {{ fmtInt(p.usage.output_tokens) }} out<span v-if="p.usage.requests"> · avg {{ p.usage.avg_seconds.toFixed(1) }} s</span><span v-if="p.usage.failures" class="error"> · {{ p.usage.failures }} failed</span></dd>

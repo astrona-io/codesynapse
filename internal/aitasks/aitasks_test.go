@@ -117,3 +117,19 @@ func TestBriefingAndBadJSON(t *testing.T) {
 	_, err = bad.Run(context.Background(), "security-triage", Input{Repo: storetest.Repo})
 	assert.Error(t, err, "non-JSON answers fail clearly")
 }
+
+func TestLimitsScaleWithBudget(t *testing.T) {
+	small := limitsFor(llm.ProviderConfig{MaxInputTokens: 12_000, MaxOutputTokens: 4000})
+	assert.Equal(t, small.findings, 18)
+	assert.Equal(t, small.batch, 6)
+	assert.Equal(t, small.symbols, 10)
+	assert.Equal(t, small.symbolLines, 80)
+
+	large := limitsFor(llm.ProviderConfig{MaxInputTokens: 228_352, MaxOutputTokens: 32_768})
+	assert.Equal(t, large.chars, 228_352*4)
+	assert.Equal(t, large.findings, 152)
+	assert.Equal(t, large.batch, 40)
+	assert.Equal(t, large.symbols, 91)
+	assert.Equal(t, large.symbolLines, 400)
+	assert.Equal(t, large.padLines, 20)
+}

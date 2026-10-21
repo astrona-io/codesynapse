@@ -52,6 +52,7 @@ git-token host="github.com": init _runtime
     mv "$tmp" .env && chmod 600 .env
     {{compose}} up -d api
     echo "token stored in .env for {{host}}; the API was restarted"
+    echo "read-only token: Contents read. For fix branches and PRs (CODESYNAPSE_ALLOW_PUSH=true): Contents and Pull requests read and write."
 
 # Build and start Neo4j, API, MCP and web
 up: init _runtime
