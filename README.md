@@ -17,7 +17,7 @@ just mcp                      # register the MCP server with your agents (asks p
 open http://localhost:3000
 ```
 
-Or use the dashboard: **Clone by URL** adds a GitHub/GitLab repository, **Sources** lists everything under `./sources`, and **Sync** on a repository fetches the chosen branch and re-indexes it.
+Or use the dashboard: **Clone by URL** adds a GitHub/GitLab repository, **Organisations** watches a whole GitHub organisation (`astrona-io/*`), **Sources** lists everything under `./sources`, and **Sync** on a repository fetches the chosen branch and re-indexes it.
 
 | URL | What |
 |---|---|
@@ -90,9 +90,10 @@ On the **AI models** page you pick a **global** model, the fallback for everythi
 
 ## Keeping repositories up to date
 
-- **Sync** fetches the chosen branch (cloned repositories) or re-indexes the folder (mounted sources).
-- **Auto-sync** per repository: off, every 15 minutes, hourly, every 6 hours or daily, with pause/resume. Status ("next in 23 min", "paused") shows on the repository card and summary.
-- **Private repositories:** `just git-token` asks for a token (input hidden), stores it in `.env` and restarts the API. Use a fine-grained GitHub token with read-only *Contents* access. The UI shows whether a token is configured, never the token.
+- **Sync** fetches the chosen branch (cloned repositories) or re-indexes the folder (mounted sources). The branch picker lists every branch of the remote (cloned) or of the checkout (mounted; only the checked-out one can be synced).
+- **Auto-sync** runs **every 5 minutes by default** for every repository. Per repository you can switch it off, or pick 15 minutes, hourly, every 6 hours or daily, with pause/resume. Status ("next in 3 min", "paused") shows on the repository card and summary, and the sidebar lists the most recently indexed repositories first and refreshes by itself.
+- **Organisations:** on the **Organisations** page enter `astrona-io` (or `https://github.com/astrona-io/*`). CodeSynapse lists every repository of that organisation or user, clones and indexes them, and rescans every 5 minutes to pick up new ones. Archived repositories and forks are skipped unless you tick them. With auto-index off it only lists, and you index repositories one by one. Stopping to watch keeps the repositories already indexed.
+- **Private repositories:** `just git-token` asks for a token (input hidden), stores it in `.env` and restarts the API. Use a fine-grained GitHub token with read-only *Contents* access. The same token lets the Organisations page list private repositories. The UI shows whether a token is configured, never the token.
 - **Remove** a repository from its card or summary; a confirmation asks for the name and offers to delete the cloned files too.
 
 ## Unused code
@@ -101,19 +102,55 @@ On the **AI models** page you pick a **global** model, the fallback for everythi
 
 ## Connect an AI agent
 
-`just mcp` (`codesynapse mcp install`) finds Claude Code, Codex, Gemini CLI, OpenCode, Cursor and the project `.mcp.json`, and asks for each whether to add CodeSynapse. Codex, Gemini, OpenCode and Cursor read the token from `$CODESYNAPSE_MCP_TOKEN`; Claude Code stores it in its user config (you are told before it does).
+**Install into your agents.** `just mcp` (`codesynapse mcp install`) finds Claude Code, Codex, Gemini CLI, OpenCode, Cursor and the project `.mcp.json`, and asks for each whether to add CodeSynapse. Codex, Gemini, OpenCode and Cursor read the token from `$CODESYNAPSE_MCP_TOKEN`; Claude Code stores it in its user config (you are told before it does).
 
-Without any database, the server can index a directory into memory at startup:
+**Or by hand.** The stack serves MCP at `http://localhost:8090/mcp` with the bearer token from `.env`:
+
+```sh
+just mcp-config      # prints a JSON client config for the running stack
+claude mcp add --transport http codesynapse http://localhost:8090/mcp \
+  --header "Authorization: Bearer $CODESYNAPSE_MCP_TOKEN"
+```
+
+**Without any database** the server can index one directory into memory at startup (stdio). Good for a single project, but it only sees that directory:
 
 ```sh
 claude mcp add codesynapse -- go run github.com/parisnakitakejser/codesynapse/services/mcp/cmd/codesynapse-mcp@latest serve --offline .
 ```
 
-This repository's own `.mcp.json` does that, so agents working on CodeSynapse use CodeSynapse.
+This repository's own `.mcp.json` does that, so agents working on CodeSynapse use CodeSynapse. Connected to the **stack** instead, an agent sees every indexed repository, including whole organisations: call `repo_list` (or `search_all_repos`), then pass `repo` to the other tools. Repositories cloned by URL or through an organisation are named `owner/name` (for example `astrona-io/astrona-cli`), so equally named repositories of two organisations never clash; mounted folders and older indexes keep a plain name.
+
+### Working efficiently
+
+The point is to ask the graph instead of reading files. A good order:
+
+1. **Start:** `minimal_context` with the task in a sentence (`max_tokens: 1500`). Read only the line ranges it returns.
+2. **Understand:** `get_symbol_context` with `verbosity: "outline"`; switch to `"full"` just before you edit. Use `file_outline` before opening a file, and `search` when you only have a name.
+3. **Trace:** `get_call_graph` at `depth: 2` (raise it only if needed, max 4). Use `get_implementations` for interfaces instead of grepping for calls.
+4. **Before finishing:** `get_pr_context` with your diff. Fix or justify anything it lists as untested, high risk or security-sensitive.
+5. **Retry with an id:** an ambiguous name returns `qualified_id` suggestions; pass one back.
+
+| I want to… | Use |
+|---|---|
+| Find where to start for a task | `minimal_context` |
+| Know what breaks if I change a function | `get_symbol_context` (full), `get_call_graph` (callers) |
+| Review what I changed | `get_pr_context` with `diff` (paste `git diff`), then `submit_review` |
+| Review a repository that is checked out elsewhere | `get_pr_context` with `diff`; `base`/`head` refs only work for repositories CodeSynapse has cloned or mounted |
+| See what is risky in a repository | `security_report` (`min_severity: "medium"`, `limit`), `security_symbols`, `hotspots` |
+| Fix a security finding | `rule_guide` with the finding's rule and language |
+| Clean up | `unused_code` (`security_only`, then `min_confidence: "high"`) |
+| Get oriented in a repository | `repo_overview`, then `repo_metrics` |
+| Check the graph is current | `repo_status` |
+| Find which repository owns something | `search_all_repos` (`repo_prefix: "astrona-io/"`), then pass `repo` on |
+| Read YAML or docs structure without opening files | `get_config_entries`, `get_doc_section` |
+| Findings in one directory | `security_report` with `path` |
+| Work through accepted review comments | `get_review` with `status: "accepted"`, then `update_review_comment` |
+
+Tips: pass `diff` rather than refs whenever you have it, since it works even when the indexed clone is on another commit. Keep `limit` small on reports, and `min_severity` at medium or above for a first pass. The graph reflects the last ingest, so files you edited since may differ; the 5-minute auto-sync keeps it close.
 
 ### MCP tools and prompts
 
-All tools are read-only. `docs/AGENT_GUIDE.md` explains when to use which, with ready-made task prompts.
+`docs/AGENT_GUIDE.md` explains when to use which, with ready-made task prompts. Every tool is read-only except `submit_review` and `update_review_comment`, which write only to the review store (turn them off with `CODESYNAPSE_MCP_REVIEWS=false`).
 
 | Tool | Returns |
 |---|---|
@@ -128,8 +165,27 @@ All tools are read-only. `docs/AGENT_GUIDE.md` explains when to use which, with 
 | `rule_guide` | Why a rule matters, the fix, and vulnerable → fixed code examples |
 | `unused_code` | Unused functions, files, modules and Helm values to remove |
 | `repo_list` / `repo_overview` / `repo_metrics` / `hotspots` / `file_history` | Orientation, metrics, churn |
+| `repo_status` | How fresh the graph is: indexed commit and time, stale flag, and whether the checkout has newer commits or local changes |
+| `search_all_repos` | Search every repository (or those with a `repo_prefix` such as `astrona-io/`) at once; a few hits each, with their `repo` |
+| `get_config_entries` | Kubernetes, Helm, compose and CI YAML entries and template definitions by file and/or name, with line ranges |
+| `get_doc_section` | Markdown sections by heading or file, with the symbols each mentions and line ranges |
+| `submit_review` | Record a review (title, summary, verdict, comments on file:line); `kind: "report"` records a briefing |
+| `update_review_comment` | Record a decision on a comment: accepted, rejected, deferred, resolved |
+| `list_reviews` / `get_review` | Reviews of a repository; the open or accepted comments of one |
 
-Prompts (`prompts/list`): `refactor-analysis`, `pr-impact-review`, `package-onboarding`, `bug-investigation`.
+Prompts (`prompts/list`; clients show them as slash commands):
+
+| Prompt | Does |
+|---|---|
+| `refactor-analysis` | Blast radius, callers and test coverage before you change a symbol |
+| `pr-impact-review` | Risk-scored review pack for changed files |
+| `package-onboarding` | How a package fits into the codebase |
+| `bug-investigation` | Caller chain, interface dispatch and churn around a suspected bug |
+| `code-review` | Review a change or area and submit it so it appears in the UI |
+| `security-triage` | Triage a repository's findings yourself and submit the result |
+| `briefing` | Write a short repository briefing and submit it as a report |
+
+**Use your own agent instead of an AI provider.** Security triage, reviews and briefings can also be run by the server with a configured model (see below). With `security-triage`, `code-review` and `briefing` your local agent does the work and submits it with `submit_review`, so no external provider is called and no key is needed. The result looks like any other review in the UI.
 
 ## CLI
 
@@ -155,8 +211,22 @@ just dev-web   # Nuxt dev server on :3000
 just ci        # lint, race tests, web typecheck + build
 ```
 
+The code is split by service: `services/api`, `services/mcp` and `services/web`, with the shared core in `internal/` and the CLI in `cmd/codesynapse`.
+
+## Container images and Kubernetes
+
+```sh
+just image-build v0.1.0     # api, mcp and web images (PLATFORM=linux/amd64, REGISTRY=ghcr.io/you)
+just image-push v0.1.0
+just k8s-secrets prod       # writes deploy/k8s/overlays/prod/secrets.env (git-ignored)
+just k8s-render prod        # review the manifests
+just k8s-apply prod
+```
+
+`deploy/k8s` holds Kustomize manifests: a `base` (Neo4j StatefulSet, api, mcp, web, network policies) and `dev` and `prod` overlays. Test on a throwaway kind cluster first (`just image-load-kind`). See `deploy/k8s/README.md`.
+
 See `AGENTS.md` for conventions and security rules and `docs/PLAN.md` for architecture and roadmap.
 
 ## Security model, briefly
 
-Indexing untrusted code is the normal case, so: `go list` runs without cgo, toolchain downloads or network; git runs with hooks, fsmonitor and diff drivers disabled, and clones only over HTTPS to public hosts; no source bodies or YAML values are stored and summaries are redacted for secrets; services require bearer tokens off loopback; MCP tools cannot write. Details in `AGENTS.md`.
+Indexing untrusted code is the normal case, so: `go list` runs without cgo, toolchain downloads or network; git runs with hooks, fsmonitor and diff drivers disabled, and clones only over HTTPS to public hosts; no source bodies or YAML values are stored and summaries are redacted for secrets; services require bearer tokens off loopback; MCP tools cannot change code or the graph (only the review store). Details in `AGENTS.md`.

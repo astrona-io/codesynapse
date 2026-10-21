@@ -3,21 +3,29 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
 
+	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
 )
 
 func connect(t *testing.T) *mcp.ClientSession {
 	t.Helper()
+	return connectGraph(t, storetest.Fixture())
+}
+
+func connectGraph(t *testing.T, g *model.Graph) *mcp.ClientSession {
+	t.Helper()
 	ctx := context.Background()
 	s := memory.New()
-	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, g))
 
 	ct, st := mcp.NewInMemoryTransports()
 	_, err := New(s, "test", Options{Reviews: s}).Connect(ctx, st, nil)
@@ -248,4 +256,84 @@ func TestAgentTaskPromptsAndReport(t *testing.T) {
 	var rv struct{ Kind string }
 	require.False(t, call(t, cs, "get_review", map[string]any{"id": sub.ID}, &rv).IsError)
 	assert.Equal(t, rv.Kind, "report")
+}
+
+func TestSecurityReportPathFilter(t *testing.T) {
+	g := storetest.Fixture()
+	for i, f := range []struct{ file, owner string }{{"app/app.go", "app.Handler"}, {"web/app.ts", "app.main"}} {
+		id := storetest.ID(model.KindFinding, fmt.Sprintf("%s:%d:exec-variable", f.file, 10+i))
+		g.AddNode(model.Node{ID: id, Repo: storetest.Repo, Kind: model.KindFinding, Name: "Process from a variable", File: f.file, StartLine: 10 + i, Rule: "exec-variable", Severity: "medium"})
+		g.AddEdge(model.Edge{From: storetest.ID(model.KindFunction, f.owner), To: id, Kind: model.EdgeHasFinding})
+	}
+	cs := connectGraph(t, g)
+	var all, some, none struct {
+		Findings      []struct{ Location string }
+		FindingCounts map[string]int `json:"finding_counts"`
+		Score         int
+	}
+	require.False(t, call(t, cs, "security_report", map[string]any{}, &all).IsError)
+	require.NotEmpty(t, all.Findings)
+	require.Len(t, all.Findings, 2)
+	assert.Equal(t, all.FindingCounts["medium"], 2)
+	file := "app/app.go"
+	require.False(t, call(t, cs, "security_report", map[string]any{"path": file}, &some).IsError)
+	assert.NotEmpty(t, some.Findings)
+	for _, f := range some.Findings {
+		assert.True(t, strings.HasPrefix(f.Location, file+":"), f.Location)
+	}
+	assert.Len(t, some.Findings, 1)
+	assert.Equal(t, some.FindingCounts["medium"], 1, "counts follow the filter")
+	assert.Equal(t, some.Score, all.Score, "score stays repository-wide")
+	require.False(t, call(t, cs, "security_report", map[string]any{"path": "nowhere/"}, &none).IsError)
+	assert.Len(t, none.Findings, 0)
+	assert.Len(t, none.FindingCounts, 0)
+}
+
+func TestDiscoveryTools(t *testing.T) {
+	cs := connect(t)
+
+	var st struct {
+		Repo, Head string
+		Stale      bool
+		Advice     string
+	}
+	require.False(t, call(t, cs, "repo_status", map[string]any{}, &st).IsError)
+	assert.Equal(t, st.Head, "abc")
+	assert.True(t, st.Stale, "the fixture was indexed years ago")
+	assert.NotEqual(t, st.Advice, "")
+
+	var all struct {
+		Results       []struct{ Repo, Name string }
+		ReposSearched int `json:"repos_searched"`
+	}
+	require.False(t, call(t, cs, "search_all_repos", map[string]any{"query": "handler"}, &all).IsError)
+	require.NotEmpty(t, all.Results)
+	assert.Equal(t, all.Results[0].Repo, storetest.Repo)
+	assert.Equal(t, all.ReposSearched, 1)
+	require.False(t, call(t, cs, "search_all_repos", map[string]any{"query": "handler", "repo_prefix": "other/"}, &all).IsError)
+	assert.Len(t, all.Results, 0)
+	assert.True(t, call(t, cs, "search_all_repos", map[string]any{"query": " "}, nil).IsError)
+
+	var cfg struct {
+		Entries []struct{ Name, Location string }
+	}
+	require.False(t, call(t, cs, "get_config_entries", map[string]any{"file": "deploy/"}, &cfg).IsError)
+	assert.True(t, len(cfg.Entries) >= 2, "Deployment and spec entries")
+	require.False(t, call(t, cs, "get_config_entries", map[string]any{"query": "Deployment"}, &cfg).IsError)
+	require.Len(t, cfg.Entries, 1)
+	assert.Equal(t, cfg.Entries[0].Name, "Deployment/api")
+	assert.True(t, call(t, cs, "get_config_entries", map[string]any{}, nil).IsError, "an unfiltered dump is refused")
+
+	var docs struct {
+		Sections []struct {
+			Heading  string
+			Location string
+			Mentions []struct{ Name string }
+		}
+	}
+	require.False(t, call(t, cs, "get_doc_section", map[string]any{"query": "usage"}, &docs).IsError)
+	require.Len(t, docs.Sections, 1)
+	assert.Equal(t, docs.Sections[0].Heading, "Usage")
+	require.NotEmpty(t, docs.Sections[0].Mentions)
+	assert.Equal(t, docs.Sections[0].Mentions[0].Name, "app.Handler")
 }
