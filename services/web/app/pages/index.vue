@@ -8,6 +8,13 @@ const { data: sources } = useApiGet<{ sources: Source[] }>('sources')
 const { data: jobs, refresh: refreshJobs } = useApiGet<{ jobs: Job[] }>('jobs')
 const { data: settings } = useApiGet<Settings>('settings')
 
+// 4 columns x 3 rows per page; the grid drops columns on narrow screens.
+const PAGE_SIZE = 12
+const page = ref(1)
+const pageCount = computed(() => Math.max(1, Math.ceil((ov.value?.repos.length ?? 0) / PAGE_SIZE)))
+watch(pageCount, (n) => { if (page.value > n) page.value = n })
+const visibleRepos = computed(() => (ov.value?.repos ?? []).slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+
 const indexed = computed(() => new Set((ov.value?.repos ?? []).map((r) => r.name)))
 const running = computed(() => jobs.value?.jobs.some((j) => j.state === 'running') ?? false)
 let timer: ReturnType<typeof setInterval> | undefined
@@ -63,7 +70,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
     </PageHeader>
 
     <section v-if="ov?.repos.length" class="cards">
-      <NuxtLink v-for="r in ov.repos" :key="r.name" :to="`/repos/${encodeURIComponent(r.name)}`" class="panel repo-card">
+      <NuxtLink v-for="r in visibleRepos" :key="r.name" :to="`/repos/${encodeURIComponent(r.name)}`" class="panel repo-card">
         <div class="repo-top">
           <div class="repo-name">
             <strong>{{ r.name }}</strong>
@@ -90,7 +97,12 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
         </div>
       </NuxtLink>
     </section>
-    <div v-else class="empty"><strong>No repositories yet</strong>Clone one by URL or index a mounted source below — it takes about a minute.</div>
+    <nav v-if="pageCount > 1" class="pager" aria-label="Repository pages">
+      <button class="secondary tiny" :disabled="page <= 1" @click="page--">Previous</button>
+      <span class="muted small">Page {{ page }} of {{ pageCount }} · {{ plural(ov?.repos.length ?? 0, 'repository', 'repositories') }}</span>
+      <button class="secondary tiny" :disabled="page >= pageCount" @click="page++">Next</button>
+    </nav>
+    <div v-else-if="!ov?.repos.length" class="empty"><strong>No repositories yet</strong>Clone one by URL or index a mounted source below — it takes about a minute.</div>
 
     <div class="grid cols-2">
       <section class="panel edge--cyan">
@@ -166,7 +178,11 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
 </template>
 
 <style scoped>
-.cards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.cards { display: grid; gap: 16px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1500px) { .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1100px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .cards { grid-template-columns: minmax(0, 1fr); } }
+.pager { display: flex; justify-content: center; align-items: center; gap: 14px; }
 .repo-card { gap: 10px; color: var(--ink); transition: transform 0.15s, border-color 0.15s; }
 .repo-card:hover { transform: translateY(-2px); border-color: var(--line-bright); color: var(--ink); }
 .repo-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }

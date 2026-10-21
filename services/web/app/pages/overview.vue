@@ -10,6 +10,12 @@ const sorted = (m: Record<string, number> | undefined) =>
 const sevBars = (m: Record<string, number> | undefined) => SEV.filter((s) => (m ?? {})[s]).map((s) => ({ label: s, value: m![s]! }))
 const crit = computed(() => (ov.value?.totals.findings.critical ?? 0) + (ov.value?.totals.findings.high ?? 0))
 const age = (h: number) => (h < 1 ? `${Math.round(h * 60)} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} d`)
+// The table lists 25 repositories per page; the totals above cover all of them.
+const PAGE_SIZE = 25
+const page = ref(1)
+const pageCount = computed(() => Math.max(1, Math.ceil((ov.value?.repos.length ?? 0) / PAGE_SIZE)))
+watch(pageCount, (n) => { if (page.value > n) page.value = n })
+const pageRepos = computed(() => (ov.value?.repos ?? []).slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 const repoLink = (r: string, p = '') => `/repos/${encodeURIComponent(r)}${p}`
 </script>
 
@@ -50,7 +56,7 @@ const repoLink = (r: string, p = '') => `/repos/${encodeURIComponent(r)}${p}`
               </tr>
             </thead>
             <tbody>
-              <tr v-for="r in ov.repos" :key="r.name">
+              <tr v-for="r in pageRepos" :key="r.name">
                 <td>
                   <NuxtLink :to="repoLink(r.name)"><strong>{{ r.name }}</strong></NuxtLink>
                   <div class="mono dim">{{ r.branch || '–' }} · {{ r.managed ? 'cloned' : 'mounted' }}</div>
@@ -71,6 +77,11 @@ const repoLink = (r: string, p = '') => `/repos/${encodeURIComponent(r)}${p}`
             </tbody>
           </table>
         </div>
+        <nav v-if="pageCount > 1" class="pager" aria-label="Repository pages">
+          <button class="secondary tiny" :disabled="page <= 1" @click="page--">Previous</button>
+          <span class="muted small">Page {{ page }} of {{ pageCount }} · {{ plural(ov.repos.length, 'repository', 'repositories') }}</span>
+          <button class="secondary tiny" :disabled="page >= pageCount" @click="page++">Next</button>
+        </nav>
         <div v-if="!ov.repos.length" class="empty"><strong>Nothing indexed yet</strong>Add a repository on the Repositories page.</div>
       </section>
 
@@ -125,4 +136,6 @@ const repoLink = (r: string, p = '') => `/repos/${encodeURIComponent(r)}${p}`
 .saving { color: var(--green); }
 .tight { gap: 12px; }
 .small { font-size: 12px; }
+.pager { display: flex; justify-content: center; align-items: center; gap: 14px; padding-top: 14px; }
+.small { font-size: 12.5px; }
 </style>

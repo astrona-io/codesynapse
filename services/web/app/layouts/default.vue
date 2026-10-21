@@ -6,7 +6,21 @@ const repo = computed(() => (route.params.repo as string | undefined) ?? '')
 const menuOpen = ref(false)
 watch(() => route.fullPath, () => (menuOpen.value = false))
 
-const { data: repos } = useApiGet<{ repos: RepoInfo[] }>('repos')
+const { data: repos, refresh: refreshRepos } = useApiGet<{ repos: RepoInfo[] }>('repos')
+// Newest index first, so a repository that was just (re)indexed moves to the top.
+const latest = computed(() => [...(repos.value?.repos ?? [])].sort((a, b) => (b.ingested_at ?? '').localeCompare(a.ingested_at ?? '')).slice(0, 8))
+// Syncs and new organisation repositories finish in the background: poll
+// while the tab is visible, and catch up as soon as it is shown again.
+let repoTimer: ReturnType<typeof setInterval> | undefined
+const refreshIfVisible = () => { if (document.visibilityState === 'visible') refreshRepos() }
+onMounted(() => {
+  repoTimer = setInterval(refreshIfVisible, 10_000)
+  document.addEventListener('visibilitychange', refreshIfVisible)
+})
+onBeforeUnmount(() => {
+  clearInterval(repoTimer)
+  document.removeEventListener('visibilitychange', refreshIfVisible)
+})
 const { data: health, error: healthError } = useFetch<{ status: string }>('/api/cg/version', { key: 'version' })
 
 const repoGroups = computed(() => {
@@ -70,8 +84,11 @@ const isActive = (to: string) => route.path === to
           </div>
         </template>
         <div v-else-if="repos?.repos.length" class="nav-section">
-          <p class="nav-label">Indexed</p>
-          <NuxtLink v-for="r in repos.repos.slice(0, 8)" :key="r.name" :to="`/repos/${encodeURIComponent(r.name)}`" class="nav-link mono">{{ r.name }}</NuxtLink>
+          <p class="nav-label">Latest indexed</p>
+          <NuxtLink v-for="r in latest" :key="r.name" :to="`/repos/${encodeURIComponent(r.name)}`" class="nav-link nav-repo-link" :title="r.ingested_at ? `Indexed ${r.ingested_at}` : ''">
+            <span class="mono nav-repo-name">{{ r.name }}</span>
+            <span v-if="r.ingested_at" class="nav-repo-time">{{ relTime(r.ingested_at) }}</span>
+          </NuxtLink>
         </div>
       </nav>
 
@@ -118,4 +135,7 @@ const isActive = (to: string) => route.path === to
   .menu-toggle { display: inline-flex; }
   .sidebar:not(.open) .sidebar__nav, .sidebar:not(.open) .sidebar__foot { display: none; }
 }
+.nav-repo-link { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.nav-repo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-repo-time { flex: none; font-size: 11px; color: var(--dim); }
 </style>
