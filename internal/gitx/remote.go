@@ -160,6 +160,27 @@ func RemoteBranches(ctx context.Context, remote string, auth Auth) ([]string, er
 	return branches, nil
 }
 
+// RemoteHead returns the commit branch points to on remote, or "" when the
+// branch does not exist. It is one cheap request, so schedulers can ask
+// before fetching anything.
+func RemoteHead(ctx context.Context, remote, branch string, auth Auth) (string, error) {
+	if err := ValidateRev(branch); err != nil {
+		return "", err
+	}
+	out, err := runRemote(ctx, "", remote, auth, "ls-remote", "--", remote, "refs/heads/"+branch)
+	if err != nil {
+		return "", err
+	}
+	sha, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\t")
+	return sha, nil
+}
+
+// IsDirty reports whether dir has uncommitted or untracked changes.
+func IsDirty(ctx context.Context, dir string) bool {
+	out, err := Run(ctx, dir, "status", "--porcelain")
+	return err != nil || len(strings.TrimSpace(string(out))) > 0
+}
+
 // LocalBranches lists the branches of a local repository: local ones plus
 // those only known from origin's remote-tracking refs, without duplicates.
 func LocalBranches(ctx context.Context, dir string) ([]string, error) {

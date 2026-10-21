@@ -229,3 +229,18 @@ func TestLocalBranchesIncludesRemoteTracking(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, got, []string{"feature", "main", "release"}, "local and origin-only branches, no duplicates, no HEAD")
 }
+
+func TestIsDirty(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"-c", "user.name=t", "-c", "user.email=t@x", "commit", "-q", "--allow-empty", "-m", "init"}} {
+		_, err := Run(ctx, dir, args...)
+		require.NoError(t, err)
+	}
+	assert.False(t, IsDirty(ctx, dir))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "new.txt"), []byte("x"), 0o600))
+	assert.True(t, IsDirty(ctx, dir), "untracked files count")
+	assert.True(t, IsDirty(ctx, t.TempDir()), "not a repository: assume changes")
+	_, err := RemoteHead(ctx, "https://example.com/x.git", "--bad", Auth{})
+	assert.Error(t, err, "branch is validated before any network call")
+}

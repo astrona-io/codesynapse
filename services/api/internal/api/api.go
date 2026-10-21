@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -223,6 +224,11 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 
 // displayRoot shows roots relative to the sources root, hiding host layout.
 func (s *Server) displayRoot(root string) string {
+	if s.inWorkspace(root) {
+		if rel, err := filepath.Rel(s.cfg.Workspace, root); err == nil {
+			return filepath.ToSlash(rel) // owner/name for managed clones
+		}
+	}
 	if s.cfg.SourcesRoot == "" || root == "" {
 		return filepath.Base(root)
 	}
@@ -251,13 +257,16 @@ func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Query().Get("files") == "1" && s.inWorkspace(n.Root) {
 		rel, relErr := filepath.Rel(s.cfg.Workspace, n.Root)
-		if relErr != nil || rel == "." || strings.Contains(rel, "..") || strings.ContainsRune(rel, filepath.Separator) {
+		if relErr != nil || rel == "." || strings.Contains(rel, "..") || strings.Count(rel, string(filepath.Separator)) > 1 {
 			s.problem(w, 400, errors.New("refusing to delete files outside a single workspace clone"))
 			return
 		}
 		if err := os.RemoveAll(n.Root); err != nil {
 			s.problem(w, 500, err)
 			return
+		}
+		if owner := filepath.Dir(n.Root); owner != filepath.Clean(s.cfg.Workspace) {
+			_ = os.Remove(owner) //nolint:errcheck // only removes the owner folder when this was its last clone
 		}
 	}
 	if err := s.st.DeleteRepo(ctx, repo); err != nil {
@@ -619,6 +628,21 @@ type ingestRequest struct {
 
 // validRepoName restricts repo names to a safe, URL-friendly alphabet.
 func validRepoName(name string) bool {
+	parts := strings.Split(name, "/")
+	if len(parts) > 2 {
+		return false
+	}
+	for _, p := range parts {
+		if !validRepoSegment(p) {
+			return false
+		}
+	}
+	return true
+}
+
+// validRepoSegment restricts one path element of a repository name to a
+// safe, URL-friendly alphabet.
+func validRepoSegment(name string) bool {
 	// A leading dot would allow "." and "..", and collide with the
 	// workspace's .codesynapse state directory.
 	if name == "" || len(name) > 100 || strings.HasPrefix(name, ".") {
@@ -630,7 +654,38 @@ func validRepoName(name string) bool {
 			return false
 		}
 	}
-	return !strings.HasPrefix(name, ".")
+	return true
+}
+
+// repoDir is where a managed clone lives: <workspace>/<name>, so
+// "astrona-io/astrona-cli" is <workspace>/astrona-io/astrona-cli. The name
+// must have passed validRepoName: at most two safe elements, none starting
+// with a dot.
+func repoDir(workspace, name string) string {
+	return filepath.Join(workspace, filepath.FromSlash(name))
+}
+
+// repoNameFromRemote names a repository after its remote: "owner/name" from
+// the last two path elements (lower-case owner, like GitHub logins), or just
+// "name" when the URL has one. It returns "" when the result is not a valid
+// repository name.
+func repoNameFromRemote(remote string) string {
+	u, err := url.Parse(remote)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(strings.TrimSuffix(strings.TrimSuffix(u.Path, "/"), ".git"), "/"), "/")
+	var name string
+	switch {
+	case len(parts) >= 2:
+		name = strings.ToLower(parts[len(parts)-2]) + "/" + parts[len(parts)-1]
+	case len(parts) == 1:
+		name = parts[0]
+	}
+	if !validRepoName(name) {
+		return ""
+	}
+	return name
 }
 
 func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {

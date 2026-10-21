@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
@@ -80,9 +81,9 @@ func TestOrgAddScansListsAndQueuesClones(t *testing.T) {
 
 	f.mu.Lock()
 	assert.Equal(t, f.cloned, []string{
-		"api https://github.com/acme/api.git",
-		"web https://github.com/acme/web.git",
-	}, "archived repositories and forks are skipped by default")
+		"acme/api https://github.com/acme/api.git",
+		"acme/web https://github.com/acme/web.git",
+	}, "named owner/name; archived repositories and forks are skipped by default")
 	f.mu.Unlock()
 
 	var list struct {
@@ -111,7 +112,7 @@ func TestOrgWithoutAutoIndexOnlyListsUntilAsked(t *testing.T) {
 	assert.Equal(t, post(t, f.ts, "/api/v1/orgs/acme/repos/api/index", ``), 202)
 	assert.Equal(t, post(t, f.ts, "/api/v1/orgs/acme/repos/not-listed/index", ``), 404, "only listed repositories can be cloned")
 	f.mu.Lock()
-	assert.Equal(t, f.cloned, []string{"api https://github.com/acme/api.git"})
+	assert.Equal(t, f.cloned, []string{"acme/api https://github.com/acme/api.git"})
 	f.mu.Unlock()
 
 	assert.Equal(t, put(t, f.ts, "/api/v1/orgs/acme", `{"auto_index":true,"include_archived":false,"include_forks":false}`), 200)
@@ -141,4 +142,70 @@ func TestOrgsPersistAndComeDue(t *testing.T) {
 	assert.Equal(t, got.Org, "Acme")
 	assert.True(t, again.begin("acme"))
 	assert.True(t, !again.begin("ACME"), "one scan at a time per organisation")
+}
+
+func TestOrgReposAreNamedWithTheirOwner(t *testing.T) {
+	o := Org{Org: "Astrona-IO"}
+	assert.Equal(t, o.fullName("cli"), "astrona-io/cli", "owner is lower-cased like GitHub logins")
+
+	// A repository indexed before names carried the owner is matched by its
+	// remote, so it is neither cloned again nor reported as a conflict.
+	byName := map[string]model.Node{
+		"cli":  {Name: "cli", URL: "https://github.com/astrona-io/cli.git"},
+		"core": {Name: "core", URL: "https://github.com/someone-else/core.git"},
+	}
+	n, ok := o.indexedAs(OrgRepo{Name: "cli"}, byName)
+	assert.True(t, ok)
+	assert.Equal(t, n.Name, "cli")
+	_, ok = o.indexedAs(OrgRepo{Name: "core"}, byName)
+	assert.True(t, !ok, "same name, different owner: a different repository")
+
+	byName["astrona-io/core"] = model.Node{Name: "astrona-io/core", URL: "https://github.com/astrona-io/core.git"}
+	n, ok = o.indexedAs(OrgRepo{Name: "core"}, byName)
+	assert.True(t, ok)
+	assert.Equal(t, n.Name, "astrona-io/core", "the full name wins")
+}
+
+func TestRepoNames(t *testing.T) {
+	for in, want := range map[string]bool{
+		"api": true, "astrona-io/astrona-cli": true, "a.b/c_d": true,
+		"": false, "a/b/c": false, "/x": false, "x/": false, "../x": false, "a/..": false, ".hidden/x": false, "a b": false, "a\\b": false,
+	} {
+		assert.Equal(t, validRepoName(in), want, in)
+	}
+	for in, want := range map[string]string{
+		"https://github.com/Astrona-IO/astrona-cli.git": "astrona-io/astrona-cli",
+		"https://github.com/astrona-io/astrona-cli":     "astrona-io/astrona-cli",
+		"https://gitlab.com/group/sub/proj.git":         "sub/proj",
+		"https://example.com/solo.git":                  "solo",
+		"https://example.com/":                          "",
+	} {
+		assert.Equal(t, repoNameFromRemote(in), want, in)
+	}
+	assert.Equal(t, repoDir("/ws", "astrona-io/cli"), "/ws/astrona-io/cli")
+}
+
+func TestPruneKeepsRunningJobs(t *testing.T) {
+	j := &Jobs{jobs: map[string]*Job{}}
+	for i := range maxJobHistory + 10 {
+		id := fmt.Sprint(i)
+		j.jobs[id] = &Job{ID: id, State: JobRunning} // a burst of queued clones, none finished
+	}
+	j.prune() // used to panic: slice bounds out of range
+	assert.Len(t, j.jobs, maxJobHistory+10)
+
+	j.jobs["0"].State, j.jobs["0"].StartedAt = JobSucceeded, "2026-01-01T00:00:00Z"
+	j.prune()
+	assert.Len(t, j.jobs, maxJobHistory+9, "only finished jobs are dropped")
+}
+
+func TestScheduleRecordsUnchangedChecks(t *testing.T) {
+	s, err := loadSchedules("")
+	require.NoError(t, err)
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	s.ensure("a", now)
+	s.started("a", now.Add(5*time.Minute), "unchanged", nil)
+	sc := s.get("a")
+	assert.Equal(t, sc.LastStatus, "unchanged")
+	assert.Equal(t, sc.NextRun, now.Add(10*time.Minute).Format(time.RFC3339), "an unchanged check still waits a full interval")
 }

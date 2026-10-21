@@ -132,7 +132,9 @@ func TestValidRepoName(t *testing.T) {
 	assert.False(t, validRepoName(".hidden"))
 	assert.False(t, validRepoName("."))
 	assert.False(t, validRepoName(".."))
-	assert.False(t, validRepoName("a/b"))
+	assert.True(t, validRepoName("astrona-io/astrona-cli"), "owner/name")
+	assert.False(t, validRepoName("a/b/c"))
+	assert.False(t, validRepoName("a/../b"))
 	assert.False(t, validRepoName(strings.Repeat("a", 101)))
 }
 
@@ -330,7 +332,7 @@ func TestSchedulesPersistAndDue(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, s.due(now.Add(10*time.Minute)), 0)
 	assert.Equal(t, s.due(now.Add(16*time.Minute)), []string{"a"}, "paused schedules never run")
-	s.started("a", now.Add(16*time.Minute), nil)
+	s.started("a", now.Add(16*time.Minute), "started", nil)
 	assert.Len(t, s.due(now.Add(20*time.Minute)), 0)
 
 	again, err := loadSchedules(dir)

@@ -184,8 +184,9 @@ func (s *schedules) due(now time.Time) []string {
 	return out
 }
 
-// started records a run and schedules the next one.
-func (s *schedules) started(repo string, now time.Time, err error) {
+// started records a run (status: started, or unchanged when nothing was new)
+// and schedules the next one.
+func (s *schedules) started(repo string, now time.Time, status string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sc, ok := s.all[repo]
@@ -193,7 +194,7 @@ func (s *schedules) started(repo string, now time.Time, err error) {
 		return
 	}
 	sc.LastRun = now.UTC().Format(time.RFC3339)
-	sc.LastStatus, sc.LastError = "started", ""
+	sc.LastStatus, sc.LastError = status, ""
 	if err != nil {
 		sc.LastStatus, sc.LastError = "failed", err.Error()
 	}
@@ -219,14 +220,18 @@ func (s *Server) runScheduler(ctx context.Context, logger *slog.Logger) {
 			}
 			s.scanDue(ctx, now, logger)
 			for _, repo := range s.sched.due(now) {
-				_, err := s.startSync(ctx, repo, "")
-				if errors.Is(err, errConflict) {
+				_, err := s.startSync(ctx, repo, "", true)
+				switch {
+				case errors.Is(err, errConflict):
 					continue // a sync is already running; try again next interval
-				}
-				if err != nil {
+				case errors.Is(err, errUnchanged):
+					s.sched.started(repo, now, "unchanged", nil)
+				case err != nil:
 					logger.Warn("scheduled sync not started", "repo", repo, "error", err)
+					s.sched.started(repo, now, "failed", err)
+				default:
+					s.sched.started(repo, now, "started", nil)
 				}
-				s.sched.started(repo, now, err)
 			}
 		}
 	}

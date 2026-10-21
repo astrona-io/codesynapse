@@ -58,7 +58,30 @@ type Org struct {
 
 // wants reports whether the org's filters include r.
 func (o Org) wants(r OrgRepo) bool {
-	return validRepoName(r.Name) && (o.IncludeArchived || !r.Archived) && (o.IncludeForks || !r.Fork)
+	return validRepoSegment(r.Name) && (o.IncludeArchived || !r.Archived) && (o.IncludeForks || !r.Fork)
+}
+
+// fullName is the repository's identity in the workspace: "owner/name", so
+// two organisations with a repository of the same name never collide.
+func (o Org) fullName(repo string) string { return strings.ToLower(o.Org) + "/" + repo }
+
+// indexedAs finds the indexed repository for r: by its full name, or by its
+// remote for repositories indexed before names carried the owner (those keep
+// their plain name until removed and added again).
+func (o Org) indexedAs(r OrgRepo, byName map[string]model.Node) (model.Node, bool) {
+	if n, ok := byName[o.fullName(r.Name)]; ok {
+		return n, true
+	}
+	want := forge.CloneURL(o.Org, r.Name)
+	if n, ok := byName[r.Name]; ok && sameRemote(n.URL, want) {
+		return n, true
+	}
+	for _, n := range byName {
+		if !strings.Contains(n.Name, "/") && n.URL != "" && sameRemote(n.URL, want) {
+			return n, true
+		}
+	}
+	return model.Node{}, false
 }
 
 // orgs persists watched organisations next to the auto-sync schedules.
@@ -256,11 +279,11 @@ func (s *Server) indexMissing(ctx context.Context, o *Org, now time.Time) {
 		if !o.wants(*r) {
 			continue
 		}
-		if _, ok := indexed[r.Name]; ok {
+		if _, ok := o.indexedAs(*r, indexed); ok {
 			r.LastTry, r.LastError = "", ""
 			continue
 		}
-		if j, ok := latest[r.Name]; ok {
+		if j, ok := latest[o.fullName(r.Name)]; ok {
 			switch j.State {
 			case JobRunning:
 				continue
@@ -288,16 +311,16 @@ func (s *Server) indexMissing(ctx context.Context, o *Org, now time.Time) {
 // cloneOrgRepo queues a clone of one repository of o. The URL is built from
 // the organisation and a name that came from GitHub and passed validRepoName.
 func (s *Server) cloneOrgRepo(o Org, name string) (Job, error) {
-	if !validRepoName(name) {
+	if !validRepoSegment(name) || !validRepoSegment(strings.ToLower(o.Org)) {
 		return Job{}, fmt.Errorf("%w: unsupported repository name %q", errBadRequest, name)
 	}
 	// github.com is fixed and both path parts passed their allowlists, so
 	// there is nothing for the SSRF check in ValidateRemote to resolve.
-	remote := forge.CloneURL(o.Org, name)
+	remote, full := forge.CloneURL(o.Org, name), o.fullName(name)
 	if s.cloneHook != nil {
-		return s.cloneHook(remote, name)
+		return s.cloneHook(remote, full)
 	}
-	return s.startClone(remote, name, "")
+	return s.startClone(remote, full, "")
 }
 
 // latestJobs maps repository to its most recent job.
@@ -327,6 +350,8 @@ func (s *Server) scanDue(ctx context.Context, now time.Time, logger *slog.Logger
 // OrgRepoView is an OrgRepo with its state in this workspace.
 type OrgRepoView struct {
 	OrgRepo
+	// Repo is the name of the repository in this workspace (owner/name).
+	Repo string `json:"repo"`
 	// Status: indexed, indexing, failed, pending (queued for the next scan),
 	// available (auto-index is off), conflict (another repository uses the
 	// name) or excluded (filtered out).
@@ -350,8 +375,11 @@ func (s *Server) orgView(ctx context.Context, o Org) OrgView {
 	latest := s.latestJobs()
 	v := OrgView{Org: o, Repos: make([]OrgRepoView, 0, len(o.Repos)), Counts: map[string]int{}}
 	for _, r := range o.Repos {
-		rv := OrgRepoView{OrgRepo: r}
-		n, isIndexed := indexed[r.Name]
+		rv := OrgRepoView{OrgRepo: r, Repo: o.fullName(r.Name)}
+		n, isIndexed := o.indexedAs(r, indexed)
+		if isIndexed {
+			rv.Repo = n.Name
+		}
 		switch {
 		case !o.wants(r):
 			rv.Status = "excluded"
@@ -359,7 +387,7 @@ func (s *Server) orgView(ctx context.Context, o Org) OrgView {
 			rv.Status = "indexed"
 		case isIndexed:
 			rv.Status = "conflict"
-		case latest[r.Name].State == JobRunning:
+		case latest[o.fullName(r.Name)].State == JobRunning:
 			rv.Status = "indexing"
 		case r.LastError != "":
 			rv.Status = "failed"

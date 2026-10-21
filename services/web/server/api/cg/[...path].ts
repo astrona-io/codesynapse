@@ -2,15 +2,27 @@
 // token. Mutating requests must come from this origin (CSRF guard), and only
 // API paths are reachable.
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
-const SAFE_PATH = /^[A-Za-z0-9._~\-/]+$/
+// %2F is allowed: repository names are owner/name and travel as one encoded
+// path element, which the API decodes after routing.
+const SAFE_PATH = /^[A-Za-z0-9._~\-/%]+$/
+
+function hasDotSegment(path: string): boolean {
+  try {
+    return path.split('/').some((seg) => decodeURIComponent(seg).split(/[/\\]/).some((part) => part === '..' || part === '.' || part.includes('\0')))
+  } catch {
+    return true // malformed percent-encoding
+  }
+}
 
 export default defineEventHandler(async (event) => {
   const method = event.method.toUpperCase()
   if (!ALLOWED_METHODS.has(method)) {
     throw createError({ statusCode: 405, statusMessage: 'Method Not Allowed' })
   }
-  const path = getRouterParam(event, 'path') ?? ''
-  if (!SAFE_PATH.test(path) || path.split('/').some((seg) => seg === '..' || seg === '.')) {
+  // The raw path, not the router param: the param is already decoded, which
+  // would turn owner%2Fname into two path elements.
+  const path = getRequestURL(event).pathname.replace(/^\/api\/cg\//, '')
+  if (!SAFE_PATH.test(path) || hasDotSegment(path)) {
     throw createError({ statusCode: 400, statusMessage: 'Bad path' })
   }
   if (method !== 'GET') {

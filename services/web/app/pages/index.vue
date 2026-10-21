@@ -114,7 +114,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
           </label>
           <div class="row">
             <label class="grow">Branch <span class="dim">(optional)</span><input v-model="reg.branch" placeholder="default branch"></label>
-            <label class="grow">Name <span class="dim">(optional)</span><input v-model="reg.name" placeholder="from the URL"></label>
+            <label class="grow">Name <span class="dim">(optional)</span><input v-model="reg.name" placeholder="owner/name from the URL"></label>
           </div>
           <div class="row">
             <button type="submit" :disabled="!reg.url || running || settings?.clone_enabled === false">Clone & index</button>

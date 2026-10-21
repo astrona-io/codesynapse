@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Watch GitHub organisations: list every repository, and clone + index new
 // ones as they appear (the API rescans every 5 minutes).
-interface OrgRepo { name: string; default_branch?: string; description?: string; archived?: boolean; fork?: boolean; private?: boolean; pushed_at?: string; status: string; last_error?: string }
+interface OrgRepo { name: string; repo: string; default_branch?: string; description?: string; archived?: boolean; fork?: boolean; private?: boolean; pushed_at?: string; status: string; last_error?: string }
 interface Org {
   org: string; include_archived: boolean; include_forks: boolean; auto_index: boolean
   last_scan?: string; last_error?: string; next_scan?: string
@@ -123,7 +123,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
         <input v-model="filter[o.org]" class="find" placeholder="Filter repositories" aria-label="Filter repositories">
         <ul class="repos">
           <li v-for="r in shown(o)" :key="r.name" class="repo">
-            <NuxtLink v-if="r.status === 'indexed'" :to="`/repos/${encodeURIComponent(r.name)}`" class="mono name">{{ r.name }}</NuxtLink>
+            <NuxtLink v-if="r.status === 'indexed'" :to="`/repos/${encodeURIComponent(r.repo)}`" class="mono name" :title="r.repo">{{ r.name }}</NuxtLink>
             <span v-else class="mono name">{{ r.name }}</span>
             <span v-if="r.private" class="badge badge--violet">private</span>
             <span v-if="r.archived" class="badge badge--amber">archived</span>

@@ -185,7 +185,9 @@ func (j *Jobs) prune() {
 		}
 	}
 	slices.SortFunc(finished, func(a, b *Job) int { return cmp.Compare(a.StartedAt, b.StartedAt) })
-	for _, job := range finished[:max(0, len(j.jobs)-maxJobHistory)] {
+	// Queued and running jobs are never dropped, so there may be fewer finished
+	// jobs than the excess.
+	for _, job := range finished[:min(len(finished), max(0, len(j.jobs)-maxJobHistory))] {
 		delete(j.jobs, job.ID)
 	}
 }
