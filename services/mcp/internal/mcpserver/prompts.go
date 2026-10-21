@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -121,5 +122,41 @@ func registerReviewPrompt(s *mcp.Server) {
    - one comment per issue, anchored to file and line, with severity, category, a clear message and a concrete suggestion (replacement code when you can)
 5. Reply with the review page returned by submit_review and the top three issues.`, target)
 		return &mcp.GetPromptResult{Description: "Guided code review", Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: text}}}}, nil
+	})
+}
+
+// registerAgentTaskPrompts adds the workflows the server would otherwise run
+// with its own model (security triage, briefing), so a local agent can do
+// them itself and submit the result without any external AI provider.
+func registerAgentTaskPrompts(s *mcp.Server) {
+	s.AddPrompt(&mcp.Prompt{
+		Name:        "security-triage",
+		Description: "Triage the security findings of a repository yourself and submit the result, without calling an external AI provider.",
+		Arguments:   []*mcp.PromptArgument{{Name: "min_severity", Description: "Lowest severity to triage: low, medium (default), high or critical"}},
+	}, func(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		sev := strings.ToLower(strings.TrimSpace(req.Params.Arguments["min_severity"]))
+		if !slices.Contains([]string{"low", "medium", "high", "critical"}, sev) {
+			sev = "medium"
+		}
+		text := fmt.Sprintf(`Triage the static-analysis security findings of this repository with CodeSynapse, then submit the triage.
+
+1. Call security_report with min_severity: %q. Work through the findings most important first (exposed and untested ones before the rest).
+2. For each finding call rule_guide with its rule and language, and read only the lines around its location.
+3. Decide per finding: likely exploitable, needs review, or probably a false positive. Explain why in one to three sentences using the code you read, and give a concrete fix.
+4. Call submit_review with a title such as "Security triage", a short summary, verdict request_changes if anything is likely exploitable (otherwise comment), and one comment per finding: file, line, rule, category "security", message starting with your decision, a suggestion, and severity "info" for false positives (otherwise the finding's severity).
+5. Reply with the review page returned by submit_review and the findings that need action first.`, sev)
+		return &mcp.GetPromptResult{Description: "Guided security triage", Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: text}}}}, nil
+	})
+	s.AddPrompt(&mcp.Prompt{
+		Name:        "briefing",
+		Description: "Write a short briefing of the repository yourself and submit it as a report, without calling an external AI provider.",
+	}, func(_ context.Context, _ *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		text := `Write a briefing for engineers joining this repository, using only facts from CodeSynapse, then submit it.
+
+1. Call repo_overview, repo_metrics, hotspots and security_report (min_severity: "high").
+2. Write Markdown of at most 450 words with the sections "What this is", "Architecture", "Quality and risk" and "Recommended next steps" (a numbered list of at most five concrete actions).
+3. Call submit_review with kind: "report", the title "Briefing: <repository>", the Markdown as summary, verdict "comment" and no comments.
+4. Reply with the report page returned by submit_review.`
+		return &mcp.GetPromptResult{Description: "Guided repository briefing", Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: text}}}}, nil
 	})
 }

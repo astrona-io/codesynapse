@@ -10,13 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/llm"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
 )
 
 // fakeModel answers with canned JSON and records the prompts it saw.

@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/aitasks"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/aitasks"
 )
 
 // inWorkspace reports whether root is a clone managed by the API.

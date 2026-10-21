@@ -232,3 +232,20 @@ func TestReviewWorkflow(t *testing.T) {
 	res = call(t, cs, "submit_review", map[string]any{"title": "x", "comments": []map[string]any{{"file": "../etc/passwd", "message": "m"}}}, nil)
 	assert.True(t, res.IsError, "path escapes rejected")
 }
+
+func TestAgentTaskPromptsAndReport(t *testing.T) {
+	cs := connect(t)
+	got, err := cs.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "security-triage", Arguments: map[string]string{"min_severity": "bogus"}})
+	require.NoError(t, err)
+	assert.Contains(t, got.Messages[0].Content.(*mcp.TextContent).Text, `min_severity: "medium"`, "unknown severity falls back")
+	got, err = cs.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "briefing"})
+	require.NoError(t, err)
+	assert.Contains(t, got.Messages[0].Content.(*mcp.TextContent).Text, `kind: "report"`)
+
+	var sub struct{ ID string }
+	res := call(t, cs, "submit_review", map[string]any{"kind": "report", "title": "Briefing: app", "summary": "## What this is\nAn app."}, &sub)
+	require.False(t, res.IsError, "%v", res.Content)
+	var rv struct{ Kind string }
+	require.False(t, call(t, cs, "get_review", map[string]any{"id": sub.ID}, &rv).IsError)
+	assert.Equal(t, rv.Kind, "report")
+}

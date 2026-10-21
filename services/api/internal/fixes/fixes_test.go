@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/llm"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
 )
 
 const original = "package app\n\nfunc Run(cmd string) {\n\texec(\"sh\", \"-c\", cmd)\n}\n"

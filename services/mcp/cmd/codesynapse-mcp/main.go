@@ -16,9 +16,9 @@ import (
 
 	"github.com/parisnakitakejser/codesynapse/internal/app"
 	"github.com/parisnakitakejser/codesynapse/internal/ingest"
-	"github.com/parisnakitakejser/codesynapse/internal/mcpserver"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
+	"github.com/parisnakitakejser/codesynapse/services/mcp/internal/mcpserver"
 )
 
 var version = "dev"

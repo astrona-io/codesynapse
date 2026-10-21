@@ -20,7 +20,7 @@ Rules for context efficiency:
 6. Read narrowly: file_outline and the "read"/"location" fields give file:start-end ranges; read only those lines.
 ```
 
-The source of truth is `Instructions` in `internal/mcpserver/server.go`.
+The source of truth is `Instructions` in `services/mcp/internal/mcpserver/server.go`.
 
 ---
 
@@ -65,6 +65,9 @@ Each prompt is also served natively as an MCP prompt (see section 4), so clients
 >
 > After fixing comments: "Call `get_review` with status "open" for review `<ID>`, fix each accepted comment, and mark it with `update_review_comment` (status "resolved", note = what changed). Reject false positives with status "rejected" and a reason."
 
+### H. AI tasks done by your own agent — prompts `security-triage` and `briefing`
+The server can run security triage and briefings with its own model (`config/llm.yaml`). To avoid calling an external provider, let your local agent do them: run the prompt, and the agent reads the graph, decides, and calls `submit_review`. The result appears on the Reviews page like a server-generated one (source `mcp`). A briefing is submitted with `kind: "report"`, the briefing in `summary` and no comments.
+
 ### F. Dead-code cleanup (CodeSynapse addition)
 > "Use `unused_code` (security_only first, then min_confidence "high") to list code nothing reaches. Remove security-relevant items first, then unused go.mod modules (and confirm with `security_report` that their CVEs are gone). For exported or low-confidence items, check for reflection and external consumers before deleting."
 
@@ -94,7 +97,7 @@ Every answer uses `qualified_id` values (`store.(*Store).Get`) that you can pass
 
 ## 4. MCP prompt declarations
 
-`codesynapse-mcp` serves these prompts (`prompts/list`, `prompts/get`); the text is in `internal/mcpserver/prompts.go`.
+`codesynapse-mcp` serves these prompts (`prompts/list`, `prompts/get`); the text is in `services/mcp/internal/mcpserver/prompts.go`.
 
 ```json
 {
@@ -108,7 +111,10 @@ Every answer uses `qualified_id` values (`store.(*Store).Get`) that you can pass
     { "name": "bug-investigation", "description": "Traces callers, interface dispatch and recent churn around a suspected bug location.",
       "arguments": [{ "name": "symbol", "description": "Symbol or file location where the bug appears", "required": true }] },
     { "name": "code-review", "description": "Review a change or area of the code with CodeSynapse and submit the review so it appears in the UI.",
-      "arguments": [{ "name": "target", "description": "What to review: a diff, base..head refs, file paths, or a package", "required": true }] }
+      "arguments": [{ "name": "target", "description": "What to review: a diff, base..head refs, file paths, or a package", "required": true }] },
+    { "name": "security-triage", "description": "Triage the security findings of a repository yourself and submit the result, without calling an external AI provider.",
+      "arguments": [{ "name": "min_severity", "description": "Lowest severity to triage: low, medium (default), high or critical" }] },
+    { "name": "briefing", "description": "Write a short briefing of the repository yourself and submit it as a report, without calling an external AI provider." }
   ]
 }
 ```

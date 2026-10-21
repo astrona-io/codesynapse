@@ -60,6 +60,7 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	if len(opts) > 0 && opts[0].Reviews != nil {
 		registerReviewTools(s, h, opts[0].Reviews)
 		registerReviewPrompt(s)
+		registerAgentTaskPrompts(s)
 	}
 	mcp.AddTool(s, add("file_outline", "Symbols and doc sections in a file with line ranges and signatures. Use before reading the file."), h.fileOutline)
 	mcp.AddTool(s, add("hotspots", "Functions ranked by complexity x file churn: where defects and review effort concentrate."), h.hotspots)

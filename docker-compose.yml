@@ -26,7 +26,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: cmd/codesynapse-api/Dockerfile
+      dockerfile: services/api/Dockerfile
     environment:
       CODESYNAPSE_NEO4J_URI: neo4j://neo4j:7687
       CODESYNAPSE_NEO4J_PASSWORD: ${NEO4J_PASSWORD}
@@ -79,7 +79,7 @@ services:
   mcp:
     build:
       context: .
-      dockerfile: cmd/codesynapse-mcp/Dockerfile
+      dockerfile: services/mcp/Dockerfile
     environment:
       CODESYNAPSE_NEO4J_URI: neo4j://neo4j:7687
       CODESYNAPSE_NEO4J_PASSWORD: ${NEO4J_PASSWORD}
@@ -105,7 +105,7 @@ services:
 
   web:
     build:
-      context: web
+      context: services/web
     environment:
       NUXT_API_BASE: http://api:8080
       NUXT_API_TOKEN: ${CODESYNAPSE_API_TOKEN}

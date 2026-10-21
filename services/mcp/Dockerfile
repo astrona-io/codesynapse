@@ -1,17 +1,17 @@
 # syntax=docker/dockerfile:1
-# Build context is the repository root: docker build -f cmd/codesynapse-mcp/Dockerfile .
+# Build context is the repository root: docker build -f services/mcp/Dockerfile .
 ARG GO_VERSION=1.27
 
 FROM docker.io/library/golang:${GO_VERSION}-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
-COPY cmd ./cmd
+COPY services/mcp ./services/mcp
 COPY internal ./internal
 COPY rules ./rules
 ARG VERSION=dev
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/codesynapse-mcp ./cmd/codesynapse-mcp
+    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/codesynapse-mcp ./services/mcp/cmd/codesynapse-mcp
 
 # git is needed for impact analysis by base/head refs.
 FROM docker.io/library/alpine:3.22

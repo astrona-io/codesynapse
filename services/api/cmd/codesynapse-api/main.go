@@ -10,10 +10,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/parisnakitakejser/codesynapse/internal/api"
 	"github.com/parisnakitakejser/codesynapse/internal/app"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/llm"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/api"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
 )
 
 var version = "dev"

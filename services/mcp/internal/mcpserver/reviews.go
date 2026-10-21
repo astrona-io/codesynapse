@@ -44,6 +44,7 @@ type submitReviewIn struct {
 	Title    string            `json:"title" jsonschema:"short title, e.g. 'Review of auth refactor'"`
 	Summary  string            `json:"summary,omitempty" jsonschema:"overall assessment in a few sentences (Markdown allowed)"`
 	Verdict  string            `json:"verdict,omitempty" jsonschema:"approve, comment (default) or request_changes"`
+	Kind     string            `json:"kind,omitempty" jsonschema:"review (default) or report: a briefing written in summary, with no comments"`
 	Base     string            `json:"base,omitempty" jsonschema:"base ref or commit reviewed against"`
 	Head     string            `json:"head,omitempty" jsonschema:"head ref or commit reviewed"`
 	Comments []reviewCommentIn `json:"comments,omitempty" jsonschema:"at most 200"`
@@ -76,7 +77,7 @@ func (h *handlers) submitReview(ctx context.Context, req *mcp.CallToolRequest, i
 		return nil, submitReviewOut{}, err
 	}
 	r := reviews.Review{
-		Repo: repo, Title: in.Title, Summary: in.Summary, Verdict: in.Verdict, Base: in.Base, Head: in.Head,
+		Repo: repo, Kind: in.Kind, Title: in.Title, Summary: in.Summary, Verdict: in.Verdict, Base: in.Base, Head: in.Head,
 		Author: clientName(req), Source: "mcp", Commit: repoNode.Head,
 	}
 	for _, c := range in.Comments {

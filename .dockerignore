@@ -1,4 +1,4 @@
 .git
-web
+services/web
 **/node_modules
 .env

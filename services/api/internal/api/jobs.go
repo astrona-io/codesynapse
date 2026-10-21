@@ -14,9 +14,9 @@ import (
 
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
 
-	"github.com/parisnakitakejser/codesynapse/internal/aitasks"
 	"github.com/parisnakitakejser/codesynapse/internal/ingest"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/aitasks"
 )
 
 // maxJobHistory bounds how many finished jobs are kept in memory.

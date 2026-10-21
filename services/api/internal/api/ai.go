@@ -11,9 +11,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/aitasks"
-	"github.com/parisnakitakejser/codesynapse/internal/llm"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/aitasks"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
 )
 
 // ProviderInfo describes a configured AI provider for the UI. It never

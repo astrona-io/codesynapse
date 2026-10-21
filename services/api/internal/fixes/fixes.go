@@ -27,9 +27,9 @@ import (
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/llm"
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
 )
 
 // Task is the LLM routing task for fixes.

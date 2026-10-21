@@ -85,14 +85,14 @@ Edges: `CONTAINS`, `DEFINES`, `HAS_METHOD`, `CALLS` (with `count`), `DISPATCHES_
 
 | Guide item | Where |
 |---|---|
-| System instructions | `Instructions` in `internal/mcpserver/server.go`, sent on MCP initialize |
+| System instructions | `Instructions` in `services/mcp/internal/mcpserver/server.go`, sent on MCP initialize |
 | `get_symbol_context` (outline/full, risk score, package view) | `agentctx.SymbolContext` |
 | `get_call_graph` (direction, depth ≤ 4, entry points) | `agentctx.CallGraph` |
 | `get_implementations` | `agentctx.Implementations` |
 | `get_pr_context` (diff / files / refs) | `agentctx.PRContext` on top of `review.Analyze` |
 | `minimal_context` (`max_tokens`) | `agentctx.MinimalContext`: keyword extraction, ranking, greedy packing |
 | `qualified_id` suggestions | `agentctx.Resolve` → `SuggestionError` |
-| Prompts `refactor-analysis`, `pr-impact-review` (+ `package-onboarding`, `bug-investigation`) | `internal/mcpserver/prompts.go` |
+| Prompts `refactor-analysis`, `pr-impact-review` (+ `package-onboarding`, `bug-investigation`) | `services/mcp/internal/mcpserver/prompts.go` |
 | One-step setup in Claude Code, Codex, Gemini, OpenCode, Cursor | `codesynapse mcp install` / `just mcp` |
 
 Follow-ups: measure `minimal_context` recall on real tasks (does it surface the files that end up edited?), and add a `security-review` MCP prompt mirroring guide prompt E.
@@ -127,11 +127,11 @@ Follow-ups: link comments to the diff hunk they were made on and flag them "outd
 
 ## AI providers and background work
 
-`internal/llm` holds providers (`openai`-compatible HTTP and the Anthropic SDK), a registry with per-task routing (global default plus `review`, `security-triage`, `briefing`; editable through `PUT /api/v1/ai/routing`, persisted in the workspace) and usage counters. `internal/aitasks` turns tasks into review documents: triage in batches sized from the output budget (6–40 findings; up to 200 per run, partial results kept); all task sizes scale with the provider's input budget, which defaults to `context_window` minus the output budget, review of a diff (comments only on files in the diff), and briefings (`kind: report`). After a successful sync, `Server.automation` compares the old and new head and finding IDs and, if the schedule asks for it, runs one background job that triages new medium+ findings and reviews `old..new`. Comment decisions are open, accepted, rejected, deferred and resolved.
+`services/api/internal/llm` holds providers (`openai`-compatible HTTP and the Anthropic SDK), a registry with per-task routing (global default plus `review`, `security-triage`, `briefing`; editable through `PUT /api/v1/ai/routing`, persisted in the workspace) and usage counters. `services/api/internal/aitasks` turns tasks into review documents: triage in batches sized from the output budget (6–40 findings; up to 200 per run, partial results kept); all task sizes scale with the provider's input budget, which defaults to `context_window` minus the output budget, review of a diff (comments only on files in the diff), and briefings (`kind: report`). After a successful sync, `Server.automation` compares the old and new head and finding IDs and, if the schedule asks for it, runs one background job that triages new medium+ findings and reviews `old..new`. Comment decisions are open, accepted, rejected, deferred and resolved.
 
 Decisions: model output is untrusted (redacted, size-limited, validated against known files and enums); remote providers get no source beyond a requested diff; budgets are per request and small by default because local hardware is slow; jobs share one semaphore with ingest so a laptop is never running two heavy things at once.
 
-Fix branches (`internal/fixes`, opt-in with `CODESYNAPSE_ALLOW_PUSH`): for accepted comments the "fix" model rewrites each affected file whole (it must fit the output budget) in a temporary worktree at the indexed head; CodeSynapse validates the answer, commits only those files, pushes a new `codesynapse/fix-<review>-<rand>` branch and opens a draft PR through the GitHub API (falling back to a normal PR, then to a compare link). Comment fix state (running, pushed, failed, branch, PR) is stored on the comment; the comment stays accepted until a person marks it fixed. Follow-up: detect merged fix branches on sync and mark comments fixed automatically; GitLab merge requests.
+Fix branches (`services/api/internal/fixes`, opt-in with `CODESYNAPSE_ALLOW_PUSH`): for accepted comments the "fix" model rewrites each affected file whole (it must fit the output budget) in a temporary worktree at the indexed head; CodeSynapse validates the answer, commits only those files, pushes a new `codesynapse/fix-<review>-<rand>` branch and opens a draft PR through the GitHub API (falling back to a normal PR, then to a compare link). Comment fix state (running, pushed, failed, branch, PR) is stored on the comment; the comment stays accepted until a person marks it fixed. Follow-up: detect merged fix branches on sync and mark comments fixed automatically; GitLab merge requests.
 
 Next: Postgres for reviews, decisions with an audit trail, a persistent job queue, finding/score history and AI usage; an in-process TTL cache for overview/security/metrics invalidated on ingest; container security (Dockerfile rules and opt-in Trivy image scans).
 

@@ -17,7 +17,6 @@ import (
 
 	"github.com/parisnakitakejser/codesynapse/internal/agentctx"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/llm"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/query"
 	"github.com/parisnakitakejser/codesynapse/internal/review"
@@ -25,6 +24,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/security"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/rules"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
 )
 
 // Store is what tasks read from and write to.
