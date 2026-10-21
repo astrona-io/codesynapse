@@ -141,9 +141,13 @@ function undo() {
 const fixTarget = ref<ReviewComment[] | null>(null) // comments in the confirm dialog
 const fixStarting = ref(false)
 const fixError = ref('')
-const fixable = (c: ReviewComment) => c.status === 'accepted' && c.fix?.state !== 'running' && c.fix?.state !== 'pushed' && !/(^|\/)\.(github|gitlab-ci|circleci)|jenkinsfile|^\.git\//i.test(c.file)
+// Matches fixes.staleAfter: an unfinished fix older than this was abandoned.
+const STALE_MS = 2 * 60 * 60 * 1000
+const unfinished = (c: ReviewComment) => c.fix?.state === 'queued' || c.fix?.state === 'running'
+const stale = (c: ReviewComment) => unfinished(c) && Date.now() - Date.parse(c.fix!.at) > STALE_MS
+const fixable = (c: ReviewComment) => c.status === 'accepted' && (!unfinished(c) || stale(c)) && c.fix?.state !== 'pushed' && !/(^|\/)\.(github|gitlab-ci|circleci)|jenkinsfile|^\.git\//i.test(c.file)
 const allFixable = computed(() => (review.value?.comments ?? []).filter(fixable))
-const anyRunning = computed(() => (review.value?.comments ?? []).some((c) => c.fix?.state === 'running'))
+const anyRunning = computed(() => (review.value?.comments ?? []).some((c) => unfinished(c) && !stale(c)))
 
 async function startFix() {
   if (!fixTarget.value || !review.value) return
@@ -153,7 +157,7 @@ async function startFix() {
     await $fetch(apiPath(`reviews/${review.value.id}/fix`), { method: 'POST', body: { comment_ids: fixTarget.value.map((c) => c.id) } })
     for (const c of fixTarget.value) {
       const live = review.value.comments.find((x) => x.id === c.id)
-      if (live) live.fix = { state: 'running', at: new Date().toISOString() }
+      if (live) live.fix = { state: 'queued', at: new Date().toISOString() }
     }
     fixTarget.value = null
   } catch (e) {
@@ -386,9 +390,17 @@ async function removeReview() {
 
                 <!-- Accepted: the fix -->
                 <div v-if="c.status === 'accepted' && c.fix" class="fixbox" :class="`fix--${c.fix.state}`">
-                  <template v-if="c.fix.state === 'running'">
+                  <template v-if="stale(c)">
+                    <span class="ico bad" aria-hidden="true">!</span>
+                    <span class="grow"><strong>This fix seems stuck</strong><span class="muted small">It started {{ relTime(c.fix.at) }} and never finished. Try again.</span></span>
+                  </template>
+                  <template v-else-if="c.fix.state === 'queued'">
+                    <span class="spin spin--slow" aria-hidden="true" />
+                    <span class="grow"><strong>Waiting for its turn…</strong><span class="muted small">CodeSynapse runs one job at a time (sync, indexing, AI). The fix starts by itself when the current job is done. Queued {{ relTime(c.fix.at) }}.</span></span>
+                  </template>
+                  <template v-else-if="c.fix.state === 'running'">
                     <span class="spin" aria-hidden="true" />
-                    <span><strong>Writing the fix on a new branch…</strong><span class="muted small"> The model rewrites the file, then CodeSynapse commits, pushes and opens a draft pull request. This can take a few minutes.</span></span>
+                    <span class="grow"><strong>Writing the fix on a new branch…</strong><span class="muted small">The model rewrites the file, then CodeSynapse commits, pushes and opens a draft pull request. Large files take a few minutes on a local model. Started {{ relTime(c.fix.at) }}.</span></span>
                   </template>
                   <template v-else-if="c.fix.state === 'pushed'">
                     <span class="ico ok" aria-hidden="true">↗</span>
@@ -412,9 +424,9 @@ async function removeReview() {
                   <span v-if="c.status_note" class="note small">“{{ c.status_note }}”</span>
                   <span class="spacer" />
                   <span v-if="c.status === 'accepted' && fixable(c)" :title="fixBlocked">
-                    <button class="tiny" :disabled="!!fixBlocked || busy === c.id" @click="fixTarget = [c]">{{ c.fix?.state === 'failed' ? 'Try the fix again' : 'Create fix branch & PR' }}</button>
+                    <button class="tiny" :disabled="!!fixBlocked || busy === c.id" @click="fixTarget = [c]">{{ c.fix?.state === 'failed' || stale(c) ? 'Try the fix again' : 'Create fix branch & PR' }}</button>
                   </span>
-                  <button v-if="c.status === 'accepted'" class="secondary tiny" :disabled="busy === c.id || c.fix?.state === 'running'" @click="decide(c, 'resolved')">★ Mark fixed</button>
+                  <button v-if="c.status === 'accepted'" class="secondary tiny" :disabled="busy === c.id || (unfinished(c) && !stale(c))" @click="decide(c, 'resolved')">★ Mark fixed</button>
                   <button class="secondary tiny" :disabled="busy === c.id" @click="decide(c, 'open')">{{ c.status === 'accepted' ? 'Undo' : 'Reopen' }}</button>
                 </footer>
               </article>
@@ -560,7 +572,8 @@ async function removeReview() {
 .fixbox { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: var(--radius-xs); border: 1px solid var(--line); background: var(--panel-faint); }
 .fixbox strong { display: block; font-size: 13.5px; }
 .fixbox .grow, .tofix .grow { flex: 1; min-width: 0; display: grid; gap: 2px; }
-.fix--running { border-color: rgba(87, 214, 255, 0.3); background: var(--tint-cyan); }
+.fix--running, .fix--queued { border-color: rgba(87, 214, 255, 0.3); background: var(--tint-cyan); }
+.spin--slow { animation-duration: 2.4s; border-top-color: var(--violet); }
 .fix--pushed { border-color: rgba(70, 230, 160, 0.3); background: var(--tint-green); }
 .fix--failed { border-color: rgba(255, 79, 162, 0.3); background: var(--tint-pink); }
 .ico.ok { color: var(--green); }

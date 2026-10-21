@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/fixes"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 )
 
 type fixRequest struct {
@@ -92,5 +94,41 @@ func (s *Server) handleFixReview(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusConflict, err)
 		return
 	}
+	// Shown until the job gets its turn and the runner marks it running.
+	reviews.SetFix(&rv, req.CommentIDs, reviews.Fix{State: reviews.FixQueued, Job: job.ID}, time.Now())
+	if err := s.st.SaveReview(r.Context(), rv); err != nil {
+		s.logger.Warn("fix queued state not saved", "review", rv.ID, "error", err)
+	}
 	writeJSON(w, http.StatusAccepted, job)
+}
+
+// recoverFixes marks fixes that were queued or running when the API stopped
+// as failed: their jobs lived in memory and are gone, so nothing will finish
+// them.
+func (s *Server) recoverFixes(ctx context.Context) {
+	repos, err := s.st.Repos(ctx)
+	if err != nil {
+		return
+	}
+	for _, n := range repos {
+		list, err := s.st.ListReviews(ctx, n.Name, 500)
+		if err != nil {
+			continue
+		}
+		for _, rv := range list {
+			var ids []string
+			for _, c := range rv.Comments {
+				if c.Fix != nil && (c.Fix.State == reviews.FixQueued || c.Fix.State == reviews.FixRunning) {
+					ids = append(ids, c.ID)
+				}
+			}
+			if len(ids) == 0 {
+				continue
+			}
+			reviews.SetFix(&rv, ids, reviews.Fix{State: reviews.FixFailed, Error: "Interrupted: CodeSynapse restarted before the fix finished. Try again."}, time.Now())
+			if err := s.st.SaveReview(ctx, rv); err == nil {
+				s.logger.Info("interrupted fixes marked failed", "review", rv.ID, "comments", len(ids))
+			}
+		}
+	}
 }

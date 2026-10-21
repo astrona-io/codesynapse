@@ -164,3 +164,34 @@ func TestProtected(t *testing.T) {
 		assert.False(t, protected(p), p)
 	}
 }
+
+func TestRunAcceptsItsQueuedComments(t *testing.T) {
+	ctx := context.Background()
+	f := setup(ctx, t, fixed, http.StatusCreated)
+	rv, _ := f.st.GetReview(ctx, f.req.ReviewID)
+	reviews.SetFix(&rv, f.req.CommentIDs, reviews.Fix{State: reviews.FixQueued, Job: "j1"}, time.Now())
+	require.NoError(t, f.st.SaveReview(ctx, rv))
+	_, err := f.r.Run(ctx, f.req)
+	require.NoError(t, err)
+}
+
+func TestSelectableStaleFix(t *testing.T) {
+	c := reviews.CommentItem{File: "a.go", Status: reviews.Accepted}
+	c.Fix = &reviews.Fix{State: reviews.FixRunning, At: time.Now().UTC().Format(time.RFC3339)}
+	assert.NotEqual(t, Selectable(c), "", "a live fix blocks a second one")
+	c.Fix.At = time.Now().Add(-3 * time.Hour).UTC().Format(time.RFC3339)
+	assert.Equal(t, Selectable(c), "", "an abandoned fix may be retried")
+	c.Fix = &reviews.Fix{State: reviews.FixPushed, At: c.Fix.At}
+	assert.NotEqual(t, Selectable(c), "")
+}
+
+func TestRunFailureBeforeStartIsRecorded(t *testing.T) {
+	ctx := context.Background()
+	f := setup(ctx, t, fixed, http.StatusCreated)
+	f.req.Provider = "missing"
+	_, err := f.r.Run(ctx, f.req)
+	assert.Error(t, err)
+	rv, _ := f.st.GetReview(ctx, f.req.ReviewID)
+	require.NotNil(t, rv.Comments[0].Fix)
+	assert.Equal(t, rv.Comments[0].Fix.State, reviews.FixFailed)
+}

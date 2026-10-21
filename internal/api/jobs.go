@@ -47,6 +47,9 @@ type Job struct {
 	// Task and Result are set for AI jobs: the task name and the review id.
 	Task   string `json:"task,omitempty"`
 	Result string `json:"result,omitempty"`
+	// Waiting is true while the job waits for another job to finish; jobs
+	// run one at a time.
+	Waiting bool `json:"waiting,omitempty"`
 }
 
 // Jobs runs ingest jobs, at most one per repository at a time and one
@@ -103,7 +106,7 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 	if kind == "" {
 		kind = "ingest"
 	}
-	job := &Job{ID: hex.EncodeToString(b), Repo: repo, Kind: kind, Branch: opts.Branch, State: JobRunning, StartedAt: time.Now().UTC().Format(time.RFC3339), Task: opts.Task}
+	job := &Job{ID: hex.EncodeToString(b), Repo: repo, Kind: kind, Branch: opts.Branch, State: JobRunning, StartedAt: time.Now().UTC().Format(time.RFC3339), Task: opts.Task, Waiting: true}
 	j.jobs[job.ID] = job
 	j.prune()
 	go j.run(job, root, opts)
@@ -114,6 +117,9 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 	select {
 	case j.sem <- struct{}{}:
 		defer func() { <-j.sem }()
+		j.mu.Lock()
+		job.Waiting = false
+		j.mu.Unlock()
 	case <-j.ctx.Done():
 		j.finish(job, 0, 0, j.ctx.Err())
 		return

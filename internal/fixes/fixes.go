@@ -28,6 +28,7 @@ import (
 
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/llm"
+	"github.com/parisnakitakejser/codesynapse/internal/logx"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 )
 
@@ -97,7 +98,9 @@ func Selectable(c reviews.CommentItem) string {
 	switch {
 	case c.Status != reviews.Accepted:
 		return "only accepted comments are fixed"
-	case c.Fix != nil && (c.Fix.State == reviews.FixRunning || c.Fix.State == reviews.FixPushed):
+	case c.Fix != nil && c.Fix.State == reviews.FixPushed:
+		return "a fix is already pushed"
+	case c.Fix != nil && (c.Fix.State == reviews.FixRunning || c.Fix.State == reviews.FixQueued) && !Stale(*c.Fix, time.Now()):
 		return "a fix is already " + c.Fix.State
 	case c.File == "" || strings.Contains(c.File, "..") || strings.HasPrefix(c.File, "/"):
 		return "the comment has no repository file"
@@ -105,6 +108,16 @@ func Selectable(c reviews.CommentItem) string {
 		return "CI and git configuration files are never changed automatically"
 	}
 	return ""
+}
+
+// staleAfter is how long a queued or running fix may take before it is
+// treated as abandoned (for example after a crash) and may be retried.
+const staleAfter = 2 * time.Hour
+
+// Stale reports whether an unfinished fix has been abandoned.
+func Stale(f reviews.Fix, now time.Time) bool {
+	at, err := time.Parse(time.RFC3339, f.At)
+	return err != nil || now.Sub(at) > staleAfter
 }
 
 // Run makes the fix branch. Comment fix state is saved as it goes, so the
@@ -117,7 +130,11 @@ func (r Runner) Run(ctx context.Context, req Request) (res Result, err error) {
 	var targets []reviews.CommentItem
 	for _, c := range rv.Comments {
 		if slices.Contains(req.CommentIDs, c.ID) {
-			if why := Selectable(c); why != "" {
+			check := c
+			if check.Fix != nil && check.Fix.State == reviews.FixQueued {
+				check.Fix = nil // queued by this run's request
+			}
+			if why := Selectable(check); why != "" {
 				return res, fmt.Errorf("%s:%d: %s", c.File, c.Line, why)
 			}
 			targets = append(targets, c)
@@ -126,6 +143,18 @@ func (r Runner) Run(ctx context.Context, req Request) (res Result, err error) {
 	if len(targets) == 0 {
 		return res, errors.New("no comments to fix")
 	}
+	ids := make([]string, len(targets))
+	for i, c := range targets {
+		ids[i] = c.ID
+	}
+	log := logx.FromContext(ctx).With("review", req.ReviewID, "comments", len(ids))
+	// From here on every failure is recorded on the comments.
+	defer func() {
+		if err != nil {
+			log.Warn("fix failed", logx.Error(err))
+			r.mark(context.WithoutCancel(ctx), req.ReviewID, ids, reviews.Fix{State: reviews.FixFailed, Error: err.Error()})
+		}
+	}()
 	provider, err := r.LLM.ProviderFor(Task, req.Provider)
 	if err != nil {
 		return res, err
@@ -134,17 +163,9 @@ func (r Runner) Run(ctx context.Context, req Request) (res Result, err error) {
 	if !cfg.AllowsSource() {
 		return res, fmt.Errorf("provider %s may not receive source code; use a local model for fixes or set send_source: true", provider)
 	}
-
-	ids := make([]string, len(targets))
-	for i, c := range targets {
-		ids[i] = c.ID
-	}
+	log = log.With("provider", provider)
+	log.Info("fix started")
 	r.mark(ctx, req.ReviewID, ids, reviews.Fix{State: reviews.FixRunning})
-	defer func() {
-		if err != nil {
-			r.mark(context.WithoutCancel(ctx), req.ReviewID, ids, reviews.Fix{State: reviews.FixFailed, Error: err.Error()})
-		}
-	}()
 
 	wt := filepath.Join(r.Workdir, rv.ID+"-"+randHex(4))
 	if err := os.MkdirAll(r.Workdir, 0o700); err != nil {
@@ -171,6 +192,7 @@ func (r Runner) Run(ctx context.Context, req Request) (res Result, err error) {
 	defer root.Close() //nolint:errcheck // read-only handle
 	var model string
 	for _, f := range files {
+		log.Info("asking the model to fix a file", "file", f)
 		m, err := r.fixFile(ctx, root, provider, cfg, f, byFile[f])
 		if err != nil {
 			return res, fmt.Errorf("%s: %w", f, err)
@@ -188,6 +210,7 @@ func (r Runner) Run(ctx context.Context, req Request) (res Result, err error) {
 	if push == nil {
 		push = gitx.PushBranch
 	}
+	log.Info("pushing fix branch", "branch", branch)
 	if err := push(ctx, wt, req.Remote, branch, r.Auth); err != nil {
 		return res, err
 	}

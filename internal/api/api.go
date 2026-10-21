@@ -78,6 +78,7 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	}
 	s.sched = sched
 	s.loadRoutes()
+	go s.recoverFixes(ctx)
 	go s.runScheduler(ctx, logger)
 	s.routes()
 	return s

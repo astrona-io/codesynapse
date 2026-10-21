@@ -365,3 +365,21 @@ func TestReviewsAPI(t *testing.T) {
 	assert.Equal(t, del(t, ts, "/api/v1/reviews/"+rv.ID), 204)
 	assert.Equal(t, get(t, ts, "/api/v1/reviews/"+rv.ID, nil), 404)
 }
+
+func TestRecoverFixes(t *testing.T) {
+	ctx := context.Background()
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+	rv, err := reviews.Prepare(reviews.Review{Repo: storetest.Repo, Title: "r", Comments: []reviews.CommentItem{{File: "a.go", Message: "m"}, {File: "b.go", Message: "m"}}}, time.Now())
+	require.NoError(t, err)
+	reviews.SetFix(&rv, []string{rv.Comments[0].ID}, reviews.Fix{State: reviews.FixRunning}, time.Now())
+	require.NoError(t, st.SaveReview(ctx, rv))
+	s := &Server{st: st, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s.recoverFixes(ctx)
+	got, err := st.GetReview(ctx, rv.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.Comments[0].Fix)
+	assert.Equal(t, got.Comments[0].Fix.State, reviews.FixFailed)
+	assert.Contains(t, got.Comments[0].Fix.Error, "restarted")
+	assert.True(t, got.Comments[1].Fix == nil)
+}

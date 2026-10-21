@@ -91,6 +91,7 @@ type CommentItem struct {
 
 // Fix states.
 const (
+	FixQueued  = "queued" // waiting for other jobs
 	FixRunning = "running"
 	FixPushed  = "pushed"
 	FixFailed  = "failed"
@@ -100,6 +101,7 @@ const (
 // reviews it before merging.
 type Fix struct {
 	State      string `json:"state"`
+	Job        string `json:"job,omitempty"`
 	Branch     string `json:"branch,omitempty"`
 	Commit     string `json:"commit,omitempty"`
 	PRURL      string `json:"pr_url,omitempty"`
