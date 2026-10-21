@@ -108,16 +108,16 @@ mcp-config:
 # Run the API against the compose Neo4j, serving ./sources
 dev-api: db
     CODESYNAPSE_NEO4J_URI=neo4j://localhost:7687 CODESYNAPSE_NEO4J_PASSWORD="$NEO4J_PASSWORD" \
-    go run ./cmd/codesynapse-api serve --sources-root ./sources
+    go run ./services/api/cmd/codesynapse-api serve --sources-root ./sources
 
 # Run the MCP server on stdio against the compose Neo4j
 dev-mcp: db
     CODESYNAPSE_NEO4J_URI=neo4j://localhost:7687 CODESYNAPSE_NEO4J_PASSWORD="$NEO4J_PASSWORD" \
-    go run ./cmd/codesynapse-mcp serve
+    go run ./services/mcp/cmd/codesynapse-mcp serve
 
 # Run the Nuxt dev server against `just dev-api`
 dev-web:
-    cd web && npm install --no-fund --no-audit && NUXT_API_BASE=http://127.0.0.1:8080 npm run dev
+    cd services/web && npm install --no-fund --no-audit && NUXT_API_BASE=http://127.0.0.1:8080 npm run dev
 
 # List the security rules (rules/*/*.yaml), most severe first
 rules:
@@ -131,7 +131,7 @@ rules:
 # Build all Go binaries into ./bin
 build:
     mkdir -p bin
-    go build -trimpath -ldflags "{{ldflags}}" -o bin/ ./cmd/...
+    go build -trimpath -ldflags "{{ldflags}}" -o bin/ ./cmd/... ./services/api/cmd/... ./services/mcp/cmd/...
 
 # Unit tests with the race detector
 test:
@@ -162,7 +162,7 @@ vuln:
 
 # Type-check and build the web app
 web-check:
-    cd web && npm ci --no-fund --no-audit && npm run typecheck && npm run build
+    cd services/web && npm ci --no-fund --no-audit && npm run typecheck && npm run build
 
 # Everything CI runs
 ci: lint test web-check

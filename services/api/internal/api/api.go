@@ -1,0 +1,675 @@
+// Package api is the HTTP JSON API behind the web dashboard. It serves the
+// same query answers as the MCP server plus dashboard aggregates, and runs
+// ingest jobs for repositories under a configured sources root.
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+
+	"github.com/parisnakitakejser/codesynapse/internal/gitx"
+	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/parisnakitakejser/codesynapse/internal/query"
+	"github.com/parisnakitakejser/codesynapse/internal/review"
+	"github.com/parisnakitakejser/codesynapse/internal/security"
+	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
+)
+
+const maxBodyBytes = 4 << 20
+
+// Config configures the API.
+type Config struct {
+	// SourcesRoot is the only directory tree ingest may read. Requests name a
+	// child directory; anything resolving outside the root is rejected.
+	SourcesRoot string
+	// CommitLimit is passed to ingest runs.
+	CommitLimit int
+	// AllowNetwork lets ingest download Go modules. Off by default; enable
+	// only for repositories you trust.
+	AllowNetwork bool
+	// VulnScan checks dependencies against osv.dev during ingest.
+	VulnScan bool
+	// Workspace is a writable directory for repositories cloned by URL.
+	Workspace string
+	// GitAuth is an optional token for cloning private repositories.
+	GitAuth gitx.Auth
+	// AllowPrivateGit permits remotes on private networks.
+	AllowPrivateGit bool
+	// AllowPush lets CodeSynapse push fix branches for accepted review
+	// comments and open pull requests. Off by default.
+	AllowPush bool
+	// GitAuthor signs fix commits.
+	GitAuthor gitx.Author
+	// LLM holds configured AI providers; nil disables AI tasks.
+	LLM     *llm.Registry
+	Version string
+}
+
+// Server is the API handler.
+type Server struct {
+	cfg    Config
+	st     store.Store
+	svc    query.Service
+	jobs   *Jobs
+	sched  *schedules
+	logger *slog.Logger
+	mux    *http.ServeMux
+}
+
+// New builds the API. Jobs run on ctx and stop when it is cancelled.
+func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *Server {
+	s := &Server{cfg: cfg, st: st, svc: query.Service{R: st}, logger: logger, mux: http.NewServeMux()}
+	s.jobs = NewJobs(ctx, st, logger, cfg.CommitLimit, cfg.AllowNetwork, cfg.VulnScan)
+	sched, err := loadSchedules(cfg.Workspace)
+	if err != nil {
+		logger.Error("auto-sync schedules unreadable; starting with none", "error", err)
+		sched, _ = loadSchedules("") //nolint:errcheck // in-memory fallback cannot fail
+	}
+	s.sched = sched
+	s.loadRoutes()
+	go s.recoverFixes(ctx)
+	go s.runScheduler(ctx, logger)
+	s.routes()
+	return s
+}
+
+// ServeHTTP implements http.Handler.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-store")
+	s.mux.ServeHTTP(w, r)
+}
+
+func (s *Server) routes() {
+	m := s.mux
+	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
+	m.HandleFunc("GET /api/v1/version", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, map[string]string{"version": s.cfg.Version})
+	})
+	// Settings report what is configured, never secret values.
+	m.HandleFunc("GET /api/v1/settings", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, map[string]any{
+			"git_token_configured": s.cfg.GitAuth.Token != "",
+			"git_token_host":       s.cfg.GitAuth.Host,
+			"clone_enabled":        s.cfg.Workspace != "",
+			"allow_private_git":    s.cfg.AllowPrivateGit,
+			"vuln_scan":            s.cfg.VulnScan,
+			"push_enabled":         s.cfg.AllowPush && s.cfg.LLM != nil,
+			"push_allowed":         s.cfg.AllowPush,
+			"sources_root":         s.cfg.SourcesRoot != "",
+		})
+	})
+	m.HandleFunc("GET /api/v1/repos", s.handleRepos)
+	m.HandleFunc("GET /api/v1/overview", s.handleWorkspaceOverview)
+	m.HandleFunc("DELETE /api/v1/repos/{repo}", s.handleDeleteRepo)
+	m.HandleFunc("GET /api/v1/repos/{repo}/overview", s.handleOverview)
+	m.HandleFunc("GET /api/v1/repos/{repo}/dashboard", s.handleDashboard)
+	m.HandleFunc("GET /api/v1/repos/{repo}/metrics", s.handleMetrics)
+	m.HandleFunc("GET /api/v1/repos/{repo}/security", s.handleSecurity)
+	m.HandleFunc("GET /api/v1/repos/{repo}/cleanup", s.handleCleanup)
+	m.HandleFunc("GET /api/v1/repos/{repo}/search", s.handleSearch)
+	m.HandleFunc("GET /api/v1/repos/{repo}/symbol", s.handleSymbol)
+	m.HandleFunc("GET /api/v1/repos/{repo}/outline", s.handleOutline)
+	m.HandleFunc("GET /api/v1/repos/{repo}/list", s.handleList)
+	m.HandleFunc("GET /api/v1/repos/{repo}/hotspots", s.handleHotspots)
+	m.HandleFunc("GET /api/v1/repos/{repo}/graph", s.handleGraph)
+	m.HandleFunc("GET /api/v1/repos/{repo}/packages/graph", s.handlePackageGraph)
+	m.HandleFunc("GET /api/v1/repos/{repo}/graph/overview", s.handleGraphOverview)
+	m.HandleFunc("GET /api/v1/repos/{repo}/graph/expand", s.handleGraphExpand)
+	m.HandleFunc("POST /api/v1/repos/{repo}/graph/edges", s.handleGraphEdges)
+	m.HandleFunc("POST /api/v1/repos/{repo}/impact", s.handleImpact)
+	m.HandleFunc("GET /api/v1/sources", s.handleSources)
+	m.HandleFunc("POST /api/v1/ingest", s.handleIngest)
+	m.HandleFunc("POST /api/v1/repos", s.handleRegister)
+	m.HandleFunc("POST /api/v1/repos/{repo}/sync", s.handleSync)
+	m.HandleFunc("GET /api/v1/repos/{repo}/schedule", s.handleGetSchedule)
+	m.HandleFunc("PUT /api/v1/repos/{repo}/schedule", s.handlePutSchedule)
+	m.HandleFunc("GET /api/v1/repos/{repo}/branches", s.handleBranches)
+	m.HandleFunc("GET /api/v1/rules", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, map[string]any{"rules": security.Catalog()})
+	})
+	m.HandleFunc("GET /api/v1/repos/{repo}/reviews", s.handleListReviews)
+	m.HandleFunc("GET /api/v1/reviews/{id}", s.handleGetReview)
+	m.HandleFunc("DELETE /api/v1/reviews/{id}", s.handleDeleteReview)
+	m.HandleFunc("PATCH /api/v1/reviews/{id}/comments/{comment}", s.handleUpdateReviewComment)
+	m.HandleFunc("POST /api/v1/reviews/{id}/fix", s.handleFixReview)
+	m.HandleFunc("POST /api/v1/repos/{repo}/remote", s.handleSwitchToRemote)
+	m.HandleFunc("GET /api/v1/ai/providers", s.handleAIProviders)
+	m.HandleFunc("PUT /api/v1/ai/routing", s.handlePutRouting)
+	m.HandleFunc("POST /api/v1/ai/providers/{name}/test", s.handleAITest)
+	m.HandleFunc("POST /api/v1/repos/{repo}/ai/{task}", s.handleAITask)
+	m.HandleFunc("GET /api/v1/jobs", s.handleJobs)
+	m.HandleFunc("GET /api/v1/jobs/{id}", s.handleJob)
+}
+
+// problem writes an RFC 7807 response. Internal errors are logged and
+// replaced with a generic message so driver errors do not leak to clients.
+func (s *Server) problem(w http.ResponseWriter, status int, err error) {
+	detail := err.Error()
+	var amb *query.AmbiguousError
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		status = http.StatusNotFound
+	case errors.As(err, &amb):
+		status = http.StatusConflict
+	case status >= 500:
+		s.logger.Error("request failed", "error", err)
+		detail = "internal error"
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck // client went away
+		"type": "about:blank", "title": http.StatusText(status), "status": status, "detail": detail,
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v) //nolint:errcheck // client went away
+}
+
+func intParam(r *http.Request, name string, def int) int {
+	v, err := strconv.Atoi(r.URL.Query().Get(name))
+	if err != nil || v <= 0 {
+		return def
+	}
+	return v
+}
+
+func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
+	repos, err := s.st.Repos(r.Context())
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(repos))
+	for _, n := range repos {
+		out = append(out, map[string]any{
+			"name": n.Name, "head": n.Head, "ingested_at": n.Time, "root": s.displayRoot(n.Root),
+			"branch": n.Branch, "remote": n.URL, "managed": s.inWorkspace(n.Root),
+		})
+	}
+	writeJSON(w, 200, map[string]any{"repos": out})
+}
+
+// displayRoot shows roots relative to the sources root, hiding host layout.
+func (s *Server) displayRoot(root string) string {
+	if s.cfg.SourcesRoot == "" || root == "" {
+		return filepath.Base(root)
+	}
+	if rel, err := filepath.Rel(s.cfg.SourcesRoot, root); err == nil && !strings.HasPrefix(rel, "..") {
+		return rel
+	}
+	return filepath.Base(root)
+}
+
+// handleDeleteRepo removes a repository's graph and auto-sync schedule.
+// With ?files=1 it also deletes a clone in the workspace; mounted sources
+// are never touched.
+func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	repo := r.PathValue("repo")
+	for _, j := range s.jobs.List() {
+		if j.Repo == repo && j.State == JobRunning {
+			s.problem(w, http.StatusConflict, fmt.Errorf("%s is being indexed; try again when the job finishes", repo))
+			return
+		}
+	}
+	n, err := s.st.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.problem(w, 500, err)
+		return
+	}
+	if r.URL.Query().Get("files") == "1" && s.inWorkspace(n.Root) {
+		rel, relErr := filepath.Rel(s.cfg.Workspace, n.Root)
+		if relErr != nil || rel == "." || strings.Contains(rel, "..") || strings.ContainsRune(rel, filepath.Separator) {
+			s.problem(w, 400, errors.New("refusing to delete files outside a single workspace clone"))
+			return
+		}
+		if err := os.RemoveAll(n.Root); err != nil {
+			s.problem(w, 500, err)
+			return
+		}
+	}
+	if err := s.st.DeleteRepo(ctx, repo); err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	if err := s.sched.remove(repo); err != nil {
+		s.logger.Warn("removing schedule", "repo", repo, "error", err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
+	ov, err := s.svc.Overview(r.Context(), r.PathValue("repo"))
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	ov.Repo.Root = s.displayRoot(ov.Repo.Root)
+	writeJSON(w, 200, ov)
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		s.problem(w, 400, errors.New("q is required"))
+		return
+	}
+	kinds, err := parseKinds(r.URL.Query()["kind"])
+	if err != nil {
+		s.problem(w, 400, err)
+		return
+	}
+	ns, err := s.st.Search(r.Context(), r.PathValue("repo"), q, kinds, intParam(r, "limit", 25))
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	refs := make([]query.Ref, 0, len(ns))
+	for _, n := range ns {
+		refs = append(refs, query.RefOf(n))
+	}
+	writeJSON(w, 200, map[string]any{"results": refs})
+}
+
+func parseKinds(raw []string) ([]model.NodeKind, error) {
+	var out []model.NodeKind
+	for _, k := range raw {
+		for _, part := range strings.Split(k, ",") {
+			nk := model.NodeKind(strings.TrimSpace(part))
+			if nk == "" {
+				continue
+			}
+			if !nk.Valid() {
+				return nil, fmt.Errorf("unknown kind %q", nk)
+			}
+			out = append(out, nk)
+		}
+	}
+	return out, nil
+}
+
+func (s *Server) handleSymbol(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		s.problem(w, 400, errors.New("id is required"))
+		return
+	}
+	card, err := s.svc.Card(r.Context(), r.PathValue("repo"), id, intParam(r, "limit", 20))
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, card)
+}
+
+func (s *Server) handleOutline(w http.ResponseWriter, r *http.Request) {
+	file := r.URL.Query().Get("file")
+	if file == "" {
+		s.problem(w, 400, errors.New("file is required"))
+		return
+	}
+	entries, err := s.svc.Outline(r.Context(), r.PathValue("repo"), file)
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"file": file, "entries": entries})
+}
+
+// handleList is the generic table endpoint behind most dashboard views:
+// ?kind=Function&metric=complexity&tag=exec&prefix=internal/&exported=1&undocumented=1&notests=1
+func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
+	qv := r.URL.Query()
+	kinds, err := parseKinds(qv["kind"])
+	if err != nil {
+		s.problem(w, 400, err)
+		return
+	}
+	m := store.Metric(qv.Get("metric"))
+	if m == "" {
+		m = store.ByName
+	}
+	if !m.Valid() {
+		s.problem(w, 400, fmt.Errorf("unknown metric %q", m))
+		return
+	}
+	f := store.Filter{
+		Kinds: kinds, Tag: qv.Get("tag"), FilePrefix: qv.Get("prefix"),
+		ExportedOnly: qv.Get("exported") == "1", Undocumented: qv.Get("undocumented") == "1",
+		ExcludeTests: qv.Get("notests") == "1",
+	}
+	ranked, err := s.st.List(r.Context(), r.PathValue("repo"), f, m, intParam(r, "limit", 50))
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	if ranked == nil {
+		ranked = []store.Ranked{}
+	}
+	writeJSON(w, 200, map[string]any{"results": ranked})
+}
+
+func (s *Server) handleHotspots(w http.ResponseWriter, r *http.Request) {
+	hs, err := s.svc.Hotspots(r.Context(), r.PathValue("repo"), intParam(r, "limit", 25))
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"hotspots": hs})
+}
+
+// GraphView is a node-link payload for the UI's graph canvas.
+type GraphView struct {
+	Nodes []GraphNode  `json:"nodes"`
+	Edges []model.Edge `json:"edges"`
+	Root  string       `json:"root,omitempty"`
+}
+
+// GraphNode is a node in a GraphView.
+type GraphNode struct {
+	query.Ref
+	Complexity int      `json:"complexity,omitempty"`
+	Tags       []string `json:"security_tags,omitempty"`
+	IsTest     bool     `json:"is_test,omitempty"`
+}
+
+func graphNode(n model.Node, depth int) GraphNode {
+	ref := query.RefOf(n)
+	ref.Depth = depth
+	return GraphNode{Ref: ref, Complexity: n.Complexity, Tags: n.SecurityTags, IsTest: n.IsTest}
+}
+
+// handleGraph returns the call neighbourhood of a symbol: callers and
+// callees up to depth, with the edges between them.
+func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	root, err := s.svc.Resolve(ctx, r.PathValue("repo"), r.URL.Query().Get("id"))
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	depth := min(intParam(r, "depth", 2), 3)
+	limit := min(intParam(r, "limit", 80), 200)
+	edges := []model.EdgeKind{model.EdgeCalls, model.EdgeDispatchesTo}
+	in, err := s.st.Traverse(ctx, root.ID, edges, store.In, depth, limit)
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	out, err := s.st.Traverse(ctx, root.ID, edges, store.Out, depth, limit)
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	view := GraphView{Root: root.ID, Nodes: []GraphNode{graphNode(root, 0)}}
+	ids := []string{root.ID}
+	seen := map[string]bool{root.ID: true}
+	for _, h := range slices.Concat(in, out) {
+		if seen[h.Node.ID] {
+			continue
+		}
+		seen[h.Node.ID] = true
+		ids = append(ids, h.Node.ID)
+		view.Nodes = append(view.Nodes, graphNode(h.Node, h.Depth))
+	}
+	view.Edges, err = s.st.Subgraph(ctx, ids, edges)
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, view)
+}
+
+func (s *Server) handlePackageGraph(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	pkgs, err := s.st.List(ctx, r.PathValue("repo"), store.Filter{Kinds: []model.NodeKind{model.KindPackage}}, store.ByName, store.MaxLimit)
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	view := GraphView{Nodes: make([]GraphNode, 0, len(pkgs))}
+	ids := make([]string, 0, len(pkgs))
+	for _, p := range pkgs {
+		ids = append(ids, p.Node.ID)
+		view.Nodes = append(view.Nodes, graphNode(p.Node, 0))
+	}
+	view.Edges, err = s.st.Subgraph(ctx, ids, []model.EdgeKind{model.EdgeImports})
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, view)
+}
+
+type impactRequest struct {
+	Diff  string `json:"diff"`
+	Base  string `json:"base"`
+	Head  string `json:"head"`
+	Depth int    `json:"depth"`
+}
+
+func (s *Server) handleImpact(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	repo := r.PathValue("repo")
+	var req impactRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		s.problem(w, 400, err)
+		return
+	}
+	diff := []byte(req.Diff)
+	if len(diff) == 0 {
+		if req.Base == "" {
+			s.problem(w, 400, errors.New("diff or base is required"))
+			return
+		}
+		repoNode, err := s.st.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
+		if err != nil {
+			s.problem(w, 500, err)
+			return
+		}
+		if err := s.insideSources(repoNode.Root); err != nil {
+			s.problem(w, 400, err)
+			return
+		}
+		head := req.Head
+		if head == "" {
+			head = "HEAD"
+		}
+		diff, err = gitx.Diff(ctx, repoNode.Root, req.Base, head)
+		if err != nil {
+			status := 500
+			if errors.Is(err, gitx.ErrInvalidRev) {
+				status = 400
+			}
+			s.problem(w, status, err)
+			return
+		}
+	}
+	changes, err := gitx.ParseDiff(diff)
+	if err != nil {
+		s.problem(w, 400, err)
+		return
+	}
+	rep, err := review.Analyze(ctx, s.svc, repo, changes, review.Options{Depth: req.Depth})
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	if r.URL.Query().Get("format") == "markdown" {
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		_ = review.WriteMarkdown(w, rep) //nolint:errcheck // client went away
+		return
+	}
+	writeJSON(w, 200, rep)
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		return errors.New("content-type must be application/json")
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return fmt.Errorf("invalid json body: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return errors.New("body must contain a single json object")
+	}
+	return nil
+}
+
+// Source is a directory under the sources root that can be ingested.
+type Source struct {
+	Name  string `json:"name"`
+	IsGit bool   `json:"is_git"`
+	IsGo  bool   `json:"is_go"`
+	// Content counts files per detected format (go, python, typescript,
+	// yaml, helm, markdown, ...) from a bounded scan.
+	Content map[string]int `json:"content"`
+	// Truncated is set when the scan stopped before the end of the tree.
+	Truncated bool `json:"truncated,omitempty"`
+}
+
+func (s *Server) handleSources(w http.ResponseWriter, _ *http.Request) {
+	if s.cfg.SourcesRoot == "" {
+		writeJSON(w, 200, map[string]any{"sources": []Source{}})
+		return
+	}
+	entries, err := os.ReadDir(s.cfg.SourcesRoot)
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	out := []Source{}
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		dir := filepath.Join(s.cfg.SourcesRoot, e.Name())
+		content, truncated := scanContent(dir)
+		out = append(out, Source{Name: e.Name(), IsGit: exists(filepath.Join(dir, ".git")), IsGo: content["go"] > 0, Content: content, Truncated: truncated})
+	}
+	writeJSON(w, 200, map[string]any{"sources": out})
+}
+
+func exists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// insideSources rejects paths that resolve (after symlinks) outside the
+// sources root.
+func (s *Server) insideSources(path string) error {
+	if s.cfg.SourcesRoot == "" {
+		return errors.New("no sources root configured")
+	}
+	root, err := filepath.EvalSymlinks(s.cfg.SourcesRoot)
+	if err != nil {
+		return fmt.Errorf("sources root: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return errors.New("path does not exist")
+	}
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return errors.New("path is outside the sources root")
+	}
+	return nil
+}
+
+type ingestRequest struct {
+	// Source is a directory name under the sources root.
+	Source string `json:"source"`
+	// Repo is the graph name; defaults to Source.
+	Repo string `json:"repo"`
+}
+
+// validRepoName restricts repo names to a safe, URL-friendly alphabet.
+func validRepoName(name string) bool {
+	// A leading dot would allow "." and "..", and collide with the
+	// workspace's .codesynapse state directory.
+	if name == "" || len(name) > 100 || strings.HasPrefix(name, ".") {
+		return false
+	}
+	for _, c := range name {
+		ok := c == '-' || c == '_' || c == '.' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if !ok {
+			return false
+		}
+	}
+	return !strings.HasPrefix(name, ".")
+}
+
+func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
+	var req ingestRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		s.problem(w, 400, err)
+		return
+	}
+	if req.Repo == "" {
+		req.Repo = req.Source
+	}
+	if !validRepoName(req.Source) || !validRepoName(req.Repo) {
+		s.problem(w, 400, errors.New("source and repo must match [A-Za-z0-9._-]+"))
+		return
+	}
+	path := filepath.Join(s.cfg.SourcesRoot, req.Source)
+	if err := s.insideSources(path); err != nil {
+		s.problem(w, 400, err)
+		return
+	}
+	job, err := s.jobs.Start(req.Repo, path, JobOptions{}) //nolint:contextcheck // jobs outlive the request by design
+	if err != nil {
+		s.problem(w, http.StatusConflict, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) handleJobs(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, 200, map[string]any{"jobs": s.jobs.List()})
+}
+
+func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {
+	job, ok := s.jobs.Get(r.PathValue("id"))
+	if !ok {
+		s.problem(w, 404, store.ErrNotFound)
+		return
+	}
+	writeJSON(w, 200, job)
+}
+
+func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
+	minSev := r.URL.Query().Get("min")
+	if minSev != "" && model.SeverityRank(minSev) < 0 {
+		s.problem(w, 400, fmt.Errorf("unknown severity %q", minSev))
+		return
+	}
+	rep, err := security.Build(r.Context(), s.st, r.PathValue("repo"), security.Options{MinSeverity: minSev})
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	if r.URL.Query().Get("format") == "markdown" {
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		_ = security.WriteMarkdown(w, rep) //nolint:errcheck // client went away
+		return
+	}
+	writeJSON(w, 200, rep)
+}

@@ -106,7 +106,7 @@ On the **AI models** page you pick a **global** model, the fallback for everythi
 Without any database, the server can index a directory into memory at startup:
 
 ```sh
-claude mcp add codesynapse -- go run github.com/parisnakitakejser/codesynapse/cmd/codesynapse-mcp@latest serve --offline .
+claude mcp add codesynapse -- go run github.com/parisnakitakejser/codesynapse/services/mcp/cmd/codesynapse-mcp@latest serve --offline .
 ```
 
 This repository's own `.mcp.json` does that, so agents working on CodeSynapse use CodeSynapse.

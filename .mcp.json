@@ -3,7 +3,7 @@
     "codesynapse": {
       "type": "stdio",
       "command": "go",
-      "args": ["run", "./cmd/codesynapse-mcp", "serve", "--offline", "."]
+      "args": ["run", "./services/mcp/cmd/codesynapse-mcp", "serve", "--offline", "."]
     }
   }
 }

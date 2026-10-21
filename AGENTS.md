@@ -10,9 +10,9 @@ Three services plus Neo4j, all in `docker-compose.yml`:
 
 | Service | Code | Port | Purpose |
 |---|---|---|---|
-| `mcp` | `cmd/codesynapse-mcp` | 8090 | MCP server for AI agents (stdio or streamable HTTP) |
-| `api` | `cmd/codesynapse-api` | 8080 | JSON API for the dashboard; runs ingest jobs |
-| `web` | `web/` (Nuxt 4) | 3000 | Dashboard; proxies to `api` server-side |
+| `mcp` | `services/mcp` | 8090 | MCP server for AI agents (stdio or streamable HTTP) |
+| `api` | `services/api` | 8080 | JSON API for the dashboard; runs ingest jobs |
+| `web` | `services/web` (Nuxt 4) | 3000 | Dashboard; proxies to `api` server-side |
 | `neo4j` | image | 7474/7687 | Graph store |
 
 `cmd/codesynapse` is the CLI (ingest, audit, stats, review, mcp install) for CI and local use. It is not a service.
@@ -36,8 +36,15 @@ When you change MCP tools, prompts or the server instructions, update `docs/AGEN
 
 ```
 cmd/codesynapse/        CLI: ingest, audit, stats, review, mcp install, schema
-cmd/codesynapse-api/    API service (+ Dockerfile)
-cmd/codesynapse-mcp/    MCP service (+ Dockerfile)
+services/api/           API service: cmd/codesynapse-api, Dockerfile, and packages only it uses
+  internal/api/         HTTP handlers, jobs (ingest/clone/sync), auto-sync scheduler, reviews, dashboard and overview
+  internal/llm/         Model providers (OpenAI-compatible, Anthropic SDK), per-task routing, usage
+  internal/aitasks/     AI tasks (security triage, review, briefing) that produce reviews
+  internal/fixes/       Fix branches for accepted review comments: worktree, model rewrite, push, draft PR
+services/mcp/           MCP service: cmd/codesynapse-mcp, Dockerfile
+  internal/mcpserver/   MCP tools, prompts (prompts.go) and server instructions
+services/web/           Nuxt 4 dashboard (app/ pages+components, server/api/cg proxy, Dockerfile)
+deploy/k8s/             Kubernetes manifests (docker-compose.yml stays at the repo root)
 internal/model/         Node/Edge kinds, Graph, IDs. The schema lives here.
 internal/ingest/        Pipeline: golang/ (go/packages + go/types; security rules in findings.go),
                         lang/ (Python, JS/TS, Vue: pure-Go structural parsers + rules),
@@ -53,18 +60,12 @@ internal/query/         Composed answers (Outline, Hotspots, Overview, Tests)
 internal/agentctx/      Composite agent answers: get_symbol_context, get_call_graph, get_implementations,
                         get_pr_context, minimal_context; qualified_id resolution and suggestions
 internal/review/        Diff → impact report, risk scoring, Markdown renderer
-internal/mcpserver/     MCP tools, prompts (prompts.go) and server instructions
 internal/agentcfg/      `codesynapse mcp install`: registers the MCP server with local agents
-internal/api/           HTTP handlers, jobs (ingest/clone/sync), auto-sync scheduler, reviews, dashboard and overview
 internal/reviews/       Code reviews: model, validation, redaction, comment decisions
-internal/llm/           Model providers (OpenAI-compatible, Anthropic SDK), per-task routing, usage
-internal/aitasks/       AI tasks (security triage, review, briefing) that produce reviews
-internal/fixes/         Fix branches for accepted review comments: worktree, model rewrite, push, draft PR
 config/                 llm.example.yaml (committed); llm.yaml is local and gitignored
 internal/app/           Shared wiring: Neo4j flags, bearer auth, HTTP server, cobra CLI bootstrap
 internal/logx/          slog logger carried in contexts
 internal/testutil/      assert/require helpers for tests
-web/                    Nuxt 4 app (app/ pages+components, server/api/cg proxy)
 docs/PLAN.md            Architecture, decisions, roadmap
 docs/AGENT_GUIDE.md     How agents should use the MCP tools and prompts
 rules/                  Security rule catalogue: one YAML per rule (code/, config/), embedded
@@ -85,7 +86,7 @@ just review     # offline review pack for the current branch
 just mcp        # register the MCP server with Claude Code, Codex, Gemini, OpenCode, Cursor
 ```
 
-Run `just test` and `just lint` before you call a Go change done, and `just web-check` for anything under `web/`.
+Run `just test` and `just lint` before you call a Go change done, and `just web-check` for anything under `services/web/`.
 
 ## Go conventions
 
@@ -112,7 +113,7 @@ Rules are static files: `rules/code/<id>.yaml` and `rules/config/<id>.yaml` (see
 1. Add the kind to `internal/model/model.go` and to `AllNodeKinds`/`AllEdgeKinds`. Those lists are the label allowlist for Cypher.
 2. New node fields need entries in `neo4jstore/props.go` (both directions) and `TestPropsRoundTrip`.
 3. New `store.Reader` methods must be implemented in `memory` and `neo4jstore` and covered in `storetest.Run`. The two stores must behave identically; the contract test is how we know.
-4. Update `docs/PLAN.md` (schema section) and `web/app/utils/types.ts` if the API shape changes.
+4. Update `docs/PLAN.md` (schema section) and `services/web/app/utils/types.ts` if the API shape changes.
 
 ## Security rules (non-negotiable)
 
@@ -129,13 +130,13 @@ This tool reads untrusted repositories and serves their contents to LLMs. Keep i
 - **Destructive API actions** (delete repository, delete review) are confirmed in the UI; deleting cloned files is limited to a single directory inside the workspace, and mounted sources are never deleted.
 - **Network services** refuse to bind a non-loopback address without a bearer token (`app.ErrTokenRequired`). The web app keeps the API token server-side, and its proxy rejects cross-origin mutating requests.
 - **Limits everywhere:** `store.MaxLimit`, `store.MaxDepth`, request body caps, query timeouts. New endpoints keep them.
-- **Pushing:** only `internal/fixes` pushes, only when `CODESYNAPSE_ALLOW_PUSH=true`, only through `gitx.PushBranch` (new `codesynapse/*` branches, never forced) from a separate worktree, and never edits CI or git configuration (`fixes.protected`). Keep those rails.
-- **LLM calls:** only through `internal/llm`. Model output is untrusted: parse it defensively, validate enums and file paths, redact before storing. Never send source to a non-local provider except a diff the user asked to review. API keys come from `api_key_env`, never from `config/llm.yaml` itself.
+- **Pushing:** only `services/api/internal/fixes` pushes, only when `CODESYNAPSE_ALLOW_PUSH=true`, only through `gitx.PushBranch` (new `codesynapse/*` branches, never forced) from a separate worktree, and never edits CI or git configuration (`fixes.protected`). Keep those rails.
+- **LLM calls:** only through `services/api/internal/llm`. Model output is untrusted: parse it defensively, validate enums and file paths, redact before storing. Never send source to a non-local provider except a diff the user asked to review. API keys come from `api_key_env`, never from `config/llm.yaml` itself.
 - Secrets come from the environment (`CODESYNAPSE_NEO4J_PASSWORD`, `*_TOKEN`), never flags, never logs.
 
 ## Web (Nuxt 4)
 
-- `web/app/` is the source dir. Pages under `app/pages/repos/[repo]/`.
+- `services/web/app/` is the source dir. Pages under `app/pages/repos/[repo]/`.
 - All data goes through `useApiGet` / `apiPost` in `app/composables/useApi.ts`, which hit `/api/cg/*`. Never call the Go API from the browser directly.
 - No UI or chart libraries; the graph canvas, bars and backdrop are plain canvas/SVG/CSS.
 - The design follows Astrona's "mission control" style: dark violet-black only, Space Grotesk + JetBrains Mono, glass sidebar and topbars (`PageHeader`), neon accents with one job each (orange = primary/action, green = success, cyan = info, pink = error/critical, amber = warning, violet = labels), mono uppercase micro-labels (`.eyebrow`, `th`), dashed row and section rules. All tokens are CSS variables at the top of `app/assets/css/main.css`; use them, never raw colours.
@@ -144,4 +145,4 @@ This tool reads untrusted repositories and serves their contents to LLMs. Keep i
 
 ## Commits
 
-Conventional commits (`feat(api): ...`, `fix(gitx): ...`). Don't commit `.env`, `sources/`, `bin/` or `web/.output`.
+Conventional commits (`feat(api): ...`, `fix(gitx): ...`). Don't commit `.env`, `sources/`, `bin/` or `services/web/.output`.
