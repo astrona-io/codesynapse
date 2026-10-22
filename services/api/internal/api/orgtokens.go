@@ -176,10 +176,9 @@ func (s *Server) reverifyOrgHost(ctx context.Context, orgID, host string) []stri
 }
 
 // pushAuth picks credentials to push a fix branch: an organisation pushes
-// with its own token, never the installation's; platform admins and
-// single-tenant installs use the installation's.
+// with its own token. Single-tenant installs use the installation token.
 func (s *Server) pushAuth(r *http.Request, graph, remote string) (gitx.Auth, error) {
-	if s.cfg.Accounts == nil || scopeFrom(r.Context()).all {
+	if s.cfg.Accounts == nil {
 		return s.authFor(remote), nil
 	}
 	org, err := s.repoOrg(r, graph)
@@ -193,24 +192,17 @@ func (s *Server) pushAuth(r *http.Request, graph, remote string) (gitx.Auth, err
 	return auth, nil
 }
 
-// syncAuth picks credentials to fetch graph from remote: the installation's
-// token for the host, else the token of an organisation that uses the graph
-// privately and can still read it.
+// syncAuth uses only the selected tenant's credentials in accounts mode.
 func (s *Server) syncAuth(ctx context.Context, graph, remote string) gitx.Auth {
-	if auth := s.authFor(remote); auth.Token != "" || s.cfg.Accounts == nil {
-		return auth
+	if s.cfg.Accounts == nil {
+		return s.authFor(remote)
 	}
-	links, err := s.cfg.Accounts.St.GraphRepositories(ctx, graph)
-	if err != nil {
+	reach, ok := scopeFrom(ctx).reach[graph]
+	if !ok || reach.Ambiguous {
 		return gitx.Auth{}
 	}
-	for _, l := range links {
-		if l.Visibility != accounts.Private || !l.Usable() {
-			continue
-		}
-		if auth, err := s.orgAuth(ctx, l.OrgID, remote); err == nil {
-			return auth
-		}
+	if auth, err := s.orgAuth(ctx, reach.OrgID, remote); err == nil {
+		return auth
 	}
 	return gitx.Auth{} // public repositories need none
 }

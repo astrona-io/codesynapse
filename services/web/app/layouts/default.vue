@@ -86,10 +86,9 @@ const orgValue = computed({
         <button class="secondary tiny menu-toggle" :aria-expanded="menuOpen" @click="menuOpen = !menuOpen">Menu</button>
       </div>
 
-      <div v-if="session.accounts.value && (session.memberships.value.length > 1 || session.isPlatformAdmin.value)" class="org-switch">
+      <div v-if="session.accounts.value && session.memberships.value.length > 1" class="org-switch">
         <label for="org-select" class="label">Organisation</label>
         <select id="org-select" v-model="orgValue">
-          <option v-if="session.isPlatformAdmin.value" value="">All organisations (admin)</option>
           <option v-for="m in session.memberships.value" :key="m.org.id" :value="m.org.slug">{{ m.org.name }}</option>
         </select>
       </div>

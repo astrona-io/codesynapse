@@ -68,6 +68,8 @@ func Run(t *testing.T, s store.Store) {
 	ctx := context.Background()
 	require.NoError(t, s.EnsureSchema(ctx))
 	require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
+	t.Run("access_projection", func(t *testing.T) { accessContract(t, s) })
+	t.Run("scoped_graph", func(t *testing.T) { scopedContract(t, s) })
 
 	t.Run("repos", func(t *testing.T) {
 		repo, ok := findRepo(ctx, t, s)

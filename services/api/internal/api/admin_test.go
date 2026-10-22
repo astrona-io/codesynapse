@@ -70,7 +70,7 @@ func TestPlatformAdministration(t *testing.T) {
 	assert.Equal(t, h.Counts.Users, 2)
 	assert.Equal(t, h.Counts.Admins, 1)
 	assert.True(t, h.Counts.AuditEvents > 0)
-	assert.True(t, len(h.Unowned) == 1, "the fixture graph belongs to no organisation yet: %v", h.Unowned)
+	assert.Len(t, h.Unowned, 0, "platform health does not disclose repository names")
 
 	var evs struct{ Events []accounts.Event }
 	require.Equal(t, ada.do("GET", "/api/v1/admin/audit?action=user.&actor=ada@example.com", "", &evs), 200)

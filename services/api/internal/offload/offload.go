@@ -77,7 +77,8 @@ type Job struct {
 	StartedAt  string `json:"started_at,omitempty"`
 	FinishedAt string `json:"finished_at,omitempty"`
 
-	turns []extract.Turn
+	turns     []extract.Turn
+	authorize func(context.Context) error
 }
 
 // Worker runs extraction jobs.
@@ -119,6 +120,11 @@ func (w *Worker) Provider() (string, error) {
 // Submit validates and queues an extraction into namespace without waiting
 // for it ("" means the repository's own namespace).
 func (w *Worker) Submit(repo, namespace, source string, turns []extract.Turn) (Job, error) {
+	return w.SubmitAuthorized(repo, namespace, source, turns, nil)
+}
+
+// SubmitAuthorized rechecks the initiating caller before extraction and storage.
+func (w *Worker) SubmitAuthorized(repo, namespace, source string, turns []extract.Turn, authorize func(context.Context) error) (Job, error) {
 	if len(turns) == 0 || len(turns) > extract.MaxTurns {
 		return Job{}, fmt.Errorf("give 1 to %d turns", extract.MaxTurns)
 	}
@@ -130,7 +136,7 @@ func (w *Worker) Submit(repo, namespace, source string, turns []extract.Turn) (J
 		return Job{}, err
 	}
 	j := &Job{ID: id, Repo: repo, Namespace: cmp.Or(namespace, repo), Source: cmp.Or(source, "agent"), State: Queued, Turns: len(turns),
-		QueuedAt: w.now().UTC().Format(time.RFC3339), turns: slices.Clone(turns)}
+		QueuedAt: w.now().UTC().Format(time.RFC3339), turns: slices.Clone(turns), authorize: authorize}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	select {
@@ -182,7 +188,7 @@ func (w *Worker) run(ctx context.Context, id string) {
 
 	ctx, cancel := context.WithTimeout(llm.WithTask(telemetry.WithTenant(ctx, memory.OrgOf(j.Namespace)), "memory"), jobTimeout)
 	defer cancel()
-	res, err := w.extract(ctx, j.Namespace, j.Source, turns, func(provider, model string) {
+	res, err := w.extract(ctx, j.Namespace, j.Source, turns, j.authorize, func(provider, model string) {
 		w.mu.Lock()
 		j.Provider, j.Model = provider, model
 		w.mu.Unlock()
@@ -190,7 +196,7 @@ func (w *Worker) run(ctx context.Context, id string) {
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	j.turns = nil
+	j.turns, j.authorize = nil, nil
 	j.FinishedAt = w.now().UTC().Format(time.RFC3339)
 	j.Extracted, j.Saved, j.Dropped = res.extracted, res.saved, res.dropped
 	if err != nil {
@@ -208,7 +214,12 @@ func (w *Worker) run(ctx context.Context, id string) {
 
 type outcome struct{ extracted, saved, dropped int }
 
-func (w *Worker) extract(ctx context.Context, repo, source string, turns []extract.Turn, started func(provider, model string)) (outcome, error) {
+func (w *Worker) extract(ctx context.Context, repo, source string, turns []extract.Turn, authorize func(context.Context) error, started func(provider, model string)) (outcome, error) {
+	if authorize != nil {
+		if err := authorize(ctx); err != nil {
+			return outcome{}, err
+		}
+	}
 	provider, err := w.Provider()
 	if err != nil {
 		return outcome{}, err
@@ -244,6 +255,11 @@ func (w *Worker) extract(ctx context.Context, repo, source string, turns []extra
 	if err != nil {
 		return out, fmt.Errorf("preparing triples: %w", err)
 	}
+	if authorize != nil {
+		if err := authorize(ctx); err != nil {
+			return out, err
+		}
+	}
 	if err := w.st.UpsertMemory(ctx, b); err != nil {
 		return out, fmt.Errorf("saving triples: %w", err)
 	}
@@ -277,7 +293,7 @@ func (w *Worker) List(repo string) []Job {
 
 func (w *Worker) snapshot(j *Job) Job {
 	c := *j
-	c.turns = nil
+	c.turns, c.authorize = nil, nil
 	return c
 }
 

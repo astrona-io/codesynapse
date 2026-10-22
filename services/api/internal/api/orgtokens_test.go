@@ -122,7 +122,7 @@ func TestPrivateRepositoriesWithOrgTokens(t *testing.T) {
 	require.Equal(t, code, 200, body)
 	assert.Contains(t, body, `"visibility":"private"`)
 	assert.Equal(t, visible(bob, inTeam), []string{secretRepo}, "proved access: the private graph is shared with the organisation")
-	assert.Equal(t, srv.syncAuth(ctx, secretRepo, secret), gitx.Auth{Host: "127.0.0.1", Token: bobToken}, "syncs use the organisation's token")
+	assert.Equal(t, srv.syncAuth(context.WithValue(ctx, scopeKey{}, scope{reach: map[string]accounts.Reach{secretRepo: {OrgID: team.ID}}}), secretRepo, secret), gitx.Auth{Host: "127.0.0.1", Token: bobToken}, "syncs use the organisation's token")
 
 	code, body = register(dave, secret, secretRepo, inOther)
 	assert.Equal(t, code, 403, body)

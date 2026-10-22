@@ -18,10 +18,9 @@ export function useSession() {
     me.value = status.value.mode === 'accounts' ? await fetcher<Me>('/api/cg/me').catch(() => null) : null
     loaded.value = true
     const ms = me.value?.memberships ?? []
-    // Keep the chosen organisation valid. Platform admins default to every
-    // organisation (no choice); everyone else works in one of theirs.
+    // Platform administration does not grant organisation membership.
     if (!ms.some((m) => m.org.slug === orgSlug.value)) {
-      orgSlug.value = me.value?.user.platform_admin || !ms.length ? null : ms[0]!.org.slug
+      orgSlug.value = ms[0]?.org.slug ?? null
     }
   }
   async function ensure() {
@@ -38,12 +37,10 @@ export function useSession() {
   const memberships = computed<Membership[]>(() => me.value?.memberships ?? [])
   const current = computed(() => memberships.value.find((m) => m.org.slug === orgSlug.value))
   const isPlatformAdmin = computed(() => !!me.value?.user.platform_admin)
-  // Platform admins without a chosen organisation see every organisation.
-  const allOrgs = computed(() => isPlatformAdmin.value && !current.value)
-  const can = (least: Role) => isPlatformAdmin.value || (current.value ? ROLE_RANK[current.value.role] >= ROLE_RANK[least] : false)
+  const can = (least: Role) => !accounts.value || (current.value ? ROLE_RANK[current.value.role] >= ROLE_RANK[least] : false)
   async function switchOrg(slug: string | null) {
     orgSlug.value = slug
     await refreshNuxtData()
   }
-  return { status, me, accounts, memberships, current, orgSlug, isPlatformAdmin, allOrgs, can, load, ensure, logout, switchOrg }
+  return { status, me, accounts, memberships, current, orgSlug, isPlatformAdmin, can, load, ensure, logout, switchOrg }
 }

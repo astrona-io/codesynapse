@@ -95,7 +95,6 @@ type Config struct {
 type Server struct {
 	cfg  Config
 	st   store.Store
-	svc  query.Service
 	jobs *Jobs
 	// offload extracts memory triples from conversation turns (local model only).
 	offload *offload.Worker
@@ -110,7 +109,7 @@ type Server struct {
 
 // New builds the API. Jobs run on ctx and stop when it is cancelled.
 func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, svc: query.Service{R: st}, logger: logger, mux: http.NewServeMux()}
+	s := &Server{cfg: cfg, st: st, logger: logger, mux: http.NewServeMux()}
 	s.jobs = NewJobs(ctx, st, logger, cfg.CommitLimit, cfg.AllowNetwork, cfg.VulnScan)
 	s.jobs.licenseLookup = cfg.LicenseLookup
 	if cfg.Accounts != nil {
@@ -121,6 +120,7 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 			cfg.Accounts.Sink = s.logAudit
 		}
 		go s.pruneAudit(ctx)
+		go s.projectAccess(ctx)
 	}
 	s.offload = offload.New(st, cfg.LLM, logger)
 	s.recall = recall.New(st, cfg.LLM, logger)
@@ -164,7 +164,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.mux.ServeHTTP(rec, r)
-	if mutating(r.Method) {
+	if mutating(r.Method) || rec.status == http.StatusForbidden || rec.status == http.StatusNotFound {
 		_, pattern := s.mux.Handler(r)
 		s.auditRequest(r, pattern, rec.status)
 	}
@@ -199,7 +199,7 @@ func (s *Server) routes() {
 		tokens, tokenHost := s.gitTokens(), s.cfg.GitAuth.Host
 		// The installation's own tokens are the operator's business:
 		// organisation users manage theirs under their organisation.
-		if s.cfg.Accounts != nil && !scopeFrom(r.Context()).all {
+		if p, ok := principal(r.Context()); s.cfg.Accounts != nil && (!ok || !p.User.PlatformAdmin) {
 			tokens, tokenHost = []gitToken{}, ""
 		}
 		hosts := make([]string, len(tokens))
@@ -226,7 +226,7 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/overview", visibleOnly, s.handleWorkspaceOverview)
 	s.route("GET /api/v1/attention", visibleOnly, s.handleAttention)
 	s.route("GET /api/v1/stats", visibleOnly, s.handleStats)
-	s.route("GET /api/v1/stats/series", visibleOnly, s.handleSeries)
+	s.route("GET /api/v1/stats/series", anyone, s.handleSeries)
 	s.route("DELETE /api/v1/repos/{repo}", repoRole(accounts.Admin), s.handleDeleteRepo)
 	s.route("GET /api/v1/repos/{repo}/overview", repoRole(accounts.Viewer), s.handleOverview)
 	s.route("GET /api/v1/repos/{repo}/dashboard", repoRole(accounts.Viewer), s.handleDashboard)
@@ -252,16 +252,16 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/repos/{repo}/graph/expand", repoRole(accounts.Viewer), s.handleGraphExpand)
 	s.route("POST /api/v1/repos/{repo}/graph/edges", repoRole(accounts.Viewer), s.handleGraphEdges)
 	s.route("POST /api/v1/repos/{repo}/impact", repoRole(accounts.Viewer), s.handleImpact)
-	s.route("GET /api/v1/sources", platformOnly, s.handleSources)
-	s.route("POST /api/v1/ingest", platformOnly, s.handleIngest)
+	s.route("GET /api/v1/sources", localOnly, s.handleSources)
+	s.route("POST /api/v1/ingest", localOnly, s.handleIngest)
 	s.route("POST /api/v1/repos", orgRole(accounts.Member), s.handleRegister)
-	s.route("GET /api/v1/orgs", platformOnly, s.handleListOrgs)
-	s.route("POST /api/v1/orgs", platformOnly, s.handleAddOrg)
-	s.route("PUT /api/v1/orgs/{org}", platformOnly, s.handleUpdateOrg)
-	s.route("DELETE /api/v1/orgs/{org}", platformOnly, s.handleDeleteOrg)
-	s.route("POST /api/v1/orgs/{org}/scan", platformOnly, s.handleScanOrg)
-	s.route("POST /api/v1/orgs/{org}/repos/{name}/index", platformOnly, s.handleIndexOrgRepo)
-	s.route("POST /api/v1/repos/{repo}/sync", repoRole(accounts.Member), s.handleSync)
+	s.route("GET /api/v1/orgs", localOnly, s.handleListOrgs)
+	s.route("POST /api/v1/orgs", localOnly, s.handleAddOrg)
+	s.route("PUT /api/v1/orgs/{org}", localOnly, s.handleUpdateOrg)
+	s.route("DELETE /api/v1/orgs/{org}", localOnly, s.handleDeleteOrg)
+	s.route("POST /api/v1/orgs/{org}/scan", localOnly, s.handleScanOrg)
+	s.route("POST /api/v1/orgs/{org}/repos/{name}/index", localOnly, s.handleIndexOrgRepo)
+	s.route("POST /api/v1/repos/{repo}/sync", repoRole(accounts.Admin), s.handleSync)
 	s.route("GET /api/v1/repos/{repo}/schedule", repoRole(accounts.Viewer), s.handleGetSchedule)
 	s.route("PUT /api/v1/repos/{repo}/schedule", repoRole(accounts.Admin), s.handlePutSchedule)
 	s.route("GET /api/v1/repos/{repo}/branches", repoRole(accounts.Viewer), s.handleBranches)
@@ -358,7 +358,7 @@ func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
 	repo := r.PathValue("repo")
 	if s.cfg.Accounts != nil {
 		// An organisation removes its link; the graph goes only with the
-		// last link. Platform admins remove the graph and every link.
+		// last link.
 		left, err := s.unlinkRepo(r, repo)
 		if err != nil {
 			s.accountError(w, err)
@@ -388,10 +388,8 @@ func (s *Server) unlinkRepo(r *http.Request, graph string) (int, error) {
 	}
 	left := len(links)
 	for _, l := range links {
-		mine := sc.all
-		for _, m := range sc.orgs {
-			mine = mine || (m.Org.ID == l.OrgID && m.Role.AtLeast(accounts.Admin))
-		}
+		reach, ok := sc.reach[graph]
+		mine := ok && !reach.Ambiguous && reach.OrgID == l.OrgID && reach.Role.AtLeast(accounts.Admin)
 		if !mine {
 			continue
 		}
@@ -443,7 +441,7 @@ func (s *Server) deleteRepo(ctx context.Context, repo string, files bool) (int, 
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
-	ov, err := s.svc.Overview(r.Context(), r.PathValue("repo"))
+	ov, err := s.repoQuery(r.PathValue("repo")).Overview(r.Context(), r.PathValue("repo"))
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -498,7 +496,7 @@ func (s *Server) handleSymbol(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, errors.New("id is required"))
 		return
 	}
-	card, err := s.svc.Card(r.Context(), r.PathValue("repo"), id, intParam(r, "limit", 20))
+	card, err := s.repoQuery(r.PathValue("repo")).Card(r.Context(), r.PathValue("repo"), id, intParam(r, "limit", 20))
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -512,7 +510,7 @@ func (s *Server) handleOutline(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, errors.New("file is required"))
 		return
 	}
-	entries, err := s.svc.Outline(r.Context(), r.PathValue("repo"), file)
+	entries, err := s.repoQuery(r.PathValue("repo")).Outline(r.Context(), r.PathValue("repo"), file)
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -554,7 +552,7 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHotspots(w http.ResponseWriter, r *http.Request) {
-	hs, err := s.svc.Hotspots(r.Context(), r.PathValue("repo"), intParam(r, "limit", 25))
+	hs, err := s.repoQuery(r.PathValue("repo")).Hotspots(r.Context(), r.PathValue("repo"), intParam(r, "limit", 25))
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -587,7 +585,7 @@ func graphNode(n model.Node, depth int) GraphNode {
 // callees up to depth, with the edges between them.
 func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	root, err := s.svc.Resolve(ctx, r.PathValue("repo"), r.URL.Query().Get("id"))
+	root, err := s.repoQuery(r.PathValue("repo")).Resolve(ctx, r.PathValue("repo"), r.URL.Query().Get("id"))
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -595,12 +593,12 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 	depth := min(intParam(r, "depth", 2), 3)
 	limit := min(intParam(r, "limit", 80), 200)
 	edges := []model.EdgeKind{model.EdgeCalls, model.EdgeDispatchesTo}
-	in, err := s.st.Traverse(ctx, root.ID, edges, store.In, depth, limit)
+	in, err := store.ForRepository(s.st, r.PathValue("repo")).Traverse(ctx, root.ID, edges, store.In, depth, limit)
 	if err != nil {
 		s.problem(w, 500, err)
 		return
 	}
-	out, err := s.st.Traverse(ctx, root.ID, edges, store.Out, depth, limit)
+	out, err := store.ForRepository(s.st, r.PathValue("repo")).Traverse(ctx, root.ID, edges, store.Out, depth, limit)
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -616,7 +614,7 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, h.Node.ID)
 		view.Nodes = append(view.Nodes, graphNode(h.Node, h.Depth))
 	}
-	view.Edges, err = s.st.Subgraph(ctx, ids, edges)
+	view.Edges, err = store.ForRepository(s.st, r.PathValue("repo")).Subgraph(ctx, ids, edges)
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -637,7 +635,7 @@ func (s *Server) handlePackageGraph(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, p.Node.ID)
 		view.Nodes = append(view.Nodes, graphNode(p.Node, 0))
 	}
-	view.Edges, err = s.st.Subgraph(ctx, ids, []model.EdgeKind{model.EdgeImports})
+	view.Edges, err = store.ForRepository(s.st, r.PathValue("repo")).Subgraph(ctx, ids, []model.EdgeKind{model.EdgeImports})
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -694,7 +692,7 @@ func (s *Server) handleImpact(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	rep, err := review.Analyze(ctx, s.svc, repo, changes, review.Options{Depth: req.Depth})
+	rep, err := review.Analyze(ctx, s.repoQuery(repo), repo, changes, review.Options{Depth: req.Depth})
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -923,13 +921,13 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 	sc := scopeFrom(r.Context())
-	jobs := slices.DeleteFunc(s.jobs.List(), func(j Job) bool { return !sc.sees(j.Repo) })
+	jobs := slices.DeleteFunc(s.jobs.List(), func(j Job) bool { return !seesReview(sc, j.Repo, j.OrgID) })
 	writeJSON(w, 200, map[string]any{"jobs": jobs})
 }
 
 func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {
 	job, ok := s.jobs.Get(r.PathValue("id"))
-	if !ok || !scopeFrom(r.Context()).sees(job.Repo) {
+	if !ok || !seesReview(scopeFrom(r.Context()), job.Repo, job.OrgID) {
 		s.problem(w, 404, store.ErrNotFound)
 		return
 	}
@@ -942,7 +940,7 @@ func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, fmt.Errorf("unknown severity %q", minSev))
 		return
 	}
-	rep, err := security.Build(r.Context(), s.st, r.PathValue("repo"), security.Options{MinSeverity: minSev})
+	rep, err := security.Build(r.Context(), store.ForRepository(s.st, r.PathValue("repo")), r.PathValue("repo"), security.Options{MinSeverity: minSev})
 	if err != nil {
 		s.problem(w, 500, err)
 		return

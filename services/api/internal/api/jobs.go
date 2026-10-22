@@ -37,6 +37,7 @@ const (
 type Job struct {
 	ID         string   `json:"id"`
 	Repo       string   `json:"repo"`
+	OrgID      string   `json:"-"`
 	Kind       string   `json:"kind"`
 	Branch     string   `json:"branch,omitempty"`
 	State      JobState `json:"state"`
@@ -77,6 +78,9 @@ func NewJobs(ctx context.Context, st store.Writer, logger *slog.Logger, commitLi
 
 // JobOptions customise a job.
 type JobOptions struct {
+	OrgID string
+	// Authorize checks current access after queueing and before graph storage.
+	Authorize func(context.Context) error
 	// Prepare runs before ingest (clone, fetch + checkout).
 	Prepare func(ctx context.Context) error
 	// Branch is recorded on the Repository node.
@@ -111,7 +115,7 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 	if kind == "" {
 		kind = "ingest"
 	}
-	job := &Job{ID: hex.EncodeToString(b), Repo: repo, Kind: kind, Branch: opts.Branch, State: JobRunning, StartedAt: time.Now().UTC().Format(time.RFC3339), Task: opts.Task, Waiting: true}
+	job := &Job{ID: hex.EncodeToString(b), Repo: repo, OrgID: opts.OrgID, Kind: kind, Branch: opts.Branch, State: JobRunning, StartedAt: time.Now().UTC().Format(time.RFC3339), Task: opts.Task, Waiting: true}
 	j.jobs[job.ID] = job
 	j.prune()
 	go j.run(job, root, opts)
@@ -136,6 +140,11 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 		return
 	}
 	ctx := logx.WithLogger(j.ctx, j.logger.With("job", job.ID, "repo", job.Repo))
+	ctx = telemetry.WithTenant(ctx, opts.OrgID)
+	if err := checkJob(ctx, opts.Authorize); err != nil {
+		fin(job, 0, 0, err)
+		return
+	}
 	if opts.Run != nil {
 		result, err := opts.Run(ctx)
 		if errors.Is(err, aitasks.ErrNothingToDo) {
@@ -159,6 +168,9 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 		err = j.st.EnsureSchema(ctx)
 	}
 	if err == nil {
+		err = checkJob(ctx, opts.Authorize)
+	}
+	if err == nil {
 		err = j.st.ReplaceRepo(ctx, job.Repo, g)
 	}
 	nodes, edges := 0, 0
@@ -175,7 +187,11 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 	telemetry.IngestDuration.Observe(time.Since(started).Seconds(), system)
 	fin(job, nodes, edges, err)
 	if err == nil && opts.After != nil {
-		go opts.After(j.ctx)
+		go func() {
+			if checkJob(j.ctx, opts.Authorize) == nil {
+				opts.After(j.ctx)
+			}
+		}()
 	}
 }
 

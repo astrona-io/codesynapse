@@ -11,6 +11,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/aitasks"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
@@ -183,7 +184,8 @@ func (s *Server) handleAITask(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 500, err)
 		return
 	}
-	runner := aitasks.Runner{St: s.st, LLM: s.cfg.LLM}
+	_, authorize := s.jobAuthorization(r.Context(), repo, accounts.Member)
+	runner := aitasks.Runner{St: s.st, LLM: s.cfg.LLM, Authorize: authorize}
 	org, err := s.repoOrg(r, repo)
 	if err != nil {
 		s.accountError(w, err)
@@ -191,7 +193,7 @@ func (s *Server) handleAITask(w http.ResponseWriter, r *http.Request) {
 	}
 	in := aitasks.Input{Repo: repo, OrgID: org, Provider: req.Provider, Diff: []byte(req.Diff)}
 	job, err := s.jobs.Start(repo, "", JobOptions{ //nolint:contextcheck // jobs outlive the request
-		Kind: "ai", Task: task,
+		Kind: "ai", Task: task, OrgID: org, Authorize: authorize,
 		Run: func(ctx context.Context) (string, error) { return runner.Run(ctx, task, in) },
 	})
 	if err != nil {

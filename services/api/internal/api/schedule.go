@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 	"github.com/parisnakitakejser/codesynapse/internal/forge"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
@@ -31,7 +32,9 @@ const defaultInterval = 30
 
 // Schedule is the auto-sync setting of one repository.
 type Schedule struct {
-	Repo string `json:"repo"`
+	Repo    string `json:"repo"`
+	OrgID   string `json:"org_id,omitempty"`
+	ActorID string `json:"actor_id,omitempty"`
 	// IntervalMinutes is 0 for manual-only.
 	IntervalMinutes int  `json:"interval_minutes"`
 	Paused          bool `json:"paused"`
@@ -161,13 +164,19 @@ func (s *schedules) ensure(repo string, now time.Time) {
 	_ = s.save() //nolint:errcheck // best effort; the next tick retries
 }
 
-func (s *schedules) set(repo string, interval int, paused, autoReview, autoTriage bool, now time.Time) (Schedule, error) {
+func (s *schedules) set(repo string, interval int, paused, autoReview, autoTriage bool, now time.Time, delegate ...Schedule) (Schedule, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sc, ok := s.all[repo]
 	if !ok {
 		sc = &Schedule{Repo: repo}
 		s.all[repo] = sc
+	}
+	if len(delegate) > 0 {
+		if sc.OrgID != "" && sc.OrgID != delegate[0].OrgID {
+			return Schedule{}, accounts.ErrForbidden
+		}
+		sc.OrgID, sc.ActorID = delegate[0].OrgID, delegate[0].ActorID
 	}
 	sc.IntervalMinutes, sc.Paused, sc.AutoReview, sc.AutoTriage = interval, paused, autoReview, autoTriage
 	sc.NextRun = ""
@@ -268,6 +277,9 @@ const goneStrikes = 3
 // it needs the provider API to answer a clean 404 goneStrikes times in a row;
 // any other answer resets the count. Mounted sources are never touched.
 func (s *Server) reapIfGone(ctx context.Context, repo string, logger *slog.Logger) {
+	if s.cfg.Accounts != nil {
+		return
+	}
 	n, err := s.st.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
 	if err != nil || !s.inWorkspace(n.Root) {
 		return
@@ -330,9 +342,26 @@ func (s *Server) runScheduler(ctx context.Context, logger *slog.Logger) {
 					s.sched.ensure(n.Name, now)
 				}
 			}
-			s.scanDue(ctx, now, logger)
+			if s.cfg.Accounts == nil {
+				s.scanDue(ctx, now, logger)
+			}
 			for _, repo := range s.sched.due(now) {
-				_, err := s.startSync(ctx, repo, "", true, func(err error) { s.sched.finished(repo, time.Now(), err) })
+				jobCtx := ctx
+				if s.cfg.Accounts != nil {
+					sc := s.sched.get(repo)
+					if sc.OrgID == "" || sc.ActorID == "" {
+						continue
+					}
+					p := accounts.Principal{User: accounts.User{ID: sc.ActorID}, OrgID: sc.OrgID, Via: "automation"}
+					access, err := s.cfg.Accounts.ResolveRepository(ctx, p, sc.OrgID, repo, accounts.Admin)
+					if err != nil {
+						s.sched.started(repo, now, "failed", err)
+						continue
+					}
+					jobCtx = context.WithValue(ctx, principalKey{}, p)
+					jobCtx = context.WithValue(jobCtx, scopeKey{}, scope{graphs: map[string]accounts.Role{repo: access.Role}, reach: map[string]accounts.Reach{repo: {OrgID: sc.OrgID, Role: access.Role}}})
+				}
+				_, err := s.startSync(jobCtx, repo, "", true, func(err error) { s.sched.finished(repo, time.Now(), err) })
 				switch {
 				case errors.Is(err, errConflict):
 					continue // a sync is already running; try again next interval
@@ -358,7 +387,18 @@ type scheduleRequest struct {
 }
 
 func (s *Server) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, s.sched.get(r.PathValue("repo")))
+	sc := s.sched.get(r.PathValue("repo"))
+	if s.cfg.Accounts != nil {
+		org, err := s.repoOrg(r, sc.Repo)
+		if err != nil {
+			s.accountError(w, err)
+			return
+		}
+		if sc.OrgID != org {
+			sc = Schedule{Repo: sc.Repo}
+		}
+	}
+	writeJSON(w, 200, sc)
 }
 
 func (s *Server) handlePutSchedule(w http.ResponseWriter, r *http.Request) {
@@ -376,9 +416,23 @@ func (s *Server) handlePutSchedule(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, fmt.Errorf("interval_minutes must be one of %v", allowedIntervals))
 		return
 	}
-	sc, err := s.sched.set(repo, req.IntervalMinutes, req.Paused, req.AutoReview, req.AutoTriage, time.Now())
+	delegate := Schedule{}
+	if s.cfg.Accounts != nil {
+		org, err := s.repoOrg(r, repo)
+		if err != nil {
+			s.accountError(w, err)
+			return
+		}
+		p, _ := principal(r.Context())
+		if p.Via == "key" {
+			s.accountError(w, accounts.ErrForbidden)
+			return
+		}
+		delegate.OrgID, delegate.ActorID = org, p.User.ID
+	}
+	sc, err := s.sched.set(repo, req.IntervalMinutes, req.Paused, req.AutoReview, req.AutoTriage, time.Now(), delegate)
 	if err != nil {
-		s.problem(w, 500, err)
+		s.accountError(w, err)
 		return
 	}
 	writeJSON(w, 200, sc)

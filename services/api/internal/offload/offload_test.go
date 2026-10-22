@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -101,6 +102,33 @@ func TestWorkerLocalOnly(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrNoLocalModel), "a cloud provider is refused")
 	_, err = New(memory.New(), nil, slog.New(slog.NewTextHandler(io.Discard, nil))).Submit("repo", "", "a", []extract.Turn{{Role: "user", Text: "x"}})
 	assert.True(t, errors.Is(err, ErrNoLocalModel), "no providers at all")
+}
+
+func TestWorkerRechecksAccessBeforeSaving(t *testing.T) {
+	for _, revokeAt := range []int{1, 2} {
+		t.Run(fmt.Sprint(revokeAt), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			st := memory.New()
+			srv := fakeModel(t, `{"triples":[{"subject":"Payments","predicate":"OWNED_BY","object":"Team Blue","confidence":0.95}]}`, nil)
+			w := New(st, registry(srv.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
+			checks := 0
+			job, err := w.SubmitAuthorized("repo", "tenant|repo", "agent", []extract.Turn{{Role: "user", Text: "Payments is owned by Team Blue."}}, func(context.Context) error {
+				checks++
+				if checks >= revokeAt {
+					return errors.New("permission revoked")
+				}
+				return nil
+			})
+			require.NoError(t, err)
+			go w.Run(ctx)
+			done := waitDone(t, w, job.ID)
+			assert.Equal(t, done.State, Failed)
+			g, err := st.SearchMemory(ctx, "tenant|repo", "", 100, false)
+			require.NoError(t, err)
+			assert.Len(t, g.Facts, 0)
+		})
+	}
 }
 
 func TestWorkerFailuresAndLimits(t *testing.T) {

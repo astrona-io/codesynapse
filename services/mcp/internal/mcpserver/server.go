@@ -50,6 +50,8 @@ type Options struct {
 	// Access scopes calls made with personal API keys to the key's
 	// organisation; without it such calls see no repositories.
 	Access Access
+	// StdioToken is a personal API key supplied by the process environment.
+	StdioToken string
 	// Offload, with Memory, adds offload_turns: background extraction of
 	// triples from conversation turns by the API's local model.
 	Offload *APIClient
@@ -64,15 +66,20 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "codesynapse", Version: version}, &mcp.ServerOptions{
 		Instructions: instructions,
 	})
-	if len(opts) > 0 && opts[0].Usage != nil {
-		s.AddReceivingMiddleware(usageMiddleware(opts[0].Usage))
-	}
-	s.AddReceivingMiddleware(telemetryMiddleware())
-	s.AddReceivingMiddleware(callerMiddleware())
 	h := &handlers{svc: query.Service{R: r}}
 	if len(opts) > 0 {
 		h.access = opts[0].Access
 	}
+	s.AddReceivingMiddleware(h.authorizationMiddleware())
+	if len(opts) > 0 && opts[0].Usage != nil {
+		s.AddReceivingMiddleware(usageMiddleware(opts[0].Usage))
+	}
+	s.AddReceivingMiddleware(telemetryMiddleware())
+	stdioToken := ""
+	if len(opts) > 0 {
+		stdioToken = opts[0].StdioToken
+	}
+	s.AddReceivingMiddleware(callerMiddleware(h.access, stdioToken))
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true}
 	add := func(name, desc string) *mcp.Tool {
 		return &mcp.Tool{Name: name, Description: desc, Annotations: readOnly}
@@ -342,7 +349,7 @@ func (h *handlers) fileHistory(ctx context.Context, _ *mcp.CallToolRequest, in f
 		return nil, historyOut{}, err
 	}
 	out := historyOut{File: in.File, Commits: []CommitRef{}}
-	hits, err := h.svc.R.Traverse(ctx, model.NodeID(repo, model.KindFile, strings.TrimPrefix(in.File, "./")),
+	hits, err := store.ForRepository(h.svc.R, repo).Traverse(ctx, model.NodeID(repo, model.KindFile, strings.TrimPrefix(in.File, "./")),
 		[]model.EdgeKind{model.EdgeModifies}, store.In, 1, 50)
 	if err != nil {
 		return nil, out, err

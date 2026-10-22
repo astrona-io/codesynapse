@@ -50,6 +50,7 @@ var AllNodeKinds = []NodeKind{
 	KindInterfaceMethod, KindType, KindExternal, KindDocument, KindSection,
 	KindCommit, KindAuthor, KindFinding, KindModule, KindVulnerability,
 	KindConfig, KindConfigEntry, KindTemplate, KindTemplateDef,
+	KindOrganization, KindUser, KindTeam, KindAccessRepository,
 }
 
 // Valid reports whether k is a known node kind.
@@ -107,6 +108,7 @@ var AllEdgeKinds = []EdgeKind{
 	EdgeContains, EdgeDefines, EdgeHasMethod, EdgeCalls, EdgeDispatchesTo,
 	EdgeImplements, EdgeImports, EdgeMentions, EdgeModifies, EdgeAuthored,
 	EdgeHasFinding, EdgeDependsOn, EdgeAffects, EdgeIncludes, EdgeUsesValue, EdgeReferences,
+	EdgeMemberOf, EdgeBelongsTo, EdgeHasAccess,
 }
 
 // Valid reports whether k is a known edge kind.

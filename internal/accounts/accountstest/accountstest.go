@@ -89,7 +89,7 @@ func Run(t *testing.T, st accounts.Store) {
 	assert.True(t, errors.Is(svc.Require(ctx, carolP, team.ID, accounts.Admin), accounts.ErrForbidden))
 	_, err = svc.AddMember(ctx, carolP, team.ID, "ada@example.com", accounts.Viewer)
 	assert.True(t, errors.Is(err, accounts.ErrForbidden), "members cannot add members")
-	require.NoError(t, svc.Require(ctx, adaP, team.ID, accounts.Owner), "platform admins act as owners")
+	assert.True(t, errors.Is(svc.Require(ctx, adaP, team.ID, accounts.Owner), accounts.ErrForbidden), "platform status grants no organisation membership")
 	assert.True(t, errors.Is(svc.RemoveMember(ctx, bobP, team.ID, bob.ID), accounts.ErrLastOwner))
 	_, err = svc.AddMember(ctx, bobP, team.ID, "carol@example.com", accounts.Viewer)
 	require.NoError(t, err, "changing a role")
@@ -198,13 +198,17 @@ func Run(t *testing.T, st accounts.Store) {
 
 	// Repository registry: one graph, referenced by two organisations.
 	add := func(orgID, graph, vis string) error {
-		return st.AddRepository(ctx, accounts.Repository{OrgID: orgID, Graph: graph, Remote: "https://github.com/" + graph, Visibility: vis, AddedBy: bob.ID, AddedAt: now})
+		creator := bob.ID
+		if orgID == dup.ID {
+			creator = ada.ID
+		}
+		return st.AddRepository(ctx, accounts.Repository{OrgID: orgID, Graph: graph, Remote: "https://github.com/" + graph, Visibility: vis, AddedBy: creator, AddedAt: now})
 	}
 	require.NoError(t, add(team.ID, "acme/api", accounts.Public))
 	require.NoError(t, add(dup.ID, "acme/api", accounts.Public))
 	require.NoError(t, add(team.ID, "acme/web", accounts.Private))
 	assert.True(t, errors.Is(add(team.ID, "acme/api", accounts.Public), accounts.ErrExists))
-	assert.True(t, errors.Is(add("no-such-org", "acme/api", accounts.Public), accounts.ErrNotFound))
+	assert.True(t, errors.Is(add("no-such-org", "acme/api", accounts.Public), accounts.ErrForbidden))
 	repos, err := st.OrgRepositories(ctx, team.ID)
 	require.NoError(t, err)
 	require.Len(t, repos, 2)

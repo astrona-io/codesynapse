@@ -17,6 +17,8 @@ func TestContract(t *testing.T) {
 	accountstest.RunConcurrentAudit(t, st)
 	accountstest.RunReBAC(t, st)
 	accountstest.RunAdmin(t, st)
+	accountstest.RunAccessBounds(t, st)
+	accountstest.RunPolicyRecovery(t, st)
 }
 
 func TestAuditTamperDetected(t *testing.T) {
@@ -38,4 +40,17 @@ func TestAuditTamperDetected(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, v.OK)
 	assert.Equal(t, v.BrokenAt, int64(3))
+}
+
+func BenchmarkAccessOf(b *testing.B) {
+	st := New()
+	userID, _ := accountstest.SeedAccessBenchmark(b, st)
+	svc := accounts.NewService(st, true)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := svc.AccessOf(context.Background(), userID); err != nil {
+			b.Fatal(err)
+		}
+	}
 }

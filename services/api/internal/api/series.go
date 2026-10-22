@@ -140,7 +140,8 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 	}
 	sc := scopeFrom(r.Context())
 	var tenants []string // nil: every tenant (platform admins, single-tenant installs)
-	if !sc.all {
+	caller, _ := principal(r.Context())
+	if !sc.all && !caller.User.PlatformAdmin {
 		if p.platform {
 			s.problem(w, http.StatusForbidden, errors.New("platform admins only"))
 			return

@@ -43,7 +43,7 @@ async function deleteTeam() {
     <template v-else>
       <section class="panel">
         <h2>Teams in {{ org.name }}</h2>
-        <p class="muted small">A team gives its members a role in the whole organisation, or access to chosen repositories (on a repository's <em>Access</em> page). Owners and admins manage teams; a team's maintainers manage its members.</p>
+        <p class="muted small">A team can grant an organisation role or repository access. Organisation roles do not grant code access; use the repository's <em>Access</em> page for that. Owners and admins manage teams; a team's maintainers manage its members.</p>
         <p v-if="loadError" class="notice notice--danger">{{ apiErrorMessage(loadError) }}</p>
         <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
         <form v-if="canManage" class="row" @submit.prevent="createTeam">

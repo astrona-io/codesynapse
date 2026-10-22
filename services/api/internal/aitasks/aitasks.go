@@ -36,8 +36,9 @@ type Store interface {
 
 // Runner executes tasks.
 type Runner struct {
-	St  Store
-	LLM *llm.Registry
+	St        Store
+	LLM       *llm.Registry
+	Authorize func(context.Context) error
 }
 
 // Input selects what a task works on.
@@ -59,6 +60,11 @@ var ErrNothingToDo = errors.New("nothing to analyse")
 
 // Run executes task and stores its result, returning the review id.
 func (r Runner) Run(ctx context.Context, task string, in Input) (string, error) {
+	if r.Authorize != nil {
+		if err := r.Authorize(ctx); err != nil {
+			return "", err
+		}
+	}
 	if r.LLM == nil {
 		return "", errors.New("no AI providers configured")
 	}
@@ -96,6 +102,11 @@ func (r Runner) Run(ctx context.Context, task string, in Input) (string, error) 
 	rv, err = reviews.Prepare(rv, time.Now())
 	if err != nil {
 		return "", fmt.Errorf("model output did not form a valid review: %w", err)
+	}
+	if r.Authorize != nil {
+		if err := r.Authorize(ctx); err != nil {
+			return "", err
+		}
 	}
 	if err := r.St.SaveReview(ctx, rv); err != nil {
 		return "", err

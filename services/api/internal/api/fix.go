@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
@@ -82,11 +83,12 @@ func (s *Server) handleFixReview(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusForbidden, err)
 		return
 	}
-	runner := fixes.Runner{St: s.st, LLM: s.cfg.LLM, Auth: auth, Author: s.cfg.GitAuthor,
+	org, authorize := s.jobAuthorization(r.Context(), rv.Repo, accounts.Member)
+	runner := fixes.Runner{Authorize: authorize, St: s.st, LLM: s.cfg.LLM, Auth: auth, Author: s.cfg.GitAuthor,
 		Workdir: filepath.Join(s.cfg.Workspace, ".codesynapse", "fixes")}
 	in := fixes.Request{ReviewID: rv.ID, CommentIDs: req.CommentIDs, Provider: req.Provider, Root: n.Root, Remote: remote, Base: n.Head, BaseBranch: n.Branch}
 	job, err := s.jobs.Start(rv.Repo, "", JobOptions{ //nolint:contextcheck // jobs outlive the request
-		Kind: "fix", Task: fixes.Task,
+		Kind: "fix", Task: fixes.Task, OrgID: org, Authorize: authorize,
 		Run: func(ctx context.Context) (string, error) {
 			res, err := runner.Run(ctx, in)
 			if res.PRURL != "" {

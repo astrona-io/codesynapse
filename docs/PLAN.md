@@ -43,7 +43,7 @@ Every reader goes through `internal/query` (and `internal/agentctx` for the comp
 
 ### Schema
 
-Every node has the label `Node` plus its kind, and the properties `id`, `repo`, `kind` and `name`. IDs are `repo|Kind|local`.
+Every code node has the label `Node` plus its kind, and the properties `id`, `repo`, `kind` and `name`. IDs are `repo|Kind|local`.
 
 | Node | Key properties |
 |---|---|
@@ -66,6 +66,8 @@ Every node has the label `Node` plus its kind, and the properties `id`, `repo`, 
 | MemoryEntity (not `:Node`) | id (`repo\|mem\|name`), repo, name, type, aliases, created_at, updated_at; joined by `:FACT` relationships with id, repo, predicate, source, confirmations, confidence, valid_from, valid_to, created_at, updated_at |
 
 Edges: `CONTAINS`, `DEFINES`, `HAS_METHOD`, `CALLS` (with `count`), `DISPATCHES_TO`, `IMPLEMENTS`, `IMPORTS`, `MENTIONS`, `MODIFIES` (with `count` = lines changed), `AUTHORED`, `HAS_FINDING`, `DEPENDS_ON`, `AFFECTS`, `INCLUDES`, `USES_VALUE`.
+
+Access projections are separate from code nodes. `Organization` carries `tenant_id`, `default_repo_access` and `policy_revision`; tenant-local `User` carries `user_id`, `active` and `inherits_default`; `Team` carries `team_id`; `AccessRepository` carries `repo_id`, `graph_id` and `usable`. `MEMBER_OF`, `BELONGS_TO` and `HAS_ACCESS` connect only these access vertices within a tenant. Grants carry `role` and numeric `rank`. HugeGraph maps each source/target pair to a fixed physical edge label. Revision/digest-scoped IDs and completion records make rebuilds retryable; PostgreSQL remains authoritative. See [the access-control implementation](ACCESS_CONTROL_PLAN.md#implementation-and-upgrade).
 
 ### Risk scoring
 

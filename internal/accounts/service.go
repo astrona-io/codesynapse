@@ -22,8 +22,9 @@ type Principal struct {
 	// OrgID is set for API keys, which act in one organisation only.
 	OrgID string `json:"org_id,omitempty"`
 	// Via is session, key or service (the legacy single-tenant token).
-	Via   string `json:"via"`
-	KeyID string `json:"key_id,omitempty"`
+	Via         string `json:"via"`
+	KeyID       string `json:"key_id,omitempty"`
+	SessionHash string `json:"-"`
 }
 
 // Service applies the account rules on top of a Store.
@@ -37,8 +38,11 @@ type Service struct {
 	// Secrets seals organisation Git tokens; nil turns them off.
 	Secrets *Sealer
 
-	byEmail  *limiter
-	byClient *limiter
+	policy     bool
+	policyOrgs map[string]bool
+	policyErr  error
+	byEmail    *limiter
+	byClient   *limiter
 }
 
 // NewService returns a service; logins are limited to 5 per minute per
@@ -186,7 +190,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 	if err != nil || u.DisabledAt != nil {
 		return Principal{}, ErrUnauthorized
 	}
-	return Principal{User: u, Via: "session"}, nil
+	return Principal{User: u, Via: "session", SessionHash: sess.TokenHash}, nil
 }
 
 // AuthenticateKey resolves an API key.
@@ -216,14 +220,14 @@ func (s *Service) AuthenticateKey(ctx context.Context, key string) (Principal, e
 	return Principal{User: u, OrgID: k.OrgID, Via: "key", KeyID: k.ID}, nil
 }
 
-// RoleIn returns p's role in org. Platform admins act as owners; API keys
+// RoleIn returns the explicitly enrolled user's role; API keys
 // only work in their own organisation.
 func (s *Service) RoleIn(ctx context.Context, p Principal, orgID string) (Role, error) {
 	if p.OrgID != "" && p.OrgID != orgID {
 		return "", ErrForbidden
 	}
-	if p.User.PlatformAdmin {
-		return Owner, nil
+	if err := s.ValidatePrincipal(ctx, p); err != nil {
+		return "", ErrForbidden
 	}
 	r, err := s.St.MemberRole(ctx, orgID, p.User.ID)
 	if errors.Is(err, ErrNotFound) {
@@ -232,6 +236,9 @@ func (s *Service) RoleIn(ctx context.Context, p Principal, orgID string) (Role, 
 	if err != nil {
 		return "", err
 	}
+	if r == Owner {
+		return r, nil
+	} // An explicit owner can repair broken team policy.
 	// Roles granted to the user's teams count too (ReBAC, authz.go).
 	tr, err := s.teamOrgRole(ctx, orgID, p.User.ID)
 	return Max(r, tr), err
@@ -298,7 +305,7 @@ func (s *Service) createOrg(ctx context.Context, owner, name, slug string) (Org,
 	}
 	base := slug
 	for i := 2; ; i++ {
-		o := Org{ID: id, Slug: slug, Name: name, CreatedAt: s.now()}
+		o := Org{ID: id, Slug: slug, Name: name, CreatedAt: s.now(), DefaultRepoAccess: DefaultRepoNone, PolicyRevision: 1}
 		err := s.St.CreateOrg(ctx, o, owner)
 		if err == nil {
 			return o, nil
@@ -312,6 +319,13 @@ func (s *Service) createOrg(ctx context.Context, owner, name, slug string) (Org,
 
 // AddMember gives an existing user a role in org.
 func (s *Service) AddMember(ctx context.Context, p Principal, orgID, email string, role Role) (Membership, error) {
+	return policyChange(ctx, s, func(tx *Service) (Membership, error) { return tx.addMemberPolicy(ctx, p, orgID, email, role) })
+}
+
+func (s *Service) addMemberPolicy(ctx context.Context, p Principal, orgID, email string, role Role) (Membership, error) {
+	if p.Via == "key" {
+		return Membership{}, ErrForbidden
+	}
 	if !role.Valid() {
 		return Membership{}, fmt.Errorf("%w: unknown role %q", ErrInvalidInput, role)
 	}
@@ -324,6 +338,11 @@ func (s *Service) AddMember(ctx context.Context, p Principal, orgID, email strin
 	}
 	u, err := s.St.UserByEmail(ctx, NormalizeEmail(email))
 	if err != nil {
+		return Membership{}, err
+	}
+	if _, err := s.St.MemberRole(ctx, orgID, u.ID); errors.Is(err, ErrNotFound) && mine != Owner {
+		return Membership{}, ErrForbidden
+	} else if err != nil && !errors.Is(err, ErrNotFound) {
 		return Membership{}, err
 	}
 	if err := s.guardLastOwner(ctx, orgID, u.ID, role); err != nil {
@@ -341,6 +360,14 @@ func (s *Service) AddMember(ctx context.Context, p Principal, orgID, email strin
 
 // RemoveMember removes a user from org; members may remove themselves.
 func (s *Service) RemoveMember(ctx context.Context, p Principal, orgID, userID string) error {
+	_, err := policyChange(ctx, s, func(tx *Service) (struct{}, error) { return struct{}{}, tx.removeMemberPolicy(ctx, p, orgID, userID) })
+	return err
+}
+
+func (s *Service) removeMemberPolicy(ctx context.Context, p Principal, orgID, userID string) error {
+	if p.Via == "key" {
+		return ErrForbidden
+	}
 	if userID != p.User.ID {
 		if err := s.Require(ctx, p, orgID, Admin); err != nil {
 			return err
@@ -351,10 +378,17 @@ func (s *Service) RemoveMember(ctx context.Context, p Principal, orgID, userID s
 	if err := s.guardLastOwner(ctx, orgID, userID, ""); err != nil {
 		return err
 	}
+	admins, err := s.adminRepositories(ctx, orgID)
+	if err != nil {
+		return err
+	}
 	if err := s.St.RemoveMember(ctx, orgID, userID); err != nil {
 		return err
 	}
 	if err := s.dropUserTuples(ctx, orgID, userID); err != nil {
+		return err
+	}
+	if err := s.preserveAdmins(ctx, orgID, admins); err != nil {
 		return err
 	}
 	s.audit(ctx, actorEvent(p, "member.remove", orgID, userID))
@@ -455,5 +489,11 @@ func (s *Service) ChangePassword(ctx context.Context, p Principal, current, next
 // audit records a service event. A storage failure is logged by the sink's
 // owner through Record's error path; the action itself stands.
 func (s *Service) audit(ctx context.Context, e Event) {
-	_, _ = s.Record(ctx, e) //nolint:errcheck // the HTTP layer also records every changing request
+	if s.policy && e.OrgID != "" {
+		s.policyOrgs[e.OrgID] = true
+	}
+	_, err := s.Record(ctx, e)
+	if s.policy && err != nil {
+		s.policyErr = err
+	}
 }

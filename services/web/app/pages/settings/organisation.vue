@@ -5,12 +5,44 @@ const session = useSession()
 const org = computed(() => session.current.value?.org)
 const { data, refresh, error: loadError } = useApiGet<{ org: AccountOrg; members: Membership[] }>(() => (org.value ? `accounts/orgs/${org.value.slug}/members` : 'accounts/orgs/-/members'))
 const canManage = computed(() => session.can('admin'))
+const { data: policy, refresh: refreshPolicy } = useApiGet<AccountOrg>(() => `accounts/orgs/${org.value?.slug ?? '-'}/repo-policy`)
+const defaultAccess = ref<'NONE' | 'READ_ONLY'>('NONE')
+watch(policy, (value) => { defaultAccess.value = value?.default_repo_access ?? 'NONE' }, { immediate: true })
+const policySaved = ref(false)
+const recoverRepo = ref('')
+const recoverUser = ref('')
+const recovered = ref(false)
+const { data: accessChanges, refresh: refreshAccessChanges } = useApiGet<{ orphaned_repositories: string[]; inactive_external_grants: number; malformed_grants: number }>(() => `accounts/orgs/${org.value?.slug ?? '-'}/access-changes`, { immediate: false })
+watch(() => session.current.value, (membership) => { if (membership?.role === 'owner') refreshAccessChanges() }, { immediate: true })
+async function recoverAdmin() {
+  error.value = ''
+  recovered.value = false
+  try {
+    await apiPost(`accounts/orgs/${org.value!.slug}/repos/${encodeURIComponent(recoverRepo.value)}/recover-admin`, { user: recoverUser.value })
+    recovered.value = true
+    await refreshAccessChanges()
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  }
+}
+async function savePolicy() {
+  error.value = ''
+  policySaved.value = false
+  try {
+    await apiPut(`accounts/orgs/${org.value!.slug}/repo-policy`, { default_repo_access: defaultAccess.value })
+    await refreshPolicy()
+    await session.load()
+    policySaved.value = true
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  }
+}
 const roles: { id: Role; label: string; help: string }[] = [
-  { id: 'guest', label: 'Guest', help: 'Sees only repositories shared with them (contractors, auditors)' },
-  { id: 'viewer', label: 'Viewer', help: 'Reads every repository, report and statistic of the organisation' },
-  { id: 'member', label: 'Member', help: 'Also syncs, adds repositories and runs AI tasks' },
+  { id: 'guest', label: 'Guest', help: 'Needs an explicit repository grant; receives no default access' },
+  { id: 'viewer', label: 'Viewer', help: 'Receives the organisation repository default unless a grant overrides it' },
+  { id: 'member', label: 'Member', help: 'Can add repositories; existing repositories follow their own permissions' },
   { id: 'admin', label: 'Admin', help: 'Also manages members, Git tokens and settings' },
-  { id: 'owner', label: 'Owner', help: 'Everything, including other owners' },
+  { id: 'owner', label: 'Owner', help: 'Manages organisation ownership and can explicitly recover repository administration' },
 ]
 const email = ref('')
 const role = ref<Role>('member')
@@ -60,7 +92,31 @@ async function createOrg() {
 
 <template>
   <div class="stack">
-    <p v-if="!org" class="notice">{{ session.allOrgs.value ? 'You are viewing all organisations as platform administrator. Choose one in the sidebar to manage its members.' : 'You are not a member of an organisation yet. Create one below.' }}</p>
+    <p v-if="!org" class="notice">You are not a member of an organisation yet. Create one below. Platform administration does not grant access to repository content.</p>
+    <section v-if="org" class="panel">
+      <h2>Default repository access</h2>
+      <p class="muted small">Applies to members without a user or team grant. Guests always need a grant. Organisation roles do not grant repository administration.</p>
+      <form v-if="canManage" class="row" @submit.prevent="savePolicy">
+        <div class="field"><label for="default-access">Default</label><select id="default-access" v-model="defaultAccess"><option value="NONE">No access</option><option value="READ_ONLY">Read only</option></select></div>
+        <button type="submit" class="align-end">Save default</button>
+      </form>
+      <p v-else>{{ policy?.default_repo_access === 'READ_ONLY' ? 'Read only' : 'No access' }}</p>
+      <p v-if="policySaved" class="notice notice--ok" role="status">Repository default saved.</p>
+      <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
+    </section>
+    <section v-if="org && session.can('owner')" class="panel">
+      <h2>Recover repository administration</h2>
+      <p class="muted small">Assign an existing organisation member as repository administrator. This records an audit event and gives that person access to the repository.</p>
+      <p v-if="accessChanges?.inactive_external_grants" class="notice">{{ accessChanges.inactive_external_grants }} external grant(s) are inactive until the recipient belongs to this organisation.</p>
+      <p v-if="accessChanges?.malformed_grants" class="notice">{{ accessChanges.malformed_grants }} malformed grant(s) need repair. Recovery keeps affected members denied except the administrator you assign.</p>
+      <p v-if="accessChanges?.orphaned_repositories.length" class="notice">Repositories needing an administrator: {{ accessChanges.orphaned_repositories.join(', ') }}.</p>
+      <form class="row" @submit.prevent="recoverAdmin">
+        <div class="field grow"><label for="recover-repo">Repository name</label><input id="recover-repo" v-model="recoverRepo" required></div>
+        <div class="field grow"><label for="recover-user">Member email</label><input id="recover-user" v-model="recoverUser" type="email" required></div>
+        <button type="submit" class="align-end">Assign administrator</button>
+      </form>
+      <p v-if="recovered" class="notice notice--ok" role="status">Repository administrator assigned.</p>
+    </section>
     <section v-if="org" class="panel">
       <div class="panel__header"><h2>Members of {{ org.name }}</h2><span class="muted small">{{ data?.members.length ?? 0 }} member(s)</span></div>
       <p v-if="loadError" class="notice notice--danger">{{ apiErrorMessage(loadError) }}</p>

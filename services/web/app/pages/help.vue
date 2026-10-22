@@ -50,12 +50,14 @@ const terms = [
       <h2>Accounts, organisations and roles</h2>
       <p>Everything belongs to an <strong>organisation</strong>: its repositories, agent memory, reviews and statistics. Members of one organisation never see another’s. The same public repository is indexed once and shared, so adding it is instant if someone already has.</p>
       <ul>
-        <li><strong>Viewer</strong> reads repositories, reports and statistics.</li>
-        <li><strong>Member</strong> also adds and syncs repositories and runs AI tasks.</li>
+        <li><strong>Guest</strong> needs an explicit repository grant.</li>
+        <li><strong>Viewer</strong> receives the organisation's repository default unless a grant overrides it.</li>
+        <li><strong>Member</strong> can also add repositories while signed in.</li>
         <li><strong>Admin</strong> also manages members, Git tokens and settings.</li>
-        <li><strong>Owner</strong> can do everything, including managing other owners.</li>
+        <li><strong>Owner</strong> also manages ownership and can explicitly recover repository administration.</li>
       </ul>
-      <p>The first account of an installation is its <strong>platform administrator</strong>, who sees every organisation and the audit log. Every change and sign-in is recorded in a tamper-evident audit log, which is what NIS2-regulated organisations need.</p>
+      <p>Repository permissions are separate: <strong>read</strong> permits navigation and recall, <strong>write</strong> adds reviews and memory updates, and <strong>admin</strong> adds sync, schedules and access management. A direct user grant overrides team grants, then the organisation default applies.</p>
+      <p>The first account is the <strong>platform administrator</strong>, who manages accounts and operational settings. Code access still requires organisation membership and repository permission. Changes and sign-ins are recorded in the audit log.</p>
       <p v-if="!session.accounts.value" class="notice">This installation runs without accounts. To turn them on, configure PostgreSQL (<code>CODESYNAPSE_DATABASE_URL</code>); the docker compose setup does this for you.</p>
     </section>
 

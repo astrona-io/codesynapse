@@ -3,7 +3,9 @@ package pgstore
 import (
 	"context"
 	"os"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 	"github.com/parisnakitakejser/codesynapse/internal/accounts/accountstest"
@@ -23,12 +25,14 @@ func TestContract(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(st.Close)
 	// Start from an empty schema: the contract creates fixed emails.
-	_, err = st.db.Exec(ctx, "DROP TABLE IF EXISTS relation_tuples, teams, org_git_tokens, repositories, audit_head, events, api_keys, sessions, memberships, orgs, users, schema_migrations CASCADE")
+	_, err = st.db.Exec(ctx, "DROP TABLE IF EXISTS access_policy_outbox, relation_tuples, teams, org_git_tokens, repositories, audit_head, events, api_keys, sessions, memberships, orgs, users, schema_migrations CASCADE")
 	require.NoError(t, err)
 	accountstest.Run(t, st)
 	accountstest.RunConcurrentAudit(t, st)
 	accountstest.RunReBAC(t, st)
 	accountstest.RunAdmin(t, st)
+	accountstest.RunAccessBounds(t, st)
+	accountstest.RunPolicyRecovery(t, st)
 
 	// Tampering with a stored entry is detected.
 	_, err = st.db.Exec(ctx, "UPDATE events SET detail = 'edited' WHERE id = (SELECT max(id) FROM events)")
@@ -36,4 +40,29 @@ func TestContract(t *testing.T) {
 	v, err := accounts.VerifyAudit(ctx, st)
 	require.NoError(t, err)
 	assert.False(t, v.OK, "a changed entry breaks the chain")
+}
+
+func BenchmarkAccessOf(b *testing.B) {
+	url := os.Getenv("CODESYNAPSE_TEST_DATABASE_URL")
+	if url == "" {
+		b.Skip("CODESYNAPSE_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	st, err := Open(ctx, url)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(st.Close)
+	if err := st.Migrate(ctx); err != nil {
+		b.Fatal(err)
+	}
+	userID, _ := accountstest.SeedAccessBenchmark(b, st, strconv.FormatInt(time.Now().UnixNano(), 10))
+	svc := accounts.NewService(st, true)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := svc.AccessOf(ctx, userID); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
