@@ -101,6 +101,8 @@ Test Kubernetes manifests only on a throwaway kind cluster, with `--context` set
 
 Run `just test` and `just lint` before you call a Go change done, and `just web-check` for anything under `services/web/`.
 
+Defer both development and production Kubernetes manifest work to the final deployment phase, after application features and SSO.
+
 ## Go conventions
 
 - Go 1.27, module `github.com/parisnakitakejser/codesynapse`.
@@ -172,3 +174,5 @@ This tool reads untrusted repositories and serves their contents to LLMs. Keep i
 ## Commits
 
 Conventional commits (`feat(api): ...`, `fix(gitx): ...`). Don't commit `.env`, `sources/`, `bin/` or `services/web/.output`.
+
+After completing each phase, commit the changes, push the branch and open a pull request for that phase.
