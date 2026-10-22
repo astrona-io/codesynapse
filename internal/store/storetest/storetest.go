@@ -5,6 +5,7 @@ package storetest
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -361,6 +362,50 @@ func Run(t *testing.T, s store.Store) {
 			case memory.EntityID(Repo, "Spaces"):
 				assert.Equal(t, f.ValidTo, "2026-03-01T05:00:00Z")
 			}
+		}
+	})
+
+	t.Run("memory vectors", func(t *testing.T) {
+		t.Cleanup(func() {
+			for _, n := range []string{"payments", "billing", "frontend"} {
+				_ = s.DeleteMemoryEntity(ctx, Repo, memory.EntityID(Repo, n))
+			}
+		})
+		b, err := memory.Prepare(Repo, []memory.Triple{
+			{Subject: "payments", Predicate: "DEPENDS_ON", Object: "billing"},
+			{Subject: "frontend", Predicate: "CALLS", Object: "payments"},
+		}, "agent", time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC))
+		require.NoError(t, err)
+		require.NoError(t, s.UpsertMemory(ctx, b))
+
+		todo, err := s.MemoryEmbeddingTodo(ctx, "m1", 500)
+		require.NoError(t, err)
+		mine := map[string]bool{}
+		for _, e := range todo {
+			if e.Repo == Repo {
+				mine[e.Name] = true
+			}
+		}
+		assert.Equal(t, len(mine), 3, "nothing is embedded yet")
+
+		id := func(n string) string { return memory.EntityID(Repo, n) }
+		require.Error(t, s.SetMemoryEmbeddings(ctx, "m1", map[string][]float32{id("payments"): {1, 0, 0}, id("billing"): {1, 0}}), "lengths must match")
+		require.NoError(t, s.SetMemoryEmbeddings(ctx, "m1", map[string][]float32{
+			id("payments"): {1, 0, 0}, id("billing"): {0.8, 0.6, 0}, id("frontend"): {0, 0, 1},
+		}))
+		near, err := s.MemoryNearest(ctx, Repo, "m1", []float32{0.9, 0.1, 0}, 2)
+		require.NoError(t, err)
+		require.Len(t, near, 2)
+		assert.Equal(t, near[0].Name, "payments")
+		assert.Equal(t, near[1].Name, "billing")
+		assert.Equal(t, math.Round(near[0].Score*1000)/1000, math.Round(memory.Similarity([]float32{0.9, 0.1, 0}, []float32{1, 0, 0})*1000)/1000, "(1+cos)/2 like Neo4j")
+		other, err := s.MemoryNearest(ctx, Repo, "m2", []float32{0.9, 0.1, 0}, 2)
+		require.NoError(t, err)
+		assert.Equal(t, len(other), 0, "vectors of another model are not compared")
+		todo, err = s.MemoryEmbeddingTodo(ctx, "m1", 500)
+		require.NoError(t, err)
+		for _, e := range todo {
+			assert.False(t, e.Repo == Repo, "embedded entities are done: "+e.Name)
 		}
 	})
 

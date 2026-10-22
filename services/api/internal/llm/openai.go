@@ -122,3 +122,30 @@ func (o *openAI) Models(ctx context.Context) ([]string, error) {
 	}
 	return out, nil
 }
+
+// Embed calls the OpenAI-compatible /embeddings endpoint (Ollama, LM Studio,
+// vLLM, llama.cpp server).
+func (o *openAI) Embed(ctx context.Context, model string, inputs []string) ([][]float32, error) {
+	var res struct {
+		Data []struct {
+			Index     int       `json:"index"`
+			Embedding []float32 `json:"embedding"`
+		} `json:"data"`
+	}
+	if err := o.do(ctx, http.MethodPost, "/embeddings", map[string]any{"model": model, "input": inputs}, &res); err != nil {
+		return nil, err
+	}
+	out := make([][]float32, len(inputs))
+	for _, d := range res.Data {
+		if d.Index < 0 || d.Index >= len(out) || len(d.Embedding) == 0 || len(d.Embedding) > 8192 {
+			return nil, fmt.Errorf("%s: unexpected embedding at index %d", o.cfg.Name, d.Index)
+		}
+		out[d.Index] = d.Embedding
+	}
+	for i, v := range out {
+		if v == nil {
+			return nil, fmt.Errorf("%s: no embedding for input %d", o.cfg.Name, i)
+		}
+	}
+	return out, nil
+}

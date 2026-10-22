@@ -121,7 +121,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	if ms, ok := r.(store.MemoryStore); ok && o.memory {
 		opts.Memory = ms
 		if o.apiURL != "" {
-			opts.Offload = &mcpserver.OffloadClient{BaseURL: o.apiURL, Token: os.Getenv("CODESYNAPSE_API_TOKEN")}
+			opts.Offload = &mcpserver.APIClient{BaseURL: o.apiURL, Token: os.Getenv("CODESYNAPSE_API_TOKEN")}
 		}
 	}
 	if us, ok := r.(store.UsageStore); ok && o.usage {

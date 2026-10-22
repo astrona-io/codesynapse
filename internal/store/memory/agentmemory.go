@@ -64,6 +64,7 @@ func (s *Store) UpsertMemory(_ context.Context, b agentmem.Batch) error {
 	}
 	for _, id := range p.DeleteEntities {
 		delete(m.entities, id)
+		delete(s.vecs, id)
 	}
 	return nil
 }
@@ -186,6 +187,7 @@ func (s *Store) DeleteMemoryEntity(_ context.Context, repo, id string) error {
 		return fmt.Errorf("entity %q: %w", id, store.ErrNotFound)
 	}
 	delete(m.entities, id)
+	delete(s.vecs, id)
 	for fid, f := range m.facts {
 		if f.Subject == id || f.Object == id {
 			delete(m.facts, fid)
@@ -222,4 +224,59 @@ func (s *Store) MemoryStats(context.Context) ([]agentmem.Stats, error) {
 	}
 	slices.SortFunc(out, func(a, b agentmem.Stats) int { return cmp.Compare(a.Repo, b.Repo) })
 	return out, nil
+}
+
+// embedding is an entity's vector and the model that made it.
+type embedding struct {
+	model string
+	vec   []float32
+}
+
+// MemoryEmbeddingTodo implements store.MemoryStore.
+func (s *Store) MemoryEmbeddingTodo(_ context.Context, model string, limit int) ([]agentmem.Entity, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []agentmem.Entity
+	for _, m := range s.mem {
+		for id, e := range m.entities {
+			if v, ok := s.vecs[id]; !ok || v.model != model {
+				out = append(out, e)
+			}
+		}
+	}
+	slices.SortFunc(out, func(a, b agentmem.Entity) int {
+		return cmp.Or(cmp.Compare(a.UpdatedAt, b.UpdatedAt), cmp.Compare(a.ID, b.ID))
+	})
+	return out[:min(len(out), store.ClampLimit(limit, 64))], nil
+}
+
+// SetMemoryEmbeddings implements store.MemoryStore.
+func (s *Store) SetMemoryEmbeddings(_ context.Context, model string, vecs map[string][]float32) error {
+	if err := agentmem.CheckVectors(vecs); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, v := range vecs {
+		s.vecs[id] = embedding{model: model, vec: slices.Clone(v)}
+	}
+	return nil
+}
+
+// MemoryNearest implements store.MemoryStore (exact cosine search).
+func (s *Store) MemoryNearest(_ context.Context, repo, model string, vec []float32, k int) ([]agentmem.Scored, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []agentmem.Scored{}
+	m := s.mem[repo]
+	if m == nil {
+		return out, nil
+	}
+	for id, e := range m.entities {
+		if v, ok := s.vecs[id]; ok && v.model == model && len(v.vec) == len(vec) {
+			out = append(out, agentmem.Scored{Entity: e, Score: agentmem.Similarity(vec, v.vec)})
+		}
+	}
+	slices.SortFunc(out, func(a, b agentmem.Scored) int { return cmp.Or(cmp.Compare(b.Score, a.Score), cmp.Compare(a.ID, b.ID)) })
+	return out[:min(len(out), store.ClampLimit(k, 10))], nil
 }

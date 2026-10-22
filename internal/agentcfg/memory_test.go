@@ -46,13 +46,14 @@ func TestAgentsBlock(t *testing.T) {
 func TestInstallHooks(t *testing.T) {
 	p := filepath.Join(t.TempDir(), ".claude", "settings.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o750))
-	require.NoError(t, os.WriteFile(p, []byte(`{"model":"opus","hooks":{"PreCompact":[{"matcher":"","hooks":[{"type":"command","command":"say compacting"}]}]}}`), 0o600))
-	cmds := HookCommands{SessionStart: "codesynapse memory recall --hook --repo r", PreCompact: "codesynapse memory offload --hook --repo r"}
+	require.NoError(t, os.WriteFile(p, []byte(`{"model":"opus","env":{"FOO":"1"},"hooks":{"PreCompact":[{"matcher":"","hooks":[{"type":"command","command":"say compacting"}]}]}}`), 0o600))
+	cmds := HookCommands{SessionStart: "codesynapse memory recall --hook --repo r", PreCompact: "codesynapse memory offload --hook --repo r", CompactAt: 30}
 	require.NoError(t, InstallHooks(p, cmds))
 	require.NoError(t, InstallHooks(p, cmds))
 
 	var doc struct {
 		Model string
+		Env   map[string]string
 		Hooks map[string][]struct {
 			Hooks []struct{ Command string }
 		}
@@ -60,6 +61,8 @@ func TestInstallHooks(t *testing.T) {
 	b, _ := os.ReadFile(p)
 	require.NoError(t, json.Unmarshal(b, &doc))
 	assert.Equal(t, doc.Model, "opus")
+	assert.Equal(t, doc.Env, map[string]string{"FOO": "1", CompactEnv: "30"}, "other variables are kept")
+	require.Error(t, InstallHooks(p, HookCommands{CompactAt: 101}))
 	require.Len(t, doc.Hooks["PreCompact"], 2, "the user's own hook stays; ours is not duplicated")
 	assert.Equal(t, doc.Hooks["PreCompact"][0].Hooks[0].Command, "say compacting")
 	assert.Equal(t, doc.Hooks["SessionStart"][0].Hooks[0].Command, cmds.SessionStart)

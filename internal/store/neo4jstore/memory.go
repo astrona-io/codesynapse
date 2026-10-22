@@ -66,7 +66,7 @@ UNWIND e.aliases AS name WITH e, name WHERE name IN $names RETURN name, e.id AS 
 			return nil, err
 		}
 		for _, r := range recs {
-			e := toEntity(r, "e")
+			e := toEntity(r)
 			st.Entities[e.ID] = e
 		}
 		if recs, err = rows(`MATCH (a:MemoryEntity)-[f:FACT {repo: $repo}]->(b:MemoryEntity)
@@ -134,7 +134,7 @@ RETURN `+entityProj+` ORDER BY score DESC, e.updated_at DESC, e.name ASC LIMIT $
 	var ids []string
 	matched := map[string]bool{}
 	for _, rec := range res.Records {
-		e := toEntity(rec, "e")
+		e := toEntity(rec)
 		g.Entities = append(g.Entities, e)
 		ids = append(ids, e.ID)
 		matched[e.ID] = true
@@ -209,13 +209,14 @@ func (s *Store) endpoints(ctx context.Context, repo string, facts []memory.Fact,
 	}
 	out := make([]memory.Entity, 0, len(res.Records))
 	for _, rec := range res.Records {
-		out = append(out, toEntity(rec, "e"))
+		out = append(out, toEntity(rec))
 	}
 	return out, nil
 }
 
-func toEntity(rec *neo4j.Record, key string) memory.Entity {
-	m, _ := rec.AsMap()[key].(map[string]any)
+// toEntity decodes the "e" column of an entityProj row.
+func toEntity(rec *neo4j.Record) memory.Entity {
+	m, _ := rec.AsMap()["e"].(map[string]any)
 	s := func(k string) string { v, _ := m[k].(string); return v }
 	e := memory.Entity{ID: s("id"), Repo: s("repo"), Name: s("name"), Type: s("type"), CreatedAt: s("created_at"), UpdatedAt: s("updated_at")}
 	e.Aliases = strs(m["aliases"])

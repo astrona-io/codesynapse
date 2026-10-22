@@ -83,6 +83,9 @@ type Worker struct {
 	logger *slog.Logger
 	queue  chan string
 
+	// OnSaved runs after a job saved facts (to embed new entities soon).
+	OnSaved func()
+
 	mu    sync.Mutex
 	jobs  map[string]*Job
 	order []string
@@ -184,6 +187,9 @@ func (w *Worker) run(ctx context.Context, id string) {
 		return
 	}
 	j.State = Succeeded
+	if j.Saved > 0 && w.OnSaved != nil {
+		w.OnSaved()
+	}
 	w.logger.Info("memory extraction done", "job", j.ID, "repo", j.Repo, "saved", j.Saved, "dropped", j.Dropped)
 }
 

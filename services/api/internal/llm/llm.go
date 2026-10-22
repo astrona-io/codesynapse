@@ -32,7 +32,7 @@ const (
 )
 
 // Tasks a provider can be routed to.
-var Tasks = []string{"security-triage", "review", "briefing", "fix", "memory"}
+var Tasks = []string{"security-triage", "review", "briefing", "fix", "memory", "embeddings"}
 
 // Request is one completion request.
 type Request struct {
@@ -111,6 +111,9 @@ type ProviderConfig struct {
 	// models (Qwen3, DeepSeek-R1 style) for faster structured answers. Sent
 	// as chat_template_kwargs.enable_thinking=false (MLX, vLLM, SGLang).
 	DisableThinking bool `yaml:"disable_thinking" json:"disable_thinking,omitempty"`
+	// EmbeddingModel names the model the provider's /embeddings endpoint
+	// uses (e.g. nomic-embed-text on Ollama); empty means no embeddings.
+	EmbeddingModel string `yaml:"embedding_model" json:"embedding_model,omitempty"`
 
 	apiKey string
 }
@@ -398,6 +401,63 @@ func (r *Registry) Complete(ctx context.Context, name string, req Request) (Resp
 	}
 	r.mu.Unlock()
 	return resp, err
+}
+
+// Embedding limits per call: entity names and queries are short.
+const (
+	maxEmbedInputs = 64
+	maxEmbedChars  = 512
+)
+
+// ErrNoEmbeddings means no local provider with an embedding model is routed
+// to the "embeddings" task.
+var ErrNoEmbeddings = errors.New("no local embedding model: set embedding_model on a local provider and route \"embeddings\" to it")
+
+type embedder interface {
+	Embed(ctx context.Context, model string, inputs []string) ([][]float32, error)
+}
+
+// EmbeddingProvider returns the provider routed to "embeddings" when it is
+// local and has an embedding model. Memory names and queries never go to a
+// cloud provider.
+func (r *Registry) EmbeddingProvider() (string, ProviderConfig, error) {
+	name, err := r.ProviderFor("embeddings", "")
+	if err != nil {
+		return "", ProviderConfig{}, ErrNoEmbeddings
+	}
+	cfg, ok := r.Config(name)
+	if _, can := r.impl[name].(embedder); !ok || !can || !cfg.Local() || cfg.EmbeddingModel == "" {
+		return "", ProviderConfig{}, ErrNoEmbeddings
+	}
+	return name, cfg, nil
+}
+
+// Embed returns one vector per input from provider name, inputs redacted
+// and truncated.
+func (r *Registry) Embed(ctx context.Context, name string, inputs []string) ([][]float32, error) {
+	p, ok := r.impl[name].(embedder)
+	cfg, _ := r.Config(name)
+	if !ok || cfg.EmbeddingModel == "" {
+		return nil, ErrNoEmbeddings
+	}
+	if len(inputs) == 0 || len(inputs) > maxEmbedInputs {
+		return nil, fmt.Errorf("embed 1 to %d inputs", maxEmbedInputs)
+	}
+	clean := make([]string, len(inputs))
+	for i, in := range inputs {
+		in = redact.Text(in)
+		if rs := []rune(in); len(rs) > maxEmbedChars {
+			in = string(rs[:maxEmbedChars])
+		}
+		clean[i] = in
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(max(cfg.TimeoutSeconds, 10))*time.Second)
+	defer cancel()
+	vecs, err := p.Embed(ctx, cfg.EmbeddingModel, clean)
+	if err == nil && len(vecs) != len(inputs) {
+		err = fmt.Errorf("%s: %d embeddings for %d inputs", name, len(vecs), len(inputs))
+	}
+	return vecs, err
 }
 
 // Models lists what provider name serves.

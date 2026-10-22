@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	agentmem "github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
@@ -71,4 +72,34 @@ func TestOffloadEndpoints(t *testing.T) {
 	assert.True(t, list.Available)
 	assert.Equal(t, len(list.Jobs), 1)
 	assert.Equal(t, get(t, ts, "/api/v1/memory/jobs/nope", nil), 404)
+}
+
+func TestRecallAndStatusEndpoints(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+	b, err := agentmem.Prepare(storetest.Repo, []agentmem.Triple{{Subject: "Payments", Predicate: "OWNED_BY", Object: "Team Blue"}}, "a", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, st.UpsertMemory(ctx, b))
+	ts := httptest.NewServer(New(ctx, Config{}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	t.Cleanup(ts.Close)
+	path := "/api/v1/repos/" + storetest.Repo + "/memory/recall"
+
+	var res struct {
+		Skipped string
+		Mode    string
+		Facts   []agentmem.Fact
+	}
+	require.Equal(t, postJSON(t, ts, path, `{"query":"who owns payments","depth":1}`, &res), 200)
+	assert.Equal(t, res.Mode, "names", "no embedding model configured")
+	require.Len(t, res.Facts, 1)
+	require.Equal(t, postJSON(t, ts, path, `{"query":"thanks!"}`, &res), 200)
+	assert.Equal(t, res.Skipped, "small talk")
+	assert.Equal(t, postJSON(t, ts, path, `{"query":"`+strings.Repeat("x", 2001)+`"}`, nil), 400)
+
+	var status map[string]any
+	require.Equal(t, get(t, ts, "/api/v1/memory/status", &status), 200)
+	assert.Equal(t, status["extraction"], false)
+	assert.Equal(t, status["embeddings"], false)
 }
