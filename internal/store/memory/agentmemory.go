@@ -264,6 +264,21 @@ func (s *Store) SetMemoryEmbeddings(_ context.Context, model string, vecs map[st
 	return nil
 }
 
+// MemoryLexical implements store.MemoryStore.
+func (s *Store) MemoryLexical(_ context.Context, repo, query string, k int) ([]agentmem.Scored, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m := s.mem[repo]
+	if m == nil {
+		return []agentmem.Scored{}, nil
+	}
+	ents := make([]agentmem.Entity, 0, len(m.entities))
+	for _, e := range m.entities {
+		ents = append(ents, e)
+	}
+	return agentmem.RankBM25(ents, query, vector.ClampK(k)), nil
+}
+
 // MemoryNearest implements store.MemoryStore (exact cosine search).
 func (s *Store) MemoryNearest(_ context.Context, repo, model string, vec []float32, k int) ([]agentmem.Scored, error) {
 	s.mu.RLock()

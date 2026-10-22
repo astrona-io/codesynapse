@@ -409,6 +409,19 @@ func (s *Store) SetMemoryEmbeddings(ctx context.Context, model string, vecs map[
 	return s.write(ctx, markEmbedded, map[string]any{"vs": marked, "model": model}, nil)
 }
 
+// MemoryLexical implements store.MemoryStore over the tenant-rooted entity
+// lookup.
+func (s *Store) MemoryLexical(ctx context.Context, repo, query string, k int) ([]memory.Scored, error) {
+	if len(memory.Words(query)) == 0 {
+		return []memory.Scored{}, nil
+	}
+	cur, err := s.loadEntities(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	return memory.RankBM25(cur.Entities, query, vector.ClampK(k)), nil
+}
+
 // MemoryNearest implements store.MemoryStore. The index searches within the
 // namespace's tenant; hits are then loaded through the tenant-rooted entity
 // lookup, so a vector whose entity is gone or elsewhere is dropped.

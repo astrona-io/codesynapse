@@ -193,7 +193,7 @@ Tips: pass `diff` rather than refs whenever you have it, since it works even whe
    - **After every compaction and at session start**, the SessionStart hook puts the saved facts back into the smaller context.
    - Hooks and the setting go to `.claude/settings.local.json` (use `--shared` for the committed `settings.json`); remove them there to turn them off.
    - Limits of Claude Code itself: hooks cannot trigger compaction or remove messages; Claude Code writes the summary and decides what it keeps, and the threshold can only be lowered. If the setting does not seem to apply, export `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=30` in your shell before starting Claude Code and check with `/context`.
-4. **Background extraction and recall by meaning need local models:** route the "memory" task to a local provider (Ollama, MLX, LM Studio) on the **AI models** page, and the "embeddings" task to a local provider with an `embedding_model` (e.g. Ollama's `nomic-embed-text`; see `config/llm.example.yaml`). Without them, `offload_turns` explains what is missing, agents save triples themselves, and `recall_context` matches by name only.
+4. **Background extraction and recall by meaning need local models:** route the "memory" task to a local provider (Ollama, MLX, LM Studio) on the **AI models** page, and the "embeddings" task to a local provider with an `embedding_model` (e.g. Ollama's `nomic-embed-text`; see `config/llm.example.yaml`). Without them, `offload_turns` explains what is missing, agents save triples themselves, and `recall_context` ranks by words only (BM25 over names, aliases and types).
 
 | Tool | Returns |
 |---|---|

@@ -443,6 +443,51 @@ func Run(t *testing.T, s store.Store) {
 		assert.Len(t, near, 0, "vectors stay within their organisation")
 	})
 
+	t.Run("memory lexical ranking", func(t *testing.T) {
+		a, b := memory.Namespace("org-lex", Repo), memory.Namespace("org-other", Repo)
+		t.Cleanup(func() {
+			for _, ns := range []string{a, b} {
+				for _, n := range []string{"payments service", "billing service", "search service", "frontend", "team web", "checkouthandler", "team blue"} {
+					_ = s.DeleteMemoryEntity(ctx, ns, memory.EntityID(ns, n))
+				}
+			}
+		})
+		at := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+		batch, err := memory.Prepare(a, []memory.Triple{
+			{Subject: "Payments service", Predicate: "OWNED_BY", Object: "Team Blue"},
+			{Subject: "Billing service", Predicate: "OWNED_BY", Object: "Team Blue"},
+			{Subject: "Search service", Predicate: "OWNED_BY", Object: "Team Blue"},
+			{Subject: "Frontend", Predicate: "OWNED_BY", Object: "Team Web"},
+			{Subject: "CheckoutHandler", SubjectType: "Component", Predicate: "CALLS", Object: "Payments service"},
+		}, "agent", at)
+		require.NoError(t, err)
+		require.NoError(t, s.UpsertMemory(ctx, batch))
+		other, err := memory.Prepare(b, []memory.Triple{{Subject: "Payments service", Predicate: "OWNED_BY", Object: "Team Blue"}}, "agent", at)
+		require.NoError(t, err)
+		require.NoError(t, s.UpsertMemory(ctx, other))
+
+		got, err := s.MemoryLexical(ctx, a, "payments service", 8)
+		require.NoError(t, err)
+		require.True(t, len(got) >= 3, "%v", got)
+		assert.Equal(t, got[0].Name, "Payments service", "the rare term decides")
+		for _, e := range got {
+			assert.Equal(t, e.Repo, a, "only the namespace's entities")
+		}
+		got, err = s.MemoryLexical(ctx, a, "checkout handler", 8)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, got[0].Name, "CheckoutHandler")
+		got, err = s.MemoryLexical(ctx, a, "service", 1)
+		require.NoError(t, err)
+		assert.Len(t, got, vector.MinK, "k is clamped like vector search")
+		got, err = s.MemoryLexical(ctx, a, "the", 8)
+		require.NoError(t, err)
+		assert.Len(t, got, 0, "stopwords match nothing")
+		got, err = s.MemoryLexical(ctx, memory.Namespace("org-none", Repo), "payments", 8)
+		require.NoError(t, err)
+		assert.Len(t, got, 0, "another organisation's namespace is empty")
+	})
+
 	t.Run("memory stats", func(t *testing.T) {
 		t.Cleanup(func() {
 			for _, name := range []string{"Team", "api"} {
