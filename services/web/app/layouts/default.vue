@@ -42,26 +42,26 @@ const repoGroups = computed(() => {
   if (!repo.value) return []
   const base = `/repos/${encodeURIComponent(repo.value)}`
   return [
-    { label: 'Understand', links: [
+    { label: 'Repository', links: [
       { to: base, label: 'Summary' },
+      { to: `${base}/security`, label: 'Security' },
+      { to: `${base}/dependencies`, label: 'Dependencies' },
+      { to: `${base}/licenses`, label: 'Licences' },
+      { to: `${base}/metrics`, label: 'Code health', also: [`${base}/cleanup`] },
+      ...(session.accounts.value ? [{ to: `${base}/access`, label: 'Access' }] : []),
+    ] },
+    { label: 'Work', links: [
+      { to: `${base}/reviews`, label: 'Reviews' },
+      { to: `${base}/memory`, label: 'Agent memory' },
+      { to: `${base}/review`, label: 'Impact of a change' },
+      { to: `${base}/ai`, label: 'AI assistant' },
+    ] },
+    { label: 'Explore', links: [
       { to: `${base}/graph`, label: 'Graph' },
       { to: `${base}/explore`, label: 'Symbols' },
       { to: `${base}/config`, label: 'Kubernetes & Helm' },
       { to: `${base}/docs`, label: 'Docs' },
       { to: `${base}/packages`, label: 'Packages' },
-    ] },
-    { label: 'Improve', links: [
-      { to: `${base}/security`, label: 'Security' },
-      { to: `${base}/licenses`, label: 'Licences' },
-      { to: `${base}/cleanup`, label: 'Cleanup' },
-      { to: `${base}/metrics`, label: 'Quality' },
-      { to: `${base}/ai`, label: 'AI assistant' },
-    ] },
-    { label: 'Change', links: [
-      { to: `${base}/reviews`, label: 'Reviews' },
-      { to: `${base}/review`, label: 'Impact of a change' },
-      { to: `${base}/memory`, label: 'Agent memory' },
-      ...(session.accounts.value ? [{ to: `${base}/access`, label: 'Access' }] : []),
     ] },
   ]
 })
@@ -105,7 +105,7 @@ const orgValue = computed({
           </div>
           <div v-for="g in repoGroups" :key="g.label" class="nav-section">
             <p class="nav-label">{{ g.label }}</p>
-            <NuxtLink v-for="l in g.links" :key="l.to" :to="l.to" class="nav-link nav-link--sub" :class="{ 'is-active': route.path === l.to }">{{ l.label }}</NuxtLink>
+            <NuxtLink v-for="l in g.links" :key="l.to" :to="l.to" class="nav-link nav-link--sub" :class="{ 'is-active': route.path === l.to || ('also' in l && l.also?.includes(route.path)) }">{{ l.label }}</NuxtLink>
           </div>
         </template>
         <div v-else-if="repos?.repos.length" class="nav-section">

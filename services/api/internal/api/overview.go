@@ -107,11 +107,20 @@ func (s *Server) handleWorkspaceOverview(w http.ResponseWriter, r *http.Request)
 
 // buildOverview summarises every repository; the statistics page reuses it.
 func (s *Server) buildOverview(ctx context.Context) (Overview, error) {
+	return s.overviewOf(ctx, "")
+}
+
+// overviewOf builds the overview of every visible repository, or of only
+// that one.
+func (s *Server) overviewOf(ctx context.Context, only string) (Overview, error) {
 	repos, err := s.st.Repos(ctx)
 	if err != nil {
 		return Overview{}, err
 	}
 	repos = visibleRepos(ctx, repos)
+	if only != "" {
+		repos = slices.DeleteFunc(repos, func(n model.Node) bool { return n.Name != only })
+	}
 	now := time.Now()
 	ov := Overview{
 		GeneratedAt: now.UTC().Format(time.RFC3339),

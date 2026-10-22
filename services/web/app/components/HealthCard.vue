@@ -17,7 +17,7 @@ defineProps<{ label: string; value: string | number; verdict: string; tone?: 'go
 a.health:hover { transform: translateY(-2px); color: var(--ink); }
 .value { font-size: 30px; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
 .verdict { font-size: 13.5px; color: var(--muted); }
-.action { margin-top: 6px; font: 500 12px var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--orange-ink); }
+.action { margin-top: 6px; font: 600 13px var(--font-sans); color: var(--accent-ink); }
 .tone--good { border-left-color: var(--green); } .tone--good .value { color: var(--green); }
 .tone--warn { border-left-color: var(--amber); } .tone--warn .value { color: var(--amber); }
 .tone--bad { border-left-color: var(--pink); } .tone--bad .value { color: var(--pink); }

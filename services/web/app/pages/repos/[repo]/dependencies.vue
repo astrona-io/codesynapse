@@ -1,0 +1,123 @@
+<script setup lang="ts">
+import type { LicenseReport, Ranked, SecurityReport, SecVuln } from '~/utils/types'
+
+const route = useRoute()
+const repo = computed(() => route.params.repo as string)
+useHead({ title: () => `Dependencies · ${repo.value}` })
+const { data: mods, error } = useApiGet<{ results: Ranked[] }>(() => repoPath(repo.value, 'list?kind=Module&metric=name&limit=500'))
+const { data: sec } = useApiGet<SecurityReport>(() => repoPath(repo.value, 'security'))
+const { data: lic } = useApiGet<LicenseReport>(() => repoPath(repo.value, 'licenses'))
+
+// Update automation: the Renovate and Dependabot rules.
+const UPDATE_RULES = /^(dependency-updates-missing|renovate-)/
+const automation = computed(() => (sec.value?.findings ?? []).filter((f) => UPDATE_RULES.test(f.rule)))
+const missing = computed(() => automation.value.some((f) => f.rule === 'dependency-updates-missing'))
+
+const vulnsByModule = computed(() => {
+  const m = new Map<string, SecVuln[]>()
+  for (const v of sec.value?.vulnerabilities ?? []) m.set(v.module, [...(m.get(v.module) ?? []), v])
+  return m
+})
+const verdicts = computed(() => new Map((lic.value?.issues ?? []).map((i) => [`${i.ecosystem}:${i.name}`, i.verdict])))
+const REACH = { called: 'Your code calls it', imported: 'Imported, not called', required: 'Required only' } as const
+
+type Row = { name: string; version: string; ecosystem: string; direct: boolean; dev: boolean; license: string; vulns: SecVuln[]; licence?: { level: string; reason: string } }
+// The package list is capped (500 by name); vulnerable packages and licence
+// issues come from their own reports, so none of those is ever cut off.
+const LIST_CAP = 500
+const rows = computed<Row[]>(() => {
+  const out: Row[] = (mods.value?.results ?? []).map(({ node: n }) => ({
+    name: n.name, version: n.version ?? '', ecosystem: n.ecosystem ?? 'go', direct: !n.indirect, dev: !!n.dev, license: n.license ?? '',
+    vulns: vulnsByModule.value.get(n.name) ?? [], licence: verdicts.value.get(`${n.ecosystem ?? 'go'}:${n.name}`),
+  }))
+  const seen = new Set(out.map((r) => r.name))
+  for (const [name, vulns] of vulnsByModule.value) {
+    if (!seen.has(name)) { seen.add(name); out.push({ name, version: vulns[0]?.version ?? '', ecosystem: '', direct: true, dev: false, license: '', vulns }) }
+  }
+  for (const i of lic.value?.issues ?? []) {
+    if (!seen.has(i.name)) {
+      seen.add(i.name)
+      out.push({ name: i.name, version: i.version, ecosystem: i.ecosystem, direct: i.direct, dev: !!i.dev, license: i.license ?? '', vulns: [], licence: i.verdict })
+    }
+  }
+  return out
+})
+const total = computed(() => Math.max(lic.value?.total ?? 0, rows.value.length))
+const truncated = computed(() => (mods.value?.results.length ?? 0) >= LIST_CAP)
+type Show = 'attention' | 'direct' | 'all'
+const show = ref<Show>('attention')
+const query = ref('')
+const shown = computed(() => rows.value
+  .filter((r) => show.value === 'all' || (show.value === 'direct' ? r.direct : r.vulns.length || (r.licence && r.licence.level !== 'ok')))
+  .filter((r) => !query.value || r.name.toLowerCase().includes(query.value.toLowerCase()))
+  .sort((a, b) => b.vulns.length - a.vulns.length || Number(b.direct) - Number(a.direct) || a.name.localeCompare(b.name)))
+const ecosystems = computed(() => {
+  const c: Record<string, number> = {}
+  for (const r of rows.value) c[r.ecosystem] = (c[r.ecosystem] ?? 0) + 1
+  return Object.entries(c).sort((a, b) => b[1] - a[1])
+})
+</script>
+
+<template>
+  <div class="stack">
+    <PageHeader eyebrow="Dependencies" title="What this repository depends on" lede="Every package it uses, with known vulnerabilities, licences and whether updates are automated. Fix vulnerabilities your code calls first." :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Dependencies' }]" />
+    <p v-if="error" class="notice notice--danger">{{ apiErrorMessage(error) }}</p>
+    <div class="grid cols-4">
+      <StatTile label="Dependencies" :value="String(total)" :hint="ecosystems.map(([e, c]) => `${c} ${e}`).join(' · ') || '–'" />
+      <StatTile label="Vulnerable" :value="String(vulnsByModule.size)" :hint="`${(sec?.vulnerabilities ?? []).filter((v) => v.reachability === 'called').length} called by your code`" />
+      <StatTile label="Licence issues" :value="String((lic?.conflict ?? 0) + (lic?.review ?? 0))" :hint="`${lic?.conflict ?? 0} conflict · ${lic?.review ?? 0} to review`" />
+      <StatTile label="Update automation" :value="missing ? 'Missing' : automation.length ? 'Needs care' : 'In place'" :hint="missing ? 'no Renovate or Dependabot config' : automation.length ? `${automation.length} configuration issue(s)` : 'Renovate or Dependabot is configured'" />
+    </div>
+
+    <section v-if="automation.length" class="panel edge--amber">
+      <h2>Keeping dependencies up to date</h2>
+      <p class="muted small">Security fixes in dependencies only help once they are installed. Renovate or Dependabot opens the update pull requests for you.</p>
+      <ul class="plain">
+        <li v-for="f in automation" :key="f.id"><span :class="`sev sev--${f.severity}`">{{ f.severity }}</span> <strong>{{ f.title }}</strong> <span class="muted small">{{ f.location }}</span><p class="muted small">{{ f.detail }}</p></li>
+      </ul>
+    </section>
+
+    <section class="panel">
+      <div class="panel__header">
+        <h2>Packages</h2>
+        <div class="row">
+          <button v-for="s in (['attention', 'direct', 'all'] as Show[])" :key="s" class="chip" :class="{ active: show === s }" @click="show = s">{{ s === 'attention' ? 'Needs attention' : s === 'direct' ? 'Direct' : 'All' }}</button>
+          <input v-model="query" class="search" placeholder="Filter by name" aria-label="Filter packages">
+        </div>
+      </div>
+      <div v-if="shown.length" class="table-wrap">
+        <table>
+          <thead><tr><th>Package</th><th>Version</th><th>Licence</th><th>Vulnerabilities</th></tr></thead>
+          <tbody>
+            <tr v-for="r in shown" :key="r.ecosystem + r.name">
+              <td><span class="mono">{{ r.name }}</span> <span class="badge">{{ r.ecosystem }}</span><span v-if="!r.direct" class="badge">indirect</span><span v-if="r.dev" class="badge">dev</span></td>
+              <td class="mono">{{ r.version || '–' }}</td>
+              <td>
+                {{ r.license || 'unknown' }}
+                <span v-if="r.licence && r.licence.level !== 'ok'" :class="r.licence.level === 'conflict' ? 'badge badge--pink' : 'badge badge--amber'" :title="r.licence.reason">{{ r.licence.level }}</span>
+              </td>
+              <td>
+                <span v-if="!r.vulns.length" class="muted">none known</span>
+                <div v-for="v in r.vulns" :key="v.id" class="vuln">
+                  <span :class="`sev sev--${v.severity}`">{{ v.severity }}</span>
+                  <a :href="v.url" target="_blank" rel="noopener noreferrer" class="mono">{{ v.id }}</a>
+                  <span class="small" :class="v.reachability === 'called' ? 'error' : 'muted'">{{ REACH[v.reachability] }}</span>
+                  <span v-if="v.fixed" class="small">· fixed in <span class="mono">{{ v.fixed }}</span></span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-if="truncated && show !== 'attention'" class="muted small">Showing the first {{ LIST_CAP }} of {{ total }} packages by name (all vulnerable packages and licence issues are included). Filter by name to find others.</p>
+      <div v-if="!shown.length" class="empty"><strong>{{ show === 'attention' ? 'Nothing needs attention' : 'No packages' }}</strong>{{ show === 'attention' ? 'No vulnerable packages and no licence issues.' : 'No dependency manifests were found.' }}</div>
+    </section>
+  </div>
+</template>
+
+<style scoped>
+.plain { list-style: none; padding: 0; display: grid; gap: 10px; }
+.search { width: 200px; min-height: 30px; padding: 4px 10px; }
+.vuln { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+td .badge { margin-left: 4px; }
+</style>
