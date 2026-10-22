@@ -284,6 +284,8 @@ just init                                # adds HUGEGRAPH_PASSWORD to .env
 just up                                  # then re-index your repositories
 ```
 
+`just` adds `docker-compose.hugegraph.yml` (start-up order for HugeGraph and Milvus) when `COMPOSE_PROFILES` contains `hugegraph`. Without `just`, pass `-f docker-compose.yml -f docker-compose.hugegraph.yml` yourself.
+
 Neo4j still starts in this mode (the services depend on it) but holds nothing; removing it from the default stack comes once HugeGraph has run on real installs for a while.
 
 Both are Apache-2.0, scale out, and keep each organisation's memory and vectors apart in the data itself (tenant partitions in Milvus, `tenant_id` on every memory vertex). HugeGraph runs Groovy scripts, so it always has a password and is never published to the host. Graphs are not migrated between backends: switching means indexing again, which is the same `just up` plus a sync. `just test-hugegraph` runs the store contract and a parity check against the in-memory reference on throwaway containers.

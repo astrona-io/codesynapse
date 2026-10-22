@@ -1,0 +1,17 @@
+# Added by the justfile when COMPOSE_PROFILES contains hugegraph. Kept out of
+# docker-compose.yml because podman-compose fails on a depends_on entry whose
+# service sits in an inactive profile, even with required: false.
+# Without just: docker compose -f docker-compose.yml -f docker-compose.hugegraph.yml
+services:
+  api:
+    depends_on:
+      hugegraph:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+  mcp:
+    depends_on:
+      hugegraph:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy

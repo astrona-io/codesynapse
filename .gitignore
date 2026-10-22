@@ -1,9 +1,11 @@
 .env
+.env.*
+!.env.example
 /bin/
 /sources/
 *.test
 *.out
-coverage.*
+/coverage.*
 .DS_Store
 /config/llm.yaml
 
@@ -12,3 +14,6 @@ coverage.*
 
 # Worktrees of Claude Code background agents
 /.claude/worktrees/
+
+# mkdocs build output
+/site/
