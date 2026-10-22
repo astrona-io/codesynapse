@@ -145,19 +145,9 @@ func openAccounts(ctx context.Context, logger *slog.Logger) (*accounts.Service, 
 	if url == "" {
 		return nil, func() {}, nil
 	}
-	var st *pgstore.Store
-	var err error
-	for attempt := range 30 { // PostgreSQL may still be starting next to us
-		if st, err = pgstore.Open(ctx, url); err == nil {
-			break
-		}
-		logger.Warn("waiting for PostgreSQL", "attempt", attempt+1, "error", err)
-		select {
-		case <-ctx.Done():
-			return nil, nil, ctx.Err()
-		case <-time.After(2 * time.Second):
-		}
-	}
+	st, err := pgstore.OpenWait(ctx, url, func(attempt int, err error) {
+		logger.Warn("waiting for PostgreSQL", "attempt", attempt, "error", err)
+	})
 	if err != nil {
 		return nil, nil, err
 	}

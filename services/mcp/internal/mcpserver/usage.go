@@ -25,7 +25,7 @@ func usageMiddleware(rec *usage.Recorder) mcp.Middleware {
 				if p, ok := req.GetParams().(*mcp.InitializeParams); ok && p.ClientInfo != nil {
 					client = p.ClientInfo.Name
 				}
-				rec.Record("", usage.Session, client, 0, 0, err != nil)
+				rec.Record(callerOrg(ctx), "", usage.Session, client, 0, 0, err != nil)
 				return res, err
 			case "tools/call", "prompts/get":
 				start := time.Now()
@@ -52,7 +52,7 @@ func usageMiddleware(rec *usage.Recorder) mcp.Middleware {
 						tokens = len(b) / 4
 					}
 				}
-				rec.Record(repo, name, sessionClient(req), time.Since(start), tokens, failed)
+				rec.Record(callerOrg(ctx), repo, name, sessionClient(req), time.Since(start), tokens, failed)
 				return res, err
 			}
 			return next(ctx, method, req)

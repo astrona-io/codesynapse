@@ -30,12 +30,12 @@ func TestRecorder(t *testing.T) {
 	sink := &fakeSink{fail: true}
 	r := NewRecorder(sink)
 	r.now = func() time.Time { return time.Date(2026, 10, 22, 23, 0, 0, 0, time.UTC) }
-	r.Record("repo", "search", "claude-code", 20*time.Millisecond, 100, false)
-	r.Record("repo", "search", "claude-code", 50*time.Millisecond, 50, true)
-	r.Record("", Session, "", 0, 0, false)
+	r.Record("", "repo", "search", "claude-code", 20*time.Millisecond, 100, false)
+	r.Record("", "repo", "search", "claude-code", 50*time.Millisecond, 50, true)
+	r.Record("", "", Session, "", 0, 0, false)
 
 	require.Error(t, r.Flush(context.Background()))
-	r.Record("repo", "search", "claude-code", 10*time.Millisecond, 10, false)
+	r.Record("", "repo", "search", "claude-code", 10*time.Millisecond, 10, false)
 	sink.fail = false
 	require.NoError(t, r.Flush(context.Background()))
 	require.Len(t, sink.got, 2, "a failed flush keeps its buckets")
@@ -53,7 +53,7 @@ func TestRecorder(t *testing.T) {
 func TestRecorderBoundsAndCleans(t *testing.T) {
 	r := NewRecorder(&fakeSink{})
 	for i := range maxBuckets + 10 {
-		r.Record(string(rune('a'+i%26))+time.Duration(i).String(), "t", "c", 0, 0, false)
+		r.Record("", string(rune('a'+i%26))+time.Duration(i).String(), "t", "c", 0, 0, false)
 	}
 	assert.Equal(t, len(r.pending), maxBuckets)
 	assert.Equal(t, clean(" evil\x1b[31mclient\n ", 64), "evil[31mclient")

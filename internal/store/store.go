@@ -182,7 +182,7 @@ type UsageStore interface {
 	AddUsage(ctx context.Context, buckets []usage.Bucket) error
 	// PruneUsage deletes buckets of days before beforeDay (YYYY-MM-DD).
 	PruneUsage(ctx context.Context, beforeDay string) error
-	// Usage returns buckets from sinceDay on, ordered by day, repo, tool, client.
+	// Usage returns buckets from sinceDay on, ordered by day, org, repo, tool, client.
 	Usage(ctx context.Context, sinceDay string) ([]usage.Bucket, error)
 }
 

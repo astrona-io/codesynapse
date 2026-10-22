@@ -17,7 +17,12 @@ import (
 // handleMemory lists a repository's agent memory for review in the UI.
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit")) //nolint:errcheck // bad values fall back to the default
-	g, err := s.st.SearchMemory(r.Context(), r.PathValue("repo"), r.URL.Query().Get("q"), store.ClampLimit(limit, 100), r.URL.Query().Get("history") == "true")
+	ns, err := s.memNamespace(r, r.PathValue("repo"))
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	g, err := s.st.SearchMemory(r.Context(), ns, r.URL.Query().Get("q"), store.ClampLimit(limit, 100), r.URL.Query().Get("history") == "true")
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -29,6 +34,11 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 // (?entity=id). IDs go in the query because entity IDs may contain slashes.
 func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 	repo, q := r.PathValue("repo"), r.URL.Query()
+	repo, nsErr := s.memNamespace(r, repo)
+	if nsErr != nil {
+		s.accountError(w, nsErr)
+		return
+	}
 	var err error
 	switch {
 	case q.Get("fact") != "":
@@ -71,7 +81,12 @@ func (s *Server) handleOffload(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	job, err := s.offload.Submit(repo, req.Source, req.Turns)
+	ns, err := s.memNamespace(r, repo)
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	job, err := s.offload.Submit(repo, ns, req.Source, req.Turns)
 	switch {
 	case errors.Is(err, offload.ErrNoLocalModel):
 		s.problem(w, http.StatusConflict, err)
@@ -112,7 +127,12 @@ func (s *Server) handleRecall(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, errors.New("query: at most 2000 characters"))
 		return
 	}
-	res, err := s.recall.Recall(r.Context(), r.PathValue("repo"), q)
+	ns, err := s.memNamespace(r, r.PathValue("repo"))
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	res, err := s.recall.Recall(r.Context(), ns, q)
 	if err != nil {
 		s.problem(w, 500, err)
 		return

@@ -53,6 +53,25 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	return &Store{db: pool}, nil
 }
 
+// OpenWait retries Open for about a minute, since PostgreSQL may still be
+// starting next to us; onRetry hears about each failed attempt.
+func OpenWait(ctx context.Context, url string, onRetry func(attempt int, err error)) (*Store, error) {
+	var err error
+	for attempt := range 30 {
+		var st *Store
+		if st, err = Open(ctx, url); err == nil {
+			return st, nil
+		}
+		onRetry(attempt+1, err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+	return nil, err
+}
+
 // Close releases the pool.
 func (s *Store) Close() { s.db.Close() }
 

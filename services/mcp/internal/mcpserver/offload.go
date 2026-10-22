@@ -57,7 +57,11 @@ func (c *APIClient) post(ctx context.Context, path string, body any, want int, o
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if c.Token != "" {
+	// A call made with a personal key goes to the API with that key, so the
+	// API scopes it to the key's organisation; otherwise the service token.
+	if tok := callerToken(ctx); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	} else if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	hc := c.HTTP
@@ -155,7 +159,7 @@ func (h *handlers) recallContext(ctx context.Context, _ *mcp.CallToolRequest, in
 		out.Skipped = why
 		return nil, out, nil
 	}
-	g, err := h.memory.SearchMemory(ctx, repo, in.Query, 8, in.History)
+	g, err := h.memory.SearchMemory(ctx, memRepo(ctx, repo), in.Query, 8, in.History)
 	if err != nil {
 		return nil, out, err
 	}
@@ -170,7 +174,7 @@ func (h *handlers) recallContext(ctx context.Context, _ *mcp.CallToolRequest, in
 	if len(ids) == 0 {
 		return nil, out, nil
 	}
-	sub, err := h.memory.MemorySubgraph(ctx, repo, ids, max(in.Depth, 1), max(in.Limit, 40), in.History)
+	sub, err := h.memory.MemorySubgraph(ctx, memRepo(ctx, repo), ids, max(in.Depth, 1), max(in.Limit, 40), in.History)
 	out.Graph = sub
 	return nil, out, err
 }

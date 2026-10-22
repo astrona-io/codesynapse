@@ -112,6 +112,9 @@ services:
       CODESYNAPSE_NEO4J_URI: neo4j://neo4j:7687
       CODESYNAPSE_NEO4J_PASSWORD: ${NEO4J_PASSWORD}
       CODESYNAPSE_MCP_TOKEN: ${CODESYNAPSE_MCP_TOKEN:?set CODESYNAPSE_MCP_TOKEN in .env}
+      # Personal API keys (csk_...) scope every tool to the key's organisation.
+      # The API owns and migrates this database.
+      CODESYNAPSE_DATABASE_URL: postgres://codesynapse:${POSTGRES_PASSWORD}@postgres:5432/codesynapse?sslmode=disable
       # Agent memory tools (upsert_graph_triples, search_graph_nodes, query_subgraph); set false to turn them off.
       CODESYNAPSE_ALLOW_MEMORY: ${CODESYNAPSE_ALLOW_MEMORY:-true}
       # Daily usage counters (no arguments or results) for the Statistics page.
@@ -137,6 +140,8 @@ services:
       retries: 30
     depends_on:
       neo4j:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   web:
