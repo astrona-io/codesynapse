@@ -40,12 +40,19 @@ type Options struct {
 	// Reviews enables the review tools (submit_review and friends), which
 	// write to this store. Nil leaves the server strictly read-only.
 	Reviews store.ReviewStore
+	// Memory enables the agent-memory tools (upsert_graph_triples and
+	// friends), which write to this store. Nil leaves them out entirely.
+	Memory store.MemoryStore
 }
 
 // New builds an MCP server backed by r.
 func New(r store.Reader, version string, opts ...Options) *mcp.Server {
+	instructions := Instructions
+	if len(opts) > 0 && opts[0].Memory != nil {
+		instructions += MemoryInstructions
+	}
 	s := mcp.NewServer(&mcp.Implementation{Name: "codesynapse", Version: version}, &mcp.ServerOptions{
-		Instructions: Instructions,
+		Instructions: instructions,
 	})
 	h := &handlers{svc: query.Service{R: r}}
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true}
@@ -64,6 +71,10 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 		registerReviewPrompt(s)
 		registerAgentTaskPrompts(s)
 	}
+	if len(opts) > 0 && opts[0].Memory != nil {
+		registerMemoryTools(s, h, opts[0].Memory)
+		registerMemoryPrompt(s)
+	}
 	mcp.AddTool(s, add("file_outline", "Symbols and doc sections in a file with line ranges and signatures. Use before reading the file."), h.fileOutline)
 	mcp.AddTool(s, add("hotspots", "Functions ranked by complexity x file churn: where defects and review effort concentrate."), h.hotspots)
 	mcp.AddTool(s, add("security_symbols", "Functions that call security-sensitive APIs (exec, sql, crypto, http, filesystem, ...), optionally filtered by tag."), h.securitySymbols)
@@ -76,6 +87,7 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 type handlers struct {
 	svc     query.Service
 	reviews store.ReviewStore
+	memory  store.MemoryStore
 }
 
 // repo resolves an optional repo argument: empty means "the only repo".

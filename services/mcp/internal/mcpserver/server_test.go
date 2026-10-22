@@ -12,6 +12,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
 
 	"github.com/parisnakitakejser/codesynapse/internal/license"
+	agentmem "github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
@@ -364,4 +365,68 @@ func TestLicenseReport(t *testing.T) {
 	require.Len(t, got.Issues, 1)
 	assert.Equal(t, got.Issues[0].Name, "example.com/gpl")
 	assert.True(t, strings.Contains(got.Issues[0].Verdict.Reason, "strong copyleft"))
+}
+
+func connectMemory(t *testing.T) *mcp.ClientSession {
+	t.Helper()
+	ctx := context.Background()
+	s := memory.New()
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+	ct, st := mcp.NewInMemoryTransports()
+	_, err := New(s, "test", Options{Memory: s}).Connect(ctx, st, nil)
+	require.NoError(t, err)
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test-client"}, nil).Connect(ctx, ct, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cs.Close() })
+	return cs
+}
+
+func TestMemoryToolsOptIn(t *testing.T) {
+	names := func(cs *mcp.ClientSession) map[string]*mcp.Tool {
+		tools, err := cs.ListTools(context.Background(), nil)
+		require.NoError(t, err)
+		out := map[string]*mcp.Tool{}
+		for _, tool := range tools.Tools {
+			out[tool.Name] = tool
+		}
+		return out
+	}
+	_, on := names(connect(t))["upsert_graph_triples"]
+	assert.False(t, on, "without Options.Memory (--allow-memory=false) the tools are absent")
+
+	tools := names(connectMemory(t))
+	require.NotNil(t, tools["upsert_graph_triples"])
+	assert.False(t, tools["upsert_graph_triples"].Annotations.ReadOnlyHint)
+	assert.True(t, tools["search_graph_nodes"].Annotations.ReadOnlyHint)
+	assert.True(t, tools["query_subgraph"].Annotations.ReadOnlyHint)
+}
+
+func TestMemoryRoundTrip(t *testing.T) {
+	cs := connectMemory(t)
+	var up struct {
+		Facts int `json:"facts"`
+	}
+	res := call(t, cs, "upsert_graph_triples", map[string]any{"triples": []map[string]any{
+		{"subject": "Payments service", "subject_type": "Service", "predicate": "owned by", "object": "Team Blue", "object_type": "Team"},
+		{"subject": "Team Blue", "predicate": "PREFERS", "object": "Small PRs"},
+	}}, &up)
+	require.False(t, res.IsError)
+	assert.Equal(t, up.Facts, 2)
+
+	var g agentmem.Graph
+	res = call(t, cs, "search_graph_nodes", map[string]any{"query": "payments"}, &g)
+	require.False(t, res.IsError)
+	assert.Equal(t, g.Notice, agentmem.Notice)
+	require.Len(t, g.Facts, 1)
+	assert.Equal(t, g.Facts[0].Predicate, "OWNED_BY")
+	assert.Equal(t, g.Facts[0].Source, "test-client", "provenance is the MCP client")
+
+	res = call(t, cs, "query_subgraph", map[string]any{"entities": []string{"payments service"}, "depth": 2}, &g)
+	require.False(t, res.IsError)
+	assert.Len(t, g.Facts, 2, "depth 2 reaches Team Blue's preference")
+
+	res = call(t, cs, "upsert_graph_triples", map[string]any{"repo": "not-indexed", "triples": []map[string]any{{"subject": "a", "predicate": "P", "object": "b"}}}, nil)
+	assert.True(t, res.IsError, "memory is only written for indexed repositories")
+	res = call(t, cs, "upsert_graph_triples", map[string]any{"triples": []map[string]any{{"subject": "a", "predicate": "MATCH (n) DETACH DELETE n", "object": "b"}}}, nil)
+	assert.True(t, res.IsError, "predicates are validated")
 }

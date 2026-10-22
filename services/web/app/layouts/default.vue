@@ -45,6 +45,7 @@ const repoGroups = computed(() => {
     { label: 'Change', links: [
       { to: `${base}/reviews`, label: 'Reviews', hint: 'Code reviews submitted by agents' },
       { to: `${base}/review`, label: 'Impact of a change', hint: 'Impact and risk of a diff' },
+      { to: `${base}/memory`, label: 'Agent memory', hint: 'Facts agents saved for later sessions' },
     ] },
   ]
 })
