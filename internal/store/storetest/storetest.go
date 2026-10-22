@@ -409,6 +409,38 @@ func Run(t *testing.T, s store.Store) {
 		}
 	})
 
+	t.Run("memory per organisation", func(t *testing.T) {
+		a, b := memory.Namespace("org-a", Repo), memory.Namespace("org-b", Repo)
+		t.Cleanup(func() {
+			for _, ns := range []string{a, b} {
+				_ = s.DeleteMemoryEntity(ctx, ns, memory.EntityID(ns, "payments"))
+				_ = s.DeleteMemoryEntity(ctx, ns, memory.EntityID(ns, "team blue"))
+			}
+		})
+		batch, err := memory.Prepare(a, []memory.Triple{{Subject: "Payments", Predicate: "OWNED_BY", Object: "Team Blue"}}, "agent",
+			time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC))
+		require.NoError(t, err)
+		require.NoError(t, s.UpsertMemory(ctx, batch))
+
+		g, err := s.SearchMemory(ctx, a, "payments", 10, false)
+		require.NoError(t, err)
+		require.Len(t, g.Facts, 1)
+		factID := g.Facts[0].ID
+		g, err = s.SearchMemory(ctx, b, "payments", 10, false)
+		require.NoError(t, err)
+		assert.Len(t, g.Entities, 0, "another organisation on the same graph sees none of it")
+		sub, err := s.MemorySubgraph(ctx, b, []string{memory.EntityID(a, "payments")}, 2, 10, true)
+		require.NoError(t, err)
+		assert.Len(t, sub.Facts, 0, "naming another namespace's entity reaches nothing")
+		assert.ErrorIs(t, s.DeleteMemoryEntity(ctx, b, memory.EntityID(a, "payments")), store.ErrNotFound)
+		assert.ErrorIs(t, s.DeleteMemoryFact(ctx, b, factID), store.ErrNotFound)
+
+		require.NoError(t, s.SetMemoryEmbeddings(ctx, "m-org", map[string][]float32{memory.EntityID(a, "payments"): {1, 0}}))
+		near, err := s.MemoryNearest(ctx, b, "m-org", []float32{1, 0}, 5)
+		require.NoError(t, err)
+		assert.Len(t, near, 0, "vectors stay within their organisation")
+	})
+
 	t.Run("memory stats", func(t *testing.T) {
 		t.Cleanup(func() {
 			for _, name := range []string{"Team", "api"} {

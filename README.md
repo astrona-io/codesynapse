@@ -1,6 +1,6 @@
 # CodeSynapse
 
-A code graph for security reviews, code quality and AI coding assistants, backed by Neo4j.
+A code graph for security reviews, code quality and AI coding assistants, backed by Neo4j or Apache HugeGraph (with Milvus for vector search).
 
 CodeSynapse indexes a repository into one graph: Go code (type-checked, so calls and interface dispatch are exact), Python, JavaScript, TypeScript and Vue, Markdown docs, YAML (Kubernetes, compose, CI, Helm values), Go templates and Helm charts, git history, and Go/npm/PyPI dependencies with their known CVEs. Agents query it over MCP and get answers like "here is `ReplaceRepo`: signature, location, 3 callers, 2 tests that reach it, the doc section that describes it" in a few hundred tokens, instead of opening five files. On this repository the context an agent needs per question is reduced by a median 92% (measured by `codesynapse stats`).
 
@@ -259,6 +259,20 @@ See `AGENTS.md` for conventions and security rules and `docs/PLAN.md` for archit
 
 Indexing untrusted code is the normal case, so: `go list` runs without cgo, toolchain downloads or network; git runs with hooks, fsmonitor and diff drivers disabled, and clones only over HTTPS to public hosts; no source bodies or YAML values are stored and summaries are redacted for secrets; services require bearer tokens off loopback; MCP tools cannot change code or the graph (only the review store). Details in `AGENTS.md`.
 
+## Graph backend: Neo4j or HugeGraph + Milvus
+
+Neo4j is the default. To run on [Apache HugeGraph](https://hugegraph.apache.org/) with [Milvus](https://milvus.io/) for agent-memory vectors instead:
+
+```sh
+just init                                # adds HUGEGRAPH_PASSWORD to .env
+# in .env: CODESYNAPSE_GRAPH_BACKEND=hugegraph and COMPOSE_PROFILES=hugegraph
+just up                                  # then re-index your repositories
+```
+
+Neo4j still starts in this mode (the services depend on it) but holds nothing; removing it from the default stack comes once HugeGraph has run on real installs for a while.
+
+Both are Apache-2.0, scale out, and keep each organisation's memory and vectors apart in the data itself (tenant partitions in Milvus, `tenant_id` on every memory vertex). HugeGraph runs Groovy scripts, so it always has a password and is never published to the host. Graphs are not migrated between backends: switching means indexing again, which is the same `just up` plus a sync. `just test-hugegraph` runs the store contract and a parity check against the in-memory reference on throwaway containers.
+
 ## Accounts, organisations and audit log
 
 With PostgreSQL configured (`CODESYNAPSE_DATABASE_URL`; the compose stack does this), CodeSynapse has user accounts, organisations with roles (owner, admin, member, viewer) and personal API keys (`csk_…`) for agents and the CLI. An agent connected with a key (`CODESYNAPSE_MCP_TOKEN=csk_… just mcp`) sees only its organisation's repositories and keeps its memory, reviews and statistics separate from other organisations. The first account becomes the platform admin; set `CODESYNAPSE_SIGNUP_OPEN=true` to let others sign up. Every change and security event goes to a tamper-evident audit log (hash chain, `GET /api/v1/admin/audit/verify`), exportable as CSV or JSON Lines and also written to the logs for your SIEM, which is what NIS2-regulated organisations need. The direction and remaining phases (organisation-scoped data, the new web app, admin area, Kubernetes production setup, single sign-on) are in [docs/SAAS.md](docs/SAAS.md).
@@ -269,4 +283,4 @@ Upgrading an existing install: run `just init` (adds `POSTGRES_PASSWORD` to `.en
 
 Copyright 2026 Astrona.io. Licensed under the [Apache License, Version 2.0](LICENSE); see [NOTICE](NOTICE) for attributions.
 
-All Go and production npm dependencies use permissive licences (Apache-2.0, MIT, BSD, ISC). Neo4j Community Edition, which the compose stack and Kubernetes manifests pull as a separate image, is licensed under GPL-3.0 and is not part of this distribution.
+All Go and production npm dependencies use permissive licences (Apache-2.0, MIT, BSD, ISC). Neo4j Community Edition, which the compose stack and Kubernetes manifests pull as a separate image, is licensed under GPL-3.0 and is not part of this distribution; Apache HugeGraph and Milvus, the alternative backend, are Apache-2.0. Both are spoken to over HTTP with the Go standard library, so neither adds Go dependencies.

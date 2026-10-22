@@ -73,7 +73,8 @@ Edges: `CONTAINS`, `DEFINES`, `HAS_METHOD`, `CALLS` (with `count`), `DISPATCHES_
 
 ## Decisions
 
-- **Neo4j as the backend**, with an in-memory twin behind the same interface. The contract test (`storetest.Run`) keeps them identical, which lets everything except the Cypher itself be tested without a database.
+- **Pluggable graph backend** (`CODESYNAPSE_GRAPH_BACKEND`): Neo4j (default) or Apache HugeGraph with Milvus for memory vectors, plus an in-memory twin. HugeGraph and Milvus are Apache-2.0 (Neo4j Community is GPL-3.0), scale out (HugeGraph on distributed storage, Milvus with tenant partitions), and keep tenant isolation in the data itself. Both are spoken over HTTP with the standard library: the Milvus Go SDK pulls in ~470 packages and a cgo CPU probe that crashes `-race` tests on macOS. HugeGraph specifics: hashed vertex IDs (128-byte cap), size-bounded write batches (Gremlin's 64 KB request default), read-before-write scripts (no index lookups after uncommitted writes). Statistics rules live once in `store.StatsBuilder`; HugeGraph aggregates groups server-side and feeds them through it.
+- **Neo4j as the default backend**, with an in-memory twin behind the same interface. The contract test (`storetest.Run`) keeps them identical, which lets everything except the Cypher itself be tested without a database.
 - **No raw Cypher over MCP.** Read transactions still permit `LOAD CSV` and procedure calls. A curated tool set is safer and cheaper for agents anyway.
 - **No LLM calls inside CodeSynapse.** Outputs are deterministic context; the agent using them is the LLM. This keeps keys and code out of third-party APIs.
 - **Short names in answers, full IDs for lookups.** Names drop import-path prefixes (`store.(*Store).Get`); the ID is there when the agent needs to be exact.

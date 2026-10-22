@@ -20,6 +20,7 @@ import (
 
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/internal/store/nodeprops"
 )
 
 const (
@@ -131,7 +132,7 @@ func (s *Store) ReplaceRepo(ctx context.Context, repo string, g *model.Graph) er
 		if !n.Kind.Valid() {
 			return fmt.Errorf("node %s has invalid kind %q", n.ID, n.Kind)
 		}
-		byKind[n.Kind] = append(byKind[n.Kind], map[string]any{"id": n.ID, "props": toProps(n)})
+		byKind[n.Kind] = append(byKind[n.Kind], map[string]any{"id": n.ID, "props": nodeprops.To(n)})
 	}
 	for _, kind := range model.AllNodeKinds {
 		// kind comes from the model allowlist, so interpolating it as a label is safe.
@@ -531,7 +532,7 @@ func nodeFrom(r *neo4j.Record, key string) (model.Node, error) {
 	if !ok {
 		return model.Node{}, fmt.Errorf("%q is %T, not a node", key, v)
 	}
-	return fromProps(dn.Props), nil
+	return nodeprops.From(dn.Props), nil
 }
 
 func str(r *neo4j.Record, key string) string {

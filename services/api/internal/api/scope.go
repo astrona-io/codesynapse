@@ -9,6 +9,7 @@ import (
 
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
+	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 )
 
@@ -347,7 +348,7 @@ func (s *Server) memNamespace(r *http.Request, graph string) (string, error) {
 	if err != nil || org == "" {
 		return graph, err
 	}
-	return org + "|" + graph, nil
+	return memory.Namespace(org, graph), nil
 }
 
 // seesReview applies the review rule: an organisation sees its own reviews
