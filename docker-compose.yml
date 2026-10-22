@@ -88,8 +88,8 @@ services:
       CODESYNAPSE_NEO4J_URI: neo4j://neo4j:7687
       CODESYNAPSE_NEO4J_PASSWORD: ${NEO4J_PASSWORD}
       CODESYNAPSE_MCP_TOKEN: ${CODESYNAPSE_MCP_TOKEN:?set CODESYNAPSE_MCP_TOKEN in .env}
-      # Agent memory tools (upsert_graph_triples, search_graph_nodes, query_subgraph); off by default.
-      CODESYNAPSE_ALLOW_MEMORY: ${CODESYNAPSE_ALLOW_MEMORY:-false}
+      # Agent memory tools (upsert_graph_triples, search_graph_nodes, query_subgraph); set false to turn them off.
+      CODESYNAPSE_ALLOW_MEMORY: ${CODESYNAPSE_ALLOW_MEMORY:-true}
     volumes:
       # Same paths as in the api container, so impact-by-git-refs can find checkouts.
       - ${SOURCES_DIR:-./sources}:/sources:ro

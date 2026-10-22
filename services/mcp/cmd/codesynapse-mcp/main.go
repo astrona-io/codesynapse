@@ -47,7 +47,7 @@ func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.transport, "transport", app.Getenv("CODESYNAPSE_MCP_TRANSPORT", "stdio"), "stdio or http")
 	f.StringVar(&o.addr, "addr", app.Getenv("CODESYNAPSE_MCP_ADDR", "127.0.0.1:8090"), "Listen address for the http transport")
 	f.StringVar(&o.offline, "offline", "", "Serve an in-memory graph of this directory instead of Neo4j")
-	f.BoolVar(&o.memory, "allow-memory", app.Getenv("CODESYNAPSE_ALLOW_MEMORY", "") == "true", "Enable the agent-memory tools upsert_graph_triples, search_graph_nodes and query_subgraph (writes only to the memory store)")
+	f.BoolVar(&o.memory, "allow-memory", app.Getenv("CODESYNAPSE_ALLOW_MEMORY", "true") == "true", "Enable the agent-memory tools upsert_graph_triples, search_graph_nodes and query_subgraph (writes only to the memory store)")
 	f.BoolVar(&o.reviews, "allow-reviews", app.Getenv("CODESYNAPSE_MCP_REVIEWS", "true") == "true", "Enable submit_review/update_review_comment (writes only to the review store)")
 	return nil
 }

@@ -15,8 +15,8 @@ data:
   CODESYNAPSE_ALLOW_PRIVATE_GIT: "false"
   # Push fix branches for accepted review comments and open draft PRs.
   CODESYNAPSE_ALLOW_PUSH: "false"
-  # Agent memory MCP tools (upsert_graph_triples, ...): write only to the memory store.
-  CODESYNAPSE_ALLOW_MEMORY: "false"
+  # Agent memory MCP tools (upsert_graph_triples, ...): write only to the memory store. "false" turns them off.
+  CODESYNAPSE_ALLOW_MEMORY: "true"
   CODESYNAPSE_GIT_TOKEN_HOST: github.com
   CODESYNAPSE_GIT_AUTHOR_NAME: CodeSynapse
   CODESYNAPSE_GIT_AUTHOR_EMAIL: codesynapse@localhost

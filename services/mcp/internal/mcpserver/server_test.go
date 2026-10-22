@@ -392,7 +392,7 @@ func TestMemoryToolsOptIn(t *testing.T) {
 		return out
 	}
 	_, on := names(connect(t))["upsert_graph_triples"]
-	assert.False(t, on, "memory tools are off unless enabled")
+	assert.False(t, on, "without Options.Memory (--allow-memory=false) the tools are absent")
 
 	tools := names(connectMemory(t))
 	require.NotNil(t, tools["upsert_graph_triples"])

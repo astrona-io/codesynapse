@@ -81,7 +81,7 @@ const factText = (f: MemoryFact) => `${label(f.subject)} ${f.predicate} ${label(
         <template v-if="applied"><strong>No match</strong>Nothing saved matches “{{ applied }}”.</template>
         <template v-else>
           <strong>Nothing saved yet</strong>
-          Agents save facts with the <code>upsert_graph_triples</code> MCP tool. It is off by default: set <code>CODESYNAPSE_ALLOW_MEMORY=true</code> for the MCP service (or run it with <code>--allow-memory</code>), then use the <code>context-offload</code> prompt.
+          Agents save facts with the <code>upsert_graph_triples</code> MCP tool. It is on by default; ask your agent to use the <code>context-offload</code> prompt. To turn it off, set <code>CODESYNAPSE_ALLOW_MEMORY=false</code> for the MCP service (or run it with <code>--allow-memory=false</code>).
         </template>
       </div>
       <p class="muted small">{{ g.notice }}</p>
