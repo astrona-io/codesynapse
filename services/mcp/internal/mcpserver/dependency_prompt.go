@@ -70,7 +70,7 @@ Provide a concise table:
 For proposed replacements, explain what functionality is retained, which packages and dependency paths are removed, whether license obligations or vulnerability exposure actually change, and what validation passed and what remains uncertain. Clearly distinguish verified facts, proposed changes, and unresolved questions. Do not claim that a project is vulnerability-free or license-compliant solely because an automated scan reports no findings.
 
 ## Start with what CodeSynapse already knows
-- security_report: vulnerable dependencies with advisory, fixed version and reachability. For Go the reachability is called (a vulnerable symbol is called), imported or required; for npm and PyPI lockfiles every finding is required (present in the lockfile), so reachability still needs your own check.
+- security_report: vulnerable dependencies with advisory, fixed version and reachability. For Go the reachability is called (a vulnerable symbol is called), imported or required; for npm and PyPI it is imported when a source file imports the package and required otherwise, because their advisories rarely name symbols; treat neither as proof that the vulnerable code runs.
 - license_report: licences of the dependencies against the repository's own, with the reason and source of each verdict (verdict: "conflict" first).
 - unused_code: go.mod requirements nothing imports, and the CVEs removing them eliminates.
 - search, get_symbol_context and get_call_graph: where a package is imported and which symbols use it (the Usage column). get_config_entries reads CI, Dockerfile-adjacent YAML and Helm structure.
