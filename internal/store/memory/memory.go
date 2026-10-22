@@ -20,6 +20,7 @@ type Store struct {
 	mu      sync.RWMutex
 	repos   map[string]*repoGraph
 	reviews map[string]reviews.Review
+	mem     map[string]*memRepo
 }
 
 type repoGraph struct {
@@ -32,7 +33,7 @@ var _ store.Store = (*Store)(nil)
 
 // New returns an empty store.
 func New() *Store {
-	return &Store{repos: map[string]*repoGraph{}, reviews: map[string]reviews.Review{}}
+	return &Store{repos: map[string]*repoGraph{}, reviews: map[string]reviews.Review{}, mem: map[string]*memRepo{}}
 }
 
 // EnsureSchema is a no-op.

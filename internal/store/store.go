@@ -7,12 +7,17 @@ import (
 	"context"
 	"errors"
 
+	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 )
 
 // ErrNotFound is returned when a requested node or repository does not exist.
 var ErrNotFound = errors.New("not found")
+
+// ErrMemoryFull is returned when an upsert would take a repository's agent
+// memory past memory.MaxFactsPerRepo or memory.MaxEntitiesPerRepo.
+var ErrMemoryFull = errors.New("agent memory for this repository is full; delete stale facts first")
 
 // Limits shared by all implementations so a single query cannot return an
 // unbounded result to an API client or an agent.
@@ -127,11 +132,38 @@ type ReviewStore interface {
 	DeleteReview(ctx context.Context, id string) error
 }
 
+// MemoryStore persists agent memory (package memory): entities and facts per
+// repository, apart from repository graphs, which ReplaceRepo and DeleteRepo
+// never touch.
+//
+// Search and subgraph results are ordered deterministically so the memory and
+// Neo4j stores answer identically: entities by match score (query words found
+// in the name, or equal to the type) then most recently updated then name;
+// facts by most recently updated then ID.
+type MemoryStore interface {
+	// UpsertMemory merges b's entities and facts (saving a fact again bumps
+	// its confirmations). For each fact in b.Replace, other facts with the
+	// same subject and predicate are deleted first. All or nothing.
+	UpsertMemory(ctx context.Context, b memory.Batch) error
+	// SearchMemory returns up to limit entities of repo matching any word of
+	// query (all entities, most recent first, when query is empty) and the
+	// facts touching them, with those facts' other entities.
+	SearchMemory(ctx context.Context, repo, query string, limit int) (memory.Graph, error)
+	// MemorySubgraph returns facts with an endpoint within depth-1 hops of
+	// the entity IDs (depth 1 = their own facts, at most 2), up to limit.
+	MemorySubgraph(ctx context.Context, repo string, ids []string, depth, limit int) (memory.Graph, error)
+	// DeleteMemoryFact removes one fact; DeleteMemoryEntity removes an
+	// entity and its facts. Both return ErrNotFound for unknown IDs.
+	DeleteMemoryFact(ctx context.Context, repo, id string) error
+	DeleteMemoryEntity(ctx context.Context, repo, id string) error
+}
+
 // Store is a full read/write backend.
 type Store interface {
 	Reader
 	Writer
 	ReviewStore
+	MemoryStore
 	Close(ctx context.Context) error
 }
 

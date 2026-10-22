@@ -62,6 +62,7 @@ Every node has the label `Node` plus its kind, and the properties `id`, `repo`, 
 | Finding | rule, severity, cwe, file, line, summary (never the secret) |
 | Module | path, version, indirect, ecosystem, dev, license (SPDX), license_source |
 | Vulnerability | id, aliases (CVE/GHSA), severity, cwe, version, fixed_version, reachability, url |
+| MemoryEntity (not `:Node`) | id (`repo\|mem\|name`), repo, name, type, created_at, updated_at; joined by `:FACT` relationships with id, repo, predicate, source, confirmations, created_at, updated_at |
 
 Edges: `CONTAINS`, `DEFINES`, `HAS_METHOD`, `CALLS` (with `count`), `DISPATCHES_TO`, `IMPLEMENTS`, `IMPORTS`, `MENTIONS`, `MODIFIES` (with `count` = lines changed), `AUTHORED`, `HAS_FINDING`, `DEPENDS_ON`, `AFFECTS`, `INCLUDES`, `USES_VALUE`.
 
@@ -118,6 +119,10 @@ Running it on CodeSynapse itself found and removed three dead helpers.
 ## Dependency licences
 
 `internal/license` checks every dependency's licence against the repository's own. The project licence comes from licence files at the root (text detection, SPDX headers), then `package.json`, then `pyproject.toml`. Dependency licences come from disk first: `package-lock.json` entries, `node_modules/*/package.json`, `vendor/` and the Go module cache, and installed packages' `METADATA` in `site-packages`. What is still unknown is looked up on deps.dev when `CODESYNAPSE_LICENSE_LOOKUP` / `--license-lookup` is on (ecosystem, name and version only). Licences are classified (public domain, permissive, weak/strong/network copyleft, restricted, unknown; SPDX `OR` takes the least restrictive choice, `AND` the most) and compared with the project's under a distribution model: strong or network copyleft and non-open-source licences conflict with permissive or proprietary projects, weak copyleft and unknown licences need a review, GPL-2.0-only rejects Apache-2.0 and GPL-3.0. Development dependencies turn conflicts into reviews. Every verdict carries its reason and the licence's source. The report is computed at ingest and stored on the Repository node, so it covers every dependency (not just `store.MaxLimit`); it is served by `GET /api/v1/repos/{repo}/licenses`, the **Licences** page, the `license_report` MCP tool and `codesynapse licenses` (`--fail-on conflict|review` for CI). Guidance, not legal advice.
+
+## Agent memory (opt-in)
+
+Agents lose detail when their context is compacted and start each session from nothing. With `--allow-memory`, the MCP server stores durable facts per repository as `(:MemoryEntity)-[:FACT]->(:MemoryEntity)` (`internal/memory`, `store.MemoryStore`), apart from the code graph so re-indexing keeps them. Entities merge by case-folded name; facts by (subject, predicate, object), where saving again bumps `confirmations`; `replace` makes a predicate single-valued. The predicate is a relationship property validated as `UPPER_SNAKE_CASE`, so the relationship type stays fixed and agent text only reaches Cypher as parameters. Names pass `redact`, are capped at 120 characters, and a repository holds at most 10,000 facts and 5,000 entities. Every fact records the MCP client that saved it; reads carry a notice that facts are data, not instructions (they may come from agents that read untrusted code). Tools: `upsert_graph_triples`, `search_graph_nodes`, `query_subgraph`, prompt `context-offload`; the **Agent memory** page lists and deletes facts (`GET`/`DELETE /api/v1/repos/{repo}/memory`). Context pruning itself stays with the client.
 
 ## Fix guidance
 

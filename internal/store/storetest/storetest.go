@@ -11,6 +11,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
 
+	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
@@ -220,6 +221,74 @@ func Run(t *testing.T, s store.Store) {
 		require.NoError(t, s.DeleteReview(ctx, r.ID))
 		_, err = s.GetReview(ctx, r.ID)
 		assert.True(t, errors.Is(err, store.ErrNotFound))
+	})
+
+	t.Run("agent memory", func(t *testing.T) {
+		t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+		// The integration run uses a live database: leave no memory behind.
+		t.Cleanup(func() {
+			for _, repo := range []string{Repo, "other-repo"} {
+				g, err := s.SearchMemory(ctx, repo, "", store.MaxLimit)
+				if err != nil {
+					continue
+				}
+				for _, e := range g.Entities {
+					_ = s.DeleteMemoryEntity(ctx, repo, e.ID)
+				}
+			}
+		})
+		save := func(at time.Time, triples ...memory.Triple) {
+			t.Helper()
+			b, err := memory.Prepare(Repo, triples, "test-agent", at)
+			require.NoError(t, err)
+			require.NoError(t, s.UpsertMemory(ctx, b))
+		}
+		save(t0,
+			memory.Triple{Subject: "User", SubjectType: "Person", Predicate: "prefers", Object: "Dark mode", ObjectType: "Preference"},
+			memory.Triple{Subject: "Project Alpha", SubjectType: "Project", Predicate: "uses framework", Object: "FastAPI", ObjectType: "Framework"},
+		)
+		save(t0.Add(time.Hour), memory.Triple{Subject: "project alpha", Predicate: "USES_FRAMEWORK", Object: "fastapi"}) // same fact, other case
+		save(t0.Add(2*time.Hour), memory.Triple{Subject: "User", Predicate: "PREFERS", Object: "Light mode", Replace: true})
+		other, err := memory.Prepare("other-repo", []memory.Triple{{Subject: "User", Predicate: "PREFERS", Object: "Vim"}}, "x", t0)
+		require.NoError(t, err)
+		require.NoError(t, s.UpsertMemory(ctx, other))
+
+		g, err := s.SearchMemory(ctx, Repo, "project alpha", 10)
+		require.NoError(t, err)
+		assert.Equal(t, g.Notice, memory.Notice)
+		require.Len(t, g.Entities, 2)
+		assert.Equal(t, g.Entities[0].Name, "project alpha", "matched first; the latest spelling wins")
+		assert.Equal(t, g.Entities[0].Type, "Project", "a later save without a type keeps it")
+		assert.Equal(t, g.Entities[1].Name, "fastapi", "then the other end of its facts")
+		require.Len(t, g.Facts, 1)
+		assert.Equal(t, g.Facts[0].Predicate, "USES_FRAMEWORK")
+		assert.Equal(t, g.Facts[0].Confirmations, 2)
+		assert.Equal(t, g.Facts[0].CreatedAt, "2026-01-01T00:00:00Z")
+		assert.Equal(t, g.Facts[0].Source, "test-agent")
+
+		g, err = s.SearchMemory(ctx, Repo, "user", 10)
+		require.NoError(t, err)
+		require.Len(t, g.Facts, 1, "replace removed Dark mode; other-repo facts are separate")
+		assert.Equal(t, g.Facts[0].Object, memory.EntityID(Repo, "Light mode"))
+
+		all, err := s.SearchMemory(ctx, Repo, "", 2)
+		require.NoError(t, err)
+		require.True(t, len(all.Entities) >= 2)
+		assert.Equal(t, all.Entities[0].Name, "Light mode", "empty query: most recently updated first")
+
+		require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
+		sub, err := s.MemorySubgraph(ctx, Repo, []string{memory.EntityID(Repo, "fastapi")}, 1, 10)
+		require.NoError(t, err)
+		require.Len(t, sub.Facts, 1, "memory survives re-indexing")
+		assert.Len(t, sub.Entities, 2)
+
+		require.NoError(t, s.DeleteMemoryFact(ctx, Repo, sub.Facts[0].ID))
+		assert.True(t, errors.Is(s.DeleteMemoryFact(ctx, Repo, sub.Facts[0].ID), store.ErrNotFound))
+		require.NoError(t, s.DeleteMemoryEntity(ctx, Repo, memory.EntityID(Repo, "User")))
+		g, err = s.SearchMemory(ctx, Repo, "user light", 10)
+		require.NoError(t, err)
+		assert.Len(t, g.Facts, 0, "deleting an entity deletes its facts")
+		assert.True(t, errors.Is(s.DeleteMemoryEntity(ctx, "other-repo", memory.EntityID(Repo, "User")), store.ErrNotFound), "repositories are isolated")
 	})
 
 	t.Run("delete", func(t *testing.T) {

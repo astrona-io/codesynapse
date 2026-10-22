@@ -146,6 +146,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/repos/{repo}/security", s.handleSecurity)
 	m.HandleFunc("GET /api/v1/repos/{repo}/cleanup", s.handleCleanup)
 	m.HandleFunc("GET /api/v1/repos/{repo}/licenses", s.handleLicenses)
+	m.HandleFunc("GET /api/v1/repos/{repo}/memory", s.handleMemory)
+	m.HandleFunc("DELETE /api/v1/repos/{repo}/memory", s.handleDeleteMemory)
 	m.HandleFunc("GET /api/v1/repos/{repo}/search", s.handleSearch)
 	m.HandleFunc("GET /api/v1/repos/{repo}/symbol", s.handleSymbol)
 	m.HandleFunc("GET /api/v1/repos/{repo}/outline", s.handleOutline)

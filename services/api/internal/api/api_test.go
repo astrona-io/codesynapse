@@ -20,6 +20,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
 
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
+	agentmem "github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
@@ -147,6 +148,28 @@ func TestLicensesEndpoint(t *testing.T) {
 	require.Equal(t, get(t, ts, "/api/v1/repos/r/licenses", &got), 200)
 	assert.Equal(t, got.Project.License, "MIT")
 	assert.Equal(t, got.Conflict, 1)
+}
+
+func TestMemoryEndpoints(t *testing.T) {
+	ctx := context.Background()
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+	b, err := agentmem.Prepare(storetest.Repo, []agentmem.Triple{{Subject: "team/blue", Predicate: "OWNS", Object: "Payments"}}, "t", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, st.UpsertMemory(ctx, b))
+	ts := httptest.NewServer(New(ctx, Config{}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	t.Cleanup(ts.Close)
+
+	base := "/api/v1/repos/" + storetest.Repo + "/memory"
+	var g agentmem.Graph
+	require.Equal(t, get(t, ts, base+"?q=payments", &g), 200)
+	require.Len(t, g.Facts, 1)
+	assert.Equal(t, del(t, ts, base), 400)
+	assert.Equal(t, del(t, ts, base+"?fact=nope"), 404)
+	assert.Equal(t, del(t, ts, base+"?fact="+g.Facts[0].ID), 204)
+	assert.Equal(t, del(t, ts, base+"?entity="+url.QueryEscape(agentmem.EntityID(storetest.Repo, "team/blue"))), 204, "entity IDs may contain slashes")
+	require.Equal(t, get(t, ts, base, &g), 200)
+	assert.Equal(t, len(g.Entities), 1)
 }
 
 func TestMaskToken(t *testing.T) {

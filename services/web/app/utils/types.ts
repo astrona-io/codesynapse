@@ -165,3 +165,10 @@ export interface LicenseReport {
   by_license: { license: string; category: LicenseCategory; count: number }[]
   issues: LicenseEntry[]; truncated?: number; online: boolean
 }
+
+export interface MemoryEntity { id: string; repo: string; name: string; type: string; created_at: string; updated_at: string }
+export interface MemoryFact {
+  id: string; repo: string; subject: string; predicate: string; object: string
+  source: string; confirmations: number; created_at: string; updated_at: string
+}
+export interface MemoryGraph { notice: string; entities: MemoryEntity[]; facts: MemoryFact[] }
