@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -116,7 +117,10 @@ func remoteEnv(remote string, auth Auth) []string {
 	if auth.Token != "" && auth.Host != "" {
 		if u, err := url.Parse(remote); err == nil && strings.EqualFold(u.Hostname(), auth.Host) {
 			cred := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + auth.Token))
-			kv = append(kv, [2]string{fmt.Sprintf("http.https://%s/.extraHeader", auth.Host), "Authorization: Basic " + cred})
+			// Keyed by the remote's host and port: git matches http.<url>
+			// settings on both, so a hostname-only key never applied to a
+			// remote with a port.
+			kv = append(kv, [2]string{fmt.Sprintf("http.https://%s/.extraHeader", u.Host), "Authorization: Basic " + cred})
 		}
 	}
 	env := []string{fmt.Sprintf("GIT_CONFIG_COUNT=%d", len(kv))}
@@ -138,14 +142,38 @@ func runRemote(ctx context.Context, dir, remote string, auth Auth, args ...strin
 	cmd.Env = append([]string{
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0", "GIT_ASKPASS=/bin/false",
 		"HOME=/nonexistent", "PATH=" + safePath(),
-	}, remoteEnv(remote, auth)...)
+	}, append(remoteEnv(remote, auth), testEnv...)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
 		// stderr can echo the URL; it never contains the token (header only).
-		return nil, fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
+		msg := strings.TrimSpace(stderr.String())
+		if deniedRe.MatchString(msg) {
+			return nil, fmt.Errorf("git %s: %w: %s", args[0], ErrNoAccess, msg)
+		}
+		return nil, fmt.Errorf("git %s: %w: %s", args[0], err, msg)
 	}
 	return stdout.Bytes(), nil
+}
+
+// testEnv is set by this package's tests only (to trust a local test CA);
+// nothing outside the package can reach it.
+var testEnv []string
+
+// ErrNoAccess means the remote refused the credentials (or, as hosts do
+// for private repositories, claims it does not exist). Network failures
+// are not ErrNoAccess.
+var ErrNoAccess = errors.New("no access to the repository")
+
+// deniedRe matches git's messages for refused credentials and for private
+// repositories hosts hide behind "not found".
+var deniedRe = regexp.MustCompile(`(?i)authentication failed|could not read username|terminal prompts disabled|repository not found|requested url returned error: (401|403|404)|access denied|permission denied|not authorized`)
+
+// CanRead checks that auth (zero for anonymous) can read remote: one
+// ls-remote of HEAD. It returns ErrNoAccess when the host refuses.
+func CanRead(ctx context.Context, remote string, auth Auth) error {
+	_, err := runRemote(ctx, "", remote, auth, "ls-remote", "--", remote, "HEAD")
+	return err
 }
 
 // Clone makes a shallow clone of remote's branch (default branch when empty) into dir.

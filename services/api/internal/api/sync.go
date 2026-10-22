@@ -61,25 +61,56 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Organisations (not platform admins) add public repositories only
-	// until they have their own Git tokens: the installation's tokens must
-	// not clone what a member could not read. An indexed graph is shared.
+	// Organisations (not platform admins) never use the installation's
+	// tokens: a public repository is cloned without any, a private one
+	// with the organisation's own token after it proved access. An indexed
+	// graph is shared only for the same remote.
 	auth := s.authFor(remote)
 	if s.cfg.Accounts != nil && !scopeFrom(r.Context()).all {
-		if !publicRemote(r.Context(), remote, req.Branch) {
-			s.problem(w, http.StatusForbidden, errors.New("this repository is private or does not exist; private repositories need an organisation Git token, which an administrator sets up"))
+		m, err := scopeFrom(r.Context()).selected()
+		if err != nil {
+			s.problem(w, http.StatusBadRequest, err)
 			return
 		}
+		vis := accounts.Public
 		auth = gitx.Auth{}
-		if _, err := s.st.Node(r.Context(), model.NodeID(req.Name, model.KindRepository, req.Name)); err == nil {
-			if err := s.linkRepo(r, req.Name, remote, accounts.Public); err != nil {
+		if !publicRemote(r.Context(), remote) {
+			orgAuth, err := s.proveAccess(r.Context(), m.Org.ID, remote)
+			switch {
+			case errors.Is(err, accounts.ErrNotFound):
+				s.problem(w, http.StatusForbidden, errors.New("this repository is private or does not exist; add a Git token for "+hostOf(remote)+" in your organisation's settings"))
+				return
+			case errors.Is(err, accounts.ErrNoSecretKey):
+				s.accountError(w, err)
+				return
+			case errors.Is(err, gitx.ErrNoAccess):
+				s.problem(w, http.StatusForbidden, errors.New("your organisation's token for "+hostOf(remote)+" cannot read this repository"))
+				return
+			case err != nil:
+				s.problem(w, http.StatusBadGateway, err)
+				return
+			}
+			vis, auth = accounts.Private, orgAuth
+		}
+		if n, err := s.st.Node(r.Context(), model.NodeID(req.Name, model.KindRepository, req.Name)); err == nil {
+			// The name alone must not open a graph: an organisation could
+			// otherwise name a public URL after someone's private graph.
+			if n.URL == "" || !sameRemote(n.URL, remote) {
+				s.problem(w, http.StatusConflict, errors.New("the name "+req.Name+" is already used for another source; choose another name"))
+				return
+			}
+			if err := s.linkRepo(r, req.Name, remote, vis); err != nil {
 				s.problem(w, 400, err)
 				return
 			}
-			writeJSON(w, http.StatusOK, map[string]any{"repo": req.Name, "shared": true, "note": "already indexed: linked to your organisation"})
+			if vis == accounts.Private {
+				// Proved just now: restore a link that had lost access.
+				_ = s.cfg.Accounts.St.SetRepositoryAccess(r.Context(), m.Org.ID, req.Name, accounts.AccessOK, time.Now().UTC().Truncate(time.Microsecond)) //nolint:errcheck // linked above; a failed stamp only delays the restore to the next sync
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"repo": req.Name, "shared": true, "visibility": vis, "note": "already indexed: linked to your organisation"})
 			return
 		}
-		if err := s.linkRepo(r, req.Name, remote, accounts.Public); err != nil {
+		if err := s.linkRepo(r, req.Name, remote, vis); err != nil {
 			s.problem(w, 400, err)
 			return
 		}
@@ -267,7 +298,9 @@ func (s *Server) startSync(ctx context.Context, repo, branch string, onlyIfChang
 		if err != nil {
 			return Job{}, fmt.Errorf("%w: %w", errBadRequest, err)
 		}
-		root, auth := n.Root, s.authFor(remote)
+		// Organisations using it privately must still be able to read it.
+		s.verifyAccess(ctx, repo)
+		root, auth := n.Root, s.syncAuth(ctx, repo, remote)
 		if onlyIfChanged {
 			cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			head, err := gitx.RemoteHead(cctx, remote, branch, auth)
@@ -395,7 +428,7 @@ func (s *Server) handleBranches(w http.ResponseWriter, r *http.Request) {
 			s.problem(w, 400, err)
 			return
 		}
-		branches, err = gitx.RemoteBranches(r.Context(), remote, s.authFor(remote))
+		branches, err = gitx.RemoteBranches(r.Context(), remote, s.syncAuth(r.Context(), n.Repo, remote))
 		if err != nil {
 			s.problem(w, http.StatusBadGateway, err)
 			return

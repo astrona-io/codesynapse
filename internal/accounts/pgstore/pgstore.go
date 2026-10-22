@@ -4,6 +4,7 @@
 package pgstore
 
 import (
+	"cmp"
 	"context"
 	"embed"
 	"errors"
@@ -383,13 +384,64 @@ func (s *Store) TouchAPIKey(ctx context.Context, keyID string, at time.Time) err
 	return err
 }
 
-const repoCols = "org_id, graph, remote, visibility, added_by, added_at"
+const repoCols = "org_id, graph, remote, visibility, added_by, added_at, access, verified_at"
 
 // AddRepository implements accounts.Store.
 func (s *Store) AddRepository(ctx context.Context, r accounts.Repository) error {
-	_, err := s.db.Exec(ctx, "INSERT INTO repositories ("+repoCols+") VALUES ($1, $2, $3, $4, $5, $6)",
-		r.OrgID, r.Graph, r.Remote, r.Visibility, r.AddedBy, r.AddedAt)
+	_, err := s.db.Exec(ctx, "INSERT INTO repositories ("+repoCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+		r.OrgID, r.Graph, r.Remote, r.Visibility, r.AddedBy, r.AddedAt, cmp.Or(r.Access, accounts.AccessOK), r.VerifiedAt)
 	return mapErr(err, "repository")
+}
+
+// SetRepositoryAccess implements accounts.Store.
+func (s *Store) SetRepositoryAccess(ctx context.Context, orgID, graph, access string, at time.Time) error {
+	tag, err := s.db.Exec(ctx, "UPDATE repositories SET access = $3, verified_at = $4 WHERE org_id = $1 AND graph = $2", orgID, graph, access, at)
+	return affected(tag, err, "repository")
+}
+
+const tokenCols = "org_id, host, preview, key_id, sealed, created_by, updated_at" //nolint:gosec // column names, not a credential
+
+// PutGitToken implements accounts.Store.
+func (s *Store) PutGitToken(ctx context.Context, t accounts.GitToken) error {
+	_, err := s.db.Exec(ctx, "INSERT INTO org_git_tokens ("+tokenCols+`) VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (org_id, host) DO UPDATE SET preview = $3, key_id = $4, sealed = $5, created_by = $6, updated_at = $7`,
+		t.OrgID, t.Host, t.Preview, t.KeyID, t.Sealed, t.CreatedBy, t.UpdatedAt)
+	return mapErr(err, "git token")
+}
+
+func scanToken(r pgx.CollectableRow) (accounts.GitToken, error) {
+	var t accounts.GitToken
+	err := r.Scan(&t.OrgID, &t.Host, &t.Preview, &t.KeyID, &t.Sealed, &t.CreatedBy, &t.UpdatedAt)
+	t.UpdatedAt = t.UpdatedAt.UTC()
+	return t, err
+}
+
+// GitToken implements accounts.Store.
+func (s *Store) GitToken(ctx context.Context, orgID, host string) (accounts.GitToken, error) {
+	rows, err := s.db.Query(ctx, "SELECT "+tokenCols+" FROM org_git_tokens WHERE org_id = $1 AND host = $2", orgID, host)
+	if err != nil {
+		return accounts.GitToken{}, err
+	}
+	t, err := pgx.CollectExactlyOneRow(rows, scanToken)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return accounts.GitToken{}, fmt.Errorf("git token: %w", accounts.ErrNotFound)
+	}
+	return t, err
+}
+
+// GitTokens implements accounts.Store.
+func (s *Store) GitTokens(ctx context.Context, orgID string) ([]accounts.GitToken, error) {
+	rows, err := s.db.Query(ctx, "SELECT "+tokenCols+" FROM org_git_tokens WHERE org_id = $1 ORDER BY host", orgID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, scanToken)
+}
+
+// DeleteGitToken implements accounts.Store.
+func (s *Store) DeleteGitToken(ctx context.Context, orgID, host string) error {
+	tag, err := s.db.Exec(ctx, "DELETE FROM org_git_tokens WHERE org_id = $1 AND host = $2", orgID, host)
+	return affected(tag, err, "git token")
 }
 
 // RemoveRepository implements accounts.Store.
@@ -410,8 +462,12 @@ func (s *Store) repos(ctx context.Context, where string, arg string) ([]accounts
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (accounts.Repository, error) {
 		var x accounts.Repository
-		err := r.Scan(&x.OrgID, &x.Graph, &x.Remote, &x.Visibility, &x.AddedBy, &x.AddedAt)
+		err := r.Scan(&x.OrgID, &x.Graph, &x.Remote, &x.Visibility, &x.AddedBy, &x.AddedAt, &x.Access, &x.VerifiedAt)
 		x.AddedAt = x.AddedAt.UTC()
+		if x.VerifiedAt != nil {
+			v := x.VerifiedAt.UTC()
+			x.VerifiedAt = &v
+		}
 		return x, err
 	})
 }

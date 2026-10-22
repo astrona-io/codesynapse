@@ -34,6 +34,8 @@ type Service struct {
 	Now        func() time.Time
 	// Sink also receives every audit entry (structured logs).
 	Sink Sink
+	// Secrets seals organisation Git tokens; nil turns them off.
+	Secrets *Sealer
 
 	byEmail  *limiter
 	byClient *limiter

@@ -288,7 +288,9 @@ Both are Apache-2.0, scale out, and keep each organisation's memory and vectors 
 
 With PostgreSQL configured (`CODESYNAPSE_DATABASE_URL`; the compose stack does this), CodeSynapse has user accounts, organisations with roles (owner, admin, member, viewer) and personal API keys (`csk_…`) for agents and the CLI. An agent connected with a key (`CODESYNAPSE_MCP_TOKEN=csk_… just mcp`) sees only its organisation's repositories and keeps its memory, reviews and statistics separate from other organisations. The first account becomes the platform admin; set `CODESYNAPSE_SIGNUP_OPEN=true` to let others sign up. Every change and security event goes to a tamper-evident audit log (hash chain, `GET /api/v1/admin/audit/verify`), exportable as CSV or JSON Lines and also written to the logs for your SIEM, which is what NIS2-regulated organisations need. The direction and remaining phases (organisation-scoped data, the new web app, admin area, Kubernetes production setup, single sign-on) are in [docs/SAAS.md](docs/SAAS.md).
 
-Upgrading an existing install: run `just init` (adds `POSTGRES_PASSWORD` to `.env`), then `just up`.
+Private repositories: an organisation admin stores a Git token per host (`PUT /api/v1/accounts/orgs/{org}/git-tokens/github.com`; the settings page comes with the new web app). Tokens are encrypted with `SECRET_KEY` from `.env` (keep it: tokens sealed with a lost key have to be set again). The organisation then adds private repositories it can read with its own token; CodeSynapse checks that access again at every sync and hides the repository from an organisation whose token stopped working.
+
+Upgrading an existing install: run `just init` (adds missing keys such as `POSTGRES_PASSWORD` and `SECRET_KEY` to `.env`), then `just up`.
 
 ## License
 
