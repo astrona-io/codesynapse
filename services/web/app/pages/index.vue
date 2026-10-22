@@ -56,7 +56,7 @@ async function register() {
 const gradeColor: Record<string, string> = { A: 'var(--green)', B: 'var(--cyan)', C: 'var(--amber)', D: 'var(--orange)', F: 'var(--pink)' }
 const syncText = (s?: { state: string; interval_minutes: number }) => {
   if (!s || s.state === 'manual') return 'Manual sync'
-  const every = ({ 15: '15 min', 60: 'hour', 360: '6 hours', 1440: 'day' } as Record<number, string>)[s.interval_minutes] ?? `${s.interval_minutes} min`
+  const every = ({ 15: '15 min', 30: '30 min', 60: 'hour', 360: '6 hours', 1440: 'day' } as Record<number, string>)[s.interval_minutes] ?? `${s.interval_minutes} min`
   return s.state === 'paused' ? `Auto-sync paused (every ${every})` : `Auto-sync every ${every}`
 }
 const jobLabel = (j: Job) => ({ ingest: 'Indexing', clone: 'Cloning', sync: 'Syncing' }[j.kind ?? 'ingest'] ?? 'Indexing')

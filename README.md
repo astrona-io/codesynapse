@@ -91,7 +91,7 @@ On the **AI models** page you pick a **global** model, the fallback for everythi
 ## Keeping repositories up to date
 
 - **Sync** fetches the chosen branch (cloned repositories) or re-indexes the folder (mounted sources). The branch picker lists every branch of the remote (cloned) or of the checkout (mounted; only the checked-out one can be synced).
-- **Auto-sync** runs **every 5 minutes by default** for every repository. Per repository you can switch it off, or pick 15 minutes, hourly, every 6 hours or daily, with pause/resume. Status ("next in 3 min", "paused") shows on the repository card and summary, and the sidebar lists the most recently indexed repositories first and refreshes by itself.
+- **Auto-sync** runs **every 30 minutes by default** for every repository. The countdown starts when a sync finishes, and first runs are spread over the interval, so repositories do not all sync together. Per repository you can switch it off, or pick 5 or 15 minutes, hourly, every 6 hours or daily, with pause/resume. Status ("next in 3 min", "paused") shows on the repository card and summary, and the sidebar lists the most recently indexed repositories first and refreshes by itself.
 - **Organisations:** on the **Organisations** page enter `astrona-io` (or `https://github.com/astrona-io/*`). CodeSynapse lists every repository of that organisation or user, clones and indexes them, and rescans every 5 minutes to pick up new ones. Archived repositories and forks are skipped unless you tick them. With auto-index off it only lists, and you index repositories one by one. Stopping to watch keeps the repositories already indexed.
 - **Private repositories:** `just git-token` asks for a token (input hidden), stores it in `.env` and restarts the API. Use a fine-grained GitHub token with read-only *Contents* access. The same token lets the Organisations page list private repositories. The UI shows whether a token is configured, never the token.
 - **Remove** a repository from its card or summary; a confirmation asks for the name and offers to delete the cloned files too.
@@ -146,7 +146,7 @@ The point is to ask the graph instead of reading files. A good order:
 | Findings in one directory | `security_report` with `path` |
 | Work through accepted review comments | `get_review` with `status: "accepted"`, then `update_review_comment` |
 
-Tips: pass `diff` rather than refs whenever you have it, since it works even when the indexed clone is on another commit. Keep `limit` small on reports, and `min_severity` at medium or above for a first pass. The graph reflects the last ingest, so files you edited since may differ; the 5-minute auto-sync keeps it close.
+Tips: pass `diff` rather than refs whenever you have it, since it works even when the indexed clone is on another commit. Keep `limit` small on reports, and `min_severity` at medium or above for a first pass. The graph reflects the last ingest, so files you edited since may differ; the 30-minute auto-sync keeps it close (`repo_status` tells you when it is stale).
 
 ### MCP tools and prompts
 

@@ -207,5 +207,5 @@ func TestScheduleRecordsUnchangedChecks(t *testing.T) {
 	s.started("a", now.Add(5*time.Minute), "unchanged", nil)
 	sc := s.get("a")
 	assert.Equal(t, sc.LastStatus, "unchanged")
-	assert.Equal(t, sc.NextRun, now.Add(10*time.Minute).Format(time.RFC3339), "an unchanged check still waits a full interval")
+	assert.Equal(t, sc.NextRun, now.Add(35*time.Minute).Format(time.RFC3339), "an unchanged check still waits a full interval")
 }

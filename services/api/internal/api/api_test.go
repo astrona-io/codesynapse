@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -297,8 +299,8 @@ func TestScheduleAndDelete(t *testing.T) {
 		NextRun         string `json:"next_run"`
 	}
 	require.Equal(t, get(t, ts, base+"/schedule", &sc), 200)
-	assert.Equal(t, sc.State, "active", "syncs every 5 minutes unless configured")
-	assert.Equal(t, sc.IntervalMinutes, 5)
+	assert.Equal(t, sc.State, "active", "syncs every 30 minutes unless configured")
+	assert.Equal(t, sc.IntervalMinutes, 30)
 	assert.Equal(t, put(t, ts, base+"/schedule", `{"interval_minutes":0}`), 200)
 	require.Equal(t, get(t, ts, base+"/schedule", &sc), 200)
 	assert.Equal(t, sc.State, "manual", "turning it off sticks")
@@ -318,7 +320,7 @@ func TestScheduleAndDelete(t *testing.T) {
 	assert.Equal(t, get(t, ts, base+"/dashboard", nil), 404)
 	require.Equal(t, get(t, ts, base+"/schedule", &sc), 200)
 	assert.Equal(t, sc.State, "active", "schedule removed with the repo; back to the default")
-	assert.Equal(t, sc.IntervalMinutes, 5)
+	assert.Equal(t, sc.IntervalMinutes, 30)
 }
 
 func TestSchedulesPersistAndDue(t *testing.T) {
@@ -340,7 +342,7 @@ func TestSchedulesPersistAndDue(t *testing.T) {
 	assert.Equal(t, again.get("b").State(), "paused", "persisted to disk")
 }
 
-func TestSchedulesDefaultEveryFiveMinutes(t *testing.T) {
+func TestSchedulesDefaultEveryThirtyMinutes(t *testing.T) {
 	s, err := loadSchedules("")
 	require.NoError(t, err)
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
@@ -348,8 +350,29 @@ func TestSchedulesDefaultEveryFiveMinutes(t *testing.T) {
 	_, err = s.set("b", 0, false, false, false, now)
 	require.NoError(t, err)
 	s.ensure("b", now)
-	assert.Len(t, s.due(now.Add(4*time.Minute)), 0)
-	assert.Equal(t, s.due(now.Add(5*time.Minute)), []string{"a"}, "default repos sync after 5 minutes; manual ones never")
+	assert.Equal(t, s.due(now.Add(30*time.Minute)), []string{"a"}, "default repos sync within 30 minutes; manual ones never")
+}
+
+func TestScheduleStaggerAndFinish(t *testing.T) {
+	s, err := loadSchedules("")
+	require.NoError(t, err)
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	distinct := map[time.Duration]bool{}
+	for i := range 40 {
+		repo := fmt.Sprintf("org/repo-%d", i)
+		d := stagger(repo, 30)
+		assert.True(t, d >= 0 && d < 30*time.Minute, "offset stays inside one interval")
+		distinct[d] = true
+		s.ensure(repo, now)
+	}
+	assert.True(t, len(distinct) > 20, "first runs are spread out")
+	assert.True(t, len(s.due(now.Add(5*time.Minute))) < 40, "not everything is due at once")
+
+	s.started("org/repo-0", now, "started", nil)
+	end := now.Add(12 * time.Minute) // a slow sync
+	s.finished("org/repo-0", end, nil)
+	assert.Equal(t, s.due(end.Add(29*time.Minute)) == nil || !slices.Contains(s.due(end.Add(29*time.Minute)), "org/repo-0"), true, "interval counts from the end of the sync")
+	assert.True(t, slices.Contains(s.due(end.Add(30*time.Minute)), "org/repo-0"))
 }
 
 func TestReviewsAPI(t *testing.T) {

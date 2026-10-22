@@ -137,7 +137,7 @@ Next: Postgres for reviews, decisions with an audit trail, a persistent job queu
 
 ## Repository lifecycle
 
-Repositories are added by URL (cloned into the workspace volume) or mounted under `./sources`. **Auto-sync** schedules (off, 15 min, 1 h, 6 h, daily; pausable) are stored in `workspace/.codesynapse/schedules.json` and run by a scheduler in the API; the next run and last result show in the UI. Removing a repository deletes its graph, schedule and optionally its clone. Private repositories use a server-side token set with `just git-token`; `GET /api/v1/settings` reports whether one is configured, never the value.
+Repositories are added by URL (cloned into the workspace volume) or mounted under `./sources`. **Auto-sync** schedules (off, 5/15/30 min, 1 h, 6 h, daily; default 30 min, counted from the end of the previous sync; pausable) are stored in `workspace/.codesynapse/schedules.json` and run by a scheduler in the API; the next run and last result show in the UI. Removing a repository deletes its graph, schedule and optionally its clone. Private repositories use a server-side token set with `just git-token`; `GET /api/v1/settings` reports whether one is configured, never the value.
 
 ## Operator overview
 
@@ -196,4 +196,4 @@ What would put security more in front of developers, ordered by value for the ef
 
 ## Organisations
 
-`internal/forge` lists a GitHub organisation's (or user's) repositories. The API keeps watched organisations in `<workspace>/.codesynapse/orgs.json` (`services/api/internal/api/orgs.go`), rescans each every 5 minutes, and with `auto_index` on queues clone + index jobs for repositories that are not indexed yet (archived repositories and forks only when asked for). Cloned repositories then follow the default 5-minute auto-sync. Endpoints: `GET/POST /api/v1/orgs`, `PUT/DELETE /api/v1/orgs/{org}`, `POST /api/v1/orgs/{org}/scan`, `POST /api/v1/orgs/{org}/repos/{name}/index`. Stopping to watch an organisation keeps its indexed repositories. The dashboard page is `/orgs`.
+`internal/forge` lists a GitHub organisation's (or user's) repositories. The API keeps watched organisations in `<workspace>/.codesynapse/orgs.json` (`services/api/internal/api/orgs.go`), rescans each every 5 minutes, and with `auto_index` on queues clone + index jobs for repositories that are not indexed yet (archived repositories and forks only when asked for). Cloned repositories then follow the default 30-minute auto-sync. Endpoints: `GET/POST /api/v1/orgs`, `PUT/DELETE /api/v1/orgs/{org}`, `POST /api/v1/orgs/{org}/scan`, `POST /api/v1/orgs/{org}/repos/{name}/index`. Stopping to watch an organisation keeps its indexed repositories. The dashboard page is `/orgs`.

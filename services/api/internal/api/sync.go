@@ -197,7 +197,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	job, err := s.startSync(r.Context(), r.PathValue("repo"), req.Branch, false)
+	job, err := s.startSync(r.Context(), r.PathValue("repo"), req.Branch, false, nil)
 	switch {
 	case errors.Is(err, errBadRequest):
 		s.problem(w, 400, err)
@@ -216,7 +216,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 // onlyIfChanged (the scheduler) it first asks cheaply whether anything is new
 // and returns errUnchanged without queueing a job when not: with hundreds of
 // repositories every few minutes, a fetch and re-index each would never drain.
-func (s *Server) startSync(ctx context.Context, repo, branch string, onlyIfChanged bool) (Job, error) {
+func (s *Server) startSync(ctx context.Context, repo, branch string, onlyIfChanged bool, done func(error)) (Job, error) {
 	n, err := s.st.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
 	if err != nil {
 		return Job{}, err
@@ -264,6 +264,7 @@ func (s *Server) startSync(ctx context.Context, repo, branch string, onlyIfChang
 		}
 	}
 	opts.After = s.automation(ctx, repo, n)
+	opts.Done = done
 	job, err := s.jobs.Start(repo, n.Root, opts) //nolint:contextcheck // jobs outlive the request
 	if err != nil {
 		return Job{}, fmt.Errorf("%w: %w", errConflict, err)
