@@ -4,17 +4,18 @@ import type { Attention, AttentionItem } from '~/utils/types'
 useHead({ title: 'Overview · CodeSynapse' })
 const session = useSession()
 const { data, error, pending } = useApiGet<Attention>('attention')
-type Filter = 'all' | 'security' | 'dependencies' | 'licences' | 'operations'
+type Filter = 'all' | 'security' | 'dependencies' | 'licences' | 'quality' | 'operations'
 const filter = ref<Filter>('all')
 const groups: Record<Exclude<Filter, 'all'>, AttentionItem['kind'][]> = {
   security: ['security'],
   dependencies: ['vulnerability', 'automation'],
   licences: ['licence'],
+  quality: ['quality'],
   operations: ['sync', 'stale', 'access'],
 }
 const filters: { id: Filter; label: string }[] = [
   { id: 'all', label: 'Everything' }, { id: 'security', label: 'Security' }, { id: 'dependencies', label: 'Dependencies' },
-  { id: 'licences', label: 'Licences' }, { id: 'operations', label: 'Upkeep' },
+  { id: 'licences', label: 'Licences' }, { id: 'quality', label: 'Code quality' }, { id: 'operations', label: 'Upkeep' },
 ]
 const items = computed(() => (data.value?.items ?? []).filter((it) => filter.value === 'all' || groups[filter.value].includes(it.kind)))
 const urgent = computed(() => (data.value?.levels.critical ?? 0) + (data.value?.levels.high ?? 0))

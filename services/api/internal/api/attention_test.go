@@ -103,3 +103,37 @@ func TestAttentionNamesLostAccessToItsOrganisation(t *testing.T) {
 	require.Equal(t, carol.do("GET", "/api/v1/attention", "", &a), 200)
 	assert.Len(t, a.Items, 0, "other organisations do not learn about it")
 }
+
+func TestAttentionFlagsDuplicateCode(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, "org/a", dupGraph(t, "org/a", "One", "Two", "Three", "Four")))
+	require.NoError(t, st.ReplaceRepo(ctx, "org/b", dupGraph(t, "org/b", "Five", "Six", "Seven", "Eight")))
+	ts := httptest.NewServer(New(ctx, Config{}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	t.Cleanup(ts.Close)
+
+	var a Attention
+	require.Equal(t, newClient(t, ts).do("GET", "/api/v1/attention", "", &a), 200)
+	var perRepo, shared []AttentionItem
+	for _, it := range a.Items {
+		if it.Kind != "quality" {
+			continue
+		}
+		if it.Repo == "" {
+			shared = append(shared, it)
+		} else {
+			perRepo = append(perRepo, it)
+		}
+	}
+	require.Len(t, perRepo, 2, "both repositories repeat most of their code")
+	assert.Equal(t, perRepo[0].Link[len(perRepo[0].Link)-len("/duplicates"):], "/duplicates")
+	require.Len(t, shared, 1)
+	assert.Equal(t, shared[0].Link, "/shared-code")
+	assert.True(t, shared[0].Detail != "")
+
+	require.Equal(t, newClient(t, ts).do("GET", "/api/v1/attention?repo=org%2Fa", "", &a), 200)
+	for _, it := range a.Items {
+		assert.True(t, it.Kind != "quality" || it.Repo == "org/a", "?repo= limits to one repository and skips the cross-repository advice: %+v", it)
+	}
+}

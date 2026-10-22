@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -30,26 +31,34 @@ func (s *Server) handleDuplicates(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, rep)
 }
 
-// handleSharedCode compares the repositories the caller can see and reports
-// code they have in common, with a recommendation where it is worth sharing.
-// Only visible repositories are read, so nothing leaks across organisations.
-func (s *Server) handleSharedCode(w http.ResponseWriter, r *http.Request) {
-	repos, err := s.st.Repos(r.Context())
+// sharedCode compares the repositories the caller can see. Only those are
+// read, so nothing leaks across organisations.
+func (s *Server) sharedCode(ctx context.Context) (duplicates.CrossReport, error) {
+	repos, err := s.st.Repos(ctx)
 	if err != nil {
-		s.problem(w, 500, err)
-		return
+		return duplicates.CrossReport{}, err
 	}
 	reports := map[string]duplicates.Report{}
-	for _, n := range visibleRepos(r.Context(), repos) {
+	for _, n := range visibleRepos(ctx, repos) {
 		if n.Duplicates == "" {
 			continue
 		}
 		rep, err := duplicates.Decode(n.Duplicates)
 		if err != nil {
-			s.problem(w, 500, err)
-			return
+			return duplicates.CrossReport{}, err
 		}
 		reports[n.Name] = rep
 	}
-	writeJSON(w, 200, duplicates.Across(reports))
+	return duplicates.Across(reports), nil
+}
+
+// handleSharedCode reports code the visible repositories have in common,
+// with a recommendation where it is worth sharing.
+func (s *Server) handleSharedCode(w http.ResponseWriter, r *http.Request) {
+	rep, err := s.sharedCode(r.Context())
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, rep)
 }

@@ -296,7 +296,7 @@ export interface ReachView { org_id: string; org: string; graph: string; role: R
 export type AttentionLevel = 'critical' | 'high' | 'medium' | 'low'
 export interface AttentionItem {
   level: AttentionLevel
-  kind: 'security' | 'vulnerability' | 'licence' | 'access' | 'sync' | 'stale' | 'automation'
+  kind: 'security' | 'vulnerability' | 'licence' | 'access' | 'sync' | 'stale' | 'automation' | 'quality'
   repo?: string
   count?: number
   title: string
