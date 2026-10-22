@@ -27,6 +27,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/offload"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/recall"
 )
 
 const maxBodyBytes = 4 << 20
@@ -75,6 +76,7 @@ type Server struct {
 	jobs *Jobs
 	// offload extracts memory triples from conversation turns (local model only).
 	offload *offload.Worker
+	recall  *recall.Service
 	sched   *schedules
 	orgs    *orgs
 	logger  *slog.Logger
@@ -89,7 +91,10 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	s.jobs = NewJobs(ctx, st, logger, cfg.CommitLimit, cfg.AllowNetwork, cfg.VulnScan)
 	s.jobs.licenseLookup = cfg.LicenseLookup
 	s.offload = offload.New(st, cfg.LLM, logger)
+	s.recall = recall.New(st, cfg.LLM, logger)
+	s.offload.OnSaved = s.recall.Kick
 	go s.offload.Run(ctx)
+	go s.recall.Run(ctx)
 	sched, err := loadSchedules(cfg.Workspace)
 	if err != nil {
 		logger.Error("auto-sync schedules unreadable; starting with none", "error", err)
@@ -155,6 +160,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/repos/{repo}/memory", s.handleMemory)
 	m.HandleFunc("DELETE /api/v1/repos/{repo}/memory", s.handleDeleteMemory)
 	m.HandleFunc("POST /api/v1/repos/{repo}/memory/offload", s.handleOffload)
+	m.HandleFunc("POST /api/v1/repos/{repo}/memory/recall", s.handleRecall)
+	m.HandleFunc("GET /api/v1/memory/status", s.handleMemoryStatus)
 	m.HandleFunc("GET /api/v1/memory/jobs", s.handleOffloadJobs)
 	m.HandleFunc("GET /api/v1/memory/jobs/{id}", s.handleOffloadJob)
 	m.HandleFunc("GET /api/v1/repos/{repo}/search", s.handleSearch)

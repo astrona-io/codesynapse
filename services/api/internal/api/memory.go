@@ -10,6 +10,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/offload"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/recall"
 )
 
 // handleMemory lists a repository's agent memory for review in the UI.
@@ -94,4 +95,38 @@ func (s *Server) handleOffloadJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, j)
+}
+
+// handleRecall runs hybrid recall: intent gate, vector and name entry
+// points, then a 1-2 hop expansion.
+func (s *Server) handleRecall(w http.ResponseWriter, r *http.Request) {
+	var q recall.Query
+	if err := decodeJSON(w, r, &q); err != nil {
+		s.problem(w, 400, err)
+		return
+	}
+	if len(q.Text) > 2000 {
+		s.problem(w, 400, errors.New("query: at most 2000 characters"))
+		return
+	}
+	res, err := s.recall.Recall(r.Context(), r.PathValue("repo"), q)
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, res)
+}
+
+// handleMemoryStatus says which memory features have a local model.
+func (s *Server) handleMemoryStatus(w http.ResponseWriter, _ *http.Request) {
+	out := map[string]any{"extraction": false, "embeddings": false}
+	if name, err := s.offload.Provider(); err == nil {
+		out["extraction"], out["extraction_provider"] = true, name
+	}
+	if s.cfg.LLM != nil {
+		if name, cfg, err := s.cfg.LLM.EmbeddingProvider(); err == nil {
+			out["embeddings"], out["embedding_provider"], out["embedding_model"] = true, name, cfg.EmbeddingModel
+		}
+	}
+	writeJSON(w, 200, out)
 }

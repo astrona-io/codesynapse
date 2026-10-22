@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -130,5 +131,44 @@ func TestBudgets(t *testing.T) {
 			assert.Equal(t, p.MaxOutputTokens, tt.wantOut)
 			assert.Equal(t, p.TimeoutSeconds, tt.wantTimeout)
 		})
+	}
+}
+
+func TestEmbeddings(t *testing.T) {
+	var got struct {
+		Model string   `json:"model"`
+		Input []string `json:"input"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		if len(got.Input) == 3 {
+			_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[1,0]}]}`)) // one short
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"index":1,"embedding":[0,1]},{"index":0,"embedding":[1,0]}]}`))
+	}))
+	defer srv.Close()
+	r := NewRegistry(Config{Providers: []ProviderConfig{
+		{Name: "ollama", Kind: KindOpenAI, BaseURL: srv.URL + "/v1", Model: "qwen", EmbeddingModel: "nomic-embed-text", TimeoutSeconds: 5},
+		{Name: "cloud", Kind: KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "big", EmbeddingModel: "text-embedding-3-small", TimeoutSeconds: 5},
+		{Name: "plain", Kind: KindOpenAI, BaseURL: srv.URL + "/v1", Model: "qwen", TimeoutSeconds: 5},
+	}, Default: "ollama"})
+
+	name, cfg, err := r.EmbeddingProvider()
+	require.NoError(t, err)
+	assert.Equal(t, name, "ollama")
+	assert.Equal(t, cfg.EmbeddingModel, "nomic-embed-text")
+	vecs, err := r.Embed(context.Background(), name, []string{"Payments service", "token=supersecretvalue1"})
+	require.NoError(t, err)
+	assert.Equal(t, vecs, [][]float32{{1, 0}, {0, 1}}, "ordered by index")
+	assert.Equal(t, got.Model, "nomic-embed-text")
+	assert.False(t, strings.Contains(got.Input[1], "supersecretvalue1"), "inputs redacted")
+	_, err = r.Embed(context.Background(), name, []string{"a", "b", "c"})
+	require.Error(t, err, "a missing embedding is an error")
+
+	for _, route := range []string{"cloud", "plain"} {
+		require.NoError(t, r.SetRoutes(Routes{Default: "ollama", Tasks: map[string]string{"embeddings": route}}))
+		_, _, err = r.EmbeddingProvider()
+		assert.True(t, errors.Is(err, ErrNoEmbeddings), route+": cloud or no embedding model is refused")
 	}
 }

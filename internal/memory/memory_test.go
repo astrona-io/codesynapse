@@ -69,6 +69,16 @@ func TestPrepareRedactsAndTruncates(t *testing.T) {
 
 func TestWordsAndScore(t *testing.T) {
 	assert.Equal(t, Words("FastAPI  fastapi a Service"), []string{"fastapi", "service"})
+	assert.Equal(t, Words("Who owns payments? (the billing_v2 one)"), []string{"owns", "payments", "billing_v2", "one"})
 	e := Entity{Name: "FastAPI backend", Type: "Service"}
 	assert.Equal(t, Score(e, Words("fastapi service other")), 2)
+}
+
+func TestRecallGate(t *testing.T) {
+	for q, skip := range map[string]bool{
+		"": true, "  hi! ": true, "Thanks so much": true, "ok.": true, "Good morning": true, "a": true,
+		"who owns payments?": false, "what did we decide about Redis": false, "hi, what about the billing service?": false,
+	} {
+		assert.Equal(t, RecallGate(q) != "", skip, q)
+	}
 }

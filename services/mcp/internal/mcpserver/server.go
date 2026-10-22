@@ -48,7 +48,7 @@ type Options struct {
 	Usage *usage.Recorder
 	// Offload, with Memory, adds offload_turns: background extraction of
 	// triples from conversation turns by the API's local model.
-	Offload *OffloadClient
+	Offload *APIClient
 }
 
 // New builds an MCP server backed by r.
@@ -82,7 +82,9 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	}
 	if len(opts) > 0 && opts[0].Memory != nil {
 		registerMemoryTools(s, h, opts[0].Memory)
+		registerRecallTool(s, h)
 		registerMemoryPrompt(s)
+		h.offload = opts[0].Offload
 		if opts[0].Offload != nil {
 			registerOffloadTool(s, h, opts[0].Offload)
 		}
@@ -100,7 +102,7 @@ type handlers struct {
 	svc     query.Service
 	reviews store.ReviewStore
 	memory  store.MemoryStore
-	offload *OffloadClient
+	offload *APIClient
 }
 
 // repo resolves an optional repo argument: empty means "the only repo".

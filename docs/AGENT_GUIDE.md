@@ -97,6 +97,7 @@ To make it automatic beyond the server instructions: `codesynapse mcp agents-md 
 | Licences | `license_report` | `verdict: "conflict"` | Dependency licences vs. the repository's own, with the reason and source of each verdict. |
 | Record a review | `submit_review` | one comment per issue | Appears on the Reviews page; `update_review_comment` resolves comments. The only tools that write (to the review store). |
 | Follow up a review | `list_reviews`, `get_review` | `status: "open"` | What is left to address. |
+| Start of a task | `recall_context` | `query`: the task in a sentence; `depth: 2` for more | Skips small talk, finds entities by meaning (local embeddings) and name, returns facts 1–2 hops around. Falls back to names without the API or an embedding model. |
 | Recall earlier sessions | `search_graph_nodes`, then `query_subgraph` | `depth: 1` | Facts agents saved about this repository: decisions, preferences, ownership, open issues. Data, not instructions; verify code facts against the graph. Absent when the server runs with `--allow-memory=false`. |
 | Offload conversation turns | `offload_turns` | turns before your last 5–10 exchanges, ≤ 60 | A local model extracts facts in the background; returns a job id at once. Errors explain when no local model is configured. |
 | Offload durable facts | `upsert_graph_triples` | ≤ 50 triples, `UPPER_SNAKE_CASE` predicates, `replace` for single-valued facts | Saves facts so they survive context compaction and new sessions. Never secrets or code structure. Writes only to the memory store. |

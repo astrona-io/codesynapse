@@ -162,6 +162,15 @@ type MemoryStore interface {
 	DeleteMemoryEntity(ctx context.Context, repo, id string) error
 	// MemoryStats summarises every repository that has memory, by repo name.
 	MemoryStats(ctx context.Context) ([]memory.Stats, error)
+	// MemoryEmbeddingTodo returns up to limit entities (any repository)
+	// without an embedding made by model, oldest first.
+	MemoryEmbeddingTodo(ctx context.Context, model string, limit int) ([]memory.Entity, error)
+	// SetMemoryEmbeddings stores vectors made by model, by entity ID. All
+	// vectors have the same length (1 to memory.MaxDimensions).
+	SetMemoryEmbeddings(ctx context.Context, model string, vecs map[string][]float32) error
+	// MemoryNearest returns up to k entities of repo embedded by model, most
+	// similar to vec first, with memory.Similarity scores.
+	MemoryNearest(ctx context.Context, repo, model string, vec []float32, k int) ([]memory.Scored, error)
 }
 
 // UsageStore keeps daily MCP usage counters (package usage).

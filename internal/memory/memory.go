@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -272,12 +273,24 @@ type Graph struct {
 // maxQueryWords bounds the words a search matches on.
 const maxQueryWords = 8
 
+// stopwords never identify an entity, so they are not matched on.
+var stopwords = map[string]bool{
+	"the": true, "an": true, "of": true, "to": true, "is": true, "are": true, "was": true, "be": true, "it": true,
+	"who": true, "what": true, "which": true, "where": true, "when": true, "why": true, "how": true, "does": true,
+	"do": true, "did": true, "we": true, "us": true, "our": true, "you": true, "about": true, "for": true, "and": true,
+	"or": true, "in": true, "on": true, "at": true, "with": true, "this": true, "that": true, "there": true, "can": true,
+	"should": true, "would": true, "could": true, "please": true, "my": true, "me": true, "from": true, "by": true,
+}
+
 // Words splits a search query into distinct lower-case words of at least two
-// characters, the unit both stores match on.
+// characters, without punctuation and stopwords: the unit both stores match on.
 func Words(query string) []string {
 	var out []string
-	for _, w := range strings.Fields(strings.ToLower(query)) {
-		if len([]rune(w)) < 2 || slices.Contains(out, w) {
+	fields := strings.FieldsFunc(strings.ToLower(query), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' && r != '_'
+	})
+	for _, w := range fields {
+		if len([]rune(w)) < 2 || stopwords[w] || slices.Contains(out, w) {
 			continue
 		}
 		out = append(out, w)
@@ -314,4 +327,51 @@ type Stats struct {
 	FactChars   int            `json:"fact_chars"`
 	Sources     map[string]int `json:"sources"`
 	LastUpdated string         `json:"last_updated,omitempty"`
+}
+
+// MaxDimensions bounds embedding vectors (the Neo4j index takes this many).
+const MaxDimensions = 8192
+
+// Scored is an entity with its similarity to a query, 0 to 1.
+type Scored struct {
+	Entity
+	Score float64 `json:"score"`
+}
+
+// EmbeddingText is what an entity's vector is computed from.
+func EmbeddingText(e Entity) string {
+	if e.Type == "" || e.Type == "Thing" {
+		return e.Name
+	}
+	return e.Name + " (" + e.Type + ")"
+}
+
+// Similarity is cosine similarity mapped to 0..1, as Neo4j's vector index
+// reports it: (1 + cos) / 2.
+func Similarity(a, b []float32) float64 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0
+	}
+	var dot, na, nb float64
+	for i := range a {
+		dot += float64(a[i]) * float64(b[i])
+		na += float64(a[i]) * float64(a[i])
+		nb += float64(b[i]) * float64(b[i])
+	}
+	if na == 0 || nb == 0 {
+		return 0
+	}
+	return (1 + dot/(math.Sqrt(na)*math.Sqrt(nb))) / 2
+}
+
+// CheckVectors enforces one vector length between 1 and MaxDimensions.
+func CheckVectors(vecs map[string][]float32) error {
+	dims := -1
+	for id, v := range vecs {
+		if len(v) == 0 || len(v) > MaxDimensions || (dims >= 0 && len(v) != dims) {
+			return fmt.Errorf("embedding for %q: vectors must all have the same length, 1 to %d", id, MaxDimensions)
+		}
+		dims = len(v)
+	}
+	return nil
 }

@@ -493,7 +493,7 @@ func TestOffloadTurns(t *testing.T) {
 	s := memory.New()
 	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
 	ct, st := mcp.NewInMemoryTransports()
-	_, err := New(s, "test", Options{Memory: s, Offload: &OffloadClient{BaseURL: api.URL, Token: "secret"}}).Connect(ctx, st, nil)
+	_, err := New(s, "test", Options{Memory: s, Offload: &APIClient{BaseURL: api.URL, Token: "secret"}}).Connect(ctx, st, nil)
 	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "claude-code"}, nil).Connect(ctx, ct, nil)
 	require.NoError(t, err)
@@ -522,4 +522,39 @@ func TestOffloadTurns(t *testing.T) {
 		absent = absent || tool.Name == "offload_turns"
 	}
 	assert.False(t, absent, "offload_turns needs --api-url")
+}
+
+func TestRecallContext(t *testing.T) {
+	ctx := context.Background()
+	// Without the API: the gate and name search run locally.
+	cs := connectMemory(t)
+	call(t, cs, "upsert_graph_triples", map[string]any{"triples": []map[string]any{{"subject": "Payments", "predicate": "OWNED_BY", "object": "Team Blue"}}}, nil)
+	var out struct {
+		Skipped string
+		Mode    string
+		Facts   []agentmem.Fact
+	}
+	res := call(t, cs, "recall_context", map[string]any{"query": "who owns payments?"}, &out)
+	require.False(t, res.IsError)
+	assert.Equal(t, out.Mode, "names")
+	require.Len(t, out.Facts, 1)
+	call(t, cs, "recall_context", map[string]any{"query": "thanks!"}, &out)
+	assert.Equal(t, out.Skipped, "small talk")
+
+	// With the API: its hybrid answer is passed through.
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"mode":"hybrid","entries":[{"id":"x","name":"Payments","score":0.9,"via":"vector"}],"notice":"n","entities":[],"facts":[]}`))
+	}))
+	t.Cleanup(api.Close)
+	s := memory.New()
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+	ct, st := mcp.NewInMemoryTransports()
+	_, err := New(s, "test", Options{Memory: s, Offload: &APIClient{BaseURL: api.URL}}).Connect(ctx, st, nil)
+	require.NoError(t, err)
+	cs2, err := mcp.NewClient(&mcp.Implementation{Name: "c"}, nil).Connect(ctx, ct, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cs2.Close() })
+	res = call(t, cs2, "recall_context", map[string]any{"query": "money flow"}, &out)
+	require.False(t, res.IsError)
+	assert.Equal(t, out.Mode, "hybrid")
 }

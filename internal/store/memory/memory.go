@@ -23,6 +23,7 @@ type Store struct {
 	reviews map[string]reviews.Review
 	mem     map[string]*memRepo
 	usage   map[string]usage.Bucket
+	vecs    map[string]embedding // memory entity ID -> vector
 }
 
 type repoGraph struct {
@@ -35,7 +36,7 @@ var _ store.Store = (*Store)(nil)
 
 // New returns an empty store.
 func New() *Store {
-	return &Store{repos: map[string]*repoGraph{}, reviews: map[string]reviews.Review{}, mem: map[string]*memRepo{}, usage: map[string]usage.Bucket{}}
+	return &Store{repos: map[string]*repoGraph{}, reviews: map[string]reviews.Review{}, mem: map[string]*memRepo{}, usage: map[string]usage.Bucket{}, vecs: map[string]embedding{}}
 }
 
 // EnsureSchema is a no-op.

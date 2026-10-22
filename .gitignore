@@ -9,3 +9,6 @@ coverage.*
 
 # Kubernetes secrets
 /deploy/k8s/overlays/*/secrets.env
+
+# Worktrees of Claude Code background agents
+/.claude/worktrees/

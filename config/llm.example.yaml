@@ -20,6 +20,14 @@ providers:
     # timeout_seconds:        # defaults to max(300, max_input_tokens/100) seconds: big prompts take minutes on a Mac
     # send_source: true       # default for local providers: short code snippets allowed
 
+  # Local Ollama for agent memory: extraction of facts from conversations and
+  # embeddings for recall by meaning. Both run on local providers only.
+  # - name: local-ollama
+  #   kind: openai
+  #   base_url: http://host.docker.internal:11434/v1
+  #   model: qwen3:8b                      # extracts triples from conversation turns
+  #   embedding_model: nomic-embed-text    # `ollama pull nomic-embed-text`; enables vector recall
+
   # Example cloud provider (uncomment, set ANTHROPIC_API_KEY in .env).
   # Cloud providers receive no source code unless you set send_source: true.
   # - name: claude
@@ -43,4 +51,6 @@ tasks:
   review: local-mlx
   briefing: local-mlx
   fix: local-mlx         # writes fixes for accepted review comments (needs source access: use a local model)
+  # memory: local-ollama     # agent memory: facts extracted from conversation turns (local providers only)
+  # embeddings: local-ollama # agent memory: recall by meaning (local, with embedding_model)
 default: local-mlx
