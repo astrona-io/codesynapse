@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/parisnakitakejser/codesynapse/internal/history"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
@@ -22,6 +23,7 @@ type Store struct {
 	mu      sync.RWMutex
 	repos   map[string]*repoGraph
 	reviews map[string]reviews.Review
+	history map[string][]history.Snapshot
 	mem     map[string]*memRepo
 	usage   map[string]usage.Bucket
 	vecs    map[string]embedding // memory entity ID -> vector
@@ -37,7 +39,7 @@ var _ store.Store = (*Store)(nil)
 
 // New returns an empty store.
 func New() *Store {
-	return &Store{repos: map[string]*repoGraph{}, reviews: map[string]reviews.Review{}, mem: map[string]*memRepo{}, usage: map[string]usage.Bucket{}, vecs: map[string]embedding{}}
+	return &Store{repos: map[string]*repoGraph{}, reviews: map[string]reviews.Review{}, history: map[string][]history.Snapshot{}, mem: map[string]*memRepo{}, usage: map[string]usage.Bucket{}, vecs: map[string]embedding{}}
 }
 
 // EnsureSchema is a no-op.
@@ -456,5 +458,36 @@ func (s *Store) DeleteReview(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.reviews, id)
+	return nil
+}
+
+// AddSnapshot implements store.HistoryStore.
+func (s *Store) AddSnapshot(_ context.Context, repo string, snap history.Snapshot) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	all := slices.DeleteFunc(slices.Clone(s.history[repo]), func(x history.Snapshot) bool { return x.At == snap.At })
+	all = append(all, snap)
+	slices.SortFunc(all, func(a, b history.Snapshot) int { return cmp.Compare(a.At, b.At) })
+	if len(all) > history.MaxSnapshots {
+		all = all[len(all)-history.MaxSnapshots:]
+	}
+	s.history[repo] = all
+	return nil
+}
+
+// Snapshots implements store.HistoryStore.
+func (s *Store) Snapshots(_ context.Context, repo string, limit int) ([]history.Snapshot, error) {
+	limit = store.ClampLimit(limit, 100)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	all := s.history[repo]
+	return slices.Clone(all[max(0, len(all)-limit):]), nil
+}
+
+// DeleteSnapshots implements store.HistoryStore.
+func (s *Store) DeleteSnapshots(_ context.Context, repo string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.history, repo)
 	return nil
 }

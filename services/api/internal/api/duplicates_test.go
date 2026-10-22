@@ -12,6 +12,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
 	"github.com/parisnakitakejser/codesynapse/internal/cleanupplan"
 	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
+	"github.com/parisnakitakejser/codesynapse/internal/history"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/refactorplan"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
@@ -136,4 +137,42 @@ func TestRefactorPlanEndpoint(t *testing.T) {
 	assert.Equal(t, get(t, ts, "/api/v1/repos/org%2Fa/duplicates/refactor?hash=zz", nil), 400)
 	assert.Equal(t, get(t, ts, "/api/v1/repos/org%2Fa/duplicates/refactor?hash="+hash+"&kind=other", nil), 400)
 	assert.Equal(t, get(t, ts, "/api/v1/repos/nope/duplicates/refactor?hash="+hash, nil), 404)
+}
+
+func TestHistoryEndpointAndRegressionItem(t *testing.T) {
+	ctx := context.Background()
+	st := memory.New()
+	g := dupGraph(t, "org/a", "One", "Two")
+	require.NoError(t, st.ReplaceRepo(ctx, "org/a", g))
+	require.NoError(t, st.AddSnapshot(ctx, "org/a", history.Snapshot{At: "2026-10-01T00:00:00Z", Grade: "A", Score: 95}))
+	ts := httptest.NewServer(New(ctx, Config{SourcesRoot: t.TempDir(), Version: "test"}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	t.Cleanup(ts.Close)
+
+	var tr history.Trend
+	require.Equal(t, get(t, ts, "/api/v1/repos/org%2Fa/history", &tr), 200)
+	assert.Len(t, tr.Snapshots, 1)
+	assert.Len(t, tr.Regressions, 0, "one snapshot has nothing to compare with")
+	var a Attention
+	require.Equal(t, get(t, ts, "/api/v1/attention", &a), 200)
+	for _, it := range a.Items {
+		assert.True(t, it.Kind != "regression")
+	}
+
+	require.NoError(t, st.AddSnapshot(ctx, "org/a", history.Snapshot{At: "2026-10-02T00:00:00Z", Grade: "C", Score: 70, VulnsCalled: 2, DupPct: 1}))
+	require.Equal(t, get(t, ts, "/api/v1/repos/org%2Fa/history?limit=1", &tr), 200)
+	assert.Len(t, tr.Snapshots, 1, "limit keeps the latest")
+	require.Equal(t, get(t, ts, "/api/v1/repos/org%2Fa/history", &tr), 200)
+	assert.Equal(t, tr.Since, "2026-10-01T00:00:00Z")
+	require.Equal(t, get(t, ts, "/api/v1/attention", &a), 200)
+	var found *AttentionItem
+	for i, it := range a.Items {
+		if it.Kind == "regression" {
+			found = &a.Items[i]
+		}
+	}
+	require.NotNil(t, found)
+	assert.Equal(t, found.Level, "high", "a worse grade and called vulnerabilities")
+	assert.Contains(t, found.Title, "Security grade A to C")
+	assert.Equal(t, found.Link, "/repos/org%2Fa/history")
+	assert.Equal(t, get(t, ts, "/api/v1/repos/nope/history", nil), 404)
 }

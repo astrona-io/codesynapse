@@ -54,6 +54,7 @@ nav:
       - Cleanup and licences: features/cleanup-licenses.md
       - Duplicate and shared code: features/duplicates.md
       - Cleanup plan: features/cleanup-plan.md
+      - Trends: features/trends.md
       - Agent memory: features/memory.md
       - Reviews and fix branches: features/reviews-fixes.md
   - Operations:

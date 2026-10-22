@@ -237,6 +237,7 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/shared-code", visibleOnly, s.handleSharedCode)
 	s.route("GET /api/v1/repos/{repo}/sbom", repoRole(accounts.Viewer), s.handleSBOM)
 	s.route("GET /api/v1/repos/{repo}/duplicates/refactor", repoRole(accounts.Viewer), s.handleRefactorPlan)
+	s.route("GET /api/v1/repos/{repo}/history", repoRole(accounts.Viewer), s.handleHistory)
 	s.route("GET /api/v1/repos/{repo}/cleanup/plan", repoRole(accounts.Viewer), s.handleCleanupPlan)
 	s.route("GET /api/v1/repos/{repo}/licenses", repoRole(accounts.Viewer), s.handleLicenses)
 	s.route("GET /api/v1/repos/{repo}/memory", repoRole(accounts.Viewer), s.handleMemory)
@@ -438,6 +439,9 @@ func (s *Server) deleteRepo(ctx context.Context, repo string, files bool) (int, 
 	}
 	if err := s.st.DeleteRepo(ctx, repo); err != nil {
 		return 500, err
+	}
+	if err := s.st.DeleteSnapshots(ctx, repo); err != nil {
+		s.logger.Warn("removing history", "repo", repo, "error", err)
 	}
 	if err := s.sched.remove(repo); err != nil {
 		s.logger.Warn("removing schedule", "repo", repo, "error", err)

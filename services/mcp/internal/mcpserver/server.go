@@ -43,6 +43,9 @@ type Options struct {
 	// Reviews enables the review tools (submit_review and friends), which
 	// write to this store. Nil leaves the server strictly read-only.
 	Reviews store.ReviewStore
+	// History enables repo_trend, which reads the snapshots taken after each
+	// ingest. Nil leaves the tool out.
+	History store.HistoryStore
 	// Memory enables the agent-memory tools (upsert_graph_triples and
 	// friends), which write to this store. Nil leaves them out entirely.
 	Memory store.MemoryStore
@@ -92,6 +95,12 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	registerAgentTools(s, h, add)
 	registerDiscoveryTools(s, h, add)
 	registerPrompts(s)
+	if len(opts) > 0 && opts[0].History != nil {
+		h.history = opts[0].History
+		mcp.AddTool(s, add("repo_trend",
+			"How a repository is changing: the security grade and score, vulnerabilities your code calls, serious findings, licence conflicts, duplicate and unused code, test reach and documentation after each sync, and what got worse or better since the sync before. Use it to answer whether the codebase is improving, and to check your change did not make something worse."),
+			h.repoTrend)
+	}
 	if len(opts) > 0 && opts[0].Reviews != nil {
 		registerReviewTools(s, h, opts[0].Reviews)
 		registerReviewPrompt(s)
@@ -118,6 +127,7 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 type handlers struct {
 	svc     query.Service
 	reviews store.ReviewStore
+	history store.HistoryStore
 	memory  store.MemoryStore
 	offload *APIClient
 	access  Access
