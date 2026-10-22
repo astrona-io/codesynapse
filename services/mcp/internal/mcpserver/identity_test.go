@@ -3,8 +3,10 @@ package mcpserver
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 	"github.com/parisnakitakejser/codesynapse/internal/agentctx"
 	"github.com/parisnakitakejser/codesynapse/internal/catalog"
 	"github.com/parisnakitakejser/codesynapse/internal/identity"
@@ -52,4 +54,54 @@ func TestIdentityToolsAndSharedCatalog(t *testing.T) {
 	assert.Equal(t, records, shared, "MCP and API use the same catalogue result")
 	assert.True(t, call(t, cs, "code_identities", map[string]any{"repo": "foreign"}, nil).IsError)
 	assert.True(t, call(t, cs, "code_annotate", map[string]any{"symbol": "sym-00000000000000000000000000000000", "purpose": "invalid target"}, nil).IsError)
+}
+
+func TestCrossRepositoryReuseRechecksLiveSession(t *testing.T) {
+	url, keys, acc, _, db := keyServer(t)
+	ctx := context.Background()
+	stamp := func(repo string, g *model.Graph) identity.Report {
+		t.Helper()
+		r, err := identity.Reconcile(g, repo, identity.Report{Version: 1, Repo: repo})
+		require.NoError(t, err)
+		rn, _ := g.Node(model.NodeID(repo, model.KindRepository, repo))
+		rn.Identities, err = identity.Encode(r)
+		require.NoError(t, err)
+		require.NoError(t, db.ReplaceRepo(ctx, repo, g))
+		return r
+	}
+	destination := stamp(storetest.Repo, storetest.Fixture())
+	source := stamp("private-source", archGraph(t, "private-source", map[string]string{}))
+	owner, err := acc.AuthenticateKey(ctx, keys["a"])
+	require.NoError(t, err)
+	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: owner.OrgID, Graph: "private-source", AddedBy: owner.User.ID, AddedAt: time.Now()}))
+	cs, err := connectKey(t, url, keys["a"])
+	require.NoError(t, err)
+	args := map[string]any{"repo": storetest.Repo, "origin_repo": "private-source", "method": "copy", "origins": []string{source.Symbols[0].ID}, "destinations": []string{destination.Symbols[0].ID}, "reason": "source-private rationale", "compatibility": "unknown", "license": "unknown", "attribution": "unknown", "validation": "not run"}
+	var created catalog.CodeView
+	require.False(t, call(t, cs, "code_record_reuse", args, &created).IsError)
+	assert.Equal(t, created.Item.Code.Sources[0].Repo, "private-source")
+	assert.Equal(t, created.Item.OrgID, owner.OrgID)
+	var page catalog.CodePage
+	require.False(t, call(t, cs, "code_records", map[string]any{"repo": storetest.Repo}, &page).IsError)
+	assert.Len(t, page.Records, 1)
+	other, err := connectKey(t, url, keys["b"])
+	require.NoError(t, err)
+	assert.True(t, call(t, other, "code_record_reuse", args, nil).IsError, "a key cannot borrow source permissions from another organisation")
+	_, err = acc.St.RemoveRepository(ctx, owner.OrgID, "private-source")
+	require.NoError(t, err)
+	require.False(t, call(t, cs, "code_records", map[string]any{"repo": storetest.Repo}, &page).IsError)
+	assert.Len(t, page.Records, 0)
+	assert.True(t, page.SourcesRestricted)
+	assert.Equal(t, page.Total, 0)
+	assert.True(t, call(t, cs, "code_record_reuse", args, nil).IsError, "resumed sessions recheck source access")
+	events, err := acc.St.ListEvents(ctx, accounts.EventFilter{})
+	require.NoError(t, err)
+	found := false
+	denied := false
+	for _, event := range events {
+		found = found || event.Action == "mcp.code.record_reuse" && event.UserID == owner.User.ID && event.OrgID == owner.OrgID
+		denied = denied || event.Action == "mcp.access_denied" && event.Target == "code_record_reuse" && event.UserID == owner.User.ID
+	}
+	assert.True(t, found, "the attributed provenance write is audited")
+	assert.True(t, denied, "revoked source access is an audited denial")
 }

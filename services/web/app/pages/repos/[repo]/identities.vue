@@ -12,7 +12,7 @@ const { data: page, pending, error } = useApiGet<IdentityPage>(() => repoPath(re
 const recordOffset = ref(0)
 watch(selected, () => { recordOffset.value = 0 })
 const { data: records, error: recordError, refresh } = useApiGet<CodeRecordPage>(() => repoPath(repo.value, `code-records?symbol=${encodeURIComponent(selected.value)}&offset=${recordOffset.value}&limit=20`))
-const form = reactive({ method: 'annotation', origins: '', destinations: '', purpose: '', labels: '', reason: '', modifications: '', compatibility: '', license: '', attribution: '', validation: '' })
+const form = reactive({ method: 'annotation', origin_repo: '', origins: '', destinations: '', purpose: '', labels: '', reason: '', modifications: '', compatibility: '', license: '', attribution: '', validation: '' })
 watch(selected, (id) => { form.destinations = id }, { immediate: true })
 const saving = ref(false)
 const saveError = ref('')
@@ -23,7 +23,7 @@ async function save() {
   saveError.value = ''
   saved.value = false
   try {
-    await apiPost(repoPath(repo.value, 'code-records'), { ...form, origins: form.method === 'annotation' ? [] : list(form.origins), destinations: list(form.destinations), labels: list(form.labels) })
+    await apiPost(repoPath(repo.value, 'code-records'), { ...form, origin_repo: form.method === 'annotation' ? '' : form.origin_repo, origins: form.method === 'annotation' ? [] : list(form.origins), destinations: list(form.destinations), labels: list(form.labels) })
     saved.value = true
     await refresh()
   } catch (e) { saveError.value = apiErrorMessage(e) }
@@ -85,15 +85,17 @@ useHead({ title: () => `Identity and reuse · ${repo.value}` })
       <p v-else-if="!records">Loading records…</p>
       <p v-else-if="!records.records.length">No recorded annotations or reuse in this scope.</p>
       <p v-if="records?.storage_truncated">The storage query reached its limit; this list may be incomplete.</p>
+      <p v-if="records?.sources_restricted" role="status">Some reuse records are unavailable because their sources are outside your current access.</p>
       <article v-for="record in records?.records" :key="record.item.id" class="stack">
         <h3>{{ record.item.code.method }} · {{ record.freshness }}</h3>
         <p class="small muted">{{ record.item.client || 'Unknown client' }} · {{ record.item.created_at }}</p>
+        <p v-if="record.source_unavailable" role="status">Source analysis is unavailable. This record needs review.</p>
         <p>{{ record.item.code.purpose || record.item.code.reason }}</p>
         <p v-if="record.item.code.labels.length" class="small">Labels: {{ record.item.code.labels.join(', ') }}</p>
         <p v-for="change in record.changed" :key="change" class="small">{{ change }}</p>
         <details>
           <summary>Provenance and validation</summary>
-          <p v-for="source in record.item.code.sources" :key="source.id" class="small mono">Origin: {{ source.id }} · {{ source.revision || 'revision unavailable' }} · {{ source.fingerprint || 'fingerprint unavailable' }}</p>
+          <p v-for="source in record.item.code.sources" :key="source.id" class="small mono">Origin: <NuxtLink :to="`/repos/${encodeURIComponent(source.repo || repo)}/identities?id=${source.id}`">{{ source.repo || repo }} · {{ source.id }}</NuxtLink> · {{ source.revision || 'revision unavailable' }} · {{ source.fingerprint || 'fingerprint unavailable' }}</p>
           <p v-for="target in record.item.code.targets" :key="target.id" class="small mono">Destination: {{ target.id }} · {{ target.revision || 'revision unavailable' }}</p>
           <dl><template v-for="field in ['modifications', 'compatibility', 'license', 'attribution', 'validation'] as const" :key="field"><dt>{{ field }}</dt><dd>{{ record.item.code[field] || 'Not recorded' }}</dd></template></dl>
         </details>
@@ -107,7 +109,7 @@ useHead({ title: () => `Identity and reuse · ${repo.value}` })
 
     <form v-if="page?.available" class="panel stack" @submit.prevent="save">
       <h2>Add an annotation or reuse record</h2>
-      <p class="small muted">Needs write access to this repository. References must be permanent IDs from this repository. An origin may be historical; destinations must be current.</p>
+      <p class="small muted">Needs write access to this repository and read access to the source in the same organisation. An origin may be historical; destinations must be current.</p>
       <label>Method <select v-model="form.method"><option value="annotation">Annotation</option><option value="shared-api">Shared API</option><option value="copy">Copy</option><option value="adapt">Adaptation</option><option value="split">Split</option><option value="merge">Merge</option></select></label>
       <label>Destination IDs, separated by commas <input v-model="form.destinations" required maxlength="800"></label>
       <template v-if="form.method === 'annotation'">
@@ -115,6 +117,7 @@ useHead({ title: () => `Identity and reuse · ${repo.value}` })
         <label>Labels, separated by commas <input v-model="form.labels" maxlength="1000"></label>
       </template>
       <template v-else>
+        <label>Source repository (leave empty for this repository) <input v-model="form.origin_repo" maxlength="300" placeholder="owner/repository"></label>
         <label>Origin IDs, separated by commas <input v-model="form.origins" required maxlength="800"></label>
         <label v-for="field in ['reason', 'modifications', 'compatibility', 'license', 'attribution', 'validation'] as const" :key="field">{{ field }} <textarea v-model="form[field]" :required="field !== 'modifications'" maxlength="1000" /></label>
         <p class="small muted">If a check was unavailable or not run, say so explicitly.</p>

@@ -8,6 +8,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 	"github.com/parisnakitakejser/codesynapse/internal/catalog"
 	"github.com/parisnakitakejser/codesynapse/internal/curation"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
@@ -18,7 +19,16 @@ import (
 // fenced to the repository the route was authorised for.
 
 func (s *Server) catalogOf(ctx context.Context, repo string) catalog.Service {
-	return catalog.Service{R: store.ForRepository(s.st, repo), Items: s.st, Org: orgOfRepo(ctx, repo)}
+	org := orgOfRepo(ctx, repo)
+	return catalog.Service{R: store.ForRepository(s.st, repo), Items: s.st, Org: org,
+		ReadRepository: func(ctx context.Context, source string) (store.Reader, error) {
+			sc := scopeFrom(ctx)
+			if !sc.sees(source) || !sc.all && !sc.graphs[source].AtLeast(accounts.Viewer) || orgOfRepo(ctx, source) != org || org == "\x00none" {
+				return nil, store.ErrNotFound
+			}
+			return store.ForRepository(s.st, source), nil
+		},
+	}
 }
 
 // orgOfRepo is the organisation whose proposals and links the caller sees on

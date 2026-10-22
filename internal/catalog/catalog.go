@@ -27,6 +27,10 @@ type Service struct {
 	R store.Reader
 	// Items keeps proposals and links; nil leaves them unavailable.
 	Items store.CuratedStore
+	// ReadRepository resolves an additional repository only after checking
+	// current read access in this same organisation. Nil denies cross-repo
+	// provenance even if R happens to be an unrestricted reader.
+	ReadRepository func(context.Context, string) (store.Reader, error)
 	// Org is the organisation whose proposals and links are shown ("" outside
 	// accounts mode). Organisations sharing a code graph never see each other's.
 	Org string

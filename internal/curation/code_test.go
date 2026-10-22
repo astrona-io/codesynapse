@@ -16,6 +16,9 @@ func TestPrepareCodeValidation(t *testing.T) {
 		valid bool
 	}{
 		{"annotation", CodeInput{Method: "annotation", Destinations: []string{id("a")}, Purpose: "serves reports"}, true},
+		{"annotation has no source repository", CodeInput{Method: "annotation", OriginRepo: "source", Destinations: []string{id("a")}, Purpose: "reports"}, false},
+		{"malformed permanent ID", CodeInput{Method: "annotation", Destinations: []string{id("z")}, Purpose: "reports"}, false},
+		{"invalid origin repository", CodeInput{Method: "copy", OriginRepo: "source\x00", Origins: []string{id("a")}, Destinations: []string{id("b")}}, false},
 		{"unknown method", CodeInput{Method: "approved"}, false},
 		{"empty", CodeInput{Method: "annotation", Destinations: []string{id("a")}}, false},
 		{"self lineage", CodeInput{Method: "copy", Origins: []string{id("a")}, Destinations: []string{id("a")}}, false},

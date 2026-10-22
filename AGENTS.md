@@ -183,8 +183,12 @@ or propagate changes. Free text is redacted and bounded. Reuse pins original
 and destination IDs/revisions/fingerprints and the author's licence,
 attribution, compatibility and validation assessment. Reads flag changed or
 unavailable evidence without rewriting history. Uncertain matches are data for
-review, never verified lineage. This version supports provenance within one
-repository. See `docs/AGENT_GUIDE.md` for contracts and limits.
+review, never verified lineage. Provenance may name one source repository in
+the same selected organisation: creation requires source read access and
+destination write access. Every read rechecks source access and hides the
+whole record if it is lost, including free text and source identifiers.
+An authorised but unavailable source is flagged, never treated as clean.
+See `docs/AGENT_GUIDE.md` for contracts and limits.
 
 - `services/web/app/` is the source dir. Pages under `app/pages/repos/[repo]/`.
 - All data goes through `useApiGet` / `apiPost` in `app/composables/useApi.ts`, which hit `/api/cg/*`. Never call the Go API from the browser directly.

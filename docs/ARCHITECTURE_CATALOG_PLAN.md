@@ -17,7 +17,7 @@ One connected system for understanding the intended architecture, finding and re
 | Code catalog: symbols with signature, range, fingerprint, tests, callers, dependencies | Exists in the code graph | done |
 | Stable symbol identity across renames and moves, ambiguous matches for review, lineage | Conservative fingerprint matching; permanent IDs alongside current locators, historical occurrences, ambiguous candidates and explicit split/merge records. Call-neighbourhood matching and identity reassignment remain | 2 |
 | Annotations, purpose, labels on symbols | Organisation-scoped attributed code records, UI/API/MCP | 2 |
-| Reuse records, derivation, divergence of copies | Same-repository explicit provenance, revision fingerprints and freshness checks. Cross-repository provenance remains; duplicate detection is not verified lineage | 2 |
+| Reuse records, derivation, divergence of copies | Explicit provenance within or between repositories of the same selected organisation, current access checked on both ends, revision fingerprints and freshness checks. Mixed-source records remain; duplicate detection is not verified lineage | 2 |
 | Recursive dependency graph, paths, licences, advisories, cycles, no silent truncation | Done for Go, npm, PyPI, Cargo, Composer, Bundler, NuGet, Gradle (`DependencyGraph`, paths, SBOM) | done |
 | Dependency replacement analysis (before/after graph, API, licences, advisories, artifact) | Review page and prompt; no before/after comparison | 3 |
 | Unified search, filters, comparison view, analysis workflow states | Per-area pages; no unified search; ingest jobs have running/succeeded/failed | 4 |

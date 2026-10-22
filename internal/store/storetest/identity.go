@@ -29,6 +29,11 @@ func identityContract(t *testing.T, st store.Store) {
 	require.NoError(t, err)
 	assert.Equal(t, got.Identities, rn.Identities)
 	it := curation.Item{ID: "code1", Repo: repo, Kind: curation.KindCode, OrgID: "o1", Code: &curation.CodeRecord{CodeInput: curation.CodeInput{Method: "annotation", Destinations: []string{n.SymbolID}, Purpose: "entry point", Labels: []string{"api"}}, Sources: []curation.SymbolSource{}, Targets: []curation.SymbolSource{{ID: n.SymbolID, Revision: "abc", NodeID: n.ID, Fingerprint: "hash"}}}}
+	it.Code.Method = "copy"
+	it.Code.OriginRepo = "source-contract"
+	it.Code.Origins = []string{"sym-abcdef0123456789abcdef0123456789"}
+	it.Code.Sources = []curation.SymbolSource{{ID: it.Code.Origins[0], Repo: it.Code.OriginRepo, Revision: "origin-rev", NodeID: "source-contract|Function|Original", Fingerprint: "original-hash"}}
+	it.Code.Targets[0].Repo = repo
 	require.NoError(t, st.SaveCurated(ctx, it))
 	saved, err := st.GetCurated(ctx, repo, it.ID)
 	require.NoError(t, err)
