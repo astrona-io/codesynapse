@@ -109,3 +109,25 @@ func TestSymbolContextShowsDuplicates(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, got.Duplicate == nil, "no copies, no field")
 }
+
+func TestPRContextNamesDuplicatedChanges(t *testing.T) {
+	ctx := context.Background()
+	g := storetest.Fixture()
+	rn, ok := g.Node(storetest.ID(model.KindRepository, storetest.Repo))
+	require.True(t, ok)
+	do := storetest.ID(model.KindMethod, "(*app.impl).Do")
+	enc, err := duplicates.Encode(duplicates.Report{Groups: []duplicates.Group{{
+		Hash: "h", Kind: "near", Similarity: 0.8, Scope: "repository", Copies: 2,
+		Members: []duplicates.Member{{ID: do, Name: "(*app.impl).Do"}, {ID: "x|Method|other", Name: "(*other.impl).Do", File: "other/do.go", StartLine: 10, EndLine: 40}},
+	}}})
+	require.NoError(t, err)
+	rn.Duplicates = enc
+	s := memory.New()
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, g))
+
+	got, err := Service{R: s}.PRContext(ctx, storetest.Repo, PROptions{Files: []string{"app/app.go"}})
+	require.NoError(t, err)
+	require.Len(t, got.DuplicatedChanged, 1)
+	assert.Contains(t, got.DuplicatedChanged[0], "edited copies ~80% alike")
+	assert.Contains(t, got.DuplicatedChanged[0], "other/do.go:10")
+}

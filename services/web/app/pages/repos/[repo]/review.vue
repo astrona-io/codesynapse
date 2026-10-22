@@ -57,6 +57,7 @@ const explore = (id: string) => ({ path: `/repos/${encodeURIComponent(repo.value
         <StatTile label="Impacted" :value="report.summary.impacted_symbols" />
         <StatTile label="Untested changes" :value="report.summary.untested_changes" />
         <StatTile label="Security-sensitive" :value="report.summary.security_sensitive" />
+        <StatTile label="With copies" :value="report.summary.duplicated_changes ?? 0" hint="changed code that exists elsewhere" />
       </div>
 
       <div class="panel">
@@ -70,7 +71,14 @@ const explore = (id: string) => ({ path: `/repos/${encodeURIComponent(repo.value
                 <td><NuxtLink :to="explore(c.id)" class="mono">{{ c.name }}</NuxtLink><div class="mono muted">{{ c.location }}</div></td>
                 <td class="num">{{ c.fan_in }}</td>
                 <td class="num" :class="{ error: !c.tests.length }">{{ c.tests.length }}</td>
-                <td class="muted">{{ c.reasons.join('; ') }}</td>
+                <td class="muted">
+                  {{ c.reasons.join('; ') }}
+                  <div v-if="c.duplicate" class="dup">
+                    <span class="badge badge--violet">{{ c.duplicate.kind === 'near' ? `edited copies · ~${Math.round(c.duplicate.similarity * 100)}% alike` : 'exact copies' }}</span>
+                    {{ c.duplicate.copies }} in total: change them too, or merge them.
+                    <span v-for="o in c.duplicate.others" :key="o.id" class="mono small"><br>{{ o.name }} {{ o.file }}:{{ o.start_line }}-{{ o.end_line }}</span>
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -109,3 +117,7 @@ const explore = (id: string) => ({ path: `/repos/${encodeURIComponent(repo.value
     </template>
   </div>
 </template>
+
+<style scoped>
+.dup { margin-top: 6px; font-size: 12.5px; }
+</style>

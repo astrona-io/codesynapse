@@ -14,8 +14,8 @@ func WriteMarkdown(w io.Writer, r Report) error {
 	var b strings.Builder
 	s := r.Summary
 	fmt.Fprintf(&b, "# Review context: %s\n\n", r.Repo)
-	fmt.Fprintf(&b, "**Max risk: %s** · %d files · %d symbols changed · %d impacted · %d untested · %d security-sensitive\n\n",
-		s.MaxLevel, s.ChangedFiles, s.ChangedSymbols, s.ImpactedSymbols, s.UntestedChanges, s.SecuritySensitive)
+	fmt.Fprintf(&b, "**Max risk: %s** · %d files · %d symbols changed · %d impacted · %d untested · %d security-sensitive · %d with copies\n\n",
+		s.MaxLevel, s.ChangedFiles, s.ChangedSymbols, s.ImpactedSymbols, s.UntestedChanges, s.SecuritySensitive, s.DuplicatedChanges)
 
 	if len(r.Changes) > 0 {
 		b.WriteString("## Changed symbols (highest risk first)\n\n")
@@ -25,6 +25,29 @@ func WriteMarkdown(w io.Writer, r Report) error {
 				c.Level, c.Risk, c.Name, c.Location, c.FanIn, len(c.Tests), strings.Join(c.Reasons, "; "))
 		}
 		b.WriteString("\n")
+	}
+
+	var dups []ChangedSymbol
+	for _, c := range r.Changes {
+		if c.Duplicate != nil {
+			dups = append(dups, c)
+		}
+	}
+	if len(dups) > 0 {
+		b.WriteString("## Changed code that exists elsewhere\n\n")
+		for _, c := range dups {
+			d := c.Duplicate
+			kind := "exact copies"
+			if d.Kind == "near" {
+				kind = fmt.Sprintf("edited copies, ~%.0f%% alike", d.Similarity*100)
+			}
+			fmt.Fprintf(&b, "- `%s` has %s (%d in total):", c.Name, kind, d.Copies)
+			for _, o := range d.Others {
+				fmt.Fprintf(&b, " `%s` %s:%d-%d;", o.Name, o.File, o.StartLine, o.EndLine)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("\nApply the change to each copy, or merge them so it is made once.\n\n")
 	}
 
 	if len(r.Impacted) > 0 {

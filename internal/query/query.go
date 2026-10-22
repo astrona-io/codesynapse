@@ -64,18 +64,25 @@ type SymbolCard struct {
 	Duplicate *duplicates.Info `json:"duplicate,omitempty"`
 }
 
-// DuplicateOf looks the function up in the repository's duplicate report. A
-// missing or unreadable report just means nothing to show.
+// DuplicateReport reads the repository's stored duplicate report. A missing
+// or unreadable report is reported as not found, which just means there is
+// nothing to show.
+func DuplicateReport(ctx context.Context, r store.Reader, repo string) (duplicates.Report, bool) {
+	rn, err := r.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
+	if err != nil || rn.Duplicates == "" {
+		return duplicates.Report{}, false
+	}
+	rep, err := duplicates.Decode(rn.Duplicates)
+	return rep, err == nil
+}
+
+// DuplicateOf looks the function up in the repository's duplicate report.
 func DuplicateOf(ctx context.Context, r store.Reader, repo string, n model.Node) *duplicates.Info {
 	if !n.Kind.IsCallable() {
 		return nil
 	}
-	rn, err := r.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
-	if err != nil || rn.Duplicates == "" {
-		return nil
-	}
-	rep, err := duplicates.Decode(rn.Duplicates)
-	if err != nil {
+	rep, ok := DuplicateReport(ctx, r, repo)
+	if !ok {
 		return nil
 	}
 	return rep.Lookup(n.ID)
