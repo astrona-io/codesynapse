@@ -67,6 +67,8 @@ type Options struct {
 	Access Access
 	// StdioToken is a personal API key supplied by the process environment.
 	StdioToken string
+	// Runtime validates upstream primary identity and binds it to transports.
+	Runtime *Runtime
 	// Offload, with Memory, adds offload_turns: background extraction of
 	// triples from conversation turns by the API's local model.
 	Offload *APIClient
@@ -97,6 +99,11 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	if len(opts) > 0 {
 		stdioToken = opts[0].StdioToken
 	}
+	runtime := NewRuntime(h.access, stdioToken, "", "")
+	if len(opts) > 0 && opts[0].Runtime != nil {
+		runtime = opts[0].Runtime
+	}
+	s.AddReceivingMiddleware(runtime.middleware())
 	s.AddReceivingMiddleware(callerMiddleware(h.access, stdioToken))
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true}
 	add := func(name, desc string) *mcp.Tool {

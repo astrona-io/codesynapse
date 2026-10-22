@@ -11,6 +11,7 @@ import (
 
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 	acctmem "github.com/parisnakitakejser/codesynapse/internal/accounts/memstore"
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
@@ -48,7 +49,11 @@ func TestPlatformContentIsolation(t *testing.T) {
 	assert.Equal(t, keyClient.do("GET", reportPath, "", nil), 403, "the report requires an owner session")
 	assert.Equal(t, keyClient.do("POST", "/api/v1/repos", `{}`, nil), 403, "keys cannot create an initial administrator grant")
 	assert.Equal(t, keyClient.do("POST", "/api/v1/accounts/orgs/"+signed.Org.Slug+"/repos", `{"graph":"`+storetest.Repo+`"}`, nil), 403, "keys cannot attach a graph and grant access")
-	assert.Equal(t, owner.do("POST", "/api/v1/repos", `{}`, nil, OrgHeader, signed.Org.Slug), 501, "owner sessions reach the workspace configuration check")
+	assert.Equal(t, owner.do("POST", "/api/v1/repos", `{}`, nil, OrgHeader, signed.Org.Slug), 403, "repository registration requires runtime metadata before side effects")
+	require.Equal(t, owner.do("POST", "/api/v1/execution/sessions", `{"session_id":"owner-registration"}`, nil, OrgHeader, signed.Org.Slug), 201)
+	headers := append([]string{OrgHeader, signed.Org.Slug}, runtimeHeaders("owner-registration")...)
+	assert.Equal(t, owner.do("POST", "/api/v1/repos", `{}`, nil, headers...), 501, "registered owner reaches the workspace configuration check")
+	assert.Equal(t, owner.do("POST", "/api/v1/accounts/orgs/"+signed.Org.Slug+"/repos", `{}`, nil), 403, "attachment also requires runtime metadata")
 	foreign := model.NewGraph()
 	secretID := model.NodeID("private", model.KindFunction, "Secret")
 	foreign.AddNode(model.Node{ID: secretID, Repo: "private", Kind: model.KindFunction, Name: "Secret", Summary: "Hidden source summary"})
@@ -95,19 +100,23 @@ func TestQueuedJobRechecksSession(t *testing.T) {
 	srv := &Server{cfg: Config{Accounts: acc}}
 	jobCtx := context.WithValue(ctx, principalKey{}, p)
 	jobCtx = context.WithValue(jobCtx, scopeKey{}, scope{reach: map[string]accounts.Reach{"repo": {OrgID: org.ID, Role: accounts.Admin}}})
+	id, err := acc.RegisterExecutionSession(ctx, user.ID, org.ID, "queued-job-runtime")
+	require.NoError(t, err)
+	jobCtx, err = execution.With(jobCtx, id)
+	require.NoError(t, err)
 	_, authorize := srv.jobAuthorization(jobCtx, "repo", accounts.Admin)
-	require.NoError(t, authorize(ctx))
+	require.NoError(t, authorize(jobCtx))
 	jobs := NewJobs(ctx, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)), 0, false, false)
 	jobs.sem <- struct{}{}
 	done := make(chan error, 1)
-	_, err = jobs.Start("repo", "", JobOptions{OrgID: org.ID, Authorize: authorize,
+	_, err = jobs.Start("repo", "", JobOptions{OrgID: org.ID, Identity: id, Authorize: authorize,
 		Run: func(context.Context) (string, error) {
 			t.Error("revoked job executed")
 			return "", nil
 		}, Done: func(err error) { done <- err }})
 	require.NoError(t, err)
 	require.NoError(t, acc.Logout(ctx, token))
-	assert.Error(t, authorize(ctx), "queued work loses permission when its session ends")
+	assert.Error(t, authorize(jobCtx), "queued work loses permission when its session ends")
 	<-jobs.sem
 	select {
 	case err := <-done:

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
 
@@ -33,7 +34,7 @@ func connectGraph(t *testing.T, g *model.Graph) *mcp.ClientSession {
 	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, g))
 
 	ct, st := mcp.NewInMemoryTransports()
-	_, err := New(s, "test", Options{Reviews: s}).Connect(ctx, st, nil)
+	_, err := newTestServer(t, s, "test", Options{Reviews: s}).Connect(ctx, st, nil)
 	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(ctx, ct, nil)
 	require.NoError(t, err)
@@ -435,7 +436,7 @@ func connectMemory(t *testing.T) *mcp.ClientSession {
 	s := memory.New()
 	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
 	ct, st := mcp.NewInMemoryTransports()
-	_, err := New(s, "test", Options{Memory: s}).Connect(ctx, st, nil)
+	_, err := newTestServer(t, s, "test", Options{Memory: s}).Connect(ctx, st, nil)
 	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test-client"}, nil).Connect(ctx, ct, nil)
 	require.NoError(t, err)
@@ -499,7 +500,7 @@ func TestUsageMiddleware(t *testing.T) {
 	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
 	rec := usage.NewRecorder(s)
 	ct, st := mcp.NewInMemoryTransports()
-	_, err := New(s, "test", Options{Reviews: s, Usage: rec}).Connect(ctx, st, nil)
+	_, err := newTestServer(t, s, "test", Options{Reviews: s, Usage: rec}).Connect(ctx, st, nil)
 	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "usage-client"}, nil).Connect(ctx, ct, nil)
 	require.NoError(t, err)
@@ -533,10 +534,11 @@ func TestOffloadTurns(t *testing.T) {
 		Turns  []map[string]string `json:"turns"`
 		Source string              `json:"source"`
 	}
-	var auth, path string
+	var auth, path, primary, parent string
 	fail := false
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth, path = r.Header.Get("Authorization"), r.URL.Path
+		primary, parent = r.Header.Get(execution.SessionHeader), r.Header.Get(execution.ParentSessionHeader)
 		_ = json.NewDecoder(r.Body).Decode(&got)
 		if fail {
 			w.WriteHeader(http.StatusConflict)
@@ -552,7 +554,7 @@ func TestOffloadTurns(t *testing.T) {
 	s := memory.New()
 	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
 	ct, st := mcp.NewInMemoryTransports()
-	_, err := New(s, "test", Options{Memory: s, Offload: &APIClient{BaseURL: api.URL, Token: "secret"}}).Connect(ctx, st, nil)
+	_, err := newTestServer(t, s, "test", Options{Memory: s, Offload: &APIClient{BaseURL: api.URL, Token: "secret"}}).Connect(ctx, st, nil)
 	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "claude-code"}, nil).Connect(ctx, ct, nil)
 	require.NoError(t, err)
@@ -562,8 +564,10 @@ func TestOffloadTurns(t *testing.T) {
 	res := call(t, cs, "offload_turns", map[string]any{"turns": []map[string]string{{"role": "user", "text": "We decided to drop Redis."}}}, &job)
 	require.False(t, res.IsError)
 	assert.Equal(t, job.ID, "j1")
-	assert.Equal(t, path, "/api/v1/repos/fixture/memory/offload")
+	assert.Equal(t, path, "/api/v1/repos/fixture/session-memory/offload")
 	assert.Equal(t, auth, "Bearer secret")
+	assert.Equal(t, primary, "fixture-chat")
+	assert.Equal(t, parent, primary)
 	assert.Equal(t, got.Source, "claude-code")
 	assert.Equal(t, got.Turns[0]["text"], "We decided to drop Redis.")
 
@@ -588,27 +592,31 @@ func TestRecallContext(t *testing.T) {
 	// Without the API: the gate and name search run locally.
 	cs := connectMemory(t)
 	call(t, cs, "upsert_graph_triples", map[string]any{"triples": []map[string]any{{"subject": "Payments", "predicate": "OWNED_BY", "object": "Team Blue"}}}, nil)
+	assert.True(t, call(t, cs, "recall_context", map[string]any{"query": "who owns payments?"}, nil).IsError, "session recall must not expose durable facts when the API is unavailable")
 	var out struct {
 		Skipped string
 		Mode    string
 		Facts   []agentmem.Fact
 	}
-	res := call(t, cs, "recall_context", map[string]any{"query": "who owns payments?"}, &out)
+	res := call(t, cs, "recall_context", map[string]any{"query": "who owns payments?", "memory_scope": "repository"}, &out)
 	require.False(t, res.IsError)
 	assert.Equal(t, out.Mode, "names")
 	require.Len(t, out.Facts, 1)
-	call(t, cs, "recall_context", map[string]any{"query": "thanks!"}, &out)
+	call(t, cs, "recall_context", map[string]any{"query": "thanks!", "memory_scope": "repository"}, &out)
 	assert.Equal(t, out.Skipped, "small talk")
 
 	// With the API: its hybrid answer is passed through.
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, r.URL.Path, "/api/v1/repos/fixture/session-memory/recall")
+		assert.Equal(t, r.Header.Get(execution.SessionHeader), "fixture-chat")
+		assert.Equal(t, r.Header.Get(execution.ParentSessionHeader), "fixture-chat")
 		_, _ = w.Write([]byte(`{"mode":"hybrid","entries":[{"id":"x","name":"Payments","score":0.9,"via":"vector"}],"notice":"n","entities":[],"facts":[]}`))
 	}))
 	t.Cleanup(api.Close)
 	s := memory.New()
 	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
 	ct, st := mcp.NewInMemoryTransports()
-	_, err := New(s, "test", Options{Memory: s, Offload: &APIClient{BaseURL: api.URL}}).Connect(ctx, st, nil)
+	_, err := newTestServer(t, s, "test", Options{Memory: s, Offload: &APIClient{BaseURL: api.URL}}).Connect(ctx, st, nil)
 	require.NoError(t, err)
 	cs2, err := mcp.NewClient(&mcp.Implementation{Name: "c"}, nil).Connect(ctx, ct, nil)
 	require.NoError(t, err)

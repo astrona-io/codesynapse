@@ -8,6 +8,7 @@
 package memory
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/redact"
 )
 
@@ -80,11 +82,12 @@ type Entity struct {
 
 // Fact is a directed triple between two entities of the same repository.
 type Fact struct {
-	ID        string `json:"id"`
-	Repo      string `json:"repo"`
-	Subject   string `json:"subject"`   // entity ID
-	Predicate string `json:"predicate"` // UPPER_SNAKE_CASE
-	Object    string `json:"object"`    // entity ID
+	OriginSessionID string `json:"origin_session_id,omitempty"`
+	ID              string `json:"id"`
+	Repo            string `json:"repo"`
+	Subject         string `json:"subject"`   // entity ID
+	Predicate       string `json:"predicate"` // UPPER_SNAKE_CASE
+	Object          string `json:"object"`    // entity ID
 	// Source names the agent or client that saved it (provenance).
 	Source string `json:"source"`
 	// Confirmations counts how often the same fact was saved again.
@@ -135,6 +138,18 @@ type Batch struct {
 	Replace  []Fact // Subject and Predicate set; other current objects are closed
 	Aliases  []Alias
 	At       string // RFC 3339 time of the batch
+}
+
+// StampOrigin records validated runtime provenance without trusting tool input.
+// Offline importers without execution identity retain their existing provenance.
+func (b Batch) StampOrigin(ctx context.Context) Batch {
+	if id, ok := execution.From(ctx); ok {
+		b.Facts = slices.Clone(b.Facts)
+		for i := range b.Facts {
+			b.Facts[i].OriginSessionID = id.SessionID
+		}
+	}
+	return b
 }
 
 // sameAs are the predicates that declare an alias instead of a fact.

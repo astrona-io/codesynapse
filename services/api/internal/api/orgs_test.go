@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
+
 	"github.com/parisnakitakejser/codesynapse/internal/forge"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
@@ -64,7 +66,11 @@ func newOrgServer(t *testing.T) *orgFixture {
 		f.cloned = append(f.cloned, name+" "+remote)
 		return Job{Repo: name, Kind: "clone", State: JobRunning}, nil
 	}
-	f.ts = httptest.NewServer(srv)
+	f.ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, err := execution.With(r.Context(), fixedExecution())
+		require.NoError(t, err)
+		srv.ServeHTTP(w, r.WithContext(ctx))
+	}))
 	t.Cleanup(f.ts.Close)
 	return f
 }
@@ -304,7 +310,8 @@ func TestLegacyOrgsDefaultToGitHub(t *testing.T) {
 }
 
 func TestMissingRepositoryIsRemovedAfterThreeConfirmedChecks(t *testing.T) {
-	ctx := context.Background()
+	ctx, err := execution.With(context.Background(), fixedExecution())
+	require.NoError(t, err)
 	exists := false
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -356,7 +363,7 @@ func TestMissingRepositoryIsRemovedAfterThreeConfirmedChecks(t *testing.T) {
 		srv.reapIfGone(ctx, "acme/api", logger)
 	}
 	assert.True(t, !has("acme/api"), "three confirmed 404s in a row remove the graph")
-	_, err := os.Stat(root)
+	_, err = os.Stat(root)
 	assert.True(t, os.IsNotExist(err), "and the clone")
 	assert.Equal(t, srv.sched.get("acme/api").Missing, 0)
 

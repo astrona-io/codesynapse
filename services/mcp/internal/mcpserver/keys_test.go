@@ -13,6 +13,7 @@ import (
 
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 	acctmem "github.com/parisnakitakejser/codesynapse/internal/accounts/memstore"
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	agentmem "github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
@@ -23,11 +24,13 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/usage"
 )
 
-type bearer struct{ token string }
+type bearer struct{ token, session string }
 
 func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
 	r = r.Clone(r.Context())
 	r.Header.Set("Authorization", "Bearer "+b.token)
+	r.Header.Set(execution.SessionHeader, b.session)
+	r.Header.Set(execution.ParentSessionHeader, b.session)
 	return http.DefaultTransport.RoundTrip(r)
 }
 
@@ -46,23 +49,30 @@ func keyServer(t *testing.T) (url string, keys map[string]string, acc *accounts.
 		key, _, err := acc.CreateKey(ctx, accounts.Principal{User: u, Via: "session"}, org.ID, "agent", 0)
 		require.NoError(t, err)
 		keys[name] = key
+		_, err = acc.RegisterExecutionSession(ctx, u.ID, org.ID, "chat-"+name)
+		require.NoError(t, err)
 		if name != "c" {
 			require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: org.ID, Graph: storetest.Repo,
 				Visibility: accounts.Public, AddedBy: u.ID, AddedAt: time.Now().UTC().Truncate(time.Microsecond)}))
 		}
 	}
 	rec = usage.NewRecorder(s)
-	server := New(s, "test", Options{Reviews: s, Memory: s, Usage: rec, Curated: s, CatalogWrites: true, Access: AccountsAccess{Acc: acc}})
+	runtime := NewRuntime(AccountsAccess{Acc: acc}, "", "", "")
+	server := New(s, "test", Options{Reviews: s, Memory: s, Usage: rec, Curated: s, CatalogWrites: true, Access: AccountsAccess{Acc: acc}, Runtime: runtime})
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 	ts := httptest.NewServer(auth.RequireBearerToken(KeyVerifier(acc, "svc-token"),
-		&auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(MeasureHTTP(handler)))
+		&auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(runtime.HTTP(MeasureHTTP(handler))))
 	t.Cleanup(ts.Close)
 	return ts.URL, keys, acc, rec, s
 }
 
-func connectKey(t *testing.T, url, token string) (*mcp.ClientSession, error) {
+func connectKey(t *testing.T, url, token string, sessions ...string) (*mcp.ClientSession, error) {
 	t.Helper()
-	tr := &mcp.StreamableClientTransport{Endpoint: url, HTTPClient: &http.Client{Transport: bearer{token}}}
+	session := "chat-a"
+	if len(sessions) > 0 {
+		session = sessions[0]
+	}
+	tr := &mcp.StreamableClientTransport{Endpoint: url, HTTPClient: &http.Client{Transport: bearer{token, session}}}
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "key-client"}, nil).Connect(context.Background(), tr, nil)
 	if err == nil {
 		t.Cleanup(func() { _ = cs.Close() })
@@ -79,9 +89,9 @@ func TestAPIKeyScoping(t *testing.T) {
 
 	a, err := connectKey(t, url, keys["a"])
 	require.NoError(t, err)
-	b, err := connectKey(t, url, keys["b"])
+	b, err := connectKey(t, url, keys["b"], "chat-b")
 	require.NoError(t, err)
-	c, err := connectKey(t, url, keys["c"])
+	c, err := connectKey(t, url, keys["c"], "chat-c")
 	require.NoError(t, err)
 	_, err = connectKey(t, url, "svc-token")
 	assert.Error(t, err, "the installation token cannot access an accounts deployment")
@@ -196,14 +206,16 @@ func TestSharesAndReadOnlyKeys(t *testing.T) {
 	require.NoError(t, err)
 	a, err := connectKey(t, url, keys["a"])
 	require.NoError(t, err)
-	b, err := connectKey(t, url, keys["b"])
+	b, err := connectKey(t, url, keys["b"], "chat-b")
 	require.NoError(t, err)
-	foreign, err := connectKey(t, url, keys["c"])
+	foreign, err := connectKey(t, url, keys["c"], "chat-c")
 	require.NoError(t, err)
 	assert.True(t, call(t, foreign, "repo_overview", map[string]any{"repo": storetest.Repo}, nil).IsError, "a key from another organisation cannot use the grant")
 	guestKey, _, err := acc.CreateKey(ctx, accounts.Principal{User: pc.User, Via: "session"}, pa.OrgID, "guest", 0)
 	require.NoError(t, err)
-	c, err := connectKey(t, url, guestKey)
+	_, err = acc.RegisterExecutionSession(ctx, pc.User.ID, pa.OrgID, "chat-guest")
+	require.NoError(t, err)
+	c, err := connectKey(t, url, guestKey, "chat-guest")
 	require.NoError(t, err)
 	for name, cs := range map[string]*mcp.ClientSession{"a": a, "b": b} {
 		res := call(t, cs, "upsert_graph_triples", map[string]any{"triples": []map[string]any{{"subject": "Billing " + name, "predicate": "OWNED_BY", "object": "Team " + name}}}, nil)
@@ -232,7 +244,9 @@ func TestSharesAndReadOnlyKeys(t *testing.T) {
 	require.NoError(t, err)
 	vkey, _, err := acc.CreateKey(ctx, accounts.Principal{User: viewer, Via: "session"}, pa.OrgID, "v", 0)
 	require.NoError(t, err)
-	v, err := connectKey(t, url, vkey)
+	_, err = acc.RegisterExecutionSession(ctx, viewer.ID, pa.OrgID, "chat-viewer")
+	require.NoError(t, err)
+	v, err := connectKey(t, url, vkey, "chat-viewer")
 	require.NoError(t, err)
 	require.False(t, call(t, v, "search_graph_nodes", map[string]any{"query": "billing"}, &g).IsError)
 	assert.Len(t, g.Entities, 2, "viewers read their organisation's memory")

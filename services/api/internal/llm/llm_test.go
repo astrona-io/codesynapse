@@ -97,7 +97,7 @@ func TestOpenAICompatible(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, models, []string{"mlx-community/Qwen3.8-27B-4bit"})
 
-	resp, err := r.Complete(context.Background(), "mlx", Request{System: "s", User: "token=supersecretvalue1 please, SSN 123-45-6789", MaxTokens: 5000})
+	resp, err := r.Complete(modelContext(t), "mlx", Request{System: "s", User: "token=supersecretvalue1 please, SSN 123-45-6789", MaxTokens: 5000})
 	require.NoError(t, err)
 	assert.Equal(t, resp.Text, `{"ok":true}`, "think blocks stripped")
 	assert.Equal(t, auth, "", "no auth header without a key")
@@ -159,12 +159,12 @@ func TestEmbeddings(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, name, "ollama")
 	assert.Equal(t, cfg.EmbeddingModel, "nomic-embed-text")
-	vecs, err := r.Embed(context.Background(), name, []string{"Payments service", "token=supersecretvalue1"})
+	vecs, err := r.Embed(modelContext(t), name, []string{"Payments service", "token=supersecretvalue1"})
 	require.NoError(t, err)
 	assert.Equal(t, vecs, [][]float32{{1, 0}, {0, 1}}, "ordered by index")
 	assert.Equal(t, got.Model, "nomic-embed-text")
 	assert.False(t, strings.Contains(got.Input[1], "supersecretvalue1"), "inputs redacted")
-	_, err = r.Embed(context.Background(), name, []string{"a", "b", "c"})
+	_, err = r.Embed(modelContext(t), name, []string{"a", "b", "c"})
 	require.Error(t, err, "a missing embedding is an error")
 
 	for _, route := range []string{"cloud", "plain"} {

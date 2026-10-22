@@ -1,109 +1,140 @@
 # Immutable session identity and inherited context
 
-Status: planned, SaaS phase 4g. The execution-context boundary is a prerequisite for all compliant MCP tool execution in production, independently of the later session-memory storage rollout and adds requirements to phases 4d–4f. It is not implemented by the current MCP transport or memory schema.
+Status: implemented in SaaS phase 4g. This reference describes the execution boundary and session-memory storage. Client setup is in [the agent guide](AGENT_GUIDE.md).
 
 ## Primary session contract
 
-Each incoming tool request belongs to exactly one primary session supplied by its trusted calling runtime as `ctx.session_id`. The identifier remains unchanged for the entire chat thread, including reconnects, retries, compaction, tool calls and background continuations. CodeSynapse must never create, increment, hash into a replacement, randomize or silently substitute a primary session ID while processing that thread.
+The trusted calling runtime supplies one primary `session_id` before the first tool invocation. It stays unchanged through reconnects, retries, compaction, delegated work and background continuations. CodeSynapse validates and registers it; it never generates a replacement. A request ID, MCP transport ID, timestamp, token hash or shared default cannot substitute for it.
 
-Validate the supplied identifier's length/format and bind it to the authenticated tenant and permitted subject/session participants in the accounts/control plane before accepting tool work. A claimed ID alone is not authorization. Reject a mismatched tenant, unapproved participant or attempted session change. Do not place session identity in model-controlled tool arguments or accept arbitrary conversation text as runtime metadata.
+`internal/execution.Identity` carries `tenant_id`, `subject_id`, `session_id` and `parent_session_id`. Every field is required, accepts 1–128 ASCII letters, digits or `._:-`, and is immutable once bound to a Go context. The parent must equal the primary ID. `Require` also rejects canceled or expired contexts. Repository authorization remains a separate check.
 
-The calling runtime supplies the identity before the first tool invocation; if it cannot, fail with an actionable missing-session error. Do not fall back to a request ID, repository ID, user ID, token hash, timestamp, random UUID or a shared `default` session. Session registration validates the upstream-provided value; it does not invent a replacement. A new chat can have a new primary identity assigned by its runtime before execution, but a continuation of an existing chat cannot become a new session automatically.
-
-Keep identifiers distinct:
-
-| Identifier | Lifetime and purpose |
+| Identifier | Purpose |
 |---|---|
-| `session_id` | One immutable primary chat/thread identity, owned by the trusted runtime |
-| `parent_session_id` | Required inherited value on delegated work; exactly equal to the primary `session_id` |
-| MCP transport session ID | Protocol connection/resumption identifier; may change independently and is never substituted for the primary identity |
-| Request, trace, job or task ID | Operational correlation; cannot authorize or select chat memory |
+| Primary `session_id` | One chat thread, supplied by its runtime |
+| `parent_session_id` | Explicit inherited primary ID on every child operation |
+| MCP transport session ID | Protocol connection/resumption; never selects chat memory |
+| Request, trace, job or task ID | Operational correlation only |
 
-Authentication handshakes and health probes do not execute tools or read/write chat memory. Once tool execution begins, missing primary context is an invalid state, not anonymous or unrestricted access. Scheduled and system-originated work also needs an authenticated parent execution context from its invoking runtime; scheduler code must not invent a chat identity to bypass this check.
+The accounts registry binds each primary ID globally to exactly one organisation and one user. Registration is idempotent for that binding; another participant or tenant cannot claim it. Membership and account suspension are checked on resolution. Platform privileges do not bypass registration or repository permission.
 
-## Propagation and authorization
+Bindings expire seven days after registration, without sliding renewal. Revocation and observed expiry leave permanent tombstones, so replay cannot reopen a thread. Limits are 1,024 active and 65,536 retained bindings per organisation. Reaching the retained limit requires a future capacity-policy change; deleting tombstones is unsafe. Long-running chats stop at expiry and must not silently switch IDs.
 
-Add a validated, immutable Go context value alongside the phase 4d principal and authorized repository:
+## Runtime integration
 
-```text
-ExecutionContext {
-  tenant_id: authenticated organisation,
-  session_id: validated primary session from the runtime,
-  subject_id: authenticated participant,
-  repository: authorized repository/content scope
-}
+Accounts must be configured. The authenticated runtime registers its supplied ID with:
+
+```http
+POST /api/v1/execution/sessions
+Content-Type: application/json
+
+{"session_id":"<runtime-provided ID>"}
 ```
 
-Construct it only at the trusted ingress boundary; expose read-only accessors. Every sub-agent invocation, subprocess, MCP call, memory recall, model request and database operation inherits the same `session_id`. Delegated task/job envelopes additionally carry `parent_session_id = session_id`. Validate equality when consuming an envelope. For in-process work pass the parent context; for detached jobs serialize only the validated identifiers and actor information needed to re-authorize, never bearer tokens or raw turns.
+The response contains the validated identity. The personal API key selects its organisation; browser sessions select one through the existing organisation header. Registration is a control-plane operation and does not need execution headers.
 
-A durable job record must retain its parent identity across process restarts. A worker rechecks membership, session validity and repository permission before processing and before storing results. Missing context, deleted/expired session, revoked access or conflicting inherited IDs prevent execution. A retry keeps its original primary identity; it can have a distinct attempt ID for diagnostics.
+Every execution request then sends both headers, outside model-controlled tool arguments:
 
-For subprocesses, use an explicit non-secret context envelope or narrowly scoped environment values. Never modify global process environment to represent concurrent requests. For sub-agents, the orchestrator passes the primary ID explicitly; agents do not infer it from prompts. Treat metadata received from a client as untrusted until authentication and session binding validate it. Protect forwarded metadata against spoofing through the existing authenticated service channel and a server-side session lookup; forwarding a raw header alone is insufficient.
+```text
+X-CodeSynapse-Session: <registered runtime ID>
+X-CodeSynapse-Parent-Session: <same runtime ID>
+```
 
-MCP HTTP middleware resolves primary runtime metadata before calling handlers. Bind protocol transport sessions to the validated primary context, and reject attempts to change it on resumed calls. Stdio has no HTTP headers: define an explicit startup/runtime integration that supplies and validates the parent context, and refuse tool execution without it. Document client compatibility and upgrade paths in `docs/AGENT_GUIDE.md`; changing a transport session must never replace the primary chat identity.
+API middleware authenticates the caller, resolves the binding and injects the immutable context. MCP resolves it before every tool call and binds it to the protocol session. A reconnect can keep the primary ID; a resumed transport cannot switch it. HTTP GET/SSE/resume and DELETE validate the same binding. Initialization alone may proceed without it, but no tool work can.
 
-`internal/agentctx`, model routing and all store/vector calls receive the same validated execution context. Required context checks happen before any side effect, query, embedding or queue insertion. Server-generated prompts do not ask the model to choose scope.
+Stdio requires a personal API key plus `CODESYNAPSE_SESSION_ID` and `CODESYNAPSE_PARENT_SESSION_ID` at startup. Use one process per chat thread. The launcher supplies the runtime values; hooks cannot change the environment of an already-running process. URL-based MCP configuration alone does not establish thread identity. Unsupported clients fail closed until their launcher can register and forward trusted runtime metadata.
 
-## Session chat-memory schema
+Authentication, health, governance and ordinary dashboard reads do not require a chat session. Ingest, repository attachment, sync, AI tasks, fix jobs, memory mutations and tool execution do. Legacy accountless service tokens cannot authorize these operations. The current web proxy drops runtime headers, so dashboard execution controls remain unavailable pending a trusted browser/runtime binding integration; registering an ID alone does not enable those controls.
 
-Separate ephemeral/session chat memory from existing durable repository knowledge. Session-memory entities, facts, vectors and queued offload records require `tenant_id`, `session_id`, content namespace, stable entity/fact ID and retention timestamps. Both ends of every fact must share the same tenant, session and namespace. Names and summaries continue through `redact.Free`; conversation turns remain transient and local-model-only under the existing offload policy.
+## Propagation and jobs
 
-Use compound identities/indexes including tenant, session and namespace. Extend model allowlists, `nodeprops`, HugeGraph property definitions, vector contracts and migration coverage together. A session deletion/expiry removes its entities, edges and vectors without touching another tenant/session. Deleted sessions cannot be recreated by replaying an old worker envelope. Enforce per-session and per-tenant caps, including maximum active sessions and retained facts.
+MCP/API handlers pass the context into graph/vector retrieval, local embedding and model calls. The LLM registry checks execution context before provider lookup or network work. AI and fix runners reject missing context before reading their stores. Subprocess environments remove ambient execution variables and copy the validated identity without changing global environment.
 
-Existing repository-wide memory is a different scope with different intended visibility. Do not silently give it a fabricated session ID or expose it as session history. Keep legacy records explicitly classified as repository memory; every future write still requires the originating execution context as provenance. Promoting a session fact into durable repository memory is an explicit authorized operation, never an automatic fallback when session context is missing. Session chat-memory recall cannot include repository-wide facts unless the caller explicitly invokes that distinct, repository-authorized retrieval path.
+Queued jobs copy the identity and actor/key identifiers, never bearer tokens. Workers restore it onto their lifetime context and recheck session validity, membership, key status and repository permission before work and before persistence. Persisted schedules retain this identity across restart; legacy schedules without it and schedules running without accounts fail closed. Retries keep the original primary ID. General jobs and conversation-offload queues are transient and are not replayed after restart.
 
-## Database filters
+Offload turns are redacted before queueing, bounded and held only in memory. Shutdown drops pending buffers. Extraction uses only the local memory model and rechecks authorization before storing facts. The old repository offload endpoint returns HTTP 410; it cannot silently turn a conversation into shared repository memory.
 
-Require all three scope components on every session-memory operation: authenticated tenant, immutable session and authorized content namespace. Parameters below are resolved by middleware, not the LLM.
+## Session and repository memory
 
-Milvus conceptual filter, applied identically to sparse and dense requests:
+| Scope | Access and storage |
+|---|---|
+| Session memory | Current participant, tenant, primary session and authorised repository namespace; separate entities, facts and vectors |
+| Repository memory | Existing organisation/repository permissions; explicit durable tools and recall; no fabricated session on legacy records |
+| Promotion | Explicit selection of current session fact IDs, requiring repository write permission |
+
+`recall_context` defaults to session memory. `memory_scope: "repository"` selects durable recall explicitly. `offload_turns` writes session memory only. `upsert_graph_triples`, `search_graph_nodes` and `query_subgraph` retain their documented repository scope. New durable writes record `origin_session_id`; older records remain without one.
+
+The API exposes these routes under `/api/v1/repos/{repo}`; all require execution headers and repository permission:
+
+| Method and suffix | Operation |
+|---|---|
+| `GET /session-memory` | Read this session's facts; optional `q` and bounded `limit` |
+| `POST /session-memory` | Upsert validated `triples` with optional `source` |
+| `DELETE /session-memory` | Clear this namespace permanently for this session |
+| `POST /session-memory/recall` | Recall from this session; `query`, current facts only |
+| `POST /session-memory/offload` | Queue local extraction from `turns` |
+| `POST /session-memory/promote` | Copy 1–50 selected `fact_ids` into durable repository memory |
+| `POST /memory/index` | Refresh a bounded batch of durable entity embeddings under this session |
+
+Promotion does not delete session facts. Deleting session memory does not delete promoted facts. A cleared namespace remains closed for that thread; the server cannot assign another ID to get around deletion. Memory job list/detail responses are restricted to the requesting execution identity.
+
+## Graph and vector schema
+
+`store.SessionMemoryStore` has identical contracts in memory, Neo4j and HugeGraph. The shared engine validates compound IDs, fact endpoints, predicates, scope and retention before an adapter commits a bounded snapshot. Backend transactions enforce revision checks and quotas, including writes that bypass the engine.
+
+| Record | Scope and fields |
+|---|---|
+| `SessionMemoryScope` | `tenant_id`, `session_id`, `ns`, bounded JSON `doc`, revision, expiry, deletion tombstone, fact count |
+| `SessionMemoryEntity` | Same three scope fields; compound entity ID, redacted entity document, expiry, optional embedding |
+| `SESSION_FACT` | Scoped endpoints; same scope fields, fact ID, predicate, redacted fact document, expiry |
+| `SessionMemoryRevocation` | Tenant/session tombstone covering every namespace |
+| `SessionMemoryTenant` (Neo4j) | Tenant transaction lock for concurrent quota checks |
+
+Neo4j uses `id` for entity IDs; HugeGraph uses `eid`. Session entities never carry the shared code `Node` label, and session edges never use durable `FACT`. The authorised code graph is shared by repository rather than duplicated per thread. No new generic code-node properties are required in `nodeprops`.
+
+Each namespace permits at most 512 facts, 1,024 entities and a 24 KiB serialized snapshot. A session permits 16 retained namespaces and 2,048 live facts; a tenant permits 2,048 retained scope roots and 65,536 live facts. Deleted and expired roots count toward namespace/root caps. The snapshot size can bind before the numeric limits; backend request caps can reduce the accepted size further. Retained-root caps are lifetime limits until a safe tombstone compaction policy exists. HugeGraph serializes commits on its single server instance; this is not a distributed cluster-lock guarantee.
+
+Reads load the authoritative scope snapshot with tenant, session and namespace filters. Materialized edge traversals preserve the same scope on both endpoints. Representative bound queries are:
+
+```cypher
+MATCH (a:SessionMemoryEntity {
+  tenant_id: $tenant, session_id: $session, ns: $ns, id: $entity
+})-[f:SESSION_FACT {tenant_id: $tenant, session_id: $session, ns: $ns}]->
+(b:SessionMemoryEntity {tenant_id: $tenant, session_id: $session, ns: $ns})
+RETURN a, f, b LIMIT $limit
+```
+
+```groovy
+g.V().hasLabel('SessionMemoryEntity')
+  .has('tenant_id',tenant).has('session_id',session).has('ns',ns).has('eid',entity)
+  .outE('SESSION_FACT').has('tenant_id',tenant).has('session_id',session).has('ns',ns)
+  .inV().hasLabel('SessionMemoryEntity')
+  .has('tenant_id',tenant).has('session_id',session).has('ns',ns).limit(limit)
+```
+
+Scripts are constants and values travel through bindings. Snapshot reads additionally check revocation and expiry; a raw traversal is not a substitute for that check.
+
+Milvus uses separate session collections per embedding model/dimension, preserving the tenant partition key. Compound physical vector IDs prevent identical logical IDs in different sessions from overwriting one another. Searches send:
 
 ```json
 {
-  "filter": "tenant_id == {tenant} and session_id == {session} and ns == {namespace}",
+  "filter": "tenant_id == {tenant} && session_id == {session} && ns == {ns} && expires_at > {now}",
   "exprParams": {
-    "tenant": "<ctx.tenant_id>",
-    "session": "<ctx.session_id>",
-    "namespace": "<authorized content namespace>"
+    "tenant": "<authenticated tenant>",
+    "session": "<registered primary session>",
+    "ns": "<authorised namespace>",
+    "now": 0
   }
 }
 ```
 
-Verify exact REST field names against the pinned Milvus API during implementation. Preserve the tenant partition key; do not partition by unbounded session IDs. Extend `vector.Isolate` to validate tenant, session and namespace on returned session-memory hits, including fetch-by-ID, delete and hybrid-search paths. Never build quoted scalar expressions by interpolating runtime IDs into query text.
+`now` is the server's current Unix time in milliseconds. Returned hits are checked again for tenant, session, namespace, expiry and valid scores, then hydrated against a fresh authoritative graph snapshot. Session recall combines bounded BM25 over scoped names/aliases/types with local dense vectors and reciprocal-rank fusion. Missing embeddings retain lexical recall. Neo4j session vectors use bounded exact similarity within the selected scope.
 
-Constant HugeGraph/Gremlin template with bound values:
+Embedding refresh runs under an authorised execution after session extraction/upsert, after durable MCP writes, or through explicit indexing. There is no anonymous global embedder. Failed optional embedding refresh leaves lexical recall available.
 
-```groovy
-g.V().hasLabel('SessionMemoryEntity')
-  .has('tenant_id', tenant_id).has('session_id', session_id).has('ns', ns)
-  .has('entity_id', entity_id)
-  .outE('SESSION_FACT').has('tenant_id', tenant_id).has('session_id', session_id)
-  .inV().hasLabel('SessionMemoryEntity')
-  .has('tenant_id', tenant_id).has('session_id', session_id).has('ns', ns)
-  .limit(limit)
-```
+## Retention, audit and verification
 
-Equivalent Neo4j template:
+Memory expiry is fixed to the registry binding's deadline. Explicit session revocation immediately blocks execution and attempts graph/vector cleanup. A minute-based worker retries cleanup and handles expired sessions in bounded batches; expired memory is also removed on access. Tombstones prevent old workers from recreating data. Cleanup failures cannot restore execution access.
 
-```cypher
-MATCH (a:SessionMemoryEntity {
-  tenant_id: $tenant_id, session_id: $session_id, ns: $ns, entity_id: $entity_id
-})-[f:SESSION_FACT {tenant_id: $tenant_id, session_id: $session_id}]->
-(b:SessionMemoryEntity {tenant_id: $tenant_id, session_id: $session_id, ns: $ns})
-RETURN a.name, f.predicate, b.name
-LIMIT $limit
-```
+Primary and parent session IDs are never metric labels. Audit records may contain session targets under existing access controls; errors do not echo rejected IDs. Prompt text and raw turns stay out of telemetry.
 
-Use separate session-memory labels/edge types to prevent legacy repository-memory reads from accidentally seeing chat history. Add them to the fixed schema allowlists only as part of the reviewed implementation. Validate scoped endpoints before upsert, and make deletion equally scoped. Any lookup by opaque entity ID must still include the tenant/session/namespace checks. The shared code graph remains authorized by repository rather than being duplicated per chat session.
-
-## Telemetry and audit
-
-Primary and parent session IDs are correlation data, not metric dimensions. They must never become VictoriaMetrics labels. Use access-controlled, redacted structured logs/traces and audit records where needed, with retention and no raw conversation content. Tenant/tool/provider/model metric labels continue to follow phase 4e. Context validation failures use a fixed reason enum; do not put the rejected ID in a metric label or error response.
-
-## Delivery and acceptance
-
-1. Specify the trusted runtime metadata contract and client capability negotiation. Add session registration/binding and immutable context accessors; no in-handler session generation API.
-2. Enforce context at API/MCP ingress and every tool boundary. Propagate through agent tasks, subprocesses, model calls, queue envelopes and workers. Cover both HTTP and stdio clients.
-3. Add session-memory schema/vector migrations and scoped APIs while preserving explicitly separate durable repository memory. Define retention, deletion, cancellation and explicit promotion behavior.
-4. Add adversarial tests for missing identity, changed identity during a thread, forged parent IDs, cross-tenant reuse, same-tenant cross-session access, guessed entity IDs, duplicate names, expired sessions, worker retries after revocation, transport reconnects and concurrent goroutine context mixing. Mock a backend returning a foreign-session hit and require it to be discarded.
-5. Run Go/lint, PostgreSQL and all graph/vector contract suites. Confirm session IDs are absent from metric labels and model-chosen fields cannot affect scope. Update `AGENTS.md`, `docs/AGENT_GUIDE.md` and client setup documentation before enabling session-memory features in production.
+Shared contracts cover conflicting identity, cross-tenant/session reads, guessed IDs, duplicate names, revoked/expired writes, direct adapter revival, immutable expiry, bounded retained roots, and foreign vector hits. API/MCP tests cover HTTP and stdio propagation, transport rebinding, membership revocation, job inheritance and canceled work. The release checks include Go race tests, lint/vet and PostgreSQL, Neo4j, HugeGraph and Milvus integration contracts.

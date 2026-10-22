@@ -19,6 +19,7 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 
 	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/parisnakitakejser/codesynapse/internal/sessionmemory"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/internal/store/nodeprops"
 	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
@@ -41,6 +42,7 @@ type Config struct {
 
 // Store is a Neo4j-backed store.Store.
 type Store struct {
+	sessionmemory.Engine
 	driver  neo4j.DriverWithContext
 	db      string
 	timeout time.Duration
@@ -65,7 +67,9 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	if timeout == 0 {
 		timeout = 30 * time.Second
 	}
-	return &Store{driver: driver, db: cfg.Database, timeout: timeout}, nil
+	s := &Store{driver: driver, db: cfg.Database, timeout: timeout}
+	s.Engine = sessionmemory.Engine{Backend: s}
+	return s, nil
 }
 
 // Close implements store.Store.
@@ -112,6 +116,12 @@ func failed(ctx context.Context, op string, err error) {
 // EnsureSchema implements store.Writer.
 func (s *Store) EnsureSchema(ctx context.Context) error {
 	stmts := []string{
+		"CREATE CONSTRAINT session_scope IF NOT EXISTS FOR (s:SessionMemoryScope) REQUIRE (s.tenant_id,s.session_id,s.ns) IS UNIQUE",
+		"CREATE CONSTRAINT session_tenant IF NOT EXISTS FOR (s:SessionMemoryTenant) REQUIRE s.tenant_id IS UNIQUE",
+		"CREATE CONSTRAINT session_revoked IF NOT EXISTS FOR (s:SessionMemoryRevocation) REQUIRE (s.tenant_id,s.session_id) IS UNIQUE",
+		"CREATE CONSTRAINT session_entity IF NOT EXISTS FOR (s:SessionMemoryEntity) REQUIRE s.id IS UNIQUE",
+		"CREATE INDEX session_entity_scope IF NOT EXISTS FOR (s:SessionMemoryEntity) ON (s.tenant_id,s.session_id,s.ns)",
+		"CREATE INDEX session_fact_scope IF NOT EXISTS FOR ()-[s:SESSION_FACT]-() ON (s.tenant_id,s.session_id,s.ns)",
 		"CREATE CONSTRAINT access_vertex_id IF NOT EXISTS FOR (n:AccessVertex) REQUIRE n.aid IS UNIQUE",
 		"CREATE INDEX access_vertex_tenant IF NOT EXISTS FOR (n:AccessVertex) ON (n.tenant_id)",
 		"DROP CONSTRAINT access_head_tenant IF EXISTS",

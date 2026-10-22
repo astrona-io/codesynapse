@@ -10,9 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
@@ -33,20 +33,18 @@ const (
 	recallTimeout     = 10 * time.Second
 	vectorTimeout     = 2 * time.Second
 	embedBatch        = 64
-	embedPeriod       = 30 * time.Second
 )
 
-// Service answers recall queries and embeds entities in the background.
+// Service answers recall queries and indexes explicitly authorized namespaces.
 type Service struct {
 	St     store.MemoryStore
 	LLM    *llm.Registry // nil: name search only
 	Logger *slog.Logger
-	kick   chan struct{}
 }
 
-// New returns a recall service; call Run for background embedding.
+// New returns a recall service; indexing runs under an authorized caller context.
 func New(st store.MemoryStore, reg *llm.Registry, logger *slog.Logger) *Service {
-	return &Service{St: st, LLM: reg, Logger: logger, kick: make(chan struct{}, 1)}
+	return &Service{St: st, LLM: reg, Logger: logger}
 }
 
 // Query is a recall request.
@@ -78,6 +76,9 @@ type Result struct {
 
 // Recall runs the gate, finds entry entities and expands them.
 func (s *Service) Recall(ctx context.Context, repo string, q Query) (Result, error) {
+	if _, err := execution.Require(ctx); err != nil {
+		return Result{}, err
+	}
 	ctx = telemetry.WithTenant(ctx, memory.OrgOf(repo))
 	telemetry.AgentMemoryRecalls.IncContext(ctx, telemetry.Tenant(ctx))
 	res, err := s.recall(ctx, repo, q)
@@ -166,33 +167,18 @@ func (s *Service) nearest(ctx context.Context, repo, text string) ([]memory.Scor
 	return kept, nil
 }
 
-// Kick asks the embedder to run soon (after new facts were saved).
-func (s *Service) Kick() {
-	select {
-	case s.kick <- struct{}{}:
-	default:
+// IndexRepository embeds only the namespace authorized by the initiating runtime.
+func (s *Service) IndexRepository(ctx context.Context, namespace string, authorize func(context.Context) error) (int, error) {
+	id, err := execution.Require(ctx)
+	if err != nil {
+		return 0, err
 	}
-}
-
-// Run embeds entities without a current embedding until ctx ends.
-func (s *Service) Run(ctx context.Context) {
-	t := time.NewTicker(embedPeriod)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		case <-s.kick:
-		}
-		if n, err := s.EmbedPending(ctx); err != nil && !errors.Is(err, llm.ErrNoEmbeddings) {
-			s.Logger.Warn("embedding memory entities failed", "embedded", n, logx.Error(err))
-		}
+	if memory.OrgOf(namespace) != id.TenantID || authorize == nil {
+		return 0, errors.New("repository indexing requires an authorized tenant namespace")
 	}
-}
-
-// EmbedPending embeds up to a few batches of entities and returns how many.
-func (s *Service) EmbedPending(ctx context.Context) (int, error) {
+	if err := authorize(ctx); err != nil {
+		return 0, err
+	}
 	if s.LLM == nil {
 		return 0, llm.ErrNoEmbeddings
 	}
@@ -200,37 +186,31 @@ func (s *Service) EmbedPending(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, recallTimeout)
+	defer cancel()
+	ctx = telemetry.WithTenant(ctx, id.TenantID)
+	graph, err := s.St.SearchMemory(ctx, namespace, "", store.MaxLimit, false)
+	if err != nil {
+		return 0, err
+	}
+	entities := []memory.Entity{}
+	for _, e := range graph.Entities {
+		if validEntity(namespace, e) {
+			entities = append(entities, e)
+		}
+	}
 	done := 0
-	for range 10 { // bounded work per round
-		todo, err := s.St.MemoryEmbeddingTodo(ctx, cfg.EmbeddingModel, embedBatch)
-		if err != nil || len(todo) == 0 {
+	for start := 0; start < len(entities); start += embedBatch {
+		batch := entities[start:min(start+embedBatch, len(entities))]
+		if err := s.embedEntities(ctx, name, cfg.EmbeddingModel, batch, authorize); err != nil {
 			return done, err
 		}
-		// A background batch can span organisations; split it before model and
-		// database calls so one tenant never receives another tenant's usage.
-		groups := map[string][]memory.Entity{}
-		var tenants []string
-		for _, entity := range todo {
-			tenant := memory.OrgOf(entity.Repo)
-			if _, ok := groups[tenant]; !ok {
-				tenants = append(tenants, tenant)
-			}
-			groups[tenant] = append(groups[tenant], entity)
-		}
-		slices.Sort(tenants)
-		for _, tenant := range tenants {
-			groupCtx := telemetry.WithTenant(ctx, tenant)
-			groupCtx = telemetry.WithModel(groupCtx, name, cfg.EmbeddingModel)
-			if err := s.embedEntities(groupCtx, name, cfg.EmbeddingModel, groups[tenant]); err != nil {
-				return done, err
-			}
-			done += len(groups[tenant])
-		}
+		done += len(batch)
 	}
 	return done, nil
 }
 
-func (s *Service) embedEntities(ctx context.Context, provider, model string, entities []memory.Entity) error {
+func (s *Service) embedEntities(ctx context.Context, provider, model string, entities []memory.Entity, authorize func(context.Context) error) error {
 	texts := make([]string, len(entities))
 	for i, entity := range entities {
 		texts[i] = memory.EmbeddingText(entity)
@@ -247,6 +227,9 @@ func (s *Service) embedEntities(ctx context.Context, provider, model string, ent
 		set[entity.ID] = vecs[i]
 	}
 	if err := memory.CheckVectors(set); err != nil {
+		return err
+	}
+	if err := authorize(ctx); err != nil {
 		return err
 	}
 	if err := s.St.SetMemoryEmbeddings(ctx, model, set); err != nil {

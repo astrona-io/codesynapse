@@ -40,14 +40,14 @@ func TestLogicalRecallCountIncludesGateAndFailureOnce(t *testing.T) {
 	const tenant = "cccccccccccccccccccccccc"
 	s, _ := setup(t, true)
 	before := recallCount(t, tenant)
-	_, err := s.Recall(t.Context(), tenant+"|r", Query{Text: "payments ownership"})
+	_, err := s.Recall(recallContext(t), tenant+"|r", Query{Text: "payments ownership"})
 	require.NoError(t, err)
 	assert.Equal(t, recallCount(t, tenant)-before, float64(1), "hybrid legs are one logical recall")
-	_, err = s.Recall(t.Context(), tenant+"|r", Query{Text: "thanks!"})
+	_, err = s.Recall(recallContext(t), tenant+"|r", Query{Text: "thanks!"})
 	require.NoError(t, err)
 	assert.Equal(t, recallCount(t, tenant)-before, float64(2), "intent-gated request is counted once")
 	s.St = unavailableRecallStore{s.St}
-	_, err = s.Recall(t.Context(), tenant+"|r", Query{Text: "payments ownership"})
+	_, err = s.Recall(recallContext(t), tenant+"|r", Query{Text: "payments ownership"})
 	require.Error(t, err)
 	assert.Equal(t, recallCount(t, tenant)-before, float64(3), "an accepted request remains a recall when its backend fails")
 }
@@ -72,22 +72,25 @@ func (s tenantEmbeddingStore) SetMemoryEmbeddings(ctx context.Context, model str
 	return s.MemoryStore.SetMemoryEmbeddings(ctx, model, vectors)
 }
 
-func TestBackgroundEmbeddingsAttributeEachTenant(t *testing.T) {
+func TestExplicitEmbeddingsAttributeEachTenant(t *testing.T) {
 	s, st := setup(t, true)
 	// Remove the setup fixture so only these two organisations remain pending.
 	for _, name := range []string{"Payments service", "Team Blue", "Small PRs", "Frontend", "Vue"} {
-		require.NoError(t, st.DeleteMemoryEntity(t.Context(), "r", memory.EntityID("r", name)))
+		require.NoError(t, st.DeleteMemoryEntity(recallContext(t), "tenant|r", memory.EntityID("tenant|r", name)))
 	}
 	a, b := strings.Repeat("a", 24), strings.Repeat("b", 24)
 	for _, tenant := range []string{a, b} {
 		batch, err := memory.Prepare(tenant+"|repo", []memory.Triple{{Subject: "Service", Predicate: "OWNED_BY", Object: "Team"}}, "test", time.Now())
 		require.NoError(t, err)
-		require.NoError(t, st.UpsertMemory(t.Context(), batch))
+		require.NoError(t, st.UpsertMemory(recallContext(t), batch))
 	}
 	seen := map[string]int{}
 	s.St = tenantEmbeddingStore{MemoryStore: st, t: t, tenants: seen}
-	n, err := s.EmbedPending(t.Context())
-	require.NoError(t, err)
-	assert.Equal(t, n, 4)
+	for _, tenant := range []string{a, b} {
+		n, err := s.IndexRepository(recallContext(t, tenant), tenant+"|repo", allowRecall)
+		require.NoError(t, err)
+		assert.Equal(t, n, 2)
+	}
+
 	assert.Equal(t, seen, map[string]int{a: 2, b: 2})
 }

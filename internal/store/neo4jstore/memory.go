@@ -19,7 +19,7 @@ import (
 // ever reaches Cypher as a parameter. What an upsert writes is computed by
 // memory.Batch.Plan, shared with the in-memory store.
 
-const factProj = `f.id AS id, f.repo AS repo, a.id AS subject, f.predicate AS predicate, b.id AS object, f.source AS source,
+const factProj = `f.id AS id, f.repo AS repo, a.id AS subject, f.predicate AS predicate, b.id AS object, f.source AS source, f.origin_session_id AS origin_session_id,
   f.confirmations AS confirmations, f.confidence AS confidence, f.valid_from AS valid_from, f.valid_to AS valid_to,
   f.created_at AS created_at, f.updated_at AS updated_at`
 
@@ -30,6 +30,7 @@ const current = "($history OR coalesce(f.valid_to, '') = '')"
 
 // UpsertMemory implements store.MemoryStore.
 func (s *Store) UpsertMemory(ctx context.Context, b memory.Batch) error {
+	b = b.StampOrigin(ctx)
 	defer observe(ctx, "write", time.Now())
 	sess := s.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: s.db, AccessMode: neo4j.AccessModeWrite})
 	defer sess.Close(ctx) //nolint:errcheck // nothing to do on close failure
@@ -98,7 +99,7 @@ WHERE f.id IN $fact_ids OR a.id IN $subjects OR b.id IN $subjects RETURN `+factP
 		facts := make([]map[string]any, len(plan.PutFacts))
 		for i, f := range plan.PutFacts {
 			facts[i] = map[string]any{"id": f.ID, "repo": f.Repo, "subject": f.Subject, "predicate": f.Predicate, "object": f.Object,
-				"source": f.Source, "confirmations": f.Confirmations, "confidence": f.Confidence, "valid_from": f.ValidFrom,
+				"source": f.Source, "origin_session_id": f.OriginSessionID, "confirmations": f.Confirmations, "confidence": f.Confidence, "valid_from": f.ValidFrom,
 				"valid_to": f.ValidTo, "created_at": f.CreatedAt, "updated_at": f.UpdatedAt}
 		}
 		w := map[string]any{"del_facts": plan.DeleteFacts, "del_entities": plan.DeleteEntities, "entities": entities, "facts": facts}
@@ -110,7 +111,7 @@ SET n.repo = e.repo, n.name = e.name, n.type = e.type, n.aliases = e.aliases, n.
 MATCH (s:MemoryEntity {id: f.subject}), (o:MemoryEntity {id: f.object})
 MERGE (s)-[r:FACT {id: f.id}]->(o)
 SET r.repo = f.repo, r.predicate = f.predicate, r.source = f.source, r.confirmations = f.confirmations,
-  r.confidence = f.confidence, r.valid_from = f.valid_from, r.valid_to = f.valid_to, r.created_at = f.created_at, r.updated_at = f.updated_at`,
+  r.origin_session_id = f.origin_session_id, r.confidence = f.confidence, r.valid_from = f.valid_from, r.valid_to = f.valid_to, r.created_at = f.created_at, r.updated_at = f.updated_at`,
 			"MATCH (e:MemoryEntity) WHERE e.id IN $del_entities DETACH DELETE e",
 		} {
 			if _, err := tx.Run(ctx, q, w); err != nil {
@@ -250,7 +251,7 @@ func toFact(rec *neo4j.Record) memory.Fact {
 	}
 	f := memory.Fact{ID: str(rec, "id"), Repo: str(rec, "repo"), Subject: str(rec, "subject"), Predicate: str(rec, "predicate"),
 		Object: str(rec, "object"), Source: str(rec, "source"), Confirmations: int(n), Confidence: conf,
-		ValidFrom: str(rec, "valid_from"), ValidTo: str(rec, "valid_to"), CreatedAt: str(rec, "created_at"), UpdatedAt: str(rec, "updated_at")}
+		OriginSessionID: str(rec, "origin_session_id"), ValidFrom: str(rec, "valid_from"), ValidTo: str(rec, "valid_to"), CreatedAt: str(rec, "created_at"), UpdatedAt: str(rec, "updated_at")}
 	if f.ValidFrom == "" {
 		f.ValidFrom = f.CreatedAt
 	}

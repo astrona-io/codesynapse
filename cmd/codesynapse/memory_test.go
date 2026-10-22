@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/parisnakitakejser/codesynapse/internal/app"
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
@@ -30,9 +31,21 @@ func TestOffloadHook(t *testing.T) {
 	var batches [][]map[string]string
 	var auth string
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/execution/sessions" {
+			var body struct {
+				SessionID string `json:"session_id"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			assert.Equal(t, body.SessionID, "abc")
+			_ = json.NewEncoder(w).Encode(execution.Identity{TenantID: "org-fixture", SubjectID: "user-fixture", SessionID: body.SessionID, ParentSessionID: body.SessionID})
+			return
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		auth = r.Header.Get("Authorization")
+		assert.Equal(t, r.URL.Path, "/api/v1/repos/api/session-memory/offload")
+		assert.Equal(t, r.Header.Get(execution.SessionHeader), "abc")
+		assert.Equal(t, r.Header.Get(execution.ParentSessionHeader), "abc")
 		var body struct{ Turns []map[string]string }
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		batches = append(batches, body.Turns)
@@ -69,6 +82,20 @@ func TestOffloadHook(t *testing.T) {
 	mu.Lock()
 	assert.Equal(t, len(batches), 3, "turns are offloaded once per session")
 	mu.Unlock()
+}
+
+func TestHookRequiresRuntimeSession(t *testing.T) {
+	called := false
+	api := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	t.Cleanup(api.Close)
+	o := &recallOptions{EC: &app.Env{Stdin: strings.NewReader(`{"cwd":"."}`)}, repo: "fixture", apiURL: api.URL, hook: true}
+	_, err := o.recall(t.Context())
+	assert.Error(t, err)
+	assert.False(t, called, "missing identity cannot make API calls")
+	c := newAPIClient(api.URL)
+	_, err = c.executionContext(t.Context(), "chat-a", "chat-b")
+	assert.Error(t, err)
+	assert.False(t, called, "forged parent cannot register")
 }
 
 func TestFormatFacts(t *testing.T) {

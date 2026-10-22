@@ -121,12 +121,12 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 		}
 		go s.pruneAudit(ctx)
 		go s.projectAccess(ctx)
+		go s.pruneExecutionMemory(ctx)
 	}
 	s.offload = offload.New(st, cfg.LLM, logger)
 	s.recall = recall.New(st, cfg.LLM, logger)
-	s.offload.OnSaved = s.recall.Kick
+	s.offload.OnSessionSaved = s.indexSession
 	go s.offload.Run(ctx)
-	go s.recall.Run(ctx)
 	go s.observeMemoryFacts(ctx)
 	sched, err := loadSchedules(cfg.Workspace)
 	if err != nil {
@@ -225,6 +225,8 @@ func (s *Server) routes() {
 	})
 	s.route("GET /api/v1/repos", visibleOnly, s.handleRepos)
 	s.accountRoutes()
+	s.executionRoutes()
+	s.sessionMemoryRoutes()
 	s.route("GET /api/v1/overview", visibleOnly, s.handleWorkspaceOverview)
 	s.route("GET /api/v1/attention", visibleOnly, s.handleAttention)
 	s.route("GET /api/v1/stats", visibleOnly, s.handleStats)
@@ -255,12 +257,12 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/repos/{repo}/cleanup/plan", repoRole(accounts.Viewer), s.handleCleanupPlan)
 	s.route("GET /api/v1/repos/{repo}/licenses", repoRole(accounts.Viewer), s.handleLicenses)
 	s.route("GET /api/v1/repos/{repo}/memory", repoRole(accounts.Viewer), s.handleMemory)
-	s.route("DELETE /api/v1/repos/{repo}/memory", repoRole(accounts.Member), s.handleDeleteMemory)
-	s.route("POST /api/v1/repos/{repo}/memory/offload", repoRole(accounts.Member), s.handleOffload)
-	s.route("POST /api/v1/repos/{repo}/memory/recall", repoRole(accounts.Viewer), s.handleRecall)
+	s.route("DELETE /api/v1/repos/{repo}/memory", repoRole(accounts.Member), s.withExecution(s.handleDeleteMemory))
+	s.route("POST /api/v1/repos/{repo}/memory/offload", repoRole(accounts.Member), s.withExecution(s.handleOffload))
+	s.route("POST /api/v1/repos/{repo}/memory/recall", repoRole(accounts.Viewer), s.withExecution(s.handleRecall))
 	s.route("GET /api/v1/memory/status", anyone, s.handleMemoryStatus)
-	s.route("GET /api/v1/memory/jobs", visibleOnly, s.handleOffloadJobs)
-	s.route("GET /api/v1/memory/jobs/{id}", visibleOnly, s.handleOffloadJob)
+	s.route("GET /api/v1/memory/jobs", visibleOnly, s.withExecution(s.handleOffloadJobs))
+	s.route("GET /api/v1/memory/jobs/{id}", visibleOnly, s.withExecution(s.handleOffloadJob))
 	s.route("GET /api/v1/repos/{repo}/search", repoRole(accounts.Viewer), s.handleSearch)
 	s.route("GET /api/v1/repos/{repo}/symbol", repoRole(accounts.Viewer), s.handleSymbol)
 	s.route("GET /api/v1/repos/{repo}/identities", repoRole(accounts.Viewer), s.handleIdentities)
@@ -277,14 +279,14 @@ func (s *Server) routes() {
 	s.route("POST /api/v1/repos/{repo}/impact", repoRole(accounts.Viewer), s.handleImpact)
 	s.route("GET /api/v1/sources", localOnly, s.handleSources)
 	s.route("POST /api/v1/ingest", localOnly, s.handleIngest)
-	s.route("POST /api/v1/repos", orgRole(accounts.Member), s.handleRegister)
+	s.route("POST /api/v1/repos", orgRole(accounts.Member), s.withExecution(s.handleRegister))
 	s.route("GET /api/v1/orgs", localOnly, s.handleListOrgs)
 	s.route("POST /api/v1/orgs", localOnly, s.handleAddOrg)
 	s.route("PUT /api/v1/orgs/{org}", localOnly, s.handleUpdateOrg)
 	s.route("DELETE /api/v1/orgs/{org}", localOnly, s.handleDeleteOrg)
 	s.route("POST /api/v1/orgs/{org}/scan", localOnly, s.handleScanOrg)
 	s.route("POST /api/v1/orgs/{org}/repos/{name}/index", localOnly, s.handleIndexOrgRepo)
-	s.route("POST /api/v1/repos/{repo}/sync", repoRole(accounts.Admin), s.handleSync)
+	s.route("POST /api/v1/repos/{repo}/sync", repoRole(accounts.Admin), s.withExecution(s.handleSync))
 	s.route("GET /api/v1/repos/{repo}/schedule", repoRole(accounts.Viewer), s.handleGetSchedule)
 	s.route("PUT /api/v1/repos/{repo}/schedule", repoRole(accounts.Admin), s.handlePutSchedule)
 	s.route("GET /api/v1/repos/{repo}/branches", repoRole(accounts.Viewer), s.handleBranches)
@@ -296,12 +298,12 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/reviews/{id}/code", reviewRole(accounts.Viewer), s.handleReviewCode)
 	s.route("DELETE /api/v1/reviews/{id}", reviewRole(accounts.Admin), s.handleDeleteReview)
 	s.route("PATCH /api/v1/reviews/{id}/comments/{comment}", reviewRole(accounts.Member), s.handleUpdateReviewComment)
-	s.route("POST /api/v1/reviews/{id}/fix", reviewRole(accounts.Member), s.handleFixReview)
-	s.route("POST /api/v1/repos/{repo}/remote", repoRole(accounts.Admin), s.handleSwitchToRemote)
+	s.route("POST /api/v1/reviews/{id}/fix", reviewRole(accounts.Member), s.withExecution(s.handleFixReview))
+	s.route("POST /api/v1/repos/{repo}/remote", repoRole(accounts.Admin), s.withExecution(s.handleSwitchToRemote))
 	s.route("GET /api/v1/ai/providers", anyone, s.handleAIProviders)
 	s.route("PUT /api/v1/ai/routing", platformOnly, s.handlePutRouting)
-	s.route("POST /api/v1/ai/providers/{name}/test", platformOnly, s.handleAITest)
-	s.route("POST /api/v1/repos/{repo}/ai/{task}", repoRole(accounts.Member), s.handleAITask)
+	s.route("POST /api/v1/ai/providers/{name}/test", platformOnly, s.withExecution(s.handleAITest))
+	s.route("POST /api/v1/repos/{repo}/ai/{task}", repoRole(accounts.Member), s.withExecution(s.handleAITask))
 	s.route("GET /api/v1/jobs", visibleOnly, s.handleJobs)
 	s.route("GET /api/v1/jobs/{id}", visibleOnly, s.handleJob)
 }
@@ -940,7 +942,8 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	job, err := s.jobs.Start(req.Repo, path, JobOptions{}) //nolint:contextcheck // jobs outlive the request by design
+	org, authorize := s.jobAuthorization(r.Context(), req.Repo, accounts.Admin)
+	job, err := s.jobs.Start(req.Repo, path, JobOptions{Identity: identityOf(r.Context()), OrgID: org, Authorize: authorize}) //nolint:contextcheck // jobs outlive the request by design
 	if err != nil {
 		s.problem(w, http.StatusConflict, err)
 		return

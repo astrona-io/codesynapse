@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/forge"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
@@ -48,6 +49,7 @@ type OrgRepo struct {
 // Org is an organisation (or user) on a git host whose repositories are
 // indexed. The same login on two hosts is two organisations.
 type Org struct {
+	Execution execution.Identity `json:"execution"`
 	// Provider is github, forgejo (also Gitea, Codeberg) or gitlab; Host is
 	// where it lives, github.com by default. Both default for entries saved
 	// before providers existed.
@@ -277,6 +279,9 @@ func (s *Server) scanOrg(ctx context.Context, login string, now time.Time) (Org,
 }
 
 func (s *Server) scan(ctx context.Context, o Org, now time.Time) (Org, error) {
+	if id, ok := execution.From(ctx); ok {
+		o.Execution = id
+	}
 	client, err := s.forgeClient(ctx, o)
 	var listed []forge.Repo
 	if err == nil {
@@ -360,6 +365,9 @@ func (s *Server) indexMissing(ctx context.Context, o *Org, now time.Time) {
 // the host, the organisation and a name that came from the provider and
 // passed validRepoSegment, never taken from the API answer.
 func (s *Server) cloneOrgRepo(ctx context.Context, o Org, name string) (Job, error) {
+	if _, err := execution.Require(ctx); err != nil {
+		return Job{}, err
+	}
 	if !validRepoSegment(name) || !validRepoSegment(strings.ToLower(o.Org)) {
 		return Job{}, fmt.Errorf("%w: unsupported repository name %q", errBadRequest, name)
 	}
@@ -373,7 +381,7 @@ func (s *Server) cloneOrgRepo(ctx context.Context, o Org, name string) (Job, err
 	if s.cloneHook != nil {
 		return s.cloneHook(remote, full)
 	}
-	return s.startClone(remote, full, "") //nolint:contextcheck // jobs outlive the request
+	return s.startClone(ctx, remote, full, "") //nolint:contextcheck // jobs outlive the request
 }
 
 // latestJobs maps repository to its most recent job.
@@ -390,8 +398,25 @@ func (s *Server) latestJobs() map[string]Job {
 // scanDue starts a background scan for every organisation that is due.
 func (s *Server) scanDue(ctx context.Context, now time.Time, logger *slog.Logger) {
 	for _, login := range s.orgs.due(now) {
+		o, ok := s.orgs.get(login)
+		if !ok {
+			continue
+		}
+		scanCtx, err := execution.With(ctx, o.Execution)
+		if s.cfg.Accounts == nil {
+			err = errExecutionRegistry
+		} else if err == nil {
+			_, err = s.cfg.Accounts.ResolveExecutionSession(scanCtx, o.Execution.SubjectID, o.Execution.TenantID, o.Execution.SessionID)
+		}
+		if err != nil {
+			o.LastError, o.NextScan = err.Error(), now.Add(orgScanInterval).UTC().Format(time.RFC3339)
+			if err := s.orgs.put(o); err != nil {
+				logger.Warn("saving paused organisation scan", "error", err)
+			}
+			continue
+		}
 		go func() {
-			if _, err := s.scanOrg(ctx, login, now); err != nil && !errors.Is(err, errConflict) {
+			if _, err := s.scanOrg(scanCtx, login, now); err != nil && !errors.Is(err, errConflict) {
 				logger.Warn("organisation scan failed", "org", login, "error", err)
 			}
 		}()
@@ -611,6 +636,9 @@ func (s *Server) handleUpdateOrg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	o.IncludeArchived, o.IncludeForks, o.AutoIndex = req.IncludeArchived, req.IncludeForks, req.AutoIndex
+	if id, ok := execution.From(r.Context()); ok {
+		o.Execution = id
+	}
 	if err := s.orgs.put(o); err != nil {
 		s.problem(w, 500, err)
 		return

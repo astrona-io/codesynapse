@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 )
 
 // KeyVerifier accepts personal API keys for the key's user and organisation.
@@ -33,6 +34,11 @@ func KeyVerifier(acc *accounts.Service, _ string) auth.TokenVerifier {
 // AccountsAccess answers Access from the accounts service: the same
 // relationship rules (organisation roles, teams, grants, shares) as the API.
 type AccountsAccess struct{ Acc *accounts.Service }
+
+// ResolveExecutionSession rechecks ownership, membership, expiry and revocation.
+func (a AccountsAccess) ResolveExecutionSession(ctx context.Context, userID, orgID, sessionID string) (execution.Identity, error) {
+	return a.Acc.ResolveExecutionSession(ctx, userID, orgID, sessionID)
+}
 
 // Reach implements Access.
 func (a AccountsAccess) Reach(ctx context.Context, userID, orgID string) (map[string]accounts.Reach, error) {

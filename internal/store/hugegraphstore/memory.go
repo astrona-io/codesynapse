@@ -22,7 +22,7 @@ import (
 const memProlog = `def E = { v -> [id: v.value('eid'), repo: v.value('ns'), name: v.property('name').orElse(''), type: v.property('type').orElse(''),
   aliases: v.property('aliases').orElse([]), created_at: v.property('created_at').orElse(''), updated_at: v.property('updated_at').orElse('')] }
 def F = { e -> [id: e.value('fid'), repo: e.value('ns'), subject: e.property('subj').orElse(''), predicate: e.property('predicate').orElse(''),
-  object: e.property('obj').orElse(''), source: e.property('source').orElse(''), confirmations: e.property('confirmations').orElse(0L),
+  object: e.property('obj').orElse(''), origin_session_id: e.property('origin_session_id').orElse(''), source: e.property('source').orElse(''), confirmations: e.property('confirmations').orElse(0L),
   confidence: e.property('confidence').orElse(0d), valid_from: e.property('valid_from').orElse(''), valid_to: e.property('valid_to').orElse(''),
   created_at: e.property('created_at').orElse(''), updated_at: e.property('updated_at').orElse('')] }
 def ents = { -> g.V().hasLabel('mem_entity').has('tenant_id', tenant).has('ns', ns) }
@@ -60,7 +60,7 @@ entities.each { e ->
 }
 factRows.each { f ->
   def kv = ['fid', f.id, 'tenant_id', tenant, 'ns', ns, 'subj', f.subject, 'obj', f.object, 'confirmations', f.confirmations, 'confidence', f.confidence]
-  put(kv, 'predicate', f.predicate); put(kv, 'source', f.source); put(kv, 'valid_from', f.valid_from); put(kv, 'valid_to', f.valid_to)
+  put(kv, 'origin_session_id', f.origin_session_id); put(kv, 'predicate', f.predicate); put(kv, 'source', f.source); put(kv, 'valid_from', f.valid_from); put(kv, 'valid_to', f.valid_to)
   put(kv, 'created_at', f.created_at); put(kv, 'updated_at', f.updated_at)
   g.V(f.sv).next().addEdge('fact', g.V(f.ov).next(), kv as Object[])
 }
@@ -142,6 +142,7 @@ func nonNil(ss []string) []string {
 // requests; HugeGraph gives no transaction spanning both, so two writers on
 // one namespace at the same moment may miss each other's aliases.
 func (s *Store) UpsertMemory(ctx context.Context, b memory.Batch) error {
+	b = b.StampOrigin(ctx)
 	cur, err := s.loadEntities(ctx, b.Repo)
 	if err != nil {
 		return err
@@ -185,7 +186,7 @@ func (s *Store) UpsertMemory(ctx context.Context, b memory.Batch) error {
 	for i, f := range plan.PutFacts {
 		facts[i] = map[string]any{"id": f.ID, "sv": entityVID(f.Subject), "ov": entityVID(f.Object), "subject": f.Subject, "object": f.Object,
 			"predicate": f.Predicate, "source": f.Source, "confirmations": int64(f.Confirmations), "confidence": f.Confidence,
-			"valid_from": f.ValidFrom, "valid_to": f.ValidTo, "created_at": f.CreatedAt, "updated_at": f.UpdatedAt}
+			"origin_session_id": f.OriginSessionID, "valid_from": f.ValidFrom, "valid_to": f.ValidTo, "created_at": f.CreatedAt, "updated_at": f.UpdatedAt}
 	}
 	err = s.write(ctx, applyPlan, with(ns(b.Repo), "delFacts", nonNil(plan.DeleteFacts), "delEntities", nonNil(plan.DeleteEntities),
 		"entities", entities, "factRows", facts), nil)

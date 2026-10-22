@@ -91,7 +91,10 @@ func TestPrivateRepositoriesWithOrgTokens(t *testing.T) {
 	inOther := []string{OrgHeader, other.Slug}
 	register := func(c *client, url, name string, org []string) (int, string) {
 		var body string
-		code := c.do("POST", "/api/v1/repos", `{"url":"`+url+`","name":"`+name+`"}`, &body, org...)
+		session := "register-" + org[1]
+		require.Equal(t, c.do("POST", "/api/v1/execution/sessions", `{"session_id":"`+session+`"}`, nil, org...), 201)
+		headers := append(append([]string{}, org...), runtimeHeaders(session)...)
+		code := c.do("POST", "/api/v1/repos", `{"url":"`+url+`","name":"`+name+`"}`, &body, headers...)
 		return code, body
 	}
 	visible := func(c *client, org []string) []string {

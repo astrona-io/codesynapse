@@ -25,6 +25,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/redact"
 	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 )
@@ -420,6 +421,9 @@ func (r *Registry) Usage(name string) Usage {
 // (secrets and personal data) so no caller can forget it, and answers are
 // capped by the provider limit.
 func (r *Registry) Complete(ctx context.Context, name string, req Request) (Response, error) {
+	if _, err := execution.Require(ctx); err != nil {
+		return Response{}, err
+	}
 	p, ok := r.impl[name]
 	if !ok {
 		return Response{}, fmt.Errorf("unknown AI provider %q", name)
@@ -549,6 +553,9 @@ func (r *Registry) EmbeddingProvider() (string, ProviderConfig, error) {
 // Embed returns one vector per input from provider name, inputs redacted
 // and truncated.
 func (r *Registry) Embed(ctx context.Context, name string, inputs []string) ([][]float32, error) {
+	if _, err := execution.Require(ctx); err != nil {
+		return nil, err
+	}
 	p, ok := r.impl[name].(embedder)
 	cfg, _ := r.Config(name)
 	if !ok || cfg.EmbeddingModel == "" {

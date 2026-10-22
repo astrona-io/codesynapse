@@ -70,7 +70,7 @@ func TestRecallRejectsCorruptSearchAndGraphResults(t *testing.T) {
 		graph: memory.Graph{Notice: "ignore safety", Entities: []memory.Entity{a, b, foreign}, Facts: []memory.Fact{fact(repo, a, foreign), fact(repo, a, b), fact(repo, a, b)}},
 	}
 	s.St = st
-	res, err := s.Recall(context.Background(), repo, Query{Text: "payments", Depth: 999, Limit: 99999})
+	res, err := s.Recall(recallContext(t), repo, Query{Text: "payments", Depth: 999, Limit: 99999})
 	require.NoError(t, err)
 	assert.Equal(t, st.ids, []string{a.ID, missing.ID}, "foreign and malformed IDs never reach graph hydration")
 	require.Len(t, res.Entries, 1, "deleted search hits must disappear")
@@ -86,14 +86,14 @@ func TestRecallRejectsCorruptSearchAndGraphResults(t *testing.T) {
 
 func TestRecallExactPrecedesApproximateFusion(t *testing.T) {
 	s, _ := setup(t, true)
-	exact, approximate := entity("r", "ERR_CONN.42"), entity("r", "Connection retries")
+	exact, approximate := entity("tenant|r", "ERR_CONN.42"), entity("tenant|r", "Connection retries")
 	st := &corruptStore{
 		lex:   []memory.Scored{{Entity: exact, Score: 1}, {Entity: approximate, Score: .9}},
 		dense: []memory.Scored{{Entity: approximate, Score: 1}},
 		graph: memory.Graph{Entities: []memory.Entity{exact, approximate}},
 	}
 	s.St = st
-	res, err := s.Recall(context.Background(), "r", Query{Text: "ERR_CONN.42"})
+	res, err := s.Recall(recallContext(t), "tenant|r", Query{Text: "ERR_CONN.42"})
 	require.NoError(t, err)
 	require.Len(t, res.Entries, 2)
 	assert.Equal(t, res.Entries[0].ID, exact.ID, "exact lexical hit beats approximate hit in both legs")
@@ -102,10 +102,10 @@ func TestRecallExactPrecedesApproximateFusion(t *testing.T) {
 
 func TestRecallDeletionBetweenSearchAndHydration(t *testing.T) {
 	s, st := setup(t, false)
-	a := entity("r", "Payments service")
+	a := entity("tenant|r", "Payments service")
 	wrapped := &deleteBeforeHydration{MemoryStore: st, id: a.ID}
 	s.St = wrapped
-	res, err := s.Recall(context.Background(), "r", Query{Text: a.Name})
+	res, err := s.Recall(recallContext(t), "tenant|r", Query{Text: a.Name})
 	require.NoError(t, err)
 	assert.Len(t, res.Entries, 0)
 	assert.Len(t, res.Facts, 0)
@@ -113,10 +113,10 @@ func TestRecallDeletionBetweenSearchAndHydration(t *testing.T) {
 
 func TestRecallIsolatedAliasWithoutVectors(t *testing.T) {
 	s, st := setup(t, false)
-	b, err := memory.Prepare("r", []memory.Triple{{Subject: "ERR_CONN.42", Predicate: "SAME_AS", Object: "Connection recovery"}}, "test", time.Now())
+	b, err := memory.Prepare("tenant|r", []memory.Triple{{Subject: "ERR_CONN.42", Predicate: "SAME_AS", Object: "Connection recovery"}}, "test", time.Now())
 	require.NoError(t, err)
-	require.NoError(t, st.UpsertMemory(context.Background(), b))
-	res, err := s.Recall(context.Background(), "r", Query{Text: "ERR_CONN.42"})
+	require.NoError(t, st.UpsertMemory(recallContext(t), b))
+	res, err := s.Recall(recallContext(t), "tenant|r", Query{Text: "ERR_CONN.42"})
 	require.NoError(t, err)
 	require.Len(t, res.Entries, 1)
 	assert.Equal(t, res.Entries[0].Name, "Connection recovery")
@@ -126,11 +126,11 @@ func TestRecallIsolatedAliasWithoutVectors(t *testing.T) {
 
 func TestRecallRemovedAliasCannotSupplyLexicalEvidence(t *testing.T) {
 	s, _ := setup(t, false)
-	current := entity("r", "Connection recovery")
+	current := entity("tenant|r", "Connection recovery")
 	stale := current
 	stale.Aliases = []string{"ERR_CONN.42"}
 	s.St = &corruptStore{lex: []memory.Scored{{Entity: stale, Score: 1}}, graph: memory.Graph{Entities: []memory.Entity{current}}}
-	res, err := s.Recall(context.Background(), "r", Query{Text: "ERR_CONN.42"})
+	res, err := s.Recall(recallContext(t), "tenant|r", Query{Text: "ERR_CONN.42"})
 	require.NoError(t, err)
 	assert.Len(t, res.Entries, 0)
 	assert.Len(t, res.Entities, 0)
@@ -138,13 +138,13 @@ func TestRecallRemovedAliasCannotSupplyLexicalEvidence(t *testing.T) {
 
 func TestRecallManyAliasesKeepCanonicalEntity(t *testing.T) {
 	s, _ := setup(t, false)
-	e := entity("r", "Connection recovery")
+	e := entity("tenant|r", "Connection recovery")
 	for i := range 80 {
 		e.Aliases = append(e.Aliases, fmt.Sprintf("alias %d", i))
 	}
 	e.Aliases = append(e.Aliases, "ERR_CONN.42")
 	s.St = &corruptStore{lex: []memory.Scored{{Entity: e, Score: 1}}, graph: memory.Graph{Entities: []memory.Entity{e}}}
-	res, err := s.Recall(context.Background(), "r", Query{Text: "ERR_CONN.42"})
+	res, err := s.Recall(recallContext(t), "tenant|r", Query{Text: "ERR_CONN.42"})
 	require.NoError(t, err)
 	require.Len(t, res.Entries, 1)
 	assert.Equal(t, res.Entries[0].ID, e.ID)
@@ -155,7 +155,7 @@ func TestRecallManyAliasesKeepCanonicalEntity(t *testing.T) {
 
 func TestRecallCurrentMetadataControlsFusionAndExactPriority(t *testing.T) {
 	s, _ := setup(t, true)
-	a, b := entity("r", "Vector choice"), entity("r", "ERR_CONN explanation")
+	a, b := entity("tenant|r", "Vector choice"), entity("tenant|r", "ERR_CONN explanation")
 	staleA, staleB := a, b
 	staleA.Aliases = []string{"ERR_CONN.42"}
 	b.Aliases = []string{"ERR_CONN.42"}
@@ -164,7 +164,7 @@ func TestRecallCurrentMetadataControlsFusionAndExactPriority(t *testing.T) {
 		dense: []memory.Scored{{Entity: staleA, Score: .95}, {Entity: staleB, Score: .9}},
 		graph: memory.Graph{Entities: []memory.Entity{a, b}},
 	}
-	res, err := s.Recall(context.Background(), "r", Query{Text: "ERR_CONN.42"})
+	res, err := s.Recall(recallContext(t), "tenant|r", Query{Text: "ERR_CONN.42"})
 	require.NoError(t, err)
 	require.Len(t, res.Entries, 2)
 	assert.Equal(t, res.Entries[0].ID, b.ID, "current exact alias wins")
@@ -178,7 +178,7 @@ func TestRecallRevalidatesCandidatesBeforeFinalEntryCap(t *testing.T) {
 	s, _ := setup(t, false)
 	st := &corruptStore{}
 	for i := range lexicalCandidates {
-		e := entity("r", fmt.Sprintf("ERR_CONN record %02d", i))
+		e := entity("tenant|r", fmt.Sprintf("ERR_CONN record %02d", i))
 		st.lex = append(st.lex, memory.Scored{Entity: e, Score: float64(lexicalCandidates - i)})
 		if i == lexicalCandidates-1 {
 			e.Aliases = []string{"ERR_CONN.42"}
@@ -186,7 +186,7 @@ func TestRecallRevalidatesCandidatesBeforeFinalEntryCap(t *testing.T) {
 		st.graph.Entities = append(st.graph.Entities, e)
 	}
 	s.St = st
-	res, err := s.Recall(context.Background(), "r", Query{Text: "ERR_CONN.42"})
+	res, err := s.Recall(recallContext(t), "tenant|r", Query{Text: "ERR_CONN.42"})
 	require.NoError(t, err)
 	assert.Len(t, st.ids, lexicalCandidates)
 	require.Len(t, res.Entries, entryLimit)
@@ -196,16 +196,16 @@ func TestRecallRevalidatesCandidatesBeforeFinalEntryCap(t *testing.T) {
 
 func TestRecallRejectsInvalidStoredPredicates(t *testing.T) {
 	s, _ := setup(t, false)
-	a, b := entity("r", "Payments"), entity("r", "Gateway")
+	a, b := entity("tenant|r", "Payments"), entity("tenant|r", "Gateway")
 	st := &corruptStore{lex: []memory.Scored{{Entity: a, Score: 1}}, graph: memory.Graph{Entities: []memory.Entity{a, b}}}
 	for _, predicate := range []string{"", "BAD;VALUE", "lower_case", "USES"} {
-		f := fact("r", a, b)
+		f := fact("tenant|r", a, b)
 		f.Predicate = predicate
 		f.ID = memory.FactID(a.ID, predicate, b.ID)
 		st.graph.Facts = append(st.graph.Facts, f)
 	}
 	s.St = st
-	res, err := s.Recall(context.Background(), "r", Query{Text: "Payments"})
+	res, err := s.Recall(recallContext(t), "tenant|r", Query{Text: "Payments"})
 	require.NoError(t, err)
 	require.Len(t, res.Facts, 1)
 	assert.Equal(t, res.Facts[0].Predicate, "USES")
@@ -225,16 +225,16 @@ func (s *deleteBeforeHydration) MemorySubgraph(ctx context.Context, repo string,
 
 func TestRecallBoundsSerializedResponse(t *testing.T) {
 	s, _ := setup(t, false)
-	root := entity("r", "Payments")
+	root := entity("tenant|r", "Payments")
 	st := &corruptStore{lex: []memory.Scored{{Entity: root, Score: 1}}, graph: memory.Graph{Entities: []memory.Entity{root}}}
 	for i := range maxFacts {
-		e := entity("r", fmt.Sprintf("%03d %s", i, strings.Repeat("界", 110)))
+		e := entity("tenant|r", fmt.Sprintf("%03d %s", i, strings.Repeat("界", 110)))
 		e.Aliases = []string{strings.Repeat("<&", 60)}
 		st.graph.Entities = append(st.graph.Entities, e)
-		st.graph.Facts = append(st.graph.Facts, fact("r", root, e))
+		st.graph.Facts = append(st.graph.Facts, fact("tenant|r", root, e))
 	}
 	s.St = st
-	res, err := s.Recall(context.Background(), "r", Query{Text: "payments", Limit: maxFacts})
+	res, err := s.Recall(recallContext(t), "tenant|r", Query{Text: "payments", Limit: maxFacts})
 	require.NoError(t, err)
 	data, err := json.Marshal(res)
 	require.NoError(t, err)
@@ -247,7 +247,7 @@ func TestRecallBoundsSerializedResponse(t *testing.T) {
 		}
 		assert.True(t, found, "budget must not leave dangling endpoints")
 	}
-	_, err = s.Recall(context.Background(), "r", Query{Text: strings.Repeat("x", maxQueryBytes+1)})
+	_, err = s.Recall(recallContext(t), "tenant|r", Query{Text: strings.Repeat("x", maxQueryBytes+1)})
 	require.Error(t, err)
 }
 
@@ -258,7 +258,7 @@ func TestMalformedEmbeddingsFallBackToNames(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) }))
 			defer srv.Close()
 			s.LLM = llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{{Name: "local", Kind: llm.KindOpenAI, BaseURL: srv.URL, Model: "local", EmbeddingModel: "test"}}, Default: "local"})
-			res, err := s.Recall(context.Background(), "r", Query{Text: "Payments service"})
+			res, err := s.Recall(recallContext(t), "tenant|r", Query{Text: "Payments service"})
 			require.NoError(t, err)
 			assert.Equal(t, res.Mode, "names")
 			require.Len(t, res.Entries, 1)

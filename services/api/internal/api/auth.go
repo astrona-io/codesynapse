@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 )
 
 // SessionCookie holds the session token; HTTP-only, so scripts never see it.
@@ -135,7 +136,7 @@ func (s *Server) trustedProxy(ip netip.Addr) bool {
 // accountError maps account errors to HTTP statuses.
 func (s *Server) accountError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, accounts.ErrInvalidInput):
+	case errors.Is(err, execution.ErrInvalid), errors.Is(err, accounts.ErrInvalidInput):
 		s.problem(w, http.StatusBadRequest, err)
 	case errors.Is(err, accounts.ErrUnauthorized), errors.Is(err, accounts.ErrKeyRevoked):
 		s.problem(w, http.StatusUnauthorized, err)
@@ -143,9 +144,9 @@ func (s *Server) accountError(w http.ResponseWriter, err error) {
 		s.problem(w, http.StatusForbidden, err)
 	case errors.Is(err, accounts.ErrNotFound):
 		s.problem(w, http.StatusNotFound, err)
-	case errors.Is(err, accounts.ErrExists), errors.Is(err, accounts.ErrLastOwner), errors.Is(err, accounts.ErrNoSecretKey), errors.Is(err, accounts.ErrLastAdmin):
+	case errors.Is(err, execution.ErrConflict), errors.Is(err, accounts.ErrExecutionSessionClosed), errors.Is(err, accounts.ErrExists), errors.Is(err, accounts.ErrLastOwner), errors.Is(err, accounts.ErrNoSecretKey), errors.Is(err, accounts.ErrLastAdmin):
 		s.problem(w, http.StatusConflict, err)
-	case errors.Is(err, accounts.ErrRateLimited):
+	case errors.Is(err, accounts.ErrExecutionSessionLimit), errors.Is(err, accounts.ErrRateLimited):
 		w.Header().Set("Retry-After", "60")
 		s.problem(w, http.StatusTooManyRequests, err)
 	default:

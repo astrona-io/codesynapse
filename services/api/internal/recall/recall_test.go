@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	memstore "github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
@@ -52,13 +53,13 @@ func fakeEmbeddings(t *testing.T) *httptest.Server {
 func setup(t *testing.T, withEmbeddings bool) (*Service, *memstore.Store) {
 	t.Helper()
 	st := memstore.New()
-	b, err := memory.Prepare("r", []memory.Triple{
+	b, err := memory.Prepare("tenant|r", []memory.Triple{
 		{Subject: "Payments service", SubjectType: "Service", Predicate: "OWNED_BY", Object: "Team Blue", ObjectType: "Team"},
 		{Subject: "Team Blue", Predicate: "PREFERS", Object: "Small PRs"},
 		{Subject: "Frontend", Predicate: "USES", Object: "Vue"},
 	}, "agent", time.Now())
 	require.NoError(t, err)
-	require.NoError(t, st.UpsertMemory(context.Background(), b))
+	require.NoError(t, st.UpsertMemory(recallContext(t), b))
 	var reg *llm.Registry
 	if withEmbeddings {
 		srv := fakeEmbeddings(t)
@@ -69,16 +70,16 @@ func setup(t *testing.T, withEmbeddings bool) (*Service, *memstore.Store) {
 }
 
 func TestHybridRecall(t *testing.T) {
-	ctx := context.Background()
+	ctx := recallContext(t)
 	s, _ := setup(t, true)
-	n, err := s.EmbedPending(ctx)
+	n, err := s.IndexRepository(ctx, "tenant|r", allowRecall)
 	require.NoError(t, err)
 	assert.Equal(t, n, 5, "every entity embedded")
-	n, err = s.EmbedPending(ctx)
+	n, err = s.IndexRepository(ctx, "tenant|r", allowRecall)
 	require.NoError(t, err)
-	assert.Equal(t, n, 0, "nothing left for this model")
+	assert.Equal(t, n, 5, "explicit indexing refreshes the authorized namespace")
 
-	res, err := s.Recall(ctx, "r", Query{Text: "where does the money flow", Depth: 2})
+	res, err := s.Recall(ctx, "tenant|r", Query{Text: "where does the money flow", Depth: 2})
 	require.NoError(t, err)
 	assert.Equal(t, res.Mode, "hybrid")
 	require.True(t, len(res.Entries) >= 1)
@@ -91,11 +92,11 @@ func TestHybridRecall(t *testing.T) {
 	assert.True(t, preds["OWNED_BY"] && preds["PREFERS"], "two hops reach Team Blue's preference")
 	assert.False(t, preds["USES"], "unrelated facts stay out")
 
-	res, err = s.Recall(ctx, "r", Query{Text: "payments"})
+	res, err = s.Recall(ctx, "tenant|r", Query{Text: "payments"})
 	require.NoError(t, err)
 	assert.Equal(t, res.Entries[0].Via, "both")
 
-	res, err = s.Recall(ctx, "r", Query{Text: "thanks!"})
+	res, err = s.Recall(ctx, "tenant|r", Query{Text: "thanks!"})
 	require.NoError(t, err)
 	assert.Equal(t, res.Skipped, "small talk")
 	assert.Equal(t, len(res.Facts), 0)
@@ -103,20 +104,20 @@ func TestHybridRecall(t *testing.T) {
 
 func TestRecallWithoutEmbeddings(t *testing.T) {
 	s, _ := setup(t, false)
-	res, err := s.Recall(context.Background(), "r", Query{Text: "where does the money flow"})
+	res, err := s.Recall(recallContext(t), "tenant|r", Query{Text: "where does the money flow"})
 	require.NoError(t, err)
 	assert.Equal(t, res.Mode, "names")
 	assert.Equal(t, len(res.Entries), 0, "no shared words, no vectors: nothing")
-	res, err = s.Recall(context.Background(), "r", Query{Text: "frontend"})
+	res, err = s.Recall(recallContext(t), "tenant|r", Query{Text: "frontend"})
 	require.NoError(t, err)
 	require.Len(t, res.Facts, 1)
 	assert.Equal(t, res.Facts[0].Predicate, "USES")
-	_, err = s.EmbedPending(context.Background())
+	_, err = s.IndexRepository(recallContext(t), "tenant|r", allowRecall)
 	require.Error(t, err)
 }
 
 func TestRecallFusesWithinTheTenant(t *testing.T) {
-	ctx := context.Background()
+	ctx := recallContext(t, "org-a")
 	s, st := setup(t, true)
 	mine, theirs := memory.Namespace("org-a", "r"), memory.Namespace("org-b", "r")
 	var triples []memory.Triple
@@ -129,7 +130,7 @@ func TestRecallFusesWithinTheTenant(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, st.UpsertMemory(ctx, b))
 	}
-	_, err := s.EmbedPending(ctx)
+	_, err := s.IndexRepository(ctx, mine, allowRecall)
 	require.NoError(t, err)
 
 	res, err := s.Recall(ctx, mine, Query{Text: "payments refunds"})
@@ -152,3 +153,15 @@ func TestRecallFusesWithinTheTenant(t *testing.T) {
 		assert.False(t, strings.Contains(e.Name, "secret"), "another organisation's memory never appears")
 	}
 }
+
+func recallContext(t *testing.T, tenant ...string) context.Context {
+	t.Helper()
+	org := "tenant"
+	if len(tenant) > 0 {
+		org = tenant[0]
+	}
+	ctx, err := execution.With(t.Context(), execution.Identity{TenantID: org, SubjectID: "user", SessionID: "thread", ParentSessionID: "thread"})
+	require.NoError(t, err)
+	return ctx
+}
+func allowRecall(context.Context) error { return nil }

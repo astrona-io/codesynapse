@@ -14,6 +14,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 )
 
 // ErrInvalidRev is returned for revisions that could be parsed as options or
@@ -52,6 +54,11 @@ func Run(ctx context.Context, dir string, args ...string) ([]byte, error) {
 		"GIT_OPTIONAL_LOCKS=0",
 		"HOME=/nonexistent", // ignore the user's global config and credential helpers
 		"PATH=" + safePath(),
+	}
+	var err error
+	cmd.Env, err = execution.Environment(ctx, cmd.Env)
+	if err != nil {
+		return nil, err
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -2,15 +2,13 @@ package api
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/memory/extract"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/offload"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/recall"
@@ -68,50 +66,24 @@ type offloadRequest struct {
 
 // handleOffload queues extraction of memory triples from conversation turns
 // and returns at once (202). Turns are held in memory until the job ran.
-func (s *Server) handleOffload(w http.ResponseWriter, r *http.Request) {
-	repo := r.PathValue("repo")
-	if _, err := s.st.Node(r.Context(), model.NodeID(repo, model.KindRepository, repo)); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			s.problem(w, 404, fmt.Errorf("repository %q is not indexed", repo))
-			return
-		}
-		s.problem(w, 500, err)
-		return
-	}
-	var req offloadRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		s.problem(w, 400, err)
-		return
-	}
-	ns, err := s.memNamespace(r, repo)
-	if err != nil {
-		s.accountError(w, err)
-		return
-	}
-	_, authorize := s.jobAuthorization(r.Context(), repo, accounts.Member)
-	job, err := s.offload.SubmitAuthorizedContext(r.Context(), repo, ns, req.Source, req.Turns, authorize)
-	switch {
-	case errors.Is(err, offload.ErrNoLocalModel):
-		s.problem(w, http.StatusConflict, err)
-	case errors.Is(err, offload.ErrBusy):
-		s.problem(w, http.StatusServiceUnavailable, err)
-	case err != nil:
-		s.problem(w, 400, err)
-	default:
-		writeJSON(w, http.StatusAccepted, job)
-	}
+func (s *Server) handleOffload(w http.ResponseWriter, _ *http.Request) {
+	s.problem(w, http.StatusGone, errors.New("conversation offload now uses session-memory/offload; promote selected session facts explicitly to repository memory"))
 }
 
 func (s *Server) handleOffloadJobs(w http.ResponseWriter, r *http.Request) {
 	_, err := s.offload.Provider()
 	sc := scopeFrom(r.Context())
-	jobs := slices.DeleteFunc(s.offload.List(r.URL.Query().Get("repo")), func(j offload.Job) bool { return !seesReview(sc, j.Repo, memory.OrgOf(j.Namespace)) })
+	id, _ := execution.From(r.Context())
+	jobs := slices.DeleteFunc(s.offload.List(r.URL.Query().Get("repo")), func(j offload.Job) bool {
+		return j.Execution != id || !seesReview(sc, j.Repo, memory.OrgOf(j.Namespace))
+	})
 	writeJSON(w, 200, map[string]any{"jobs": jobs, "available": err == nil})
 }
 
 func (s *Server) handleOffloadJob(w http.ResponseWriter, r *http.Request) {
 	j, ok := s.offload.Get(r.PathValue("id"))
-	if !ok || !seesReview(scopeFrom(r.Context()), j.Repo, memory.OrgOf(j.Namespace)) {
+	id, _ := execution.From(r.Context())
+	if !ok || j.Execution != id || !seesReview(scopeFrom(r.Context()), j.Repo, memory.OrgOf(j.Namespace)) {
 		s.problem(w, 404, errors.New("no such memory extraction job"))
 		return
 	}

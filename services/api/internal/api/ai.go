@@ -193,7 +193,7 @@ func (s *Server) handleAITask(w http.ResponseWriter, r *http.Request) {
 	}
 	in := aitasks.Input{Repo: repo, OrgID: org, Provider: req.Provider, Diff: []byte(req.Diff)}
 	job, err := s.jobs.Start(repo, "", JobOptions{ //nolint:contextcheck // jobs outlive the request
-		Kind: "ai", Task: task, OrgID: org, Authorize: authorize,
+		Kind: "ai", Task: task, OrgID: org, Identity: identityOf(r.Context()), Authorize: authorize,
 		Run: func(ctx context.Context) (string, error) { return runner.Run(ctx, task, in) },
 	})
 	if err != nil {

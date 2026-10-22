@@ -39,6 +39,26 @@ func TestPolicyAuditFailureRollsBack(t *testing.T) {
 	assert.Equal(t, after, before)
 }
 
+func TestExecutionAuditFailureRollsBack(t *testing.T) {
+	ctx := context.Background()
+	st := New()
+	now := time.Now().UTC()
+	require.NoError(t, st.CreateUser(ctx, accounts.User{ID: "owner", Email: "owner@example.com", CreatedAt: now}))
+	require.NoError(t, st.CreateOrg(ctx, accounts.Org{ID: "org", Slug: "org", CreatedAt: now}, "owner"))
+	failed := accounts.NewService(failedAuditStore{st}, false)
+	_, err := failed.RegisterExecutionSession(ctx, "owner", "org", "runtime-chat")
+	assert.True(t, errors.Is(err, errAuditUnavailable))
+	_, err = st.ExecutionSessionByID(ctx, "runtime-chat")
+	assert.True(t, errors.Is(err, accounts.ErrNotFound), "failed registration leaves no binding")
+	live := accounts.NewService(st, false)
+	_, err = live.RegisterExecutionSession(ctx, "owner", "org", "runtime-chat")
+	require.NoError(t, err)
+	err = failed.RevokeExecutionSession(ctx, "owner", "org", "runtime-chat")
+	assert.True(t, errors.Is(err, errAuditUnavailable))
+	_, err = live.ResolveExecutionSession(ctx, "owner", "org", "runtime-chat")
+	require.NoError(t, err, "failed audited revocation leaves the session live")
+}
+
 type unavailableTeamStore struct{ accounts.Store }
 
 func (s unavailableTeamStore) ReadTuples(context.Context, accounts.TupleFilter) ([]accounts.Tuple, error) {

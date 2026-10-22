@@ -115,7 +115,7 @@ func TestProviderUsageAndCostCoverage(t *testing.T) {
 			t.Cleanup(srv.Close)
 			cfg := ProviderConfig{Name: "coverage", Model: "configured", BaseURL: srv.URL, TimeoutSeconds: 5, PriceInputPerMTok: 3, PriceCachedInputPerMTok: 0.3, PriceOutputPerMTok: 15}
 			r := NewRegistry(Config{Providers: []ProviderConfig{cfg}})
-			resp, err := r.Complete(telemetry.WithTenant(t.Context(), strings.Repeat(strconv.Itoa(tc.input/100+1), 24)), "coverage", Request{User: "hello"})
+			resp, err := r.Complete(telemetry.WithTenant(modelContext(t), strings.Repeat(strconv.Itoa(tc.input/100+1), 24)), "coverage", Request{User: "hello"})
 			require.NoError(t, err)
 			assert.Equal(t, resp.UsageKnown, tc.known)
 			assert.Equal(t, resp.InputTokens, tc.input)

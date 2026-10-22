@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
 	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 
@@ -36,17 +37,18 @@ const (
 
 // Job is one ingest run.
 type Job struct {
-	ID         string   `json:"id"`
-	Repo       string   `json:"repo"`
-	OrgID      string   `json:"-"`
-	Kind       string   `json:"kind"`
-	Branch     string   `json:"branch,omitempty"`
-	State      JobState `json:"state"`
-	StartedAt  string   `json:"started_at"`
-	FinishedAt string   `json:"finished_at,omitempty"`
-	Nodes      int      `json:"nodes,omitempty"`
-	Edges      int      `json:"edges,omitempty"`
-	Error      string   `json:"error,omitempty"`
+	Identity   execution.Identity `json:"execution"`
+	ID         string             `json:"id"`
+	Repo       string             `json:"repo"`
+	OrgID      string             `json:"-"`
+	Kind       string             `json:"kind"`
+	Branch     string             `json:"branch,omitempty"`
+	State      JobState           `json:"state"`
+	StartedAt  string             `json:"started_at"`
+	FinishedAt string             `json:"finished_at,omitempty"`
+	Nodes      int                `json:"nodes,omitempty"`
+	Edges      int                `json:"edges,omitempty"`
+	Error      string             `json:"error,omitempty"`
 	// Task and Result are set for AI jobs: the task name and the review id.
 	Task   string `json:"task,omitempty"`
 	Result string `json:"result,omitempty"`
@@ -79,7 +81,8 @@ func NewJobs(ctx context.Context, st store.Writer, logger *slog.Logger, commitLi
 
 // JobOptions customise a job.
 type JobOptions struct {
-	OrgID string
+	Identity execution.Identity
+	OrgID    string
 	// Authorize checks current access after queueing and before graph storage.
 	Authorize func(context.Context) error
 	// Prepare runs before ingest (clone, fetch + checkout).
@@ -101,6 +104,16 @@ type JobOptions struct {
 
 // Start queues an ingest of root into repo.
 func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
+	ctx, err := execution.With(j.ctx, opts.Identity)
+	if err != nil {
+		return Job{}, err
+	}
+	if opts.OrgID != "" && opts.Identity.TenantID != opts.OrgID {
+		return Job{}, execution.ErrConflict
+	}
+	if err := checkJob(ctx, opts.Authorize); err != nil {
+		return Job{}, err
+	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	for _, existing := range j.jobs {
@@ -116,7 +129,7 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 	if kind == "" {
 		kind = "ingest"
 	}
-	job := &Job{ID: hex.EncodeToString(b), Repo: repo, OrgID: opts.OrgID, Kind: kind, Branch: opts.Branch, State: JobRunning, StartedAt: time.Now().UTC().Format(time.RFC3339), Task: opts.Task, Waiting: true}
+	job := &Job{ID: hex.EncodeToString(b), Repo: repo, OrgID: opts.OrgID, Identity: opts.Identity, Kind: kind, Branch: opts.Branch, State: JobRunning, StartedAt: time.Now().UTC().Format(time.RFC3339), Task: opts.Task, Waiting: true}
 	j.jobs[job.ID] = job
 	j.prune()
 	go j.run(job, root, opts)
@@ -140,7 +153,12 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 		fin(job, 0, 0, j.ctx.Err())
 		return
 	}
-	ctx := logx.WithLogger(j.ctx, j.logger.With("job", job.ID, "repo", job.Repo))
+	ctx, err := execution.With(j.ctx, job.Identity)
+	if err != nil {
+		fin(job, 0, 0, err)
+		return
+	}
+	ctx = logx.WithLogger(ctx, j.logger.With("job", job.ID, "repo", job.Repo))
 	ctx = telemetry.WithTenant(ctx, opts.OrgID)
 	if err := checkJob(ctx, opts.Authorize); err != nil {
 		fin(job, 0, 0, err)
@@ -148,6 +166,9 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 	}
 	if opts.Run != nil {
 		result, err := opts.Run(ctx)
+		if err == nil {
+			err = checkJob(ctx, opts.Authorize)
+		}
 		if errors.Is(err, aitasks.ErrNothingToDo) {
 			err = nil // nothing new to analyse is a normal outcome
 		}
@@ -175,6 +196,9 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 	}
 	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Branch: opts.Branch, PreviousIdentities: previous})
 	if err == nil {
+		err = checkJob(ctx, opts.Authorize)
+	}
+	if err == nil {
 		err = j.st.EnsureSchema(ctx)
 	}
 	if err == nil {
@@ -201,8 +225,8 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 	fin(job, nodes, edges, err)
 	if err == nil && opts.After != nil {
 		go func() {
-			if checkJob(j.ctx, opts.Authorize) == nil {
-				opts.After(j.ctx)
+			if checkJob(ctx, opts.Authorize) == nil {
+				opts.After(ctx)
 			}
 		}()
 	}

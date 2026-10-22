@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/forge"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
@@ -32,9 +33,10 @@ const defaultInterval = 30
 
 // Schedule is the auto-sync setting of one repository.
 type Schedule struct {
-	Repo    string `json:"repo"`
-	OrgID   string `json:"org_id,omitempty"`
-	ActorID string `json:"actor_id,omitempty"`
+	Execution execution.Identity `json:"execution"`
+	Repo      string             `json:"repo"`
+	OrgID     string             `json:"org_id,omitempty"`
+	ActorID   string             `json:"actor_id,omitempty"`
 	// IntervalMinutes is 0 for manual-only.
 	IntervalMinutes int  `json:"interval_minutes"`
 	Paused          bool `json:"paused"`
@@ -177,6 +179,7 @@ func (s *schedules) set(repo string, interval int, paused, autoReview, autoTriag
 			return Schedule{}, accounts.ErrForbidden
 		}
 		sc.OrgID, sc.ActorID = delegate[0].OrgID, delegate[0].ActorID
+		sc.Execution = delegate[0].Execution
 	}
 	sc.IntervalMinutes, sc.Paused, sc.AutoReview, sc.AutoTriage = interval, paused, autoReview, autoTriage
 	sc.NextRun = ""
@@ -277,6 +280,9 @@ const goneStrikes = 3
 // it needs the provider API to answer a clean 404 goneStrikes times in a row;
 // any other answer resets the count. Mounted sources are never touched.
 func (s *Server) reapIfGone(ctx context.Context, repo string, logger *slog.Logger) {
+	if _, err := execution.Require(ctx); err != nil {
+		return
+	}
 	if s.cfg.Accounts != nil {
 		return
 	}
@@ -346,22 +352,13 @@ func (s *Server) runScheduler(ctx context.Context, logger *slog.Logger) {
 				s.scanDue(ctx, now, logger)
 			}
 			for _, repo := range s.sched.due(now) {
-				jobCtx := ctx
-				if s.cfg.Accounts != nil {
-					sc := s.sched.get(repo)
-					if sc.OrgID == "" || sc.ActorID == "" {
-						continue
-					}
-					p := accounts.Principal{User: accounts.User{ID: sc.ActorID}, OrgID: sc.OrgID, Via: "automation"}
-					access, err := s.cfg.Accounts.ResolveRepository(ctx, p, sc.OrgID, repo, accounts.Admin)
-					if err != nil {
-						s.sched.started(repo, now, "failed", err)
-						continue
-					}
-					jobCtx = context.WithValue(ctx, principalKey{}, p)
-					jobCtx = context.WithValue(jobCtx, scopeKey{}, scope{graphs: map[string]accounts.Role{repo: access.Role}, reach: map[string]accounts.Reach{repo: {OrgID: sc.OrgID, Role: access.Role}}})
+				sc := s.sched.get(repo)
+				jobCtx, err := s.scheduleContext(ctx, sc)
+				if err != nil {
+					s.sched.started(repo, now, "failed", err)
+					continue
 				}
-				_, err := s.startSync(jobCtx, repo, "", true, func(err error) { s.sched.finished(repo, time.Now(), err) })
+				_, err = s.startSync(jobCtx, repo, "", true, func(err error) { s.sched.finished(repo, time.Now(), err) })
 				switch {
 				case errors.Is(err, errConflict):
 					continue // a sync is already running; try again next interval
@@ -370,13 +367,37 @@ func (s *Server) runScheduler(ctx context.Context, logger *slog.Logger) {
 				case err != nil:
 					logger.Warn("scheduled sync not started", "repo", repo, "error", err)
 					s.sched.started(repo, now, "failed", err)
-					s.reapIfGone(ctx, repo, logger)
+					s.reapIfGone(jobCtx, repo, logger)
 				default:
 					s.sched.started(repo, now, "started", nil)
 				}
 			}
 		}
 	}
+}
+
+func (s *Server) scheduleContext(ctx context.Context, sc Schedule) (context.Context, error) {
+	if s.cfg.Accounts == nil {
+		return nil, errExecutionRegistry
+	}
+	ctx, err := execution.With(ctx, sc.Execution)
+	if err != nil {
+		return nil, err
+	}
+	if sc.OrgID == "" || sc.ActorID == "" || sc.Execution.SubjectID != sc.ActorID || sc.Execution.TenantID != sc.OrgID {
+		return nil, execution.ErrConflict
+	}
+	if _, err := s.cfg.Accounts.ResolveExecutionSession(ctx, sc.ActorID, sc.OrgID, sc.Execution.SessionID); err != nil {
+		return nil, err
+	}
+	p := accounts.Principal{User: accounts.User{ID: sc.ActorID}, OrgID: sc.OrgID, Via: "automation"}
+	access, err := s.cfg.Accounts.ResolveRepository(ctx, p, sc.OrgID, sc.Repo, accounts.Admin)
+	if err != nil {
+		return nil, err
+	}
+	ctx = context.WithValue(ctx, principalKey{}, p)
+	ctx = context.WithValue(ctx, scopeKey{}, scope{graphs: map[string]accounts.Role{sc.Repo: access.Role}, reach: map[string]accounts.Reach{sc.Repo: {OrgID: sc.OrgID, Role: access.Role}}})
+	return ctx, nil
 }
 
 type scheduleRequest struct {
@@ -416,7 +437,17 @@ func (s *Server) handlePutSchedule(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, fmt.Errorf("interval_minutes must be one of %v", allowedIntervals))
 		return
 	}
-	delegate := Schedule{}
+	delegate := Schedule{Execution: identityOf(r.Context())}
+	if (req.IntervalMinutes > 0 && !req.Paused) || req.AutoReview || req.AutoTriage {
+		if s.cfg.Accounts == nil {
+			s.problem(w, http.StatusForbidden, errExecutionRegistry)
+			return
+		}
+		if _, err := execution.Require(r.Context()); err != nil {
+			s.problem(w, http.StatusForbidden, err)
+			return
+		}
+	}
 	if s.cfg.Accounts != nil {
 		org, err := s.repoOrg(r, repo)
 		if err != nil {

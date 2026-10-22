@@ -19,6 +19,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
 
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	agentmem "github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
@@ -58,6 +59,20 @@ func post(t *testing.T, ts *httptest.Server, path, body string) int {
 	require.NoError(t, err)
 	defer res.Body.Close() //nolint:errcheck // test
 	return res.StatusCode
+}
+
+// Handler tests use an explicit trusted runtime fixture; HTTP tests separately
+// verify that callers without a registered runtime are refused at ingress.
+func runtimeHandlerStatus(t *testing.T, handler http.HandlerFunc, method, path, repo, body string) int {
+	t.Helper()
+	ctx, err := execution.With(context.Background(), fixedExecution())
+	require.NoError(t, err)
+	req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("repo", repo)
+	w := httptest.NewRecorder()
+	handler(w, req)
+	return w.Code
 }
 
 func TestReadEndpoints(t *testing.T) {
@@ -159,17 +174,22 @@ func TestMemoryEndpoints(t *testing.T) {
 	b, err := agentmem.Prepare(storetest.Repo, []agentmem.Triple{{Subject: "team/blue", Predicate: "OWNS", Object: "Payments"}}, "t", time.Now())
 	require.NoError(t, err)
 	require.NoError(t, st.UpsertMemory(ctx, b))
-	ts := httptest.NewServer(New(ctx, Config{}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	srv := New(ctx, Config{}, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 
 	base := "/api/v1/repos/" + storetest.Repo + "/memory"
 	var g agentmem.Graph
 	require.Equal(t, get(t, ts, base+"?q=payments", &g), 200)
 	require.Len(t, g.Facts, 1)
-	assert.Equal(t, del(t, ts, base), 400)
-	assert.Equal(t, del(t, ts, base+"?fact=nope"), 404)
-	assert.Equal(t, del(t, ts, base+"?fact="+g.Facts[0].ID), 204)
-	assert.Equal(t, del(t, ts, base+"?entity="+url.QueryEscape(agentmem.EntityID(storetest.Repo, "team/blue"))), 204, "entity IDs may contain slashes")
+	assert.Equal(t, del(t, ts, base), 403, "runtime identity is required at HTTP ingress")
+	remove := func(path string) int {
+		return runtimeHandlerStatus(t, srv.handleDeleteMemory, http.MethodDelete, path, storetest.Repo, "")
+	}
+	assert.Equal(t, remove(base), 400)
+	assert.Equal(t, remove(base+"?fact=nope"), 404)
+	assert.Equal(t, remove(base+"?fact="+g.Facts[0].ID), 204)
+	assert.Equal(t, remove(base+"?entity="+url.QueryEscape(agentmem.EntityID(storetest.Repo, "team/blue"))), 204, "entity IDs may contain slashes")
 	require.Equal(t, get(t, ts, base, &g), 200)
 	assert.Equal(t, len(g.Entities), 1)
 }
@@ -290,9 +310,10 @@ func TestSyncAndRegister(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	assert.Equal(t, post(t, ts, "/api/v1/repos/proj/sync", `{}`), http.StatusAccepted, "mounted source re-ingests")
-	assert.Equal(t, post(t, ts, "/api/v1/repos/proj/sync", `{"branch":"feature"}`), 400, "cannot switch branch of a mount")
-	assert.Equal(t, post(t, ts, "/api/v1/repos/nope/sync", `{}`), 404)
+	assert.Equal(t, post(t, ts, "/api/v1/repos/proj/sync", `{}`), 403, "missing runtime is refused at ingress")
+	assert.Equal(t, runtimeHandlerStatus(t, srv.handleSync, http.MethodPost, "/api/v1/repos/proj/sync", "proj", `{}`), http.StatusForbidden, "accountsless jobs cannot validate the persisted runtime")
+	assert.Equal(t, runtimeHandlerStatus(t, srv.handleSync, http.MethodPost, "/api/v1/repos/proj/sync", "proj", `{"branch":"feature"}`), 403, "runtime authorization precedes branch changes")
+	assert.Equal(t, post(t, ts, "/api/v1/repos/nope/sync", `{}`), 403)
 
 	for _, body := range []string{
 		`{"url":"http://github.com/a/b"}`,
@@ -301,7 +322,8 @@ func TestSyncAndRegister(t *testing.T) {
 		`{"url":"https://127.0.0.1/a/b"}`,
 		`{"url":"https://github.com/a/b","branch":"--upload-pack=x"}`,
 	} {
-		assert.Equal(t, post(t, ts, "/api/v1/repos", body), 400, body)
+		assert.Equal(t, post(t, ts, "/api/v1/repos", body), 403, "runtime is checked before repository validation")
+		assert.Equal(t, runtimeHandlerStatus(t, srv.handleRegister, http.MethodPost, "/api/v1/repos", "", body), 400, body)
 	}
 }
 
@@ -320,12 +342,16 @@ func TestSwitchToRemoteRefusals(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	assert.Equal(t, post(t, ts, "/api/v1/repos/proj/remote", `{}`), 400, "no origin and no URL")
-	assert.Equal(t, post(t, ts, "/api/v1/repos/proj/remote", `{"url":"http://github.com/a/b"}`), 400, "https only")
-	assert.Equal(t, post(t, ts, "/api/v1/repos/proj/remote", `{"url":"https://127.0.0.1/a/b"}`), 400, "no internal hosts")
-	assert.Equal(t, post(t, ts, "/api/v1/repos/cloned/remote", `{}`), 400, "already a clone")
+	assert.Equal(t, post(t, ts, "/api/v1/repos/proj/remote", `{}`), 403, "missing runtime is refused at ingress")
+	remote := func(repo, body string) int {
+		return runtimeHandlerStatus(t, srv.handleSwitchToRemote, http.MethodPost, "/api/v1/repos/"+repo+"/remote", repo, body)
+	}
+	assert.Equal(t, remote("proj", `{}`), 400, "no origin and no URL")
+	assert.Equal(t, remote("proj", `{"url":"http://github.com/a/b"}`), 400, "https only")
+	assert.Equal(t, remote("proj", `{"url":"https://127.0.0.1/a/b"}`), 400, "no internal hosts")
+	assert.Equal(t, remote("cloned", `{}`), 400, "already a clone")
 	require.NoError(t, os.Mkdir(filepath.Join(ws, "proj"), 0o750))
-	assert.Equal(t, post(t, ts, "/api/v1/repos/proj/remote", `{"url":"https://github.com/a/proj"}`), http.StatusConflict, "folder exists")
+	assert.Equal(t, remote("proj", `{"url":"https://github.com/a/proj"}`), http.StatusConflict, "folder exists")
 }
 
 func TestWorkspaceOverview(t *testing.T) {
@@ -390,10 +416,11 @@ func TestScheduleAndDelete(t *testing.T) {
 	require.Equal(t, get(t, ts, base+"/schedule", &sc), 200)
 	assert.Equal(t, sc.State, "manual", "turning it off sticks")
 
-	assert.Equal(t, put(t, ts, base+"/schedule", `{"interval_minutes":60}`), 200)
+	assert.Equal(t, put(t, ts, base+"/schedule", `{"interval_minutes":60}`), 403, "enabling automation needs runtime delegation")
+	srv := ts.Config.Handler.(*Server)
+	assert.Equal(t, runtimeHandlerStatus(t, srv.handlePutSchedule, http.MethodPut, base+"/schedule", storetest.Repo, `{"interval_minutes":60}`), 403)
 	require.Equal(t, get(t, ts, base+"/schedule", &sc), 200)
-	assert.Equal(t, sc.State, "active")
-	assert.NotEqual(t, sc.NextRun, "")
+	assert.Equal(t, sc.State, "manual")
 
 	assert.Equal(t, put(t, ts, base+"/schedule", `{"interval_minutes":60,"paused":true}`), 200)
 	require.Equal(t, get(t, ts, base+"/schedule", &sc), 200)
