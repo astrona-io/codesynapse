@@ -352,16 +352,17 @@ func vulnSteps(vulns []security.Vulnerability, covered map[string]bool, link str
 			s.Effort = 3
 			s.Targets = append(s.Targets, Target{Name: parent, Location: "via " + first.Via})
 		}
-		to := "a fixed version"
+		fix := "no fixed version is listed yet: check the advisory, and replace or mitigate if none comes"
+		s.Title = fmt.Sprintf("Look into %s in %s (no fixed version listed yet)", plural(len(vs), "advisory", "advisories"), target)
 		if fixed != "" {
-			to = fixed
+			fix = "the fix is in " + fixed
+			s.Title = fmt.Sprintf("Upgrade %s to fix %s", target, plural(len(vs), "advisory", "advisories"))
 		}
-		s.Title = fmt.Sprintf("Upgrade %s to fix %s", target, plural(len(vs), "advisory", "advisories"))
 		s.Why = fmt.Sprintf("%s (%s) affects %s", strings.Join(ids[:min(len(ids), 3)], ", "), first.Severity, m)
 		if first.Via != "" {
-			s.Why += fmt.Sprintf(", which is pulled in via %s; the fix is in %s", first.Via, to)
+			s.Why += fmt.Sprintf(", which is pulled in via %s; %s", first.Via, fix)
 		} else {
-			s.Why += fmt.Sprintf("; fixed in %s", to)
+			s.Why += "; " + fix
 		}
 		if called {
 			s.Why += ". Your code calls the vulnerable code, so this is exploitable until fixed."
