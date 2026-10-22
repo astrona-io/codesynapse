@@ -62,6 +62,7 @@ Every node has the label `Node` plus its kind, and the properties `id`, `repo`, 
 | Finding | rule, severity, cwe, file, line, summary (never the secret) |
 | Module | path, version, indirect, ecosystem, dev, license (SPDX), license_source |
 | Vulnerability | id, aliases (CVE/GHSA), severity, cwe, version, fixed_version, reachability, url |
+| McpUsage (not `:Node`) | key (`day\|repo\|tool\|client`), day, repo, tool, client, calls, errors, response_tokens, duration_ms, max_duration_ms |
 | MemoryEntity (not `:Node`) | id (`repo\|mem\|name`), repo, name, type, created_at, updated_at; joined by `:FACT` relationships with id, repo, predicate, source, confirmations, created_at, updated_at |
 
 Edges: `CONTAINS`, `DEFINES`, `HAS_METHOD`, `CALLS` (with `count`), `DISPATCHES_TO`, `IMPLEMENTS`, `IMPORTS`, `MENTIONS`, `MODIFIES` (with `count` = lines changed), `AUTHORED`, `HAS_FINDING`, `DEPENDS_ON`, `AFFECTS`, `INCLUDES`, `USES_VALUE`.
@@ -123,6 +124,10 @@ Running it on CodeSynapse itself found and removed three dead helpers.
 ## Agent memory
 
 Agents lose detail when their context is compacted and start each session from nothing. The MCP server (unless started with `--allow-memory=false`) stores durable facts per repository as `(:MemoryEntity)-[:FACT]->(:MemoryEntity)` (`internal/memory`, `store.MemoryStore`), apart from the code graph so re-indexing keeps them. Entities merge by case-folded name; facts by (subject, predicate, object), where saving again bumps `confirmations`; `replace` makes a predicate single-valued. The predicate is a relationship property validated as `UPPER_SNAKE_CASE`, so the relationship type stays fixed and agent text only reaches Cypher as parameters. Names pass `redact`, are capped at 120 characters, and a repository holds at most 10,000 facts and 5,000 entities. Every fact records the MCP client that saved it; reads carry a notice that facts are data, not instructions (they may come from agents that read untrusted code). Tools: `upsert_graph_triples`, `search_graph_nodes`, `query_subgraph`, prompt `context-offload`; the **Agent memory** page lists and deletes facts (`GET`/`DELETE /api/v1/repos/{repo}/memory`). Context pruning itself stays with the client.
+
+## Statistics
+
+`GET /api/v1/stats?days=7|30|90` and the **Statistics** page combine everything measured across the workspace. Agent activity comes from MCP usage counters (`internal/usage`): a receiving middleware counts sessions (`initialize`, or `server/discover` for sessionless clients), tool calls and prompt requests per day, repository, tool and client, with errors, response tokens (bytes/4) and latency, and flushes aggregates every 30 seconds to `:McpUsage` nodes (180 days kept). Tokens avoided are estimated for navigation tools from each repository's ingest-time token benchmark (file-reading baseline ÷ graph answer). Context offloading shows stored facts, saves, recalls and measured tokens per recall, and a turn-by-turn model of one session with and without offloading (client compaction vs. offloading at a target fraction of the window) whose assumptions are editable on the page. The rest aggregates existing reports: security grades, findings and vulnerabilities by severity, the most widespread rules, licence verdicts and repository licences, update automation and Renovate issues, review decisions and fix branches, AI provider usage and sync health.
 
 ## Fix guidance
 

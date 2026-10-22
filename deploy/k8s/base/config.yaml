@@ -17,6 +17,8 @@ data:
   CODESYNAPSE_ALLOW_PUSH: "false"
   # Agent memory MCP tools (upsert_graph_triples, ...): write only to the memory store. "false" turns them off.
   CODESYNAPSE_ALLOW_MEMORY: "true"
+  # MCP usage counters for the Statistics page (aggregates only, never arguments or results).
+  CODESYNAPSE_MCP_USAGE: "true"
   CODESYNAPSE_GIT_TOKEN_HOST: github.com
   CODESYNAPSE_GIT_AUTHOR_NAME: CodeSynapse
   CODESYNAPSE_GIT_AUTHOR_EMAIL: codesynapse@localhost

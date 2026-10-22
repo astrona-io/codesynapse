@@ -16,6 +16,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
+	"github.com/parisnakitakejser/codesynapse/internal/usage"
 )
 
 func connect(t *testing.T) *mcp.ClientSession {
@@ -429,4 +430,39 @@ func TestMemoryRoundTrip(t *testing.T) {
 	assert.True(t, res.IsError, "memory is only written for indexed repositories")
 	res = call(t, cs, "upsert_graph_triples", map[string]any{"triples": []map[string]any{{"subject": "a", "predicate": "MATCH (n) DETACH DELETE n", "object": "b"}}}, nil)
 	assert.True(t, res.IsError, "predicates are validated")
+}
+
+func TestUsageMiddleware(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+	rec := usage.NewRecorder(s)
+	ct, st := mcp.NewInMemoryTransports()
+	_, err := New(s, "test", Options{Reviews: s, Usage: rec}).Connect(ctx, st, nil)
+	require.NoError(t, err)
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "usage-client"}, nil).Connect(ctx, ct, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cs.Close() })
+
+	call(t, cs, "search", map[string]any{"repo": storetest.Repo, "query": "Handler"}, nil)
+	call(t, cs, "search", map[string]any{"repo": storetest.Repo, "query": "x", "kinds": []string{"Bogus"}}, nil)
+	_, err = cs.GetPrompt(ctx, &mcp.GetPromptParams{Name: "code-review", Arguments: map[string]string{"target": "HEAD~1..HEAD"}})
+	require.NoError(t, err)
+	require.NoError(t, rec.Flush(ctx))
+
+	got, err := s.Usage(ctx, "2000-01-01")
+	require.NoError(t, err)
+	by := map[string]usage.Bucket{}
+	for _, b := range got {
+		by[b.Tool] = b
+	}
+	search := by["search"]
+	assert.Equal(t, search.Repo, storetest.Repo)
+	assert.Equal(t, search.Client, "usage-client")
+	assert.Equal(t, search.Calls, 2)
+	assert.Equal(t, search.Errors, 1, "tool errors count")
+	assert.True(t, search.ResponseTokens > 0)
+	assert.Equal(t, by[usage.Session].Calls, 1)
+	assert.Equal(t, by[usage.Session].Client, "usage-client")
+	assert.Equal(t, by["prompt:code-review"].Calls, 1)
 }

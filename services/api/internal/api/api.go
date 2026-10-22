@@ -139,6 +139,7 @@ func (s *Server) routes() {
 	})
 	m.HandleFunc("GET /api/v1/repos", s.handleRepos)
 	m.HandleFunc("GET /api/v1/overview", s.handleWorkspaceOverview)
+	m.HandleFunc("GET /api/v1/stats", s.handleStats)
 	m.HandleFunc("DELETE /api/v1/repos/{repo}", s.handleDeleteRepo)
 	m.HandleFunc("GET /api/v1/repos/{repo}/overview", s.handleOverview)
 	m.HandleFunc("GET /api/v1/repos/{repo}/dashboard", s.handleDashboard)

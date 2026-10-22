@@ -73,6 +73,7 @@ const isActive = (to: string) => route.path === to
           <NuxtLink to="/" class="nav-link" :class="{ 'is-active': route.path === '/' }" title="Your indexed repositories and what to add">Repositories</NuxtLink>
           <NuxtLink to="/orgs" class="nav-link" :class="{ 'is-active': route.path === '/orgs' }" title="Index every repository of a GitHub organisation">Organisations</NuxtLink>
           <NuxtLink to="/overview" class="nav-link" :class="{ 'is-active': route.path === '/overview' }" title="Everything at a glance, worst first">Workspace health</NuxtLink>
+          <NuxtLink to="/stats" class="nav-link" :class="{ 'is-active': route.path === '/stats' }" title="Agent sessions, context offloading, security, licences, reviews and more">Statistics</NuxtLink>
           <NuxtLink to="/ai" class="nav-link" :class="{ 'is-active': route.path === '/ai' }" title="Local and cloud language models">AI models</NuxtLink>
         </div>
         <template v-if="repo">

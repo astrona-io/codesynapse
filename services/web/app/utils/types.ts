@@ -172,3 +172,32 @@ export interface MemoryFact {
   source: string; confirmations: number; created_at: string; updated_at: string
 }
 export interface MemoryGraph { notice: string; entities: MemoryEntity[]; facts: MemoryFact[] }
+
+export interface UsageDay { day: string; sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number }
+export interface UsageTool { tool: string; kind: string; calls: number; errors: number; response_tokens: number; avg_tokens: number; avg_ms: number; max_ms: number }
+export interface WorkspaceStats {
+  generated_at: string; days: number
+  agents: {
+    sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; avoided_method: string
+    avg_latency_ms: number; max_latency_ms: number; daily: UsageDay[]; tools: UsageTool[]
+    clients: { client: string; sessions: number; calls: number }[]
+    repos: { repo: string; calls: number; response_tokens: number; avoided_tokens: number }[]
+  }
+  memory: {
+    entities: number; facts: number; confirmations: number; sources: Record<string, number>
+    repos: { repo: string; entities: number; facts: number; confirmations: number; fact_chars: number; sources: Record<string, number>; last_updated?: string }[]
+    saves: number; recalls: number; recall_tokens: number
+    model: { tokens_per_fact: number; tokens_per_recall: number; recalls_per_session: number; measured: boolean }
+  }
+  licenses: {
+    dependencies: number; ok: number; review: number; conflict: number; unknown: number
+    unlicensed: string[]; conflicts: { repo: string; count: number }[]
+    by_license: { license: string; category: LicenseCategory; count: number }[]; projects: Record<string, number>
+  }
+  reviews: { reviews: number; comments: number; by_status: Record<string, number>; by_kind: Record<string, number>; by_source: Record<string, number>; verdicts: Record<string, number>; fixes: Record<string, number> }
+  hygiene: { no_update_automation: string[]; renovate_issues: { repo: string; count: number }[]; top_rules: { rule: string; severity: string; findings: number; repos: number }[] }
+  ai: { provider: string; model: string; local: boolean; usage: { requests: number; failures: number; input_tokens: number; output_tokens: number; avg_seconds: number; last_error?: string } }[]
+  workspace: WorkspaceOverview['totals']
+  jobs: WorkspaceOverview['jobs']
+  repos: RepoSummary[]
+}

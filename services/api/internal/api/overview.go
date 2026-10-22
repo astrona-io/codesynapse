@@ -2,6 +2,7 @@ package api
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -96,11 +97,19 @@ type Overview struct {
 }
 
 func (s *Server) handleWorkspaceOverview(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	repos, err := s.st.Repos(ctx)
+	ov, err := s.buildOverview(r.Context())
 	if err != nil {
 		s.problem(w, 500, err)
 		return
+	}
+	writeJSON(w, 200, ov)
+}
+
+// buildOverview summarises every repository; the statistics page reuses it.
+func (s *Server) buildOverview(ctx context.Context) (Overview, error) {
+	repos, err := s.st.Repos(ctx)
+	if err != nil {
+		return Overview{}, err
 	}
 	now := time.Now()
 	ov := Overview{
@@ -116,13 +125,11 @@ func (s *Server) handleWorkspaceOverview(w http.ResponseWriter, r *http.Request)
 		name := repoNode.Name
 		st, err := s.st.Stats(ctx, name)
 		if err != nil {
-			s.problem(w, 500, err)
-			return
+			return Overview{}, err
 		}
 		sec, err := security.Build(ctx, s.st, name, security.Options{})
 		if err != nil {
-			s.problem(w, 500, err)
-			return
+			return Overview{}, err
 		}
 		rs := RepoSummary{
 			Name: name, Branch: repoNode.Branch, Head: repoNode.Head, Remote: repoNode.URL,
@@ -169,6 +176,7 @@ func (s *Server) handleWorkspaceOverview(w http.ResponseWriter, r *http.Request)
 			if json.Unmarshal([]byte(repoNode.Metrics), &m) == nil {
 				rs.TestReachPct, rs.DocCoverPct = m.Tests.ReachablePct, m.Docs.CoveragePct
 				rs.ReductionPct = m.Benchmark.MedianReductionPct
+				rs.GraphTokens, rs.BaseTokens = m.Benchmark.TotalGraph, m.Benchmark.TotalBaseline
 				graphTok += m.Benchmark.TotalGraph
 				baseTok += m.Benchmark.TotalBaseline
 			}
@@ -199,7 +207,7 @@ func (s *Server) handleWorkspaceOverview(w http.ResponseWriter, r *http.Request)
 	// Worst security posture first: that is what an operator acts on.
 	slices.SortFunc(ov.Repos, func(a, b RepoSummary) int { return cmp.Or(cmp.Compare(a.Score, b.Score), cmp.Compare(a.Name, b.Name)) })
 	ov.Jobs = jobHealth(s.jobs.List())
-	writeJSON(w, 200, ov)
+	return ov, nil
 }
 
 func jobHealth(jobs []Job) JobHealth {

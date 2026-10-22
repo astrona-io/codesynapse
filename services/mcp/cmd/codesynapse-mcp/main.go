@@ -10,14 +10,17 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
 	"github.com/parisnakitakejser/codesynapse/internal/app"
 	"github.com/parisnakitakejser/codesynapse/internal/ingest"
+	"github.com/parisnakitakejser/codesynapse/internal/logx"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
+	"github.com/parisnakitakejser/codesynapse/internal/usage"
 	"github.com/parisnakitakejser/codesynapse/services/mcp/internal/mcpserver"
 )
 
@@ -39,6 +42,7 @@ type serveOptions struct {
 	offline   string
 	reviews   bool
 	memory    bool
+	usage     bool
 }
 
 func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -48,6 +52,7 @@ func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.addr, "addr", app.Getenv("CODESYNAPSE_MCP_ADDR", "127.0.0.1:8090"), "Listen address for the http transport")
 	f.StringVar(&o.offline, "offline", "", "Serve an in-memory graph of this directory instead of Neo4j")
 	f.BoolVar(&o.memory, "allow-memory", app.Getenv("CODESYNAPSE_ALLOW_MEMORY", "true") == "true", "Enable the agent-memory tools upsert_graph_triples, search_graph_nodes and query_subgraph (writes only to the memory store)")
+	f.BoolVar(&o.usage, "record-usage", app.Getenv("CODESYNAPSE_MCP_USAGE", "true") == "true", "Count sessions and tool calls per day, repository, tool and client for the Statistics page (never arguments or results)")
 	f.BoolVar(&o.reviews, "allow-reviews", app.Getenv("CODESYNAPSE_MCP_REVIEWS", "true") == "true", "Enable submit_review/update_review_comment (writes only to the review store)")
 	return nil
 }
@@ -106,6 +111,19 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	}
 	if ms, ok := r.(store.MemoryStore); ok && o.memory {
 		opts.Memory = ms
+	}
+	if us, ok := r.(store.UsageStore); ok && o.usage {
+		opts.Usage = usage.NewRecorder(us)
+		usageCtx, stopUsage := context.WithCancel(ctx)
+		flushed := make(chan struct{})
+		go func() {
+			defer close(flushed)
+			opts.Usage.Run(usageCtx, 30*time.Second, func(err error) {
+				logx.FromContext(ctx).Warn("recording MCP usage failed", logx.Error(err))
+			})
+		}()
+		// Stop the recorder and wait for its final flush before exiting.
+		defer func() { stopUsage(); <-flushed }()
 	}
 	server := mcpserver.New(r, version, opts)
 
