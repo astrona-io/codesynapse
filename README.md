@@ -230,3 +230,9 @@ See `AGENTS.md` for conventions and security rules and `docs/PLAN.md` for archit
 ## Security model, briefly
 
 Indexing untrusted code is the normal case, so: `go list` runs without cgo, toolchain downloads or network; git runs with hooks, fsmonitor and diff drivers disabled, and clones only over HTTPS to public hosts; no source bodies or YAML values are stored and summaries are redacted for secrets; services require bearer tokens off loopback; MCP tools cannot change code or the graph (only the review store). Details in `AGENTS.md`.
+
+## License
+
+Copyright 2026 Astrona.io. Licensed under the [Apache License, Version 2.0](LICENSE); see [NOTICE](NOTICE) for attributions.
+
+All Go and production npm dependencies use permissive licences (Apache-2.0, MIT, BSD, ISC). Neo4j Community Edition, which the compose stack and Kubernetes manifests pull as a separate image, is licensed under GPL-3.0 and is not part of this distribution.

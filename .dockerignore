@@ -1,4 +1,7 @@
 .git
-services/web
-**/node_modules
 .env
+sources
+bin
+**/node_modules
+services/web/.nuxt
+services/web/.output
