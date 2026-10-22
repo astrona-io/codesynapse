@@ -90,6 +90,13 @@ The server can run security triage and briefings with its own model (`config/llm
 | Record a review | `submit_review` | one comment per issue | Appears on the Reviews page; `update_review_comment` resolves comments. The only tools that write (to the review store). |
 | Follow up a review | `list_reviews`, `get_review` | `status: "open"` | What is left to address. |
 | Orientation | `repo_overview`, `repo_metrics`, `hotspots` | — | Once per session. |
+| Is the graph current? | `repo_status` | — | Indexed commit and time, stale flag, and whether the checkout has newer commits or uncommitted changes. Call it when an answer looks out of date. |
+| Find the owner of a name across many repositories | `search_all_repos` | `repo_prefix: "astrona-io/"`, `per_repo: 3` | A few hits per repository, each with its `repo`. Then use `repo` on the other tools. |
+| YAML, Helm, CI structure | `get_config_entries` | `file: "deploy/"` or `query: "Deployment"` | Entries with line ranges; read only those lines. |
+| What the docs say about something | `get_doc_section` | `query: "install"` or `file: "docs/"` | Sections with line ranges and the symbols each mentions. Text is not stored: read the lines. |
+| Findings in one place | `security_report` | `path: "internal/api/"` | Findings (and counts) in a file or directory; score and grade stay repository-wide. |
+
+Repositories indexed from a URL or an organisation are named `owner/name` on github.com (for example `astrona-io/astrona-cli`) and `host/owner/name` on every other provider (for example `codeberg.org/team/api`), so the same organisation and repository on two providers never collide; pass that as `repo`. `search_all_repos` with `repo_prefix: "codeberg.org/"` searches one provider. Mounted folders and older indexes keep a plain name.
 
 Every answer uses `qualified_id` values (`store.(*Store).Get`) that you can pass back to any tool. Ambiguous names return an error listing the exact `qualified_id`s to retry with.
 

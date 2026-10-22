@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
@@ -47,10 +48,10 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Name == "" {
-		req.Name = strings.TrimSuffix(filepath.Base(remote), ".git")
+		req.Name = repoNameFromRemote(remote)
 	}
 	if !validRepoName(req.Name) {
-		s.problem(w, 400, errors.New("name must match [A-Za-z0-9._-]+"))
+		s.problem(w, 400, errors.New("name must be name, owner/name or host/owner/name using only [A-Za-z0-9._-]"))
 		return
 	}
 	if req.Branch != "" {
@@ -73,11 +74,11 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 // startClone queues a clone of an already validated remote into the
 // workspace under name, then indexes it.
 func (s *Server) startClone(remote, name, branch string) (Job, error) {
-	dir := filepath.Join(s.cfg.Workspace, name)
-	if _, err := os.Stat(dir); err == nil { //nolint:gosec // name passed validRepoName: one path element, no leading dot
+	dir := repoDir(s.cfg.Workspace, name)
+	if _, err := os.Stat(dir); err == nil { //nolint:gosec // name passed validRepoName: at most two safe elements, none with a leading dot
 		return Job{}, fmt.Errorf("%w: %q already exists; use sync", errConflict, name)
 	}
-	auth := s.cfg.GitAuth
+	auth := s.authFor(remote)
 	job, err := s.jobs.Start(name, dir, JobOptions{
 		Kind: "clone", Branch: branch,
 		Prepare: func(ctx context.Context) error {
@@ -128,11 +129,11 @@ func (s *Server) handleSwitchToRemote(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !validRepoName(repo) {
-		s.problem(w, 400, errors.New("repository name must match [A-Za-z0-9._-]+ to be cloned"))
+		s.problem(w, 400, errors.New("repository name must be name, owner/name or host/owner/name using only [A-Za-z0-9._-] to be cloned"))
 		return
 	}
-	dir := filepath.Join(s.cfg.Workspace, repo)
-	if _, err := os.Stat(dir); err == nil { //nolint:gosec // repo passed validRepoName: one path element, no dots first
+	dir := repoDir(s.cfg.Workspace, repo)
+	if _, err := os.Stat(dir); err == nil { //nolint:gosec // repo passed validRepoName: at most two safe elements, none with a leading dot
 		s.problem(w, http.StatusConflict, fmt.Errorf("the workspace already has a folder named %q; remove it first", repo))
 		return
 	}
@@ -157,7 +158,7 @@ func (s *Server) handleSwitchToRemote(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	auth, branch := s.cfg.GitAuth, req.Branch
+	auth, branch := s.authFor(remote), req.Branch
 	job, err := s.jobs.Start(repo, dir, JobOptions{ //nolint:contextcheck // jobs outlive the request
 		Kind: "clone", Branch: branch,
 		Prepare: func(ctx context.Context) error {
@@ -183,6 +184,8 @@ type syncRequest struct {
 var (
 	errBadRequest = errors.New("bad request")
 	errConflict   = errors.New("conflict")
+	// errUnchanged means a scheduled sync found nothing new and queued no job.
+	errUnchanged = errors.New("up to date")
 )
 
 // handleSync updates a repository and re-indexes it.
@@ -194,7 +197,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	job, err := s.startSync(r.Context(), r.PathValue("repo"), req.Branch)
+	job, err := s.startSync(r.Context(), r.PathValue("repo"), req.Branch, false, nil)
 	switch {
 	case errors.Is(err, errBadRequest):
 		s.problem(w, 400, err)
@@ -209,8 +212,11 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 
 // startSync queues a sync of repo. Clones in the workspace fetch branch
 // (default: the indexed one) from origin; mounted sources are re-indexed as
-// they are on disk. Used by the Sync button and the scheduler.
-func (s *Server) startSync(ctx context.Context, repo, branch string) (Job, error) {
+// they are on disk. Used by the Sync button and the scheduler. With
+// onlyIfChanged (the scheduler) it first asks cheaply whether anything is new
+// and returns errUnchanged without queueing a job when not: with hundreds of
+// repositories every few minutes, a fetch and re-index each would never drain.
+func (s *Server) startSync(ctx context.Context, repo, branch string, onlyIfChanged bool, done func(error)) (Job, error) {
 	n, err := s.st.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
 	if err != nil {
 		return Job{}, err
@@ -232,7 +238,18 @@ func (s *Server) startSync(ctx context.Context, repo, branch string) (Job, error
 		if err != nil {
 			return Job{}, fmt.Errorf("%w: %w", errBadRequest, err)
 		}
-		root, auth := n.Root, s.cfg.GitAuth
+		root, auth := n.Root, s.authFor(remote)
+		if onlyIfChanged {
+			cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			head, err := gitx.RemoteHead(cctx, remote, branch, auth)
+			cancel()
+			if err != nil {
+				return Job{}, fmt.Errorf("checking %s for new commits: %w", repo, err)
+			}
+			if head == "" || head == n.Head {
+				return Job{}, errUnchanged
+			}
+		}
 		opts.Prepare = func(ctx context.Context) error { return gitx.FetchCheckout(ctx, root, remote, branch, auth) }
 	default:
 		if err := s.insideSources(n.Root); err != nil {
@@ -241,8 +258,13 @@ func (s *Server) startSync(ctx context.Context, repo, branch string) (Job, error
 		if requested != "" && requested != n.Branch {
 			return Job{}, fmt.Errorf("%w: mounted sources follow the checkout on disk; switch branches there, or register the repository by URL", errBadRequest)
 		}
+		// A git checkout with the indexed commit and no local edits is unchanged.
+		if onlyIfChanged && n.Head != "" && gitx.HeadCommit(ctx, n.Root) == n.Head && !gitx.IsDirty(ctx, n.Root) {
+			return Job{}, errUnchanged
+		}
 	}
 	opts.After = s.automation(ctx, repo, n)
+	opts.Done = done
 	job, err := s.jobs.Start(repo, n.Root, opts) //nolint:contextcheck // jobs outlive the request
 	if err != nil {
 		return Job{}, fmt.Errorf("%w: %w", errConflict, err)
@@ -344,7 +366,7 @@ func (s *Server) handleBranches(w http.ResponseWriter, r *http.Request) {
 			s.problem(w, 400, err)
 			return
 		}
-		branches, err = gitx.RemoteBranches(r.Context(), remote, s.cfg.GitAuth)
+		branches, err = gitx.RemoteBranches(r.Context(), remote, s.authFor(remote))
 		if err != nil {
 			s.problem(w, http.StatusBadGateway, err)
 			return

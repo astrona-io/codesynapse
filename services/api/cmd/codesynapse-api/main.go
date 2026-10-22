@@ -93,7 +93,11 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		registry = llm.NewRegistry(llmCfg)
 		o.EC.Logger.Info("AI providers configured", "providers", len(llmCfg.Providers), "default", llmCfg.Default)
 	}
-	srv := api.New(ctx, api.Config{LLM: registry, SourcesRoot: o.sources, CommitLimit: o.commitLimit, AllowNetwork: o.network, VulnScan: o.vulnScan, Version: version,
+	gitAuths, err := gitx.ParseAuths(os.Getenv("CODESYNAPSE_GIT_TOKENS"))
+	if err != nil {
+		return fmt.Errorf("CODESYNAPSE_GIT_TOKENS: %w", err)
+	}
+	srv := api.New(ctx, api.Config{GitAuths: gitAuths, LLM: registry, SourcesRoot: o.sources, CommitLimit: o.commitLimit, AllowNetwork: o.network, VulnScan: o.vulnScan, Version: version,
 		Workspace: o.workspace, AllowPrivateGit: app.Getenv("CODESYNAPSE_ALLOW_PRIVATE_GIT", "") == "true",
 		GitAuth:   gitx.Auth{Host: app.Getenv("CODESYNAPSE_GIT_TOKEN_HOST", "github.com"), Token: os.Getenv("CODESYNAPSE_GIT_TOKEN")},
 		AllowPush: app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true",

@@ -11,12 +11,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/parisnakitakejser/codesynapse/internal/forge"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/query"
@@ -44,6 +46,9 @@ type Config struct {
 	Workspace string
 	// GitAuth is an optional token for cloning private repositories.
 	GitAuth gitx.Auth
+	// GitAuths holds tokens for further hosts (CODESYNAPSE_GIT_TOKENS). A token
+	// is only ever sent to its own host.
+	GitAuths []gitx.Auth
 	// AllowPrivateGit permits remotes on private networks.
 	AllowPrivateGit bool
 	// AllowPush lets CodeSynapse push fix branches for accepted review
@@ -51,9 +56,9 @@ type Config struct {
 	AllowPush bool
 	// GitAuthor signs fix commits.
 	GitAuthor gitx.Author
-	// GitHubAPI overrides the GitHub REST endpoint used to list organisations
-	// (tests only; empty means api.github.com).
-	GitHubAPI string
+	// ForgeAPI overrides the REST endpoint used to list organisations, for every
+	// provider (tests only; empty derives it from the host).
+	ForgeAPI string
 	// LLM holds configured AI providers; nil disables AI tasks.
 	LLM     *llm.Registry
 	Version string
@@ -113,6 +118,7 @@ func (s *Server) routes() {
 		writeJSON(w, 200, map[string]any{
 			"git_token_configured": s.cfg.GitAuth.Token != "",
 			"git_token_host":       s.cfg.GitAuth.Host,
+			"git_token_hosts":      s.tokenHosts(),
 			"clone_enabled":        s.cfg.Workspace != "",
 			"allow_private_git":    s.cfg.AllowPrivateGit,
 			"vuln_scan":            s.cfg.VulnScan,
@@ -223,6 +229,11 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 
 // displayRoot shows roots relative to the sources root, hiding host layout.
 func (s *Server) displayRoot(root string) string {
+	if s.inWorkspace(root) {
+		if rel, err := filepath.Rel(s.cfg.Workspace, root); err == nil {
+			return filepath.ToSlash(rel) // owner/name for managed clones
+		}
+	}
 	if s.cfg.SourcesRoot == "" || root == "" {
 		return filepath.Base(root)
 	}
@@ -251,13 +262,20 @@ func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Query().Get("files") == "1" && s.inWorkspace(n.Root) {
 		rel, relErr := filepath.Rel(s.cfg.Workspace, n.Root)
-		if relErr != nil || rel == "." || strings.Contains(rel, "..") || strings.ContainsRune(rel, filepath.Separator) {
+		if relErr != nil || rel == "." || strings.Contains(rel, "..") || strings.Count(rel, string(filepath.Separator)) > 2 {
 			s.problem(w, 400, errors.New("refusing to delete files outside a single workspace clone"))
 			return
 		}
 		if err := os.RemoveAll(n.Root); err != nil {
 			s.problem(w, 500, err)
 			return
+		}
+		// os.Remove only deletes an empty folder: the owner (and host) folder goes
+		// when this was its last clone.
+		for dir := filepath.Dir(n.Root); dir != filepath.Clean(s.cfg.Workspace) && strings.HasPrefix(dir, filepath.Clean(s.cfg.Workspace)+string(filepath.Separator)); dir = filepath.Dir(dir) {
+			if os.Remove(dir) != nil { //nolint:errcheck,gosec // non-empty is the normal case; dir is inside the workspace
+				break
+			}
 		}
 	}
 	if err := s.st.DeleteRepo(ctx, repo); err != nil {
@@ -617,8 +635,40 @@ type ingestRequest struct {
 	Repo string `json:"repo"`
 }
 
-// validRepoName restricts repo names to a safe, URL-friendly alphabet.
+// authFor returns the token configured for remote's host, if any.
+func (s *Server) authFor(remote string) gitx.Auth {
+	return gitx.AuthFor(remote, append([]gitx.Auth{s.cfg.GitAuth}, s.cfg.GitAuths...)...)
+}
+
+// tokenHosts lists the hosts a token is configured for (never the tokens).
+func (s *Server) tokenHosts() []string {
+	hosts := []string{}
+	for _, a := range append([]gitx.Auth{s.cfg.GitAuth}, s.cfg.GitAuths...) {
+		if a.Token != "" && a.Host != "" && !slices.Contains(hosts, strings.ToLower(a.Host)) {
+			hosts = append(hosts, strings.ToLower(a.Host))
+		}
+	}
+	return hosts
+}
+
+// validRepoName restricts repo names to a safe, URL-friendly alphabet: "name",
+// "owner/name", or "host/owner/name" for hosts other than github.com.
 func validRepoName(name string) bool {
+	parts := strings.Split(name, "/")
+	if len(parts) > 3 {
+		return false
+	}
+	for _, p := range parts {
+		if !validRepoSegment(p) {
+			return false
+		}
+	}
+	return true
+}
+
+// validRepoSegment restricts one path element of a repository name to a
+// safe, URL-friendly alphabet.
+func validRepoSegment(name string) bool {
 	// A leading dot would allow "." and "..", and collide with the
 	// workspace's .codesynapse state directory.
 	if name == "" || len(name) > 100 || strings.HasPrefix(name, ".") {
@@ -630,7 +680,46 @@ func validRepoName(name string) bool {
 			return false
 		}
 	}
-	return !strings.HasPrefix(name, ".")
+	return true
+}
+
+// repoDir is where a managed clone lives: <workspace>/<name>, so
+// "astrona-io/astrona-cli" is <workspace>/astrona-io/astrona-cli and
+// "codeberg.org/team/api" is <workspace>/codeberg.org/team/api. The name must
+// have passed validRepoName: at most three safe elements, none starting with
+// a dot.
+func repoDir(workspace, name string) string {
+	return filepath.Join(workspace, filepath.FromSlash(name))
+}
+
+// repoNameFromRemote names a repository after its remote, so the same
+// owner and name on two providers never collide: "owner/name" on github.com,
+// "host/owner/name" anywhere else (lower-case owner and host), or just "name"
+// when the URL has no owner. It returns "" when the result is not a valid
+// repository name, for instance a GitLab subgroup path the name cannot hold.
+func repoNameFromRemote(remote string) string {
+	u, err := url.Parse(remote)
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if u.Port() != "" {
+		return "" // a host name alone would not tell two servers apart; name it explicitly
+	}
+	parts := strings.Split(strings.Trim(strings.TrimSuffix(strings.TrimSuffix(u.Path, "/"), ".git"), "/"), "/")
+	var name string
+	switch {
+	case len(parts) == 2 && host == forge.DefaultHost:
+		name = forge.RepoName(host, parts[0], parts[1])
+	case len(parts) == 2 && forge.ValidHost(host):
+		name = forge.RepoName(host, parts[0], parts[1])
+	case len(parts) == 1:
+		name = parts[0]
+	}
+	if !validRepoName(name) {
+		return ""
+	}
+	return name
 }
 
 func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {

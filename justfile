@@ -35,7 +35,7 @@ _runtime:
         exit 1
     fi
 
-# Store a token for cloning private repositories (prompted, never echoed), then restart the API.
+# Store a token for one git host (prompted, never echoed), then restart the API. Run it once per host.
 # Use a fine-grained GitHub token with read-only "Contents" access to the repositories you index.
 git-token host="github.com": init _runtime
     #!/usr/bin/env sh
@@ -46,12 +46,18 @@ git-token host="github.com": init _runtime
     stty echo 2>/dev/null || true
     echo
     [ -n "$token" ] || { echo "no token given, nothing changed"; exit 1; }
+    # One entry per host in CODESYNAPSE_GIT_TOKENS (host=token,host2=token2); a token
+    # is only ever sent to its own host. Re-running for a host replaces its entry.
+    host=$(printf '%s' "{{host}}" | tr 'A-Z' 'a-z')
     tmp=$(mktemp)
-    grep -v -e '^CODESYNAPSE_GIT_TOKEN=' -e '^CODESYNAPSE_GIT_TOKEN_HOST=' .env > "$tmp" || true
-    printf 'CODESYNAPSE_GIT_TOKEN=%s\nCODESYNAPSE_GIT_TOKEN_HOST=%s\n' "$token" "{{host}}" >> "$tmp"
+    current=$(sed -n 's/^CODESYNAPSE_GIT_TOKENS=//p' .env | head -n 1)
+    kept=$(printf '%s' "$current" | tr ',' '\n' | grep -v -e "^$host=" -e '^$' | paste -sd, - || true)
+    entries="${kept:+$kept,}$host=$token"
+    grep -v -e '^CODESYNAPSE_GIT_TOKENS=' .env > "$tmp" || true
+    printf 'CODESYNAPSE_GIT_TOKENS=%s\n' "$entries" >> "$tmp"
     mv "$tmp" .env && chmod 600 .env
     {{compose}} up -d api
-    echo "token stored in .env for {{host}}; the API was restarted"
+    echo "token stored in .env for $host; the API was restarted. Run again with another host (just git-token codeberg.org) to add more."
     echo "read-only token: Contents read. For fix branches and PRs (CODESYNAPSE_ALLOW_PUSH=true): Contents and Pull requests read and write."
 
 # Build and start Neo4j, API, MCP and web

@@ -25,6 +25,39 @@ type Auth struct {
 	Token string
 }
 
+// ParseAuths reads "host=token,host2=token2" (the CODESYNAPSE_GIT_TOKENS
+// format) into one Auth per host. Tokens never contain commas or equals signs.
+func ParseAuths(spec string) ([]Auth, error) {
+	var out []Auth
+	for _, item := range strings.Split(spec, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		host, token, ok := strings.Cut(item, "=")
+		host = strings.ToLower(strings.TrimSpace(host))
+		if !ok || host == "" || strings.ContainsAny(host, "/:@ ") || strings.TrimSpace(token) == "" {
+			return nil, errors.New("git tokens must look like host=token,host2=token2")
+		}
+		out = append(out, Auth{Host: host, Token: strings.TrimSpace(token)})
+	}
+	return out, nil
+}
+
+// AuthFor returns the token entry for remote's host, or the zero Auth.
+func AuthFor(remote string, auths ...Auth) Auth {
+	u, err := url.Parse(remote)
+	if err != nil {
+		return Auth{}
+	}
+	for _, a := range auths {
+		if a.Token != "" && strings.EqualFold(a.Host, u.Hostname()) {
+			return a
+		}
+	}
+	return Auth{}
+}
+
 // RemoteOptions controls network git operations.
 type RemoteOptions struct {
 	Auth Auth
@@ -158,6 +191,27 @@ func RemoteBranches(ctx context.Context, remote string, auth Auth) ([]string, er
 		}
 	}
 	return branches, nil
+}
+
+// RemoteHead returns the commit branch points to on remote, or "" when the
+// branch does not exist. It is one cheap request, so schedulers can ask
+// before fetching anything.
+func RemoteHead(ctx context.Context, remote, branch string, auth Auth) (string, error) {
+	if err := ValidateRev(branch); err != nil {
+		return "", err
+	}
+	out, err := runRemote(ctx, "", remote, auth, "ls-remote", "--", remote, "refs/heads/"+branch)
+	if err != nil {
+		return "", err
+	}
+	sha, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\t")
+	return sha, nil
+}
+
+// IsDirty reports whether dir has uncommitted or untracked changes.
+func IsDirty(ctx context.Context, dir string) bool {
+	out, err := Run(ctx, dir, "status", "--porcelain")
+	return err != nil || len(strings.TrimSpace(string(out))) > 0
 }
 
 // LocalBranches lists the branches of a local repository: local ones plus
