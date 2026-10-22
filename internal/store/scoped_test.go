@@ -56,18 +56,46 @@ type nativeGraphReader struct {
 	store.Reader
 	calls int
 	repo  string
+	hits  []model.Hit
+	edges []model.Edge
 }
 
 func (r *nativeGraphReader) TraverseRepository(_ context.Context, repo, _ string, _ []model.EdgeKind, _ store.Direction, _, _ int) ([]model.Hit, error) {
 	r.calls++
 	r.repo = repo
-	return nil, nil
+	return r.hits, nil
 }
 
 func (r *nativeGraphReader) SubgraphRepository(_ context.Context, repo string, _ []string, _ []model.EdgeKind) ([]model.Edge, error) {
 	r.calls++
 	r.repo = repo
-	return nil, nil
+	return r.edges, nil
+}
+
+func TestRepositoryReaderRejectsForeignNativeResults(t *testing.T) {
+	root, leaf := "a|Function|root", "a|Function|leaf"
+	backend := &nativeGraphReader{hits: []model.Hit{
+		{Node: model.Node{ID: "b|Function|secret", Repo: "b"}, Depth: 1},
+		{Node: model.Node{ID: "b|Function|forged", Repo: "a"}, Depth: 1},
+		{Node: model.Node{ID: root, Repo: "a"}, Depth: 0},
+		{Node: model.Node{ID: leaf, Repo: "a"}, Depth: 1},
+		{Node: model.Node{ID: leaf, Repo: "a"}, Depth: 2},
+		{Node: model.Node{ID: "a|Function|deep", Repo: "a"}, Depth: 3},
+	}, edges: []model.Edge{
+		{From: root, To: leaf, Kind: model.EdgeCalls},
+		{From: root, To: "b|Function|secret", Kind: model.EdgeCalls},
+		{From: root, To: "a|Function|unrequested", Kind: model.EdgeCalls},
+		{From: root, To: leaf, Kind: model.EdgeImports},
+	}}
+	r := store.ForRepository(backend, "a")
+	hits, err := r.Traverse(t.Context(), root, []model.EdgeKind{model.EdgeCalls}, store.Out, 2, 10)
+	require.NoError(t, err)
+	require.Len(t, hits, 1)
+	assert.Equal(t, hits[0].Node.ID, leaf)
+	es, err := r.Subgraph(t.Context(), []string{root, leaf}, []model.EdgeKind{model.EdgeCalls})
+	require.NoError(t, err)
+	require.Len(t, es, 1)
+	assert.Equal(t, es[0].To, leaf)
 }
 
 func TestRepositoryReaderUsesNativeBoundary(t *testing.T) {

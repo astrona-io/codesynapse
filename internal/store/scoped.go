@@ -31,6 +31,9 @@ type repositoryReader struct {
 }
 
 func (s repositoryReader) allows(repo string) bool { return s.repo != "" && repo == s.repo }
+func (s repositoryReader) allowsNode(n model.Node) bool {
+	return s.allows(n.Repo) && strings.HasPrefix(n.ID, s.repo+"|")
+}
 func (s repositoryReader) Repos(ctx context.Context) ([]model.Node, error) {
 	n, err := s.Node(ctx, model.NodeID(s.repo, model.KindRepository, s.repo))
 	if err != nil {
@@ -64,7 +67,7 @@ func (s repositoryReader) Node(ctx context.Context, id string) (model.Node, erro
 	if err != nil {
 		return model.Node{}, err
 	}
-	if !s.allows(n.Repo) {
+	if !s.allowsNode(n) || n.ID != id {
 		return model.Node{}, ErrNotFound
 	}
 	return n, nil
@@ -72,7 +75,7 @@ func (s repositoryReader) Node(ctx context.Context, id string) (model.Node, erro
 func (s repositoryReader) filter(ns []model.Node) []model.Node {
 	out := make([]model.Node, 0, len(ns))
 	for _, n := range ns {
-		if s.allows(n.Repo) {
+		if s.allowsNode(n) {
 			out = append(out, n)
 		}
 	}
@@ -99,7 +102,7 @@ func (s repositoryReader) List(ctx context.Context, repo string, f Filter, m Met
 	ns, err := s.reader.List(ctx, repo, f, m, limit)
 	out := make([]Ranked, 0, len(ns))
 	for _, n := range ns {
-		if s.allows(n.Node.Repo) {
+		if s.allowsNode(n.Node) {
 			out = append(out, n)
 		}
 	}
@@ -113,7 +116,26 @@ func (s repositoryReader) Traverse(ctx context.Context, id string, edges []model
 		return nil, ErrNotFound
 	}
 	if native, ok := s.reader.(RepositoryGraphReader); ok {
-		return native.TraverseRepository(ctx, s.repo, id, edges, dir, depth, limit)
+		depth, limit = ClampDepth(depth), ClampLimit(limit, 50)
+		hits, err := native.TraverseRepository(ctx, s.repo, id, edges, dir, depth, limit)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]model.Hit, 0, min(len(hits), limit))
+		seen := map[string]bool{id: true}
+		slices.SortFunc(hits, func(a, b model.Hit) int {
+			return cmp.Or(cmp.Compare(a.Depth, b.Depth), cmp.Compare(a.Node.ID, b.Node.ID))
+		})
+		for _, hit := range hits {
+			if s.allowsNode(hit.Node) && hit.Depth > 0 && hit.Depth <= depth && !seen[hit.Node.ID] {
+				out = append(out, hit)
+				seen[hit.Node.ID] = true
+				if len(out) == limit {
+					break
+				}
+			}
+		}
+		return out, nil
 	}
 	if _, err := s.Node(ctx, id); err != nil {
 		return nil, err
@@ -133,7 +155,7 @@ func (s repositoryReader) Traverse(ctx context.Context, id string, edges []model
 				return nil, err
 			}
 			for _, hit := range hits {
-				if !s.allows(hit.Node.Repo) || seen[hit.Node.ID] {
+				if !s.allowsNode(hit.Node) || seen[hit.Node.ID] {
 					continue
 				}
 				seen[hit.Node.ID] = true
@@ -171,20 +193,29 @@ func (s repositoryReader) Subgraph(ctx context.Context, ids []string, kinds []mo
 			return nil, ErrNotFound
 		}
 	}
-	if native, ok := s.reader.(RepositoryGraphReader); ok {
-		return native.SubgraphRepository(ctx, s.repo, ids, kinds)
-	}
 	want := map[string]bool{}
+	native, isNative := s.reader.(RepositoryGraphReader)
 	for _, id := range ids {
-		if _, err := s.Node(ctx, id); err != nil {
-			return nil, err
+		if !isNative {
+			if _, err := s.Node(ctx, id); err != nil {
+				return nil, err
+			}
 		}
 		want[id] = true
 	}
-	es, err := s.reader.Subgraph(ctx, ids, kinds)
+	var es []model.Edge
+	var err error
+	if isNative {
+		es, err = native.SubgraphRepository(ctx, s.repo, ids, kinds)
+	} else {
+		es, err = s.reader.Subgraph(ctx, ids, kinds)
+	}
+	if err != nil {
+		return nil, err
+	}
 	out := make([]model.Edge, 0, len(es))
 	for _, e := range es {
-		if want[e.From] && want[e.To] {
+		if want[e.From] && want[e.To] && (len(kinds) == 0 || slices.Contains(kinds, e.Kind)) {
 			out = append(out, e)
 		}
 	}

@@ -83,17 +83,19 @@ func entityTokens(e Entity) []string {
 }
 
 // RankBM25 scores entities against query with BM25 and returns the matches,
-// best first, at most k. Entities sharing no term with the query are left
-// out; an empty or stopword-only query matches nothing.
+// best first, at most k. Exact IDs, names and aliases come first. Other
+// entities must share a non-stopword term with the query.
 func RankBM25(entities []Entity, query string, k int) []Scored {
 	terms := Words(query)
 	out := []Scored{}
-	if len(terms) == 0 || len(entities) == 0 {
+	if strings.TrimSpace(query) == "" || len(entities) == 0 || k <= 0 {
 		return out
 	}
+	exact := map[string]bool{}
 	docs := make([][]string, len(entities))
 	total := 0
 	for i, e := range entities {
+		exact[e.ID] = ExactMatch(e, query)
 		docs[i] = entityTokens(e)
 		total += len(docs[i])
 	}
@@ -133,12 +135,34 @@ func RankBM25(entities []Entity, query string, k int) []Scored {
 			norm := bm25K1 * (1 - bm25B + bm25B*float64(len(docs[i]))/avg)
 			score += idf * f * (bm25K1 + 1) / (f + norm)
 		}
-		if score > 0 {
+		if score > 0 || exact[e.ID] {
 			out = append(out, Scored{Entity: e, Score: score})
 		}
 	}
-	slices.SortFunc(out, func(a, b Scored) int { return cmp.Or(cmp.Compare(b.Score, a.Score), cmp.Compare(a.ID, b.ID)) })
+	slices.SortFunc(out, func(a, b Scored) int {
+		if exact[a.ID] != exact[b.ID] {
+			if exact[a.ID] {
+				return -1
+			}
+			return 1
+		}
+		return cmp.Or(cmp.Compare(b.Score, a.Score), cmp.Compare(a.ID, b.ID))
+	})
 	return out[:min(len(out), max(k, 0))]
+}
+
+// ExactMatch preserves punctuation for names and aliases, using the same case
+// and whitespace normalization as entity identity. Opaque IDs match literally.
+func ExactMatch(e Entity, query string) bool {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return false
+	}
+	if e.ID == q {
+		return true
+	}
+	q = normName(q)
+	return normName(e.Name) == q || slices.ContainsFunc(e.Aliases, func(a string) bool { return normName(a) == q })
 }
 
 // Fused is one entity after reciprocal rank fusion.
@@ -160,7 +184,8 @@ func FuseRRF(k int, legs map[string][]Scored) []Fused {
 	slices.Sort(names) // deterministic Legs order
 	byID := map[string]*Fused{}
 	for _, name := range names {
-		for rank, s := range legs[name] {
+		rank := 0
+		for _, s := range legs[name] {
 			f, ok := byID[s.ID]
 			if !ok {
 				f = &Fused{Scored: Scored{Entity: s.Entity}}
@@ -171,6 +196,7 @@ func FuseRRF(k int, legs map[string][]Scored) []Fused {
 			}
 			f.Score += 1 / float64(rrfK+rank+1)
 			f.Legs = append(f.Legs, name)
+			rank++
 		}
 	}
 	out := make([]Fused, 0, len(byID))

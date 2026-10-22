@@ -277,6 +277,9 @@ func NormalizePredicate(p string) string {
 	return strings.ToUpper(separators.ReplaceAllString(strings.TrimSpace(p), "_"))
 }
 
+// ValidPredicate checks the stored UPPER_SNAKE_CASE representation of a fact.
+func ValidPredicate(p string) bool { return predicateRe.MatchString(p) }
+
 // EntityID identifies an entity by repository and case-folded name, so
 // "FastAPI" and "fastapi" are the same node.
 func EntityID(repo, name string) string {
@@ -395,12 +398,24 @@ func Similarity(a, b []float32) float64 {
 	return (1 + dot/(math.Sqrt(na)*math.Sqrt(nb))) / 2
 }
 
-// CheckVectors enforces one vector length between 1 and MaxDimensions.
+// CheckVectors enforces finite, nonzero vectors of one length between 1 and
+// MaxDimensions; invalid vectors cannot supply cosine similarity evidence.
 func CheckVectors(vecs map[string][]float32) error {
 	dims := -1
 	for id, v := range vecs {
 		if len(v) == 0 || len(v) > MaxDimensions || (dims >= 0 && len(v) != dims) {
 			return fmt.Errorf("embedding for %q: vectors must all have the same length, 1 to %d", id, MaxDimensions)
+		}
+		var norm float64
+		for _, component := range v {
+			f := float64(component)
+			if math.IsNaN(f) || math.IsInf(f, 0) {
+				return errors.New("embedding components must be finite")
+			}
+			norm += f * f
+		}
+		if norm == 0 {
+			return errors.New("embedding must have nonzero magnitude")
 		}
 		dims = len(v)
 	}

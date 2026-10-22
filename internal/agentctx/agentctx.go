@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
@@ -103,18 +104,19 @@ type Churn struct {
 
 // SymbolContext answers get_symbol_context for a code symbol.
 type SymbolContext struct {
-	Symbol          Symbol      `json:"symbol"`
-	Risk            *Risk       `json:"risk,omitempty"`
-	Counts          Counts      `json:"counts"`
-	Callers         []Ref       `json:"callers"`
-	Callees         []Ref       `json:"callees"`
-	Tests           []Ref       `json:"tests"`
-	UntestedCallers []Ref       `json:"untested_public_callers,omitempty"`
-	Implementations []Ref       `json:"implementations,omitempty"`
-	Docs            []Ref       `json:"docs,omitempty"`
-	Findings        []Ref       `json:"findings,omitempty"`
-	Churn           *Churn      `json:"churn,omitempty"`
-	Package         *PackageCtx `json:"package,omitempty"`
+	Budget          ResponseBudget `json:"budget"`
+	Symbol          Symbol         `json:"symbol"`
+	Risk            *Risk          `json:"risk,omitempty"`
+	Counts          Counts         `json:"counts"`
+	Callers         []Ref          `json:"callers"`
+	Callees         []Ref          `json:"callees"`
+	Tests           []Ref          `json:"tests"`
+	UntestedCallers []Ref          `json:"untested_public_callers,omitempty"`
+	Implementations []Ref          `json:"implementations,omitempty"`
+	Docs            []Ref          `json:"docs,omitempty"`
+	Findings        []Ref          `json:"findings,omitempty"`
+	Churn           *Churn         `json:"churn,omitempty"`
+	Package         *PackageCtx    `json:"package,omitempty"`
 	// Duplicate is set when the function has exact or edited copies elsewhere.
 	Duplicate *duplicates.Info `json:"duplicate,omitempty"`
 	Hint      string           `json:"hint,omitempty"`
@@ -122,22 +124,27 @@ type SymbolContext struct {
 
 // Counts are totals before list truncation.
 type Counts struct {
-	Callers         int `json:"callers"`
-	Callees         int `json:"callees"`
-	Tests           int `json:"tests"`
-	Implementations int `json:"implementations,omitempty"`
+	Callers            int `json:"callers"`
+	Callees            int `json:"callees"`
+	Tests              int `json:"tests"`
+	Implementations    int `json:"implementations,omitempty"`
+	CallerTestsChecked int `json:"caller_tests_checked,omitempty"`
+	CallerTestsOmitted int `json:"caller_tests_omitted,omitempty"`
 }
 
 // ContextOptions tune SymbolContext.
 type ContextOptions struct {
 	Verbosity string
 	// Depth is the caller depth (1 = direct). Outline always uses 1.
-	Depth int
-	Limit int
+	Depth     int
+	Limit     int
+	MaxTokens int
 }
 
 // SymbolContext builds the context for a symbol or package.
 func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts ContextOptions) (SymbolContext, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	s.R = store.ForRepository(s.R, repo)
 	full := opts.Verbosity == Full
 	limit := store.ClampLimit(opts.Limit, 5)
@@ -155,7 +162,7 @@ func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts Co
 		if err != nil {
 			return SymbolContext{}, err
 		}
-		return SymbolContext{Symbol: symbolOf(n), Package: &pc, Callers: []Ref{}, Callees: []Ref{}, Tests: []Ref{}}, nil
+		return finishSymbol(SymbolContext{Symbol: symbolOf(n), Package: &pc, Callers: []Ref{}, Callees: []Ref{}, Tests: []Ref{}}, opts.MaxTokens)
 	}
 
 	out := SymbolContext{Symbol: symbolOf(n)}
@@ -215,6 +222,7 @@ func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts Co
 	}
 
 	out.Duplicate = query.DuplicateOf(ctx, s.R, repo, n)
+	out.Duplicate = s.scopedDuplicate(ctx, out.Duplicate)
 
 	if full {
 		// Public callers with no test of their own: where a refactor can break
@@ -223,6 +231,11 @@ func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts Co
 			if !h.Node.Exported && !security.IsEntryPoint(h.Node) {
 				continue
 			}
+			if out.Counts.CallerTestsChecked >= limit {
+				out.Counts.CallerTestsOmitted++
+				continue
+			}
+			out.Counts.CallerTestsChecked++
 			t, err := s.q().Tests(ctx, h.Node.ID, 3, 1)
 			if err != nil {
 				return out, err
@@ -230,6 +243,9 @@ func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts Co
 			if len(t) == 0 {
 				out.UntestedCallers = append(out.UntestedCallers, refOf(h.Node, h.Depth, false))
 			}
+		}
+		if out.Counts.CallerTestsOmitted > 0 {
+			out.Hint = fmt.Sprintf("Test coverage was checked for %d of %d public or entry-point callers; increase limit or narrow the symbol before drawing conclusions.", out.Counts.CallerTestsChecked, out.Counts.CallerTestsChecked+out.Counts.CallerTestsOmitted)
 		}
 		docs, err := s.R.Traverse(ctx, n.ID, []model.EdgeKind{model.EdgeMentions}, store.In, 1, limit)
 		if err != nil {
@@ -246,7 +262,7 @@ func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts Co
 	} else {
 		out.Hint = "verbosity=full adds transitive callers, untested public callers, docs and file churn"
 	}
-	return out, nil
+	return finishSymbol(out, opts.MaxTokens)
 }
 
 func refs(hits []model.Hit, limit int, withSummary bool) []Ref {
@@ -282,6 +298,12 @@ func (s Service) churn(ctx context.Context, repo, file string) (*Churn, error) {
 // node ID, a plain name, or a package path. Ambiguous or unknown names
 // return a SuggestionError listing qualified IDs to retry with.
 func (s Service) Resolve(ctx context.Context, repo, symbol string) (model.Node, error) {
+	if len(symbol) > 4096 || len(repo) > 4096 {
+		return model.Node{}, errors.New("repository and symbol must not exceed 4096 bytes")
+	}
+	if err := ctx.Err(); err != nil {
+		return model.Node{}, err
+	}
 	s.R = store.ForRepository(s.R, repo)
 	symbol = strings.TrimSpace(symbol)
 	if query.IsSymbolID(symbol) {
@@ -294,6 +316,19 @@ func (s Service) Resolve(ctx context.Context, repo, symbol string) (model.Node, 
 		return s.R.Node(ctx, symbol)
 	}
 	kinds := []model.NodeKind{model.KindFunction, model.KindMethod, model.KindInterfaceMethod, model.KindType, model.KindPackage}
+	// Qualified node IDs are indexed by every store. Resolve them before a
+	// capped substring search can hide the exact symbol among common names.
+	if strings.ContainsAny(symbol, "./") {
+		for _, kind := range kinds {
+			n, err := s.R.Node(ctx, model.NodeID(repo, kind, symbol))
+			if err == nil {
+				return n, nil
+			}
+			if !errors.Is(err, store.ErrNotFound) {
+				return model.Node{}, err
+			}
+		}
+	}
 	needle := symbol
 	if i := strings.LastIndexAny(symbol, ".)"); i >= 0 && i+1 < len(symbol) {
 		needle = symbol[i+1:]
@@ -331,6 +366,25 @@ func (s Service) Resolve(ctx context.Context, repo, symbol string) (model.Node, 
 		pool = cands
 	}
 	return model.Node{}, suggestions(symbol, pool, len(exact) > 1)
+}
+
+func (s Service) scopedDuplicate(ctx context.Context, info *duplicates.Info) *duplicates.Info {
+	if info == nil {
+		return nil
+	}
+	others := make([]duplicates.Member, 0, len(info.Others))
+	for _, member := range info.Others {
+		n, err := s.R.Node(ctx, member.ID)
+		if err != nil {
+			continue
+		}
+		others = append(others, duplicates.Member{ID: n.ID, Name: n.ShortName(), Package: n.Package,
+			File: n.File, StartLine: n.StartLine, EndLine: n.EndLine, LOC: n.LOC})
+	}
+	if len(others) == 0 {
+		return nil
+	}
+	return &duplicates.Info{Kind: info.Kind, Similarity: info.Similarity, Scope: "repository", Copies: len(others) + 1, Others: others}
 }
 
 // SuggestionError tells the agent which exact IDs to use next.

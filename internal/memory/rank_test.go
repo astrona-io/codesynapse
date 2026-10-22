@@ -70,6 +70,36 @@ func TestFuseRRF(t *testing.T) {
 	assert.Len(t, FuseRRF(5, nil), 0)
 }
 
+func TestExactMemoryIdentifiers(t *testing.T) {
+	for _, query := range []string{"ERR_CONN.42", "Host.Example", "policy/4.2", "X", "org|repo|mem|canonical", "Rare Alias"} {
+		t.Run(query, func(t *testing.T) {
+			exact := Entity{ID: "org|repo|mem|canonical", Name: query}
+			if query == exact.ID {
+				exact.Name = "Canonical"
+			}
+			if query == "Rare Alias" {
+				exact.Name, exact.Aliases = "Canonical", []string{"rare alias"}
+			}
+			got := RankBM25([]Entity{{ID: "approx", Name: query + " " + query + " integration"}, exact}, query, 1)
+			require.Len(t, got, 1)
+			assert.Equal(t, got[0].ID, exact.ID)
+		})
+	}
+	assert.False(t, ExactMatch(Entity{Name: "ERR_CONN 42"}, "ERR_CONN.42"), "punctuation belongs to an exact identifier")
+}
+
+func TestRRFRepeatedCandidatesDoNotChangeRanks(t *testing.T) {
+	a, b := Scored{Entity: Entity{ID: "a"}}, Scored{Entity: Entity{ID: "b"}}
+	assert.Equal(t, FuseRRF(8, map[string][]Scored{"name": {a, a, a, b}}), FuseRRF(8, map[string][]Scored{"name": {a, b}}))
+}
+
+func TestInvalidEmbeddingVectors(t *testing.T) {
+	for _, v := range [][]float32{nil, {0, 0}, {float32(math.NaN())}, {float32(math.Inf(1))}} {
+		require.Error(t, CheckVectors(map[string][]float32{"entity": v}))
+	}
+	require.NoError(t, CheckVectors(map[string][]float32{"entity": {1, 0}}))
+}
+
 func BenchmarkRankBM25Full(b *testing.B) {
 	words := []string{"payments", "billing", "search", "checkout", "ledger", "gateway", "team", "service", "handler", "api", "frontend", "worker"}
 	ents := make([]Entity, MaxEntitiesPerRepo)

@@ -159,6 +159,12 @@ The prompt works for any language. It starts from what CodeSynapse already has (
 
 ## 3. Tool usage best practices
 
+`minimal_context`, `get_symbol_context`, `get_call_graph` and `get_pr_context` accept `max_tokens`, clamped to 256–20,000. The default is 1,500 for `minimal_context` and 20,000 for the others. Counts estimate the complete structured answer as `ceil(JSON bytes / 4)`, including escaped strings and budget metadata. MCP also sends a text copy and protocol metadata, so wire size and model tokens can exceed this estimate.
+
+Check budget omissions and the suggested next step before treating an answer as complete. Full symbol context reports public callers checked and omitted from test coverage. A minimum answer that cannot fit returns a budget error; narrow the request or raise the budget. Call graphs retain the node limit separately for each direction. Duplicate locations are limited to the selected repository; use `shared_code` to compare authorized repositories.
+
+`minimal_context` prioritizes exact qualified identifiers and reports the indexed revision and retrieval method. Recall validates candidates against current memory entities before returning facts, drops deleted or foreign hits, and retains exact current names and aliases before approximate matches. Recall returns at most 8 entries, 2 hops, 80 facts and 32 KiB of result JSON; `truncated` means evidence may be omitted. Local lexical search remains available when embeddings cannot be used. These limits do not establish an end-to-end latency guarantee.
+
 | Task | Tool | Recommended settings | Strategy |
 |---|---|---|---|
 | Start a new task | `minimal_context` | `max_tokens: 1500` | Describe the task; read only the returned line ranges. |

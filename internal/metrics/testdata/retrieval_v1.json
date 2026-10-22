@@ -1,0 +1,248 @@
+{
+  "version": "retrieval-v1",
+  "policy": "metadata-only; local-name-embeddings-only; repo-fence; no exclusions; synthetic source fixture",
+  "repo": "fixture/payments",
+  "files": {
+    "payments.go": "package payments\n\nimport \"errors\"\n\n// Charge validates an invoice before scheduling settlement.\nfunc Charge(amount int) error {\n\tif err := Validate(amount); err != nil {\n\t\treturn err\n\t}\n\treturn Settle(amount)\n}\n\n// Validate rejects a zero or negative invoice amount.\nfunc Validate(amount int) error {\n\tif amount <= 0 {\n\t\treturn errors.New(\"E-PAY.42\")\n\t}\n\treturn nil\n}\n\n// Settle writes an approved invoice to the local settlement queue.\nfunc Settle(amount int) error {\n\t_ = amount\n\treturn nil\n}\n",
+    "handler.go": "package payments\n\n// Handler passes the invoice amount to Charge and preserves validation errors.\nfunc Handler(amount int) error {\n\treturn Charge(amount)\n}\n",
+    "payments_test.go": "package payments\n\nimport \"testing\"\n\nfunc TestCharge(t *testing.T) {\n\tif err := Charge(0); err == nil {\n\t\tt.Fatal(\"expected invalid invoice error\")\n\t}\n\tif err := Charge(100); err != nil {\n\t\tt.Fatal(err)\n\t}\n}\n",
+    "policy.md": "# Invoice policy\n\nE-PAY.42 identifies a non-positive invoice amount.\nPolicy clause INV-4.2 requires positive invoice amounts.\nSettlement host payments.eu.example is used by the invoice worker.\nFaktura 支払い describes invoice payment in the multilingual operator glossary.\n"
+  },
+  "nodes": [
+    {
+      "kind": "Function",
+      "name": "Charge",
+      "qualified_name": "payments.Charge",
+      "file": "payments.go",
+      "start_line": 6,
+      "end_line": 11,
+      "signature": "func Charge(amount int) error",
+      "summary": "Charge validates an invoice before scheduling settlement.",
+      "exported": true
+    },
+    {
+      "kind": "Function",
+      "name": "Validate",
+      "qualified_name": "payments.Validate",
+      "file": "payments.go",
+      "start_line": 14,
+      "end_line": 19,
+      "signature": "func Validate(amount int) error",
+      "summary": "Validate rejects a zero or negative invoice amount.",
+      "exported": true
+    },
+    {
+      "kind": "Function",
+      "name": "Settle",
+      "qualified_name": "payments.Settle",
+      "file": "payments.go",
+      "start_line": 22,
+      "end_line": 25,
+      "signature": "func Settle(amount int) error",
+      "summary": "Settle writes an approved invoice to the local settlement queue.",
+      "exported": true
+    },
+    {
+      "kind": "Function",
+      "name": "Handler",
+      "qualified_name": "payments.Handler",
+      "file": "handler.go",
+      "start_line": 4,
+      "end_line": 6,
+      "signature": "func Handler(amount int) error",
+      "exported": true
+    },
+    {
+      "kind": "Function",
+      "name": "TestCharge",
+      "qualified_name": "payments.TestCharge",
+      "file": "payments_test.go",
+      "start_line": 5,
+      "end_line": 12,
+      "is_test": true
+    },
+    {
+      "kind": "Section",
+      "name": "E-PAY.42",
+      "qualified_name": "E-PAY.42",
+      "file": "policy.md",
+      "start_line": 3,
+      "end_line": 3
+    },
+    {
+      "kind": "Section",
+      "name": "INV-4.2",
+      "qualified_name": "INV-4.2",
+      "file": "policy.md",
+      "start_line": 4,
+      "end_line": 4
+    },
+    {
+      "kind": "Section",
+      "name": "payments.eu.example",
+      "qualified_name": "payments.eu.example",
+      "file": "policy.md",
+      "start_line": 5,
+      "end_line": 5
+    },
+    {
+      "kind": "Section",
+      "name": "Faktura 支払い",
+      "qualified_name": "Faktura 支払い",
+      "file": "policy.md",
+      "start_line": 6,
+      "end_line": 6
+    }
+  ],
+  "calls": [
+    [
+      "payments.Charge",
+      "payments.Validate"
+    ],
+    [
+      "payments.Charge",
+      "payments.Settle"
+    ],
+    [
+      "payments.Handler",
+      "payments.Charge"
+    ],
+    [
+      "payments.TestCharge",
+      "payments.Charge"
+    ]
+  ],
+  "tasks": [
+    {
+      "name": "symbol-explanation",
+      "tool": "symbol",
+      "query": "payments.Charge",
+      "files": [
+        "payments.go",
+        "handler.go",
+        "payments_test.go"
+      ],
+      "evidence": [
+        "payments.Charge",
+        "func Charge(amount int) error",
+        "Charge validates an invoice before scheduling settlement.",
+        "payments.Validate",
+        "payments.Settle",
+        "payments.Handler",
+        "payments.TestCharge"
+      ]
+    },
+    {
+      "name": "callers-callees",
+      "tool": "calls",
+      "query": "payments.Charge",
+      "files": [
+        "payments.go",
+        "handler.go",
+        "payments_test.go"
+      ],
+      "evidence": [
+        "payments.Charge",
+        "payments.Validate",
+        "payments.Settle",
+        "payments.Handler",
+        "payments.TestCharge"
+      ]
+    },
+    {
+      "name": "change-impact",
+      "tool": "impact",
+      "query": "payments.go",
+      "files": [
+        "payments.go",
+        "handler.go",
+        "payments_test.go"
+      ],
+      "evidence": [
+        "payments.Charge",
+        "payments.Validate",
+        "payments.Settle",
+        "payments.Handler",
+        "payments.TestCharge"
+      ]
+    },
+    {
+      "name": "error-identifier",
+      "tool": "lookup",
+      "query": "E-PAY.42",
+      "files": [
+        "policy.md"
+      ],
+      "evidence": [
+        "E-PAY.42",
+        "policy.md:3"
+      ]
+    },
+    {
+      "name": "policy-clause",
+      "tool": "lookup",
+      "query": "INV-4.2",
+      "files": [
+        "policy.md"
+      ],
+      "evidence": [
+        "INV-4.2",
+        "policy.md:4"
+      ]
+    },
+    {
+      "name": "hostname",
+      "tool": "lookup",
+      "query": "payments.eu.example",
+      "files": [
+        "policy.md"
+      ],
+      "evidence": [
+        "payments.eu.example",
+        "policy.md:5"
+      ]
+    },
+    {
+      "name": "mixed-language",
+      "tool": "lookup",
+      "query": "Faktura 支払い",
+      "files": [
+        "policy.md"
+      ],
+      "evidence": [
+        "Faktura 支払い",
+        "policy.md:6"
+      ]
+    },
+    {
+      "name": "no-match",
+      "tool": "symbol",
+      "query": "DOES_NOT_EXIST_693",
+      "files": [],
+      "evidence": [],
+      "expect_error": true
+    },
+    {
+      "name": "foreign-id",
+      "tool": "symbol",
+      "query": "foreign-id",
+      "files": [],
+      "evidence": [],
+      "expect_error": true
+    },
+    {
+      "name": "minimal-context",
+      "tool": "minimal",
+      "query": "Charge Validate",
+      "files": [
+        "payments.go",
+        "handler.go",
+        "payments_test.go"
+      ],
+      "evidence": [
+        "payments.Charge",
+        "payments.Validate"
+      ]
+    }
+  ]
+}
