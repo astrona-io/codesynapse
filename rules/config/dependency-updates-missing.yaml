@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../schema.json
+id: dependency-updates-missing
+title: No automated dependency updates
+severity: medium
+cwe: [CWE-1104]
+category: config
+languages: [json]
+why: Without Renovate or Dependabot, upgrades depend on someone remembering them, so known-vulnerable modules, images and actions stay in place long after fixes ship.
+fix: Add a Renovate config (renovate.json) or .github/dependabot.yml that covers every package ecosystem in the repository.
+references:
+  - https://cwe.mitre.org/data/definitions/1104.html
+  - https://docs.renovatebot.com/configuration-options/
+  - https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+examples:
+  - language: json
+    vulnerable: '(go.mod, package.json and workflows, but no renovate.json or .github/dependabot.yml)'
+    fixed: |-
+      {
+        "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+        "extends": ["config:best-practices"]
+      }
+  - language: yaml
+    vulnerable: '(no .github/dependabot.yml)'
+    fixed: |-
+      version: 2
+      updates:
+        - package-ecosystem: gomod
+          directory: /
+          schedule: {interval: weekly}
+        - package-ecosystem: github-actions
+          directory: /
+          schedule: {interval: weekly}

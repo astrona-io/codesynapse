@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../schema.json
+id: renovate-config-invalid
+title: Renovate config cannot be parsed
+severity: medium
+cwe: [CWE-1104]
+category: config
+languages: [json]
+why: Renovate stops updating a repository whose config it cannot read and only reports it in an issue that is easy to miss, so the repository looks covered while nothing is updated.
+fix: Fix the syntax (run renovate-config-validator in CI) so the file is valid JSON or JSON5.
+references:
+  - https://cwe.mitre.org/data/definitions/1104.html
+  - https://docs.renovatebot.com/config-validation/
+examples:
+  - language: json
+    vulnerable: |-
+      {
+        "extends": ["config:recommended"]
+        "automerge": false
+      }
+    fixed: |-
+      {
+        "extends": ["config:recommended"],
+        "automerge": false
+      }
