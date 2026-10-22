@@ -36,6 +36,12 @@ func registerAgentTools(s *mcp.Server, h *handlers, add func(name, desc string) 
 	mcp.AddTool(s, add("unused_code",
 		"Unused code to remove: unreachable and test-only functions (with confidence and security relevance), files with nothing live, unused go.mod modules (and CVEs removing them eliminates), unused Helm values and template defines."),
 		h.unusedCode)
+	mcp.AddTool(s, add("duplicate_code",
+		"Code that exists more than once in a repository: groups of functions with the same structure (names and literal values ignored), the redundant lines, how far apart the copies are (file, package, repository) and where each copy is. Use it before writing a helper, and to find what to merge."),
+		h.duplicateCode)
+	mcp.AddTool(s, add("shared_code",
+		"Code that several repositories contain: copies found across every repository you can see, and where it is worth it a recommendation to move them into a shared library or framework, with candidates and the lines saved. Use it before copying code between repositories."),
+		h.sharedCode)
 	mcp.AddTool(s, add("license_report",
 		"Dependency licences checked against the repository's own licence: conflicts (e.g. GPL or AGPL in an Apache/MIT project, non-open-source licences), items to review (weak copyleft, unknown licences) and counts per licence. Each verdict says why and where the licence was read. Guidance, not legal advice."),
 		h.licenseReport)

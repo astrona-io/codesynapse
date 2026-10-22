@@ -29,6 +29,7 @@ const { data: health, error: healthError } = useFetch<{ status: string }>('/api/
 const main = [
   { to: '/overview', label: 'Overview', hint: 'What needs attention' },
   { to: '/', label: 'Repositories', hint: 'Everything you indexed' },
+  { to: '/shared-code', label: 'Shared code', hint: 'Code several repositories copy' },
   { to: '/agents', label: 'Agents', hint: 'Connect Claude Code, Codex, Cursor' },
   { to: '/stats', label: 'Statistics', hint: 'Usage, tokens, cost, latency' },
 ]

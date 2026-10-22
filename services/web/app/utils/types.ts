@@ -331,3 +331,15 @@ export interface AuditEvent {
   id: number; at: string; request_id?: string; user_id?: string; actor_email?: string; via?: string; key_id?: string; org_id?: string
   ip?: string; user_agent?: string; action: string; target?: string; outcome: string; status?: number; detail?: string; hash: string
 }
+
+export interface DuplicateMember { id: string; name: string; package?: string; file: string; start_line: number; end_line: number; loc: number }
+export interface DuplicateGroup { hash: string; copies: number; loc: number; redundant_loc: number; scope: 'file' | 'package' | 'repository'; members: DuplicateMember[] }
+export interface DuplicatesReport {
+  summary: { groups: number; duplicated_functions: number; redundant_loc: number; function_loc: number; percent: number }
+  groups: DuplicateGroup[]
+  truncated?: boolean
+}
+export interface SharedCodeMember extends DuplicateMember { repo: string }
+export interface SharedCodeGroup { hash: string; repos: string[]; copies: number; loc: number; redundant_loc: number; members: SharedCodeMember[] }
+export interface SharedCodeSuggestion { kind: 'library' | 'framework'; repos: string[]; groups: number; redundant_loc: number; name: string; candidates: string[]; rationale: string }
+export interface SharedCodeReport { repos: number; groups: SharedCodeGroup[]; suggestions: SharedCodeSuggestion[]; redundant_loc: number; partial?: string[] }

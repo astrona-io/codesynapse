@@ -95,6 +95,8 @@ func TestReadEndpoints(t *testing.T) {
 		{base + "/packages/graph", 200},
 		{"/api/v1/repos/nope/dashboard", 404},
 		{base + "/licenses", 404}, // fixture repository has no stored report
+		{base + "/duplicates", 404},
+		{"/api/v1/shared-code", 200},
 		{"/api/v1/sources", 200},
 		{"/api/v1/settings", 200},
 	}

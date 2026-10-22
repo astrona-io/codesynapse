@@ -233,6 +233,8 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/repos/{repo}/metrics", repoRole(accounts.Viewer), s.handleMetrics)
 	s.route("GET /api/v1/repos/{repo}/security", repoRole(accounts.Viewer), s.handleSecurity)
 	s.route("GET /api/v1/repos/{repo}/cleanup", repoRole(accounts.Viewer), s.handleCleanup)
+	s.route("GET /api/v1/repos/{repo}/duplicates", repoRole(accounts.Viewer), s.handleDuplicates)
+	s.route("GET /api/v1/shared-code", visibleOnly, s.handleSharedCode)
 	s.route("GET /api/v1/repos/{repo}/licenses", repoRole(accounts.Viewer), s.handleLicenses)
 	s.route("GET /api/v1/repos/{repo}/memory", repoRole(accounts.Viewer), s.handleMemory)
 	s.route("DELETE /api/v1/repos/{repo}/memory", repoRole(accounts.Member), s.handleDeleteMemory)
