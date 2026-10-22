@@ -3,6 +3,7 @@ package neo4jstore
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -153,11 +154,16 @@ RETURN `+entityProj+` ORDER BY score DESC, e.updated_at DESC, e.name ASC LIMIT $
 
 // MemorySubgraph implements store.MemoryStore.
 func (s *Store) MemorySubgraph(ctx context.Context, repo string, ids []string, depth, limit int, history bool) (memory.Graph, error) {
+	if len(ids) > store.MaxLimit {
+		return memory.Graph{}, fmt.Errorf("memory roots exceed %d", store.MaxLimit)
+	}
+	roots := slices.Clone(ids)
+	ids = slices.Clone(ids)
 	limit = store.ClampLimit(limit, 50)
 	g := memory.Graph{Notice: memory.Notice, Entities: []memory.Entity{}, Facts: []memory.Fact{}}
 	if min(max(depth, 1), 2) == 2 {
-		res, err := s.read(ctx, `MATCH (a:MemoryEntity {repo: $repo})-[f:FACT]-(b:MemoryEntity)
-WHERE a.id IN $ids AND `+current+` RETURN DISTINCT b.id AS id`, map[string]any{"repo": repo, "ids": ids, "history": history})
+		res, err := s.read(ctx, `MATCH (a:MemoryEntity {repo: $repo})-[f:FACT {repo: $repo}]-(b:MemoryEntity {repo: $repo})
+WHERE a.id IN $ids AND `+current+` RETURN DISTINCT b.id AS id ORDER BY id LIMIT $max`, map[string]any{"repo": repo, "ids": ids, "history": history, "max": memory.MaxEntitiesPerRepo})
 		if err != nil {
 			return g, err
 		}
@@ -169,7 +175,7 @@ WHERE a.id IN $ids AND `+current+` RETURN DISTINCT b.id AS id`, map[string]any{"
 	if g.Facts, err = s.factsTouching(ctx, repo, ids, limit, history); err != nil {
 		return g, err
 	}
-	g.Entities, err = s.endpoints(ctx, repo, g.Facts, nil)
+	g.Entities, err = s.endpoints(ctx, repo, g.Facts, nil, roots...)
 	return g, err
 }
 
@@ -178,7 +184,7 @@ func (s *Store) factsTouching(ctx context.Context, repo string, ids []string, li
 	if len(ids) == 0 {
 		return out, nil
 	}
-	res, err := s.read(ctx, `MATCH (a:MemoryEntity)-[f:FACT {repo: $repo}]->(b:MemoryEntity)
+	res, err := s.read(ctx, `MATCH (a:MemoryEntity {repo: $repo})-[f:FACT {repo: $repo}]->(b:MemoryEntity {repo: $repo})
 WHERE (a.id IN $ids OR b.id IN $ids) AND `+current+`
 RETURN `+factProj+`
 ORDER BY f.updated_at DESC, f.id ASC LIMIT $limit`, map[string]any{"repo": repo, "ids": ids, "limit": limit, "history": history})
@@ -192,9 +198,15 @@ ORDER BY f.updated_at DESC, f.id ASC LIMIT $limit`, map[string]any{"repo": repo,
 }
 
 // endpoints loads the entities facts refer to, except those in skip, by name.
-func (s *Store) endpoints(ctx context.Context, repo string, facts []memory.Fact, skip map[string]bool) ([]memory.Entity, error) {
+func (s *Store) endpoints(ctx context.Context, repo string, facts []memory.Fact, skip map[string]bool, roots ...string) ([]memory.Entity, error) {
 	var ids []string
 	seen := map[string]bool{}
+	for _, id := range roots {
+		if !seen[id] && !skip[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
 	for _, f := range facts {
 		for _, id := range []string{f.Subject, f.Object} {
 			if !seen[id] && !skip[id] {

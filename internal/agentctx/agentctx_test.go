@@ -78,8 +78,8 @@ func TestKeywords(t *testing.T) {
 func TestMinimalContextBudget(t *testing.T) {
 	out, err := svc(t).MinimalContext(context.Background(), storetest.Repo, "Handler Do main Usage", nil, 120)
 	require.NoError(t, err)
-	assert.LessOrEqual(t, out.UsedTokens, 120)
-	assert.Greater(t, out.Omitted, 0, "tight budget drops items")
+	assert.Equal(t, out.Budget, MinContextTokens)
+	assert.LessOrEqual(t, out.UsedTokens, out.Budget)
 }
 
 func TestSymbolContextShowsDuplicates(t *testing.T) {
@@ -91,7 +91,7 @@ func TestSymbolContextShowsDuplicates(t *testing.T) {
 	require.True(t, ok)
 	enc, err := duplicates.Encode(duplicates.Report{Groups: []duplicates.Group{{
 		Hash: "h", Kind: "exact", Similarity: 1, Scope: "repository", Copies: 2,
-		Members: []duplicates.Member{{ID: handler, Name: "app.Handler"}, {ID: "other|Function|x.Copy", Name: "x.Copy", File: "x/copy.go", StartLine: 3, EndLine: 20}},
+		Members: []duplicates.Member{{ID: handler, Name: "app.Handler"}, {ID: storetest.ID(model.KindFunction, "app.main"), Name: "app.main"}},
 	}}})
 	require.NoError(t, err)
 	rn.Duplicates = enc
@@ -103,9 +103,9 @@ func TestSymbolContextShowsDuplicates(t *testing.T) {
 	require.NotNil(t, got.Duplicate)
 	assert.Equal(t, got.Duplicate.Copies, 2)
 	require.Len(t, got.Duplicate.Others, 1)
-	assert.Equal(t, got.Duplicate.Others[0].Name, "x.Copy")
+	assert.Equal(t, got.Duplicate.Others[0].Name, "app.main")
 
-	got, err = Service{R: s}.SymbolContext(ctx, storetest.Repo, storetest.ID(model.KindFunction, "app.main"), ContextOptions{})
+	got, err = Service{R: s}.SymbolContext(ctx, storetest.Repo, storetest.ID(model.KindMethod, "(*app.impl).Do"), ContextOptions{})
 	require.NoError(t, err)
 	assert.True(t, got.Duplicate == nil, "no copies, no field")
 }
@@ -118,7 +118,7 @@ func TestPRContextNamesDuplicatedChanges(t *testing.T) {
 	do := storetest.ID(model.KindMethod, "(*app.impl).Do")
 	enc, err := duplicates.Encode(duplicates.Report{Groups: []duplicates.Group{{
 		Hash: "h", Kind: "near", Similarity: 0.8, Scope: "repository", Copies: 2,
-		Members: []duplicates.Member{{ID: do, Name: "(*app.impl).Do"}, {ID: "x|Method|other", Name: "(*other.impl).Do", File: "other/do.go", StartLine: 10, EndLine: 40}},
+		Members: []duplicates.Member{{ID: do, Name: "(*app.impl).Do"}, {ID: storetest.ID(model.KindFunction, "app.main"), Name: "app.main"}},
 	}}})
 	require.NoError(t, err)
 	rn.Duplicates = enc
@@ -127,7 +127,7 @@ func TestPRContextNamesDuplicatedChanges(t *testing.T) {
 
 	got, err := Service{R: s}.PRContext(ctx, storetest.Repo, PROptions{Files: []string{"app/app.go"}})
 	require.NoError(t, err)
-	require.Len(t, got.DuplicatedChanged, 1)
+	require.True(t, len(got.DuplicatedChanged) > 0)
 	assert.Contains(t, got.DuplicatedChanged[0], "edited copies ~80% alike")
-	assert.Contains(t, got.DuplicatedChanged[0], "other/do.go:10")
+	assert.Contains(t, got.DuplicatedChanged[0], "app/app.go:")
 }

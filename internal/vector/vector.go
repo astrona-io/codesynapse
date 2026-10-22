@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"sync"
 
@@ -76,9 +77,26 @@ func Check(items []Item) error {
 // Isolate keeps the hits of tenant's namespace, best first, at most k. Every
 // Index runs its results through it.
 func Isolate(hits []Hit, tenant, namespace string, k int) []Hit {
-	out := slices.DeleteFunc(hits, func(h Hit) bool { return h.Tenant != tenant || h.Namespace != namespace })
+	if tenant == "" || namespace == "" {
+		return nil
+	}
+	out := slices.DeleteFunc(hits, func(h Hit) bool {
+		return h.Tenant != tenant || h.Namespace != namespace || h.ID == "" || math.IsNaN(h.Score) || math.IsInf(h.Score, 0) || h.Score < -1e-6 || h.Score > 1+1e-6
+	})
+	// Float32 cosine backends can round an identical vector just above one.
+	for i := range out {
+		out[i].Score = max(0, min(out[i].Score, 1))
+	}
 	slices.SortFunc(out, func(a, b Hit) int { return cmp.Or(cmp.Compare(b.Score, a.Score), cmp.Compare(a.ID, b.ID)) })
-	return out[:min(len(out), k)]
+	seen := map[string]bool{}
+	unique := out[:0]
+	for _, hit := range out {
+		if !seen[hit.ID] {
+			unique = append(unique, hit)
+			seen[hit.ID] = true
+		}
+	}
+	return unique[:min(len(unique), max(k, 0), MaxK)]
 }
 
 // ClampK bounds k to [MinK, MaxK], defaulting to DefaultK. Every store's

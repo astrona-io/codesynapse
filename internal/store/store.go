@@ -216,6 +216,8 @@ type MemoryStore interface {
 	// MemorySubgraph returns facts with an endpoint within depth-1 hops of
 	// the entity IDs (depth 1 = their own facts, at most 2), up to limit.
 	// Hops and results use current facts only unless history is set.
+	// Existing requested roots are included even when no facts touch them;
+	// missing or foreign roots are omitted. At most MaxLimit roots are accepted.
 	MemorySubgraph(ctx context.Context, repo string, ids []string, depth, limit int, history bool) (memory.Graph, error)
 	// DeleteMemoryFact removes one fact; DeleteMemoryEntity removes an
 	// entity and its facts. Both return ErrNotFound for unknown IDs.

@@ -6,9 +6,9 @@
 package recall
 
 import (
-	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"time"
@@ -17,16 +17,23 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
+	"github.com/parisnakitakejser/codesynapse/internal/vector"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
 )
 
 // Tuning.
 const (
 	// MinScore keeps vector hits at cosine >= 0.4: (1+0.4)/2.
-	MinScore    = 0.7
-	entryLimit  = 8
-	embedBatch  = 64
-	embedPeriod = 30 * time.Second
+	MinScore          = 0.7
+	entryLimit        = 8
+	lexicalCandidates = vector.MaxK
+	maxQueryBytes     = 4096
+	maxResponseBytes  = 32 << 10
+	maxFacts          = 80
+	recallTimeout     = 10 * time.Second
+	vectorTimeout     = 2 * time.Second
+	embedBatch        = 64
+	embedPeriod       = 30 * time.Second
 )
 
 // Service answers recall queries and embeds entities in the background.
@@ -63,8 +70,9 @@ type Result struct {
 	// Skipped says why no lookup ran (the intent gate), else "".
 	Skipped string `json:"skipped,omitempty"`
 	// Mode is hybrid (vectors and names) or names (no embedding model).
-	Mode    string  `json:"mode"`
-	Entries []Entry `json:"entries"`
+	Mode      string  `json:"mode"`
+	Entries   []Entry `json:"entries"`
+	Truncated bool    `json:"truncated,omitempty"`
 	memory.Graph
 }
 
@@ -81,6 +89,11 @@ func (s *Service) Recall(ctx context.Context, repo string, q Query) (Result, err
 
 func (s *Service) recall(ctx context.Context, repo string, q Query) (Result, error) {
 	res := Result{Mode: "names", Entries: []Entry{}, Graph: memory.Graph{Notice: memory.Notice, Entities: []memory.Entity{}, Facts: []memory.Fact{}}}
+	if len(q.Text) > maxQueryBytes {
+		return res, fmt.Errorf("recall query exceeds %d bytes", maxQueryBytes)
+	}
+	ctx, cancel := context.WithTimeout(ctx, recallTimeout)
+	defer cancel()
 	if why := memory.RecallGate(q.Text); why != "" {
 		res.Skipped = why
 		return res, nil
@@ -93,34 +106,35 @@ func (s *Service) recall(ctx context.Context, repo string, q Query) (Result, err
 		// An embedding failure degrades to names; recall must keep working.
 		logx.FromContext(ctx).Warn("vector recall failed; using names", logx.Error(err))
 	}
-	lex, err := s.St.MemoryLexical(ctx, repo, q.Text, entryLimit)
+	if err := ctx.Err(); err != nil {
+		return res, err
+	}
+	lex, err := s.St.MemoryLexical(ctx, repo, q.Text, lexicalCandidates)
 	if err != nil {
 		return res, err
 	}
-	legs["name"] = lex
-	for _, f := range memory.FuseRRF(entryLimit, legs) {
-		via := f.Legs[0]
-		if len(f.Legs) > 1 {
-			via = "both"
-		}
-		res.Entries = append(res.Entries, Entry{Entity: f.Entity, Score: f.Score, Via: via})
-	}
-	if len(res.Entries) == 0 {
+	legs["name"] = candidates(repo, lex, lexicalCandidates)
+	res.Truncated = len(lex) >= lexicalCandidates || len(legs["vector"]) >= vector.MaxK
+	fused := memory.FuseRRF(lexicalCandidates+vector.MaxK, legs)
+	if len(fused) == 0 {
 		return res, nil
 	}
-	ids := make([]string, len(res.Entries))
-	for i, e := range res.Entries {
+	ids := make([]string, len(fused))
+	for i, e := range fused {
 		ids[i] = e.ID
 	}
-	sub, err := s.St.MemorySubgraph(ctx, repo, ids, cmp.Or(q.Depth, 1), cmp.Or(q.Limit, 40), q.History)
+	depth := min(max(q.Depth, 1), 2)
+	limit := min(store.ClampLimit(q.Limit, 40), maxFacts)
+	sub, err := s.St.MemorySubgraph(ctx, repo, ids, depth, limit, q.History)
 	if err != nil {
 		return res, err
 	}
-	res.Graph = sub
-	return res, nil
+	return hydrate(res, sub, legs, repo, q.Text, depth, limit, q.History), nil
 }
 
 func (s *Service) nearest(ctx context.Context, repo, text string) ([]memory.Scored, error) {
+	ctx, cancel := context.WithTimeout(ctx, vectorTimeout)
+	defer cancel()
 	if s.LLM == nil {
 		return nil, llm.ErrNoEmbeddings
 	}
@@ -133,13 +147,19 @@ func (s *Service) nearest(ctx context.Context, repo, text string) ([]memory.Scor
 	if err != nil {
 		return nil, err
 	}
-	hits, err := s.St.MemoryNearest(ctx, repo, cfg.EmbeddingModel, vecs[0], entryLimit)
+	if len(vecs) != 1 {
+		return nil, errors.New("embedding response has the wrong vector count")
+	}
+	if err := memory.CheckVectors(map[string][]float32{"query": vecs[0]}); err != nil {
+		return nil, err
+	}
+	hits, err := s.St.MemoryNearest(ctx, repo, cfg.EmbeddingModel, vecs[0], vector.MaxK)
 	if err != nil {
 		return nil, err
 	}
-	kept := hits[:0]
-	for _, h := range hits {
-		if h.Score >= MinScore {
+	kept := []memory.Scored{}
+	for _, h := range candidates(repo, hits, vector.MaxK) {
+		if h.Score >= MinScore && h.Score <= 1 {
 			kept = append(kept, h)
 		}
 	}
@@ -219,9 +239,15 @@ func (s *Service) embedEntities(ctx context.Context, provider, model string, ent
 	if err != nil {
 		return err
 	}
+	if len(vecs) != len(entities) {
+		return errors.New("embedding response has the wrong vector count")
+	}
 	set := make(map[string][]float32, len(entities))
 	for i, entity := range entities {
 		set[entity.ID] = vecs[i]
+	}
+	if err := memory.CheckVectors(set); err != nil {
+		return err
 	}
 	if err := s.St.SetMemoryEmbeddings(ctx, model, set); err != nil {
 		return err

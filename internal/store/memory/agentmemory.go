@@ -105,7 +105,13 @@ func (s *Store) SearchMemory(_ context.Context, repo, query string, limit int, h
 }
 
 // MemorySubgraph implements store.MemoryStore.
-func (s *Store) MemorySubgraph(_ context.Context, repo string, ids []string, depth, limit int, history bool) (agentmem.Graph, error) {
+func (s *Store) MemorySubgraph(ctx context.Context, repo string, ids []string, depth, limit int, history bool) (agentmem.Graph, error) {
+	if err := ctx.Err(); err != nil {
+		return agentmem.Graph{}, err
+	}
+	if len(ids) > store.MaxLimit {
+		return agentmem.Graph{}, fmt.Errorf("memory roots exceed %d", store.MaxLimit)
+	}
 	limit = store.ClampLimit(limit, 50)
 	depth = min(max(depth, 1), 2)
 	s.mu.RLock()
@@ -128,6 +134,19 @@ func (s *Store) MemorySubgraph(_ context.Context, repo string, ids []string, dep
 	}
 	g.Facts = m.factsTouching(reached, limit, history)
 	g.Entities = m.endpoints(g.Facts, nil)
+	seen := map[string]bool{}
+	for _, e := range g.Entities {
+		seen[e.ID] = true
+	}
+	for _, id := range ids {
+		if e, ok := m.entities[id]; ok && !seen[id] {
+			g.Entities = append(g.Entities, e)
+			seen[id] = true
+		}
+	}
+	slices.SortFunc(g.Entities, func(a, b agentmem.Entity) int {
+		return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.ID, b.ID))
+	})
 	return g, nil
 }
 

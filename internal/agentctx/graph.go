@@ -3,12 +3,14 @@ package agentctx
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
@@ -59,16 +61,19 @@ func (s Service) Implementations(ctx context.Context, repo, symbol string, limit
 
 // CallGraph is a bounded call neighbourhood with its edges.
 type CallGraph struct {
-	Root    Symbol       `json:"root"`
-	Nodes   []Ref        `json:"nodes"`
-	Edges   []model.Edge `json:"edges"`
-	Total   int          `json:"total"`
-	Entries []string     `json:"entry_points,omitempty"`
+	Budget  ResponseBudget `json:"budget"`
+	Root    Symbol         `json:"root"`
+	Nodes   []Ref          `json:"nodes"`
+	Edges   []model.Edge   `json:"edges"`
+	Total   int            `json:"total"`
+	Entries []string       `json:"entry_points,omitempty"`
 }
 
 // CallGraph returns callers ("callers"), callees ("callees") or both up to
 // depth (default 2, max 4). Edge endpoints use qualified IDs.
-func (s Service) CallGraph(ctx context.Context, repo, symbol, direction string, depth, limit int) (CallGraph, error) {
+func (s Service) CallGraph(ctx context.Context, repo, symbol, direction string, depth, limit int, maxTokens ...int) (CallGraph, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	s.R = store.ForRepository(s.R, repo)
 	n, err := s.Resolve(ctx, repo, symbol)
 	if err != nil {
@@ -116,22 +121,30 @@ func (s Service) CallGraph(ctx context.Context, repo, symbol, direction string, 
 		return g, err
 	}
 	for _, e := range edges {
+		if names[e.From] == "" || names[e.To] == "" {
+			continue
+		}
 		e.From, e.To = names[e.From], names[e.To]
 		g.Edges = append(g.Edges, e)
 	}
 	if g.Nodes == nil {
 		g.Nodes = []Ref{}
 	}
-	return g, nil
+	budget := 0
+	if len(maxTokens) > 0 {
+		budget = maxTokens[0]
+	}
+	return finishCallGraph(g, budget)
 }
 
 // PRContext is get_pr_context: the review report plus the questions the
 // guide asks about a change, answered directly.
 type PRContext struct {
 	review.Report
-	ExportedChanged  []string `json:"exported_changed"`
-	ExportedUntested []string `json:"exported_untested"`
-	SensitiveTouched []string `json:"sensitive_touched"`
+	Budget           ResponseBudget `json:"budget"`
+	ExportedChanged  []string       `json:"exported_changed"`
+	ExportedUntested []string       `json:"exported_untested"`
+	SensitiveTouched []string       `json:"sensitive_touched"`
 	// DuplicatedChanged names changed functions that have copies, with where
 	// the copies are: the same change probably belongs there too.
 	DuplicatedChanged []string `json:"duplicated_changed"`
@@ -140,16 +153,27 @@ type PRContext struct {
 // PROptions select the change to analyse: a unified diff, a list of files
 // (every symbol in them counts as changed), or base/head refs with root.
 type PROptions struct {
-	Diff  []byte
-	Files []string
-	Base  string
-	Head  string
-	Root  string
-	Depth int
+	Diff      []byte
+	Files     []string
+	Base      string
+	Head      string
+	Root      string
+	Depth     int
+	MaxTokens int
 }
 
 // PRContext analyses a change.
 func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRContext, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if len(repo) > 4096 || len(o.Diff) > 4<<20 || len(o.Files) > 100 {
+		return PRContext{}, errors.New("context accepts at most 4 MiB of diff or 100 files")
+	}
+	for _, file := range o.Files {
+		if len(file) > 4096 {
+			return PRContext{}, errors.New("file path exceeds 4096 bytes")
+		}
+	}
 	s.R = store.ForRepository(s.R, repo)
 	var changes []gitx.FileChange
 	switch {
@@ -183,17 +207,28 @@ func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRCon
 	default:
 		return PRContext{}, errDiffRequired
 	}
-	rep, err := review.Analyze(ctx, s.q(), repo, changes, review.Options{Depth: o.Depth})
+	if len(changes) > 100 {
+		return PRContext{}, errors.New("context accepts at most 100 changed files; narrow the diff")
+	}
+	depth := o.Depth
+	if depth <= 0 {
+		depth = 3
+	}
+	rep, err := review.Analyze(ctx, s.q(), repo, changes, review.Options{Depth: min(depth, 4)})
 	if err != nil {
 		return PRContext{}, err
 	}
 	out := PRContext{Report: rep, ExportedChanged: []string{}, ExportedUntested: []string{}, SensitiveTouched: []string{}, DuplicatedChanged: []string{}}
-	for _, c := range rep.Changes {
+	out.Summary.DuplicatedChanges = 0
+	for i := range out.Changes {
+		c := &out.Changes[i]
+		c.Duplicate = s.scopedDuplicate(ctx, c.Duplicate)
 		n, err := s.R.Node(ctx, c.ID)
 		if err != nil {
 			continue
 		}
 		if d := c.Duplicate; d != nil {
+			out.Summary.DuplicatedChanges++
 			where := make([]string, 0, len(d.Others))
 			for _, o := range d.Others {
 				where = append(where, fmt.Sprintf("%s:%d", o.File, o.StartLine))
@@ -214,7 +249,7 @@ func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRCon
 			out.SensitiveTouched = append(out.SensitiveTouched, c.Name+" ["+strings.Join(c.Tags, ",")+"]")
 		}
 	}
-	return out, nil
+	return finishPR(out, o.MaxTokens)
 }
 
 var errDiffRequired = errorString("pass diff, files, or base (and optionally head)")
@@ -225,12 +260,15 @@ func (e errorString) Error() string { return string(e) }
 
 // MinimalItem is one entry of a minimal context pack.
 type MinimalItem struct {
-	QualifiedID string         `json:"qualified_id"`
-	Kind        model.NodeKind `json:"kind"`
-	Read        string         `json:"read,omitempty"`
-	Signature   string         `json:"signature,omitempty"`
-	Summary     string         `json:"summary,omitempty"`
-	Why         string         `json:"why"`
+	QualifiedID   string         `json:"qualified_id"`
+	Kind          model.NodeKind `json:"kind"`
+	Read          string         `json:"read,omitempty"`
+	Signature     string         `json:"signature,omitempty"`
+	Summary       string         `json:"summary,omitempty"`
+	Why           string         `json:"why"`
+	Revision      string         `json:"revision,omitempty"`
+	Retrieval     string         `json:"retrieval"`
+	DetailOmitted bool           `json:"detail_omitted,omitempty"`
 }
 
 // MinimalContext is the token-budgeted answer to "what should I look at
@@ -243,10 +281,12 @@ type MinimalContext struct {
 	Items      []MinimalItem `json:"items"`
 	Omitted    int           `json:"omitted"`
 	Next       string        `json:"next"`
+	Estimator  string        `json:"estimator"`
+	Source     string        `json:"source"`
 }
 
 var (
-	identRe   = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_./()*]*`)
+	identRe   = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_./()*:-]*`)
 	stopwords = map[string]bool{
 		"the": true, "and": true, "for": true, "with": true, "that": true, "this": true, "from": true, "into": true,
 		"when": true, "what": true, "where": true, "which": true, "how": true, "why": true, "add": true, "fix": true,
@@ -263,14 +303,22 @@ func keywords(task string) []string {
 	var out []string
 	add := func(w string) {
 		lw := strings.ToLower(strings.Trim(w, "./()*"))
-		if len(lw) < 3 || stopwords[lw] || seen[lw] {
+		if lw == "" || seen[lw] || ((len(lw) < 3 || stopwords[lw]) && w == strings.ToLower(w)) {
 			return
 		}
 		seen[lw] = true
 		out = append(out, strings.Trim(w, "./()*"))
 	}
-	for _, w := range identRe.FindAllString(task, -1) {
+	words := identRe.FindAllString(task, -1)
+	// Whole identifiers precede split fragments so an early CamelCase term
+	// cannot consume the keyword cap and hide a later exact identifier.
+	for _, w := range words {
 		add(w)
+		// Preserve punctuation in identifiers, but also accept a prose colon
+		// or dash following a symbol: "Handler: fix nil checks".
+		add(strings.TrimRight(w, ":-"))
+	}
+	for _, w := range words {
 		if i := strings.LastIndexAny(w, "./"); i >= 0 {
 			add(w[i+1:])
 		}
@@ -308,12 +356,19 @@ func splitIdent(w string) []string {
 // MinimalContext ranks symbols, doc sections and config entries for a task
 // and packs the best ones until maxTokens (estimated at bytes/4) is spent.
 func (s Service) MinimalContext(ctx context.Context, repo, task string, files []string, maxTokens int) (MinimalContext, error) {
-	s.R = store.ForRepository(s.R, repo)
-	if maxTokens <= 0 {
-		maxTokens = 1500
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if len(task) > 8192 || len(repo) > 4096 || len(files) > 100 {
+		return MinimalContext{}, errors.New("context accepts a task up to 8192 bytes, a repository up to 4096 bytes, and at most 100 files")
 	}
-	maxTokens = min(maxTokens, 20000)
-	mc := MinimalContext{Task: task, Budget: maxTokens, Keywords: keywords(task), Items: []MinimalItem{}}
+	for _, file := range files {
+		if len(file) > 4096 {
+			return MinimalContext{}, errors.New("file path exceeds 4096 bytes")
+		}
+	}
+	s.R = store.ForRepository(s.R, repo)
+	maxTokens = contextBudget(maxTokens, 1500)
+	mc := MinimalContext{Task: task, Budget: maxTokens, Keywords: keywords(task), Items: []MinimalItem{}, Estimator: JSONEstimator, Source: "indexed_graph"}
 	inFiles := map[string]bool{}
 	for _, f := range files {
 		inFiles[strings.TrimPrefix(f, "./")] = true
@@ -322,20 +377,48 @@ func (s Service) MinimalContext(ctx context.Context, repo, task string, files []
 		n     model.Node
 		score float64
 		why   []string
+		exact bool
 	}
 	byID := map[string]*scored{}
+	exactTerms := map[string]bool{}
+	for _, word := range identRe.FindAllString(task, -1) {
+		word = strings.Trim(word, "./")
+		exactTerms[word] = true
+		exactTerms[strings.TrimRight(word, ":-")] = true
+	}
 	kinds := []model.NodeKind{model.KindFunction, model.KindMethod, model.KindInterfaceMethod, model.KindType, model.KindSection, model.KindConfigEntry, model.KindTemplateDef}
 	for i, kw := range mc.Keywords {
+		if err := ctx.Err(); err != nil {
+			return MinimalContext{}, err
+		}
 		hits, err := s.R.Search(ctx, repo, kw, kinds, 60)
 		if err != nil {
 			return mc, err
 		}
+		if exactTerms[kw] && strings.ContainsAny(kw, "./") {
+			for _, kind := range kinds {
+				n, err := s.R.Node(ctx, model.NodeID(repo, kind, kw))
+				if err == nil {
+					hits = append(hits, n)
+				} else if !errors.Is(err, store.ErrNotFound) {
+					return MinimalContext{}, err
+				}
+			}
+		}
 		weight := 1.0 / (1 + float64(i)*0.15) // earlier keywords matter more
+		seen := map[string]bool{}
 		for _, n := range hits {
+			if seen[n.ID] {
+				continue
+			}
+			seen[n.ID] = true
 			sc := byID[n.ID]
 			if sc == nil {
 				sc = &scored{n: n}
 				byID[n.ID] = sc
+			}
+			if exactTerms[kw] && (n.Name == kw || n.ShortName() == kw || n.QualifiedName == kw) {
+				sc.exact = true
 			}
 			switch {
 			case strings.EqualFold(n.Name, kw) || strings.EqualFold(n.ShortName(), kw):
@@ -363,29 +446,56 @@ func (s Service) MinimalContext(ctx context.Context, repo, task string, files []
 		ranked = append(ranked, sc)
 	}
 	slices.SortFunc(ranked, func(a, b *scored) int {
+		if a.exact != b.exact {
+			if a.exact {
+				return -1
+			}
+			return 1
+		}
 		return cmp.Or(cmp.Compare(b.score, a.score), cmp.Compare(len(a.n.ID), len(b.n.ID)), cmp.Compare(a.n.ID, b.n.ID))
 	})
 
-	const overhead = 60 // JSON envelope
-	mc.UsedTokens = overhead
+	mc.Omitted = len(ranked)
+	mc.Next = "Read listed ranges; use get_symbol_context before editing. Omitted matches may require a narrower task or larger max_tokens."
+	if len(ranked) == 0 {
+		mc.Next = "Nothing matched; try search with a symbol name or repo_overview."
+	}
+	if n, err := measuredTokens(&mc, &mc.UsedTokens); err != nil {
+		return MinimalContext{}, err
+	} else if n > maxTokens {
+		return MinimalContext{}, ErrResponseBudget
+	}
 	for _, sc := range ranked {
 		item := MinimalItem{
 			QualifiedID: sc.n.ShortName(), Kind: sc.n.Kind, Read: sc.n.Location(),
 			Signature: sc.n.Signature, Summary: sc.n.Summary, Why: "matches " + strings.Join(dedupe(sc.why), ", "),
+			Revision: sc.n.Revision, Retrieval: "lexical",
 		}
-		cost := tokens(item)
-		if mc.UsedTokens+cost > maxTokens {
-			mc.Omitted++
-			continue
+		if sc.exact {
+			item.Retrieval = "exact"
 		}
-		mc.UsedTokens += cost
 		mc.Items = append(mc.Items, item)
+		mc.Omitted--
+		for {
+			n, err := measuredTokens(&mc, &mc.UsedTokens)
+			if err != nil {
+				return MinimalContext{}, err
+			}
+			if n <= maxTokens {
+				break
+			}
+			last := &mc.Items[len(mc.Items)-1]
+			if last.Summary != "" || last.Signature != "" {
+				last.Summary, last.Signature, last.DetailOmitted = "", "", true
+				continue
+			}
+			mc.Items = mc.Items[:len(mc.Items)-1]
+			mc.Omitted++
+			break
+		}
 	}
-	switch {
-	case len(mc.Items) == 0:
-		mc.Next = "nothing matched; try search with a symbol name or repo_overview"
-	default:
-		mc.Next = "read only the listed line ranges; use get_symbol_context on the top items before editing"
+	if _, err := measuredTokens(&mc, &mc.UsedTokens); err != nil {
+		return MinimalContext{}, err
 	}
 	return mc, nil
 }
@@ -400,11 +510,6 @@ func dedupe(in []string) []string {
 		}
 	}
 	return out
-}
-
-func tokens(it MinimalItem) int {
-	n := len(it.QualifiedID) + len(it.Read) + len(it.Signature) + len(it.Summary) + len(it.Why) + len(it.Kind) + 70
-	return (n + 3) / 4
 }
 
 // PackageCtx is the package view of get_symbol_context.
