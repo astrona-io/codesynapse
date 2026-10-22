@@ -18,7 +18,7 @@ import (
 // memory tools are enabled. Agents read server instructions on connect, so
 // this is what makes them use memory without being asked.
 const MemoryInstructions = `
-9. Memory (use it on your own, without being asked):
+10. Memory (use it on your own, without being asked):
    - At the start of every task, call recall_context with the task in a sentence (it skips small talk, matches by meaning and name, and returns facts 1-2 hops around). Use search_graph_nodes and query_subgraph to look further. Prior decisions, preferences and conventions saved there apply unless the user says otherwise.
    - When the user states a preference, makes or confirms a decision, sets a convention, assigns ownership, or you finish a task with a lasting outcome, save it with upsert_graph_triples (replace=true when it supersedes an earlier value). Save as you go; do not wait for the end of the session.
    - In long sessions keep the last 5-10 exchanges in your context and hand older turns to offload_turns (when available), which extracts facts in the background without blocking you.

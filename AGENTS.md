@@ -27,6 +27,7 @@ If the codesynapse MCP server is connected (see `.mcp.json`), use it on this rep
 4. `file_outline` before opening a file.
 5. `get_pr_context` with your diff before finishing a change. Fix or justify anything it flags as untested, high risk or security-sensitive.
 6. Ambiguous names return `qualified_id` suggestions: retry with one of them.
+7. Before writing new code, look for what exists: `search` (and `search_all_repos`), then `duplicate_code`; reuse or extend before adding a second copy.
 
 The graph reflects the last ingest. Files you edited in this session may differ.
 

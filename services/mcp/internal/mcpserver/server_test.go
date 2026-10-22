@@ -201,6 +201,33 @@ func TestPrompts(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestReuseFirstGuidance(t *testing.T) {
+	ctx := context.Background()
+	cs := connect(t)
+	assert.Contains(t, cs.InitializeResult().Instructions, "Reuse before you write")
+
+	got, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{Name: "reuse-first", Arguments: map[string]string{"task": "add retry to the HTTP client"}})
+	require.NoError(t, err)
+	text := got.Messages[0].Content.(*mcp.TextContent).Text
+	assert.Contains(t, text, "add retry to the HTTP client")
+	assert.Contains(t, text, "Search and reuse existing code")
+	_, err = cs.GetPrompt(ctx, &mcp.GetPromptParams{Name: "reuse-first", Arguments: map[string]string{}})
+	assert.Error(t, err, "the task is required")
+
+	// Every tool the guidance names must exist, or agents are told to call
+	// something that is not there.
+	tools, err := cs.ListTools(ctx, nil)
+	require.NoError(t, err)
+	have := map[string]bool{}
+	for _, tl := range tools.Tools {
+		have[tl.Name] = true
+	}
+	for _, name := range []string{"search", "search_all_repos", "minimal_context", "get_symbol_context", "get_implementations", "get_call_graph", "duplicate_code", "shared_code"} {
+		assert.True(t, have[name], name)
+		assert.Contains(t, text, name)
+	}
+}
+
 func TestErrorsAreToolErrors(t *testing.T) {
 	cs := connect(t)
 	res := call(t, cs, "search", map[string]any{"query": "x", "kinds": []string{"Bogus"}}, nil)
