@@ -152,7 +152,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	}
 	defer closeAccounts()
 	if acc != nil {
-		opts.Access = mcpserver.OrgAccess{St: acc.St}
+		opts.Access = mcpserver.AccountsAccess{Acc: acc}
 	}
 	server := mcpserver.New(r, version, opts)
 

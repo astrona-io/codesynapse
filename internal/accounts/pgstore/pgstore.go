@@ -543,3 +543,113 @@ func (s *Store) PruneEvents(ctx context.Context, before time.Time) (int, error) 
 	tag, err := s.db.Exec(ctx, "DELETE FROM events WHERE at < $1", before)
 	return int(tag.RowsAffected()), err
 }
+
+// CreateTeam implements accounts.Store.
+func (s *Store) CreateTeam(ctx context.Context, t accounts.Team) error {
+	_, err := s.db.Exec(ctx, "INSERT INTO teams (id, org_id, slug, name, created_at) VALUES ($1, $2, $3, $4, $5)", t.ID, t.OrgID, t.Slug, t.Name, t.CreatedAt)
+	return mapErr(err, "team")
+}
+
+func (s *Store) team(ctx context.Context, where string, args ...any) (accounts.Team, error) {
+	var t accounts.Team
+	err := s.db.QueryRow(ctx, "SELECT id, org_id, slug, name, created_at FROM teams WHERE "+where, args...).Scan(&t.ID, &t.OrgID, &t.Slug, &t.Name, &t.CreatedAt)
+	t.CreatedAt = t.CreatedAt.UTC()
+	return t, mapErr(err, "team")
+}
+
+// TeamByID implements accounts.Store.
+func (s *Store) TeamByID(ctx context.Context, id string) (accounts.Team, error) {
+	return s.team(ctx, "id = $1", id)
+}
+
+// TeamBySlug implements accounts.Store.
+func (s *Store) TeamBySlug(ctx context.Context, orgID, slug string) (accounts.Team, error) {
+	return s.team(ctx, "org_id = $1 AND slug = $2", orgID, slug)
+}
+
+// OrgTeams implements accounts.Store.
+func (s *Store) OrgTeams(ctx context.Context, orgID string) ([]accounts.Team, error) {
+	rows, err := s.db.Query(ctx, "SELECT id, org_id, slug, name, created_at FROM teams WHERE org_id = $1 ORDER BY name, id", orgID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (accounts.Team, error) {
+		var t accounts.Team
+		err := r.Scan(&t.ID, &t.OrgID, &t.Slug, &t.Name, &t.CreatedAt)
+		t.CreatedAt = t.CreatedAt.UTC()
+		return t, err
+	})
+}
+
+// DeleteTeam implements accounts.Store: the team and every tuple naming it,
+// in one transaction.
+func (s *Store) DeleteTeam(ctx context.Context, id string) error {
+	return pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, "DELETE FROM teams WHERE id = $1", id)
+		if err := affected(tag, err, "team"); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, "DELETE FROM relation_tuples WHERE (object_type = 'team' AND object_id = $1) OR (subject_type = 'team' AND subject_id = $1)", id)
+		return err
+	})
+}
+
+const tupleCols = "object_type, object_id, relation, subject_type, subject_id, subject_relation, created_by, created_at"
+
+// WriteTuple implements accounts.Store.
+func (s *Store) WriteTuple(ctx context.Context, t accounts.Tuple) error {
+	_, err := s.db.Exec(ctx, "INSERT INTO relation_tuples ("+tupleCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+		t.ObjectType, t.ObjectID, t.Relation, t.SubjectType, t.SubjectID, t.SubjectRelation, t.CreatedBy, t.CreatedAt)
+	return mapErr(err, "tuple")
+}
+
+// DeleteTuple implements accounts.Store.
+func (s *Store) DeleteTuple(ctx context.Context, t accounts.Tuple) error {
+	tag, err := s.db.Exec(ctx, `DELETE FROM relation_tuples WHERE object_type = $1 AND object_id = $2 AND relation = $3
+  AND subject_type = $4 AND subject_id = $5 AND subject_relation = $6`, t.ObjectType, t.ObjectID, t.Relation, t.SubjectType, t.SubjectID, t.SubjectRelation)
+	return affected(tag, err, "tuple")
+}
+
+// tupleWhere builds a parameterised condition: column names are fixed
+// here, values are parameters.
+func tupleWhere(f accounts.TupleFilter) (string, []any) {
+	conds := []string{"true"}
+	var args []any
+	for _, c := range []struct{ col, val string }{
+		{"object_type", f.ObjectType}, {"object_id", f.ObjectID}, {"relation", f.Relation},
+		{"subject_type", f.SubjectType}, {"subject_id", f.SubjectID}, {"subject_relation", f.SubjectRelation},
+	} {
+		if c.val != "" {
+			args = append(args, c.val)
+			conds = append(conds, fmt.Sprintf("%s = $%d", c.col, len(args)))
+		}
+	}
+	if f.SubjectIDs != nil {
+		args = append(args, f.SubjectIDs)
+		conds = append(conds, fmt.Sprintf("subject_id = ANY($%d)", len(args)))
+	}
+	return strings.Join(conds, " AND "), args
+}
+
+// ReadTuples implements accounts.Store.
+func (s *Store) ReadTuples(ctx context.Context, f accounts.TupleFilter) ([]accounts.Tuple, error) {
+	where, args := tupleWhere(f)
+	rows, err := s.db.Query(ctx, "SELECT "+tupleCols+" FROM relation_tuples WHERE "+where+
+		fmt.Sprintf(" ORDER BY object_type, object_id, relation, subject_type, subject_id, subject_relation LIMIT %d", accounts.MaxTuples), args...)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (accounts.Tuple, error) {
+		var t accounts.Tuple
+		err := r.Scan(&t.ObjectType, &t.ObjectID, &t.Relation, &t.SubjectType, &t.SubjectID, &t.SubjectRelation, &t.CreatedBy, &t.CreatedAt)
+		t.CreatedAt = t.CreatedAt.UTC()
+		return t, err
+	})
+}
+
+// DeleteTuples implements accounts.Store.
+func (s *Store) DeleteTuples(ctx context.Context, f accounts.TupleFilter) (int, error) {
+	where, args := tupleWhere(f)
+	tag, err := s.db.Exec(ctx, "DELETE FROM relation_tuples WHERE "+where, args...)
+	return int(tag.RowsAffected()), err
+}

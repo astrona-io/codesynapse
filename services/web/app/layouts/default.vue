@@ -61,6 +61,7 @@ const repoGroups = computed(() => {
       { to: `${base}/reviews`, label: 'Reviews' },
       { to: `${base}/review`, label: 'Impact of a change' },
       { to: `${base}/memory`, label: 'Agent memory' },
+      ...(session.accounts.value ? [{ to: `${base}/access`, label: 'Access' }] : []),
     ] },
   ]
 })

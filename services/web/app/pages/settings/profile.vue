@@ -1,5 +1,9 @@
 <script setup lang="ts">
+import type { ReachView } from '~/utils/types'
+
 const session = useSession()
+const { data: access } = useApiGet<{ repos: ReachView[] }>('me/access')
+const shared = computed(() => (access.value?.repos ?? []).filter((r) => r.shared))
 const current = ref('')
 const next = ref('')
 const msg = ref('')
@@ -32,6 +36,12 @@ async function change() {
       <ul class="plain">
         <li v-for="m in session.memberships.value" :key="m.org.id">{{ m.org.name }} <span class="badge">{{ m.role }}</span></li>
       </ul>
+      <template v-if="shared.length">
+        <h3>Shared with you</h3>
+        <ul class="plain">
+          <li v-for="r in shared" :key="r.org_id + r.graph"><NuxtLink :to="`/repos/${encodeURIComponent(r.graph)}`">{{ r.graph }}</NuxtLink> <span class="muted small">from {{ r.org }}, read-only</span></li>
+        </ul>
+      </template>
     </section>
     <section class="panel">
       <h2>Change password</h2>

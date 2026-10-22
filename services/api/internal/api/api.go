@@ -397,6 +397,9 @@ func (s *Server) unlinkRepo(r *http.Request, graph string) (int, error) {
 		if left, err = s.cfg.Accounts.St.RemoveRepository(ctx, l.OrgID, graph); err != nil {
 			return 0, err
 		}
+		if err := s.cfg.Accounts.DropRepoGrants(ctx, l.OrgID, graph); err != nil {
+			return 0, err
+		}
 	}
 	return left, nil
 }

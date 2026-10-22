@@ -25,6 +25,9 @@ type Store struct {
 	lastID   int64
 	repos    map[string]accounts.Repository // org|graph
 	tokens   map[string]accounts.GitToken   // org|host
+	teams    map[string]accounts.Team
+	tuples   map[accounts.Tuple]bool // keys have CreatedBy/CreatedAt zeroed
+	tupleAt  map[accounts.Tuple]accounts.Tuple
 }
 
 type member struct {
@@ -37,7 +40,8 @@ var _ accounts.Store = (*Store)(nil)
 // New returns an empty store.
 func New() *Store {
 	return &Store{users: map[string]accounts.User{}, orgs: map[string]accounts.Org{}, members: map[string]map[string]member{},
-		sessions: map[string]accounts.Session{}, keys: map[string]accounts.APIKey{}, repos: map[string]accounts.Repository{}, tokens: map[string]accounts.GitToken{}}
+		sessions: map[string]accounts.Session{}, keys: map[string]accounts.APIKey{}, repos: map[string]accounts.Repository{}, tokens: map[string]accounts.GitToken{},
+		teams: map[string]accounts.Team{}, tuples: map[accounts.Tuple]bool{}, tupleAt: map[accounts.Tuple]accounts.Tuple{}}
 }
 
 // Migrate implements accounts.Store.
@@ -515,4 +519,146 @@ func (s *Store) reposWhere(keep func(accounts.Repository) bool) []accounts.Repos
 func public(u accounts.User) accounts.User {
 	u.PasswordHash = ""
 	return u
+}
+
+// CreateTeam implements accounts.Store.
+func (s *Store) CreateTeam(_ context.Context, t accounts.Team) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.orgs[t.OrgID]; !ok {
+		return fmt.Errorf("organisation: %w", accounts.ErrNotFound)
+	}
+	for _, x := range s.teams {
+		if x.OrgID == t.OrgID && x.Slug == t.Slug {
+			return fmt.Errorf("team: %w", accounts.ErrExists)
+		}
+	}
+	s.teams[t.ID] = t
+	return nil
+}
+
+// TeamByID implements accounts.Store.
+func (s *Store) TeamByID(_ context.Context, id string) (accounts.Team, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.teams[id]
+	if !ok {
+		return accounts.Team{}, fmt.Errorf("team: %w", accounts.ErrNotFound)
+	}
+	return t, nil
+}
+
+// TeamBySlug implements accounts.Store.
+func (s *Store) TeamBySlug(_ context.Context, orgID, slug string) (accounts.Team, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, t := range s.teams {
+		if t.OrgID == orgID && t.Slug == slug {
+			return t, nil
+		}
+	}
+	return accounts.Team{}, fmt.Errorf("team: %w", accounts.ErrNotFound)
+}
+
+// OrgTeams implements accounts.Store (by name).
+func (s *Store) OrgTeams(_ context.Context, orgID string) ([]accounts.Team, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []accounts.Team{}
+	for _, t := range s.teams {
+		if t.OrgID == orgID {
+			out = append(out, t)
+		}
+	}
+	slices.SortFunc(out, func(a, b accounts.Team) int { return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.ID, b.ID)) })
+	return out, nil
+}
+
+// DeleteTeam implements accounts.Store.
+func (s *Store) DeleteTeam(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.teams[id]; !ok {
+		return fmt.Errorf("team: %w", accounts.ErrNotFound)
+	}
+	delete(s.teams, id)
+	for k := range s.tuples {
+		if (k.ObjectType == accounts.TypeTeam && k.ObjectID == id) || (k.SubjectType == accounts.TypeTeam && k.SubjectID == id) {
+			delete(s.tuples, k)
+			delete(s.tupleAt, k)
+		}
+	}
+	return nil
+}
+
+func tupleKey(t accounts.Tuple) accounts.Tuple {
+	t.CreatedBy, t.CreatedAt = "", time.Time{}
+	return t
+}
+
+// WriteTuple implements accounts.Store.
+func (s *Store) WriteTuple(_ context.Context, t accounts.Tuple) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := tupleKey(t)
+	if s.tuples[k] {
+		return fmt.Errorf("tuple: %w", accounts.ErrExists)
+	}
+	s.tuples[k] = true
+	s.tupleAt[k] = t
+	return nil
+}
+
+// DeleteTuple implements accounts.Store.
+func (s *Store) DeleteTuple(_ context.Context, t accounts.Tuple) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := tupleKey(t)
+	if !s.tuples[k] {
+		return fmt.Errorf("tuple: %w", accounts.ErrNotFound)
+	}
+	delete(s.tuples, k)
+	delete(s.tupleAt, k)
+	return nil
+}
+
+func matches(t accounts.Tuple, f accounts.TupleFilter) bool {
+	eq := func(want, got string) bool { return want == "" || want == got }
+	if !eq(f.ObjectType, t.ObjectType) || !eq(f.ObjectID, t.ObjectID) || !eq(f.Relation, t.Relation) ||
+		!eq(f.SubjectType, t.SubjectType) || !eq(f.SubjectID, t.SubjectID) || !eq(f.SubjectRelation, t.SubjectRelation) {
+		return false
+	}
+	return f.SubjectIDs == nil || slices.Contains(f.SubjectIDs, t.SubjectID)
+}
+
+// ReadTuples implements accounts.Store, ordered like the PostgreSQL store.
+func (s *Store) ReadTuples(_ context.Context, f accounts.TupleFilter) ([]accounts.Tuple, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []accounts.Tuple{}
+	for k := range s.tuples {
+		if matches(k, f) {
+			out = append(out, s.tupleAt[k])
+		}
+	}
+	slices.SortFunc(out, func(a, b accounts.Tuple) int {
+		return cmp.Or(cmp.Compare(a.ObjectType, b.ObjectType), cmp.Compare(a.ObjectID, b.ObjectID), cmp.Compare(a.Relation, b.Relation),
+			cmp.Compare(a.SubjectType, b.SubjectType), cmp.Compare(a.SubjectID, b.SubjectID), cmp.Compare(a.SubjectRelation, b.SubjectRelation))
+	})
+	return out[:min(len(out), accounts.MaxTuples)], nil
+}
+
+// DeleteTuples implements accounts.Store.
+func (s *Store) DeleteTuples(_ context.Context, f accounts.TupleFilter) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for k := range s.tuples {
+		if matches(k, f) {
+			delete(s.tuples, k)
+			delete(s.tupleAt, k)
+			n++
+		}
+	}
+	return n, nil
 }
