@@ -22,6 +22,8 @@ RUN apk add --no-cache git ca-certificates && \
     mkdir -p /cache/go-build /cache/gomod /workspace && chown -R codesynapse /cache /workspace
 ENV GOCACHE=/cache/go-build GOMODCACHE=/cache/gomod GOTOOLCHAIN=local \
     CODESYNAPSE_API_ADDR=0.0.0.0:8080 CODESYNAPSE_SOURCES_ROOT=/sources
+LABEL org.opencontainers.image.licenses="Apache-2.0" org.opencontainers.image.vendor="Astrona.io"
+COPY LICENSE NOTICE /usr/share/licenses/codesynapse/
 COPY --from=build /out/ /usr/local/bin/
 USER codesynapse
 EXPOSE 8080

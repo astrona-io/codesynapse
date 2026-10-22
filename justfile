@@ -124,7 +124,7 @@ image-build tag="dev":
         {{engine}} build $plat --build-arg VERSION={{version}} -f services/$svc/Dockerfile \
             -t codesynapse-$svc:{{tag}} -t {{registry}}/codesynapse-$svc:{{tag}} .
     done
-    {{engine}} build $plat -t codesynapse-web:{{tag}} -t {{registry}}/codesynapse-web:{{tag}} services/web
+    {{engine}} build $plat -f services/web/Dockerfile -t codesynapse-web:{{tag}} -t {{registry}}/codesynapse-web:{{tag}} .
 
 # Push the images to REGISTRY (log in first: docker login ghcr.io)
 image-push tag="dev":
