@@ -347,7 +347,7 @@ func (x *extractor) funcDecl(p *packages.Package, d *ast.FuncDecl, abs, rel, fil
 		n.BodyHash = hex.EncodeToString(sum[:8])
 	}
 	if !isTestFile && !x.generated && n.LOC >= minCloneLOC {
-		n.CloneHash = cloneHash(p.TypesInfo, d)
+		n.CloneHash, n.CloneSig = cloneHash(p.TypesInfo, d)
 	}
 	if d.Body != nil {
 		n.Complexity = cyclomatic(d.Body)

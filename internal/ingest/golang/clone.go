@@ -1,12 +1,11 @@
 package golang
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"go/ast"
 	"go/types"
-	"hash"
+
+	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 )
 
 // A function is a clone candidate only when it is big enough that sharing it
@@ -21,12 +20,11 @@ const (
 // only in naming or constants hash the same. Everything that carries meaning
 // stays: called functions, types, fields, imported packages and operators.
 // It returns "" when d is too small to be a candidate.
-func cloneHash(info *types.Info, d *ast.FuncDecl) string {
+func cloneHash(info *types.Info, d *ast.FuncDecl) (hash, sig string) {
 	if d.Body == nil {
-		return ""
+		return "", ""
 	}
-	h := sha256.New()
-	w := &cloneWalk{info: info, h: h, locals: map[types.Object]int{}}
+	w := &cloneWalk{info: info, locals: map[types.Object]int{}}
 	// The receiver's type is left out so methods of different types can match;
 	// its name is a local like any parameter.
 	if d.Recv != nil {
@@ -39,14 +37,14 @@ func cloneHash(info *types.Info, d *ast.FuncDecl) string {
 	w.walk(d.Type)
 	w.walk(d.Body)
 	if w.stmts < minCloneStmts {
-		return ""
+		return "", ""
 	}
-	return hex.EncodeToString(h.Sum(nil)[:8])
+	return duplicates.Hash(w.toks), duplicates.Sig(w.toks)
 }
 
 type cloneWalk struct {
 	info   *types.Info
-	h      hash.Hash
+	toks   []string
 	locals map[types.Object]int
 	stmts  int
 }
@@ -60,7 +58,7 @@ func (w *cloneWalk) local(o types.Object) {
 }
 
 func (w *cloneWalk) emit(format string, args ...any) {
-	fmt.Fprintf(w.h, format+";", args...) //nolint:errcheck // hash.Hash.Write never fails
+	w.toks = append(w.toks, fmt.Sprintf(format, args...))
 }
 
 func (w *cloneWalk) walk(n ast.Node) {

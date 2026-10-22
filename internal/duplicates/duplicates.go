@@ -12,6 +12,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/parisnakitakejser/codesynapse/internal/model"
@@ -21,7 +22,7 @@ import (
 const (
 	MaxGroups       = 200
 	MaxMembers      = 20
-	MaxFingerprints = 3000
+	MaxFingerprints = 2000
 )
 
 // Member is one copy.
@@ -39,8 +40,16 @@ type Member struct {
 type Group struct {
 	Hash   string `json:"hash"`
 	Copies int    `json:"copies"`
-	// LOC is the size of the largest copy; Redundant the lines left when one
-	// copy is kept.
+	// Kind is "exact" (same structure) or "near" (edited copies: several
+	// different fingerprints whose signatures are close). A near group lists
+	// every copy of every variant.
+	Kind string `json:"kind"`
+	// Similarity is 1 for exact groups and, for near groups, the lowest
+	// estimated similarity between the variants that were joined.
+	Similarity float64 `json:"similarity"`
+	// LOC is the size of the largest copy. Redundant is the lines left when
+	// one copy is kept; for a near group only the differing variants count,
+	// each once, because the copies inside a variant are in an exact group.
 	LOC       int `json:"loc"`
 	Redundant int `json:"redundant_loc"`
 	// Scope is how far the copies are apart: file, package or repository.
@@ -52,6 +61,8 @@ type Group struct {
 // compared without reading this repository's graph.
 type Fingerprint struct {
 	Hash string `json:"hash"`
+	// Sig is the MinHash signature used to find near copies.
+	Sig string `json:"sig,omitempty"`
 	Member
 }
 
@@ -60,6 +71,10 @@ type Summary struct {
 	Groups          int `json:"groups"`
 	DuplicatedFuncs int `json:"duplicated_functions"`
 	RedundantLOC    int `json:"redundant_loc"`
+	// NearGroups and NearRedundantLOC count edited copies on top of the exact
+	// ones; Percent covers both.
+	NearGroups       int `json:"near_groups"`
+	NearRedundantLOC int `json:"near_redundant_loc"`
 	// FunctionLOC is the size of all non-test functions, the denominator of
 	// Percent.
 	FunctionLOC int     `json:"function_loc"`
@@ -95,22 +110,25 @@ func Analyze(g *model.Graph) Report {
 		}
 	}
 	var prints []Fingerprint
-	for hash, nodes := range byHash {
-		for _, n := range nodes {
-			prints = append(prints, Fingerprint{Hash: hash, Member: member(n)})
-		}
-		if len(nodes) < 2 {
-			continue
-		}
+	var variants []variant
+	var variantHash []string
+	for _, hash := range slices.Sorted(maps.Keys(byHash)) {
+		nodes := byHash[hash]
 		slices.SortFunc(nodes, func(a, b model.Node) int {
 			return cmp.Or(cmp.Compare(a.File, b.File), cmp.Compare(a.StartLine, b.StartLine))
 		})
 		total, largest := 0, 0
 		for _, n := range nodes {
+			prints = append(prints, Fingerprint{Hash: hash, Sig: n.CloneSig, Member: member(n)})
 			total += n.LOC
 			largest = max(largest, n.LOC)
 		}
-		gr := Group{Hash: hash, Copies: len(nodes), LOC: largest, Redundant: total - largest, Scope: scope(nodes)}
+		variants = append(variants, variant{sig: nodes[0].CloneSig, loc: largest})
+		variantHash = append(variantHash, hash)
+		if len(nodes) < 2 {
+			continue
+		}
+		gr := Group{Hash: hash, Kind: "exact", Similarity: 1, Copies: len(nodes), LOC: largest, Redundant: total - largest, Scope: scope(nodes)}
 		for _, n := range nodes[:min(len(nodes), MaxMembers)] {
 			gr.Members = append(gr.Members, member(n))
 		}
@@ -119,11 +137,30 @@ func Analyze(g *model.Graph) Report {
 		rep.Summary.DuplicatedFuncs += len(nodes)
 		rep.Summary.RedundantLOC += gr.Redundant
 	}
+	for _, c := range nearClusters(variants) {
+		var nodes []model.Node
+		extra, largest := 0, 0
+		for _, i := range c.members {
+			nodes = append(nodes, byHash[variantHash[i]]...)
+			extra += variants[i].loc
+			largest = max(largest, variants[i].loc)
+		}
+		slices.SortFunc(nodes, func(a, b model.Node) int {
+			return cmp.Or(cmp.Compare(a.File, b.File), cmp.Compare(a.StartLine, b.StartLine))
+		})
+		gr := Group{Hash: variantHash[c.members[0]], Kind: "near", Similarity: c.similarity, Copies: len(nodes), LOC: largest, Redundant: extra - largest, Scope: scope(nodes)}
+		for _, n := range nodes[:min(len(nodes), MaxMembers)] {
+			gr.Members = append(gr.Members, member(n))
+		}
+		rep.Groups = append(rep.Groups, gr)
+		rep.Summary.NearGroups++
+		rep.Summary.NearRedundantLOC += gr.Redundant
+	}
 	if rep.Summary.FunctionLOC > 0 {
-		rep.Summary.Percent = float64(rep.Summary.RedundantLOC) * 100 / float64(rep.Summary.FunctionLOC)
+		rep.Summary.Percent = float64(rep.Summary.RedundantLOC+rep.Summary.NearRedundantLOC) * 100 / float64(rep.Summary.FunctionLOC)
 	}
 	slices.SortFunc(rep.Groups, func(a, b Group) int {
-		return cmp.Or(cmp.Compare(b.Redundant, a.Redundant), cmp.Compare(a.Hash, b.Hash))
+		return cmp.Or(cmp.Compare(b.Redundant, a.Redundant), cmp.Compare(a.Hash, b.Hash), cmp.Compare(a.Kind, b.Kind))
 	})
 	if len(rep.Groups) > MaxGroups {
 		rep.Groups, rep.Truncated = rep.Groups[:MaxGroups], true

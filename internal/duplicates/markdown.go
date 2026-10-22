@@ -12,7 +12,7 @@ func WriteMarkdown(w io.Writer, repo string, r Report, limit int) error {
 	var b strings.Builder
 	s := r.Summary
 	fmt.Fprintf(&b, "# Duplicate code: %s\n\n", repo)
-	fmt.Fprintf(&b, "**%d groups, %d functions, %d redundant lines (%.1f%% of function LOC)**\n\n", s.Groups, s.DuplicatedFuncs, s.RedundantLOC, s.Percent)
+	fmt.Fprintf(&b, "**%d groups, %d functions, %d redundant lines (%.1f%% of function LOC)** · %d groups of edited copies, %d lines\n\n", s.Groups, s.DuplicatedFuncs, s.RedundantLOC, s.Percent, s.NearGroups, s.NearRedundantLOC)
 	if len(r.Groups) == 0 {
 		b.WriteString("No duplicated functions found.\n")
 	}
@@ -21,7 +21,7 @@ func WriteMarkdown(w io.Writer, repo string, r Report, limit int) error {
 			fmt.Fprintf(&b, "\n… %d more groups\n", len(r.Groups)-limit)
 			break
 		}
-		fmt.Fprintf(&b, "## %d copies of %d lines (%s) · %d redundant\n\n", g.Copies, g.LOC, g.Scope, g.Redundant)
+		fmt.Fprintf(&b, "## %d copies of %d lines (%s) · %d redundant%s\n\n", g.Copies, g.LOC, g.Scope, g.Redundant, similar(g.Kind, g.Similarity))
 		for _, m := range g.Members {
 			fmt.Fprintf(&b, "- `%s` %s:%d-%d\n", m.Name, m.File, m.StartLine, m.EndLine)
 		}
@@ -54,7 +54,7 @@ func WriteCrossMarkdown(w io.Writer, r CrossReport, limit int) error {
 			fmt.Fprintf(&b, "\n… %d more groups\n", len(r.Groups)-limit)
 			break
 		}
-		fmt.Fprintf(&b, "## %d copies of %d lines in %s\n\n", g.Copies, g.LOC, strings.Join(g.Repos, ", "))
+		fmt.Fprintf(&b, "## %d copies of %d lines in %s%s\n\n", g.Copies, g.LOC, strings.Join(g.Repos, ", "), similar(g.Kind, g.Similarity))
 		for _, m := range g.Members {
 			fmt.Fprintf(&b, "- %s `%s` %s:%d-%d\n", m.Repo, m.Name, m.File, m.StartLine, m.EndLine)
 		}
@@ -62,4 +62,12 @@ func WriteCrossMarkdown(w io.Writer, r CrossReport, limit int) error {
 	}
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// similar labels edited copies with how alike they are.
+func similar(kind string, similarity float64) string {
+	if kind != "near" {
+		return ""
+	}
+	return fmt.Sprintf(" · edited copies, ~%.0f%% alike", similarity*100)
 }

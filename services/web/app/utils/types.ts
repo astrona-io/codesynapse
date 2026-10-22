@@ -333,13 +333,13 @@ export interface AuditEvent {
 }
 
 export interface DuplicateMember { id: string; name: string; package?: string; file: string; start_line: number; end_line: number; loc: number }
-export interface DuplicateGroup { hash: string; copies: number; loc: number; redundant_loc: number; scope: 'file' | 'package' | 'repository'; members: DuplicateMember[] }
+export interface DuplicateGroup { hash: string; kind: 'exact' | 'near'; similarity: number; copies: number; loc: number; redundant_loc: number; scope: 'file' | 'package' | 'repository'; members: DuplicateMember[] }
 export interface DuplicatesReport {
-  summary: { groups: number; duplicated_functions: number; redundant_loc: number; function_loc: number; percent: number }
+  summary: { groups: number; duplicated_functions: number; redundant_loc: number; near_groups: number; near_redundant_loc: number; function_loc: number; percent: number }
   groups: DuplicateGroup[]
   truncated?: boolean
 }
 export interface SharedCodeMember extends DuplicateMember { repo: string }
-export interface SharedCodeGroup { hash: string; repos: string[]; copies: number; loc: number; redundant_loc: number; members: SharedCodeMember[] }
+export interface SharedCodeGroup { hash: string; kind: 'exact' | 'near'; similarity: number; repos: string[]; copies: number; loc: number; redundant_loc: number; members: SharedCodeMember[] }
 export interface SharedCodeSuggestion { kind: 'library' | 'framework'; repos: string[]; groups: number; redundant_loc: number; name: string; candidates: string[]; rationale: string }
 export interface SharedCodeReport { repos: number; groups: SharedCodeGroup[]; suggestions: SharedCodeSuggestion[]; redundant_loc: number; partial?: string[] }

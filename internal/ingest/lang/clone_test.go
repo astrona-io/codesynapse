@@ -75,20 +75,25 @@ const jsRenamed = `function addAll(values, cap) {
 }
 `
 
-func TestCloneHash(t *testing.T) {
-	py := cloneHash(Python, []byte(pyTotal))
-	assert.True(t, py != "", "big enough")
-	assert.Equal(t, cloneHash(Python, []byte(pyRenamed)), py, "renamed variables, literals and docstring")
-	assert.True(t, cloneHash(Python, []byte(pyOtherCall)) != py, "different callee")
-	assert.True(t, cloneHash(Python, []byte(pyDeeper)) != py, "indentation is structure")
-	assert.Equal(t, cloneHash(Python, []byte("def f(a):\n    return a\n")), "", "small")
+func hashOf(lang string, text []byte) string {
+	h, _ := cloneHash(lang, text)
+	return h
+}
 
-	js := cloneHash(JavaScript, []byte(jsTotal))
+func TestCloneHash(t *testing.T) {
+	py := hashOf(Python, []byte(pyTotal))
+	assert.True(t, py != "", "big enough")
+	assert.Equal(t, hashOf(Python, []byte(pyRenamed)), py, "renamed variables, literals and docstring")
+	assert.True(t, hashOf(Python, []byte(pyOtherCall)) != py, "different callee")
+	assert.True(t, hashOf(Python, []byte(pyDeeper)) != py, "indentation is structure")
+	assert.Equal(t, hashOf(Python, []byte("def f(a):\n    return a\n")), "", "small")
+
+	js := hashOf(JavaScript, []byte(jsTotal))
 	assert.True(t, js != "")
-	assert.Equal(t, cloneHash(JavaScript, []byte(jsRenamed)), js, "renamed variables and literals")
-	assert.Equal(t, cloneHash(TypeScript, []byte(jsTotal)), js, "language does not change the fingerprint")
+	assert.Equal(t, hashOf(JavaScript, []byte(jsRenamed)), js, "renamed variables and literals")
+	assert.Equal(t, hashOf(TypeScript, []byte(jsTotal)), js, "language does not change the fingerprint")
 	assert.True(t, js != py, "languages differ")
-	assert.Equal(t, cloneHash(Python, []byte("# @generated\n"+pyTotal)), "", "generated code")
+	assert.Equal(t, hashOf(Python, []byte("# @generated\n"+pyTotal)), "", "generated code")
 }
 
 func TestExtractSetsCloneHash(t *testing.T) {

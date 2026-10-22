@@ -11,7 +11,7 @@ import (
 func TestPropsRoundTrip(t *testing.T) {
 	n := model.Node{
 		ID: "r|Function|f", Kind: model.KindFunction, Repo: "r", Name: "f", QualifiedName: "p.f",
-		File: "a.go", StartLine: 3, EndLine: 9, Complexity: 4, Exported: true, SecurityTags: []string{"exec", "sql"},
+		File: "a.go", StartLine: 3, EndLine: 9, Complexity: 4, Exported: true, SecurityTags: []string{"exec", "sql"}, CloneHash: "0123456789abcdef", CloneSig: "00ff",
 	}
 	p := To(n)
 	_, hasSummary := p["summary"]

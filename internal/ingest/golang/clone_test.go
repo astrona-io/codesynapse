@@ -105,7 +105,7 @@ func TestCloneHash(t *testing.T) {
 			if fd.Recv != nil {
 				name = fd.Recv.List[0].Type.(*ast.StarExpr).X.(*ast.Ident).Name + "." + name
 			}
-			hashes[name] = cloneHash(info, fd)
+			hashes[name], _ = cloneHash(info, fd)
 		}
 	}
 	assert.True(t, hashes["sumA"] != "", "big enough")

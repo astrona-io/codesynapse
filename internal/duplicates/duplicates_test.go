@@ -129,3 +129,92 @@ func TestAcrossPartial(t *testing.T) {
 	assert.Equal(t, got.Partial, []string{"a"})
 	assert.Len(t, got.Groups, 0)
 }
+
+// toks is a stand-in for a normalised function: n tokens, the run starting
+// at edit replaced by other tokens.
+func toks(n, edit, run int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = fmt.Sprintf("t%d", i)
+		if i >= edit && i < edit+run {
+			out[i] = fmt.Sprintf("edited%d", i)
+		}
+	}
+	return out
+}
+
+func TestSignatures(t *testing.T) {
+	base := toks(100, 0, 0)
+	assert.Equal(t, Similarity(Sig(base), Sig(base)), 1.0)
+	assert.True(t, Hash(base) != Hash(toks(100, 40, 6)), "an edit changes the exact hash")
+	assert.Equal(t, Hash(base), Hash(toks(100, 0, 0)))
+
+	oneLine := Similarity(Sig(base), Sig(toks(100, 40, 4)))
+	assert.True(t, oneLine >= NearThreshold, "a few edited tokens stay near: %.2f", oneLine)
+	half := Similarity(Sig(base), Sig(toks(100, 20, 50)))
+	assert.True(t, half < NearThreshold, "half rewritten is not near: %.2f", half)
+	other := make([]string, 100)
+	for i := range other {
+		other[i] = fmt.Sprintf("o%d", i)
+	}
+	assert.True(t, Similarity(Sig(base), Sig(other)) < 0.2, "unrelated code")
+	assert.Equal(t, Similarity("zz", Sig(base)), 0.0, "malformed signature")
+}
+
+func TestAnalyzeNear(t *testing.T) {
+	g := model.NewGraph()
+	add := func(name, file string, tk []string, loc int) {
+		n := fn("r", "x/a", file, name, Hash(tk), loc)
+		n.CloneSig = Sig(tk)
+		g.AddNode(n)
+	}
+	add("Original", "a.go", toks(100, 0, 0), 30)
+	add("Edited", "b.go", toks(100, 40, 4), 32)
+	add("Rewritten", "c.go", toks(100, 20, 60), 30)
+	twin := make([]string, 80)
+	for i := range twin {
+		twin[i] = fmt.Sprintf("w%d", i)
+	}
+	add("Twin1", "d.go", twin, 20)
+	add("Twin2", "e.go", twin, 20)
+
+	rep := Analyze(g)
+	var near, exact []Group
+	for _, gr := range rep.Groups {
+		if gr.Kind == "near" {
+			near = append(near, gr)
+		} else {
+			exact = append(exact, gr)
+		}
+	}
+	require.Len(t, exact, 1, "the twins")
+	assert.Equal(t, exact[0].Similarity, 1.0)
+	require.Len(t, near, 1, "the edited copy, not the rewrite")
+	assert.Equal(t, near[0].Copies, 2)
+	assert.Equal(t, near[0].Redundant, 30, "the smaller variant is redundant")
+	assert.True(t, near[0].Similarity >= NearThreshold && near[0].Similarity < 1)
+	assert.Equal(t, rep.Summary.NearGroups, 1)
+	assert.Equal(t, rep.Summary.NearRedundantLOC, 30)
+	assert.Equal(t, rep.Summary.RedundantLOC, 20, "exact copies are counted apart")
+}
+
+func TestAcrossNear(t *testing.T) {
+	mk := func(repo, name string, tk []string) Report {
+		g := model.NewGraph()
+		n := fn(repo, "x/p", "f.go", name, Hash(tk), 30)
+		n.CloneSig = Sig(tk)
+		g.AddNode(n)
+		return Analyze(g)
+	}
+	reports := map[string]Report{
+		"a": mk("a", "Parse", toks(100, 0, 0)),
+		"b": mk("b", "Read", toks(100, 40, 4)),
+		"c": mk("c", "Other", toks(100, 20, 60)),
+	}
+	got := Across(reports)
+	require.Len(t, got.Groups, 1)
+	assert.Equal(t, got.Groups[0].Kind, "near")
+	assert.Equal(t, got.Groups[0].Repos, []string{"a", "b"})
+	assert.Equal(t, got.Groups[0].Redundant, 30)
+	assert.Equal(t, got.RedundantLOC, 30)
+}

@@ -50,6 +50,7 @@ const explore = (repo: string, id: string) => ({ path: `/repos/${encodeURICompon
             <article v-for="g in data.groups" :key="g.hash" class="group">
               <header class="row">
                 <strong>{{ g.copies }} copies of {{ g.loc }} lines</strong>
+                <span v-if="g.kind === 'near'" class="badge badge--violet" title="Copies that were edited after copying; the variants differ a little">edited · ~{{ Math.round(g.similarity * 100) }}% alike</span>
                 <span class="muted">in {{ g.repos.join(', ') }} · {{ g.redundant_loc }} redundant lines</span>
               </header>
               <ul class="members">
