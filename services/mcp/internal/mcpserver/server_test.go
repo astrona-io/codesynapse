@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -465,4 +467,59 @@ func TestUsageMiddleware(t *testing.T) {
 	assert.Equal(t, by[usage.Session].Calls, 1)
 	assert.Equal(t, by[usage.Session].Client, "usage-client")
 	assert.Equal(t, by["prompt:code-review"].Calls, 1)
+}
+
+func TestOffloadTurns(t *testing.T) {
+	var got struct {
+		Turns  []map[string]string `json:"turns"`
+		Source string              `json:"source"`
+	}
+	var auth, path string
+	fail := false
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth, path = r.Header.Get("Authorization"), r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		if fail {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"detail":"memory extraction runs only on a local model"}`))
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"id":"j1","repo":"fixture","state":"queued","turns":1}`))
+	}))
+	t.Cleanup(api.Close)
+
+	ctx := context.Background()
+	s := memory.New()
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+	ct, st := mcp.NewInMemoryTransports()
+	_, err := New(s, "test", Options{Memory: s, Offload: &OffloadClient{BaseURL: api.URL, Token: "secret"}}).Connect(ctx, st, nil)
+	require.NoError(t, err)
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "claude-code"}, nil).Connect(ctx, ct, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cs.Close() })
+
+	var job struct{ ID, State string }
+	res := call(t, cs, "offload_turns", map[string]any{"turns": []map[string]string{{"role": "user", "text": "We decided to drop Redis."}}}, &job)
+	require.False(t, res.IsError)
+	assert.Equal(t, job.ID, "j1")
+	assert.Equal(t, path, "/api/v1/repos/fixture/memory/offload")
+	assert.Equal(t, auth, "Bearer secret")
+	assert.Equal(t, got.Source, "claude-code")
+	assert.Equal(t, got.Turns[0]["text"], "We decided to drop Redis.")
+
+	fail = true
+	res = call(t, cs, "offload_turns", map[string]any{"turns": []map[string]string{{"role": "user", "text": "x"}}}, nil)
+	require.True(t, res.IsError)
+	assert.True(t, strings.Contains(res.Content[0].(*mcp.TextContent).Text, "local model"), "the API's reason reaches the agent")
+	res = call(t, cs, "offload_turns", map[string]any{"turns": []map[string]string{}}, nil)
+	assert.True(t, res.IsError)
+
+	_, absent := map[string]bool{}["x"]
+	tools, err := connectMemory(t).ListTools(ctx, nil)
+	require.NoError(t, err)
+	for _, tool := range tools.Tools {
+		absent = absent || tool.Name == "offload_turns"
+	}
+	assert.False(t, absent, "offload_turns needs --api-url")
 }

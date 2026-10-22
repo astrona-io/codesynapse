@@ -92,6 +92,10 @@ services:
       CODESYNAPSE_ALLOW_MEMORY: ${CODESYNAPSE_ALLOW_MEMORY:-true}
       # Daily usage counters (no arguments or results) for the Statistics page.
       CODESYNAPSE_MCP_USAGE: ${CODESYNAPSE_MCP_USAGE:-true}
+      # offload_turns hands older conversation turns to the API, which
+      # extracts memory triples with a local model in the background.
+      CODESYNAPSE_API_URL: http://api:8080
+      CODESYNAPSE_API_TOKEN: ${CODESYNAPSE_API_TOKEN}
     volumes:
       # Same paths as in the api container, so impact-by-git-refs can find checkouts.
       - ${SOURCES_DIR:-./sources}:/sources:ro

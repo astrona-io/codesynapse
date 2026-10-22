@@ -37,7 +37,7 @@ var version = "dev"
 func main() {
 	os.Exit(app.Main("codesynapse", "Index code, docs and history into a graph for review and AI assistants", version,
 		func(ec *app.Env) []*cobra.Command {
-			return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), statsCmd(ec), mcpCmd(ec), schemaCmd(ec)}
+			return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), statsCmd(ec), mcpCmd(ec), memoryCmd(ec), schemaCmd(ec)}
 		}))
 }
 
@@ -564,6 +564,16 @@ func mcpCmd(ec *app.Env) *cobra.Command {
 		WithShortDesc("Register the MCP server with Claude Code, Codex, Gemini, OpenCode, Cursor or a project .mcp.json").
 		WithExample("  codesynapse mcp install\n  codesynapse mcp install --yes --only claude,codex").
 		WithNoArgs().
+		Build())
+	parent.AddCommand(app.NewSubCommand("agents-md [dir]", &mcpAgentsMdOptions{EC: ec}, ec).
+		WithShortDesc("Add the CodeSynapse memory block to a repository's AGENTS.md (and CLAUDE.md when it does not import AGENTS.md)").
+		WithExample("  codesynapse mcp agents-md ~/src/api").
+		WithMaxArgs(1).
+		Build())
+	parent.AddCommand(app.NewSubCommand("hooks [dir]", &mcpHooksOptions{EC: ec}, ec).
+		WithShortDesc("Install Claude Code hooks: recall memory at session start, offload older turns before compaction").
+		WithExample("  export CODESYNAPSE_API_TOKEN=...   # from the CodeSynapse .env\n  codesynapse mcp hooks ~/src/api\n  codesynapse mcp hooks . --shared --repo astrona-io/api").
+		WithMaxArgs(1).
 		Build())
 	return parent
 }

@@ -32,7 +32,7 @@ const (
 )
 
 // Tasks a provider can be routed to.
-var Tasks = []string{"security-triage", "review", "briefing", "fix"}
+var Tasks = []string{"security-triage", "review", "briefing", "fix", "memory"}
 
 // Request is one completion request.
 type Request struct {

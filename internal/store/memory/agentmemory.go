@@ -24,60 +24,52 @@ func (s *Store) UpsertMemory(_ context.Context, b agentmem.Batch) error {
 	if m == nil {
 		m = &memRepo{entities: map[string]agentmem.Entity{}, facts: map[string]agentmem.Fact{}}
 	}
-
-	// Work out the effect first so a full memory changes nothing.
-	keep := map[string]bool{}
-	for _, f := range b.Replace {
-		keep[f.ID] = true
-	}
-	removed := map[string]bool{}
-	for _, r := range b.Replace {
-		for id, f := range m.facts {
-			if f.Subject == r.Subject && f.Predicate == r.Predicate && !keep[id] {
-				removed[id] = true
+	aliasOf := map[string]string{}
+	names := b.Names()
+	for id, e := range m.entities {
+		for _, a := range e.Aliases {
+			if slices.Contains(names, a) {
+				aliasOf[a] = id
 			}
 		}
 	}
-	newEntities, newFacts := 0, 0
-	for _, e := range b.Entities {
-		if _, ok := m.entities[e.ID]; !ok {
-			newEntities++
-		}
-	}
-	for _, f := range b.Facts {
-		if _, ok := m.facts[f.ID]; !ok {
-			newFacts++
-		}
-	}
-	if len(m.entities)+newEntities > agentmem.MaxEntitiesPerRepo || len(m.facts)-len(removed)+newFacts > agentmem.MaxFactsPerRepo {
-		return store.ErrMemoryFull
-	}
+	b.Resolve(aliasOf)
 
+	entityIDs, subjects, factIDs := b.Needs()
+	st := agentmem.State{Entities: map[string]agentmem.Entity{}, Facts: map[string]agentmem.Fact{}, EntityCount: len(m.entities), FactCount: len(m.facts)}
+	for _, id := range entityIDs {
+		if e, ok := m.entities[id]; ok {
+			st.Entities[id] = e
+		}
+	}
+	for id, f := range m.facts {
+		if slices.Contains(factIDs, id) || slices.Contains(subjects, f.Subject) || slices.Contains(subjects, f.Object) {
+			st.Facts[id] = f
+		}
+	}
+	p, err := b.Plan(st)
+	if err != nil {
+		return err
+	}
 	s.mem[b.Repo] = m
-	for id := range removed {
+	for _, id := range p.DeleteFacts {
 		delete(m.facts, id)
 	}
-	for _, e := range b.Entities {
-		if old, ok := m.entities[e.ID]; ok {
-			e.CreatedAt = old.CreatedAt
-			if e.Type == "Thing" {
-				e.Type = old.Type
-			}
-		}
+	for _, e := range p.PutEntities {
+		e.Aliases = slices.Clone(e.Aliases)
 		m.entities[e.ID] = e
 	}
-	for _, f := range b.Facts {
-		if old, ok := m.facts[f.ID]; ok {
-			f.CreatedAt = old.CreatedAt
-			f.Confirmations = old.Confirmations + 1
-		}
+	for _, f := range p.PutFacts {
 		m.facts[f.ID] = f
+	}
+	for _, id := range p.DeleteEntities {
+		delete(m.entities, id)
 	}
 	return nil
 }
 
 // SearchMemory implements store.MemoryStore.
-func (s *Store) SearchMemory(_ context.Context, repo, query string, limit int) (agentmem.Graph, error) {
+func (s *Store) SearchMemory(_ context.Context, repo, query string, limit int, history bool) (agentmem.Graph, error) {
 	limit = store.ClampLimit(limit, 20)
 	words := agentmem.Words(query)
 	s.mu.RLock()
@@ -105,13 +97,13 @@ func (s *Store) SearchMemory(_ context.Context, repo, query string, limit int) (
 		matched[h.e.ID] = true
 		g.Entities = append(g.Entities, h.e)
 	}
-	g.Facts = m.factsTouching(matched, min(limit*5, store.MaxLimit))
+	g.Facts = m.factsTouching(matched, min(limit*5, store.MaxLimit), history)
 	g.Entities = append(g.Entities, m.endpoints(g.Facts, matched)...)
 	return g, nil
 }
 
 // MemorySubgraph implements store.MemoryStore.
-func (s *Store) MemorySubgraph(_ context.Context, repo string, ids []string, depth, limit int) (agentmem.Graph, error) {
+func (s *Store) MemorySubgraph(_ context.Context, repo string, ids []string, depth, limit int, history bool) (agentmem.Graph, error) {
 	limit = store.ClampLimit(limit, 50)
 	depth = min(max(depth, 1), 2)
 	s.mu.RLock()
@@ -128,20 +120,20 @@ func (s *Store) MemorySubgraph(_ context.Context, repo string, ids []string, dep
 		}
 	}
 	if depth == 2 {
-		for _, f := range m.factsTouching(reached, len(m.facts)) {
+		for _, f := range m.factsTouching(reached, len(m.facts), history) {
 			reached[f.Subject], reached[f.Object] = true, true
 		}
 	}
-	g.Facts = m.factsTouching(reached, limit)
+	g.Facts = m.factsTouching(reached, limit, history)
 	g.Entities = m.endpoints(g.Facts, nil)
 	return g, nil
 }
 
 // factsTouching returns facts with an endpoint in ids, most recent first.
-func (m *memRepo) factsTouching(ids map[string]bool, limit int) []agentmem.Fact {
+func (m *memRepo) factsTouching(ids map[string]bool, limit int, history bool) []agentmem.Fact {
 	out := []agentmem.Fact{}
 	for _, f := range m.facts {
-		if ids[f.Subject] || ids[f.Object] {
+		if (ids[f.Subject] || ids[f.Object]) && (history || f.Current()) {
 			out = append(out, f)
 		}
 	}
@@ -211,11 +203,16 @@ func (s *Store) MemoryStats(context.Context) ([]agentmem.Stats, error) {
 		if len(m.entities) == 0 && len(m.facts) == 0 {
 			continue
 		}
-		st := agentmem.Stats{Repo: repo, Entities: len(m.entities), Facts: len(m.facts), Sources: map[string]int{}}
+		st := agentmem.Stats{Repo: repo, Entities: len(m.entities), Sources: map[string]int{}}
 		for _, e := range m.entities {
 			st.LastUpdated = max(st.LastUpdated, e.UpdatedAt)
 		}
 		for _, f := range m.facts {
+			if !f.Current() {
+				st.History++
+				continue
+			}
+			st.Facts++
 			st.Confirmations += f.Confirmations
 			st.FactChars += utf8.RuneCountInString(m.entities[f.Subject].Name) + utf8.RuneCountInString(f.Predicate) + utf8.RuneCountInString(m.entities[f.Object].Name)
 			st.Sources[f.Source]++

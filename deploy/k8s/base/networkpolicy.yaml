@@ -1,4 +1,5 @@
-# Only the paths that are needed: web -> api, api and mcp -> neo4j. The
+# Only the paths that are needed: web and mcp -> api (mcp hands turns to
+# memory extraction), api and mcp -> neo4j. The
 # browser-facing pods (web, mcp) accept traffic from anywhere in the cluster
 # or the ingress controller. Egress stays open: the API reaches git hosts,
 # api.github.com, osv.dev and api.deps.dev.
@@ -25,4 +26,5 @@ spec:
   ingress:
     - from:
         - podSelector: {matchLabels: {app.kubernetes.io/name: web}}
+        - podSelector: {matchLabels: {app.kubernetes.io/name: mcp}}
       ports: [{port: 8080}]

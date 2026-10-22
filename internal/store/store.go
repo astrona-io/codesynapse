@@ -18,7 +18,7 @@ var ErrNotFound = errors.New("not found")
 
 // ErrMemoryFull is returned when an upsert would take a repository's agent
 // memory past memory.MaxFactsPerRepo or memory.MaxEntitiesPerRepo.
-var ErrMemoryFull = errors.New("agent memory for this repository is full; delete stale facts first")
+var ErrMemoryFull = memory.ErrFull
 
 // Limits shared by all implementations so a single query cannot return an
 // unbounded result to an API client or an agent.
@@ -142,17 +142,20 @@ type ReviewStore interface {
 // in the name, or equal to the type) then most recently updated then name;
 // facts by most recently updated then ID.
 type MemoryStore interface {
-	// UpsertMemory merges b's entities and facts (saving a fact again bumps
-	// its confirmations). For each fact in b.Replace, other facts with the
-	// same subject and predicate are deleted first. All or nothing.
+	// UpsertMemory resolves b's names against stored aliases, then applies
+	// b.Plan: entities and facts merged, replaced facts closed (kept as
+	// history), alias entities merged into their canonical one. All or
+	// nothing; ErrMemoryFull over the limits.
 	UpsertMemory(ctx context.Context, b memory.Batch) error
-	// SearchMemory returns up to limit entities of repo matching any word of
-	// query (all entities, most recent first, when query is empty) and the
-	// facts touching them, with those facts' other entities.
-	SearchMemory(ctx context.Context, repo, query string, limit int) (memory.Graph, error)
+	// SearchMemory returns up to limit entities of repo whose name or an
+	// alias contains a word of query (all entities, most recent first, when
+	// query is empty) and the facts touching them, with those facts' other
+	// entities. Only current facts unless history is set.
+	SearchMemory(ctx context.Context, repo, query string, limit int, history bool) (memory.Graph, error)
 	// MemorySubgraph returns facts with an endpoint within depth-1 hops of
 	// the entity IDs (depth 1 = their own facts, at most 2), up to limit.
-	MemorySubgraph(ctx context.Context, repo string, ids []string, depth, limit int) (memory.Graph, error)
+	// Hops and results use current facts only unless history is set.
+	MemorySubgraph(ctx context.Context, repo string, ids []string, depth, limit int, history bool) (memory.Graph, error)
 	// DeleteMemoryFact removes one fact; DeleteMemoryEntity removes an
 	// entity and its facts. Both return ErrNotFound for unknown IDs.
 	DeleteMemoryFact(ctx context.Context, repo, id string) error
