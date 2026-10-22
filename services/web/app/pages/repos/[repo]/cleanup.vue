@@ -25,12 +25,13 @@ const steps = [
 <template>
   <div class="stack">
     <PageHeader
-      eyebrow="Hygiene" title="Unused code cleanup"
+      eyebrow="Code health" title="Unused code"
       lede="Code, dependencies and config nothing uses. Dead code is still compiled, shipped, reviewed and patched — and can be the only thing pulling in a vulnerable dependency. Remove it."
-      :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Cleanup' }]"
+      :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Code health' }]"
     >
       <SyncControl :repo="repo" />
     </PageHeader>
+    <CodeHealthTabs :repo="repo" />
 
     <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="rep">

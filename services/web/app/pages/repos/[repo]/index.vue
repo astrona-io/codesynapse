@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import type { CleanupReport, Dashboard, MetricsReport, SecurityReport } from '~/utils/types'
+import type { Attention, CleanupReport, Dashboard, MetricsReport, SecurityReport } from '~/utils/types'
 
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
 const base = computed(() => `/repos/${encodeURIComponent(repo.value)}`)
 const { data: d, error } = useApiGet<Dashboard>(() => repoPath(repo.value, 'dashboard'))
+const { data: attention } = useApiGet<Attention>(() => `attention?repo=${encodeURIComponent(repo.value)}`)
 const { data: sec } = useApiGet<SecurityReport>(() => repoPath(repo.value, 'security'))
 const { data: clean } = useApiGet<CleanupReport>(() => repoPath(repo.value, 'cleanup'))
 const { data: met } = useApiGet<MetricsReport>(() => repoPath(repo.value, 'metrics'))
@@ -99,6 +100,12 @@ const steps = computed<Step[]>(() => {
       <RemoveRepo :repo="repo" :managed="isManaged" @removed="navigateTo('/')" />
     </PageHeader>
     <div class="panel panel--glass autosync-bar"><AutoSync :repo="repo" /></div>
+
+    <section v-if="attention" class="panel">
+      <div class="panel__header"><h2>Needs attention <span class="muted">{{ attention.items.length }}</span></h2></div>
+      <AttentionList v-if="attention.items.length" :items="attention.items" :show-repo="false" :limit="6" />
+      <p v-else class="notice notice--ok">Nothing flagged: no critical or high findings, no vulnerable or conflicting dependencies, update automation in place, and indexed recently.</p>
+    </section>
 
     <section class="panel">
       <div class="panel__header">

@@ -100,6 +100,10 @@ On the **AI models** page you pick a **global** model, the fallback for everythi
 
 **Background reviews:** in a repository's auto-sync settings, turn on "AI-review new commits" and "AI-triage new findings". After each successful sync (manual or scheduled) CodeSynapse reviews the commits that arrived and triages security findings of medium severity or above that are new since the previous sync. Results appear as reviews waiting for your decisions.
 
+## What needs attention
+
+The **Overview** page ranks what to fix across your repositories, worst first: vulnerable dependencies your code calls, critical and high security findings, licence conflicts, private repositories that lost access, failing syncs, repositories no security check covers, stale indexes and missing Renovate or Dependabot. Every item explains why it matters and links to where it is fixed; each repository's Summary shows its own list. The **Dependencies** page of a repository lists every package with its licence, known vulnerabilities (and whether your code calls them) and update automation.
+
 ## Live statistics (by the minute and hour)
 
 The compose stack runs [VictoriaMetrics](https://victoriametrics.com/) (Apache-2.0). The API and MCP services push metrics to it every 15 seconds, and the **Statistics** page charts them per minute, 5 or 15 minutes, hour or 6 hours (`/stats?range=1h|6h|24h|7d|30d`):

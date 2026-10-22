@@ -14,12 +14,13 @@ const short = (p: string) => p.replace(/^.*?\/internal\//, 'internal/').replace(
 <template>
   <div class="stack">
     <PageHeader
-      eyebrow="Measurements" title="Metrics & benchmark"
-      lede="Computed from the full graph at ingest: size, complexity, test reachability, documentation, package coupling, and how many tokens the graph saves an agent."
-      :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Metrics' }]"
+      eyebrow="Code health" title="Quality"
+      lede="How big and how complex the code is, how much of it tests reach, how well it is documented, and how many tokens the graph saves an agent."
+      :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Code health' }]"
     >
       <span v-if="m" class="pill"><span class="dot dot--ok" />Computed {{ relTime(m.generated_at) }}</span>
     </PageHeader>
+    <CodeHealthTabs :repo="repo" />
 
     <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="m">

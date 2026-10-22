@@ -20,6 +20,11 @@ export interface GraphNodeData {
   bytes?: number
   severity?: string
   head?: string
+  version?: string
+  ecosystem?: string
+  license?: string
+  indirect?: boolean
+  dev?: boolean
 }
 export interface NodeRef { id: string; kind: string; name: string; location?: string; summary?: string; depth?: number }
 export interface Ranked { node: GraphNodeData; score: number }
@@ -284,3 +289,27 @@ export interface RepoGrant {
   created_at: string
 }
 export interface ReachView { org_id: string; org: string; graph: string; role: Role; via: string; shared: boolean }
+
+// GET /api/v1/attention: what needs attention, worst first.
+export type AttentionLevel = 'critical' | 'high' | 'medium' | 'low'
+export interface AttentionItem {
+  level: AttentionLevel
+  kind: 'security' | 'vulnerability' | 'licence' | 'access' | 'sync' | 'stale' | 'automation'
+  repo?: string
+  count?: number
+  title: string
+  detail: string
+  action: string
+  link: string
+}
+export interface Attention {
+  generated_at: string
+  items: AttentionItem[]
+  levels: Partial<Record<AttentionLevel, number>>
+  repos: number
+  clean: string[]
+  tokens_saved: number
+  findings: number
+  vulns: number
+  grades: Record<string, number>
+}
