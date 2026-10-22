@@ -25,6 +25,8 @@ export interface GraphNodeData {
   license?: string
   indirect?: boolean
   dev?: boolean
+  via?: string
+  roots?: number
 }
 export interface NodeRef { id: string; kind: string; name: string; location?: string; summary?: string; depth?: number }
 export interface Ranked { node: GraphNodeData; score: number }
@@ -86,7 +88,7 @@ export interface SecFinding {
 }
 export interface SecVuln {
   id: string; cve?: string[]; aliases?: string[]; summary: string; severity: string; cwe?: string[]
-  module: string; version: string; fixed?: string; reachability: 'called' | 'imported' | 'required'; url: string
+  module: string; version: string; via?: string; roots?: number; fixed?: string; reachability: 'called' | 'imported' | 'required'; url: string
   call_sites?: NodeRef[]; priority: number
 }
 export interface SecurityReport {

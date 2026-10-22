@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -80,6 +81,11 @@ func ManifestModules(root string) ([]Module, error) {
 			if prev, ok := seen[key]; ok {
 				// Shipped by any lockfile means shipped; keep a licence either one recorded.
 				prev.Dev = prev.Dev && m.Dev
+				for _, r := range m.Requires {
+					if !slices.Contains(prev.Requires, r) {
+						prev.Requires = append(prev.Requires, r)
+					}
+				}
 				if prev.License == "" {
 					prev.License, prev.LicenseSource = m.License, m.LicenseSource
 				}
@@ -88,6 +94,7 @@ func ManifestModules(root string) ([]Module, error) {
 					continue
 				}
 				m.Dev, m.License, m.LicenseSource = prev.Dev, cmp.Or(m.License, prev.License), cmp.Or(m.LicenseSource, prev.LicenseSource)
+				m.Requires = prev.Requires
 			}
 			if len(seen) >= maxModules {
 				return filepath.SkipAll
@@ -137,10 +144,12 @@ func parseNPMLock(data []byte, dir string) []Module {
 	var out []Module
 	for key, raw := range lock.Packages {
 		var p struct {
-			Version     string `json:"version"`
-			Link        bool   `json:"link"`
-			Dev         bool   `json:"dev"`
-			DevOptional bool   `json:"devOptional"`
+			Version              string            `json:"version"`
+			Link                 bool              `json:"link"`
+			Dev                  bool              `json:"dev"`
+			DevOptional          bool              `json:"devOptional"`
+			Dependencies         map[string]string `json:"dependencies"`
+			OptionalDependencies map[string]string `json:"optionalDependencies"`
 		}
 		i := strings.LastIndex(key, "node_modules/")
 		if key == "" || i < 0 || json.Unmarshal(raw, &p) != nil || p.Version == "" || p.Link {
@@ -148,7 +157,7 @@ func parseNPMLock(data []byte, dir string) []Module {
 		}
 		name := key[i+len("node_modules/"):]
 		m := Module{Path: name, Version: p.Version, Ecosystem: EcosystemNPM, Indirect: !direct[name] || strings.Count(key, "node_modules/") > 1,
-			Dev: p.Dev || p.DevOptional}
+			Dev: p.Dev || p.DevOptional, Requires: npmRequires(p.Dependencies, p.OptionalDependencies)}
 		if id := license.NPMField(raw); id != "" {
 			m.License, m.LicenseSource = id, "package-lock.json"
 		}
@@ -171,6 +180,20 @@ func parseNPMLock(data []byte, dir string) []Module {
 		}
 		walk(lock.Dependencies, false)
 	}
+	return out
+}
+
+// npmRequires turns the dependency maps of a lockfile entry into module keys.
+func npmRequires(maps ...map[string]string) []string {
+	var out []string
+	for _, deps := range maps {
+		for name := range deps {
+			if k := (Module{Path: name, Ecosystem: EcosystemNPM}).Key(); !slices.Contains(out, k) {
+				out = append(out, k)
+			}
+		}
+	}
+	slices.Sort(out)
 	return out
 }
 
@@ -256,8 +279,43 @@ func parseTOMLLock(data []byte, dir string) []Module {
 			continue
 		}
 		name := normalizePy(n[1])
-		out = append(out, Module{Path: name, Version: v[1], Ecosystem: EcosystemPyPI, Indirect: direct != nil && !direct[name]})
+		out = append(out, Module{Path: name, Version: v[1], Ecosystem: EcosystemPyPI, Indirect: direct != nil && !direct[name], Requires: tomlRequires(block)})
 	}
+	return out
+}
+
+var (
+	uvDeps       = regexp.MustCompile(`(?s)\ndependencies = \[(.*?)\n\]`)
+	uvDepName    = regexp.MustCompile(`\{\s*name\s*=\s*"([^"]+)"`)
+	poetryDeps   = regexp.MustCompile(`(?s)\[package\.dependencies\]\n(.*?)(?:\n\[|$)`)
+	poetryDepKey = regexp.MustCompile(`(?m)^([A-Za-z0-9][A-Za-z0-9._-]*)\s*=`)
+)
+
+// tomlRequires reads the runtime requirements of one [[package]] block: the
+// dependencies array of uv.lock or the [package.dependencies] table of
+// poetry.lock.
+func tomlRequires(block string) []string {
+	var names []string
+	if m := uvDeps.FindStringSubmatch(block); m != nil {
+		for _, d := range uvDepName.FindAllStringSubmatch(m[1], -1) {
+			names = append(names, d[1])
+		}
+	}
+	if m := poetryDeps.FindStringSubmatch(block); m != nil {
+		for _, d := range poetryDepKey.FindAllStringSubmatch(m[1], -1) {
+			names = append(names, d[1])
+		}
+	}
+	var out []string
+	for _, n := range names {
+		if n = normalizePy(n); n == "python" {
+			continue
+		}
+		if k := (Module{Path: n, Ecosystem: EcosystemPyPI}).Key(); !slices.Contains(out, k) {
+			out = append(out, k)
+		}
+	}
+	slices.Sort(out)
 	return out
 }
 
