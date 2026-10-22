@@ -164,3 +164,21 @@ func TestShortName(t *testing.T) {
 	assert.Equal(t, shortName("github.com/x/y/internal/store.newID"), "store.newID")
 	assert.Equal(t, shortName("app.Handler"), "app.Handler")
 }
+
+func TestUpgradeStepSaysWhenNoFixIsListed(t *testing.T) {
+	p := Build(Inputs{Repo: "r", Vulns: []security.Vulnerability{
+		{ID: "GHSA-9", Severity: "high", Module: "braces", Version: "3.0.3", Reachability: "required"},
+		{ID: "GHSA-8", Severity: "high", Module: "forge", Version: "1.4.0", Fixed: "1.5.0", Reachability: "required"},
+	}})
+	byTitle := map[string]Step{}
+	for _, s := range p.Steps {
+		byTitle[s.Title] = s
+	}
+	none, ok := byTitle["Look into 1 advisory in braces (no fixed version listed yet)"]
+	require.True(t, ok, "%v", byTitle)
+	assert.Contains(t, none.Why, "no fixed version is listed yet")
+	assert.False(t, strings.Contains(none.Why, "a fixed version"))
+	fixed, ok := byTitle["Upgrade forge to fix 1 advisory"]
+	require.True(t, ok)
+	assert.Contains(t, fixed.Why, "the fix is in 1.5.0")
+}

@@ -157,9 +157,12 @@ func suggest(groups []CrossGroup) []Suggestion {
 		areas := map[string]int{}
 		for _, g := range gs {
 			redundant += g.Redundant
+			// A group stands for one area: the package most of its copies are in.
+			groupAreas := map[string]int{}
 			for _, m := range g.Members {
-				areas[path.Base(m.Package)]++
+				groupAreas[path.Base(m.Package)]++
 			}
+			areas[topArea(groupAreas)]++
 		}
 		if len(gs) < suggestMinGroups && redundant < suggestMinRedundant {
 			continue
@@ -171,8 +174,12 @@ func suggest(groups []CrossGroup) []Suggestion {
 		for _, g := range gs[:min(len(gs), maxCandidates)] {
 			s.Candidates = append(s.Candidates, g.Members[0].Name)
 		}
-		s.Rationale = fmt.Sprintf("%d functions (%d redundant lines) are copied between %s. Move one maintained copy into a shared %s (for example %q) that each of them imports, instead of fixing every copy.",
-			len(gs), redundant, strings.Join(s.Repos, ", "), s.Kind, s.Name)
+		what, verb := fmt.Sprintf("%d functions", len(gs)), "are"
+		if len(gs) == 1 {
+			what, verb = "1 function", "is"
+		}
+		s.Rationale = fmt.Sprintf("%s (%d redundant lines) %s copied between %s. Move one maintained copy into a shared %s (for example %q) that each of them imports, instead of fixing every copy.",
+			what, redundant, verb, strings.Join(s.Repos, ", "), s.Kind, s.Name)
 		out = append(out, s)
 	}
 	slices.SortFunc(out, func(a, b Suggestion) int {

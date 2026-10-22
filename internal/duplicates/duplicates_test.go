@@ -239,3 +239,21 @@ func TestLookup(t *testing.T) {
 	assert.Equal(t, near.Others[0].ID, "a")
 	assert.True(t, rep.Lookup("zzz") == nil)
 }
+
+func TestAcrossOneGroupInManyPackagesIsALibrary(t *testing.T) {
+	// One function copied into four packages of three repositories is one
+	// area of work, not a framework.
+	mk := func(repo, pkg string) Report {
+		g := model.NewGraph()
+		n := fn(repo, "x/"+pkg, pkg+"/p.go", "Join", "same", 60)
+		n.CloneSig = Sig(toks(100, 0, 0))
+		g.AddNode(n)
+		return Analyze(g)
+	}
+	got := Across(map[string]Report{"a": mk("a", "config"), "b": mk("b", "hypervisor"), "c": mk("c", "api")})
+	require.Len(t, got.Suggestions, 1)
+	s := got.Suggestions[0]
+	assert.Equal(t, s.Kind, "library")
+	assert.Equal(t, s.Groups, 1)
+	assert.Contains(t, s.Rationale, "1 function (120 redundant lines) is copied", "singular grammar")
+}
