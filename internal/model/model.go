@@ -41,6 +41,12 @@ const (
 	KindTemplate NodeKind = "Template"
 	// KindTemplateDef is a {{define "name"}} block.
 	KindTemplateDef NodeKind = "TemplateDef"
+	// KindRecord is an architecture record kept as a file in the repository:
+	// an ADR, RFC, standard, policy, overview, runbook or diagram. Only its
+	// metadata and location are stored, not its text.
+	KindRecord NodeKind = "Record"
+	// KindComponent is a part of the system that records apply to.
+	KindComponent NodeKind = "Component"
 )
 
 // AllNodeKinds lists every valid node kind. Stores use it as the allowlist
@@ -49,7 +55,7 @@ var AllNodeKinds = []NodeKind{
 	KindRepository, KindPackage, KindFile, KindFunction, KindMethod,
 	KindInterfaceMethod, KindType, KindExternal, KindDocument, KindSection,
 	KindCommit, KindAuthor, KindFinding, KindModule, KindVulnerability,
-	KindConfig, KindConfigEntry, KindTemplate, KindTemplateDef,
+	KindConfig, KindConfigEntry, KindTemplate, KindTemplateDef, KindRecord, KindComponent,
 	KindOrganization, KindUser, KindTeam, KindAccessRepository,
 }
 
@@ -104,12 +110,26 @@ const (
 	EdgeReferences EdgeKind = "REFERENCES"
 )
 
+// Architecture catalog edges.
+const (
+	// EdgeSupersedes links a Record to the older Record it replaces.
+	EdgeSupersedes EdgeKind = "SUPERSEDES"
+	// EdgeAppliesTo links a Record to a Component it governs.
+	EdgeAppliesTo EdgeKind = "APPLIES_TO"
+	// EdgeImplementsDecision links code (a symbol, file or package) to the
+	// Record whose decision it carries out.
+	EdgeImplementsDecision EdgeKind = "IMPLEMENTS_DECISION"
+	// EdgeRelatesTo links two Records that refer to each other.
+	EdgeRelatesTo EdgeKind = "RELATES_TO"
+)
+
 // AllEdgeKinds lists every valid edge kind (the relationship-type allowlist).
 var AllEdgeKinds = []EdgeKind{
 	EdgeContains, EdgeDefines, EdgeHasMethod, EdgeCalls, EdgeDispatchesTo,
 	EdgeImplements, EdgeImports, EdgeMentions, EdgeModifies, EdgeAuthored,
 	EdgeHasFinding, EdgeDependsOn, EdgeAffects, EdgeIncludes, EdgeUsesValue, EdgeReferences,
 	EdgeMemberOf, EdgeBelongsTo, EdgeHasAccess,
+	EdgeSupersedes, EdgeAppliesTo, EdgeImplementsDecision, EdgeRelatesTo,
 }
 
 // Valid reports whether k is a known edge kind.
@@ -212,6 +232,13 @@ type Node struct {
 	// declared dependencies lead to it.
 	Via   string `json:"via,omitempty"`
 	Roots int    `json:"roots,omitempty"`
+	// DocType and Status describe a Record: its kind (adr, rfc, standard,
+	// policy, overview, runbook, diagram) and its lifecycle state in the
+	// canonical words of that kind. Meta is the JSON of the rest (owner, topic,
+	// labels, components, references and what could not be resolved).
+	DocType string `json:"doc_type,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Meta    string `json:"-"`
 	// Dev marks Modules used only to develop or build (npm devDependencies,
 	// Pipfile develop), which are normally not shipped.
 	Dev bool `json:"dev,omitempty"`

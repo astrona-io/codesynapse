@@ -1,0 +1,81 @@
+# Architecture catalog
+
+Decisions, standards and designs usually live in files next to the code. CodeSynapse indexes them on every sync, so people and coding agents can ask "what did we decide, is it still true, and which code carries it out?" and get an answer that says which record is a rule and which is only a proposal.
+
+## What is a record
+
+Markdown files (and `.mmd`, `.puml`, `.d2`, `.drawio` diagrams) in the usual places become records:
+
+| Where | Type |
+|---|---|
+| `adr/`, `adrs/`, `docs/adr/`, `decisions/` | `adr` |
+| `rfc/`, `rfcs/`, `proposals/` | `rfc` |
+| `standards/` | `standard` |
+| `policies/`, `policy/` | `policy` |
+| `runbooks/`, `playbooks/` | `runbook` |
+| `architecture/`, `ARCHITECTURE.md` | `overview` |
+| diagrams under `architecture/`, `diagrams/` | `diagram` |
+
+A `type:` in the front matter places any Markdown file elsewhere. `README`, `index` and template files are not records.
+
+## Writing one
+
+Metadata goes in YAML front matter. The formats people already use are read too: `- Status: accepted` bullets under the title and a `## Status` section.
+
+```markdown
+---
+id: ADR-0007            # optional: the number in the file name gives ADR-0007 anyway
+status: accepted
+owner: Platform team
+components: [api, store]
+labels: [security]
+topic: storage          # what the record decides
+supersedes: ADR-0002
+implements: [internal/store, store.Reader, services/api/internal/api]
+relates: [0003-cache.md]
+conflicts-with: [ADR-0011]
+---
+# Use PostgreSQL for accounts
+```
+
+`implements` names the code that carries the decision out: a file, a directory (its packages), a package path or suffix, or a symbol by qualified or short name. A name that matches several symbols links nothing and is reported as ambiguous.
+
+Only a short redacted summary of the text is stored. The text stays in the file; the catalog gives the lines to read, the content fingerprint and the commit it was indexed at.
+
+## Lifecycle: what binds
+
+Each type has its own statuses, and words are mapped onto them (approved is accepted, in review is in-review):
+
+| Type | Statuses |
+|---|---|
+| ADR | proposed, accepted, rejected, deprecated, superseded |
+| RFC | draft, in-review, accepted, rejected, withdrawn, implemented, superseded |
+| Standard, policy | draft, active, deprecated, retired, superseded |
+| Overview, runbook, diagram | draft, current, outdated, retired (current when nothing is said) |
+
+A status that does not belong to the type, or none, is `unknown` and is reported.
+
+**Only an accepted ADR, or an active standard or policy that nothing has replaced, is a rule.** Drafts, proposals, rejected, deprecated and superseded records, RFCs, overviews, runbooks and diagrams inform and are never presented as requirements. A record that an accepted record supersedes is not binding even if its own status was never updated; that mismatch is reported.
+
+## Things for a person to look at
+
+The catalog reports and never decides:
+
+- a reference that matches no record or no code;
+- a record replaced by another but not marked superseded, and a superseded record that names no successor;
+- a replacement that is itself only proposed, so nothing is in force;
+- supersession cycles;
+- two rules in force for the same topic and component, and records that declare `conflicts-with`;
+- statuses that are missing or unknown.
+
+## Where
+
+- **Web**: the **Architecture** page of each repository (filters, rules in force, problems) and a detail page for each record: lifecycle, supersession chain, code that carries it out, code its text mentions, sections with line ranges, related records and recent commits.
+- **MCP**: `architecture_search`, `architecture_get`, `architecture_context` (give files, symbols, components and the task; rules in force come apart from background, with the problems found) and `architecture_issues`. Agents are told to read this before designing or changing code and to report conflicts instead of resolving them.
+- **API**: `GET /api/v1/repos/{repo}/architecture` (also `/record?id=`, `/issues`, `/context`).
+
+All of them go through one service on a reader fenced to the repository the caller may read, so search, relationships and summaries cannot show another repository's records.
+
+## Not in this version
+
+Creating proposals and links from the UI or by agents, annotations, code identity across renames, reuse records, dependency replacement analysis and the unified search are the next steps of the same plan (`docs/ARCHITECTURE_CATALOG_PLAN.md`).
