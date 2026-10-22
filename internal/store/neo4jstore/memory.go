@@ -8,6 +8,7 @@ import (
 
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/internal/store/nodeprops"
 )
 
 // Agent memory lives in :MemoryEntity nodes joined by :FACT relationships.
@@ -219,7 +220,7 @@ func toEntity(rec *neo4j.Record) memory.Entity {
 	m, _ := rec.AsMap()["e"].(map[string]any)
 	s := func(k string) string { v, _ := m[k].(string); return v }
 	e := memory.Entity{ID: s("id"), Repo: s("repo"), Name: s("name"), Type: s("type"), CreatedAt: s("created_at"), UpdatedAt: s("updated_at")}
-	e.Aliases = strs(m["aliases"])
+	e.Aliases = nodeprops.Strs(m["aliases"])
 	return e
 }
 

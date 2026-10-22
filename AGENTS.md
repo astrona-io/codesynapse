@@ -56,7 +56,9 @@ internal/metrics/       Repository metrics and the token benchmark (computed at 
 internal/forge/         Organisation listing for GitHub, Forgejo/Gitea and GitLab (one host per client) for the Organisations feature
 internal/gitx/          Hardened git runner, diff/log parsers, clone/fetch with SSRF checks
 internal/redact/        Secret redaction for every stored summary
-internal/store/         Store interface; memory/ and neo4jstore/ implementations; storetest/ contract
+internal/store/         Store interface; memory/, neo4jstore/ and hugegraphstore/ implementations; storetest/ contract;
+                        nodeprops/ (node <-> property map, shared); StatsBuilder (shared Stats rules)
+internal/vector/        Memory-embedding index: Flat (in-process), milvus/ (Milvus REST v2); vectortest/ contract
 internal/query/         Composed answers (Outline, Hotspots, Overview, Tests)
 internal/agentctx/      Composite agent answers: get_symbol_context, get_call_graph, get_implementations,
                         get_pr_context, minimal_context; qualified_id resolution and suggestions
@@ -117,9 +119,9 @@ Rules are static files: `rules/code/<id>.yaml` and `rules/config/<id>.yaml` (see
 
 ## Changing the graph schema
 
-1. Add the kind to `internal/model/model.go` and to `AllNodeKinds`/`AllEdgeKinds`. Those lists are the label allowlist for Cypher.
-2. New node fields need entries in `neo4jstore/props.go` (both directions) and `TestPropsRoundTrip`.
-3. New `store.Reader` methods must be implemented in `memory` and `neo4jstore` and covered in `storetest.Run`. The two stores must behave identically; the contract test is how we know.
+1. Add the kind to `internal/model/model.go` and to `AllNodeKinds`/`AllEdgeKinds`. Those lists are the label allowlist for Cypher and Gremlin.
+2. New node fields need entries in `internal/store/nodeprops` (both directions, `TestPropsRoundTrip`) and a type in `hugegraphstore/schema.go` (`TestSchemaCoversNodeProps` fails otherwise). `EnsureSchema` appends new HugeGraph properties to existing labels.
+3. New `store.Reader` methods must be implemented in `memory`, `neo4jstore` and `hugegraphstore` and covered in `storetest.Run`. The stores must behave identically; the contract test (`just test-integration`, `just test-hugegraph`) and `TestParityWithReference` are how we know.
 4. Update `docs/PLAN.md` (schema section) and `services/web/app/utils/types.ts` if the API shape changes.
 
 ## Security rules (non-negotiable)
@@ -127,6 +129,8 @@ Rules are static files: `rules/code/<id>.yaml` and `rules/config/<id>.yaml` (see
 This tool reads untrusted repositories and serves their contents to LLMs. Keep it that way:
 
 - **Cypher:** values only through parameters. Labels, relationship types, depth and ORDER BY may be interpolated only from `model` allowlists, `store.ClampDepth`, or the `metricCypher` table. Never build Cypher from request strings.
+- **Gremlin (HugeGraph):** scripts are constants in `hugegraphstore`; values, labels and IDs travel only in `bindings`, never in script text. Gremlin-groovy executes code on the server, so HugeGraph always runs with a password (`HUGEGRAPH_PASSWORD`; the compose service refuses to start without one), is never published to the host, and there is no raw-Gremlin tool. Tenant-owned data (agent memory) carries `tenant_id` and every traversal over it starts at `has('tenant_id', …).has('ns', …)`.
+- **Vectors (Milvus):** filters are expression templates with values in `exprParams`, never in the expression. Every item carries its tenant (`tenant_id` is the partition key), every search names one (`vector.ErrNoTenant` otherwise), and `vector.Isolate` drops any hit of another tenant or namespace even if the backend's filter was wrong. Only entity names are embedded, by a local model.
 - **git:** only through `gitx.Run`. It disables fsmonitor, hooks, external diff and textconv, ignores global config, and never uses a shell. Validate user revisions with `gitx.ValidateRev`.
 - **go list:** extraction runs with `CGO_ENABLED=0`, `GOTOOLCHAIN=local`, `GOPROXY=off` unless the user opts into network. Do not loosen these defaults.
 - **Filesystem:** API ingest is confined to `CODESYNAPSE_SOURCES_ROOT` after symlink resolution (`insideSources`). Docs walking never follows symlinks.

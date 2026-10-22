@@ -10,13 +10,17 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/pflag"
 
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/internal/store/hugegraphstore"
 	"github.com/parisnakitakejser/codesynapse/internal/store/neo4jstore"
+	"github.com/parisnakitakejser/codesynapse/internal/vector"
+	"github.com/parisnakitakejser/codesynapse/internal/vector/milvus"
 )
 
 // Environment variables. The password is only read from the environment so
@@ -26,13 +30,32 @@ const (
 	EnvNeo4jUser     = "CODESYNAPSE_NEO4J_USER"
 	EnvNeo4jPassword = "CODESYNAPSE_NEO4J_PASSWORD" //nolint:gosec // env var name, not a credential
 	EnvNeo4jDatabase = "CODESYNAPSE_NEO4J_DATABASE"
+
+	// EnvGraphBackend picks the graph database: neo4j (default) or hugegraph.
+	EnvGraphBackend      = "CODESYNAPSE_GRAPH_BACKEND"
+	EnvHugeGraphURL      = "CODESYNAPSE_HUGEGRAPH_URL"
+	EnvHugeGraphGraph    = "CODESYNAPSE_HUGEGRAPH_GRAPH"
+	EnvHugeGraphUser     = "CODESYNAPSE_HUGEGRAPH_USER"
+	EnvHugeGraphPassword = "CODESYNAPSE_HUGEGRAPH_PASSWORD" //nolint:gosec // env var name, not a credential
+	// EnvHugeGraphMaxRequest is the server's Gremlin maxContentLength in
+	// bytes (default 60000, under HugeGraph's 65536).
+	EnvHugeGraphMaxRequest = "CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES"
+	// EnvMilvusURL turns on Milvus for agent-memory vectors with HugeGraph.
+	EnvMilvusURL   = "CODESYNAPSE_MILVUS_URL"
+	EnvMilvusToken = "CODESYNAPSE_MILVUS_TOKEN" //nolint:gosec // env var name, not a credential
 )
 
-// Neo4jFlags are the connection settings shared by all binaries.
+// Neo4jFlags are the store settings shared by all binaries. Despite the
+// name they also select HugeGraph (with Milvus for vectors).
 type Neo4jFlags struct {
 	URI      string
 	User     string
 	Database string
+
+	Backend        string
+	HugeGraphURL   string
+	HugeGraphGraph string
+	MilvusURL      string
 }
 
 // AddFlags registers the flags on fs with environment-derived defaults.
@@ -40,10 +63,21 @@ func (f *Neo4jFlags) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&f.URI, "neo4j-uri", Getenv(EnvNeo4jURI, "neo4j://localhost:7687"), "Neo4j URI (env "+EnvNeo4jURI+")")
 	fs.StringVar(&f.User, "neo4j-user", Getenv(EnvNeo4jUser, "neo4j"), "Neo4j user (env "+EnvNeo4jUser+")")
 	fs.StringVar(&f.Database, "neo4j-database", Getenv(EnvNeo4jDatabase, "neo4j"), "Neo4j database (env "+EnvNeo4jDatabase+")")
+	fs.StringVar(&f.Backend, "graph-backend", Getenv(EnvGraphBackend, "neo4j"), "Graph database: neo4j or hugegraph (env "+EnvGraphBackend+")")
+	fs.StringVar(&f.HugeGraphURL, "hugegraph-url", Getenv(EnvHugeGraphURL, "http://localhost:8180"), "HugeGraph server URL (env "+EnvHugeGraphURL+"; user and password from "+EnvHugeGraphUser+"/"+EnvHugeGraphPassword+")")
+	fs.StringVar(&f.HugeGraphGraph, "hugegraph-graph", Getenv(EnvHugeGraphGraph, "hugegraph"), "HugeGraph graph name (env "+EnvHugeGraphGraph+")")
+	fs.StringVar(&f.MilvusURL, "milvus-url", Getenv(EnvMilvusURL, ""), "Milvus REST URL for agent-memory vectors with HugeGraph, e.g. http://milvus:19530 (env "+EnvMilvusURL+"; token from "+EnvMilvusToken+")")
 }
 
-// Open connects to Neo4j.
+// Open connects to the selected graph database.
 func (f *Neo4jFlags) Open(ctx context.Context) (store.Store, error) {
+	switch f.Backend {
+	case "", "neo4j":
+	case "hugegraph":
+		return f.openHugeGraph(ctx)
+	default:
+		return nil, fmt.Errorf("unknown graph backend %q (%s is not set to neo4j or hugegraph)", f.Backend, EnvGraphBackend)
+	}
 	pw := os.Getenv(EnvNeo4jPassword)
 	if pw == "" {
 		return nil, fmt.Errorf("%s is not set", EnvNeo4jPassword)
@@ -51,6 +85,29 @@ func (f *Neo4jFlags) Open(ctx context.Context) (store.Store, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	return neo4jstore.New(ctx, neo4jstore.Config{URI: f.URI, User: f.User, Password: pw, Database: f.Database})
+}
+
+func (f *Neo4jFlags) openHugeGraph(ctx context.Context) (store.Store, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	maxRequest, err := strconv.Atoi(Getenv(EnvHugeGraphMaxRequest, "0"))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", EnvHugeGraphMaxRequest, err)
+	}
+	var vec vector.Index
+	if f.MilvusURL != "" {
+		mx, err := milvus.New(ctx, milvus.Config{URL: f.MilvusURL, Token: os.Getenv(EnvMilvusToken)})
+		if err != nil {
+			return nil, err
+		}
+		vec = mx
+	}
+	s, err := hugegraphstore.New(ctx, hugegraphstore.Config{URL: f.HugeGraphURL, Graph: f.HugeGraphGraph,
+		User: os.Getenv(EnvHugeGraphUser), Password: os.Getenv(EnvHugeGraphPassword), Vectors: vec, MaxRequestBytes: maxRequest})
+	if err != nil && vec != nil {
+		_ = vec.Close(ctx) //nolint:errcheck // the connection error is the one worth returning
+	}
+	return s, err
 }
 
 // OpenWithRetry retries Open until it succeeds or ctx ends. Services use it

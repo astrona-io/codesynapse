@@ -125,61 +125,16 @@ func (s *Store) Stats(_ context.Context, repo string) (model.Stats, error) {
 	if err != nil {
 		return model.Stats{}, err
 	}
-	st := model.Stats{Repo: repo, Nodes: map[model.NodeKind]int{}, Edges: map[model.EdgeKind]int{}, SecurityTags: map[string]int{}, Formats: map[string]int{}}
-	var complexitySum, callables int
-	charts := map[string]bool{}
+	b := store.NewStatsBuilder(repo)
 	for _, n := range rg.nodes {
-		st.Nodes[n.Kind]++
-		accumulate(&st, n, &complexitySum, &callables)
-		if f := model.FileFormat(n.Kind, n.Language, n.Package != ""); f != "" {
-			st.Formats[f]++
-		}
-		if n.Kind == model.KindTemplate && n.Package != "" {
-			charts[n.Package] = true
-		}
-		if model.IsK8sResource(n) {
-			st.K8sResources++
-		}
+		b.Add(n, 1)
 	}
-	st.HelmCharts = len(charts)
 	for _, edges := range rg.out {
 		for _, e := range edges {
-			st.Edges[e.Kind]++
+			b.AddEdges(e.Kind, 1)
 		}
 	}
-	if callables > 0 {
-		st.AvgComplexity = float64(complexitySum) / float64(callables)
-	}
-	return st, nil
-}
-
-// accumulate applies the per-node Stats rules shared with the Neo4j store's
-// Cypher aggregation.
-func accumulate(st *model.Stats, n model.Node, complexitySum, callables *int) {
-	switch n.Kind {
-	case model.KindFile:
-		st.TotalLOC += n.LOC
-	case model.KindFunction, model.KindMethod:
-		if n.IsTest {
-			st.Tests++
-			return
-		}
-		*complexitySum += n.Complexity
-		*callables++
-		for _, t := range n.SecurityTags {
-			st.SecurityTags[t]++
-		}
-	}
-	if isSymbol(n.Kind) && n.Exported && !n.IsTest {
-		st.Exported++
-		if n.Summary != "" {
-			st.Documented++
-		}
-	}
-}
-
-func isSymbol(k model.NodeKind) bool {
-	return k == model.KindFunction || k == model.KindMethod || k == model.KindType
+	return b.Stats(), nil
 }
 
 // Node implements store.Reader.

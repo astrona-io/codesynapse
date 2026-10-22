@@ -6,6 +6,8 @@ import (
 	"slices"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/parisnakitakejser/codesynapse/internal/memory"
 )
 
 // Caller is who a tool call acts for when it came with a personal API key:
@@ -87,7 +89,7 @@ func (h *handlers) sees(ctx context.Context, graph string) (bool, error) {
 // sharing a graph keep separate memories.
 func memRepo(ctx context.Context, graph string) string {
 	if c := callerFrom(ctx); c != nil {
-		return c.OrgID + "|" + graph
+		return memory.Namespace(c.OrgID, graph)
 	}
 	return graph
 }

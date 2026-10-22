@@ -1,10 +1,20 @@
-package neo4jstore
+// Package nodeprops maps graph nodes to the flat property maps the graph
+// databases store, shared by every store so a new node field cannot be
+// saved by one and lost by another.
+package nodeprops
 
-import "github.com/parisnakitakejser/codesynapse/internal/model"
+import (
+	"encoding/json"
 
-// toProps converts a node to Neo4j properties. Zero values are omitted so
-// nodes stay small; fromProps restores them as zero values.
-func toProps(n model.Node) map[string]any {
+	"github.com/parisnakitakejser/codesynapse/internal/model"
+)
+
+// Lists are the properties holding string lists.
+var Lists = []string{"cwe", "aliases", "security_tags"}
+
+// To converts a node to properties. Zero values are omitted so nodes stay
+// small; From restores them as zero values.
+func To(n model.Node) map[string]any {
 	p := map[string]any{"id": n.ID, "kind": string(n.Kind), "repo": n.Repo, "name": n.Name}
 	setStr := func(k, v string) {
 		if v != "" {
@@ -69,9 +79,11 @@ func toProps(n model.Node) map[string]any {
 	return p
 }
 
-func fromProps(p map[string]any) model.Node {
+// From restores a node. Integers may arrive as int64 (Neo4j), float64 or
+// json.Number (JSON), lists as []any or []string.
+func From(p map[string]any) model.Node {
 	s := func(k string) string { v, _ := p[k].(string); return v }
-	i := func(k string) int { v, _ := p[k].(int64); return int(v) }
+	i := func(k string) int { return Int(p[k]) }
 	b := func(k string) bool { v, _ := p[k].(bool); return v }
 	n := model.Node{
 		ID: s("id"), Kind: model.NodeKind(s("kind")), Repo: s("repo"), Name: s("name"),
@@ -85,14 +97,33 @@ func fromProps(p map[string]any) model.Node {
 		Reachability: s("reachability"), URL: s("url"), Indirect: b("indirect"),
 		Liveness: s("liveness"), Cleanup: s("cleanup"), Licenses: s("licenses"), Coverage: s("coverage"), Language: s("language"), Ecosystem: s("ecosystem"),
 		License: s("license"), LicenseSource: s("license_source"), Dev: b("dev"),
-		CWE: strs(p["cwe"]), Aliases: strs(p["aliases"]),
+		CWE: Strs(p["cwe"]), Aliases: Strs(p["aliases"]),
 	}
-	n.SecurityTags = strs(p["security_tags"])
+	n.SecurityTags = Strs(p["security_tags"])
 	return n
 }
 
-// strs converts a Neo4j list property to []string (nil when absent).
-func strs(v any) []string {
+// Int reads an integer property in any of the forms the drivers return.
+func Int(v any) int {
+	switch n := v.(type) {
+	case int64:
+		return int(n)
+	case int:
+		return n
+	case float64:
+		return int(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	}
+	return 0
+}
+
+// Strs converts a list property to []string (nil when absent).
+func Strs(v any) []string {
+	if ss, ok := v.([]string); ok && len(ss) > 0 {
+		return ss
+	}
 	list, ok := v.([]any)
 	if !ok {
 		return nil

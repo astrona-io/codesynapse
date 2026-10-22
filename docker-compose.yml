@@ -1,4 +1,4 @@
-# Local stack: Neo4j + API + MCP + web dashboard.
+# Local stack: Neo4j (or HugeGraph + Milvus) + PostgreSQL + API + MCP + web dashboard.
 #   cp .env.example .env   # set passwords/tokens
 #   just up                # or: docker compose up -d --build
 # Repositories to index live under ${SOURCES_DIR} (default ./sources) and are
@@ -23,6 +23,47 @@ services:
       timeout: 5s
       retries: 20
 
+  # Optional graph backend (COMPOSE_PROFILES=hugegraph and
+  # CODESYNAPSE_GRAPH_BACKEND=hugegraph). Gremlin runs Groovy on the server,
+  # so HugeGraph always has a password and is never published to the host.
+  hugegraph:
+    image: docker.io/hugegraph/hugegraph:1.5.0
+    profiles: [hugegraph]
+    # Without a password the image would start in no-auth mode: refuse instead.
+    # Requests may carry a whole review: Gremlin's 64 KB limit becomes 16 MB.
+    entrypoint: ["sh", "-c", "[ -n \"$$PASSWORD\" ] || { echo 'HUGEGRAPH_PASSWORD is not set; run just init' >&2; exit 1; }; sed -i 's/^maxContentLength: .*/maxContentLength: 16777216/' conf/gremlin-server.yaml && exec ./docker-entrypoint.sh"]
+    environment:
+      PASSWORD: ${HUGEGRAPH_PASSWORD:-}
+    volumes:
+      - hugegraph-data:/hugegraph-server/rocksdb-data
+      - hugegraph-init:/hugegraph-server/docker
+    healthcheck:
+      # REST answers before the Gremlin server behind it: probe a real query.
+      test: ["CMD-SHELL", "curl -sf -u admin:\"$$PASSWORD\" -X POST http://127.0.0.1:8080/gremlin -H 'Content-Type: application/json' -d '{\"gremlin\":\"1\"}' >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # Agent-memory vectors for the HugeGraph backend (standalone, embedded etcd,
+  # local storage). Internal network only.
+  milvus:
+    image: docker.io/milvusdb/milvus:v2.6.4
+    profiles: [hugegraph]
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_USE_EMBED: "true"
+      ETCD_DATA_DIR: /var/lib/milvus/etcd
+      COMMON_STORAGETYPE: local
+      DEPLOY_MODE: STANDALONE
+    volumes:
+      - milvus-data:/var/lib/milvus
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
   # Users, organisations, API keys and the audit log.
   postgres:
     image: docker.io/library/postgres:17-alpine
@@ -45,6 +86,12 @@ services:
     environment:
       CODESYNAPSE_NEO4J_URI: neo4j://neo4j:7687
       CODESYNAPSE_NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      CODESYNAPSE_GRAPH_BACKEND: ${CODESYNAPSE_GRAPH_BACKEND:-neo4j}
+      CODESYNAPSE_HUGEGRAPH_URL: http://hugegraph:8080
+      CODESYNAPSE_HUGEGRAPH_USER: admin
+      CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_PASSWORD:-}
+      CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES: "8388608"
+      CODESYNAPSE_MILVUS_URL: http://milvus:19530
       CODESYNAPSE_API_TOKEN: ${CODESYNAPSE_API_TOKEN:?set CODESYNAPSE_API_TOKEN in .env}
       # Accounts: users, organisations, API keys and the audit log.
       CODESYNAPSE_DATABASE_URL: postgres://codesynapse:${POSTGRES_PASSWORD}@postgres:5432/codesynapse?sslmode=disable
@@ -101,6 +148,12 @@ services:
     depends_on:
       neo4j:
         condition: service_healthy
+      hugegraph:
+        condition: service_healthy
+        required: false
+      milvus:
+        condition: service_healthy
+        required: false
       postgres:
         condition: service_healthy
 
@@ -111,6 +164,12 @@ services:
     environment:
       CODESYNAPSE_NEO4J_URI: neo4j://neo4j:7687
       CODESYNAPSE_NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      CODESYNAPSE_GRAPH_BACKEND: ${CODESYNAPSE_GRAPH_BACKEND:-neo4j}
+      CODESYNAPSE_HUGEGRAPH_URL: http://hugegraph:8080
+      CODESYNAPSE_HUGEGRAPH_USER: admin
+      CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_PASSWORD:-}
+      CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES: "8388608"
+      CODESYNAPSE_MILVUS_URL: http://milvus:19530
       CODESYNAPSE_MCP_TOKEN: ${CODESYNAPSE_MCP_TOKEN:?set CODESYNAPSE_MCP_TOKEN in .env}
       # Personal API keys (csk_...) scope every tool to the key's organisation.
       # The API owns and migrates this database.
@@ -141,6 +200,12 @@ services:
     depends_on:
       neo4j:
         condition: service_healthy
+      hugegraph:
+        condition: service_healthy
+        required: false
+      milvus:
+        condition: service_healthy
+        required: false
       postgres:
         condition: service_healthy
 
@@ -167,6 +232,9 @@ services:
         condition: service_healthy
 
 volumes:
+  hugegraph-data:
+  hugegraph-init:
+  milvus-data:
   postgres-data:
   neo4j-data:
   workspace:

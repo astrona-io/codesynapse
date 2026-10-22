@@ -23,12 +23,17 @@ init:
             printf '\n# PostgreSQL for users, organisations, API keys and the audit log.\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
             echo "added POSTGRES_PASSWORD to .env"
         fi
+        if ! grep -q '^HUGEGRAPH_PASSWORD=' .env; then
+            printf '\n# HugeGraph admin password (only used with CODESYNAPSE_GRAPH_BACKEND=hugegraph).\nHUGEGRAPH_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
+            echo "added HUGEGRAPH_PASSWORD to .env"
+        fi
         exit 0
     fi
     sed -e "s/change-me-please/$(openssl rand -hex 24)/" \
         -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" \
-        -e "s/change-me-postgres/$(openssl rand -hex 24)/" .env.example > .env
+        -e "s/change-me-postgres/$(openssl rand -hex 24)/" \
+        -e "s/change-me-hugegraph/$(openssl rand -hex 24)/" .env.example > .env
     mkdir -p sources
     [ -f sources/go.mod ] || printf "module sources\n" > sources/go.mod
     echo "wrote .env; put repositories (or symlink-free clones) under ./sources"
@@ -216,6 +221,23 @@ test-postgres: _runtime
     until {{engine}} exec "$name" pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
     sleep 1
     CODESYNAPSE_TEST_DATABASE_URL="postgres://postgres:$pw@127.0.0.1:55432/cs?sslmode=disable" go test -race -count=1 ./internal/accounts/...
+
+# Store contract and parity checks against throwaway HugeGraph and Milvus containers
+test-hugegraph: _runtime
+    #!/usr/bin/env sh
+    set -eu
+    hg="codesynapse-hg-test-$$"; mv="codesynapse-milvus-test-$$"
+    {{engine}} run --rm -d --name "$hg" -p 127.0.0.1:58080:8080 docker.io/hugegraph/hugegraph:1.5.0 >/dev/null
+    {{engine}} run --rm -d --name "$mv" -p 127.0.0.1:59530:19530 -e ETCD_USE_EMBED=true -e ETCD_DATA_DIR=/var/lib/milvus/etcd \
+        -e COMMON_STORAGETYPE=local -e DEPLOY_MODE=STANDALONE docker.io/milvusdb/milvus:v2.6.4 milvus run standalone >/dev/null
+    trap '{{engine}} stop "$hg" "$mv" >/dev/null 2>&1' EXIT
+    # REST answers before the Gremlin server behind it: wait for a real query.
+    until curl -sf -X POST http://127.0.0.1:58080/gremlin -H 'Content-Type: application/json' -d '{"gremlin":"1"}' >/dev/null 2>&1; do sleep 2; done
+    until {{engine}} exec "$mv" curl -sf http://127.0.0.1:9091/healthz >/dev/null 2>&1; do sleep 2; done
+    export CODESYNAPSE_TEST_HUGEGRAPH_URL=http://127.0.0.1:58080 CODESYNAPSE_TEST_MILVUS_URL=http://127.0.0.1:59530
+    go test -race -count=1 ./internal/store/hugegraphstore/... ./internal/vector/...
+    # The parity check indexes this repository; go/packages races under -race.
+    go test -count=1 -run TestParityWithReference ./internal/store/hugegraphstore/
 
 test-integration: db
     CODESYNAPSE_TEST_NEO4J_URI=neo4j://localhost:7687 CODESYNAPSE_TEST_NEO4J_PASSWORD="$NEO4J_PASSWORD" \
