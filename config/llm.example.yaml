@@ -38,10 +38,18 @@ providers:
   #   context_window: 200000  # default; raise it if your account has a larger window
   #   max_output_tokens: 32000
   #   # US dollars per million tokens, for the cost charts on the Statistics
-  #   # page (take them from your provider's price list; unset = free):
+  #   # page. These are illustrative rates, not a current provider price list.
+  #   # Missing remote rates leave cost unknown. Cache writes need their own rate.
   #   price_input_per_mtok: 5
   #   price_cached_input_per_mtok: 0.5
+  #   price_cache_write_per_mtok: 6.25
   #   price_output_per_mtok: 25
+  #   # Set only after specifying every applicable rate; permits deliberate zeros.
+  #   pricing_configured: true
+
+  # Local providers with all rates unset have zero token billing; hardware and
+  # electricity costs are outside these estimates. Usage omitted by a provider
+  # remains unknown. Cache-read tokens are still input and may still be billed.
 
   # Example OpenAI-compatible cloud endpoint with a key.
   # - name: openrouter

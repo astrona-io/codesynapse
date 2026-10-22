@@ -4,6 +4,8 @@ CodeSynapse is a deterministic code graph layer that gives AI assistants precise
 
 Connecting is one command: `just mcp` (or `codesynapse mcp install`) registers the server with every agent it finds. The system instructions below are sent automatically by the server on connect (MCP `instructions`); paste them into your assistant's rules only if your client ignores server instructions.
 
+The checked-in `.mcp.json` uses HTTP at `http://localhost:8090/mcp`, with the bearer token read from `CODESYNAPSE_MCP_TOKEN`. It does not launch a local process or Python helper. Start the stack and supply the personal key in the agent's environment before connecting.
+
 **Personal API keys.** When the installation has accounts (PostgreSQL configured), create a key under your profile and use it as the bearer token: `CODESYNAPSE_MCP_TOKEN=csk_… just mcp`. The key acts in exactly one organisation. Its owner must be an explicit member, including platform administrators. The installation's MCP token cannot read code in accounts mode. Revoking a key, suspending its owner, removing membership or withdrawing a grant takes effect on the next call, including calls on an existing connection.
 
 Repository access uses a direct user override first, then the strongest grant from the user's teams, then the organisation's `READ_ONLY` or `NONE` default. A direct `NONE` denies access even when a team grants it. Guests receive no default access. Organisation owner/admin roles manage membership and policy; repository permissions determine code access. `READ` permits navigation, review reading and memory recall. `WRITE` also permits `upsert_graph_triples`, `offload_turns`, `submit_review` and `update_review_comment`. `ADMIN` includes repository configuration and access management through the API. The server checks a fixed policy for each tool before executing it.
@@ -226,3 +228,13 @@ Every answer uses `qualified_id` values (`store.(*Store).Get`) that you can pass
   ]
 }
 ```
+
+## Telemetry attribution
+
+Accepted tools carry the authenticated organisation and their registered tool name into database and memory work. Tool arguments cannot choose metric labels. Provider and model labels come from server configuration. Token usage covers model calls CodeSynapse makes; it cannot observe an agent's own model usage.
+
+Calls forwarded to the API retain the caller's key and organisation. Their API-side metrics use tool `none`: the API has no signed proof of the originating MCP tool and does not trust a caller-supplied tool header. Memory recalls are counted once by the service doing the retrieval.
+
+MCP HTTP bandwidth counts request-body bytes read and response-body bytes written, including stream frames. It excludes HTTP headers, TLS and TCP overhead. HTTP framing uses the fixed `transport` tool category because notifications and streamed responses cannot always be assigned to one tool. Stdio counts newline frames in platform totals: a read can contain several requests before authentication. Accepted stdio tool calls still have tenant attribution.
+
+Provider cache metrics count input tokens actually reported as cache reads. Cached tokens may still be sent and billed. Cost estimates use configured input, output, cache-read and cache-write rates; missing rates or incomplete usage leave cost unknown. Cloud payload counters include consumed retry bodies. Local-only operations have no assumed cloud-savings baseline and do not claim avoided traffic. See [the telemetry plan](TELEMETRY_PLAN.md) for metric definitions and dashboard limits.

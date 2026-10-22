@@ -28,8 +28,8 @@ type Pusher struct {
 // CheckURL validates a VictoriaMetrics base URL.
 func CheckURL(raw string) error {
 	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
-		return errors.New("metrics url must be http(s)://host:port without credentials")
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery {
+		return errors.New("metrics url must be http(s)://host:port without credentials, query or fragment")
 	}
 	return nil
 }

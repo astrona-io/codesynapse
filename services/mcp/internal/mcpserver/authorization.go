@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 )
 
 type toolPolicy struct {
@@ -103,6 +104,8 @@ func (h *handlers) authorizationMiddleware() mcp.Middleware {
 				}
 				return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, nil
 			}
+			telemetry.AllowTools(p.Name)
+			ctx = telemetry.WithTool(ctx, p.Name)
 			return next(ctx, method, req)
 		}
 	}

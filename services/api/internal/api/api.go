@@ -127,6 +127,7 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	s.offload.OnSaved = s.recall.Kick
 	go s.offload.Run(ctx)
 	go s.recall.Run(ctx)
+	go s.observeMemoryFacts(ctx)
 	sched, err := loadSchedules(cfg.Workspace)
 	if err != nil {
 		logger.Error("auto-sync schedules unreadable; starting with none", "error", err)
@@ -185,8 +186,9 @@ func (s *Server) observe(r *http.Request, status int, tenant string, start time.
 	if tenant == "" {
 		tenant = telemetry.NoTenant
 	}
-	telemetry.HTTPRequests.Inc(tenant, route, r.Method, fmt.Sprintf("%dxx", status/100))
-	telemetry.HTTPDuration.Observe(time.Since(start).Seconds(), route, r.Method)
+	ctx := telemetry.WithTenant(r.Context(), tenant)
+	telemetry.HTTPRequests.IncContext(ctx, tenant, route, r.Method, fmt.Sprintf("%dxx", status/100))
+	telemetry.HTTPDuration.ObserveContext(ctx, time.Since(start).Seconds(), route, r.Method)
 }
 
 func (s *Server) routes() {

@@ -12,11 +12,11 @@ watch(error, (e) => {
   const status = (e as { statusCode?: number } | null)?.statusCode
   if (status === 409 || status === 403) emit('unavailable', status)
 })
-const empty = computed(() => !data.value?.series.length || data.value.series.every((s) => s.total === 0))
+const empty = computed(() => !data.value?.series.some((s) => s.values.some((v) => v !== null)))
 const headline = computed(() => {
   const d = data.value
   if (!d?.series.length) return ''
-  if (d.kind === 'count') return fmtUnit(d.series.reduce((t, s) => t + s.total, 0), d.unit)
+  if (d.kind === 'count') return d.series.length === 1 ? fmtUnit(d.series[0]!.total, d.unit) : ''
   return fmtUnit(Math.max(...d.series.map((s) => s.total)), d.unit) + ' peak'
 })
 </script>
@@ -30,7 +30,7 @@ const headline = computed(() => {
     <p v-if="error && (error as any).statusCode !== 409 && (error as any).statusCode !== 403" class="muted small">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="data">
       <LineChart v-if="!empty" :times="data.times" :series="data.series" :title="data.title" :unit="data.unit" :step-seconds="data.step_seconds" />
-      <p v-else class="muted small empty-chart">Nothing recorded in this window yet.</p>
+      <p v-else class="muted small empty-chart">{{ data.empty }}</p>
       <p class="muted small">{{ data.help }}</p>
     </template>
   </div>

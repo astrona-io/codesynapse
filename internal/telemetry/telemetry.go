@@ -1,5 +1,4 @@
-// Package telemetry keeps Prometheus-style counters and histograms in
-// process and pushes them to VictoriaMetrics (standard library only).
+// Package telemetry records bounded metrics and pushes them to VictoriaMetrics.
 //
 // Labels stay low-cardinality by construction: every label value passes a
 // per-label rule (tenant IDs must look like organisation IDs, tools must be
@@ -60,9 +59,10 @@ func Tenant(ctx context.Context) string {
 
 // Registry holds metrics in registration order.
 type Registry struct {
-	mu      sync.Mutex
-	metrics []writer
-	dropped *Counter
+	gaugesMu sync.RWMutex
+	mu       sync.Mutex
+	metrics  []writer
+	dropped  *Counter
 }
 
 type writer interface {
@@ -100,6 +100,8 @@ func (r *Registry) add(m writer) {
 
 // WriteText writes every metric in the Prometheus text format.
 func (r *Registry) WriteText(w io.Writer) error {
+	r.gaugesMu.RLock()
+	defer r.gaugesMu.RUnlock()
 	r.mu.Lock()
 	ms := slices.Clone(r.metrics)
 	r.mu.Unlock()
@@ -112,10 +114,13 @@ func (r *Registry) WriteText(w io.Writer) error {
 }
 
 type family struct {
-	reg        *Registry
-	name, help string
-	kind       string
-	labels     []string
+	reg         *Registry
+	name, help  string
+	kind        string
+	labels      []string
+	inputLabels []string
+	scoped      bool
+	budget      int
 }
 
 var nameRe = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
@@ -129,7 +134,7 @@ func newFamily(r *Registry, name, help, kind string, labels []string) family {
 			panic("telemetry: invalid label name " + l) // programmer error
 		}
 	}
-	return family{reg: r, name: name, help: help, kind: kind, labels: labels}
+	return family{reg: r, name: name, help: help, kind: kind, labels: labels, inputLabels: labels, budget: maxSeries}
 }
 
 // key joins label values; values never contain \xff (labelValue strips it).
@@ -162,6 +167,9 @@ func labelValue(v string) string {
 
 func (f *family) header(w io.Writer) error {
 	_, err := fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s %s\n", f.name, f.help, f.name, f.kind)
+	if err == nil && f.scoped {
+		_, err = fmt.Fprintf(w, "# HELP platform_%s %s\n# TYPE platform_%s %s\n", f.name, f.help, f.name, f.kind)
+	}
 	return err
 }
 
@@ -174,6 +182,9 @@ func (f *family) labelSet(key string, extra ...string) string {
 	}
 	pairs := make([]string, 0, len(vals)+len(extra)/2)
 	for i, l := range f.labels {
+		if f.scoped && l == "tenant_id" && !tenantRe.MatchString(vals[i]) {
+			continue
+		}
 		pairs = append(pairs, l+`="`+escape(vals[i])+`"`)
 	}
 	for i := 0; i+1 < len(extra); i += 2 {
@@ -216,33 +227,45 @@ var nowMillis = func() int64 { return time.Now().UnixMilli() }
 // Counter is a counter family.
 type Counter struct {
 	family
-	mu    sync.Mutex
-	vals  map[string]float64
-	fresh born
+	mu      sync.Mutex
+	vals    map[string]float64
+	fresh   born
+	started born
 }
 
 // Add adds v (negative values are ignored) to the series of values.
-func (c *Counter) Add(v float64, values ...string) {
-	if v < 0 || math.IsNaN(v) {
+func (c *Counter) Add(v float64, values ...string) { c.add(legacyContext, v, values...) }
+
+// AddContext records trusted request attribution with the observation.
+func (c *Counter) AddContext(ctx context.Context, v float64, values ...string) {
+	c.add(ctx, v, values...)
+}
+
+// IncContext adds one with trusted request attribution.
+func (c *Counter) IncContext(ctx context.Context, values ...string) { c.add(ctx, 1, values...) }
+
+func (c *Counter) add(ctx context.Context, v float64, values ...string) {
+	if v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
 		return
 	}
-	key, ok := c.key(values)
+	key, ok := c.contextKey(ctx, values)
 	if !ok {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.vals == nil {
-		c.vals, c.fresh = map[string]float64{}, born{}
+		c.vals, c.fresh, c.started = map[string]float64{}, born{}, born{}
 	}
 	if _, seen := c.vals[key]; !seen {
-		if len(c.vals) >= maxSeries {
+		if len(c.vals) >= c.budget {
 			if c.reg.dropped != c {
-				go c.reg.dropped.Add(1, c.name) // not under this lock
+				c.reg.dropped.AddContext(ctx, 1, c.name)
 			}
 			return
 		}
 		c.fresh.note(key)
+		c.started.note(key)
 	}
 	c.vals[key] += v
 }
@@ -260,10 +283,10 @@ func (c *Counter) write(w io.Writer) error {
 	lines := make([]string, 0, len(keys))
 	for _, k := range keys {
 		if at, ok := c.fresh[k]; ok {
-			lines = append(lines, c.name+c.labelSet(k)+" 0 "+strconv.FormatInt(at, 10)+"\n")
+			lines = append(lines, c.sampleName(k)+c.labelSet(k)+" 0 "+strconv.FormatInt(at, 10)+"\n")
 			delete(c.fresh, k)
 		}
-		lines = append(lines, c.name+c.labelSet(k)+" "+num(c.vals[k])+"\n")
+		lines = append(lines, c.sampleName(k)+c.labelSet(k)+" "+num(c.vals[k])+"\n")
 	}
 	c.mu.Unlock()
 	if len(lines) == 0 {
@@ -283,6 +306,7 @@ type Histogram struct {
 	mu      sync.Mutex
 	vals    map[string]*hist
 	fresh   born
+	started born
 }
 
 type hist struct {
@@ -292,28 +316,36 @@ type hist struct {
 }
 
 // Observe records v in the series of values.
-func (h *Histogram) Observe(v float64, values ...string) {
-	if math.IsNaN(v) {
+func (h *Histogram) Observe(v float64, values ...string) { h.observe(legacyContext, v, values...) }
+
+// ObserveContext records a measurement with trusted request attribution.
+func (h *Histogram) ObserveContext(ctx context.Context, v float64, values ...string) {
+	h.observe(ctx, v, values...)
+}
+
+func (h *Histogram) observe(ctx context.Context, v float64, values ...string) {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
 		return
 	}
-	key, ok := h.key(values)
+	key, ok := h.contextKey(ctx, values)
 	if !ok {
 		return
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.vals == nil {
-		h.vals, h.fresh = map[string]*hist{}, born{}
+		h.vals, h.fresh, h.started = map[string]*hist{}, born{}, born{}
 	}
 	s := h.vals[key]
 	if s == nil {
-		if len(h.vals) >= maxSeries {
-			go h.reg.dropped.Add(1, h.name)
+		if len(h.vals) >= h.budget {
+			h.reg.dropped.AddContext(ctx, 1, h.name)
 			return
 		}
 		s = &hist{counts: make([]uint64, len(h.buckets))}
 		h.vals[key] = s
 		h.fresh.note(key)
+		h.started.note(key)
 	}
 	if i, _ := slices.BinarySearch(h.buckets, v); i < len(h.buckets) {
 		s.counts[i]++
@@ -335,21 +367,21 @@ func (h *Histogram) write(w io.Writer) error {
 		if at, ok := h.fresh[k]; ok {
 			ts := " 0 " + strconv.FormatInt(at, 10) + "\n"
 			for _, ub := range h.buckets {
-				b.WriteString(h.name + "_bucket" + h.labelSet(k, "le", num(ub)) + ts)
+				b.WriteString(h.sampleName(k) + "_bucket" + h.labelSet(k, "le", num(ub)) + ts)
 			}
-			b.WriteString(h.name + "_bucket" + h.labelSet(k, "le", "+Inf") + ts)
-			b.WriteString(h.name + "_sum" + h.labelSet(k) + ts)
-			b.WriteString(h.name + "_count" + h.labelSet(k) + ts)
+			b.WriteString(h.sampleName(k) + "_bucket" + h.labelSet(k, "le", "+Inf") + ts)
+			b.WriteString(h.sampleName(k) + "_sum" + h.labelSet(k) + ts)
+			b.WriteString(h.sampleName(k) + "_count" + h.labelSet(k) + ts)
 			delete(h.fresh, k)
 		}
 		var cum uint64
 		for i, ub := range h.buckets {
 			cum += s.counts[i]
-			b.WriteString(h.name + "_bucket" + h.labelSet(k, "le", num(ub)) + " " + strconv.FormatUint(cum, 10) + "\n")
+			b.WriteString(h.sampleName(k) + "_bucket" + h.labelSet(k, "le", num(ub)) + " " + strconv.FormatUint(cum, 10) + "\n")
 		}
-		b.WriteString(h.name + "_bucket" + h.labelSet(k, "le", "+Inf") + " " + strconv.FormatUint(s.count, 10) + "\n")
-		b.WriteString(h.name + "_sum" + h.labelSet(k) + " " + num(s.sum) + "\n")
-		b.WriteString(h.name + "_count" + h.labelSet(k) + " " + strconv.FormatUint(s.count, 10) + "\n")
+		b.WriteString(h.sampleName(k) + "_bucket" + h.labelSet(k, "le", "+Inf") + " " + strconv.FormatUint(s.count, 10) + "\n")
+		b.WriteString(h.sampleName(k) + "_sum" + h.labelSet(k) + " " + num(s.sum) + "\n")
+		b.WriteString(h.sampleName(k) + "_count" + h.labelSet(k) + " " + strconv.FormatUint(s.count, 10) + "\n")
 	}
 	h.mu.Unlock()
 	if b.Len() == 0 {

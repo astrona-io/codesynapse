@@ -187,6 +187,13 @@ type CuratedStore interface {
 	DeleteAllCurated(ctx context.Context, repo string) error
 }
 
+// MemoryFactCount is the current durable fact count of one memory namespace.
+// A namespace is an organisation and repository pair, or a legacy repository.
+type MemoryFactCount struct {
+	Namespace string `json:"namespace"`
+	Facts     int64  `json:"facts"`
+}
+
 // MemoryStore persists agent memory (package memory): entities and facts per
 // repository, apart from repository graphs, which ReplaceRepo and DeleteRepo
 // never touch.
@@ -216,6 +223,10 @@ type MemoryStore interface {
 	DeleteMemoryEntity(ctx context.Context, repo, id string) error
 	// MemoryStats summarises every repository that has memory, by repo name.
 	MemoryStats(ctx context.Context) ([]memory.Stats, error)
+	// MemoryFactCounts returns at most limit namespace aggregates, ordered by
+	// namespace strictly after afterNamespace. An empty page ends enumeration.
+	// Only current facts count; namespaces with entities but no facts return zero.
+	MemoryFactCounts(ctx context.Context, afterNamespace string, limit int) ([]MemoryFactCount, error)
 	// MemoryEmbeddingTodo returns up to limit entities (any repository)
 	// without an embedding made by model, oldest first.
 	MemoryEmbeddingTodo(ctx context.Context, model string, limit int) ([]memory.Entity, error)

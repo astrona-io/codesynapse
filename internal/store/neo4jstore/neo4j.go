@@ -90,18 +90,22 @@ func (s *Store) read(ctx context.Context, query string, params map[string]any) (
 		neo4j.ExecuteQueryWithDatabase(s.db), neo4j.ExecuteQueryWithReadersRouting())
 	failed(ctx, "read", err)
 	if err == nil {
-		telemetry.GraphTraversed.Add(float64(len(res.Records)), telemetry.Tenant(ctx), "neo4j")
+		telemetry.GraphTraversed.AddContext(ctx, float64(len(res.Records)), telemetry.Tenant(ctx), "neo4j")
+		telemetry.GraphRowsReturned.AddContext(ctx, float64(len(res.Records)), telemetry.Tenant(ctx), "neo4j")
 	}
 	return res, err
 }
 
 func observe(ctx context.Context, op string, start time.Time) {
-	telemetry.DBDuration.Observe(time.Since(start).Seconds(), telemetry.Tenant(ctx), "neo4j", op)
+	telemetry.DBDuration.ObserveContext(ctx, time.Since(start).Seconds(), telemetry.Tenant(ctx), "neo4j", op)
 }
 
 func failed(ctx context.Context, op string, err error) {
 	if err != nil {
-		telemetry.DBErrors.Inc(telemetry.Tenant(ctx), "neo4j", op)
+		telemetry.DBErrors.IncContext(ctx, telemetry.Tenant(ctx), "neo4j", op)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			telemetry.DBTimeouts.IncContext(ctx, telemetry.Tenant(ctx), "neo4j", op)
+		}
 	}
 }
 

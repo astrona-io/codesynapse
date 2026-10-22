@@ -89,7 +89,7 @@ func (s *Server) handleOffload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, authorize := s.jobAuthorization(r.Context(), repo, accounts.Member)
-	job, err := s.offload.SubmitAuthorized(repo, ns, req.Source, req.Turns, authorize)
+	job, err := s.offload.SubmitAuthorizedContext(r.Context(), repo, ns, req.Source, req.Turns, authorize)
 	switch {
 	case errors.Is(err, offload.ErrNoLocalModel):
 		s.problem(w, http.StatusConflict, err)

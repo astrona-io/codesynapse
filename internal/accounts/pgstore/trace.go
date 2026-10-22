@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -31,9 +32,12 @@ func (tracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQuer
 		return
 	}
 	tenant := telemetry.Tenant(ctx)
-	telemetry.DBDuration.Observe(time.Since(st.at).Seconds(), tenant, "postgres", st.op)
+	telemetry.DBDuration.ObserveContext(ctx, time.Since(st.at).Seconds(), tenant, "postgres", st.op)
 	if data.Err != nil {
-		telemetry.DBErrors.Inc(tenant, "postgres", st.op)
+		telemetry.DBErrors.IncContext(ctx, tenant, "postgres", st.op)
+		if errors.Is(data.Err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			telemetry.DBTimeouts.IncContext(ctx, tenant, "postgres", st.op)
+		}
 	}
 }
 

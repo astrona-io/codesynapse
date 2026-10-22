@@ -89,7 +89,7 @@ func (h *handlers) upsertTriples(ctx context.Context, req *mcp.CallToolRequest, 
 	if err := h.memory.UpsertMemory(ctx, b); err != nil {
 		return nil, upsertTriplesOut{}, err
 	}
-	telemetry.MemoryFacts.Add(float64(len(b.Facts)), telemetry.Tenant(ctx), "tool")
+	telemetry.MemoryFacts.AddContext(ctx, float64(len(b.Facts)), telemetry.Tenant(ctx), "tool")
 	out := upsertTriplesOut{Repo: repo, Entities: len(b.Entities), Facts: len(b.Facts), FactIDs: []string{}, Replaced: len(b.Replace)}
 	for _, f := range b.Facts {
 		out.FactIDs = append(out.FactIDs, f.ID)
@@ -109,7 +109,8 @@ func (h *handlers) searchMemory(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, memory.Graph{}, err
 	}
-	telemetry.MemoryRecalls.Inc(telemetry.Tenant(ctx), "text")
+	telemetry.MemoryRecalls.IncContext(ctx, telemetry.Tenant(ctx), "text")
+	telemetry.AgentMemoryRecalls.IncContext(ctx, telemetry.Tenant(ctx))
 	g, err := h.memory.SearchMemory(ctx, h.memRepo(ctx, repo), in.Query, in.Limit, in.History)
 	return nil, g, err
 }
@@ -134,7 +135,8 @@ func (h *handlers) querySubgraph(ctx context.Context, _ *mcp.CallToolRequest, in
 	for i, name := range in.Entities {
 		ids[i] = memory.EntityID(h.memRepo(ctx, repo), name)
 	}
-	telemetry.MemoryRecalls.Inc(telemetry.Tenant(ctx), "graph")
+	telemetry.MemoryRecalls.IncContext(ctx, telemetry.Tenant(ctx), "graph")
+	telemetry.AgentMemoryRecalls.IncContext(ctx, telemetry.Tenant(ctx))
 	g, err := h.memory.MemorySubgraph(ctx, h.memRepo(ctx, repo), ids, in.Depth, in.Limit, in.History)
 	return nil, g, err
 }
