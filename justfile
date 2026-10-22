@@ -35,7 +35,7 @@ _runtime:
         exit 1
     fi
 
-# Store a token for cloning private repositories (prompted, never echoed), then restart the API.
+# Store a token for one git host (prompted, never echoed), then restart the API. Run it once per host.
 # Use a fine-grained GitHub token with read-only "Contents" access to the repositories you index.
 git-token host="github.com": init _runtime
     #!/usr/bin/env sh
@@ -46,12 +46,18 @@ git-token host="github.com": init _runtime
     stty echo 2>/dev/null || true
     echo
     [ -n "$token" ] || { echo "no token given, nothing changed"; exit 1; }
+    # One entry per host in CODESYNAPSE_GIT_TOKENS (host=token,host2=token2); a token
+    # is only ever sent to its own host. Re-running for a host replaces its entry.
+    host=$(printf '%s' "{{host}}" | tr 'A-Z' 'a-z')
     tmp=$(mktemp)
-    grep -v -e '^CODESYNAPSE_GIT_TOKEN=' -e '^CODESYNAPSE_GIT_TOKEN_HOST=' .env > "$tmp" || true
-    printf 'CODESYNAPSE_GIT_TOKEN=%s\nCODESYNAPSE_GIT_TOKEN_HOST=%s\n' "$token" "{{host}}" >> "$tmp"
+    current=$(sed -n 's/^CODESYNAPSE_GIT_TOKENS=//p' .env | head -n 1)
+    kept=$(printf '%s' "$current" | tr ',' '\n' | grep -v -e "^$host=" -e '^$' | paste -sd, - || true)
+    entries="${kept:+$kept,}$host=$token"
+    grep -v -e '^CODESYNAPSE_GIT_TOKENS=' .env > "$tmp" || true
+    printf 'CODESYNAPSE_GIT_TOKENS=%s\n' "$entries" >> "$tmp"
     mv "$tmp" .env && chmod 600 .env
     {{compose}} up -d api
-    echo "token stored in .env for {{host}}; the API was restarted"
+    echo "token stored in .env for $host; the API was restarted. Run again with another host (just git-token codeberg.org) to add more."
     echo "read-only token: Contents read. For fix branches and PRs (CODESYNAPSE_ALLOW_PUSH=true): Contents and Pull requests read and write."
 
 # Build and start Neo4j, API, MCP and web
@@ -102,6 +108,59 @@ mcp:
 # Print an MCP client config for the running stack
 mcp-config:
     @echo '{ "mcpServers": { "codesynapse": { "type": "http", "url": "http://localhost:8090/mcp", "headers": { "Authorization": "Bearer '"$CODESYNAPSE_MCP_TOKEN"'" } } } }'
+
+# --- container images and Kubernetes --------------------------------------
+
+registry := env("REGISTRY", "ghcr.io/parisnakitakejser")
+platform := env("PLATFORM", "")
+engine := env("CONTAINER_ENGINE", `if command -v docker >/dev/null 2>&1; then echo docker; elif command -v podman >/dev/null 2>&1; then echo podman; else echo missing-container-runtime; fi`)
+
+# Build the api, mcp and web images, tagged codesynapse-<svc>:<tag> and <registry>/codesynapse-<svc>:<tag>. PLATFORM=linux/amd64 for a cluster of another architecture.
+image-build tag="dev":
+    #!/usr/bin/env sh
+    set -eu
+    p="{{platform}}"; plat=""; [ -z "$p" ] || plat="--platform $p"
+    for svc in api mcp; do
+        {{engine}} build $plat --build-arg VERSION={{version}} -f services/$svc/Dockerfile \
+            -t codesynapse-$svc:{{tag}} -t {{registry}}/codesynapse-$svc:{{tag}} .
+    done
+    {{engine}} build $plat -t codesynapse-web:{{tag}} -t {{registry}}/codesynapse-web:{{tag}} services/web
+
+# Push the images to REGISTRY (log in first: docker login ghcr.io)
+image-push tag="dev":
+    #!/usr/bin/env sh
+    set -eu
+    for svc in api mcp web; do {{engine}} push {{registry}}/codesynapse-$svc:{{tag}}; done
+
+# Load the dev images into a local kind cluster
+image-load-kind tag="dev" cluster="kind":
+    #!/usr/bin/env sh
+    set -eu
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    for svc in api mcp web; do
+        {{engine}} save -o "$tmp/$svc.tar" {{registry}}/codesynapse-$svc:{{tag}}
+        kind load image-archive "$tmp/$svc.tar" --name {{cluster}}
+    done
+
+# Create deploy/k8s/overlays/<overlay>/secrets.env with random secrets if it does not exist
+k8s-secrets overlay="dev":
+    #!/usr/bin/env sh
+    set -eu
+    dir=deploy/k8s/overlays/{{overlay}}
+    if [ -f "$dir/secrets.env" ]; then echo "$dir/secrets.env exists, leaving it alone"; exit 0; fi
+    sed -e "s/change-me-please/$(openssl rand -hex 24)/" \
+        -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
+        -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" "$dir/secrets.env.example" > "$dir/secrets.env"
+    echo "wrote $dir/secrets.env (git-ignored); add CODESYNAPSE_GIT_TOKEN etc. there if you need them"
+
+# Print the manifests an overlay produces
+k8s-render overlay="dev":
+    kustomize build deploy/k8s/overlays/{{overlay}}
+
+# Apply an overlay to the current kubectl context
+k8s-apply overlay="dev":
+    kubectl apply -k deploy/k8s/overlays/{{overlay}}
+    @echo "kubectl -n codesynapse get pods · kubectl -n codesynapse port-forward svc/web 3000:80"
 
 # --- local development (no containers except Neo4j) ------------------------
 

@@ -1,0 +1,103 @@
+# The API runs ingest jobs, so it needs a writable workspace (clones) and a
+# Go build cache. Repositories are added by URL or through Organisations;
+# there is no host ./sources folder in a cluster.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: workspace
+  labels: {app.kubernetes.io/part-of: codesynapse}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 20Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels: {app.kubernetes.io/name: api, app.kubernetes.io/part-of: codesynapse}
+spec:
+  replicas: 1
+  # One writer on the workspace volume and one scheduler: never run two.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: api}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: api, app.kubernetes.io/part-of: codesynapse}
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: api
+          image: codesynapse-api
+          args: [serve]
+          ports:
+            - {name: http, containerPort: 8080}
+          envFrom:
+            - configMapRef: {name: codesynapse-config}
+          env:
+            - name: CODESYNAPSE_NEO4J_PASSWORD
+              valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: NEO4J_PASSWORD}}
+            - name: CODESYNAPSE_API_TOKEN
+              valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: CODESYNAPSE_API_TOKEN}}
+            - name: CODESYNAPSE_GIT_TOKEN
+              valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: CODESYNAPSE_GIT_TOKEN, optional: true}}
+            - name: CODESYNAPSE_GIT_TOKENS
+              valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: CODESYNAPSE_GIT_TOKENS, optional: true}}
+            - name: ANTHROPIC_API_KEY
+              valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: ANTHROPIC_API_KEY, optional: true}}
+            - name: OPENROUTER_API_KEY
+              valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: OPENROUTER_API_KEY, optional: true}}
+            - {name: CODESYNAPSE_WORKSPACE, value: /workspace}
+            - {name: CODESYNAPSE_LLM_CONFIG, value: /config/llm.yaml}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          # The service waits for Neo4j before it listens; do not let liveness kill it meanwhile.
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+            failureThreshold: 120
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {memory: 3Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: workspace, mountPath: /workspace}
+            - {name: cache, mountPath: /cache}
+            - {name: sources, mountPath: /sources, readOnly: true}
+            - {name: llm, mountPath: /config, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: workspace
+          persistentVolumeClaim: {claimName: workspace}
+        - {name: cache, emptyDir: {}}
+        - {name: sources, emptyDir: {}}
+        - {name: tmp, emptyDir: {}}
+        # Optional AI provider routing (config/llm.example.yaml). Create with:
+        #   kubectl -n codesynapse create configmap codesynapse-llm --from-file=llm.yaml=config/llm.yaml
+        - name: llm
+          configMap: {name: codesynapse-llm, optional: true}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels: {app.kubernetes.io/name: api, app.kubernetes.io/part-of: codesynapse}
+spec:
+  selector: {app.kubernetes.io/name: api}
+  ports:
+    - {name: http, port: 8080, targetPort: http}

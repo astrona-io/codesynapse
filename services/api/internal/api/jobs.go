@@ -87,6 +87,8 @@ type JobOptions struct {
 	// Run replaces ingest with arbitrary work (AI tasks); its result (a
 	// review id) is stored on the job.
 	Run func(ctx context.Context) (string, error)
+	// Done is called once the job ended, whatever the outcome.
+	Done func(err error)
 }
 
 // Start queues an ingest of root into repo.
@@ -114,6 +116,12 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 }
 
 func (j *Jobs) run(job *Job, root string, opts JobOptions) {
+	fin := func(job *Job, nodes, edges int, err error) {
+		j.finish(job, nodes, edges, err)
+		if opts.Done != nil {
+			opts.Done(err)
+		}
+	}
 	select {
 	case j.sem <- struct{}{}:
 		defer func() { <-j.sem }()
@@ -121,7 +129,7 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 		job.Waiting = false
 		j.mu.Unlock()
 	case <-j.ctx.Done():
-		j.finish(job, 0, 0, j.ctx.Err())
+		fin(job, 0, 0, j.ctx.Err())
 		return
 	}
 	ctx := logx.WithLogger(j.ctx, j.logger.With("job", job.ID, "repo", job.Repo))
@@ -133,12 +141,12 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 		j.mu.Lock()
 		job.Result = result
 		j.mu.Unlock()
-		j.finish(job, 0, 0, err)
+		fin(job, 0, 0, err)
 		return
 	}
 	if opts.Prepare != nil {
 		if err := opts.Prepare(ctx); err != nil {
-			j.finish(job, 0, 0, err)
+			fin(job, 0, 0, err)
 			return
 		}
 	}
@@ -153,7 +161,7 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 	if g != nil {
 		nodes, edges = len(g.Nodes()), len(g.Edges())
 	}
-	j.finish(job, nodes, edges, err)
+	fin(job, nodes, edges, err)
 	if err == nil && opts.After != nil {
 		go opts.After(j.ctx)
 	}
@@ -185,7 +193,9 @@ func (j *Jobs) prune() {
 		}
 	}
 	slices.SortFunc(finished, func(a, b *Job) int { return cmp.Compare(a.StartedAt, b.StartedAt) })
-	for _, job := range finished[:max(0, len(j.jobs)-maxJobHistory)] {
+	// Queued and running jobs are never dropped, so there may be fewer finished
+	// jobs than the excess.
+	for _, job := range finished[:min(len(finished), max(0, len(j.jobs)-maxJobHistory))] {
 		delete(j.jobs, job.ID)
 	}
 }

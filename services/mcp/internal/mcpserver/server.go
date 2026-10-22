@@ -31,7 +31,8 @@ Rules for context efficiency:
 4. Exact matches: when a lookup returns suggestions, retry with the exact qualified_id it lists (e.g. store.(*Store).Get).
 5. Test boundaries: before editing a symbol, check its tests (is_test: true callers) to confirm safety and find fixtures.
 6. Read narrowly: file_outline and the "read"/"location" fields give file:start-end ranges; read only those lines.
-7. Reviews: when asked to review code, analyse with get_pr_context, security_report and rule_guide, then record the result with submit_review (comments anchored to file:line, with concrete suggestions). Mark comments you have addressed with update_review_comment.
+7. Freshness and breadth: repo_status says whether the graph is current; search_all_repos finds which repository owns a name across an organisation; get_config_entries and get_doc_section read YAML and Markdown structure without opening the files.
+8. Reviews: when asked to review code, analyse with get_pr_context, security_report and rule_guide, then record the result with submit_review (comments anchored to file:line, with concrete suggestions). Mark comments you have addressed with update_review_comment.
 Locations are repo-relative. The graph reflects the last ingest; files edited since may differ.`
 
 // Options configure the MCP server.
@@ -56,6 +57,7 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	mcp.AddTool(s, add("repo_overview", "Stats, packages (with summaries) and documents of a repository. Start here."), h.repoOverview)
 	mcp.AddTool(s, add("search", "Find symbols, files or doc sections by name substring. Returns ids for the other tools."), h.search)
 	registerAgentTools(s, h, add)
+	registerDiscoveryTools(s, h, add)
 	registerPrompts(s)
 	if len(opts) > 0 && opts[0].Reviews != nil {
 		registerReviewTools(s, h, opts[0].Reviews)
@@ -321,6 +323,7 @@ type securityReportIn struct {
 	RepoArg
 	MinSeverity string `json:"min_severity,omitempty" jsonschema:"info, low, medium, high or critical; default low"`
 	Limit       int    `json:"limit,omitempty" jsonschema:"max findings and vulnerabilities each"`
+	Path        string `json:"path,omitempty" jsonschema:"only findings in this file or directory (repo-relative); counts follow, score and grade stay repository-wide"`
 }
 
 func (h *handlers) securityReport(ctx context.Context, _ *mcp.CallToolRequest, in securityReportIn) (*mcp.CallToolResult, security.Report, error) {
@@ -340,6 +343,7 @@ func (h *handlers) securityReport(ctx context.Context, _ *mcp.CallToolRequest, i
 		return nil, rep, err
 	}
 	rep.Sensitive = nil // keep the answer small; security_symbols has these
+	filterFindingsByPath(&rep, in.Path)
 	if in.Limit > 0 {
 		rep.Findings = rep.Findings[:min(len(rep.Findings), in.Limit)]
 		rep.Vulnerabilities = rep.Vulnerabilities[:min(len(rep.Vulnerabilities), in.Limit)]

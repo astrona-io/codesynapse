@@ -1,0 +1,28 @@
+# Only the paths that are needed: web -> api, api and mcp -> neo4j. The
+# browser-facing pods (web, mcp) accept traffic from anywhere in the cluster
+# or the ingress controller. Egress stays open: the API reaches git hosts,
+# api.github.com and osv.dev.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: neo4j-from-services
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: neo4j}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: api}}
+        - podSelector: {matchLabels: {app.kubernetes.io/name: mcp}}
+      ports: [{port: 7687}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-from-web
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: api}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: web}}
+      ports: [{port: 8080}]

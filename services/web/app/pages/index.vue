@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import type { Job, Source, WorkspaceOverview } from '~/utils/types'
 
-interface Settings { git_token_configured: boolean; git_token_host: string; clone_enabled: boolean; allow_private_git: boolean; vuln_scan: boolean }
+interface Settings { git_token_configured: boolean; git_token_host: string; git_token_hosts?: string[]; clone_enabled: boolean; allow_private_git: boolean; vuln_scan: boolean }
 
 const { data: ov, refresh: refreshOverview } = useApiGet<WorkspaceOverview>('overview')
 const { data: sources } = useApiGet<{ sources: Source[] }>('sources')
 const { data: jobs, refresh: refreshJobs } = useApiGet<{ jobs: Job[] }>('jobs')
 const { data: settings } = useApiGet<Settings>('settings')
+
+// 4 columns x 3 rows per page; the grid drops columns on narrow screens.
+const PAGE_SIZE = 12
+const page = ref(1)
+const pageCount = computed(() => Math.max(1, Math.ceil((ov.value?.repos.length ?? 0) / PAGE_SIZE)))
+watch(pageCount, (n) => { if (page.value > n) page.value = n })
+const visibleRepos = computed(() => (ov.value?.repos ?? []).slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 
 const indexed = computed(() => new Set((ov.value?.repos ?? []).map((r) => r.name)))
 const running = computed(() => jobs.value?.jobs.some((j) => j.state === 'running') ?? false)
@@ -32,7 +39,8 @@ async function ingest(source: string) {
 const reg = reactive({ url: '', branch: '', name: '' })
 const regError = ref('')
 const regOk = ref('')
-const isGitHub = computed(() => /github\.com/i.test(reg.url))
+const urlHost = computed(() => { try { return new URL(reg.url.trim()).hostname.toLowerCase() } catch { return '' } })
+const hostHasToken = computed(() => !!urlHost.value && (settings.value?.git_token_hosts ?? []).includes(urlHost.value))
 async function register() {
   regError.value = ''
   regOk.value = ''
@@ -49,7 +57,7 @@ async function register() {
 const gradeColor: Record<string, string> = { A: 'var(--green)', B: 'var(--cyan)', C: 'var(--amber)', D: 'var(--orange)', F: 'var(--pink)' }
 const syncText = (s?: { state: string; interval_minutes: number }) => {
   if (!s || s.state === 'manual') return 'Manual sync'
-  const every = ({ 15: '15 min', 60: 'hour', 360: '6 hours', 1440: 'day' } as Record<number, string>)[s.interval_minutes] ?? `${s.interval_minutes} min`
+  const every = ({ 15: '15 min', 30: '30 min', 60: 'hour', 360: '6 hours', 1440: 'day' } as Record<number, string>)[s.interval_minutes] ?? `${s.interval_minutes} min`
   return s.state === 'paused' ? `Auto-sync paused (every ${every})` : `Auto-sync every ${every}`
 }
 const jobLabel = (j: Job) => ({ ingest: 'Indexing', clone: 'Cloning', sync: 'Syncing' }[j.kind ?? 'ingest'] ?? 'Indexing')
@@ -63,7 +71,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
     </PageHeader>
 
     <section v-if="ov?.repos.length" class="cards">
-      <NuxtLink v-for="r in ov.repos" :key="r.name" :to="`/repos/${encodeURIComponent(r.name)}`" class="panel repo-card">
+      <NuxtLink v-for="r in visibleRepos" :key="r.name" :to="`/repos/${encodeURIComponent(r.name)}`" class="panel repo-card">
         <div class="repo-top">
           <div class="repo-name">
             <strong>{{ r.name }}</strong>
@@ -90,7 +98,12 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
         </div>
       </NuxtLink>
     </section>
-    <div v-else class="empty"><strong>No repositories yet</strong>Clone one by URL or index a mounted source below — it takes about a minute.</div>
+    <nav v-if="pageCount > 1" class="pager" aria-label="Repository pages">
+      <button class="secondary tiny" :disabled="page <= 1" @click="page--">Previous</button>
+      <span class="muted small">Page {{ page }} of {{ pageCount }} · {{ plural(ov?.repos.length ?? 0, 'repository', 'repositories') }}</span>
+      <button class="secondary tiny" :disabled="page >= pageCount" @click="page++">Next</button>
+    </nav>
+    <div v-else-if="!ov?.repos.length" class="empty"><strong>No repositories yet</strong>Clone one by URL or index a mounted source below — it takes about a minute.</div>
 
     <div class="grid cols-2">
       <section class="panel edge--cyan">
@@ -102,7 +115,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
           </label>
           <div class="row">
             <label class="grow">Branch <span class="dim">(optional)</span><input v-model="reg.branch" placeholder="default branch"></label>
-            <label class="grow">Name <span class="dim">(optional)</span><input v-model="reg.name" placeholder="from the URL"></label>
+            <label class="grow">Name <span class="dim">(optional)</span><input v-model="reg.name" placeholder="owner/name from the URL"></label>
           </div>
           <div class="row">
             <button type="submit" :disabled="!reg.url || running || settings?.clone_enabled === false">Clone & index</button>
@@ -114,8 +127,8 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
 
         <div class="token" :class="settings?.git_token_configured ? 'token--ok' : 'token--missing'">
           <template v-if="settings?.git_token_configured">
-            <strong>Private repositories on {{ settings.git_token_host }}: enabled</strong>
-            <p class="muted">A token is configured on the server. It is sent only to {{ settings.git_token_host }} and never shown here.</p>
+            <strong>Private repositories on {{ (settings.git_token_hosts?.length ? settings.git_token_hosts : [settings.git_token_host]).join(', ') }}: enabled</strong>
+            <p class="muted">Tokens are configured on the server. Each is sent only to its own host and never shown here. Add another host with <code>just git-token &lt;host&gt;</code>.</p>
           </template>
           <template v-else>
             <strong>Private repositories need a token</strong>
@@ -123,9 +136,9 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
               <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">fine-grained GitHub token</a>
               with read-only <em>Contents</em> access to the repositories, then run this in the project folder:</p>
             <pre class="cmd">just git-token</pre>
-            <p class="muted small">It asks for the token without showing it, stores it in <code>.env</code> and restarts the API. For GitLab or another host: <code>just git-token gitlab.com</code>.</p>
+            <p class="muted small">It asks for the token without showing it, stores it in <code>.env</code> and restarts the API. For GitLab, Forgejo or another host: <code>just git-token codeberg.org</code>.</p>
           </template>
-          <p v-if="isGitHub && !settings?.git_token_configured" class="muted small">If this repository is private, cloning will fail until a token is set.</p>
+          <p v-if="urlHost && !hostHasToken" class="muted small">No token is set for {{ urlHost }}: if this repository is private, cloning will fail. Run <code>just git-token {{ urlHost }}</code>.</p>
         </div>
       </section>
 
@@ -166,7 +179,11 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
 </template>
 
 <style scoped>
-.cards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.cards { display: grid; gap: 16px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1500px) { .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1100px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .cards { grid-template-columns: minmax(0, 1fr); } }
+.pager { display: flex; justify-content: center; align-items: center; gap: 14px; }
 .repo-card { gap: 10px; color: var(--ink); transition: transform 0.15s, border-color 0.15s; }
 .repo-card:hover { transform: translateY(-2px); border-color: var(--line-bright); color: var(--ink); }
 .repo-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }

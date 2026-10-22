@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/forge"
+	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 )
 
@@ -43,11 +45,17 @@ type OrgRepo struct {
 	LastError string `json:"last_error,omitempty"`
 }
 
-// Org is a GitHub organisation (or user) whose repositories are indexed.
+// Org is an organisation (or user) on a git host whose repositories are
+// indexed. The same login on two hosts is two organisations.
 type Org struct {
-	Org             string `json:"org"`
-	IncludeArchived bool   `json:"include_archived"`
-	IncludeForks    bool   `json:"include_forks"`
+	// Provider is github, forgejo (also Gitea, Codeberg) or gitlab; Host is
+	// where it lives, github.com by default. Both default for entries saved
+	// before providers existed.
+	Provider        forge.Kind `json:"provider"`
+	Host            string     `json:"host"`
+	Org             string     `json:"org"`
+	IncludeArchived bool       `json:"include_archived"`
+	IncludeForks    bool       `json:"include_forks"`
 	// AutoIndex clones and indexes repositories as they appear.
 	AutoIndex bool      `json:"auto_index"`
 	LastScan  string    `json:"last_scan,omitempty"`
@@ -58,14 +66,65 @@ type Org struct {
 
 // wants reports whether the org's filters include r.
 func (o Org) wants(r OrgRepo) bool {
-	return validRepoName(r.Name) && (o.IncludeArchived || !r.Archived) && (o.IncludeForks || !r.Fork)
+	return validRepoSegment(r.Name) && (o.IncludeArchived || !r.Archived) && (o.IncludeForks || !r.Fork)
+}
+
+// normalize fills in the defaults of entries saved before providers existed.
+func (o *Org) normalize() {
+	if o.Provider == "" {
+		o.Provider = forge.GitHub
+	}
+	if o.Host == "" {
+		o.Host = forge.DefaultHost
+	}
+	o.Host = strings.ToLower(o.Host)
+}
+
+// ident is the organisation's identity: its lower-case login on github.com,
+// "host/login" elsewhere, so the same login on two hosts stays apart. It is
+// the {org} of the HTTP routes.
+func (o Org) ident() string {
+	login := strings.ToLower(o.Org)
+	if o.Host == "" || o.Host == forge.DefaultHost {
+		return login
+	}
+	return o.Host + "/" + login
+}
+
+func (o Org) client() forge.Client { return forge.Client{Kind: o.Provider, Host: o.Host} }
+
+// cloneURL is the remote of one repository of o.
+func (o Org) cloneURL(repo string) string { return o.client().CloneURL(o.Org, repo) }
+
+// fullName is the repository's identity in the workspace: "owner/name" on
+// github.com, "host/owner/name" elsewhere, so repositories of the same name
+// on two organisations or two providers never collide.
+func (o Org) fullName(repo string) string { return forge.RepoName(o.Host, o.Org, repo) }
+
+// indexedAs finds the indexed repository for r: by its full name, or by its
+// remote for repositories indexed before names carried the owner (those keep
+// their plain name until removed and added again).
+func (o Org) indexedAs(r OrgRepo, byName map[string]model.Node) (model.Node, bool) {
+	if n, ok := byName[o.fullName(r.Name)]; ok {
+		return n, true
+	}
+	want := o.cloneURL(r.Name)
+	if n, ok := byName[r.Name]; ok && sameRemote(n.URL, want) {
+		return n, true
+	}
+	for _, n := range byName {
+		if !strings.Contains(n.Name, "/") && n.URL != "" && sameRemote(n.URL, want) {
+			return n, true
+		}
+	}
+	return model.Node{}, false
 }
 
 // orgs persists watched organisations next to the auto-sync schedules.
 type orgs struct {
 	mu       sync.Mutex
 	path     string
-	all      map[string]*Org // key: lower-case login
+	all      map[string]*Org // key: Org.ident()
 	scanning map[string]bool
 }
 
@@ -87,7 +146,8 @@ func loadOrgs(dir string) (*orgs, error) {
 		return nil, fmt.Errorf("reading %s: %w", o.path, err)
 	}
 	for _, org := range list {
-		o.all[strings.ToLower(org.Org)] = org
+		org.normalize()
+		o.all[org.ident()] = org
 	}
 	return o, nil
 }
@@ -101,7 +161,7 @@ func (o *orgs) save() error {
 	for _, org := range o.all {
 		list = append(list, org)
 	}
-	slices.SortFunc(list, func(a, b *Org) int { return strings.Compare(a.Org, b.Org) })
+	slices.SortFunc(list, func(a, b *Org) int { return strings.Compare(a.ident(), b.ident()) })
 	data, err := json.MarshalIndent(list, "", "  ")
 	if err != nil {
 		return err
@@ -133,14 +193,15 @@ func (o *orgs) list() []Org {
 	for _, org := range o.all {
 		out = append(out, *org)
 	}
-	slices.SortFunc(out, func(a, b Org) int { return strings.Compare(a.Org, b.Org) })
+	slices.SortFunc(out, func(a, b Org) int { return strings.Compare(a.ident(), b.ident()) })
 	return out
 }
 
 func (o *orgs) put(org Org) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.all[strings.ToLower(org.Org)] = &org
+	org.normalize()
+	o.all[org.ident()] = &org
 	return o.save()
 }
 
@@ -159,7 +220,7 @@ func (o *orgs) due(now time.Time) []string {
 	for _, org := range o.all {
 		next, err := time.Parse(time.RFC3339, org.NextScan)
 		if err != nil || !now.Before(next) {
-			out = append(out, org.Org)
+			out = append(out, org.ident())
 		}
 	}
 	slices.Sort(out)
@@ -184,14 +245,20 @@ func (o *orgs) end(login string) {
 	delete(o.scanning, strings.ToLower(login))
 }
 
-// githubClient sends the configured token to GitHub only when that is the
-// host the token was issued for.
-func (s *Server) githubClient() forge.Client {
-	c := forge.Client{BaseURL: s.cfg.GitHubAPI}
-	if s.cfg.GitAuth.Token != "" && strings.EqualFold(s.cfg.GitAuth.Host, "github.com") {
-		c.Token = s.cfg.GitAuth.Token
+// forgeClient returns the API client of o's host. Hosts other than github.com
+// come from the user, so they go through the same SSRF check as clone URLs
+// (no internal addresses unless CODESYNAPSE_ALLOW_PRIVATE_GIT), and the token
+// configured for a host is sent to that host only.
+func (s *Server) forgeClient(ctx context.Context, o Org) (forge.Client, error) {
+	c := o.client()
+	c.BaseURL = s.cfg.ForgeAPI
+	if s.cfg.ForgeAPI == "" && o.Host != forge.DefaultHost {
+		if _, err := gitx.ValidateRemote(ctx, o.cloneURL("x"), gitx.RemoteOptions{AllowPrivate: s.cfg.AllowPrivateGit}); err != nil {
+			return c, fmt.Errorf("%w: %w", errBadRequest, err)
+		}
 	}
-	return c
+	c.Token = s.authFor(o.cloneURL("x")).Token
+	return c, nil
 }
 
 // scanOrg lists the organisation's repositories, stores the result and, when
@@ -210,10 +277,14 @@ func (s *Server) scanOrg(ctx context.Context, login string, now time.Time) (Org,
 }
 
 func (s *Server) scan(ctx context.Context, o Org, now time.Time) (Org, error) {
-	listed, err := s.githubClient().ListRepos(ctx, o.Org)
+	client, err := s.forgeClient(ctx, o)
+	var listed []forge.Repo
+	if err == nil {
+		listed, err = client.ListRepos(ctx, o.Org)
+	}
 	o.NextScan = now.Add(orgScanInterval).UTC().Format(time.RFC3339)
 	if err != nil {
-		// Keep the previous list; a GitHub hiccup must not forget repositories.
+		// Keep the previous list; a provider hiccup must not forget repositories.
 		o.LastError = err.Error()
 		if perr := s.orgs.put(o); perr != nil {
 			s.logger.Warn("saving organisation", "org", o.Org, "error", perr)
@@ -256,11 +327,11 @@ func (s *Server) indexMissing(ctx context.Context, o *Org, now time.Time) {
 		if !o.wants(*r) {
 			continue
 		}
-		if _, ok := indexed[r.Name]; ok {
+		if _, ok := o.indexedAs(*r, indexed); ok {
 			r.LastTry, r.LastError = "", ""
 			continue
 		}
-		if j, ok := latest[r.Name]; ok {
+		if j, ok := latest[o.fullName(r.Name)]; ok {
 			switch j.State {
 			case JobRunning:
 				continue
@@ -274,7 +345,7 @@ func (s *Server) indexMissing(ctx context.Context, o *Org, now time.Time) {
 		if started >= maxClonesPerScan {
 			break
 		}
-		if _, err := s.cloneOrgRepo(*o, r.Name); err != nil { //nolint:contextcheck // jobs outlive the scan
+		if _, err := s.cloneOrgRepo(ctx, *o, r.Name); err != nil { //nolint:contextcheck // jobs outlive the scan
 			if !errors.Is(err, errConflict) {
 				r.LastTry, r.LastError = now.UTC().Format(time.RFC3339), err.Error()
 			}
@@ -286,18 +357,23 @@ func (s *Server) indexMissing(ctx context.Context, o *Org, now time.Time) {
 }
 
 // cloneOrgRepo queues a clone of one repository of o. The URL is built from
-// the organisation and a name that came from GitHub and passed validRepoName.
-func (s *Server) cloneOrgRepo(o Org, name string) (Job, error) {
-	if !validRepoName(name) {
+// the host, the organisation and a name that came from the provider and
+// passed validRepoSegment, never taken from the API answer.
+func (s *Server) cloneOrgRepo(ctx context.Context, o Org, name string) (Job, error) {
+	if !validRepoSegment(name) || !validRepoSegment(strings.ToLower(o.Org)) {
 		return Job{}, fmt.Errorf("%w: unsupported repository name %q", errBadRequest, name)
 	}
-	// github.com is fixed and both path parts passed their allowlists, so
-	// there is nothing for the SSRF check in ValidateRemote to resolve.
-	remote := forge.CloneURL(o.Org, name)
-	if s.cloneHook != nil {
-		return s.cloneHook(remote, name)
+	remote, full := o.cloneURL(name), o.fullName(name)
+	if o.Host != forge.DefaultHost && s.cfg.ForgeAPI == "" {
+		var err error
+		if remote, err = gitx.ValidateRemote(ctx, remote, gitx.RemoteOptions{AllowPrivate: s.cfg.AllowPrivateGit}); err != nil {
+			return Job{}, fmt.Errorf("%w: %w", errBadRequest, err)
+		}
 	}
-	return s.startClone(remote, name, "")
+	if s.cloneHook != nil {
+		return s.cloneHook(remote, full)
+	}
+	return s.startClone(remote, full, "") //nolint:contextcheck // jobs outlive the request
 }
 
 // latestJobs maps repository to its most recent job.
@@ -327,6 +403,8 @@ func (s *Server) scanDue(ctx context.Context, now time.Time, logger *slog.Logger
 // OrgRepoView is an OrgRepo with its state in this workspace.
 type OrgRepoView struct {
 	OrgRepo
+	// Repo is the name of the repository in this workspace (owner/name).
+	Repo string `json:"repo"`
 	// Status: indexed, indexing, failed, pending (queued for the next scan),
 	// available (auto-index is off), conflict (another repository uses the
 	// name) or excluded (filtered out).
@@ -336,6 +414,8 @@ type OrgRepoView struct {
 // OrgView is an Org with per-repository status and counts.
 type OrgView struct {
 	Org
+	// Key identifies the organisation in the API paths.
+	Key    string         `json:"key"`
 	Repos  []OrgRepoView  `json:"repos"`
 	Counts map[string]int `json:"counts"`
 }
@@ -348,18 +428,21 @@ func (s *Server) orgView(ctx context.Context, o Org) OrgView {
 		}
 	}
 	latest := s.latestJobs()
-	v := OrgView{Org: o, Repos: make([]OrgRepoView, 0, len(o.Repos)), Counts: map[string]int{}}
+	v := OrgView{Org: o, Key: o.ident(), Repos: make([]OrgRepoView, 0, len(o.Repos)), Counts: map[string]int{}}
 	for _, r := range o.Repos {
-		rv := OrgRepoView{OrgRepo: r}
-		n, isIndexed := indexed[r.Name]
+		rv := OrgRepoView{OrgRepo: r, Repo: o.fullName(r.Name)}
+		n, isIndexed := o.indexedAs(r, indexed)
+		if isIndexed {
+			rv.Repo = n.Name
+		}
 		switch {
 		case !o.wants(r):
 			rv.Status = "excluded"
-		case isIndexed && sameRemote(n.URL, forge.CloneURL(o.Org, r.Name)):
+		case isIndexed && sameRemote(n.URL, o.cloneURL(r.Name)):
 			rv.Status = "indexed"
 		case isIndexed:
 			rv.Status = "conflict"
-		case latest[r.Name].State == JobRunning:
+		case latest[o.fullName(r.Name)].State == JobRunning:
 			rv.Status = "indexing"
 		case r.LastError != "":
 			rv.Status = "failed"
@@ -398,10 +481,63 @@ func (s *Server) handleListOrgs(w http.ResponseWriter, r *http.Request) {
 }
 
 type addOrgRequest struct {
+	// Provider is github, forgejo (gitea, codeberg) or gitlab; guessed for
+	// github.com, gitlab.com and codeberg.org.
+	Provider string `json:"provider"`
+	// Host defaults to github.com.
+	Host string `json:"host"`
+	// Org is a login, "host/login", or a URL such as https://codeberg.org/team/*.
 	Org             string `json:"org"`
 	IncludeArchived bool   `json:"include_archived"`
 	IncludeForks    bool   `json:"include_forks"`
 	AutoIndex       *bool  `json:"auto_index"`
+}
+
+// parseOrgInput resolves the provider, host and login of an add request.
+func parseOrgInput(provider, host, input string) (forge.Kind, string, string, error) {
+	input = strings.TrimSpace(input)
+	host = strings.ToLower(strings.TrimSpace(host))
+	if strings.Contains(input, "://") {
+		u, err := url.Parse(input)
+		if err != nil || u.Scheme != "https" || u.User != nil {
+			return "", "", "", errors.New("use an https:// URL without credentials")
+		}
+		if u.Port() != "" {
+			return "", "", "", errors.New("hosts with a port are not supported")
+		}
+		host, input = strings.ToLower(u.Hostname()), strings.TrimPrefix(u.Path, "/")
+	}
+	input = strings.TrimSuffix(strings.TrimSuffix(input, "/*"), "/")
+	if first, rest, ok := strings.Cut(input, "/"); ok {
+		switch {
+		case host == "" && strings.Contains(first, "."):
+			host, input = strings.ToLower(first), rest // "codeberg.org/team"
+		default:
+			input = first // "team/repo" or "team/*": only the organisation counts
+		}
+		if strings.Contains(input, "/") {
+			return "", "", "", errors.New("give the organisation only, such as team or codeberg.org/team")
+		}
+	}
+	if host == "" {
+		host = forge.DefaultHost
+	}
+	if !forge.ValidHost(host) {
+		return "", "", "", fmt.Errorf("%q is not a valid host name (no scheme, port or path)", host)
+	}
+	kind, ok := forge.ParseKind(provider)
+	switch {
+	case provider != "" && !ok:
+		return "", "", "", errors.New("provider must be github, forgejo (also Gitea, Codeberg) or gitlab")
+	case provider == "":
+		if kind, ok = forge.KindForHost(host); !ok {
+			return "", "", "", fmt.Errorf("choose the provider of %s: github, forgejo or gitlab", host)
+		}
+	}
+	if !forge.ValidOwner(kind, input) {
+		return "", "", "", fmt.Errorf("%q is not a valid %s organisation name", input, kind)
+	}
+	return kind, host, input, nil
 }
 
 // handleAddOrg starts watching an organisation: it lists the repositories
@@ -415,28 +551,28 @@ func (s *Server) handleAddOrg(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	req.Org = strings.TrimSpace(strings.TrimPrefix(req.Org, "https://github.com/"))
-	req.Org = strings.TrimSuffix(strings.TrimSuffix(req.Org, "/*"), "/")
-	if !forge.ValidOwner(req.Org) {
-		s.problem(w, 400, errors.New("organisation must be a GitHub login such as astrona-io"))
+	kind, host, login, err := parseOrgInput(req.Provider, req.Host, req.Org)
+	if err != nil {
+		s.problem(w, 400, err)
 		return
 	}
-	if _, ok := s.orgs.get(req.Org); ok {
-		s.problem(w, http.StatusConflict, fmt.Errorf("%s is already watched", req.Org))
+	o := Org{Provider: kind, Host: host, Org: login, IncludeArchived: req.IncludeArchived, IncludeForks: req.IncludeForks, AutoIndex: req.AutoIndex == nil || *req.AutoIndex}
+	key := o.ident()
+	if _, ok := s.orgs.get(key); ok {
+		s.problem(w, http.StatusConflict, fmt.Errorf("%s is already watched", key))
 		return
 	}
-	o := Org{Org: req.Org, IncludeArchived: req.IncludeArchived, IncludeForks: req.IncludeForks, AutoIndex: req.AutoIndex == nil || *req.AutoIndex}
-	if !s.orgs.begin(o.Org) {
-		s.problem(w, http.StatusConflict, fmt.Errorf("a scan of %s is already running", o.Org))
+	if !s.orgs.begin(key) {
+		s.problem(w, http.StatusConflict, fmt.Errorf("a scan of %s is already running", key))
 		return
 	}
-	defer s.orgs.end(o.Org)
+	defer s.orgs.end(key)
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	o, err := s.scan(ctx, o, time.Now())
+	o, err = s.scan(ctx, o, time.Now())
 	if err != nil {
 		s.orgs.mu.Lock()
-		delete(s.orgs.all, strings.ToLower(o.Org)) // never listed: do not keep it
+		delete(s.orgs.all, key) // never listed: do not keep it
 		s.orgs.mu.Unlock()
 		s.orgError(w, err)
 		return
@@ -517,10 +653,10 @@ func (s *Server) handleIndexOrgRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.PathValue("name")
 	if !slices.ContainsFunc(o.Repos, func(x OrgRepo) bool { return x.Name == name }) {
-		s.problem(w, 404, fmt.Errorf("%s/%s was not found in the last scan", o.Org, name))
+		s.problem(w, 404, fmt.Errorf("%s/%s was not found in the last scan", o.ident(), name))
 		return
 	}
-	job, err := s.cloneOrgRepo(o, name) //nolint:contextcheck // jobs outlive the request
+	job, err := s.cloneOrgRepo(r.Context(), o, name) //nolint:contextcheck // jobs outlive the request
 	if err != nil {
 		s.orgError(w, err)
 		return

@@ -77,7 +77,7 @@ func (s *Server) handleFixReview(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	runner := fixes.Runner{St: s.st, LLM: s.cfg.LLM, Auth: s.cfg.GitAuth, Author: s.cfg.GitAuthor,
+	runner := fixes.Runner{St: s.st, LLM: s.cfg.LLM, Auth: s.authFor(remote), Author: s.cfg.GitAuthor,
 		Workdir: filepath.Join(s.cfg.Workspace, ".codesynapse", "fixes")}
 	in := fixes.Request{ReviewID: rv.ID, CommentIDs: req.CommentIDs, Provider: req.Provider, Root: n.Root, Remote: remote, Base: n.Head, BaseBranch: n.Branch}
 	job, err := s.jobs.Start(rv.Repo, "", JobOptions{ //nolint:contextcheck // jobs outlive the request

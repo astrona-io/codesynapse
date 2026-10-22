@@ -44,7 +44,7 @@ services/api/           API service: cmd/codesynapse-api, Dockerfile, and packag
 services/mcp/           MCP service: cmd/codesynapse-mcp, Dockerfile
   internal/mcpserver/   MCP tools, prompts (prompts.go) and server instructions
 services/web/           Nuxt 4 dashboard (app/ pages+components, server/api/cg proxy, Dockerfile)
-deploy/k8s/             Kubernetes manifests (docker-compose.yml stays at the repo root)
+deploy/k8s/             Kustomize manifests (base + dev/prod overlays); docker-compose.yml stays at the repo root
 internal/model/         Node/Edge kinds, Graph, IDs. The schema lives here.
 internal/ingest/        Pipeline: golang/ (go/packages + go/types; security rules in findings.go),
                         lang/ (Python, JS/TS, Vue: pure-Go structural parsers + rules),
@@ -53,7 +53,7 @@ internal/cleanup/       Liveness (reachability from entry points), unused code/m
 internal/vuln/          go.mod and npm/PyPI lockfiles + OSV lookups, called/imported/required reachability
 internal/security/      Security report: grading, exposure, prioritisation, Markdown; rule guides (guides.go)
 internal/metrics/       Repository metrics and the token benchmark (computed at ingest)
-internal/forge/         GitHub organisation listing (api.github.com only) for the Organisations feature
+internal/forge/         Organisation listing for GitHub, Forgejo/Gitea and GitLab (one host per client) for the Organisations feature
 internal/gitx/          Hardened git runner, diff/log parsers, clone/fetch with SSRF checks
 internal/redact/        Secret redaction for every stored summary
 internal/store/         Store interface; memory/ and neo4jstore/ implementations; storetest/ contract
@@ -84,8 +84,11 @@ just up         # full stack in docker compose (creates .env with random secrets
 just db         # only Neo4j; then just dev-api / just dev-mcp / just dev-web
 just test-integration   # store contract tests against the compose Neo4j
 just review     # offline review pack for the current branch
+just image-build  # api, mcp and web images; then just k8s-secrets/k8s-apply (see deploy/k8s/README.md)
 just mcp        # register the MCP server with Claude Code, Codex, Gemini, OpenCode, Cursor
 ```
+
+Test Kubernetes manifests only on a throwaway kind cluster, with `--context` set explicitly; never on a shared or production cluster.
 
 Run `just test` and `just lint` before you call a Go change done, and `just web-check` for anything under `services/web/`.
 
@@ -126,7 +129,7 @@ This tool reads untrusted repositories and serves their contents to LLMs. Keep i
 - **Filesystem:** API ingest is confined to `CODESYNAPSE_SOURCES_ROOT` after symlink resolution (`insideSources`). Docs walking never follows symlinks.
 - **No source bodies or YAML values in the graph.** Store hashes, signatures, key paths, line ranges and short summaries. Every summary passes through `redact.Summary`. Author e-mails are stored only as hashes. Security findings describe the problem, never the secret.
 - **Remote git:** only `gitx.Clone`/`FetchCheckout`/`RemoteBranches`. Remotes go through `gitx.ValidateRemote` (https only, no credentials in URLs, no private/loopback hosts unless `CODESYNAPSE_ALLOW_PRIVATE_GIT`). Tokens are passed as `GIT_CONFIG_*` environment, never argv, and only to their configured host.
-- **Organisations:** repositories are listed only through `internal/forge` (api.github.com, no redirects, token sent only there and only when `CODESYNAPSE_GIT_TOKEN_HOST` is github.com). Clone URLs are built as `https://github.com/<login>/<name>.git` from an allowlisted login and a `validRepoName` name, never taken from the API answer. Scans queue at most 10 clones each and back off an hour after a failure.
+- **Organisations:** repositories are listed only through `internal/forge`, one client per host (GitHub, Forgejo/Gitea, GitLab; no redirects). Hosts other than github.com come from the user, so they pass `gitx.ValidateRemote` (https, no internal addresses unless `CODESYNAPSE_ALLOW_PRIVATE_GIT`, no ports) before any API call or clone. Tokens are per host (`CODESYNAPSE_GIT_TOKENS`, legacy `CODESYNAPSE_GIT_TOKEN` + `_HOST`), picked with `gitx.AuthFor` and sent to that host only. Clone URLs are built as `https://<host>/<login>/<name>.git` from a validated host, an allowlisted login and a `validRepoSegment` name, never taken from the API answer. Repository names carry the host except on github.com (`owner/name` vs `host/owner/name`), so identical org and repo names on two providers never collide. Scans queue at most 10 clones each and back off an hour after a failure.
 - **Vulnerability data:** only module paths and versions leave the machine (osv.dev). Keep it that way.
 - **MCP tools are read-only** and annotated `ReadOnlyHint`, with one exception: the review tools (`submit_review`, `update_review_comment`) write to the review store only (`store.ReviewStore`, `:Review` nodes), never to code or the graph. Review text is size-limited and secret-redacted (`reviews.Prepare`), file paths are repo-relative with no `..`, and `--allow-reviews=false` disables them. There is deliberately no raw-Cypher tool (read transactions still allow `LOAD CSV`, an SSRF and exfiltration path). Do not add other write tools without discussing it first.
 - **Destructive API actions** (delete repository, delete review) are confirmed in the UI; deleting cloned files is limited to a single directory inside the workspace, and mounted sources are never deleted.

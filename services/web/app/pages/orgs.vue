@@ -1,24 +1,27 @@
 <script setup lang="ts">
-// Watch GitHub organisations: list every repository, and clone + index new
-// ones as they appear (the API rescans every 5 minutes).
-interface OrgRepo { name: string; default_branch?: string; description?: string; archived?: boolean; fork?: boolean; private?: boolean; pushed_at?: string; status: string; last_error?: string }
+// Watch organisations on GitHub, Forgejo/Gitea or GitLab: list every repository,
+// and clone + index new ones as they appear (the API rescans every 5 minutes).
+interface OrgRepo { name: string; repo: string; default_branch?: string; description?: string; archived?: boolean; fork?: boolean; private?: boolean; pushed_at?: string; status: string; last_error?: string }
 interface Org {
+  key: string; provider: 'github' | 'forgejo' | 'gitlab'; host: string
   org: string; include_archived: boolean; include_forks: boolean; auto_index: boolean
   last_scan?: string; last_error?: string; next_scan?: string
   repos: OrgRepo[]; counts: Record<string, number>
 }
 
 const { data, refresh } = useApiGet<{ orgs: Org[]; enabled: boolean }>('orgs')
-const { data: settings } = useApiGet<{ git_token_configured: boolean; git_token_host: string }>('settings')
+const { data: settings } = useApiGet<{ git_token_configured: boolean; git_token_host: string; git_token_hosts?: string[] }>('settings')
 
-const form = reactive({ org: '', include_archived: false, include_forks: false, auto_index: true })
+const PROVIDERS = [{ v: '', label: 'Detect from host' }, { v: 'github', label: 'GitHub' }, { v: 'forgejo', label: 'Forgejo / Gitea / Codeberg' }, { v: 'gitlab', label: 'GitLab' }]
+const LABEL: Record<string, string> = { github: 'GitHub', forgejo: 'Forgejo', gitlab: 'GitLab' }
+const form = reactive({ provider: '', host: '', org: '', include_archived: false, include_forks: false, auto_index: true })
 const adding = ref(false)
 const error = ref('')
 async function add() {
   error.value = ''
   adding.value = true
   try {
-    await apiPost('orgs', { ...form, org: form.org.trim() })
+    await apiPost('orgs', { ...form, host: form.host.trim(), org: form.org.trim() })
     form.org = ''
     await refresh()
   } catch (e) {
@@ -37,15 +40,15 @@ async function call(method: 'PUT' | 'DELETE' | 'POST', path: string, body?: Reco
     error.value = apiErrorMessage(e)
   }
 }
-const rescan = (o: Org) => call('POST', `orgs/${encodeURIComponent(o.org)}/scan`)
-const stop = (o: Org) => call('DELETE', `orgs/${encodeURIComponent(o.org)}`)
-const index = (o: Org, r: OrgRepo) => call('POST', `orgs/${encodeURIComponent(o.org)}/repos/${encodeURIComponent(r.name)}/index`)
+const rescan = (o: Org) => call('POST', `orgs/${encodeURIComponent(o.key)}/scan`)
+const stop = (o: Org) => call('DELETE', `orgs/${encodeURIComponent(o.key)}`)
+const index = (o: Org, r: OrgRepo) => call('POST', `orgs/${encodeURIComponent(o.key)}/repos/${encodeURIComponent(r.name)}/index`)
 const setting = (o: Org, patch: Partial<Pick<Org, 'include_archived' | 'include_forks' | 'auto_index'>>) =>
-  call('PUT', `orgs/${encodeURIComponent(o.org)}`, { include_archived: o.include_archived, include_forks: o.include_forks, auto_index: o.auto_index, ...patch })
+  call('PUT', `orgs/${encodeURIComponent(o.key)}`, { include_archived: o.include_archived, include_forks: o.include_forks, auto_index: o.auto_index, ...patch })
 
 const open = reactive<Record<string, boolean>>({})
 const filter = reactive<Record<string, string>>({})
-const shown = (o: Org) => o.repos.filter((r) => !filter[o.org] || r.name.toLowerCase().includes(filter[o.org]!.toLowerCase()))
+const shown = (o: Org) => o.repos.filter((r) => !filter[o.key] || r.name.toLowerCase().includes(filter[o.key]!.toLowerCase()))
 
 const busy = computed(() => data.value?.orgs.some((o) => (o.counts.indexing ?? 0) + (o.counts.pending ?? 0) > 0) ?? false)
 let timer: ReturnType<typeof setInterval> | undefined
@@ -68,7 +71,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 
 <template>
   <div class="stack">
-    <PageHeader eyebrow="Workspace" title="Organisations" lede="Watch a GitHub organisation and CodeSynapse lists every repository in it, indexes them, and picks up new repositories automatically." />
+    <PageHeader eyebrow="Workspace" title="Organisations" lede="Watch an organisation on GitHub, Forgejo, Gitea or GitLab and CodeSynapse lists every repository in it, indexes them, and picks up new repositories automatically. The same organisation name on two hosts stays two separate organisations." />
 
     <p v-if="data && !data.enabled" class="error">Cloning is off: set CODESYNAPSE_WORKSPACE on the API to watch organisations.</p>
 
@@ -76,8 +79,16 @@ const STATUS: Record<string, { label: string; cls: string }> = {
       <p class="eyebrow">Watch an organisation</p>
       <h2>Index everything in <span class="mono">astrona-io/*</span></h2>
       <form class="add" @submit.prevent="add">
-        <label class="grow">GitHub organisation or user
-          <input v-model="form.org" required placeholder="astrona-io" autocomplete="off">
+        <label>Provider
+          <select v-model="form.provider">
+            <option v-for="p in PROVIDERS" :key="p.v" :value="p.v">{{ p.label }}</option>
+          </select>
+        </label>
+        <label>Host <span class="muted small">(empty = github.com)</span>
+          <input v-model="form.host" placeholder="git.example.com" autocomplete="off">
+        </label>
+        <label class="grow">Organisation or user
+          <input v-model="form.org" required placeholder="astrona-io  ·  or https://codeberg.org/team/*" autocomplete="off">
         </label>
         <label class="check"><input v-model="form.auto_index" type="checkbox"> Index new repositories automatically</label>
         <label class="check"><input v-model="form.include_archived" type="checkbox"> Include archived</label>
@@ -85,19 +96,19 @@ const STATUS: Record<string, { label: string; cls: string }> = {
         <div class="row">
           <button type="submit" :disabled="!form.org.trim() || adding || data?.enabled === false">{{ adding ? 'Scanning…' : 'Scan & watch' }}</button>
           <span class="muted small">
-            <template v-if="settings?.git_token_configured">Private repositories on {{ settings.git_token_host }} are included (token configured on the server).</template>
-            <template v-else>Without a token only public repositories are listed. Run <code>just git-token</code> to add private ones.</template>
+            <template v-if="settings?.git_token_hosts?.length">Private repositories are included for {{ settings.git_token_hosts.join(', ') }} (tokens configured on the server, each sent to its own host only). Add another host with <code>just git-token &lt;host&gt;</code>.</template>
+            <template v-else>Without a token only public repositories are listed. Run <code>just git-token &lt;host&gt;</code> to add private ones.</template>
           </span>
         </div>
       </form>
       <p v-if="error" class="error">{{ error }}</p>
     </section>
 
-    <section v-for="o in data?.orgs ?? []" :key="o.org" class="panel org">
+    <section v-for="o in data?.orgs ?? []" :key="o.key" class="panel org">
       <div class="org-head">
         <div>
-          <p class="eyebrow">GitHub</p>
-          <h2 class="mono">{{ o.org }}/*</h2>
+          <p class="eyebrow">{{ LABEL[o.provider] ?? o.provider }} · {{ o.host }}</p>
+          <h2 class="mono">{{ o.key }}/*</h2>
           <p class="muted small">
             {{ plural(o.repos.length, 'repository', 'repositories') }}
             · {{ o.counts.indexed ?? 0 }} indexed
@@ -108,7 +119,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
         </div>
         <div class="row tight-actions">
           <button class="secondary tiny" @click="rescan(o)">Scan now</button>
-          <button class="secondary tiny" @click="open[o.org] = !open[o.org]">{{ open[o.org] ? 'Hide repositories' : 'Show repositories' }}</button>
+          <button class="secondary tiny" @click="open[o.key] = !open[o.key]">{{ open[o.key] ? 'Hide repositories' : 'Show repositories' }}</button>
           <button class="secondary tiny" title="Stops watching; indexed repositories stay" @click="stop(o)">Stop watching</button>
         </div>
       </div>
@@ -119,11 +130,11 @@ const STATUS: Record<string, { label: string; cls: string }> = {
         <label class="check"><input type="checkbox" :checked="o.include_forks" @change="setting(o, { include_forks: ($event.target as HTMLInputElement).checked })"> Forks</label>
       </div>
 
-      <template v-if="open[o.org]">
-        <input v-model="filter[o.org]" class="find" placeholder="Filter repositories" aria-label="Filter repositories">
+      <template v-if="open[o.key]">
+        <input v-model="filter[o.key]" class="find" placeholder="Filter repositories" aria-label="Filter repositories">
         <ul class="repos">
           <li v-for="r in shown(o)" :key="r.name" class="repo">
-            <NuxtLink v-if="r.status === 'indexed'" :to="`/repos/${encodeURIComponent(r.name)}`" class="mono name">{{ r.name }}</NuxtLink>
+            <NuxtLink v-if="r.status === 'indexed'" :to="`/repos/${encodeURIComponent(r.repo)}`" class="mono name" :title="r.repo">{{ r.name }}</NuxtLink>
             <span v-else class="mono name">{{ r.name }}</span>
             <span v-if="r.private" class="badge badge--violet">private</span>
             <span v-if="r.archived" class="badge badge--amber">archived</span>
@@ -137,7 +148,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
       </template>
     </section>
 
-    <div v-if="data && !data.orgs.length" class="empty"><strong>No organisations yet</strong>Enter an organisation above, for example <code>astrona-io</code>.</div>
+    <div v-if="data && !data.orgs.length" class="empty"><strong>No organisations yet</strong>Enter an organisation above, for example <code>astrona-io</code> on GitHub or <code>https://codeberg.org/team</code>.</div>
   </div>
 </template>
 

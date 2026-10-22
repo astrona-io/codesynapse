@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,11 +19,11 @@ import (
 
 // Allowed auto-sync intervals in minutes. A short list keeps the UI simple
 // and stops anyone from hammering a git host.
-var allowedIntervals = []int{0, 5, 15, 60, 360, 1440}
+var allowedIntervals = []int{0, 5, 15, 30, 60, 360, 1440}
 
 // defaultInterval is the auto-sync interval of a repository nobody has
 // configured: new repositories stay fresh without a visit to the settings.
-const defaultInterval = 5
+const defaultInterval = 30
 
 // Schedule is the auto-sync setting of one repository.
 type Schedule struct {
@@ -130,6 +131,16 @@ func (s *schedules) get(repo string) Schedule {
 	return Schedule{Repo: repo, IntervalMinutes: defaultInterval}
 }
 
+// stagger spreads first runs over one interval, derived from the repository
+// name so it is stable across restarts. Without it every repository added
+// together (an organisation scan) would be due in the same minute, again and
+// again.
+func stagger(repo string, interval int) time.Duration {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(repo)) //nolint:errcheck // hash writes never fail
+	return time.Duration(int64(h.Sum32())%int64(interval*60)) * time.Second
+}
+
 // ensure stores the default schedule for repo when it has none, so the
 // scheduler has a next run to count down to.
 func (s *schedules) ensure(repo string, now time.Time) {
@@ -139,7 +150,7 @@ func (s *schedules) ensure(repo string, now time.Time) {
 		return
 	}
 	s.all[repo] = &Schedule{Repo: repo, IntervalMinutes: defaultInterval,
-		NextRun: now.Add(defaultInterval * time.Minute).UTC().Format(time.RFC3339)}
+		NextRun: now.Add(stagger(repo, defaultInterval)).UTC().Format(time.RFC3339)}
 	_ = s.save() //nolint:errcheck // best effort; the next tick retries
 }
 
@@ -184,8 +195,9 @@ func (s *schedules) due(now time.Time) []string {
 	return out
 }
 
-// started records a run and schedules the next one.
-func (s *schedules) started(repo string, now time.Time, err error) {
+// started records a run (status: started, or unchanged when nothing was new)
+// and schedules the next one.
+func (s *schedules) started(repo string, now time.Time, status string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sc, ok := s.all[repo]
@@ -193,11 +205,30 @@ func (s *schedules) started(repo string, now time.Time, err error) {
 		return
 	}
 	sc.LastRun = now.UTC().Format(time.RFC3339)
-	sc.LastStatus, sc.LastError = "started", ""
+	sc.LastStatus, sc.LastError = status, ""
 	if err != nil {
 		sc.LastStatus, sc.LastError = "failed", err.Error()
 	}
 	sc.NextRun = now.Add(time.Duration(sc.IntervalMinutes) * time.Minute).UTC().Format(time.RFC3339)
+	_ = s.save() //nolint:errcheck // best effort; the next tick retries
+}
+
+// finished schedules the next run one interval after a scheduled sync ended,
+// so a long sync never eats into the gap and repositories drift apart.
+func (s *schedules) finished(repo string, now time.Time, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sc, ok := s.all[repo]
+	if !ok {
+		return
+	}
+	sc.LastStatus, sc.LastError = "succeeded", ""
+	if err != nil {
+		sc.LastStatus, sc.LastError = "failed", err.Error()
+	}
+	if sc.State() == "active" {
+		sc.NextRun = now.Add(time.Duration(sc.IntervalMinutes) * time.Minute).UTC().Format(time.RFC3339)
+	}
 	_ = s.save() //nolint:errcheck // best effort; the next tick retries
 }
 
@@ -219,14 +250,18 @@ func (s *Server) runScheduler(ctx context.Context, logger *slog.Logger) {
 			}
 			s.scanDue(ctx, now, logger)
 			for _, repo := range s.sched.due(now) {
-				_, err := s.startSync(ctx, repo, "")
-				if errors.Is(err, errConflict) {
+				_, err := s.startSync(ctx, repo, "", true, func(err error) { s.sched.finished(repo, time.Now(), err) })
+				switch {
+				case errors.Is(err, errConflict):
 					continue // a sync is already running; try again next interval
-				}
-				if err != nil {
+				case errors.Is(err, errUnchanged):
+					s.sched.started(repo, now, "unchanged", nil)
+				case err != nil:
 					logger.Warn("scheduled sync not started", "repo", repo, "error", err)
+					s.sched.started(repo, now, "failed", err)
+				default:
+					s.sched.started(repo, now, "started", nil)
 				}
-				s.sched.started(repo, now, err)
 			}
 		}
 	}
