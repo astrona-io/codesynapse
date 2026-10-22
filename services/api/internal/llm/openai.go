@@ -86,8 +86,11 @@ func (o *openAI) Complete(ctx context.Context, req Request) (Response, error) {
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
+			PromptTokens        int `json:"prompt_tokens"`
+			CompletionTokens    int `json:"completion_tokens"`
+			PromptTokensDetails struct {
+				CachedTokens int `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := o.do(ctx, http.MethodPost, "/chat/completions", body, &res); err != nil {
@@ -104,7 +107,8 @@ func (o *openAI) Complete(ctx context.Context, req Request) (Response, error) {
 	if model == "" {
 		model = o.cfg.Model
 	}
-	return Response{Text: text, Model: model, InputTokens: res.Usage.PromptTokens, OutputTokens: res.Usage.CompletionTokens}, nil
+	return Response{Text: text, Model: model, InputTokens: res.Usage.PromptTokens, CachedInputTokens: res.Usage.PromptTokensDetails.CachedTokens,
+		OutputTokens: res.Usage.CompletionTokens}, nil
 }
 
 func (o *openAI) Models(ctx context.Context) ([]string, error) {

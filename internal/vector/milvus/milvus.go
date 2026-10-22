@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 	"github.com/parisnakitakejser/codesynapse/internal/vector"
 )
 
@@ -93,8 +94,20 @@ func New(ctx context.Context, cfg Config) (*Index, error) {
 // Close implements vector.Index.
 func (x *Index) Close(context.Context) error { x.http.CloseIdleConnections(); return nil }
 
-// call posts body to /v2/vectordb/path and decodes "data" into out.
+// call posts body to /v2/vectordb/path and decodes "data" into out. The
+// path (a fixed set) is the operation label.
 func (x *Index) call(ctx context.Context, path string, body map[string]any, out any) error {
+	start := time.Now()
+	err := x.do(ctx, path, body, out)
+	tenant := telemetry.Tenant(ctx)
+	telemetry.DBDuration.Observe(time.Since(start).Seconds(), tenant, "milvus", path)
+	if err != nil {
+		telemetry.DBErrors.Inc(tenant, "milvus", path)
+	}
+	return err
+}
+
+func (x *Index) do(ctx context.Context, path string, body map[string]any, out any) error {
 	if x.db != "" {
 		body["dbName"] = x.db
 	}
@@ -300,7 +313,17 @@ func (x *Index) Search(ctx context.Context, model, tenant, namespace string, vec
 		// COSINE "distance" is cos in -1..1; memory.Similarity is (1+cos)/2.
 		hits = append(hits, vector.Hit{ID: r.ID, Tenant: r.Tenant, Namespace: r.NS, Score: (1 + r.Distance) / 2})
 	}
-	return vector.Isolate(hits, tenant, namespace, k), nil
+	hits = vector.Isolate(hits, tenant, namespace, k)
+	telemetry.VectorMatches.Add(float64(len(hits)), telemetry.TenantLabel(orgOf(tenant)), "milvus")
+	return hits, nil
+}
+
+// orgOf turns a vector tenant back into an organisation ID ("" for none).
+func orgOf(tenant string) string {
+	if tenant == memory.NoTenant {
+		return ""
+	}
+	return tenant
 }
 
 // Delete implements vector.Index.

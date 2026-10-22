@@ -17,6 +17,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/accounts/pgstore"
 	"github.com/parisnakitakejser/codesynapse/internal/app"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/api"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
 )
@@ -102,6 +103,11 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		registry = llm.NewRegistry(llmCfg)
 		o.EC.Logger.Info("AI providers configured", "providers", len(llmCfg.Providers), "default", llmCfg.Default)
 	}
+	stopMetrics, err := app.StartMetrics(ctx, o.EC.Logger, "api")
+	if err != nil {
+		return err
+	}
+	defer stopMetrics()
 	acc, closeAccounts, err := openAccounts(ctx, o.EC.Logger)
 	if err != nil {
 		return err
@@ -117,6 +123,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		AllowPush: app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true",
 		Accounts:  acc, ServiceToken: os.Getenv(EnvToken), SecureCookies: app.Getenv("CODESYNAPSE_COOKIE_SECURE", "true") == "true",
 		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour,
+		Metrics:        metricsQuerier(),
 		GitAuthor:      gitx.Author{Name: app.Getenv("CODESYNAPSE_GIT_AUTHOR_NAME", "CodeSynapse"), Email: app.Getenv("CODESYNAPSE_GIT_AUTHOR_EMAIL", "codesynapse@localhost")}}, st, o.EC.Logger)
 	o.EC.Logger.Info("api listening", "addr", o.addr, "sources_root", o.sources, "auth", os.Getenv(EnvToken) != "", "accounts", acc != nil)
 	if acc != nil {
@@ -158,6 +165,16 @@ func openAccounts(ctx context.Context, logger *slog.Logger) (*accounts.Service, 
 	svc := accounts.NewService(st, app.Getenv("CODESYNAPSE_SIGNUP_OPEN", "") == "true")
 	logger.Info("accounts enabled", "signup_open", svc.SignupOpen)
 	return svc, st.Close, nil
+}
+
+// metricsQuerier reads the statistics' time series from the VictoriaMetrics
+// the services push to, or nil without one.
+func metricsQuerier() *telemetry.Querier {
+	url := os.Getenv(app.EnvMetricsURL)
+	if url == "" || telemetry.CheckURL(url) != nil {
+		return nil // StartMetrics already refused a bad URL
+	}
+	return &telemetry.Querier{URL: url, User: app.Getenv(app.EnvMetricsUser, ""), Password: os.Getenv(app.EnvMetricsPassword)}
 }
 
 // retentionDays reads CODESYNAPSE_AUDIT_RETENTION_DAYS (default 400).

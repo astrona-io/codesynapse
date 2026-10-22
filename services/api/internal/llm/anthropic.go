@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -46,9 +47,14 @@ func (a *anthropicProvider) Complete(ctx context.Context, req Request) (Response
 		params.OutputConfig = anthropic.BetaOutputConfigParam{Effort: anthropic.BetaOutputConfigEffort(a.cfg.Effort)}
 	}
 	// Streamed so long answers are not cut by request timeouts.
+	start := time.Now()
 	stream := a.client.Beta.Messages.NewStreaming(ctx, params)
 	var msg anthropic.BetaMessage
+	var first time.Duration
 	for stream.Next() {
+		if first == 0 && stream.Current().Type == "content_block_delta" {
+			first = time.Since(start)
+		}
 		if err := msg.Accumulate(stream.Current()); err != nil {
 			return Response{}, fmt.Errorf("%s: %w", a.cfg.Name, err)
 		}
@@ -74,7 +80,9 @@ func (a *anthropicProvider) Complete(ctx context.Context, req Request) (Response
 	}
 	return Response{
 		Text: strings.TrimSpace(b.String()), Model: msg.Model,
-		InputTokens: int(msg.Usage.InputTokens), OutputTokens: int(msg.Usage.OutputTokens),
+		// Anthropic reports cache reads and writes apart from input_tokens.
+		InputTokens:       int(msg.Usage.InputTokens + msg.Usage.CacheReadInputTokens + msg.Usage.CacheCreationInputTokens),
+		CachedInputTokens: int(msg.Usage.CacheReadInputTokens), OutputTokens: int(msg.Usage.OutputTokens), FirstToken: first,
 	}, nil
 }
 

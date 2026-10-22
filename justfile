@@ -23,6 +23,10 @@ init:
             printf '\n# PostgreSQL for users, organisations, API keys and the audit log.\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
             echo "added POSTGRES_PASSWORD to .env"
         fi
+        if ! grep -q '^METRICS_PASSWORD=' .env; then
+            printf '\n# VictoriaMetrics password (statistics by minute and hour).\nMETRICS_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
+            echo "added METRICS_PASSWORD to .env"
+        fi
         if ! grep -q '^HUGEGRAPH_PASSWORD=' .env; then
             printf '\n# HugeGraph admin password (only used with CODESYNAPSE_GRAPH_BACKEND=hugegraph).\nHUGEGRAPH_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
             echo "added HUGEGRAPH_PASSWORD to .env"
@@ -33,7 +37,8 @@ init:
         -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-postgres/$(openssl rand -hex 24)/" \
-        -e "s/change-me-hugegraph/$(openssl rand -hex 24)/" .env.example > .env
+        -e "s/change-me-hugegraph/$(openssl rand -hex 24)/" \
+        -e "s/change-me-metrics/$(openssl rand -hex 24)/" .env.example > .env
     mkdir -p sources
     [ -f sources/go.mod ] || printf "module sources\n" > sources/go.mod
     echo "wrote .env; put repositories (or symlink-free clones) under ./sources"
@@ -238,6 +243,18 @@ test-hugegraph: _runtime
     go test -race -count=1 ./internal/store/hugegraphstore/... ./internal/vector/...
     # The parity check indexes this repository; go/packages races under -race.
     go test -count=1 -run TestParityWithReference ./internal/store/hugegraphstore/
+
+# Push and tenant-filtered queries against a throwaway VictoriaMetrics
+test-metrics: _runtime
+    #!/usr/bin/env sh
+    set -eu
+    name="codesynapse-vm-test-$$"; pw=$(openssl rand -hex 16)
+    {{engine}} run --rm -d --name "$name" -p 127.0.0.1:58428:8428 quay.io/victoriametrics/victoria-metrics:v1.110.0 \
+        -search.latencyOffset=1s -httpAuth.username=cs -httpAuth.password="$pw" >/dev/null
+    trap '{{engine}} stop "$name" >/dev/null 2>&1' EXIT
+    until curl -sf http://127.0.0.1:58428/health >/dev/null; do sleep 1; done
+    CODESYNAPSE_TEST_METRICS_URL=http://127.0.0.1:58428 CODESYNAPSE_TEST_METRICS_USER=cs CODESYNAPSE_TEST_METRICS_PASSWORD="$pw" \
+        go test -race -count=1 -run TestVictoriaMetrics ./internal/telemetry/
 
 test-integration: db
     CODESYNAPSE_TEST_NEO4J_URI=neo4j://localhost:7687 CODESYNAPSE_TEST_NEO4J_PASSWORD="$NEO4J_PASSWORD" \

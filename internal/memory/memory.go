@@ -48,10 +48,18 @@ func Namespace(org, graph string) string {
 // TenantOf is the organisation a namespace belongs to, NoTenant without one.
 // Graph names never contain "|".
 func TenantOf(namespace string) string {
-	if org, _, ok := strings.Cut(namespace, "|"); ok && org != "" {
+	if org := OrgOf(namespace); org != "" {
 		return org
 	}
 	return NoTenant
+}
+
+// OrgOf is the organisation a namespace belongs to, "" without one.
+func OrgOf(namespace string) string {
+	if org, _, ok := strings.Cut(namespace, "|"); ok {
+		return org
+	}
+	return ""
 }
 
 // Notice is attached to every read so agents treat recalled facts as data.

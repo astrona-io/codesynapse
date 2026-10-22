@@ -27,6 +27,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/review"
 	"github.com/parisnakitakejser/codesynapse/internal/security"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/offload"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/recall"
@@ -58,6 +59,9 @@ type Config struct {
 	SecureCookies bool
 	// AuditRetention is how long audit entries are kept (default 400 days).
 	AuditRetention time.Duration
+	// Metrics reads time series for the statistics (nil without
+	// VictoriaMetrics).
+	Metrics *telemetry.Querier
 	// Workspace is a writable directory for repositories cloned by URL.
 	Workspace string
 	// GitAuth is an optional token for cloning private repositories.
@@ -142,6 +146,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Request-ID", rid)
 	r = r.WithContext(accounts.WithRequestInfo(r.Context(), accounts.RequestInfo{RequestID: rid, IP: clientAddr(r), UserAgent: r.UserAgent()}))
 	rec := &statusRecorder{ResponseWriter: w}
+	start, tenant := time.Now(), new(string)
+	r = r.WithContext(context.WithValue(r.Context(), tenantSlot{}, tenant))
+	defer func() { s.observe(r, rec.status, *tenant, start) }()
 	if s.cfg.Accounts != nil {
 		var ok bool
 		if r, ok = s.authenticate(rec, r); !ok {
@@ -154,6 +161,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, pattern := s.mux.Handler(r)
 		s.auditRequest(r, pattern, rec.status)
 	}
+}
+
+// tenantSlot lets guard report the request's tenant to ServeHTTP, which
+// records the request metrics after the handler ran.
+type tenantSlot struct{}
+
+func (s *Server) observe(r *http.Request, status int, tenant string, start time.Time) {
+	_, route := s.mux.Handler(r)
+	if route == "" {
+		route = "(no route)"
+	}
+	if status == 0 {
+		status = http.StatusOK
+	}
+	if tenant == "" {
+		tenant = telemetry.NoTenant
+	}
+	telemetry.HTTPRequests.Inc(tenant, route, r.Method, fmt.Sprintf("%dxx", status/100))
+	telemetry.HTTPDuration.Observe(time.Since(start).Seconds(), route, r.Method)
 }
 
 func (s *Server) routes() {
@@ -186,6 +212,7 @@ func (s *Server) routes() {
 	s.accountRoutes()
 	s.route("GET /api/v1/overview", visibleOnly, s.handleWorkspaceOverview)
 	s.route("GET /api/v1/stats", visibleOnly, s.handleStats)
+	s.route("GET /api/v1/stats/series", visibleOnly, s.handleSeries)
 	s.route("DELETE /api/v1/repos/{repo}", repoRole(accounts.Admin), s.handleDeleteRepo)
 	s.route("GET /api/v1/repos/{repo}/overview", repoRole(accounts.Viewer), s.handleOverview)
 	s.route("GET /api/v1/repos/{repo}/dashboard", repoRole(accounts.Viewer), s.handleDashboard)

@@ -1,0 +1,104 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	acctmem "github.com/parisnakitakejser/codesynapse/internal/accounts/memstore"
+	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
+	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
+	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+)
+
+// fakeVM answers query_range with one series and records the filters.
+type fakeVM struct {
+	mu      sync.Mutex
+	filters []string
+	queries []string
+}
+
+func (f *fakeVM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	f.filters = append(f.filters, strings.Join(r.URL.Query()["extra_filters[]"], ";"))
+	f.queries = append(f.queries, r.URL.Query().Get("query"))
+	f.mu.Unlock()
+	start := r.URL.Query().Get("start")
+	_, _ = io.WriteString(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"mcp_tool":"search"},"values":[[`+start+`,"3"]]}]}}`)
+}
+
+func (f *fakeVM) last() (filter, query string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.filters[len(f.filters)-1], f.queries[len(f.queries)-1]
+}
+
+func TestSeriesScopedByTenant(t *testing.T) {
+	vm := &fakeVM{}
+	vmSrv := httptest.NewServer(vm)
+	defer vmSrv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	acc := accounts.NewService(acctmem.New(), true)
+	ts := httptest.NewServer(New(ctx, Config{Accounts: acc, Metrics: &telemetry.Querier{URL: vmSrv.URL}}, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil))))
+	defer ts.Close()
+
+	admin := newClient(t, ts)
+	require.Equal(t, admin.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil), 201)
+	bob := newClient(t, ts)
+	var signed struct{ Org accounts.Org }
+	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 201)
+
+	var p SeriesPanel
+	require.Equal(t, bob.do("GET", "/api/v1/stats/series?panel=tool_calls&range=1h", "", &p), 200)
+	filter, query := vm.last()
+	assert.Equal(t, filter, `{tenant_id=~"`+signed.Org.ID+`"}`, "members see their own organisation only, enforced by VictoriaMetrics")
+	assert.Contains(t, query, "[1m]", "the 1h range uses 1-minute steps")
+	assert.Equal(t, len(p.Times), 60)
+	require.Len(t, p.Series, 1)
+	assert.Equal(t, p.Series[0].Name, "search")
+	assert.Equal(t, p.Series[0].Total, 3.0)
+	assert.True(t, p.Series[0].Values[len(p.Times)-1] != nil && *p.Series[0].Values[len(p.Times)-1] == 0, "count panels fill quiet steps with 0")
+
+	assert.Equal(t, bob.do("GET", "/api/v1/stats/series?panel=tenants&range=1h", "", nil), 403, "cross-tenant panels are for platform admins")
+	assert.Equal(t, bob.do("GET", "/api/v1/stats/series?panel=nope", "", nil), 400)
+	assert.Equal(t, bob.do("GET", "/api/v1/stats/series?panel=tool_calls&range=2y", "", nil), 400)
+
+	require.Equal(t, admin.do("GET", "/api/v1/stats/series?panel=tenants&range=7d", "", &p), 200)
+	filter, query = vm.last()
+	assert.Equal(t, filter, "", "platform admins see every tenant")
+	assert.Contains(t, query, "[1h]")
+
+	plain := httptest.NewServer(New(ctx, Config{}, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil))))
+	defer plain.Close()
+	assert.Equal(t, newClient(t, plain).do("GET", "/api/v1/stats/series?panel=tool_calls", "", nil), 409, "without VictoriaMetrics the panel says so")
+}
+
+func TestFoldSeries(t *testing.T) {
+	v := func(f float64) *float64 { return &f }
+	var lines []SeriesLine
+	for i, name := range []string{"a", "b", "c", "d", "e", "f", "g"} {
+		lines = append(lines, SeriesLine{Name: name, Total: float64(10 - i), Values: []*float64{v(float64(10 - i)), nil}})
+	}
+	got := foldSeries(lines, "count", 2)
+	require.Len(t, got, maxNamedSeries+1)
+	other := got[maxNamedSeries]
+	assert.Equal(t, other.Name, "other")
+	assert.Equal(t, other.Total, 6.0+5+4)
+	assert.Equal(t, *other.Values[0], 15.0)
+	assert.True(t, other.Values[1] == nil, "steps without data stay empty")
+	assert.Len(t, foldSeries(lines[:5], "count", 2), maxNamedSeries+1, "a fifth series folds: hues never repeat")
+	small := []SeriesLine{{Name: "b", Total: 9}, {Name: "a", Total: 1}}
+	got = foldSeries(small, "count", 0)
+	assert.Equal(t, got[0].Name, "a", "named series are ordered by name, not size, so colours stay with them")
+	b, _ := json.Marshal(foldSeries(lines[:7], "gauge", 2))
+	assert.False(t, strings.Contains(string(b), "other"), "levels are not summed")
+}

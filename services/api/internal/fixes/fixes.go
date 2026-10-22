@@ -268,7 +268,7 @@ func (r Runner) fixFile(ctx context.Context, root *os.Root, provider string, cfg
 		}
 	}
 	fmt.Fprintf(&b, "\nCurrent file:\n````\n%s\n````\n", orig)
-	resp, err := r.LLM.Complete(ctx, provider, llm.Request{System: fixSystem, User: b.String()})
+	resp, err := r.LLM.Complete(llm.WithTask(ctx, "fix"), provider, llm.Request{System: fixSystem, User: b.String()})
 	if err != nil {
 		return "", err
 	}

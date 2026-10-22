@@ -1,5 +1,31 @@
 <script setup lang="ts">
-import type { WorkspaceStats } from '~/utils/types'
+import type { SeriesRange, WorkspaceStats } from '~/utils/types'
+
+// Live activity: time series from VictoriaMetrics, by minute up to hours.
+const RANGES: { id: SeriesRange; label: string }[] = [
+  { id: '1h', label: 'last hour' }, { id: '6h', label: '6 hours' }, { id: '24h', label: '24 hours' },
+  { id: '7d', label: '7 days' }, { id: '30d', label: '30 days' },
+]
+const PANELS = ['tool_calls', 'tool_latency', 'sessions', 'served_tokens', 'llm_tokens', 'llm_cost', 'llm_ttft', 'db_latency', 'db_rows', 'memory', 'tool_errors', 'tenants']
+// The window lives in the URL (?range=1h) so a view can be shared.
+const route = useRoute()
+const router = useRouter()
+const isRange = (v: unknown): v is SeriesRange => RANGES.some((r) => r.id === v)
+const range = ref<SeriesRange>(isRange(route.query.range) ? route.query.range : '24h')
+watch(range, (r) => router.replace({ query: { ...route.query, range: r } }))
+const tick = ref(0)
+const metricsOff = ref(false)
+const hiddenPanels = ref<string[]>([])
+function unavailable(panel: string, status: number) {
+  if (status === 409) metricsOff.value = true
+  else if (!hiddenPanels.value.includes(panel)) hiddenPanels.value.push(panel)
+}
+let timer: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  // Short windows move by the minute: refresh them while the page is open.
+  timer = setInterval(() => { if (range.value === '1h' || range.value === '6h') tick.value++ }, 60_000)
+})
+onBeforeUnmount(() => clearInterval(timer))
 
 const days = ref(30)
 const { data: s, error, pending } = useApiGet<WorkspaceStats>(() => `stats?days=${days.value}`)
@@ -51,6 +77,22 @@ const automationPct = computed(() => {
       <button v-for="d in [7, 30, 90]" :key="d" class="chip" :class="{ active: days === d }" @click="days = d">last {{ d }} days</button>
       <span v-if="pending" class="muted small">refreshing…</span>
     </div>
+
+    <!-- Live activity ------------------------------------------------- -->
+    <section class="panel edge--cyan">
+      <p class="eyebrow">Live activity</p><h2>By the minute and hour</h2>
+      <p class="muted small">Recorded by the services every 15 seconds: agent calls, latency, AI model tokens and cost, database work and memory. Counts are per step of the chart ({{ range === '1h' ? '1 minute' : range === '6h' ? '5 minutes' : range === '24h' ? '15 minutes' : range === '7d' ? '1 hour' : '6 hours' }}). You see your organisation's activity; platform admins see everyone's.</p>
+      <div class="row filters">
+        <span class="label">Window</span>
+        <button v-for="r in RANGES" :key="r.id" class="chip" :class="{ active: range === r.id }" @click="range = r.id">{{ r.label }}</button>
+      </div>
+      <div v-if="metricsOff" class="empty"><strong>Time series are not switched on</strong>They need VictoriaMetrics: the compose stack runs it, other installs set <code>CODESYNAPSE_METRICS_URL</code> (and <code>CODESYNAPSE_METRICS_PASSWORD</code>) on the API and MCP services.</div>
+      <div v-else class="grid cols-2">
+        <template v-for="p in PANELS" :key="p">
+          <SeriesCard v-if="!hiddenPanels.includes(p)" :panel="p" :range="range" :tick="tick" @unavailable="(s) => unavailable(p, s)" />
+        </template>
+      </div>
+    </section>
 
     <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="s && a && m && w && l && r">

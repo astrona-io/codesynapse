@@ -70,6 +70,7 @@ internal/accounts/      Users, organisations, roles, sessions, API keys, audit l
 config/                 llm.example.yaml (committed); llm.yaml is local and gitignored
 internal/app/           Shared wiring: Neo4j flags, bearer auth, HTTP server, cobra CLI bootstrap
 internal/logx/          slog logger carried in contexts
+internal/telemetry/     Metrics (counters, histograms, Prometheus text), push to and query from VictoriaMetrics
 internal/testutil/      assert/require helpers for tests
 docs/PLAN.md            Architecture, decisions, roadmap
 docs/AGENT_GUIDE.md     How agents should use the MCP tools and prompts
@@ -88,6 +89,8 @@ just up         # full stack in docker compose (creates .env with random secrets
 just db         # only Neo4j; then just dev-api / just dev-mcp / just dev-web
 just test-integration   # store contract tests against the compose Neo4j
 just test-postgres      # accounts contract against a throwaway PostgreSQL container
+just test-hugegraph     # HugeGraph/Milvus store contract and parity on throwaway containers
+just test-metrics       # telemetry push and tenant-filtered queries on a throwaway VictoriaMetrics
 just review     # offline review pack for the current branch
 just image-build  # api, mcp and web images; then just k8s-secrets/k8s-apply (see deploy/k8s/README.md)
 just mcp        # register the MCP server with Claude Code, Codex, Gemini, OpenCode, Cursor
@@ -131,6 +134,7 @@ This tool reads untrusted repositories and serves their contents to LLMs. Keep i
 - **Cypher:** values only through parameters. Labels, relationship types, depth and ORDER BY may be interpolated only from `model` allowlists, `store.ClampDepth`, or the `metricCypher` table. Never build Cypher from request strings.
 - **Gremlin (HugeGraph):** scripts are constants in `hugegraphstore`; values, labels and IDs travel only in `bindings`, never in script text. Gremlin-groovy executes code on the server, so HugeGraph always runs with a password (`HUGEGRAPH_PASSWORD`; the compose service refuses to start without one), is never published to the host, and there is no raw-Gremlin tool. Tenant-owned data (agent memory) carries `tenant_id` and every traversal over it starts at `has('tenant_id', …).has('ns', …)`.
 - **Vectors (Milvus):** filters are expression templates with values in `exprParams`, never in the expression. Every item carries its tenant (`tenant_id` is the partition key), every search names one (`vector.ErrNoTenant` otherwise), and `vector.Isolate` drops any hit of another tenant or namespace even if the backend's filter was wrong. Only entity names are embedded, by a local model.
+- **Telemetry:** metrics carry only bounded labels: `tenant_id` comes from the authenticated caller (`telemetry.WithTenant`) and must look like an organisation ID (`TenantLabel`), tool names only after the server accepted the call (`AllowTools`/`ToolLabel`), providers and models from the configuration, operations from fixed sets. Prompt text, queries, file paths, repository names, user IDs and anything a client sends never become labels; they belong in logs. Each metric caps its series. Services push to VictoriaMetrics (internal network, password from `METRICS_PASSWORD`); nothing listens for scrapes. `GET /api/v1/stats/series` serves fixed MetricsQL panels (the step is the only interpolation, from `seriesRanges`) and passes the caller's organisations as VictoriaMetrics `extra_filters`, so the database enforces the tenant scope; cross-tenant panels are platform-only. New metrics go in `internal/telemetry/metrics.go` with the same rules.
 - **git:** only through `gitx.Run`. It disables fsmonitor, hooks, external diff and textconv, ignores global config, and never uses a shell. Validate user revisions with `gitx.ValidateRev`.
 - **go list:** extraction runs with `CGO_ENABLED=0`, `GOTOOLCHAIN=local`, `GOPROXY=off` unless the user opts into network. Do not loosen these defaults.
 - **Filesystem:** API ingest is confined to `CODESYNAPSE_SOURCES_ROOT` after symlink resolution (`insideSources`). Docs walking never follows symlinks.

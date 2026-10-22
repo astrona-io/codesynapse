@@ -43,6 +43,13 @@
   --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--orange);
 
   /* Graph palette: node kinds and edge kinds on the dark canvas. */
+  /* Chart series (identity only, fixed order; validated with the dataviz
+     palette checks against --panel: lightness band, CVD separation, contrast). */
+  --s-1: #22a6bd;
+  --s-2: #a35fd6;
+  --s-3: #d9732b;
+  --s-4: #3aa685;
+  --s-other: #6b5c80;
   --k-func: #35e6ff;
   --k-method: #c77cf5;
   --k-iface: #ffc24d;

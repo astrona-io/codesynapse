@@ -11,6 +11,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 )
 
 // OrgHeader selects the organisation a request acts in when the caller
@@ -153,6 +154,14 @@ func (s *Server) guard(pol policy, h http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		ctx := context.WithValue(r.Context(), scopeKey{}, sc)
+		org := ""
+		if len(sc.orgs) == 1 {
+			org = sc.orgs[0].Org.ID
+		}
+		ctx = telemetry.WithTenant(ctx, org)
+		if slot, ok := ctx.Value(tenantSlot{}).(*string); ok {
+			*slot = telemetry.Tenant(ctx)
+		}
 		r = r.WithContext(ctx)
 		if sc.all {
 			h(w, r)

@@ -141,6 +141,11 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		// Stop the recorder and wait for its final flush before exiting.
 		defer func() { stopUsage(); <-flushed }()
 	}
+	stopMetrics, err := app.StartMetrics(ctx, o.EC.Logger, "mcp")
+	if err != nil {
+		return err
+	}
+	defer stopMetrics()
 	acc, closeAccounts, err := o.openAccounts(ctx)
 	if err != nil {
 		return err

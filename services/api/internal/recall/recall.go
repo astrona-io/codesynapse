@@ -14,6 +14,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
 )
 
@@ -66,6 +67,14 @@ type Result struct {
 
 // Recall runs the gate, finds entry entities and expands them.
 func (s *Service) Recall(ctx context.Context, repo string, q Query) (Result, error) {
+	res, err := s.recall(ctx, repo, q)
+	if err == nil {
+		telemetry.MemoryRecalls.Inc(telemetry.TenantLabel(memory.OrgOf(repo)), res.Mode) // names or hybrid
+	}
+	return res, err
+}
+
+func (s *Service) recall(ctx context.Context, repo string, q Query) (Result, error) {
 	res := Result{Mode: "names", Entries: []Entry{}, Graph: memory.Graph{Notice: memory.Notice, Entities: []memory.Entity{}, Facts: []memory.Fact{}}}
 	if why := memory.RecallGate(q.Text); why != "" {
 		res.Skipped = why
@@ -193,6 +202,7 @@ func (s *Service) EmbedPending(ctx context.Context) (int, error) {
 		for i, e := range todo {
 			set[e.ID] = vecs[i]
 		}
+		telemetry.EmbeddedEntities.Add(float64(len(set)), cfg.EmbeddingModel)
 		if err := s.St.SetMemoryEmbeddings(ctx, cfg.EmbeddingModel, set); err != nil {
 			return done, err
 		}
