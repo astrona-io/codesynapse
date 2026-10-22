@@ -1,6 +1,8 @@
 // Package recall finds the memory relevant to a query: an intent gate, then
-// entry entities by vector similarity (local embeddings) and by name, then
-// a 1-2 hop expansion. It also keeps entity embeddings up to date.
+// entry entities from two legs, vector similarity (local embeddings) and
+// BM25 over names, aliases and types, fused by reciprocal rank, then a 1-2
+// hop expansion (docs/adr/0001-search.md). Both legs read only the query's
+// namespace. It also keeps entity embeddings up to date.
 package recall
 
 import (
@@ -8,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"slices"
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
@@ -48,7 +49,8 @@ type Query struct {
 	History bool   `json:"history"`
 }
 
-// Entry is an entity recall started from and why.
+// Entry is an entity recall started from and why. Score is the fused
+// reciprocal-rank score, comparable only within one result.
 type Entry struct {
 	memory.Entity
 	Score float64 `json:"score"`
@@ -80,36 +82,26 @@ func (s *Service) recall(ctx context.Context, repo string, q Query) (Result, err
 		res.Skipped = why
 		return res, nil
 	}
-	entries := map[string]*Entry{}
+	legs := map[string][]memory.Scored{}
 	if hits, err := s.nearest(ctx, repo, q.Text); err == nil {
 		res.Mode = "hybrid"
-		for _, h := range hits {
-			entries[h.ID] = &Entry{Entity: h.Entity, Score: h.Score, Via: "vector"}
-		}
+		legs["vector"] = hits
 	} else if !errors.Is(err, llm.ErrNoEmbeddings) {
 		// An embedding failure degrades to names; recall must keep working.
 		logx.FromContext(ctx).Warn("vector recall failed; using names", logx.Error(err))
 	}
-	g, err := s.St.SearchMemory(ctx, repo, q.Text, entryLimit, q.History)
+	lex, err := s.St.MemoryLexical(ctx, repo, q.Text, entryLimit)
 	if err != nil {
 		return res, err
 	}
-	words := memory.Words(q.Text)
-	for _, e := range g.Entities {
-		sc := memory.Score(e, words)
-		if sc == 0 {
-			continue // an endpoint of a matched entity, not a match itself
+	legs["name"] = lex
+	for _, f := range memory.FuseRRF(entryLimit, legs) {
+		via := f.Legs[0]
+		if len(f.Legs) > 1 {
+			via = "both"
 		}
-		if cur, ok := entries[e.ID]; ok {
-			cur.Via = "both"
-			continue
-		}
-		entries[e.ID] = &Entry{Entity: e, Score: float64(sc) / float64(len(words)), Via: "name"}
+		res.Entries = append(res.Entries, Entry{Entity: f.Entity, Score: f.Score, Via: via})
 	}
-	for _, e := range entries {
-		res.Entries = append(res.Entries, *e)
-	}
-	slices.SortFunc(res.Entries, func(a, b Entry) int { return cmp.Or(cmp.Compare(b.Score, a.Score), cmp.Compare(a.ID, b.ID)) })
 	if len(res.Entries) == 0 {
 		return res, nil
 	}

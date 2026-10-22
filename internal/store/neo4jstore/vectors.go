@@ -123,3 +123,21 @@ RETURN `+entityProj+`, score ORDER BY score DESC, e.id LIMIT $k`,
 	telemetry.VectorMatches.Add(float64(len(out)), telemetry.Tenant(ctx), "neo4j")
 	return out, nil
 }
+
+// MemoryLexical implements store.MemoryStore: the namespace's entities (at
+// most memory.MaxEntitiesPerRepo short documents) ranked in-process.
+func (s *Store) MemoryLexical(ctx context.Context, repo, query string, k int) ([]memory.Scored, error) {
+	if len(memory.Words(query)) == 0 {
+		return []memory.Scored{}, nil
+	}
+	res, err := s.read(ctx, `MATCH (e:MemoryEntity {repo: $repo}) RETURN `+entityProj+` LIMIT $max`,
+		map[string]any{"repo": repo, "max": memory.MaxEntitiesPerRepo})
+	if err != nil {
+		return nil, err
+	}
+	ents := make([]memory.Entity, 0, len(res.Records))
+	for _, rec := range res.Records {
+		ents = append(ents, toEntity(rec))
+	}
+	return memory.RankBM25(ents, query, vector.ClampK(k)), nil
+}

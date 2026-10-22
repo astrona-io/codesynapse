@@ -34,6 +34,8 @@ func fakeEmbeddings(t *testing.T) *httptest.Server {
 			v := []float32{0, 0, 1}
 			l := strings.ToLower(in)
 			switch {
+			case strings.Contains(l, "refund"):
+				v = []float32{1, 0.1, 0.6}
 			case strings.Contains(l, "payment"), strings.Contains(l, "money"):
 				v = []float32{1, 0.1, 0}
 			case strings.Contains(l, "billing"):
@@ -111,4 +113,42 @@ func TestRecallWithoutEmbeddings(t *testing.T) {
 	assert.Equal(t, res.Facts[0].Predicate, "USES")
 	_, err = s.EmbedPending(context.Background())
 	require.Error(t, err)
+}
+
+func TestRecallFusesWithinTheTenant(t *testing.T) {
+	ctx := context.Background()
+	s, st := setup(t, true)
+	mine, theirs := memory.Namespace("org-a", "r"), memory.Namespace("org-b", "r")
+	var triples []memory.Triple
+	for _, n := range []string{"Payments ledger", "Payments gateway", "Payments refunds", "Payments fraud", "Payments reports",
+		"Payments export", "Payments import", "Payments audit", "Payments alerts", "Payments billing"} {
+		triples = append(triples, memory.Triple{Subject: n, Predicate: "PART_OF", Object: "Payments"})
+	}
+	for ns, ts := range map[string][]memory.Triple{mine: triples, theirs: {{Subject: "Payments secret project", Predicate: "OWNED_BY", Object: "Org B"}}} {
+		b, err := memory.Prepare(ns, ts, "agent", time.Now())
+		require.NoError(t, err)
+		require.NoError(t, st.UpsertMemory(ctx, b))
+	}
+	_, err := s.EmbedPending(ctx)
+	require.NoError(t, err)
+
+	res, err := s.Recall(ctx, mine, Query{Text: "payments refunds"})
+	require.NoError(t, err)
+	assert.Equal(t, res.Mode, "hybrid")
+	assert.True(t, len(res.Entries) <= entryLimit, "top_k: at most %d entries, got %d", entryLimit, len(res.Entries))
+	// The fake embeds every payments name alike, so only the fusion is
+	// checked here; memory.TestRankBM25 and TestFuseRRF check the order.
+	seen := map[string]bool{}
+	for _, e := range res.Entries {
+		if e.Name == "Payments refunds" {
+			assert.Equal(t, e.Via, "both", "found by words and by meaning")
+		}
+		assert.False(t, seen[e.ID], "deduplicated: "+e.Name)
+		seen[e.ID] = true
+		assert.Equal(t, e.Repo, mine, "both legs stay in the namespace: "+e.Name)
+	}
+	assert.True(t, seen[memory.EntityID(mine, "payments refunds")], "the entity both legs found is an entry")
+	for _, e := range res.Entities {
+		assert.False(t, strings.Contains(e.Name, "secret"), "another organisation's memory never appears")
+	}
 }

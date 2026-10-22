@@ -174,6 +174,9 @@ type MemoryStore interface {
 	// MemoryNearest returns up to k entities of repo embedded by model, most
 	// similar to vec first, with memory.Similarity scores.
 	MemoryNearest(ctx context.Context, repo, model string, vec []float32, k int) ([]memory.Scored, error)
+	// MemoryLexical returns up to k entities of repo matching query by
+	// words, ranked with memory.RankBM25 over the namespace, best first.
+	MemoryLexical(ctx context.Context, repo, query string, k int) ([]memory.Scored, error)
 }
 
 // UsageStore keeps daily MCP usage counters (package usage).

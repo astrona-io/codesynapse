@@ -74,6 +74,7 @@ internal/telemetry/     Metrics (counters, histograms, Prometheus text), push to
 internal/testutil/      assert/require helpers for tests
 docs/PLAN.md            Architecture, decisions, roadmap
 docs/AGENT_GUIDE.md     How agents should use the MCP tools and prompts
+docs/adr/               Architecture decision records (0001: search stays inside the stores)
 rules/                  Security rule catalogue: one YAML per rule (code/, config/), embedded
 ```
 
