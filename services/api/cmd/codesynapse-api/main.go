@@ -5,11 +5,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/parisnakitakejser/codesynapse/internal/accounts/pgstore"
 	"github.com/parisnakitakejser/codesynapse/internal/app"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/api"
@@ -70,7 +75,9 @@ func (o *serveOptions) Complete(context.Context, *app.Env) error {
 }
 
 func (o *serveOptions) Validate(context.Context, *app.Env) error {
-	if os.Getenv(EnvToken) == "" && !app.IsLoopback(o.addr) {
+	// With accounts every request is authenticated; without them the one
+	// bearer token is the only lock.
+	if os.Getenv(EnvToken) == "" && os.Getenv(EnvDatabaseURL) == "" && !app.IsLoopback(o.addr) {
 		return fmt.Errorf("%w (%s)", app.ErrTokenRequired, EnvToken)
 	}
 	return nil
@@ -95,6 +102,11 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		registry = llm.NewRegistry(llmCfg)
 		o.EC.Logger.Info("AI providers configured", "providers", len(llmCfg.Providers), "default", llmCfg.Default)
 	}
+	acc, closeAccounts, err := openAccounts(ctx, o.EC.Logger)
+	if err != nil {
+		return err
+	}
+	defer closeAccounts()
 	gitAuths, err := gitx.ParseAuths(os.Getenv("CODESYNAPSE_GIT_TOKENS"))
 	if err != nil {
 		return fmt.Errorf("CODESYNAPSE_GIT_TOKENS: %w", err)
@@ -103,8 +115,13 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		Workspace: o.workspace, AllowPrivateGit: app.Getenv("CODESYNAPSE_ALLOW_PRIVATE_GIT", "") == "true",
 		GitAuth:   gitx.Auth{Host: app.Getenv("CODESYNAPSE_GIT_TOKEN_HOST", "github.com"), Token: os.Getenv("CODESYNAPSE_GIT_TOKEN")},
 		AllowPush: app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true",
-		GitAuthor: gitx.Author{Name: app.Getenv("CODESYNAPSE_GIT_AUTHOR_NAME", "CodeSynapse"), Email: app.Getenv("CODESYNAPSE_GIT_AUTHOR_EMAIL", "codesynapse@localhost")}}, st, o.EC.Logger)
-	o.EC.Logger.Info("api listening", "addr", o.addr, "sources_root", o.sources, "auth", os.Getenv(EnvToken) != "")
+		Accounts:  acc, ServiceToken: os.Getenv(EnvToken), SecureCookies: app.Getenv("CODESYNAPSE_COOKIE_SECURE", "true") == "true",
+		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour,
+		GitAuthor:      gitx.Author{Name: app.Getenv("CODESYNAPSE_GIT_AUTHOR_NAME", "CodeSynapse"), Email: app.Getenv("CODESYNAPSE_GIT_AUTHOR_EMAIL", "codesynapse@localhost")}}, st, o.EC.Logger)
+	o.EC.Logger.Info("api listening", "addr", o.addr, "sources_root", o.sources, "auth", os.Getenv(EnvToken) != "", "accounts", acc != nil)
+	if acc != nil {
+		return app.Serve(ctx, app.NewServer(o.addr, srv)) // the server authenticates every request itself
+	}
 	return app.Serve(ctx, app.NewServer(o.addr, app.RequireBearer(os.Getenv(EnvToken), srv)))
 }
 
@@ -115,4 +132,49 @@ func serveCmd(ec *app.Env) *cobra.Command {
 		WithGroupID(app.GroupBase).
 		WithNoArgs().
 		Build()
+}
+
+// EnvDatabaseURL turns on accounts (users, organisations, API keys, audit
+// log). It holds a password, so it is read from the environment only.
+const EnvDatabaseURL = "CODESYNAPSE_DATABASE_URL" //nolint:gosec // env var name
+
+// openAccounts connects to PostgreSQL and migrates it, or returns nil when
+// no database is configured (single-tenant mode).
+func openAccounts(ctx context.Context, logger *slog.Logger) (*accounts.Service, func(), error) {
+	url := os.Getenv(EnvDatabaseURL)
+	if url == "" {
+		return nil, func() {}, nil
+	}
+	var st *pgstore.Store
+	var err error
+	for attempt := range 30 { // PostgreSQL may still be starting next to us
+		if st, err = pgstore.Open(ctx, url); err == nil {
+			break
+		}
+		logger.Warn("waiting for PostgreSQL", "attempt", attempt+1, "error", err)
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := st.Migrate(ctx); err != nil {
+		st.Close()
+		return nil, nil, fmt.Errorf("migrating the accounts database: %w", err)
+	}
+	svc := accounts.NewService(st, app.Getenv("CODESYNAPSE_SIGNUP_OPEN", "") == "true")
+	logger.Info("accounts enabled", "signup_open", svc.SignupOpen)
+	return svc, st.Close, nil
+}
+
+// retentionDays reads CODESYNAPSE_AUDIT_RETENTION_DAYS (default 400).
+func retentionDays() int {
+	n, err := strconv.Atoi(app.Getenv("CODESYNAPSE_AUDIT_RETENTION_DAYS", "400"))
+	if err != nil || n < 30 {
+		return 400 // NIS2 evidence needs history; below a month is a typo
+	}
+	return n
 }

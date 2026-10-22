@@ -1,0 +1,224 @@
+// Package accountstest is the contract every accounts.Store follows,
+// exercised through accounts.Service so the rules are covered too.
+package accountstest
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
+	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+)
+
+const pw = "correct horse battery staple"
+
+// Run tests st, which must be empty.
+func Run(t *testing.T, st accounts.Store) {
+	ctx := context.Background()
+	require.NoError(t, st.Migrate(ctx))
+	require.NoError(t, st.Migrate(ctx), "migrations are idempotent")
+	now := time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)
+	svc := accounts.NewService(st, false)
+	svc.Now = func() time.Time { return now }
+
+	setup, err := svc.Status(ctx)
+	require.NoError(t, err)
+	assert.True(t, setup, "an empty store needs its first account")
+
+	// Sign-up: the first account is a platform admin with its own organisation.
+	ada, adaOrg, err := svc.SignUp(ctx, "  Ada@Example.com ", "Ada Lovelace", pw)
+	require.NoError(t, err)
+	assert.Equal(t, ada.Email, "ada@example.com")
+	assert.True(t, ada.PlatformAdmin)
+	assert.Equal(t, adaOrg.Slug, "ada-lovelace-s-organisation")
+	_, _, err = svc.SignUp(ctx, "bob@example.com", "Bob", pw)
+	assert.True(t, errors.Is(err, accounts.ErrSignupClosed), "sign-up is closed after the first account")
+	svc.SignupOpen = true
+	_, _, err = svc.SignUp(ctx, "ADA@example.com", "Ada again", pw)
+	assert.True(t, errors.Is(err, accounts.ErrExists), "emails are unique, case-insensitively")
+	_, _, err = svc.SignUp(ctx, "carol@example.com", "Carol", "short")
+	assert.True(t, errors.Is(err, accounts.ErrInvalidInput), "password policy")
+	bob, _, err := svc.SignUp(ctx, "bob@example.com", "Bob", pw)
+	require.NoError(t, err)
+	assert.False(t, bob.PlatformAdmin)
+
+	// Login and sessions.
+	_, _, err = svc.Login(ctx, "bob@example.com", "wrong password!!", "1.2.3.4")
+	assert.True(t, errors.Is(err, accounts.ErrUnauthorized))
+	_, _, err = svc.Login(ctx, "nobody@example.com", pw, "1.2.3.4")
+	assert.True(t, errors.Is(err, accounts.ErrUnauthorized), "unknown emails look the same as wrong passwords")
+	tok, _, err := svc.Login(ctx, "BOB@example.com", pw, "1.2.3.4")
+	require.NoError(t, err)
+	p, err := svc.Authenticate(ctx, tok)
+	require.NoError(t, err)
+	assert.Equal(t, p.User.ID, bob.ID)
+	assert.Equal(t, p.Via, "session")
+	now = now.Add(accounts.SessionTTL + time.Second)
+	_, err = svc.Authenticate(ctx, tok)
+	assert.True(t, errors.Is(err, accounts.ErrUnauthorized), "sessions expire")
+	tok, _, err = svc.Login(ctx, "bob@example.com", pw, "1.2.3.4")
+	require.NoError(t, err)
+	require.NoError(t, svc.Logout(ctx, tok))
+	_, err = svc.Authenticate(ctx, tok)
+	assert.True(t, errors.Is(err, accounts.ErrUnauthorized), "logout ends the session")
+
+	// Organisations and roles.
+	adaP := accounts.Principal{User: ada, Via: "session"}
+	bobP := accounts.Principal{User: bob, Via: "session"}
+	team, err := svc.CreateOrg(ctx, bobP, "Platform Team", "")
+	require.NoError(t, err)
+	_, err = svc.CreateOrg(ctx, bobP, "Other", "platform-team")
+	assert.True(t, errors.Is(err, accounts.ErrExists), "explicit slugs must be free")
+	dup, err := svc.CreateOrg(ctx, adaP, "Platform team", "")
+	require.NoError(t, err)
+	assert.Equal(t, dup.Slug, "platform-team-2", "derived slugs get a suffix")
+	carol, _, err := svc.SignUp(ctx, "carol@example.com", "Carol", pw)
+	require.NoError(t, err)
+	carolP := accounts.Principal{User: carol, Via: "session"}
+	assert.True(t, errors.Is(svc.Require(ctx, carolP, team.ID, accounts.Viewer), accounts.ErrForbidden), "not a member")
+	_, err = svc.AddMember(ctx, bobP, team.ID, "carol@example.com", accounts.Member)
+	require.NoError(t, err)
+	require.NoError(t, svc.Require(ctx, carolP, team.ID, accounts.Member))
+	assert.True(t, errors.Is(svc.Require(ctx, carolP, team.ID, accounts.Admin), accounts.ErrForbidden))
+	_, err = svc.AddMember(ctx, carolP, team.ID, "ada@example.com", accounts.Viewer)
+	assert.True(t, errors.Is(err, accounts.ErrForbidden), "members cannot add members")
+	require.NoError(t, svc.Require(ctx, adaP, team.ID, accounts.Owner), "platform admins act as owners")
+	assert.True(t, errors.Is(svc.RemoveMember(ctx, bobP, team.ID, bob.ID), accounts.ErrLastOwner))
+	_, err = svc.AddMember(ctx, bobP, team.ID, "carol@example.com", accounts.Viewer)
+	require.NoError(t, err, "changing a role")
+	members, err := st.OrgMembers(ctx, team.ID)
+	require.NoError(t, err)
+	require.Len(t, members, 2)
+	assert.Equal(t, members[1].User.Email, "carol@example.com")
+	assert.Equal(t, members[1].Role, accounts.Viewer)
+	assert.Equal(t, members[1].User.PasswordHash, "", "memberships carry no hashes")
+	mine, err := st.UserMemberships(ctx, bob.ID)
+	require.NoError(t, err)
+	assert.Equal(t, len(mine), 2, "Bob's own organisation and the team")
+
+	// API keys.
+	key, k, err := svc.CreateKey(ctx, carolP, team.ID, "Claude Code laptop", 0)
+	require.NoError(t, err)
+	assert.Equal(t, key[:len(k.Prefix)], k.Prefix)
+	kp, err := svc.AuthenticateKey(ctx, key)
+	require.NoError(t, err)
+	assert.Equal(t, kp.OrgID, team.ID)
+	assert.Equal(t, kp.Via, "key")
+	_, err = svc.RoleIn(ctx, kp, dup.ID)
+	assert.True(t, errors.Is(err, accounts.ErrForbidden), "a key works in its own organisation only")
+	_, _, err = svc.CreateKey(ctx, kp, team.ID, "minted by a key", 0)
+	assert.True(t, errors.Is(err, accounts.ErrForbidden), "keys do not mint keys")
+	keys, err := st.ListAPIKeys(ctx, carol.ID)
+	require.NoError(t, err)
+	require.Len(t, keys, 1)
+	assert.True(t, keys[0].LastUsedAt != nil, "last use is recorded")
+	assert.True(t, errors.Is(svc.RevokeKey(ctx, bobP, k.ID), accounts.ErrNotFound), "nobody revokes another user's key")
+	require.NoError(t, svc.RevokeKey(ctx, carolP, k.ID))
+	_, err = svc.AuthenticateKey(ctx, key)
+	assert.True(t, errors.Is(err, accounts.ErrKeyRevoked))
+	short, _, err := svc.CreateKey(ctx, carolP, team.ID, "short-lived", time.Hour)
+	require.NoError(t, err)
+	now = now.Add(2 * time.Hour)
+	_, err = svc.AuthenticateKey(ctx, short)
+	assert.True(t, errors.Is(err, accounts.ErrKeyRevoked), "keys expire")
+	other, _, err := svc.CreateKey(ctx, carolP, team.ID, "removed member", 0)
+	require.NoError(t, err)
+	require.NoError(t, svc.RemoveMember(ctx, bobP, team.ID, carol.ID))
+	_, err = svc.AuthenticateKey(ctx, other)
+	assert.True(t, errors.Is(err, accounts.ErrForbidden), "removed members' keys stop working")
+	_, err = svc.AuthenticateKey(ctx, "csk_not-a-real-key")
+	assert.True(t, errors.Is(err, accounts.ErrUnauthorized))
+
+	// Password change ends every session.
+	tok, _, err = svc.Login(ctx, "ada@example.com", pw, "5.6.7.8")
+	require.NoError(t, err)
+	assert.True(t, errors.Is(svc.ChangePassword(ctx, adaP, "not the password", "a brand new passphrase"), accounts.ErrUnauthorized))
+	require.NoError(t, svc.ChangePassword(ctx, adaP, pw, "a brand new passphrase"))
+	_, err = svc.Authenticate(ctx, tok)
+	assert.True(t, errors.Is(err, accounts.ErrUnauthorized))
+	_, _, err = svc.Login(ctx, "ada@example.com", "a brand new passphrase", "5.6.7.8")
+	require.NoError(t, err)
+
+	// Rate limiting: five tries per email per minute.
+	for range 5 {
+		_, _, _ = svc.Login(ctx, "carol@example.com", "wrong password!!", "9.9.9.9") //nolint:errcheck // counting attempts
+	}
+	_, _, err = svc.Login(ctx, "carol@example.com", pw, "9.9.9.9")
+	assert.True(t, errors.Is(err, accounts.ErrRateLimited))
+	now = now.Add(time.Minute)
+	_, _, err = svc.Login(ctx, "carol@example.com", pw, "9.9.9.9")
+	require.NoError(t, err, "the limit resets")
+
+	// Audit log: every security event, with request details, hash-chained.
+	events, err := st.ListEvents(ctx, accounts.EventFilter{OrgID: team.ID, Limit: 50})
+	require.NoError(t, err)
+	actions := map[string]bool{}
+	for _, e := range events {
+		actions[e.Action] = true
+		assert.Equal(t, e.OrgID, team.ID)
+	}
+	for _, a := range []string{"org.create", "member.set", "member.remove", "key.create"} {
+		assert.True(t, actions[a], a)
+	}
+	all, err := st.ListEvents(ctx, accounts.EventFilter{Limit: 1000, Ascending: true})
+	require.NoError(t, err)
+	failed := 0
+	for _, e := range all {
+		if e.Action == "user.login" && e.Outcome == accounts.Failure {
+			failed++
+		}
+	}
+	assert.True(t, failed >= 3, "wrong password, unknown email and rate limit are all logged")
+	ctxReq := accounts.WithRequestInfo(ctx, accounts.RequestInfo{RequestID: "req-1", IP: "10.0.0.7", UserAgent: "curl/8"})
+	ev, err := svc.Record(ctxReq, accounts.Event{UserID: bob.ID, Via: "session", OrgID: team.ID, Action: "repo.delete", Target: "api", Outcome: accounts.Success, Status: 204})
+	require.NoError(t, err)
+	assert.Equal(t, ev.IP, "10.0.0.7")
+	assert.Equal(t, ev.RequestID, "req-1")
+	assert.Equal(t, ev.PrevHash, all[len(all)-1].Hash, "entries chain onto the previous one")
+	v, err := accounts.VerifyAudit(ctx, st)
+	require.NoError(t, err)
+	assert.True(t, v.OK, v.Reason)
+	assert.Equal(t, v.Checked, len(all)+1)
+	recent, err := st.ListEvents(ctx, accounts.EventFilter{Since: now.Add(-time.Second), Limit: 1000})
+	require.NoError(t, err)
+	assert.True(t, len(recent) >= 1 && len(recent) < len(all), "time filter")
+	n, err := st.PruneEvents(ctx, now.Add(-time.Second))
+	require.NoError(t, err)
+	assert.True(t, n > 0, "retention prunes old entries")
+	v, err = accounts.VerifyAudit(ctx, st)
+	require.NoError(t, err)
+	assert.True(t, v.OK, "the chain still verifies from its first remaining entry")
+
+	orgs, err := st.ListOrgs(ctx, 100)
+	require.NoError(t, err)
+	assert.Equal(t, len(orgs), 5)
+	users, err := st.ListUsers(ctx, 100)
+	require.NoError(t, err)
+	assert.Equal(t, users[0].Email, "ada@example.com", "by email")
+}
+
+// RunConcurrentAudit appends from many goroutines and checks the chain did
+// not fork.
+func RunConcurrentAudit(t *testing.T, st accounts.Store) {
+	ctx := context.Background()
+	svc := accounts.NewService(st, true)
+	var wg sync.WaitGroup
+	for g := range 16 {
+		wg.Go(func() {
+			for i := range 10 {
+				_, err := svc.Record(ctx, accounts.Event{Action: "concurrent", Detail: fmt.Sprintf("%d-%d", g, i)})
+				assert.NoError(t, err)
+			}
+		})
+	}
+	wg.Wait()
+	v, err := accounts.VerifyAudit(ctx, st)
+	require.NoError(t, err)
+	assert.True(t, v.OK, v.Reason)
+	assert.True(t, v.Checked >= 160)
+}

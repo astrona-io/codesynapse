@@ -1,0 +1,425 @@
+package accounts
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
+	"unicode/utf8"
+)
+
+// Lifetimes.
+const (
+	SessionTTL    = 14 * 24 * time.Hour
+	keyTouchEvery = time.Minute // last_used_at is written at most this often
+)
+
+// Principal is who a request acts as.
+type Principal struct {
+	User User `json:"user"`
+	// OrgID is set for API keys, which act in one organisation only.
+	OrgID string `json:"org_id,omitempty"`
+	// Via is session, key or service (the legacy single-tenant token).
+	Via   string `json:"via"`
+	KeyID string `json:"key_id,omitempty"`
+}
+
+// Service applies the account rules on top of a Store.
+type Service struct {
+	St Store
+	// SignupOpen lets anyone create an account after the first one.
+	SignupOpen bool
+	Now        func() time.Time
+	// Sink also receives every audit entry (structured logs).
+	Sink Sink
+
+	byEmail  *limiter
+	byClient *limiter
+}
+
+// NewService returns a service; logins are limited to 5 per minute per
+// email and 20 per minute per client address.
+func NewService(st Store, signupOpen bool) *Service {
+	return &Service{St: st, SignupOpen: signupOpen, Now: time.Now,
+		byEmail: newLimiter(5, time.Minute), byClient: newLimiter(20, time.Minute)}
+}
+
+func (s *Service) now() time.Time { return s.Now().UTC().Truncate(time.Microsecond) }
+
+var (
+	emailRe = regexp.MustCompile(`^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$`)
+	slugRe  = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$`)
+	nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
+)
+
+// NormalizeEmail lower-cases and trims; emails are matched case-insensitively.
+func NormalizeEmail(e string) string { return strings.ToLower(strings.TrimSpace(e)) }
+
+func checkName(name string, what string) (string, error) {
+	name = strings.Join(strings.Fields(name), " ")
+	if n := utf8.RuneCountInString(name); n < 1 || n > 100 {
+		return "", fmt.Errorf("%w: %s needs 1 to 100 characters", ErrInvalidInput, what)
+	}
+	return name, nil
+}
+
+// Slugify derives an organisation slug from a name.
+func Slugify(name string) string {
+	s := strings.Trim(nonSlug.ReplaceAllString(strings.ToLower(name), "-"), "-")
+	if len(s) > 40 {
+		s = strings.Trim(s[:40], "-")
+	}
+	if len(s) < 2 {
+		s = "org-" + s
+	}
+	return s
+}
+
+// Status says whether the installation still needs its first account.
+func (s *Service) Status(ctx context.Context) (needsSetup bool, err error) {
+	n, err := s.St.CountUsers(ctx)
+	return n == 0, err
+}
+
+// SignUp creates an account and a personal organisation. The first account
+// becomes a platform admin; later ones need SignupOpen.
+func (s *Service) SignUp(ctx context.Context, email, name, password string) (User, Org, error) {
+	email = NormalizeEmail(email)
+	if !emailRe.MatchString(email) {
+		return User{}, Org{}, fmt.Errorf("%w: a valid email address is needed", ErrInvalidInput)
+	}
+	name, err := checkName(name, "a name")
+	if err != nil {
+		return User{}, Org{}, err
+	}
+	if err := CheckPassword(password); err != nil {
+		return User{}, Org{}, err
+	}
+	n, err := s.St.CountUsers(ctx)
+	if err != nil {
+		return User{}, Org{}, err
+	}
+	if n > 0 && !s.SignupOpen {
+		return User{}, Org{}, ErrSignupClosed
+	}
+	hash, err := HashPassword(password)
+	if err != nil {
+		return User{}, Org{}, err
+	}
+	id, err := newID()
+	if err != nil {
+		return User{}, Org{}, err
+	}
+	u := User{ID: id, Email: email, Name: name, PlatformAdmin: n == 0, CreatedAt: s.now(), PasswordHash: hash}
+	if err := s.St.CreateUser(ctx, u); err != nil {
+		return User{}, Org{}, err
+	}
+	org, err := s.createOrg(ctx, u.ID, name+"'s organisation", "")
+	if err != nil {
+		return u, Org{}, err
+	}
+	s.audit(ctx, Event{UserID: u.ID, ActorEmail: u.Email, Via: "anonymous", OrgID: org.ID, Action: "user.signup", Target: u.Email})
+	return u, org, nil
+}
+
+// Login checks credentials and returns a new session token.
+func (s *Service) Login(ctx context.Context, email, password, client string) (string, User, error) {
+	email = NormalizeEmail(email)
+	now := s.now()
+	if !s.byEmail.allow(email, now) || !s.byClient.allow(client, now) {
+		s.audit(ctx, Event{Via: "anonymous", Action: "user.login", Target: email, Outcome: Failure, Detail: "rate limited"})
+		return "", User{}, ErrRateLimited
+	}
+	u, err := s.St.UserByEmail(ctx, email)
+	if errors.Is(err, ErrNotFound) {
+		VerifyPassword(password, dummyHash()) // same time for unknown emails
+		s.audit(ctx, Event{Via: "anonymous", Action: "user.login", Target: email, Outcome: Failure, Detail: "unknown email"})
+		return "", User{}, ErrUnauthorized
+	}
+	if err != nil {
+		return "", User{}, err
+	}
+	if u.PasswordHash == "" || !VerifyPassword(password, u.PasswordHash) {
+		s.audit(ctx, Event{UserID: u.ID, ActorEmail: u.Email, Via: "anonymous", Action: "user.login", Target: u.Email, Outcome: Failure, Detail: "wrong password"})
+		return "", User{}, ErrUnauthorized
+	}
+	tok, err := randomToken(32)
+	if err != nil {
+		return "", User{}, err
+	}
+	if err := s.St.CreateSession(ctx, Session{TokenHash: HashToken(tok), UserID: u.ID, CreatedAt: now, ExpiresAt: now.Add(SessionTTL)}); err != nil {
+		return "", User{}, err
+	}
+	s.audit(ctx, Event{UserID: u.ID, ActorEmail: u.Email, Via: "session", Action: "user.login", Target: u.Email})
+	return tok, u, nil
+}
+
+// Logout ends a session.
+func (s *Service) Logout(ctx context.Context, token string) error {
+	if sess, err := s.St.SessionByHash(ctx, HashToken(token)); err == nil {
+		if u, err := s.St.UserByID(ctx, sess.UserID); err == nil {
+			s.audit(ctx, Event{UserID: u.ID, ActorEmail: u.Email, Via: "session", Action: "user.logout", Target: u.Email})
+		}
+	}
+	return s.St.DeleteSession(ctx, HashToken(token))
+}
+
+// Authenticate resolves a session token.
+func (s *Service) Authenticate(ctx context.Context, token string) (Principal, error) {
+	if token == "" {
+		return Principal{}, ErrUnauthorized
+	}
+	sess, err := s.St.SessionByHash(ctx, HashToken(token))
+	if err != nil || !s.now().Before(sess.ExpiresAt) {
+		return Principal{}, ErrUnauthorized
+	}
+	u, err := s.St.UserByID(ctx, sess.UserID)
+	if err != nil {
+		return Principal{}, ErrUnauthorized
+	}
+	return Principal{User: u, Via: "session"}, nil
+}
+
+// AuthenticateKey resolves an API key.
+func (s *Service) AuthenticateKey(ctx context.Context, key string) (Principal, error) {
+	if !strings.HasPrefix(key, KeyPrefix) {
+		return Principal{}, ErrUnauthorized
+	}
+	k, err := s.St.APIKeyByHash(ctx, HashToken(key))
+	if err != nil {
+		return Principal{}, ErrUnauthorized
+	}
+	now := s.now()
+	if k.RevokedAt != nil || (k.ExpiresAt != nil && !now.Before(*k.ExpiresAt)) {
+		return Principal{}, ErrKeyRevoked
+	}
+	u, err := s.St.UserByID(ctx, k.UserID)
+	if err != nil {
+		return Principal{}, ErrUnauthorized
+	}
+	// A key outlives a membership only on paper: removed members lose access.
+	if _, err := s.St.MemberRole(ctx, k.OrgID, u.ID); err != nil {
+		return Principal{}, ErrForbidden
+	}
+	if k.LastUsedAt == nil || now.Sub(*k.LastUsedAt) >= keyTouchEvery {
+		_ = s.St.TouchAPIKey(ctx, k.ID, now) //nolint:errcheck // usage time is informational
+	}
+	return Principal{User: u, OrgID: k.OrgID, Via: "key", KeyID: k.ID}, nil
+}
+
+// RoleIn returns p's role in org. Platform admins act as owners; API keys
+// only work in their own organisation.
+func (s *Service) RoleIn(ctx context.Context, p Principal, orgID string) (Role, error) {
+	if p.OrgID != "" && p.OrgID != orgID {
+		return "", ErrForbidden
+	}
+	if p.User.PlatformAdmin {
+		return Owner, nil
+	}
+	r, err := s.St.MemberRole(ctx, orgID, p.User.ID)
+	if errors.Is(err, ErrNotFound) {
+		return "", ErrForbidden
+	}
+	return r, err
+}
+
+// Require returns ErrForbidden unless p has at least the role least in org.
+func (s *Service) Require(ctx context.Context, p Principal, orgID string, least Role) error {
+	r, err := s.RoleIn(ctx, p, orgID)
+	if err != nil {
+		return err
+	}
+	if !r.AtLeast(least) {
+		return ErrForbidden
+	}
+	return nil
+}
+
+// CreateOrg creates an organisation owned by p.
+func (s *Service) CreateOrg(ctx context.Context, p Principal, name, slug string) (Org, error) {
+	if p.Via == "key" {
+		return Org{}, ErrForbidden // keys act inside one organisation
+	}
+	o, err := s.createOrg(ctx, p.User.ID, name, slug)
+	if err == nil {
+		s.audit(ctx, actorEvent(p, "org.create", o.ID, o.Slug))
+	}
+	return o, err
+}
+
+func (s *Service) createOrg(ctx context.Context, owner, name, slug string) (Org, error) {
+	name, err := checkName(name, "an organisation name")
+	if err != nil {
+		return Org{}, err
+	}
+	explicit := slug != ""
+	if !explicit {
+		slug = Slugify(name)
+	}
+	if !slugRe.MatchString(slug) {
+		return Org{}, fmt.Errorf("%w: slugs are 2 to 40 lower-case letters, digits and dashes", ErrInvalidInput)
+	}
+	id, err := newID()
+	if err != nil {
+		return Org{}, err
+	}
+	base := slug
+	for i := 2; ; i++ {
+		o := Org{ID: id, Slug: slug, Name: name, CreatedAt: s.now()}
+		err := s.St.CreateOrg(ctx, o, owner)
+		if err == nil {
+			return o, nil
+		}
+		if !errors.Is(err, ErrExists) || explicit || i > 50 {
+			return Org{}, err
+		}
+		slug = fmt.Sprintf("%s-%d", strings.TrimRight(base[:min(len(base), 36)], "-"), i)
+	}
+}
+
+// AddMember gives an existing user a role in org.
+func (s *Service) AddMember(ctx context.Context, p Principal, orgID, email string, role Role) (Membership, error) {
+	if !role.Valid() {
+		return Membership{}, fmt.Errorf("%w: unknown role %q", ErrInvalidInput, role)
+	}
+	mine, err := s.RoleIn(ctx, p, orgID)
+	if err != nil {
+		return Membership{}, err
+	}
+	if !mine.AtLeast(Admin) || (role == Owner && mine != Owner) {
+		return Membership{}, ErrForbidden
+	}
+	u, err := s.St.UserByEmail(ctx, NormalizeEmail(email))
+	if err != nil {
+		return Membership{}, err
+	}
+	if err := s.guardLastOwner(ctx, orgID, u.ID, role); err != nil {
+		return Membership{}, err
+	}
+	if err := s.St.SetMember(ctx, orgID, u.ID, role); err != nil {
+		return Membership{}, err
+	}
+	e := actorEvent(p, "member.set", orgID, u.Email)
+	e.Detail = "role " + string(role)
+	s.audit(ctx, e)
+	o, err := s.St.OrgByID(ctx, orgID)
+	return Membership{Org: o, User: u, Role: role, AddedAt: s.now()}, err
+}
+
+// RemoveMember removes a user from org; members may remove themselves.
+func (s *Service) RemoveMember(ctx context.Context, p Principal, orgID, userID string) error {
+	if userID != p.User.ID {
+		if err := s.Require(ctx, p, orgID, Admin); err != nil {
+			return err
+		}
+	} else if _, err := s.RoleIn(ctx, p, orgID); err != nil {
+		return err
+	}
+	if err := s.guardLastOwner(ctx, orgID, userID, ""); err != nil {
+		return err
+	}
+	if err := s.St.RemoveMember(ctx, orgID, userID); err != nil {
+		return err
+	}
+	s.audit(ctx, actorEvent(p, "member.remove", orgID, userID))
+	return nil
+}
+
+// guardLastOwner refuses to leave org without an owner.
+func (s *Service) guardLastOwner(ctx context.Context, orgID, userID string, newRole Role) error {
+	if newRole == Owner {
+		return nil
+	}
+	members, err := s.St.OrgMembers(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	owners, target := 0, false
+	for _, m := range members {
+		if m.Role == Owner {
+			owners++
+			if m.User.ID == userID {
+				target = true
+			}
+		}
+	}
+	if target && owners == 1 {
+		return ErrLastOwner
+	}
+	return nil
+}
+
+// CreateKey makes a personal API key for org and returns the secret once.
+func (s *Service) CreateKey(ctx context.Context, p Principal, orgID, name string, ttl time.Duration) (string, APIKey, error) {
+	if p.Via == "key" {
+		return "", APIKey{}, ErrForbidden // keys do not mint keys
+	}
+	if _, err := s.RoleIn(ctx, p, orgID); err != nil {
+		return "", APIKey{}, err
+	}
+	name, err := checkName(name, "a key name")
+	if err != nil {
+		return "", APIKey{}, err
+	}
+	key, prefix, err := newAPIKey()
+	if err != nil {
+		return "", APIKey{}, err
+	}
+	id, err := newID()
+	if err != nil {
+		return "", APIKey{}, err
+	}
+	k := APIKey{ID: id, UserID: p.User.ID, OrgID: orgID, Name: name, Prefix: prefix, Hash: HashToken(key), CreatedAt: s.now()}
+	if ttl > 0 {
+		exp := k.CreatedAt.Add(ttl)
+		k.ExpiresAt = &exp
+	}
+	if err := s.St.CreateAPIKey(ctx, k); err != nil {
+		return "", APIKey{}, err
+	}
+	s.audit(ctx, actorEvent(p, "key.create", orgID, prefix))
+	return key, k, nil
+}
+
+// RevokeKey revokes one of p's keys.
+func (s *Service) RevokeKey(ctx context.Context, p Principal, keyID string) error {
+	if err := s.St.RevokeAPIKey(ctx, p.User.ID, keyID, s.now()); err != nil {
+		return err
+	}
+	s.audit(ctx, actorEvent(p, "key.revoke", "", keyID))
+	return nil
+}
+
+// ChangePassword sets a new password and ends every session of the user.
+func (s *Service) ChangePassword(ctx context.Context, p Principal, current, next string) error {
+	if p.Via == "key" {
+		return ErrForbidden
+	}
+	u, err := s.St.UserByID(ctx, p.User.ID)
+	if err != nil {
+		return err
+	}
+	if !VerifyPassword(current, u.PasswordHash) {
+		return ErrUnauthorized
+	}
+	if err := CheckPassword(next); err != nil {
+		return err
+	}
+	hash, err := HashPassword(next)
+	if err != nil {
+		return err
+	}
+	if err := s.St.SetPassword(ctx, u.ID, hash); err != nil {
+		return err
+	}
+	s.audit(ctx, actorEvent(p, "user.password", "", u.Email))
+	return s.St.DeleteUserSessions(ctx, u.ID)
+}
+
+// audit records a service event. A storage failure is logged by the sink's
+// owner through Record's error path; the action itself stands.
+func (s *Service) audit(ctx context.Context, e Event) {
+	_, _ = s.Record(ctx, e) //nolint:errcheck // the HTTP layer also records every changing request
+}
