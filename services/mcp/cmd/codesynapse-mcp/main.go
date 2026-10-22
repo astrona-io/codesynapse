@@ -125,6 +125,9 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	if rs, ok := r.(store.ReviewStore); ok && o.reviews {
 		opts.Reviews = rs
 	}
+	if hs, ok := r.(store.HistoryStore); ok {
+		opts.History = hs
+	}
 	if ms, ok := r.(store.MemoryStore); ok && o.memory {
 		opts.Memory = ms
 		if o.apiURL != "" {

@@ -16,6 +16,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 
 	"github.com/parisnakitakejser/codesynapse/internal/ingest"
+	"github.com/parisnakitakejser/codesynapse/internal/snapshot"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/aitasks"
 )
@@ -172,6 +173,9 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 	}
 	if err == nil {
 		err = j.st.ReplaceRepo(ctx, job.Repo, g)
+		if hs, ok := j.st.(snapshot.Store); ok && err == nil {
+			snapshot.Record(ctx, hs, job.Repo)
+		}
 	}
 	nodes, edges := 0, 0
 	if g != nil {

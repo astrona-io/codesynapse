@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/parisnakitakejser/codesynapse/internal/history"
 	"github.com/parisnakitakejser/codesynapse/internal/security"
 )
 
@@ -20,7 +22,7 @@ import (
 // AttentionItem is one thing to look at.
 type AttentionItem struct {
 	Level  string `json:"level"` // critical, high, medium, low
-	Kind   string `json:"kind"`  // security, vulnerability, licence, access, sync, stale, automation, quality
+	Kind   string `json:"kind"`  // security, vulnerability, licence, access, sync, stale, automation, quality, regression
 	Repo   string `json:"repo,omitempty"`
 	Count  int    `json:"count,omitempty"`
 	Title  string `json:"title"`
@@ -55,7 +57,7 @@ const (
 )
 
 var levelRank = map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3}
-var kindRank = map[string]int{"access": 0, "vulnerability": 1, "security": 2, "licence": 3, "sync": 4, "stale": 5, "automation": 6, "quality": 7}
+var kindRank = map[string]int{"access": 0, "vulnerability": 1, "security": 2, "licence": 3, "sync": 4, "stale": 5, "automation": 6, "quality": 7, "regression": 1}
 
 func repoLink(repo, page string) string {
 	p := "/repos/" + url.PathEscape(repo)
@@ -133,6 +135,7 @@ func (s *Server) buildAttention(ctx context.Context, only string, now time.Time)
 				Detail: "None of its files are in a language or format CodeSynapse's rules cover yet, so there is no grade. The Security page lists what was and was not checked; review the rest by hand.",
 				Action: "See what was checked", Link: repoLink(rs.Name, "security")})
 		}
+		s.regressionItem(ctx, rs.Name, add)
 		if rs.DupPct >= dupAttentionPct && rs.DupLOC >= dupAttentionLOC {
 			add(AttentionItem{Level: "low", Kind: "quality", Repo: rs.Name, Count: rs.DupLOC,
 				Title:  fmt.Sprintf("%d lines repeat code that already exists (%.0f%% of function code)", rs.DupLOC, rs.DupPct),
@@ -271,4 +274,33 @@ func firstLineOf(s string) string {
 		s = s[:240] + "…"
 	}
 	return s
+}
+
+// urgentRegressions are the changes that raise an item to high: a worse
+// grade, more vulnerabilities your code calls, more serious findings, new
+// licence conflicts. Anything else that got worse is a low item.
+var urgentRegressions = map[string]bool{"grade": true, "vulns_called": true, "findings_high": true, "vulns_high": true, "licence_conflicts": true}
+
+// regressionItem adds one item for a repository that got worse since the
+// snapshot before the last ingest. One snapshot or none means nothing to say.
+func (s *Server) regressionItem(ctx context.Context, repo string, add func(AttentionItem)) {
+	snaps, err := s.st.Snapshots(ctx, repo, 2)
+	if err != nil || len(snaps) < 2 {
+		return
+	}
+	reg, _ := history.Compare(snaps[0], snaps[1])
+	if len(reg) == 0 {
+		return
+	}
+	level, details := "low", make([]string, 0, len(reg))
+	for _, c := range reg {
+		if urgentRegressions[c.Key] {
+			level = "high"
+		}
+		details = append(details, c.Detail)
+	}
+	add(AttentionItem{Level: level, Kind: "regression", Repo: repo, Count: len(reg),
+		Title:  "Got worse since the previous sync: " + strings.Join(details[:min(len(details), 3)], "; "),
+		Detail: strings.Join(details, ". ") + ". Compared with the sync before the last one; the history page shows the trend.",
+		Action: "See the trend", Link: repoLink(repo, "history")})
 }

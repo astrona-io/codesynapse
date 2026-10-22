@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/parisnakitakejser/codesynapse/internal/history"
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
@@ -156,6 +157,20 @@ type ReviewStore interface {
 	DeleteReview(ctx context.Context, id string) error
 }
 
+// HistoryStore keeps the snapshots of package history: what a repository
+// looked like after each ingest. Like reviews they live apart from the
+// repository graph, so ReplaceRepo does not touch them; they are removed with
+// DeleteSnapshots when the repository is deleted.
+type HistoryStore interface {
+	// AddSnapshot records a snapshot. One with the same At is replaced, and
+	// only the latest history.MaxSnapshots are kept.
+	AddSnapshot(ctx context.Context, repo string, s history.Snapshot) error
+	// Snapshots returns up to limit of the latest snapshots, oldest first.
+	Snapshots(ctx context.Context, repo string, limit int) ([]history.Snapshot, error)
+	// DeleteSnapshots removes every snapshot of repo.
+	DeleteSnapshots(ctx context.Context, repo string) error
+}
+
 // MemoryStore persists agent memory (package memory): entities and facts per
 // repository, apart from repository graphs, which ReplaceRepo and DeleteRepo
 // never touch.
@@ -224,6 +239,7 @@ type Store interface {
 	Reader
 	Writer
 	ReviewStore
+	HistoryStore
 	MemoryStore
 	UsageStore
 	Close(ctx context.Context) error

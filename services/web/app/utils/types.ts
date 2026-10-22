@@ -299,7 +299,7 @@ export interface ReachView { org_id: string; org: string; graph: string; role: R
 export type AttentionLevel = 'critical' | 'high' | 'medium' | 'low'
 export interface AttentionItem {
   level: AttentionLevel
-  kind: 'security' | 'vulnerability' | 'licence' | 'access' | 'sync' | 'stale' | 'automation' | 'quality'
+  kind: 'security' | 'vulnerability' | 'licence' | 'access' | 'sync' | 'stale' | 'automation' | 'quality' | 'regression'
   repo?: string
   count?: number
   title: string
@@ -359,4 +359,19 @@ export interface RefactorCopy extends NodeRef { signature?: string; exported?: b
 export interface RefactorPlan {
   hash: string; kind: string; similarity: number; scope: string; name: string; home: string; approach: string
   copies: RefactorCopy[]; steps: string[]; risks: string[]; truncated?: boolean
+}
+
+// GET /api/v1/repos/{repo}/history
+export interface HistorySnapshot {
+  at: string; head?: string; grade?: string; score: number
+  findings?: Record<string, number>; vulns?: Record<string, number>; vulns_called: number
+  modules: number; direct: number; licence_conflicts: number; licence_review: number
+  functions: number; function_loc: number; dead_functions: number; dead_loc: number; unused_modules: number
+  dup_loc: number; near_loc: number; dup_pct: number; test_reach_pct: number; doc_coverage_pct: number
+}
+export interface HistorySeries { key: string; label: string; unit?: string; lower_is_better: boolean; values: number[] }
+export interface HistoryChange { key: string; label: string; from: number; to: number; detail: string }
+export interface HistoryTrend {
+  snapshots: HistorySnapshot[]; series: HistorySeries[]
+  regressions: HistoryChange[]; improvements: HistoryChange[]; since?: string
 }

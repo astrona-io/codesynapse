@@ -30,6 +30,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/review"
 	"github.com/parisnakitakejser/codesynapse/internal/sbom"
 	"github.com/parisnakitakejser/codesynapse/internal/security"
+	"github.com/parisnakitakejser/codesynapse/internal/snapshot"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 )
@@ -106,6 +107,7 @@ func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err := st.ReplaceRepo(ctx, o.repo, g); err != nil {
 		return err
 	}
+	snapshot.Record(ctx, st, o.repo)
 	o.EC.Logger.Info("graph stored", "repo", o.repo, "nodes", len(g.Nodes()), "edges", len(g.Edges()))
 	return nil
 }

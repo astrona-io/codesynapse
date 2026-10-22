@@ -11,6 +11,7 @@ import (
 
 	"github.com/parisnakitakejser/codesynapse/internal/cleanupplan"
 	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
+	"github.com/parisnakitakejser/codesynapse/internal/history"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/refactorplan"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
@@ -122,4 +123,21 @@ func (h *handlers) refactorDuplicates(ctx context.Context, _ *mcp.CallToolReques
 	}
 	plan, err := refactorplan.ForGroup(ctx, store.ForRepository(h.svc.R, repo), repo, in.Hash, in.Kind)
 	return nil, plan, err
+}
+
+type trendIn struct {
+	RepoArg
+	Limit int `json:"limit,omitempty" jsonschema:"how many of the latest snapshots to return, default 20, max 100"`
+}
+
+func (h *handlers) repoTrend(ctx context.Context, _ *mcp.CallToolRequest, in trendIn) (*mcp.CallToolResult, history.Trend, error) {
+	repo, err := h.repo(ctx, in.Repo)
+	if err != nil {
+		return nil, history.Trend{}, err
+	}
+	snaps, err := h.history.Snapshots(ctx, repo, clampInt(in.Limit, 20, 100))
+	if err != nil {
+		return nil, history.Trend{}, err
+	}
+	return nil, history.Build(snaps), nil
 }

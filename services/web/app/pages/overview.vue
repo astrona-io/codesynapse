@@ -10,7 +10,7 @@ const groups: Record<Exclude<Filter, 'all'>, AttentionItem['kind'][]> = {
   security: ['security'],
   dependencies: ['vulnerability', 'automation'],
   licences: ['licence'],
-  quality: ['quality'],
+  quality: ['quality', 'regression'],
   operations: ['sync', 'stale', 'access'],
 }
 const filters: { id: Filter; label: string }[] = [

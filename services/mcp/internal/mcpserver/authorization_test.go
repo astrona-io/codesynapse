@@ -19,7 +19,7 @@ import (
 func TestEveryToolHasPolicy(t *testing.T) {
 	ctx := context.Background()
 	s := memory.New()
-	server := New(s, "test", Options{Memory: s, Reviews: s, Offload: &APIClient{}})
+	server := New(s, "test", Options{Memory: s, Reviews: s, History: s, Offload: &APIClient{}})
 	ct, st := mcp.NewInMemoryTransports()
 	ss, err := server.Connect(ctx, st, nil)
 	require.NoError(t, err)

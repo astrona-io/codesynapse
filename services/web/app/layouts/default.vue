@@ -51,6 +51,7 @@ const repoGroups = computed(() => {
       { to: `${base}/licenses`, label: 'Licences' },
       { to: `${base}/dependency-review`, label: 'Dependency review' },
       { to: `${base}/metrics`, label: 'Code health', also: [`${base}/cleanup`] },
+      { to: `${base}/history`, label: 'Trends' },
       ...(session.accounts.value ? [{ to: `${base}/access`, label: 'Access' }] : []),
     ] },
     { label: 'Work', links: [

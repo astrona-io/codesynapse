@@ -10,6 +10,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
 	"github.com/parisnakitakejser/codesynapse/internal/cleanupplan"
 	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
+	"github.com/parisnakitakejser/codesynapse/internal/history"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/refactorplan"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
@@ -48,7 +49,7 @@ func connectRepos(t *testing.T, graphs map[string]*model.Graph) *mcp.ClientSessi
 		require.NoError(t, s.ReplaceRepo(ctx, repo, g))
 	}
 	ct, st := mcp.NewInMemoryTransports()
-	_, err := New(s, "test", Options{Reviews: s}).Connect(ctx, st, nil)
+	_, err := New(s, "test", Options{Reviews: s, History: s}).Connect(ctx, st, nil)
 	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(ctx, ct, nil)
 	require.NoError(t, err)
@@ -142,4 +143,33 @@ func TestRefactorDuplicatesTool(t *testing.T) {
 
 	assert.True(t, call(t, cs, "refactor_duplicates", map[string]any{"repo": "org/a", "hash": "short"}, nil).IsError)
 	assert.True(t, call(t, cs, "refactor_duplicates", map[string]any{"repo": "org/a", "hash": "ffffffffffffffff"}, nil).IsError)
+}
+
+func TestRepoTrendTool(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	require.NoError(t, s.ReplaceRepo(ctx, "org/a", dupRepo(t, "org/a", "h1")))
+	require.NoError(t, s.AddSnapshot(ctx, "org/a", history.Snapshot{At: "2026-10-01T00:00:00Z", Grade: "A", Score: 95}))
+	require.NoError(t, s.AddSnapshot(ctx, "org/a", history.Snapshot{At: "2026-10-02T00:00:00Z", Grade: "B", Score: 85, VulnsCalled: 1}))
+	ct, st := mcp.NewInMemoryTransports()
+	_, err := New(s, "test", Options{Reviews: s, History: s}).Connect(ctx, st, nil)
+	require.NoError(t, err)
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(ctx, ct, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cs.Close() })
+
+	var got history.Trend
+	res := call(t, cs, "repo_trend", map[string]any{"repo": "org/a"}, &got)
+	require.False(t, res.IsError)
+	require.Len(t, got.Snapshots, 2)
+	var keys []string
+	for _, c := range got.Regressions {
+		keys = append(keys, c.Key)
+	}
+	assert.Contains(t, keys, "grade")
+	assert.Contains(t, keys, "vulns_called")
+
+	res = call(t, cs, "repo_trend", map[string]any{"repo": "org/a", "limit": 1}, &got)
+	require.False(t, res.IsError)
+	assert.Len(t, got.Snapshots, 1)
 }

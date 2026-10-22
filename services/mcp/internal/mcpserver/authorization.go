@@ -29,6 +29,7 @@ var toolPolicies = map[string]toolPolicy{
 	"unused_code":           {accounts.Viewer, "repository"},
 	"duplicate_code":        {accounts.Viewer, "repository"},
 	"cleanup_plan":          {accounts.Viewer, "repository"},
+	"repo_trend":            {accounts.Viewer, "repository"},
 	"refactor_duplicates":   {accounts.Viewer, "repository"},
 	"shared_code":           {accounts.Viewer, "list"},
 	"license_report":        {accounts.Viewer, "repository"},
