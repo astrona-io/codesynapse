@@ -159,3 +159,31 @@ func TestKinds(t *testing.T) {
 	_, ok = KindForHost("git.example.com")
 	assert.False(t, ok)
 }
+
+func TestRepoExists(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.EscapedPath() {
+		case "/repos/o/here", "/projects/grp%2Fhere":
+			_, _ = fmt.Fprint(w, `{}`)
+		case "/repos/o/denied":
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	gh := Client{BaseURL: srv.URL}
+	ok, err := gh.RepoExists(context.Background(), "o", "here")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	ok, err = gh.RepoExists(context.Background(), "o", "gone")
+	require.NoError(t, err)
+	assert.False(t, ok, "a clean 404 means gone")
+	_, err = gh.RepoExists(context.Background(), "o", "denied")
+	assert.Error(t, err, "a refusal is not proof the repository is gone")
+	_, err = gh.RepoExists(context.Background(), "o", "../x")
+	assert.Error(t, err)
+	ok, err = Client{Kind: GitLab, BaseURL: srv.URL}.RepoExists(context.Background(), "grp", "here")
+	require.NoError(t, err)
+	assert.True(t, ok)
+}

@@ -247,28 +247,33 @@ func (s *Server) displayRoot(root string) string {
 // With ?files=1 it also deletes a clone in the workspace; mounted sources
 // are never touched.
 func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	repo := r.PathValue("repo")
+	status, err := s.deleteRepo(r.Context(), r.PathValue("repo"), r.URL.Query().Get("files") == "1")
+	if err != nil {
+		s.problem(w, status, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteRepo removes a repository's graph and schedule and, when files is
+// set, its clone. On failure it returns the HTTP status to report.
+func (s *Server) deleteRepo(ctx context.Context, repo string, files bool) (int, error) {
 	for _, j := range s.jobs.List() {
 		if j.Repo == repo && j.State == JobRunning {
-			s.problem(w, http.StatusConflict, fmt.Errorf("%s is being indexed; try again when the job finishes", repo))
-			return
+			return http.StatusConflict, fmt.Errorf("%s is being indexed; try again when the job finishes", repo)
 		}
 	}
 	n, err := s.st.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		s.problem(w, 500, err)
-		return
+		return 500, err
 	}
-	if r.URL.Query().Get("files") == "1" && s.inWorkspace(n.Root) {
+	if files && s.inWorkspace(n.Root) {
 		rel, relErr := filepath.Rel(s.cfg.Workspace, n.Root)
 		if relErr != nil || rel == "." || strings.Contains(rel, "..") || strings.Count(rel, string(filepath.Separator)) > 2 {
-			s.problem(w, 400, errors.New("refusing to delete files outside a single workspace clone"))
-			return
+			return 400, errors.New("refusing to delete files outside a single workspace clone")
 		}
 		if err := os.RemoveAll(n.Root); err != nil {
-			s.problem(w, 500, err)
-			return
+			return 500, err
 		}
 		// os.Remove only deletes an empty folder: the owner (and host) folder goes
 		// when this was its last clone.
@@ -279,13 +284,12 @@ func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := s.st.DeleteRepo(ctx, repo); err != nil {
-		s.problem(w, 500, err)
-		return
+		return 500, err
 	}
 	if err := s.sched.remove(repo); err != nil {
 		s.logger.Warn("removing schedule", "repo", repo, "error", err)
 	}
-	w.WriteHeader(http.StatusNoContent)
+	return http.StatusNoContent, nil
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {

@@ -8,12 +8,16 @@ import (
 	"hash/fnv"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/forge"
+	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 )
 
@@ -38,7 +42,10 @@ type Schedule struct {
 	LastRun    string `json:"last_run,omitempty"`
 	LastStatus string `json:"last_status,omitempty"`
 	LastError  string `json:"last_error,omitempty"`
-	NextRun    string `json:"next_run,omitempty"`
+	// Missing counts consecutive scheduled syncs that failed while the provider
+	// confirmed the repository no longer exists.
+	Missing int    `json:"missing,omitempty"`
+	NextRun string `json:"next_run,omitempty"`
 }
 
 // State is "manual", "paused" or "active".
@@ -208,6 +215,8 @@ func (s *schedules) started(repo string, now time.Time, status string, err error
 	sc.LastStatus, sc.LastError = status, ""
 	if err != nil {
 		sc.LastStatus, sc.LastError = "failed", err.Error()
+	} else {
+		sc.Missing = 0
 	}
 	sc.NextRun = now.Add(time.Duration(sc.IntervalMinutes) * time.Minute).UTC().Format(time.RFC3339)
 	_ = s.save() //nolint:errcheck // best effort; the next tick retries
@@ -230,6 +239,79 @@ func (s *schedules) finished(repo string, now time.Time, err error) {
 		sc.NextRun = now.Add(time.Duration(sc.IntervalMinutes) * time.Minute).UTC().Format(time.RFC3339)
 	}
 	_ = s.save() //nolint:errcheck // best effort; the next tick retries
+}
+
+// setMissing bumps (gone) or clears the count of consecutive confirmed-missing
+// checks and returns the new count.
+func (s *schedules) setMissing(repo string, gone bool) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sc, ok := s.all[repo]
+	if !ok {
+		return 0
+	}
+	if gone {
+		sc.Missing++
+	} else {
+		sc.Missing = 0
+	}
+	_ = s.save() //nolint:errcheck // best effort; the next tick retries
+	return sc.Missing
+}
+
+// goneStrikes is how many scheduled syncs in a row must find the repository
+// missing at its provider before the clone and graph are removed.
+const goneStrikes = 3
+
+// reapIfGone removes a cloned repository the provider says no longer exists.
+// A failed sync alone proves nothing (network, rate limit, lost access), so
+// it needs the provider API to answer a clean 404 goneStrikes times in a row;
+// any other answer resets the count. Mounted sources are never touched.
+func (s *Server) reapIfGone(ctx context.Context, repo string, logger *slog.Logger) {
+	n, err := s.st.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
+	if err != nil || !s.inWorkspace(n.Root) {
+		return
+	}
+	u, err := url.Parse(n.URL)
+	if err != nil {
+		return
+	}
+	host := strings.ToLower(u.Hostname())
+	parts := strings.Split(strings.Trim(strings.TrimSuffix(u.Path, ".git"), "/"), "/")
+	if len(parts) != 2 || u.Port() != "" || !forge.ValidHost(host) {
+		return
+	}
+	kind, ok := forge.KindForHost(host)
+	for _, o := range s.orgs.list() {
+		if !ok && o.Host == host {
+			kind, ok = o.Provider, true
+		}
+	}
+	if !ok {
+		return // a host whose provider is unknown cannot be asked
+	}
+	client, err := s.forgeClient(ctx, Org{Provider: kind, Host: host, Org: parts[0]})
+	if err != nil {
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	exists, err := client.RepoExists(cctx, parts[0], parts[1])
+	if err != nil {
+		return
+	}
+	count := s.sched.setMissing(repo, !exists)
+	if exists || count < goneStrikes {
+		if !exists {
+			logger.Warn("repository not found at its provider", "repo", repo, "checks", count, "of", goneStrikes)
+		}
+		return
+	}
+	if _, err := s.deleteRepo(ctx, repo, true); err != nil {
+		logger.Warn("removing repository that no longer exists", "repo", repo, "error", err)
+		return
+	}
+	logger.Info("removed repository that no longer exists at its provider", "repo", repo, "remote", gitx.SanitizeURL(n.URL))
 }
 
 // runScheduler starts due syncs every minute until ctx ends.
@@ -259,6 +341,7 @@ func (s *Server) runScheduler(ctx context.Context, logger *slog.Logger) {
 				case err != nil:
 					logger.Warn("scheduled sync not started", "repo", repo, "error", err)
 					s.sched.started(repo, now, "failed", err)
+					s.reapIfGone(ctx, repo, logger)
 				default:
 					s.sched.started(repo, now, "started", nil)
 				}
