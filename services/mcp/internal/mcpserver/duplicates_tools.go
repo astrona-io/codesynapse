@@ -9,8 +9,10 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/parisnakitakejser/codesynapse/internal/cleanupplan"
 	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/parisnakitakejser/codesynapse/internal/store"
 )
 
 type duplicateCodeIn struct {
@@ -75,4 +77,30 @@ func (h *handlers) sharedCode(ctx context.Context, _ *mcp.CallToolRequest, in sh
 	}
 	out.Groups = out.Groups[:min(len(out.Groups), clampInt(in.Limit, 10, 50))]
 	return nil, out, nil
+}
+
+type cleanupPlanIn struct {
+	RepoArg
+	Kind  string `json:"kind,omitempty" jsonschema:"only one kind of step: remove-risky-dead-code, remove-dead-code, remove-dead-file, remove-dependency, upgrade-dependency, resolve-licence, merge-duplicates, review-edited-copies or test-hotspot"`
+	Limit int    `json:"limit,omitempty" jsonschema:"max steps, default 10, max 50"`
+}
+
+func (h *handlers) cleanupPlan(ctx context.Context, _ *mcp.CallToolRequest, in cleanupPlanIn) (*mcp.CallToolResult, cleanupplan.Plan, error) {
+	repo, err := h.repo(ctx, in.Repo)
+	if err != nil {
+		return nil, cleanupplan.Plan{}, err
+	}
+	plan, err := cleanupplan.Assemble(ctx, store.ForRepository(h.svc.R, repo), repo)
+	if err != nil {
+		return nil, cleanupplan.Plan{}, err
+	}
+	if in.Kind != "" {
+		plan.Steps = slices.DeleteFunc(plan.Steps, func(s cleanupplan.Step) bool { return s.Kind != in.Kind })
+	}
+	total := len(plan.Steps)
+	plan.Steps = plan.Steps[:min(total, clampInt(in.Limit, 10, 50))]
+	if total > len(plan.Steps) {
+		plan.Notes = append(plan.Notes, fmt.Sprintf("%d more steps; raise limit or filter by kind.", total-len(plan.Steps)))
+	}
+	return nil, plan, nil
 }

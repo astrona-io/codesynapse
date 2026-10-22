@@ -346,3 +346,11 @@ export interface SharedCodeMember extends DuplicateMember { repo: string }
 export interface SharedCodeGroup { hash: string; kind: 'exact' | 'near'; similarity: number; repos: string[]; copies: number; loc: number; redundant_loc: number; members: SharedCodeMember[] }
 export interface SharedCodeSuggestion { kind: 'library' | 'framework'; repos: string[]; groups: number; redundant_loc: number; name: string; candidates: string[]; rationale: string }
 export interface SharedCodeReport { repos: number; groups: SharedCodeGroup[]; suggestions: SharedCodeSuggestion[]; redundant_loc: number; partial?: string[] }
+
+export interface PlanTarget { id?: string; name: string; location?: string }
+export interface PlanStep {
+  id: string; kind: string; title: string; why: string
+  value: number; effort: 1 | 2 | 3; safety: 'high' | 'medium' | 'low'; priority: number
+  lines?: number; advisories?: number; targets: PlanTarget[]; verify: string; link?: string
+}
+export interface CleanupPlan { steps: PlanStep[]; summary: { steps: number; lines_up_to: number; advisories: number }; notes: string[] }

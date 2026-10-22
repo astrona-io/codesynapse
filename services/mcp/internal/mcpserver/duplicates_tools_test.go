@@ -2,10 +2,13 @@ package mcpserver
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
+	"github.com/parisnakitakejser/codesynapse/internal/cleanupplan"
 	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
@@ -91,4 +94,27 @@ func TestSharedCode(t *testing.T) {
 	res = call(t, cs, "shared_code", map[string]any{"repo_prefix": "org/a"}, &got)
 	require.False(t, res.IsError)
 	assert.Len(t, got.Groups, 0, "one repository has nothing to compare with")
+}
+
+func TestCleanupPlanTool(t *testing.T) {
+	g := dupRepo(t, "org/a", "h1", "h2")
+	rn, ok := g.Node(model.NodeID("org/a", model.KindRepository, "org/a"))
+	require.True(t, ok)
+	cl, err := cleanup.Encode(cleanup.Report{Modules: []cleanup.ModuleItem{{Path: "github.com/old/lib", Version: "v1", Vulns: []string{"GO-1"}}}})
+	require.NoError(t, err)
+	rn.Cleanup = cl
+	cs := connectRepos(t, map[string]*model.Graph{"org/a": g})
+
+	var got cleanupplan.Plan
+	res := call(t, cs, "cleanup_plan", map[string]any{"repo": "org/a"}, &got)
+	require.False(t, res.IsError)
+	require.NotEmpty(t, got.Steps)
+	assert.Equal(t, got.Steps[0].Kind, cleanupplan.RemoveDependency, "an unused dependency with an advisory outranks merging copies")
+	assert.Equal(t, got.Steps[0].Advisory, 1)
+
+	res = call(t, cs, "cleanup_plan", map[string]any{"repo": "org/a", "kind": "merge-duplicates", "limit": 1}, &got)
+	require.False(t, res.IsError)
+	require.Len(t, got.Steps, 1)
+	assert.Equal(t, got.Steps[0].Kind, cleanupplan.MergeDuplicates)
+	assert.Contains(t, strings.Join(got.Notes, " "), "more steps")
 }
