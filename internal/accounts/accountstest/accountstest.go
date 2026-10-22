@@ -194,6 +194,32 @@ func Run(t *testing.T, st accounts.Store) {
 	require.NoError(t, err)
 	assert.True(t, v.OK, "the chain still verifies from its first remaining entry")
 
+	// Repository registry: one graph, referenced by two organisations.
+	add := func(orgID, graph, vis string) error {
+		return st.AddRepository(ctx, accounts.Repository{OrgID: orgID, Graph: graph, Remote: "https://github.com/" + graph, Visibility: vis, AddedBy: bob.ID, AddedAt: now})
+	}
+	require.NoError(t, add(team.ID, "acme/api", accounts.Public))
+	require.NoError(t, add(dup.ID, "acme/api", accounts.Public))
+	require.NoError(t, add(team.ID, "acme/web", accounts.Private))
+	assert.True(t, errors.Is(add(team.ID, "acme/api", accounts.Public), accounts.ErrExists))
+	assert.True(t, errors.Is(add("no-such-org", "acme/api", accounts.Public), accounts.ErrNotFound))
+	repos, err := st.OrgRepositories(ctx, team.ID)
+	require.NoError(t, err)
+	require.Len(t, repos, 2)
+	assert.Equal(t, repos[0].Graph, "acme/api")
+	assert.Equal(t, repos[1].Visibility, accounts.Private)
+	refs, err := st.GraphRepositories(ctx, "acme/api")
+	require.NoError(t, err)
+	assert.Equal(t, len(refs), 2)
+	left, err := st.RemoveRepository(ctx, team.ID, "acme/api")
+	require.NoError(t, err)
+	assert.Equal(t, left, 1, "the other organisation still uses the graph")
+	left, err = st.RemoveRepository(ctx, dup.ID, "acme/api")
+	require.NoError(t, err)
+	assert.Equal(t, left, 0, "the last reference is gone")
+	_, err = st.RemoveRepository(ctx, dup.ID, "acme/api")
+	assert.True(t, errors.Is(err, accounts.ErrNotFound))
+
 	orgs, err := st.ListOrgs(ctx, 100)
 	require.NoError(t, err)
 	assert.Equal(t, len(orgs), 5)

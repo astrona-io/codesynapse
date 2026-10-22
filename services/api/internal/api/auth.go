@@ -30,11 +30,6 @@ var publicPaths = map[string]bool{
 	"POST /api/v1/auth/login": true, "POST /api/v1/auth/signup": true, "POST /api/v1/auth/logout": true,
 }
 
-// accountPaths are the routes ordinary users may call before phase 2 scopes
-// repository data by organisation; everything else stays with platform
-// admins and the service token so no tenant sees another's data.
-var accountPrefixes = []string{"/api/v1/me", "/api/v1/accounts/", "/api/v1/auth/"}
-
 // authenticate resolves the caller in accounts mode. It returns false after
 // writing the error response.
 func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
@@ -75,20 +70,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (*http.Req
 		s.problem(w, status, errors.New("log in or use a valid API key"))
 		return r, false
 	}
-	if !p.User.PlatformAdmin && !accountPath(r.URL.Path) {
-		s.problem(w, http.StatusForbidden, errors.New("repository data is not separated by organisation yet; until then only platform admins can see it"))
-		return r, false
-	}
 	return r.WithContext(context.WithValue(r.Context(), principalKey{}, p)), true
-}
-
-func accountPath(p string) bool {
-	for _, pre := range accountPrefixes {
-		if p == strings.TrimSuffix(pre, "/") || strings.HasPrefix(p, pre) {
-			return true
-		}
-	}
-	return false
 }
 
 // sameOrigin refuses cookie-authenticated requests from other sites. Safe
@@ -167,6 +149,8 @@ func (s *Server) accountRoutes() {
 	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/audit", s.handleOrgAudit)
 	m.HandleFunc("GET /api/v1/admin/audit", s.handleAdminAudit)
 	m.HandleFunc("GET /api/v1/admin/audit/verify", s.handleVerifyAudit)
+	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/repos", s.handleOrgRepos)
+	m.HandleFunc("POST /api/v1/accounts/orgs/{org}/repos", s.handleAttachRepo)
 	m.HandleFunc("GET /api/v1/admin/users", s.handleAdminUsers)
 	m.HandleFunc("GET /api/v1/admin/orgs", s.handleAdminOrgs)
 }

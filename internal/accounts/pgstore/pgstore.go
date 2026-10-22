@@ -363,6 +363,49 @@ func (s *Store) TouchAPIKey(ctx context.Context, keyID string, at time.Time) err
 	return err
 }
 
+const repoCols = "org_id, graph, remote, visibility, added_by, added_at"
+
+// AddRepository implements accounts.Store.
+func (s *Store) AddRepository(ctx context.Context, r accounts.Repository) error {
+	_, err := s.db.Exec(ctx, "INSERT INTO repositories ("+repoCols+") VALUES ($1, $2, $3, $4, $5, $6)",
+		r.OrgID, r.Graph, r.Remote, r.Visibility, r.AddedBy, r.AddedAt)
+	return mapErr(err, "repository")
+}
+
+// RemoveRepository implements accounts.Store.
+func (s *Store) RemoveRepository(ctx context.Context, orgID, graph string) (int, error) {
+	tag, err := s.db.Exec(ctx, "DELETE FROM repositories WHERE org_id = $1 AND graph = $2", orgID, graph)
+	if err := affected(tag, err, "repository"); err != nil {
+		return 0, err
+	}
+	var n int
+	err = s.db.QueryRow(ctx, "SELECT count(*) FROM repositories WHERE graph = $1", graph).Scan(&n)
+	return n, err
+}
+
+func (s *Store) repos(ctx context.Context, where string, arg string) ([]accounts.Repository, error) {
+	rows, err := s.db.Query(ctx, "SELECT "+repoCols+" FROM repositories WHERE "+where+" = $1 ORDER BY graph, org_id", arg)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (accounts.Repository, error) {
+		var x accounts.Repository
+		err := r.Scan(&x.OrgID, &x.Graph, &x.Remote, &x.Visibility, &x.AddedBy, &x.AddedAt)
+		x.AddedAt = x.AddedAt.UTC()
+		return x, err
+	})
+}
+
+// OrgRepositories implements accounts.Store.
+func (s *Store) OrgRepositories(ctx context.Context, orgID string) ([]accounts.Repository, error) {
+	return s.repos(ctx, "org_id", orgID)
+}
+
+// GraphRepositories implements accounts.Store.
+func (s *Store) GraphRepositories(ctx context.Context, graph string) ([]accounts.Repository, error) {
+	return s.repos(ctx, "graph", graph)
+}
+
 const eventCols = "id, at, request_id, user_id, actor_email, via, key_id, org_id, ip, user_agent, action, target, outcome, status, detail, prev_hash, hash"
 
 // AddEvent implements accounts.Store: the chain tip is locked, the entry is

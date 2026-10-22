@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/parisnakitakejser/codesynapse/internal/memory/extract"
@@ -85,12 +86,14 @@ func (s *Server) handleOffload(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleOffloadJobs(w http.ResponseWriter, r *http.Request) {
 	_, err := s.offload.Provider()
-	writeJSON(w, 200, map[string]any{"jobs": s.offload.List(r.URL.Query().Get("repo")), "available": err == nil})
+	sc := scopeFrom(r.Context())
+	jobs := slices.DeleteFunc(s.offload.List(r.URL.Query().Get("repo")), func(j offload.Job) bool { return !sc.sees(j.Repo) })
+	writeJSON(w, 200, map[string]any{"jobs": jobs, "available": err == nil})
 }
 
 func (s *Server) handleOffloadJob(w http.ResponseWriter, r *http.Request) {
 	j, ok := s.offload.Get(r.PathValue("id"))
-	if !ok {
+	if !ok || !scopeFrom(r.Context()).sees(j.Repo) {
 		s.problem(w, 404, errors.New("no such memory extraction job"))
 		return
 	}

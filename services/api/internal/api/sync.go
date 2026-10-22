@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
@@ -60,7 +61,30 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	job, err := s.startClone(remote, req.Name, req.Branch) //nolint:contextcheck // jobs outlive the request
+	// Organisations (not platform admins) add public repositories only
+	// until they have their own Git tokens: the installation's tokens must
+	// not clone what a member could not read. An indexed graph is shared.
+	auth := s.authFor(remote)
+	if s.cfg.Accounts != nil && !scopeFrom(r.Context()).all {
+		if !publicRemote(r.Context(), remote, req.Branch) {
+			s.problem(w, http.StatusForbidden, errors.New("this repository is private or does not exist; private repositories need an organisation Git token, which an administrator sets up"))
+			return
+		}
+		auth = gitx.Auth{}
+		if _, err := s.st.Node(r.Context(), model.NodeID(req.Name, model.KindRepository, req.Name)); err == nil {
+			if err := s.linkRepo(r, req.Name, remote, accounts.Public); err != nil {
+				s.problem(w, 400, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"repo": req.Name, "shared": true, "note": "already indexed: linked to your organisation"})
+			return
+		}
+		if err := s.linkRepo(r, req.Name, remote, accounts.Public); err != nil {
+			s.problem(w, 400, err)
+			return
+		}
+	}
+	job, err := s.startCloneAuth(remote, req.Name, req.Branch, auth) //nolint:contextcheck // jobs outlive the request
 	switch {
 	case errors.Is(err, errConflict):
 		s.problem(w, http.StatusConflict, err)
@@ -74,11 +98,16 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 // startClone queues a clone of an already validated remote into the
 // workspace under name, then indexes it.
 func (s *Server) startClone(remote, name, branch string) (Job, error) {
+	return s.startCloneAuth(remote, name, branch, s.authFor(remote))
+}
+
+// startCloneAuth clones with the given credentials (none for organisations
+// adding public repositories).
+func (s *Server) startCloneAuth(remote, name, branch string, auth gitx.Auth) (Job, error) {
 	dir := repoDir(s.cfg.Workspace, name)
 	if _, err := os.Stat(dir); err == nil { //nolint:gosec // name passed validRepoName: at most two safe elements, none with a leading dot
 		return Job{}, fmt.Errorf("%w: %q already exists; use sync", errConflict, name)
 	}
-	auth := s.authFor(remote)
 	job, err := s.jobs.Start(name, dir, JobOptions{
 		Kind: "clone", Branch: branch,
 		Prepare: func(ctx context.Context) error {
