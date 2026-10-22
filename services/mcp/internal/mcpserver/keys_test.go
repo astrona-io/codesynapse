@@ -14,6 +14,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 	acctmem "github.com/parisnakitakejser/codesynapse/internal/accounts/memstore"
 	agentmem "github.com/parisnakitakejser/codesynapse/internal/memory"
+	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
 	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
@@ -82,8 +83,8 @@ func TestAPIKeyScoping(t *testing.T) {
 	require.NoError(t, err)
 	c, err := connectKey(t, url, keys["c"])
 	require.NoError(t, err)
-	svc, err := connectKey(t, url, "svc-token")
-	require.NoError(t, err)
+	_, err = connectKey(t, url, "svc-token")
+	assert.Error(t, err, "the installation token cannot access an accounts deployment")
 
 	var list repoListOut
 	require.False(t, call(t, a, "repo_list", map[string]any{}, &list).IsError)
@@ -91,7 +92,6 @@ func TestAPIKeyScoping(t *testing.T) {
 	require.False(t, call(t, c, "repo_list", map[string]any{}, &list).IsError)
 	assert.Len(t, list.Repos, 0, "an organisation sees only its repositories")
 	assert.True(t, call(t, c, "repo_overview", map[string]any{"repo": storetest.Repo}, nil).IsError)
-	assert.False(t, call(t, svc, "repo_overview", map[string]any{"repo": storetest.Repo}, nil).IsError, "the MCP token sees everything")
 
 	t.Run("memory per organisation", func(t *testing.T) {
 		res := call(t, a, "upsert_graph_triples", map[string]any{"triples": []map[string]any{
@@ -101,7 +101,7 @@ func TestAPIKeyScoping(t *testing.T) {
 		var g agentmem.Graph
 		require.False(t, call(t, a, "search_graph_nodes", map[string]any{"query": "payments"}, &g).IsError)
 		assert.Len(t, g.Facts, 1)
-		for name, cs := range map[string]*mcp.ClientSession{"b": b, "svc": svc} {
+		for name, cs := range map[string]*mcp.ClientSession{"b": b} {
 			g = agentmem.Graph{}
 			require.False(t, call(t, cs, "search_graph_nodes", map[string]any{"query": "payments"}, &g).IsError)
 			assert.Len(t, g.Facts, 0, name+" shares the graph, not the memory")
@@ -121,6 +121,17 @@ func TestAPIKeyScoping(t *testing.T) {
 		assert.True(t, call(t, b, "update_review_comment", map[string]any{"review_id": sub.ID, "comment_id": "x", "status": "resolved"}, nil).IsError)
 	})
 
+	t.Run("legacy unscoped review", func(t *testing.T) {
+		require.NoError(t, s.SaveReview(ctx, reviews.Review{ID: "legacy-review", Repo: storetest.Repo, Title: "Legacy"}))
+		assert.True(t, callContext(ctx, t, a, "get_review", map[string]any{"id": "legacy-review"}, nil).IsError)
+		assert.True(t, callContext(ctx, t, a, "update_review_comment", map[string]any{"review_id": "legacy-review", "comment_id": "x", "status": "resolved"}, nil).IsError)
+		var listed struct{ Reviews []struct{ ID string } }
+		require.False(t, callContext(ctx, t, a, "list_reviews", map[string]any{}, &listed).IsError)
+		for _, review := range listed.Reviews {
+			assert.False(t, review.ID == "legacy-review")
+		}
+	})
+
 	t.Run("usage per organisation", func(t *testing.T) {
 		require.NoError(t, rec.Flush(ctx))
 		got, err := s.Usage(ctx, "2000-01-01")
@@ -129,7 +140,7 @@ func TestAPIKeyScoping(t *testing.T) {
 		for _, bk := range got {
 			orgs[bk.Org] = true
 		}
-		assert.Equal(t, len(orgs), 4, "three organisations and the MCP token (no organisation)")
+		assert.Equal(t, len(orgs), 3, "only authenticated organisations")
 	})
 }
 
@@ -174,14 +185,23 @@ func TestSharesAndReadOnlyKeys(t *testing.T) {
 	require.NoError(t, err)
 	ownerA := accounts.Principal{User: pa.User, Via: "session"}
 
-	// Organisation a shares the repository with c, who is outside it.
+	// An external recipient must first join the owning organisation explicitly.
+	_, err = acc.SetRepoGrant(ctx, ownerA, pa.OrgID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: pc.User.ID}, accounts.Viewer)
+	assert.Error(t, err, "a grant cannot replace explicit membership")
+	_, err = acc.AddMember(ctx, ownerA, pa.OrgID, pc.User.Email, accounts.Guest)
+	require.NoError(t, err)
 	_, err = acc.SetRepoGrant(ctx, ownerA, pa.OrgID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: pc.User.ID}, accounts.Viewer)
 	require.NoError(t, err)
 	a, err := connectKey(t, url, keys["a"])
 	require.NoError(t, err)
 	b, err := connectKey(t, url, keys["b"])
 	require.NoError(t, err)
-	c, err := connectKey(t, url, keys["c"])
+	foreign, err := connectKey(t, url, keys["c"])
+	require.NoError(t, err)
+	assert.True(t, call(t, foreign, "repo_overview", map[string]any{"repo": storetest.Repo}, nil).IsError, "a key from another organisation cannot use the grant")
+	guestKey, _, err := acc.CreateKey(ctx, accounts.Principal{User: pc.User, Via: "session"}, pa.OrgID, "guest", 0)
+	require.NoError(t, err)
+	c, err := connectKey(t, url, guestKey)
 	require.NoError(t, err)
 	for name, cs := range map[string]*mcp.ClientSession{"a": a, "b": b} {
 		res := call(t, cs, "upsert_graph_triples", map[string]any{"triples": []map[string]any{{"subject": "Billing " + name, "predicate": "OWNED_BY", "object": "Team " + name}}}, nil)
@@ -189,7 +209,7 @@ func TestSharesAndReadOnlyKeys(t *testing.T) {
 	}
 	var list repoListOut
 	require.False(t, call(t, c, "repo_list", map[string]any{}, &list).IsError)
-	require.Len(t, list.Repos, 1, "the share is visible to c's key")
+	require.Len(t, list.Repos, 1, "the owning organisation key sees its explicit grant")
 	var g agentmem.Graph
 	require.False(t, call(t, c, "search_graph_nodes", map[string]any{"query": "billing"}, &g).IsError)
 	require.Len(t, g.Entities, 2)
@@ -201,10 +221,12 @@ func TestSharesAndReadOnlyKeys(t *testing.T) {
 	res = call(t, c, "submit_review", map[string]any{"title": "t", "summary": "s"}, nil)
 	assert.True(t, res.IsError)
 
-	// A viewer of organisation a reads but does not write.
+	// A viewer needs an explicit read grant when the organisation default is NONE.
 	viewer, _, err := acc.SignUp(ctx, "viewer@example.com", "viewer", "correct horse battery staple")
 	require.NoError(t, err)
 	_, err = acc.AddMember(ctx, ownerA, pa.OrgID, viewer.Email, accounts.Viewer)
+	require.NoError(t, err)
+	_, err = acc.SetRepoGrant(ctx, ownerA, pa.OrgID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: viewer.ID}, accounts.Viewer)
 	require.NoError(t, err)
 	vkey, _, err := acc.CreateKey(ctx, accounts.Principal{User: viewer, Via: "session"}, pa.OrgID, "v", 0)
 	require.NoError(t, err)
@@ -214,6 +236,9 @@ func TestSharesAndReadOnlyKeys(t *testing.T) {
 	assert.Len(t, g.Entities, 2, "viewers read their organisation's memory")
 	res = call(t, v, "upsert_graph_triples", map[string]any{"triples": []map[string]any{{"subject": "x", "predicate": "P", "object": "y"}}}, nil)
 	assert.True(t, res.IsError, "viewers do not write")
+	require.NoError(t, acc.RemoveMember(ctx, ownerA, pa.OrgID, viewer.ID))
+	_, err = v.CallTool(ctx, &mcp.CallToolParams{Name: "repo_list", Arguments: map[string]any{}})
+	assert.Error(t, err, "removed membership revokes a live session")
 }
 
 func TestRevokedKeyStopsWorking(t *testing.T) {
@@ -221,9 +246,12 @@ func TestRevokedKeyStopsWorking(t *testing.T) {
 	ctx := context.Background()
 	p, err := acc.AuthenticateKey(ctx, keys["a"])
 	require.NoError(t, err)
-	_, err = connectKey(t, url, keys["a"])
+	live, err := connectKey(t, url, keys["a"])
 	require.NoError(t, err)
+	require.False(t, call(t, live, "repo_list", map[string]any{}, nil).IsError)
 	require.NoError(t, acc.RevokeKey(ctx, accounts.Principal{User: p.User, Via: "session"}, p.KeyID))
+	_, err = live.CallTool(ctx, &mcp.CallToolParams{Name: "repo_list", Arguments: map[string]any{}})
+	assert.Error(t, err, "revocation also stops a live transport session")
 	_, err = connectKey(t, url, keys["a"])
 	assert.Error(t, err)
 }

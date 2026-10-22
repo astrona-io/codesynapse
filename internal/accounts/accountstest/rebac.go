@@ -3,7 +3,7 @@ package accountstest
 import (
 	"context"
 	"errors"
-	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,8 +12,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
 )
 
-// RunReBAC exercises relationship-based access through accounts.Service.
-// It creates its own users, so it runs on any store state.
+// RunReBAC exercises the authoritative resolver and mutation rules on both stores.
 func RunReBAC(t *testing.T, st accounts.Store) {
 	ctx := context.Background()
 	require.NoError(t, st.Migrate(ctx))
@@ -25,125 +24,225 @@ func RunReBAC(t *testing.T, st accounts.Store) {
 		require.NoError(t, err)
 		return u, accounts.Principal{User: u, Via: "session"}
 	}
-	owner, ownerP := user("rebac-owner@example.com")
-	viewer, viewerP := user("rebac-viewer@example.com")
-	guest, guestP := user("rebac-guest@example.com")
-	teammate, _ := user("rebac-teammate@example.com")
-	outsider, outsiderP := user("rebac-outsider@example.com")
-	acme, err := svc.CreateOrg(ctx, ownerP, "ReBAC Acme", "")
+	owner, ownerP := user("policy-owner@example.com")
+	reader, readerP := user("policy-reader@example.com")
+	guest, _ := user("policy-guest@example.com")
+	outsider, outsiderP := user("policy-outsider@example.com")
+	require.NoError(t, st.SetPlatformAdmin(ctx, outsider.ID, true))
+	outsiderP.User.PlatformAdmin = true
+	org, err := svc.CreateOrg(ctx, ownerP, "Policy Acme", "")
 	require.NoError(t, err)
 	for _, m := range []struct {
-		email string
-		role  accounts.Role
-	}{{viewer.Email, accounts.Viewer}, {guest.Email, accounts.Guest}, {teammate.Email, accounts.Guest}} {
-		_, err := svc.AddMember(ctx, ownerP, acme.ID, m.email, m.role)
+		u accounts.User
+		r accounts.Role
+	}{{reader, accounts.Viewer}, {guest, accounts.Guest}} {
+		_, err := svc.AddMember(ctx, ownerP, org.ID, m.u.Email, m.r)
 		require.NoError(t, err)
 	}
-	for _, g := range []string{"acme/api", "acme/web"} {
-		require.NoError(t, st.AddRepository(ctx, accounts.Repository{OrgID: acme.ID, Graph: g, Remote: "https://github.com/" + g, Visibility: accounts.Private, AddedAt: now}))
-	}
-	reach := func(u accounts.User) map[string]accounts.Role {
-		a, err := svc.AccessOf(ctx, u.ID)
-		require.NoError(t, err)
-		out := map[string]accounts.Role{}
-		for _, r := range a.Repos {
-			if r.OrgID == acme.ID {
-				out[r.Graph] = r.Role
-			}
-		}
-		return out
-	}
-	userSubject := func(u accounts.User) accounts.Tuple {
+	graph := "policy/api"
+	require.NoError(t, st.AddRepository(ctx, accounts.Repository{OrgID: org.ID, Graph: graph, AddedBy: owner.ID, Visibility: accounts.Private, AddedAt: now}))
+	subject := func(u accounts.User) accounts.Tuple {
 		return accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: u.ID}
 	}
-
-	// Organisation roles flow down; guests inherit nothing.
-	assert.Equal(t, reach(viewer), map[string]accounts.Role{"acme/api": accounts.Viewer, "acme/web": accounts.Viewer})
-	assert.Equal(t, reach(owner)["acme/api"], accounts.Admin)
-	assert.Equal(t, len(reach(guest)), 0, "a guest sees only what is granted")
-
-	// A direct grant to a guest.
-	_, err = svc.SetRepoGrant(ctx, ownerP, acme.ID, "acme/web", userSubject(guest), accounts.Viewer)
-	require.NoError(t, err)
-	assert.Equal(t, reach(guest), map[string]accounts.Role{"acme/web": accounts.Viewer})
-
-	// Teams: a role in the organisation flows down to every repository.
-	platform, err := svc.CreateTeam(ctx, ownerP, acme.ID, "Platform")
-	require.NoError(t, err)
-	_, err = svc.SetTeamMember(ctx, ownerP, platform.ID, teammate.Email, accounts.RelMember)
-	require.NoError(t, err)
-	require.NoError(t, svc.SetTeamRole(ctx, ownerP, platform.ID, accounts.Member))
-	assert.Equal(t, reach(teammate), map[string]accounts.Role{"acme/api": accounts.Member, "acme/web": accounts.Member})
-	r, err := svc.RoleIn(ctx, accounts.Principal{User: teammate, Via: "session"}, acme.ID)
-	require.NoError(t, err)
-	assert.Equal(t, r, accounts.Member, "a team role counts as the member's organisation role")
-	_, err = svc.SetTeamMember(ctx, ownerP, platform.ID, outsider.Email, accounts.RelMember)
-	assert.True(t, errors.Is(err, accounts.ErrInvalidInput), "teams hold members of their organisation")
-
-	// A team grant on one repository.
-	contractors, err := svc.CreateTeam(ctx, ownerP, acme.ID, "Contractors")
-	require.NoError(t, err)
-	_, err = svc.SetTeamMember(ctx, ownerP, contractors.ID, guest.Email, accounts.RelMember)
-	require.NoError(t, err)
-	_, err = svc.SetRepoGrant(ctx, ownerP, acme.ID, "acme/api", accounts.Tuple{SubjectType: accounts.TypeTeam, SubjectID: contractors.ID, SubjectRelation: accounts.RelMember}, accounts.Member)
-	require.NoError(t, err)
-	assert.Equal(t, reach(guest), map[string]accounts.Role{"acme/api": accounts.Member, "acme/web": accounts.Viewer})
-
-	// Repository admins grant inside the organisation, not outside it.
-	_, err = svc.SetRepoGrant(ctx, ownerP, acme.ID, "acme/api", userSubject(viewer), accounts.Admin)
-	require.NoError(t, err)
-	_, err = svc.SetRepoGrant(ctx, viewerP, acme.ID, "acme/api", userSubject(outsider), accounts.Viewer)
-	assert.True(t, errors.Is(err, accounts.ErrForbidden), "only organisation admins share outside")
-	_, err = svc.SetRepoGrant(ctx, guestP, acme.ID, "acme/api", userSubject(outsider), accounts.Viewer)
-	assert.True(t, errors.Is(err, accounts.ErrForbidden), "editors do not grant")
-
-	// Sharing across organisations is read-only.
-	_, err = svc.SetRepoGrant(ctx, ownerP, acme.ID, "acme/web", userSubject(outsider), accounts.Member)
-	assert.True(t, errors.Is(err, accounts.ErrForbidden), "shares are read-only")
-	g, err := svc.SetRepoGrant(ctx, ownerP, acme.ID, "acme/web", userSubject(outsider), accounts.Viewer)
-	require.NoError(t, err)
-	assert.True(t, g.External)
-	assert.Equal(t, reach(outsider), map[string]accounts.Role{"acme/web": accounts.Viewer})
-	_, err = svc.SetRepoGrant(ctx, accounts.Principal{User: owner, Via: "key", OrgID: acme.ID}, acme.ID, "acme/web", userSubject(guest), accounts.Admin)
-	assert.True(t, errors.Is(err, accounts.ErrForbidden), "API keys do not change access")
-	_, err = svc.SetRepoGrant(ctx, ownerP, acme.ID, "acme/nope", userSubject(guest), accounts.Viewer)
-	assert.True(t, errors.Is(err, accounts.ErrNotFound))
-	grants, err := svc.RepoGrants(ctx, ownerP, acme.ID, "acme/web")
-	require.NoError(t, err)
-	labels := []string{}
-	for _, g := range grants {
-		labels = append(labels, g.Label)
+	role := func(u accounts.User) accounts.Role {
+		a, err := svc.AccessOf(ctx, u.ID)
+		require.NoError(t, err)
+		for _, r := range a.Repos {
+			if r.OrgID == org.ID && r.Graph == graph {
+				return r.Role
+			}
+		}
+		return ""
 	}
-	assert.True(t, slices.Contains(labels, outsider.Email) && slices.Contains(labels, guest.Email), "grants name their subjects")
-	_, err = svc.RepoGrants(ctx, outsiderP, acme.ID, "acme/web")
-	assert.Error(t, err, "outsiders do not see who else has access")
-
-	// Lost private access hides the entry from everyone who reached it.
-	require.NoError(t, st.SetRepositoryAccess(ctx, acme.ID, "acme/web", accounts.AccessLost, now))
-	assert.Equal(t, len(reach(outsider)), 0)
-	_, hasWeb := reach(guest)["acme/web"]
-	assert.False(t, hasWeb)
-	require.NoError(t, st.SetRepositoryAccess(ctx, acme.ID, "acme/web", accounts.AccessOK, now))
-
-	// Leaving the organisation drops team places and grants there.
-	require.NoError(t, svc.RemoveMember(ctx, ownerP, acme.ID, guest.ID))
-	assert.Equal(t, len(reach(guest)), 0)
-	members, err := svc.TeamMembers(ctx, ownerP, contractors.ID)
+	assert.Equal(t, role(owner), accounts.Admin)
+	assert.Equal(t, role(reader), accounts.Role(""), "new organisations default to NONE")
+	_, err = svc.ResolveRepository(ctx, outsiderP, org.ID, graph, accounts.Viewer)
+	assert.True(t, errors.Is(err, accounts.ErrNotFound))
+	_, err = svc.AddMember(ctx, outsiderP, org.ID, outsider.Email, accounts.Owner)
+	assert.True(t, errors.Is(err, accounts.ErrForbidden), "platform admin cannot enrol itself")
+	require.NoError(t, svc.SetDefaultRepoAccess(ctx, ownerP, org.ID, accounts.DefaultRepoReadOnly))
+	assert.Equal(t, role(reader), accounts.Viewer)
+	assert.Equal(t, role(guest), accounts.Role(""))
+	team, err := svc.CreateTeam(ctx, ownerP, org.ID, "Builders")
 	require.NoError(t, err)
-	assert.Len(t, members, 0)
-
-	// Deleting a team removes what it granted.
-	require.NoError(t, svc.DeleteTeam(ctx, ownerP, platform.ID))
-	assert.Equal(t, len(reach(teammate)), 0, "the team's role is gone; the guest membership remains")
-
-	// Every grant change is audited.
-	evs, err := st.ListEvents(ctx, accounts.EventFilter{OrgID: acme.ID, Limit: 200})
+	_, err = svc.SetTeamMember(ctx, ownerP, team.ID, reader.Email, accounts.RelMember)
+	require.NoError(t, err)
+	_, err = svc.SetTeamMember(ctx, ownerP, team.ID, outsider.Email, accounts.RelMember)
+	assert.True(t, errors.Is(err, accounts.ErrInvalidInput))
+	teamSub := accounts.Tuple{SubjectType: accounts.TypeTeam, SubjectID: team.ID, SubjectRelation: accounts.RelMember}
+	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, teamSub, accounts.Admin)
+	require.NoError(t, err)
+	assert.Equal(t, role(reader), accounts.Admin)
+	for _, tc := range []struct {
+		name        string
+		grant, want accounts.Role
+	}{{"direct read overrides team admin", accounts.Viewer, accounts.Viewer}, {"direct deny overrides team and default", accounts.None, ""}, {"direct write", accounts.Member, accounts.Member}} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.SetRepoGrant(ctx, ownerP, org.ID, graph, subject(reader), tc.grant)
+			require.NoError(t, err)
+			assert.Equal(t, role(reader), tc.want)
+		})
+	}
+	require.NoError(t, svc.RemoveRepoGrant(ctx, ownerP, org.ID, graph, subject(reader)))
+	assert.Equal(t, role(reader), accounts.Admin)
+	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, teamSub, accounts.None)
+	assert.True(t, errors.Is(err, accounts.ErrInvalidInput), "NONE applies only to users")
+	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, subject(outsider), accounts.Viewer)
+	assert.True(t, errors.Is(err, accounts.ErrForbidden), "external shares need explicit membership")
+	// Store foreign keys reject new repository grants without tenant membership.
+	err = st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(org.ID, graph), Relation: accounts.RepoViewer, SubjectType: accounts.TypeUser, SubjectID: outsider.ID, CreatedAt: now})
+	assert.True(t, errors.Is(err, accounts.ErrNotFound))
+	assert.Equal(t, role(outsider), accounts.Role(""))
+	a, err := svc.AccessOf(ctx, reader.ID)
+	require.NoError(t, err)
+	assert.Len(t, a.Scope(map[string]bool{"foreign": true}), 0)
+	require.NoError(t, svc.SetDefaultRepoAccess(ctx, ownerP, org.ID, accounts.DefaultRepoNone))
+	assert.Equal(t, role(reader), accounts.Admin)
+	// Removing team membership removes inherited access immediately.
+	require.NoError(t, svc.RemoveTeamMember(ctx, ownerP, team.ID, reader.ID))
+	assert.Equal(t, role(reader), accounts.Role(""))
+	// Organisation ownership does not bypass an explicit repository deny.
+	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, subject(reader), accounts.Admin)
+	require.NoError(t, err)
+	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, subject(owner), accounts.None)
+	require.NoError(t, err)
+	assert.Equal(t, role(owner), accounts.Role(""))
+	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, subject(guest), accounts.Viewer)
+	assert.True(t, errors.Is(err, accounts.ErrForbidden))
+	require.NoError(t, svc.RecoverRepoAdmin(ctx, ownerP, org.ID, graph, owner.ID))
+	// Two concurrent removals cannot remove the last administrator.
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, u := range []accounts.User{owner, reader} {
+		wg.Go(func() { errs <- svc.RemoveRepoGrant(ctx, ownerP, org.ID, graph, subject(u)) })
+	}
+	wg.Wait()
+	close(errs)
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+		} else {
+			assert.True(t, errors.Is(err, accounts.ErrLastRepoAdmin) || errors.Is(err, accounts.ErrForbidden))
+		}
+	}
+	assert.Equal(t, successes, 1)
+	require.NoError(t, svc.RecoverRepoAdmin(ctx, ownerP, org.ID, graph, owner.ID))
+	// Suspension overrides even the last repository administrator; recovery remains available.
+	disabled := now
+	require.NoError(t, st.SetUserDisabled(ctx, reader.ID, &disabled))
+	_, err = svc.AccessOf(ctx, reader.ID)
+	assert.True(t, errors.Is(err, accounts.ErrSuspended))
+	_, err = svc.ResolveRepository(ctx, readerP, org.ID, graph, accounts.Viewer)
+	assert.True(t, errors.Is(err, accounts.ErrUnauthorized))
+	require.NoError(t, st.SetUserDisabled(ctx, reader.ID, nil))
+	token, key, err := svc.CreateKey(ctx, ownerP, org.ID, "policy test", 0)
+	require.NoError(t, err)
+	kp, err := svc.AuthenticateKey(ctx, token)
+	require.NoError(t, err)
+	_, err = svc.ResolveRepository(ctx, kp, org.ID, graph, accounts.Admin)
+	require.NoError(t, err)
+	require.NoError(t, svc.RevokeKey(ctx, ownerP, key.ID))
+	_, err = svc.ResolveRepository(ctx, kp, org.ID, graph, accounts.Viewer)
+	assert.True(t, errors.Is(err, accounts.ErrKeyRevoked))
+	require.NoError(t, st.SetRepositoryAccess(ctx, org.ID, graph, accounts.AccessLost, now))
+	assert.Equal(t, role(owner), accounts.Role(""))
+	require.NoError(t, st.SetRepositoryAccess(ctx, org.ID, graph, accounts.AccessOK, now))
+	// Transaction failure rolls policy and outbox back.
+	before, err := st.OrgByID(ctx, org.ID)
+	require.NoError(t, err)
+	rollback := errors.New("rollback")
+	err = st.PolicyTransaction(ctx, org.ID, func(tx accounts.Store) error {
+		require.NoError(t, tx.SetDefaultRepoAccess(ctx, org.ID, accounts.DefaultRepoReadOnly))
+		require.NoError(t, tx.TouchPolicy(ctx, org.ID))
+		return rollback
+	})
+	assert.True(t, errors.Is(err, rollback))
+	after, err := st.OrgByID(ctx, org.ID)
+	require.NoError(t, err)
+	assert.Equal(t, after, before)
+	pending, err := st.PendingAccessPolicies(ctx, accounts.MaxTuples)
+	require.NoError(t, err)
+	found := false
+	for _, o := range pending {
+		if o.ID == org.ID {
+			found = true
+		}
+	}
+	assert.True(t, found)
+	require.NoError(t, st.AcknowledgeAccessPolicy(ctx, org.ID, before.PolicyRevision-1))
+	pending, err = st.PendingAccessPolicies(ctx, accounts.MaxTuples)
+	require.NoError(t, err)
+	found = false
+	for _, o := range pending {
+		if o.ID == org.ID {
+			found = true
+		}
+	}
+	assert.True(t, found, "stale acknowledgement preserves newer work")
+	// The initial grant, policy updates and explicit recovery have audit records.
+	evs, err := st.ListEvents(ctx, accounts.EventFilter{OrgID: org.ID, Limit: 200})
 	require.NoError(t, err)
 	actions := map[string]bool{}
 	for _, e := range evs {
 		actions[e.Action] = true
 	}
-	for _, a := range []string{"team.create", "team.member.set", "team.role.set", "repo.grant.set", "repo.share", "team.delete"} {
-		assert.True(t, actions[a], "audited: "+a)
+	for _, action := range []string{"repo.admin.initial", "org.repo_policy.set", "repo.admin.recover", "repo.grant.set"} {
+		assert.True(t, actions[action], action)
 	}
+}
+
+// RunPolicyRecovery covers malformed legacy grants without restoring broad access.
+func RunPolicyRecovery(t *testing.T, st accounts.Store) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	svc := accounts.NewService(st, true)
+	users := []accounts.User{
+		{ID: "recovery-owner", Email: "recovery-owner@example.com", CreatedAt: now},
+		{ID: "recovery-admin", Email: "recovery-admin@example.com", CreatedAt: now},
+		{ID: "recovery-member", Email: "recovery-member@example.com", CreatedAt: now},
+	}
+	for _, u := range users {
+		require.NoError(t, st.CreateUser(ctx, u))
+	}
+	orgID, graph := "recovery-org", "recovery/repo"
+	require.NoError(t, st.CreateOrg(ctx, accounts.Org{ID: orgID, Slug: orgID, Name: "Recovery", CreatedAt: now}, users[0].ID))
+	for _, u := range users[1:] {
+		require.NoError(t, st.SetMember(ctx, orgID, u.ID, accounts.Member))
+	}
+	ownerP := accounts.Principal{User: users[0], Via: "session"}
+	require.NoError(t, st.AddRepository(ctx, accounts.Repository{OrgID: orgID, Graph: graph, AddedBy: users[0].ID, Visibility: accounts.Public, AddedAt: now}))
+	require.NoError(t, svc.SetDefaultRepoAccess(ctx, ownerP, orgID, accounts.DefaultRepoReadOnly))
+	team := accounts.Team{ID: "recovery-team", OrgID: orgID, Slug: "recovery-team", Name: "Recovery", CreatedAt: now}
+	require.NoError(t, st.CreateTeam(ctx, team))
+	for _, u := range users {
+		require.NoError(t, st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeTeam, ObjectID: team.ID, Relation: accounts.RelMember, SubjectType: accounts.TypeUser, SubjectID: u.ID, CreatedAt: now}))
+	}
+	require.NoError(t, st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(orgID, graph), Relation: "invalid", SubjectType: accounts.TypeTeam, SubjectID: team.ID, SubjectRelation: accounts.RelMember, CreatedAt: now}))
+	_, err := svc.AccessOf(ctx, users[0].ID)
+	assert.True(t, errors.Is(err, accounts.ErrInvalidInput))
+	report, err := svc.AccessChangeReport(ctx, orgID)
+	require.NoError(t, err)
+	assert.Equal(t, report.MalformedGrants, 1)
+	assert.Equal(t, report.OrphanedRepositories, []string{graph})
+	require.NoError(t, svc.Require(ctx, ownerP, orgID, accounts.Owner))
+	require.NoError(t, svc.RecoverRepoAdmin(ctx, ownerP, orgID, graph, users[1].ID))
+	for i, u := range users {
+		a, err := svc.AccessOf(ctx, u.ID)
+		require.NoError(t, err)
+		if i == 1 {
+			require.Len(t, a.Repos, 1)
+			assert.Equal(t, a.Repos[0].Role, accounts.Admin)
+		} else {
+			assert.Len(t, a.Repos, 0, "repair preserves denial for other affected members, including the owner")
+		}
+	}
+	report, err = svc.AccessChangeReport(ctx, orgID)
+	require.NoError(t, err)
+	assert.Equal(t, report.MalformedGrants, 0)
+	assert.Len(t, report.OrphanedRepositories, 0)
+	events, err := st.ListEvents(ctx, accounts.EventFilter{OrgID: orgID, Action: "repo.admin.recover"})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, events[0].Detail, "repaired 1 malformed grants")
 }

@@ -30,7 +30,9 @@ const migrateLock = 0x636f6465 // "code"
 
 // Store is a PostgreSQL accounts store.
 type Store struct {
-	db *pgxpool.Pool
+	db     database
+	pool   *pgxpool.Pool
+	policy bool
 }
 
 var _ accounts.Store = (*Store)(nil)
@@ -52,7 +54,7 @@ func Open(ctx context.Context, url string) (*Store, error) {
 		pool.Close()
 		return nil, fmt.Errorf("connecting to PostgreSQL: %w", err)
 	}
-	return &Store{db: pool}, nil
+	return &Store{db: pool, pool: pool}, nil
 }
 
 // OpenWait retries Open for about a minute, since PostgreSQL may still be
@@ -75,11 +77,11 @@ func OpenWait(ctx context.Context, url string, onRetry func(attempt int, err err
 }
 
 // Close releases the pool.
-func (s *Store) Close() { s.db.Close() }
+func (s *Store) Close() { s.pool.Close() }
 
 // Migrate implements accounts.Store.
 func (s *Store) Migrate(ctx context.Context) error {
-	conn, err := s.db.Acquire(ctx)
+	conn, err := s.pool.Acquire(ctx)
 	if err != nil {
 		return err
 	}
@@ -212,11 +214,11 @@ func (s *Store) ListUsers(ctx context.Context, limit int) ([]accounts.User, erro
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (accounts.User, error) { return scanUser(r) })
 }
 
-const orgCols = "id, slug, name, created_at"
+const orgCols = "id, slug, name, created_at, default_repo_access, policy_revision"
 
 func scanOrg(row pgx.Row) (accounts.Org, error) {
 	var o accounts.Org
-	err := row.Scan(&o.ID, &o.Slug, &o.Name, &o.CreatedAt)
+	err := row.Scan(&o.ID, &o.Slug, &o.Name, &o.CreatedAt, &o.DefaultRepoAccess, &o.PolicyRevision)
 	o.CreatedAt = o.CreatedAt.UTC()
 	return o, err
 }
@@ -225,11 +227,15 @@ func scanOrg(row pgx.Row) (accounts.Org, error) {
 // the same transaction.
 func (s *Store) CreateOrg(ctx context.Context, o accounts.Org, owner string) error {
 	return pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "INSERT INTO orgs ("+orgCols+") VALUES ($1, $2, $3, $4)", o.ID, o.Slug, o.Name, o.CreatedAt); err != nil {
+		if _, err := tx.Exec(ctx, "INSERT INTO orgs ("+orgCols+") VALUES ($1, $2, $3, $4, $5, $6)", o.ID, o.Slug, o.Name, o.CreatedAt, cmp.Or(o.DefaultRepoAccess, accounts.DefaultRepoNone), max(o.PolicyRevision, 1)); err != nil {
 			return mapErr(err, "slug")
 		}
 		_, err := tx.Exec(ctx, "INSERT INTO memberships (org_id, user_id, role, added_at) VALUES ($1, $2, 'owner', $3)", o.ID, owner, o.CreatedAt)
-		return mapErr(err, "owner")
+		if err != nil {
+			return mapErr(err, "owner")
+		}
+		_, err = tx.Exec(ctx, "INSERT INTO access_policy_outbox(org_id,revision) SELECT id,policy_revision FROM orgs WHERE id=$1", o.ID)
+		return err
 	})
 }
 
@@ -254,15 +260,15 @@ func (s *Store) ListOrgs(ctx context.Context, limit int) ([]accounts.Org, error)
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (accounts.Org, error) { return scanOrg(r) })
 }
 
-const membershipQuery = `SELECT o.id, o.slug, o.name, o.created_at,
-  u.id, u.email, u.name, u.password_hash, u.platform_admin, u.created_at, m.role, m.added_at
+const membershipQuery = `SELECT o.id, o.slug, o.name, o.created_at, o.default_repo_access, o.policy_revision,
+  u.id, u.email, u.name, u.password_hash, u.platform_admin, u.created_at, u.disabled_at, m.role, m.added_at
 FROM memberships m JOIN orgs o ON o.id = m.org_id JOIN users u ON u.id = m.user_id `
 
 func scanMembership(r pgx.CollectableRow) (accounts.Membership, error) {
 	var m accounts.Membership
 	var role string
-	err := r.Scan(&m.Org.ID, &m.Org.Slug, &m.Org.Name, &m.Org.CreatedAt,
-		&m.User.ID, &m.User.Email, &m.User.Name, &m.User.PasswordHash, &m.User.PlatformAdmin, &m.User.CreatedAt, &role, &m.AddedAt)
+	err := r.Scan(&m.Org.ID, &m.Org.Slug, &m.Org.Name, &m.Org.CreatedAt, &m.Org.DefaultRepoAccess, &m.Org.PolicyRevision,
+		&m.User.ID, &m.User.Email, &m.User.Name, &m.User.PasswordHash, &m.User.PlatformAdmin, &m.User.CreatedAt, &m.User.DisabledAt, &role, &m.AddedAt)
 	m.Role = accounts.Role(role)
 	m.Org.CreatedAt, m.User.CreatedAt, m.AddedAt = m.Org.CreatedAt.UTC(), m.User.CreatedAt.UTC(), m.AddedAt.UTC()
 	m.User.PasswordHash = "" // never leaves the store in a membership
@@ -271,7 +277,7 @@ func scanMembership(r pgx.CollectableRow) (accounts.Membership, error) {
 
 // UserMemberships implements accounts.Store.
 func (s *Store) UserMemberships(ctx context.Context, userID string) ([]accounts.Membership, error) {
-	rows, err := s.db.Query(ctx, membershipQuery+"WHERE m.user_id = $1 ORDER BY o.name, o.id", userID)
+	rows, err := s.db.Query(ctx, membershipQuery+"WHERE m.user_id = $1 ORDER BY o.name, o.id LIMIT 257", userID)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +286,7 @@ func (s *Store) UserMemberships(ctx context.Context, userID string) ([]accounts.
 
 // OrgMembers implements accounts.Store.
 func (s *Store) OrgMembers(ctx context.Context, orgID string) ([]accounts.Membership, error) {
-	rows, err := s.db.Query(ctx, membershipQuery+"WHERE m.org_id = $1 ORDER BY u.email", orgID)
+	rows, err := s.db.Query(ctx, membershipQuery+"WHERE m.org_id = $1 ORDER BY u.email LIMIT 5001", orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -296,6 +302,21 @@ func (s *Store) MemberRole(ctx context.Context, orgID, userID string) (accounts.
 
 // SetMember implements accounts.Store.
 func (s *Store) SetMember(ctx context.Context, orgID, userID string, role accounts.Role) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		orgIDs := []string{orgID}
+		if err := st.(*Store).setMember(ctx, orgID, userID, role); err != nil {
+			return err
+		}
+		for _, id := range orgIDs {
+			if err := st.TouchPolicy(ctx, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) setMember(ctx context.Context, orgID, userID string, role accounts.Role) error {
 	_, err := s.db.Exec(ctx, `INSERT INTO memberships (org_id, user_id, role, added_at) VALUES ($1, $2, $3, $4)
 ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role`, orgID, userID, string(role), time.Now().UTC())
 	return mapErr(err, "organisation or user")
@@ -303,6 +324,21 @@ ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role`, orgID, userID
 
 // RemoveMember implements accounts.Store.
 func (s *Store) RemoveMember(ctx context.Context, orgID, userID string) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		orgIDs := []string{orgID}
+		if err := st.(*Store).removeMember(ctx, orgID, userID); err != nil {
+			return err
+		}
+		for _, id := range orgIDs {
+			if err := st.TouchPolicy(ctx, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) removeMember(ctx context.Context, orgID, userID string) error {
 	tag, err := s.db.Exec(ctx, "DELETE FROM memberships WHERE org_id = $1 AND user_id = $2", orgID, userID)
 	return affected(tag, err, "membership")
 }
@@ -392,6 +428,32 @@ const repoCols = "org_id, graph, remote, visibility, added_by, added_at, access,
 
 // AddRepository implements accounts.Store.
 func (s *Store) AddRepository(ctx context.Context, r accounts.Repository) error {
+	return s.PolicyTransaction(ctx, r.OrgID, func(st accounts.Store) error {
+		if r.AddedBy == "" {
+			return accounts.ErrInvalidInput
+		}
+		u, err := st.UserByID(ctx, r.AddedBy)
+		if err != nil || u.DisabledAt != nil {
+			return accounts.ErrForbidden
+		}
+		if _, err := st.MemberRole(ctx, r.OrgID, r.AddedBy); err != nil {
+			return accounts.ErrForbidden
+		}
+		tx := st.(*Store)
+		if err := tx.addRepository(ctx, r); err != nil {
+			return err
+		}
+		if err := st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(r.OrgID, r.Graph), Relation: accounts.RepoAdmin, SubjectType: accounts.TypeUser, SubjectID: r.AddedBy, CreatedBy: r.AddedBy, CreatedAt: r.AddedAt}); err != nil {
+			return err
+		}
+		if _, err := st.AddEvent(ctx, accounts.Event{At: r.AddedAt, UserID: r.AddedBy, ActorEmail: u.Email, OrgID: r.OrgID, Action: "repo.admin.initial", Target: r.Graph, Outcome: accounts.Success}); err != nil {
+			return err
+		}
+		return st.TouchPolicy(ctx, r.OrgID)
+	})
+}
+
+func (s *Store) addRepository(ctx context.Context, r accounts.Repository) error {
 	_, err := s.db.Exec(ctx, "INSERT INTO repositories ("+repoCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
 		r.OrgID, r.Graph, r.Remote, r.Visibility, r.AddedBy, r.AddedAt, cmp.Or(r.Access, accounts.AccessOK), r.VerifiedAt)
 	return mapErr(err, "repository")
@@ -399,6 +461,21 @@ func (s *Store) AddRepository(ctx context.Context, r accounts.Repository) error 
 
 // SetRepositoryAccess implements accounts.Store.
 func (s *Store) SetRepositoryAccess(ctx context.Context, orgID, graph, access string, at time.Time) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		orgIDs := []string{orgID}
+		if err := st.(*Store).setRepositoryAccess(ctx, orgID, graph, access, at); err != nil {
+			return err
+		}
+		for _, id := range orgIDs {
+			if err := st.TouchPolicy(ctx, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) setRepositoryAccess(ctx context.Context, orgID, graph, access string, at time.Time) error {
 	tag, err := s.db.Exec(ctx, "UPDATE repositories SET access = $3, verified_at = $4 WHERE org_id = $1 AND graph = $2", orgID, graph, access, at)
 	return affected(tag, err, "repository")
 }
@@ -450,6 +527,22 @@ func (s *Store) DeleteGitToken(ctx context.Context, orgID, host string) error {
 
 // RemoveRepository implements accounts.Store.
 func (s *Store) RemoveRepository(ctx context.Context, orgID, graph string) (int, error) {
+	var count int
+	err := s.PolicyTransaction(ctx, orgID, func(st accounts.Store) error {
+		var err error
+		count, err = st.(*Store).removeRepository(ctx, orgID, graph)
+		if err != nil {
+			return err
+		}
+		if _, err := st.DeleteTuples(ctx, accounts.TupleFilter{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(orgID, graph)}); err != nil {
+			return err
+		}
+		return st.TouchPolicy(ctx, orgID)
+	})
+	return count, err
+}
+
+func (s *Store) removeRepository(ctx context.Context, orgID, graph string) (int, error) {
 	tag, err := s.db.Exec(ctx, "DELETE FROM repositories WHERE org_id = $1 AND graph = $2", orgID, graph)
 	if err := affected(tag, err, "repository"); err != nil {
 		return 0, err
@@ -464,16 +557,7 @@ func (s *Store) repos(ctx context.Context, where string, arg string) ([]accounts
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (accounts.Repository, error) {
-		var x accounts.Repository
-		err := r.Scan(&x.OrgID, &x.Graph, &x.Remote, &x.Visibility, &x.AddedBy, &x.AddedAt, &x.Access, &x.VerifiedAt)
-		x.AddedAt = x.AddedAt.UTC()
-		if x.VerifiedAt != nil {
-			v := x.VerifiedAt.UTC()
-			x.VerifiedAt = &v
-		}
-		return x, err
-	})
+	return pgx.CollectRows(rows, scanRepo)
 }
 
 // OrgRepositories implements accounts.Store.
@@ -551,6 +635,16 @@ func (s *Store) PruneEvents(ctx context.Context, before time.Time) (int, error) 
 
 // CreateTeam implements accounts.Store.
 func (s *Store) CreateTeam(ctx context.Context, t accounts.Team) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+
+		if err := st.(*Store).createTeam(ctx, t); err != nil {
+			return err
+		}
+		return st.TouchPolicy(ctx, t.OrgID)
+	})
+}
+
+func (s *Store) createTeam(ctx context.Context, t accounts.Team) error {
 	_, err := s.db.Exec(ctx, "INSERT INTO teams (id, org_id, slug, name, created_at) VALUES ($1, $2, $3, $4, $5)", t.ID, t.OrgID, t.Slug, t.Name, t.CreatedAt)
 	return mapErr(err, "team")
 }
@@ -589,6 +683,19 @@ func (s *Store) OrgTeams(ctx context.Context, orgID string) ([]accounts.Team, er
 // DeleteTeam implements accounts.Store: the team and every tuple naming it,
 // in one transaction.
 func (s *Store) DeleteTeam(ctx context.Context, id string) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		team, err := st.TeamByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := st.(*Store).deleteTeam(ctx, id); err != nil {
+			return err
+		}
+		return st.TouchPolicy(ctx, team.OrgID)
+	})
+}
+
+func (s *Store) deleteTeam(ctx context.Context, id string) error {
 	return pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "DELETE FROM teams WHERE id = $1", id)
 		if err := affected(tag, err, "team"); err != nil {
@@ -603,6 +710,24 @@ const tupleCols = "object_type, object_id, relation, subject_type, subject_id, s
 
 // WriteTuple implements accounts.Store.
 func (s *Store) WriteTuple(ctx context.Context, t accounts.Tuple) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		orgs, err := tupleOrganisations(ctx, st, []accounts.Tuple{t})
+		if err != nil {
+			return err
+		}
+		if err := st.(*Store).writeTuple(ctx, t); err != nil {
+			return err
+		}
+		for org := range orgs {
+			if err := st.TouchPolicy(ctx, org); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) writeTuple(ctx context.Context, t accounts.Tuple) error {
 	_, err := s.db.Exec(ctx, "INSERT INTO relation_tuples ("+tupleCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
 		t.ObjectType, t.ObjectID, t.Relation, t.SubjectType, t.SubjectID, t.SubjectRelation, t.CreatedBy, t.CreatedAt)
 	return mapErr(err, "tuple")
@@ -610,6 +735,24 @@ func (s *Store) WriteTuple(ctx context.Context, t accounts.Tuple) error {
 
 // DeleteTuple implements accounts.Store.
 func (s *Store) DeleteTuple(ctx context.Context, t accounts.Tuple) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		orgs, err := tupleOrganisations(ctx, st, []accounts.Tuple{t})
+		if err != nil {
+			return err
+		}
+		if err := st.(*Store).deleteTuple(ctx, t); err != nil {
+			return err
+		}
+		for org := range orgs {
+			if err := st.TouchPolicy(ctx, org); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) deleteTuple(ctx context.Context, t accounts.Tuple) error {
 	tag, err := s.db.Exec(ctx, `DELETE FROM relation_tuples WHERE object_type = $1 AND object_id = $2 AND relation = $3
   AND subject_type = $4 AND subject_id = $5 AND subject_relation = $6`, t.ObjectType, t.ObjectID, t.Relation, t.SubjectType, t.SubjectID, t.SubjectRelation)
 	return affected(tag, err, "tuple")
@@ -629,6 +772,10 @@ func tupleWhere(f accounts.TupleFilter) (string, []any) {
 			conds = append(conds, fmt.Sprintf("%s = $%d", c.col, len(args)))
 		}
 	}
+	if f.ObjectIDs != nil {
+		args = append(args, f.ObjectIDs)
+		conds = append(conds, fmt.Sprintf("object_id = ANY($%d)", len(args)))
+	}
 	if f.SubjectIDs != nil {
 		args = append(args, f.SubjectIDs)
 		conds = append(conds, fmt.Sprintf("subject_id = ANY($%d)", len(args)))
@@ -640,20 +787,50 @@ func tupleWhere(f accounts.TupleFilter) (string, []any) {
 func (s *Store) ReadTuples(ctx context.Context, f accounts.TupleFilter) ([]accounts.Tuple, error) {
 	where, args := tupleWhere(f)
 	rows, err := s.db.Query(ctx, "SELECT "+tupleCols+" FROM relation_tuples WHERE "+where+
-		fmt.Sprintf(" ORDER BY object_type, object_id, relation, subject_type, subject_id, subject_relation LIMIT %d", accounts.MaxTuples), args...)
+		fmt.Sprintf(" ORDER BY object_type, object_id, relation, subject_type, subject_id, subject_relation LIMIT %d", accounts.MaxTuples+1), args...)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (accounts.Tuple, error) {
+	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (accounts.Tuple, error) {
 		var t accounts.Tuple
 		err := r.Scan(&t.ObjectType, &t.ObjectID, &t.Relation, &t.SubjectType, &t.SubjectID, &t.SubjectRelation, &t.CreatedBy, &t.CreatedAt)
 		t.CreatedAt = t.CreatedAt.UTC()
 		return t, err
 	})
+	if len(out) > accounts.MaxTuples {
+		return nil, accounts.ErrAccessLimit
+	}
+	return out, err
 }
 
 // DeleteTuples implements accounts.Store.
 func (s *Store) DeleteTuples(ctx context.Context, f accounts.TupleFilter) (int, error) {
+	var count int
+	err := s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		ts, err := st.ReadTuples(ctx, f)
+		if err != nil {
+			return err
+		}
+		tx := st.(*Store)
+		orgs, err := tupleOrganisations(ctx, st, ts)
+		if err != nil {
+			return err
+		}
+		count, err = tx.deleteTuples(ctx, f)
+		if err != nil {
+			return err
+		}
+		for org := range orgs {
+			if err := st.TouchPolicy(ctx, org); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return count, err
+}
+
+func (s *Store) deleteTuples(ctx context.Context, f accounts.TupleFilter) (int, error) {
 	where, args := tupleWhere(f)
 	tag, err := s.db.Exec(ctx, "DELETE FROM relation_tuples WHERE "+where, args...)
 	return int(tag.RowsAffected()), err
@@ -661,6 +838,28 @@ func (s *Store) DeleteTuples(ctx context.Context, f accounts.TupleFilter) (int, 
 
 // SetUserDisabled implements accounts.Store.
 func (s *Store) SetUserDisabled(ctx context.Context, userID string, at *time.Time) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		ms, err := st.UserMemberships(ctx, userID)
+		if err != nil {
+			return err
+		}
+		orgIDs := []string{}
+		for _, m := range ms {
+			orgIDs = append(orgIDs, m.Org.ID)
+		}
+		if err := st.(*Store).setUserDisabled(ctx, userID, at); err != nil {
+			return err
+		}
+		for _, id := range orgIDs {
+			if err := st.TouchPolicy(ctx, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) setUserDisabled(ctx context.Context, userID string, at *time.Time) error {
 	tag, err := s.db.Exec(ctx, "UPDATE users SET disabled_at = $2 WHERE id = $1", userID, at)
 	return affected(tag, err, "user")
 }
@@ -669,4 +868,16 @@ func (s *Store) SetUserDisabled(ctx context.Context, userID string, at *time.Tim
 func (s *Store) SetPlatformAdmin(ctx context.Context, userID string, admin bool) error {
 	tag, err := s.db.Exec(ctx, "UPDATE users SET platform_admin = $2 WHERE id = $1", userID, admin)
 	return affected(tag, err, "user")
+}
+
+func scanRepo(r pgx.CollectableRow) (accounts.Repository, error) {
+	var x accounts.Repository
+	err := r.Scan(&x.OrgID, &x.Graph, &x.Remote, &x.Visibility, &x.AddedBy, &x.AddedAt, &x.Access, &x.VerifiedAt)
+	x.AddedAt = x.AddedAt.UTC()
+	if x.VerifiedAt != nil {
+		v := x.VerifiedAt.UTC()
+		x.VerifiedAt = &v
+	}
+	return x, err
+
 }

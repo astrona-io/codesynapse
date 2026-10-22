@@ -205,7 +205,80 @@ func (s *Server) handleRepoGrants(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"org": o.Slug, "repo": r.PathValue("repo"), "grants": gs})
+	effective, err := s.cfg.Accounts.ResolveRepository(r.Context(), p, o.ID, r.PathValue("repo"), accounts.Viewer)
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"org": o.Slug, "repo": r.PathValue("repo"), "grants": gs, "default_repo_access": o.DefaultRepoAccess, "effective": effective})
+}
+
+func (s *Server) handleRepoPolicy(w http.ResponseWriter, r *http.Request) {
+	p, o, ok := s.orgFor(w, r, accounts.Admin)
+	if !ok {
+		return
+	}
+	if r.Method == http.MethodPut {
+		var req struct {
+			DefaultRepoAccess string `json:"default_repo_access"`
+		}
+		if err := decodeJSON(w, r, &req); err != nil {
+			s.problem(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := s.cfg.Accounts.SetDefaultRepoAccess(r.Context(), p, o.ID, req.DefaultRepoAccess); err != nil {
+			s.accountError(w, err)
+			return
+		}
+		var err error
+		o, err = s.cfg.Accounts.St.OrgByID(r.Context(), o.ID)
+		if err != nil {
+			s.accountError(w, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, o)
+}
+
+func (s *Server) handleAccessChanges(w http.ResponseWriter, r *http.Request) {
+	p, o, ok := s.orgFor(w, r, accounts.Owner)
+	if !ok {
+		return
+	}
+	role, err := s.cfg.Accounts.St.MemberRole(r.Context(), o.ID, p.User.ID)
+	if err != nil || role != accounts.Owner || p.Via != "session" {
+		s.accountError(w, accounts.ErrForbidden)
+		return
+	}
+	report, err := s.cfg.Accounts.AccessChangeReport(r.Context(), o.ID)
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+func (s *Server) handleRecoverRepoAdmin(w http.ResponseWriter, r *http.Request) {
+	p, o, ok := s.orgFor(w, r, accounts.Owner)
+	if !ok {
+		return
+	}
+	var req struct {
+		User string `json:"user"`
+	}
+	if err := decodeJSON(w, r, &req); err != nil {
+		s.problem(w, http.StatusBadRequest, err)
+		return
+	}
+	u, err := s.cfg.Accounts.St.UserByEmail(r.Context(), accounts.NormalizeEmail(req.User))
+	if err == nil {
+		err = s.cfg.Accounts.RecoverRepoAdmin(r.Context(), p, o.ID, r.PathValue("repo"), u.ID)
+	}
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleSetRepoGrant(w http.ResponseWriter, r *http.Request) {
@@ -288,6 +361,9 @@ func (s *Server) handleMyAccess(w http.ResponseWriter, r *http.Request) {
 	out := make([]reachView, 0, len(a.Repos))
 	slugs := map[string]string{}
 	for _, ra := range a.Repos {
+		if p.OrgID != "" && ra.OrgID != p.OrgID {
+			continue
+		}
 		if _, ok := slugs[ra.OrgID]; !ok {
 			if o, err := s.cfg.Accounts.St.OrgByID(r.Context(), ra.OrgID); err == nil {
 				slugs[ra.OrgID] = o.Slug
@@ -295,6 +371,19 @@ func (s *Server) handleMyAccess(w http.ResponseWriter, r *http.Request) {
 		}
 		_, member := a.Orgs[ra.OrgID]
 		out = append(out, reachView{RepoAccess: ra, Org: slugs[ra.OrgID], Shared: !member})
+	}
+	if p.OrgID != "" {
+		for org := range a.Orgs {
+			if org != p.OrgID {
+				delete(a.Orgs, org)
+			}
+		}
+		for team := range a.Teams {
+			t, err := s.cfg.Accounts.St.TeamByID(r.Context(), team)
+			if err != nil || t.OrgID != p.OrgID {
+				delete(a.Teams, team)
+			}
+		}
 	}
 	writeJSON(w, 200, map[string]any{"orgs": a.Orgs, "teams": a.Teams, "repos": out})
 }

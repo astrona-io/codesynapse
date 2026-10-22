@@ -12,9 +12,8 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 )
 
-// Caller is who a tool call acts for when it came with a personal API key:
-// the key's user and organisation. Calls with the MCP token (or over stdio)
-// have no caller and see every repository.
+// Caller identifies the authenticated personal key and its organisation.
+// Accounts mode requires a caller on both HTTP and stdio.
 type Caller struct {
 	UserID string
 	Email  string
@@ -34,9 +33,10 @@ const (
 )
 
 // Access says what a key's user reaches in the key's organisation:
-// accounts.AccessOf narrowed with Scope (organisation roles, teams,
-// repository grants and shares), keyed by graph.
+// accounts.AccessOf narrowed to one explicit organisation, keyed by graph.
 type Access interface {
+	Authenticate(ctx context.Context, token string) (*Caller, error)
+	Denied(ctx context.Context, caller *Caller, tool string) error
 	Reach(ctx context.Context, userID, orgID string) (map[string]accounts.Reach, error)
 }
 
@@ -49,18 +49,20 @@ func callerFrom(ctx context.Context) *Caller {
 
 // callerMiddleware puts the caller from the request's token into the
 // context every handler receives.
-func callerMiddleware() mcp.Middleware {
+func callerMiddleware(access Access, stdioToken string) mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-			if extra := req.GetExtra(); extra != nil && extra.TokenInfo != nil {
-				ti := extra.TokenInfo
-				if org, _ := ti.Extra[ExtraOrgID].(string); org != "" {
-					email, _ := ti.Extra[ExtraEmail].(string)
-					key, _ := ti.Extra[ExtraKeyID].(string)
-					tok, _ := ti.Extra[ExtraToken].(string)
-					ctx = context.WithValue(ctx, callerKey{}, &Caller{UserID: ti.UserID, Email: email, OrgID: org, KeyID: key, token: tok})
-					ctx = telemetry.WithTenant(ctx, org)
+			if access != nil {
+				token := stdioToken
+				if extra := req.GetExtra(); extra != nil && extra.TokenInfo != nil {
+					token, _ = extra.TokenInfo.Extra[ExtraToken].(string)
 				}
+				c, err := access.Authenticate(ctx, token)
+				if err != nil || c == nil || c.UserID == "" || c.OrgID == "" || c.KeyID == "" {
+					return nil, fmt.Errorf("personal API key required")
+				}
+				ctx = context.WithValue(ctx, callerKey{}, c)
+				ctx = telemetry.WithTenant(ctx, c.OrgID)
 			}
 			return next(ctx, method, req)
 		}
@@ -68,14 +70,20 @@ func callerMiddleware() mcp.Middleware {
 }
 
 // reach returns what the caller reaches; restricted is false when every
-// graph is allowed (the MCP token, stdio).
+// graph is allowed (explicit local single-user mode).
 func (h *handlers) reach(ctx context.Context) (map[string]accounts.Reach, bool, error) {
 	c := callerFrom(ctx)
 	if c == nil {
+		if h.access != nil {
+			return nil, true, fmt.Errorf("personal API key required")
+		}
 		return nil, false, nil
 	}
 	if h.access == nil {
 		return map[string]accounts.Reach{}, true, nil // a key without an access source sees nothing
+	}
+	if r, ok := ctx.Value(reachKey{}).(map[string]accounts.Reach); ok {
+		return r, true, nil
 	}
 	r, err := h.access.Reach(ctx, c.UserID, c.OrgID)
 	return r, true, err
@@ -92,8 +100,7 @@ func (h *handlers) allowed(ctx context.Context) (graphs []string, restricted boo
 	return graphs, restricted, err
 }
 
-// canWrite: writing memory or reviews needs editor (organisation members,
-// editor grants); viewers and share recipients read only.
+// canWrite requires repository WRITE permission for memory and reviews.
 func (h *handlers) canWrite(ctx context.Context, graph string) error {
 	r, restricted, err := h.reach(ctx)
 	if err != nil || !restricted {
@@ -114,19 +121,13 @@ func (h *handlers) sees(ctx context.Context, graph string) (bool, error) {
 	return slices.Contains(g, graph), nil
 }
 
-// memRepo is the memory namespace of graph for the caller: the content
-// organisation of their grant (their own, or the one that shared it), so
-// organisations sharing a graph keep separate memories.
+// memRepo keeps memory separate for organisations sharing a code graph.
 func (h *handlers) memRepo(ctx context.Context, graph string) string {
 	c := callerFrom(ctx)
 	if c == nil {
 		return graph
 	}
-	org := c.OrgID
-	if r, _, err := h.reach(ctx); err == nil && r[graph].OrgID != "" {
-		org = r[graph].OrgID
-	}
-	return memory.Namespace(org, graph)
+	return memory.Namespace(c.OrgID, graph)
 }
 
 // reviewOrg is the organisation a review belongs to ("" without a caller).
@@ -137,14 +138,8 @@ func reviewOrg(ctx context.Context) string {
 	return ""
 }
 
-// canSeeReview checks a review's repository and organisation. Reviews
-// without an organisation (scheduled ones on shared code) are visible to
-// every organisation using the repository.
+// canSeeReview keeps private review content inside the authenticated tenant.
 func (h *handlers) canSeeReview(ctx context.Context, repo, org string) error {
-	c := callerFrom(ctx)
-	if c == nil {
-		return nil
-	}
 	ok, err := h.sees(ctx, repo)
 	if err != nil {
 		return err
@@ -152,13 +147,10 @@ func (h *handlers) canSeeReview(ctx context.Context, repo, org string) error {
 	if !ok {
 		return fmt.Errorf("no such review")
 	}
-	if org == "" || org == c.OrgID {
-		return nil
+	if c := callerFrom(ctx); c != nil && org != c.OrgID {
+		return fmt.Errorf("no such review")
 	}
-	if r, _, err := h.reach(ctx); err == nil && r[repo].OrgID == org {
-		return nil // content follows the repository's grant (shares included)
-	}
-	return fmt.Errorf("no such review")
+	return nil
 }
 
 func callerToken(ctx context.Context) string {

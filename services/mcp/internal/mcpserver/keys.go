@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	"crypto/subtle"
 	"fmt"
 	"net/http"
 
@@ -11,17 +10,17 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 )
 
-// KeyVerifier accepts the installation's MCP token (no caller: every
-// repository) and personal API keys (the key's user and organisation).
+// KeyVerifier accepts personal API keys for the key's user and organisation.
+// The installation token cannot authorize repository access in accounts mode.
 // Revocation and removed memberships take effect on the next request, since
 // every request is checked against the accounts store.
-func KeyVerifier(acc *accounts.Service, serviceToken string) auth.TokenVerifier {
+func KeyVerifier(acc *accounts.Service, _ string) auth.TokenVerifier {
 	return func(ctx context.Context, token string, _ *http.Request) (*auth.TokenInfo, error) {
-		if serviceToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(serviceToken)) == 1 {
-			return &auth.TokenInfo{UserID: "service"}, nil
-		}
 		p, err := acc.AuthenticateKey(ctx, token)
 		if err != nil {
+			if _, auditErr := acc.Record(ctx, accounts.Event{Action: "mcp.authentication_failed", Outcome: accounts.Failure, Status: http.StatusUnauthorized}); auditErr != nil {
+				return nil, fmt.Errorf("%w: authentication unavailable", auth.ErrInvalidToken)
+			}
 			// The message reaches the client: say nothing about why.
 			return nil, fmt.Errorf("%w: unknown, revoked or expired key", auth.ErrInvalidToken)
 		}
@@ -42,21 +41,29 @@ func (a AccountsAccess) Reach(ctx context.Context, userID, orgID string) (map[st
 		return nil, err
 	}
 	if _, member := access.Orgs[orgID]; !member {
-		u, err := a.Acc.St.UserByID(ctx, userID)
-		if err != nil || !u.PlatformAdmin {
-			return map[string]accounts.Reach{}, err
-		}
-		// A platform admin's key acts as an owner of the organisation.
-		repos, err := a.Acc.St.OrgRepositories(ctx, orgID)
-		if err != nil {
-			return nil, err
-		}
-		for _, r := range repos {
-			if r.Usable() {
-				access.Repos = append(access.Repos, accounts.RepoAccess{OrgID: orgID, Graph: r.Graph, Role: accounts.Admin})
-			}
-		}
-		access.Orgs[orgID] = accounts.Owner
+		return map[string]accounts.Reach{}, nil
 	}
 	return access.Scope(map[string]bool{orgID: true}), nil
+}
+
+// Authenticate checks credentials again for each invocation, including stdio.
+func (a AccountsAccess) Authenticate(ctx context.Context, token string) (*Caller, error) {
+	p, err := a.Acc.AuthenticateKey(ctx, token)
+	if err != nil {
+		if _, auditErr := a.Acc.Record(ctx, accounts.Event{Action: "mcp.authentication_failed", Outcome: accounts.Failure, Status: http.StatusUnauthorized}); auditErr != nil {
+			return nil, fmt.Errorf("authentication unavailable")
+		}
+		return nil, fmt.Errorf("personal API key required")
+	}
+	return &Caller{UserID: p.User.ID, Email: p.User.Email, OrgID: p.OrgID, KeyID: p.KeyID, token: token}, nil
+}
+
+// Denied records authorization failures without storing tool arguments.
+func (a AccountsAccess) Denied(ctx context.Context, c *Caller, tool string) error {
+	e := accounts.Event{Action: "mcp.access_denied", Target: tool, Outcome: accounts.Failure, Status: http.StatusForbidden}
+	if c != nil {
+		e.UserID, e.ActorEmail, e.OrgID, e.KeyID, e.Via = c.UserID, c.Email, c.OrgID, c.KeyID, "key"
+	}
+	_, err := a.Acc.Record(ctx, e)
+	return err
 }

@@ -19,7 +19,7 @@ const filters: { id: Filter; label: string }[] = [
 const items = computed(() => (data.value?.items ?? []).filter((it) => filter.value === 'all' || groups[filter.value].includes(it.kind)))
 const urgent = computed(() => (data.value?.levels.critical ?? 0) + (data.value?.levels.high ?? 0))
 const affected = computed(() => (data.value ? data.value.repos - data.value.clean.length : 0))
-const where = computed(() => session.allOrgs.value ? 'all organisations' : session.current.value?.org.name ?? 'your repositories')
+const where = computed(() => session.current.value?.org.name ?? 'your repositories')
 </script>
 
 <template>

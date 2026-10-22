@@ -74,6 +74,9 @@ func (o *serveOptions) Validate(_ context.Context, _ *app.Env) error {
 	}
 	switch o.transport {
 	case "stdio":
+		if os.Getenv(EnvDatabaseURL) != "" && os.Getenv("CODESYNAPSE_API_TOKEN") == "" {
+			return fmt.Errorf("accounts mode over stdio requires a personal key in CODESYNAPSE_API_TOKEN")
+		}
 		return nil
 	case "http":
 		// With accounts, personal API keys protect the endpoint.
@@ -152,7 +155,14 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	}
 	defer closeAccounts()
 	if acc != nil {
-		opts.Access = mcpserver.AccountsAccess{Acc: acc}
+		access := mcpserver.AccountsAccess{Acc: acc}
+		opts.Access = access
+		if o.transport == "stdio" {
+			opts.StdioToken = os.Getenv("CODESYNAPSE_API_TOKEN")
+			if _, err := access.Authenticate(ctx, opts.StdioToken); err != nil {
+				return fmt.Errorf("authenticating stdio: %w", err)
+			}
+		}
 	}
 	server := mcpserver.New(r, version, opts)
 
@@ -168,7 +178,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 	mux := http.NewServeMux()
 	if acc != nil {
-		// Personal API keys or the MCP token; tools are scoped to the key's organisation.
+		// Personal API keys are required in accounts mode.
 		mux.Handle("/mcp", auth.RequireBearerToken(mcpserver.KeyVerifier(acc, os.Getenv(EnvToken)),
 			&auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(handler))
 	} else {
@@ -187,7 +197,7 @@ const EnvDatabaseURL = "CODESYNAPSE_DATABASE_URL" //nolint:gosec // env var name
 // (the MCP token alone, every repository).
 func (o *serveOptions) openAccounts(ctx context.Context) (*accounts.Service, func(), error) {
 	url := os.Getenv(EnvDatabaseURL)
-	if url == "" || o.transport != "http" {
+	if url == "" {
 		return nil, func() {}, nil
 	}
 	st, err := pgstore.OpenWait(ctx, url, func(attempt int, err error) {

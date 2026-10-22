@@ -69,7 +69,7 @@ onBeforeUnmount(() => clearInterval(poll))
       <div class="stack--tight">
         <h2>Create a key for this agent</h2>
         <template v-if="session.accounts.value">
-          <p class="muted">The key acts as you in <strong>{{ session.current.value?.org.name ?? 'your organisation' }}</strong>: the agent sees that organisation's repositories, and its memory and statistics stay there. You can revoke it any time under <NuxtLink to="/settings/keys">Settings → API keys</NuxtLink>.</p>
+          <p class="muted">The key acts as you in <strong>{{ session.current.value?.org.name ?? 'your organisation' }}</strong>: the agent sees repositories you can access there, and its memory and statistics stay there. You can revoke it any time under <NuxtLink to="/settings/keys">Settings → API keys</NuxtLink>.</p>
           <form v-if="!key" class="row" @submit.prevent="createKey">
             <div class="field grow"><label for="aname">Name it after the machine or agent</label><input id="aname" v-model="name" placeholder="e.g. laptop Claude Code" maxlength="80"></div>
             <button type="submit" class="align-end">Create key</button>

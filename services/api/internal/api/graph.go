@@ -70,7 +70,7 @@ func (s *Server) handleGraphOverview(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, rk.Node.ID)
 		view.Nodes = append(view.Nodes, graphNode(rk.Node, 0))
 	}
-	view.Edges, err = s.st.Subgraph(ctx, ids, edges)
+	view.Edges, err = store.ForRepository(s.st, r.PathValue("repo")).Subgraph(ctx, ids, edges)
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -83,7 +83,7 @@ func (s *Server) handleGraphOverview(w http.ResponseWriter, r *http.Request) {
 // then asks /graph/edges for edges to nodes it already shows.
 func (s *Server) handleGraphExpand(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	root, err := s.svc.Resolve(ctx, r.PathValue("repo"), r.URL.Query().Get("id"))
+	root, err := s.repoQuery(r.PathValue("repo")).Resolve(ctx, r.PathValue("repo"), r.URL.Query().Get("id"))
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -97,7 +97,7 @@ func (s *Server) handleGraphExpand(w http.ResponseWriter, r *http.Request) {
 	view := GraphView{Root: root.ID, Nodes: []GraphNode{graphNode(root, 0)}}
 	seen := map[string]bool{root.ID: true}
 	for _, dir := range []store.Direction{store.In, store.Out} {
-		hits, err := s.st.Traverse(ctx, root.ID, edges, dir, 1, limit)
+		hits, err := store.ForRepository(s.st, r.PathValue("repo")).Traverse(ctx, root.ID, edges, dir, 1, limit)
 		if err != nil {
 			s.problem(w, 500, err)
 			return
@@ -141,7 +141,7 @@ func (s *Server) handleGraphEdges(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	out, err := s.st.Subgraph(r.Context(), req.IDs, edges)
+	out, err := store.ForRepository(s.st, r.PathValue("repo")).Subgraph(r.Context(), req.IDs, edges)
 	if err != nil {
 		s.problem(w, 500, err)
 		return

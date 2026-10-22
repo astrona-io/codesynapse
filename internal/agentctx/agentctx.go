@@ -132,6 +132,7 @@ type ContextOptions struct {
 
 // SymbolContext builds the context for a symbol or package.
 func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts ContextOptions) (SymbolContext, error) {
+	s.R = store.ForRepository(s.R, repo)
 	full := opts.Verbosity == Full
 	limit := store.ClampLimit(opts.Limit, 5)
 	depth := 1
@@ -249,6 +250,7 @@ func refs(hits []model.Hit, limit int, withSummary bool) []Ref {
 }
 
 func (s Service) churn(ctx context.Context, repo, file string) (*Churn, error) {
+	s.R = store.ForRepository(s.R, repo)
 	f, err := s.R.Node(ctx, model.NodeID(repo, model.KindFile, file))
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -272,6 +274,7 @@ func (s Service) churn(ctx context.Context, repo, file string) (*Churn, error) {
 // node ID, a plain name, or a package path. Ambiguous or unknown names
 // return a SuggestionError listing qualified IDs to retry with.
 func (s Service) Resolve(ctx context.Context, repo, symbol string) (model.Node, error) {
+	s.R = store.ForRepository(s.R, repo)
 	symbol = strings.TrimSpace(symbol)
 	if symbol == "" {
 		return model.Node{}, errors.New("symbol is required")

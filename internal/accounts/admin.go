@@ -10,8 +10,18 @@ import (
 // administrator flag. Only platform admins, never through an API key, and
 // never in a way that locks everyone out.
 
-func (s *Service) requirePlatform(p Principal) error {
-	if !p.User.PlatformAdmin || p.Via == "key" {
+func (s *Service) requirePlatform(ctx context.Context, p Principal) error {
+	if p.Via != "session" {
+		return ErrForbidden
+	}
+	if err := s.ValidatePrincipal(ctx, p); err != nil {
+		return err
+	}
+	u, err := s.St.UserByID(ctx, p.User.ID)
+	if err != nil {
+		return err
+	}
+	if !u.PlatformAdmin {
 		return ErrForbidden
 	}
 	return nil
@@ -20,7 +30,12 @@ func (s *Service) requirePlatform(p Principal) error {
 // SuspendUser stops a user: no sign-in, sessions ended, API keys refused.
 // Their memberships, keys and history stay, so ResumeUser restores them.
 func (s *Service) SuspendUser(ctx context.Context, p Principal, userID string) error {
-	if err := s.requirePlatform(p); err != nil {
+	_, err := policyChange(ctx, s, func(tx *Service) (struct{}, error) { return struct{}{}, tx.suspendUserPolicy(ctx, p, userID) })
+	return err
+}
+
+func (s *Service) suspendUserPolicy(ctx context.Context, p Principal, userID string) error {
+	if err := s.requirePlatform(ctx, p); err != nil {
 		return err
 	}
 	if userID == p.User.ID {
@@ -48,7 +63,12 @@ func (s *Service) SuspendUser(ctx context.Context, p Principal, userID string) e
 
 // ResumeUser lifts a suspension.
 func (s *Service) ResumeUser(ctx context.Context, p Principal, userID string) error {
-	if err := s.requirePlatform(p); err != nil {
+	_, err := policyChange(ctx, s, func(tx *Service) (struct{}, error) { return struct{}{}, tx.resumeUserPolicy(ctx, p, userID) })
+	return err
+}
+
+func (s *Service) resumeUserPolicy(ctx context.Context, p Principal, userID string) error {
+	if err := s.requirePlatform(ctx, p); err != nil {
 		return err
 	}
 	u, err := s.St.UserByID(ctx, userID)
@@ -65,7 +85,14 @@ func (s *Service) ResumeUser(ctx context.Context, p Principal, userID string) er
 // SetPlatformAdmin grants or revokes the platform administrator flag. The
 // last active platform admin cannot be removed.
 func (s *Service) SetPlatformAdmin(ctx context.Context, p Principal, userID string, admin bool) error {
-	if err := s.requirePlatform(p); err != nil {
+	_, err := policyChange(ctx, s, func(tx *Service) (struct{}, error) {
+		return struct{}{}, tx.setPlatformAdminPolicy(ctx, p, userID, admin)
+	})
+	return err
+}
+
+func (s *Service) setPlatformAdminPolicy(ctx context.Context, p Principal, userID string, admin bool) error {
+	if err := s.requirePlatform(ctx, p); err != nil {
 		return err
 	}
 	u, err := s.St.UserByID(ctx, userID)

@@ -200,6 +200,7 @@ func System(s any) string {
 
 // Store is a full read/write backend.
 type Store interface {
+	AccessStore
 	Reader
 	Writer
 	ReviewStore

@@ -29,6 +29,7 @@ type RefList struct {
 //	interface method -> concrete methods it dispatches to
 //	concrete method  -> interface methods it satisfies
 func (s Service) Implementations(ctx context.Context, repo, symbol string, limit int) (RefList, error) {
+	s.R = store.ForRepository(s.R, repo)
 	n, err := s.Resolve(ctx, repo, symbol)
 	if err != nil {
 		return RefList{}, err
@@ -67,6 +68,7 @@ type CallGraph struct {
 // CallGraph returns callers ("callers"), callees ("callees") or both up to
 // depth (default 2, max 4). Edge endpoints use qualified IDs.
 func (s Service) CallGraph(ctx context.Context, repo, symbol, direction string, depth, limit int) (CallGraph, error) {
+	s.R = store.ForRepository(s.R, repo)
 	n, err := s.Resolve(ctx, repo, symbol)
 	if err != nil {
 		return CallGraph{}, err
@@ -144,6 +146,7 @@ type PROptions struct {
 
 // PRContext analyses a change.
 func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRContext, error) {
+	s.R = store.ForRepository(s.R, repo)
 	var changes []gitx.FileChange
 	switch {
 	case len(o.Diff) > 0:
@@ -290,6 +293,7 @@ func splitIdent(w string) []string {
 // MinimalContext ranks symbols, doc sections and config entries for a task
 // and packs the best ones until maxTokens (estimated at bytes/4) is spent.
 func (s Service) MinimalContext(ctx context.Context, repo, task string, files []string, maxTokens int) (MinimalContext, error) {
+	s.R = store.ForRepository(s.R, repo)
 	if maxTokens <= 0 {
 		maxTokens = 1500
 	}
@@ -402,6 +406,7 @@ type PackageCtx struct {
 }
 
 func (s Service) packageContext(ctx context.Context, repo string, pkg model.Node, limit int) (PackageCtx, error) {
+	s.R = store.ForRepository(s.R, repo)
 	pc := PackageCtx{Path: pkg.QualifiedName, Summary: pkg.Summary, Exported: []Ref{}, Interfaces: []Ref{}, Hubs: []Ref{}, Imports: []string{}, ImportedBy: []string{}}
 	members, err := s.R.Traverse(ctx, pkg.ID, []model.EdgeKind{model.EdgeContains, model.EdgeDefines}, store.Out, 2, store.MaxLimit)
 	if err != nil {

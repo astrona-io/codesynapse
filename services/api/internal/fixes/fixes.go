@@ -46,10 +46,11 @@ type Store interface {
 
 // Runner makes fix branches.
 type Runner struct {
-	St     Store
-	LLM    *llm.Registry
-	Auth   gitx.Auth
-	Author gitx.Author
+	Authorize func(context.Context) error
+	St        Store
+	LLM       *llm.Registry
+	Auth      gitx.Auth
+	Author    gitx.Author
 	// Workdir holds temporary worktrees.
 	Workdir string
 	// GitHubAPI is the GitHub REST base URL; empty means api.github.com.
@@ -123,6 +124,11 @@ func Stale(f reviews.Fix, now time.Time) bool {
 // Run makes the fix branch. Comment fix state is saved as it goes, so the
 // UI can show progress and failures.
 func (r Runner) Run(ctx context.Context, req Request) (res Result, err error) {
+	if r.Authorize != nil {
+		if err := r.Authorize(ctx); err != nil {
+			return res, err
+		}
+	}
 	rv, err := r.St.GetReview(ctx, req.ReviewID)
 	if err != nil {
 		return res, err
@@ -210,6 +216,11 @@ func (r Runner) Run(ctx context.Context, req Request) (res Result, err error) {
 	if push == nil {
 		push = gitx.PushBranch
 	}
+	if r.Authorize != nil {
+		if err := r.Authorize(ctx); err != nil {
+			return res, err
+		}
+	}
 	log.Info("pushing fix branch", "branch", branch)
 	if err := push(ctx, wt, req.Remote, branch, r.Auth); err != nil {
 		return res, err
@@ -230,6 +241,9 @@ func (r Runner) Run(ctx context.Context, req Request) (res Result, err error) {
 }
 
 func (r Runner) mark(ctx context.Context, id string, ids []string, f reviews.Fix) {
+	if r.Authorize != nil && r.Authorize(ctx) != nil {
+		return
+	}
 	rv, err := r.St.GetReview(ctx, id)
 	if err != nil {
 		return

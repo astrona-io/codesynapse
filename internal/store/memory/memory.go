@@ -18,6 +18,7 @@ import (
 
 // Store keeps graphs per repository. It is safe for concurrent use.
 type Store struct {
+	access  map[string]model.AccessSnapshot
 	mu      sync.RWMutex
 	repos   map[string]*repoGraph
 	reviews map[string]reviews.Review

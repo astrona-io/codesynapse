@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -172,6 +173,10 @@ func (s *Server) accountRoutes() {
 	m.HandleFunc("GET /api/v1/admin/audit", s.handleAdminAudit)
 	m.HandleFunc("GET /api/v1/admin/audit/verify", s.handleVerifyAudit)
 	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/repos", s.handleOrgRepos)
+	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/repo-policy", s.handleRepoPolicy)
+	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/access-changes", s.handleAccessChanges)
+	m.HandleFunc("PUT /api/v1/accounts/orgs/{org}/repo-policy", s.handleRepoPolicy)
+	m.HandleFunc("POST /api/v1/accounts/orgs/{org}/repos/{repo}/recover-admin", s.handleRecoverRepoAdmin)
 	m.HandleFunc("POST /api/v1/accounts/orgs/{org}/repos", s.handleAttachRepo)
 	m.HandleFunc("GET /api/v1/me/access", s.handleMyAccess)
 	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/teams", s.handleTeams)
@@ -391,6 +396,9 @@ func (s *Server) handleMyOrgs(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.problem(w, 500, err)
 		return
+	}
+	if p.OrgID != "" {
+		ms = slices.DeleteFunc(ms, func(m accounts.Membership) bool { return m.Org.ID != p.OrgID })
 	}
 	writeJSON(w, 200, map[string]any{"memberships": ms})
 }

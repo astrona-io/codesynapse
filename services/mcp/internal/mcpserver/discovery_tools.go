@@ -304,7 +304,7 @@ func (h *handlers) docSection(ctx context.Context, _ *mcp.CallToolRequest, in do
 	out := docSectionOut{Sections: []docSection{}}
 	for _, n := range nodes {
 		sec := docSection{ID: n.ID, Heading: n.ShortName(), Level: n.Level, Location: n.Location(), Summary: n.Summary}
-		hits, err := h.svc.R.Traverse(ctx, n.ID, []model.EdgeKind{model.EdgeMentions}, store.Out, 1, 10)
+		hits, err := store.ForRepository(h.svc.R, repo).Traverse(ctx, n.ID, []model.EdgeKind{model.EdgeMentions}, store.Out, 1, 10)
 		if err != nil {
 			return nil, docSectionOut{}, err
 		}

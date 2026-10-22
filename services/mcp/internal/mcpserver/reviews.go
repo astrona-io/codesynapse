@@ -175,7 +175,7 @@ func (h *handlers) listReviews(ctx context.Context, _ *mcp.CallToolRequest, in l
 		return nil, listReviewsOut{}, err
 	}
 	if c := callerFrom(ctx); c != nil {
-		list = slices.DeleteFunc(list, func(r reviews.Review) bool { return r.OrgID != c.OrgID && r.OrgID != "" })
+		list = slices.DeleteFunc(list, func(r reviews.Review) bool { return r.OrgID != c.OrgID })
 	}
 	out := listReviewsOut{Reviews: []reviews.Summary{}}
 	for _, r := range list {

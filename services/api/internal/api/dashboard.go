@@ -40,7 +40,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	callables := []model.NodeKind{model.KindFunction, model.KindMethod}
 
-	if d.Hotspots, err = s.svc.Hotspots(ctx, repo, 10); err != nil {
+	if d.Hotspots, err = s.repoQuery(repo).Hotspots(ctx, repo, 10); err != nil {
 		s.problem(w, 500, err)
 		return
 	}

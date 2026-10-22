@@ -24,6 +24,13 @@ type RepoGrant struct {
 
 // CreateTeam adds a team to an organisation (owners and admins).
 func (s *Service) CreateTeam(ctx context.Context, p Principal, orgID, name string) (Team, error) {
+	return policyChange(ctx, s, func(tx *Service) (Team, error) { return tx.createTeamPolicy(ctx, p, orgID, name) })
+}
+
+func (s *Service) createTeamPolicy(ctx context.Context, p Principal, orgID, name string) (Team, error) {
+	if p.Via == "key" {
+		return Team{}, ErrForbidden
+	}
 	if err := s.Require(ctx, p, orgID, Admin); err != nil {
 		return Team{}, err
 	}
@@ -49,6 +56,14 @@ func (s *Service) CreateTeam(ctx context.Context, p Principal, orgID, name strin
 
 // DeleteTeam removes a team and every grant it held.
 func (s *Service) DeleteTeam(ctx context.Context, p Principal, teamID string) error {
+	_, err := policyChange(ctx, s, func(tx *Service) (struct{}, error) { return struct{}{}, tx.deleteTeamPolicy(ctx, p, teamID) })
+	return err
+}
+
+func (s *Service) deleteTeamPolicy(ctx context.Context, p Principal, teamID string) error {
+	if p.Via == "key" {
+		return ErrForbidden
+	}
 	t, err := s.St.TeamByID(ctx, teamID)
 	if err != nil {
 		return err
@@ -56,7 +71,14 @@ func (s *Service) DeleteTeam(ctx context.Context, p Principal, teamID string) er
 	if err := s.Require(ctx, p, t.OrgID, Admin); err != nil {
 		return err
 	}
+	admins, err := s.adminRepositories(ctx, t.OrgID)
+	if err != nil {
+		return err
+	}
 	if err := s.St.DeleteTeam(ctx, teamID); err != nil {
+		return err
+	}
+	if err := s.preserveAdmins(ctx, t.OrgID, admins); err != nil {
 		return err
 	}
 	s.audit(ctx, actorEvent(p, "team.delete", t.OrgID, t.Slug))
@@ -84,6 +106,13 @@ func (s *Service) canMaintain(ctx context.Context, p Principal, t Team) error {
 // SetTeamMember adds a member of the team's organisation (guests included)
 // as member or maintainer, replacing their previous place.
 func (s *Service) SetTeamMember(ctx context.Context, p Principal, teamID, email, relation string) (TeamMember, error) {
+	return policyChange(ctx, s, func(tx *Service) (TeamMember, error) { return tx.setTeamMemberPolicy(ctx, p, teamID, email, relation) })
+}
+
+func (s *Service) setTeamMemberPolicy(ctx context.Context, p Principal, teamID, email, relation string) (TeamMember, error) {
+	if p.Via == "key" {
+		return TeamMember{}, ErrForbidden
+	}
 	if relation != RelMember && relation != RelMaintainer {
 		return TeamMember{}, fmt.Errorf("%w: member or maintainer", ErrInvalidInput)
 	}
@@ -101,6 +130,19 @@ func (s *Service) SetTeamMember(ctx context.Context, p Principal, teamID, email,
 	if _, err := s.St.MemberRole(ctx, t.OrgID, u.ID); err != nil {
 		return TeamMember{}, fmt.Errorf("%w: add %s to the organisation first", ErrInvalidInput, u.Email)
 	}
+	places, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeTeam, SubjectType: TypeUser, SubjectID: u.ID})
+	if err != nil {
+		return TeamMember{}, err
+	}
+	existing := false
+	for _, place := range places {
+		if place.ObjectID == t.ID {
+			existing = true
+		}
+	}
+	if !existing && len(places) >= MaxTeams {
+		return TeamMember{}, ErrAccessLimit
+	}
 	if _, err := s.St.DeleteTuples(ctx, TupleFilter{ObjectType: TypeTeam, ObjectID: t.ID, SubjectType: TypeUser, SubjectID: u.ID}); err != nil {
 		return TeamMember{}, err
 	}
@@ -116,6 +158,16 @@ func (s *Service) SetTeamMember(ctx context.Context, p Principal, teamID, email,
 
 // RemoveTeamMember takes a user out of a team.
 func (s *Service) RemoveTeamMember(ctx context.Context, p Principal, teamID, userID string) error {
+	_, err := policyChange(ctx, s, func(tx *Service) (struct{}, error) {
+		return struct{}{}, tx.removeTeamMemberPolicy(ctx, p, teamID, userID)
+	})
+	return err
+}
+
+func (s *Service) removeTeamMemberPolicy(ctx context.Context, p Principal, teamID, userID string) error {
+	if p.Via == "key" {
+		return ErrForbidden
+	}
 	t, err := s.St.TeamByID(ctx, teamID)
 	if err != nil {
 		return err
@@ -125,12 +177,22 @@ func (s *Service) RemoveTeamMember(ctx context.Context, p Principal, teamID, use
 			return err
 		}
 	}
+	admins, err := s.adminRepositories(ctx, t.OrgID)
+	if err != nil {
+		return err
+	}
+	if _, err := s.RoleIn(ctx, p, t.OrgID); err != nil {
+		return err
+	}
 	n, err := s.St.DeleteTuples(ctx, TupleFilter{ObjectType: TypeTeam, ObjectID: t.ID, SubjectType: TypeUser, SubjectID: userID})
 	if err != nil {
 		return err
 	}
 	if n == 0 {
 		return fmt.Errorf("team member: %w", ErrNotFound)
+	}
+	if err := s.preserveAdmins(ctx, t.OrgID, admins); err != nil {
+		return err
 	}
 	s.audit(ctx, actorEvent(p, "team.member.remove", t.OrgID, t.Slug+" "+userID))
 	return nil
@@ -143,7 +205,7 @@ func (s *Service) TeamMembers(ctx context.Context, p Principal, teamID string) (
 		return nil, err
 	}
 	if err := s.Require(ctx, p, t.OrgID, Viewer); err != nil {
-		if errors.Is(s.canMaintain(ctx, p, t), ErrForbidden) {
+		if s.canMaintain(ctx, p, t) != nil {
 			return nil, err
 		}
 	}
@@ -166,6 +228,14 @@ func (s *Service) TeamMembers(ctx context.Context, p Principal, teamID string) (
 // SetTeamRole gives every member of a team a role in the team's
 // organisation ("" removes it). Only owners grant owner.
 func (s *Service) SetTeamRole(ctx context.Context, p Principal, teamID string, role Role) error {
+	_, err := policyChange(ctx, s, func(tx *Service) (struct{}, error) { return struct{}{}, tx.setTeamRolePolicy(ctx, p, teamID, role) })
+	return err
+}
+
+func (s *Service) setTeamRolePolicy(ctx context.Context, p Principal, teamID string, role Role) error {
+	if p.Via == "key" {
+		return ErrForbidden
+	}
 	t, err := s.St.TeamByID(ctx, teamID)
 	if err != nil {
 		return err
@@ -205,35 +275,41 @@ func (s *Service) TeamRole(ctx context.Context, t Team) (Role, error) {
 	return best, err
 }
 
-// canAdminRepo: platform admins, the owning organisation's owners and
-// admins, and holders of the admin relation on the repository.
-func (s *Service) canAdminRepo(ctx context.Context, p Principal, orgID, graph string) (orgAdmin bool, err error) {
-	if err := s.Require(ctx, p, orgID, Admin); err == nil {
-		return true, nil
+// canAdminRepo requires an effective repository administrator grant.
+func (s *Service) canAdminRepo(ctx context.Context, p Principal, orgID, graph string) error {
+	if err := s.ValidatePrincipal(ctx, p); err != nil {
+		return err
 	}
+
 	if p.OrgID != "" && p.OrgID != orgID {
-		return false, ErrForbidden
+		return ErrForbidden
 	}
 	a, err := s.AccessOf(ctx, p.User.ID)
 	if err != nil {
-		return false, err
+		return err
 	}
 	for _, r := range a.Repos {
 		if r.OrgID == orgID && r.Graph == graph && r.Role == Admin {
-			return false, nil
+			return nil
 		}
 	}
-	return false, ErrForbidden
+	return ErrForbidden
 }
 
 // SetRepoGrant gives a user or a team's members role on orgID's entry for
-// graph, replacing their previous grant there. Subjects outside the
-// organisation get read access only, and only from organisation admins.
+// graph, replacing their previous grant there. The subject must be enrolled
+// in the owning organisation.
 func (s *Service) SetRepoGrant(ctx context.Context, p Principal, orgID, graph string, subject Tuple, role Role) (RepoGrant, error) {
+	return policyChange(ctx, s, func(tx *Service) (RepoGrant, error) {
+		return tx.setRepoGrantPolicy(ctx, p, orgID, graph, subject, role)
+	})
+}
+
+func (s *Service) setRepoGrantPolicy(ctx context.Context, p Principal, orgID, graph string, subject Tuple, role Role) (RepoGrant, error) {
 	if p.Via == "key" {
 		return RepoGrant{}, ErrForbidden // agents do not change access
 	}
-	orgAdmin, err := s.canAdminRepo(ctx, p, orgID, graph)
+	err := s.canAdminRepo(ctx, p, orgID, graph)
 	if err != nil {
 		return RepoGrant{}, err
 	}
@@ -249,8 +325,8 @@ func (s *Service) SetRepoGrant(ctx context.Context, p Principal, orgID, graph st
 	if err != nil {
 		return RepoGrant{}, err
 	}
-	if g.External && (!orgAdmin || role != Viewer) {
-		return RepoGrant{}, fmt.Errorf("%w: outside the organisation, repositories are shared read-only, by an organisation admin", ErrForbidden)
+	if g.External {
+		return RepoGrant{}, fmt.Errorf("%w: enrol the subject in this organisation before granting access", ErrForbidden)
 	}
 	if _, err := s.St.DeleteTuples(ctx, TupleFilter{ObjectType: t.ObjectType, ObjectID: t.ObjectID, SubjectType: t.SubjectType, SubjectID: t.SubjectID, SubjectRelation: t.SubjectRelation}); err != nil {
 		return RepoGrant{}, err
@@ -258,11 +334,10 @@ func (s *Service) SetRepoGrant(ctx context.Context, p Principal, orgID, graph st
 	if err := s.St.WriteTuple(ctx, t); err != nil {
 		return RepoGrant{}, err
 	}
-	action := "repo.grant.set"
-	if g.External {
-		action = "repo.share"
+	if err := s.guardRepoAdmin(ctx, orgID, graph); err != nil {
+		return RepoGrant{}, err
 	}
-	e := actorEvent(p, action, orgID, graph+" "+g.Label)
+	e := actorEvent(p, "repo.grant.set", orgID, graph+" "+g.Label)
 	e.Detail = t.Relation
 	s.audit(ctx, e)
 	return g, nil
@@ -270,10 +345,17 @@ func (s *Service) SetRepoGrant(ctx context.Context, p Principal, orgID, graph st
 
 // RemoveRepoGrant removes a subject's grant on orgID's entry for graph.
 func (s *Service) RemoveRepoGrant(ctx context.Context, p Principal, orgID, graph string, subject Tuple) error {
+	_, err := policyChange(ctx, s, func(tx *Service) (struct{}, error) {
+		return struct{}{}, tx.removeRepoGrantPolicy(ctx, p, orgID, graph, subject)
+	})
+	return err
+}
+
+func (s *Service) removeRepoGrantPolicy(ctx context.Context, p Principal, orgID, graph string, subject Tuple) error {
 	if p.Via == "key" {
 		return ErrForbidden
 	}
-	if _, err := s.canAdminRepo(ctx, p, orgID, graph); err != nil {
+	if err := s.canAdminRepo(ctx, p, orgID, graph); err != nil {
 		return err
 	}
 	n, err := s.St.DeleteTuples(ctx, TupleFilter{ObjectType: TypeRepository, ObjectID: RepoObject(orgID, graph),
@@ -284,17 +366,18 @@ func (s *Service) RemoveRepoGrant(ctx context.Context, p Principal, orgID, graph
 	if n == 0 {
 		return fmt.Errorf("grant: %w", ErrNotFound)
 	}
+	if err := s.guardRepoAdmin(ctx, orgID, graph); err != nil {
+		return err
+	}
 	s.audit(ctx, actorEvent(p, "repo.grant.remove", orgID, graph+" "+subject.SubjectType+":"+subject.SubjectID))
 	return nil
 }
 
 // RepoGrants lists the explicit grants on orgID's entry for graph
-// (organisation members and the repository's admins).
+// (repository administrators only).
 func (s *Service) RepoGrants(ctx context.Context, p Principal, orgID, graph string) ([]RepoGrant, error) {
-	if err := s.Require(ctx, p, orgID, Viewer); err != nil {
-		if _, err2 := s.canAdminRepo(ctx, p, orgID, graph); err2 != nil {
-			return nil, err
-		}
+	if err := s.canAdminRepo(ctx, p, orgID, graph); err != nil {
+		return nil, err
 	}
 	ts, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeRepository, ObjectID: RepoObject(orgID, graph)})
 	if err != nil {
@@ -336,6 +419,9 @@ func (s *Service) describe(ctx context.Context, orgID string, t Tuple) (RepoGran
 		g.Label = u.Email
 		_, err = s.St.MemberRole(ctx, orgID, u.ID)
 		g.External = errors.Is(err, ErrNotFound)
+		if err != nil && !g.External {
+			return g, err
+		}
 	case TypeTeam:
 		team, err := s.St.TeamByID(ctx, t.SubjectID)
 		if err != nil {

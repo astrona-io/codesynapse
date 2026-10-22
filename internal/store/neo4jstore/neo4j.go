@@ -108,6 +108,11 @@ func failed(ctx context.Context, op string, err error) {
 // EnsureSchema implements store.Writer.
 func (s *Store) EnsureSchema(ctx context.Context) error {
 	stmts := []string{
+		"CREATE CONSTRAINT access_vertex_id IF NOT EXISTS FOR (n:AccessVertex) REQUIRE n.aid IS UNIQUE",
+		"CREATE INDEX access_vertex_tenant IF NOT EXISTS FOR (n:AccessVertex) ON (n.tenant_id)",
+		"DROP CONSTRAINT access_head_tenant IF EXISTS",
+		"CREATE CONSTRAINT access_head_id IF NOT EXISTS FOR (n:AccessHead) REQUIRE n.aid IS UNIQUE",
+		"CREATE INDEX access_head_tenant_revision IF NOT EXISTS FOR (n:AccessHead) ON (n.tenant_id, n.policy_revision)",
 		"CREATE CONSTRAINT node_id IF NOT EXISTS FOR (n:Node) REQUIRE n.id IS UNIQUE",
 		"CREATE INDEX node_repo IF NOT EXISTS FOR (n:Node) ON (n.repo)",
 		"CREATE INDEX node_repo_file IF NOT EXISTS FOR (n:Node) ON (n.repo, n.file)",

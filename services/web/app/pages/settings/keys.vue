@@ -34,7 +34,7 @@ async function revoke() {
   <div class="stack">
     <section class="panel">
       <h2>New API key</h2>
-      <p class="muted small">An API key lets an agent (Claude Code, Codex, Cursor), a hook or the CLI act as you in <strong>{{ session.current.value?.org.name ?? 'your organisation' }}</strong>. It sees only that organisation's repositories, and its memory, reviews and statistics stay there. The <NuxtLink to="/agents">Agents</NuxtLink> page walks you through connecting one.</p>
+      <p class="muted small">An API key lets an agent, a hook or the CLI act as you in <strong>{{ session.current.value?.org.name ?? 'your organisation' }}</strong>. It reaches only repositories you can access there; its memory, reviews and statistics stay there. Keys cannot register repositories or change access. The <NuxtLink to="/agents">Agents</NuxtLink> page walks you through connecting one.</p>
       <form class="row" @submit.prevent="create">
         <div class="field grow"><label for="kname">Name</label><input id="kname" v-model="name" placeholder="e.g. laptop, CI" required maxlength="80"></div>
         <div class="field"><label for="ttl">Expires</label>

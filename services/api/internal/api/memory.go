@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/memory/extract"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
@@ -86,7 +88,8 @@ func (s *Server) handleOffload(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	job, err := s.offload.Submit(repo, ns, req.Source, req.Turns)
+	_, authorize := s.jobAuthorization(r.Context(), repo, accounts.Member)
+	job, err := s.offload.SubmitAuthorized(repo, ns, req.Source, req.Turns, authorize)
 	switch {
 	case errors.Is(err, offload.ErrNoLocalModel):
 		s.problem(w, http.StatusConflict, err)
@@ -102,13 +105,13 @@ func (s *Server) handleOffload(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleOffloadJobs(w http.ResponseWriter, r *http.Request) {
 	_, err := s.offload.Provider()
 	sc := scopeFrom(r.Context())
-	jobs := slices.DeleteFunc(s.offload.List(r.URL.Query().Get("repo")), func(j offload.Job) bool { return !sc.sees(j.Repo) })
+	jobs := slices.DeleteFunc(s.offload.List(r.URL.Query().Get("repo")), func(j offload.Job) bool { return !seesReview(sc, j.Repo, memory.OrgOf(j.Namespace)) })
 	writeJSON(w, 200, map[string]any{"jobs": jobs, "available": err == nil})
 }
 
 func (s *Server) handleOffloadJob(w http.ResponseWriter, r *http.Request) {
 	j, ok := s.offload.Get(r.PathValue("id"))
-	if !ok || !scopeFrom(r.Context()).sees(j.Repo) {
+	if !ok || !seesReview(scopeFrom(r.Context()), j.Repo, memory.OrgOf(j.Namespace)) {
 		s.problem(w, 404, errors.New("no such memory extraction job"))
 		return
 	}

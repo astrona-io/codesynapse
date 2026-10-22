@@ -65,6 +65,7 @@ type SymbolCard struct {
 // several symbols return an error listing candidates, so the caller can retry
 // with an ID instead of guessing.
 func (s Service) Resolve(ctx context.Context, repo, idOrName string) (model.Node, error) {
+	s.R = store.ForRepository(s.R, repo)
 	if strings.Count(idOrName, "|") >= 2 {
 		return s.R.Node(ctx, idOrName)
 	}
@@ -111,6 +112,7 @@ func (e *AmbiguousError) Error() string {
 
 // Card builds a SymbolCard. limit bounds each list.
 func (s Service) Card(ctx context.Context, repo, idOrName string, limit int) (SymbolCard, error) {
+	s.R = store.ForRepository(s.R, repo)
 	limit = store.ClampLimit(limit, 10)
 	n, err := s.Resolve(ctx, repo, idOrName)
 	if err != nil {
@@ -184,6 +186,7 @@ type OutlineEntry struct {
 // Outline lists what a file contains with line ranges, so an agent can read
 // only the lines it needs.
 func (s Service) Outline(ctx context.Context, repo, file string) ([]OutlineEntry, error) {
+	s.R = store.ForRepository(s.R, repo)
 	ns, err := s.R.NodesInFile(ctx, repo, strings.TrimPrefix(file, "./"))
 	if err != nil {
 		return nil, err
@@ -200,6 +203,7 @@ func (s Service) Outline(ctx context.Context, repo, file string) ([]OutlineEntry
 
 // SymbolsAt returns the code symbols whose line range overlaps [start, end].
 func (s Service) SymbolsAt(ctx context.Context, repo, file string, start, end int) ([]model.Node, error) {
+	s.R = store.ForRepository(s.R, repo)
 	ns, err := s.R.NodesInFile(ctx, repo, file)
 	if err != nil {
 		return nil, err
@@ -231,6 +235,7 @@ type Overview struct {
 
 // Overview summarises a repository: stats, packages and documents.
 func (s Service) Overview(ctx context.Context, repo string) (Overview, error) {
+	s.R = store.ForRepository(s.R, repo)
 	st, err := s.R.Stats(ctx, repo)
 	if err != nil {
 		return Overview{}, err
@@ -269,6 +274,7 @@ type Hotspot struct {
 // Hotspots ranks non-test functions by complexity x (1 + churn of their
 // file). Complex code that changes often is where defects concentrate.
 func (s Service) Hotspots(ctx context.Context, repo string, limit int) ([]Hotspot, error) {
+	s.R = store.ForRepository(s.R, repo)
 	limit = store.ClampLimit(limit, 20)
 	fns, err := s.R.List(ctx, repo, store.Filter{
 		Kinds: []model.NodeKind{model.KindFunction, model.KindMethod}, ExcludeTests: true,

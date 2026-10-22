@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
@@ -234,21 +233,6 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 		}
 		orgs, err := s.cfg.Accounts.St.ListOrgs(ctx, 100000)
 		h.Counts.Orgs = len(orgs)
-		owned := map[string]bool{}
-		for _, o := range orgs {
-			repos, err := s.cfg.Accounts.St.OrgRepositories(ctx, o.ID)
-			if err != nil {
-				return "", err
-			}
-			for _, repo := range repos {
-				owned[repo.Graph] = true
-			}
-		}
-		for _, g := range graphs {
-			if !owned[g] {
-				h.Unowned = append(h.Unowned, g)
-			}
-		}
 		return "PostgreSQL", err
 	})
 	h.Metrics = timed(func() (string, error) {
@@ -270,6 +254,6 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 		return plural(v.Checked, "entry verifies", "entries verify"), nil
 	})
 	h.Jobs = jobHealth(s.jobs.List())
-	slices.Sort(h.Unowned)
+	h.Jobs.RecentFailures = []Job{}
 	writeJSON(w, 200, h)
 }

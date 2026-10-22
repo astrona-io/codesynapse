@@ -85,9 +85,12 @@ func TestAttentionNamesLostAccessToItsOrganisation(t *testing.T) {
 	t.Cleanup(ts.Close)
 	newClient(t, ts).do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil)
 	bob := newClient(t, ts)
-	var signed struct{ Org accounts.Org }
+	var signed struct {
+		Org  accounts.Org
+		User accounts.User
+	}
 	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 201)
-	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: signed.Org.ID, Graph: "acme/secret", Remote: "https://github.com/acme/secret", Visibility: accounts.Private, AddedAt: time.Now()}))
+	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: signed.Org.ID, AddedBy: signed.User.ID, Graph: "acme/secret", Remote: "https://github.com/acme/secret", Visibility: accounts.Private, AddedAt: time.Now()}))
 	require.NoError(t, acc.St.SetRepositoryAccess(ctx, signed.Org.ID, "acme/secret", accounts.AccessLost, time.Now()))
 
 	var a Attention

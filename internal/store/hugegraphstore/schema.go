@@ -84,5 +84,5 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("hugegraph schema: %w", err)
 	}
-	return nil
+	return s.write(ctx, accessSchema, nil, nil)
 }

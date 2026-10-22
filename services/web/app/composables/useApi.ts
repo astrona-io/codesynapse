@@ -12,6 +12,14 @@ export function apiPost<T>(path: string, body: unknown): Promise<T> {
   return $fetch(apiPath(path), { method: 'POST', body: body as Record<string, unknown> }) as Promise<T>
 }
 
+export function apiPut<T>(path: string, body: unknown): Promise<T> {
+  return $fetch(apiPath(path), { method: 'PUT', body: body as Record<string, unknown> }) as Promise<T>
+}
+
+export function apiDelete(path: string): Promise<unknown> {
+  return $fetch(apiPath(path), { method: 'DELETE' })
+}
+
 export function apiErrorMessage(err: unknown): string {
   const e = err as { data?: { detail?: string; statusMessage?: string }; message?: string }
   return e?.data?.detail ?? e?.data?.statusMessage ?? e?.message ?? String(err)

@@ -140,7 +140,7 @@ func TestAuditTrail(t *testing.T) {
 	ts, _ := accountsServer(t)
 	ada := newClient(t, ts)
 	require.Equal(t, ada.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil, "User-Agent", "audit-test/1"), 201)
-	assert.Equal(t, ada.do("PUT", "/api/v1/repos/"+storetest.Repo+"/schedule", `{"bogus":true}`, nil), 400, "a failing change")
+	assert.Equal(t, ada.do("PUT", "/api/v1/repos/"+storetest.Repo+"/schedule", `{"bogus":true}`, nil), 404, "an inaccessible repository")
 	anon := newClient(t, ts)
 	assert.Equal(t, anon.do("DELETE", "/api/v1/repos/"+storetest.Repo, "", nil), 401, "a refused request")
 

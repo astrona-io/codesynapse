@@ -165,7 +165,7 @@ func (s *Server) buildAttention(ctx context.Context, only string, now time.Time)
 		}
 	}
 	for repo, j := range latest {
-		if j.State != JobFailed || !scopeFrom(ctx).sees(repo) || (only != "" && repo != only) {
+		if j.State != JobFailed || !seesReview(scopeFrom(ctx), repo, j.OrgID) || (only != "" && repo != only) {
 			continue
 		}
 		add(AttentionItem{Level: "high", Kind: "sync", Repo: repo,

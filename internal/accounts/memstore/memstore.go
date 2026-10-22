@@ -17,6 +17,8 @@ import (
 // Store is safe for concurrent use.
 type Store struct {
 	mu       sync.RWMutex
+	policy   bool
+	outbox   map[string]int64
 	users    map[string]accounts.User
 	orgs     map[string]accounts.Org
 	members  map[string]map[string]member // org -> user -> role
@@ -40,7 +42,7 @@ var _ accounts.Store = (*Store)(nil)
 
 // New returns an empty store.
 func New() *Store {
-	return &Store{users: map[string]accounts.User{}, orgs: map[string]accounts.Org{}, members: map[string]map[string]member{},
+	return &Store{outbox: map[string]int64{}, users: map[string]accounts.User{}, orgs: map[string]accounts.Org{}, members: map[string]map[string]member{},
 		sessions: map[string]accounts.Session{}, keys: map[string]accounts.APIKey{}, repos: map[string]accounts.Repository{}, tokens: map[string]accounts.GitToken{},
 		teams: map[string]accounts.Team{}, tuples: map[accounts.Tuple]bool{}, tupleAt: map[accounts.Tuple]accounts.Tuple{}}
 }
@@ -124,7 +126,10 @@ func (s *Store) CreateOrg(_ context.Context, o accounts.Org, owner string) error
 			return fmt.Errorf("slug: %w", accounts.ErrExists)
 		}
 	}
+	o.DefaultRepoAccess = cmp.Or(o.DefaultRepoAccess, accounts.DefaultRepoNone)
+	o.PolicyRevision = max(o.PolicyRevision, 1)
 	s.orgs[o.ID] = o
+	s.outbox[o.ID] = o.PolicyRevision
 	s.members[o.ID] = map[string]member{owner: {role: accounts.Owner, addedAt: o.CreatedAt}}
 	return nil
 }
@@ -202,7 +207,22 @@ func (s *Store) MemberRole(_ context.Context, orgID, userID string) (accounts.Ro
 }
 
 // SetMember implements accounts.Store.
-func (s *Store) SetMember(_ context.Context, orgID, userID string, role accounts.Role) error {
+func (s *Store) SetMember(ctx context.Context, orgID, userID string, role accounts.Role) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		orgIDs := []string{orgID}
+		if err := st.(*Store).setMember(ctx, orgID, userID, role); err != nil {
+			return err
+		}
+		for _, id := range orgIDs {
+			if err := st.TouchPolicy(ctx, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) setMember(_ context.Context, orgID, userID string, role accounts.Role) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.orgs[orgID]; !ok {
@@ -221,13 +241,36 @@ func (s *Store) SetMember(_ context.Context, orgID, userID string, role accounts
 }
 
 // RemoveMember implements accounts.Store.
-func (s *Store) RemoveMember(_ context.Context, orgID, userID string) error {
+func (s *Store) RemoveMember(ctx context.Context, orgID, userID string) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		orgIDs := []string{orgID}
+		if err := st.(*Store).removeMember(ctx, orgID, userID); err != nil {
+			return err
+		}
+		for _, id := range orgIDs {
+			if err := st.TouchPolicy(ctx, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) removeMember(_ context.Context, orgID, userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.members[orgID][userID]; !ok {
 		return fmt.Errorf("membership: %w", accounts.ErrNotFound)
 	}
 	delete(s.members[orgID], userID)
+	for tuple := range s.tuples {
+		org, _, ok := accounts.SplitRepoObject(tuple.ObjectID)
+		if ok && tuple.ObjectType == accounts.TypeRepository && org == orgID && tuple.SubjectType == accounts.TypeUser && tuple.SubjectID == userID {
+			delete(s.tuples, tuple)
+			delete(s.tupleAt, tuple)
+		}
+	}
+
 	return nil
 }
 
@@ -395,7 +438,33 @@ func (s *Store) PruneEvents(_ context.Context, before time.Time) (int, error) {
 }
 
 // AddRepository implements accounts.Store.
-func (s *Store) AddRepository(_ context.Context, r accounts.Repository) error {
+func (s *Store) AddRepository(ctx context.Context, r accounts.Repository) error {
+	return s.PolicyTransaction(ctx, r.OrgID, func(st accounts.Store) error {
+		if r.AddedBy == "" {
+			return accounts.ErrInvalidInput
+		}
+		u, err := st.UserByID(ctx, r.AddedBy)
+		if err != nil || u.DisabledAt != nil {
+			return accounts.ErrForbidden
+		}
+		if _, err := st.MemberRole(ctx, r.OrgID, r.AddedBy); err != nil {
+			return accounts.ErrForbidden
+		}
+		tx := st.(*Store)
+		if err := tx.addRepository(ctx, r); err != nil {
+			return err
+		}
+		if err := st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(r.OrgID, r.Graph), Relation: accounts.RepoAdmin, SubjectType: accounts.TypeUser, SubjectID: r.AddedBy, CreatedBy: r.AddedBy, CreatedAt: r.AddedAt}); err != nil {
+			return err
+		}
+		if _, err := st.AddEvent(ctx, accounts.Event{At: r.AddedAt, UserID: r.AddedBy, ActorEmail: u.Email, OrgID: r.OrgID, Action: "repo.admin.initial", Target: r.Graph, Outcome: accounts.Success}); err != nil {
+			return err
+		}
+		return st.TouchPolicy(ctx, r.OrgID)
+	})
+}
+
+func (s *Store) addRepository(_ context.Context, r accounts.Repository) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.orgs[r.OrgID]; !ok {
@@ -411,7 +480,22 @@ func (s *Store) AddRepository(_ context.Context, r accounts.Repository) error {
 }
 
 // SetRepositoryAccess implements accounts.Store.
-func (s *Store) SetRepositoryAccess(_ context.Context, orgID, graph, access string, at time.Time) error {
+func (s *Store) SetRepositoryAccess(ctx context.Context, orgID, graph, access string, at time.Time) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		orgIDs := []string{orgID}
+		if err := st.(*Store).setRepositoryAccess(ctx, orgID, graph, access, at); err != nil {
+			return err
+		}
+		for _, id := range orgIDs {
+			if err := st.TouchPolicy(ctx, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) setRepositoryAccess(_ context.Context, orgID, graph, access string, at time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := orgID + "|" + graph
@@ -476,7 +560,23 @@ func (s *Store) DeleteGitToken(_ context.Context, orgID, host string) error {
 }
 
 // RemoveRepository implements accounts.Store.
-func (s *Store) RemoveRepository(_ context.Context, orgID, graph string) (int, error) {
+func (s *Store) RemoveRepository(ctx context.Context, orgID, graph string) (int, error) {
+	var count int
+	err := s.PolicyTransaction(ctx, orgID, func(st accounts.Store) error {
+		var err error
+		count, err = st.(*Store).removeRepository(ctx, orgID, graph)
+		if err != nil {
+			return err
+		}
+		if _, err := st.DeleteTuples(ctx, accounts.TupleFilter{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(orgID, graph)}); err != nil {
+			return err
+		}
+		return st.TouchPolicy(ctx, orgID)
+	})
+	return count, err
+}
+
+func (s *Store) removeRepository(_ context.Context, orgID, graph string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := orgID + "|" + graph
@@ -525,7 +625,17 @@ func public(u accounts.User) accounts.User {
 }
 
 // CreateTeam implements accounts.Store.
-func (s *Store) CreateTeam(_ context.Context, t accounts.Team) error {
+func (s *Store) CreateTeam(ctx context.Context, t accounts.Team) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+
+		if err := st.(*Store).createTeam(ctx, t); err != nil {
+			return err
+		}
+		return st.TouchPolicy(ctx, t.OrgID)
+	})
+}
+
+func (s *Store) createTeam(_ context.Context, t accounts.Team) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.orgs[t.OrgID]; !ok {
@@ -578,7 +688,20 @@ func (s *Store) OrgTeams(_ context.Context, orgID string) ([]accounts.Team, erro
 }
 
 // DeleteTeam implements accounts.Store.
-func (s *Store) DeleteTeam(_ context.Context, id string) error {
+func (s *Store) DeleteTeam(ctx context.Context, id string) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		team, err := st.TeamByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := st.(*Store).deleteTeam(ctx, id); err != nil {
+			return err
+		}
+		return st.TouchPolicy(ctx, team.OrgID)
+	})
+}
+
+func (s *Store) deleteTeam(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.teams[id]; !ok {
@@ -600,10 +723,54 @@ func tupleKey(t accounts.Tuple) accounts.Tuple {
 }
 
 // WriteTuple implements accounts.Store.
-func (s *Store) WriteTuple(_ context.Context, t accounts.Tuple) error {
+func (s *Store) WriteTuple(ctx context.Context, t accounts.Tuple) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		orgs, err := tupleOrganisations(ctx, st, []accounts.Tuple{t})
+		if err != nil {
+			return err
+		}
+		if err := st.(*Store).writeTuple(ctx, t); err != nil {
+			return err
+		}
+		for org := range orgs {
+			if err := st.TouchPolicy(ctx, org); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) writeTuple(_ context.Context, t accounts.Tuple) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := tupleKey(t)
+	if t.ObjectType == accounts.TypeRepository {
+		org, graph, ok := accounts.SplitRepoObject(t.ObjectID)
+		if !ok {
+			return accounts.ErrNotFound
+		}
+		if _, ok := s.repos[accounts.RepoObject(org, graph)]; !ok {
+			return accounts.ErrNotFound
+		}
+		if t.SubjectType == accounts.TypeUser {
+			if _, ok := s.members[org][t.SubjectID]; !ok {
+				return accounts.ErrNotFound
+			}
+		}
+		if t.SubjectType == accounts.TypeTeam {
+			if team, ok := s.teams[t.SubjectID]; !ok || team.OrgID != org {
+				return accounts.ErrNotFound
+			}
+		}
+
+		for old := range s.tuples {
+			if old.ObjectType == t.ObjectType && old.ObjectID == t.ObjectID && old.SubjectType == t.SubjectType && old.SubjectID == t.SubjectID && old.SubjectRelation == t.SubjectRelation {
+				return accounts.ErrExists
+			}
+		}
+	}
+
 	if s.tuples[k] {
 		return fmt.Errorf("tuple: %w", accounts.ErrExists)
 	}
@@ -613,7 +780,25 @@ func (s *Store) WriteTuple(_ context.Context, t accounts.Tuple) error {
 }
 
 // DeleteTuple implements accounts.Store.
-func (s *Store) DeleteTuple(_ context.Context, t accounts.Tuple) error {
+func (s *Store) DeleteTuple(ctx context.Context, t accounts.Tuple) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		orgs, err := tupleOrganisations(ctx, st, []accounts.Tuple{t})
+		if err != nil {
+			return err
+		}
+		if err := st.(*Store).deleteTuple(ctx, t); err != nil {
+			return err
+		}
+		for org := range orgs {
+			if err := st.TouchPolicy(ctx, org); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) deleteTuple(_ context.Context, t accounts.Tuple) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := tupleKey(t)
@@ -631,7 +816,7 @@ func matches(t accounts.Tuple, f accounts.TupleFilter) bool {
 		!eq(f.SubjectType, t.SubjectType) || !eq(f.SubjectID, t.SubjectID) || !eq(f.SubjectRelation, t.SubjectRelation) {
 		return false
 	}
-	return f.SubjectIDs == nil || slices.Contains(f.SubjectIDs, t.SubjectID)
+	return (f.SubjectIDs == nil || slices.Contains(f.SubjectIDs, t.SubjectID)) && (f.ObjectIDs == nil || slices.Contains(f.ObjectIDs, t.ObjectID))
 }
 
 // ReadTuples implements accounts.Store, ordered like the PostgreSQL store.
@@ -648,11 +833,40 @@ func (s *Store) ReadTuples(_ context.Context, f accounts.TupleFilter) ([]account
 		return cmp.Or(cmp.Compare(a.ObjectType, b.ObjectType), cmp.Compare(a.ObjectID, b.ObjectID), cmp.Compare(a.Relation, b.Relation),
 			cmp.Compare(a.SubjectType, b.SubjectType), cmp.Compare(a.SubjectID, b.SubjectID), cmp.Compare(a.SubjectRelation, b.SubjectRelation))
 	})
-	return out[:min(len(out), accounts.MaxTuples)], nil
+	if len(out) > accounts.MaxTuples {
+		return nil, accounts.ErrAccessLimit
+	}
+	return out, nil
 }
 
 // DeleteTuples implements accounts.Store.
-func (s *Store) DeleteTuples(_ context.Context, f accounts.TupleFilter) (int, error) {
+func (s *Store) DeleteTuples(ctx context.Context, f accounts.TupleFilter) (int, error) {
+	var count int
+	err := s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		ts, err := st.ReadTuples(ctx, f)
+		if err != nil {
+			return err
+		}
+		tx := st.(*Store)
+		orgs, err := tupleOrganisations(ctx, st, ts)
+		if err != nil {
+			return err
+		}
+		count, err = tx.deleteTuples(ctx, f)
+		if err != nil {
+			return err
+		}
+		for org := range orgs {
+			if err := st.TouchPolicy(ctx, org); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return count, err
+}
+
+func (s *Store) deleteTuples(_ context.Context, f accounts.TupleFilter) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := 0
@@ -667,7 +881,29 @@ func (s *Store) DeleteTuples(_ context.Context, f accounts.TupleFilter) (int, er
 }
 
 // SetUserDisabled implements accounts.Store.
-func (s *Store) SetUserDisabled(_ context.Context, userID string, at *time.Time) error {
+func (s *Store) SetUserDisabled(ctx context.Context, userID string, at *time.Time) error {
+	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
+		ms, err := st.UserMemberships(ctx, userID)
+		if err != nil {
+			return err
+		}
+		orgIDs := []string{}
+		for _, m := range ms {
+			orgIDs = append(orgIDs, m.Org.ID)
+		}
+		if err := st.(*Store).setUserDisabled(ctx, userID, at); err != nil {
+			return err
+		}
+		for _, id := range orgIDs {
+			if err := st.TouchPolicy(ctx, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) setUserDisabled(_ context.Context, userID string, at *time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	u, ok := s.users[userID]

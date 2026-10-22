@@ -43,7 +43,12 @@ func connectGraph(t *testing.T, g *model.Graph) *mcp.ClientSession {
 
 func call(t *testing.T, cs *mcp.ClientSession, name string, args map[string]any, out any) *mcp.CallToolResult {
 	t.Helper()
-	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
+	return callContext(context.Background(), t, cs, name, args, out)
+}
+
+func callContext(ctx context.Context, t *testing.T, cs *mcp.ClientSession, name string, args map[string]any, out any) *mcp.CallToolResult {
+	t.Helper()
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
 	require.NoError(t, err)
 	if out != nil && !res.IsError {
 		b, err := json.Marshal(res.StructuredContent)

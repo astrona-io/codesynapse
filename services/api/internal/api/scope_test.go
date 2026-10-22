@@ -46,10 +46,15 @@ func TestTenantIsolation(t *testing.T) {
 	require.Equal(t, ada.do("POST", "/api/v1/accounts/orgs", `{"name":"Side"}`, &side), 201)
 	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+team.Slug+"/members", `{"email":"carol@example.com","role":"viewer"}`, nil), 200)
 
-	// Existing graphs belong to nobody until a platform admin attaches them.
-	assert.Equal(t, bob.do("POST", "/api/v1/accounts/orgs/"+team.Slug+"/repos", `{"graph":"`+storetest.Repo+`"}`, nil), 403)
-	require.Equal(t, ada.do("POST", "/api/v1/accounts/orgs/"+team.Slug+"/repos", `{"graph":"`+storetest.Repo+`"}`, nil), 201)
-	require.Equal(t, ada.do("POST", "/api/v1/accounts/orgs/"+side.Slug+"/repos", `{"graph":"`+storetest.Repo+`"}`, nil), 201)
+	// Platform administration cannot attach a graph to another tenant.
+	assert.Equal(t, ada.do("POST", "/api/v1/accounts/orgs/"+team.Slug+"/repos", `{"graph":"`+storetest.Repo+`"}`, nil), 404)
+	bobUser, err := acc.St.UserByEmail(ctx, "bob@example.com")
+	require.NoError(t, err)
+	adaUser, err := acc.St.UserByEmail(ctx, "ada@example.com")
+	require.NoError(t, err)
+	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: team.ID, Graph: storetest.Repo, AddedBy: bobUser.ID, AddedAt: time.Now()}))
+	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: side.ID, Graph: storetest.Repo, AddedBy: adaUser.ID, AddedAt: time.Now()}))
+	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+team.Slug+"/repo-policy", `{"default_repo_access":"READ_ONLY"}`, nil), 200)
 
 	var list struct{ Repos []struct{ Name string } }
 	require.Equal(t, bob.do("GET", "/api/v1/repos", "", &list), 200)
@@ -65,7 +70,7 @@ func TestTenantIsolation(t *testing.T) {
 	assert.Equal(t, bob.do("GET", "/api/v1/repos/"+storetest.Repo+"/overview", "", nil), 200)
 	assert.Equal(t, bob.do("GET", "/api/v1/repos/secret/overview", "", nil), 404, "other repositories do not exist for you")
 	assert.Equal(t, bob.do("GET", "/api/v1/reviews/"+rv.ID, "", nil), 404, "nor their reviews")
-	assert.Equal(t, ada.do("GET", "/api/v1/reviews/"+rv.ID, "", nil), 200)
+	assert.Equal(t, ada.do("GET", "/api/v1/reviews/"+rv.ID, "", nil), 404)
 	assert.Equal(t, bob.do("GET", "/api/v1/sources", "", nil), 403, "mounted sources are for platform admins")
 	assert.Equal(t, carol.do("PUT", "/api/v1/repos/"+storetest.Repo+"/schedule", `{"interval_minutes":60}`, nil), 403, "viewers cannot change schedules")
 	assert.Equal(t, carol.do("DELETE", "/api/v1/repos/"+storetest.Repo, "", nil), 403)

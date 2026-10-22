@@ -33,7 +33,7 @@ func TestContract(t *testing.T) {
 		t.Cleanup(func() { _ = mx.Drop(ctx) })
 		vec = mx
 	}
-	s, err := New(ctx, Config{URL: url, Vectors: vec})
+	s, err := New(ctx, Config{URL: url, Vectors: vec, User: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_USER"), Password: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_PASSWORD")})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close(ctx) })
 	require.NoError(t, s.EnsureSchema(ctx))

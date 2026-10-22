@@ -16,6 +16,7 @@ type Role string
 // Roles. A guest belongs to the organisation but inherits no repository:
 // it sees only what is granted to it (see authz.go).
 const (
+	None   Role = "none" // explicit repository deny; not an organisation role
 	Guest  Role = "guest"
 	Viewer Role = "viewer"
 	Member Role = "member"
@@ -37,7 +38,9 @@ func Max(a, b Role) Role {
 func (r Role) Valid() bool { _, ok := roleRank[r]; return ok }
 
 // AtLeast reports whether r grants at least least.
-func (r Role) AtLeast(least Role) bool { return r.Valid() && roleRank[r] >= roleRank[least] }
+func (r Role) AtLeast(least Role) bool {
+	return r.Valid() && least.Valid() && roleRank[r] >= roleRank[least]
+}
 
 // User is a person who can log in.
 type User struct {
@@ -53,12 +56,20 @@ type User struct {
 	PasswordHash string `json:"-"`
 }
 
+// Default repository visibility policies.
+const (
+	DefaultRepoNone     = "NONE"
+	DefaultRepoReadOnly = "READ_ONLY"
+)
+
 // Org is a tenant.
 type Org struct {
-	ID        string    `json:"id"`
-	Slug      string    `json:"slug"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+	DefaultRepoAccess string    `json:"default_repo_access"`
+	PolicyRevision    int64     `json:"policy_revision"`
+	ID                string    `json:"id"`
+	Slug              string    `json:"slug"`
+	Name              string    `json:"name"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 // Membership is a user's role in an org.
@@ -154,6 +165,7 @@ type TupleFilter struct {
 	SubjectType, SubjectID, SubjectRelation string
 	// SubjectIDs, when set, matches any of these subject IDs.
 	SubjectIDs []string
+	ObjectIDs  []string
 }
 
 // GitToken is an organisation's credential for one Git host. The token is
@@ -210,17 +222,19 @@ type EventFilter struct {
 
 // Errors.
 var (
-	ErrNotFound     = errors.New("not found")
-	ErrExists       = errors.New("already exists")
-	ErrUnauthorized = errors.New("invalid credentials")
-	ErrForbidden    = errors.New("not allowed")
-	ErrSignupClosed = errors.New("sign-up is closed; ask an administrator for an account")
-	ErrRateLimited  = errors.New("too many attempts; wait a minute and try again")
-	ErrLastOwner    = errors.New("an organisation needs at least one owner")
-	ErrInvalidInput = errors.New("invalid input")
-	ErrKeyRevoked   = errors.New("API key revoked or expired")
-	ErrSuspended    = errors.New("this account is suspended; ask an administrator")
-	ErrNoSecretKey  = errors.New("organisation Git tokens need CODESYNAPSE_SECRET_KEY (32 random bytes, base64 or hex) on the API")
+	ErrAccessLimit   = errors.New("access policy exceeds evaluation limit")
+	ErrLastRepoAdmin = errors.New("a repository needs at least one active administrator")
+	ErrNotFound      = errors.New("not found")
+	ErrExists        = errors.New("already exists")
+	ErrUnauthorized  = errors.New("invalid credentials")
+	ErrForbidden     = errors.New("not allowed")
+	ErrSignupClosed  = errors.New("sign-up is closed; ask an administrator for an account")
+	ErrRateLimited   = errors.New("too many attempts; wait a minute and try again")
+	ErrLastOwner     = errors.New("an organisation needs at least one owner")
+	ErrInvalidInput  = errors.New("invalid input")
+	ErrKeyRevoked    = errors.New("API key revoked or expired")
+	ErrSuspended     = errors.New("this account is suspended; ask an administrator")
+	ErrNoSecretKey   = errors.New("organisation Git tokens need CODESYNAPSE_SECRET_KEY (32 random bytes, base64 or hex) on the API")
 )
 
 // Store persists accounts. Implementations must be safe for concurrent use
@@ -228,6 +242,15 @@ var (
 type Store interface {
 	// Migrate creates or upgrades the schema. It is idempotent.
 	Migrate(ctx context.Context) error
+
+	// PolicyTransaction serializes policy changes and commits their audit/outbox records together.
+	PolicyTransaction(ctx context.Context, orgID string, fn func(Store) error) error
+	// ReadSnapshot evaluates current policy consistently without serializing other readers.
+	ReadSnapshot(ctx context.Context, fn func(Store) error) error
+	SetDefaultRepoAccess(ctx context.Context, orgID, policy string) error
+	TouchPolicy(ctx context.Context, orgID string) error
+	PendingAccessPolicies(ctx context.Context, limit int) ([]Org, error)
+	AcknowledgeAccessPolicy(ctx context.Context, orgID string, revision int64) error
 
 	CountUsers(ctx context.Context) (int, error)
 	CreateUser(ctx context.Context, u User) error // ErrExists on a taken email
@@ -267,6 +290,7 @@ type Store interface {
 	// reference the graph.
 	RemoveRepository(ctx context.Context, orgID, graph string) (int, error)
 	OrgRepositories(ctx context.Context, orgID string) ([]Repository, error)
+	RepositoriesForOrgs(ctx context.Context, orgIDs []string) ([]Repository, error)
 	// GraphRepositories lists every organisation's entry for a graph.
 	GraphRepositories(ctx context.Context, graph string) ([]Repository, error)
 	// SetRepositoryAccess records the outcome of an access check.
@@ -276,6 +300,7 @@ type Store interface {
 	TeamByID(ctx context.Context, id string) (Team, error)
 	TeamBySlug(ctx context.Context, orgID, slug string) (Team, error)
 	OrgTeams(ctx context.Context, orgID string) ([]Team, error)
+	TeamsByIDs(ctx context.Context, ids []string) ([]Team, error)
 	// DeleteTeam removes the team and every tuple naming it.
 	DeleteTeam(ctx context.Context, id string) error
 

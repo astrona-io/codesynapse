@@ -245,6 +245,8 @@ export interface AccountOrg {
   slug: string
   name: string
   created_at: string
+  default_repo_access: 'NONE' | 'READ_ONLY'
+  policy_revision: number
 }
 export type Role = 'owner' | 'admin' | 'member' | 'viewer' | 'guest'
 export interface Membership {
@@ -282,8 +284,8 @@ export interface Team { id: string; org_id: string; slug: string; name: string; 
 export interface RepoGrant {
   subject_type: 'user' | 'team'
   subject_id: string
-  relation: 'admin' | 'editor' | 'viewer'
-  role: Role
+  relation: 'admin' | 'editor' | 'viewer' | 'none'
+  role: Role | 'none'
   label: string
   external: boolean
   created_at: string

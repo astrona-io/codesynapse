@@ -44,6 +44,15 @@ func TestResolve(t *testing.T) {
 	assert.True(t, IsSuggestion(err))
 }
 
+func TestResolveForeignQualifiedID(t *testing.T) {
+	s := svc(t)
+	// The fixture exists, but selecting another repository cannot reach it by ID.
+	_, err := s.Resolve(context.Background(), "other", storetest.ID(model.KindFunction, "app.main"))
+	assert.True(t, err != nil)
+	_, err = s.CallGraph(context.Background(), "other", storetest.ID(model.KindFunction, "app.main"), "both", 2, 20)
+	assert.True(t, err != nil)
+}
+
 func TestPackageContext(t *testing.T) {
 	out, err := svc(t).SymbolContext(context.Background(), storetest.Repo, "example.com/app", ContextOptions{})
 	require.NoError(t, err)

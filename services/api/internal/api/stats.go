@@ -220,7 +220,7 @@ func (s *Server) buildStats(ctx context.Context, days int, now time.Time) (Stats
 	if sc := scopeFrom(ctx); !sc.all {
 		// An organisation sees its own agents' usage only, even on a
 		// repository it shares with others.
-		buckets = slices.DeleteFunc(buckets, func(b usage.Bucket) bool { return !seesOrg(sc, b.Org) || !sc.sees(b.Repo) })
+		buckets = slices.DeleteFunc(buckets, func(b usage.Bucket) bool { return !seesReview(sc, b.Repo, b.Org) })
 	}
 	st.Agents = agentStats(buckets, days, now, ratio, workspaceRatio)
 
@@ -373,7 +373,7 @@ func (s *Server) memoryStats(ctx context.Context, buckets []usage.Bucket, sessio
 	for _, r := range repos {
 		// Namespaces are "org|graph" for organisations, the graph otherwise.
 		if org, graph, ok := strings.Cut(r.Repo, "|"); ok {
-			if !seesOrg(sc, org) || !sc.sees(graph) {
+			if !seesReview(sc, graph, org) {
 				continue
 			}
 		} else if !sc.all {
