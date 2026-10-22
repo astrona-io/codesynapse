@@ -137,7 +137,7 @@ Next: Postgres for reviews, decisions with an audit trail, a persistent job queu
 
 ## Repository lifecycle
 
-Repositories are added by URL (cloned into the workspace volume) or mounted under `./sources`. **Auto-sync** schedules (off, 5/15/30 min, 1 h, 6 h, daily; default 30 min, counted from the end of the previous sync; pausable) are stored in `workspace/.codesynapse/schedules.json` and run by a scheduler in the API; the next run and last result show in the UI. Removing a repository deletes its graph, schedule and optionally its clone. Private repositories use a server-side token set with `just git-token`; `GET /api/v1/settings` reports whether one is configured, never the value.
+Repositories are added by URL (cloned into the workspace volume) or mounted under `./sources`. **Auto-sync** schedules (off, 5/15/30 min, 1 h, 6 h, daily; default 30 min, counted from the end of the previous sync; pausable) are stored in `workspace/.codesynapse/schedules.json` and run by a scheduler in the API; the next run and last result show in the UI. Removing a repository deletes its graph, schedule and optionally its clone. Private repositories use a server-side token set with `just git-token`; `GET /api/v1/settings` reports the hosts with a token and a masked preview (first and last five characters; tokens under 20 characters show only `***`), never the full value.
 
 ## Operator overview
 
