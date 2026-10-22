@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/parisnakitakejser/codesynapse/internal/curation"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/query"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
@@ -42,6 +43,9 @@ type ContextResult struct {
 	// Issues are problems with the records involved, such as possible conflicts.
 	Issues []Issue  `json:"issues"`
 	Notes  []string `json:"notes"`
+	// OpenProposals are drafts someone has proposed that match the task. They
+	// are not decisions; they are listed so work is not duplicated or contradicted.
+	OpenProposals []ProposalView `json:"open_proposals"`
 	// Truncated is set when more records applied than Limit allowed; Omitted counts them.
 	Truncated bool   `json:"truncated"`
 	Omitted   int    `json:"omitted"`
@@ -57,7 +61,7 @@ func (s Service) Context(ctx context.Context, repo string, t Task) (ContextResul
 	if err != nil {
 		return ContextResult{}, err
 	}
-	res := ContextResult{Binding: []Applicable{}, Informational: []Applicable{}, Issues: []Issue{}, Notes: []string{}, Source: l.source}
+	res := ContextResult{Binding: []Applicable{}, Informational: []Applicable{}, Issues: []Issue{}, Notes: []string{}, OpenProposals: []ProposalView{}, Source: l.source}
 	byNode := map[string]string{} // record node ID -> record ID
 	for id, n := range l.nodes {
 		byNode[n.ID] = id
@@ -96,18 +100,44 @@ func (s Service) Context(ctx context.Context, repo string, t Task) (ContextResul
 		}
 		touched = append(touched, n)
 	}
+	around := map[string]string{} // node ID -> what it is, for the code the task touches and what surrounds it
 	for _, n := range touched {
+		around[n.ID] = n.ShortName()
+		if n.File != "" && n.Kind != model.KindFile {
+			around[model.NodeID(repo, model.KindFile, n.File)] = n.File
+		}
+		if n.Package != "" && n.Kind != model.KindPackage {
+			around[model.NodeID(repo, model.KindPackage, n.Package)] = "package " + n.Package
+		}
 		s.decisionsFor(ctx, repo, n, byNode, note)
 		if n.Kind == model.KindFile {
-			if err := s.decisionsInFile(ctx, repo, n, byNode, note); err != nil {
+			inFile, err := s.decisionsInFile(ctx, repo, n, byNode, note)
+			if err != nil {
 				return res, err
+			}
+			for id, name := range inFile {
+				around[id] = name + " in " + n.File
+			}
+		}
+	}
+	// Links added through the catalog count like declared ones, and say who added them.
+	for i, it := range l.links {
+		if i >= maxLinks {
+			res.Notes = append(res.Notes, "more links exist than were checked")
+			break
+		}
+		if k := it.Link; k != nil && k.Kind == curation.Implements {
+			if target, err := s.resolveCode(ctx, repo, k.Target); err == nil {
+				if what, ok := around[target.ID]; ok {
+					note(canonical(l, k.Record), 4, fmt.Sprintf("linked by %s to %s", cmp.Or(it.Client, it.CreatedBy, "a user"), what))
+				}
 			}
 		}
 	}
 	for _, c := range t.Components {
 		c = strings.ToLower(strings.TrimSpace(c))
 		for _, id := range l.order {
-			if slices.Contains(l.metas[id].Components, c) {
+			if slices.Contains(l.entry(id, nil).Components, c) {
 				note(id, 3, fmt.Sprintf("applies to component %s", c))
 			}
 		}
@@ -155,6 +185,25 @@ func (s Service) Context(ctx context.Context, repo string, t Task) (ContextResul
 		issueIDs[id] = true
 	}
 	res.Truncated = res.Omitted > 0
+	if props, err := s.Proposals(ctx, repo); err == nil {
+		words := strings.Fields(strings.ToLower(t.Query))
+		for _, p := range props {
+			if p.State != curation.Open || len(res.OpenProposals) >= 5 {
+				continue
+			}
+			hay := strings.ToLower(p.Title + " " + p.Topic + " " + strings.Join(p.Components, " "))
+			match := false
+			for _, w := range words {
+				match = match || (len(w) > 3 && strings.Contains(hay, w))
+			}
+			for _, c := range t.Components {
+				match = match || slices.Contains(p.Components, strings.ToLower(strings.TrimSpace(c)))
+			}
+			if match {
+				res.OpenProposals = append(res.OpenProposals, p)
+			}
+		}
+	}
 	for _, is := range l.issues() {
 		if slices.ContainsFunc(is.Records, func(r string) bool { return issueIDs[r] }) {
 			res.Issues = append(res.Issues, is)
@@ -171,10 +220,10 @@ const maxFileSymbols = 400
 
 // decisionsInFile notes the records carried out by the symbols a file defines.
 // One edge query covers them all.
-func (s Service) decisionsInFile(ctx context.Context, repo string, file model.Node, byNode map[string]string, note func(id string, points int, reason string)) error {
+func (s Service) decisionsInFile(ctx context.Context, repo string, file model.Node, byNode map[string]string, note func(id string, points int, reason string)) (map[string]string, error) {
 	symbols, err := s.R.NodesInFile(ctx, repo, file.File)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ids := make([]string, 0, len(symbols)+len(byNode))
 	name := map[string]string{}
@@ -186,21 +235,21 @@ func (s Service) decisionsInFile(ctx context.Context, repo string, file model.No
 		name[sym.ID] = sym.ShortName()
 	}
 	if len(ids) == 0 {
-		return nil
+		return name, nil
 	}
 	for node := range byNode {
 		ids = append(ids, node)
 	}
 	edges, err := s.R.Subgraph(ctx, ids, []model.EdgeKind{model.EdgeImplementsDecision})
 	if err != nil {
-		return err
+		return name, err
 	}
 	for _, e := range edges {
 		if id, ok := byNode[e.To]; ok && name[e.From] != "" {
 			note(id, 4, fmt.Sprintf("implemented by %s in %s", name[e.From], file.File))
 		}
 	}
-	return nil
+	return name, nil
 }
 
 // decisionsFor notes the records that code, its file and its package carry out.

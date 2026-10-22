@@ -58,6 +58,16 @@ func (a AccountsAccess) Authenticate(ctx context.Context, token string) (*Caller
 	return &Caller{UserID: p.User.ID, Email: p.User.Email, OrgID: p.OrgID, KeyID: p.KeyID, token: token}, nil
 }
 
+// Changed records a successful change made through a tool, without its arguments.
+func (a AccountsAccess) Changed(ctx context.Context, c *Caller, action, target string) error {
+	e := accounts.Event{Action: action, Target: target, Outcome: accounts.Success, Status: http.StatusOK}
+	if c != nil {
+		e.UserID, e.ActorEmail, e.OrgID, e.KeyID, e.Via = c.UserID, c.Email, c.OrgID, c.KeyID, "key"
+	}
+	_, err := a.Acc.Record(ctx, e)
+	return err
+}
+
 // Denied records authorization failures without storing tool arguments.
 func (a AccountsAccess) Denied(ctx context.Context, c *Caller, tool string) error {
 	e := accounts.Event{Action: "mcp.access_denied", Target: tool, Outcome: accounts.Failure, Status: http.StatusForbidden}

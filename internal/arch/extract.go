@@ -170,7 +170,7 @@ func readRecord(repo, rel, dirType string, content []byte) *record {
 		id = v[0]
 	}
 	if id == "" {
-		id = defaultID(typ, rel, r.number)
+		id = DefaultID(typ, rel, r.number)
 	}
 	id = slug(id)
 	title := strings.TrimSpace(p.Title)
@@ -230,7 +230,9 @@ func withoutEmails(s string) string {
 	return strings.Join(strings.Fields(emailRe.ReplaceAllString(s, " ")), " ")
 }
 
-func defaultID(typ, rel, number string) string {
+// DefaultID is the ID a record gets when its front matter has none: the number
+// of its file name for ADRs and RFCs, else the type and its path.
+func DefaultID(typ, rel, number string) string {
 	if number != "" && (typ == ADR || typ == RFC) {
 		n, _ := strconv.Atoi(number)
 		return fmt.Sprintf("%s-%04d", strings.ToUpper(typ), n)

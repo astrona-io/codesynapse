@@ -3,10 +3,12 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/parisnakitakejser/codesynapse/internal/catalog"
+	"github.com/parisnakitakejser/codesynapse/internal/curation"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 )
 
@@ -20,7 +22,32 @@ func (h *handlers) catalogFor(ctx context.Context, repoArg string) (catalog.Serv
 	if err != nil {
 		return catalog.Service{}, "", err
 	}
-	return catalog.Service{R: store.ForRepository(h.svc.R, repo)}, repo, nil
+	return catalog.Service{R: store.ForRepository(h.svc.R, repo), Items: h.curated, Org: callerOrg(ctx)}, repo, nil
+}
+
+// actorOf is who is adding something: the key's organisation and user, and the
+// MCP client's name, so a person can tell an agent's work from a colleague's.
+func actorOf(ctx context.Context, req *mcp.CallToolRequest) catalog.Actor {
+	a := catalog.Actor{Org: callerOrg(ctx), Client: clientName(req)}
+	if c := callerFrom(ctx); c != nil {
+		a.User = c.UserID
+	}
+	return a
+}
+
+// Auditor records successful changes. AccountsAccess implements it; without
+// accounts there is no audit log and the item itself carries who added it.
+type Auditor interface {
+	Changed(ctx context.Context, c *Caller, action, target string) error
+}
+
+// audit records a change before it is made: if the log cannot be written the
+// change is refused.
+func (h *handlers) audit(ctx context.Context, action, target string) error {
+	if a, ok := h.access.(Auditor); ok {
+		return a.Changed(ctx, callerFrom(ctx), action, target)
+	}
+	return nil
 }
 
 type architectureSearchIn struct {
@@ -94,7 +121,88 @@ func (h *handlers) architectureIssues(ctx context.Context, _ *mcp.CallToolReques
 	return nil, architectureIssuesOut{Issues: issues, Source: src}, err
 }
 
-func registerArchitectureTools(s *mcp.Server, h *handlers, add func(name, desc string) *mcp.Tool) {
+type architectureProposalsIn struct {
+	RepoArg
+	ID string `json:"id,omitempty" jsonschema:"one proposal's ID, to read its text; omit to list them"`
+}
+
+type proposalsOut struct {
+	Proposals []catalog.ProposalView `json:"proposals"`
+}
+
+func (h *handlers) architectureProposals(ctx context.Context, _ *mcp.CallToolRequest, in architectureProposalsIn) (*mcp.CallToolResult, proposalsOut, error) {
+	svc, repo, err := h.catalogFor(ctx, in.Repo)
+	if err != nil {
+		return nil, proposalsOut{}, err
+	}
+	if in.ID != "" {
+		p, err := svc.Proposal(ctx, repo, in.ID)
+		return nil, proposalsOut{Proposals: []catalog.ProposalView{p}}, err
+	}
+	list, err := svc.Proposals(ctx, repo)
+	return nil, proposalsOut{Proposals: list}, err
+}
+
+type architectureProposeIn struct {
+	RepoArg
+	Type       string   `json:"type" jsonschema:"adr, rfc, standard or policy"`
+	Title      string   `json:"title"`
+	Body       string   `json:"body,omitempty" jsonschema:"the text in Markdown: context, decision, consequences"`
+	Topic      string   `json:"topic,omitempty" jsonschema:"what it decides, for example storage"`
+	Components []string `json:"components,omitempty"`
+	Labels     []string `json:"labels,omitempty"`
+	Supersedes []string `json:"supersedes,omitempty" jsonschema:"IDs of records it would replace"`
+	Relates    []string `json:"relates,omitempty" jsonschema:"IDs of related records"`
+	Implements []string `json:"implements,omitempty" jsonschema:"code it would govern: file, package or symbol; each must name exactly one place"`
+}
+
+func (h *handlers) architecturePropose(ctx context.Context, req *mcp.CallToolRequest, in architectureProposeIn) (*mcp.CallToolResult, catalog.ProposalView, error) {
+	svc, repo, err := h.catalogFor(ctx, in.Repo)
+	if err != nil {
+		return nil, catalog.ProposalView{}, err
+	}
+	if err := h.audit(ctx, "mcp.architecture.propose", repo); err != nil {
+		return nil, catalog.ProposalView{}, fmt.Errorf("the change could not be recorded in the audit log, so it was not made")
+	}
+	p, err := svc.Propose(ctx, repo, actorOf(ctx, req), curation.ProposalInput{Type: in.Type, Title: in.Title, Body: in.Body, Topic: in.Topic,
+		Components: in.Components, Labels: in.Labels, Supersedes: in.Supersedes, Relates: in.Relates, Implements: in.Implements})
+	return nil, p, err
+}
+
+type architectureLinkIn struct {
+	RepoArg
+	Kind   string `json:"kind" jsonschema:"implements (code carries out the record), relates (two records) or applies-to (a component)"`
+	Record string `json:"record" jsonschema:"the record ID, for example ADR-0007"`
+	Target string `json:"target" jsonschema:"for implements a file, package or symbol; for relates a record ID; for applies-to a component name"`
+	Note   string `json:"note,omitempty"`
+}
+
+func (h *handlers) architectureLink(ctx context.Context, req *mcp.CallToolRequest, in architectureLinkIn) (*mcp.CallToolResult, catalog.LinkView, error) {
+	svc, repo, err := h.catalogFor(ctx, in.Repo)
+	if err != nil {
+		return nil, catalog.LinkView{}, err
+	}
+	if err := h.audit(ctx, "mcp.architecture.link", repo); err != nil {
+		return nil, catalog.LinkView{}, fmt.Errorf("the change could not be recorded in the audit log, so it was not made")
+	}
+	l, err := svc.AddLink(ctx, repo, actorOf(ctx, req), in.Kind, in.Record, in.Target, in.Note)
+	return nil, l, err
+}
+
+func registerArchitectureTools(s *mcp.Server, h *handlers, add func(name, desc string) *mcp.Tool, writes bool) {
+	mcp.AddTool(s, add("architecture_proposals",
+		"Open proposals for new architecture records: drafts that are not in the repository yet and never binding. Check them before proposing something similar. Pass id to read one proposal's text."),
+		h.architectureProposals)
+	if writes {
+		notDestructive := false
+		write := &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, DestructiveHint: &notDestructive}
+		mcp.AddTool(s, &mcp.Tool{Name: "architecture_propose", Annotations: write,
+			Description: "Propose a new architecture record (adr, rfc, standard or policy) as a draft. It is stored as a proposal, always proposed or draft, never accepted: a person turns it into a decision by committing it as a file with an accepted status, and you cannot approve, accept or supersede anything yourself. Superseded records and implemented code you name must exist and be unambiguous. Writes only to the catalog's proposals, never to code, the code graph or the record files. Check architecture_context and architecture_proposals first, and tell the user what you proposed."},
+			h.architecturePropose)
+		mcp.AddTool(s, &mcp.Tool{Name: "architecture_link", Annotations: write,
+			Description: "Record that code carries out an architecture record (kind implements: a file, package or symbol that names exactly one place), that two records relate, or that a record applies to a component. The link is marked as added by you, can be removed by a person, and is flagged stale if the code is renamed. It does not change the record's status or the code. Writes only to the catalog's links."},
+			h.architectureLink)
+	}
 	mcp.AddTool(s, add("architecture_search",
 		"Search the architecture catalog of a repository: ADRs, RFCs, standards, policies, overviews, runbooks and diagrams kept as files. Filter by type, status, component, label or words; binding_only returns just the rules in force (accepted ADRs, active standards and policies, not superseded). Each entry says whether it binds; a proposal, draft, rejected or superseded record never does. Answers carry the indexed commit."),
 		h.architectureSearch)

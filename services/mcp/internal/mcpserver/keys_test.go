@@ -52,7 +52,7 @@ func keyServer(t *testing.T) (url string, keys map[string]string, acc *accounts.
 		}
 	}
 	rec = usage.NewRecorder(s)
-	server := New(s, "test", Options{Reviews: s, Memory: s, Usage: rec, Access: AccountsAccess{Acc: acc}})
+	server := New(s, "test", Options{Reviews: s, Memory: s, Usage: rec, Curated: s, CatalogWrites: true, Access: AccountsAccess{Acc: acc}})
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 	ts := httptest.NewServer(auth.RequireBearerToken(KeyVerifier(acc, "svc-token"),
 		&auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(handler))

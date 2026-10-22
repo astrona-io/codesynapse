@@ -46,6 +46,7 @@ type serveOptions struct {
 	offline   string
 	reviews   bool
 	memory    bool
+	catalog   bool
 	usage     bool
 	apiURL    string
 }
@@ -56,6 +57,7 @@ func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.transport, "transport", app.Getenv("CODESYNAPSE_MCP_TRANSPORT", "stdio"), "stdio or http")
 	f.StringVar(&o.addr, "addr", app.Getenv("CODESYNAPSE_MCP_ADDR", "127.0.0.1:8090"), "Listen address for the http transport")
 	f.StringVar(&o.offline, "offline", "", "Serve an in-memory graph of this directory instead of Neo4j")
+	f.BoolVar(&o.catalog, "allow-catalog", app.Getenv("CODESYNAPSE_ALLOW_CATALOG", "true") == "true", "Enable architecture_propose and architecture_link (they write only proposals and links of the architecture catalog; proposals are never decisions)")
 	f.BoolVar(&o.memory, "allow-memory", app.Getenv("CODESYNAPSE_ALLOW_MEMORY", "true") == "true", "Enable the agent-memory tools upsert_graph_triples, search_graph_nodes and query_subgraph (writes only to the memory store)")
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", ""), "CodeSynapse API base URL; enables offload_turns (background triple extraction by the API's local model). Token from CODESYNAPSE_API_TOKEN")
 	f.BoolVar(&o.usage, "record-usage", app.Getenv("CODESYNAPSE_MCP_USAGE", "true") == "true", "Count sessions and tool calls per day, repository, tool and client for the Statistics page (never arguments or results)")
@@ -124,6 +126,9 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	var opts mcpserver.Options
 	if rs, ok := r.(store.ReviewStore); ok && o.reviews {
 		opts.Reviews = rs
+	}
+	if cs, ok := r.(store.CuratedStore); ok {
+		opts.Curated, opts.CatalogWrites = cs, o.catalog
 	}
 	if hs, ok := r.(store.HistoryStore); ok {
 		opts.History = hs

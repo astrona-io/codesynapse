@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/parisnakitakejser/codesynapse/internal/curation"
 	"github.com/parisnakitakejser/codesynapse/internal/history"
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
@@ -171,6 +172,21 @@ type HistoryStore interface {
 	DeleteSnapshots(ctx context.Context, repo string) error
 }
 
+// CuratedStore keeps what people and agents add to the architecture catalog
+// (package curation): proposals and links. Like reviews and history they live
+// apart from the code graph, so ReplaceRepo does not touch them; DeleteRepo
+// does not either, and the API removes them with the repository.
+type CuratedStore interface {
+	// SaveCurated inserts or replaces an item by (repo, ID).
+	SaveCurated(ctx context.Context, it curation.Item) error
+	GetCurated(ctx context.Context, repo, id string) (curation.Item, error)
+	// ListCurated returns items of repo, newest first; kind "" means every kind.
+	ListCurated(ctx context.Context, repo, kind string, limit int) ([]curation.Item, error)
+	DeleteCurated(ctx context.Context, repo, id string) error
+	// DeleteAllCurated removes every item of repo.
+	DeleteAllCurated(ctx context.Context, repo string) error
+}
+
 // MemoryStore persists agent memory (package memory): entities and facts per
 // repository, apart from repository graphs, which ReplaceRepo and DeleteRepo
 // never touch.
@@ -240,6 +256,7 @@ type Store interface {
 	Writer
 	ReviewStore
 	HistoryStore
+	CuratedStore
 	MemoryStore
 	UsageStore
 	Close(ctx context.Context) error

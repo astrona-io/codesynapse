@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/parisnakitakejser/codesynapse/internal/arch"
@@ -40,11 +41,27 @@ func code(repo string) *model.Graph {
 // ingest does, and returns a service fenced to the repository.
 func catalogOf(t *testing.T, repo string, files map[string]string, st *memory.Store) Service {
 	t.Helper()
+	return indexWith(t, repo, files, st)
+}
+
+// indexWith is catalogOf for a code graph without the nodes in drop, as after
+// a rename or a removal.
+func indexWith(t *testing.T, repo string, files map[string]string, st *memory.Store, drop ...string) Service {
+	t.Helper()
 	root := t.TempDir()
 	for rel, text := range files {
 		write(t, root, rel, text)
 	}
 	g := code(repo)
+	if len(drop) > 0 {
+		kept := model.NewGraph()
+		for _, n := range g.Nodes() {
+			if !slices.Contains(drop, n.ID) {
+				kept.AddNode(n)
+			}
+		}
+		g = kept
+	}
 	d, err := docs.Extract(context.Background(), repo, root, g)
 	require.NoError(t, err)
 	g.Merge(d)

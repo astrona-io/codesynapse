@@ -76,6 +76,16 @@ The catalog reports and never decides:
 
 All of them go through one service on a reader fenced to the repository the caller may read, so search, relationships and summaries cannot show another repository's records.
 
+## Proposals and links
+
+People and agents can add to the catalog without editing files, and none of it is a decision.
+
+- **Proposals.** A draft for a new ADR, RFC, standard or policy: title, text, topic, components, the records it would replace or relate to, and the code it would govern. It is stored apart from the repository's records, always with the draft status of its type (`proposed` for an ADR, `draft` for the others), is never binding and has no way to be marked accepted. Records it names must exist, and each code reference must name exactly one place. **Download file** gives the Markdown to commit (front matter with the draft status, the next free number and a suggested path); a person turns it into a decision by merging it with an accepted status. When a record with that title appears after a sync, the proposal is shown as merged. Proposals can be withdrawn and stay as history.
+- **Links.** *Implements* (a file, package or symbol carries out a record), *relates* (two records) and *applies-to* (a record governs a component). The record must exist and an implements target must name exactly one place. A link is shown beside what the file declares, labelled with who added it (the MCP client or the user); it counts for `architecture_context` like a declared one, can be removed, and is flagged "needs re-linking" if the code is renamed or removed instead of silently disappearing.
+- **Who and where.** Writing needs the Member role on the repository (viewers read). Proposals and links belong to the organisation that made them: two organisations that share one code graph never see each other's. Text is redacted and size-limited, every item records its client and user, and in accounts mode each MCP change is written to the audit log first (if that fails the change is refused). `--allow-catalog=false` (`CODESYNAPSE_ALLOW_CATALOG=false`) removes the two write tools; the web API keeps its own role checks.
+- **MCP.** `architecture_propose`, `architecture_link` and the read tool `architecture_proposals`. Agents are told to check proposals first, to say what they proposed, and that they cannot approve anything.
+- **API.** `GET/POST .../architecture/proposals`, `GET .../proposals/{id}`, `POST .../proposals/{id}/withdraw`, `GET .../proposals/{id}/export`, `GET/POST .../architecture/links`, `DELETE .../architecture/links/{id}`.
+
 ## Not in this version
 
-Creating proposals and links from the UI or by agents, annotations, code identity across renames, reuse records, dependency replacement analysis and the unified search are the next steps of the same plan (`docs/ARCHITECTURE_CATALOG_PLAN.md`).
+Annotations, code identity across renames, reuse records, dependency replacement analysis and the unified search are the next steps of the same plan (`docs/ARCHITECTURE_CATALOG_PLAN.md`).

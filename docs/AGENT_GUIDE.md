@@ -33,7 +33,7 @@ Rules for context efficiency:
 Locations are repo-relative. The graph reflects the last ingest; files edited since may differ.
 ```
 
-The source of truth is `Instructions` in `services/mcp/internal/mcpserver/server.go`. With memory enabled, rule 11 (memory) is appended.
+The source of truth is `Instructions` in `services/mcp/internal/mcpserver/server.go`. With the catalog write tools enabled, two sentences are added to rule 10 (agents may propose and link, a proposal is never a decision, search proposals first). With memory enabled, rule 11 (memory) is appended.
 
 Rule 9 makes agents look for existing code before they write any: exact searches first, then meaning, then the duplicate tools, with the current source read before reuse. Access is enforced by the tools themselves (an API key sees only its organisation's repositories); the rule only reminds the agent not to copy restricted code elsewhere and to keep licence and attribution. The `reuse-first` prompt (below) is the longer form of the same rule.
 
@@ -117,6 +117,7 @@ The prompt works for any language. It starts from what CodeSynapse already has (
 | Is it getting better? | `repo_trend` | `limit: 20` | The security grade and score, called vulnerabilities, serious findings, licence conflicts, duplicate and unused code, test reach and docs after each sync, and what got worse or better since the sync before. Check it after your change has been synced. |
 | Before designing or changing code | `architecture_context` | `files`, `symbols`, `components`, `task` | The rules in force (accepted ADRs, active standards) apart from background (proposals, drafts, overviews, superseded records), why each applies, and problems such as records that may conflict. Report conflicts to the user; never choose between decisions yourself. |
 | Find or read a decision | `architecture_search`, `architecture_get`, `architecture_issues` | `binding_only: true` for rules only | Records with status, whether they bind, supersession chain, the code that carries them out and the lines to read. |
+| Propose a decision or tie code to one | `architecture_proposals` first, then `architecture_propose` / `architecture_link` | `type`, `title`, `body`, `components`, `supersedes`, `implements` | A proposal is a draft (proposed or draft), never accepted, outside the repository until a person commits it as a file. Tell the user what you proposed. A link records that code carries out a record; it names exactly one place and is marked as yours. |
 | What to fix next | `cleanup_plan` | `limit: 10`, `kind` to focus | Ranked steps from the stored reports: delete dead code, remove or upgrade dependencies, licence conflicts, merge duplicates, test hotspots. Each has value, effort, safety, targets with file:line and how to verify. Take the first, check it, then Sync. |
 | Cleanup | `unused_code` | `min_confidence: "high"`, `security_only` | Unreachable/test-only code, unused modules, unused Helm values. |
 | Before writing a helper | `duplicate_code` | `scope: "repository"` | Groups of functions with the same structure (names and literals ignored), redundant lines and where each copy is. `kind: "near"` lists edited copies (with `similarity`). Reuse or merge instead of adding another copy. Go, Python, JavaScript, TypeScript and Vue. |
