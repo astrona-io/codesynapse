@@ -2,16 +2,20 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
+	"github.com/parisnakitakejser/codesynapse/internal/memory/extract"
+	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/offload"
 )
 
 // handleMemory lists a repository's agent memory for review in the UI.
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit")) //nolint:errcheck // bad values fall back to the default
-	g, err := s.st.SearchMemory(r.Context(), r.PathValue("repo"), r.URL.Query().Get("q"), store.ClampLimit(limit, 100))
+	g, err := s.st.SearchMemory(r.Context(), r.PathValue("repo"), r.URL.Query().Get("q"), store.ClampLimit(limit, 100), r.URL.Query().Get("history") == "true")
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -41,4 +45,53 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+type offloadRequest struct {
+	Turns  []extract.Turn `json:"turns"`
+	Source string         `json:"source"`
+}
+
+// handleOffload queues extraction of memory triples from conversation turns
+// and returns at once (202). Turns are held in memory until the job ran.
+func (s *Server) handleOffload(w http.ResponseWriter, r *http.Request) {
+	repo := r.PathValue("repo")
+	if _, err := s.st.Node(r.Context(), model.NodeID(repo, model.KindRepository, repo)); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			s.problem(w, 404, fmt.Errorf("repository %q is not indexed", repo))
+			return
+		}
+		s.problem(w, 500, err)
+		return
+	}
+	var req offloadRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		s.problem(w, 400, err)
+		return
+	}
+	job, err := s.offload.Submit(repo, req.Source, req.Turns)
+	switch {
+	case errors.Is(err, offload.ErrNoLocalModel):
+		s.problem(w, http.StatusConflict, err)
+	case errors.Is(err, offload.ErrBusy):
+		s.problem(w, http.StatusServiceUnavailable, err)
+	case err != nil:
+		s.problem(w, 400, err)
+	default:
+		writeJSON(w, http.StatusAccepted, job)
+	}
+}
+
+func (s *Server) handleOffloadJobs(w http.ResponseWriter, r *http.Request) {
+	_, err := s.offload.Provider()
+	writeJSON(w, 200, map[string]any{"jobs": s.offload.List(r.URL.Query().Get("repo")), "available": err == nil})
+}
+
+func (s *Server) handleOffloadJob(w http.ResponseWriter, r *http.Request) {
+	j, ok := s.offload.Get(r.PathValue("id"))
+	if !ok {
+		s.problem(w, 404, errors.New("no such memory extraction job"))
+		return
+	}
+	writeJSON(w, 200, j)
 }

@@ -46,6 +46,9 @@ type Options struct {
 	Memory store.MemoryStore
 	// Usage, when set, counts sessions, tool calls and prompt requests.
 	Usage *usage.Recorder
+	// Offload, with Memory, adds offload_turns: background extraction of
+	// triples from conversation turns by the API's local model.
+	Offload *OffloadClient
 }
 
 // New builds an MCP server backed by r.
@@ -80,6 +83,9 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	if len(opts) > 0 && opts[0].Memory != nil {
 		registerMemoryTools(s, h, opts[0].Memory)
 		registerMemoryPrompt(s)
+		if opts[0].Offload != nil {
+			registerOffloadTool(s, h, opts[0].Offload)
+		}
 	}
 	mcp.AddTool(s, add("file_outline", "Symbols and doc sections in a file with line ranges and signatures. Use before reading the file."), h.fileOutline)
 	mcp.AddTool(s, add("hotspots", "Functions ranked by complexity x file churn: where defects and review effort concentrate."), h.hotspots)
@@ -94,6 +100,7 @@ type handlers struct {
 	svc     query.Service
 	reviews store.ReviewStore
 	memory  store.MemoryStore
+	offload *OffloadClient
 }
 
 // repo resolves an optional repo argument: empty means "the only repo".

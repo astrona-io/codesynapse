@@ -26,6 +26,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/security"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
+	"github.com/parisnakitakejser/codesynapse/services/api/internal/offload"
 )
 
 const maxBodyBytes = 4 << 20
@@ -68,14 +69,16 @@ type Config struct {
 
 // Server is the API handler.
 type Server struct {
-	cfg    Config
-	st     store.Store
-	svc    query.Service
-	jobs   *Jobs
-	sched  *schedules
-	orgs   *orgs
-	logger *slog.Logger
-	mux    *http.ServeMux
+	cfg  Config
+	st   store.Store
+	svc  query.Service
+	jobs *Jobs
+	// offload extracts memory triples from conversation turns (local model only).
+	offload *offload.Worker
+	sched   *schedules
+	orgs    *orgs
+	logger  *slog.Logger
+	mux     *http.ServeMux
 	// cloneHook replaces the clone job for organisation repositories (tests).
 	cloneHook func(remote, name string) (Job, error)
 }
@@ -85,6 +88,8 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	s := &Server{cfg: cfg, st: st, svc: query.Service{R: st}, logger: logger, mux: http.NewServeMux()}
 	s.jobs = NewJobs(ctx, st, logger, cfg.CommitLimit, cfg.AllowNetwork, cfg.VulnScan)
 	s.jobs.licenseLookup = cfg.LicenseLookup
+	s.offload = offload.New(st, cfg.LLM, logger)
+	go s.offload.Run(ctx)
 	sched, err := loadSchedules(cfg.Workspace)
 	if err != nil {
 		logger.Error("auto-sync schedules unreadable; starting with none", "error", err)
@@ -149,6 +154,9 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/repos/{repo}/licenses", s.handleLicenses)
 	m.HandleFunc("GET /api/v1/repos/{repo}/memory", s.handleMemory)
 	m.HandleFunc("DELETE /api/v1/repos/{repo}/memory", s.handleDeleteMemory)
+	m.HandleFunc("POST /api/v1/repos/{repo}/memory/offload", s.handleOffload)
+	m.HandleFunc("GET /api/v1/memory/jobs", s.handleOffloadJobs)
+	m.HandleFunc("GET /api/v1/memory/jobs/{id}", s.handleOffloadJob)
 	m.HandleFunc("GET /api/v1/repos/{repo}/search", s.handleSearch)
 	m.HandleFunc("GET /api/v1/repos/{repo}/symbol", s.handleSymbol)
 	m.HandleFunc("GET /api/v1/repos/{repo}/outline", s.handleOutline)

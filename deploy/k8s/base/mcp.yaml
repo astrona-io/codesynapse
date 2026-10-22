@@ -37,6 +37,11 @@ spec:
               valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: NEO4J_PASSWORD}}
             - name: CODESYNAPSE_MCP_TOKEN
               valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: CODESYNAPSE_MCP_TOKEN}}
+            # offload_turns: the API extracts memory triples with a local model.
+            - name: CODESYNAPSE_API_URL
+              value: http://api:8080
+            - name: CODESYNAPSE_API_TOKEN
+              valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: CODESYNAPSE_API_TOKEN}}
           readinessProbe:
             httpGet: {path: /healthz, port: http}
             periodSeconds: 10

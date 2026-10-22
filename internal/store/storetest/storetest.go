@@ -229,7 +229,7 @@ func Run(t *testing.T, s store.Store) {
 		// The integration run uses a live database: leave no memory behind.
 		t.Cleanup(func() {
 			for _, repo := range []string{Repo, "other-repo"} {
-				g, err := s.SearchMemory(ctx, repo, "", store.MaxLimit)
+				g, err := s.SearchMemory(ctx, repo, "", store.MaxLimit, false)
 				if err != nil {
 					continue
 				}
@@ -254,7 +254,7 @@ func Run(t *testing.T, s store.Store) {
 		require.NoError(t, err)
 		require.NoError(t, s.UpsertMemory(ctx, other))
 
-		g, err := s.SearchMemory(ctx, Repo, "project alpha", 10)
+		g, err := s.SearchMemory(ctx, Repo, "project alpha", 10, false)
 		require.NoError(t, err)
 		assert.Equal(t, g.Notice, memory.Notice)
 		require.Len(t, g.Entities, 2)
@@ -267,18 +267,27 @@ func Run(t *testing.T, s store.Store) {
 		assert.Equal(t, g.Facts[0].CreatedAt, "2026-01-01T00:00:00Z")
 		assert.Equal(t, g.Facts[0].Source, "test-agent")
 
-		g, err = s.SearchMemory(ctx, Repo, "user", 10)
+		g, err = s.SearchMemory(ctx, Repo, "user", 10, false)
 		require.NoError(t, err)
-		require.Len(t, g.Facts, 1, "replace removed Dark mode; other-repo facts are separate")
+		require.Len(t, g.Facts, 1, "replace closed Dark mode; other-repo facts are separate")
 		assert.Equal(t, g.Facts[0].Object, memory.EntityID(Repo, "Light mode"))
+		assert.Equal(t, g.Facts[0].ValidFrom, "2026-01-01T02:00:00Z")
+		hist, err := s.SearchMemory(ctx, Repo, "user", 10, true)
+		require.NoError(t, err)
+		require.Len(t, hist.Facts, 2, "the replaced fact is kept as history")
+		for _, f := range hist.Facts {
+			if f.Object == memory.EntityID(Repo, "Dark mode") {
+				assert.Equal(t, f.ValidTo, "2026-01-01T02:00:00Z")
+			}
+		}
 
-		all, err := s.SearchMemory(ctx, Repo, "", 2)
+		all, err := s.SearchMemory(ctx, Repo, "", 2, false)
 		require.NoError(t, err)
 		require.True(t, len(all.Entities) >= 2)
 		assert.Equal(t, all.Entities[0].Name, "Light mode", "empty query: most recently updated first")
 
 		require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
-		sub, err := s.MemorySubgraph(ctx, Repo, []string{memory.EntityID(Repo, "fastapi")}, 1, 10)
+		sub, err := s.MemorySubgraph(ctx, Repo, []string{memory.EntityID(Repo, "fastapi")}, 1, 10, false)
 		require.NoError(t, err)
 		require.Len(t, sub.Facts, 1, "memory survives re-indexing")
 		assert.Len(t, sub.Entities, 2)
@@ -286,14 +295,81 @@ func Run(t *testing.T, s store.Store) {
 		require.NoError(t, s.DeleteMemoryFact(ctx, Repo, sub.Facts[0].ID))
 		assert.True(t, errors.Is(s.DeleteMemoryFact(ctx, Repo, sub.Facts[0].ID), store.ErrNotFound))
 		require.NoError(t, s.DeleteMemoryEntity(ctx, Repo, memory.EntityID(Repo, "User")))
-		g, err = s.SearchMemory(ctx, Repo, "user light", 10)
+		g, err = s.SearchMemory(ctx, Repo, "user light", 10, false)
 		require.NoError(t, err)
 		assert.Len(t, g.Facts, 0, "deleting an entity deletes its facts")
 		assert.True(t, errors.Is(s.DeleteMemoryEntity(ctx, "other-repo", memory.EntityID(Repo, "User")), store.ErrNotFound), "repositories are isolated")
 	})
 
+	t.Run("memory aliases and history", func(t *testing.T) {
+		t.Cleanup(func() {
+			if g, err := s.SearchMemory(ctx, Repo, "", store.MaxLimit, true); err == nil {
+				for _, e := range g.Entities {
+					_ = s.DeleteMemoryEntity(ctx, Repo, e.ID)
+				}
+			}
+		})
+		t0 := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+		save := func(at time.Time, triples ...memory.Triple) {
+			t.Helper()
+			b, err := memory.Prepare(Repo, triples, "agent", at)
+			require.NoError(t, err)
+			require.NoError(t, s.UpsertMemory(ctx, b))
+		}
+		// "me" and "I" are the speaker; User_1 starts as a separate entity.
+		save(t0, memory.Triple{Subject: "me", Predicate: "PREFERS", Object: "Tabs", Confidence: 0.6},
+			memory.Triple{Subject: "User_1", Predicate: "OWNS", Object: "billing"})
+		save(t0.Add(time.Hour), memory.Triple{Subject: "I", Predicate: "PREFERS", Object: "tabs", Confidence: 0.9})
+		// Declaring User_1 the same as the user merges it, facts included.
+		save(t0.Add(2*time.Hour), memory.Triple{Subject: "User_1", Predicate: "SAME_AS", Object: "User"})
+		// Later saves under the alias land on User.
+		save(t0.Add(3*time.Hour), memory.Triple{Subject: "user_1", Predicate: "REVIEWS", Object: "billing"})
+		// A fact and the alias for its subject in one call: the fact lands on the canonical entity.
+		save(t0.Add(3*time.Hour), memory.Triple{Subject: "Bob_2", Predicate: "MAINTAINS", Object: "billing"},
+			memory.Triple{Subject: "Bob_2", Predicate: "SAME_AS", Object: "Bob"})
+		bob, err := s.SearchMemory(ctx, Repo, "bob", 10, false)
+		require.NoError(t, err)
+		require.Len(t, bob.Facts, 1, "the fact survives its subject being declared an alias")
+		assert.Equal(t, bob.Facts[0].Subject, memory.EntityID(Repo, "Bob"))
+
+		g, err := s.SearchMemory(ctx, Repo, "user_1", 10, false)
+		require.NoError(t, err)
+		require.True(t, len(g.Entities) >= 1)
+		assert.Equal(t, g.Entities[0].Name, memory.Speaker, "found through its alias")
+		assert.Equal(t, g.Entities[0].Aliases, []string{"user_1"})
+		preds := map[string]memory.Fact{}
+		for _, f := range g.Facts {
+			assert.Equal(t, f.Subject, memory.EntityID(Repo, memory.Speaker))
+			preds[f.Predicate] = f
+		}
+		assert.Equal(t, len(preds), 3, "PREFERS, the merged OWNS and REVIEWS")
+		assert.Equal(t, preds["PREFERS"].Confirmations, 2)
+		assert.Equal(t, preds["PREFERS"].Confidence, 0.9, "confidence keeps the maximum")
+		_, gone := findEntity(ctx, s, Repo, "user_1")
+		assert.False(t, gone, "the duplicate entity was merged away")
+
+		// Replace, then save the old value again: it reopens.
+		save(t0.Add(4*time.Hour), memory.Triple{Subject: "User", Predicate: "PREFERS", Object: "Spaces", Replace: true})
+		save(t0.Add(5*time.Hour), memory.Triple{Subject: "User", Predicate: "PREFERS", Object: "Tabs", Replace: true})
+		h, err := s.SearchMemory(ctx, Repo, "user", 10, true)
+		require.NoError(t, err)
+		for _, f := range h.Facts {
+			switch f.Object {
+			case memory.EntityID(Repo, "Tabs"):
+				assert.True(t, f.Current())
+				assert.Equal(t, f.ValidFrom, "2026-03-01T05:00:00Z", "reopened facts are valid from the new save")
+			case memory.EntityID(Repo, "Spaces"):
+				assert.Equal(t, f.ValidTo, "2026-03-01T05:00:00Z")
+			}
+		}
+	})
+
 	t.Run("memory stats", func(t *testing.T) {
-		t.Cleanup(func() { _ = s.DeleteMemoryEntity(ctx, Repo, memory.EntityID(Repo, "Team")) })
+		t.Cleanup(func() {
+			for _, name := range []string{"Team", "api"} {
+				_ = s.DeleteMemoryEntity(ctx, Repo, memory.EntityID(Repo, name))
+			}
+		})
 		b, err := memory.Prepare(Repo, []memory.Triple{{Subject: "Team", Predicate: "OWNS", Object: "api"}}, "agent-a", time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
 		require.NoError(t, err)
 		require.NoError(t, s.UpsertMemory(ctx, b))
@@ -355,4 +431,19 @@ func findRepo(ctx context.Context, t *testing.T, s store.Store) (model.Node, boo
 		}
 	}
 	return model.Node{}, false
+}
+
+// findEntity reports whether repo's memory has an entity with this exact
+// normalised ID name.
+func findEntity(ctx context.Context, s store.Store, repo, name string) (memory.Entity, bool) {
+	g, err := s.SearchMemory(ctx, repo, "", store.MaxLimit, true)
+	if err != nil {
+		return memory.Entity{}, false
+	}
+	for _, e := range g.Entities {
+		if e.ID == memory.EntityID(repo, name) {
+			return e, true
+		}
+	}
+	return memory.Entity{}, false
 }

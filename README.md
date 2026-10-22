@@ -164,7 +164,14 @@ Tips: pass `diff` rather than refs whenever you have it, since it works even whe
 
 **Statistics.** The **Statistics** page shows MCP sessions and tool calls per day, the most used tools, clients and repositories, tokens served and an estimate of tokens avoided, agent memory use with a model of what offloading saves, and workspace-wide security, licence, update-automation, review, AI and sync figures. The MCP server records only daily counters (never arguments or results); turn it off with `CODESYNAPSE_MCP_USAGE=false`.
 
-**Agent memory.** Agents can offload durable facts from their context window as triples (`upsert_graph_triples`) and recall them in later sessions (`search_graph_nodes`, `query_subgraph`, prompt `context-offload`). Facts are scoped to one indexed repository, redacted, size-limited, tagged with the agent that saved them, and listed on the **Agent memory** page, where you can delete them. Turn it off with `CODESYNAPSE_ALLOW_MEMORY=false`.
+**Agent memory.** Agents can offload durable facts from their context window as triples (`upsert_graph_triples`, or `offload_turns` to let a local model extract them in the background) and recall them in later sessions (`search_graph_nodes`, `query_subgraph`, prompt `context-offload`). Facts are scoped to one indexed repository, merged by name and alias (`me`, `I` and `user` are the same person; `SAME_AS` joins two names), keep history when they change (`valid_from` / `valid_to`), carry a confidence, are redacted, size-limited and tagged with the agent that saved them, and are listed on the **Agent memory** page, where you can delete them. Turn it off with `CODESYNAPSE_ALLOW_MEMORY=false`.
+
+#### Make agents use memory automatically
+
+1. **Nothing to do for the basics.** Memory is on by default, and every agent connected to the MCP server (`just mcp`) receives instructions to recall at the start of a task and save decisions and preferences as they come up.
+2. **Repository instructions** (for agents that follow AGENTS.md more closely than server instructions): `codesynapse mcp agents-md ~/src/your-repo` adds a marked memory block to AGENTS.md (and CLAUDE.md if it does not import AGENTS.md). Re-running updates the block; commit it.
+3. **Claude Code hooks** (fully automatic recall and offloading): in the CodeSynapse folder run `export CODESYNAPSE_API_TOKEN=$(sed -n 's/^CODESYNAPSE_API_TOKEN=//p' .env)`, then `codesynapse mcp hooks ~/src/your-repo`. At session start the saved facts are put into context; before Claude Code compacts, turns older than the last 10 exchanges go to background extraction. Hooks go to `.claude/settings.local.json` (use `--shared` for the committed `settings.json`); remove them there to turn them off.
+4. **Background extraction needs a local model:** route the "memory" task to a local provider (Ollama, MLX, LM Studio) on the **AI models** page. Without one, `offload_turns` explains this and agents save triples themselves.
 
 | Tool | Returns |
 |---|---|

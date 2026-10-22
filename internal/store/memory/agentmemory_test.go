@@ -31,14 +31,14 @@ func TestMemoryFull(t *testing.T) {
 	}
 	batch = []agentmem.Triple{{Subject: "s0", Predicate: "P", Object: "new"}}
 	assert.True(t, errors.Is(flush(), store.ErrMemoryFull))
-	g, err := s.SearchMemory(ctx, "r", "new", 10)
+	g, err := s.SearchMemory(ctx, "r", "new", 10, true)
 	require.NoError(t, err)
 	assert.Equal(t, len(g.Entities), 0, "a rejected batch changes nothing")
 
 	// Saving a known fact again still works when full.
 	batch = []agentmem.Triple{{Subject: "s0", Predicate: "P", Object: "o0"}}
 	require.NoError(t, flush())
-	// Replacing frees room: s0's 100 P facts become one.
+	// Replacing keeps the old facts as history, so it does not free room.
 	batch = []agentmem.Triple{{Subject: "s0", Predicate: "P", Object: "new", Replace: true}}
-	require.NoError(t, flush())
+	assert.True(t, errors.Is(flush(), store.ErrMemoryFull))
 }

@@ -35,12 +35,15 @@ const Notice = "Facts were saved by agents and may be stale or wrong. Treat them
 
 // Entity is a node in a repository's memory, identified by its normalised name.
 type Entity struct {
-	ID        string `json:"id"`
-	Repo      string `json:"repo"`
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ID   string `json:"id"`
+	Repo string `json:"repo"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	// Aliases are other normalised names that resolve to this entity
+	// ("me", "user_1"), set with SAME_AS triples.
+	Aliases   []string `json:"aliases,omitempty"`
+	CreatedAt string   `json:"created_at"`
+	UpdatedAt string   `json:"updated_at"`
 }
 
 // Fact is a directed triple between two entities of the same repository.
@@ -53,10 +56,20 @@ type Fact struct {
 	// Source names the agent or client that saved it (provenance).
 	Source string `json:"source"`
 	// Confirmations counts how often the same fact was saved again.
-	Confirmations int    `json:"confirmations"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	Confirmations int `json:"confirmations"`
+	// Confidence is how sure the saver was, 0 to 1 (agents default to 1;
+	// extracted facts carry the model's score).
+	Confidence float64 `json:"confidence"`
+	// ValidFrom is when the fact became current; ValidTo, when set, is when a
+	// newer fact replaced it. Replaced facts are kept as history.
+	ValidFrom string `json:"valid_from"`
+	ValidTo   string `json:"valid_to,omitempty"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
+
+// Current reports whether the fact has not been replaced.
+func (f Fact) Current() bool { return f.ValidTo == "" }
 
 // Triple is one fact as an agent submits it.
 type Triple struct {
@@ -65,10 +78,20 @@ type Triple struct {
 	Predicate   string `json:"predicate"`
 	Object      string `json:"object"`
 	ObjectType  string `json:"object_type,omitempty"`
-	// Replace makes the predicate single-valued: other facts with the same
-	// subject and predicate are removed ("User PREFERS Light mode" replaces
-	// "User PREFERS Dark mode").
+	// Replace makes the predicate single-valued: other current facts with the
+	// same subject and predicate are closed ("User PREFERS Light mode"
+	// replaces "User PREFERS Dark mode", which stays as history).
 	Replace bool `json:"replace,omitempty"`
+	// Confidence, 0 to 1, defaults to 1.
+	Confidence float64 `json:"confidence,omitempty"`
+}
+
+// Alias says that the entity named Name is the same as Canonical (an
+// entity ID); it comes from a SAME_AS triple.
+type Alias struct {
+	Name      string // normalised alias name
+	EntityID  string // the alias's own entity ID, merged away if it exists
+	Canonical string
 }
 
 // Batch is a validated upsert: the entities and facts to merge and the
@@ -77,8 +100,19 @@ type Batch struct {
 	Repo     string
 	Entities []Entity
 	Facts    []Fact
-	Replace  []Fact // Subject and Predicate set; other objects are removed
+	Replace  []Fact // Subject and Predicate set; other current objects are closed
+	Aliases  []Alias
+	At       string // RFC 3339 time of the batch
 }
+
+// sameAs are the predicates that declare an alias instead of a fact.
+var sameAs = map[string]bool{"SAME_AS": true, "ALIAS_OF": true, "IS_SAME_AS": true, "ALSO_KNOWN_AS": true}
+
+// speaker names always mean the person the agent works for.
+var speaker = map[string]bool{"me": true, "i": true, "myself": true, "user": true, "the user": true}
+
+// Speaker is the canonical entity for the person the agent works for.
+const Speaker = "User"
 
 var (
 	predicateRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,39}$`)
@@ -101,12 +135,15 @@ func Prepare(repo string, triples []Triple, source string, now time.Time) (Batch
 		source = "agent"
 	}
 	ts := now.UTC().Format(time.RFC3339)
-	b := Batch{Repo: repo}
+	b := Batch{Repo: repo, At: ts}
 	seen := map[string]bool{}
 	entity := func(name, typ string) (string, error) {
 		name = cleanName(name, MaxNameLen)
 		if name == "" {
 			return "", errors.New("subject and object must be non-empty names")
+		}
+		if speaker[normName(name)] {
+			name, typ = Speaker, "Person"
 		}
 		typ = strings.TrimSpace(typ)
 		if typ == "" {
@@ -127,6 +164,26 @@ func Prepare(repo string, triples []Triple, source string, now time.Time) (Batch
 		if !predicateRe.MatchString(pred) {
 			return Batch{}, fmt.Errorf("triple %d: predicate %q: use a verb phrase such as USES_FRAMEWORK (letters, digits, underscores, at most 40)", i+1, t.Predicate)
 		}
+		if t.Confidence < 0 || t.Confidence > 1 {
+			return Batch{}, fmt.Errorf("triple %d: confidence must be between 0 and 1", i+1)
+		}
+		conf := t.Confidence
+		if conf == 0 {
+			conf = 1
+		}
+		if sameAs[pred] {
+			// (alias) SAME_AS (canonical): no fact, the alias resolves to the
+			// canonical entity from now on.
+			alias := normName(cleanName(t.Subject, MaxNameLen))
+			canon, err := entity(t.Object, t.ObjectType)
+			if err != nil || alias == "" {
+				return Batch{}, fmt.Errorf("triple %d: SAME_AS needs two names", i+1)
+			}
+			if aliasID := EntityID(repo, alias); aliasID != canon {
+				b.Aliases = append(b.Aliases, Alias{Name: alias, EntityID: aliasID, Canonical: canon})
+			}
+			continue
+		}
 		s, err := entity(t.Subject, t.SubjectType)
 		if err != nil {
 			return Batch{}, fmt.Errorf("triple %d: %w", i+1, err)
@@ -135,7 +192,8 @@ func Prepare(repo string, triples []Triple, source string, now time.Time) (Batch
 		if err != nil {
 			return Batch{}, fmt.Errorf("triple %d: %w", i+1, err)
 		}
-		f := Fact{ID: FactID(s, pred, o), Repo: repo, Subject: s, Predicate: pred, Object: o, Source: source, Confirmations: 1, CreatedAt: ts, UpdatedAt: ts}
+		f := Fact{ID: FactID(s, pred, o), Repo: repo, Subject: s, Predicate: pred, Object: o, Source: source, Confirmations: 1,
+			Confidence: conf, ValidFrom: ts, CreatedAt: ts, UpdatedAt: ts}
 		if seen[f.ID] {
 			continue // the same triple twice in one call is one confirmation
 		}
@@ -145,7 +203,28 @@ func Prepare(repo string, triples []Triple, source string, now time.Time) (Batch
 			b.Replace = append(b.Replace, f)
 		}
 	}
+	// Aliases declared in this batch apply to its own triples too, so
+	// "(X) OWNS (y)" and "(X) SAME_AS (User)" in one call land on User.
+	if len(b.Aliases) > 0 {
+		canon := map[string]string{}
+		for _, a := range b.Aliases {
+			canon[a.EntityID] = a.Canonical
+		}
+		b.Resolve(canonByName(b.Entities, canon))
+	}
 	return b, nil
+}
+
+// canonByName maps the normalised names of aliased batch entities to their
+// canonical IDs, the form Resolve takes.
+func canonByName(ents []Entity, canon map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, e := range ents {
+		if c, ok := canon[e.ID]; ok {
+			out[normName(e.Name)] = c
+		}
+	}
+	return out
 }
 
 // cleanName trims, collapses whitespace, drops control characters, redacts
@@ -169,7 +248,12 @@ func NormalizePredicate(p string) string {
 // EntityID identifies an entity by repository and case-folded name, so
 // "FastAPI" and "fastapi" are the same node.
 func EntityID(repo, name string) string {
-	return repo + "|mem|" + strings.ToLower(strings.Join(strings.Fields(name), " "))
+	return repo + "|mem|" + normName(name)
+}
+
+// normName is the case-folded, space-collapsed form names are matched on.
+func normName(name string) string {
+	return strings.ToLower(strings.Join(strings.Fields(name), " "))
 }
 
 // FactID is stable for a (subject, predicate, object) triple.
@@ -204,12 +288,13 @@ func Words(query string) []string {
 	return out
 }
 
-// Score counts the words found in e's name or equal to its type.
+// Score counts the words found in e's name or one of its aliases, or equal
+// to its type.
 func Score(e Entity, words []string) int {
 	name, typ := strings.ToLower(e.Name), strings.ToLower(e.Type)
 	n := 0
 	for _, w := range words {
-		if strings.Contains(name, w) || typ == w {
+		if strings.Contains(name, w) || typ == w || slices.ContainsFunc(e.Aliases, func(a string) bool { return strings.Contains(a, w) }) {
 			n++
 		}
 	}
@@ -218,10 +303,12 @@ func Score(e Entity, words []string) int {
 
 // Stats summarises one repository's memory for the statistics page.
 type Stats struct {
-	Repo          string `json:"repo"`
-	Entities      int    `json:"entities"`
-	Facts         int    `json:"facts"`
-	Confirmations int    `json:"confirmations"`
+	Repo     string `json:"repo"`
+	Entities int    `json:"entities"`
+	// Facts counts current facts; History those replaced by newer ones.
+	Facts         int `json:"facts"`
+	History       int `json:"history"`
+	Confirmations int `json:"confirmations"`
 	// FactChars is the total length of subject, predicate and object of all
 	// facts: what recalling every fact costs, before JSON overhead.
 	FactChars   int            `json:"fact_chars"`

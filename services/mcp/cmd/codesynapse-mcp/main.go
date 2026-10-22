@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -43,6 +44,7 @@ type serveOptions struct {
 	reviews   bool
 	memory    bool
 	usage     bool
+	apiURL    string
 }
 
 func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -52,6 +54,7 @@ func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.addr, "addr", app.Getenv("CODESYNAPSE_MCP_ADDR", "127.0.0.1:8090"), "Listen address for the http transport")
 	f.StringVar(&o.offline, "offline", "", "Serve an in-memory graph of this directory instead of Neo4j")
 	f.BoolVar(&o.memory, "allow-memory", app.Getenv("CODESYNAPSE_ALLOW_MEMORY", "true") == "true", "Enable the agent-memory tools upsert_graph_triples, search_graph_nodes and query_subgraph (writes only to the memory store)")
+	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", ""), "CodeSynapse API base URL; enables offload_turns (background triple extraction by the API's local model). Token from CODESYNAPSE_API_TOKEN")
 	f.BoolVar(&o.usage, "record-usage", app.Getenv("CODESYNAPSE_MCP_USAGE", "true") == "true", "Count sessions and tool calls per day, repository, tool and client for the Statistics page (never arguments or results)")
 	f.BoolVar(&o.reviews, "allow-reviews", app.Getenv("CODESYNAPSE_MCP_REVIEWS", "true") == "true", "Enable submit_review/update_review_comment (writes only to the review store)")
 	return nil
@@ -60,6 +63,12 @@ func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 func (o *serveOptions) Complete(context.Context, *app.Env) error { return nil }
 
 func (o *serveOptions) Validate(_ context.Context, _ *app.Env) error {
+	if o.apiURL != "" {
+		u, err := url.Parse(o.apiURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+			return fmt.Errorf("--api-url must be an http(s) URL without credentials, e.g. http://api:8080")
+		}
+	}
 	switch o.transport {
 	case "stdio":
 		return nil
@@ -111,6 +120,9 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	}
 	if ms, ok := r.(store.MemoryStore); ok && o.memory {
 		opts.Memory = ms
+		if o.apiURL != "" {
+			opts.Offload = &mcpserver.OffloadClient{BaseURL: o.apiURL, Token: os.Getenv("CODESYNAPSE_API_TOKEN")}
+		}
 	}
 	if us, ok := r.(store.UsageStore); ok && o.usage {
 		opts.Usage = usage.NewRecorder(us)
