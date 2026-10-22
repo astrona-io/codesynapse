@@ -300,3 +300,13 @@ web-check:
 
 # Everything CI runs
 ci: lint test web-check
+
+# --- docs (mkdocs) ------------------------------------------------------------
+
+# Serve the docs with live reload on http://localhost:8000 (needs uv)
+docs:
+    uvx --with-requirements docs/requirements.txt mkdocs serve -a localhost:8000
+
+# Build the docs into site/, failing on broken links and nav
+docs-build:
+    uvx --with-requirements docs/requirements.txt mkdocs build --strict
