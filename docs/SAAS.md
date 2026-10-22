@@ -57,7 +57,10 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
 ## Phases
 
 1. **Accounts and audit** (done): PostgreSQL with embedded migrations; users, organisations, memberships, sessions, API keys; the hash-chained audit log with export and verification; signup (first user is platform admin), login, logout, `me`, organisations and members, personal API keys; auth middleware accepting session, API key or the legacy service token; single-tenant mode unchanged without a database.
-2. **Tenant scoping**: repository registry in PostgreSQL; organisation scope on every API route and MCP tool (from the API key); graph de-duplication; reviews to PostgreSQL; memory and usage per organisation.
+2. **Tenant scoping**, in three parts:
+   - **2a (done):** repository registry in PostgreSQL (`repositories`: organisation, graph, remote, visibility); every API route carries an authorisation policy; lists, overview, statistics and jobs show the organisation's repositories only; other organisations' repositories, reviews and jobs answer 404; an organisation adding an already indexed public repository is linked to the existing graph (de-duplication); organisations add public repositories only, cloned without the installation's tokens; deleting removes the link and the graph with the last link; platform admins attach graphs indexed before accounts (`POST /api/v1/accounts/orgs/{org}/repos`).
+   - **2b:** the MCP server authenticates personal API keys and scopes every tool to the key's organisation; memory, reviews and usage counters per organisation.
+   - **2c:** organisation settings: Git tokens per host, encrypted at rest, which also allow private repositories (shared only after the organisation proves access with its own token).
 3. **New web app**: the product structure above, login and signup, settings, agent onboarding.
 4. **Admin and statistics**: platform admin area, cross-tenant statistics, per-organisation statistics.
 5. **Production on Kubernetes**: PostgreSQL (operator or managed), secrets, ingress with TLS, horizontal scaling of API and MCP, backups, upgrade notes.

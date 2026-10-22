@@ -217,6 +217,9 @@ func (s *Server) buildStats(ctx context.Context, days int, now time.Time) (Stats
 	if err != nil {
 		return st, err
 	}
+	if sc := scopeFrom(ctx); !sc.all {
+		buckets = slices.DeleteFunc(buckets, func(b usage.Bucket) bool { return !sc.sees(b.Repo) })
+	}
 	st.Agents = agentStats(buckets, days, now, ratio, workspaceRatio)
 
 	if st.Memory, err = s.memoryStats(ctx, buckets, st.Agents.Sessions); err != nil {
@@ -364,7 +367,11 @@ func (s *Server) memoryStats(ctx context.Context, buckets []usage.Bucket, sessio
 		return m, err
 	}
 	chars := 0
+	sc := scopeFrom(ctx)
 	for _, r := range repos {
+		if !sc.sees(r.Repo) {
+			continue
+		}
 		m.Repos = append(m.Repos, r)
 		m.Entities += r.Entities
 		m.Facts += r.Facts

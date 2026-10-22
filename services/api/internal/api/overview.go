@@ -111,6 +111,7 @@ func (s *Server) buildOverview(ctx context.Context) (Overview, error) {
 	if err != nil {
 		return Overview{}, err
 	}
+	repos = visibleRepos(ctx, repos)
 	now := time.Now()
 	ov := Overview{
 		GeneratedAt: now.UTC().Format(time.RFC3339),

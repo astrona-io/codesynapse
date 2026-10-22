@@ -23,6 +23,7 @@ type Store struct {
 	keys     map[string]accounts.APIKey // by ID
 	events   []accounts.Event
 	lastID   int64
+	repos    map[string]accounts.Repository // org|graph
 }
 
 type member struct {
@@ -35,7 +36,7 @@ var _ accounts.Store = (*Store)(nil)
 // New returns an empty store.
 func New() *Store {
 	return &Store{users: map[string]accounts.User{}, orgs: map[string]accounts.Org{}, members: map[string]map[string]member{},
-		sessions: map[string]accounts.Session{}, keys: map[string]accounts.APIKey{}}
+		sessions: map[string]accounts.Session{}, keys: map[string]accounts.APIKey{}, repos: map[string]accounts.Repository{}}
 }
 
 // Migrate implements accounts.Store.
@@ -383,6 +384,64 @@ func (s *Store) PruneEvents(_ context.Context, before time.Time) (int, error) {
 	}
 	s.events = keep
 	return n, nil
+}
+
+// AddRepository implements accounts.Store.
+func (s *Store) AddRepository(_ context.Context, r accounts.Repository) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.orgs[r.OrgID]; !ok {
+		return fmt.Errorf("organisation: %w", accounts.ErrNotFound)
+	}
+	k := r.OrgID + "|" + r.Graph
+	if _, ok := s.repos[k]; ok {
+		return fmt.Errorf("repository: %w", accounts.ErrExists)
+	}
+	s.repos[k] = r
+	return nil
+}
+
+// RemoveRepository implements accounts.Store.
+func (s *Store) RemoveRepository(_ context.Context, orgID, graph string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := orgID + "|" + graph
+	if _, ok := s.repos[k]; !ok {
+		return 0, fmt.Errorf("repository: %w", accounts.ErrNotFound)
+	}
+	delete(s.repos, k)
+	n := 0
+	for _, r := range s.repos {
+		if r.Graph == graph {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// OrgRepositories implements accounts.Store (by graph).
+func (s *Store) OrgRepositories(_ context.Context, orgID string) ([]accounts.Repository, error) {
+	return s.reposWhere(func(r accounts.Repository) bool { return r.OrgID == orgID }), nil
+}
+
+// GraphRepositories implements accounts.Store (by organisation).
+func (s *Store) GraphRepositories(_ context.Context, graph string) ([]accounts.Repository, error) {
+	return s.reposWhere(func(r accounts.Repository) bool { return r.Graph == graph }), nil
+}
+
+func (s *Store) reposWhere(keep func(accounts.Repository) bool) []accounts.Repository {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []accounts.Repository{}
+	for _, r := range s.repos {
+		if keep(r) {
+			out = append(out, r)
+		}
+	}
+	slices.SortFunc(out, func(a, b accounts.Repository) int {
+		return cmp.Or(cmp.Compare(a.Graph, b.Graph), cmp.Compare(a.OrgID, b.OrgID))
+	})
+	return out
 }
 
 // public drops the password hash, which never leaves the store in a membership.

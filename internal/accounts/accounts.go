@@ -79,6 +79,23 @@ type APIKey struct {
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 }
 
+// Visibility of a repository entry.
+const (
+	Public  = "public"  // anyone may add it; its graph is shared
+	Private = "private" // added with credentials; shared only after proof of access
+	Local   = "local"   // a mounted folder (platform admins)
+)
+
+// Repository is an organisation's entry for a graph.
+type Repository struct {
+	OrgID      string    `json:"org_id"`
+	Graph      string    `json:"graph"`
+	Remote     string    `json:"remote,omitempty"`
+	Visibility string    `json:"visibility"`
+	AddedBy    string    `json:"added_by,omitempty"`
+	AddedAt    time.Time `json:"added_at"`
+}
+
 // Event is an audit log entry. Entries form a hash chain (see audit.go):
 // each Hash covers the entry and the previous entry's Hash, so a changed or
 // removed entry is detectable.
@@ -161,6 +178,15 @@ type Store interface {
 	ListAPIKeys(ctx context.Context, userID string) ([]APIKey, error)
 	RevokeAPIKey(ctx context.Context, userID, keyID string, at time.Time) error // ErrNotFound for others' keys
 	TouchAPIKey(ctx context.Context, keyID string, at time.Time) error
+
+	// AddRepository links a graph to an organisation (ErrExists if linked).
+	AddRepository(ctx context.Context, r Repository) error
+	// RemoveRepository unlinks it and returns how many organisations still
+	// reference the graph.
+	RemoveRepository(ctx context.Context, orgID, graph string) (int, error)
+	OrgRepositories(ctx context.Context, orgID string) ([]Repository, error)
+	// GraphRepositories lists every organisation's entry for a graph.
+	GraphRepositories(ctx context.Context, graph string) ([]Repository, error)
 
 	// AddEvent appends e to the audit chain: under a lock, it sets
 	// e.PrevHash to the last entry's hash and e.Hash = e.ChainHash().

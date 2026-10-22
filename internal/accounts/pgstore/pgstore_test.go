@@ -23,7 +23,7 @@ func TestContract(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(st.Close)
 	// Start from an empty schema: the contract creates fixed emails.
-	_, err = st.db.Exec(ctx, "DROP TABLE IF EXISTS audit_head, events, api_keys, sessions, memberships, orgs, users, schema_migrations CASCADE")
+	_, err = st.db.Exec(ctx, "DROP TABLE IF EXISTS repositories, audit_head, events, api_keys, sessions, memberships, orgs, users, schema_migrations CASCADE")
 	require.NoError(t, err)
 	accountstest.Run(t, st)
 	accountstest.RunConcurrentAudit(t, st)

@@ -101,7 +101,10 @@ func TestAccountsFlow(t *testing.T) {
 	acc.SignupOpen = true
 	bob := newClient(t, ts)
 	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 201)
-	assert.Equal(t, bob.do("GET", "/api/v1/repos", "", nil), 403, "ordinary users do not see unscoped repository data")
+	var bobRepos struct{ Repos []map[string]any }
+	require.Equal(t, bob.do("GET", "/api/v1/repos", "", &bobRepos), 200)
+	assert.Equal(t, len(bobRepos.Repos), 0, "ordinary users see only their organisations' repositories (none yet)")
+	assert.Equal(t, bob.do("GET", "/api/v1/repos/"+storetest.Repo+"/overview", "", nil), 404)
 	assert.Equal(t, bob.do("GET", "/api/v1/admin/users", "", nil), 403)
 	assert.Equal(t, bob.do("GET", "/api/v1/accounts/orgs/"+signed.Org.Slug+"/members", "", nil), 404, "other organisations are invisible")
 	assert.Equal(t, bob.do("POST", "/api/v1/accounts/orgs", `{"name":"Platform Team"}`, nil, "Origin", "https://evil.example"), 403, "cross-origin cookie writes are refused")

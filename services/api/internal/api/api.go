@@ -157,13 +157,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) routes() {
-	m := s.mux
-	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
-	m.HandleFunc("GET /api/v1/version", func(w http.ResponseWriter, _ *http.Request) {
+	s.route("GET /healthz", anyone, func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
+	s.route("GET /api/v1/version", anyone, func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]string{"version": s.cfg.Version})
 	})
 	// Settings report what is configured, never full secret values.
-	m.HandleFunc("GET /api/v1/settings", func(w http.ResponseWriter, _ *http.Request) {
+	s.route("GET /api/v1/settings", anyone, func(w http.ResponseWriter, _ *http.Request) {
 		tokens := s.gitTokens()
 		hosts := make([]string, len(tokens))
 		for i, t := range tokens {
@@ -183,64 +182,64 @@ func (s *Server) routes() {
 			"sources_root":         s.cfg.SourcesRoot != "",
 		})
 	})
-	m.HandleFunc("GET /api/v1/repos", s.handleRepos)
+	s.route("GET /api/v1/repos", visibleOnly, s.handleRepos)
 	s.accountRoutes()
-	m.HandleFunc("GET /api/v1/overview", s.handleWorkspaceOverview)
-	m.HandleFunc("GET /api/v1/stats", s.handleStats)
-	m.HandleFunc("DELETE /api/v1/repos/{repo}", s.handleDeleteRepo)
-	m.HandleFunc("GET /api/v1/repos/{repo}/overview", s.handleOverview)
-	m.HandleFunc("GET /api/v1/repos/{repo}/dashboard", s.handleDashboard)
-	m.HandleFunc("GET /api/v1/repos/{repo}/metrics", s.handleMetrics)
-	m.HandleFunc("GET /api/v1/repos/{repo}/security", s.handleSecurity)
-	m.HandleFunc("GET /api/v1/repos/{repo}/cleanup", s.handleCleanup)
-	m.HandleFunc("GET /api/v1/repos/{repo}/licenses", s.handleLicenses)
-	m.HandleFunc("GET /api/v1/repos/{repo}/memory", s.handleMemory)
-	m.HandleFunc("DELETE /api/v1/repos/{repo}/memory", s.handleDeleteMemory)
-	m.HandleFunc("POST /api/v1/repos/{repo}/memory/offload", s.handleOffload)
-	m.HandleFunc("POST /api/v1/repos/{repo}/memory/recall", s.handleRecall)
-	m.HandleFunc("GET /api/v1/memory/status", s.handleMemoryStatus)
-	m.HandleFunc("GET /api/v1/memory/jobs", s.handleOffloadJobs)
-	m.HandleFunc("GET /api/v1/memory/jobs/{id}", s.handleOffloadJob)
-	m.HandleFunc("GET /api/v1/repos/{repo}/search", s.handleSearch)
-	m.HandleFunc("GET /api/v1/repos/{repo}/symbol", s.handleSymbol)
-	m.HandleFunc("GET /api/v1/repos/{repo}/outline", s.handleOutline)
-	m.HandleFunc("GET /api/v1/repos/{repo}/list", s.handleList)
-	m.HandleFunc("GET /api/v1/repos/{repo}/hotspots", s.handleHotspots)
-	m.HandleFunc("GET /api/v1/repos/{repo}/graph", s.handleGraph)
-	m.HandleFunc("GET /api/v1/repos/{repo}/packages/graph", s.handlePackageGraph)
-	m.HandleFunc("GET /api/v1/repos/{repo}/graph/overview", s.handleGraphOverview)
-	m.HandleFunc("GET /api/v1/repos/{repo}/graph/expand", s.handleGraphExpand)
-	m.HandleFunc("POST /api/v1/repos/{repo}/graph/edges", s.handleGraphEdges)
-	m.HandleFunc("POST /api/v1/repos/{repo}/impact", s.handleImpact)
-	m.HandleFunc("GET /api/v1/sources", s.handleSources)
-	m.HandleFunc("POST /api/v1/ingest", s.handleIngest)
-	m.HandleFunc("POST /api/v1/repos", s.handleRegister)
-	m.HandleFunc("GET /api/v1/orgs", s.handleListOrgs)
-	m.HandleFunc("POST /api/v1/orgs", s.handleAddOrg)
-	m.HandleFunc("PUT /api/v1/orgs/{org}", s.handleUpdateOrg)
-	m.HandleFunc("DELETE /api/v1/orgs/{org}", s.handleDeleteOrg)
-	m.HandleFunc("POST /api/v1/orgs/{org}/scan", s.handleScanOrg)
-	m.HandleFunc("POST /api/v1/orgs/{org}/repos/{name}/index", s.handleIndexOrgRepo)
-	m.HandleFunc("POST /api/v1/repos/{repo}/sync", s.handleSync)
-	m.HandleFunc("GET /api/v1/repos/{repo}/schedule", s.handleGetSchedule)
-	m.HandleFunc("PUT /api/v1/repos/{repo}/schedule", s.handlePutSchedule)
-	m.HandleFunc("GET /api/v1/repos/{repo}/branches", s.handleBranches)
-	m.HandleFunc("GET /api/v1/rules", func(w http.ResponseWriter, _ *http.Request) {
+	s.route("GET /api/v1/overview", visibleOnly, s.handleWorkspaceOverview)
+	s.route("GET /api/v1/stats", visibleOnly, s.handleStats)
+	s.route("DELETE /api/v1/repos/{repo}", repoRole(accounts.Admin), s.handleDeleteRepo)
+	s.route("GET /api/v1/repos/{repo}/overview", repoRole(accounts.Viewer), s.handleOverview)
+	s.route("GET /api/v1/repos/{repo}/dashboard", repoRole(accounts.Viewer), s.handleDashboard)
+	s.route("GET /api/v1/repos/{repo}/metrics", repoRole(accounts.Viewer), s.handleMetrics)
+	s.route("GET /api/v1/repos/{repo}/security", repoRole(accounts.Viewer), s.handleSecurity)
+	s.route("GET /api/v1/repos/{repo}/cleanup", repoRole(accounts.Viewer), s.handleCleanup)
+	s.route("GET /api/v1/repos/{repo}/licenses", repoRole(accounts.Viewer), s.handleLicenses)
+	s.route("GET /api/v1/repos/{repo}/memory", repoRole(accounts.Viewer), s.handleMemory)
+	s.route("DELETE /api/v1/repos/{repo}/memory", repoRole(accounts.Member), s.handleDeleteMemory)
+	s.route("POST /api/v1/repos/{repo}/memory/offload", repoRole(accounts.Member), s.handleOffload)
+	s.route("POST /api/v1/repos/{repo}/memory/recall", repoRole(accounts.Viewer), s.handleRecall)
+	s.route("GET /api/v1/memory/status", anyone, s.handleMemoryStatus)
+	s.route("GET /api/v1/memory/jobs", visibleOnly, s.handleOffloadJobs)
+	s.route("GET /api/v1/memory/jobs/{id}", visibleOnly, s.handleOffloadJob)
+	s.route("GET /api/v1/repos/{repo}/search", repoRole(accounts.Viewer), s.handleSearch)
+	s.route("GET /api/v1/repos/{repo}/symbol", repoRole(accounts.Viewer), s.handleSymbol)
+	s.route("GET /api/v1/repos/{repo}/outline", repoRole(accounts.Viewer), s.handleOutline)
+	s.route("GET /api/v1/repos/{repo}/list", repoRole(accounts.Viewer), s.handleList)
+	s.route("GET /api/v1/repos/{repo}/hotspots", repoRole(accounts.Viewer), s.handleHotspots)
+	s.route("GET /api/v1/repos/{repo}/graph", repoRole(accounts.Viewer), s.handleGraph)
+	s.route("GET /api/v1/repos/{repo}/packages/graph", repoRole(accounts.Viewer), s.handlePackageGraph)
+	s.route("GET /api/v1/repos/{repo}/graph/overview", repoRole(accounts.Viewer), s.handleGraphOverview)
+	s.route("GET /api/v1/repos/{repo}/graph/expand", repoRole(accounts.Viewer), s.handleGraphExpand)
+	s.route("POST /api/v1/repos/{repo}/graph/edges", repoRole(accounts.Viewer), s.handleGraphEdges)
+	s.route("POST /api/v1/repos/{repo}/impact", repoRole(accounts.Viewer), s.handleImpact)
+	s.route("GET /api/v1/sources", platformOnly, s.handleSources)
+	s.route("POST /api/v1/ingest", platformOnly, s.handleIngest)
+	s.route("POST /api/v1/repos", orgRole(accounts.Member), s.handleRegister)
+	s.route("GET /api/v1/orgs", platformOnly, s.handleListOrgs)
+	s.route("POST /api/v1/orgs", platformOnly, s.handleAddOrg)
+	s.route("PUT /api/v1/orgs/{org}", platformOnly, s.handleUpdateOrg)
+	s.route("DELETE /api/v1/orgs/{org}", platformOnly, s.handleDeleteOrg)
+	s.route("POST /api/v1/orgs/{org}/scan", platformOnly, s.handleScanOrg)
+	s.route("POST /api/v1/orgs/{org}/repos/{name}/index", platformOnly, s.handleIndexOrgRepo)
+	s.route("POST /api/v1/repos/{repo}/sync", repoRole(accounts.Member), s.handleSync)
+	s.route("GET /api/v1/repos/{repo}/schedule", repoRole(accounts.Viewer), s.handleGetSchedule)
+	s.route("PUT /api/v1/repos/{repo}/schedule", repoRole(accounts.Admin), s.handlePutSchedule)
+	s.route("GET /api/v1/repos/{repo}/branches", repoRole(accounts.Viewer), s.handleBranches)
+	s.route("GET /api/v1/rules", anyone, func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{"rules": security.Catalog()})
 	})
-	m.HandleFunc("GET /api/v1/repos/{repo}/reviews", s.handleListReviews)
-	m.HandleFunc("GET /api/v1/reviews/{id}", s.handleGetReview)
-	m.HandleFunc("GET /api/v1/reviews/{id}/code", s.handleReviewCode)
-	m.HandleFunc("DELETE /api/v1/reviews/{id}", s.handleDeleteReview)
-	m.HandleFunc("PATCH /api/v1/reviews/{id}/comments/{comment}", s.handleUpdateReviewComment)
-	m.HandleFunc("POST /api/v1/reviews/{id}/fix", s.handleFixReview)
-	m.HandleFunc("POST /api/v1/repos/{repo}/remote", s.handleSwitchToRemote)
-	m.HandleFunc("GET /api/v1/ai/providers", s.handleAIProviders)
-	m.HandleFunc("PUT /api/v1/ai/routing", s.handlePutRouting)
-	m.HandleFunc("POST /api/v1/ai/providers/{name}/test", s.handleAITest)
-	m.HandleFunc("POST /api/v1/repos/{repo}/ai/{task}", s.handleAITask)
-	m.HandleFunc("GET /api/v1/jobs", s.handleJobs)
-	m.HandleFunc("GET /api/v1/jobs/{id}", s.handleJob)
+	s.route("GET /api/v1/repos/{repo}/reviews", repoRole(accounts.Viewer), s.handleListReviews)
+	s.route("GET /api/v1/reviews/{id}", reviewRole(accounts.Viewer), s.handleGetReview)
+	s.route("GET /api/v1/reviews/{id}/code", reviewRole(accounts.Viewer), s.handleReviewCode)
+	s.route("DELETE /api/v1/reviews/{id}", reviewRole(accounts.Admin), s.handleDeleteReview)
+	s.route("PATCH /api/v1/reviews/{id}/comments/{comment}", reviewRole(accounts.Member), s.handleUpdateReviewComment)
+	s.route("POST /api/v1/reviews/{id}/fix", reviewRole(accounts.Member), s.handleFixReview)
+	s.route("POST /api/v1/repos/{repo}/remote", repoRole(accounts.Admin), s.handleSwitchToRemote)
+	s.route("GET /api/v1/ai/providers", anyone, s.handleAIProviders)
+	s.route("PUT /api/v1/ai/routing", platformOnly, s.handlePutRouting)
+	s.route("POST /api/v1/ai/providers/{name}/test", platformOnly, s.handleAITest)
+	s.route("POST /api/v1/repos/{repo}/ai/{task}", repoRole(accounts.Member), s.handleAITask)
+	s.route("GET /api/v1/jobs", visibleOnly, s.handleJobs)
+	s.route("GET /api/v1/jobs/{id}", visibleOnly, s.handleJob)
 }
 
 // problem writes an RFC 7807 response. Internal errors are logged and
@@ -284,6 +283,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 500, err)
 		return
 	}
+	repos = visibleRepos(r.Context(), repos)
 	out := make([]map[string]any, 0, len(repos))
 	for _, n := range repos {
 		out = append(out, map[string]any{
@@ -314,12 +314,51 @@ func (s *Server) displayRoot(root string) string {
 // With ?files=1 it also deletes a clone in the workspace; mounted sources
 // are never touched.
 func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
-	status, err := s.deleteRepo(r.Context(), r.PathValue("repo"), r.URL.Query().Get("files") == "1")
+	repo := r.PathValue("repo")
+	if s.cfg.Accounts != nil {
+		// An organisation removes its link; the graph goes only with the
+		// last link. Platform admins remove the graph and every link.
+		left, err := s.unlinkRepo(r, repo)
+		if err != nil {
+			s.accountError(w, err)
+			return
+		}
+		if left > 0 {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+	status, err := s.deleteRepo(r.Context(), repo, r.URL.Query().Get("files") == "1")
 	if err != nil {
 		s.problem(w, status, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// unlinkRepo removes the links the request may remove and returns how
+// many organisations still use the graph.
+func (s *Server) unlinkRepo(r *http.Request, graph string) (int, error) {
+	ctx := r.Context()
+	sc := scopeFrom(ctx)
+	links, err := s.cfg.Accounts.St.GraphRepositories(ctx, graph)
+	if err != nil {
+		return 0, err
+	}
+	left := len(links)
+	for _, l := range links {
+		mine := sc.all
+		for _, m := range sc.orgs {
+			mine = mine || (m.Org.ID == l.OrgID && m.Role.AtLeast(accounts.Admin))
+		}
+		if !mine {
+			continue
+		}
+		if left, err = s.cfg.Accounts.St.RemoveRepository(ctx, l.OrgID, graph); err != nil {
+			return 0, err
+		}
+	}
+	return left, nil
 }
 
 // deleteRepo removes a repository's graph and schedule and, when files is
@@ -838,13 +877,15 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, job)
 }
 
-func (s *Server) handleJobs(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, 200, map[string]any{"jobs": s.jobs.List()})
+func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
+	sc := scopeFrom(r.Context())
+	jobs := slices.DeleteFunc(s.jobs.List(), func(j Job) bool { return !sc.sees(j.Repo) })
+	writeJSON(w, 200, map[string]any{"jobs": jobs})
 }
 
 func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {
 	job, ok := s.jobs.Get(r.PathValue("id"))
-	if !ok {
+	if !ok || !scopeFrom(r.Context()).sees(job.Repo) {
 		s.problem(w, 404, store.ErrNotFound)
 		return
 	}
