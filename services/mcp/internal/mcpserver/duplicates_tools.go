@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -15,6 +16,7 @@ import (
 type duplicateCodeIn struct {
 	RepoArg
 	Scope string `json:"scope,omitempty" jsonschema:"only copies this far apart: file, package or repository (default all)"`
+	Kind  string `json:"kind,omitempty" jsonschema:"exact (same structure) or near (edited copies); default both"`
 	Limit int    `json:"limit,omitempty" jsonschema:"max groups, default 10"`
 }
 
@@ -37,7 +39,7 @@ func (h *handlers) duplicateCode(ctx context.Context, _ *mcp.CallToolRequest, in
 	rep.Fingerprints = nil
 	groups := rep.Groups[:0:0]
 	for _, g := range rep.Groups {
-		if in.Scope == "" || in.Scope == "all" || in.Scope == g.Scope {
+		if (in.Scope == "" || in.Scope == "all" || in.Scope == g.Scope) && (in.Kind == "" || in.Kind == g.Kind) {
 			groups = append(groups, g)
 		}
 	}
@@ -47,6 +49,7 @@ func (h *handlers) duplicateCode(ctx context.Context, _ *mcp.CallToolRequest, in
 
 type sharedCodeIn struct {
 	RepoPrefix string `json:"repo_prefix,omitempty" jsonschema:"only repositories whose name starts with this, e.g. astrona-io/"`
+	Kind       string `json:"kind,omitempty" jsonschema:"exact (same structure) or near (edited copies); default both"`
 	Limit      int    `json:"limit,omitempty" jsonschema:"max groups, default 10"`
 }
 
@@ -67,6 +70,9 @@ func (h *handlers) sharedCode(ctx context.Context, _ *mcp.CallToolRequest, in sh
 		reports[n.Name] = rep
 	}
 	out := duplicates.Across(reports)
+	if in.Kind != "" {
+		out.Groups = slices.DeleteFunc(out.Groups, func(g duplicates.CrossGroup) bool { return g.Kind != in.Kind })
+	}
 	out.Groups = out.Groups[:min(len(out.Groups), clampInt(in.Limit, 10, 50))]
 	return nil, out, nil
 }

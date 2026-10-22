@@ -66,6 +66,10 @@ func TestDuplicateCode(t *testing.T) {
 	assert.Equal(t, got.Groups[0].Scope, "file")
 	assert.Len(t, got.Fingerprints, 0, "fingerprints are not sent")
 
+	res = call(t, cs, "duplicate_code", map[string]any{"repo": "org/a", "kind": "near"}, &got)
+	require.False(t, res.IsError)
+	assert.Len(t, got.Groups, 0, "no edited copies in the fixture")
+
 	res = call(t, cs, "duplicate_code", map[string]any{"repo": "org/a", "scope": "repository"}, &got)
 	require.False(t, res.IsError)
 	assert.Len(t, got.Groups, 0, "both copies sit in one file")

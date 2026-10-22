@@ -71,6 +71,7 @@ type symbol struct {
 	calls      []call
 	class      string
 	clone      string // structural fingerprint, see cloneHash
+	cloneSig   string
 }
 
 type call struct {
@@ -243,7 +244,7 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 		}
 		n.SecurityTags = tagsFor(s.calls, lang)
 		if !n.IsTest {
-			n.CloneHash = s.clone
+			n.CloneHash, n.CloneSig = s.clone, s.cloneSig
 		}
 		ix.g.AddNode(n)
 		ix.g.AddEdge(model.Edge{From: fileID, To: sid, Kind: model.EdgeDefines})
@@ -280,7 +281,7 @@ func (fr *fileResult) fingerprint(lang string, code []byte) {
 		if s.start > end {
 			continue
 		}
-		s.clone = cloneHash(lang, bytes.Join(lines[s.start-1:end], []byte("\n")))
+		s.clone, s.cloneSig = cloneHash(lang, bytes.Join(lines[s.start-1:end], []byte("\n")))
 	}
 }
 

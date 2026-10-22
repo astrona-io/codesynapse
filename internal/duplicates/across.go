@@ -3,6 +3,7 @@ package duplicates
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -25,12 +26,16 @@ type CrossMember struct {
 
 // CrossGroup is code found in two or more repositories.
 type CrossGroup struct {
-	Hash      string        `json:"hash"`
-	Repos     []string      `json:"repos"`
-	Copies    int           `json:"copies"`
-	LOC       int           `json:"loc"`
-	Redundant int           `json:"redundant_loc"`
-	Members   []CrossMember `json:"members"`
+	Hash  string   `json:"hash"`
+	Repos []string `json:"repos"`
+	// Kind and Similarity are as in Group: exact copies, or edited copies
+	// whose Redundant counts the differing variants only.
+	Kind       string        `json:"kind"`
+	Similarity float64       `json:"similarity"`
+	Copies     int           `json:"copies"`
+	LOC        int           `json:"loc"`
+	Redundant  int           `json:"redundant_loc"`
+	Members    []CrossMember `json:"members"`
 }
 
 // Suggestion recommends moving code that several repositories copy into one
@@ -64,35 +69,61 @@ type CrossReport struct {
 func Across(reports map[string]Report) CrossReport {
 	out := CrossReport{Repos: len(reports), Groups: []CrossGroup{}, Suggestions: []Suggestion{}}
 	byHash := map[string][]CrossMember{}
+	sigs := map[string]string{}
 	for repo, rep := range reports {
 		if rep.Truncated {
 			out.Partial = append(out.Partial, repo)
 		}
 		for _, f := range rep.Fingerprints {
 			byHash[f.Hash] = append(byHash[f.Hash], CrossMember{Repo: repo, Member: f.Member})
+			sigs[f.Hash] = f.Sig
 		}
 	}
 	slices.Sort(out.Partial)
-	for hash, ms := range byHash {
-		repos := distinctRepos(ms)
-		if len(repos) < 2 {
-			continue
-		}
-		slices.SortFunc(ms, func(a, b CrossMember) int {
-			return cmp.Or(cmp.Compare(a.Repo, b.Repo), cmp.Compare(a.File, b.File), cmp.Compare(a.StartLine, b.StartLine))
-		})
+	byMember := func(a, b CrossMember) int {
+		return cmp.Or(cmp.Compare(a.Repo, b.Repo), cmp.Compare(a.File, b.File), cmp.Compare(a.StartLine, b.StartLine))
+	}
+	var variants []variant
+	var variantHash []string
+	for _, hash := range slices.Sorted(maps.Keys(byHash)) {
+		ms := byHash[hash]
+		slices.SortFunc(ms, byMember)
 		total, largest := 0, 0
 		for _, m := range ms {
 			total += m.LOC
 			largest = max(largest, m.LOC)
 		}
-		gr := CrossGroup{Hash: hash, Repos: repos, Copies: len(ms), LOC: largest, Redundant: total - largest}
+		variants = append(variants, variant{sig: sigs[hash], loc: largest})
+		variantHash = append(variantHash, hash)
+		repos := distinctRepos(ms)
+		if len(repos) < 2 {
+			continue
+		}
+		gr := CrossGroup{Hash: hash, Repos: repos, Kind: "exact", Similarity: 1, Copies: len(ms), LOC: largest, Redundant: total - largest}
+		gr.Members = ms[:min(len(ms), MaxMembers)]
+		out.Groups = append(out.Groups, gr)
+		out.RedundantLOC += gr.Redundant
+	}
+	for _, c := range nearClusters(variants) {
+		var ms []CrossMember
+		extra, largest := 0, 0
+		for _, i := range c.members {
+			ms = append(ms, byHash[variantHash[i]]...)
+			extra += variants[i].loc
+			largest = max(largest, variants[i].loc)
+		}
+		repos := distinctRepos(ms)
+		if len(repos) < 2 {
+			continue
+		}
+		slices.SortFunc(ms, byMember)
+		gr := CrossGroup{Hash: variantHash[c.members[0]], Repos: repos, Kind: "near", Similarity: c.similarity, Copies: len(ms), LOC: largest, Redundant: extra - largest}
 		gr.Members = ms[:min(len(ms), MaxMembers)]
 		out.Groups = append(out.Groups, gr)
 		out.RedundantLOC += gr.Redundant
 	}
 	slices.SortFunc(out.Groups, func(a, b CrossGroup) int {
-		return cmp.Or(cmp.Compare(b.Redundant, a.Redundant), cmp.Compare(a.Hash, b.Hash))
+		return cmp.Or(cmp.Compare(b.Redundant, a.Redundant), cmp.Compare(a.Hash, b.Hash), cmp.Compare(a.Kind, b.Kind))
 	})
 	out.Suggestions = suggest(out.Groups)
 	if len(out.Groups) > MaxGroups {

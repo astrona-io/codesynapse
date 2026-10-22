@@ -10,7 +10,7 @@ import (
 // Node property types. TestSchemaCoversNodeProps keeps them in step with
 // package nodeprops; "id" is stored as "nid".
 var (
-	nodeTexts = []string{"nid", "kind", "repo", "name", "qualified_name", "package", "file", "signature", "summary", "body_hash", "clone_hash", "duplicates",
+	nodeTexts = []string{"nid", "kind", "repo", "name", "qualified_name", "package", "file", "signature", "summary", "body_hash", "clone_hash", "clone_sig", "duplicates",
 		"time", "head", "root", "branch", "metrics", "severity", "rule", "version", "fixed_version", "reachability", "url",
 		"liveness", "cleanup", "licenses", "coverage", "language", "ecosystem", "license", "license_source", "run"}
 	nodeLongs = []string{"bytes", "start_line", "end_line", "complexity", "loc", "level", "churn"}

@@ -2,10 +2,10 @@ package lang
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
+
+	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 )
 
 // The same thresholds as the Go extractor: below them a function is too small
@@ -40,9 +40,9 @@ func setOf(words string) map[string]bool {
 // identifier is treated as a variable. That matches renamed copies and can
 // also match code that differs only in what it reads, which the size
 // thresholds keep rare. It returns "" for small functions and generated files.
-func cloneHash(lang string, text []byte) string {
+func cloneHash(lang string, text []byte) (hash, sig string) {
 	if generatedMarker(text) {
-		return ""
+		return "", ""
 	}
 	py := lang == Python
 	toks := cloneTokens(text, py)
@@ -56,13 +56,13 @@ func cloneHash(lang string, text []byte) string {
 		lines = codeLines(text)
 	}
 	if lines < minCloneLines {
-		return ""
+		return "", ""
 	}
 	kw := cloneKeywordsJS
 	if py {
 		kw = cloneKeywordsPy
 	}
-	var b strings.Builder
+	var out []string
 	vars := map[string]int{}
 	named := false // the function's own name is the first plain identifier
 	base := -1
@@ -72,34 +72,33 @@ func cloneHash(lang string, text []byte) string {
 			if base < 0 {
 				base = t.lvl
 			}
-			fmt.Fprintf(&b, "L%d;", t.lvl-base)
+			out = append(out, fmt.Sprintf("L%d", t.lvl-base))
 		case 'k', 'p':
-			b.WriteString(t.text + ";")
+			out = append(out, t.text)
 		case 's':
-			b.WriteString("S;")
+			out = append(out, "S")
 		case 'n':
-			b.WriteString("N;")
+			out = append(out, "N")
 		case 'i':
 			switch {
 			case kw[t.text]:
-				b.WriteString(t.text + ";")
+				out = append(out, t.text)
 			case !named:
 				named = true
-				b.WriteString("NAME;")
+				out = append(out, "NAME")
 			case i > 0 && toks[i-1].text == ".", i+1 < len(toks) && toks[i+1].text == "(":
-				b.WriteString("id:" + t.text + ";")
+				out = append(out, "id:"+t.text)
 			default:
 				n, ok := vars[t.text]
 				if !ok {
 					n = len(vars)
 					vars[t.text] = n
 				}
-				fmt.Fprintf(&b, "v%d;", n)
+				out = append(out, fmt.Sprintf("v%d", n))
 			}
 		}
 	}
-	sum := sha256.Sum256([]byte(b.String()))
-	return hex.EncodeToString(sum[:8])
+	return duplicates.Hash(out), duplicates.Sig(out)
 }
 
 func generatedMarker(text []byte) bool {

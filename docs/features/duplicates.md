@@ -16,7 +16,18 @@ Each function or method of at least 6 lines and 5 statements gets a **structural
 Tests and generated files are skipped. No source is stored: only the hash, the location and the size.
 
 !!! note "What it does not find"
-    Edited copies (a line added or changed) have a different structure and are not matched, and a function written as `function f` never matches the same code written as an arrow function. Python never matches JavaScript or TypeScript; JavaScript, TypeScript and Vue can match each other. Small functions (getters, one-line wrappers) are ignored on purpose.
+    Heavily rewritten copies (below about 70% alike) are not matched, and a function written as `function f` never matches the same code written as an arrow function. Python never matches JavaScript or TypeScript; JavaScript, TypeScript and Vue can match each other. Small functions (getters, one-line wrappers) are ignored on purpose.
+
+## Edited copies
+
+Copies that were edited after copying (a line added, a condition changed) have a different structural fingerprint, so exact matching misses them. Each fingerprinted function also gets a **MinHash signature** of its normalised tokens (`Node.CloneSig`): 32 values of 16 bits over overlapping groups of three tokens. Two functions whose signatures agree on at least 70% of the values count as **edited copies**. Locality-sensitive hashing picks the pairs to compare, so large repositories stay fast.
+
+- Only functions of at least 10 lines are compared, and a function less than half the size of another is never its edited copy.
+- The largest variant leads a group and the others join only if they are close to it. Joining through a chain of neighbours would glue together functions that just share boilerplate.
+- A near group lists every copy of every variant. Its **redundant lines** are the lines of the differing variants, each counted once, because copies inside one variant belong to an exact group. Exact and near lines are reported side by side and never added twice.
+- The similarity is an estimate (about plus or minus 8 points), shown as "~88% alike".
+
+In practice this surfaces code that was copied and drifted, for example three API handlers that read, check and write a report the same way, or two HTTP clients with the same request, retry and decode steps. Look at what differs before merging: sometimes the difference is the reason the copies exist.
 
 ## Inside one repository
 
@@ -38,7 +49,7 @@ Where to look: the **Duplicates** tab under Code health on each repository, the 
 
 ## Across repositories
 
-Each repository's report keeps the fingerprints of its largest candidates (up to 3,000). When you open **Shared code**, the API compares the reports of the repositories **you may see**; nothing else is read, so one organisation never sees another's code.
+Each repository's report keeps the fingerprints of its largest candidates (up to 2,000). When you open **Shared code**, the API compares the reports of the repositories **you may see**; nothing else is read, so one organisation never sees another's code.
 
 ```mermaid
 flowchart TB
@@ -52,7 +63,7 @@ flowchart TB
     rec --> fw[framework: 3+ areas]
 ```
 
-Groups found in the same set of repositories are bundled into one recommendation:
+Exact and edited groups found in the same set of repositories are bundled into one recommendation:
 
 - **library:** a shared module the repositories import, named after the most common package;
 - **framework:** the same, when the copies span three or more areas (for example auth, logging, config and HTTP), which means the repositories rebuild the same foundation.

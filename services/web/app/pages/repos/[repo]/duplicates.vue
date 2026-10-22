@@ -5,7 +5,9 @@ const route = useRoute()
 const repo = computed(() => route.params.repo as string)
 const { data: rep, error } = useApiGet<DuplicatesReport>(() => repoPath(repo.value, 'duplicates'))
 const scope = ref('all')
-const groups = computed(() => (rep.value?.groups ?? []).filter((g) => scope.value === 'all' || g.scope === scope.value))
+const kind = ref('all')
+const groups = computed(() => (rep.value?.groups ?? []).filter((g) =>
+  (scope.value === 'all' || g.scope === scope.value) && (kind.value === 'all' || g.kind === kind.value)))
 const explore = (id: string) => ({ path: `/repos/${encodeURIComponent(repo.value)}/explore`, query: { id } })
 const scopeClass = (s: string) => ({ file: 'badge--green', package: 'badge--amber', repository: 'badge--pink' }[s] ?? '')
 const scopeHint: Record<string, string> = {
@@ -30,7 +32,8 @@ const scopeHint: Record<string, string> = {
     <template v-else-if="rep">
       <div class="grid grid--stats">
         <StatTile label="Duplicate groups" :value="rep.summary.groups" :hint="`${rep.summary.duplicated_functions} functions involved`" />
-        <StatTile label="Redundant lines" :value="fmtInt(rep.summary.redundant_loc)" :hint="`${rep.summary.percent.toFixed(1)}% of ${fmtInt(rep.summary.function_loc)} function lines`" />
+        <StatTile label="Redundant lines" :value="fmtInt(rep.summary.redundant_loc + rep.summary.near_redundant_loc)" :hint="`${rep.summary.percent.toFixed(1)}% of ${fmtInt(rep.summary.function_loc)} function lines`" />
+        <StatTile label="Edited copies" :value="rep.summary.near_groups" :hint="`${fmtInt(rep.summary.near_redundant_loc)} lines differ between the variants`" />
       </div>
       <p v-if="rep.truncated" class="notice">Only the largest groups are listed.</p>
 
@@ -39,6 +42,8 @@ const scopeHint: Record<string, string> = {
           <div><p class="eyebrow">Code</p><h2>Copies <span class="muted">· {{ groups.length }}</span></h2></div>
         </div>
         <div class="row">
+          <span class="label">Kind</span>
+          <button v-for="c in ['all', 'exact', 'near']" :key="c" class="chip" :class="{ active: kind === c }" @click="kind = c">{{ c === 'near' ? 'edited' : c }}</button>
           <span class="label">Where</span>
           <button v-for="c in ['all', 'file', 'package', 'repository']" :key="c" class="chip" :class="{ active: scope === c }" @click="scope = c">{{ c }}</button>
         </div>
@@ -47,6 +52,7 @@ const scopeHint: Record<string, string> = {
             <header class="row">
               <strong>{{ g.copies }} copies of {{ g.loc }} lines</strong>
               <span class="badge" :class="scopeClass(g.scope)" :title="scopeHint[g.scope]">{{ g.scope }}</span>
+              <span v-if="g.kind === 'near'" class="badge badge--violet" title="Copies that were edited after copying; the variants differ a little">edited · ~{{ Math.round(g.similarity * 100) }}% alike</span>
               <span class="muted">{{ g.redundant_loc }} redundant lines · {{ scopeHint[g.scope] }}</span>
             </header>
             <ul class="members">
