@@ -200,7 +200,7 @@ type Node struct {
 	Coverage string `json:"-"`
 	// Language is the source language (go, python, typescript, ...) of code nodes.
 	Language string `json:"language,omitempty"`
-	// Ecosystem is the package ecosystem of Module nodes (Go, npm, PyPI).
+	// Ecosystem is the package ecosystem of Module nodes (Go, npm, PyPI, crates.io, Packagist, RubyGems, NuGet, Maven).
 	Ecosystem string `json:"ecosystem,omitempty"`
 	// License is the SPDX expression of a Module's or Repository's licence;
 	// LicenseSource says where it was read (a file, lockfile or deps.dev).

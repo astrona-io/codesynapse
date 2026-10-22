@@ -17,7 +17,7 @@ Inspired by [code-review-graph](https://github.com/tirth8205/code-review-graph).
 | Secrets | names sanitised | summaries redacted, no source bodies, hashed author e-mails |
 | Security review | – | graded review: type-aware code rules, YAML rules, CVEs with reachability, exposure and test context |
 | Languages | 40+ | Go (type-checked), Python, JS/TS/Vue, Markdown, YAML, Go templates/Helm |
-| Dependencies | – | Go, npm and PyPI with CVEs; symbol-level reachability for Go |
+| Dependencies | – | Go, npm, PyPI, Cargo, Composer, Bundler, NuGet and Gradle with CVEs; symbol-level reachability for Go |
 | Dead code | – | reachability-based liveness, unused modules/config, security-first ordering |
 | Fix guidance | – | per-rule guide with vulnerable → fixed examples per language |
 
@@ -110,7 +110,7 @@ Follow-ups: measure `minimal_context` recall on real tasks (does it surface the 
 - **JS/TS/Vue:** a masking pass blanks strings, comments, regex and template text (keeping `${}` code), then brace depth finds functions, arrow functions, classes and methods; ES imports, `require`, re-exports, dynamic imports, `@/`/`~/` aliases; `<script>` of Vue SFCs with line offsets; `<script setup>` bindings are entry points (used by the template).
 - **Call resolution fallbacks:** a method or (JS) function name unique in the repository resolves even without an import (Nuxt auto-imports, `obj.method()` on untyped values); class calls also link to the constructor. Ambiguous names never create edges.
 - **Tests:** pytest conventions, `*.test.*`/`*.spec.*`/`__tests__`; module-level test code becomes a synthetic `<tests>` function so test reachability works.
-- **Dependencies:** npm and PyPI lockfiles feed the same OSV scan; reachability is imported/required (advisories rarely list symbols).
+- **Dependencies:** lockfiles feed the same OSV scan; reachability is imported/required (advisories rarely list symbols). npm and PyPI are read from `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `uv.lock`, `Pipfile.lock` and `requirements*.txt`; `internal/vuln/lockfiles.go` adds `Cargo.lock` (crates.io), `composer.lock` (Packagist), `Gemfile.lock` (RubyGems), `packages.lock.json` (NuGet) and `gradle.lockfile` (Maven coordinates), each with the manifest next to it for which dependencies the project declares (Cargo.toml and workspace members, composer.json, the Gemfile DEPENDENCIES section, NuGet `type: Direct`, the Gradle build file). Cargo, Composer, Bundler and NuGet record requirement edges, so they get dependency paths; Gradle lockfiles do not. Source files of these languages are not indexed, so their reachability is always required. Maven `pom.xml` is not read (no resolved graph). Licences come from the lockfile when it records them (Composer) and from deps.dev for Cargo, NuGet and Maven when lookups are on.
 
 Known limits: no type inference for Python/JS, so dynamic dispatch and higher-order calls are under-reported; tree-sitter (roadmap) would give exact parsing and more languages.
 

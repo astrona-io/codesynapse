@@ -22,6 +22,12 @@ const (
 	EcosystemGo   = "Go"
 	EcosystemNPM  = "npm"
 	EcosystemPyPI = "PyPI"
+	// The ecosystems below are read from lockfiles only, and OSV names them so.
+	EcosystemCargo     = "crates.io"
+	EcosystemPackagist = "Packagist"
+	EcosystemRubyGems  = "RubyGems"
+	EcosystemNuGet     = "NuGet"
+	EcosystemMaven     = "Maven"
 )
 
 // maxModules bounds the dependencies read from lockfiles.
@@ -31,15 +37,20 @@ const maxManifest = 32 << 20
 
 // lockfiles lists the manifests read, by file name.
 var lockfiles = map[string]func([]byte, string) []Module{
-	"package-lock.json": parseNPMLock,
-	"yarn.lock":         parseYarnLock,
-	"pnpm-lock.yaml":    parsePNPMLock,
-	"poetry.lock":       parseTOMLLock,
-	"uv.lock":           parseTOMLLock,
-	"Pipfile.lock":      parsePipfileLock,
+	"package-lock.json":  parseNPMLock,
+	"yarn.lock":          parseYarnLock,
+	"pnpm-lock.yaml":     parsePNPMLock,
+	"poetry.lock":        parseTOMLLock,
+	"uv.lock":            parseTOMLLock,
+	"Pipfile.lock":       parsePipfileLock,
+	"Cargo.lock":         parseCargoLock,
+	"composer.lock":      parseComposerLock,
+	"Gemfile.lock":       parseGemfileLock,
+	"packages.lock.json": parseNuGetLock,
+	"gradle.lockfile":    parseGradleLock,
 }
 
-// ManifestModules reads npm and Python lockfiles under root. dir is the
+// ManifestModules reads npm, Python, Rust, PHP, Ruby, .NET and Gradle lockfiles under root. dir is the
 // lockfile's directory, used to find direct dependencies next to it.
 func ManifestModules(root string) ([]Module, error) {
 	seen := map[string]Module{}
@@ -49,7 +60,7 @@ func ManifestModules(root string) ([]Module, error) {
 		}
 		name := d.Name()
 		if d.IsDir() {
-			if p != root && (name == "node_modules" || name == "vendor" || name == "testdata" || name == ".venv" || name == "venv" || strings.HasPrefix(name, ".") || isRepo(p)) {
+			if p != root && (name == "node_modules" || name == "vendor" || name == "testdata" || name == "target" || name == ".venv" || name == "venv" || strings.HasPrefix(name, ".") || isRepo(p)) {
 				return filepath.SkipDir
 			}
 			return nil

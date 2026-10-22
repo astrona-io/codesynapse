@@ -19,6 +19,10 @@ const (
 	Go   = "Go"
 	NPM  = "npm"
 	PyPI = "PyPI"
+	// Lockfile-only ecosystems, as OSV names them.
+	Cargo = "crates.io"
+	NuGet = "NuGet"
+	Maven = "Maven"
 )
 
 // Dep is one dependency to find a licence for.

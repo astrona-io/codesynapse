@@ -13,7 +13,7 @@ On this repository the context an agent needs per question drops by a median 92%
 | Markdown | Sections with line ranges; `MENTIONS` edges to exported symbols |
 | YAML, Helm, Go templates | Kubernetes resources, key paths, `{{define}}` blocks, `.Values` links |
 | Git history | Commits, authors (e-mail hashed), per-file churn |
-| Dependencies | Go, npm, PyPI modules with licences and CVEs (via osv.dev) |
+| Dependencies | Go, npm, PyPI, Rust, PHP, Ruby, .NET and Gradle modules with licences and CVEs (via osv.dev) |
 | Security rules | Findings per rule, linked to the owning function |
 
 ## Big picture
