@@ -172,6 +172,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 			}
 		}
 	}
+	opts.Runtime = mcpserver.NewRuntime(opts.Access, opts.StdioToken, os.Getenv("CODESYNAPSE_SESSION_ID"), os.Getenv("CODESYNAPSE_PARENT_SESSION_ID"))
 	server := mcpserver.New(r, version, opts)
 
 	if o.transport == "stdio" {
@@ -183,7 +184,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		return err
 	}
 
-	handler := mcpserver.MeasureHTTP(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
+	handler := opts.Runtime.HTTP(mcpserver.MeasureHTTP(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)))
 	mux := http.NewServeMux()
 	if acc != nil {
 		// Personal API keys are required in accounts mode.

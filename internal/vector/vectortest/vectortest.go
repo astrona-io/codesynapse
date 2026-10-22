@@ -12,6 +12,7 @@ import (
 
 // Run exercises idx; it must start empty.
 func Run(t *testing.T, idx vector.Index) {
+	t.Run("session", func(t *testing.T) { RunSession(t, idx) })
 	ctx := context.Background()
 	const model = "test-embed"
 	items := []vector.Item{

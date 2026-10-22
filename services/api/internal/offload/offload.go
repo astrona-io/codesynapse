@@ -18,9 +18,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/memory/extract"
+	"github.com/parisnakitakejser/codesynapse/internal/redact"
+	"github.com/parisnakitakejser/codesynapse/internal/sessionmemory"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
@@ -59,8 +62,11 @@ type Store interface {
 
 // Job is one extraction; turns are dropped when it finishes.
 type Job struct {
-	ID   string `json:"id"`
-	Repo string `json:"repo"`
+	Execution     execution.Identity `json:"execution"`
+	SessionMemory bool               `json:"session_memory"`
+	expiresAt     time.Time
+	ID            string `json:"id"`
+	Repo          string `json:"repo"`
 	// Namespace is where the facts go: the repository, or "org|repo" when an
 	// organisation asked (organisations sharing a graph keep separate memory).
 	Namespace  string `json:"-"`
@@ -90,7 +96,8 @@ type Worker struct {
 	queue  chan string
 
 	// OnSaved runs after a job saved facts (to embed new entities soon).
-	OnSaved func()
+	OnSaved        func()
+	OnSessionSaved func(context.Context, sessionmemory.Scope, func(context.Context) error)
 
 	mu    sync.Mutex
 	jobs  map[string]*Job
@@ -131,8 +138,37 @@ func (w *Worker) SubmitAuthorized(repo, namespace, source string, turns []extrac
 
 // SubmitAuthorizedContext carries accepted tool attribution into queued work.
 func (w *Worker) SubmitAuthorizedContext(ctx context.Context, repo, namespace, source string, turns []extract.Turn, authorize func(context.Context) error) (Job, error) {
+	return w.submit(ctx, repo, namespace, source, turns, authorize, false, time.Time{})
+}
+
+// SubmitSession queues transient turns for the current session's private memory.
+func (w *Worker) SubmitSession(ctx context.Context, repo, namespace, source string, turns []extract.Turn, expiresAt time.Time, authorize func(context.Context) error) (Job, error) {
+	return w.submit(ctx, repo, namespace, source, turns, authorize, true, expiresAt)
+}
+
+func (w *Worker) submit(ctx context.Context, repo, namespace, source string, turns []extract.Turn, authorize func(context.Context) error, session bool, expiresAt time.Time) (Job, error) {
+	if err := ctx.Err(); err != nil {
+		return Job{}, err
+	}
+	identity, err := execution.Require(ctx)
+	if err != nil {
+		return Job{}, err
+	}
+	if authorize == nil {
+		return Job{}, errors.New("execution requires a session and permission recheck")
+	}
+
 	if len(turns) == 0 || len(turns) > extract.MaxTurns {
 		return Job{}, fmt.Errorf("give 1 to %d turns", extract.MaxTurns)
+	}
+	turns = slices.Clone(turns)
+	total := 0
+	for i := range turns {
+		total += len(turns[i].Text)
+		if len(turns[i].Text) > 4*extract.MaxTurnChars || total > 4*extract.MaxInputChars {
+			return Job{}, errors.New("conversation turns exceed the extraction limit")
+		}
+		turns[i].Text = redact.Free(turns[i].Text)
 	}
 	if _, err := w.Provider(); err != nil {
 		return Job{}, err
@@ -141,7 +177,11 @@ func (w *Worker) SubmitAuthorizedContext(ctx context.Context, repo, namespace, s
 	if err != nil {
 		return Job{}, err
 	}
-	j := &Job{ID: id, Repo: repo, Namespace: cmp.Or(namespace, repo), Source: cmp.Or(source, "agent"), State: Queued, Turns: len(turns),
+	source = redact.Free(source)
+	if runes := []rune(source); len(runes) > 120 {
+		source = string(runes[:120])
+	}
+	j := &Job{Execution: identity, SessionMemory: session, expiresAt: expiresAt, ID: id, Repo: repo, Namespace: cmp.Or(namespace, repo), Source: cmp.Or(source, "agent"), State: Queued, Turns: len(turns),
 		QueuedAt: w.now().UTC().Format(time.RFC3339), turns: slices.Clone(turns), authorize: authorize, tool: telemetry.Tool(ctx)}
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -172,6 +212,7 @@ func (w *Worker) SubmitAuthorizedContext(ctx context.Context, repo, namespace, s
 
 // Run processes jobs until ctx ends.
 func (w *Worker) Run(ctx context.Context) {
+	defer w.cancelPending()
 	for {
 		select {
 		case <-ctx.Done():
@@ -183,9 +224,12 @@ func (w *Worker) Run(ctx context.Context) {
 }
 
 func (w *Worker) run(ctx context.Context, id string) {
+	if ctx.Err() != nil {
+		return
+	}
 	w.mu.Lock()
 	j := w.jobs[id]
-	if j == nil {
+	if j == nil || j.State != Queued {
 		w.mu.Unlock()
 		return
 	}
@@ -193,14 +237,25 @@ func (w *Worker) run(ctx context.Context, id string) {
 	turns := j.turns
 	w.mu.Unlock()
 
+	ctx, identityErr := execution.With(ctx, j.Execution)
+	if identityErr != nil {
+		w.mu.Lock()
+		j.State, j.Error, j.turns = Failed, identityErr.Error(), nil
+		w.mu.Unlock()
+		return
+	}
 	ctx = telemetry.WithTool(ctx, j.tool)
 	ctx, cancel := context.WithTimeout(llm.WithTask(telemetry.WithTenant(ctx, memory.OrgOf(j.Namespace)), "memory"), jobTimeout)
 	defer cancel()
-	res, err := w.extract(ctx, j.Namespace, j.Source, turns, j.authorize, func(provider, model string) {
+	res, err := w.extract(ctx, j.Namespace, j.Source, turns, j.authorize, j.SessionMemory, j.expiresAt, func(provider, model string) {
 		w.mu.Lock()
 		j.Provider, j.Model = provider, model
 		w.mu.Unlock()
 	})
+
+	if err == nil && j.SessionMemory && w.OnSessionSaved != nil {
+		w.OnSessionSaved(ctx, sessionmemory.Scope{TenantID: j.Execution.TenantID, SessionID: j.Execution.SessionID, Namespace: j.Namespace}, j.authorize)
+	}
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -222,7 +277,7 @@ func (w *Worker) run(ctx context.Context, id string) {
 
 type outcome struct{ extracted, saved, dropped int }
 
-func (w *Worker) extract(ctx context.Context, repo, source string, turns []extract.Turn, authorize func(context.Context) error, started func(provider, model string)) (outcome, error) {
+func (w *Worker) extract(ctx context.Context, repo, source string, turns []extract.Turn, authorize func(context.Context) error, session bool, expiresAt time.Time, started func(provider, model string)) (outcome, error) {
 	if authorize != nil {
 		if err := authorize(ctx); err != nil {
 			return outcome{}, err
@@ -234,7 +289,24 @@ func (w *Worker) extract(ctx context.Context, repo, source string, turns []extra
 	}
 	cfg, _ := w.llm.Config(provider)
 	ctx = telemetry.WithModel(ctx, provider, cfg.Model)
-	g, err := w.st.SearchMemory(ctx, repo, "", extract.MaxKnown, false)
+	var g memory.Graph
+	var sessionStore store.SessionMemoryStore
+	var scope sessionmemory.Scope
+	if session {
+		id, identityErr := execution.Require(ctx)
+		if identityErr != nil {
+			return outcome{}, identityErr
+		}
+		scope = sessionmemory.Scope{TenantID: id.TenantID, SessionID: id.SessionID, Namespace: repo}
+		var ok bool
+		sessionStore, ok = w.st.(store.SessionMemoryStore)
+		if !ok {
+			return outcome{}, errors.New("session memory is unavailable")
+		}
+		g, err = sessionStore.ReadSessionMemory(ctx, scope, "", extract.MaxKnown)
+	} else {
+		g, err = w.st.SearchMemory(ctx, repo, "", extract.MaxKnown, false)
+	}
 	if err != nil {
 		return outcome{}, fmt.Errorf("reading known entities: %w", err)
 	}
@@ -269,7 +341,12 @@ func (w *Worker) extract(ctx context.Context, repo, source string, turns []extra
 			return out, err
 		}
 	}
-	if err := w.st.UpsertMemory(ctx, b); err != nil {
+	if session {
+		err = sessionStore.UpsertSessionMemory(ctx, scope, res.Triples, label, expiresAt)
+	} else {
+		err = w.st.UpsertMemory(ctx, b)
+	}
+	if err != nil {
 		return out, fmt.Errorf("saving triples: %w", err)
 	}
 	out.saved = len(b.Facts) + len(b.Aliases)
@@ -312,4 +389,16 @@ func newID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// Shutdown drops transient turns even when they never reached the worker.
+func (w *Worker) cancelPending() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, j := range w.jobs {
+		if j.State == Queued || j.State == Running {
+			j.State, j.Error, j.FinishedAt = Failed, "worker stopped before completion", w.now().UTC().Format(time.RFC3339)
+			j.turns, j.authorize = nil, nil
+		}
+	}
 }

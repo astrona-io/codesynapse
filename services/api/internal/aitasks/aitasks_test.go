@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
@@ -38,7 +39,7 @@ func fakeModel(t *testing.T, answer string) (*httptest.Server, *[]string) {
 
 func setup(t *testing.T, answer string, sendSource bool) (Runner, *memory.Store, *[]string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := taskContext(t)
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "app"), 0o750))
 	var src strings.Builder
@@ -68,9 +69,9 @@ func setup(t *testing.T, answer string, sendSource bool) (Runner, *memory.Store,
 func TestSecurityTriage(t *testing.T) {
 	answer := "Sure!\n```json\n{\"summary\":\"One real issue.\",\"items\":[{\"index\":0,\"verdict\":\"likely-exploitable\",\"explanation\":\"Input reaches sh -c.\",\"suggestion\":\"exec.Command(\\\"convert\\\", name)\"},{\"index\":7,\"verdict\":\"needs-review\",\"explanation\":\"ghost\"}]}\n```"
 	r, st, prompts := setup(t, answer, true)
-	id, err := r.Run(context.Background(), "security-triage", Input{Repo: storetest.Repo})
+	id, err := r.Run(taskContext(t), "security-triage", Input{Repo: storetest.Repo})
 	require.NoError(t, err)
-	rv, err := st.GetReview(context.Background(), id)
+	rv, err := st.GetReview(taskContext(t), id)
 	require.NoError(t, err)
 	assert.Equal(t, rv.Source, "ai")
 	assert.Equal(t, rv.Verdict, reviews.RequestChanges)
@@ -87,7 +88,7 @@ func TestSecurityTriage(t *testing.T) {
 
 func TestNoSourceForRemoteProviders(t *testing.T) {
 	r, _, prompts := setup(t, `{"summary":"s","items":[]}`, false)
-	_, err := r.Run(context.Background(), "security-triage", Input{Repo: storetest.Repo})
+	_, err := r.Run(taskContext(t), "security-triage", Input{Repo: storetest.Repo})
 	require.NoError(t, err)
 	assert.NotContains(t, (*prompts)[0], "27: line")
 }
@@ -95,9 +96,9 @@ func TestNoSourceForRemoteProviders(t *testing.T) {
 func TestCodeReviewKeepsOnlyShownFiles(t *testing.T) {
 	answer := `{"summary":"ok","verdict":"lgtm","comments":[{"file":"app/app.go","line":10,"severity":"HIGH","category":"bug","message":"nil check"},{"file":"elsewhere.go","line":1,"message":"invented"}]}`
 	r, st, _ := setup(t, answer, true)
-	id, err := r.Run(context.Background(), "review", Input{Repo: storetest.Repo})
+	id, err := r.Run(taskContext(t), "review", Input{Repo: storetest.Repo})
 	require.NoError(t, err)
-	rv, err := st.GetReview(context.Background(), id)
+	rv, err := st.GetReview(taskContext(t), id)
 	require.NoError(t, err)
 	assert.Equal(t, rv.Verdict, reviews.Comment, "unknown verdict normalised")
 	require.Len(t, rv.Comments, 1)
@@ -106,15 +107,15 @@ func TestCodeReviewKeepsOnlyShownFiles(t *testing.T) {
 
 func TestBriefingAndBadJSON(t *testing.T) {
 	r, st, _ := setup(t, "## What this is\nA fixture.", true)
-	id, err := r.Run(context.Background(), "briefing", Input{Repo: storetest.Repo})
+	id, err := r.Run(taskContext(t), "briefing", Input{Repo: storetest.Repo})
 	require.NoError(t, err)
-	rv, err := st.GetReview(context.Background(), id)
+	rv, err := st.GetReview(taskContext(t), id)
 	require.NoError(t, err)
 	assert.Equal(t, rv.Kind, reviews.KindReport)
 	assert.Contains(t, rv.Summary, "A fixture.")
 
 	bad, _, _ := setup(t, "I cannot help with that.", true)
-	_, err = bad.Run(context.Background(), "security-triage", Input{Repo: storetest.Repo})
+	_, err = bad.Run(taskContext(t), "security-triage", Input{Repo: storetest.Repo})
 	assert.Error(t, err, "non-JSON answers fail clearly")
 }
 
@@ -132,4 +133,16 @@ func TestLimitsScaleWithBudget(t *testing.T) {
 	assert.Equal(t, large.symbols, 91)
 	assert.Equal(t, large.symbolLines, 400)
 	assert.Equal(t, large.padLines, 20)
+}
+
+func taskContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, err := execution.With(t.Context(), execution.Identity{TenantID: "tenant", SubjectID: "user", SessionID: "thread", ParentSessionID: "thread"})
+	require.NoError(t, err)
+	return ctx
+}
+
+func TestRunRequiresExecutionBeforeStoreAccess(t *testing.T) {
+	_, err := (Runner{}).Run(context.Background(), "briefing", Input{})
+	require.ErrorIs(t, err, execution.ErrMissing)
 }

@@ -88,7 +88,7 @@ func (s *Server) handleFixReview(w http.ResponseWriter, r *http.Request) {
 		Workdir: filepath.Join(s.cfg.Workspace, ".codesynapse", "fixes")}
 	in := fixes.Request{ReviewID: rv.ID, CommentIDs: req.CommentIDs, Provider: req.Provider, Root: n.Root, Remote: remote, Base: n.Head, BaseBranch: n.Branch}
 	job, err := s.jobs.Start(rv.Repo, "", JobOptions{ //nolint:contextcheck // jobs outlive the request
-		Kind: "fix", Task: fixes.Task, OrgID: org, Authorize: authorize,
+		Kind: "fix", Task: fixes.Task, OrgID: org, Identity: identityOf(r.Context()), Authorize: authorize,
 		Run: func(ctx context.Context) (string, error) {
 			res, err := runner.Run(ctx, in)
 			if res.PRURL != "" {

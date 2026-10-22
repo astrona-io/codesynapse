@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
 	"golang.org/x/tools/go/packages"
 
@@ -75,6 +76,10 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 	)
 	if !opts.AllowNetwork {
 		env = append(env, "GOPROXY=off", "GONOSUMDB=*")
+	}
+	env, err = execution.Environment(ctx, env)
+	if err != nil {
+		return nil, err
 	}
 	cfg := &packages.Config{
 		Context: ctx,

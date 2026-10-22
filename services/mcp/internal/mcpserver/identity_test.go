@@ -29,7 +29,7 @@ func TestIdentityToolsAndSharedCatalog(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.ReplaceRepo(ctx, storetest.Repo, g))
 	ct, st := mcp.NewInMemoryTransports()
-	_, err = New(db, "test", Options{Curated: db, CatalogWrites: true}).Connect(ctx, st, nil)
+	_, err = newTestServer(t, db, "test", Options{Curated: db, CatalogWrites: true}).Connect(ctx, st, nil)
 	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "codex-test"}, nil).Connect(ctx, ct, nil)
 	require.NoError(t, err)
@@ -84,7 +84,7 @@ func TestCrossRepositoryReuseRechecksLiveSession(t *testing.T) {
 	var page catalog.CodePage
 	require.False(t, call(t, cs, "code_records", map[string]any{"repo": storetest.Repo}, &page).IsError)
 	assert.Len(t, page.Records, 1)
-	other, err := connectKey(t, url, keys["b"])
+	other, err := connectKey(t, url, keys["b"], "chat-b")
 	require.NoError(t, err)
 	assert.True(t, call(t, other, "code_record_reuse", args, nil).IsError, "a key cannot borrow source permissions from another organisation")
 	_, err = acc.St.RemoveRepository(ctx, owner.OrgID, "private-source")

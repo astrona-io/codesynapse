@@ -4,7 +4,9 @@
       "type": "http",
       "url": "http://localhost:8090/mcp",
       "headers": {
-        "Authorization": "Bearer ${CODESYNAPSE_MCP_TOKEN}"
+        "Authorization": "Bearer ${CODESYNAPSE_MCP_TOKEN}",
+        "X-CodeSynapse-Session": "${CODESYNAPSE_SESSION_ID}",
+        "X-CodeSynapse-Parent-Session": "${CODESYNAPSE_PARENT_SESSION_ID}"
       }
     }
   }

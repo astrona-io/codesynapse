@@ -14,21 +14,27 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/history"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
+	"github.com/parisnakitakejser/codesynapse/internal/sessionmemory"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/internal/usage"
+	"github.com/parisnakitakejser/codesynapse/internal/vector"
 )
 
 // Store keeps graphs per repository. It is safe for concurrent use.
 type Store struct {
-	access  map[string]model.AccessSnapshot
-	mu      sync.RWMutex
-	repos   map[string]*repoGraph
-	reviews map[string]reviews.Review
-	history map[string][]history.Snapshot
-	curated map[string]curation.Item
-	mem     map[string]*memRepo
-	usage   map[string]usage.Bucket
-	vecs    map[string]embedding // memory entity ID -> vector
+	sessionmemory.Engine
+	sessions       map[string]sessionmemory.Document
+	sessionRevoked map[string]bool
+	sessionVectors *vector.Flat
+	access         map[string]model.AccessSnapshot
+	mu             sync.RWMutex
+	repos          map[string]*repoGraph
+	reviews        map[string]reviews.Review
+	history        map[string][]history.Snapshot
+	curated        map[string]curation.Item
+	mem            map[string]*memRepo
+	usage          map[string]usage.Bucket
+	vecs           map[string]embedding // memory entity ID -> vector
 }
 
 type repoGraph struct {
@@ -41,7 +47,12 @@ var _ store.Store = (*Store)(nil)
 
 // New returns an empty store.
 func New() *Store {
-	return &Store{repos: map[string]*repoGraph{}, reviews: map[string]reviews.Review{}, history: map[string][]history.Snapshot{}, curated: map[string]curation.Item{}, mem: map[string]*memRepo{}, usage: map[string]usage.Bucket{}, vecs: map[string]embedding{}}
+	s := &Store{repos: map[string]*repoGraph{}, reviews: map[string]reviews.Review{}, history: map[string][]history.Snapshot{}, curated: map[string]curation.Item{}, mem: map[string]*memRepo{}, usage: map[string]usage.Bucket{}, vecs: map[string]embedding{}}
+	s.Engine = sessionmemory.Engine{Backend: s}
+	s.sessions = map[string]sessionmemory.Document{}
+	s.sessionRevoked = map[string]bool{}
+	s.sessionVectors = vector.NewFlat()
+	return s
 }
 
 // EnsureSchema is a no-op.

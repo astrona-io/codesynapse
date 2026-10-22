@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/sessionmemory"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 	"github.com/parisnakitakejser/codesynapse/internal/vector"
@@ -62,6 +63,7 @@ type Config struct {
 
 // Store is a HugeGraph-backed store.Store.
 type Store struct {
+	sessionmemory.Engine
 	base, graph    string
 	user, password string
 	http           *http.Client
@@ -92,6 +94,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	}
 	s := &Store{base: strings.TrimRight(cfg.URL, "/"), graph: cfg.Graph, user: cfg.User, password: cfg.Password,
 		http: &http.Client{}, timeout: timeout, vec: cfg.Vectors, maxRequest: cfg.MaxRequestBytes}
+	s.Engine = sessionmemory.Engine{Backend: s}
 	if s.maxRequest <= 0 {
 		s.maxRequest = 60000
 	}
@@ -151,10 +154,7 @@ func (s *Store) gremlin(ctx context.Context, script string, bindings map[string]
 	if bindings == nil {
 		bindings = map[string]any{}
 	}
-	body, err := json.Marshal(map[string]any{
-		"gremlin": script, "bindings": bindings, "language": "gremlin-groovy",
-		"aliases": map[string]string{"graph": s.graph, "g": "__g_" + s.graph},
-	})
+	body, err := s.gremlinBody(script, bindings)
 	if err != nil {
 		return err
 	}
@@ -216,3 +216,10 @@ func vid(prefix, id string) string {
 func nodeVID(id string) string { return vid("n", id) }
 
 func lower(s string) string { return strings.ToLower(s) }
+
+func (s *Store) gremlinBody(script string, bindings map[string]any) ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"gremlin": script, "bindings": bindings, "language": "gremlin-groovy",
+		"aliases": map[string]string{"graph": s.graph, "g": "__g_" + s.graph},
+	})
+}

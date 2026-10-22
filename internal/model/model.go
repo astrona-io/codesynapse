@@ -56,7 +56,7 @@ var AllNodeKinds = []NodeKind{
 	KindInterfaceMethod, KindType, KindExternal, KindDocument, KindSection,
 	KindCommit, KindAuthor, KindFinding, KindModule, KindVulnerability,
 	KindConfig, KindConfigEntry, KindTemplate, KindTemplateDef, KindRecord, KindComponent,
-	KindOrganization, KindUser, KindTeam, KindAccessRepository,
+	KindOrganization, KindUser, KindTeam, KindAccessRepository, KindSessionMemoryEntity,
 }
 
 // Valid reports whether k is a known node kind.
@@ -125,6 +125,7 @@ const (
 
 // AllEdgeKinds lists every valid edge kind (the relationship-type allowlist).
 var AllEdgeKinds = []EdgeKind{
+	EdgeSessionFact,
 	EdgeContains, EdgeDefines, EdgeHasMethod, EdgeCalls, EdgeDispatchesTo,
 	EdgeImplements, EdgeImports, EdgeMentions, EdgeModifies, EdgeAuthored,
 	EdgeHasFinding, EdgeDependsOn, EdgeAffects, EdgeIncludes, EdgeUsesValue, EdgeReferences,

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
@@ -86,7 +87,7 @@ func setup(ctx context.Context, t *testing.T, answer string, prStatus int) *fixt
 const fixed = "Here you go:\n```go\npackage app\n\nfunc Run(cmd string) {\n\texec(cmd)\n}\n```\n"
 
 func TestRunPushesBranchAndOpensDraftPR(t *testing.T) {
-	ctx := context.Background()
+	ctx := fixContext(t)
 	f := setup(ctx, t, fixed, http.StatusCreated)
 	res, err := f.r.Run(ctx, f.req)
 	require.NoError(t, err)
@@ -110,7 +111,7 @@ func TestRunPushesBranchAndOpensDraftPR(t *testing.T) {
 }
 
 func TestRunKeepsBranchWhenPRFails(t *testing.T) {
-	ctx := context.Background()
+	ctx := fixContext(t)
 	f := setup(ctx, t, fixed, http.StatusForbidden)
 	res, err := f.r.Run(ctx, f.req)
 	require.NoError(t, err)
@@ -120,7 +121,7 @@ func TestRunKeepsBranchWhenPRFails(t *testing.T) {
 }
 
 func TestRunRefusals(t *testing.T) {
-	ctx := context.Background()
+	ctx := fixContext(t)
 	t.Run("protected file", func(t *testing.T) {
 		f := setup(ctx, t, fixed, http.StatusCreated)
 		rv, _ := f.st.GetReview(ctx, f.req.ReviewID)
@@ -166,7 +167,7 @@ func TestProtected(t *testing.T) {
 }
 
 func TestRunAcceptsItsQueuedComments(t *testing.T) {
-	ctx := context.Background()
+	ctx := fixContext(t)
 	f := setup(ctx, t, fixed, http.StatusCreated)
 	rv, _ := f.st.GetReview(ctx, f.req.ReviewID)
 	reviews.SetFix(&rv, f.req.CommentIDs, reviews.Fix{State: reviews.FixQueued, Job: "j1"}, time.Now())
@@ -186,7 +187,7 @@ func TestSelectableStaleFix(t *testing.T) {
 }
 
 func TestRunFailureBeforeStartIsRecorded(t *testing.T) {
-	ctx := context.Background()
+	ctx := fixContext(t)
 	f := setup(ctx, t, fixed, http.StatusCreated)
 	f.req.Provider = "missing"
 	_, err := f.r.Run(ctx, f.req)
@@ -194,4 +195,16 @@ func TestRunFailureBeforeStartIsRecorded(t *testing.T) {
 	rv, _ := f.st.GetReview(ctx, f.req.ReviewID)
 	require.NotNil(t, rv.Comments[0].Fix)
 	assert.Equal(t, rv.Comments[0].Fix.State, reviews.FixFailed)
+}
+
+func fixContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, err := execution.With(context.Background(), execution.Identity{TenantID: "tenant", SubjectID: "user", SessionID: "thread", ParentSessionID: "thread"})
+	require.NoError(t, err)
+	return ctx
+}
+
+func TestRunRequiresExecutionBeforeStoreAccess(t *testing.T) {
+	_, err := (Runner{}).Run(context.Background(), Request{})
+	require.ErrorIs(t, err, execution.ErrMissing)
 }

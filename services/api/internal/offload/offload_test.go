@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/memory/extract"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
@@ -71,7 +72,7 @@ func TestWorkerExtractsAndSaves(t *testing.T) {
 	w := New(st, registry(srv.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	go w.Run(ctx)
 
-	j, err := w.Submit("repo", "", "claude-code", []extract.Turn{{Role: "user", Text: "I prefer small PRs. Payments is owned by Team Blue."}})
+	j, err := submit(t, w, "repo", "", "claude-code", []extract.Turn{{Role: "user", Text: "I prefer small PRs. Payments is owned by Team Blue."}})
 	require.NoError(t, err)
 	assert.Equal(t, j.State, Queued)
 	done := waitDone(t, w, j.ID)
@@ -88,7 +89,7 @@ func TestWorkerExtractsAndSaves(t *testing.T) {
 	assert.Equal(t, g.Facts[0].Confidence, 0.9)
 
 	// The next extraction is told which entities exist.
-	j, err = w.Submit("repo", "", "claude-code", []extract.Turn{{Role: "user", Text: "anything"}})
+	j, err = submit(t, w, "repo", "", "claude-code", []extract.Turn{{Role: "user", Text: "anything"}})
 	require.NoError(t, err)
 	waitDone(t, w, j.ID)
 	assert.True(t, strings.Contains(prompt, "- Payments"), "known entities are passed to the model")
@@ -99,9 +100,9 @@ func TestWorkerLocalOnly(t *testing.T) {
 	reg := registry("http://127.0.0.1:1")
 	require.NoError(t, reg.SetRoutes(llm.Routes{Default: "local", Tasks: map[string]string{Task: "cloud"}}))
 	w := New(memory.New(), reg, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	_, err := w.Submit("repo", "", "a", []extract.Turn{{Role: "user", Text: "x"}})
+	_, err := submit(t, w, "repo", "", "a", []extract.Turn{{Role: "user", Text: "x"}})
 	assert.True(t, errors.Is(err, ErrNoLocalModel), "a cloud provider is refused")
-	_, err = New(memory.New(), nil, slog.New(slog.NewTextHandler(io.Discard, nil))).Submit("repo", "", "a", []extract.Turn{{Role: "user", Text: "x"}})
+	_, err = submit(t, New(memory.New(), nil, slog.New(slog.NewTextHandler(io.Discard, nil))), "repo", "", "a", []extract.Turn{{Role: "user", Text: "x"}})
 	assert.True(t, errors.Is(err, ErrNoLocalModel), "no providers at all")
 }
 
@@ -114,7 +115,7 @@ func TestWorkerRechecksAccessBeforeSaving(t *testing.T) {
 			srv := fakeModel(t, `{"triples":[{"subject":"Payments","predicate":"OWNED_BY","object":"Team Blue","confidence":0.95}]}`, nil)
 			w := New(st, registry(srv.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
 			checks := 0
-			job, err := w.SubmitAuthorized("repo", "tenant|repo", "agent", []extract.Turn{{Role: "user", Text: "Payments is owned by Team Blue."}}, func(context.Context) error {
+			job, err := w.SubmitAuthorizedContext(workerContext(t, "tenant"), "repo", "tenant|repo", "agent", []extract.Turn{{Role: "user", Text: "Payments is owned by Team Blue."}}, func(context.Context) error {
 				checks++
 				if checks >= revokeAt {
 					return errors.New("permission revoked")
@@ -137,15 +138,15 @@ func TestWorkerFailuresAndLimits(t *testing.T) {
 	t.Cleanup(cancel)
 	srv := fakeModel(t, "Sorry, I cannot do that.", nil)
 	w := New(memory.New(), registry(srv.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	_, err := w.Submit("repo", "", "a", nil)
+	_, err := submit(t, w, "repo", "", "a", nil)
 	require.Error(t, err)
 
 	// Without a running worker the queue fills up instead of blocking.
 	for range queueSize {
-		_, err := w.Submit("repo", "", "a", []extract.Turn{{Role: "user", Text: "x"}})
+		_, err := submit(t, w, "repo", "", "a", []extract.Turn{{Role: "user", Text: "x"}})
 		require.NoError(t, err)
 	}
-	_, err = w.Submit("repo", "", "a", []extract.Turn{{Role: "user", Text: "x"}})
+	_, err = submit(t, w, "repo", "", "a", []extract.Turn{{Role: "user", Text: "x"}})
 	assert.True(t, errors.Is(err, ErrBusy))
 
 	go w.Run(ctx)
@@ -162,6 +163,8 @@ func TestWorkerPreservesAcceptedToolAfterRequestEnds(t *testing.T) {
 	srv := fakeModel(t, `{"triples":[{"subject":"Payments","predicate":"OWNED_BY","object":"Team Blue","confidence":0.95}]}`, nil)
 	w := New(memory.New(), registry(srv.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	checks := 0
+	ctx, err := execution.With(ctx, execution.Identity{TenantID: tenant, SubjectID: "user", SessionID: "thread", ParentSessionID: "thread"})
+	require.NoError(t, err)
 	job, err := w.SubmitAuthorizedContext(ctx, "repo", tenant+"|repo", "agent", []extract.Turn{{Role: "user", Text: "Payments is owned by Team Blue."}}, func(workerCtx context.Context) error {
 		checks++
 		assert.Equal(t, telemetry.Tenant(workerCtx), tenant)
@@ -175,4 +178,36 @@ func TestWorkerPreservesAcceptedToolAfterRequestEnds(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, done.State, Succeeded, done.Error)
 	assert.Equal(t, checks, 2)
+}
+
+func workerContext(t *testing.T, tenant string) context.Context {
+	t.Helper()
+	ctx, err := execution.With(t.Context(), execution.Identity{TenantID: tenant, SubjectID: "user", SessionID: "thread", ParentSessionID: "thread"})
+	require.NoError(t, err)
+	return ctx
+}
+func submit(t *testing.T, w *Worker, repo, namespace, source string, turns []extract.Turn) (Job, error) {
+	t.Helper()
+	return w.SubmitAuthorizedContext(workerContext(t, "tenant"), repo, namespace, source, turns, func(context.Context) error { return nil })
+}
+func TestMissingWorkerIdentityIsRejected(t *testing.T) {
+	w := New(memory.New(), nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	_, err := w.Submit("repo", "tenant|repo", "agent", []extract.Turn{{Role: "user", Text: "A owns B"}})
+	assert.True(t, errors.Is(err, execution.ErrMissing))
+	assert.Len(t, w.List("repo"), 0)
+}
+
+func TestShutdownDropsQueuedConversation(t *testing.T) {
+	model := fakeModel(t, `{"triples":[]}`, nil)
+	w := New(memory.New(), registry(model.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	job, err := submit(t, w, "repo", "tenant|repo", "runtime", []extract.Turn{{Role: "user", Text: "private conversation"}})
+	require.NoError(t, err)
+	stopped, cancel := context.WithCancel(t.Context())
+	cancel()
+	w.Run(stopped)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	assert.Equal(t, w.jobs[job.ID].State, Failed)
+	assert.Len(t, w.jobs[job.ID].turns, 0)
+	assert.True(t, w.jobs[job.ID].authorize == nil)
 }

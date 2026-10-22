@@ -270,7 +270,7 @@ func combine(a, b Fact) Fact {
 	out.CreatedAt = min(a.CreatedAt, b.CreatedAt)
 	out.ValidFrom = min(a.ValidFrom, b.ValidFrom)
 	if b.UpdatedAt > a.UpdatedAt {
-		out.UpdatedAt, out.Source = b.UpdatedAt, b.Source
+		out.UpdatedAt, out.Source, out.OriginSessionID = b.UpdatedAt, b.Source, b.OriginSessionID
 	}
 	if a.Current() || b.Current() {
 		out.ValidTo = ""

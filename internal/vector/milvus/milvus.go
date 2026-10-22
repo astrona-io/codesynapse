@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
+	"github.com/parisnakitakejser/codesynapse/internal/sessionmemory"
 	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 	"github.com/parisnakitakejser/codesynapse/internal/vector"
 )
@@ -63,8 +64,10 @@ type Index struct {
 	prefix string
 	http   *http.Client
 
-	mu    sync.Mutex
-	ready map[string]bool // collections known to exist and be loaded
+	mu          sync.Mutex
+	ready       map[string]bool // collections known to exist and be loaded
+	sessionMode bool
+	sessions    *Index
 }
 
 var _ vector.Index = (*Index)(nil)
@@ -85,6 +88,7 @@ func New(ctx context.Context, cfg Config) (*Index, error) {
 	}
 	x := &Index{base: strings.TrimRight(cfg.URL, "/"), token: cfg.Token, db: cfg.DBName, prefix: p,
 		http: &http.Client{Timeout: timeout}, ready: map[string]bool{}}
+	x.sessions = &Index{base: x.base, token: x.token, db: x.db, prefix: "session_" + p, http: x.http, ready: map[string]bool{}, sessionMode: true}
 	if _, err := x.names(ctx); err != nil {
 		return nil, fmt.Errorf("connecting to milvus at %s: %w", cfg.URL, err)
 	}
@@ -212,13 +216,19 @@ func (x *Index) ensure(ctx context.Context, name string, dims int) error {
 			return map[string]any{"fieldName": name, "dataType": "VarChar", "elementTypeParams": map[string]any{"max_length": n}}
 		}
 		id, tenant := varchar("id", maxID), varchar("tenant_id", maxTenant)
+		if x.sessionMode {
+			id = varchar("id", 2048)
+		}
 		id["isPrimary"] = true
 		tenant["isPartitionKey"] = true
+		fields := []any{id, tenant, varchar("ns", maxNamespace), map[string]any{"fieldName": "vec", "dataType": "FloatVector", "elementTypeParams": map[string]any{"dim": fmt.Sprint(dims)}}}
+		if x.sessionMode {
+			fields = append(fields, varchar("session_id", 128), varchar("entity_id", 2048), map[string]any{"fieldName": "expires_at", "dataType": "Int64"})
+		}
 		err := x.call(ctx, "collections/create", map[string]any{
 			"collectionName": name,
 			"description":    "CodeSynapse agent-memory entity embeddings",
-			"schema": map[string]any{"autoId": false, "fields": []any{id, tenant, varchar("ns", maxNamespace),
-				map[string]any{"fieldName": "vec", "dataType": "FloatVector", "elementTypeParams": map[string]any{"dim": fmt.Sprint(dims)}}}},
+			"schema":         map[string]any{"autoId": false, "fields": fields},
 			"indexParams": []any{map[string]any{"fieldName": "vec", "indexName": "vec", "metricType": "COSINE", "indexType": "HNSW",
 				"params": map[string]any{"M": 16, "efConstruction": 200}}},
 		}, nil)
@@ -244,10 +254,24 @@ func (x *Index) Upsert(ctx context.Context, model string, items []vector.Item) e
 	}
 	rows := make([]map[string]any, len(items))
 	for i, it := range items {
-		if len(it.ID) > maxID || len(it.Tenant) > maxTenant || len(it.Namespace) > maxNamespace {
+		idLimit := maxID
+		if x.sessionMode {
+			idLimit = 2048
+		} else if it.SessionID != "" {
+			return sessionmemory.ErrScope
+		}
+		if len(it.ID) > idLimit || len(it.Tenant) > maxTenant || len(it.Namespace) > maxNamespace || len(it.SessionID) > 128 {
 			return fmt.Errorf("milvus: item %q has an over-long field", it.ID)
 		}
 		rows[i] = map[string]any{"id": it.ID, "tenant_id": it.Tenant, "ns": it.Namespace, "vec": it.Vector}
+		if x.sessionMode {
+			rows[i]["session_id"] = it.SessionID
+			rows[i]["entity_id"] = it.ID
+			rows[i]["expires_at"] = it.ExpiresAt
+			key, _ := json.Marshal([]string{it.Tenant, it.SessionID, it.Namespace, it.ID})
+			sum := sha256.Sum256(key)
+			rows[i]["id"] = hex.EncodeToString(sum[:])
+		}
 	}
 	dims := len(items[0].Vector)
 	name := x.collection(model, dims)
@@ -359,7 +383,7 @@ func (x *Index) Drop(ctx context.Context) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	for _, name := range names {
-		if strings.HasPrefix(name, x.prefix) {
+		if strings.HasPrefix(name, x.prefix) || strings.HasPrefix(name, "session_"+x.prefix) {
 			if err := x.call(ctx, "collections/drop", map[string]any{"collectionName": name}, nil); err != nil {
 				return err
 			}

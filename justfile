@@ -139,9 +139,9 @@ review base="origin/main":
 mcp:
     go run ./cmd/codesynapse mcp install
 
-# Print an MCP client config for the running stack
+# Print runtime-aware MCP configuration without expanding credentials
 mcp-config:
-    @echo '{ "mcpServers": { "codesynapse": { "type": "http", "url": "http://localhost:8090/mcp", "headers": { "Authorization": "Bearer '"$CODESYNAPSE_MCP_TOKEN"'" } } } }'
+    @cat .mcp.json
 
 # --- container images and Kubernetes --------------------------------------
 

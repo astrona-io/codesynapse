@@ -278,6 +278,13 @@ type Store interface {
 	DeleteSession(ctx context.Context, hash string) error
 	DeleteUserSessions(ctx context.Context, userID string) error
 
+	// Execution sessions retain closed rows permanently to reject replay.
+	RegisterExecutionSession(ctx context.Context, session ExecutionSession) (ExecutionSession, bool, error)
+	ExecutionSessionByID(ctx context.Context, id string) (ExecutionSession, error)
+	RevokeExecutionSession(ctx context.Context, id, orgID, userID string, at time.Time) error
+	// ClosedExecutionSessions pages permanent tombstones and expired bindings for memory cleanup.
+	ClosedExecutionSessions(ctx context.Context, before time.Time, afterID string, limit int) ([]ExecutionSession, error)
+
 	CreateAPIKey(ctx context.Context, k APIKey) error
 	APIKeyByHash(ctx context.Context, hash string) (APIKey, error)
 	ListAPIKeys(ctx context.Context, userID string) ([]APIKey, error)

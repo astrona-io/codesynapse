@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/agentctx"
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/query"
@@ -60,6 +61,9 @@ var ErrNothingToDo = errors.New("nothing to analyse")
 
 // Run executes task and stores its result, returning the review id.
 func (r Runner) Run(ctx context.Context, task string, in Input) (string, error) {
+	if _, err := execution.Require(ctx); err != nil {
+		return "", err
+	}
 	if r.Authorize != nil {
 		if err := r.Authorize(ctx); err != nil {
 			return "", err

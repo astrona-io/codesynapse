@@ -18,7 +18,8 @@ type memRepo struct {
 }
 
 // UpsertMemory implements store.MemoryStore.
-func (s *Store) UpsertMemory(_ context.Context, b agentmem.Batch) error {
+func (s *Store) UpsertMemory(ctx context.Context, b agentmem.Batch) error {
+	b = b.StampOrigin(ctx)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m := s.mem[b.Repo]

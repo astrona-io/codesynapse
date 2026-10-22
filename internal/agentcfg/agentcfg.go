@@ -21,6 +21,12 @@ const Name = "codesynapse"
 // TokenEnv is the environment variable agents read the bearer token from.
 const TokenEnv = "CODESYNAPSE_MCP_TOKEN" //nolint:gosec // env var name
 
+// Runtime variables must be supplied by the launcher for one chat thread.
+const (
+	SessionEnv       = "CODESYNAPSE_SESSION_ID"
+	ParentSessionEnv = "CODESYNAPSE_PARENT_SESSION_ID"
+)
+
 // Server describes the MCP endpoint to register.
 type Server struct {
 	URL   string
@@ -64,7 +70,7 @@ func Detect(home, cwd string) []Target {
 			install: func(_ context.Context, s Server) error {
 				return mergeJSON(p, []string{"mcpServers", Name}, map[string]any{
 					"httpUrl": s.URL,
-					"headers": map[string]any{"Authorization": "Bearer $" + TokenEnv},
+					"headers": runtimeHeaders("Bearer $"+TokenEnv, "$"+SessionEnv, "$"+ParentSessionEnv),
 				})
 			},
 		})
@@ -76,7 +82,7 @@ func Detect(home, cwd string) []Target {
 			install: func(_ context.Context, s Server) error {
 				return mergeJSON(p, []string{"mcp", Name}, map[string]any{
 					"type": "remote", "url": s.URL, "enabled": true,
-					"headers": map[string]any{"Authorization": "Bearer {env:" + TokenEnv + "}"},
+					"headers": runtimeHeaders("Bearer {env:"+TokenEnv+"}", "{env:"+SessionEnv+"}", "{env:"+ParentSessionEnv+"}"),
 				})
 			},
 		})
@@ -88,7 +94,7 @@ func Detect(home, cwd string) []Target {
 			install: func(_ context.Context, s Server) error {
 				return mergeJSON(p, []string{"mcpServers", Name}, map[string]any{
 					"url":     s.URL,
-					"headers": map[string]any{"Authorization": "Bearer ${env:" + TokenEnv + "}"},
+					"headers": runtimeHeaders("Bearer ${env:"+TokenEnv+"}", "${env:"+SessionEnv+"}", "${env:"+ParentSessionEnv+"}"),
 				})
 			},
 		})
@@ -99,11 +105,15 @@ func Detect(home, cwd string) []Target {
 		install: func(_ context.Context, s Server) error {
 			return mergeJSON(p, []string{"mcpServers", Name}, map[string]any{
 				"type": "http", "url": s.URL,
-				"headers": map[string]any{"Authorization": "Bearer ${" + TokenEnv + "}"},
+				"headers": runtimeHeaders("Bearer ${"+TokenEnv+"}", "${"+SessionEnv+"}", "${"+ParentSessionEnv+"}"),
 			})
 		},
 	})
 	return out
+}
+
+func runtimeHeaders(authorization, primary, parent string) map[string]any {
+	return map[string]any{"Authorization": authorization, "X-CodeSynapse-Session": primary, "X-CodeSynapse-Parent-Session": parent}
 }
 
 func dirExists(p string) bool {
@@ -126,7 +136,7 @@ func installClaude(ctx context.Context, s Server) error {
 	}
 	cfg, err := json.Marshal(map[string]any{
 		"type": "http", "url": s.URL,
-		"headers": map[string]string{"Authorization": "Bearer " + s.Token},
+		"headers": runtimeHeaders("Bearer "+s.Token, "${"+SessionEnv+"}", "${"+ParentSessionEnv+"}"),
 	})
 	if err != nil {
 		return err

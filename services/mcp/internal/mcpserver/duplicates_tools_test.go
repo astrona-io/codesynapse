@@ -49,7 +49,7 @@ func connectRepos(t *testing.T, graphs map[string]*model.Graph) *mcp.ClientSessi
 		require.NoError(t, s.ReplaceRepo(ctx, repo, g))
 	}
 	ct, st := mcp.NewInMemoryTransports()
-	_, err := New(s, "test", Options{Reviews: s, History: s}).Connect(ctx, st, nil)
+	_, err := newTestServer(t, s, "test", Options{Reviews: s, History: s}).Connect(ctx, st, nil)
 	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(ctx, ct, nil)
 	require.NoError(t, err)
@@ -152,7 +152,7 @@ func TestRepoTrendTool(t *testing.T) {
 	require.NoError(t, s.AddSnapshot(ctx, "org/a", history.Snapshot{At: "2026-10-01T00:00:00Z", Grade: "A", Score: 95}))
 	require.NoError(t, s.AddSnapshot(ctx, "org/a", history.Snapshot{At: "2026-10-02T00:00:00Z", Grade: "B", Score: 85, VulnsCalled: 1}))
 	ct, st := mcp.NewInMemoryTransports()
-	_, err := New(s, "test", Options{Reviews: s, History: s}).Connect(ctx, st, nil)
+	_, err := newTestServer(t, s, "test", Options{Reviews: s, History: s}).Connect(ctx, st, nil)
 	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(ctx, ct, nil)
 	require.NoError(t, err)

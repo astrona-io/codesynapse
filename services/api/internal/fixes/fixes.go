@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
@@ -124,6 +125,9 @@ func Stale(f reviews.Fix, now time.Time) bool {
 // Run makes the fix branch. Comment fix state is saved as it goes, so the
 // UI can show progress and failures.
 func (r Runner) Run(ctx context.Context, req Request) (res Result, err error) {
+	if _, err := execution.Require(ctx); err != nil {
+		return res, err
+	}
 	if r.Authorize != nil {
 		if err := r.Authorize(ctx); err != nil {
 			return res, err

@@ -26,6 +26,8 @@ type Item struct {
 	// Tenant is the organisation (memory.TenantOf of the namespace).
 	Tenant    string
 	Namespace string
+	SessionID string
+	ExpiresAt int64 // Unix milliseconds, session vectors only
 	Vector    []float32
 }
 
@@ -34,6 +36,8 @@ type Hit struct {
 	ID        string
 	Tenant    string
 	Namespace string
+	SessionID string
+	ExpiresAt int64 // Unix milliseconds, session vectors only
 	Score     float64
 }
 
@@ -81,7 +85,7 @@ func Isolate(hits []Hit, tenant, namespace string, k int) []Hit {
 		return nil
 	}
 	out := slices.DeleteFunc(hits, func(h Hit) bool {
-		return h.Tenant != tenant || h.Namespace != namespace || h.ID == "" || math.IsNaN(h.Score) || math.IsInf(h.Score, 0) || h.Score < -1e-6 || h.Score > 1+1e-6
+		return h.Tenant != tenant || h.Namespace != namespace || h.SessionID != "" || h.ID == "" || math.IsNaN(h.Score) || math.IsInf(h.Score, 0) || h.Score < -1e-6 || h.Score > 1+1e-6
 	})
 	// Float32 cosine backends can round an identical vector just above one.
 	for i := range out {
@@ -110,8 +114,9 @@ func ClampK(k int) int {
 
 // Flat is an exact in-process Index.
 type Flat struct {
-	mu    sync.RWMutex
-	items map[string]flatItem
+	mu           sync.RWMutex
+	items        map[string]flatItem
+	sessionItems map[string]flatItem
 }
 
 type flatItem struct {
@@ -126,6 +131,11 @@ func NewFlat() *Flat { return &Flat{items: map[string]flatItem{}} }
 
 // Upsert implements Index.
 func (f *Flat) Upsert(_ context.Context, model string, items []Item) error {
+	for _, it := range items {
+		if it.SessionID != "" {
+			return errors.New("session vectors require the session index")
+		}
+	}
 	if err := Check(items); err != nil {
 		return err
 	}
@@ -147,7 +157,7 @@ func (f *Flat) Search(_ context.Context, model, tenant, namespace string, vec []
 	defer f.mu.RUnlock()
 	var hits []Hit
 	for _, it := range f.items {
-		if it.model == model && it.Tenant == tenant && it.Namespace == namespace && len(it.Vector) == len(vec) {
+		if it.SessionID == "" && it.model == model && it.Tenant == tenant && it.Namespace == namespace && len(it.Vector) == len(vec) {
 			hits = append(hits, Hit{ID: it.ID, Tenant: it.Tenant, Namespace: it.Namespace, Score: memory.Similarity(vec, it.Vector)})
 		}
 	}

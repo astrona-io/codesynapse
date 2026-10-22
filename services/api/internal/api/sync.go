@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
@@ -120,7 +121,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	org, authorize := s.jobAuthorization(r.Context(), req.Name, accounts.Admin)
-	job, err := s.startCloneAuth(remote, req.Name, req.Branch, auth, JobOptions{OrgID: org, Authorize: authorize}) //nolint:contextcheck // jobs outlive the request
+	job, err := s.startCloneAuth(remote, req.Name, req.Branch, auth, JobOptions{OrgID: org, Identity: identityOf(r.Context()), Authorize: authorize}) //nolint:contextcheck // jobs outlive the request
 	switch {
 	case errors.Is(err, errConflict):
 		s.problem(w, http.StatusConflict, err)
@@ -133,8 +134,9 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 // startClone queues a clone of an already validated remote into the
 // workspace under name, then indexes it.
-func (s *Server) startClone(remote, name, branch string) (Job, error) {
-	return s.startCloneAuth(remote, name, branch, s.authFor(remote))
+func (s *Server) startClone(ctx context.Context, remote, name, branch string) (Job, error) {
+	org, authorize := s.jobAuthorization(ctx, name, accounts.Admin)
+	return s.startCloneAuth(remote, name, branch, s.authFor(remote), JobOptions{OrgID: org, Identity: identityOf(ctx), Authorize: authorize}) //nolint:contextcheck // detached jobs inherit the serialized runtime identity
 }
 
 // startCloneAuth clones with the given credentials (none for organisations
@@ -144,12 +146,15 @@ func (s *Server) startCloneAuth(remote, name, branch string, auth gitx.Auth, acc
 	if len(access) > 0 {
 		opts = access[0]
 	}
+	if err := execution.Validate(opts.Identity); err != nil {
+		return Job{}, err
+	}
 	dir := repoDir(s.cfg.Workspace, name)
 	if _, err := os.Stat(dir); err == nil { //nolint:gosec // name passed validRepoName: at most two safe elements, none with a leading dot
 		return Job{}, fmt.Errorf("%w: %q already exists; use sync", errConflict, name)
 	}
 	job, err := s.jobs.Start(name, dir, JobOptions{
-		Kind: "clone", Branch: branch, OrgID: opts.OrgID, Authorize: opts.Authorize,
+		Kind: "clone", Branch: branch, OrgID: opts.OrgID, Identity: opts.Identity, Authorize: opts.Authorize,
 		Prepare: func(ctx context.Context) error {
 			if err := gitx.Clone(ctx, remote, branch, dir, auth); err != nil {
 				_ = os.RemoveAll(dir) //nolint:errcheck,gosec // best-effort cleanup of a partial clone; dir is workspace/<validated name>
@@ -235,7 +240,7 @@ func (s *Server) handleSwitchToRemote(w http.ResponseWriter, r *http.Request) {
 	branch := req.Branch
 	org, authorize := s.jobAuthorization(r.Context(), repo, accounts.Admin)
 	job, err := s.jobs.Start(repo, dir, JobOptions{ //nolint:contextcheck // jobs outlive the request
-		Kind: "clone", Branch: branch, OrgID: org, Authorize: authorize,
+		Kind: "clone", Branch: branch, OrgID: org, Identity: identityOf(r.Context()), Authorize: authorize,
 		Prepare: func(ctx context.Context) error {
 			if err := gitx.Clone(ctx, remote, branch, dir, auth); err != nil {
 				_ = os.RemoveAll(dir) //nolint:errcheck,gosec // best-effort cleanup; dir is a validated workspace child
@@ -274,6 +279,8 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	job, err := s.startSync(r.Context(), r.PathValue("repo"), req.Branch, false, nil)
 	switch {
+	case errors.Is(err, errExecutionRegistry):
+		s.problem(w, http.StatusForbidden, err)
 	case errors.Is(err, errBadRequest):
 		s.problem(w, 400, err)
 	case errors.Is(err, errConflict):
@@ -292,6 +299,9 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 // and returns errUnchanged without queueing a job when not: with hundreds of
 // repositories every few minutes, a fetch and re-index each would never drain.
 func (s *Server) startSync(ctx context.Context, repo, branch string, onlyIfChanged bool, done func(error)) (Job, error) {
+	if _, err := execution.Require(ctx); err != nil {
+		return Job{}, err
+	}
 	n, err := s.st.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
 	if err != nil {
 		return Job{}, err
@@ -304,7 +314,7 @@ func (s *Server) startSync(ctx context.Context, repo, branch string, onlyIfChang
 	if err := checkJob(ctx, authorize); err != nil {
 		return Job{}, err
 	}
-	opts := JobOptions{Kind: "sync", Branch: branch, OrgID: org, Authorize: authorize}
+	opts := JobOptions{Kind: "sync", Branch: branch, OrgID: org, Identity: identityOf(ctx), Authorize: authorize}
 	switch {
 	case s.inWorkspace(n.Root):
 		if branch == "" {
@@ -396,7 +406,7 @@ func (s *Server) automation(ctx context.Context, repo string, before model.Node)
 		if len(newFindings) == 0 && len(diff) == 0 {
 			return
 		}
-		_, err = s.jobs.Start(repo, "", JobOptions{Kind: "ai", Task: "automatic", OrgID: org, Authorize: authorize, Run: func(ctx context.Context) (string, error) { //nolint:contextcheck // runs as its own job
+		_, err = s.jobs.Start(repo, "", JobOptions{Kind: "ai", Task: "automatic", OrgID: org, Identity: identityOf(ctx), Authorize: authorize, Run: func(ctx context.Context) (string, error) { //nolint:contextcheck // runs as its own job
 			var last string
 			var errs []error
 			if len(newFindings) > 0 {

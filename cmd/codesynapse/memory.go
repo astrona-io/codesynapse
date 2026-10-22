@@ -19,6 +19,7 @@ import (
 
 	"github.com/parisnakitakejser/codesynapse/internal/agentcfg"
 	"github.com/parisnakitakejser/codesynapse/internal/app"
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
@@ -58,6 +59,11 @@ func newAPIClient(base string) apiClient {
 }
 
 func (c apiClient) do(ctx context.Context, method, path string, body, out any) error {
+	if strings.Contains(path, "/memory") || strings.Contains(path, "/session-memory") {
+		if _, err := execution.Require(ctx); err != nil {
+			return err
+		}
+	}
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -71,10 +77,16 @@ func (c apiClient) do(ctx context.Context, method, path string, body, out any) e
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if id, ok := execution.From(ctx); ok {
+		req.Header.Set(execution.SessionHeader, id.SessionID)
+		req.Header.Set(execution.ParentSessionHeader, id.ParentSessionID)
+	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
-	res, err := c.http.Do(req)
+	httpClient := *c.http
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	res, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -96,6 +108,23 @@ func (c apiClient) do(ctx context.Context, method, path string, body, out any) e
 		return json.Unmarshal(data, out)
 	}
 	return nil
+}
+
+func (c apiClient) executionContext(ctx context.Context, primary, parent string) (context.Context, error) {
+	if primary == "" || parent == "" {
+		return nil, execution.ErrMissing
+	}
+	if primary != parent {
+		return nil, execution.ErrConflict
+	}
+	var id execution.Identity
+	if err := c.do(ctx, http.MethodPost, "/api/v1/execution/sessions", map[string]string{"session_id": primary}, &id); err != nil {
+		return nil, fmt.Errorf("register runtime session: %w", err)
+	}
+	if id.SessionID != primary || id.ParentSessionID != parent {
+		return nil, execution.ErrConflict
+	}
+	return execution.With(ctx, id)
 }
 
 // resolveRepo finds the CodeSynapse repository name of dir: the indexed
@@ -197,10 +226,18 @@ func (o *recallOptions) Run(ctx context.Context, _ *app.Env) error {
 func (o *recallOptions) recall(ctx context.Context) (string, error) {
 	c := newAPIClient(o.apiURL)
 	dir := "."
+	primary, parent := os.Getenv("CODESYNAPSE_SESSION_ID"), os.Getenv("CODESYNAPSE_PARENT_SESSION_ID")
 	if o.hook {
-		if in := readHook(o.EC.Stdin); in.Cwd != "" {
+		in := readHook(o.EC.Stdin)
+		primary, parent = in.SessionID, in.SessionID
+		if in.Cwd != "" {
 			dir = in.Cwd
 		}
+	}
+	var err error
+	ctx, err = c.executionContext(ctx, primary, parent)
+	if err != nil {
+		return "", err
 	}
 	repo := o.repo
 	if repo == "" {
@@ -210,7 +247,7 @@ func (o *recallOptions) recall(ctx context.Context) (string, error) {
 		}
 	}
 	var g memory.Graph
-	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/api/v1/repos/%s/memory?limit=%d", url.PathEscape(repo), max(1, o.limit)), nil, &g); err != nil {
+	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/api/v1/repos/%s/session-memory?limit=%d", url.PathEscape(repo), max(1, o.limit)), nil, &g); err != nil {
 		return "", err
 	}
 	return formatFacts(repo, g, 6000), nil
@@ -286,9 +323,17 @@ func (o *offloadOptions) Run(ctx context.Context, _ *app.Env) error {
 }
 
 func (o *offloadOptions) offload(ctx context.Context) (int, error) {
-	in := hookInput{TranscriptPath: o.transcript, Cwd: "."}
+	in := hookInput{TranscriptPath: o.transcript, Cwd: ".", SessionID: os.Getenv("CODESYNAPSE_SESSION_ID")}
+	parent := os.Getenv("CODESYNAPSE_PARENT_SESSION_ID")
 	if o.hook {
 		in = readHook(o.EC.Stdin)
+		parent = in.SessionID
+	}
+	c := newAPIClient(o.apiURL)
+	var err error
+	ctx, err = c.executionContext(ctx, in.SessionID, parent)
+	if err != nil {
+		return 0, err
 	}
 	if in.TranscriptPath == "" {
 		return 0, errors.New("no transcript")
@@ -312,7 +357,6 @@ func (o *offloadOptions) offload(ctx context.Context) (int, error) {
 	if len(todo) == 0 {
 		return 0, nil
 	}
-	c := newAPIClient(o.apiURL)
 	repo := o.repo
 	if repo == "" {
 		if repo, err = c.resolveRepo(ctx, cmp.Or(in.Cwd, ".")); err != nil {
@@ -322,7 +366,7 @@ func (o *offloadOptions) offload(ctx context.Context) (int, error) {
 	sent := 0
 	for start := 0; start < len(todo); start += extract.MaxTurns {
 		chunk := todo[start:min(start+extract.MaxTurns, len(todo))]
-		if err := c.do(ctx, http.MethodPost, "/api/v1/repos/"+url.PathEscape(repo)+"/memory/offload",
+		if err := c.do(ctx, http.MethodPost, "/api/v1/repos/"+url.PathEscape(repo)+"/session-memory/offload",
 			map[string]any{"turns": chunk, "source": "claude-code (hook)"}, nil); err != nil {
 			saveOffloadState(state, done+sent)
 			return sent, err

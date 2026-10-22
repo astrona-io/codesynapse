@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 )
 
 // HistoryDepth is how many commits clones and fetches keep. Enough for
@@ -143,6 +145,11 @@ func runRemote(ctx context.Context, dir, remote string, auth Auth, args ...strin
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0", "GIT_ASKPASS=/bin/false",
 		"HOME=/nonexistent", "PATH=" + safePath(),
 	}, append(remoteEnv(remote, auth), testEnv...)...)
+	var err error
+	cmd.Env, err = execution.Environment(ctx, cmd.Env)
+	if err != nil {
+		return nil, err
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

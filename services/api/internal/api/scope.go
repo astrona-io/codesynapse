@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/parisnakitakejser/codesynapse/internal/execution"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
@@ -230,7 +231,10 @@ func (s *Server) guard(pol policy, h http.HandlerFunc) http.HandlerFunc {
 			s.accountError(w, accounts.ErrForbidden)
 			return
 		}
-		h(w, r)
+		r, ok = s.executionRequest(w, r, false)
+		if ok {
+			h(w, r)
+		}
 	}
 }
 
@@ -272,6 +276,13 @@ func (s *Server) linkRepo(r *http.Request, graph, remote, visibility string) err
 	if p.Via != "session" {
 		return accounts.ErrForbidden
 	}
+	id, err := execution.Require(r.Context())
+	if err != nil {
+		return err
+	}
+	if _, err := s.cfg.Accounts.ResolveExecutionSession(r.Context(), p.User.ID, m.Org.ID, id.SessionID); err != nil {
+		return err
+	}
 	err = s.cfg.Accounts.St.AddRepository(r.Context(), accounts.Repository{OrgID: m.Org.ID, Graph: graph, Remote: remote,
 		Visibility: visibility, AddedBy: p.User.ID, AddedAt: time.Now().UTC().Truncate(time.Microsecond)})
 	if errors.Is(err, accounts.ErrExists) {
@@ -295,6 +306,8 @@ type attachRequest struct {
 }
 
 // handleAttachRepo requires the organisation owner to prove remote access.
+//
+//nolint:contextcheck // bindExecutionRequest adds validated identity to the incoming request context
 func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request) {
 	p, o, ok := s.orgFor(w, r, accounts.Owner)
 	if !ok {
@@ -302,6 +315,15 @@ func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.Via != "session" {
 		s.accountError(w, accounts.ErrForbidden)
+		return
+	}
+	session, err := executionHeader(r)
+	if err != nil {
+		s.problem(w, http.StatusForbidden, err)
+		return
+	}
+	r, ok = s.bindExecutionRequest(w, r, p.User.ID, o.ID, session)
+	if !ok {
 		return
 	}
 	var req attachRequest
@@ -327,6 +349,10 @@ func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request) {
 			s.accountError(w, accounts.ErrForbidden)
 			return
 		}
+	}
+	if _, err := s.cfg.Accounts.ResolveExecutionSession(r.Context(), p.User.ID, o.ID, session); err != nil {
+		s.accountError(w, err)
+		return
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	err = s.cfg.Accounts.St.AddRepository(r.Context(), accounts.Repository{OrgID: o.ID, Graph: req.Graph, Remote: n.URL, Visibility: vis,

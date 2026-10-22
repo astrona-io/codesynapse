@@ -19,7 +19,7 @@ import (
 func TestEveryToolHasPolicy(t *testing.T) {
 	ctx := context.Background()
 	s := memory.New()
-	server := New(s, "test", Options{Memory: s, Reviews: s, History: s, Curated: s, CatalogWrites: true, Offload: &APIClient{}})
+	server := newTestServer(t, s, "test", Options{Memory: s, Reviews: s, History: s, Curated: s, CatalogWrites: true, Offload: &APIClient{}})
 	ct, st := mcp.NewInMemoryTransports()
 	ss, err := server.Connect(ctx, st, nil)
 	require.NoError(t, err)
@@ -59,7 +59,7 @@ func TestAccountsStdioAuthentication(t *testing.T) {
 		{"personal", keys["a"], true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server := New(s, "test", Options{Access: AccountsAccess{Acc: acc}, StdioToken: tc.token})
+			server := New(s, "test", Options{Access: AccountsAccess{Acc: acc}, StdioToken: tc.token, Runtime: NewRuntime(AccountsAccess{Acc: acc}, tc.token, "chat-a", "chat-a")})
 			ct, st := mcp.NewInMemoryTransports()
 			ss, err := server.Connect(ctx, st, nil)
 			require.NoError(t, err)

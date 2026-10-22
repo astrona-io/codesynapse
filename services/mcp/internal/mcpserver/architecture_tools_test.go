@@ -105,7 +105,7 @@ func TestProposeAndLinkTools(t *testing.T) {
 	s := memory.New()
 	require.NoError(t, s.ReplaceRepo(ctx, "org/a", archGraph(t, "org/a", archRecords)))
 	ct, st := mcp.NewInMemoryTransports()
-	_, err := New(s, "test", Options{Curated: s, CatalogWrites: true}).Connect(ctx, st, nil)
+	_, err := newTestServer(t, s, "test", Options{Curated: s, CatalogWrites: true}).Connect(ctx, st, nil)
 	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "claude-code"}, nil).Connect(ctx, ct, nil)
 	require.NoError(t, err)
@@ -166,7 +166,7 @@ func TestCatalogWritesAreOffWithoutTheFlag(t *testing.T) {
 	s := memory.New()
 	require.NoError(t, s.ReplaceRepo(ctx, "org/a", archGraph(t, "org/a", archRecords)))
 	ct, st := mcp.NewInMemoryTransports()
-	_, err := New(s, "test", Options{Curated: s}).Connect(ctx, st, nil)
+	_, err := newTestServer(t, s, "test", Options{Curated: s}).Connect(ctx, st, nil)
 	require.NoError(t, err)
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "x"}, nil).Connect(ctx, ct, nil)
 	require.NoError(t, err)
@@ -208,7 +208,7 @@ func TestCatalogWritesNeedEditorAccessAndAreAudited(t *testing.T) {
 	assert.True(t, audited, "the change is in the audit log")
 
 	// Another organisation that shares the graph does not see the proposal.
-	other, err := connectKey(t, url, keys["b"])
+	other, err := connectKey(t, url, keys["b"], "chat-b")
 	require.NoError(t, err)
 	var seen proposalsOut
 	require.False(t, callContext(ctx, t, other, "architecture_proposals", map[string]any{"repo": storetest.Repo}, &seen).IsError)

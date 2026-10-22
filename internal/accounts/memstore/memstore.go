@@ -16,21 +16,22 @@ import (
 
 // Store is safe for concurrent use.
 type Store struct {
-	mu       sync.RWMutex
-	policy   bool
-	outbox   map[string]int64
-	users    map[string]accounts.User
-	orgs     map[string]accounts.Org
-	members  map[string]map[string]member // org -> user -> role
-	sessions map[string]accounts.Session
-	keys     map[string]accounts.APIKey // by ID
-	events   []accounts.Event
-	lastID   int64
-	repos    map[string]accounts.Repository // org|graph
-	tokens   map[string]accounts.GitToken   // org|host
-	teams    map[string]accounts.Team
-	tuples   map[accounts.Tuple]bool // keys have CreatedBy/CreatedAt zeroed
-	tupleAt  map[accounts.Tuple]accounts.Tuple
+	mu         sync.RWMutex
+	policy     bool
+	outbox     map[string]int64
+	users      map[string]accounts.User
+	orgs       map[string]accounts.Org
+	members    map[string]map[string]member // org -> user -> role
+	sessions   map[string]accounts.Session
+	executions map[string]accounts.ExecutionSession
+	keys       map[string]accounts.APIKey // by ID
+	events     []accounts.Event
+	lastID     int64
+	repos      map[string]accounts.Repository // org|graph
+	tokens     map[string]accounts.GitToken   // org|host
+	teams      map[string]accounts.Team
+	tuples     map[accounts.Tuple]bool // keys have CreatedBy/CreatedAt zeroed
+	tupleAt    map[accounts.Tuple]accounts.Tuple
 }
 
 type member struct {
@@ -43,7 +44,7 @@ var _ accounts.Store = (*Store)(nil)
 // New returns an empty store.
 func New() *Store {
 	return &Store{outbox: map[string]int64{}, users: map[string]accounts.User{}, orgs: map[string]accounts.Org{}, members: map[string]map[string]member{},
-		sessions: map[string]accounts.Session{}, keys: map[string]accounts.APIKey{}, repos: map[string]accounts.Repository{}, tokens: map[string]accounts.GitToken{},
+		sessions: map[string]accounts.Session{}, executions: map[string]accounts.ExecutionSession{}, keys: map[string]accounts.APIKey{}, repos: map[string]accounts.Repository{}, tokens: map[string]accounts.GitToken{},
 		teams: map[string]accounts.Team{}, tuples: map[accounts.Tuple]bool{}, tupleAt: map[accounts.Tuple]accounts.Tuple{}}
 }
 

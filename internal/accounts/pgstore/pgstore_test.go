@@ -25,7 +25,7 @@ func TestContract(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(st.Close)
 	// Start from an empty schema: the contract creates fixed emails.
-	_, err = st.db.Exec(ctx, "DROP TABLE IF EXISTS access_policy_outbox, relation_tuples, teams, org_git_tokens, repositories, audit_head, events, api_keys, sessions, memberships, orgs, users, schema_migrations CASCADE")
+	_, err = st.db.Exec(ctx, "DROP TABLE IF EXISTS execution_sessions, access_policy_outbox, relation_tuples, teams, org_git_tokens, repositories, audit_head, events, api_keys, sessions, memberships, orgs, users, schema_migrations CASCADE")
 	require.NoError(t, err)
 	accountstest.Run(t, st)
 	accountstest.RunConcurrentAudit(t, st)
@@ -33,6 +33,7 @@ func TestContract(t *testing.T) {
 	accountstest.RunAdmin(t, st)
 	accountstest.RunAccessBounds(t, st)
 	accountstest.RunPolicyRecovery(t, st)
+	accountstest.RunExecutionSessions(t, st)
 
 	// Tampering with a stored entry is detected.
 	_, err = st.db.Exec(ctx, "UPDATE events SET detail = 'edited' WHERE id = (SELECT max(id) FROM events)")

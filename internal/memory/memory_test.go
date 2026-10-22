@@ -86,3 +86,13 @@ func TestRecallGate(t *testing.T) {
 		assert.Equal(t, RecallGate(q) != "", skip, q)
 	}
 }
+
+func TestMergedFactKeepsLatestOrigin(t *testing.T) {
+	old := Fact{Source: "first", OriginSessionID: "chat-first", UpdatedAt: "2026-01-01"}
+	latest := Fact{Source: "second", OriginSessionID: "chat-second", UpdatedAt: "2026-02-01"}
+	for _, facts := range [][2]Fact{{old, latest}, {latest, old}} {
+		merged := combine(facts[0], facts[1])
+		assert.Equal(t, merged.Source, "second")
+		assert.Equal(t, merged.OriginSessionID, "chat-second")
+	}
+}

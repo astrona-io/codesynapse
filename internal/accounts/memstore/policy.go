@@ -28,6 +28,7 @@ func (s *Store) PolicyTransaction(ctx context.Context, _ string, fn func(account
 	s.orgs = tx.orgs
 	s.members = tx.members
 	s.sessions = tx.sessions
+	s.executions = tx.executions
 	s.keys = tx.keys
 	s.events = tx.events
 	s.lastID = tx.lastID
@@ -164,6 +165,7 @@ func (s *Store) snapshot() *Store {
 		tx.members[id] = maps.Clone(ms)
 	}
 	tx.sessions = maps.Clone(s.sessions)
+	tx.executions = maps.Clone(s.executions)
 	tx.keys = maps.Clone(s.keys)
 	tx.events = slices.Clone(s.events)
 	tx.lastID = s.lastID

@@ -13,11 +13,11 @@ Requires [just](https://github.com/casey/just) and Docker or Podman (`podman mac
 ```sh
 just up                       # writes .env with random secrets, builds and starts everything
 just ingest ~/src/my-service  # copies the checkout into ./sources and indexes it
-just mcp                      # register the MCP server with your agents (asks per agent)
+just mcp                      # install client config; runtime session setup is also required
 open http://localhost:3000
 ```
 
-Or use the dashboard: **Clone by URL** adds a GitHub/GitLab repository, **Organisations** watches a whole GitHub organisation (`astrona-io/*`), **Sources** lists everything under `./sources`, and **Sync** on a repository fetches the chosen branch and re-indexes it.
+The dashboard supports sign-in, governance and repository browsing. Execution controls such as cloning, sync and model tasks now require a registered runtime session. The web proxy does not yet carry that trusted binding, so these controls are unavailable through the dashboard. Use the authenticated API with runtime metadata; offline CLI ingest remains available.
 
 | URL | What |
 |---|---|
@@ -73,7 +73,7 @@ Non-Go call edges are name-based (imports, enclosing class, names unique in the 
 
 ## Code reviews
 
-Ask your agent to review a change ("review my changes with CodeSynapse and submit the review", or the `code-review` MCP prompt). It analyses the change with the graph and calls `submit_review`; the review appears on the **Reviews** page with a verdict, a summary and comments on exact lines, each with severity, category, the symbol it points at and a suggested fix. Resolve comments in the UI, or let the agent mark them fixed with `update_review_comment`. These are the only MCP tools that write, and they write only to the review store (disable with `CODESYNAPSE_MCP_REVIEWS=false`).
+Ask your agent to review a change ("review my changes with CodeSynapse and submit the review", or the `code-review` MCP prompt). It analyses the change with the graph and calls `submit_review`; the review appears on the **Reviews** page with a verdict, a summary and comments on exact lines, each with severity, category, the symbol it points at and a suggested fix. Resolve comments in the UI, or let the agent mark them fixed with `update_review_comment`. These review tools write only to the review store (disable with `CODESYNAPSE_MCP_REVIEWS=false`).
 
 Every comment needs a decision: **Accept** (agreed, to fix), **Reject** (disagree or false positive, with an optional reason), **Defer** (later) or **Mark fixed**. The Reviews page shows progress and tabs for To decide, To fix, Later and Done; agents record the same decisions with `update_review_comment` and read the to-do list with `get_review` status "accepted".
 
@@ -133,23 +133,21 @@ Metrics use OpenTelemetry cumulative OTLP/HTTP by default. Set `CODESYNAPSE_METR
 
 ## Connect an AI agent
 
-**Install into your agents.** `just mcp` (`codesynapse mcp install`) finds Claude Code, Codex, Gemini CLI, OpenCode, Cursor and the project `.mcp.json`, and asks for each whether to add CodeSynapse. Codex, Gemini, OpenCode and Cursor read the token from `$CODESYNAPSE_MCP_TOKEN`; Claude Code stores it in its user config (you are told before it does).
+MCP tool execution requires PostgreSQL accounts, a personal organisation API key and an immutable chat ID supplied by the calling runtime. The installation token alone cannot execute tools. Offline CLI indexing still works without accounts; MCP tools fail closed without the execution-session registry.
 
-**Or by hand.** The stack serves MCP at `http://localhost:8090/mcp` with the bearer token from `.env`:
+`just mcp` (`codesynapse mcp install`) installs connection settings for detected clients. It does not supply a chat identity or register a session. Before the first tool call, a runtime-aware launcher or client integration must:
 
-```sh
-just mcp-config      # prints a JSON client config for the running stack
-claude mcp add --transport http codesynapse http://localhost:8090/mcp \
-  --header "Authorization: Bearer $CODESYNAPSE_MCP_TOKEN"
-```
+1. Read the existing thread ID from its runtime and register it with `POST /api/v1/execution/sessions`, using the personal key and body `{"session_id":"<runtime-provided thread ID>"}`.
+2. Send that same value in both `X-CodeSynapse-Session` and `X-CodeSynapse-Parent-Session` on every MCP HTTP request, together with `Authorization: Bearer <personal key>`.
+3. Keep the identity unchanged across reconnects, compaction and delegated work. Each new chat needs its own runtime-provided ID. Do not generate an ID inside a tool, substitute an MCP transport ID or share one static value across chats.
 
-**Without any database** the server can index one directory into memory at startup (stdio). Good for a single project, but it only sees that directory:
+The checked-in `.mcp.json` connects to `http://localhost:8090/mcp` and contains environment placeholders for `CODESYNAPSE_MCP_TOKEN`, `CODESYNAPSE_SESSION_ID` and `CODESYNAPSE_PARENT_SESSION_ID`. A launcher must supply these before the client reads its configuration, after registration. Placeholder syntax and per-chat headers vary by client; the template is not a verified integration for every client. It launches no local process or Python helper.
 
-```sh
-claude mcp add codesynapse -- go run github.com/parisnakitakejser/codesynapse/services/mcp/cmd/codesynapse-mcp@latest serve --offline .
-```
+**Codex:** the installed CLI's `mcp add` supports the URL and bearer-token environment variable but has no HTTP header setter. Its installer therefore does not complete runtime-header setup. Configure headers through a supported client configuration or runtime integration and verify that they reach the server before using tools. See the [runtime contract and client limitations](docs/AGENT_GUIDE.md#runtime-session-setup).
 
-This repository's `.mcp.json` connects directly to the running stack at `http://localhost:8090/mcp`, using `CODESYNAPSE_MCP_TOKEN` for bearer authentication. In accounts mode, set that variable to a personal organisation API key before starting the agent. The registration launches no local process or Python helper. Call `repo_list` (or `search_all_repos`) to find repositories your account may access, then pass `repo` to the other tools. Repositories cloned by URL or through an organisation are named `owner/name` (for example `astrona-io/astrona-cli`), so equally named repositories of two organisations never clash; mounted folders and older indexes keep a plain name.
+**Stdio:** launch one MCP server process per chat, with `CODESYNAPSE_DATABASE_URL`, the personal key in `CODESYNAPSE_API_TOKEN`, and the already-registered primary and parent IDs in `CODESYNAPSE_SESSION_ID` and `CODESYNAPSE_PARENT_SESSION_ID`. Both IDs must match. A process cannot switch to another chat; the server rechecks credentials and registration on each tool call.
+
+Once connected, call `repo_list` or `search_all_repos`, then pass an authorised `repo` to other tools. Cloned repositories use names such as `owner/name`; mounted folders and older indexes can have plain names.
 
 ### Working efficiently
 
@@ -177,27 +175,26 @@ The point is to ask the graph instead of reading files. A good order:
 | Findings in one directory | `security_report` with `path` |
 | Work through accepted review comments | `get_review` with `status: "accepted"`, then `update_review_comment` |
 
-Tips: pass `diff` rather than refs whenever you have it, since it works even when the indexed clone is on another commit. Keep `limit` small on reports, and `min_severity` at medium or above for a first pass. The graph reflects the last ingest, so files you edited since may differ; the 30-minute auto-sync keeps it close (`repo_status` tells you when it is stale).
+Tips: pass `diff` rather than refs whenever you have it, since it works even when the indexed clone is on another commit. Keep `limit` small on reports, and `min_severity` at medium or above for a first pass. The graph reflects the last ingest, so files you edited since may differ; a schedule with a valid delegated runtime session can refresh it (`repo_status` tells you when it is stale).
 
 ### MCP tools and prompts
 
-`docs/AGENT_GUIDE.md` explains when to use which, with ready-made task prompts. Every tool is read-only except `submit_review` and `update_review_comment`, which write only to the review store (turn them off with `CODESYNAPSE_MCP_REVIEWS=false`), and the opt-in agent-memory tool below.
+`docs/AGENT_GUIDE.md` explains when to use which, with ready-made task prompts. Write tools are limited to reviews, explicitly requested durable memory, session offloading and catalog proposals/annotations. They do not edit source code. Review tools can be disabled with `CODESYNAPSE_MCP_REVIEWS=false`; memory is enabled by default and can be disabled with `CODESYNAPSE_ALLOW_MEMORY=false`.
 
 **Statistics.** The **Statistics** page shows MCP sessions and tool calls per day, the most used tools, clients and repositories, tokens served and an estimate of tokens avoided, agent memory use with a model of what offloading saves, and workspace-wide security, licence, update-automation, review, AI and sync figures. The MCP server records only daily counters (never arguments or results); turn it off with `CODESYNAPSE_MCP_USAGE=false`.
 
-**Agent memory.** Agents can offload durable facts from their context window as triples (`upsert_graph_triples`, or `offload_turns` to let a local model extract them in the background) and recall them in later sessions (`search_graph_nodes`, `query_subgraph`, prompt `context-offload`). Facts are scoped to one indexed repository, merged by name and alias (`me`, `I` and `user` are the same person; `SAME_AS` joins two names), keep history when they change (`valid_from` / `valid_to`), carry a confidence, are redacted, size-limited and tagged with the agent that saved them, and are listed on the **Agent memory** page, where you can delete them. Turn it off with `CODESYNAPSE_ALLOW_MEMORY=false`.
+**Agent memory has two scopes.** `recall_context` defaults to the current chat's private session memory, and `offload_turns` extracts older turns into that same scope using a local model. Both require the API and validated runtime metadata. Session recall never falls back to repository-wide memory. Sessions expire seven days after registration; reconnecting does not extend them. Revoking a session blocks further work and schedules deletion of its graph facts and vectors.
 
-#### Make agents use memory automatically
+Durable repository knowledge is shared with authorised readers of that repository in the organisation. Use `upsert_graph_triples` only when the user explicitly asks to retain a fact beyond the chat. Read it with `search_graph_nodes`, `query_subgraph`, or `recall_context` with `memory_scope: "repository"`. The **Agent memory** page displays this durable scope. Existing facts stay in that scope; new writes record their originating session. Selected session facts can be explicitly promoted through the [session-memory API](docs/AGENT_GUIDE.md#session-memory-api).
 
-1. **Nothing to do for the basics.** Memory is on by default, and every agent connected to the MCP server (`just mcp`) receives instructions to recall at the start of a task and save decisions and preferences as they come up.
-2. **Repository instructions** (for agents that follow AGENTS.md more closely than server instructions): `codesynapse mcp agents-md ~/src/your-repo` adds a marked memory block to AGENTS.md (and CLAUDE.md if it does not import AGENTS.md). Re-running updates the block; commit it.
-3. **Claude Code hooks** (fully automatic recall, offloading and a smaller session): in the CodeSynapse folder run `export CODESYNAPSE_API_TOKEN=$(sed -n 's/^CODESYNAPSE_API_TOKEN=//p' .env)`, then `codesynapse mcp hooks ~/src/your-repo` and restart Claude Code in that project.
-   - **The session shrinks at 30%.** The installer sets `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=30`, so Claude Code compacts when the conversation reaches 30% of its auto-compact window instead of near the limit. `--compact-at 25` picks another size; `--compact-at 0` keeps Claude Code's default.
-   - **Before every compaction**, the PreCompact hook sends the turns older than the last 10 exchanges to background extraction, so what mattered is saved before the conversation is summarised.
-   - **After every compaction and at session start**, the SessionStart hook puts the saved facts back into the smaller context.
-   - Hooks and the setting go to `.claude/settings.local.json` (use `--shared` for the committed `settings.json`); remove them there to turn them off.
-   - Limits of Claude Code itself: hooks cannot trigger compaction or remove messages; Claude Code writes the summary and decides what it keeps, and the threshold can only be lowered. If the setting does not seem to apply, export `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=30` in your shell before starting Claude Code and check with `/context`.
-4. **Background extraction and recall by meaning need local models:** route the "memory" task to a local provider (Ollama, MLX, LM Studio) on the **AI models** page, and the "embeddings" task to a local provider with an `embedding_model` (e.g. Ollama's `nomic-embed-text`; see `config/llm.example.yaml`). Without them, `offload_turns` explains what is missing, agents save triples themselves, and `recall_context` ranks by words only (BM25 over names, aliases and types).
+#### Set up memory and hooks
+
+1. Configure the runtime session binding above. Connected agents receive instructions to recall the current chat and offload older turns; those instructions do not supply authentication or runtime metadata.
+2. Run `codesynapse mcp agents-md ~/src/your-repo` to add the same memory rules to AGENTS.md and, where applicable, CLAUDE.md. Re-running updates the marked block.
+3. Supply a personal key in `CODESYNAPSE_API_TOKEN`, then run `codesynapse mcp hooks ~/src/your-repo` to install Claude Code hooks. The SessionStart and PreCompact hook payloads must contain the runtime's `session_id`. Hooks register that supplied ID and send both identity headers when recalling or offloading through the API. They report an error and skip work if the identity is missing or closed.
+4. Route the `memory` task to a local provider for extraction and the `embeddings` task to a local provider with an `embedding_model`; see `config/llm.example.yaml`. Without embeddings, session recall can use lexical search through the API. There is no anonymous background embedding worker: session indexing follows authorised writes, and durable indexing uses `POST /api/v1/repos/{repo}/memory/index` with the caller's runtime context. MCP durable writes request this indexing when the API is configured; failed indexing leaves lexical retrieval available.
+
+Hooks cannot change the environment or HTTP headers of an already-running MCP client. Installing them does not complete MCP runtime integration. They recall at session start and after compaction, and offload turns older than the last 10 exchanges before compaction. The installer also sets `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=30`; `--compact-at 0` leaves the client's setting unchanged. Hooks cannot remove messages or force compaction. Their configuration lives in `.claude/settings.local.json`, or `.claude/settings.json` with `--shared`.
 
 | Tool | Returns |
 |---|---|
@@ -278,7 +275,7 @@ See `AGENTS.md` for conventions and security rules and `docs/PLAN.md` for archit
 
 ## Security model, briefly
 
-Indexing untrusted code is the normal case, so: `go list` runs without cgo, toolchain downloads or network; git runs with hooks, fsmonitor and diff drivers disabled, and clones only over HTTPS to public hosts; no source bodies or YAML values are stored and summaries are redacted for secrets; services require bearer tokens off loopback; MCP tools cannot change code or the graph (only the review store). Details in `AGENTS.md`.
+Indexing untrusted code is the normal case, so: `go list` runs without cgo, toolchain downloads or network; git runs with hooks, fsmonitor and diff drivers disabled, and clones only over HTTPS to public hosts; no source bodies or YAML values are stored and summaries are redacted for secrets; services require bearer tokens off loopback; MCP tools cannot edit source code; their approved writes are confined to reviews, memory and catalog records. Details in `AGENTS.md`.
 
 ## Graph backend: Neo4j or HugeGraph + Milvus
 
@@ -298,11 +295,11 @@ Both are Apache-2.0, scale out, and keep each organisation's memory and vectors 
 
 ## Accounts, organisations and audit log
 
-The web app has sign-in, a first-run setup (the first account administers the installation), Settings for your profile, API keys, members and Git tokens, an Agents page that connects Claude Code, Codex or Cursor in three steps, and Help that explains every figure. It follows your system's light or dark mode, or the choice in the sidebar.
+The web app has sign-in, a first-run setup (the first account administers the installation), Settings for your profile, API keys, members and Git tokens, an Agents page with client connection settings (runtime session integration is still required), and Help that explains every figure. It follows your system's light or dark mode, or the choice in the sidebar.
 
 Repository access requires explicit organisation membership, including for platform administrators. A direct user grant (read, write, admin, or no access) overrides team grants; otherwise the strongest team grant applies, then the organisation's read-only/no-access default. Guests need a grant. Write permits reviews and memory updates; admin also permits sync, schedules and access management. Settings → Organisation controls the default and owner recovery; Settings → Teams and each repository's Access page manage grants. Changes are audited. See the [upgrade notes](docs/ACCESS_CONTROL_PLAN.md#implementation-and-upgrade) before upgrading an existing accounts database.
 
-With PostgreSQL configured (`CODESYNAPSE_DATABASE_URL`; the compose stack does this), CodeSynapse has user accounts, organisations with roles (owner, admin, member, viewer) and personal API keys (`csk_…`) for agents and the CLI. An agent connected with a key (`CODESYNAPSE_MCP_TOKEN=csk_… just mcp`) sees only its organisation's repositories and keeps its memory, reviews and statistics separate from other organisations. The first account becomes the platform admin; set `CODESYNAPSE_SIGNUP_OPEN=true` to let others sign up. Every change and security event goes to a tamper-evident audit log (hash chain, `GET /api/v1/admin/audit/verify`), exportable as CSV or JSON Lines and also written to the logs for your SIEM, which is what NIS2-regulated organisations need. Platform admins get an Administration area: system health, every organisation and user, suspending accounts, granting platform admin, and the audit log with filters and export. The direction and remaining phases (privacy masking, hybrid search, Kubernetes production setup, single sign-on) are in [docs/SAAS.md](docs/SAAS.md).
+With PostgreSQL configured (`CODESYNAPSE_DATABASE_URL`; the compose stack does this), CodeSynapse has user accounts, organisations with roles (owner, admin, member, viewer) and personal API keys (`csk_…`) for agents and the CLI. An agent connected with a personal key and registered runtime session sees only its organisation's repositories and keeps its memory, reviews and statistics separate from other organisations. The first account becomes the platform admin; set `CODESYNAPSE_SIGNUP_OPEN=true` to let others sign up. Every change and security event goes to a tamper-evident audit log (hash chain, `GET /api/v1/admin/audit/verify`), exportable as CSV or JSON Lines and also written to the logs for your SIEM, which is what NIS2-regulated organisations need. Platform admins get an Administration area: system health, every organisation and user, suspending accounts, granting platform admin, and the audit log with filters and export. The direction and remaining phases (privacy masking, hybrid search, Kubernetes production setup, single sign-on) are in [docs/SAAS.md](docs/SAAS.md).
 
 Private repositories: an organisation admin stores a Git token per host (`PUT /api/v1/accounts/orgs/{org}/git-tokens/github.com`; the settings page comes with the new web app). Tokens are encrypted with `SECRET_KEY` from `.env` (keep it: tokens sealed with a lost key have to be set again). The organisation then adds private repositories it can read with its own token; CodeSynapse checks that access again at every sync and hides the repository from an organisation whose token stopped working.
 

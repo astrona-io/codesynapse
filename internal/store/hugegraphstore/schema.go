@@ -21,12 +21,12 @@ var (
 // Other labels' properties (names shared with nodes have the same type).
 var (
 	entityProps   = []string{"eid", "tenant_id", "ns", "name", "type", "aliases", "created_at", "updated_at", "emb_model"}
-	factProps     = []string{"fid", "tenant_id", "ns", "subj", "obj", "predicate", "source", "confirmations", "confidence", "valid_from", "valid_to", "created_at", "updated_at"}
+	factProps     = []string{"origin_session_id", "fid", "tenant_id", "ns", "subj", "obj", "predicate", "source", "confirmations", "confidence", "valid_from", "valid_to", "created_at", "updated_at"}
 	reviewProps   = []string{"rid", "repo", "created_at", "updated_at", "doc"}
 	snapshotProps = []string{"sid", "repo", "at", "doc"}
 	curatedProps  = []string{"cid", "repo", "kind", "created_at", "doc"}
 	usageProps    = []string{"ukey", "day", "daynum", "org", "repo", "tool", "client", "calls", "errors", "response_tokens", "duration_ms", "max_duration_ms"}
-	otherTexts    = []string{"eid", "tenant_id", "ns", "type", "created_at", "updated_at", "emb_model", "fid", "subj", "obj", "predicate", "source",
+	otherTexts    = []string{"origin_session_id", "eid", "tenant_id", "ns", "type", "created_at", "updated_at", "emb_model", "fid", "subj", "obj", "predicate", "source",
 		"valid_from", "valid_to", "rid", "doc", "ukey", "day", "org", "tool", "client", "sid", "at", "cid", "kind"}
 	otherLongs = []string{"count", "confirmations", "daynum", "calls", "errors", "response_tokens", "duration_ms", "max_duration_ms"}
 )
@@ -60,6 +60,9 @@ edgeKinds.each { k ->
 def factNullable = factProps - ['fid', 'tenant_id', 'ns', 'subj', 'obj']
 s.edgeLabel('fact').sourceLabel('mem_entity').targetLabel('mem_entity').multiTimes().properties(factProps as String[])
   .sortKeys('fid').nullableKeys(factNullable as String[]).ifNotExist().create()
+def haveFact=s.getEdgeLabel('fact').properties().collect{graph.propertyKey(it).name()}
+def missingFact=factProps-haveFact
+if(missingFact){s.edgeLabel('fact').properties(missingFact as String[]).nullableKeys(missingFact as String[]).append()}
 
 s.indexLabel('nodeByRepo').onV('node').by('repo').secondary().ifNotExist().create()
 s.indexLabel('nodeByKind').onV('node').by('kind').secondary().ifNotExist().create()
@@ -76,9 +79,11 @@ s.indexLabel('usageByDay').onV('usage').by('daynum').range().ifNotExist().create
 // EnsureSchema implements store.Writer. Property keys, labels and indexes
 // are created when missing; nothing is dropped.
 func (s *Store) EnsureSchema(ctx context.Context) error {
-	edges := make([]string, len(model.AllEdgeKinds))
-	for i, k := range model.AllEdgeKinds {
-		edges[i] = string(k)
+	edges := []string{}
+	for _, k := range model.AllEdgeKinds {
+		if k != model.EdgeSessionFact {
+			edges = append(edges, string(k))
+		}
 	}
 	nodeProps := append(append(append(append([]string{}, nodeTexts...), nodeLongs...), nodeBools...), nodeLists...)
 	err := s.write(ctx, schemaScript, map[string]any{
@@ -90,5 +95,8 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("hugegraph schema: %w", err)
 	}
-	return s.write(ctx, accessSchema, nil, nil)
+	if err = s.write(ctx, accessSchema, nil, nil); err != nil {
+		return err
+	}
+	return s.write(ctx, sessionSchema, nil, nil)
 }
