@@ -165,19 +165,23 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return n, err
 }
 
-const userCols = "id, email, name, password_hash, platform_admin, created_at"
+const userCols = "id, email, name, password_hash, platform_admin, created_at, disabled_at"
 
 func scanUser(row pgx.Row) (accounts.User, error) {
 	var u accounts.User
-	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.PlatformAdmin, &u.CreatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.PlatformAdmin, &u.CreatedAt, &u.DisabledAt)
 	u.CreatedAt = u.CreatedAt.UTC()
+	if u.DisabledAt != nil {
+		t := u.DisabledAt.UTC()
+		u.DisabledAt = &t
+	}
 	return u, err
 }
 
 // CreateUser implements accounts.Store.
 func (s *Store) CreateUser(ctx context.Context, u accounts.User) error {
-	_, err := s.db.Exec(ctx, "INSERT INTO users ("+userCols+") VALUES ($1, $2, $3, $4, $5, $6)",
-		u.ID, u.Email, u.Name, u.PasswordHash, u.PlatformAdmin, u.CreatedAt)
+	_, err := s.db.Exec(ctx, "INSERT INTO users ("+userCols+") VALUES ($1, $2, $3, $4, $5, $6, $7)",
+		u.ID, u.Email, u.Name, u.PasswordHash, u.PlatformAdmin, u.CreatedAt, u.DisabledAt)
 	return mapErr(err, "email")
 }
 
@@ -525,7 +529,8 @@ func (s *Store) ListEvents(ctx context.Context, f accounts.EventFilter) ([]accou
 	}
 	rows, err := s.db.Query(ctx, "SELECT "+eventCols+` FROM events
 WHERE ($1 = '' OR org_id = $1) AND ($2::timestamptz IS NULL OR at >= $2) AND ($3::timestamptz IS NULL OR at < $3) AND id > $4
-ORDER BY id `+order+" LIMIT $5", f.OrgID, since, until, f.AfterID, limit)
+  AND ($6 = '' OR starts_with(action, $6)) AND ($7 = '' OR actor_email = $7 OR user_id = $7) AND ($8 = '' OR outcome = $8)
+ORDER BY id `+order+" LIMIT $5", f.OrgID, since, until, f.AfterID, limit, f.Action, f.Actor, f.Outcome)
 	if err != nil {
 		return nil, err
 	}
@@ -652,4 +657,16 @@ func (s *Store) DeleteTuples(ctx context.Context, f accounts.TupleFilter) (int, 
 	where, args := tupleWhere(f)
 	tag, err := s.db.Exec(ctx, "DELETE FROM relation_tuples WHERE "+where, args...)
 	return int(tag.RowsAffected()), err
+}
+
+// SetUserDisabled implements accounts.Store.
+func (s *Store) SetUserDisabled(ctx context.Context, userID string, at *time.Time) error {
+	tag, err := s.db.Exec(ctx, "UPDATE users SET disabled_at = $2 WHERE id = $1", userID, at)
+	return affected(tag, err, "user")
+}
+
+// SetPlatformAdmin implements accounts.Store.
+func (s *Store) SetPlatformAdmin(ctx context.Context, userID string, admin bool) error {
+	tag, err := s.db.Exec(ctx, "UPDATE users SET platform_admin = $2 WHERE id = $1", userID, admin)
+	return affected(tag, err, "user")
 }

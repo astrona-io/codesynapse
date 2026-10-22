@@ -16,6 +16,7 @@ func TestContract(t *testing.T) {
 	accountstest.Run(t, st)
 	accountstest.RunConcurrentAudit(t, st)
 	accountstest.RunReBAC(t, st)
+	accountstest.RunAdmin(t, st)
 }
 
 func TestAuditTamperDetected(t *testing.T) {

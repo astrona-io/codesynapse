@@ -147,6 +147,11 @@ func (s *Service) Login(ctx context.Context, email, password, client string) (st
 		s.audit(ctx, Event{UserID: u.ID, ActorEmail: u.Email, Via: "anonymous", Action: "user.login", Target: u.Email, Outcome: Failure, Detail: "wrong password"})
 		return "", User{}, ErrUnauthorized
 	}
+	if u.DisabledAt != nil {
+		// Checked after the password, so a suspension is not an oracle for it.
+		s.audit(ctx, Event{UserID: u.ID, ActorEmail: u.Email, Via: "anonymous", Action: "user.login", Target: u.Email, Outcome: Failure, Detail: "account suspended"})
+		return "", User{}, ErrSuspended
+	}
 	tok, err := randomToken(32)
 	if err != nil {
 		return "", User{}, err
@@ -178,7 +183,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 		return Principal{}, ErrUnauthorized
 	}
 	u, err := s.St.UserByID(ctx, sess.UserID)
-	if err != nil {
+	if err != nil || u.DisabledAt != nil {
 		return Principal{}, ErrUnauthorized
 	}
 	return Principal{User: u, Via: "session"}, nil
@@ -198,7 +203,7 @@ func (s *Service) AuthenticateKey(ctx context.Context, key string) (Principal, e
 		return Principal{}, ErrKeyRevoked
 	}
 	u, err := s.St.UserByID(ctx, k.UserID)
-	if err != nil {
+	if err != nil || u.DisabledAt != nil {
 		return Principal{}, ErrUnauthorized
 	}
 	// A key outlives a membership only on paper: removed members lose access.

@@ -36,6 +36,7 @@ const more = computed(() => [
   { to: '/orgs', label: 'Import', hint: 'Index every repository of a GitHub, GitLab or Forgejo organisation' },
   { to: '/ai', label: 'AI models', hint: 'Local and cloud language models' },
   ...(session.accounts.value ? [{ to: '/settings', label: 'Settings', hint: 'Profile, API keys, organisation, Git tokens' }] : []),
+  ...(session.accounts.value && session.isPlatformAdmin.value ? [{ to: '/admin', label: 'Administration', hint: 'Organisations, people, health and the audit log' }] : []),
   { to: '/help', label: 'Help', hint: 'Getting started and what things mean' },
 ])
 const repoGroups = computed(() => {

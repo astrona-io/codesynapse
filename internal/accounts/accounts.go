@@ -46,6 +46,9 @@ type User struct {
 	Name          string    `json:"name"`
 	PlatformAdmin bool      `json:"platform_admin"`
 	CreatedAt     time.Time `json:"created_at"`
+	// DisabledAt is set while the account is suspended: no sign-in, and
+	// its sessions and API keys stop working.
+	DisabledAt *time.Time `json:"disabled_at,omitempty"`
 	// PasswordHash is the argon2id PHC string; never serialised.
 	PasswordHash string `json:"-"`
 }
@@ -197,6 +200,10 @@ type EventFilter struct {
 	Until   time.Time
 	AfterID int64
 	Limit   int
+	// Action matches actions starting with it ("user." finds every user
+	// event); Actor matches the actor's email or user ID; Outcome is
+	// success, failure or empty for both.
+	Action, Actor, Outcome string
 	// Ascending orders oldest first (export, verification).
 	Ascending bool
 }
@@ -212,6 +219,7 @@ var (
 	ErrLastOwner    = errors.New("an organisation needs at least one owner")
 	ErrInvalidInput = errors.New("invalid input")
 	ErrKeyRevoked   = errors.New("API key revoked or expired")
+	ErrSuspended    = errors.New("this account is suspended; ask an administrator")
 	ErrNoSecretKey  = errors.New("organisation Git tokens need CODESYNAPSE_SECRET_KEY (32 random bytes, base64 or hex) on the API")
 )
 
@@ -227,6 +235,9 @@ type Store interface {
 	UserByEmail(ctx context.Context, email string) (User, error)
 	SetPassword(ctx context.Context, userID, hash string) error
 	ListUsers(ctx context.Context, limit int) ([]User, error)
+	// SetUserDisabled suspends (at != nil) or restores a user.
+	SetUserDisabled(ctx context.Context, userID string, at *time.Time) error
+	SetPlatformAdmin(ctx context.Context, userID string, admin bool) error
 
 	CreateOrg(ctx context.Context, o Org, owner string) error // ErrExists on a taken slug
 	OrgBySlug(ctx context.Context, slug string) (Org, error)
