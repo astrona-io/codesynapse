@@ -1,0 +1,70 @@
+site_name: CodeSynapse
+site_description: Code graph for security reviews, code quality and AI coding assistants
+repo_url: https://github.com/parisnakitakejser/codesynapse
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Ingest pipeline: architecture/ingest.md
+      - Graph schema: architecture/graph-schema.md
+      - Stores and backends: architecture/stores.md
+  - Features:
+      - Agent context (MCP): features/agent-context.md
+      - Security review: features/security.md
+      - Cleanup and licences: features/cleanup-licenses.md
+      - Agent memory: features/memory.md
+      - Reviews and fix branches: features/reviews-fixes.md
+  - Operations:
+      - Accounts and access: operations/accounts-access.md
+      - Security model: operations/security-model.md
+      - Running the stack: operations/running.md
+  - Reference:
+      - Agent guide: AGENT_GUIDE.md
+      - Plan and decisions: PLAN.md
+      - Access control plan: ACCESS_CONTROL_PLAN.md
+      - Retrieval plan: RETRIEVAL_PLAN.md
+      - Telemetry plan: TELEMETRY_PLAN.md
+      - Session context plan: SESSION_CONTEXT_PLAN.md
+      - Repo config plan: REPO_CONFIG_PLAN.md
+      - Ingest transparency plan: INGEST_TRANSPARENCY_PLAN.md
+      - SaaS: SAAS.md
+      - "ADR 0001: search": adr/0001-search.md
