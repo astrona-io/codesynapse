@@ -187,10 +187,20 @@ func (s *Server) handleVerifyAudit(w http.ResponseWriter, r *http.Request) {
 }
 
 // exportAudit writes entries as JSON (default), JSON Lines or CSV. Query:
-// since, until (RFC 3339), after_id (cursor), limit (max 10000), format.
+// since, until (RFC 3339), after_id (cursor), limit (max 10000), action
+// (prefix), actor (email or user ID), outcome (success, failure), format.
 func (s *Server) exportAudit(w http.ResponseWriter, r *http.Request, orgID string) {
 	q := r.URL.Query()
-	f := accounts.EventFilter{OrgID: orgID, Limit: clamp(atoi(q.Get("limit")), 1, 10000, 500), Ascending: q.Get("order") == "asc"}
+	f := accounts.EventFilter{OrgID: orgID, Limit: clamp(atoi(q.Get("limit")), 1, 10000, 500), Ascending: q.Get("order") == "asc",
+		Action: q.Get("action"), Actor: accounts.NormalizeEmail(q.Get("actor")), Outcome: q.Get("outcome")}
+	if f.Outcome != "" && f.Outcome != accounts.Success && f.Outcome != accounts.Failure {
+		s.problem(w, 400, errors.New("outcome must be success or failure"))
+		return
+	}
+	if len(f.Action) > 100 || len(f.Actor) > 320 {
+		s.problem(w, 400, errors.New("filter too long"))
+		return
+	}
 	var err error
 	if f.AfterID, err = strconv.ParseInt(cmpOr(q.Get("after_id"), "0"), 10, 64); err != nil {
 		s.problem(w, 400, errors.New("after_id must be a number"))

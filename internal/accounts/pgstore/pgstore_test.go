@@ -28,6 +28,7 @@ func TestContract(t *testing.T) {
 	accountstest.Run(t, st)
 	accountstest.RunConcurrentAudit(t, st)
 	accountstest.RunReBAC(t, st)
+	accountstest.RunAdmin(t, st)
 
 	// Tampering with a stored entry is detected.
 	_, err = st.db.Exec(ctx, "UPDATE events SET detail = 'edited' WHERE id = (SELECT max(id) FROM events)")

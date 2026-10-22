@@ -138,11 +138,11 @@ func (s *Server) accountError(w http.ResponseWriter, err error) {
 		s.problem(w, http.StatusBadRequest, err)
 	case errors.Is(err, accounts.ErrUnauthorized), errors.Is(err, accounts.ErrKeyRevoked):
 		s.problem(w, http.StatusUnauthorized, err)
-	case errors.Is(err, accounts.ErrForbidden), errors.Is(err, accounts.ErrSignupClosed):
+	case errors.Is(err, accounts.ErrForbidden), errors.Is(err, accounts.ErrSignupClosed), errors.Is(err, accounts.ErrSuspended):
 		s.problem(w, http.StatusForbidden, err)
 	case errors.Is(err, accounts.ErrNotFound):
 		s.problem(w, http.StatusNotFound, err)
-	case errors.Is(err, accounts.ErrExists), errors.Is(err, accounts.ErrLastOwner), errors.Is(err, accounts.ErrNoSecretKey):
+	case errors.Is(err, accounts.ErrExists), errors.Is(err, accounts.ErrLastOwner), errors.Is(err, accounts.ErrNoSecretKey), errors.Is(err, accounts.ErrLastAdmin):
 		s.problem(w, http.StatusConflict, err)
 	case errors.Is(err, accounts.ErrRateLimited):
 		w.Header().Set("Retry-After", "60")
@@ -186,8 +186,12 @@ func (s *Server) accountRoutes() {
 	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/git-tokens", s.handleGitTokens)
 	m.HandleFunc("PUT /api/v1/accounts/orgs/{org}/git-tokens/{host}", s.handleSetGitToken)
 	m.HandleFunc("DELETE /api/v1/accounts/orgs/{org}/git-tokens/{host}", s.handleRemoveGitToken)
-	m.HandleFunc("GET /api/v1/admin/users", s.handleAdminUsers)
-	m.HandleFunc("GET /api/v1/admin/orgs", s.handleAdminOrgs)
+	m.HandleFunc("GET /api/v1/admin/users", s.handleAdminUsersDetail)
+	m.HandleFunc("GET /api/v1/admin/orgs", s.handleAdminOrgsDetail)
+	m.HandleFunc("POST /api/v1/admin/users/{id}/suspend", s.handleSuspendUser)
+	m.HandleFunc("POST /api/v1/admin/users/{id}/resume", s.handleResumeUser)
+	m.HandleFunc("PUT /api/v1/admin/users/{id}/platform-admin", s.handleSetPlatformAdmin)
+	m.HandleFunc("GET /api/v1/admin/health", s.handleAdminHealth)
 }
 
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
@@ -494,30 +498,6 @@ func (s *Server) platformAdmin(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return ok
-}
-
-func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
-	if !s.platformAdmin(w, r) {
-		return
-	}
-	users, err := s.cfg.Accounts.St.ListUsers(r.Context(), 1000)
-	if err != nil {
-		s.problem(w, 500, err)
-		return
-	}
-	writeJSON(w, 200, map[string]any{"users": users})
-}
-
-func (s *Server) handleAdminOrgs(w http.ResponseWriter, r *http.Request) {
-	if !s.platformAdmin(w, r) {
-		return
-	}
-	orgs, err := s.cfg.Accounts.St.ListOrgs(r.Context(), 1000)
-	if err != nil {
-		s.problem(w, 500, err)
-		return
-	}
-	writeJSON(w, 200, map[string]any{"orgs": orgs})
 }
 
 func clamp(v, lo, hi, def int) int {

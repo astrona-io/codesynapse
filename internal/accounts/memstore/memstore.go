@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -355,7 +356,9 @@ func (s *Store) ListEvents(_ context.Context, f accounts.EventFilter) ([]account
 	}
 	match := func(e accounts.Event) bool {
 		return (f.OrgID == "" || e.OrgID == f.OrgID) && (f.Since.IsZero() || !e.At.Before(f.Since)) &&
-			(f.Until.IsZero() || e.At.Before(f.Until)) && e.ID > f.AfterID
+			(f.Until.IsZero() || e.At.Before(f.Until)) && e.ID > f.AfterID &&
+			strings.HasPrefix(e.Action, f.Action) && (f.Actor == "" || e.ActorEmail == f.Actor || e.UserID == f.Actor) &&
+			(f.Outcome == "" || e.Outcome == f.Outcome)
 	}
 	out := []accounts.Event{}
 	if f.Ascending {
@@ -661,4 +664,30 @@ func (s *Store) DeleteTuples(_ context.Context, f accounts.TupleFilter) (int, er
 		}
 	}
 	return n, nil
+}
+
+// SetUserDisabled implements accounts.Store.
+func (s *Store) SetUserDisabled(_ context.Context, userID string, at *time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.users[userID]
+	if !ok {
+		return fmt.Errorf("user: %w", accounts.ErrNotFound)
+	}
+	u.DisabledAt = at
+	s.users[userID] = u
+	return nil
+}
+
+// SetPlatformAdmin implements accounts.Store.
+func (s *Store) SetPlatformAdmin(_ context.Context, userID string, admin bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.users[userID]
+	if !ok {
+		return fmt.Errorf("user: %w", accounts.ErrNotFound)
+	}
+	u.PlatformAdmin = admin
+	s.users[userID] = u
+	return nil
 }

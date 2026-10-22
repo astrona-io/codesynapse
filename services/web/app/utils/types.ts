@@ -313,3 +313,19 @@ export interface Attention {
   vulns: number
   grades: Record<string, number>
 }
+
+// Platform administration.
+export interface AdminOrg extends AccountOrg { members: number; roles: Record<string, number>; repositories: number; lost_access: number; teams: number }
+export interface AdminUser extends AccountUser { disabled_at?: string; orgs: { slug: string; name: string; role: Role }[]; active_keys: number; last_key_use?: string }
+export interface HealthCheck { ok: boolean; detail: string; seconds: number }
+export interface AdminHealth {
+  version: string; checked: string
+  graph: HealthCheck; accounts: HealthCheck; metrics: HealthCheck; audit: HealthCheck
+  counts: { users: number; suspended: number; admins: number; orgs: number; graphs: number; audit_events_checked: number }
+  jobs: { total: number; running: number; succeeded: number; failed: number }
+  unowned: string[]
+}
+export interface AuditEvent {
+  id: number; at: string; request_id?: string; user_id?: string; actor_email?: string; via?: string; key_id?: string; org_id?: string
+  ip?: string; user_agent?: string; action: string; target?: string; outcome: string; status?: number; detail?: string; hash: string
+}
