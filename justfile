@@ -17,10 +17,18 @@ default:
 init:
     #!/usr/bin/env sh
     set -eu
-    if [ -f .env ]; then echo ".env exists, leaving it alone"; exit 0; fi
+    if [ -f .env ]; then
+        # Upgrades: add keys newer versions need, never touch existing ones.
+        if ! grep -q '^POSTGRES_PASSWORD=' .env; then
+            printf '\n# PostgreSQL for users, organisations, API keys and the audit log.\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
+            echo "added POSTGRES_PASSWORD to .env"
+        fi
+        exit 0
+    fi
     sed -e "s/change-me-please/$(openssl rand -hex 24)/" \
         -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
-        -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" .env.example > .env
+        -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" \
+        -e "s/change-me-postgres/$(openssl rand -hex 24)/" .env.example > .env
     mkdir -p sources
     [ -f sources/go.mod ] || printf "module sources\n" > sources/go.mod
     echo "wrote .env; put repositories (or symlink-free clones) under ./sources"
@@ -197,6 +205,18 @@ test:
     go test -race ./...
 
 # Store contract tests against the compose Neo4j (uses repo name "fixture")
+# Accounts contract against a throwaway PostgreSQL container (never the compose database: the test drops its tables)
+test-postgres: _runtime
+    #!/usr/bin/env sh
+    set -eu
+    pw=$(openssl rand -hex 16)
+    name="codesynapse-pg-test-$$"
+    {{engine}} run --rm -d --name "$name" -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=cs docker.io/library/postgres:17-alpine >/dev/null
+    trap '{{engine}} stop "$name" >/dev/null 2>&1' EXIT
+    until {{engine}} exec "$name" pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+    sleep 1
+    CODESYNAPSE_TEST_DATABASE_URL="postgres://postgres:$pw@127.0.0.1:55432/cs?sslmode=disable" go test -race -count=1 ./internal/accounts/...
+
 test-integration: db
     CODESYNAPSE_TEST_NEO4J_URI=neo4j://localhost:7687 CODESYNAPSE_TEST_NEO4J_PASSWORD="$NEO4J_PASSWORD" \
     go test -race -run TestContract ./internal/store/...

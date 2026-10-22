@@ -257,6 +257,12 @@ See `AGENTS.md` for conventions and security rules and `docs/PLAN.md` for archit
 
 Indexing untrusted code is the normal case, so: `go list` runs without cgo, toolchain downloads or network; git runs with hooks, fsmonitor and diff drivers disabled, and clones only over HTTPS to public hosts; no source bodies or YAML values are stored and summaries are redacted for secrets; services require bearer tokens off loopback; MCP tools cannot change code or the graph (only the review store). Details in `AGENTS.md`.
 
+## Accounts, organisations and audit log
+
+With PostgreSQL configured (`CODESYNAPSE_DATABASE_URL`; the compose stack does this), CodeSynapse has user accounts, organisations with roles (owner, admin, member, viewer) and personal API keys (`csk_…`) for agents and the CLI. The first account becomes the platform admin; set `CODESYNAPSE_SIGNUP_OPEN=true` to let others sign up. Every change and security event goes to a tamper-evident audit log (hash chain, `GET /api/v1/admin/audit/verify`), exportable as CSV or JSON Lines and also written to the logs for your SIEM, which is what NIS2-regulated organisations need. The direction and remaining phases (organisation-scoped data, the new web app, admin area, Kubernetes production setup, single sign-on) are in [docs/SAAS.md](docs/SAAS.md).
+
+Upgrading an existing install: run `just init` (adds `POSTGRES_PASSWORD` to `.env`), then `just up`.
+
 ## License
 
 Copyright 2026 Astrona.io. Licensed under the [Apache License, Version 2.0](LICENSE); see [NOTICE](NOTICE) for attributions.

@@ -63,6 +63,8 @@ internal/agentctx/      Composite agent answers: get_symbol_context, get_call_gr
 internal/review/        Diff → impact report, risk scoring, Markdown renderer
 internal/agentcfg/      `codesynapse mcp install`: registers the MCP server with local agents
 internal/reviews/       Code reviews: model, validation, redaction, comment decisions
+internal/accounts/      Users, organisations, roles, sessions, API keys, audit log (memstore/, pgstore/ with
+                        embedded migrations, accountstest/ contract)
 config/                 llm.example.yaml (committed); llm.yaml is local and gitignored
 internal/app/           Shared wiring: Neo4j flags, bearer auth, HTTP server, cobra CLI bootstrap
 internal/logx/          slog logger carried in contexts
@@ -83,6 +85,7 @@ just ci         # all of the above
 just up         # full stack in docker compose (creates .env with random secrets)
 just db         # only Neo4j; then just dev-api / just dev-mcp / just dev-web
 just test-integration   # store contract tests against the compose Neo4j
+just test-postgres      # accounts contract against a throwaway PostgreSQL container
 just review     # offline review pack for the current branch
 just image-build  # api, mcp and web images; then just k8s-secrets/k8s-apply (see deploy/k8s/README.md)
 just mcp        # register the MCP server with Claude Code, Codex, Gemini, OpenCode, Cursor
@@ -138,6 +141,8 @@ This tool reads untrusted repositories and serves their contents to LLMs. Keep i
 - **Limits everywhere:** `store.MaxLimit`, `store.MaxDepth`, request body caps, query timeouts. New endpoints keep them.
 - **Pushing:** only `services/api/internal/fixes` pushes, only when `CODESYNAPSE_ALLOW_PUSH=true`, only through `gitx.PushBranch` (new `codesynapse/*` branches, never forced) from a separate worktree, and never edits CI or git configuration (`fixes.protected`). Keep those rails.
 - **LLM calls:** only through `services/api/internal/llm`. Model output is untrusted: parse it defensively, validate enums and file paths, redact before storing. Never send source to a non-local provider except a diff the user asked to review. API keys come from `api_key_env`, never from `config/llm.yaml` itself.
+- **Accounts** (`internal/accounts`, PostgreSQL via `CODESYNAPSE_DATABASE_URL`, env only): passwords are argon2id; session tokens and API keys (`csk_…`) are stored only as SHA-256 hashes; sessions are HTTP-only `SameSite=Lax` cookies; logins are rate limited and unknown emails take as long as wrong passwords; API keys act in one organisation and stop working when the member is removed; cookie-authenticated changes must be same-origin. Until repository data is scoped by organisation (docs/SAAS.md phase 2), only platform admins and the service token may call the repository endpoints. Never return a password hash or key hash from an endpoint.
+- **Audit log (NIS2):** every changing request and every security event is recorded with actor, how they authenticated, client address, user agent, request ID, target, status and outcome, in an append-only, hash-chained table (`events`, tip in `audit_head`, appended under a row lock) with `GET /api/v1/admin/audit/verify`, export as JSON, JSON Lines or CSV (formula-neutralised), and a structured `audit` log line for SIEMs. New endpoints are covered automatically by the HTTP middleware; new security-relevant actions in services also call `Service.Record` with a semantic action. Retention is `CODESYNAPSE_AUDIT_RETENTION_DAYS` (default 400, minimum 30).
 - Secrets come from the environment (`CODESYNAPSE_NEO4J_PASSWORD`, `*_TOKEN`), never flags, never logs.
 
 ## Web (Nuxt 4)

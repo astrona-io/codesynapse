@@ -17,7 +17,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 	"github.com/parisnakitakejser/codesynapse/internal/forge"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
@@ -46,6 +48,16 @@ type Config struct {
 	VulnScan bool
 	// LicenseLookup asks deps.dev for licences not found on disk.
 	LicenseLookup bool
+	// Accounts enables users, organisations and API keys (PostgreSQL);
+	// nil keeps the single-tenant mode behind one bearer token.
+	Accounts *accounts.Service
+	// ServiceToken, in accounts mode, still authenticates internal callers
+	// (the web app, MCP, hooks) as a platform admin.
+	ServiceToken string
+	// SecureCookies marks the session cookie Secure (HTTPS deployments).
+	SecureCookies bool
+	// AuditRetention is how long audit entries are kept (default 400 days).
+	AuditRetention time.Duration
 	// Workspace is a writable directory for repositories cloned by URL.
 	Workspace string
 	// GitAuth is an optional token for cloning private repositories.
@@ -90,6 +102,15 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	s := &Server{cfg: cfg, st: st, svc: query.Service{R: st}, logger: logger, mux: http.NewServeMux()}
 	s.jobs = NewJobs(ctx, st, logger, cfg.CommitLimit, cfg.AllowNetwork, cfg.VulnScan)
 	s.jobs.licenseLookup = cfg.LicenseLookup
+	if cfg.Accounts != nil {
+		if cfg.AuditRetention <= 0 {
+			s.cfg.AuditRetention = accounts.DefaultRetention
+		}
+		if cfg.Accounts.Sink == nil {
+			cfg.Accounts.Sink = s.logAudit
+		}
+		go s.pruneAudit(ctx)
+	}
 	s.offload = offload.New(st, cfg.LLM, logger)
 	s.recall = recall.New(st, cfg.LLM, logger)
 	s.offload.OnSaved = s.recall.Kick
@@ -117,7 +138,22 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
-	s.mux.ServeHTTP(w, r)
+	rid := requestID(r)
+	w.Header().Set("X-Request-ID", rid)
+	r = r.WithContext(accounts.WithRequestInfo(r.Context(), accounts.RequestInfo{RequestID: rid, IP: clientAddr(r), UserAgent: r.UserAgent()}))
+	rec := &statusRecorder{ResponseWriter: w}
+	if s.cfg.Accounts != nil {
+		var ok bool
+		if r, ok = s.authenticate(rec, r); !ok {
+			s.auditDenied(r, rec.status)
+			return
+		}
+	}
+	s.mux.ServeHTTP(rec, r)
+	if mutating(r.Method) {
+		_, pattern := s.mux.Handler(r)
+		s.auditRequest(r, pattern, rec.status)
+	}
 }
 
 func (s *Server) routes() {
@@ -148,6 +184,7 @@ func (s *Server) routes() {
 		})
 	})
 	m.HandleFunc("GET /api/v1/repos", s.handleRepos)
+	s.accountRoutes()
 	m.HandleFunc("GET /api/v1/overview", s.handleWorkspaceOverview)
 	m.HandleFunc("GET /api/v1/stats", s.handleStats)
 	m.HandleFunc("DELETE /api/v1/repos/{repo}", s.handleDeleteRepo)

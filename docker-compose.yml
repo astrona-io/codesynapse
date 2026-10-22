@@ -23,6 +23,21 @@ services:
       timeout: 5s
       retries: 20
 
+  # Users, organisations, API keys and the audit log.
+  postgres:
+    image: docker.io/library/postgres:17-alpine
+    environment:
+      POSTGRES_USER: codesynapse
+      POSTGRES_DB: codesynapse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run "just init" to add POSTGRES_PASSWORD to .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codesynapse -d codesynapse"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   api:
     build:
       context: .
@@ -31,6 +46,13 @@ services:
       CODESYNAPSE_NEO4J_URI: neo4j://neo4j:7687
       CODESYNAPSE_NEO4J_PASSWORD: ${NEO4J_PASSWORD}
       CODESYNAPSE_API_TOKEN: ${CODESYNAPSE_API_TOKEN:?set CODESYNAPSE_API_TOKEN in .env}
+      # Accounts: users, organisations, API keys and the audit log.
+      CODESYNAPSE_DATABASE_URL: postgres://codesynapse:${POSTGRES_PASSWORD}@postgres:5432/codesynapse?sslmode=disable
+      # Anyone may create an account after the first (which becomes the platform admin).
+      CODESYNAPSE_SIGNUP_OPEN: ${CODESYNAPSE_SIGNUP_OPEN:-false}
+      # The local stack is served over plain HTTP on 127.0.0.1; set true behind TLS.
+      CODESYNAPSE_COOKIE_SECURE: ${CODESYNAPSE_COOKIE_SECURE:-false}
+      CODESYNAPSE_AUDIT_RETENTION_DAYS: ${CODESYNAPSE_AUDIT_RETENTION_DAYS:-400}
       # Module downloads during ingest. Keep false for repositories you do not trust.
       CODESYNAPSE_ALLOW_NETWORK: ${CODESYNAPSE_ALLOW_NETWORK:-false}
       # Check go.mod dependencies against osv.dev (sends module paths + versions only).
@@ -78,6 +100,8 @@ services:
       retries: 30
     depends_on:
       neo4j:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   mcp:
@@ -138,6 +162,7 @@ services:
         condition: service_healthy
 
 volumes:
+  postgres-data:
   neo4j-data:
   workspace:
   go-cache:
