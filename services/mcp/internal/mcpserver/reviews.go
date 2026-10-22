@@ -35,7 +35,7 @@ type reviewCommentIn struct {
 	Severity   string `json:"severity,omitempty" jsonschema:"info, low, medium (default), high or critical"`
 	Category   string `json:"category,omitempty" jsonschema:"security, bug, performance, maintainability, style, test, docs or other"`
 	Message    string `json:"message" jsonschema:"what is wrong and why, for a human reader"`
-	Suggestion string `json:"suggestion,omitempty" jsonschema:"suggested replacement code or concrete fix"`
+	Suggestion string `json:"suggestion,omitempty" jsonschema:"concrete fix in Markdown; put replacement code in a fenced code block that replaces exactly lines line..end_line, so the review page can show it as a diff"`
 	Rule       string `json:"rule,omitempty" jsonschema:"security rule id if the comment is about a finding (see rule_guide)"`
 }
 

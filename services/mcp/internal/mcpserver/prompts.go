@@ -119,7 +119,7 @@ func registerReviewPrompt(s *mcp.Server) {
 4. Submit with submit_review:
    - title and a short summary of your overall assessment
    - verdict: approve, comment, or request_changes if anything high/critical must be fixed first
-   - one comment per issue, anchored to file and line, with severity, category, a clear message and a concrete suggestion (replacement code when you can)
+   - one comment per issue, anchored to file and line, with severity, category, a clear message and a concrete suggestion (when you can, replacement code in a fenced block that replaces exactly lines line..end_line; the review page shows it as a diff)
 5. Reply with the review page returned by submit_review and the top three issues.`, target)
 		return &mcp.GetPromptResult{Description: "Guided code review", Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: text}}}}, nil
 	})

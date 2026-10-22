@@ -65,6 +65,8 @@ Each prompt is also served natively as an MCP prompt (see section 4), so clients
 >
 > After fixing comments: "Call `get_review` with status "open" for review `<ID>`, fix each accepted comment, and mark it with `update_review_comment` (status "resolved", note = what changed). Reject false positives with status "rejected" and a reason."
 
+Put replacement code in a fenced code block inside `suggestion`; it replaces exactly lines `line`..`end_line`. The review page shows the code at the reviewed commit with that block applied as a diff, and links the location to GitHub, GitLab or Forgejo.
+
 ### H. AI tasks done by your own agent — prompts `security-triage` and `briefing`
 The server can run security triage and briefings with its own model (`config/llm.yaml`). To avoid calling an external provider, let your local agent do them: run the prompt, and the agent reads the graph, decides, and calls `submit_review`. The result appears on the Reviews page like a server-generated one (source `mcp`). A briefing is submitted with `kind: "report"`, the briefing in `summary` and no comments.
 

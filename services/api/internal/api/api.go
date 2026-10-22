@@ -164,6 +164,7 @@ func (s *Server) routes() {
 	})
 	m.HandleFunc("GET /api/v1/repos/{repo}/reviews", s.handleListReviews)
 	m.HandleFunc("GET /api/v1/reviews/{id}", s.handleGetReview)
+	m.HandleFunc("GET /api/v1/reviews/{id}/code", s.handleReviewCode)
 	m.HandleFunc("DELETE /api/v1/reviews/{id}", s.handleDeleteReview)
 	m.HandleFunc("PATCH /api/v1/reviews/{id}/comments/{comment}", s.handleUpdateReviewComment)
 	m.HandleFunc("POST /api/v1/reviews/{id}/fix", s.handleFixReview)
