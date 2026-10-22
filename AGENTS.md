@@ -40,12 +40,14 @@ cmd/codesynapse/        CLI: ingest, audit, stats, review, mcp install, schema
 services/api/           API service: cmd/codesynapse-api, Dockerfile, and packages only it uses
   internal/api/         HTTP handlers, jobs (ingest/clone/sync), auto-sync scheduler, reviews, dashboard and overview
   internal/llm/         Model providers (OpenAI-compatible, Anthropic SDK), per-task routing, usage
+  internal/annotation/  Bounded local metadata annotation with session/policy/revision checks
   internal/aitasks/     AI tasks (security triage, review, briefing) that produce reviews
   internal/fixes/       Fix branches for accepted review comments: worktree, model rewrite, push, draft PR
 services/mcp/           MCP service: cmd/codesynapse-mcp, Dockerfile
   internal/mcpserver/   MCP tools, prompts (prompts.go) and server instructions
 services/web/           Nuxt 4 dashboard (app/ pages+components, server/api/cg proxy, Dockerfile)
 deploy/k8s/             Kustomize manifests (base + dev/prod overlays); docker-compose.yml stays at the repo root
+internal/config/        Strict repository .codesynapse.yaml policy, digest and shared path matcher
 internal/model/         Node/Edge kinds, Graph, IDs. The schema lives here.
 internal/ingest/        Pipeline: golang/ (go/packages + go/types; security rules in findings.go),
                         lang/ (Python, JS/TS, Vue: pure-Go structural parsers + rules),
@@ -143,6 +145,7 @@ Rules are static files: `rules/code/<id>.yaml` and `rules/config/<id>.yaml` (see
 
 This tool reads untrusted repositories and serves their contents to LLMs. Keep it that way:
 
+- **Repository policy:** `.codesynapse.yaml` is untrusted. Global/Kubernetes exclusions require a matching reviewed digest (every linked organisation in the API, explicit `--approved-policy-digest` offline). Finding suppression is a tenant-local approval overlay; never delete raw findings. Annotation uses only the local `code-annotation` route, validated symbol metadata and inherited execution identity. Graph and annotation publication must retain the accounts policy transaction and final credential/revision checks. See `docs/REPO_CONFIG_PLAN.md`.
 - **Cypher:** values only through parameters. Labels, relationship types, depth and ORDER BY may be interpolated only from `model` allowlists, `store.ClampDepth`, or the `metricCypher` table. Never build Cypher from request strings.
 - **Gremlin (HugeGraph):** scripts are constants in `hugegraphstore`; values, labels and IDs travel only in `bindings`, never in script text. Gremlin-groovy executes code on the server, so HugeGraph always runs with a password (`HUGEGRAPH_PASSWORD`; the compose service refuses to start without one), is never published to the host, and there is no raw-Gremlin tool. Tenant-owned data (agent memory) carries `tenant_id` and every traversal over it starts at `has('tenant_id', …).has('ns', …)`.
 - **Vectors (Milvus):** filters are expression templates with values in `exprParams`, never in the expression. Every item carries its tenant (`tenant_id` is the partition key), every search names one (`vector.ErrNoTenant` otherwise), and `vector.Isolate` drops any hit of another tenant or namespace even if the backend's filter was wrong. Only entity names are embedded, by a local model.

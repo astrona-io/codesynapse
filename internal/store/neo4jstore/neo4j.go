@@ -116,6 +116,7 @@ func failed(ctx context.Context, op string, err error) {
 // EnsureSchema implements store.Writer.
 func (s *Store) EnsureSchema(ctx context.Context) error {
 	stmts := []string{
+		"CREATE CONSTRAINT ingest_head_repo IF NOT EXISTS FOR (h:IngestHead) REQUIRE h.repo IS UNIQUE",
 		"CREATE CONSTRAINT session_scope IF NOT EXISTS FOR (s:SessionMemoryScope) REQUIRE (s.tenant_id,s.session_id,s.ns) IS UNIQUE",
 		"CREATE CONSTRAINT session_tenant IF NOT EXISTS FOR (s:SessionMemoryTenant) REQUIRE s.tenant_id IS UNIQUE",
 		"CREATE CONSTRAINT session_revoked IF NOT EXISTS FOR (s:SessionMemoryRevocation) REQUIRE (s.tenant_id,s.session_id) IS UNIQUE",
@@ -160,66 +161,75 @@ func newRunID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// ReplaceRepo implements store.Writer. Nodes and edges are upserted in
-// batches tagged with a run ID, then everything of the repo not tagged with
-// that run is deleted. Readers may briefly see a mix of old and new data
-// while a re-index runs, but never a partially deleted graph.
+// ReplaceRepo commits every batch and stale-row deletion in one transaction.
 func (s *Store) ReplaceRepo(ctx context.Context, repo string, g *model.Graph) error {
+	nodes, edges, err := store.Replacement(ctx, repo, g)
+	if err != nil {
+		return err
+	}
+	if err := store.CommitCheck(ctx); err != nil {
+		return err
+	}
 	run, err := newRunID()
 	if err != nil {
 		return fmt.Errorf("generating run id: %w", err)
 	}
 	byKind := map[model.NodeKind][]map[string]any{}
-	for _, n := range g.Nodes() {
-		if n.Repo != repo {
-			return fmt.Errorf("node %s belongs to repo %q, not %q", n.ID, n.Repo, repo)
-		}
-		if !n.Kind.Valid() {
-			return fmt.Errorf("node %s has invalid kind %q", n.ID, n.Kind)
-		}
+	for _, n := range nodes {
 		byKind[n.Kind] = append(byKind[n.Kind], map[string]any{"id": n.ID, "props": nodeprops.To(n)})
 	}
-	for _, kind := range model.AllNodeKinds {
-		// kind comes from the model allowlist, so interpolating it as a label is safe.
-		q := fmt.Sprintf(`UNWIND $rows AS r
-MERGE (n:Node {id: r.id})
-SET n = r.props, n.ingest_run = $run
-SET n:%s`, kind)
-		if err := s.batched(ctx, q, byKind[kind], map[string]any{"run": run}); err != nil {
-			return fmt.Errorf("writing %s nodes: %w", kind, err)
-		}
-	}
-
 	byEdge := map[model.EdgeKind][]map[string]any{}
-	for _, e := range g.Edges() {
-		if !e.Kind.Valid() {
-			return fmt.Errorf("edge %s->%s has invalid kind %q", e.From, e.To, e.Kind)
-		}
+	for _, e := range edges {
 		byEdge[e.Kind] = append(byEdge[e.Kind], map[string]any{"from": e.From, "to": e.To, "count": int64(e.Count)})
 	}
-	for _, kind := range model.AllEdgeKinds {
-		q := fmt.Sprintf(`UNWIND $rows AS r
-MATCH (a:Node {id: r.from})
-MATCH (b:Node {id: r.to})
-MERGE (a)-[e:%s]->(b)
-SET e.count = r.count, e.ingest_run = $run`, kind)
-		if err := s.batched(ctx, q, byEdge[kind], map[string]any{"run": run}); err != nil {
-			return fmt.Errorf("writing %s edges: %w", kind, err)
+	sess := s.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: s.db})
+	defer func() { _ = sess.Close(ctx) }()
+	defer observe(ctx, "write", time.Now())
+	_, err = sess.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		// The head serializes competing replacements, including empty graphs.
+		if _, err := tx.Run(ctx, `MERGE (h:IngestHead {repo:$repo}) SET h.run=$run`, map[string]any{"repo": repo, "run": run}); err != nil {
+			return nil, err
 		}
-	}
-
-	params := map[string]any{"repo": repo, "run": run, "batch": deleteBatch}
-	if err := s.drain(ctx, `MATCH (a:Node {repo: $repo})-[e]->()
-WHERE e.ingest_run <> $run
-WITH e LIMIT $batch DELETE e RETURN count(*) AS c`, params); err != nil {
-		return fmt.Errorf("removing stale edges: %w", err)
-	}
-	if err := s.drain(ctx, `MATCH (n:Node {repo: $repo})
-WHERE n.ingest_run <> $run
-WITH n LIMIT $batch DETACH DELETE n RETURN count(*) AS c`, params); err != nil {
-		return fmt.Errorf("removing stale nodes: %w", err)
-	}
-	return nil
+		batch := func(query string, rows []map[string]any) error {
+			for start := 0; start < len(rows); start += writeBatch {
+				res, err := tx.Run(ctx, query, map[string]any{"rows": rows[start:min(start+writeBatch, len(rows))], "run": run})
+				if err != nil {
+					return err
+				}
+				if _, err = res.Consume(ctx); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		for _, kind := range model.AllNodeKinds {
+			q := fmt.Sprintf(`UNWIND $rows AS r MERGE (n:Node {id:r.id}) SET n=r.props,n.ingest_run=$run SET n:%s`, kind)
+			if err := batch(q, byKind[kind]); err != nil {
+				return nil, fmt.Errorf("write replacement nodes: %w", err)
+			}
+		}
+		for _, kind := range model.AllEdgeKinds {
+			q := fmt.Sprintf(`UNWIND $rows AS r MATCH (a:Node {id:r.from}) MATCH (b:Node {id:r.to}) MERGE (a)-[e:%s]->(b) SET e.count=r.count,e.ingest_run=$run`, kind)
+			if err := batch(q, byEdge[kind]); err != nil {
+				return nil, fmt.Errorf("write replacement edges: %w", err)
+			}
+		}
+		for _, q := range []string{
+			`MATCH (a:Node {repo:$repo})-[e]->() WHERE e.ingest_run IS NULL OR e.ingest_run<>$run DELETE e`,
+			`MATCH (n:Node {repo:$repo}) WHERE n.ingest_run IS NULL OR n.ingest_run<>$run DETACH DELETE n`,
+		} {
+			res, err := tx.Run(ctx, q, map[string]any{"repo": repo, "run": run})
+			if err != nil {
+				return nil, err
+			}
+			if _, err = res.Consume(ctx); err != nil {
+				return nil, err
+			}
+		}
+		return nil, store.CommitCheck(ctx)
+	})
+	failed(ctx, "write", err)
+	return err
 }
 
 func (s *Store) batched(ctx context.Context, q string, rows []map[string]any, extra map[string]any) error {

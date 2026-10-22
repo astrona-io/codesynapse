@@ -5,12 +5,14 @@ package ingest
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"time"
 
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"github.com/astrona-io/codesynapse/internal/license"
 	"github.com/astrona-io/codesynapse/internal/logx"
 
@@ -32,8 +34,10 @@ import (
 
 // Options configures an ingest run.
 type Options struct {
-	Repo string
-	Root string
+	// ApprovedPolicyDigest is supplied by a trusted control plane or CLI operator.
+	ApprovedPolicyDigest string
+	Repo                 string
+	Root                 string
 	// PreviousIdentities is read from the stored repository before extraction.
 	// A corrupt baseline fails ingest instead of resetting permanent IDs.
 	PreviousIdentities string
@@ -70,6 +74,15 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("repository root %s is not a directory", root)
 	}
+	ctx, err = preparePolicy(ctx, root, opts)
+	if err != nil {
+		return nil, err
+	}
+	policy := repoconfig.FromContext(ctx)
+	metadata, err := policyMetadata(ctx, root)
+	if err != nil {
+		return nil, err
+	}
 	if opts.Repo == "" {
 		opts.Repo = filepath.Base(root)
 	}
@@ -89,12 +102,17 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	if repoNode.Branch == "" {
 		repoNode.Branch = gitx.CurrentBranch(ctx, root)
 	}
-	own := license.Project(root)
+	meta, err := json.Marshal(repoMetadata{Policy: metadata})
+	if err != nil {
+		return nil, fmt.Errorf("encode repository policy: %w", err)
+	}
+	repoNode.Meta = string(meta)
+	own := (license.Resolver{Root: root, Policy: policy}).Project()
 	repoNode.License, repoNode.LicenseSource = own.License, own.Source
 
 	extImports := map[string][]string{}
 	var goRes *golang.Result
-	if hasGoModule(root) {
+	if hasGoModule(root, policy) {
 		res, err := golang.Extract(ctx, golang.Options{Repo: opts.Repo, Root: root, AllowNetwork: opts.AllowNetwork})
 		if err != nil {
 			return nil, fmt.Errorf("go extraction: %w", err)
@@ -165,7 +183,7 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	if repoNode.Metrics, err = metrics.Encode(rep); err != nil {
 		return nil, fmt.Errorf("encoding metrics: %w", err)
 	}
-	if repoNode.Coverage, err = security.EncodeCoverage(security.CoverageOf(g, security.Inventory(root))); err != nil {
+	if repoNode.Coverage, err = security.EncodeCoverage(policyCoverage(security.CoverageOf(g, security.Inventory(root, policy)), metadata)); err != nil {
 		return nil, fmt.Errorf("encoding security coverage: %w", err)
 	}
 	identities, err := identity.Reconcile(g, opts.Repo, previous)
@@ -180,11 +198,18 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	return g, nil
 }
 
-func hasGoModule(root string) bool {
+func hasGoModule(root string, policies ...*repoconfig.Policy) bool {
+	var policy *repoconfig.Policy
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
 	found := false
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error { //nolint:errcheck // best-effort probe
 		if err != nil || found {
 			return filepath.SkipAll
+		}
+		if allowed, policyErr := policy.WalkEntry(root, path, d); !allowed || policyErr != nil {
+			return policyErr
 		}
 		if d.IsDir() && path != root && (d.Name() == "vendor" || d.Name() == "node_modules" || d.Name() == "testdata" || d.Name()[0] == '.') {
 			return filepath.SkipDir
@@ -205,13 +230,13 @@ func addDependencies(ctx context.Context, opts Options, root string, g *model.Gr
 	logger := logx.FromContext(ctx)
 	var mods []vuln.Module
 	if goRes != nil {
-		goMods, err := vuln.Modules(root, runtime.Version())
+		goMods, err := vuln.Modules(root, runtime.Version(), repoconfig.FromContext(ctx))
 		if err != nil {
 			return nil, fmt.Errorf("reading go.mod: %w", err)
 		}
 		mods = goMods
 	}
-	other, err := vuln.ManifestModules(root)
+	other, err := vuln.ManifestModules(root, repoconfig.FromContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("reading lockfiles: %w", err)
 	}
@@ -252,7 +277,7 @@ func resolveLicenses(ctx context.Context, opts Options, root string, mods []vuln
 			deps = append(deps, license.Dep{Ecosystem: cmp.Or(m.Ecosystem, vuln.EcosystemGo), Name: m.Path, Version: m.Version})
 		}
 	}
-	r := license.Resolver{Root: root}
+	r := license.Resolver{Root: root, Policy: repoconfig.FromContext(ctx)}
 	if opts.LicenseLookup {
 		r.Online = cmp.Or(opts.DepsDev, &license.DepsDev{})
 	}
@@ -269,21 +294,27 @@ func resolveLicenses(ctx context.Context, opts Options, root string, mods []vuln
 // Licenses checks the dependency licences of the repository at root without
 // indexing its code: the quick path for `codesynapse licenses` in CI.
 func Licenses(ctx context.Context, root string, opts Options) (license.Report, error) {
+	var err error
+	ctx, err = preparePolicy(ctx, root, opts)
+	if err != nil {
+		return license.Report{}, err
+	}
 	var mods []vuln.Module
-	if hasGoModule(root) {
-		goMods, err := vuln.Modules(root, runtime.Version())
+	if hasGoModule(root, repoconfig.FromContext(ctx)) {
+		goMods, err := vuln.Modules(root, runtime.Version(), repoconfig.FromContext(ctx))
 		if err != nil {
 			return license.Report{}, fmt.Errorf("reading go.mod: %w", err)
 		}
 		mods = goMods
 	}
-	other, err := vuln.ManifestModules(root)
+	other, err := vuln.ManifestModules(root, repoconfig.FromContext(ctx))
 	if err != nil {
 		return license.Report{}, fmt.Errorf("reading lockfiles: %w", err)
 	}
 	mods = append(mods, other...)
 	resolveLicenses(ctx, opts, root, mods)
-	return license.Build(license.Project(root), licenseDeps(mods), opts.LicenseLookup), nil
+	own := (license.Resolver{Root: root, Policy: repoconfig.FromContext(ctx)}).Project()
+	return license.Build(own, licenseDeps(mods), opts.LicenseLookup), nil
 }
 
 func licenseDeps(mods []vuln.Module) []license.Dependency {

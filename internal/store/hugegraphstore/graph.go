@@ -28,24 +28,6 @@ const props = `def P = { v -> def m = [:]; v.properties().each { m[it.key()] = i
 // Node writes and stale removal. Code-graph scripts always start at
 // hasLabel('node'): reviews also carry a "repo" property.
 const (
-	writeNodes = `rows.each { r ->
-  def kv = [T.label, 'node', T.id, r.v, 'run', run]
-  r.p.each { k, val -> kv << k; kv << val }
-  graph.addVertex(kv as Object[])
-}
-rows.size()`
-	writeEdges = `def n = 0
-rows.each { r ->
-  def a = g.V(r.a).tryNext(); def b = g.V(r.b).tryNext()
-  if (a.isPresent() && b.isPresent()) { a.get().addEdge(r.l, b.get(), 'count', r.c, 'run', run); n++ }
-}
-n`
-	dropStaleEdges = `def es = g.V().hasLabel('node').has('repo', repo).outE().not(has('run', run)).limit(batch).toList()
-es.each { it.remove() }
-es.size()`
-	dropStaleNodes = `def vs = g.V().hasLabel('node').has('repo', repo).not(has('run', run)).limit(batch).toList()
-vs.each { it.remove() }
-vs.size()`
 	dropRepo = `def vs = g.V().hasLabel('node').has('repo', repo).limit(batch).toList()
 vs.each { it.remove() }
 vs.size()`
@@ -59,49 +41,13 @@ func newRunID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// ReplaceRepo implements store.Writer like the Neo4j store: nodes and edges
-// are upserted in batches tagged with a run ID, then everything of the repo
-// from earlier runs is deleted. Readers may briefly see a mix of old and new
-// data, never a partially deleted graph.
+// ReplaceRepo stages data outside code labels, then replaces the graph in one transaction.
 func (s *Store) ReplaceRepo(ctx context.Context, repo string, g *model.Graph) error {
-	run, err := newRunID()
+	nodes, edges, err := store.Replacement(ctx, repo, g)
 	if err != nil {
-		return fmt.Errorf("generating run id: %w", err)
+		return err
 	}
-	var rows []map[string]any
-	for _, n := range g.Nodes() {
-		if n.Repo != repo {
-			return fmt.Errorf("node %s belongs to repo %q, not %q", n.ID, n.Repo, repo)
-		}
-		if !n.Kind.Valid() {
-			return fmt.Errorf("node %s has invalid kind %q", n.ID, n.Kind)
-		}
-		p := nodeprops.To(n)
-		p["nid"] = p["id"]
-		delete(p, "id")
-		rows = append(rows, map[string]any{"v": nodeVID(n.ID), "p": p})
-	}
-	if err := s.batched(ctx, writeNodes, rows, map[string]any{"run": run}); err != nil {
-		return fmt.Errorf("writing nodes: %w", err)
-	}
-	rows = rows[:0]
-	for _, e := range g.Edges() {
-		if !e.Kind.Valid() {
-			return fmt.Errorf("edge %s->%s has invalid kind %q", e.From, e.To, e.Kind)
-		}
-		rows = append(rows, map[string]any{"a": nodeVID(e.From), "b": nodeVID(e.To), "l": string(e.Kind), "c": int64(max(e.Count, 1))})
-	}
-	if err := s.batched(ctx, writeEdges, rows, map[string]any{"run": run}); err != nil {
-		return fmt.Errorf("writing edges: %w", err)
-	}
-	b := map[string]any{"repo": repo, "run": run, "batch": deleteBatch}
-	if err := s.drain(ctx, dropStaleEdges, b); err != nil {
-		return fmt.Errorf("removing stale edges: %w", err)
-	}
-	if err := s.drain(ctx, dropStaleNodes, b); err != nil {
-		return fmt.Errorf("removing stale nodes: %w", err)
-	}
-	return nil
+	return s.replaceAtomic(ctx, repo, nodes, edges)
 }
 
 // batched writes rows in requests of at most writeBatch rows that stay

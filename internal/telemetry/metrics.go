@@ -49,11 +49,13 @@ var (
 
 // API and ingestion.
 var (
-	HTTPRequests   = Default.ScopedCounter("http_requests_total", "API requests by route pattern and status class.", "tenant_id", "route", "method", "code")
-	HTTPDuration   = Default.ScopedHistogram("http_request_duration_seconds", "API request time by route pattern.", latency, "route", "method")
-	IngestRuns     = Default.ScopedCounter("ingest_runs_total", "Repository indexing runs by outcome.", "db_system", "outcome")
-	IngestDuration = Default.ScopedHistogram("ingest_duration_seconds", "Repository indexing time, extraction and storage.", latency, "db_system")
-	IngestNodes    = Default.ScopedCounter("ingest_nodes_total", "Nodes written by indexing.", "db_system")
+	HTTPRequests       = Default.ScopedCounter("http_requests_total", "API requests by route pattern and status class.", "tenant_id", "route", "method", "code")
+	HTTPDuration       = Default.ScopedHistogram("http_request_duration_seconds", "API request time by route pattern.", latency, "route", "method")
+	IngestRuns         = Default.ScopedCounter("ingest_runs_total", "Repository indexing runs by outcome.", "db_system", "outcome")
+	IngestDuration     = Default.ScopedHistogram("ingest_duration_seconds", "Repository indexing time, extraction and storage.", latency, "db_system")
+	IngestNodes        = Default.ScopedCounter("ingest_nodes_total", "Nodes written by indexing.", "db_system")
+	AnnotationJobs     = Default.ScopedCounter("codesynapse_annotation_jobs_total", "Annotation jobs completed by outcome.", "outcome")
+	AnnotationDuration = Default.ScopedHistogram("codesynapse_annotation_duration_seconds", "Annotation time from queue acceptance to completion.", latency, "outcome")
 )
 
 var (

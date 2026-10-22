@@ -80,7 +80,7 @@ var licenseFile = regexp.MustCompile(`(?i)^(licen[cs]e|copying|unlicense)([.-][a
 // returns the SPDX expression and the file names it used. Several permissive
 // files (LICENSE-MIT plus LICENSE-APACHE) are a choice and joined with OR;
 // any other mix applies together and is joined with AND.
-func FromDir(dir string) (string, []string) {
+func FromDir(dir string, allowed ...func(string) bool) (string, []string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", nil
@@ -90,7 +90,11 @@ func FromDir(dir string) (string, []string) {
 		if !e.Type().IsRegular() || !licenseFile.MatchString(e.Name()) {
 			continue
 		}
-		id := detectFile(filepath.Join(dir, e.Name()))
+		p := filepath.Join(dir, e.Name())
+		if len(allowed) > 0 && !allowed[0](p) {
+			continue
+		}
+		id := detectFile(p)
 		if id == "" {
 			continue
 		}
@@ -134,16 +138,16 @@ var pyprojectLicense = regexp.MustCompile(`(?m)^\s*license\s*=\s*(?:"([^"]+)"|\{
 
 // Project returns the licence of the repository at root: licence files at the
 // top, then the "license" field of package.json, then pyproject.toml.
-func Project(root string) Found {
-	if id, files := FromDir(root); id != "" {
+func Project(root string, allowed ...func(string) bool) Found {
+	if id, files := FromDir(root, allowed...); id != "" {
 		return Found{License: id, Source: strings.Join(files, ", ")}
 	}
-	if b, err := readSmall(filepath.Join(root, "package.json")); err == nil {
+	if b, err := projectFile(root, "package.json", allowed); err == nil {
 		if id := NPMField(b); id != "" {
 			return Found{License: id, Source: "package.json"}
 		}
 	}
-	if b, err := readSmall(filepath.Join(root, "pyproject.toml")); err == nil {
+	if b, err := projectFile(root, "pyproject.toml", allowed); err == nil {
 		if m := pyprojectLicense.FindSubmatch(b); m != nil {
 			if id := Normalize(string(m[1]) + string(m[2])); Classify(id) != Unknown {
 				return Found{License: id, Source: "pyproject.toml"}
@@ -151,4 +155,12 @@ func Project(root string) Found {
 		}
 	}
 	return Found{}
+}
+
+func projectFile(root, name string, allowed []func(string) bool) ([]byte, error) {
+	p := filepath.Join(root, name)
+	if len(allowed) > 0 && !allowed[0](p) {
+		return nil, os.ErrPermission
+	}
+	return readSmall(p)
 }

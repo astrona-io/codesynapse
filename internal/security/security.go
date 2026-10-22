@@ -15,6 +15,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/redact"
 	"github.com/astrona-io/codesynapse/internal/store"
 )
 
@@ -27,15 +28,16 @@ var severityBase = map[string]int{"critical": 90, "high": 70, "medium": 45, "low
 
 // Finding is a code finding with context.
 type Finding struct {
-	ID       string     `json:"id"`
-	Rule     string     `json:"rule"`
-	Title    string     `json:"title"`
-	Severity string     `json:"severity"`
-	CWE      []string   `json:"cwe,omitempty"`
-	Location string     `json:"location"`
-	Language string     `json:"language,omitempty"`
-	Detail   string     `json:"detail"`
-	Owner    *query.Ref `json:"owner,omitempty"`
+	SuppressionReason string     `json:"suppression_reason,omitempty"`
+	ID                string     `json:"id"`
+	Rule              string     `json:"rule"`
+	Title             string     `json:"title"`
+	Severity          string     `json:"severity"`
+	CWE               []string   `json:"cwe,omitempty"`
+	Location          string     `json:"location"`
+	Language          string     `json:"language,omitempty"`
+	Detail            string     `json:"detail"`
+	Owner             *query.Ref `json:"owner,omitempty"`
 	// Exposed means the owner is an entry point or reachable from one
 	// (main, an exported function, or an HTTP/MCP handler) within a few hops.
 	Exposed bool `json:"exposed"`
@@ -69,16 +71,18 @@ type Vulnerability struct {
 
 // Report is the security review.
 type Report struct {
-	Repo            string          `json:"repo"`
-	Score           int             `json:"score"`
-	Grade           string          `json:"grade"`
-	FindingCounts   map[string]int  `json:"finding_counts"`
-	VulnCounts      map[string]int  `json:"vuln_counts"`
-	Findings        []Finding       `json:"findings"`
-	Vulnerabilities []Vulnerability `json:"vulnerabilities"`
-	Modules         ModuleStats     `json:"modules"`
-	Rules           []RuleCount     `json:"rules"`
-	Sensitive       []query.Ref     `json:"sensitive_functions"`
+	Suppressed       []Finding       `json:"suppressed,omitempty"`
+	SuppressedCounts map[string]int  `json:"suppressed_counts,omitempty"`
+	Repo             string          `json:"repo"`
+	Score            int             `json:"score"`
+	Grade            string          `json:"grade"`
+	FindingCounts    map[string]int  `json:"finding_counts"`
+	VulnCounts       map[string]int  `json:"vuln_counts"`
+	Findings         []Finding       `json:"findings"`
+	Vulnerabilities  []Vulnerability `json:"vulnerabilities"`
+	Modules          ModuleStats     `json:"modules"`
+	Rules            []RuleCount     `json:"rules"`
+	Sensitive        []query.Ref     `json:"sensitive_functions"`
 	// Head and IndexedAt say which commit the report describes; a checkout
 	// that moved on needs a sync before the report covers it.
 	Head      string `json:"head,omitempty"`
@@ -117,6 +121,9 @@ type RuleCount struct {
 
 // Options filter the report.
 type Options struct {
+	// Suppression returns a reason only for an active, authorised tenant approval.
+	// Raw findings and findings beyond the report limit remain unchanged.
+	Suppression func(model.Node) string
 	// MinSeverity drops findings and vulnerabilities below it ("" keeps all).
 	MinSeverity string
 }
@@ -124,7 +131,7 @@ type Options struct {
 // Build assembles the report for repo.
 func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Report, error) {
 	svc := query.Service{R: r}
-	rep := Report{Repo: repo, FindingCounts: map[string]int{}, VulnCounts: map[string]int{}, Findings: []Finding{}, Vulnerabilities: []Vulnerability{}, Rules: []RuleCount{}}
+	rep := Report{Repo: repo, SuppressedCounts: map[string]int{}, FindingCounts: map[string]int{}, VulnCounts: map[string]int{}, Findings: []Finding{}, Vulnerabilities: []Vulnerability{}, Rules: []RuleCount{}}
 	minRank := model.SeverityRank(opts.MinSeverity)
 
 	findings, err := r.List(ctx, repo, store.Filter{Kinds: []model.NodeKind{model.KindFinding}}, store.ByName, store.MaxLimit)
@@ -136,13 +143,6 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 	penalty := 0.0
 	for _, f := range findings {
 		n := f.Node
-		rep.FindingCounts[n.Severity]++
-		rc := rules[n.Rule]
-		if rc == nil {
-			rc = &RuleCount{Rule: n.Rule, Title: n.Name, Severity: n.Severity}
-			rules[n.Rule] = rc
-		}
-		rc.Count++
 		fv := Finding{ID: n.ID, Rule: n.Rule, Title: n.Name, Severity: n.Severity, CWE: n.CWE, Location: n.Location(), Detail: n.Summary, Language: findingLanguage(n)}
 		owners, err := r.Traverse(ctx, n.ID, []model.EdgeKind{model.EdgeHasFinding}, store.In, 1, 1)
 		if err != nil {
@@ -184,6 +184,21 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 		if !fv.Tested {
 			fv.Priority += 5
 		}
+		if opts.Suppression != nil {
+			fv.SuppressionReason = redact.Summary(redact.Free(strings.TrimSpace(opts.Suppression(n))), 500)
+		}
+		if fv.SuppressionReason != "" {
+			rep.SuppressedCounts[n.Severity]++
+			rep.Suppressed = append(rep.Suppressed, fv)
+			continue
+		}
+		rep.FindingCounts[n.Severity]++
+		rc := rules[n.Rule]
+		if rc == nil {
+			rc = &RuleCount{Rule: n.Rule, Title: n.Name, Severity: n.Severity}
+			rules[n.Rule] = rc
+		}
+		rc.Count++
 		penalty += w
 		if model.SeverityRank(n.Severity) >= minRank {
 			rep.Findings = append(rep.Findings, fv)
@@ -306,10 +321,10 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 		return rep, err
 	}
 	for sev, total := range all {
-		if extra := total - rep.FindingCounts[sev]; extra > 0 {
+		if extra := total - rep.FindingCounts[sev] - rep.SuppressedCounts[sev]; extra > 0 {
 			penalty += float64(extra * severityWeight[sev])
 			rep.Unanalysed += extra
-			rep.FindingCounts[sev] = total
+			rep.FindingCounts[sev] = total - rep.SuppressedCounts[sev]
 		}
 	}
 	penalty += min(requiredPenalty, 10)
@@ -413,6 +428,13 @@ func (r Report) ExceedsThreshold(severity string) bool {
 	if rank < 0 {
 		return false
 	}
+	if r.Unanalysed > 0 {
+		for severity, count := range r.FindingCounts {
+			if count > 0 && model.SeverityRank(severity) >= rank {
+				return true
+			}
+		}
+	}
 	for _, f := range r.Findings {
 		if model.SeverityRank(f.Severity) >= rank {
 			return true
@@ -484,8 +506,16 @@ func WriteMarkdown(w io.Writer, r Report) error {
 		}
 		b.WriteString("\n")
 	}
+	if len(r.Suppressed) > 0 {
+		fmt.Fprintf(&b, "## Approved suppressions\n\n%s. These findings remain stored and are excluded from this tenant's grade.\n\n| Sev | Rule | Location | Reason |\n|---|---|---|---|\n", counts(r.SuppressedCounts))
+		escape := strings.NewReplacer("|", "\\|", "\n", " ", "\r", " ")
+		for _, f := range r.Suppressed {
+			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", f.Severity, f.Rule, escape.Replace(f.Location), escape.Replace(f.SuppressionReason))
+		}
+		b.WriteString("\n")
+	}
 	if len(r.Findings) == 0 && len(r.Vulnerabilities) == 0 {
-		b.WriteString("No findings at or above the selected severity.\n")
+		b.WriteString("No active findings at or above the selected severity.\n")
 	}
 	_, err := io.WriteString(w, b.String())
 	return err

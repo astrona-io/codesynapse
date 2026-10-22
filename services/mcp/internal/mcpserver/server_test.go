@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/astrona-io/codesynapse/internal/license"
 	agentmem "github.com/astrona-io/codesynapse/internal/memory"

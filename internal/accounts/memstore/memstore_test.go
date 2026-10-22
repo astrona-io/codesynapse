@@ -20,6 +20,7 @@ func TestContract(t *testing.T) {
 	accountstest.RunAccessBounds(t, st)
 	accountstest.RunPolicyRecovery(t, st)
 	accountstest.RunExecutionSessions(t, st)
+	accountstest.RunRepoPolicy(t, st)
 }
 
 func TestAuditTamperDetected(t *testing.T) {

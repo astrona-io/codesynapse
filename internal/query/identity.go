@@ -32,6 +32,9 @@ func IdentityReport(ctx context.Context, r store.Reader, repo string) (identity.
 		return identity.Report{}, false, err
 	}
 	report, err := identity.Decode(n.Identities, repo)
+	if err == nil {
+		report, err = filterIdentityPolicy(report, n.Meta)
+	}
 	return report, n.Identities != "", err
 }
 

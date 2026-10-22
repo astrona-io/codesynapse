@@ -14,6 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"github.com/astrona-io/codesynapse/internal/license"
 )
 
@@ -36,7 +37,7 @@ const maxModules = 20000
 const maxManifest = 32 << 20
 
 // lockfiles lists the manifests read, by file name.
-var lockfiles = map[string]func([]byte, string) []Module{
+var lockfiles = map[string]func([]byte, string, ...manifestScope) []Module{
 	"package-lock.json":  parseNPMLock,
 	"yarn.lock":          parseYarnLock,
 	"pnpm-lock.yaml":     parsePNPMLock,
@@ -52,13 +53,20 @@ var lockfiles = map[string]func([]byte, string) []Module{
 
 // ManifestModules reads npm, Python, Rust, PHP, Ruby, .NET and Gradle lockfiles under root. dir is the
 // lockfile's directory, used to find direct dependencies next to it.
-func ManifestModules(root string) ([]Module, error) {
+func ManifestModules(root string, policies ...*repoconfig.Policy) ([]Module, error) {
+	var policy *repoconfig.Policy
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
 	seen := map[string]Module{}
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		name := d.Name()
+		if allowed, policyErr := policy.WalkEntry(root, p, d); !allowed || policyErr != nil {
+			return policyErr
+		}
 		if d.IsDir() {
 			if p != root && (name == "node_modules" || name == "vendor" || name == "testdata" || name == "target" || name == ".venv" || name == "venv" || strings.HasPrefix(name, ".") || isRepo(p)) {
 				return filepath.SkipDir
@@ -85,7 +93,7 @@ func ManifestModules(root string) ([]Module, error) {
 		if isReq {
 			mods = parseRequirements(data)
 		} else {
-			mods = parse(data, filepath.Dir(p))
+			mods = parse(data, filepath.Dir(p), manifestScope{root: root, policy: policy})
 		}
 		for _, m := range mods {
 			key := m.Ecosystem + "|" + m.Path + "|" + m.Version
@@ -122,8 +130,8 @@ func ManifestModules(root string) ([]Module, error) {
 }
 
 // npmDirect returns the dependency names declared in package.json in dir.
-func npmDirect(dir string) map[string]bool {
-	data, err := os.ReadFile(filepath.Join(dir, "package.json")) //nolint:gosec // next to a lockfile inside root
+func npmDirect(dir string, scopes ...manifestScope) map[string]bool {
+	data, err := readManifest(filepath.Join(dir, "package.json"), scopes...) //nolint:gosec // next to a lockfile inside root
 	if err != nil {
 		return nil
 	}
@@ -143,7 +151,7 @@ func npmDirect(dir string) map[string]bool {
 	return direct
 }
 
-func parseNPMLock(data []byte, dir string) []Module {
+func parseNPMLock(data []byte, dir string, scopes ...manifestScope) []Module {
 	var lock struct {
 		Packages     map[string]json.RawMessage `json:"packages"`
 		Dependencies map[string]json.RawMessage `json:"dependencies"`
@@ -151,7 +159,7 @@ func parseNPMLock(data []byte, dir string) []Module {
 	if json.Unmarshal(data, &lock) != nil {
 		return nil
 	}
-	direct := npmDirect(dir)
+	direct := npmDirect(dir, scopes...)
 	var out []Module
 	for key, raw := range lock.Packages {
 		var p struct {
@@ -210,8 +218,8 @@ func npmRequires(maps ...map[string]string) []string {
 
 var yarnEntry = regexp.MustCompile(`^"?(@?[^@"\s]+)@`)
 
-func parseYarnLock(data []byte, dir string) []Module {
-	direct := npmDirect(dir)
+func parseYarnLock(data []byte, dir string, scopes ...manifestScope) []Module {
+	direct := npmDirect(dir, scopes...)
 	var out []Module
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
@@ -240,14 +248,14 @@ func parseYarnLock(data []byte, dir string) []Module {
 
 var pnpmKey = regexp.MustCompile(`^/?(@?[^@/]+(?:/[^@/]+)?)@([^(@]+)`)
 
-func parsePNPMLock(data []byte, dir string) []Module {
+func parsePNPMLock(data []byte, dir string, scopes ...manifestScope) []Module {
 	var lock struct {
 		Packages map[string]any `yaml:"packages"`
 	}
 	if yaml.Unmarshal(data, &lock) != nil {
 		return nil
 	}
-	direct := npmDirect(dir)
+	direct := npmDirect(dir, scopes...)
 	var out []Module
 	for key := range lock.Packages {
 		if m := pnpmKey.FindStringSubmatch(key); m != nil {
@@ -281,8 +289,8 @@ var (
 
 // parseTOMLLock reads poetry.lock and uv.lock: [[package]] blocks with
 // name and version. Direct dependencies come from pyproject.toml.
-func parseTOMLLock(data []byte, dir string) []Module {
-	direct := pyprojectDirect(dir)
+func parseTOMLLock(data []byte, dir string, scopes ...manifestScope) []Module {
+	direct := pyprojectDirect(dir, scopes...)
 	var out []Module
 	for _, block := range tomlPackage.Split(string(data), -1)[1:] {
 		n, v := tomlName.FindStringSubmatch(block), tomlVersion.FindStringSubmatch(block)
@@ -330,8 +338,8 @@ func tomlRequires(block string) []string {
 	return out
 }
 
-func pyprojectDirect(dir string) map[string]bool {
-	data, err := os.ReadFile(filepath.Join(dir, "pyproject.toml")) //nolint:gosec // next to a lockfile inside root
+func pyprojectDirect(dir string, scopes ...manifestScope) map[string]bool {
+	data, err := readManifest(filepath.Join(dir, "pyproject.toml"), scopes...) //nolint:gosec // next to a lockfile inside root
 	if err != nil {
 		return nil
 	}
@@ -360,7 +368,7 @@ func pyprojectDirect(dir string) map[string]bool {
 	return direct
 }
 
-func parsePipfileLock(data []byte, _ string) []Module {
+func parsePipfileLock(data []byte, _ string, _ ...manifestScope) []Module {
 	var lock map[string]map[string]struct {
 		Version string `json:"version"`
 	}

@@ -31,16 +31,14 @@ func (s *Server) jobAuthorization(ctx context.Context, repo string, least accoun
 		if err != nil || current != id {
 			return execution.ErrConflict
 		}
-		_, err = s.cfg.Accounts.ResolveExecutionSession(ctx, p.User.ID, org, id.SessionID)
+		service := s.accountsFor(ctx)
+		_, err = service.ResolveExecutionSession(ctx, p.User.ID, org, id.SessionID)
 		if err == nil {
-			_, err = s.cfg.Accounts.ResolveRepository(ctx, p, org, repo, least)
+			_, err = service.ResolveRepository(ctx, p, org, repo, least)
 		}
 		if err != nil {
-			_, auditErr := s.cfg.Accounts.Record(ctx, accounts.Event{UserID: p.User.ID, Via: p.Via, KeyID: p.KeyID,
+			s.recordJobDenial(ctx, accounts.Event{UserID: p.User.ID, Via: p.Via, KeyID: p.KeyID,
 				OrgID: org, Action: "job.authorization_denied", Target: repo, Outcome: accounts.Failure})
-			if auditErr != nil && s.logger != nil {
-				s.logger.Warn("job authorization audit failed", "error", auditErr)
-			}
 		}
 		return err
 	}

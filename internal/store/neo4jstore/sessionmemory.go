@@ -7,9 +7,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/astrona-io/codesynapse/internal/memory"
 	"github.com/astrona-io/codesynapse/internal/sessionmemory"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
 func sessionParams(scope sessionmemory.Scope) map[string]any {

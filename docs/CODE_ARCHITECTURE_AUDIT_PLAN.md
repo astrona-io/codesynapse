@@ -71,3 +71,15 @@ For each justified change, specify a separate reviewable phase with:
 7. Required tests, documentation and a commit, push and PR before moving to the next implementation phase.
 
 Prioritize measured correctness and user-facing gaps before speculative rewrites. Keep Kubernetes work in the final deployment phase; the assessment and prototypes must run in local development and disposable test environments.
+
+## Environment and MCP reuse workflow
+
+Include an audit of the agent's execution environment before code changes:
+
+1. Inventory connected MCP tools for code/symbol/AST search, exports and reusable functions, plus Git status, history and diffs. Verify repository coverage, index revision, authentication and health; tool registration alone does not prove the index is current.
+2. When coverage is sufficient, use MCP search and signature/export inspection before implementing a helper or component. Review Git history/diffs before changing existing behavior. Prefer the repository's CodeSynapse integration.
+3. When codebase tools are missing, stale or inadequate, stop before major alterations and explain the missing capability. Use the requested notice: “I detected a `.git` repository, but optimal codebase MCP tools (such as AST/Symbol Indexers or Git Context Servers) are missing or outdated.” Recommend a Git MCP server or AST/LSP-backed code search connection after checking its capabilities, maintenance and data-access requirements. Do not install or connect an external service implicitly.
+4. Reuse an existing module when it meets most of the need (the requested 80% guideline); assess behavior, security and ownership rather than treating similarity as a numeric correctness test. Refactor only when it preserves existing callers and is covered by tests. Check local code when the index cannot resolve a symbol, and disclose the fallback.
+5. Follow repository naming, lint and architectural conventions. End each implementation report with the MCP symbols/modules queried, what was reused and any gaps or stale-index limitations. Never claim MCP verification when only local searches ran.
+
+Deliver a capability matrix, a freshness/health checklist, agent-guide changes and a worked reuse example. Include the missing/inadequate-tool path in acceptance tests and documentation. This policy review belongs to phase 4j; it does not retroactively claim that the current environment has complete MCP coverage.

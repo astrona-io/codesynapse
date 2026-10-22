@@ -68,6 +68,7 @@ func Run(t *testing.T, s store.Store) {
 	ctx := context.Background()
 	require.NoError(t, s.EnsureSchema(ctx))
 	require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
+	t.Run("replacement_failure", func(t *testing.T) { replacementContract(t, s) })
 	t.Run("access_projection", func(t *testing.T) { accessContract(t, s) })
 	t.Run("scoped_graph", func(t *testing.T) { scopedContract(t, s) })
 	t.Run("dependency_graph", func(t *testing.T) { dependencyContract(t, s) })

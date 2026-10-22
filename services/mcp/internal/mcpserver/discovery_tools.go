@@ -343,6 +343,16 @@ func filterFindingsByPath(rep *security.Report, path string) {
 		}
 		rc.Count++
 	}
+	suppressed := rep.Suppressed[:0:0]
+	suppressedCounts := map[string]int{}
+	for _, f := range rep.Suppressed {
+		file, _, _ := strings.Cut(f.Location, ":")
+		if file == path || strings.HasPrefix(file, path+"/") {
+			suppressed = append(suppressed, f)
+			suppressedCounts[f.Severity]++
+		}
+	}
+	rep.Suppressed, rep.SuppressedCounts = suppressed, suppressedCounts
 	rep.Findings, rep.FindingCounts = kept, counts
 	rep.Rules = rep.Rules[:0:0]
 	for _, rc := range rules {

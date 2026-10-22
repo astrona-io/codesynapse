@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/agentctx"
 	"github.com/astrona-io/codesynapse/internal/catalog"
@@ -16,6 +15,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/store/storetest"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestIdentityToolsAndSharedCatalog(t *testing.T) {

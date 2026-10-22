@@ -63,6 +63,7 @@ tasks:
   security-triage: local-mlx
   review: local-mlx
   briefing: local-mlx
+  code-annotation: local-mlx # indexed symbol metadata; requires repository approval and runtime identity
   fix: local-mlx         # writes fixes for accepted review comments (needs source access: use a local model)
   # memory: local-ollama     # agent memory: facts extracted from conversation turns (local providers only)
   # embeddings: local-ollama # agent memory: recall by meaning (local, with embedding_model)

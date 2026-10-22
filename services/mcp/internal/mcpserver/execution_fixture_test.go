@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Graph-focused unit tests use an explicit registered runtime fixture without

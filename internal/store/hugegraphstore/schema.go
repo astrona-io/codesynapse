@@ -98,5 +98,8 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	if err = s.write(ctx, accessSchema, nil, nil); err != nil {
 		return err
 	}
-	return s.write(ctx, sessionSchema, nil, nil)
+	if err = s.write(ctx, sessionSchema, nil, nil); err != nil {
+		return err
+	}
+	return s.write(ctx, stageSchema, nil, nil)
 }

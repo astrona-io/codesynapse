@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/redact"
 )
@@ -69,6 +70,9 @@ func Extract(ctx context.Context, repo, root string, g *model.Graph) error {
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
+		}
+		if allowed, policyErr := repoconfig.FromContext(ctx).WalkEntry(root, p, d); !allowed || policyErr != nil {
+			return policyErr
 		}
 		if d.IsDir() {
 			if p != root && (skipDirs[d.Name()] || strings.HasPrefix(d.Name(), ".") || isRepo(p)) {

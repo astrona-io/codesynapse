@@ -36,8 +36,8 @@ var (
 // parseCargoLock reads [[package]] blocks. Packages without a source are the
 // workspace's own crates. dir holds Cargo.toml (and, for a workspace, its
 // members below it), which says which crates the project declares.
-func parseCargoLock(data []byte, dir string) []Module {
-	runtime, dev := cargoDeclared(dir)
+func parseCargoLock(data []byte, dir string, scopes ...manifestScope) []Module {
+	runtime, dev := cargoDeclared(dir, scopes...)
 	var out []Module
 	for _, block := range tomlPackage.Split(string(data), -1)[1:] {
 		n, v, src := cargoName.FindStringSubmatch(block), cargoVersion.FindStringSubmatch(block), cargoSource.FindStringSubmatch(block)
@@ -62,11 +62,16 @@ func parseCargoLock(data []byte, dir string) []Module {
 // cargoDeclared returns the crates named in [dependencies] and
 // [build-dependencies] (runtime) and [dev-dependencies] (dev) of the Cargo.toml
 // files at dir and one to three levels below it.
-func cargoDeclared(dir string) (runtime, dev map[string]bool) {
+func cargoDeclared(dir string, scopes ...manifestScope) (runtime, dev map[string]bool) {
 	runtime, dev = map[string]bool{}, map[string]bool{}
 	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error { //nolint:errcheck // best effort
 		if err != nil {
 			return nil //nolint:nilerr // unreadable entries are skipped
+		}
+		if len(scopes) > 0 {
+			if allowed, policyErr := scopes[0].policy.WalkEntry(scopes[0].root, p, d); !allowed || policyErr != nil {
+				return policyErr
+			}
 		}
 		if d.IsDir() {
 			rel, _ := filepath.Rel(dir, p) //nolint:errcheck // p is below dir
@@ -78,7 +83,7 @@ func cargoDeclared(dir string) (runtime, dev map[string]bool) {
 		if d.Name() != "Cargo.toml" || d.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
-		if b, err := os.ReadFile(p); err == nil { //nolint:gosec // inside the scanned root, not a symlink
+		if b, err := readManifest(p, scopes...); err == nil { //nolint:gosec // inside the scanned root, not a symlink
 			cargoToml(string(b), runtime, dev)
 		}
 		return nil
@@ -115,7 +120,7 @@ func cargoToml(text string, runtime, dev map[string]bool) {
 
 // --- PHP: composer.lock -------------------------------------------------------
 
-func parseComposerLock(data []byte, dir string) []Module {
+func parseComposerLock(data []byte, dir string, scopes ...manifestScope) []Module {
 	var lock struct {
 		Packages    []composerPackage `json:"packages"`
 		PackagesDev []composerPackage `json:"packages-dev"`
@@ -123,7 +128,7 @@ func parseComposerLock(data []byte, dir string) []Module {
 	if json.Unmarshal(data, &lock) != nil {
 		return nil
 	}
-	direct, haveManifest := composerDirect(dir)
+	direct, haveManifest := composerDirect(dir, scopes...)
 	var out []Module
 	for _, set := range []struct {
 		pkgs []composerPackage
@@ -158,8 +163,8 @@ type composerPackage struct {
 	Require map[string]string `json:"require"`
 }
 
-func composerDirect(dir string) (map[string]bool, bool) {
-	data, err := os.ReadFile(filepath.Join(dir, "composer.json")) //nolint:gosec // next to a lockfile inside root
+func composerDirect(dir string, scopes ...manifestScope) (map[string]bool, bool) {
+	data, err := readManifest(filepath.Join(dir, "composer.json"), scopes...) //nolint:gosec // next to a lockfile inside root
 	if err != nil {
 		return nil, false
 	}
@@ -191,7 +196,7 @@ var (
 
 // parseGemfileLock reads the GEM specs (resolved gems, with the gems each
 // requires one level deeper) and the DEPENDENCIES the Gemfile declares.
-func parseGemfileLock(data []byte, _ string) []Module {
+func parseGemfileLock(data []byte, _ string, _ ...manifestScope) []Module {
 	var out []Module
 	direct := map[string]bool{}
 	section, inSpecs := "", false
@@ -233,7 +238,7 @@ func parseGemfileLock(data []byte, _ string) []Module {
 
 // --- .NET: packages.lock.json -------------------------------------------------
 
-func parseNuGetLock(data []byte, _ string) []Module {
+func parseNuGetLock(data []byte, _ string, _ ...manifestScope) []Module {
 	var lock struct {
 		Dependencies map[string]map[string]struct {
 			Type         string            `json:"type"`
@@ -277,10 +282,10 @@ func parseNuGetLock(data []byte, _ string) []Module {
 // parseGradleLock reads "group:artifact:version=configuration,..." lines.
 // The build file next to the lockfile says which coordinates the project names
 // itself; the lockfile has no dependency edges.
-func parseGradleLock(data []byte, dir string) []Module {
+func parseGradleLock(data []byte, dir string, scopes ...manifestScope) []Module {
 	build := ""
 	for _, f := range []string{"build.gradle.kts", "build.gradle"} {
-		if b, err := os.ReadFile(filepath.Join(dir, f)); err == nil { //nolint:gosec // next to a lockfile inside root
+		if b, err := readManifest(filepath.Join(dir, f), scopes...); err == nil { //nolint:gosec // next to a lockfile inside root
 			build += string(b)
 		}
 	}

@@ -442,7 +442,7 @@ func (h *handlers) securityReport(ctx context.Context, _ *mcp.CallToolRequest, i
 	if model.SeverityRank(minSev) < 0 {
 		return nil, security.Report{}, fmt.Errorf("unknown severity %q", minSev)
 	}
-	rep, err := security.Build(ctx, h.svc.R, repo, security.Options{MinSeverity: minSev})
+	rep, err := security.Build(ctx, h.svc.R, repo, h.securityOptions(ctx, repo, minSev))
 	if err != nil {
 		return nil, rep, err
 	}
@@ -450,6 +450,7 @@ func (h *handlers) securityReport(ctx context.Context, _ *mcp.CallToolRequest, i
 	filterFindingsByPath(&rep, in.Path)
 	if in.Limit > 0 {
 		rep.Findings = rep.Findings[:min(len(rep.Findings), in.Limit)]
+		rep.Suppressed = rep.Suppressed[:min(len(rep.Suppressed), in.Limit)]
 		rep.Vulnerabilities = rep.Vulnerabilities[:min(len(rep.Vulnerabilities), in.Limit)]
 	}
 	return nil, rep, nil

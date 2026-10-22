@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/redact"
 )
@@ -54,6 +55,9 @@ func Extract(ctx context.Context, repo, root string, symbols *model.Graph) (*mod
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
+		}
+		if allowed, policyErr := repoconfig.FromContext(ctx).WalkEntry(root, path, d); !allowed || policyErr != nil {
+			return policyErr
 		}
 		if d.IsDir() {
 			if path == root {

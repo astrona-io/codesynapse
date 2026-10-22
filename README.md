@@ -71,6 +71,20 @@ Every rule is a readable YAML file in [`rules/`](rules/README.md) with why it ma
 
 Non-Go call edges are name-based (imports, enclosing class, names unique in the repo), so they can miss dynamic dispatch; Go keeps exact type-checked edges. Parsers are pure Go: no cgo, static binaries.
 
+## Repository indexing policy
+
+An optional `.codesynapse.yaml` at a repository root requests path exclusions, Kubernetes scanner controls, security exceptions and local AI annotation. Validate it before approving it:
+
+```sh
+codesynapse config inspect /path/to/repository
+# Review the normalized configuration and copy its exact digest:
+codesynapse ingest /path/to/repository --approved-policy-digest '<reviewed-digest>'
+```
+
+With accounts, a repository administrator approves the configuration on **Indexing policy**, with a reason and optional expiry. Exclusions need approval from every organisation sharing the graph. Security exceptions apply only to the approving organisation; the raw findings remain available. Annotation additionally needs the local `code-annotation` model route and a registered runtime session. See the [configuration reference](docs/REPO_CONFIG_PLAN.md) for the YAML schema and API workflow.
+
+The repository and Go module now use `github.com/astrona-io/codesynapse`; container image references use `ghcr.io/astrona-io`. Update existing clones with `git remote set-url origin git@github.com:astrona-io/codesynapse.git`. Consumers of the Go module must update their imports.
+
 ## Code reviews
 
 Ask your agent to review a change ("review my changes with CodeSynapse and submit the review", or the `code-review` MCP prompt). It analyses the change with the graph and calls `submit_review`; the review appears on the **Reviews** page with a verdict, a summary and comments on exact lines, each with severity, category, the symbol it points at and a suggested fix. Resolve comments in the UI, or let the agent mark them fixed with `update_review_comment`. These review tools write only to the review store (disable with `CODESYNAPSE_MCP_REVIEWS=false`).

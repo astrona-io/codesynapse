@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"golang.org/x/mod/module"
 )
 
@@ -46,11 +47,15 @@ type Found struct {
 // Resolver finds dependency licences on disk and, when Online is set, from
 // deps.dev. Only ecosystem, name and version leave the machine.
 type Resolver struct {
-	Root string
+	Policy *repoconfig.Policy
+	Root   string
 	// GoModCache is the Go module cache; "" uses GOMODCACHE or GOPATH/pkg/mod.
 	GoModCache string
 	Online     *DepsDev
 }
+
+// Project resolves the repository licence through the same path policy as dependencies.
+func (r Resolver) Project() Found { return Project(r.Root, r.allowed) }
 
 // maxScanDirs bounds the directories searched for node_modules and
 // virtualenvs.
@@ -61,7 +66,7 @@ const maxScanDirs = 5000
 func (r Resolver) Resolve(ctx context.Context, deps []Dep) map[string]Found {
 	out := map[string]Found{}
 	nodeDirs, sitePkgs := r.scan()
-	py := pythonLicenses(sitePkgs)
+	py := pythonLicenses(sitePkgs, r.allowed)
 	var missing []Dep
 	for _, d := range deps {
 		var f Found
@@ -92,8 +97,8 @@ func (r Resolver) goLicense(d Dep) Found {
 		return Found{License: "BSD-3-Clause", Source: "Go standard library"}
 	}
 	vendor := filepath.Join(r.Root, "vendor", filepath.FromSlash(d.Name))
-	if inside(r.Root, vendor) {
-		if id, files := FromDir(vendor); id != "" {
+	if inside(r.Root, vendor) && !r.Policy.PruneDir("vendor/"+d.Name) {
+		if id, files := FromDir(vendor, r.allowed); id != "" {
 			return Found{License: id, Source: "vendor/" + d.Name + "/" + files[0]}
 		}
 	}
@@ -126,6 +131,9 @@ func (r Resolver) scan() (nodeDirs, sitePkgs []string) {
 		if err != nil || !d.IsDir() {
 			return nil //nolint:nilerr // unreadable entries are skipped
 		}
+		if allowed, policyErr := r.Policy.WalkEntry(r.Root, p, d); !allowed || policyErr != nil {
+			return policyErr
+		}
 		if n++; n > maxScanDirs {
 			return filepath.SkipAll
 		}
@@ -150,7 +158,7 @@ func (r Resolver) scan() (nodeDirs, sitePkgs []string) {
 func (r Resolver) npmLicense(nodeDirs []string, d Dep) Found {
 	for _, dir := range nodeDirs {
 		p := filepath.Join(dir, filepath.FromSlash(d.Name), "package.json")
-		if !inside(r.Root, p) {
+		if !inside(r.Root, p) || !r.allowed(p) {
 			continue
 		}
 		b, err := readSmall(p)
@@ -205,7 +213,7 @@ func NPMField(raw []byte) string {
 var classifier = regexp.MustCompile(`^Classifier: License :: (?:OSI Approved :: )?(.+)$`)
 
 // pythonLicenses reads installed packages' METADATA in site-packages.
-func pythonLicenses(sitePkgs []string) map[string]Found {
+func pythonLicenses(sitePkgs []string, allowed ...func(string) bool) map[string]Found {
 	out := map[string]Found{}
 	for _, sp := range sitePkgs {
 		entries, err := os.ReadDir(sp)
@@ -216,7 +224,11 @@ func pythonLicenses(sitePkgs []string) map[string]Found {
 			if !e.IsDir() || !strings.HasSuffix(e.Name(), ".dist-info") {
 				continue
 			}
-			b, err := readSmall(filepath.Join(sp, e.Name(), "METADATA"))
+			p := filepath.Join(sp, e.Name(), "METADATA")
+			if len(allowed) > 0 && !allowed[0](p) {
+				continue
+			}
+			b, err := readSmall(p)
 			if err != nil {
 				continue
 			}
@@ -299,4 +311,9 @@ func inside(root, p string) bool {
 	}
 	rel, err := filepath.Rel(rr, rp)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func (r Resolver) allowed(path string) bool {
+	rel, err := filepath.Rel(r.Root, path)
+	return err == nil && r.Policy.PathAllowed(filepath.ToSlash(rel))
 }

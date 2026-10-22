@@ -65,15 +65,19 @@ func (s *Store) System() string { return "memory" }
 func (s *Store) Close(context.Context) error { return nil }
 
 // ReplaceRepo implements store.Writer.
-func (s *Store) ReplaceRepo(_ context.Context, repo string, g *model.Graph) error {
+func (s *Store) ReplaceRepo(ctx context.Context, repo string, g *model.Graph) error {
+	nodes, edges, err := store.Replacement(ctx, repo, g)
+	if err != nil {
+		return err
+	}
 	rg := &repoGraph{nodes: map[string]model.Node{}, out: map[string][]model.Edge{}, in: map[string][]model.Edge{}}
-	for _, n := range g.Nodes() {
+	for _, n := range nodes {
 		if n.Repo != repo {
 			return fmt.Errorf("node %s belongs to repo %q, not %q", n.ID, n.Repo, repo)
 		}
 		rg.nodes[n.ID] = n
 	}
-	for _, e := range g.Edges() {
+	for _, e := range edges {
 		if _, ok := rg.nodes[e.From]; !ok {
 			continue
 		}
@@ -82,6 +86,9 @@ func (s *Store) ReplaceRepo(_ context.Context, repo string, g *model.Graph) erro
 		}
 		rg.out[e.From] = append(rg.out[e.From], e)
 		rg.in[e.To] = append(rg.in[e.To], e)
+	}
+	if err := store.CommitCheck(ctx); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	s.repos[repo] = rg

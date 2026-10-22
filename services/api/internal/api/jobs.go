@@ -12,8 +12,11 @@ import (
 	"sync"
 	"time"
 
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/logx"
+	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 
 	"github.com/astrona-io/codesynapse/internal/ingest"
@@ -60,6 +63,9 @@ type Job struct {
 // Jobs runs ingest jobs, at most one per repository at a time and one
 // overall, since type-checking a large module is memory hungry.
 type Jobs struct {
+	Policy      func(context.Context, string, *repoconfig.Policy) (string, error)
+	Publish     func(context.Context, string, func(context.Context) error) error
+	Ingested    func(context.Context, string, *model.Graph, func(context.Context) error)
 	ctx         context.Context //nolint:containedctx // lifetime of the job runner, not a request
 	st          store.Writer
 	logger      *slog.Logger
@@ -194,7 +200,21 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 			return
 		}
 	}
-	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Branch: opts.Branch, PreviousIdentities: previous})
+	policy, err := repoconfig.Load(ctx, root)
+	if err != nil {
+		fin(job, 0, 0, err)
+		return
+	}
+	approved := ""
+	if j.Policy != nil {
+		approved, err = j.Policy(ctx, job.Repo, policy)
+	}
+	if err != nil {
+		fin(job, 0, 0, err)
+		return
+	}
+	ctx = repoconfig.WithPolicy(ctx, policy)
+	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Branch: opts.Branch, PreviousIdentities: previous, ApprovedPolicyDigest: approved})
 	if err == nil {
 		err = checkJob(ctx, opts.Authorize)
 	}
@@ -205,7 +225,48 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 		err = checkJob(ctx, opts.Authorize)
 	}
 	if err == nil {
-		err = j.st.ReplaceRepo(ctx, job.Repo, g)
+		latest, loadErr := repoconfig.Load(ctx, root)
+		if loadErr != nil {
+			err = loadErr
+		} else if latest.Digest() != policy.Digest() {
+			err = errors.New("repository configuration changed during ingest")
+		} else if j.Policy != nil {
+			_, err = j.Policy(ctx, job.Repo, latest)
+		}
+	}
+	if err == nil {
+		indexed, _ := g.Node(model.NodeID(job.Repo, model.KindRepository, job.Repo))
+		if indexed != nil && indexed.Head != gitx.HeadCommit(ctx, root) {
+			err = errors.New("repository commit changed during ingest")
+		}
+	}
+	if err == nil {
+		ctx = store.WithCommitCheck(ctx, func(checkCtx context.Context) error {
+			if err := checkJob(checkCtx, opts.Authorize); err != nil {
+				return err
+			}
+			latest, err := repoconfig.Load(checkCtx, root)
+			if err != nil {
+				return err
+			}
+			if latest.Digest() != policy.Digest() {
+				return errors.New("repository configuration changed before publication")
+			}
+			indexed, ok := g.Node(model.NodeID(job.Repo, model.KindRepository, job.Repo))
+			if ok && indexed.Head != gitx.HeadCommit(checkCtx, root) {
+				return errors.New("repository commit changed before publication")
+			}
+			if j.Policy != nil {
+				_, err = j.Policy(checkCtx, job.Repo, latest)
+			}
+			return err
+		})
+		publish := func(publishCtx context.Context) error { return j.st.ReplaceRepo(publishCtx, job.Repo, g) }
+		if j.Publish != nil {
+			err = j.Publish(ctx, job.Repo, publish)
+		} else {
+			err = publish(ctx)
+		}
 		if hs, ok := j.st.(snapshot.Store); ok && err == nil {
 			snapshot.Record(ctx, hs, job.Repo)
 		}
@@ -223,6 +284,9 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 	telemetry.IngestRuns.IncContext(ctx, system, outcome)
 	telemetry.IngestDuration.ObserveContext(ctx, time.Since(started).Seconds(), system)
 	fin(job, nodes, edges, err)
+	if err == nil && j.Ingested != nil {
+		j.Ingested(ctx, job.Repo, g, opts.Authorize)
+	}
 	if err == nil && opts.After != nil {
 		go func() {
 			if checkJob(ctx, opts.Authorize) == nil {

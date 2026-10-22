@@ -14,8 +14,10 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/logx"
 	"golang.org/x/tools/go/packages"
@@ -89,7 +91,7 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedSyntax |
 			packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedModule,
 	}
-	pkgs, err := packages.Load(cfg, opts.Patterns...)
+	pkgs, err := loadPackages(ctx, cfg, opts.Patterns, repoconfig.FromContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
@@ -103,13 +105,14 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 
 	x := &extractor{
 		opts:    opts,
+		policy:  repoconfig.FromContext(ctx),
 		g:       model.NewGraph(),
 		modules: map[string]bool{},
 		srcs:    map[string][]byte{},
 		res:     &Result{ExternalCalls: map[string][]string{}, ExternalImports: map[string][]string{}},
 	}
 	x.g.AddNode(model.Node{ID: x.repoID(), Kind: model.KindRepository, Repo: opts.Repo, Name: opts.Repo})
-	x.nested = nestedRepos(opts.Root)
+	x.nested = nestedRepos(opts.Root, x.policy)
 
 	for _, p := range pkgs {
 		if p.Module != nil {
@@ -149,6 +152,7 @@ func isTestVariant(p *packages.Package) bool {
 }
 
 type extractor struct {
+	policy  *repoconfig.Policy
 	opts    Options
 	g       *model.Graph
 	modules map[string]bool
@@ -163,11 +167,18 @@ type extractor struct {
 }
 
 // nestedRepos finds directories below root that contain their own .git.
-func nestedRepos(root string) []string {
+func nestedRepos(root string, policies ...*repoconfig.Policy) []string {
+	var policy *repoconfig.Policy
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
 	var out []string
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error { //nolint:errcheck // best-effort
 		if err != nil || !d.IsDir() || path == root {
 			return nil //nolint:nilerr // unreadable dirs are skipped
+		}
+		if allowed, policyErr := policy.WalkEntry(root, path, d); !allowed || policyErr != nil {
+			return policyErr
 		}
 		name := d.Name()
 		if name == "node_modules" || name == "vendor" || strings.HasPrefix(name, ".") {
@@ -205,7 +216,11 @@ func (x *extractor) inRepo(pkgPath string) bool {
 // relPath converts an absolute file name to a repo-relative slash path, or
 // "" when the file lies outside the repository (build cache, GOROOT).
 func (x *extractor) relPath(abs string) string {
-	rel, err := filepath.Rel(x.opts.Root, abs)
+	canonical, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return ""
+	}
+	rel, err := filepath.Rel(x.opts.Root, canonical)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return ""
 	}
@@ -225,7 +240,7 @@ func (x *extractor) inNested(rel string) bool {
 // repository (and not to a nested one).
 func (x *extractor) pkgInRepo(p *packages.Package) bool {
 	for _, f := range p.CompiledGoFiles {
-		if rel := x.relPath(f); rel != "" && !x.inNested(rel) {
+		if rel := x.relPath(f); rel != "" && !x.inNested(rel) && x.policy.PathAllowed(rel) {
 			return true
 		}
 	}
@@ -245,7 +260,7 @@ func (x *extractor) pkg(p *packages.Package, testOnly bool) {
 	x.g.AddEdge(model.Edge{From: x.repoID(), To: pkgID, Kind: model.EdgeContains})
 
 	if !testOnly {
-		for imp := range p.Imports {
+		for imp := range x.permittedImports(p) {
 			if x.inRepo(imp) {
 				x.g.AddEdge(model.Edge{From: pkgID, To: x.id(model.KindPackage, imp), Kind: model.EdgeImports})
 			} else {
@@ -261,7 +276,7 @@ func (x *extractor) pkg(p *packages.Package, testOnly bool) {
 		abs := p.CompiledGoFiles[i]
 		rel := x.relPath(abs)
 		isTestFile := strings.HasSuffix(abs, "_test.go")
-		if rel == "" || (testOnly && !isTestFile) || strings.HasPrefix(rel, "vendor/") || x.inNested(rel) {
+		if rel == "" || (testOnly && !isTestFile) || strings.HasPrefix(rel, "vendor/") || x.inNested(rel) || !x.policy.PathAllowed(rel) {
 			continue
 		}
 		if pkgNode.Summary == "" && f.Doc != nil {
@@ -269,6 +284,27 @@ func (x *extractor) pkg(p *packages.Package, testOnly bool) {
 		}
 		x.file(p, f, abs, rel, pkgPath, isTestFile)
 	}
+}
+
+// Package imports include ignored files too; use only declarations emitted here.
+func (x *extractor) permittedImports(p *packages.Package) map[string]bool {
+	imports := map[string]bool{}
+	for i, file := range p.Syntax {
+		if i >= len(p.CompiledGoFiles) {
+			break
+		}
+		rel := x.relPath(p.CompiledGoFiles[i])
+		if rel == "" || x.inNested(rel) || !x.policy.PathAllowed(rel) {
+			continue
+		}
+		for _, spec := range file.Imports {
+			path, err := strconv.Unquote(spec.Path.Value)
+			if err == nil {
+				imports[path] = true
+			}
+		}
+	}
+	return imports
 }
 
 func (x *extractor) source(abs string) []byte {

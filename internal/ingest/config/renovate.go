@@ -73,12 +73,12 @@ func (b *builder) dependencyUpdateRules(root string, manifests []string) {
 	}
 	repoID := model.NodeID(b.repo, model.KindRepository, b.repo)
 	for _, rel := range renovateFiles {
-		if content, ok := regularFile(root, rel); ok {
+		if content, ok := b.regularFile(root, rel); ok {
 			b.renovateRules(repoID, rel, content, nil, manifests)
 			return
 		}
 	}
-	if content, ok := regularFile(root, "package.json"); ok {
+	if content, ok := b.regularFile(root, "package.json"); ok {
 		if pkg, err := parseJSON5(content); err == nil {
 			if f := pkg.field("renovate"); f != nil {
 				b.renovateRules(repoID, "package.json", nil, f, manifests)
@@ -87,7 +87,7 @@ func (b *builder) dependencyUpdateRules(root string, manifests []string) {
 		}
 	}
 	for _, rel := range dependabotFiles {
-		if _, ok := regularFile(root, rel); ok {
+		if _, ok := b.regularFile(root, rel); ok {
 			return
 		}
 	}
@@ -323,4 +323,11 @@ func (b *builder) digestRules(rel, repoID string, cfg *jsonValue, rules []*jsonV
 		line = f.line
 	}
 	b.report(rel, repoID, "renovate-no-digest-pinning", line, strings.Join(missing, " and ")+" are updated by tag without digest pinning")
+}
+
+func (b *builder) regularFile(root, rel string) ([]byte, bool) {
+	if !b.policy.PathAllowed(rel) {
+		return nil, false
+	}
+	return regularFile(root, rel)
 }
