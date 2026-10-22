@@ -59,6 +59,12 @@ type Vulnerability struct {
 	URL          string      `json:"url"`
 	CallSites    []query.Ref `json:"call_sites,omitempty"`
 	Priority     int         `json:"priority"`
+	// Via and Roots say how an indirect module got in (see model.Node): the
+	// chain from a dependency the project declares, and how many such
+	// dependencies lead to it. Upgrading the first link of Via is usually how
+	// an indirect vulnerability is fixed.
+	Via   string `json:"via,omitempty"`
+	Roots int    `json:"roots,omitempty"`
 }
 
 // Report is the security review.
@@ -199,6 +205,13 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 		vv := Vulnerability{
 			ID: n.Name, Aliases: n.Aliases, Summary: n.Summary, Severity: n.Severity, CWE: n.CWE,
 			Module: n.Package, Version: n.Version, Fixed: n.FixedVersion, Reachability: n.Reachability, URL: n.URL,
+		}
+		key := n.Package
+		if n.Ecosystem != "" && n.Ecosystem != "Go" {
+			key = n.Ecosystem + ":" + n.Package
+		}
+		if mod, err := r.Node(ctx, model.NodeID(repo, model.KindModule, key)); err == nil {
+			vv.Via, vv.Roots = mod.Via, mod.Roots
 		}
 		for _, a := range n.Aliases {
 			if strings.HasPrefix(a, "CVE-") {

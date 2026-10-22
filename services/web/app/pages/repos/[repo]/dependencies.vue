@@ -21,23 +21,23 @@ const vulnsByModule = computed(() => {
 const verdicts = computed(() => new Map((lic.value?.issues ?? []).map((i) => [`${i.ecosystem}:${i.name}`, i.verdict])))
 const REACH = { called: 'Your code calls it', imported: 'Imported, not called', required: 'Required only' } as const
 
-type Row = { name: string; version: string; ecosystem: string; direct: boolean; dev: boolean; license: string; vulns: SecVuln[]; licence?: { level: string; reason: string } }
+type Row = { name: string; version: string; ecosystem: string; direct: boolean; dev: boolean; license: string; via: string; roots: number; vulns: SecVuln[]; licence?: { level: string; reason: string } }
 // The package list is capped (500 by name); vulnerable packages and licence
 // issues come from their own reports, so none of those is ever cut off.
 const LIST_CAP = 500
 const rows = computed<Row[]>(() => {
   const out: Row[] = (mods.value?.results ?? []).map(({ node: n }) => ({
-    name: n.name, version: n.version ?? '', ecosystem: n.ecosystem ?? 'go', direct: !n.indirect, dev: !!n.dev, license: n.license ?? '',
+    name: n.name, version: n.version ?? '', ecosystem: n.ecosystem ?? 'go', direct: !n.indirect, dev: !!n.dev, license: n.license ?? '', via: n.via ?? '', roots: n.roots ?? 0,
     vulns: vulnsByModule.value.get(n.name) ?? [], licence: verdicts.value.get(`${n.ecosystem ?? 'go'}:${n.name}`),
   }))
   const seen = new Set(out.map((r) => r.name))
   for (const [name, vulns] of vulnsByModule.value) {
-    if (!seen.has(name)) { seen.add(name); out.push({ name, version: vulns[0]?.version ?? '', ecosystem: '', direct: true, dev: false, license: '', vulns }) }
+    if (!seen.has(name)) { seen.add(name); out.push({ name, version: vulns[0]?.version ?? '', ecosystem: '', direct: true, dev: false, license: '', via: '', roots: 0, vulns }) }
   }
   for (const i of lic.value?.issues ?? []) {
     if (!seen.has(i.name)) {
       seen.add(i.name)
-      out.push({ name: i.name, version: i.version, ecosystem: i.ecosystem, direct: i.direct, dev: !!i.dev, license: i.license ?? '', vulns: [], licence: i.verdict })
+      out.push({ name: i.name, version: i.version, ecosystem: i.ecosystem, direct: i.direct, dev: !!i.dev, license: i.license ?? '', via: '', roots: 0, vulns: [], licence: i.verdict })
     }
   }
   return out
@@ -90,7 +90,7 @@ const ecosystems = computed(() => {
           <thead><tr><th>Package</th><th>Version</th><th>Licence</th><th>Vulnerabilities</th></tr></thead>
           <tbody>
             <tr v-for="r in shown" :key="r.ecosystem + r.name">
-              <td><span class="mono">{{ r.name }}</span> <span class="badge">{{ r.ecosystem }}</span><span v-if="!r.direct" class="badge">indirect</span><span v-if="r.dev" class="badge">dev</span></td>
+              <td><span class="mono">{{ r.name }}</span> <span class="badge">{{ r.ecosystem }}</span><span v-if="!r.direct" class="badge" :title="r.via ? `Via ${r.via}${r.roots > 1 ? ` · ${r.roots} of your dependencies lead to it` : ''}` : 'Not declared by this repository'">indirect</span><span v-if="r.via" class="muted small"> via {{ r.via }}</span><span v-if="r.dev" class="badge">dev</span></td>
               <td class="mono">{{ r.version || '–' }}</td>
               <td>
                 {{ r.license || 'unknown' }}

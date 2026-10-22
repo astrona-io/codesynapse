@@ -12,7 +12,7 @@ const { data: clean } = useApiGet<CleanupReport>(() => repoPath(repo.value, 'cle
 type Verdict = { level: string; reason: string }
 type Row = {
   key: string; name: string; version: string; ecosystem: string; direct: boolean; dev: boolean; license: string
-  vulns: SecVuln[]; verdict?: Verdict; unused: boolean
+  vulns: SecVuln[]; verdict?: Verdict; unused: boolean; via: string; roots: number
 }
 
 // What the review table covers: packages with an advisory, a licence to
@@ -23,16 +23,16 @@ const rows = computed<Row[]>(() => {
   const row = (name: string, e?: string): Row => {
     const key = `${eco(e)}:${name}`
     let r = byKey.get(key)
-    if (!r) { r = { key, name, version: '', ecosystem: eco(e), direct: true, dev: false, license: '', vulns: [], unused: false }; byKey.set(key, r) }
+    if (!r) { r = { key, name, version: '', ecosystem: eco(e), direct: true, dev: false, license: '', vulns: [], unused: false, via: '', roots: 0 }; byKey.set(key, r) }
     return r
   }
   const known = new Map<string, Row>()
   for (const { node: n } of mods.value?.results ?? []) {
-    known.set(n.name, { key: '', name: n.name, version: n.version ?? '', ecosystem: eco(n.ecosystem), direct: !n.indirect, dev: !!n.dev, license: n.license ?? '', vulns: [], unused: false })
+    known.set(n.name, { key: '', name: n.name, version: n.version ?? '', ecosystem: eco(n.ecosystem), direct: !n.indirect, dev: !!n.dev, license: n.license ?? '', vulns: [], unused: false, via: n.via ?? '', roots: n.roots ?? 0 })
   }
   const fill = (r: Row) => {
     const k = known.get(r.name)
-    if (k) Object.assign(r, { version: r.version || k.version, direct: k.direct, dev: k.dev, license: r.license || k.license, ecosystem: r.ecosystem || k.ecosystem })
+    if (k) Object.assign(r, { version: r.version || k.version, direct: k.direct, dev: k.dev, license: r.license || k.license, ecosystem: r.ecosystem || k.ecosystem, via: k.via, roots: k.roots })
     return r
   }
   for (const v of sec.value?.vulnerabilities ?? []) {
@@ -43,7 +43,8 @@ const rows = computed<Row[]>(() => {
   for (const i of lic.value?.issues ?? []) {
     if (i.verdict.level === 'ok') continue
     const r = row(i.name, i.ecosystem)
-    Object.assign(r, { version: i.version, direct: i.direct, dev: !!i.dev, license: i.license ?? '', verdict: i.verdict })
+    const k = known.get(i.name)
+    Object.assign(r, { version: i.version, direct: i.direct, dev: !!i.dev, license: i.license ?? '', verdict: i.verdict, via: k?.via ?? '', roots: k?.roots ?? 0 })
   }
   for (const m of clean.value?.modules ?? []) {
     const r = fill(row(m.path, known.get(m.path)?.ecosystem))
@@ -133,6 +134,11 @@ const agentText = computed(() => `Run the dependency-review prompt for ${repo.va
               <td><span class="mono">{{ r.name }}</span><div class="mono muted">{{ r.version || '–' }}</div><span class="badge">{{ r.ecosystem }}</span><span v-if="r.dev" class="badge">dev</span></td>
               <td>
                 <template v-if="r.direct">Direct: your manifest</template>
+                <template v-else-if="r.via">
+                  Indirect, via <span class="mono">{{ r.via }}</span>
+                  <div v-if="r.roots > 1" class="muted small">{{ r.roots }} of your dependencies lead to it</div>
+                  <div v-else class="muted small">only through that chain</div>
+                </template>
                 <template v-else>Indirect: path not recorded<div><button class="chip" :title="`Copy: ${why(r)}`" @click="copy(why(r))">{{ copied === why(r) ? 'Copied' : 'Copy how to find it' }}</button></div></template>
               </td>
               <td class="small" :class="{ error: r.vulns.some((v) => v.reachability === 'called') }">{{ usage(r) }}</td>
@@ -161,7 +167,7 @@ const agentText = computed(() => `Run the dependency-review prompt for ${repo.va
     <div class="grid cols-2">
       <section class="panel">
         <p class="eyebrow">By hand</p><h2>Check it with your package manager</h2>
-        <p class="muted small">CodeSynapse does not store how an indirect dependency got in, and it only reads go.mod, npm and Python lockfiles. These commands resolve the real graph; confirm names and flags against your installed version.</p>
+        <p class="muted small">CodeSynapse shows how an indirect dependency got in when the package graph says so (the Go packages your build imports, npm and Python lockfiles). Yarn and pnpm lockfiles carry no paths yet, and it only reads go.mod, npm and Python lockfiles. These commands resolve the real graph; confirm names and flags against your installed version.</p>
         <div class="table-wrap"><table>
           <thead><tr><th>Ecosystem</th><th>Graph and why</th><th>Advisories</th><th>Licences</th></tr></thead>
           <tbody><tr v-for="g in present" :key="g.label"><td>{{ g.label }}</td><td class="mono small">{{ g.graph }}</td><td class="mono small">{{ g.audit }}</td><td class="mono small">{{ g.licences }}</td></tr></tbody>

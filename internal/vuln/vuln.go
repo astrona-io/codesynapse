@@ -45,6 +45,15 @@ type Module struct {
 	// them, otherwise by package license during ingest.
 	License       string `json:"license,omitempty"`
 	LicenseSource string `json:"license_source,omitempty"`
+	// Requires lists the Keys of the modules this one requires, where the
+	// lockfile records them (npm, Python). Go edges come from GoGraph.
+	Requires []string `json:"requires,omitempty"`
+	// Via is the shortest chain of modules from a dependency the project
+	// declares itself to this one ("a > b" means project, a, b, this); Roots
+	// is how many such dependencies lead to it. Both are set by AssignPaths
+	// and stay empty for direct dependencies and unknown paths.
+	Via   string `json:"via,omitempty"`
+	Roots int    `json:"roots,omitempty"`
 }
 
 func (m Module) ecosystem() string {

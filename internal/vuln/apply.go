@@ -24,7 +24,7 @@ func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability,
 		id := model.NodeID(repo, model.KindModule, m.Key())
 		eco[m.Key()] = m.ecosystem()
 		g.AddNode(model.Node{ID: id, Kind: model.KindModule, Repo: repo, Name: m.Path, QualifiedName: m.Path, Version: m.Version, Indirect: m.Indirect, Ecosystem: m.ecosystem(),
-			Dev: m.Dev, License: m.License, LicenseSource: m.LicenseSource})
+			Dev: m.Dev, License: m.License, LicenseSource: m.LicenseSource, Via: m.Via, Roots: m.Roots})
 		g.AddEdge(model.Edge{From: repoID, To: id, Kind: model.EdgeDependsOn})
 	}
 

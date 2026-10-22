@@ -110,7 +110,7 @@ The prompt works for any language. It starts from what CodeSynapse already has (
 | Interface navigation | `get_implementations` | default | Resolve `DISPATCHES_TO` / `IMPLEMENTS` without guessing types. |
 | Deep dive | `get_call_graph` | `depth: 2` | Raise depth only when 2 is not enough (max 4). |
 | Before reading a file | `file_outline` | — | Symbols, doc sections or YAML entries with line ranges. |
-| Security | `security_report`, `security_symbols` | `min_severity: "medium"` | Findings by exposure and tests; CVEs by reachability. |
+| Security | `security_report`, `security_symbols` | `min_severity: "medium"` | Findings by exposure and tests; CVEs by reachability, with `via` and `roots` for indirect packages (which declared dependency to upgrade). |
 | Fixing a finding | `rule_guide` | `language` of the file | Why it matters, the fix, vulnerable → fixed example. |
 | Cleanup | `unused_code` | `min_confidence: "high"`, `security_only` | Unreachable/test-only code, unused modules, unused Helm values. |
 | Before writing a helper | `duplicate_code` | `scope: "repository"` | Groups of functions with the same structure (names and literals ignored), redundant lines and where each copy is. `kind: "near"` lists edited copies (with `similarity`). Reuse or merge instead of adding another copy. Go, Python, JavaScript, TypeScript and Vue. |

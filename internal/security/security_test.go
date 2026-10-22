@@ -219,3 +219,28 @@ func TestModulesBeyondTheListLimitCount(t *testing.T) {
 	assert.Equal(t, rep.Modules.Total, 541)
 	assert.Equal(t, rep.Modules.Direct+rep.Modules.Indirect, 541)
 }
+
+func TestVulnerabilityNamesHowItGotIn(t *testing.T) {
+	ctx := context.Background()
+	g := storetest.Fixture()
+	add := func(n model.Node) { n.Repo = storetest.Repo; g.AddNode(n) }
+	add(model.Node{ID: storetest.ID(model.KindModule, "golang.org/x/net"), Kind: model.KindModule, Name: "golang.org/x/net", Version: "v0.17.0",
+		Ecosystem: "Go", Indirect: true, Via: "github.com/a/a > github.com/b/b", Roots: 2})
+	add(model.Node{ID: storetest.ID(model.KindVulnerability, "golang.org/x/net@GO-1"), Kind: model.KindVulnerability, Name: "GO-1", Severity: "high",
+		Package: "golang.org/x/net", Version: "v0.17.0", FixedVersion: "v0.23.0", Reachability: "required", Ecosystem: "Go"})
+	add(model.Node{ID: storetest.ID(model.KindModule, "npm:lodash"), Kind: model.KindModule, Name: "lodash", Version: "4.0.0",
+		Ecosystem: "npm", Indirect: true, Via: "express", Roots: 1})
+	add(model.Node{ID: storetest.ID(model.KindVulnerability, "npm:lodash@GHSA-1"), Kind: model.KindVulnerability, Name: "GHSA-1", Severity: "medium",
+		Package: "lodash", Version: "4.0.0", Reachability: "required", Ecosystem: "npm"})
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, storetest.Repo, g))
+
+	rep, err := Build(ctx, st, storetest.Repo, Options{})
+	require.NoError(t, err)
+	via := map[string]string{}
+	for _, v := range rep.Vulnerabilities {
+		via[v.Module] = v.Via
+	}
+	assert.Equal(t, via["golang.org/x/net"], "github.com/a/a > github.com/b/b")
+	assert.Equal(t, via["lodash"], "express", "non-Go modules are keyed by ecosystem")
+}

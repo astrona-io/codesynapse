@@ -206,6 +206,11 @@ type Node struct {
 	// LicenseSource says where it was read (a file, lockfile or deps.dev).
 	License       string `json:"license,omitempty"`
 	LicenseSource string `json:"license_source,omitempty"`
+	// Via and Roots say how an indirect Module got in: the shortest chain of
+	// modules from a dependency the project declares ("a > b"), and how many
+	// declared dependencies lead to it.
+	Via   string `json:"via,omitempty"`
+	Roots int    `json:"roots,omitempty"`
 	// Dev marks Modules used only to develop or build (npm devDependencies,
 	// Pipfile develop), which are normally not shipped.
 	Dev bool `json:"dev,omitempty"`

@@ -197,6 +197,11 @@ func addDependencies(ctx context.Context, opts Options, root string, g *model.Gr
 		return nil, fmt.Errorf("reading lockfiles: %w", err)
 	}
 	mods = append(mods, other...)
+	var goEdges map[string][]string
+	if goRes != nil {
+		goEdges = vuln.GoGraph(ctx, root, opts.AllowNetwork)
+	}
+	vuln.AssignPaths(mods, goEdges)
 	var calls map[string][]string
 	if goRes != nil {
 		calls = goRes.ExternalCalls
