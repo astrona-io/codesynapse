@@ -61,7 +61,9 @@ type Jobs struct {
 	commitLimit int
 	network     bool
 	vulnScan    bool
-	sem         chan struct{}
+	// licenseLookup is set after NewJobs; it is read only by running jobs.
+	licenseLookup bool
+	sem           chan struct{}
 
 	mu   sync.Mutex
 	jobs map[string]*Job
@@ -150,7 +152,7 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 			return
 		}
 	}
-	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, Branch: opts.Branch})
+	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Branch: opts.Branch})
 	if err == nil {
 		err = j.st.EnsureSchema(ctx)
 	}

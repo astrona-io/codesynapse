@@ -37,6 +37,7 @@ const repoGroups = computed(() => {
     ] },
     { label: 'Improve', links: [
       { to: `${base}/security`, label: 'Security', hint: 'Findings and vulnerable dependencies' },
+      { to: `${base}/licenses`, label: 'Licences', hint: 'Dependency licences vs. your own' },
       { to: `${base}/cleanup`, label: 'Cleanup', hint: 'Unused code to remove' },
       { to: `${base}/metrics`, label: 'Quality metrics', hint: 'Complexity, tests, token savings' },
       { to: `${base}/ai`, label: 'AI assistant', hint: 'Triage, review and briefings by a model' },

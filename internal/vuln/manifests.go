@@ -3,6 +3,7 @@ package vuln
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"io/fs"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/parisnakitakejser/codesynapse/internal/license"
 )
 
 // Ecosystems, as named by OSV.
@@ -74,8 +77,17 @@ func ManifestModules(root string) ([]Module, error) {
 		}
 		for _, m := range mods {
 			key := m.Ecosystem + "|" + m.Path + "|" + m.Version
-			if prev, ok := seen[key]; ok && !prev.Indirect {
-				continue
+			if prev, ok := seen[key]; ok {
+				// Shipped by any lockfile means shipped; keep a licence either one recorded.
+				prev.Dev = prev.Dev && m.Dev
+				if prev.License == "" {
+					prev.License, prev.LicenseSource = m.License, m.LicenseSource
+				}
+				if !prev.Indirect {
+					seen[key] = prev
+					continue
+				}
+				m.Dev, m.License, m.LicenseSource = prev.Dev, cmp.Or(m.License, prev.License), cmp.Or(m.LicenseSource, prev.LicenseSource)
 			}
 			if len(seen) >= maxModules {
 				return filepath.SkipAll
@@ -115,10 +127,7 @@ func npmDirect(dir string) map[string]bool {
 
 func parseNPMLock(data []byte, dir string) []Module {
 	var lock struct {
-		Packages map[string]struct {
-			Version string `json:"version"`
-			Link    bool   `json:"link"`
-		} `json:"packages"`
+		Packages     map[string]json.RawMessage `json:"packages"`
 		Dependencies map[string]json.RawMessage `json:"dependencies"`
 	}
 	if json.Unmarshal(data, &lock) != nil {
@@ -126,13 +135,24 @@ func parseNPMLock(data []byte, dir string) []Module {
 	}
 	direct := npmDirect(dir)
 	var out []Module
-	for key, p := range lock.Packages {
+	for key, raw := range lock.Packages {
+		var p struct {
+			Version     string `json:"version"`
+			Link        bool   `json:"link"`
+			Dev         bool   `json:"dev"`
+			DevOptional bool   `json:"devOptional"`
+		}
 		i := strings.LastIndex(key, "node_modules/")
-		if key == "" || i < 0 || p.Version == "" || p.Link {
+		if key == "" || i < 0 || json.Unmarshal(raw, &p) != nil || p.Version == "" || p.Link {
 			continue
 		}
 		name := key[i+len("node_modules/"):]
-		out = append(out, Module{Path: name, Version: p.Version, Ecosystem: EcosystemNPM, Indirect: !direct[name] || strings.Count(key, "node_modules/") > 1})
+		m := Module{Path: name, Version: p.Version, Ecosystem: EcosystemNPM, Indirect: !direct[name] || strings.Count(key, "node_modules/") > 1,
+			Dev: p.Dev || p.DevOptional}
+		if id := license.NPMField(raw); id != "" {
+			m.License, m.LicenseSource = id, "package-lock.json"
+		}
+		out = append(out, m)
 	}
 	if len(lock.Packages) == 0 { // lockfileVersion 1
 		var walk func(deps map[string]json.RawMessage, nested bool)
@@ -282,7 +302,7 @@ func parsePipfileLock(data []byte, _ string) []Module {
 	for _, section := range []string{"default", "develop"} {
 		for name, p := range lock[section] {
 			if v := strings.TrimPrefix(p.Version, "=="); v != "" {
-				out = append(out, Module{Path: normalizePy(name), Version: v, Ecosystem: EcosystemPyPI})
+				out = append(out, Module{Path: normalizePy(name), Version: v, Ecosystem: EcosystemPyPI, Dev: section == "develop"})
 			}
 		}
 	}

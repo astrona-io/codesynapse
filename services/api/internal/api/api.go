@@ -42,6 +42,8 @@ type Config struct {
 	AllowNetwork bool
 	// VulnScan checks dependencies against osv.dev during ingest.
 	VulnScan bool
+	// LicenseLookup asks deps.dev for licences not found on disk.
+	LicenseLookup bool
 	// Workspace is a writable directory for repositories cloned by URL.
 	Workspace string
 	// GitAuth is an optional token for cloning private repositories.
@@ -82,6 +84,7 @@ type Server struct {
 func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *Server {
 	s := &Server{cfg: cfg, st: st, svc: query.Service{R: st}, logger: logger, mux: http.NewServeMux()}
 	s.jobs = NewJobs(ctx, st, logger, cfg.CommitLimit, cfg.AllowNetwork, cfg.VulnScan)
+	s.jobs.licenseLookup = cfg.LicenseLookup
 	sched, err := loadSchedules(cfg.Workspace)
 	if err != nil {
 		logger.Error("auto-sync schedules unreadable; starting with none", "error", err)
@@ -128,6 +131,7 @@ func (s *Server) routes() {
 			"clone_enabled":        s.cfg.Workspace != "",
 			"allow_private_git":    s.cfg.AllowPrivateGit,
 			"vuln_scan":            s.cfg.VulnScan,
+			"license_lookup":       s.cfg.LicenseLookup,
 			"push_enabled":         s.cfg.AllowPush && s.cfg.LLM != nil,
 			"push_allowed":         s.cfg.AllowPush,
 			"sources_root":         s.cfg.SourcesRoot != "",
@@ -141,6 +145,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/repos/{repo}/metrics", s.handleMetrics)
 	m.HandleFunc("GET /api/v1/repos/{repo}/security", s.handleSecurity)
 	m.HandleFunc("GET /api/v1/repos/{repo}/cleanup", s.handleCleanup)
+	m.HandleFunc("GET /api/v1/repos/{repo}/licenses", s.handleLicenses)
 	m.HandleFunc("GET /api/v1/repos/{repo}/search", s.handleSearch)
 	m.HandleFunc("GET /api/v1/repos/{repo}/symbol", s.handleSymbol)
 	m.HandleFunc("GET /api/v1/repos/{repo}/outline", s.handleOutline)

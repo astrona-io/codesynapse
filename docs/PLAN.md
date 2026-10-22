@@ -47,7 +47,7 @@ Every node has the label `Node` plus its kind, and the properties `id`, `repo`, 
 
 | Node | Key properties |
 |---|---|
-| Repository | head, branch, url (origin, no credentials), root, time (ingested at), metrics (JSON) |
+| Repository | head, branch, url (origin, no credentials), root, time (ingested at), metrics (JSON), license, license_source, licenses (JSON report) |
 | Package | qualified_name, summary |
 | File | file, loc, churn, is_test |
 | Function / Method | qualified_name, file, start_line, end_line, signature, summary, complexity, loc, body_hash, exported, is_test, security_tags |
@@ -60,7 +60,7 @@ Every node has the label `Node` plus its kind, and the properties `id`, `repo`, 
 | Config / ConfigEntry | YAML file; Kubernetes resource (`Kind/name`) or key path, with line range |
 | Template / TemplateDef | Go template or Helm template file; `{{define}}` block |
 | Finding | rule, severity, cwe, file, line, summary (never the secret) |
-| Module | path, version, indirect |
+| Module | path, version, indirect, ecosystem, dev, license (SPDX), license_source |
 | Vulnerability | id, aliases (CVE/GHSA), severity, cwe, version, fixed_version, reachability, url |
 
 Edges: `CONTAINS`, `DEFINES`, `HAS_METHOD`, `CALLS` (with `count`), `DISPATCHES_TO`, `IMPLEMENTS`, `IMPORTS`, `MENTIONS`, `MODIFIES` (with `count` = lines changed), `AUTHORED`, `HAS_FINDING`, `DEPENDS_ON`, `AFFECTS`, `INCLUDES`, `USES_VALUE`.
@@ -114,6 +114,10 @@ Known limits: no type inference for Python/JS, so dynamic dispatch and higher-or
 `internal/cleanup` runs at ingest on the complete graph. Roots are `main`/`init`, exported API outside `internal/`/`cmd/`, methods called implicitly by the standard library (`String`, `Error`, `ServeHTTP`, …), package-level initialisers, decorated or registered functions, and Vue setup bindings. Everything reachable over `CALLS`, `DISPATCHES_TO` and `REFERENCES` (functions used as values, a new edge) is live; code reachable only from tests is test-only; the rest is unreachable. Packages only tests use are test support and not counted. The report lists functions with confidence and security relevance, files with nothing live, unused direct Go modules with removable CVEs, unused Helm values and template defines, plus a safe-removal checklist. Every function and module node carries `liveness`.
 
 Running it on CodeSynapse itself found and removed three dead helpers.
+
+## Dependency licences
+
+`internal/license` checks every dependency's licence against the repository's own. The project licence comes from licence files at the root (text detection, SPDX headers), then `package.json`, then `pyproject.toml`. Dependency licences come from disk first: `package-lock.json` entries, `node_modules/*/package.json`, `vendor/` and the Go module cache, and installed packages' `METADATA` in `site-packages`. What is still unknown is looked up on deps.dev when `CODESYNAPSE_LICENSE_LOOKUP` / `--license-lookup` is on (ecosystem, name and version only). Licences are classified (public domain, permissive, weak/strong/network copyleft, restricted, unknown; SPDX `OR` takes the least restrictive choice, `AND` the most) and compared with the project's under a distribution model: strong or network copyleft and non-open-source licences conflict with permissive or proprietary projects, weak copyleft and unknown licences need a review, GPL-2.0-only rejects Apache-2.0 and GPL-3.0. Development dependencies turn conflicts into reviews. Every verdict carries its reason and the licence's source. The report is computed at ingest and stored on the Repository node, so it covers every dependency (not just `store.MaxLimit`); it is served by `GET /api/v1/repos/{repo}/licenses`, the **Licences** page, the `license_report` MCP tool and `codesynapse licenses` (`--fail-on conflict|review` for CI). Guidance, not legal advice.
 
 ## Fix guidance
 

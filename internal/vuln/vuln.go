@@ -39,6 +39,12 @@ type Module struct {
 	Indirect bool   `json:"indirect,omitempty"`
 	// Ecosystem is Go (default), npm or PyPI.
 	Ecosystem string `json:"ecosystem,omitempty"`
+	// Dev marks development-only dependencies (npm dev, Pipfile develop).
+	Dev bool `json:"dev,omitempty"`
+	// License and LicenseSource are filled from the lockfile when it records
+	// them, otherwise by package license during ingest.
+	License       string `json:"license,omitempty"`
+	LicenseSource string `json:"license_source,omitempty"`
 }
 
 func (m Module) ecosystem() string {

@@ -1,7 +1,7 @@
 # Only the paths that are needed: web -> api, api and mcp -> neo4j. The
 # browser-facing pods (web, mcp) accept traffic from anywhere in the cluster
 # or the ingress controller. Egress stays open: the API reaches git hosts,
-# api.github.com and osv.dev.
+# api.github.com, osv.dev and api.deps.dev.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

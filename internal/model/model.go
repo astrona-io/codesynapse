@@ -182,10 +182,19 @@ type Node struct {
 	Liveness string `json:"liveness,omitempty"`
 	// Cleanup is the JSON-encoded cleanup.Report on Repository nodes.
 	Cleanup string `json:"-"`
+	// Licenses is the JSON-encoded license.Report on Repository nodes.
+	Licenses string `json:"-"`
 	// Language is the source language (go, python, typescript, ...) of code nodes.
 	Language string `json:"language,omitempty"`
 	// Ecosystem is the package ecosystem of Module nodes (Go, npm, PyPI).
 	Ecosystem string `json:"ecosystem,omitempty"`
+	// License is the SPDX expression of a Module's or Repository's licence;
+	// LicenseSource says where it was read (a file, lockfile or deps.dev).
+	License       string `json:"license,omitempty"`
+	LicenseSource string `json:"license_source,omitempty"`
+	// Dev marks Modules used only to develop or build (npm devDependencies,
+	// Pipfile develop), which are normally not shipped.
+	Dev bool `json:"dev,omitempty"`
 }
 
 // Severities from lowest to highest.

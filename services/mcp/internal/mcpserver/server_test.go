@@ -11,6 +11,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
 
+	"github.com/parisnakitakejser/codesynapse/internal/license"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
@@ -336,4 +337,31 @@ func TestDiscoveryTools(t *testing.T) {
 	assert.Equal(t, docs.Sections[0].Heading, "Usage")
 	require.NotEmpty(t, docs.Sections[0].Mentions)
 	assert.Equal(t, docs.Sections[0].Mentions[0].Name, "app.Handler")
+}
+
+func TestLicenseReport(t *testing.T) {
+	// The fixture has no stored report: a clear tool error, not a crash.
+	res := call(t, connect(t), "license_report", nil, nil)
+	assert.True(t, res.IsError)
+
+	rep := license.Build(license.Found{License: "Apache-2.0", Source: "LICENSE"}, []license.Dependency{
+		{Ecosystem: license.Go, Name: "example.com/gpl", Version: "v1.0.0", License: "GPL-3.0"},
+		{Ecosystem: license.NPM, Name: "lightningcss", Version: "1.0.0", License: "MPL-2.0"},
+		{Ecosystem: license.NPM, Name: "lodash", Version: "4.17.21", License: "MIT"},
+	}, false)
+	enc, err := license.Encode(rep)
+	require.NoError(t, err)
+	g := storetest.Fixture()
+	repoID := model.NodeID(storetest.Repo, model.KindRepository, storetest.Repo)
+	repoNode, ok := g.Node(repoID)
+	require.True(t, ok)
+	repoNode.Licenses = enc
+	var got license.Report
+	res = call(t, connectGraph(t, g), "license_report", map[string]any{"verdict": "conflict"}, &got)
+	require.False(t, res.IsError)
+	assert.Equal(t, got.Conflict, 1)
+	assert.Equal(t, got.Review, 1)
+	require.Len(t, got.Issues, 1)
+	assert.Equal(t, got.Issues[0].Name, "example.com/gpl")
+	assert.True(t, strings.Contains(got.Issues[0].Verdict.Reason, "strong copyleft"))
 }

@@ -47,6 +47,15 @@ codesynapse audit . -o json
 
 Only module paths and versions are sent to osv.dev. Set `--vulns=false` (or `CODESYNAPSE_VULN_SCAN=false`) to stay offline.
 
+### Dependency licences
+
+`codesynapse licenses` (and the **Licences** page, and the `license_report` MCP tool) checks every Go, npm and PyPI dependency's licence against the repository's own and explains each verdict: GPL or AGPL in an Apache/MIT project is a conflict, MPL/LGPL or an unknown licence needs a review, development-only dependencies are flagged but not blocking. Licences are read from lockfiles, `vendor/`, the Go module cache, `node_modules` and `site-packages`; `--license-lookup` (or `CODESYNAPSE_LICENSE_LOOKUP=true`) asks deps.dev for the rest, sending only package names and versions.
+
+```sh
+codesynapse licenses .                                        # Markdown report
+codesynapse licenses . --license-lookup --fail-on conflict    # CI gate
+```
+
 Every rule is a readable YAML file in [`rules/`](rules/README.md) with why it matters, how to fix it and vulnerable → fixed examples per language. They show up as **How to fix** on each finding, through the `rule_guide` MCP tool and at `GET /api/v1/rules`. `just rules` lists them; adding a rule is a YAML file plus a detector.
 
 ### Languages

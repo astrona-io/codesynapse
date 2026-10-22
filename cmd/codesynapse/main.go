@@ -22,6 +22,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/ingest"
+	"github.com/parisnakitakejser/codesynapse/internal/license"
 	"github.com/parisnakitakejser/codesynapse/internal/metrics"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/query"
@@ -36,7 +37,7 @@ var version = "dev"
 func main() {
 	os.Exit(app.Main("codesynapse", "Index code, docs and history into a graph for review and AI assistants", version,
 		func(ec *app.Env) []*cobra.Command {
-			return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), cleanupCmd(ec), statsCmd(ec), mcpCmd(ec), schemaCmd(ec)}
+			return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), statsCmd(ec), mcpCmd(ec), schemaCmd(ec)}
 		}))
 }
 
@@ -48,6 +49,7 @@ type ingestOptions struct {
 	commitLimit  int
 	allowNetwork bool
 	vulns        bool
+	licenses     bool
 	root         string
 }
 
@@ -58,6 +60,7 @@ func (o *ingestOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.IntVar(&o.commitLimit, "commits", 500, "Number of recent commits to index (0 disables history)")
 	f.BoolVar(&o.allowNetwork, "allow-network", false, "Allow `go list` to download modules (off by default for untrusted repos)")
 	f.BoolVar(&o.vulns, "vulns", false, "Check dependencies against osv.dev (sends module paths and versions)")
+	f.BoolVar(&o.licenses, "license-lookup", false, "Look up dependency licences not found on disk on deps.dev (sends package names and versions)")
 	return nil
 }
 
@@ -86,7 +89,7 @@ func (o *ingestOptions) Validate(_ context.Context, _ *app.Env) error {
 
 func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
-	g, err := ingest.Run(ctx, ingest.Options{Repo: o.repo, Root: o.root, CommitLimit: o.commitLimit, AllowNetwork: o.allowNetwork, VulnScan: o.vulns})
+	g, err := ingest.Run(ctx, ingest.Options{Repo: o.repo, Root: o.root, CommitLimit: o.commitLimit, AllowNetwork: o.allowNetwork, VulnScan: o.vulns, LicenseLookup: o.licenses})
 	if err != nil {
 		return err
 	}
@@ -411,6 +414,74 @@ func auditCmd(ec *app.Env) *cobra.Command {
 		WithShortDesc("Security review: code findings and vulnerable dependencies (offline graph)").
 		WithLongDesc("Runs the security rules over the type-checked code and checks go.mod dependencies and the Go standard library against osv.dev. Findings are ranked by severity, exposure from entry points and test reachability; vulnerabilities by severity and whether the vulnerable symbol is called.").
 		WithExample("  codesynapse audit .\n  codesynapse audit . --fail-on high      # CI gate\n  codesynapse audit . --vulns=false -o json").
+		WithGroupID(app.GroupBase).
+		WithMaxArgs(1).
+		Build()
+}
+
+// licensesOptions configures `codesynapse licenses`.
+type licensesOptions struct {
+	EC     *app.Env
+	lookup bool
+	failOn string
+	root   string
+}
+
+// errLicenses makes `licenses --fail-on` exit non-zero without an error banner.
+var errLicenses = errors.New("dependency licences at or above the --fail-on level")
+
+func (o *licensesOptions) SetupFlags(_ context.Context, _ *app.Env) error {
+	f := o.EC.Command.Flags()
+	f.BoolVar(&o.lookup, "license-lookup", false, "Look up licences not found on disk on deps.dev (sends package names and versions)")
+	f.StringVar(&o.failOn, "fail-on", "", "Exit 1 on any dependency with this verdict or worse: conflict or review")
+	return nil
+}
+
+func (o *licensesOptions) Complete(_ context.Context, _ *app.Env) error {
+	o.root = "."
+	if len(o.EC.Args) > 0 {
+		o.root = o.EC.Args[0]
+	}
+	abs, err := filepath.Abs(o.root)
+	o.root = abs
+	return err
+}
+
+func (o *licensesOptions) Validate(context.Context, *app.Env) error {
+	if o.failOn != "" && o.failOn != license.Conflict && o.failOn != license.Review {
+		return fmt.Errorf("--fail-on must be %q or %q", license.Conflict, license.Review)
+	}
+	return nil
+}
+
+func (o *licensesOptions) Run(ctx context.Context, _ *app.Env) error {
+	ctx = app.Ctx(ctx, o.EC)
+	rep, err := ingest.Licenses(ctx, o.root, ingest.Options{LicenseLookup: o.lookup})
+	if err != nil {
+		return err
+	}
+	if o.EC.Output == app.OutputJSON {
+		enc := json.NewEncoder(o.EC.Stdout)
+		enc.SetIndent("", "  ")
+		err = enc.Encode(rep)
+	} else {
+		_, err = io.WriteString(o.EC.Stdout, license.Markdown(filepath.Base(o.root), rep))
+	}
+	if err != nil {
+		return err
+	}
+	if rep.Conflict > 0 && o.failOn != "" || rep.Review > 0 && o.failOn == license.Review {
+		return errLicenses
+	}
+	return nil
+}
+
+func licensesCmd(ec *app.Env) *cobra.Command {
+	o := &licensesOptions{EC: ec}
+	return app.NewSubCommand("licenses [path]", o, ec).
+		WithShortDesc("Check dependency licences against the repository's own licence").
+		WithLongDesc("Reads go.mod and npm/PyPI lockfiles, finds each dependency's licence (lockfile, vendor, Go module cache, node_modules, site-packages; deps.dev with --license-lookup) and explains whether it fits the project's licence. Guidance, not legal advice: every verdict says why and where the licence was read.").
+		WithExample("  codesynapse licenses .\n  codesynapse licenses . --license-lookup --fail-on conflict   # CI gate\n  codesynapse licenses . -o json").
 		WithGroupID(app.GroupBase).
 		WithMaxArgs(1).
 		Build()

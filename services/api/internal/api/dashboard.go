@@ -120,3 +120,19 @@ func (s *Server) handleCleanup(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(n.Cleanup)) //nolint:errcheck // client went away
 }
+
+// handleLicenses serves the dependency licence report computed at ingest time.
+func (s *Server) handleLicenses(w http.ResponseWriter, r *http.Request) {
+	repo := r.PathValue("repo")
+	n, err := s.st.Node(r.Context(), model.NodeID(repo, model.KindRepository, repo))
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	if n.Licenses == "" {
+		s.problem(w, http.StatusNotFound, errors.New("no licence report stored; re-ingest (Sync) the repository"))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(n.Licenses)) //nolint:errcheck // client went away
+}

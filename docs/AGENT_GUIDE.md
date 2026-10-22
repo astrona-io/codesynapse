@@ -89,6 +89,7 @@ The server can run security triage and briefings with its own model (`config/llm
 | Security | `security_report`, `security_symbols` | `min_severity: "medium"` | Findings by exposure and tests; CVEs by reachability. |
 | Fixing a finding | `rule_guide` | `language` of the file | Why it matters, the fix, vulnerable → fixed example. |
 | Cleanup | `unused_code` | `min_confidence: "high"`, `security_only` | Unreachable/test-only code, unused modules, unused Helm values. |
+| Licences | `license_report` | `verdict: "conflict"` | Dependency licences vs. the repository's own, with the reason and source of each verdict. |
 | Record a review | `submit_review` | one comment per issue | Appears on the Reviews page; `update_review_comment` resolves comments. The only tools that write (to the review store). |
 | Follow up a review | `list_reviews`, `get_review` | `status: "open"` | What is left to address. |
 | Orientation | `repo_overview`, `repo_metrics`, `hotspots` | — | Once per session. |
