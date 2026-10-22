@@ -20,6 +20,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/agentcfg"
 	"github.com/parisnakitakejser/codesynapse/internal/app"
 	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
+	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/ingest"
 	"github.com/parisnakitakejser/codesynapse/internal/license"
@@ -37,7 +38,7 @@ var version = "dev"
 func main() {
 	os.Exit(app.Main("codesynapse", "Index code, docs and history into a graph for review and AI assistants", version,
 		func(ec *app.Env) []*cobra.Command {
-			return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), statsCmd(ec), mcpCmd(ec), memoryCmd(ec), schemaCmd(ec)}
+			return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), statsCmd(ec), mcpCmd(ec), memoryCmd(ec), schemaCmd(ec)}
 		}))
 }
 
@@ -636,5 +637,84 @@ func cleanupCmd(ec *app.Env) *cobra.Command {
 		WithExample("  codesynapse cleanup .\n  codesynapse cleanup . -o json").
 		WithGroupID(app.GroupBase).
 		WithMaxArgs(1).
+		Build()
+}
+
+// duplicatesOptions configures `codesynapse duplicates`.
+type duplicatesOptions struct {
+	EC    *app.Env
+	limit int
+	roots []string
+}
+
+func (o *duplicatesOptions) SetupFlags(_ context.Context, _ *app.Env) error {
+	o.EC.Command.Flags().IntVar(&o.limit, "limit", 20, "Max groups listed in Markdown output (0 = all)")
+	return nil
+}
+
+func (o *duplicatesOptions) Complete(_ context.Context, _ *app.Env) error {
+	args := o.EC.Args
+	if len(args) == 0 {
+		args = []string{"."}
+	}
+	for _, a := range args {
+		abs, err := filepath.Abs(a)
+		if err != nil {
+			return err
+		}
+		o.roots = append(o.roots, abs)
+	}
+	return nil
+}
+
+func (o *duplicatesOptions) Validate(context.Context, *app.Env) error { return nil }
+
+func (o *duplicatesOptions) Run(ctx context.Context, _ *app.Env) error {
+	ctx = app.Ctx(ctx, o.EC)
+	reports := map[string]duplicates.Report{}
+	var names []string
+	for _, root := range o.roots {
+		repo := filepath.Base(root)
+		g, err := ingest.Run(ctx, ingest.Options{Repo: repo, Root: root})
+		if err != nil {
+			return fmt.Errorf("%s: %w", root, err)
+		}
+		n, ok := g.Node(model.NodeID(repo, model.KindRepository, repo))
+		if !ok || n.Duplicates == "" {
+			return fmt.Errorf("%s: duplicate analysis did not run", root)
+		}
+		rep, err := duplicates.Decode(n.Duplicates)
+		if err != nil {
+			return err
+		}
+		reports[repo] = rep
+		names = append(names, repo)
+	}
+	var out any
+	if len(names) == 1 {
+		rep := reports[names[0]]
+		rep.Fingerprints = nil
+		out = rep
+	} else {
+		out = duplicates.Across(reports)
+	}
+	if o.EC.Output == app.OutputJSON {
+		enc := json.NewEncoder(o.EC.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	if cross, ok := out.(duplicates.CrossReport); ok {
+		return duplicates.WriteCrossMarkdown(o.EC.Stdout, cross, o.limit)
+	}
+	return duplicates.WriteMarkdown(o.EC.Stdout, names[0], out.(duplicates.Report), o.limit)
+}
+
+func duplicatesCmd(ec *app.Env) *cobra.Command {
+	o := &duplicatesOptions{EC: ec}
+	return app.NewSubCommand("duplicates [path...]", o, ec).
+		WithShortDesc("Find code that exists more than once, in one repository or across several (offline graph)").
+		WithLongDesc("Groups functions and methods with the same structure (names and literal values ignored) and ranks them by redundant lines. With several paths it also finds code copied between the repositories and recommends where a shared library or framework would pay off.").
+		WithExample("  codesynapse duplicates .\n  codesynapse duplicates ~/src/api ~/src/worker ~/src/cli -o json").
+		WithGroupID(app.GroupBase).
 		Build()
 }

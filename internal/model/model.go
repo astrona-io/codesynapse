@@ -140,6 +140,10 @@ type Node struct {
 	// BodyHash fingerprints the declaration source so callers can detect
 	// changes without storing the source itself.
 	BodyHash string `json:"body_hash,omitempty"`
+	// CloneHash fingerprints the structure of a function or method with
+	// names and literal values abstracted away, so copies that differ only in
+	// naming share it. Set only on functions big enough to be worth sharing.
+	CloneHash string `json:"clone_hash,omitempty"`
 	// SecurityTags are the sensitive API categories this node touches.
 	SecurityTags []string `json:"security_tags,omitempty"`
 	// Level is the heading level for Section nodes.
@@ -184,6 +188,8 @@ type Node struct {
 	Liveness string `json:"liveness,omitempty"`
 	// Cleanup is the JSON-encoded cleanup.Report on Repository nodes.
 	Cleanup string `json:"-"`
+	// Duplicates is the JSON-encoded duplicates.Report on Repository nodes.
+	Duplicates string `json:"-"`
 	// Licenses is the JSON-encoded license.Report on Repository nodes.
 	Licenses string `json:"-"`
 	// Coverage is the JSON-encoded security.Coverage on Repository nodes:

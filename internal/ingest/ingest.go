@@ -15,6 +15,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
 
 	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
+	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/ingest/config"
 	"github.com/parisnakitakejser/codesynapse/internal/ingest/docs"
@@ -141,6 +142,9 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	cl := cleanup.Analyze(g, extImports)
 	if repoNode.Cleanup, err = cleanup.Encode(cl); err != nil {
 		return nil, fmt.Errorf("encoding cleanup report: %w", err)
+	}
+	if repoNode.Duplicates, err = duplicates.Encode(duplicates.Analyze(g)); err != nil {
+		return nil, err
 	}
 	rep, err := metrics.Compute(ctx, opts.Repo, g, metrics.Options{})
 	if err != nil {

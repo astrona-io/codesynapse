@@ -152,6 +152,9 @@ type extractor struct {
 	// nested holds repo-relative prefixes ("sources/other/") of nested git
 	// repositories, which are separate graphs and must not be merged in.
 	nested []string
+	// generated is set while a generated file is walked: machine output is
+	// not worth sharing.
+	generated bool
 }
 
 // nestedRepos finds directories below root that contain their own .git.
@@ -277,6 +280,7 @@ func (x *extractor) source(abs string) []byte {
 
 func (x *extractor) file(p *packages.Package, f *ast.File, abs, rel, pkgPath string, isTest bool) {
 	fset := p.Fset
+	x.generated = ast.IsGenerated(f)
 	fileID := x.id(model.KindFile, rel)
 	tf := fset.File(f.Pos())
 	lines, size := 0, 0
@@ -341,6 +345,9 @@ func (x *extractor) funcDecl(p *packages.Package, d *ast.FuncDecl, abs, rel, fil
 	if src := x.source(abs); src != nil && end.Offset <= len(src) && start.Offset < end.Offset {
 		sum := sha256.Sum256(src[start.Offset:end.Offset])
 		n.BodyHash = hex.EncodeToString(sum[:8])
+	}
+	if !isTestFile && !x.generated && n.LOC >= minCloneLOC {
+		n.CloneHash = cloneHash(p.TypesInfo, d)
 	}
 	if d.Body != nil {
 		n.Complexity = cyclomatic(d.Body)
