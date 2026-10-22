@@ -18,7 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/parisnakitakejser/codesynapse/internal/redact"
+	"github.com/astrona-io/codesynapse/internal/redact"
 )
 
 // Verdicts.

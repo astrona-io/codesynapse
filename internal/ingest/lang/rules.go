@@ -5,9 +5,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/redact"
-	"github.com/parisnakitakejser/codesynapse/rules"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/redact"
+	"github.com/astrona-io/codesynapse/rules"
 )
 
 // RuleIDs are the rules this detector reports; see rules/code/<id>.yaml.

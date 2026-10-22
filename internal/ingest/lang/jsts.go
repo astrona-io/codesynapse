@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/model"
 )
 
 var (

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/parisnakitakejser/codesynapse/internal/history"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/history"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // Snapshots are :Snapshot nodes (not :Node), so repository replacement and

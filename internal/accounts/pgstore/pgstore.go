@@ -19,7 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
 //go:embed migrations/*.sql

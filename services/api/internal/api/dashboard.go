@@ -4,10 +4,10 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/parisnakitakejser/codesynapse/internal/cleanupplan"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/query"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/cleanupplan"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // Dashboard bundles everything the repository landing page shows, so the UI

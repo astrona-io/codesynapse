@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/model"
 )
 
 const maxFileSize = 2 << 20

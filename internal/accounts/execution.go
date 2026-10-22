@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/execution"
 )
 
 // Execution sessions are distinct from browser login sessions. Expiry never slides.

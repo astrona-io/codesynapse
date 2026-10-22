@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/model"
 )
 
 // Node property types. TestSchemaCoversNodeProps keeps them in step with

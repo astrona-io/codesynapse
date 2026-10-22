@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/model"
 )
 
 // codeIndex finds the code a record names: a file path, a directory (its

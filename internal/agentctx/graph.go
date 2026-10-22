@@ -13,10 +13,10 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/review"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/review"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // RefList is a bounded list with its untruncated total.

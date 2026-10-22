@@ -3,8 +3,8 @@ package api
 import (
 	"context"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/execution"
 )
 
 // jobAuthorization captures identity, never a request context or bearer token.

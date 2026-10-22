@@ -12,11 +12,11 @@ resources:
 # Image names are placeholders; overlays point them at your registry and tag.
 images:
   - name: codesynapse-api
-    newName: ghcr.io/parisnakitakejser/codesynapse-api
+    newName: ghcr.io/astrona-io/codesynapse-api
     newTag: latest
   - name: codesynapse-mcp
-    newName: ghcr.io/parisnakitakejser/codesynapse-mcp
+    newName: ghcr.io/astrona-io/codesynapse-mcp
     newTag: latest
   - name: codesynapse-web
-    newName: ghcr.io/parisnakitakejser/codesynapse-web
+    newName: ghcr.io/astrona-io/codesynapse-web
     newTag: latest

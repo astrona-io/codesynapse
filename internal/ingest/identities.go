@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // IdentityBaseline reads the prior state before a serialized repository sync.

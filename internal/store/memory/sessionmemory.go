@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/sessionmemory"
-	"github.com/parisnakitakejser/codesynapse/internal/vector"
+	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/sessionmemory"
+	"github.com/astrona-io/codesynapse/internal/vector"
 )
 
 // LoadSessionDocument loads one tenant/session/namespace snapshot, checking revocation first.

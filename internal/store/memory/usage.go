@@ -5,7 +5,7 @@ import (
 	"context"
 	"slices"
 
-	"github.com/parisnakitakejser/codesynapse/internal/usage"
+	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
 // AddUsage implements store.UsageStore.

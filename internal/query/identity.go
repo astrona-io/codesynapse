@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/identity"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/identity"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // IdentityPage is shared by the API and MCP. Available distinguishes an older

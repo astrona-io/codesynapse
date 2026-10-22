@@ -12,14 +12,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
-	"github.com/parisnakitakejser/codesynapse/internal/logx"
-	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/logx"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 
-	"github.com/parisnakitakejser/codesynapse/internal/ingest"
-	"github.com/parisnakitakejser/codesynapse/internal/snapshot"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/aitasks"
+	"github.com/astrona-io/codesynapse/internal/ingest"
+	"github.com/astrona-io/codesynapse/internal/snapshot"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/services/api/internal/aitasks"
 )
 
 // maxJobHistory bounds how many finished jobs are kept in memory.

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"text/template/parse"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/redact"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/redact"
 )
 
 // templateFile indexes a Go template. chart is the Helm chart root ("" when

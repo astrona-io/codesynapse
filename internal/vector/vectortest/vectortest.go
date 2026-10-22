@@ -5,9 +5,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
-	"github.com/parisnakitakejser/codesynapse/internal/vector"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/vector"
 )
 
 // Run exercises idx; it must start empty.

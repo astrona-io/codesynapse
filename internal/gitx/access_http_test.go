@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
 // gitHost serves a bare repository over TLS with git http-backend. Only

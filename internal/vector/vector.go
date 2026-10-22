@@ -17,7 +17,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/memory"
 )
 
 // Item is one entity's vector.

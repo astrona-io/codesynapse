@@ -3,8 +3,8 @@ package api
 import (
 	"net/http"
 
-	"github.com/parisnakitakejser/codesynapse/internal/history"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/history"
+	"github.com/astrona-io/codesynapse/internal/model"
 )
 
 // handleHistory serves the snapshots taken after each ingest of a repository

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/query"
 )
 
 // Projection failures delay explanations; PostgreSQL still decides access.

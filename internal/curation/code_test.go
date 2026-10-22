@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 )
 
 func TestPrepareCodeValidation(t *testing.T) {

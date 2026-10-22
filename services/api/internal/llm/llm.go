@@ -25,9 +25,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
-	"github.com/parisnakitakejser/codesynapse/internal/redact"
-	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/redact"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // Kinds of provider.

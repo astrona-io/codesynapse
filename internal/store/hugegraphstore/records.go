@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/reviews"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/internal/usage"
+	"github.com/astrona-io/codesynapse/internal/reviews"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
 // Reviews and usage counters are their own vertex labels, so repository

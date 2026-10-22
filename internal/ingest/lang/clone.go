@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
+	"github.com/astrona-io/codesynapse/internal/duplicates"
 )
 
 // The same thresholds as the Go extractor: below them a function is too small

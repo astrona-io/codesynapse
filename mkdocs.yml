@@ -1,6 +1,6 @@
 site_name: CodeSynapse
 site_description: Code graph for security reviews, code quality and AI coding assistants
-repo_url: https://github.com/parisnakitakejser/codesynapse
+repo_url: https://github.com/astrona-io/codesynapse
 docs_dir: docs
 site_dir: site
 

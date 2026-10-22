@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // maxGraphIDs bounds the node set a browser graph can ask edges for.

@@ -1,6 +1,6 @@
 package store
 
-import "github.com/parisnakitakejser/codesynapse/internal/model"
+import "github.com/astrona-io/codesynapse/internal/model"
 
 // StatsBuilder applies the Stats rules every store shares. Stores that
 // aggregate in the database feed it groups: a node standing for count alike

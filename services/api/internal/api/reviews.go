@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/reviews"
+	"github.com/astrona-io/codesynapse/internal/reviews"
 )
 
 func (s *Server) handleListReviews(w http.ResponseWriter, r *http.Request) {

@@ -14,7 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/parisnakitakejser/codesynapse/internal/license"
+	"github.com/astrona-io/codesynapse/internal/license"
 )
 
 // Ecosystems, as named by OSV.

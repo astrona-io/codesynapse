@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 )
 
 func TestText(t *testing.T) {

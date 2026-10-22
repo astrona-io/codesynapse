@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
 // Relationship-based access (accounts/authz.go): teams, repository grants

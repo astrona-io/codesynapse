@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/memory/extract"
+	"github.com/astrona-io/codesynapse/internal/memory/extract"
 )
 
 // Markers delimit the block AgentsBlock manages, so re-running replaces it.

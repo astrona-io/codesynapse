@@ -3,7 +3,7 @@ package vuln
 import (
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/model"
 )
 
 // Reachability levels, strongest first.

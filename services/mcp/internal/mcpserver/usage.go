@@ -7,7 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/parisnakitakejser/codesynapse/internal/usage"
+	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
 // usageMiddleware counts sessions, tool calls and prompt requests. Only the

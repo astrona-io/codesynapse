@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/memory"
 )
 
 // VectorBackend supplies scoped vector storage for validated graph entities.

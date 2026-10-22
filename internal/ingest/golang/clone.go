@@ -5,7 +5,7 @@ import (
 	"go/ast"
 	"go/types"
 
-	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
+	"github.com/astrona-io/codesynapse/internal/duplicates"
 )
 
 // A function is a clone candidate only when it is big enough that sharing it

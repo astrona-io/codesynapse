@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/model"
 )
 
 // Bounds prevent unbounded ingest state. Exhaustion fails the ingest rather

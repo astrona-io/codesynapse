@@ -5,10 +5,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
-	"github.com/parisnakitakejser/codesynapse/internal/vector"
-	"github.com/parisnakitakejser/codesynapse/internal/vector/vectortest"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/vector"
+	"github.com/astrona-io/codesynapse/internal/vector/vectortest"
 )
 
 // TestContract runs against a real Milvus when CODESYNAPSE_TEST_MILVUS_URL

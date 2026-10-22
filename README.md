@@ -236,7 +236,7 @@ Prompts (`prompts/list`; clients show them as slash commands):
 ## CLI
 
 ```sh
-go install github.com/parisnakitakejser/codesynapse/cmd/codesynapse@latest
+go install github.com/astrona-io/codesynapse/cmd/codesynapse@latest
 
 codesynapse audit .                      # security review (offline graph)
 codesynapse cleanup .                    # unused code, files, modules (offline graph)

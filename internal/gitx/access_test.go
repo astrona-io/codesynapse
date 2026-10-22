@@ -3,7 +3,7 @@ package gitx
 import (
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 )
 
 func TestDeniedMessages(t *testing.T) {

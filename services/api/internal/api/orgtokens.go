@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
-	"github.com/parisnakitakejser/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/gitx"
 )
 
 // Organisation Git tokens and private repositories (SaaS phase 2c).

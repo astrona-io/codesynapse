@@ -3,7 +3,7 @@ package neo4jstore
 import (
 	"context"
 
-	"github.com/parisnakitakejser/codesynapse/internal/usage"
+	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
 // MCP usage counters are :McpUsage nodes (not :Node), one per day,

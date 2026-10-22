@@ -3,8 +3,8 @@ package hugegraphstore
 import (
 	"context"
 
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // This operator-only enumeration returns namespace IDs, never memory content.

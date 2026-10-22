@@ -16,11 +16,11 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/internal/store/hugegraphstore"
-	"github.com/parisnakitakejser/codesynapse/internal/store/neo4jstore"
-	"github.com/parisnakitakejser/codesynapse/internal/vector"
-	"github.com/parisnakitakejser/codesynapse/internal/vector/milvus"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/store/hugegraphstore"
+	"github.com/astrona-io/codesynapse/internal/store/neo4jstore"
+	"github.com/astrona-io/codesynapse/internal/vector"
+	"github.com/astrona-io/codesynapse/internal/vector/milvus"
 )
 
 // Environment variables. The password is only read from the environment so

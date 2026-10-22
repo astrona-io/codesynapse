@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/model"
 )
 
 // AccessStore holds rebuildable explanations. Accounts remain the authority.

@@ -17,13 +17,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/parisnakitakejser/codesynapse/internal/agentcfg"
-	"github.com/parisnakitakejser/codesynapse/internal/app"
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
-	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/logx"
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/memory/extract"
+	"github.com/astrona-io/codesynapse/internal/agentcfg"
+	"github.com/astrona-io/codesynapse/internal/app"
+	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/logx"
+	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/memory/extract"
 )
 
 // apiTokenEnv holds the API bearer token; the hooks fall back to tokenFile.

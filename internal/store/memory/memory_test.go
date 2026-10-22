@@ -3,7 +3,7 @@ package memory
 import (
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
+	"github.com/astrona-io/codesynapse/internal/store/storetest"
 )
 
 func TestContract(t *testing.T) {

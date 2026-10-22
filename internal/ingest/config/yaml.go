@@ -18,9 +18,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/redact"
-	"github.com/parisnakitakejser/codesynapse/rules"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/redact"
+	"github.com/astrona-io/codesynapse/rules"
 )
 
 // maxKeyDepth bounds key-path entries for plain YAML; values files of Helm

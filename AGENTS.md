@@ -114,7 +114,7 @@ Defer both development and production Kubernetes manifest work to the final depl
 
 ## Go conventions
 
-- Go 1.27, module `github.com/parisnakitakejser/codesynapse`.
+- Go 1.27, module `github.com/astrona-io/codesynapse`.
 - Standard library first. Current dependencies: cobra (CLI), the Neo4j driver, the MCP Go SDK, golang.org/x/tools and x/mod. Ask before adding any other dependency.
 - Tests use the in-repo helpers `internal/testutil/assert` (continue on failure) and `internal/testutil/require` (stop on failure). Do not add testify.
 - Logging is `log/slog`, carried through contexts with `internal/logx`.

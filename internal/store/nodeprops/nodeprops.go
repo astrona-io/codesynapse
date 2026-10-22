@@ -6,7 +6,7 @@ package nodeprops
 import (
 	"encoding/json"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/model"
 )
 
 // Lists are the properties holding string lists.

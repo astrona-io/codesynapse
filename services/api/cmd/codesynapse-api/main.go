@@ -15,13 +15,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
-	"github.com/parisnakitakejser/codesynapse/internal/accounts/pgstore"
-	"github.com/parisnakitakejser/codesynapse/internal/app"
-	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/api"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts/pgstore"
+	"github.com/astrona-io/codesynapse/internal/app"
+	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/services/api/internal/api"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
 var version = "dev"

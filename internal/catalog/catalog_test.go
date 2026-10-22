@@ -7,13 +7,13 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/arch"
-	"github.com/parisnakitakejser/codesynapse/internal/ingest/docs"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/arch"
+	"github.com/astrona-io/codesynapse/internal/ingest/docs"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/store/memory"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
 func write(t *testing.T, root, rel, text string) {

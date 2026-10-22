@@ -5,9 +5,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
 
-	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
+	"github.com/astrona-io/codesynapse/internal/store/storetest"
 )
 
 // TestContract runs against a real Neo4j when CODESYNAPSE_TEST_NEO4J_URI is

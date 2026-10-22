@@ -6,8 +6,8 @@ import (
 	"slices"
 	"unicode/utf8"
 
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/vector"
+	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/vector"
 )
 
 // Search metadata may lag deletion or alias merging. Only current, scoped

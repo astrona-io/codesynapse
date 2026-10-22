@@ -6,7 +6,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
 // PolicyTransaction evaluates changes against a private copy and publishes only

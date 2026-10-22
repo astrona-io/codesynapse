@@ -9,7 +9,7 @@ import (
 
 	"cmp"
 
-	"github.com/parisnakitakejser/codesynapse/internal/testutil"
+	"github.com/astrona-io/codesynapse/internal/testutil"
 )
 
 func fail(t testing.TB, msg string, msgAndArgs []any) bool {
