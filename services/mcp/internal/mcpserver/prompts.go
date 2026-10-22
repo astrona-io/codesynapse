@@ -39,7 +39,8 @@ var taskPrompts = []taskPrompt{
 1. Call get_pr_context with files: [%s] (or pass the unified diff if you have it) to compute blast radius and risk for every modified symbol.
 2. Check whether any modified symbol touches security-tagged APIs (sensitive_touched, External nodes) or carries findings; call security_report with min_severity: "medium" for context.
 3. Verify that new or modified public functions have unit tests (exported_untested lists the gaps).
-4. Summarize high-risk changes, missing test coverage, and potential architectural side effects, citing file:line.`, files, quoteList(files))
+4. Check duplicated_changed: changed functions that have exact or edited copies elsewhere. Say whether the same change belongs in each copy, or whether the copies should be merged. The graph reflects the last ingest, so a function added in this change is not listed unless the repository was synced after it.
+5. Summarize high-risk changes, missing test coverage, and potential architectural side effects, citing file:line.`, files, quoteList(files))
 		},
 	},
 	{

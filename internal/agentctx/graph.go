@@ -3,6 +3,7 @@ package agentctx
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"math"
 	"regexp"
 	"slices"
@@ -131,6 +132,9 @@ type PRContext struct {
 	ExportedChanged  []string `json:"exported_changed"`
 	ExportedUntested []string `json:"exported_untested"`
 	SensitiveTouched []string `json:"sensitive_touched"`
+	// DuplicatedChanged names changed functions that have copies, with where
+	// the copies are: the same change probably belongs there too.
+	DuplicatedChanged []string `json:"duplicated_changed"`
 }
 
 // PROptions select the change to analyse: a unified diff, a list of files
@@ -183,11 +187,22 @@ func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRCon
 	if err != nil {
 		return PRContext{}, err
 	}
-	out := PRContext{Report: rep, ExportedChanged: []string{}, ExportedUntested: []string{}, SensitiveTouched: []string{}}
+	out := PRContext{Report: rep, ExportedChanged: []string{}, ExportedUntested: []string{}, SensitiveTouched: []string{}, DuplicatedChanged: []string{}}
 	for _, c := range rep.Changes {
 		n, err := s.R.Node(ctx, c.ID)
 		if err != nil {
 			continue
+		}
+		if d := c.Duplicate; d != nil {
+			where := make([]string, 0, len(d.Others))
+			for _, o := range d.Others {
+				where = append(where, fmt.Sprintf("%s:%d", o.File, o.StartLine))
+			}
+			label := "exact copies"
+			if d.Kind == "near" {
+				label = fmt.Sprintf("edited copies ~%.0f%% alike", d.Similarity*100)
+			}
+			out.DuplicatedChanged = append(out.DuplicatedChanged, fmt.Sprintf("%s [%s: %s]", c.Name, label, strings.Join(where, ", ")))
 		}
 		if n.Exported {
 			out.ExportedChanged = append(out.ExportedChanged, c.Name)

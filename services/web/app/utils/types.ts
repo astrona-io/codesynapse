@@ -67,10 +67,10 @@ export interface SymbolCard { duplicate?: DuplicateInfo; symbol: GraphNodeData; 
 export interface ViewNode extends NodeRef { complexity?: number; security_tags?: string[]; is_test?: boolean }
 export interface ViewEdge { from: string; to: string; kind: string; count?: number }
 export interface GraphView { nodes: ViewNode[]; edges: ViewEdge[]; root?: string }
-export interface ChangedSymbol extends NodeRef { signature?: string; risk: number; level: string; reasons: string[]; security_tags?: string[]; fan_in: number; impacted: number; tests: NodeRef[] }
+export interface ChangedSymbol extends NodeRef { signature?: string; risk: number; level: string; reasons: string[]; security_tags?: string[]; fan_in: number; impacted: number; tests: NodeRef[]; duplicate?: DuplicateInfo }
 export interface Report {
   repo: string
-  summary: { changed_files: number; changed_symbols: number; impacted_symbols: number; untested_changes: number; security_sensitive: number; max_level: string }
+  summary: { changed_files: number; changed_symbols: number; impacted_symbols: number; untested_changes: number; security_sensitive: number; duplicated_changes?: number; max_level: string }
   changes: ChangedSymbol[]
   impacted: NodeRef[]
   files: { path: string; status: string; symbols: number; indexed: boolean }[]

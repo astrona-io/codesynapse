@@ -9,6 +9,7 @@ import (
 	"context"
 	"slices"
 
+	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/query"
@@ -65,6 +66,9 @@ type ChangedSymbol struct {
 	Tests     []query.Ref `json:"tests"`
 	// Findings are security findings inside the changed symbol.
 	Findings []query.Ref `json:"findings,omitempty"`
+	// Duplicate is set when the symbol has exact or edited copies: a change
+	// to it probably belongs in the copies too, or the copies should be merged.
+	Duplicate *duplicates.Info `json:"duplicate,omitempty"`
 }
 
 // FileSummary describes one changed file.
@@ -79,11 +83,13 @@ type FileSummary struct {
 
 // Summary is the headline of a report.
 type Summary struct {
-	ChangedFiles      int   `json:"changed_files"`
-	ChangedSymbols    int   `json:"changed_symbols"`
-	ImpactedSymbols   int   `json:"impacted_symbols"`
-	UntestedChanges   int   `json:"untested_changes"`
-	SecuritySensitive int   `json:"security_sensitive"`
+	ChangedFiles      int `json:"changed_files"`
+	ChangedSymbols    int `json:"changed_symbols"`
+	ImpactedSymbols   int `json:"impacted_symbols"`
+	UntestedChanges   int `json:"untested_changes"`
+	SecuritySensitive int `json:"security_sensitive"`
+	// DuplicatedChanges counts changed functions that have exact or edited copies.
+	DuplicatedChanges int   `json:"duplicated_changes"`
 	MaxLevel          Level `json:"max_level"`
 }
 
@@ -139,6 +145,7 @@ func Analyze(ctx context.Context, svc query.Service, repo string, changes []gitx
 		rep.Files = append(rep.Files, fs)
 	}
 
+	dupReport, haveDups := query.DuplicateReport(ctx, svc.R, repo)
 	impacted := map[string]query.Ref{}
 	docs := map[string]query.Ref{}
 	tags := map[string]bool{}
@@ -173,6 +180,11 @@ func Analyze(ctx context.Context, svc query.Service, repo string, changes []gitx
 		if len(cs.Tags) > 0 {
 			rep.Summary.SecuritySensitive++
 		}
+		if haveDups && n.Kind.IsCallable() && !n.IsTest {
+			if cs.Duplicate = dupReport.Lookup(n.ID); cs.Duplicate != nil {
+				rep.Summary.DuplicatedChanges++
+			}
+		}
 		if cs.Level.rank() > rep.Summary.MaxLevel.rank() {
 			rep.Summary.MaxLevel = cs.Level
 		}
@@ -197,7 +209,7 @@ func Analyze(ctx context.Context, svc query.Service, repo string, changes []gitx
 
 	rep.Summary.ChangedFiles = len(rep.Files)
 	rep.Summary.ChangedSymbols = len(rep.Changes)
-	rep.Checklist = checklist(tags, rep.Summary.UntestedChanges > 0, len(rep.Docs) > 0)
+	rep.Checklist = checklist(tags, rep.Summary.UntestedChanges > 0, len(rep.Docs) > 0, rep.Summary.DuplicatedChanges > 0)
 	return rep, nil
 }
 
@@ -350,7 +362,7 @@ var tagChecks = map[string]string{
 	"auth":          "AuthN/Z: tokens validated (issuer, audience, expiry, algorithm); authorization checked server-side.",
 }
 
-func checklist(tags map[string]bool, untested, docs bool) []string {
+func checklist(tags map[string]bool, untested, docs, duplicated bool) []string {
 	var out []string
 	keys := make([]string, 0, len(tags))
 	for t := range tags {
@@ -364,6 +376,9 @@ func checklist(tags map[string]bool, untested, docs bool) []string {
 	}
 	if untested {
 		out = append(out, "Add or extend tests for changed symbols that no test reaches.")
+	}
+	if duplicated {
+		out = append(out, "Changed functions with copies: apply the same change to each copy, or merge the copies into one so the next change is made once.")
 	}
 	if docs {
 		out = append(out, "Check that the listed documentation sections still match the changed behaviour.")
