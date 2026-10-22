@@ -6,7 +6,10 @@ version := `git describe --tags --always --dirty 2>/dev/null || echo dev`
 ldflags := "-s -w -X main.version=" + version
 
 # Container runtime: Docker if present, else Podman. Override with COMPOSE="...".
-compose := env("COMPOSE", `if command -v docker >/dev/null 2>&1; then echo "docker compose"; elif command -v podman >/dev/null 2>&1; then echo "podman compose"; else echo "missing-container-runtime"; fi`)
+runtime := `if command -v docker >/dev/null 2>&1; then echo "docker compose"; elif command -v podman >/dev/null 2>&1; then echo "podman compose"; else echo "missing-container-runtime"; fi`
+# The HugeGraph/Milvus start-up ordering lives in its own file, loaded only with that profile.
+files := if env("COMPOSE_PROFILES", "") =~ "hugegraph" { "-f docker-compose.yml -f docker-compose.hugegraph.yml" } else { "" }
+compose := env("COMPOSE", trim(runtime + " " + files))
 
 default:
     @just --list
@@ -99,6 +102,14 @@ down:
 # Stop the stack and delete the graph and caches
 nuke:
     {{compose}} down -v
+
+# Destroy everything (containers, volumes incl. graphs, accounts and audit log, local images, orphans) and recreate from scratch. Keeps .env.
+[confirm("This deletes all volumes (indexed graphs, accounts, audit log). Continue?")]
+reset: init _runtime
+    {{compose}} down -v --remove-orphans --rmi local
+    {{compose}} build --no-cache
+    {{compose}} up -d --force-recreate
+    @echo "web http://localhost:3000 · api http://localhost:8080 · mcp http://localhost:8090/mcp · neo4j http://localhost:7474"
 
 # Follow logs, optionally for one service: just logs api
 logs service="":

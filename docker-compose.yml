@@ -183,12 +183,6 @@ services:
     depends_on:
       neo4j:
         condition: service_healthy
-      hugegraph:
-        condition: service_healthy
-        required: false
-      milvus:
-        condition: service_healthy
-        required: false
       postgres:
         condition: service_healthy
 
@@ -238,12 +232,6 @@ services:
     depends_on:
       neo4j:
         condition: service_healthy
-      hugegraph:
-        condition: service_healthy
-        required: false
-      milvus:
-        condition: service_healthy
-        required: false
       postgres:
         condition: service_healthy
 
