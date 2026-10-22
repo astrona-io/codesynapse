@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -62,6 +63,12 @@ type Config struct {
 	// Metrics reads time series for the statistics (nil without
 	// VictoriaMetrics).
 	Metrics *telemetry.Querier
+	// TrustedProxies may report the client address in X-Forwarded-For
+	// (the web app); everyone else is identified by the connection.
+	TrustedProxies []netip.Prefix
+	// PublicMCPURL is where agents reach the MCP server, shown in the
+	// connection instructions.
+	PublicMCPURL string
 	// Workspace is a writable directory for repositories cloned by URL.
 	Workspace string
 	// GitAuth is an optional token for cloning private repositories.
@@ -144,7 +151,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	rid := requestID(r)
 	w.Header().Set("X-Request-ID", rid)
-	r = r.WithContext(accounts.WithRequestInfo(r.Context(), accounts.RequestInfo{RequestID: rid, IP: clientAddr(r), UserAgent: r.UserAgent()}))
+	r = r.WithContext(accounts.WithRequestInfo(r.Context(), accounts.RequestInfo{RequestID: rid, IP: s.clientAddr(r), UserAgent: r.UserAgent()}))
 	rec := &statusRecorder{ResponseWriter: w}
 	start, tenant := time.Now(), new(string)
 	r = r.WithContext(context.WithValue(r.Context(), tenantSlot{}, tenant))
@@ -188,18 +195,24 @@ func (s *Server) routes() {
 		writeJSON(w, 200, map[string]string{"version": s.cfg.Version})
 	})
 	// Settings report what is configured, never full secret values.
-	s.route("GET /api/v1/settings", anyone, func(w http.ResponseWriter, _ *http.Request) {
-		tokens := s.gitTokens()
+	s.route("GET /api/v1/settings", anyone, func(w http.ResponseWriter, r *http.Request) {
+		tokens, tokenHost := s.gitTokens(), s.cfg.GitAuth.Host
+		// The installation's own tokens are the operator's business:
+		// organisation users manage theirs under their organisation.
+		if s.cfg.Accounts != nil && !scopeFrom(r.Context()).all {
+			tokens, tokenHost = []gitToken{}, ""
+		}
 		hosts := make([]string, len(tokens))
 		for i, t := range tokens {
 			hosts[i] = t.Host
 		}
 		writeJSON(w, 200, map[string]any{
 			"git_token_configured": len(tokens) > 0,
-			"git_token_host":       s.cfg.GitAuth.Host,
+			"git_token_host":       tokenHost,
 			"git_token_hosts":      hosts,
 			"git_tokens":           tokens,
 			"clone_enabled":        s.cfg.Workspace != "",
+			"mcp_url":              s.cfg.PublicMCPURL,
 			"allow_private_git":    s.cfg.AllowPrivateGit,
 			"vuln_scan":            s.cfg.VulnScan,
 			"license_lookup":       s.cfg.LicenseLookup,

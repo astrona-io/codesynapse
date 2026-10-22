@@ -1,16 +1,38 @@
-// Proxies /api/cg/<path> to the Go API at /api/v1/<path>, adding the bearer
-// token. Mutating requests must come from this origin (CSRF guard), and only
-// API paths are reachable.
+// Proxies /api/cg/<path> to the Go API at /api/v1/<path>. Mutating requests
+// must come from this origin (CSRF guard), and only API paths are reachable.
+//
+// Who the API sees: with accounts (PostgreSQL configured), the browser's
+// own session cookie is forwarded and the API's Set-Cookie comes back; the
+// installation token is never added, so a visitor is exactly the user they
+// logged in as. Only a single-tenant install (no accounts) gets the server's
+// token. When the mode cannot be read, no token is added (fail closed).
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
 // %2F is allowed: repository names are owner/name and travel as one encoded
 // path element, which the API decodes after routing.
 const SAFE_PATH = /^[A-Za-z0-9._~\-/%]+$/
+const SESSION_COOKIE = 'cs_session'
+// The organisation the user works in (a UI choice, not a credential).
+const ORG_COOKIE = 'cs_org'
+const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/
 
 function hasDotSegment(path: string): boolean {
   try {
     return path.split('/').some((seg) => decodeURIComponent(seg).split(/[/\\]/).some((part) => part === '..' || part === '.' || part.includes('\0')))
   } catch {
     return true // malformed percent-encoding
+  }
+}
+
+let mode: { value: 'single' | 'accounts'; at: number } | undefined
+async function apiMode(base: string): Promise<'single' | 'accounts'> {
+  if (mode && Date.now() - mode.at < 30_000) return mode.value
+  try {
+    const res = await fetch(`${base}/api/v1/auth/status`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(5_000) })
+    const body = (await res.json()) as { mode?: string }
+    mode = { value: body.mode === 'single' ? 'single' : 'accounts', at: Date.now() }
+    return mode.value
+  } catch {
+    return 'accounts'
   }
 }
 
@@ -34,10 +56,24 @@ export default defineEventHandler(async (event) => {
   }
 
   const { apiBase, apiToken } = useRuntimeConfig(event)
+  const base = apiBase.replace(/\/$/, '')
   const search = getRequestURL(event).search
-  const target = `${apiBase.replace(/\/$/, '')}/api/v1/${path}${search}`
+  const target = `${base}/api/v1/${path}${search}`
   const headers: Record<string, string> = { accept: 'application/json' }
-  if (apiToken) headers.authorization = `Bearer ${apiToken}`
+  const ua = getRequestHeader(event, 'user-agent')
+  if (ua) headers['user-agent'] = ua.slice(0, 300)
+  // The API trusts this only from the web app's address (TRUSTED_PROXIES);
+  // it is the connection's address, never a header the client sent.
+  const ip = getRequestIP(event, { xForwardedFor: false })
+  if (ip) headers['x-forwarded-for'] = ip
+  if ((await apiMode(base)) === 'single') {
+    if (apiToken) headers.authorization = `Bearer ${apiToken}`
+  } else {
+    const session = getCookie(event, SESSION_COOKIE)
+    if (session && /^[A-Za-z0-9_-]{16,128}$/.test(session)) headers.cookie = `${SESSION_COOKIE}=${session}`
+    const org = getCookie(event, ORG_COOKIE)
+    if (org && SLUG.test(org)) headers['x-codesynapse-org'] = org
+  }
   const contentType = getRequestHeader(event, 'content-type')
   if (contentType) headers['content-type'] = contentType
 
@@ -46,6 +82,10 @@ export default defineEventHandler(async (event) => {
   setResponseStatus(event, res.status)
   const ct = res.headers.get('content-type')
   if (ct) setResponseHeader(event, 'content-type', ct)
+  // Login, sign-up and logout set or clear the session cookie.
+  for (const c of res.headers.getSetCookie()) {
+    if (c.startsWith(`${SESSION_COOKIE}=`)) appendResponseHeader(event, 'set-cookie', c)
+  }
   setResponseHeader(event, 'cache-control', 'no-store')
   return res.status === 204 ? null : new Uint8Array(await res.arrayBuffer())
 })

@@ -6,9 +6,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -103,6 +105,10 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		registry = llm.NewRegistry(llmCfg)
 		o.EC.Logger.Info("AI providers configured", "providers", len(llmCfg.Providers), "default", llmCfg.Default)
 	}
+	trusted, err := parsePrefixes(os.Getenv("CODESYNAPSE_TRUSTED_PROXIES"))
+	if err != nil {
+		return fmt.Errorf("CODESYNAPSE_TRUSTED_PROXIES: %w", err)
+	}
 	stopMetrics, err := app.StartMetrics(ctx, o.EC.Logger, "api")
 	if err != nil {
 		return err
@@ -124,7 +130,8 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		Accounts:  acc, ServiceToken: os.Getenv(EnvToken), SecureCookies: app.Getenv("CODESYNAPSE_COOKIE_SECURE", "true") == "true",
 		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour,
 		Metrics:        metricsQuerier(),
-		GitAuthor:      gitx.Author{Name: app.Getenv("CODESYNAPSE_GIT_AUTHOR_NAME", "CodeSynapse"), Email: app.Getenv("CODESYNAPSE_GIT_AUTHOR_EMAIL", "codesynapse@localhost")}}, st, o.EC.Logger)
+		TrustedProxies: trusted, PublicMCPURL: app.Getenv("CODESYNAPSE_PUBLIC_MCP_URL", "http://localhost:8090/mcp"),
+		GitAuthor: gitx.Author{Name: app.Getenv("CODESYNAPSE_GIT_AUTHOR_NAME", "CodeSynapse"), Email: app.Getenv("CODESYNAPSE_GIT_AUTHOR_EMAIL", "codesynapse@localhost")}}, st, o.EC.Logger)
 	o.EC.Logger.Info("api listening", "addr", o.addr, "sources_root", o.sources, "auth", os.Getenv(EnvToken) != "", "accounts", acc != nil)
 	if acc != nil {
 		return app.Serve(ctx, app.NewServer(o.addr, srv)) // the server authenticates every request itself
@@ -182,6 +189,31 @@ func openAccounts(ctx context.Context, logger *slog.Logger) (*accounts.Service, 
 	}
 	logger.Info("accounts enabled", "signup_open", svc.SignupOpen)
 	return svc, st.Close, nil
+}
+
+// parsePrefixes reads "10.0.0.0/8,192.168.1.5" (single addresses allowed).
+func parsePrefixes(s string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, f := range strings.Split(s, ",") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if !strings.Contains(f, "/") {
+			a, err := netip.ParseAddr(f)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, netip.PrefixFrom(a, a.BitLen()))
+			continue
+		}
+		p, err := netip.ParsePrefix(f)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p.Masked())
+	}
+	return out, nil
 }
 
 // metricsQuerier reads the statistics' time series from the VictoriaMetrics

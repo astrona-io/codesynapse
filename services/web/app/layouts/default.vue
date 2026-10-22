@@ -1,20 +1,23 @@
 <script setup lang="ts">
 import type { RepoInfo } from '~/utils/types'
+import type { ThemeChoice } from '~/composables/useTheme'
 
 const route = useRoute()
+const session = useSession()
+const { choice: theme } = useTheme()
 const repo = computed(() => (route.params.repo as string | undefined) ?? '')
 const menuOpen = ref(false)
 watch(() => route.fullPath, () => (menuOpen.value = false))
 
 const { data: repos, refresh: refreshRepos } = useApiGet<{ repos: RepoInfo[] }>('repos')
 // Newest index first, so a repository that was just (re)indexed moves to the top.
-const latest = computed(() => [...(repos.value?.repos ?? [])].sort((a, b) => (b.ingested_at ?? '').localeCompare(a.ingested_at ?? '')).slice(0, 8))
-// Syncs and new organisation repositories finish in the background: poll
-// while the tab is visible, and catch up as soon as it is shown again.
+const latest = computed(() => [...(repos.value?.repos ?? [])].sort((a, b) => (b.ingested_at ?? '').localeCompare(a.ingested_at ?? '')).slice(0, 6))
+// Syncs finish in the background: poll while the tab is visible, and catch
+// up as soon as it is shown again.
 let repoTimer: ReturnType<typeof setInterval> | undefined
 const refreshIfVisible = () => { if (document.visibilityState === 'visible') refreshRepos() }
 onMounted(() => {
-  repoTimer = setInterval(refreshIfVisible, 10_000)
+  repoTimer = setInterval(refreshIfVisible, 15_000)
   document.addEventListener('visibilitychange', refreshIfVisible)
 })
 onBeforeUnmount(() => {
@@ -23,122 +26,158 @@ onBeforeUnmount(() => {
 })
 const { data: health, error: healthError } = useFetch<{ status: string }>('/api/cg/version', { key: 'version' })
 
+const main = [
+  { to: '/overview', label: 'Overview', hint: 'What needs attention' },
+  { to: '/', label: 'Repositories', hint: 'Everything you indexed' },
+  { to: '/agents', label: 'Agents', hint: 'Connect Claude Code, Codex, Cursor' },
+  { to: '/stats', label: 'Statistics', hint: 'Usage, tokens, cost, latency' },
+]
+const more = computed(() => [
+  { to: '/orgs', label: 'Import', hint: 'Index every repository of a GitHub, GitLab or Forgejo organisation' },
+  { to: '/ai', label: 'AI models', hint: 'Local and cloud language models' },
+  ...(session.accounts.value ? [{ to: '/settings', label: 'Settings', hint: 'Profile, API keys, organisation, Git tokens' }] : []),
+  { to: '/help', label: 'Help', hint: 'Getting started and what things mean' },
+])
 const repoGroups = computed(() => {
   if (!repo.value) return []
   const base = `/repos/${encodeURIComponent(repo.value)}`
   return [
     { label: 'Understand', links: [
-      { to: base, label: 'Summary', hint: 'Health and next steps' },
-      { to: `${base}/graph`, label: 'Graph', hint: 'Explore how code connects' },
-      { to: `${base}/explore`, label: 'Symbols', hint: 'Look up any function or type' },
-      { to: `${base}/config`, label: 'Kubernetes & Helm', hint: 'Manifests, charts, values' },
-      { to: `${base}/docs`, label: 'Docs', hint: 'Markdown and what it describes' },
-      { to: `${base}/packages`, label: 'Packages', hint: 'Architecture and imports' },
+      { to: base, label: 'Summary' },
+      { to: `${base}/graph`, label: 'Graph' },
+      { to: `${base}/explore`, label: 'Symbols' },
+      { to: `${base}/config`, label: 'Kubernetes & Helm' },
+      { to: `${base}/docs`, label: 'Docs' },
+      { to: `${base}/packages`, label: 'Packages' },
     ] },
     { label: 'Improve', links: [
-      { to: `${base}/security`, label: 'Security', hint: 'Findings and vulnerable dependencies' },
-      { to: `${base}/licenses`, label: 'Licences', hint: 'Dependency licences vs. your own' },
-      { to: `${base}/cleanup`, label: 'Cleanup', hint: 'Unused code to remove' },
-      { to: `${base}/metrics`, label: 'Quality metrics', hint: 'Complexity, tests, token savings' },
-      { to: `${base}/ai`, label: 'AI assistant', hint: 'Triage, review and briefings by a model' },
+      { to: `${base}/security`, label: 'Security' },
+      { to: `${base}/licenses`, label: 'Licences' },
+      { to: `${base}/cleanup`, label: 'Cleanup' },
+      { to: `${base}/metrics`, label: 'Quality' },
+      { to: `${base}/ai`, label: 'AI assistant' },
     ] },
     { label: 'Change', links: [
-      { to: `${base}/reviews`, label: 'Reviews', hint: 'Code reviews submitted by agents' },
-      { to: `${base}/review`, label: 'Impact of a change', hint: 'Impact and risk of a diff' },
-      { to: `${base}/memory`, label: 'Agent memory', hint: 'Facts agents saved for later sessions' },
+      { to: `${base}/reviews`, label: 'Reviews' },
+      { to: `${base}/review`, label: 'Impact of a change' },
+      { to: `${base}/memory`, label: 'Agent memory' },
     ] },
   ]
 })
-const isActive = (to: string) => route.path === to
+const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path === to || route.path.startsWith(`${to}/`))
+const themes: { id: ThemeChoice; label: string }[] = [{ id: 'system', label: 'Auto' }, { id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }]
+const orgValue = computed({
+  get: () => session.current.value?.org.slug ?? '',
+  set: (v: string) => session.switchOrg(v || null),
+})
 </script>
 
 <template>
-  <div class="console">
-    <SpaceBackdrop />
-    <aside class="sidebar panel--glass" :class="{ open: menuOpen }">
+  <div class="shell">
+    <a href="#main" class="skip">Skip to content</a>
+    <aside class="sidebar" :class="{ open: menuOpen }">
       <div class="sidebar__top">
-        <NuxtLink to="/" class="brand">
-          <span class="brand__logo"><img src="/favicon.svg" alt="" width="26" height="26"></span>
-          <span>
-            <span class="brand__name">CodeSynapse</span>
-            <span class="brand__tag">code intelligence</span>
-          </span>
+        <NuxtLink to="/overview" class="brand">
+          <img src="/favicon.svg" alt="" width="24" height="24">
+          <span class="brand__name">CodeSynapse</span>
         </NuxtLink>
         <button class="secondary tiny menu-toggle" :aria-expanded="menuOpen" @click="menuOpen = !menuOpen">Menu</button>
       </div>
 
-      <nav class="sidebar__nav">
+      <div v-if="session.accounts.value && (session.memberships.value.length > 1 || session.isPlatformAdmin.value)" class="org-switch">
+        <label for="org-select" class="label">Organisation</label>
+        <select id="org-select" v-model="orgValue">
+          <option v-if="session.isPlatformAdmin.value" value="">All organisations (admin)</option>
+          <option v-for="m in session.memberships.value" :key="m.org.id" :value="m.org.slug">{{ m.org.name }}</option>
+        </select>
+      </div>
+      <p v-else-if="session.current.value" class="org-single"><span class="label">Organisation</span>{{ session.current.value.org.name }}</p>
+
+      <nav class="sidebar__nav" aria-label="Main">
         <div class="nav-section">
-          <p class="nav-label">Workspace</p>
-          <NuxtLink to="/" class="nav-link" :class="{ 'is-active': route.path === '/' }" title="Your indexed repositories and what to add">Repositories</NuxtLink>
-          <NuxtLink to="/orgs" class="nav-link" :class="{ 'is-active': route.path === '/orgs' }" title="Index every repository of a GitHub organisation">Organisations</NuxtLink>
-          <NuxtLink to="/overview" class="nav-link" :class="{ 'is-active': route.path === '/overview' }" title="Everything at a glance, worst first">Workspace health</NuxtLink>
-          <NuxtLink to="/stats" class="nav-link" :class="{ 'is-active': route.path === '/stats' }" title="Agent sessions, context offloading, security, licences, reviews and more">Statistics</NuxtLink>
-          <NuxtLink to="/ai" class="nav-link" :class="{ 'is-active': route.path === '/ai' }" title="Local and cloud language models">AI models</NuxtLink>
+          <NuxtLink v-for="l in main" :key="l.to" :to="l.to" class="nav-link" :class="{ 'is-active': isActive(l.to) && !repo }" :title="l.hint">{{ l.label }}</NuxtLink>
         </div>
         <template v-if="repo">
-          <div class="nav-repo-head">
+          <div class="nav-section">
             <p class="nav-label">Repository</p>
             <p class="nav-repo mono" :title="repo">{{ repo }}</p>
           </div>
           <div v-for="g in repoGroups" :key="g.label" class="nav-section">
             <p class="nav-label">{{ g.label }}</p>
-            <NuxtLink v-for="l in g.links" :key="l.to" :to="l.to" class="nav-link" :class="{ 'is-active': isActive(l.to) }" :title="l.hint">{{ l.label }}</NuxtLink>
+            <NuxtLink v-for="l in g.links" :key="l.to" :to="l.to" class="nav-link nav-link--sub" :class="{ 'is-active': route.path === l.to }">{{ l.label }}</NuxtLink>
           </div>
         </template>
         <div v-else-if="repos?.repos.length" class="nav-section">
-          <p class="nav-label">Latest indexed</p>
-          <NuxtLink v-for="r in latest" :key="r.name" :to="`/repos/${encodeURIComponent(r.name)}`" class="nav-link nav-repo-link" :title="r.ingested_at ? `Indexed ${r.ingested_at}` : ''">
+          <p class="nav-label">Recently indexed</p>
+          <NuxtLink v-for="r in latest" :key="r.name" :to="`/repos/${encodeURIComponent(r.name)}`" class="nav-link nav-link--sub nav-repo-link" :title="r.ingested_at ? `Indexed ${r.ingested_at}` : ''">
             <span class="mono nav-repo-name">{{ r.name }}</span>
             <span v-if="r.ingested_at" class="nav-repo-time">{{ relTime(r.ingested_at) }}</span>
           </NuxtLink>
         </div>
+        <div class="nav-section">
+          <NuxtLink v-for="l in more" :key="l.to" :to="l.to" class="nav-link" :class="{ 'is-active': isActive(l.to) }" :title="l.hint">{{ l.label }}</NuxtLink>
+        </div>
       </nav>
 
       <div class="sidebar__foot">
-        <span class="dot" :class="healthError ? 'dot--bad' : health ? 'dot--ok' : 'dot--warn'" />
-        <span class="muted">{{ healthError ? 'API unreachable' : health ? 'API connected' : 'Connecting…' }}</span>
+        <div class="theme" role="radiogroup" aria-label="Theme">
+          <button v-for="t in themes" :key="t.id" class="tiny" :class="theme === t.id ? '' : 'secondary'" role="radio" :aria-checked="theme === t.id" @click="theme = t.id">{{ t.label }}</button>
+        </div>
+        <div v-if="session.me.value" class="user">
+          <div class="user__who">
+            <strong class="truncate">{{ session.me.value.user.name }}</strong>
+            <span class="muted small truncate">{{ session.me.value.user.email }}</span>
+          </div>
+          <button class="secondary tiny" @click="session.logout()">Sign out</button>
+        </div>
+        <p class="status small">
+          <span class="dot" :class="healthError ? 'dot--bad' : health ? 'dot--ok' : 'dot--warn'" />
+          <span class="muted">{{ healthError ? 'API unreachable' : health ? 'Connected' : 'Connecting…' }}</span>
+        </p>
       </div>
     </aside>
-    <main id="main" class="console__main"><slot /></main>
+    <main id="main" class="shell__main"><slot /></main>
   </div>
 </template>
 
 <style scoped>
-.console { position: relative; display: grid; grid-template-columns: 272px minmax(0, 1fr); gap: 24px; padding: 24px var(--gutter); min-height: 100vh; }
-.console__main { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 24px; max-width: var(--shell-max); min-width: 0; }
+.shell { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 100vh; }
+.shell__main { display: flex; flex-direction: column; gap: 20px; padding: 28px var(--gutter) 48px; max-width: var(--shell-max); width: 100%; min-width: 0; }
+.skip { position: absolute; left: -9999px; }
+.skip:focus { left: 12px; top: 12px; z-index: 10; background: var(--panel); padding: 8px 12px; border-radius: var(--radius-sm); }
 .sidebar {
-  position: sticky; top: 24px; z-index: 2; align-self: start; max-height: calc(100vh - 48px); overflow-y: auto;
-  display: flex; flex-direction: column; gap: 18px; padding: 20px 16px;
-  border: 1px solid var(--line); border-radius: var(--radius);
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 14px; padding: 18px 12px;
+  background: var(--panel); border-right: 1px solid var(--line);
 }
-.sidebar__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.brand { display: flex; align-items: center; gap: 12px; color: var(--ink); }
-.brand:hover { color: var(--ink); }
-.brand__logo { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 0 14px rgba(255, 122, 24, 0.25); }
-.brand__name { display: block; font-size: 18px; font-weight: 700; letter-spacing: 0.02em; line-height: 1.2; }
-.brand__tag { display: block; font: 400 9px var(--font-mono); text-transform: uppercase; letter-spacing: 0.16em; color: var(--green); }
-.sidebar__nav { display: flex; flex-direction: column; gap: 14px; }
-.nav-section { display: flex; flex-direction: column; gap: 2px; padding-top: 14px; border-top: 1px dashed var(--line); }
-.nav-label { font: 400 10px var(--font-mono); text-transform: uppercase; letter-spacing: 0.14em; color: var(--violet); margin: 0 12px 6px; }
-.nav-repo-head { padding-top: 14px; border-top: 1px dashed var(--line); }
-.nav-repo { margin: -2px 12px 0; color: var(--ink); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav-link {
-  display: flex; align-items: center; min-height: 40px; padding: 8px 12px;
-  border-left: 2px solid transparent; border-radius: var(--radius-xs);
-  color: var(--muted); font-size: 14px; font-weight: 500;
-}
-.nav-link:hover { color: var(--ink); background: rgba(236, 231, 245, 0.04); }
-.nav-link.is-active { color: var(--ink); background: var(--tint-orange); border-left-color: var(--orange); }
-.sidebar__foot { margin-top: auto; display: flex; align-items: center; gap: 10px; padding-top: 14px; border-top: 1px dashed var(--line); font-size: 13px; }
-.menu-toggle { display: none; }
-@media (max-width: 1080px) {
-  .console { grid-template-columns: 1fr; }
-  .sidebar { position: relative; top: 0; max-height: none; }
-  .menu-toggle { display: inline-flex; }
-  .sidebar:not(.open) .sidebar__nav, .sidebar:not(.open) .sidebar__foot { display: none; }
-}
-.nav-repo-link { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.sidebar__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px; }
+.brand { display: flex; align-items: center; gap: 10px; color: var(--ink); }
+.brand:hover { color: var(--ink); text-decoration: none; }
+.brand__name { font-size: 16px; font-weight: 650; letter-spacing: -0.01em; }
+.org-switch, .org-single { display: flex; flex-direction: column; gap: 4px; padding: 0 8px; }
+.org-single { font-weight: 600; font-size: 13.5px; }
+.sidebar__nav { display: flex; flex-direction: column; gap: 12px; }
+.nav-section { display: flex; flex-direction: column; gap: 1px; }
+.nav-label { font: 600 11.5px var(--font-sans); color: var(--dim); margin: 6px 10px 4px; }
+.nav-repo { margin: 0 10px 2px; color: var(--ink); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-link { display: flex; align-items: center; min-height: 34px; padding: 6px 10px; border-radius: var(--radius-sm); color: var(--muted); font-size: 14px; font-weight: 500; }
+.nav-link--sub { min-height: 30px; font-size: 13.5px; }
+.nav-link:hover { color: var(--ink); background: var(--hover); text-decoration: none; }
+.nav-link.is-active { color: var(--ink); background: var(--accent-soft); }
+.nav-repo-link { justify-content: space-between; gap: 8px; }
 .nav-repo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav-repo-time { flex: none; font-size: 11px; color: var(--dim); }
+.nav-repo-time { flex: none; font-size: 11.5px; color: var(--dim); }
+.sidebar__foot { margin-top: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px 8px 0; border-top: 1px solid var(--line); }
+.theme { display: flex; gap: 4px; }
+.theme button { flex: 1; }
+.user { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.user__who { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; font-size: 13.5px; }
+.status { display: flex; align-items: center; gap: 8px; }
+.menu-toggle { display: none; }
+@media (max-width: 960px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .menu-toggle { display: inline-flex; }
+  .sidebar:not(.open) > :not(.sidebar__top) { display: none; }
+}
 </style>

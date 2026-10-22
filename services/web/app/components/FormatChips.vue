@@ -19,7 +19,7 @@ const entries = computed(() => formatEntries(props.formats).map((e) => {
 
 <style scoped>
 .formats { display: flex; flex-wrap: wrap; gap: 6px; }
-.fmt { display: inline-flex; gap: 6px; align-items: baseline; padding: 4px 10px; border-radius: var(--pill); font-size: 12.5px; border: 1px solid var(--line); background: rgba(236, 231, 245, 0.04); }
+.fmt { display: inline-flex; gap: 6px; align-items: baseline; padding: 4px 10px; border-radius: var(--pill); font-size: 12.5px; border: 1px solid var(--line); background: var(--hover); }
 .fmt strong { font-weight: 600; }
 .fmt span { color: var(--muted); font-family: var(--font-mono); font-size: 11.5px; }
 .fmt--code strong { color: var(--cyan); }
