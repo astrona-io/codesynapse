@@ -4,7 +4,7 @@ Code that exists twice has to be read, tested, secured and fixed twice, and the 
 
 ## What counts as a duplicate
 
-Each Go function or method of at least 6 lines and 5 statements gets a **structural fingerprint** at ingest (`Node.CloneHash`). It is computed from the type-checked syntax tree:
+Each function or method of at least 6 lines and 5 statements gets a **structural fingerprint** at ingest (`Node.CloneHash`). For Go it is computed from the type-checked syntax tree. Python, JavaScript, TypeScript and Vue have no type information, so their fingerprint comes from tokens: comments, docstrings, strings and numbers are dropped, called functions and member names are kept, and every other identifier counts as a variable. They can therefore also match code that differs only in what it reads. The table describes Go:
 
 | Abstracted (copies still match) | Kept (copies must agree) |
 |---|---|
@@ -16,7 +16,7 @@ Each Go function or method of at least 6 lines and 5 statements gets a **structu
 Tests and generated files are skipped. No source is stored: only the hash, the location and the size.
 
 !!! note "What it does not find"
-    Edited copies (a line added or changed) have a different structure and are not matched. Python, JavaScript, TypeScript and Vue are not fingerprinted yet. Small functions (getters, one-line wrappers) are ignored on purpose.
+    Edited copies (a line added or changed) have a different structure and are not matched, and a function written as `function f` never matches the same code written as an arrow function. Python never matches JavaScript or TypeScript; JavaScript, TypeScript and Vue can match each other. Small functions (getters, one-line wrappers) are ignored on purpose.
 
 ## Inside one repository
 
