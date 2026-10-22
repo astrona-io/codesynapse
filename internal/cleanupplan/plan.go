@@ -89,6 +89,14 @@ type Step struct {
 	Verify   string   `json:"verify"`
 	// Link is a path in the web app with more detail.
 	Link string `json:"link,omitempty"`
+	// Group is the duplicate group a merge step is about, for refactor_duplicates.
+	Group *GroupRef `json:"group,omitempty"`
+}
+
+// GroupRef names a duplicate group as duplicate_code lists it.
+type GroupRef struct {
+	Hash string `json:"hash"`
+	Kind string `json:"kind"`
 }
 
 // Summary totals the plan. Lines can overlap between steps (a duplicate that
@@ -418,7 +426,7 @@ func duplicateSteps(d *duplicates.Report, link string, add func(Step)) {
 			if near++; near > maxEditedCopySteps {
 				continue
 			}
-			add(Step{Kind: ReviewEditedCopies, ID: stepID(ReviewEditedCopies, g.Hash+"|near"), Lines: g.Redundant, Effort: 3, Safety: "low", Link: link + "/duplicates",
+			add(Step{Kind: ReviewEditedCopies, ID: stepID(ReviewEditedCopies, g.Hash+"|near"), Lines: g.Redundant, Effort: 3, Safety: "low", Link: link + "/duplicates?group=" + g.Hash + "&kind=near", Group: &GroupRef{Hash: g.Hash, Kind: "near"},
 				Value:   capAt(5+g.Redundant/10, 40),
 				Title:   fmt.Sprintf("Check whether %d edited copies of %s should be one function (~%.0f%% alike)", g.Copies, name, g.Similarity*100),
 				Why:     "They started as copies and drifted. Sometimes the difference is the reason they exist; sometimes it is a fix that only reached one of them.",
@@ -431,7 +439,7 @@ func duplicateSteps(d *duplicates.Report, link string, add func(Step)) {
 		effort := map[string]int{"file": 1, "package": 2}[g.Scope]
 		effort = cmp.Or(effort, 3)
 		where := map[string]string{"file": "extract a helper in the same file", "package": "extract one function in the package", "repository": "move one maintained copy into a package they all import"}[g.Scope]
-		add(Step{Kind: MergeDuplicates, ID: stepID(MergeDuplicates, g.Hash), Lines: g.Redundant, Effort: effort, Safety: "medium", Link: link + "/duplicates",
+		add(Step{Kind: MergeDuplicates, ID: stepID(MergeDuplicates, g.Hash), Lines: g.Redundant, Effort: effort, Safety: "medium", Link: link + "/duplicates?group=" + g.Hash + "&kind=exact", Group: &GroupRef{Hash: g.Hash, Kind: "exact"},
 			Value:   capAt(10+g.Redundant/5, 70),
 			Title:   fmt.Sprintf("Merge %d exact copies of %s (%d redundant lines)", g.Copies, name, g.Redundant),
 			Why:     "Identical logic that has to be read, tested and fixed in every copy, and that drifts when only one is fixed. To fix it, " + where + ".",

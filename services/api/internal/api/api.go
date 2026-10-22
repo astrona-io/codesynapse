@@ -236,6 +236,7 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/repos/{repo}/duplicates", repoRole(accounts.Viewer), s.handleDuplicates)
 	s.route("GET /api/v1/shared-code", visibleOnly, s.handleSharedCode)
 	s.route("GET /api/v1/repos/{repo}/sbom", repoRole(accounts.Viewer), s.handleSBOM)
+	s.route("GET /api/v1/repos/{repo}/duplicates/refactor", repoRole(accounts.Viewer), s.handleRefactorPlan)
 	s.route("GET /api/v1/repos/{repo}/cleanup/plan", repoRole(accounts.Viewer), s.handleCleanupPlan)
 	s.route("GET /api/v1/repos/{repo}/licenses", repoRole(accounts.Viewer), s.handleLicenses)
 	s.route("GET /api/v1/repos/{repo}/memory", repoRole(accounts.Viewer), s.handleMemory)

@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 
 	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/parisnakitakejser/codesynapse/internal/refactorplan"
+	"github.com/parisnakitakejser/codesynapse/internal/store"
 )
 
 // handleDuplicates serves the duplicate-code report computed at ingest time.
@@ -61,4 +64,25 @@ func (s *Server) handleSharedCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, rep)
+}
+
+var groupHash = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+// handleRefactorPlan says how to merge one group of duplicates: ?hash= and
+// ?kind=exact|near, both as listed by the duplicates report.
+func (s *Server) handleRefactorPlan(w http.ResponseWriter, r *http.Request) {
+	repo, hash, kind := r.PathValue("repo"), r.URL.Query().Get("hash"), r.URL.Query().Get("kind")
+	if !groupHash.MatchString(hash) || (kind != "" && kind != "exact" && kind != "near") {
+		s.problem(w, http.StatusBadRequest, errors.New("hash (16 hex digits) is required; kind is exact or near"))
+		return
+	}
+	plan, err := refactorplan.ForGroup(r.Context(), store.ForRepository(s.st, repo), repo, hash, kind)
+	switch {
+	case errors.Is(err, refactorplan.ErrNotFound):
+		s.problem(w, http.StatusNotFound, err)
+	case err != nil:
+		s.problem(w, 500, err)
+	default:
+		writeJSON(w, 200, plan)
+	}
 }

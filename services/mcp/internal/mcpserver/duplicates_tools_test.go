@@ -11,6 +11,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/cleanupplan"
 	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/parisnakitakejser/codesynapse/internal/refactorplan"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
@@ -117,4 +118,28 @@ func TestCleanupPlanTool(t *testing.T) {
 	require.Len(t, got.Steps, 1)
 	assert.Equal(t, got.Steps[0].Kind, cleanupplan.MergeDuplicates)
 	assert.Contains(t, strings.Join(got.Notes, " "), "more steps")
+}
+
+func TestRefactorDuplicatesTool(t *testing.T) {
+	const hash = "0123456789abcdef"
+	g := model.NewGraph()
+	rn := g.AddNode(model.Node{ID: model.NodeID("org/a", model.KindRepository, "org/a"), Kind: model.KindRepository, Repo: "org/a", Name: "org/a"})
+	for _, name := range []string{"newID", "newRunID"} {
+		g.AddNode(model.Node{ID: model.NodeID("org/a", model.KindFunction, "pkg."+name), Kind: model.KindFunction, Repo: "org/a", Name: name, QualifiedName: "pkg." + name,
+			Package: "x/pkg", File: name + ".go", StartLine: 1, EndLine: 40, LOC: 40, CloneHash: hash, Signature: "func " + name + "() string"})
+	}
+	enc, err := duplicates.Encode(duplicates.Analyze(g))
+	require.NoError(t, err)
+	rn.Duplicates = enc
+	cs := connectRepos(t, map[string]*model.Graph{"org/a": g})
+
+	var got refactorplan.Plan
+	res := call(t, cs, "refactor_duplicates", map[string]any{"repo": "org/a", "hash": hash}, &got)
+	require.False(t, res.IsError)
+	assert.Equal(t, got.Name, "newID", "alphabetical among equally common names")
+	assert.Equal(t, len(got.Copies), 2)
+	assert.True(t, len(got.Steps) >= 5)
+
+	assert.True(t, call(t, cs, "refactor_duplicates", map[string]any{"repo": "org/a", "hash": "short"}, nil).IsError)
+	assert.True(t, call(t, cs, "refactor_duplicates", map[string]any{"repo": "org/a", "hash": "ffffffffffffffff"}, nil).IsError)
 }

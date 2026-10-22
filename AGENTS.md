@@ -50,6 +50,7 @@ internal/model/         Node/Edge kinds, Graph, IDs. The schema lives here.
 internal/ingest/        Pipeline: golang/ (go/packages + go/types; security rules in findings.go),
                         lang/ (Python, JS/TS, Vue: pure-Go structural parsers + rules),
                         docs/ (Markdown), config/ (YAML, Go templates, Helm; YAML security rules), githistory/
+internal/refactorplan/   How to merge one duplicate group (name, home, callers, tests, risks, steps); plans only
 internal/cleanupplan/   Ranked cleanup plan from the stored reports (dead code, dependencies, duplicates, hotspots)
 internal/cleanup/       Liveness (reachability from entry points), unused code/modules/config
 internal/sbom/          CycloneDX 1.5 SBOM from the dependency graph (store.DependencyGraph)

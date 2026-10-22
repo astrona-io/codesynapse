@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { DuplicatesReport } from '~/utils/types'
+import type { DuplicatesReport, RefactorPlan } from '~/utils/types'
 
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
@@ -8,6 +8,25 @@ const scope = ref('all')
 const kind = ref('all')
 const groups = computed(() => (rep.value?.groups ?? []).filter((g) =>
   (scope.value === 'all' || g.scope === scope.value) && (kind.value === 'all' || g.kind === kind.value)))
+// How to merge one group, fetched when asked for.
+const plans = reactive<Record<string, RefactorPlan | string>>({})
+const open = ref<string>('')
+const key = (g: { hash: string; kind: string }) => `${g.hash}:${g.kind}`
+async function showPlan(g: { hash: string; kind: string }) {
+  const k = key(g)
+  open.value = open.value === k ? '' : k
+  if (open.value !== k || plans[k]) return
+  try {
+    plans[k] = await $fetch<RefactorPlan>(apiPath(repoPath(repo.value, 'duplicates/refactor')), { query: { hash: g.hash, kind: g.kind } })
+  } catch (e) {
+    plans[k] = apiErrorMessage(e)
+  }
+}
+const asked = computed(() => ({ hash: String(route.query.group ?? ''), kind: String(route.query.kind ?? 'exact') }))
+watch([rep, asked], () => {
+  const g = rep.value?.groups.find((x) => x.hash === asked.value.hash && x.kind === asked.value.kind)
+  if (g && open.value !== key(g)) { open.value = ''; showPlan(g) }
+}, { immediate: true })
 const explore = (id: string) => ({ path: `/repos/${encodeURIComponent(repo.value)}/explore`, query: { id } })
 const scopeClass = (s: string) => ({ file: 'badge--green', package: 'badge--amber', repository: 'badge--pink' }[s] ?? '')
 const scopeHint: Record<string, string> = {
@@ -61,6 +80,30 @@ const scopeHint: Record<string, string> = {
                 <span class="mono muted">{{ m.file }}:{{ m.start_line }}-{{ m.end_line }}</span>
               </li>
             </ul>
+            <div>
+              <button class="chip" :class="{ active: open === key(g) }" @click="showPlan(g)">{{ open === key(g) ? 'Hide' : 'How to merge' }}</button>
+            </div>
+            <div v-if="open === key(g)" class="plan">
+              <p v-if="!plans[key(g)]" class="muted">Working it out…</p>
+              <p v-else-if="typeof plans[key(g)] === 'string'" class="error">{{ plans[key(g)] }}</p>
+              <template v-else>
+                <template v-for="p in [plans[key(g)] as RefactorPlan]" :key="p.hash">
+                  <p><strong>Suggested:</strong> a function called <span class="mono">{{ p.name }}</span> in {{ p.home }}.</p>
+                  <p>{{ p.approach }}</p>
+                  <ol class="steps"><li v-for="s in p.steps" :key="s">{{ s.replace(/^\d+\.\s*/, '') }}</li></ol>
+                  <div v-if="p.risks.length"><strong>Watch for</strong><ul><li v-for="r in p.risks" :key="r">{{ r }}</li></ul></div>
+                  <div class="table-wrap"><table>
+                    <thead><tr><th>Copy</th><th class="num">Callers</th><th class="num">Tests</th></tr></thead>
+                    <tbody><tr v-for="c in p.copies" :key="c.id">
+                      <td><NuxtLink :to="explore(c.id)" class="mono">{{ c.name }}</NuxtLink><div class="mono muted">{{ c.location }}</div></td>
+                      <td class="num">{{ c.callers.length }}</td>
+                      <td class="num" :class="{ error: !c.tests.length }">{{ c.tests.length }}</td>
+                    </tr></tbody>
+                  </table></div>
+                  <p class="muted small">A suggestion from the graph, not a change: nothing is edited. Read the code before you move it.</p>
+                </template>
+              </template>
+            </div>
           </article>
         </div>
         <div v-else class="empty"><strong>No duplicates</strong>for the current filter.</div>
@@ -74,4 +117,8 @@ const scopeHint: Record<string, string> = {
 .group { border-top: 1px solid var(--border); padding-top: 12px; display: grid; gap: 8px; }
 .members { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .members li { display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+.plan { background: var(--surface-2, transparent); border-left: 3px solid var(--accent); padding: 8px 14px; display: grid; gap: 8px; }
+.plan p, .plan ul, .plan ol { margin: 0; }
+.steps { padding-left: 20px; display: grid; gap: 2px; }
+.small { font-size: 12.5px; }
 </style>

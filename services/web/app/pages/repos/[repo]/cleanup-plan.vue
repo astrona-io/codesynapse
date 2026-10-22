@@ -72,7 +72,7 @@ const effortLabel = (e: number) => ({ 1: 'small', 2: 'medium', 3: 'large' }[e] ?
                 <span v-if="t.location" class="mono muted"> {{ t.location }}</span>
               </li>
             </ul>
-            <p class="muted small"><strong>Check:</strong> {{ s.verify }} <NuxtLink v-if="s.link" :to="s.link">More detail</NuxtLink></p>
+            <p class="muted small"><strong>Check:</strong> {{ s.verify }} <NuxtLink v-if="s.link" :to="s.link">{{ s.group ? 'How to merge' : 'More detail' }}</NuxtLink></p>
           </li>
         </ol>
         <div v-else class="empty"><strong>Nothing to do here</strong>No steps for this filter.</div>
