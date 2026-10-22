@@ -10,6 +10,7 @@
 package lang
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -69,6 +70,7 @@ type symbol struct {
 	complexity int
 	calls      []call
 	class      string
+	clone      string // structural fingerprint, see cloneHash
 }
 
 type call struct {
@@ -179,6 +181,7 @@ func (ix *indexer) id(kind model.NodeKind, local string) string {
 func (ix *indexer) parse(rel, lang string, src []byte) {
 	var fr *fileResult
 	offset := 0
+	code := src // the text the parser saw: symbol lines index into it
 	switch lang {
 	case Python:
 		fr = parsePython(src)
@@ -191,9 +194,11 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 		} else {
 			fr = parseJS(script, true)
 			offset = start
+			code = script
 		}
 		fr.findings = append(fr.findings, vueRules(src)...)
 	}
+	fr.fingerprint(lang, code)
 	if offset > 0 {
 		fr.shift(offset)
 	}
@@ -237,6 +242,9 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 			n.IsTest = true
 		}
 		n.SecurityTags = tagsFor(s.calls, lang)
+		if !n.IsTest {
+			n.CloneHash = s.clone
+		}
 		ix.g.AddNode(n)
 		ix.g.AddEdge(model.Edge{From: fileID, To: sid, Kind: model.EdgeDefines})
 		if s.class != "" {
@@ -257,6 +265,22 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 		ix.g.AddNode(model.Node{ID: tid, Kind: model.KindFunction, Repo: ix.repo, Name: "<tests>", QualifiedName: module + ".<tests>",
 			Package: module, File: rel, StartLine: 1, EndLine: lines, IsTest: true, Language: lang})
 		pf.symIDs["<tests>"] = tid
+	}
+}
+
+// fingerprint sets symbol.clone on the functions and methods of a file whose
+// lines index into code.
+func (fr *fileResult) fingerprint(lang string, code []byte) {
+	lines := bytes.Split(code, []byte("\n"))
+	for _, s := range fr.symbols {
+		if s.kind != model.KindFunction && s.kind != model.KindMethod || s.start < 1 || s.end-s.start+1 < minCloneLOC {
+			continue
+		}
+		end := min(s.end, len(lines))
+		if s.start > end {
+			continue
+		}
+		s.clone = cloneHash(lang, bytes.Join(lines[s.start-1:end], []byte("\n")))
 	}
 }
 
