@@ -17,7 +17,7 @@ func TestPrepare(t *testing.T) {
 		Repo: "r", Title: "  Review of auth  ", Author: "claude-code",
 		Comments: []CommentItem{
 			{File: "./internal/auth.go", Line: 10, Message: "Token logged: password=hunter2secret", Category: "security", Severity: "high", Suggestion: "log.Info(\"login\")"},
-			{File: "web/app.vue", Message: "Missing alt text"},
+			{File: "web/app.vue", Message: "Missing alt text; the fixture holds card 4111 1111 1111 1111"},
 		},
 	}, now)
 	require.NoError(t, err)
@@ -26,6 +26,7 @@ func TestPrepare(t *testing.T) {
 	assert.NotEqual(t, r.ID, "")
 	assert.Equal(t, r.Comments[0].File, "internal/auth.go")
 	assert.NotContains(t, r.Comments[0].Message, "hunter2secret", "secrets redacted")
+	assert.Contains(t, r.Comments[1].Message, "card [CARD]", "personal data masked")
 	assert.Equal(t, r.Comments[1].Severity, "medium")
 	assert.Equal(t, r.Comments[1].Category, "other")
 	assert.Equal(t, r.Comments[0].Status, Open)

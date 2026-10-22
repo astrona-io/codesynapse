@@ -398,15 +398,16 @@ func (r *Registry) Usage(name string) Usage {
 	return Usage{}
 }
 
-// Complete sends req to provider name. Prompts are redacted again here so
-// no caller can forget it, and answers are capped by the provider limit.
+// Complete sends req to provider name. Prompts are redacted again here
+// (secrets and personal data) so no caller can forget it, and answers are
+// capped by the provider limit.
 func (r *Registry) Complete(ctx context.Context, name string, req Request) (Response, error) {
 	p, ok := r.impl[name]
 	if !ok {
 		return Response{}, fmt.Errorf("unknown AI provider %q", name)
 	}
 	cfg, _ := r.Config(name)
-	req.System, req.User = redact.Text(req.System), redact.Text(req.User)
+	req.System, req.User = redact.Free(req.System), redact.Free(req.User)
 	if req.MaxTokens <= 0 || req.MaxTokens > cfg.MaxOutputTokens {
 		req.MaxTokens = cfg.MaxOutputTokens
 	}
@@ -507,7 +508,7 @@ func (r *Registry) Embed(ctx context.Context, name string, inputs []string) ([][
 	}
 	clean := make([]string, len(inputs))
 	for i, in := range inputs {
-		in = redact.Text(in)
+		in = redact.Free(in)
 		if rs := []rune(in); len(rs) > maxEmbedChars {
 			in = string(rs[:maxEmbedChars])
 		}

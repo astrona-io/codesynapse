@@ -78,7 +78,7 @@ func Prompt(known []string, turns []Turn) (sys, user string, err error) {
 	// Keep the newest turns when the budget runs out: they carry the
 	// latest decisions.
 	for i := len(turns) - 1; i >= 0 && budget > 0; i-- {
-		text := redact.Text(turns[i].Text)
+		text := redact.Free(turns[i].Text)
 		if r := []rune(text); len(r) > MaxTurnChars {
 			text = string(r[:MaxTurnChars]) + " …"
 		}

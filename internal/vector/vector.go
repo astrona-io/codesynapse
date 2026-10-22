@@ -49,8 +49,14 @@ type Index interface {
 	Close(ctx context.Context) error
 }
 
-// MaxK bounds a search: recall should add a few entities, not flood the context.
-const MaxK = 50
+// A search returns MinK to MaxK hits (DefaultK when unset): recall should
+// add a few strong entities, not a long tail that floods the context. Fewer
+// than three gives the graph expansion too little to work from.
+const (
+	MinK     = 3
+	MaxK     = 10
+	DefaultK = 8
+)
 
 // ErrNoTenant rejects searches and writes without a tenant.
 var ErrNoTenant = errors.New("vector: tenant is required")
@@ -75,12 +81,13 @@ func Isolate(hits []Hit, tenant, namespace string, k int) []Hit {
 	return out[:min(len(out), k)]
 }
 
-// ClampK bounds k to [1, MaxK], defaulting to 10.
+// ClampK bounds k to [MinK, MaxK], defaulting to DefaultK. Every store's
+// nearest-neighbour search uses it, so they answer alike.
 func ClampK(k int) int {
 	if k <= 0 {
-		return 10
+		return DefaultK
 	}
-	return min(k, MaxK)
+	return max(MinK, min(k, MaxK))
 }
 
 // Flat is an exact in-process Index.

@@ -25,6 +25,10 @@ func TestPrepare(t *testing.T) {
 	assert.Equal(t, b.Facts[0].Source, "agent")
 	require.Len(t, b.Replace, 1)
 	assert.Equal(t, b.Replace[0].Predicate, "PREFERS")
+
+	b, err = Prepare("r", []Triple{{Subject: "Support line", Predicate: "REACHED_AT", Object: "+45 28 12 34 56"}}, "", now)
+	require.NoError(t, err)
+	assert.Equal(t, b.Entities[1].Name, "[PHONE]", "personal data is masked in names")
 }
 
 func TestPrepareRejects(t *testing.T) {

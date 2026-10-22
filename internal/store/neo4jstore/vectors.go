@@ -8,6 +8,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
+	"github.com/parisnakitakejser/codesynapse/internal/vector"
 )
 
 // vectorIndex indexes MemoryEntity.embedding for nearest-neighbour search.
@@ -95,7 +96,7 @@ SET e.embedding = r.vec, e.embedding_model = $model`, map[string]any{"rows": row
 // spans all repositories, so it is asked for more neighbours than needed
 // and filtered to repo and model.
 func (s *Store) MemoryNearest(ctx context.Context, repo, model string, vec []float32, k int) ([]memory.Scored, error) {
-	k = store.ClampLimit(k, 10)
+	k = vector.ClampK(k)
 	out := []memory.Scored{}
 	dims, err := s.vectorDims(ctx)
 	if err != nil || dims != len(vec) {
