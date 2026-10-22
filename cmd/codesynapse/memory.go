@@ -395,12 +395,13 @@ func (o *mcpAgentsMdOptions) Run(_ context.Context, _ *app.Env) error {
 
 // mcpHooksOptions configures `codesynapse mcp hooks`.
 type mcpHooksOptions struct {
-	EC     *app.Env
-	dir    string
-	repo   string
-	apiURL string
-	shared bool
-	keep   int
+	EC        *app.Env
+	dir       string
+	repo      string
+	apiURL    string
+	shared    bool
+	keep      int
+	compactAt int
 }
 
 func (o *mcpHooksOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -409,6 +410,7 @@ func (o *mcpHooksOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "CodeSynapse API the hooks call")
 	f.BoolVar(&o.shared, "shared", false, "Write .claude/settings.json (committed, for the whole team) instead of .claude/settings.local.json")
 	f.IntVar(&o.keep, "keep", 10, "Recent exchanges kept in context; older ones are offloaded before compaction")
+	f.IntVar(&o.compactAt, "compact-at", 30, "Let Claude Code compact the session at this % of its auto-compact window (offloading first), so it stays small; 0 keeps Claude Code's default")
 	return nil
 }
 func (o *mcpHooksOptions) Complete(context.Context, *app.Env) error {
@@ -423,6 +425,9 @@ func (o *mcpHooksOptions) Complete(context.Context, *app.Env) error {
 func (o *mcpHooksOptions) Validate(context.Context, *app.Env) error {
 	if o.keep < 1 || o.keep > 50 {
 		return errors.New("--keep must be between 1 and 50")
+	}
+	if o.compactAt < 0 || o.compactAt > 100 {
+		return errors.New("--compact-at must be 0 (Claude Code's default) or 1 to 100")
 	}
 	return nil
 }
@@ -464,9 +469,14 @@ func (o *mcpHooksOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err := agentcfg.InstallHooks(settings, agentcfg.HookCommands{
 		SessionStart: fmt.Sprintf("%s memory recall %s", q(bin), common),
 		PreCompact:   fmt.Sprintf("%s memory offload %s --keep %d", q(bin), common, o.keep),
+		CompactAt:    o.compactAt,
 	}); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(o.EC.Stdout, "installed Claude Code hooks for %s in %s\n  SessionStart: recall saved facts into context\n  PreCompact:   offload turns older than the last %d exchanges (local model, background)\nAPI token stored in %s (0600)\n", repo, settings, o.keep, p)
+	shrink := "Claude Code's default compaction threshold is unchanged"
+	if o.compactAt > 0 {
+		shrink = fmt.Sprintf("the session is compacted at %d%% of the auto-compact window (%s), right after the offload, so it stays small", o.compactAt, agentcfg.CompactEnv)
+	}
+	_, err = fmt.Fprintf(o.EC.Stdout, "installed Claude Code hooks for %s in %s\n  SessionStart: recall saved facts into context (also after each compaction)\n  PreCompact:   offload turns older than the last %d exchanges (local model, background)\n  %s\nAPI token stored in %s (0600). Restart Claude Code in that project to apply.\n", repo, settings, o.keep, shrink, p)
 	return err
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/parisnakitakejser/codesynapse/internal/memory/extract"
@@ -87,7 +88,17 @@ func writeBlock(p string) (bool, error) {
 type HookCommands struct {
 	SessionStart string
 	PreCompact   string
+	// CompactAt, 1 to 100, makes Claude Code compact the session when it
+	// reaches this percentage of its auto-compact window, through the
+	// CLAUDE_AUTOCOMPACT_PCT_OVERRIDE variable (which can only lower the
+	// default). Every compaction first runs PreCompact, so older turns are
+	// offloaded and the session shrinks at the chosen size. 0 leaves
+	// Claude Code's own threshold alone.
+	CompactAt int
 }
+
+// CompactEnv is Claude Code's variable for an earlier auto-compaction.
+const CompactEnv = "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
 
 // marker identifies hooks this package installed, so re-running replaces them.
 const marker = "codesynapse memory "
@@ -121,6 +132,17 @@ func InstallHooks(settings string, cmds HookCommands) error {
 		})
 	}
 	doc["hooks"] = hooks
+	if cmds.CompactAt < 0 || cmds.CompactAt > 100 {
+		return fmt.Errorf("compact-at must be 0 (unchanged) or 1 to 100, not %d", cmds.CompactAt)
+	}
+	if cmds.CompactAt > 0 {
+		env, _ := doc["env"].(map[string]any)
+		if env == nil {
+			env = map[string]any{}
+		}
+		env[CompactEnv] = strconv.Itoa(cmds.CompactAt)
+		doc["env"] = env
+	}
 	b, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return err
