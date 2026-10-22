@@ -345,3 +345,23 @@ func (c Client) decode(body []byte) ([]Repo, error) {
 	}
 	return repos, nil
 }
+
+// RepoExists reports whether owner/name still exists as far as the token can
+// see: false only on a clean 404. Any other failure is an error, never "gone".
+func (c Client) RepoExists(ctx context.Context, owner, name string) (bool, error) {
+	if !ValidOwner(c.kind(), owner) || name == "" || strings.ContainsAny(name, "/?#%\\ ") || strings.HasPrefix(name, ".") {
+		return false, fmt.Errorf("invalid repository %q/%q", owner, name)
+	}
+	path := "/repos/" + owner + "/" + name
+	if c.kind() == GitLab {
+		path = "/projects/" + owner + "%2F" + name
+	}
+	_, err := c.get(ctx, c.apiBase()+path)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, ErrNotFound):
+		return false, nil
+	}
+	return false, err
+}

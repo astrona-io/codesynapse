@@ -302,3 +302,70 @@ func TestLegacyOrgsDefaultToGitHub(t *testing.T) {
 	assert.Equal(t, got.Host, "github.com")
 	assert.Equal(t, got.fullName("x"), "old/x")
 }
+
+func TestMissingRepositoryIsRemovedAfterThreeConfirmedChecks(t *testing.T) {
+	ctx := context.Background()
+	exists := false
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/acme/api" && exists:
+			_, _ = fmt.Fprint(w, `{}`)
+		case r.URL.Path == "/repos/acme/flaky":
+			w.WriteHeader(http.StatusBadGateway)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer fake.Close()
+
+	ws := t.TempDir()
+	st := memory.New()
+	add := func(name, remote string) string {
+		root := filepath.Join(ws, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(root, 0o700))
+		g := model.NewGraph()
+		g.AddNode(model.Node{ID: model.NodeID(name, model.KindRepository, name), Kind: model.KindRepository, Repo: name, Name: name, Root: root, URL: remote})
+		require.NoError(t, st.ReplaceRepo(ctx, name, g))
+		return root
+	}
+	root := add("acme/api", "https://github.com/acme/api.git")
+	add("acme/flaky", "https://github.com/acme/flaky.git")
+	mounted := t.TempDir() // outside the workspace: never removed
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("mnt", model.KindRepository, "mnt"), Kind: model.KindRepository, Repo: "mnt", Name: "mnt", Root: mounted, URL: "https://github.com/acme/mnt.git"})
+	require.NoError(t, st.ReplaceRepo(ctx, "mnt", g))
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := New(ctx, Config{Workspace: ws, ForgeAPI: fake.URL, Version: "test"}, st, logger)
+	for _, r := range []string{"acme/api", "acme/flaky", "mnt"} {
+		srv.sched.ensure(r, time.Now())
+	}
+	has := func(name string) bool {
+		_, err := st.Node(ctx, model.NodeID(name, model.KindRepository, name))
+		return err == nil
+	}
+
+	srv.reapIfGone(ctx, "acme/api", logger)
+	srv.reapIfGone(ctx, "acme/api", logger)
+	assert.True(t, has("acme/api"), "two checks are not enough")
+	exists = true
+	srv.reapIfGone(ctx, "acme/api", logger)
+	assert.Equal(t, srv.sched.get("acme/api").Missing, 0, "it exists again: the count starts over")
+	exists = false
+	for range goneStrikes {
+		srv.reapIfGone(ctx, "acme/api", logger)
+	}
+	assert.True(t, !has("acme/api"), "three confirmed 404s in a row remove the graph")
+	_, err := os.Stat(root)
+	assert.True(t, os.IsNotExist(err), "and the clone")
+	assert.Equal(t, srv.sched.get("acme/api").Missing, 0)
+
+	for range 2 * goneStrikes {
+		srv.reapIfGone(ctx, "acme/flaky", logger)
+		srv.reapIfGone(ctx, "mnt", logger)
+	}
+	assert.True(t, has("acme/flaky"), "an unclear answer (502) never counts as gone")
+	assert.True(t, has("mnt"), "mounted sources are never removed")
+	_, err = os.Stat(mounted)
+	assert.NoError(t, err)
+}
