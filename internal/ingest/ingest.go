@@ -26,6 +26,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/ingest/githistory"
 	"github.com/astrona-io/codesynapse/internal/ingest/golang"
 	"github.com/astrona-io/codesynapse/internal/ingest/lang"
+	"github.com/astrona-io/codesynapse/internal/ingestreport"
 	"github.com/astrona-io/codesynapse/internal/metrics"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/security"
@@ -79,6 +80,17 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 		return nil, err
 	}
 	policy := repoconfig.FromContext(ctx)
+	head := gitx.HeadCommit(ctx, root)
+	ledger := ingestreport.FromContext(ctx)
+	if err := ledger.SetSource(head, policy.Digest()); err != nil {
+		return nil, err
+	}
+	if err := ledger.Discover(ctx, root, policy); err != nil {
+		return nil, fmt.Errorf("discover files: %w", err)
+	}
+	if err := ledger.Checkpoint(ctx); err != nil {
+		return nil, fmt.Errorf("checkpoint ingest inventory: %w", err)
+	}
 	metadata, err := policyMetadata(ctx, root)
 	if err != nil {
 		return nil, err
@@ -95,7 +107,7 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	g := model.NewGraph()
 	repoNode := g.AddNode(model.Node{
 		ID: model.NodeID(opts.Repo, model.KindRepository, opts.Repo), Kind: model.KindRepository,
-		Repo: opts.Repo, Name: opts.Repo, Root: root, Head: gitx.HeadCommit(ctx, root),
+		Repo: opts.Repo, Name: opts.Repo, Root: root, Head: head,
 		Time: start.UTC().Format(time.RFC3339), URL: gitx.SanitizeURL(gitx.HTTPSRemote(gitx.OriginURL(ctx, root))),
 		Branch: opts.Branch,
 	})
@@ -230,13 +242,13 @@ func addDependencies(ctx context.Context, opts Options, root string, g *model.Gr
 	logger := logx.FromContext(ctx)
 	var mods []vuln.Module
 	if goRes != nil {
-		goMods, err := vuln.Modules(root, runtime.Version(), repoconfig.FromContext(ctx))
+		goMods, err := vuln.ModulesContext(ctx, root, runtime.Version(), repoconfig.FromContext(ctx))
 		if err != nil {
 			return nil, fmt.Errorf("reading go.mod: %w", err)
 		}
 		mods = goMods
 	}
-	other, err := vuln.ManifestModules(root, repoconfig.FromContext(ctx))
+	other, err := vuln.ManifestModulesContext(ctx, root, repoconfig.FromContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("reading lockfiles: %w", err)
 	}
@@ -301,13 +313,13 @@ func Licenses(ctx context.Context, root string, opts Options) (license.Report, e
 	}
 	var mods []vuln.Module
 	if hasGoModule(root, repoconfig.FromContext(ctx)) {
-		goMods, err := vuln.Modules(root, runtime.Version(), repoconfig.FromContext(ctx))
+		goMods, err := vuln.ModulesContext(ctx, root, runtime.Version(), repoconfig.FromContext(ctx))
 		if err != nil {
 			return license.Report{}, fmt.Errorf("reading go.mod: %w", err)
 		}
 		mods = goMods
 	}
-	other, err := vuln.ManifestModules(root, repoconfig.FromContext(ctx))
+	other, err := vuln.ManifestModulesContext(ctx, root, repoconfig.FromContext(ctx))
 	if err != nil {
 		return license.Report{}, fmt.Errorf("reading lockfiles: %w", err)
 	}

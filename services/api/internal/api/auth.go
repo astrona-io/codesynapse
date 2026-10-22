@@ -144,9 +144,13 @@ func (s *Server) accountError(w http.ResponseWriter, err error) {
 		s.problem(w, http.StatusForbidden, err)
 	case errors.Is(err, accounts.ErrNotFound):
 		s.problem(w, http.StatusNotFound, err)
+	case errors.Is(err, accounts.ErrIngestReportExpired):
+		s.problem(w, http.StatusGone, err)
+	case errors.Is(err, accounts.ErrIngestConflict):
+		s.problem(w, http.StatusConflict, err)
 	case errors.Is(err, execution.ErrConflict), errors.Is(err, accounts.ErrExecutionSessionClosed), errors.Is(err, accounts.ErrExists), errors.Is(err, accounts.ErrLastOwner), errors.Is(err, accounts.ErrNoSecretKey), errors.Is(err, accounts.ErrLastAdmin):
 		s.problem(w, http.StatusConflict, err)
-	case errors.Is(err, accounts.ErrExecutionSessionLimit), errors.Is(err, accounts.ErrRateLimited):
+	case errors.Is(err, accounts.ErrExecutionSessionLimit), errors.Is(err, accounts.ErrIngestLimit), errors.Is(err, accounts.ErrRateLimited):
 		w.Header().Set("Retry-After", "60")
 		s.problem(w, http.StatusTooManyRequests, err)
 	default:

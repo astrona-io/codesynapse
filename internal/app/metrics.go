@@ -80,3 +80,16 @@ func startPrometheusMetrics(ctx context.Context, logger *slog.Logger, job, url s
 		}
 	})
 }
+
+// NewIngestMetrics uses the selected transport for fenced durable file totals.
+// It returns nil when metrics are disabled and never starts its own export loop.
+func NewIngestMetrics(ctx context.Context) (*telemetry.IngestExporter, error) {
+	url := os.Getenv(EnvMetricsURL)
+	if url == "" {
+		return nil, nil
+	}
+	return telemetry.NewIngestExporter(ctx, telemetry.IngestExportConfig{
+		URL: url, User: os.Getenv(EnvMetricsUser), Password: os.Getenv(EnvMetricsPassword),
+		Format: Getenv(EnvMetricsExporter, "otlp"), Timeout: 10 * time.Second,
+	})
+}

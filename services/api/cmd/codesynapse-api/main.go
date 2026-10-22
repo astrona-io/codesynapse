@@ -119,6 +119,19 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		return err
 	}
 	defer closeAccounts()
+	ingestMetrics, err := app.NewIngestMetrics(ctx)
+	if err != nil {
+		return err
+	}
+	if ingestMetrics != nil {
+		defer func() {
+			shutdown, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if err := ingestMetrics.Shutdown(shutdown); err != nil {
+				o.EC.Logger.Warn("ingest metrics shutdown failed", "error", err)
+			}
+		}()
+	}
 	gitAuths, err := gitx.ParseAuths(os.Getenv("CODESYNAPSE_GIT_TOKENS"))
 	if err != nil {
 		return fmt.Errorf("CODESYNAPSE_GIT_TOKENS: %w", err)
@@ -129,7 +142,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		AllowPush: app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true",
 		Accounts:  acc, ServiceToken: os.Getenv(EnvToken), SecureCookies: app.Getenv("CODESYNAPSE_COOKIE_SECURE", "true") == "true",
 		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour,
-		Metrics:        metricsQuerier(),
+		Metrics:        metricsQuerier(), IngestMetrics: ingestMetrics,
 		TrustedProxies: trusted, PublicMCPURL: app.Getenv("CODESYNAPSE_PUBLIC_MCP_URL", "http://localhost:8090/mcp"),
 		GitAuthor: gitx.Author{Name: app.Getenv("CODESYNAPSE_GIT_AUTHOR_NAME", "CodeSynapse"), Email: app.Getenv("CODESYNAPSE_GIT_AUTHOR_EMAIL", "codesynapse@localhost")}}, st, o.EC.Logger)
 	o.EC.Logger.Info("api listening", "addr", o.addr, "sources_root", o.sources, "auth", os.Getenv(EnvToken) != "", "accounts", acc != nil)

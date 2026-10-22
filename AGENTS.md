@@ -47,6 +47,7 @@ services/mcp/           MCP service: cmd/codesynapse-mcp, Dockerfile
   internal/mcpserver/   MCP tools, prompts (prompts.go) and server instructions
 services/web/           Nuxt 4 dashboard (app/ pages+components, server/api/cg proxy, Dockerfile)
 deploy/k8s/             Kustomize manifests (base + dev/prod overlays); docker-compose.yml stays at the repo root
+internal/ingestreport/  Bounded file ledger, commit-confirmed outcomes and metadata-only context estimates
 internal/config/        Strict repository .codesynapse.yaml policy, digest and shared path matcher
 internal/model/         Node/Edge kinds, Graph, IDs. The schema lives here.
 internal/ingest/        Pipeline: golang/ (go/packages + go/types; security rules in findings.go),
@@ -145,6 +146,7 @@ Rules are static files: `rules/code/<id>.yaml` and `rules/config/<id>.yaml` (see
 
 This tool reads untrusted repositories and serves their contents to LLMs. Keep it that way:
 
+- **Ingestion accounting:** exact reports live in tenant-owned accounts records, never in shared graph metrics. `Repository.meta.ingest_receipt` is an opaque commit receipt only. Checkpoints precede extraction/publication; recovery counts indexed files only after matching a receipt under the publication lock. Preserve run tombstones, cumulative totals and stable repository metric IDs across retries, restarts and unlink/relink. The three `codesynapse_files_*_total` metrics alone may carry `repo`, an admitted server-owned 24-hex repository-entry ID verified against its tenant, never a display name or graph ID. Export persisted totals through the fenced ingestion exporter, never replay them into Default counters. Scoped series use both tenant and repository extra filters. See `docs/INGEST_TRANSPARENCY_PLAN.md`.
 - **Repository policy:** `.codesynapse.yaml` is untrusted. Global/Kubernetes exclusions require a matching reviewed digest (every linked organisation in the API, explicit `--approved-policy-digest` offline). Finding suppression is a tenant-local approval overlay; never delete raw findings. Annotation uses only the local `code-annotation` route, validated symbol metadata and inherited execution identity. Graph and annotation publication must retain the accounts policy transaction and final credential/revision checks. See `docs/REPO_CONFIG_PLAN.md`.
 - **Cypher:** values only through parameters. Labels, relationship types, depth and ORDER BY may be interpolated only from `model` allowlists, `store.ClampDepth`, or the `metricCypher` table. Never build Cypher from request strings.
 - **Gremlin (HugeGraph):** scripts are constants in `hugegraphstore`; values, labels and IDs travel only in `bindings`, never in script text. Gremlin-groovy executes code on the server, so HugeGraph always runs with a password (`HUGEGRAPH_PASSWORD`; the compose service refuses to start without one), is never published to the host, and there is no raw-Gremlin tool. Tenant-owned data (agent memory) carries `tenant_id` and every traversal over it starts at `has('tenant_id', …).has('ns', …)`.

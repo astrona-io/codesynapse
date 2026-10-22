@@ -36,11 +36,26 @@ type Point struct {
 // ErrBadTenant rejects tenant filters that are not organisation IDs.
 var ErrBadTenant = errors.New("telemetry: tenant filter must be organisation IDs")
 
+// ErrBadRepository rejects repository names and absent tenant scope.
+var ErrBadRepository = errors.New("telemetry: repository filter requires an opaque repository ID and tenant scope")
+
 // QueryRange runs a MetricsQL range query. tenants, when not nil, restricts
 // every series to those tenant_id values through VictoriaMetrics'
 // extra_filters, so the database enforces the scope whatever the query
 // says; an empty non-nil list matches nothing.
 func (q *Querier) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration, tenants []string) ([]Series, error) {
+	return q.queryRange(ctx, expr, start, end, step, tenants, "")
+}
+
+// QueryRangeForRepo intersects a trusted repository-entry ID with tenant scope.
+func (q *Querier) QueryRangeForRepo(ctx context.Context, expr string, start, end time.Time, step time.Duration, tenants []string, repositoryID string) ([]Series, error) {
+	if tenants == nil || !tenantRe.MatchString(repositoryID) {
+		return nil, ErrBadRepository
+	}
+	return q.queryRange(ctx, expr, start, end, step, tenants, repositoryID)
+}
+
+func (q *Querier) queryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration, tenants []string, repositoryID string) ([]Series, error) {
 	v := url.Values{}
 	v.Set("query", expr)
 	v.Set("start", strconv.FormatInt(start.Unix(), 10))
@@ -55,7 +70,11 @@ func (q *Querier) QueryRange(ctx context.Context, expr string, start, end time.T
 				return nil, ErrBadTenant
 			}
 		}
-		v.Add("extra_filters[]", `{tenant_id=~"`+strings.Join(tenants, "|")+`"}`)
+		filter := `tenant_id=~"` + strings.Join(tenants, "|") + `"`
+		if repositoryID != "" {
+			filter += `,repo="` + repositoryID + `"`
+		}
+		v.Add("extra_filters[]", "{"+filter+"}")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(q.URL, "/")+"/api/v1/query_range?"+v.Encode(), nil)
 	if err != nil {

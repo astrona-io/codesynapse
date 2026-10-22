@@ -83,6 +83,8 @@ codesynapse ingest /path/to/repository --approved-policy-digest '<reviewed-diges
 
 With accounts, a repository administrator approves the configuration on **Indexing policy**, with a reason and optional expiry. Exclusions need approval from every organisation sharing the graph. Security exceptions apply only to the approving organisation; the raw findings remain available. Annotation additionally needs the local `code-annotation` model route and a registered runtime session. See the [configuration reference](docs/REPO_CONFIG_PLAN.md) for the YAML schema and API workflow.
 
+**Ingestion reports** shows the latest attempt and last successful run separately, with per-file outcomes, scanner exclusions and graph publication status. The read-only MCP tool `ingestion_report` returns the same summaries. File metrics come from durable accounting, so restarts and recovery do not count a write twice. Savings are metadata-based estimates with coverage shown; unknown files beneath pruned directories are excluded. See [ingestion accounting](docs/INGEST_TRANSPARENCY_PLAN.md) for limits and recovery behavior.
+
 The repository and Go module now use `github.com/astrona-io/codesynapse`; container image references use `ghcr.io/astrona-io`. Update existing clones with `git remote set-url origin git@github.com:astrona-io/codesynapse.git`. Consumers of the Go module must update their imports.
 
 ## Code reviews

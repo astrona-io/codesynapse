@@ -9,9 +9,10 @@ import (
 
 type accountTransactionKey struct{}
 type accountTransaction struct {
-	server  *Server
-	service *accounts.Service
-	denied  []accounts.Event
+	server      *Server
+	service     *accounts.Service
+	denied      []accounts.Event
+	afterCommit []func()
 }
 
 // accountsFor uses the already locked policy snapshot during graph publication.
@@ -24,7 +25,7 @@ func (s *Server) accountsFor(ctx context.Context) *accounts.Service {
 	return s.cfg.Accounts
 }
 
-func (s *Server) publishRepo(ctx context.Context, _ string, publish func(context.Context) error) error {
+func (s *Server) publishRepo(ctx context.Context, graph string, publish func(context.Context) error) error {
 	if s.cfg.Accounts == nil {
 		return publish(ctx)
 	}
@@ -41,10 +42,18 @@ func (s *Server) publishRepo(ctx context.Context, _ string, publish func(context
 		if _, err := service.ResolveExecutionSession(workCtx, id.SubjectID, id.TenantID, id.SessionID); err != nil {
 			return err
 		}
+		if err := s.reconcileIngestReports(workCtx, graph); err != nil {
+			return err
+		}
 		return publish(workCtx)
 	})
 	// Denials must survive the rollback that kept the previous graph active.
 	if txContext != nil {
+		if err == nil {
+			for _, committed := range txContext.afterCommit {
+				committed()
+			}
+		}
 		for _, event := range txContext.denied {
 			if _, auditErr := s.cfg.Accounts.Record(ctx, event); auditErr != nil && s.logger != nil {
 				s.logger.Warn("job authorization audit failed", "error", auditErr)

@@ -99,3 +99,13 @@ var (
 	MemoryFactsObservedAt       = Default.ScopedGauge("agent_memory_facts_observed_at_seconds", "Time of the last complete durable memory count snapshot.", "tenant_id")
 	MemoryFactsCollectionErrors = Default.Counter("platform_memory_facts_collection_errors_total", "Failed or incomplete durable memory count collections.")
 )
+
+// File-accounting metrics are exported from durable totals, never Default counters.
+const (
+	FilesScannedMetric        = "codesynapse_files_scanned_total"
+	FilesIndexedMetric        = "codesynapse_files_indexed_total"
+	FilesSkippedMetric        = "codesynapse_files_skipped_total"
+	IngestDroppedSeriesMetric = "platform_codesynapse_ingest_metric_series_dropped_total"
+)
+
+var ingestExportRejections = Default.Counter("platform_ingest_metric_export_rejections_total", "Durable ingest metric snapshots rejected before export.", "reason")

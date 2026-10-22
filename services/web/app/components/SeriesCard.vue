@@ -4,9 +4,9 @@ import type { SeriesPanel, SeriesRange } from '~/utils/types'
 // One time-series panel from /stats/series. Emits "unavailable" when the
 // API says metrics are not configured (409) or the panel is not for this
 // user (403), so the page can explain once instead of per chart.
-const props = defineProps<{ panel: string; range: SeriesRange; tick: number }>()
+const props = defineProps<{ panel: string; range: SeriesRange; tick: number; repo?: string }>()
 const emit = defineEmits<{ unavailable: [status: number] }>()
-const { data, error, pending, refresh } = useApiGet<SeriesPanel>(() => `stats/series?panel=${props.panel}&range=${props.range}`)
+const { data, error, pending, refresh } = useApiGet<SeriesPanel>(() => `stats/series?panel=${props.panel}&range=${props.range}${props.repo ? `&repo=${encodeURIComponent(props.repo)}` : ""}`)
 watch(() => props.tick, () => refresh())
 watch(error, (e) => {
   const status = (e as { statusCode?: number } | null)?.statusCode

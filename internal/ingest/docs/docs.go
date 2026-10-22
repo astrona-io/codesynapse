@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
+	"github.com/astrona-io/codesynapse/internal/ingestreport"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/redact"
 )
@@ -73,19 +74,27 @@ func Extract(ctx context.Context, repo, root string, symbols *model.Graph) (*mod
 		if d.Type()&fs.ModeSymlink != 0 || !isMarkdown(d.Name()) {
 			return nil
 		}
-		info, err := d.Info()
-		if err != nil || info.Size() > maxDocSize {
-			return nil //nolint:nilerr // unreadable or oversized docs are skipped, not fatal
-		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
+		rel = filepath.ToSlash(rel)
+		info, err := d.Info()
+		if err != nil {
+			ingestreport.Observe(ctx, rel, ingestreport.Docs, ingestreport.StageFailed, "metadata_unavailable")
+			return nil //nolint:nilerr // the ledger retains the file failure while extraction continues
+		}
+		if info.Size() > maxDocSize {
+			ingestreport.Observe(ctx, rel, ingestreport.Docs, ingestreport.StageFailed, "size_limit")
+			return nil
+		}
 		content, err := os.ReadFile(path) //nolint:gosec // path is inside root and not a symlink
 		if err != nil {
+			ingestreport.Observe(ctx, rel, ingestreport.Docs, ingestreport.StageFailed, "read_failed")
 			return fmt.Errorf("reading %s: %w", rel, err)
 		}
 		addDocument(g, repo, repoID, filepath.ToSlash(rel), content, index)
+		ingestreport.Observe(ctx, rel, ingestreport.Docs, ingestreport.StageSucceeded, "")
 		return nil
 	})
 	if err != nil {

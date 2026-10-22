@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
+	"github.com/astrona-io/codesynapse/internal/ingestreport"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/redact"
 )
@@ -137,19 +138,27 @@ func Extract(ctx context.Context, repo, root string) (*Result, error) {
 		if lang == "" || d.Type()&fs.ModeSymlink != 0 || strings.HasSuffix(d.Name(), ".min.js") {
 			return nil
 		}
-		info, err := d.Info()
-		if err != nil || info.Size() > maxFileSize {
-			return nil //nolint:nilerr // skip unreadable or huge (generated) files
-		}
 		rel, err := filepath.Rel(root, p)
 		if err != nil {
 			return err
 		}
+		rel = filepath.ToSlash(rel)
+		info, err := d.Info()
+		if err != nil {
+			ingestreport.Observe(ctx, rel, ingestreport.Language, ingestreport.StageFailed, "metadata_unavailable")
+			return nil //nolint:nilerr // the ledger retains the file failure while extraction continues
+		}
+		if info.Size() > maxFileSize {
+			ingestreport.Observe(ctx, rel, ingestreport.Language, ingestreport.StageFailed, "size_limit")
+			return nil
+		}
 		src, err := os.ReadFile(p) //nolint:gosec // inside root, not a symlink
 		if err != nil {
+			ingestreport.Observe(ctx, rel, ingestreport.Language, ingestreport.StageFailed, "read_failed")
 			return nil //nolint:nilerr // unreadable file: skip
 		}
 		ix.parse(filepath.ToSlash(rel), lang, src)
+		ingestreport.Observe(ctx, rel, ingestreport.Language, ingestreport.StageSucceeded, "")
 		return nil
 	})
 	if err != nil {

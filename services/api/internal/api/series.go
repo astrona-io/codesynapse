@@ -8,6 +8,9 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // Time-series statistics from VictoriaMetrics. Panels are fixed MetricsQL
@@ -40,9 +43,10 @@ type seriesQuery struct {
 type seriesPanel struct {
 	Title, Unit, Help, Empty string
 	// Kind is "count" (per step) or "gauge" (latency, a level per step).
-	Kind     string
-	queries  []seriesQuery
-	platform bool // cross-tenant: platform admins only
+	Kind       string
+	queries    []seriesQuery
+	platform   bool // cross-tenant: platform admins only
+	repository bool
 }
 
 // OTLP can split related gauges across HTTP batches. Only observations whose
@@ -50,6 +54,15 @@ type seriesPanel struct {
 const memoryObserved = `agent_memory_facts_observed_at_seconds and (timestamp(agent_memory_facts_count) == timestamp(agent_memory_facts_observed_at_seconds))`
 
 var seriesPanels = map[string]seriesPanel{
+	"annotation_jobs": {Title: "Organisation annotation outcomes", Unit: "jobs", Kind: "count",
+		Help:    "Local annotation jobs across the selected organisations, separate from ingestion outcomes. This panel is not repository-specific.",
+		queries: []seriesQuery{{expr: `sum by (outcome) (increase(codesynapse_annotation_jobs_total[$w]))`, by: "outcome"}}},
+	"ingest_files": {Title: "File processing across runs", Unit: "files", Kind: "count", repository: true,
+		Help:    "Persisted file accounting: encountered files and confirmed file writes. Exact counts belong to each ingestion report; these increases span runs.",
+		queries: []seriesQuery{{name: "scanned", expr: `sum(increase(codesynapse_files_scanned_total[$w]))`}, {name: "written", expr: `sum(increase(codesynapse_files_indexed_total[$w]))`}}},
+	"ingest_skips": {Title: "Whole-file exclusions across runs", Unit: "files", Kind: "count", repository: true,
+		Help:    "Whole-file skip decisions from persisted report checkpoints. Kubernetes-only exclusions are stage decisions and do not count as skipped files.",
+		queries: []seriesQuery{{expr: `sum by (skip_reason) (increase(codesynapse_files_skipped_total[$w]))`, by: "skip_reason"}}},
 	"tool_calls": {Title: "Tool calls", Unit: "calls", Kind: "count",
 		Help:    "MCP tool and prompt calls per step, by tool.",
 		queries: []seriesQuery{{expr: `sum by (mcp_tool) (increase(mcp_tool_calls_total[$w]))`, by: "mcp_tool"}}},
@@ -206,6 +219,35 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 			tenants = append(tenants, m.Org.ID)
 		}
 	}
+	repositoryID := ""
+	if p.repository {
+		if s.cfg.Accounts == nil {
+			s.accountError(w, accounts.ErrNotFound)
+			return
+		}
+		contentScope, err := s.scopeOf(r, caller)
+		if err != nil {
+			s.accountError(w, err)
+			return
+		}
+		repo := r.URL.Query().Get("repo")
+		reach, ok := contentScope.reach[repo]
+		if !ok || reach.Ambiguous || !reach.Role.AtLeast(accounts.Viewer) {
+			s.accountError(w, accounts.ErrNotFound)
+			return
+		}
+		runs, err := s.cfg.Accounts.St.ListIngestRuns(r.Context(), reach.OrgID, repo, 1)
+		if err != nil {
+			s.accountError(w, err)
+			return
+		}
+		if len(runs) == 0 || !runs[0].MetricCoverage {
+			s.problem(w, http.StatusConflict, errors.New("repository ingestion metrics are not available; use the exact ingestion report"))
+			return
+		}
+		repositoryID = runs[0].RepositoryID
+		tenants = []string{reach.OrgID}
+	}
 	// The last step is the current one, still filling: recent activity
 	// shows at once instead of when the step completes.
 	end := time.Now().Truncate(sr.step).Add(sr.step)
@@ -223,7 +265,13 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 		index[t] = i
 	}
 	for _, q := range p.queries {
-		res, err := s.cfg.Metrics.QueryRange(r.Context(), strings.ReplaceAll(q.expr, "$w", sr.window), start.Add(sr.step), end, sr.step, tenants)
+		var res []telemetry.Series
+		var err error
+		if p.repository {
+			res, err = s.cfg.Metrics.QueryRangeForRepo(r.Context(), strings.ReplaceAll(q.expr, "$w", sr.window), start.Add(sr.step), end, sr.step, tenants, repositoryID)
+		} else {
+			res, err = s.cfg.Metrics.QueryRange(r.Context(), strings.ReplaceAll(q.expr, "$w", sr.window), start.Add(sr.step), end, sr.step, tenants)
+		}
 		if err != nil {
 			s.problem(w, http.StatusBadGateway, err)
 			return

@@ -63,7 +63,8 @@ type Config struct {
 	AuditRetention time.Duration
 	// Metrics reads time series for the statistics (nil without
 	// VictoriaMetrics).
-	Metrics *telemetry.Querier
+	Metrics       *telemetry.Querier
+	IngestMetrics *telemetry.IngestExporter
 	// TrustedProxies may report the client address in X-Forwarded-For
 	// (the web app); everyone else is identified by the connection.
 	TrustedProxies []netip.Prefix
@@ -117,6 +118,7 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	s.jobs.Policy = s.approveIngestPolicy
 	s.jobs.Publish = s.publishRepo
 	s.jobs.Ingested = s.annotateIngest
+	s.jobs.Report = s.saveIngestReport
 	s.annotations = annotation.New(cfg.LLM, s.persistAnnotations)
 	go s.annotations.Run(ctx)
 	if cfg.Accounts != nil {
@@ -129,6 +131,8 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 		go s.pruneAudit(ctx)
 		go s.projectAccess(ctx)
 		go s.pruneExecutionMemory(ctx)
+		go s.recoverIngestReports(ctx)
+		go s.exportIngestMetrics(ctx)
 	}
 	s.offload = offload.New(st, cfg.LLM, logger)
 	s.recall = recall.New(st, cfg.LLM, logger)
