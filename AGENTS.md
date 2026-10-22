@@ -51,6 +51,7 @@ internal/ingest/        Pipeline: golang/ (go/packages + go/types; security rule
                         lang/ (Python, JS/TS, Vue: pure-Go structural parsers + rules),
                         docs/ (Markdown), config/ (YAML, Go templates, Helm; YAML security rules), githistory/
 internal/cleanup/       Liveness (reachability from entry points), unused code/modules/config
+internal/sbom/          CycloneDX 1.5 SBOM from the dependency graph (store.DependencyGraph)
 internal/vuln/          go.mod and lockfiles (npm, PyPI, Cargo, Composer, Bundler, NuGet, Gradle) + OSV lookups, called/imported/required reachability
 internal/security/      Security report: grading, exposure, prioritisation, Markdown; rule guides (guides.go)
 internal/metrics/       Repository metrics and the token benchmark (computed at ingest)

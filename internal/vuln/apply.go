@@ -27,6 +27,20 @@ func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability,
 			Dev: m.Dev, License: m.License, LicenseSource: m.LicenseSource, Via: m.Via, Roots: m.Roots})
 		g.AddEdge(model.Edge{From: repoID, To: id, Kind: model.EdgeDependsOn})
 	}
+	// Module requires module, for the dependency graph of an SBOM. Edges to
+	// modules the project does not have are dropped.
+	have := make(map[string]bool, len(modules))
+	for _, m := range modules {
+		have[m.Key()] = true
+	}
+	for _, m := range modules {
+		from := model.NodeID(repo, model.KindModule, m.Key())
+		for _, r := range m.Requires {
+			if r != m.Key() && have[r] {
+				g.AddEdge(model.Edge{From: from, To: model.NodeID(repo, model.KindModule, r), Kind: model.EdgeDependsOn})
+			}
+		}
+	}
 
 	// Index called symbols by import path in OSV notation.
 	calledByPkg := map[string]map[string][]string{}

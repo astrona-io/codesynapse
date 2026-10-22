@@ -70,6 +70,7 @@ func Run(t *testing.T, s store.Store) {
 	require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
 	t.Run("access_projection", func(t *testing.T) { accessContract(t, s) })
 	t.Run("scoped_graph", func(t *testing.T) { scopedContract(t, s) })
+	t.Run("dependency_graph", func(t *testing.T) { dependencyContract(t, s) })
 
 	t.Run("repos", func(t *testing.T) {
 		repo, ok := findRepo(ctx, t, s)

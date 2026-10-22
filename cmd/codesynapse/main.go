@@ -28,6 +28,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/query"
 	"github.com/parisnakitakejser/codesynapse/internal/review"
+	"github.com/parisnakitakejser/codesynapse/internal/sbom"
 	"github.com/parisnakitakejser/codesynapse/internal/security"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
@@ -38,7 +39,7 @@ var version = "dev"
 func main() {
 	os.Exit(app.Main("codesynapse", "Index code, docs and history into a graph for review and AI assistants", version,
 		func(ec *app.Env) []*cobra.Command {
-			return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), statsCmd(ec), mcpCmd(ec), memoryCmd(ec), schemaCmd(ec)}
+			return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), statsCmd(ec), mcpCmd(ec), memoryCmd(ec), schemaCmd(ec)}
 		}))
 }
 
@@ -749,5 +750,73 @@ func duplicatesCmd(ec *app.Env) *cobra.Command {
 		WithLongDesc("Groups functions and methods with the same structure (names and literal values ignored) and ranks them by redundant lines. With several paths it also finds code copied between the repositories and recommends where a shared library or framework would pay off.").
 		WithExample("  codesynapse duplicates .\n  codesynapse duplicates ~/src/api ~/src/worker ~/src/cli -o json\n  codesynapse duplicates . --max-percent 5   # fail a CI job above 5%").
 		WithGroupID(app.GroupBase).
+		Build()
+}
+
+// sbomOptions configures `codesynapse sbom`.
+type sbomOptions struct {
+	EC    *app.Env
+	vulns bool
+	file  string
+	root  string
+}
+
+func (o *sbomOptions) SetupFlags(_ context.Context, _ *app.Env) error {
+	f := o.EC.Command.Flags()
+	f.BoolVar(&o.vulns, "vulns", false, "Also look up known vulnerabilities at osv.dev and list them in the SBOM (sends ecosystem, package names and versions)")
+	f.StringVar(&o.file, "file", "", "Write the SBOM to this file instead of standard output")
+	return nil
+}
+
+func (o *sbomOptions) Complete(_ context.Context, _ *app.Env) error {
+	o.root = "."
+	if len(o.EC.Args) > 0 {
+		o.root = o.EC.Args[0]
+	}
+	abs, err := filepath.Abs(o.root)
+	o.root = abs
+	return err
+}
+
+func (o *sbomOptions) Validate(context.Context, *app.Env) error { return nil }
+
+func (o *sbomOptions) Run(ctx context.Context, _ *app.Env) error {
+	ctx = app.Ctx(ctx, o.EC)
+	repo := filepath.Base(o.root)
+	g, err := ingest.Run(ctx, ingest.Options{Repo: repo, Root: o.root, VulnScan: o.vulns})
+	if err != nil {
+		return err
+	}
+	mem := memory.New()
+	if err := mem.ReplaceRepo(ctx, repo, g); err != nil {
+		return err
+	}
+	n, err := mem.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
+	if err != nil {
+		return err
+	}
+	deps, err := mem.DependencyGraph(ctx, repo)
+	if err != nil {
+		return err
+	}
+	b, err := sbom.Marshal(sbom.Build(n, deps, sbom.Options{Tool: version}))
+	if err != nil {
+		return err
+	}
+	if o.file != "" {
+		return os.WriteFile(o.file, b, 0o644) //nolint:gosec // an SBOM is meant to be shared
+	}
+	_, err = o.EC.Stdout.Write(b)
+	return err
+}
+
+func sbomCmd(ec *app.Env) *cobra.Command {
+	o := &sbomOptions{EC: ec}
+	return app.NewSubCommand("sbom [path]", o, ec).
+		WithShortDesc("Write a CycloneDX software bill of materials from go.mod and the lockfiles (offline)").
+		WithLongDesc("Lists the dependencies that go.mod and the npm, Python, Rust, PHP, Ruby, .NET and Gradle lockfiles resolve, with licences, versions, package URLs and which module requires which. It is the resolved dependency set, not the contents of a built artifact. --vulns adds known vulnerabilities from osv.dev.").
+		WithExample("  codesynapse sbom . --file sbom.cdx.json").
+		WithGroupID(app.GroupBase).
+		WithMaxArgs(1).
 		Build()
 }

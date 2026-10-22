@@ -82,6 +82,9 @@ export default defineEventHandler(async (event) => {
   setResponseStatus(event, res.status)
   const ct = res.headers.get('content-type')
   if (ct) setResponseHeader(event, 'content-type', ct)
+  // Only the one download the API offers (the SBOM), with a plain file name.
+  const disposition = res.headers.get('content-disposition')
+  if (disposition && /^attachment; filename="[A-Za-z0-9._-]{1,200}"$/.test(disposition)) setResponseHeader(event, 'content-disposition', disposition)
   // Login, sign-up and logout set or clear the session cookie.
   for (const c of res.headers.getSetCookie()) {
     if (c.startsWith(`${SESSION_COOKIE}=`)) appendResponseHeader(event, 'set-cookie', c)

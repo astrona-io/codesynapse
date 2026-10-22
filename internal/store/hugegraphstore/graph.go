@@ -371,6 +371,49 @@ g.V(ids as Object[]).toList().each { a ->
 }
 out`
 
+const dependencyScript = props + `def mods = g.V().hasLabel('node').has('repo', repo).has('kind', 'Module').toList()
+mods.sort { it.value('nid') }
+def vulns = g.V().hasLabel('node').has('repo', repo).has('kind', 'Vulnerability').toList()
+vulns.sort { it.value('nid') }
+def ids = mods.collect { it.id().toString() } as Set
+def edges = []
+mods.each { a ->
+  a.edges(Direction.OUT, 'DEPENDS_ON').each { e ->
+    def b = e.inVertex()
+    if (ids.contains(b.id().toString())) { edges << [a.value('nid'), b.value('nid')] }
+  }
+}
+edges.sort { x, y -> x[0] <=> y[0] ?: x[1] <=> y[1] }
+[[modules: mods.take(limit as int).collect { P(it) }, vulns: vulns.take(limit as int).collect { P(it) }, edges: edges.take(elimit as int),
+  more: mods.size() > limit || vulns.size() > limit || edges.size() > elimit]]`
+
+// DependencyGraph implements store.Reader.
+func (s *Store) DependencyGraph(ctx context.Context, repo string) (store.DependencyGraph, error) {
+	if err := s.repoExists(ctx, repo); err != nil {
+		return store.DependencyGraph{}, err
+	}
+	var res []struct {
+		Modules []map[string]any `json:"modules"`
+		Vulns   []map[string]any `json:"vulns"`
+		Edges   [][]string       `json:"edges"`
+		More    bool             `json:"more"`
+	}
+	if err := s.read(ctx, dependencyScript, map[string]any{"repo": repo, "limit": store.MaxDependencies, "elimit": store.MaxDependencyEdges}, &res); err != nil {
+		return store.DependencyGraph{}, err
+	}
+	g := store.DependencyGraph{}
+	if len(res) == 0 {
+		return g, nil
+	}
+	g.Modules, g.Vulnerabilities, g.Truncated = toNodes(res[0].Modules), toNodes(res[0].Vulns), res[0].More
+	for _, e := range res[0].Edges {
+		if len(e) == 2 {
+			g.Edges = append(g.Edges, model.Edge{From: e[0], To: e[1], Kind: model.EdgeDependsOn, Count: 1})
+		}
+	}
+	return g, nil
+}
+
 // Subgraph implements store.Reader.
 func (s *Store) Subgraph(ctx context.Context, ids []string, kinds []model.EdgeKind) ([]model.Edge, error) {
 	if len(ids) == 0 {

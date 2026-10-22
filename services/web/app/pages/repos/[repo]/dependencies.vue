@@ -4,6 +4,7 @@ import type { LicenseReport, Ranked, SecurityReport, SecVuln } from '~/utils/typ
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
 useHead({ title: () => `Dependencies · ${repo.value}` })
+const sbomHref = computed(() => apiPath(repoPath(repo.value, 'sbom')))
 const { data: mods, error } = useApiGet<{ results: Ranked[] }>(() => repoPath(repo.value, 'list?kind=Module&metric=name&limit=500'))
 const { data: sec } = useApiGet<SecurityReport>(() => repoPath(repo.value, 'security'))
 const { data: lic } = useApiGet<LicenseReport>(() => repoPath(repo.value, 'licenses'))
@@ -60,7 +61,9 @@ const ecosystems = computed(() => {
 
 <template>
   <div class="stack">
-    <PageHeader eyebrow="Dependencies" title="What this repository depends on" lede="Every package it uses, with known vulnerabilities, licences and whether updates are automated. Fix vulnerabilities your code calls first." :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Dependencies' }]" />
+    <PageHeader eyebrow="Dependencies" title="What this repository depends on" lede="Every package it uses, with known vulnerabilities, licences and whether updates are automated. Fix vulnerabilities your code calls first." :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Dependencies' }]">
+      <a :href="sbomHref" download class="btn btn--ghost" title="Dependencies resolved by go.mod and the lockfiles, as CycloneDX 1.5 JSON. Not the contents of a built artifact.">Download SBOM</a>
+    </PageHeader>
     <p v-if="error" class="notice notice--danger">{{ apiErrorMessage(error) }}</p>
     <div class="grid cols-4">
       <StatTile label="Dependencies" :value="String(total)" :hint="ecosystems.map(([e, c]) => `${c} ${e}`).join(' · ') || '–'" />
