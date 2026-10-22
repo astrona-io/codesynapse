@@ -30,16 +30,20 @@ services:
     image: docker.io/hugegraph/hugegraph:1.5.0
     profiles: [hugegraph]
     # Without a password the image would start in no-auth mode: refuse instead.
+    # The image enables auth by editing its config files once and records
+    # that on the volume, so a recreated container would come back without
+    # auth: enable it on every start (the script is idempotent).
     # Requests may carry a whole review: Gremlin's 64 KB limit becomes 16 MB.
-    entrypoint: ["sh", "-c", "[ -n \"$$PASSWORD\" ] || { echo 'HUGEGRAPH_PASSWORD is not set; run just init' >&2; exit 1; }; sed -i 's/^maxContentLength: .*/maxContentLength: 16777216/' conf/gremlin-server.yaml && exec ./docker-entrypoint.sh"]
+    entrypoint: ["sh", "-c", "[ -n \"$$PASSWORD\" ] || { echo 'HUGEGRAPH_PASSWORD is not set; run just init' >&2; exit 1; }; ./bin/enable-auth.sh && grep -q HugeFactoryAuthProxy conf/graphs/hugegraph.properties || { echo 'could not enable authentication' >&2; exit 1; }; sed -i 's/^maxContentLength: .*/maxContentLength: 16777216/' conf/gremlin-server.yaml && exec ./docker-entrypoint.sh"]
     environment:
       PASSWORD: ${HUGEGRAPH_PASSWORD:-}
     volumes:
       - hugegraph-data:/hugegraph-server/rocksdb-data
       - hugegraph-init:/hugegraph-server/docker
     healthcheck:
-      # REST answers before the Gremlin server behind it: probe a real query.
-      test: ["CMD-SHELL", "curl -sf -u admin:\"$$PASSWORD\" -X POST http://127.0.0.1:8080/gremlin -H 'Content-Type: application/json' -d '{\"gremlin\":\"1\"}' >/dev/null"]
+      # REST answers before the Gremlin server behind it: probe a real query,
+      # and stay unhealthy if the server answers without the password.
+      test: ["CMD-SHELL", "curl -sf -u admin:\"$$PASSWORD\" -X POST http://127.0.0.1:8080/gremlin -H 'Content-Type: application/json' -d '{\"gremlin\":\"1\"}' >/dev/null && [ \"$$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8080/gremlin -H 'Content-Type: application/json' -d '{\"gremlin\":\"1\"}')\" = 401 ]"]
       interval: 10s
       timeout: 5s
       retries: 30
