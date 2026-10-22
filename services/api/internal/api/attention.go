@@ -20,7 +20,7 @@ import (
 // AttentionItem is one thing to look at.
 type AttentionItem struct {
 	Level  string `json:"level"` // critical, high, medium, low
-	Kind   string `json:"kind"`  // security, vulnerability, licence, access, sync, stale, automation
+	Kind   string `json:"kind"`  // security, vulnerability, licence, access, sync, stale, automation, quality
 	Repo   string `json:"repo,omitempty"`
 	Count  int    `json:"count,omitempty"`
 	Title  string `json:"title"`
@@ -45,8 +45,17 @@ type Attention struct {
 	Grades      map[string]int `json:"grades"`
 }
 
+// A repository is flagged for duplicate code from this share of its function
+// lines, and only when that is a meaningful amount; the cross-repository
+// recommendations are capped so they do not crowd out anything urgent.
+const (
+	dupAttentionPct    = 5.0
+	dupAttentionLOC    = 100
+	maxSharedAttention = 3
+)
+
 var levelRank = map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3}
-var kindRank = map[string]int{"access": 0, "vulnerability": 1, "security": 2, "licence": 3, "sync": 4, "stale": 5, "automation": 6}
+var kindRank = map[string]int{"access": 0, "vulnerability": 1, "security": 2, "licence": 3, "sync": 4, "stale": 5, "automation": 6, "quality": 7}
 
 func repoLink(repo, page string) string {
 	p := "/repos/" + url.PathEscape(repo)
@@ -124,6 +133,12 @@ func (s *Server) buildAttention(ctx context.Context, only string, now time.Time)
 				Detail: "None of its files are in a language or format CodeSynapse's rules cover yet, so there is no grade. The Security page lists what was and was not checked; review the rest by hand.",
 				Action: "See what was checked", Link: repoLink(rs.Name, "security")})
 		}
+		if rs.DupPct >= dupAttentionPct && rs.DupLOC >= dupAttentionLOC {
+			add(AttentionItem{Level: "low", Kind: "quality", Repo: rs.Name, Count: rs.DupLOC,
+				Title:  fmt.Sprintf("%d lines repeat code that already exists (%.0f%% of function code)", rs.DupLOC, rs.DupPct),
+				Detail: "Copies have to be read, tested and fixed separately and drift apart. The page groups them and says whether to extract a helper or move them to a shared package.",
+				Action: "See the duplicates", Link: repoLink(rs.Name, "duplicates")})
+		}
 		if rs.Stale {
 			days := int(rs.AgeHours / 24)
 			add(AttentionItem{Level: "low", Kind: "stale", Repo: rs.Name,
@@ -184,6 +199,19 @@ func (s *Server) buildAttention(ctx context.Context, only string, now time.Time)
 			Title:  "Your organisation can no longer read this private repository",
 			Detail: "Its Git token was removed or lost access, so the repository is hidden from your organisation. An admin can save a working token.",
 			Action: "Fix the Git token", Link: "/settings/git-tokens"})
+	}
+
+	if only == "" {
+		shared, err := s.sharedCode(ctx)
+		if err != nil {
+			return a, err
+		}
+		for _, sg := range shared.Suggestions[:min(len(shared.Suggestions), maxSharedAttention)] {
+			add(AttentionItem{Level: "low", Kind: "quality", Count: sg.RedundantLOC,
+				Title:  fmt.Sprintf("%d of your repositories copy the same code: share it as a %s", len(sg.Repos), sg.Kind),
+				Detail: sg.Rationale,
+				Action: "See the shared code", Link: "/shared-code"})
+		}
 	}
 
 	slices.SortStableFunc(a.Items, func(x, y AttentionItem) int {

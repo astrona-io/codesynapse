@@ -77,6 +77,7 @@ A repository whose report hit the cap is listed as partial, because copies of it
 | Surface | Use |
 |---|---|
 | Dashboard, repository, Code health, Duplicates | Groups, scope and locations for one repository |
+| Overview, Code quality | A low-priority item per repository that repeats 5% or more of its function lines (and at least 100 lines), and up to three recommendations to share code between repositories |
 | Dashboard, Shared code | Cross-repository groups and recommendations |
 | MCP `duplicate_code`, `shared_code` | Agents check before writing a helper or copying code |
 | CLI `codesynapse duplicates [path...]` | One path for one repository; several paths also compare them |

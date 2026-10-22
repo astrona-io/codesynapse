@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
+	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/metrics"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/security"
@@ -52,6 +53,8 @@ type RepoSummary struct {
 	DeadFuncs     int            `json:"dead_functions"`
 	DeadLOC       int            `json:"dead_loc"`
 	UnusedMods    int            `json:"unused_modules"`
+	DupLOC        int            `json:"duplicate_loc"`
+	DupPct        float64        `json:"duplicate_pct"`
 	GraphTokens   int            `json:"-"`
 	BaseTokens    int            `json:"-"`
 }
@@ -179,6 +182,11 @@ func (s *Server) overviewOf(ctx context.Context, only string) (Overview, error) 
 				rs.DeadLOC, rs.UnusedMods = c.Summary.DeadLOC, c.Summary.UnusedModules
 				ov.Totals.DeadLOC += c.Summary.DeadLOC
 				ov.Totals.UnusedMods += c.Summary.UnusedModules
+			}
+		}
+		if repoNode.Duplicates != "" {
+			if d, err := duplicates.Decode(repoNode.Duplicates); err == nil {
+				rs.DupLOC, rs.DupPct = d.Summary.RedundantLOC+d.Summary.NearRedundantLOC, math.Round(d.Summary.Percent*10)/10
 			}
 		}
 		if repoNode.Metrics != "" {
