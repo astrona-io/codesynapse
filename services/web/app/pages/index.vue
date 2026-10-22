@@ -59,7 +59,7 @@ const splitName = (name: string) => {
   const i = name.lastIndexOf('/')
   return i < 0 ? { prefix: '', base: name } : { prefix: name.slice(0, i + 1), base: name.slice(i + 1) }
 }
-const gradeColor: Record<string, string> = { A: 'var(--green)', B: 'var(--cyan)', C: 'var(--amber)', D: 'var(--orange)', F: 'var(--pink)' }
+const gradeColor: Record<string, string> = { A: 'var(--green)', B: 'var(--cyan)', C: 'var(--amber)', D: 'var(--orange)', F: 'var(--pink)', 'N/A': 'var(--muted)' }
 const syncText = (s?: { state: string; interval_minutes: number }) => {
   if (!s || s.state === 'manual') return 'Manual sync'
   const every = ({ 15: '15 min', 30: '30 min', 60: 'hour', 360: '6 hours', 1440: 'day' } as Record<number, string>)[s.interval_minutes] ?? `${s.interval_minutes} min`

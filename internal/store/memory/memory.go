@@ -99,6 +99,23 @@ func (s *Store) repo(name string) (*repoGraph, error) {
 	return rg, nil
 }
 
+// FindingCounts implements store.Reader.
+func (s *Store) FindingCounts(_ context.Context, repo string) (map[string]int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rg, err := s.repo(repo)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]int{}
+	for _, n := range rg.nodes {
+		if n.Kind == model.KindFinding {
+			out[n.Severity]++
+		}
+	}
+	return out, nil
+}
+
 // Stats implements store.Reader.
 func (s *Store) Stats(_ context.Context, repo string) (model.Stats, error) {
 	s.mu.RLock()

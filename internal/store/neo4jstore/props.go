@@ -51,6 +51,7 @@ func toProps(n model.Node) map[string]any {
 	setStr("liveness", n.Liveness)
 	setStr("cleanup", n.Cleanup)
 	setStr("licenses", n.Licenses)
+	setStr("coverage", n.Coverage)
 	setStr("language", n.Language)
 	setStr("ecosystem", n.Ecosystem)
 	setStr("license", n.License)
@@ -82,7 +83,7 @@ func fromProps(p map[string]any) model.Node {
 		Exported: b("exported"), IsTest: b("is_test"),
 		Severity: s("severity"), Rule: s("rule"), Version: s("version"), FixedVersion: s("fixed_version"),
 		Reachability: s("reachability"), URL: s("url"), Indirect: b("indirect"),
-		Liveness: s("liveness"), Cleanup: s("cleanup"), Licenses: s("licenses"), Language: s("language"), Ecosystem: s("ecosystem"),
+		Liveness: s("liveness"), Cleanup: s("cleanup"), Licenses: s("licenses"), Coverage: s("coverage"), Language: s("language"), Ecosystem: s("ecosystem"),
 		License: s("license"), LicenseSource: s("license_source"), Dev: b("dev"),
 		CWE: strs(p["cwe"]), Aliases: strs(p["aliases"]),
 	}

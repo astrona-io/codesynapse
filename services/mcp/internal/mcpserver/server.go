@@ -91,7 +91,7 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	mcp.AddTool(s, add("hotspots", "Functions ranked by complexity x file churn: where defects and review effort concentrate."), h.hotspots)
 	mcp.AddTool(s, add("security_symbols", "Functions that call security-sensitive APIs (exec, sql, crypto, http, filesystem, ...), optionally filtered by tag."), h.securitySymbols)
 	mcp.AddTool(s, add("file_history", "Recent commits that modified a file."), h.fileHistory)
-	mcp.AddTool(s, add("security_report", "Security review: graded score, code findings (rule, severity, CWE, location, exposed from an entry point, tested) and vulnerable dependencies (CVE, severity, fixed version, called/imported/required). Use min_severity to trim."), h.securityReport)
+	mcp.AddTool(s, add("security_report", "Security review: graded score, findings from code, Kubernetes/Helm, CI and Compose rules (rule, severity, CWE, location, exposed, tested) and vulnerable dependencies (CVE, severity, fixed version, called/imported/required). Also says what the rules checked and what they did not (review those files by hand), and the commit it describes: if your checkout is on another commit, call repo_status and ask for a sync. Grade N/A means nothing was covered. Use min_severity to trim."), h.securityReport)
 	mcp.AddTool(s, add("repo_metrics", "Repository metrics from the last ingest: size, complexity distributions, test reachability, doc coverage, package coupling, dead-code candidates and the token benchmark."), h.repoMetrics)
 	return s
 }

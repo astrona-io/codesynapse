@@ -3,8 +3,8 @@ import type { WorkspaceOverview } from '~/utils/types'
 
 const { data: ov, error, refresh } = useApiGet<WorkspaceOverview>('overview')
 const SEV = ['critical', 'high', 'medium', 'low', 'info']
-const GRADES = ['A', 'B', 'C', 'D', 'F']
-const gradeColor: Record<string, string> = { A: 'var(--green)', B: 'var(--cyan)', C: 'var(--amber)', D: 'var(--orange)', F: 'var(--pink)' }
+const GRADES = ['A', 'B', 'C', 'D', 'F', 'N/A']
+const gradeColor: Record<string, string> = { A: 'var(--green)', B: 'var(--cyan)', C: 'var(--amber)', D: 'var(--orange)', F: 'var(--pink)', 'N/A': 'var(--muted)' }
 const sorted = (m: Record<string, number> | undefined) =>
   Object.entries(m ?? {}).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }))
 const sevBars = (m: Record<string, number> | undefined) => SEV.filter((s) => (m ?? {})[s]).map((s) => ({ label: s, value: m![s]! }))

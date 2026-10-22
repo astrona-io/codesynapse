@@ -233,6 +233,20 @@ func (s *Store) repoExists(ctx context.Context, repo string) error {
 	return nil
 }
 
+// FindingCounts implements store.Reader.
+func (s *Store) FindingCounts(ctx context.Context, repo string) (map[string]int, error) {
+	res, err := s.read(ctx, "MATCH (n:Finding {repo: $repo}) RETURN n.severity AS severity, count(n) AS n", map[string]any{"repo": repo})
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]int{}
+	for _, rec := range res.Records {
+		n, _ := rec.AsMap()["n"].(int64)
+		out[str(rec, "severity")] = int(n)
+	}
+	return out, nil
+}
+
 // Stats implements store.Reader. The aggregation mirrors memory.accumulate.
 func (s *Store) Stats(ctx context.Context, repo string) (model.Stats, error) {
 	if err := s.repoExists(ctx, repo); err != nil {

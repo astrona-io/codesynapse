@@ -21,6 +21,12 @@ func (b *builder) templateFile(rel string, content []byte, chart string, refs *t
 	})
 	b.g.AddEdge(model.Edge{From: model.NodeID(b.repo, model.KindRepository, b.repo), To: fileID, Kind: model.EdgeContains})
 
+	// Templates that render Kubernetes manifests get the YAML security
+	// rules on their literal values; Language "yaml" marks them as scanned
+	// for the security report's coverage.
+	if chart != "" && b.scanTemplate(rel, fileID, content) {
+		file.Language = "yaml"
+	}
 	trees, err := parseTemplate(rel, string(content))
 	if err != nil {
 		file.Summary = "unparseable template: " + redact.Summary(err.Error(), 120)

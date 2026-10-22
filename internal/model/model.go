@@ -184,6 +184,9 @@ type Node struct {
 	Cleanup string `json:"-"`
 	// Licenses is the JSON-encoded license.Report on Repository nodes.
 	Licenses string `json:"-"`
+	// Coverage is the JSON-encoded security.Coverage on Repository nodes:
+	// what the security rules could read.
+	Coverage string `json:"-"`
 	// Language is the source language (go, python, typescript, ...) of code nodes.
 	Language string `json:"language,omitempty"`
 	// Ecosystem is the package ecosystem of Module nodes (Go, npm, PyPI).
