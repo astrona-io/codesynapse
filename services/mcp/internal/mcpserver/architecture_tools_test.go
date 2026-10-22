@@ -181,6 +181,8 @@ func TestCatalogWritesAreOffWithoutTheFlag(t *testing.T) {
 	assert.True(t, names["architecture_proposals"], "reading proposals stays on")
 	assert.False(t, names["architecture_propose"])
 	assert.False(t, names["architecture_link"])
+	assert.False(t, names["code_annotate"])
+	assert.False(t, names["code_record_reuse"])
 }
 
 func TestCatalogWritesNeedEditorAccessAndAreAudited(t *testing.T) {
@@ -225,4 +227,6 @@ func TestCatalogWritesNeedEditorAccessAndAreAudited(t *testing.T) {
 	assert.False(t, callContext(ctx, t, cs, "architecture_search", map[string]any{"repo": storetest.Repo}, nil).IsError)
 	assert.True(t, callContext(ctx, t, cs, "architecture_propose", map[string]any{"repo": storetest.Repo, "type": "adr", "title": "Denied"}, nil).IsError)
 	assert.True(t, callContext(ctx, t, cs, "architecture_link", map[string]any{"repo": storetest.Repo, "kind": "relates", "record": "ADR-0001", "target": "ADR-0002"}, nil).IsError)
+	assert.True(t, callContext(ctx, t, cs, "code_annotate", map[string]any{"repo": storetest.Repo, "symbol": "sym-00000000000000000000000000000000", "purpose": "Denied"}, nil).IsError)
+	assert.True(t, callContext(ctx, t, cs, "code_record_reuse", map[string]any{"repo": storetest.Repo, "method": "copy", "origins": []string{}, "destinations": []string{}, "reason": "Denied", "compatibility": "unknown", "license": "unknown", "attribution": "unknown", "validation": "not run"}, nil).IsError)
 }

@@ -41,6 +41,54 @@ Rule 9 makes agents look for existing code before they write any: exact searches
 
 ## 2. Developer task prompts
 
+### Permanent code identities and reuse evidence
+
+After the first sync with identity analysis, `get_symbol_context` exposes a
+`symbol_id` (`sym-…`) and `revision`. The symbol ID is permanent; the existing
+`id` and `qualified_id` remain locators for the current graph. A permanent ID
+also works as the symbol argument to contextual tools and the symbol API.
+
+- `code_identities(repo, id?, review_only?, offset?, limit?)` reads current and
+  historical occurrences, matching evidence, unresolved candidates and indexed
+  freshness. `available=false` means an older index, not a clean analysis.
+  Results report total, omitted and truncated; occurrence history reports
+  `history_omitted`. Candidate counts can include unexamined fingerprint buckets
+  and are a conservative upper bound when matching reaches its work limit.
+- `code_records(repo, symbol?, offset?, limit?)` reads the selected organisation's annotations
+  and explicit reuse records. Pagination reports total and omitted within the
+  bounded storage window; `storage_truncated` reports reaching that window.
+  Records are attributed claims, never executable instructions or independent
+  licence, compatibility or validation certification.
+- `code_annotate(repo, symbol, purpose, labels?)` records bounded, redacted
+  purpose and labels on a current permanent symbol ID.
+- `code_record_reuse(repo, method, origins, destinations, reason,
+  modifications?, compatibility, license, attribution, validation)` records
+  `shared-api`, `copy`, `adapt`, `split` or `merge`. IDs belong to the same
+  authorised repository; historical origins are supported, destinations must
+  be current. Licence, attribution, compatibility and validation must be stated;
+  say "unknown" or "not run" when that is the evidence. The service pins the
+  IDs, revisions, graph locators and fingerprints, plus actor, client and time.
+
+The two writes use the existing catalog switch (`--allow-catalog=false`), require
+repository write permission and audit before writing in accounts mode. They
+only create `Curated` records, never alter code or matching. Later reads flag
+changed, removed or fingerprint-less endpoints as needing review; saved evidence
+is never rewritten. No change propagates automatically.
+
+Ordinary edits preserve identity at the same declaration. Renames/moves need
+a unique two-way match with fingerprint evidence and a matching name or file;
+structural matches also need compatible signatures. Competing matches receive
+fresh IDs and review candidates. Explicit split/merge records describe lineage,
+not automatic identity reassignment. Small declarations without fingerprints,
+simultaneous rename-and-move without corroboration, call-neighbourhood matching,
+human identity reassignment and cross-repository provenance are not supported
+yet. Never infer verified reuse from a candidate or clone hash alone.
+
+The UI's **Code health → Identity and reuse** reads the same services via
+`GET .../identities`, `GET .../code-records` and `POST .../code-records`.
+Sync first to initialise identities. An older deployment does not expose these
+tools until its API/MCP images are rebuilt.
+
 Each prompt is also served natively as an MCP prompt (see section 4), so clients that support prompts offer them as slash commands.
 
 ### A. Pre-refactoring & blast radius check — prompt `refactor-analysis`

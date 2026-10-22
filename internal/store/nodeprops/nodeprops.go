@@ -32,6 +32,9 @@ func To(n model.Node) map[string]any {
 		}
 	}
 	setStr("qualified_name", n.QualifiedName)
+	setStr("symbol_id", n.SymbolID)
+	setStr("revision", n.Revision)
+	setStr("identities", n.Identities)
 	setStr("package", n.Package)
 	setStr("file", n.File)
 	setStr("signature", n.Signature)
@@ -95,6 +98,7 @@ func From(p map[string]any) model.Node {
 	b := func(k string) bool { v, _ := p[k].(bool); return v }
 	n := model.Node{
 		ID: s("id"), Kind: model.NodeKind(s("kind")), Repo: s("repo"), Name: s("name"),
+		SymbolID: s("symbol_id"), Revision: s("revision"), Identities: s("identities"),
 		QualifiedName: s("qualified_name"), Package: s("package"), File: s("file"),
 		Signature: s("signature"), Summary: s("summary"), BodyHash: s("body_hash"), CloneHash: s("clone_hash"), DocType: s("doc_type"), Status: s("status"), Meta: s("meta"), Via: s("via"), Roots: i("roots"), CloneSig: s("clone_sig"), Duplicates: s("duplicates"),
 		Time: s("time"), Head: s("head"), Root: s("root"), Branch: s("branch"), Metrics: s("metrics"), Bytes: i("bytes"),

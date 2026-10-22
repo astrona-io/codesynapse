@@ -73,6 +73,10 @@ const isCode = (r: NodeRef) => ['Function', 'Method', 'InterfaceMethod', 'Type']
           <span class="tag">{{ card.symbol.kind }}</span>
         </div>
         <p class="mono muted">{{ location(card.symbol) }}</p>
+        <p v-if="card.symbol.symbol_id" class="small">
+          <NuxtLink :to="`/repos/${encodeURIComponent(repo)}/identities?id=${card.symbol.symbol_id}`">Identity, annotations and reuse: <span class="mono">{{ card.symbol.symbol_id }}</span></NuxtLink>
+          <span v-if="card.symbol.revision" class="muted"> · revision {{ card.symbol.revision.slice(0, 12) }}</span>
+        </p>
         <pre v-if="card.symbol.signature" class="sig mono">{{ card.symbol.signature }}</pre>
         <p v-if="card.symbol.summary">{{ card.symbol.summary }}</p>
         <div class="row">

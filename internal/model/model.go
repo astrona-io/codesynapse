@@ -141,6 +141,12 @@ type Node struct {
 	ID   string   `json:"id"`
 	Kind NodeKind `json:"kind"`
 	Repo string   `json:"repo"`
+	// SymbolID survives supported declaration renames and moves. ID remains
+	// the current graph locator; Revision describes this occurrence.
+	SymbolID string `json:"symbol_id,omitempty"`
+	Revision string `json:"revision,omitempty"`
+	// Identities is the bounded identity baseline on Repository nodes.
+	Identities string `json:"-"`
 	// Name is the short name (func name, file base name, heading text).
 	Name string `json:"name"`
 	// QualifiedName is the fully qualified name, e.g. "(*pkg.T).Method".

@@ -9,6 +9,7 @@ const base = computed(() => `/repos/${encodeURIComponent(props.repo)}`)
     <NuxtLink :to="`${base}/metrics`">Quality</NuxtLink>
     <NuxtLink :to="`${base}/cleanup`">Unused code</NuxtLink>
     <NuxtLink :to="`${base}/duplicates`">Duplicates</NuxtLink>
+    <NuxtLink :to="`${base}/identities`">Identity and reuse</NuxtLink>
     <NuxtLink :to="`${base}/cleanup-plan`">Plan</NuxtLink>
   </nav>
 </template>

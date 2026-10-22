@@ -1,6 +1,8 @@
 // Mirrors the Go API JSON (internal/model, internal/query, internal/api).
 export interface GraphNodeData {
   id: string
+  symbol_id?: string
+  revision?: string
   kind: string
   repo: string
   name: string
@@ -29,6 +31,13 @@ export interface GraphNodeData {
   roots?: number
 }
 export interface NodeRef { id: string; kind: string; name: string; location?: string; summary?: string; depth?: number }
+
+export interface SymbolLocation { node_id: string; name: string; file?: string; signature?: string; revision?: string; fingerprint?: string; start_line?: number; end_line?: number }
+export interface SymbolIdentity { id: string; kind: string; language?: string; active: boolean; current: SymbolLocation; history: SymbolLocation[]; history_omitted: number; match: string; candidates: string[] | null; candidates_omitted: number }
+export interface IdentityPage { repo: string; revision?: string; indexed_at?: string; available: boolean; symbols: SymbolIdentity[]; total: number; offset: number; omitted: number; truncated: boolean }
+export interface CodeRecordInput { method: string; origins: string[]; destinations: string[]; purpose: string; labels: string[]; reason: string; modifications: string; compatibility: string; license: string; attribution: string; validation: string }
+export interface CodeRecordView { item: { id: string; client?: string; created_by?: string; created_at: string; code: CodeRecordInput & { sources: { id: string; revision: string; fingerprint: string }[]; targets: { id: string; revision: string; fingerprint: string }[] } }; freshness: string; changed: string[] }
+export interface CodeRecordPage { records: CodeRecordView[]; truncated: boolean; limit: number; offset: number; total: number; omitted: number; storage_truncated: boolean }
 export interface Ranked { node: GraphNodeData; score: number }
 export interface Stats {
   repo: string

@@ -18,6 +18,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
 	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
+	"github.com/parisnakitakejser/codesynapse/internal/identity"
 	"github.com/parisnakitakejser/codesynapse/internal/ingest/config"
 	"github.com/parisnakitakejser/codesynapse/internal/ingest/docs"
 	"github.com/parisnakitakejser/codesynapse/internal/ingest/githistory"
@@ -33,6 +34,9 @@ import (
 type Options struct {
 	Repo string
 	Root string
+	// PreviousIdentities is read from the stored repository before extraction.
+	// A corrupt baseline fails ingest instead of resetting permanent IDs.
+	PreviousIdentities string
 	// CommitLimit is how many recent commits to index; 0 skips history.
 	CommitLimit int
 	// AllowNetwork lets `go list` download modules.
@@ -68,6 +72,10 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	}
 	if opts.Repo == "" {
 		opts.Repo = filepath.Base(root)
+	}
+	previous, err := identity.Decode(opts.PreviousIdentities, opts.Repo)
+	if err != nil {
+		return nil, err
 	}
 
 	start := time.Now()
@@ -159,6 +167,13 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	}
 	if repoNode.Coverage, err = security.EncodeCoverage(security.CoverageOf(g, security.Inventory(root))); err != nil {
 		return nil, fmt.Errorf("encoding security coverage: %w", err)
+	}
+	identities, err := identity.Reconcile(g, opts.Repo, previous)
+	if err != nil {
+		return nil, err
+	}
+	if repoNode.Identities, err = identity.Encode(identities); err != nil {
+		return nil, fmt.Errorf("encoding symbol identities: %w", err)
 	}
 	logger.Info("ingest complete", "repo", opts.Repo, "nodes", len(g.Nodes()), "edges", len(g.Edges()),
 		"pruned_edges", pruned, "duration", time.Since(start).Round(time.Millisecond).String())

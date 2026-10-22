@@ -164,7 +164,16 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 		}
 	}
 	started := time.Now()
-	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Branch: opts.Branch})
+	var previous string
+	if reader, ok := j.st.(store.Reader); ok {
+		var err error
+		previous, err = ingest.IdentityBaseline(ctx, reader, job.Repo)
+		if err != nil {
+			fin(job, 0, 0, err)
+			return
+		}
+	}
+	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Branch: opts.Branch, PreviousIdentities: previous})
 	if err == nil {
 		err = j.st.EnsureSchema(ctx)
 	}
