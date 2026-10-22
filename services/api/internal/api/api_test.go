@@ -135,7 +135,8 @@ func TestValidRepoName(t *testing.T) {
 	assert.False(t, validRepoName("."))
 	assert.False(t, validRepoName(".."))
 	assert.True(t, validRepoName("astrona-io/astrona-cli"), "owner/name")
-	assert.False(t, validRepoName("a/b/c"))
+	assert.True(t, validRepoName("codeberg.org/team/api"), "host/owner/name")
+	assert.False(t, validRepoName("a/b/c/d"))
 	assert.False(t, validRepoName("a/../b"))
 	assert.False(t, validRepoName(strings.Repeat("a", 101)))
 }

@@ -96,7 +96,7 @@ The server can run security triage and briefings with its own model (`config/llm
 | What the docs say about something | `get_doc_section` | `query: "install"` or `file: "docs/"` | Sections with line ranges and the symbols each mentions. Text is not stored: read the lines. |
 | Findings in one place | `security_report` | `path: "internal/api/"` | Findings (and counts) in a file or directory; score and grade stay repository-wide. |
 
-Repositories indexed from a URL or an organisation are named `owner/name` (for example `astrona-io/astrona-cli`); pass that as `repo`. Mounted folders and older indexes keep a plain name.
+Repositories indexed from a URL or an organisation are named `owner/name` on github.com (for example `astrona-io/astrona-cli`) and `host/owner/name` on every other provider (for example `codeberg.org/team/api`), so the same organisation and repository on two providers never collide; pass that as `repo`. `search_all_repos` with `repo_prefix: "codeberg.org/"` searches one provider. Mounted folders and older indexes keep a plain name.
 
 Every answer uses `qualified_id` values (`store.(*Store).Get`) that you can pass back to any tool. Ambiguous names return an error listing the exact `qualified_id`s to retry with.
 

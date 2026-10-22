@@ -40,6 +40,7 @@ services:
       # Optional token for private repositories on one host (never logged).
       CODESYNAPSE_GIT_TOKEN: ${CODESYNAPSE_GIT_TOKEN:-}
       CODESYNAPSE_GIT_TOKEN_HOST: ${CODESYNAPSE_GIT_TOKEN_HOST:-github.com}
+      CODESYNAPSE_GIT_TOKENS: ${CODESYNAPSE_GIT_TOKENS:-}
       CODESYNAPSE_ALLOW_PRIVATE_GIT: ${CODESYNAPSE_ALLOW_PRIVATE_GIT:-false}
       # Push fix branches for accepted review comments and open draft PRs.
       CODESYNAPSE_ALLOW_PUSH: ${CODESYNAPSE_ALLOW_PUSH:-false}

@@ -51,7 +51,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		req.Name = repoNameFromRemote(remote)
 	}
 	if !validRepoName(req.Name) {
-		s.problem(w, 400, errors.New("name must be name or owner/name using only [A-Za-z0-9._-]"))
+		s.problem(w, 400, errors.New("name must be name, owner/name or host/owner/name using only [A-Za-z0-9._-]"))
 		return
 	}
 	if req.Branch != "" {
@@ -78,7 +78,7 @@ func (s *Server) startClone(remote, name, branch string) (Job, error) {
 	if _, err := os.Stat(dir); err == nil { //nolint:gosec // name passed validRepoName: at most two safe elements, none with a leading dot
 		return Job{}, fmt.Errorf("%w: %q already exists; use sync", errConflict, name)
 	}
-	auth := s.cfg.GitAuth
+	auth := s.authFor(remote)
 	job, err := s.jobs.Start(name, dir, JobOptions{
 		Kind: "clone", Branch: branch,
 		Prepare: func(ctx context.Context) error {
@@ -129,7 +129,7 @@ func (s *Server) handleSwitchToRemote(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !validRepoName(repo) {
-		s.problem(w, 400, errors.New("repository name must be name or owner/name using only [A-Za-z0-9._-] to be cloned"))
+		s.problem(w, 400, errors.New("repository name must be name, owner/name or host/owner/name using only [A-Za-z0-9._-] to be cloned"))
 		return
 	}
 	dir := repoDir(s.cfg.Workspace, repo)
@@ -158,7 +158,7 @@ func (s *Server) handleSwitchToRemote(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	auth, branch := s.cfg.GitAuth, req.Branch
+	auth, branch := s.authFor(remote), req.Branch
 	job, err := s.jobs.Start(repo, dir, JobOptions{ //nolint:contextcheck // jobs outlive the request
 		Kind: "clone", Branch: branch,
 		Prepare: func(ctx context.Context) error {
@@ -238,7 +238,7 @@ func (s *Server) startSync(ctx context.Context, repo, branch string, onlyIfChang
 		if err != nil {
 			return Job{}, fmt.Errorf("%w: %w", errBadRequest, err)
 		}
-		root, auth := n.Root, s.cfg.GitAuth
+		root, auth := n.Root, s.authFor(remote)
 		if onlyIfChanged {
 			cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			head, err := gitx.RemoteHead(cctx, remote, branch, auth)
@@ -366,7 +366,7 @@ func (s *Server) handleBranches(w http.ResponseWriter, r *http.Request) {
 			s.problem(w, 400, err)
 			return
 		}
-		branches, err = gitx.RemoteBranches(r.Context(), remote, s.cfg.GitAuth)
+		branches, err = gitx.RemoteBranches(r.Context(), remote, s.authFor(remote))
 		if err != nil {
 			s.problem(w, http.StatusBadGateway, err)
 			return

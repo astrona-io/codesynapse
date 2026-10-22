@@ -7,10 +7,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/forge"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
@@ -24,6 +27,10 @@ func fakeGitHub(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/orgs/acme/repos" {
 			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Query().Get("page") > "1" { // Forgejo pages until an empty one
+			_, _ = fmt.Fprint(w, `[]`)
 			return
 		}
 		_, _ = fmt.Fprint(w, `[
@@ -50,7 +57,7 @@ func newOrgServer(t *testing.T) *orgFixture {
 	st := memory.New()
 	require.NoError(t, st.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
 	f := &orgFixture{}
-	srv := New(ctx, Config{Workspace: t.TempDir(), GitHubAPI: fakeGitHub(t).URL, Version: "test"}, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := New(ctx, Config{Workspace: t.TempDir(), ForgeAPI: fakeGitHub(t).URL, Version: "test"}, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv.cloneHook = func(remote, name string) (Job, error) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -133,7 +140,7 @@ func TestOrgsPersistAndComeDue(t *testing.T) {
 	require.NoError(t, o.put(Org{Org: "Acme", NextScan: now.Add(5 * time.Minute).Format(time.RFC3339)}))
 	require.NoError(t, o.put(Org{Org: "beta"}))
 	assert.Equal(t, o.due(now), []string{"beta"}, "never scanned means due; the other is not due yet")
-	assert.Equal(t, o.due(now.Add(5*time.Minute)), []string{"Acme", "beta"})
+	assert.Equal(t, o.due(now.Add(5*time.Minute)), []string{"acme", "beta"}, "keyed by lower-case login")
 
 	again, err := loadOrgs(dir)
 	require.NoError(t, err)
@@ -169,14 +176,17 @@ func TestOrgReposAreNamedWithTheirOwner(t *testing.T) {
 func TestRepoNames(t *testing.T) {
 	for in, want := range map[string]bool{
 		"api": true, "astrona-io/astrona-cli": true, "a.b/c_d": true,
-		"": false, "a/b/c": false, "/x": false, "x/": false, "../x": false, "a/..": false, ".hidden/x": false, "a b": false, "a\\b": false,
+		"": false, "a/b/c": true, "a/b/c/d": false, "/x": false, "x/": false, "../x": false, "a/..": false, ".hidden/x": false, "a b": false, "a\\b": false,
 	} {
 		assert.Equal(t, validRepoName(in), want, in)
 	}
 	for in, want := range map[string]string{
 		"https://github.com/Astrona-IO/astrona-cli.git": "astrona-io/astrona-cli",
 		"https://github.com/astrona-io/astrona-cli":     "astrona-io/astrona-cli",
-		"https://gitlab.com/group/sub/proj.git":         "sub/proj",
+		"https://gitlab.com/group/sub/proj.git":         "",
+		"https://codeberg.org/Team/API.git":             "codeberg.org/team/API",
+		"https://git.example.com/team/api":              "git.example.com/team/api",
+		"https://git.example.com:8443/team/api":         "",
 		"https://example.com/solo.git":                  "solo",
 		"https://example.com/":                          "",
 	} {
@@ -208,4 +218,87 @@ func TestScheduleRecordsUnchangedChecks(t *testing.T) {
 	sc := s.get("a")
 	assert.Equal(t, sc.LastStatus, "unchanged")
 	assert.Equal(t, sc.NextRun, now.Add(35*time.Minute).Format(time.RFC3339), "an unchanged check still waits a full interval")
+}
+
+func TestSameOrgOnTwoProvidersStaysApart(t *testing.T) {
+	f := newOrgServer(t)
+	assert.Equal(t, post(t, f.ts, "/api/v1/orgs", `{"org":"acme"}`), 201)
+	assert.Equal(t, post(t, f.ts, "/api/v1/orgs", `{"org":"git.example.com/acme","provider":"forgejo"}`), 201, "same login, another host")
+	assert.Equal(t, post(t, f.ts, "/api/v1/orgs", `{"org":"https://git.example.com/acme/*","provider":"forgejo"}`), 409)
+	assert.Equal(t, post(t, f.ts, "/api/v1/orgs", `{"org":"acme","host":"git.example.com"}`), 400, "an unknown host needs a provider")
+	assert.Equal(t, post(t, f.ts, "/api/v1/orgs", `{"org":"acme","host":"host:3000","provider":"forgejo"}`), 400)
+
+	f.mu.Lock()
+	assert.Equal(t, f.cloned, []string{
+		"acme/api https://github.com/acme/api.git",
+		"acme/web https://github.com/acme/web.git",
+		"git.example.com/acme/api https://git.example.com/acme/api.git",
+		"git.example.com/acme/web https://git.example.com/acme/web.git",
+	}, "github.com keeps owner/name; other hosts are prefixed with the host")
+	f.mu.Unlock()
+
+	var list struct {
+		Orgs []struct {
+			Key      string `json:"key"`
+			Provider string `json:"provider"`
+			Host     string `json:"host"`
+		} `json:"orgs"`
+	}
+	require.Equal(t, get(t, f.ts, "/api/v1/orgs", &list), 200)
+	require.Len(t, list.Orgs, 2)
+	assert.Equal(t, list.Orgs[0].Key, "acme")
+	assert.Equal(t, list.Orgs[0].Provider, "github")
+	assert.Equal(t, list.Orgs[1].Key, "git.example.com/acme")
+	assert.Equal(t, list.Orgs[1].Provider, "forgejo")
+
+	assert.Equal(t, del(t, f.ts, "/api/v1/orgs/git.example.com%2Facme"), 204)
+	assert.Equal(t, get(t, f.ts, "/api/v1/orgs", &list), 200)
+	assert.Len(t, list.Orgs, 1, "removing one leaves the other host's organisation")
+}
+
+func TestParseOrgInput(t *testing.T) {
+	for _, tc := range []struct {
+		provider, host, in string
+		kind               forge.Kind
+		wantHost, wantOrg  string
+		fails              bool
+	}{
+		{in: "astrona-io", kind: forge.GitHub, wantHost: "github.com", wantOrg: "astrona-io"},
+		{in: "https://github.com/astrona-io/*", kind: forge.GitHub, wantHost: "github.com", wantOrg: "astrona-io"},
+		{in: "astrona-io/*", kind: forge.GitHub, wantHost: "github.com", wantOrg: "astrona-io"},
+		{in: "https://codeberg.org/team", kind: forge.Forgejo, wantHost: "codeberg.org", wantOrg: "team"},
+		{in: "https://GitLab.com/grp/", kind: forge.GitLab, wantHost: "gitlab.com", wantOrg: "grp"},
+		{provider: "gitea", in: "git.example.com/team", kind: forge.Forgejo, wantHost: "git.example.com", wantOrg: "team"},
+		{provider: "github", host: "ghe.corp", in: "eng", kind: forge.GitHub, wantHost: "ghe.corp", wantOrg: "eng"},
+		{in: "team", host: "git.example.com", fails: true},
+		{in: "http://github.com/x", fails: true},
+		{in: "https://user:pw@github.com/x", fails: true},
+		{in: "https://git.example.com:8443/x", provider: "forgejo", fails: true},
+		{in: "../x", fails: true},
+		{in: "codeberg.org/team/repo", provider: "forgejo", fails: true},
+		{in: "x", provider: "bitbucket", fails: true},
+	} {
+		kind, host, org, err := parseOrgInput(tc.provider, tc.host, tc.in)
+		if tc.fails {
+			assert.Error(t, err, tc.in)
+			continue
+		}
+		require.NoError(t, err, tc.in)
+		assert.Equal(t, kind, tc.kind, tc.in)
+		assert.Equal(t, host, tc.wantHost, tc.in)
+		assert.Equal(t, org, tc.wantOrg, tc.in)
+	}
+}
+
+func TestLegacyOrgsDefaultToGitHub(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codesynapse"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".codesynapse", "orgs.json"), []byte(`[{"org":"Old","auto_index":true,"repos":[]}]`), 0o600))
+	o, err := loadOrgs(dir)
+	require.NoError(t, err)
+	got, ok := o.get("old")
+	require.True(t, ok)
+	assert.Equal(t, got.Provider, forge.GitHub)
+	assert.Equal(t, got.Host, "github.com")
+	assert.Equal(t, got.fullName("x"), "old/x")
 }

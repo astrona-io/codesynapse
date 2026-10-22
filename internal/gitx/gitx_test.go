@@ -244,3 +244,20 @@ func TestIsDirty(t *testing.T) {
 	_, err := RemoteHead(ctx, "https://example.com/x.git", "--bad", Auth{})
 	assert.Error(t, err, "branch is validated before any network call")
 }
+
+func TestParseAuthsAndAuthFor(t *testing.T) {
+	auths, err := ParseAuths("GitHub.com=ghp_x, git.example.com=tok2 ,")
+	require.NoError(t, err)
+	require.Len(t, auths, 2)
+	assert.Equal(t, auths[0].Host, "github.com")
+	assert.Equal(t, AuthFor("https://git.example.com/a/b.git", auths...).Token, "tok2")
+	assert.Equal(t, AuthFor("https://evil.example.com/a/b.git", auths...).Token, "", "a token only goes to its own host")
+	assert.Equal(t, AuthFor("not a url", auths...).Token, "")
+	for _, bad := range []string{"tok", "host=", "=tok", "a b=tok", "h:1=tok"} {
+		_, err := ParseAuths(bad)
+		assert.Error(t, err, bad)
+	}
+	none, err := ParseAuths("")
+	require.NoError(t, err)
+	assert.Len(t, none, 0)
+}

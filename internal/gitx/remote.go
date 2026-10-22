@@ -25,6 +25,39 @@ type Auth struct {
 	Token string
 }
 
+// ParseAuths reads "host=token,host2=token2" (the CODESYNAPSE_GIT_TOKENS
+// format) into one Auth per host. Tokens never contain commas or equals signs.
+func ParseAuths(spec string) ([]Auth, error) {
+	var out []Auth
+	for _, item := range strings.Split(spec, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		host, token, ok := strings.Cut(item, "=")
+		host = strings.ToLower(strings.TrimSpace(host))
+		if !ok || host == "" || strings.ContainsAny(host, "/:@ ") || strings.TrimSpace(token) == "" {
+			return nil, errors.New("git tokens must look like host=token,host2=token2")
+		}
+		out = append(out, Auth{Host: host, Token: strings.TrimSpace(token)})
+	}
+	return out, nil
+}
+
+// AuthFor returns the token entry for remote's host, or the zero Auth.
+func AuthFor(remote string, auths ...Auth) Auth {
+	u, err := url.Parse(remote)
+	if err != nil {
+		return Auth{}
+	}
+	for _, a := range auths {
+		if a.Token != "" && strings.EqualFold(a.Host, u.Hostname()) {
+			return a
+		}
+	}
+	return Auth{}
+}
+
 // RemoteOptions controls network git operations.
 type RemoteOptions struct {
 	Auth Auth

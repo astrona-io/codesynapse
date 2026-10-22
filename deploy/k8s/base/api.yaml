@@ -48,6 +48,8 @@ spec:
               valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: CODESYNAPSE_API_TOKEN}}
             - name: CODESYNAPSE_GIT_TOKEN
               valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: CODESYNAPSE_GIT_TOKEN, optional: true}}
+            - name: CODESYNAPSE_GIT_TOKENS
+              valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: CODESYNAPSE_GIT_TOKENS, optional: true}}
             - name: ANTHROPIC_API_KEY
               valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: ANTHROPIC_API_KEY, optional: true}}
             - name: OPENROUTER_API_KEY

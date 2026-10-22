@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Job, Source, WorkspaceOverview } from '~/utils/types'
 
-interface Settings { git_token_configured: boolean; git_token_host: string; clone_enabled: boolean; allow_private_git: boolean; vuln_scan: boolean }
+interface Settings { git_token_configured: boolean; git_token_host: string; git_token_hosts?: string[]; clone_enabled: boolean; allow_private_git: boolean; vuln_scan: boolean }
 
 const { data: ov, refresh: refreshOverview } = useApiGet<WorkspaceOverview>('overview')
 const { data: sources } = useApiGet<{ sources: Source[] }>('sources')
@@ -39,7 +39,8 @@ async function ingest(source: string) {
 const reg = reactive({ url: '', branch: '', name: '' })
 const regError = ref('')
 const regOk = ref('')
-const isGitHub = computed(() => /github\.com/i.test(reg.url))
+const urlHost = computed(() => { try { return new URL(reg.url.trim()).hostname.toLowerCase() } catch { return '' } })
+const hostHasToken = computed(() => !!urlHost.value && (settings.value?.git_token_hosts ?? []).includes(urlHost.value))
 async function register() {
   regError.value = ''
   regOk.value = ''
@@ -126,8 +127,8 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
 
         <div class="token" :class="settings?.git_token_configured ? 'token--ok' : 'token--missing'">
           <template v-if="settings?.git_token_configured">
-            <strong>Private repositories on {{ settings.git_token_host }}: enabled</strong>
-            <p class="muted">A token is configured on the server. It is sent only to {{ settings.git_token_host }} and never shown here.</p>
+            <strong>Private repositories on {{ (settings.git_token_hosts?.length ? settings.git_token_hosts : [settings.git_token_host]).join(', ') }}: enabled</strong>
+            <p class="muted">Tokens are configured on the server. Each is sent only to its own host and never shown here. Add another host with <code>just git-token &lt;host&gt;</code>.</p>
           </template>
           <template v-else>
             <strong>Private repositories need a token</strong>
@@ -135,9 +136,9 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
               <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">fine-grained GitHub token</a>
               with read-only <em>Contents</em> access to the repositories, then run this in the project folder:</p>
             <pre class="cmd">just git-token</pre>
-            <p class="muted small">It asks for the token without showing it, stores it in <code>.env</code> and restarts the API. For GitLab or another host: <code>just git-token gitlab.com</code>.</p>
+            <p class="muted small">It asks for the token without showing it, stores it in <code>.env</code> and restarts the API. For GitLab, Forgejo or another host: <code>just git-token codeberg.org</code>.</p>
           </template>
-          <p v-if="isGitHub && !settings?.git_token_configured" class="muted small">If this repository is private, cloning will fail until a token is set.</p>
+          <p v-if="urlHost && !hostHasToken" class="muted small">No token is set for {{ urlHost }}: if this repository is private, cloning will fail. Run <code>just git-token {{ urlHost }}</code>.</p>
         </div>
       </section>
 
