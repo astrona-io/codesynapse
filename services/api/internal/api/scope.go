@@ -124,6 +124,9 @@ func (s *Server) scopeOf(r *http.Request, p accounts.Principal) (scope, error) {
 			return scope{}, err
 		}
 		for _, repo := range repos {
+			if !repo.Usable() {
+				continue // the organisation's token no longer reads it
+			}
 			if cur, ok := sc.graphs[repo.Graph]; !ok || m.Role.AtLeast(cur) {
 				sc.graphs[repo.Graph] = m.Role
 			}
@@ -253,12 +256,12 @@ func (s *Server) linkRepo(r *http.Request, graph, remote, visibility string) err
 
 // publicRemote reports whether remote can be read without credentials,
 // which is what lets an organisation share an existing graph or clone it
-// without the installation's tokens.
-func publicRemote(ctx context.Context, remote, branch string) bool {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+// without any token. It probes HEAD: an empty branch (the default) used
+// to fail validation and made every such repository look private.
+func publicRemote(ctx context.Context, remote string) bool {
+	ctx, cancel := context.WithTimeout(ctx, accessTimeout)
 	defer cancel()
-	_, err := gitx.RemoteHead(ctx, remote, branch, gitx.Auth{})
-	return err == nil
+	return canRead(ctx, remote, gitx.Auth{}) == nil
 }
 
 type attachRequest struct {
@@ -289,13 +292,19 @@ func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request) {
 	vis := accounts.Local
 	if n.URL != "" {
 		vis = accounts.Private
-		if publicRemote(r.Context(), n.URL, n.Branch) {
+		if publicRemote(r.Context(), n.URL) {
 			vis = accounts.Public
 		}
 	}
 	p, _ := principal(r.Context())
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	err = s.cfg.Accounts.St.AddRepository(r.Context(), accounts.Repository{OrgID: o.ID, Graph: req.Graph, Remote: n.URL, Visibility: vis,
-		AddedBy: p.User.ID, AddedAt: time.Now().UTC().Truncate(time.Microsecond)})
+		AddedBy: p.User.ID, AddedAt: now})
+	if err == nil && vis == accounts.Private {
+		// A platform admin assigned it: the organisation still needs its
+		// own token before it can see the graph.
+		s.verifyLink(r.Context(), accounts.Repository{OrgID: o.ID, Graph: req.Graph, Remote: n.URL, Visibility: vis, Access: accounts.AccessOK})
+	}
 	if err != nil {
 		s.accountError(w, err)
 		return

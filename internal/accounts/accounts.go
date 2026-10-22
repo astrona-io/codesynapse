@@ -94,6 +94,33 @@ type Repository struct {
 	Visibility string    `json:"visibility"`
 	AddedBy    string    `json:"added_by,omitempty"`
 	AddedAt    time.Time `json:"added_at"`
+	// Access is AccessOK, or AccessLost once the organisation's own token
+	// stopped reading a private repository; lost entries are invisible to
+	// the organisation until a working token restores them.
+	Access     string     `json:"access"`
+	VerifiedAt *time.Time `json:"verified_at,omitempty"`
+}
+
+// Repository access states.
+const (
+	AccessOK   = "ok"
+	AccessLost = "lost"
+)
+
+// Usable reports whether the organisation may use the entry's graph.
+func (r Repository) Usable() bool { return r.Access != AccessLost }
+
+// GitToken is an organisation's credential for one Git host. The token is
+// stored sealed (AES-256-GCM, see Sealer) and only opened to clone or
+// fetch; the API shows Preview, never the token.
+type GitToken struct {
+	OrgID     string    `json:"org_id"`
+	Host      string    `json:"host"`
+	Preview   string    `json:"preview"`
+	KeyID     string    `json:"-"`
+	Sealed    []byte    `json:"-"`
+	CreatedBy string    `json:"created_by,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Event is an audit log entry. Entries form a hash chain (see audit.go):
@@ -142,6 +169,7 @@ var (
 	ErrLastOwner    = errors.New("an organisation needs at least one owner")
 	ErrInvalidInput = errors.New("invalid input")
 	ErrKeyRevoked   = errors.New("API key revoked or expired")
+	ErrNoSecretKey  = errors.New("organisation Git tokens need CODESYNAPSE_SECRET_KEY (32 random bytes, base64 or hex) on the API")
 )
 
 // Store persists accounts. Implementations must be safe for concurrent use
@@ -187,6 +215,14 @@ type Store interface {
 	OrgRepositories(ctx context.Context, orgID string) ([]Repository, error)
 	// GraphRepositories lists every organisation's entry for a graph.
 	GraphRepositories(ctx context.Context, graph string) ([]Repository, error)
+	// SetRepositoryAccess records the outcome of an access check.
+	SetRepositoryAccess(ctx context.Context, orgID, graph, access string, at time.Time) error
+
+	// PutGitToken inserts or replaces an organisation's token for a host.
+	PutGitToken(ctx context.Context, t GitToken) error
+	GitToken(ctx context.Context, orgID, host string) (GitToken, error) // ErrNotFound
+	GitTokens(ctx context.Context, orgID string) ([]GitToken, error)    // by host
+	DeleteGitToken(ctx context.Context, orgID, host string) error       // ErrNotFound
 
 	// AddEvent appends e to the audit chain: under a lock, it sets
 	// e.PrevHash to the last entry's hash and e.Hash = e.ChainHash().

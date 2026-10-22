@@ -23,6 +23,10 @@ init:
             printf '\n# PostgreSQL for users, organisations, API keys and the audit log.\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
             echo "added POSTGRES_PASSWORD to .env"
         fi
+        if ! grep -q '^SECRET_KEY=' .env; then
+            printf '\n# Seals organisation Git tokens; keep it (tokens sealed with a lost key must be set again).\nSECRET_KEY=%s\n' "$(openssl rand -base64 32)" >> .env
+            echo "added SECRET_KEY to .env"
+        fi
         if ! grep -q '^METRICS_PASSWORD=' .env; then
             printf '\n# VictoriaMetrics password (statistics by minute and hour).\nMETRICS_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
             echo "added METRICS_PASSWORD to .env"
@@ -38,7 +42,8 @@ init:
         -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-postgres/$(openssl rand -hex 24)/" \
         -e "s/change-me-hugegraph/$(openssl rand -hex 24)/" \
-        -e "s/change-me-metrics/$(openssl rand -hex 24)/" .env.example > .env
+        -e "s/change-me-metrics/$(openssl rand -hex 24)/" \
+        -e "s|change-me-secret-key|$(openssl rand -base64 32)|" .env.example > .env
     mkdir -p sources
     [ -f sources/go.mod ] || printf "module sources\n" > sources/go.mod
     echo "wrote .env; put repositories (or symlink-free clones) under ./sources"

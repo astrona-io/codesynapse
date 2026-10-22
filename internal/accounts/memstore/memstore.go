@@ -24,6 +24,7 @@ type Store struct {
 	events   []accounts.Event
 	lastID   int64
 	repos    map[string]accounts.Repository // org|graph
+	tokens   map[string]accounts.GitToken   // org|host
 }
 
 type member struct {
@@ -36,7 +37,7 @@ var _ accounts.Store = (*Store)(nil)
 // New returns an empty store.
 func New() *Store {
 	return &Store{users: map[string]accounts.User{}, orgs: map[string]accounts.Org{}, members: map[string]map[string]member{},
-		sessions: map[string]accounts.Session{}, keys: map[string]accounts.APIKey{}, repos: map[string]accounts.Repository{}}
+		sessions: map[string]accounts.Session{}, keys: map[string]accounts.APIKey{}, repos: map[string]accounts.Repository{}, tokens: map[string]accounts.GitToken{}}
 }
 
 // Migrate implements accounts.Store.
@@ -397,7 +398,73 @@ func (s *Store) AddRepository(_ context.Context, r accounts.Repository) error {
 	if _, ok := s.repos[k]; ok {
 		return fmt.Errorf("repository: %w", accounts.ErrExists)
 	}
+	r.Access = cmp.Or(r.Access, accounts.AccessOK)
 	s.repos[k] = r
+	return nil
+}
+
+// SetRepositoryAccess implements accounts.Store.
+func (s *Store) SetRepositoryAccess(_ context.Context, orgID, graph, access string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := orgID + "|" + graph
+	r, ok := s.repos[k]
+	if !ok {
+		return fmt.Errorf("repository: %w", accounts.ErrNotFound)
+	}
+	r.Access, r.VerifiedAt = access, &at
+	s.repos[k] = r
+	return nil
+}
+
+// PutGitToken implements accounts.Store.
+func (s *Store) PutGitToken(_ context.Context, t accounts.GitToken) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.orgs[t.OrgID]; !ok {
+		return fmt.Errorf("organisation: %w", accounts.ErrNotFound)
+	}
+	t.Sealed = slices.Clone(t.Sealed)
+	s.tokens[t.OrgID+"|"+t.Host] = t
+	return nil
+}
+
+// GitToken implements accounts.Store.
+func (s *Store) GitToken(_ context.Context, orgID, host string) (accounts.GitToken, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.tokens[orgID+"|"+host]
+	if !ok {
+		return accounts.GitToken{}, fmt.Errorf("git token: %w", accounts.ErrNotFound)
+	}
+	t.Sealed = slices.Clone(t.Sealed)
+	return t, nil
+}
+
+// GitTokens implements accounts.Store.
+func (s *Store) GitTokens(_ context.Context, orgID string) ([]accounts.GitToken, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []accounts.GitToken{}
+	for _, t := range s.tokens {
+		if t.OrgID == orgID {
+			t.Sealed = slices.Clone(t.Sealed)
+			out = append(out, t)
+		}
+	}
+	slices.SortFunc(out, func(a, b accounts.GitToken) int { return cmp.Compare(a.Host, b.Host) })
+	return out, nil
+}
+
+// DeleteGitToken implements accounts.Store.
+func (s *Store) DeleteGitToken(_ context.Context, orgID, host string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := orgID + "|" + host
+	if _, ok := s.tokens[k]; !ok {
+		return fmt.Errorf("git token: %w", accounts.ErrNotFound)
+	}
+	delete(s.tokens, k)
 	return nil
 }
 

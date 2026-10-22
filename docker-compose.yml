@@ -120,6 +120,8 @@ services:
       # Accounts: users, organisations, API keys and the audit log.
       CODESYNAPSE_DATABASE_URL: postgres://codesynapse:${POSTGRES_PASSWORD}@postgres:5432/codesynapse?sslmode=disable
       # Anyone may create an account after the first (which becomes the platform admin).
+      # Seals organisation Git tokens (private repositories for organisations).
+      CODESYNAPSE_SECRET_KEY: ${SECRET_KEY:-}
       CODESYNAPSE_SIGNUP_OPEN: ${CODESYNAPSE_SIGNUP_OPEN:-false}
       # The local stack is served over plain HTTP on 127.0.0.1; set true behind TLS.
       CODESYNAPSE_COOKIE_SECURE: ${CODESYNAPSE_COOKIE_SECURE:-false}

@@ -151,6 +151,20 @@ func TestTelemetryCarriesTenant(t *testing.T) {
 	assert.False(t, strings.Contains(out, "no_such_tool_"), "the invented name never reaches a series")
 }
 
+func TestLostPrivateAccessLeavesScope(t *testing.T) {
+	url, keys, acc, _, _ := keyServer(t)
+	ctx := context.Background()
+	p, err := acc.AuthenticateKey(ctx, keys["a"])
+	require.NoError(t, err)
+	require.NoError(t, acc.St.SetRepositoryAccess(ctx, p.OrgID, storetest.Repo, accounts.AccessLost, time.Now().UTC()))
+	a, err := connectKey(t, url, keys["a"])
+	require.NoError(t, err)
+	var list repoListOut
+	require.False(t, call(t, a, "repo_list", map[string]any{}, &list).IsError)
+	assert.Len(t, list.Repos, 0, "an organisation whose token lost access no longer sees the graph")
+	assert.True(t, call(t, a, "repo_overview", map[string]any{"repo": storetest.Repo}, nil).IsError)
+}
+
 func TestRevokedKeyStopsWorking(t *testing.T) {
 	url, keys, acc, _, _ := keyServer(t)
 	ctx := context.Background()

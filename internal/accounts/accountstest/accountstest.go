@@ -4,8 +4,10 @@ package accountstest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -211,6 +213,53 @@ func Run(t *testing.T, st accounts.Store) {
 	refs, err := st.GraphRepositories(ctx, "acme/api")
 	require.NoError(t, err)
 	assert.Equal(t, len(refs), 2)
+	assert.Equal(t, repos[1].Access, accounts.AccessOK, "new entries are usable")
+	assert.True(t, repos[1].VerifiedAt == nil)
+	require.NoError(t, st.SetRepositoryAccess(ctx, team.ID, "acme/web", accounts.AccessLost, now))
+	repos, err = st.OrgRepositories(ctx, team.ID)
+	require.NoError(t, err)
+	assert.False(t, repos[1].Usable(), "a lost private repository is not usable")
+	require.NotNil(t, repos[1].VerifiedAt)
+	assert.True(t, repos[1].VerifiedAt.Equal(now))
+	assert.True(t, errors.Is(st.SetRepositoryAccess(ctx, dup.ID, "acme/web", accounts.AccessOK, now), accounts.ErrNotFound))
+
+	// Organisation Git tokens: sealed, admins only, bound to org and host.
+	_, err = svc.SetGitToken(ctx, bobP, team.ID, "github.com", "ghp_abcdefghijklmnopqrstuvwxyz0123456789")
+	assert.True(t, errors.Is(err, accounts.ErrNoSecretKey), "no secret key, no tokens")
+	sealKey := make([]byte, 32)
+	sealKey[0] = 7
+	svc.Secrets, err = accounts.NewSealer(sealKey)
+	require.NoError(t, err)
+	const ghToken = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+	gt, err := svc.SetGitToken(ctx, bobP, team.ID, " GitHub.com ", ghToken)
+	require.NoError(t, err)
+	assert.Equal(t, gt.Host, "github.com")
+	assert.Equal(t, gt.Preview, "ghp_a***56789")
+	_, err = svc.SetGitToken(ctx, accounts.Principal{User: bob, Via: "key", OrgID: team.ID}, team.ID, "github.com", ghToken)
+	assert.True(t, errors.Is(err, accounts.ErrForbidden), "API keys do not manage secrets")
+	_, err = svc.SetGitToken(ctx, bobP, team.ID, "https://github.com/x", ghToken)
+	assert.True(t, errors.Is(err, accounts.ErrInvalidInput), "a host, not a URL")
+	_, err = svc.SetGitToken(ctx, bobP, team.ID, "gitlab.com", "short")
+	assert.True(t, errors.Is(err, accounts.ErrInvalidInput))
+	listed, err := svc.GitTokens(ctx, bobP, team.ID)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	b, _ := json.Marshal(listed)
+	assert.False(t, strings.Contains(string(b), ghToken) || strings.Contains(string(b), "sealed"), "listing shows the preview only")
+	stored, err := st.GitToken(ctx, team.ID, "github.com")
+	require.NoError(t, err)
+	assert.False(t, strings.Contains(string(stored.Sealed), ghToken), "stored sealed, never in clear")
+	opened, err := svc.OpenGitToken(ctx, team.ID, "github.com")
+	require.NoError(t, err)
+	assert.Equal(t, opened, ghToken)
+	stored.OrgID = dup.ID
+	require.NoError(t, st.PutGitToken(ctx, stored))
+	_, err = svc.OpenGitToken(ctx, dup.ID, "github.com")
+	assert.Error(t, err, "a sealed token copied to another organisation does not open")
+	_, err = svc.OpenGitToken(ctx, team.ID, "gitlab.com")
+	assert.True(t, errors.Is(err, accounts.ErrNotFound))
+	require.NoError(t, svc.RemoveGitToken(ctx, bobP, team.ID, "github.com"))
+	assert.True(t, errors.Is(svc.RemoveGitToken(ctx, bobP, team.ID, "github.com"), accounts.ErrNotFound))
 	left, err := st.RemoveRepository(ctx, team.ID, "acme/api")
 	require.NoError(t, err)
 	assert.Equal(t, left, 1, "the other organisation still uses the graph")

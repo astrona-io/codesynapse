@@ -42,7 +42,9 @@ func (a OrgAccess) OrgGraphs(ctx context.Context, orgID string) ([]string, error
 	}
 	graphs := make([]string, 0, len(repos))
 	for _, r := range repos {
-		graphs = append(graphs, r.Graph)
+		if r.Usable() { // a lost private repository is out of scope
+			graphs = append(graphs, r.Graph)
+		}
 	}
 	return graphs, nil
 }

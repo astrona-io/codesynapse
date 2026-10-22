@@ -145,6 +145,10 @@ func serveCmd(ec *app.Env) *cobra.Command {
 // log). It holds a password, so it is read from the environment only.
 const EnvDatabaseURL = "CODESYNAPSE_DATABASE_URL" //nolint:gosec // env var name
 
+// EnvSecretKey seals organisation Git tokens (32 bytes, base64 or hex).
+// Losing it makes stored tokens unreadable; they then have to be set again.
+const EnvSecretKey = "CODESYNAPSE_SECRET_KEY" //nolint:gosec // env var name
+
 // openAccounts connects to PostgreSQL and migrates it, or returns nil when
 // no database is configured (single-tenant mode).
 func openAccounts(ctx context.Context, logger *slog.Logger) (*accounts.Service, func(), error) {
@@ -163,6 +167,19 @@ func openAccounts(ctx context.Context, logger *slog.Logger) (*accounts.Service, 
 		return nil, nil, fmt.Errorf("migrating the accounts database: %w", err)
 	}
 	svc := accounts.NewService(st, app.Getenv("CODESYNAPSE_SIGNUP_OPEN", "") == "true")
+	if raw := os.Getenv(EnvSecretKey); raw != "" {
+		key, err := accounts.ParseSecretKey(raw)
+		if err != nil {
+			st.Close()
+			return nil, nil, fmt.Errorf("%s: %w", EnvSecretKey, err)
+		}
+		if svc.Secrets, err = accounts.NewSealer(key); err != nil {
+			st.Close()
+			return nil, nil, err
+		}
+	} else {
+		logger.Warn("organisation Git tokens are off: set " + EnvSecretKey + " to allow private repositories for organisations")
+	}
 	logger.Info("accounts enabled", "signup_open", svc.SignupOpen)
 	return svc, st.Close, nil
 }

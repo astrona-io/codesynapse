@@ -120,7 +120,7 @@ func (s *Server) accountError(w http.ResponseWriter, err error) {
 		s.problem(w, http.StatusForbidden, err)
 	case errors.Is(err, accounts.ErrNotFound):
 		s.problem(w, http.StatusNotFound, err)
-	case errors.Is(err, accounts.ErrExists), errors.Is(err, accounts.ErrLastOwner):
+	case errors.Is(err, accounts.ErrExists), errors.Is(err, accounts.ErrLastOwner), errors.Is(err, accounts.ErrNoSecretKey):
 		s.problem(w, http.StatusConflict, err)
 	case errors.Is(err, accounts.ErrRateLimited):
 		w.Header().Set("Retry-After", "60")
@@ -151,6 +151,9 @@ func (s *Server) accountRoutes() {
 	m.HandleFunc("GET /api/v1/admin/audit/verify", s.handleVerifyAudit)
 	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/repos", s.handleOrgRepos)
 	m.HandleFunc("POST /api/v1/accounts/orgs/{org}/repos", s.handleAttachRepo)
+	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/git-tokens", s.handleGitTokens)
+	m.HandleFunc("PUT /api/v1/accounts/orgs/{org}/git-tokens/{host}", s.handleSetGitToken)
+	m.HandleFunc("DELETE /api/v1/accounts/orgs/{org}/git-tokens/{host}", s.handleRemoveGitToken)
 	m.HandleFunc("GET /api/v1/admin/users", s.handleAdminUsers)
 	m.HandleFunc("GET /api/v1/admin/orgs", s.handleAdminOrgs)
 }
