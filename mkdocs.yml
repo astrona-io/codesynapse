@@ -47,6 +47,7 @@ nav:
       - Ingest pipeline: architecture/ingest.md
       - Graph schema: architecture/graph-schema.md
       - Stores and backends: architecture/stores.md
+      - Retrieval and memory: architecture/retrieval-memory.md
   - Features:
       - Agent context (MCP): features/agent-context.md
       - Security review: features/security.md
