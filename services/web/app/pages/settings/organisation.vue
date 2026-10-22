@@ -6,7 +6,8 @@ const org = computed(() => session.current.value?.org)
 const { data, refresh, error: loadError } = useApiGet<{ org: AccountOrg; members: Membership[] }>(() => (org.value ? `accounts/orgs/${org.value.slug}/members` : 'accounts/orgs/-/members'))
 const canManage = computed(() => session.can('admin'))
 const roles: { id: Role; label: string; help: string }[] = [
-  { id: 'viewer', label: 'Viewer', help: 'Reads repositories, reports and statistics' },
+  { id: 'guest', label: 'Guest', help: 'Sees only repositories shared with them (contractors, auditors)' },
+  { id: 'viewer', label: 'Viewer', help: 'Reads every repository, report and statistic of the organisation' },
   { id: 'member', label: 'Member', help: 'Also syncs, adds repositories and runs AI tasks' },
   { id: 'admin', label: 'Admin', help: 'Also manages members, Git tokens and settings' },
   { id: 'owner', label: 'Owner', help: 'Everything, including other owners' },

@@ -1,6 +1,6 @@
 import type { AuthStatus, Me, Membership, Role } from '~/utils/types'
 
-const ROLE_RANK: Record<Role, number> = { viewer: 0, member: 1, admin: 2, owner: 3 }
+const ROLE_RANK: Record<Role, number> = { guest: 0, viewer: 1, member: 2, admin: 3, owner: 4 }
 
 // The signed-in user and the organisation they work in. The session itself
 // is an HTTP-only cookie the browser never reads; this only holds what the

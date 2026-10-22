@@ -7,6 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 )
@@ -32,9 +33,11 @@ const (
 	ExtraToken = "token"
 )
 
-// Access lists the repositories (graphs) an organisation may use.
+// Access says what a key's user reaches in the key's organisation:
+// accounts.AccessOf narrowed with Scope (organisation roles, teams,
+// repository grants and shares), keyed by graph.
 type Access interface {
-	OrgGraphs(ctx context.Context, orgID string) ([]string, error)
+	Reach(ctx context.Context, userID, orgID string) (map[string]accounts.Reach, error)
 }
 
 type callerKey struct{}
@@ -64,18 +67,42 @@ func callerMiddleware() mcp.Middleware {
 	}
 }
 
-// allowed returns the graphs the caller may use; restricted is false when
-// every graph is allowed.
-func (h *handlers) allowed(ctx context.Context) (graphs []string, restricted bool, err error) {
+// reach returns what the caller reaches; restricted is false when every
+// graph is allowed (the MCP token, stdio).
+func (h *handlers) reach(ctx context.Context) (map[string]accounts.Reach, bool, error) {
 	c := callerFrom(ctx)
 	if c == nil {
 		return nil, false, nil
 	}
 	if h.access == nil {
-		return nil, true, nil // a key without an access source sees nothing
+		return map[string]accounts.Reach{}, true, nil // a key without an access source sees nothing
 	}
-	g, err := h.access.OrgGraphs(ctx, c.OrgID)
-	return g, true, err
+	r, err := h.access.Reach(ctx, c.UserID, c.OrgID)
+	return r, true, err
+}
+
+// allowed returns the graphs the caller may use; restricted is false when
+// every graph is allowed.
+func (h *handlers) allowed(ctx context.Context) (graphs []string, restricted bool, err error) {
+	r, restricted, err := h.reach(ctx)
+	for g := range r {
+		graphs = append(graphs, g)
+	}
+	slices.Sort(graphs)
+	return graphs, restricted, err
+}
+
+// canWrite: writing memory or reviews needs editor (organisation members,
+// editor grants); viewers and share recipients read only.
+func (h *handlers) canWrite(ctx context.Context, graph string) error {
+	r, restricted, err := h.reach(ctx)
+	if err != nil || !restricted {
+		return err
+	}
+	if !r[graph].Role.AtLeast(accounts.Member) {
+		return fmt.Errorf("repository %q is read-only for you: writing memory or reviews needs editor access", graph)
+	}
+	return nil
 }
 
 // sees reports whether the caller may use graph.
@@ -87,13 +114,19 @@ func (h *handlers) sees(ctx context.Context, graph string) (bool, error) {
 	return slices.Contains(g, graph), nil
 }
 
-// memRepo is the memory namespace of graph for the caller: organisations
-// sharing a graph keep separate memories.
-func memRepo(ctx context.Context, graph string) string {
-	if c := callerFrom(ctx); c != nil {
-		return memory.Namespace(c.OrgID, graph)
+// memRepo is the memory namespace of graph for the caller: the content
+// organisation of their grant (their own, or the one that shared it), so
+// organisations sharing a graph keep separate memories.
+func (h *handlers) memRepo(ctx context.Context, graph string) string {
+	c := callerFrom(ctx)
+	if c == nil {
+		return graph
 	}
-	return graph
+	org := c.OrgID
+	if r, _, err := h.reach(ctx); err == nil && r[graph].OrgID != "" {
+		org = r[graph].OrgID
+	}
+	return memory.Namespace(org, graph)
 }
 
 // reviewOrg is the organisation a review belongs to ("" without a caller).
@@ -116,10 +149,16 @@ func (h *handlers) canSeeReview(ctx context.Context, repo, org string) error {
 	if err != nil {
 		return err
 	}
-	if !ok || (org != c.OrgID && org != "") {
+	if !ok {
 		return fmt.Errorf("no such review")
 	}
-	return nil
+	if org == "" || org == c.OrgID {
+		return nil
+	}
+	if r, _, err := h.reach(ctx); err == nil && r[repo].OrgID == org {
+		return nil // content follows the repository's grant (shares included)
+	}
+	return fmt.Errorf("no such review")
 }
 
 func callerToken(ctx context.Context) string {

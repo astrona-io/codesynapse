@@ -73,6 +73,9 @@ func (h *handlers) submitReview(ctx context.Context, req *mcp.CallToolRequest, i
 	if err != nil {
 		return nil, submitReviewOut{}, err
 	}
+	if err := h.canWrite(ctx, repo); err != nil {
+		return nil, submitReviewOut{}, err
+	}
 	repoNode, err := h.svc.R.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
 	if err != nil {
 		return nil, submitReviewOut{}, err
@@ -140,6 +143,9 @@ func (h *handlers) updateReviewComment(ctx context.Context, req *mcp.CallToolReq
 		return nil, reviews.Counts{}, err
 	}
 	if err := h.canSeeReview(ctx, r.Repo, r.OrgID); err != nil {
+		return nil, reviews.Counts{}, err
+	}
+	if err := h.canWrite(ctx, r.Repo); err != nil {
 		return nil, reviews.Counts{}, err
 	}
 	by := clientName(req)

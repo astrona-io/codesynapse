@@ -224,7 +224,31 @@ func (s *Service) RoleIn(ctx context.Context, p Principal, orgID string) (Role, 
 	if errors.Is(err, ErrNotFound) {
 		return "", ErrForbidden
 	}
-	return r, err
+	if err != nil {
+		return "", err
+	}
+	// Roles granted to the user's teams count too (ReBAC, authz.go).
+	tr, err := s.teamOrgRole(ctx, orgID, p.User.ID)
+	return Max(r, tr), err
+}
+
+// teamOrgRole is the strongest organisation role the user holds through a
+// team ("" without one).
+func (s *Service) teamOrgRole(ctx context.Context, orgID, userID string) (Role, error) {
+	mine, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeTeam, SubjectType: TypeUser, SubjectID: userID})
+	if err != nil || len(mine) == 0 {
+		return "", err
+	}
+	ids := make([]string, len(mine))
+	for i, t := range mine {
+		ids[i] = t.ObjectID
+	}
+	grants, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeOrganisation, ObjectID: orgID, SubjectType: TypeTeam, SubjectIDs: ids, SubjectRelation: RelMember})
+	var best Role
+	for _, g := range grants {
+		best = Max(best, Role(g.Relation))
+	}
+	return best, err
 }
 
 // Require returns ErrForbidden unless p has at least the role least in org.
@@ -323,6 +347,9 @@ func (s *Service) RemoveMember(ctx context.Context, p Principal, orgID, userID s
 		return err
 	}
 	if err := s.St.RemoveMember(ctx, orgID, userID); err != nil {
+		return err
+	}
+	if err := s.dropUserTuples(ctx, orgID, userID); err != nil {
 		return err
 	}
 	s.audit(ctx, actorEvent(p, "member.remove", orgID, userID))

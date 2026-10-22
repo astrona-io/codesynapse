@@ -106,6 +106,9 @@ func (h *handlers) offloadTurns(ctx context.Context, req *mcp.CallToolRequest, i
 	if err != nil {
 		return nil, offloadJob{}, err
 	}
+	if err := h.canWrite(ctx, repo); err != nil {
+		return nil, offloadJob{}, err
+	}
 	if len(in.Turns) == 0 || len(in.Turns) > extract.MaxTurns {
 		return nil, offloadJob{}, fmt.Errorf("turns: give 1 to %d", extract.MaxTurns)
 	}
@@ -159,7 +162,7 @@ func (h *handlers) recallContext(ctx context.Context, _ *mcp.CallToolRequest, in
 		out.Skipped = why
 		return nil, out, nil
 	}
-	g, err := h.memory.SearchMemory(ctx, memRepo(ctx, repo), in.Query, 8, in.History)
+	g, err := h.memory.SearchMemory(ctx, h.memRepo(ctx, repo), in.Query, 8, in.History)
 	if err != nil {
 		return nil, out, err
 	}
@@ -174,7 +177,7 @@ func (h *handlers) recallContext(ctx context.Context, _ *mcp.CallToolRequest, in
 	if len(ids) == 0 {
 		return nil, out, nil
 	}
-	sub, err := h.memory.MemorySubgraph(ctx, memRepo(ctx, repo), ids, max(in.Depth, 1), max(in.Limit, 40), in.History)
+	sub, err := h.memory.MemorySubgraph(ctx, h.memRepo(ctx, repo), ids, max(in.Depth, 1), max(in.Limit, 40), in.History)
 	out.Graph = sub
 	return nil, out, err
 }

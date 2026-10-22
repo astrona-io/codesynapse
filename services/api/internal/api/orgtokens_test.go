@@ -149,7 +149,8 @@ func TestPrivateRepositoriesWithOrgTokens(t *testing.T) {
 	// Fix branches: an organisation pushes with its own token.
 	req := httptest.NewRequest("POST", "/", nil)
 	req = req.WithContext(context.WithValue(ctx, scopeKey{}, scope{graphs: map[string]accounts.Role{secretRepo: accounts.Owner},
-		orgs: []accounts.Membership{{Org: team, Role: accounts.Owner}}}))
+		reach: map[string]accounts.Reach{secretRepo: {Role: accounts.Admin, OrgID: team.ID}},
+		orgs:  []accounts.Membership{{Org: team, Role: accounts.Owner}}}))
 	push, err := srv.pushAuth(req, secretRepo, secret)
 	require.NoError(t, err)
 	assert.Equal(t, push.Token, bobToken2)

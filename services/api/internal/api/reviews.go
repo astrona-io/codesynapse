@@ -17,7 +17,7 @@ func (s *Server) handleListReviews(w http.ResponseWriter, r *http.Request) {
 	sc := scopeFrom(r.Context())
 	out := make([]reviews.Summary, 0, len(list))
 	for _, rv := range list {
-		if seesReview(sc, rv.OrgID) {
+		if seesReview(sc, rv.Repo, rv.OrgID) {
 			out = append(out, reviews.SummaryOf(rv))
 		}
 	}

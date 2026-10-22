@@ -51,7 +51,7 @@ func keyServer(t *testing.T) (url string, keys map[string]string, acc *accounts.
 		}
 	}
 	rec = usage.NewRecorder(s)
-	server := New(s, "test", Options{Reviews: s, Memory: s, Usage: rec, Access: OrgAccess{St: acc.St}})
+	server := New(s, "test", Options{Reviews: s, Memory: s, Usage: rec, Access: AccountsAccess{Acc: acc}})
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 	ts := httptest.NewServer(auth.RequireBearerToken(KeyVerifier(acc, "svc-token"),
 		&auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(handler))
@@ -163,6 +163,57 @@ func TestLostPrivateAccessLeavesScope(t *testing.T) {
 	require.False(t, call(t, a, "repo_list", map[string]any{}, &list).IsError)
 	assert.Len(t, list.Repos, 0, "an organisation whose token lost access no longer sees the graph")
 	assert.True(t, call(t, a, "repo_overview", map[string]any{"repo": storetest.Repo}, nil).IsError)
+}
+
+func TestSharesAndReadOnlyKeys(t *testing.T) {
+	url, keys, acc, _, _ := keyServer(t)
+	ctx := context.Background()
+	pa, err := acc.AuthenticateKey(ctx, keys["a"])
+	require.NoError(t, err)
+	pc, err := acc.AuthenticateKey(ctx, keys["c"])
+	require.NoError(t, err)
+	ownerA := accounts.Principal{User: pa.User, Via: "session"}
+
+	// Organisation a shares the repository with c, who is outside it.
+	_, err = acc.SetRepoGrant(ctx, ownerA, pa.OrgID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: pc.User.ID}, accounts.Viewer)
+	require.NoError(t, err)
+	a, err := connectKey(t, url, keys["a"])
+	require.NoError(t, err)
+	b, err := connectKey(t, url, keys["b"])
+	require.NoError(t, err)
+	c, err := connectKey(t, url, keys["c"])
+	require.NoError(t, err)
+	for name, cs := range map[string]*mcp.ClientSession{"a": a, "b": b} {
+		res := call(t, cs, "upsert_graph_triples", map[string]any{"triples": []map[string]any{{"subject": "Billing " + name, "predicate": "OWNED_BY", "object": "Team " + name}}}, nil)
+		require.False(t, res.IsError, "%v", res.Content)
+	}
+	var list repoListOut
+	require.False(t, call(t, c, "repo_list", map[string]any{}, &list).IsError)
+	require.Len(t, list.Repos, 1, "the share is visible to c's key")
+	var g agentmem.Graph
+	require.False(t, call(t, c, "search_graph_nodes", map[string]any{"query": "billing"}, &g).IsError)
+	require.Len(t, g.Entities, 2)
+	names := g.Entities[0].Name + " " + g.Entities[1].Name
+	assert.Contains(t, names, "Billing a", "c reads the sharing organisation's memory")
+	assert.False(t, strings.Contains(names, "Billing b"), "not a third organisation's")
+	res := call(t, c, "upsert_graph_triples", map[string]any{"triples": []map[string]any{{"subject": "x", "predicate": "P", "object": "y"}}}, nil)
+	assert.True(t, res.IsError, "shares are read-only")
+	res = call(t, c, "submit_review", map[string]any{"title": "t", "summary": "s"}, nil)
+	assert.True(t, res.IsError)
+
+	// A viewer of organisation a reads but does not write.
+	viewer, _, err := acc.SignUp(ctx, "viewer@example.com", "viewer", "correct horse battery staple")
+	require.NoError(t, err)
+	_, err = acc.AddMember(ctx, ownerA, pa.OrgID, viewer.Email, accounts.Viewer)
+	require.NoError(t, err)
+	vkey, _, err := acc.CreateKey(ctx, accounts.Principal{User: viewer, Via: "session"}, pa.OrgID, "v", 0)
+	require.NoError(t, err)
+	v, err := connectKey(t, url, vkey)
+	require.NoError(t, err)
+	require.False(t, call(t, v, "search_graph_nodes", map[string]any{"query": "billing"}, &g).IsError)
+	assert.Len(t, g.Entities, 2, "viewers read their organisation's memory")
+	res = call(t, v, "upsert_graph_triples", map[string]any{"triples": []map[string]any{{"subject": "x", "predicate": "P", "object": "y"}}}, nil)
+	assert.True(t, res.IsError, "viewers do not write")
 }
 
 func TestRevokedKeyStopsWorking(t *testing.T) {

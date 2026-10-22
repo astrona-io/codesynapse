@@ -241,7 +241,7 @@ export interface AccountOrg {
   name: string
   created_at: string
 }
-export type Role = 'owner' | 'admin' | 'member' | 'viewer'
+export type Role = 'owner' | 'admin' | 'member' | 'viewer' | 'guest'
 export interface Membership {
   org: AccountOrg
   user: AccountUser
@@ -270,3 +270,17 @@ export interface GitToken {
   preview: string
   updated_at: string
 }
+
+// Relationship-based access (teams, repository grants and shares).
+export interface TeamMember { user: AccountUser; relation: 'member' | 'maintainer' }
+export interface Team { id: string; org_id: string; slug: string; name: string; role?: Role; members: TeamMember[] }
+export interface RepoGrant {
+  subject_type: 'user' | 'team'
+  subject_id: string
+  relation: 'admin' | 'editor' | 'viewer'
+  role: Role
+  label: string
+  external: boolean
+  created_at: string
+}
+export interface ReachView { org_id: string; org: string; graph: string; role: Role; via: string; shared: boolean }

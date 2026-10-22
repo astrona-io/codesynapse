@@ -6,6 +6,8 @@ Connecting is one command: `just mcp` (or `codesynapse mcp install`) registers t
 
 **Personal API keys.** When the installation has accounts (PostgreSQL configured), create a key under your profile and use it as the bearer token: `CODESYNAPSE_MCP_TOKEN=csk_… just mcp`. The agent then sees only your organisation's repositories, and its memory, reviews and usage statistics belong to your organisation, even when another organisation uses the same repository. Revoking the key or leaving the organisation cuts the agent off on its next call. The installation's own MCP token still sees everything; keep it for operators.
 
+What a key reaches follows the key owner's relationships (organisation role, teams, repository grants, and repositories other organisations shared with them). Repositories you can only view (viewer role, guests' read grants, shares from other organisations) are read-only for agents too: `upsert_graph_triples`, `offload_turns`, `submit_review` and `update_review_comment` answer that writing needs editor access. On a shared repository the agent reads the sharing organisation's memory and reviews.
+
 ---
 
 ## 1. MCP server system instructions

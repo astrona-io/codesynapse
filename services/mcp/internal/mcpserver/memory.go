@@ -79,7 +79,10 @@ func (h *handlers) upsertTriples(ctx context.Context, req *mcp.CallToolRequest, 
 	if err != nil {
 		return nil, upsertTriplesOut{}, err
 	}
-	b, err := memory.Prepare(memRepo(ctx, repo), in.Triples, clientName(req), time.Now())
+	if err := h.canWrite(ctx, repo); err != nil {
+		return nil, upsertTriplesOut{}, err
+	}
+	b, err := memory.Prepare(h.memRepo(ctx, repo), in.Triples, clientName(req), time.Now())
 	if err != nil {
 		return nil, upsertTriplesOut{}, err
 	}
@@ -107,7 +110,7 @@ func (h *handlers) searchMemory(ctx context.Context, _ *mcp.CallToolRequest, in 
 		return nil, memory.Graph{}, err
 	}
 	telemetry.MemoryRecalls.Inc(telemetry.Tenant(ctx), "text")
-	g, err := h.memory.SearchMemory(ctx, memRepo(ctx, repo), in.Query, in.Limit, in.History)
+	g, err := h.memory.SearchMemory(ctx, h.memRepo(ctx, repo), in.Query, in.Limit, in.History)
 	return nil, g, err
 }
 
@@ -129,10 +132,10 @@ func (h *handlers) querySubgraph(ctx context.Context, _ *mcp.CallToolRequest, in
 	}
 	ids := make([]string, len(in.Entities))
 	for i, name := range in.Entities {
-		ids[i] = memory.EntityID(memRepo(ctx, repo), name)
+		ids[i] = memory.EntityID(h.memRepo(ctx, repo), name)
 	}
 	telemetry.MemoryRecalls.Inc(telemetry.Tenant(ctx), "graph")
-	g, err := h.memory.MemorySubgraph(ctx, memRepo(ctx, repo), ids, in.Depth, in.Limit, in.History)
+	g, err := h.memory.MemorySubgraph(ctx, h.memRepo(ctx, repo), ids, in.Depth, in.Limit, in.History)
 	return nil, g, err
 }
 

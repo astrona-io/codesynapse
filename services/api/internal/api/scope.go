@@ -52,11 +52,14 @@ func reviewRole(r accounts.Role) policy { return policy{kind: onReview, least: r
 func orgRole(r accounts.Role) policy    { return policy{kind: inOrg, least: r} }
 
 // scope is what a caller may see: every graph (platform admins, the service
-// token, single-tenant mode) or the graphs of their organisations with the
-// best role they hold on each.
+// token, single-tenant mode) or the graphs reached through relationships
+// (accounts.AccessOf: organisation roles, teams, repository grants and
+// shares) with the best role on each.
 type scope struct {
 	all    bool
 	graphs map[string]accounts.Role
+	// reach says whose content (reviews, memory) each graph shows.
+	reach map[string]accounts.Reach
 	// orgs are the organisations the request acts in: the key's, the one
 	// named by OrgHeader, or all of a user's.
 	orgs []accounts.Membership
@@ -100,11 +103,16 @@ func (s *Server) scopeOf(r *http.Request, p accounts.Principal) (scope, error) {
 		return scope{}, err
 	}
 	want := r.Header.Get(OrgHeader)
-	sc := scope{graphs: map[string]accounts.Role{}}
+	sc := scope{graphs: map[string]accounts.Role{}, reach: map[string]accounts.Reach{}}
+	access, err := s.cfg.Accounts.AccessOf(ctx, p.User.ID)
+	if err != nil && p.Via != "service" {
+		return scope{}, err
+	}
 	for _, m := range ms {
 		if (p.OrgID != "" && m.Org.ID != p.OrgID) || (want != "" && m.Org.Slug != want) {
 			continue
 		}
+		m.Role = accounts.Max(m.Role, access.OrgRole(m.Org.ID)) // roles through teams count
 		sc.orgs = append(sc.orgs, m)
 	}
 	if want != "" && len(sc.orgs) == 0 {
@@ -118,19 +126,25 @@ func (s *Server) scopeOf(r *http.Request, p accounts.Principal) (scope, error) {
 			return scope{}, accounts.ErrNotFound
 		}
 	}
+	selected := map[string]bool{}
 	for _, m := range sc.orgs {
-		repos, err := s.cfg.Accounts.St.OrgRepositories(ctx, m.Org.ID)
-		if err != nil {
-			return scope{}, err
-		}
-		for _, repo := range repos {
-			if !repo.Usable() {
-				continue // the organisation's token no longer reads it
+		selected[m.Org.ID] = true
+		if _, member := access.Orgs[m.Org.ID]; !member {
+			// A platform admin acting in an organisation it is not part of.
+			repos, err := s.cfg.Accounts.St.OrgRepositories(ctx, m.Org.ID)
+			if err != nil {
+				return scope{}, err
 			}
-			if cur, ok := sc.graphs[repo.Graph]; !ok || m.Role.AtLeast(cur) {
-				sc.graphs[repo.Graph] = m.Role
+			for _, repo := range repos {
+				if repo.Usable() {
+					access.Repos = append(access.Repos, accounts.RepoAccess{OrgID: m.Org.ID, Graph: repo.Graph, Role: accounts.Admin, Via: accounts.TypeOrganisation})
+				}
 			}
+			access.Orgs[m.Org.ID] = accounts.Owner
 		}
+	}
+	for graph, reach := range access.Scope(selected) {
+		sc.graphs[graph], sc.reach[graph] = reach.Role, reach
 	}
 	return sc, nil
 }
@@ -184,7 +198,7 @@ func (s *Server) guard(pol policy, h http.HandlerFunc) http.HandlerFunc {
 				s.problem(w, http.StatusNotFound, errors.New("no such review"))
 				return
 			}
-			if !seesReview(sc, rv.OrgID) {
+			if !seesReview(sc, rv.Repo, rv.OrgID) {
 				s.problem(w, http.StatusNotFound, errors.New("no such review"))
 				return
 			}
@@ -338,25 +352,14 @@ func (s *Server) repoOrg(r *http.Request, graph string) (string, error) {
 	if sc.all {
 		return "", nil
 	}
-	links, err := s.cfg.Accounts.St.GraphRepositories(r.Context(), graph)
-	if err != nil {
-		return "", err
-	}
-	var orgs []string
-	for _, m := range sc.orgs {
-		for _, l := range links {
-			if l.OrgID == m.Org.ID {
-				orgs = append(orgs, m.Org.ID)
-			}
-		}
-	}
-	switch len(orgs) {
-	case 0:
+	reach, ok := sc.reach[graph]
+	switch {
+	case !ok:
 		return "", accounts.ErrNotFound
-	case 1:
-		return orgs[0], nil
+	case reach.Ambiguous:
+		return "", errors.New("several of your organisations use this repository: say which one with the " + OrgHeader + " header")
 	}
-	return "", errors.New("several of your organisations use this repository: say which one with the " + OrgHeader + " header")
+	return reach.OrgID, nil
 }
 
 // memNamespace is the agent-memory namespace of graph for the request:
@@ -371,9 +374,12 @@ func (s *Server) memNamespace(r *http.Request, graph string) (string, error) {
 
 // seesReview applies the review rule: an organisation sees its own reviews
 // and the organisation-less ones (scheduled reviews of shared code).
-func seesReview(sc scope, orgID string) bool {
+func seesReview(sc scope, graph, orgID string) bool {
 	if sc.all || orgID == "" {
 		return true
+	}
+	if reach, ok := sc.reach[graph]; ok && reach.OrgID == orgID {
+		return true // content follows the repository's grant (shares included)
 	}
 	for _, m := range sc.orgs {
 		if m.Org.ID == orgID {

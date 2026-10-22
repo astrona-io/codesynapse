@@ -13,15 +13,25 @@ import (
 // Role is a user's role in an organisation, weakest first.
 type Role string
 
-// Roles.
+// Roles. A guest belongs to the organisation but inherits no repository:
+// it sees only what is granted to it (see authz.go).
 const (
+	Guest  Role = "guest"
 	Viewer Role = "viewer"
 	Member Role = "member"
 	Admin  Role = "admin"
 	Owner  Role = "owner"
 )
 
-var roleRank = map[Role]int{Viewer: 0, Member: 1, Admin: 2, Owner: 3}
+var roleRank = map[Role]int{Guest: 0, Viewer: 1, Member: 2, Admin: 3, Owner: 4}
+
+// Max returns the stronger of two roles ("" is weaker than any role).
+func Max(a, b Role) Role {
+	if !b.Valid() || (a.Valid() && roleRank[a] >= roleRank[b]) {
+		return a
+	}
+	return b
+}
 
 // Valid reports whether r is a known role.
 func (r Role) Valid() bool { _, ok := roleRank[r]; return ok }
@@ -109,6 +119,39 @@ const (
 
 // Usable reports whether the organisation may use the entry's graph.
 func (r Repository) Usable() bool { return r.Access != AccessLost }
+
+// Team groups members of an organisation; roles granted to a team apply to
+// its members.
+type Team struct {
+	ID        string    `json:"id"`
+	OrgID     string    `json:"org_id"`
+	Slug      string    `json:"slug"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Tuple is a relationship in Zanzibar notation: object#relation@subject,
+// where the subject is a user ("user:U") or every holder of a relation on
+// another object ("team:T#member"). Organisation memberships stay in their
+// own table and act as organisation:O#<role>@user:U tuples.
+type Tuple struct {
+	ObjectType      string    `json:"object_type"`
+	ObjectID        string    `json:"object_id"`
+	Relation        string    `json:"relation"`
+	SubjectType     string    `json:"subject_type"`
+	SubjectID       string    `json:"subject_id"`
+	SubjectRelation string    `json:"subject_relation,omitempty"`
+	CreatedBy       string    `json:"created_by,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// TupleFilter selects tuples; empty fields match anything.
+type TupleFilter struct {
+	ObjectType, ObjectID, Relation          string
+	SubjectType, SubjectID, SubjectRelation string
+	// SubjectIDs, when set, matches any of these subject IDs.
+	SubjectIDs []string
+}
 
 // GitToken is an organisation's credential for one Git host. The token is
 // stored sealed (AES-256-GCM, see Sealer) and only opened to clone or
@@ -217,6 +260,21 @@ type Store interface {
 	GraphRepositories(ctx context.Context, graph string) ([]Repository, error)
 	// SetRepositoryAccess records the outcome of an access check.
 	SetRepositoryAccess(ctx context.Context, orgID, graph, access string, at time.Time) error
+
+	CreateTeam(ctx context.Context, t Team) error // ErrExists on a taken slug in the organisation
+	TeamByID(ctx context.Context, id string) (Team, error)
+	TeamBySlug(ctx context.Context, orgID, slug string) (Team, error)
+	OrgTeams(ctx context.Context, orgID string) ([]Team, error)
+	// DeleteTeam removes the team and every tuple naming it.
+	DeleteTeam(ctx context.Context, id string) error
+
+	// WriteTuple adds a relationship (ErrExists when present).
+	WriteTuple(ctx context.Context, t Tuple) error
+	DeleteTuple(ctx context.Context, t Tuple) error // ErrNotFound
+	// ReadTuples lists matching relationships (at most MaxTuples).
+	ReadTuples(ctx context.Context, f TupleFilter) ([]Tuple, error)
+	// DeleteTuples removes every matching relationship and returns how many.
+	DeleteTuples(ctx context.Context, f TupleFilter) (int, error)
 
 	// PutGitToken inserts or replaces an organisation's token for a host.
 	PutGitToken(ctx context.Context, t GitToken) error
