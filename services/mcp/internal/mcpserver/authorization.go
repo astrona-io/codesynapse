@@ -28,6 +28,7 @@ var toolPolicies = map[string]toolPolicy{
 	"get_pr_context":        {accounts.Viewer, "repository"},
 	"unused_code":           {accounts.Viewer, "repository"},
 	"duplicate_code":        {accounts.Viewer, "repository"},
+	"cleanup_plan":          {accounts.Viewer, "repository"},
 	"shared_code":           {accounts.Viewer, "list"},
 	"license_report":        {accounts.Viewer, "repository"},
 	"minimal_context":       {accounts.Viewer, "repository"},

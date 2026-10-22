@@ -36,6 +36,9 @@ func registerAgentTools(s *mcp.Server, h *handlers, add func(name, desc string) 
 	mcp.AddTool(s, add("unused_code",
 		"Unused code to remove: unreachable and test-only functions (with confidence and security relevance), files with nothing live, unused go.mod modules (and CVEs removing them eliminates), unused Helm values and template defines."),
 		h.unusedCode)
+	mcp.AddTool(s, add("cleanup_plan",
+		"A ranked list of changes worth making in a repository: delete unreachable code (security-relevant first), remove unused dependencies, upgrade vulnerable ones (indirect ones through the package that pulls them in), resolve licence conflicts, merge duplicate code and cover untested hotspots. Each step has a value, effort and safety, why it matters, its targets with file:line and how to verify it. Use it to pick what to do next."),
+		h.cleanupPlan)
 	mcp.AddTool(s, add("duplicate_code",
 		"Code that exists more than once in a repository: groups of functions with the same structure (names and literal values ignored) and of edited copies (kind near), the redundant lines, how far apart the copies are (file, package, repository) and where each copy is. Use it before writing a helper, and to find what to merge."),
 		h.duplicateCode)

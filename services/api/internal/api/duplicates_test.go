@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
+	"github.com/parisnakitakejser/codesynapse/internal/cleanupplan"
 	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
@@ -79,4 +81,29 @@ func TestSBOMEndpoint(t *testing.T) {
 
 	assert.Equal(t, get(t, ts, "/api/v1/repos/nope/sbom", nil), 404)
 	assert.Equal(t, sbomFileName("host.example/team/../x y"), "host.example-team-..-x-y.cdx.json")
+}
+
+func TestCleanupPlanEndpoint(t *testing.T) {
+	ctx := context.Background()
+	st := memory.New()
+	g := dupGraph(t, "org/a", "One", "Two")
+	rn, ok := g.Node(model.NodeID("org/a", model.KindRepository, "org/a"))
+	require.True(t, ok)
+	cl, err := cleanup.Encode(cleanup.Report{Modules: []cleanup.ModuleItem{{Path: "github.com/old/lib", Version: "v1"}}})
+	require.NoError(t, err)
+	rn.Cleanup = cl
+	require.NoError(t, st.ReplaceRepo(ctx, "org/a", g))
+	ts := httptest.NewServer(New(ctx, Config{SourcesRoot: t.TempDir(), Version: "test"}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	t.Cleanup(ts.Close)
+
+	var plan cleanupplan.Plan
+	require.Equal(t, get(t, ts, "/api/v1/repos/org%2Fa/cleanup/plan", &plan), 200)
+	kinds := map[string]bool{}
+	for _, s := range plan.Steps {
+		kinds[s.Kind] = true
+	}
+	assert.True(t, kinds[cleanupplan.RemoveDependency], "the unused module")
+	assert.True(t, kinds[cleanupplan.MergeDuplicates], "the two identical functions")
+	assert.Equal(t, plan.Summary.Steps, len(plan.Steps))
+	assert.Equal(t, get(t, ts, "/api/v1/repos/nope/cleanup/plan", nil), 404)
 }

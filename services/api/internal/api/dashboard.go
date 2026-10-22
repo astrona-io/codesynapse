@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/parisnakitakejser/codesynapse/internal/cleanupplan"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/query"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
@@ -135,4 +136,16 @@ func (s *Server) handleLicenses(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(n.Licenses)) //nolint:errcheck // client went away
+}
+
+// handleCleanupPlan ranks the findings of one repository into a list of
+// changes worth making, from the reports stored at ingest time.
+func (s *Server) handleCleanupPlan(w http.ResponseWriter, r *http.Request) {
+	repo := r.PathValue("repo")
+	plan, err := cleanupplan.Assemble(r.Context(), store.ForRepository(s.st, repo), repo)
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, plan)
 }

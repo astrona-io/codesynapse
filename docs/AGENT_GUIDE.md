@@ -112,6 +112,7 @@ The prompt works for any language. It starts from what CodeSynapse already has (
 | Before reading a file | `file_outline` | — | Symbols, doc sections or YAML entries with line ranges. |
 | Security | `security_report`, `security_symbols` | `min_severity: "medium"` | Findings by exposure and tests; CVEs by reachability, with `via` and `roots` for indirect packages (which declared dependency to upgrade). |
 | Fixing a finding | `rule_guide` | `language` of the file | Why it matters, the fix, vulnerable → fixed example. |
+| What to fix next | `cleanup_plan` | `limit: 10`, `kind` to focus | Ranked steps from the stored reports: delete dead code, remove or upgrade dependencies, licence conflicts, merge duplicates, test hotspots. Each has value, effort, safety, targets with file:line and how to verify. Take the first, check it, then Sync. |
 | Cleanup | `unused_code` | `min_confidence: "high"`, `security_only` | Unreachable/test-only code, unused modules, unused Helm values. |
 | Before writing a helper | `duplicate_code` | `scope: "repository"` | Groups of functions with the same structure (names and literals ignored), redundant lines and where each copy is. `kind: "near"` lists edited copies (with `similarity`). Reuse or merge instead of adding another copy. Go, Python, JavaScript, TypeScript and Vue. |
 | Before copying code between repositories | `shared_code` | `repo_prefix: "astrona-io/"` | Code several visible repositories contain, with a recommendation to extract a shared library or framework. Compares only repositories you may see. |
