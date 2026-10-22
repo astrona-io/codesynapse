@@ -84,6 +84,11 @@ const WHY: Record<string, (n: string) => string> = {
   go: (n) => `go mod why -m ${n}`,
   npm: (n) => `npm explain ${n}`,
   pypi: (n) => `pipdeptree -r -p ${n}`,
+  'crates.io': (n) => `cargo tree -i ${n}`,
+  packagist: (n) => `composer why ${n}`,
+  rubygems: (n) => `bundle exec gem dependency ${n} --reverse-dependencies`,
+  nuget: (n) => `dotnet nuget why <project> ${n}`,
+  maven: (n) => `gradle dependencyInsight --dependency ${n.split(':')[1] ?? n}`,
 }
 const why = (r: Row) => (WHY[r.ecosystem] ?? WHY.go!)(r.name)
 
@@ -98,6 +103,11 @@ const GUIDE: Record<string, { label: string; graph: string; audit: string; licen
   go: { label: 'Go', graph: 'go list -m -json all · go mod graph · go mod why -m <module>', audit: 'govulncheck ./...', licences: 'go-licenses report ./...' },
   npm: { label: 'npm', graph: 'npm ls --all · npm explain <package>', audit: 'npm audit · osv-scanner', licences: 'license-checker' },
   pypi: { label: 'Python', graph: 'uv tree · pipdeptree · poetry show --tree', audit: 'pip-audit · osv-scanner', licences: 'pip-licenses' },
+  'crates.io': { label: 'Rust', graph: 'cargo tree · cargo tree -i <crate>', audit: 'cargo audit · cargo deny check advisories', licences: 'cargo deny check licenses' },
+  packagist: { label: 'PHP', graph: 'composer show --tree · composer why <package>', audit: 'composer audit', licences: 'composer licenses' },
+  rubygems: { label: 'Ruby', graph: 'bundle list · bundle viz', audit: 'bundler-audit', licences: 'license_finder' },
+  nuget: { label: '.NET', graph: 'dotnet list package --include-transitive', audit: 'dotnet list package --vulnerable --include-transitive', licences: 'nuget-license' },
+  maven: { label: 'Java / Kotlin', graph: 'gradle dependencies · gradle dependencyInsight --dependency <name>', audit: 'osv-scanner · OWASP dependency-check', licences: 'a licence report plugin' },
 }
 const present = computed(() => {
   const seen = new Set((mods.value?.results ?? []).map(({ node: n }) => (n.ecosystem || 'go').toLowerCase()))
@@ -167,7 +177,7 @@ const agentText = computed(() => `Run the dependency-review prompt for ${repo.va
     <div class="grid cols-2">
       <section class="panel">
         <p class="eyebrow">By hand</p><h2>Check it with your package manager</h2>
-        <p class="muted small">CodeSynapse shows how an indirect dependency got in when the package graph says so (the Go packages your build imports, npm and Python lockfiles). Yarn and pnpm lockfiles carry no paths yet, and it only reads go.mod, npm and Python lockfiles. These commands resolve the real graph; confirm names and flags against your installed version.</p>
+        <p class="muted small">CodeSynapse shows how an indirect dependency got in when the package graph says so (the Go packages your build imports and the lockfiles of npm, Python, Rust, PHP, Ruby and .NET). Yarn, pnpm and Gradle lockfiles carry no paths, and it only reads go.mod and those lockfiles. These commands resolve the real graph; confirm names and flags against your installed version.</p>
         <div class="table-wrap"><table>
           <thead><tr><th>Ecosystem</th><th>Graph and why</th><th>Advisories</th><th>Licences</th></tr></thead>
           <tbody><tr v-for="g in present" :key="g.label"><td>{{ g.label }}</td><td class="mono small">{{ g.graph }}</td><td class="mono small">{{ g.audit }}</td><td class="mono small">{{ g.licences }}</td></tr></tbody>

@@ -51,7 +51,7 @@ internal/ingest/        Pipeline: golang/ (go/packages + go/types; security rule
                         lang/ (Python, JS/TS, Vue: pure-Go structural parsers + rules),
                         docs/ (Markdown), config/ (YAML, Go templates, Helm; YAML security rules), githistory/
 internal/cleanup/       Liveness (reachability from entry points), unused code/modules/config
-internal/vuln/          go.mod and npm/PyPI lockfiles + OSV lookups, called/imported/required reachability
+internal/vuln/          go.mod and lockfiles (npm, PyPI, Cargo, Composer, Bundler, NuGet, Gradle) + OSV lookups, called/imported/required reachability
 internal/security/      Security report: grading, exposure, prioritisation, Markdown; rule guides (guides.go)
 internal/metrics/       Repository metrics and the token benchmark (computed at ingest)
 internal/forge/         Organisation listing for GitHub, Forgejo/Gitea and GitLab (one host per client) for the Organisations feature

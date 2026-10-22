@@ -396,7 +396,7 @@ func (c *Client) detail(ctx context.Context, id string, mod Module) (Vulnerabili
 		v.Summary = firstLine(e.Details)
 	}
 	for _, a := range e.Affected {
-		if a.Package.Name != mod.Path && (mod.ecosystem() != EcosystemPyPI || normalizePy(a.Package.Name) != mod.Path) {
+		if !samePackage(mod, a.Package.Name) {
 			continue
 		}
 		v.Fixed = fixedFor(mod.Version, a.Ranges)
@@ -514,4 +514,16 @@ func dedupe(vs []Vulnerability) []Vulnerability {
 	}
 	slices.SortFunc(out, func(a, b Vulnerability) int { return cmp.Or(cmp.Compare(a.Module, b.Module), cmp.Compare(a.ID, b.ID)) })
 	return out
+}
+
+// samePackage matches an advisory's package name to a module. PyPI names are
+// normalised and NuGet names are case-insensitive; the rest compare exactly.
+func samePackage(mod Module, name string) bool {
+	switch mod.ecosystem() {
+	case EcosystemPyPI:
+		return name == mod.Path || normalizePy(name) == mod.Path
+	case EcosystemNuGet:
+		return strings.EqualFold(name, mod.Path)
+	}
+	return name == mod.Path
 }

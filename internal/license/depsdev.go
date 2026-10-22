@@ -29,7 +29,7 @@ const (
 	maxResponse = 1 << 20
 )
 
-var systems = map[string]string{Go: "GO", NPM: "NPM", PyPI: "PYPI"}
+var systems = map[string]string{Go: "GO", NPM: "NPM", PyPI: "PYPI", Cargo: "CARGO", NuGet: "NUGET", Maven: "MAVEN"}
 
 // Lookup returns licences for deps, keyed by Dep.Key. Failed lookups are left
 // out; the caller treats them as unknown.

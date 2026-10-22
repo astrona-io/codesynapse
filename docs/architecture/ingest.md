@@ -23,7 +23,7 @@ flowchart TD
     graph --> post
 
     subgraph post[Post-processing on the complete graph]
-        vuln[vuln: go.mod, npm, PyPI lockfiles<br/>OSV lookup, reachability]
+        vuln[vuln: go.mod and lockfiles<br/>OSV lookup, reachability]
         lic[license: project vs dependencies]
         clean[cleanup: liveness from entry points]
         sec[security: coverage and inventory]

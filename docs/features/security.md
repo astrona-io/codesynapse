@@ -16,7 +16,7 @@ flowchart TB
         yd[config/yaml.go<br/>Kubernetes, compose, Actions, Renovate]
     end
     subgraph deps[Dependencies]
-        lock[go.mod, npm, PyPI lockfiles]
+        lock[go.mod and lockfiles:<br/>npm, PyPI, Cargo, Composer,<br/>Bundler, NuGet, Gradle]
         osv[osv.dev<br/>names and versions only]
     end
 
@@ -55,7 +55,7 @@ flowchart LR
     call -- yes --> called[called<br/>with call sites]
 ```
 
-Symbol-level reachability exists for Go. For npm and PyPI, advisories rarely list symbols, so the levels are imported or required. `--fail-on` gates CI on reachable vulnerabilities only.
+Symbol-level reachability exists for Go. For the other ecosystems, advisories rarely list symbols, so the levels are imported (npm and PyPI, when a source file imports the package) or required (everything else, because source files of Rust, PHP, Ruby, C# and Java are not indexed). `--fail-on` gates CI on reachable vulnerabilities only.
 
 ## Priority
 
