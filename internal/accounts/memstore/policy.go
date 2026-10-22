@@ -6,7 +6,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
 // PolicyTransaction evaluates changes against a private copy and publishes only
@@ -38,6 +38,8 @@ func (s *Store) PolicyTransaction(ctx context.Context, _ string, fn func(account
 	s.tuples = tx.tuples
 	s.tupleAt = tx.tupleAt
 	s.outbox = tx.outbox
+	s.repoPolicies = tx.repoPolicies
+	s.annotations = tx.annotations
 	return nil
 }
 
@@ -175,6 +177,11 @@ func (s *Store) snapshot() *Store {
 	tx.tuples = maps.Clone(s.tuples)
 	tx.tupleAt = maps.Clone(s.tupleAt)
 	tx.outbox = maps.Clone(s.outbox)
+	tx.repoPolicies = maps.Clone(s.repoPolicies)
+	tx.annotations = maps.Clone(s.annotations)
+	for key, annotations := range tx.annotations {
+		tx.annotations[key] = maps.Clone(annotations)
+	}
 	return tx
 }
 

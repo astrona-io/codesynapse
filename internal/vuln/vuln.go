@@ -30,6 +30,8 @@ import (
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
+
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 )
 
 // Module is a required module version.
@@ -82,13 +84,20 @@ const StdlibPath = "stdlib"
 // buildGo (the local toolchain, e.g. runtime.Version()) or a newer
 // `toolchain` line. The `go` directive is only a minimum, so using it would
 // report years of fixed CVEs for any library that supports old releases.
-func Modules(root, buildGo string) ([]Module, error) {
+func Modules(root, buildGo string, policies ...*repoconfig.Policy) ([]Module, error) {
+	var policy *repoconfig.Policy
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
 	byPath := map[string]Module{}
 	own := map[string]bool{}
 	stdlib := ""
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if allowed, policyErr := policy.WalkEntry(root, path, d); !allowed || policyErr != nil {
+			return policyErr
 		}
 		if d.IsDir() {
 			name := d.Name()

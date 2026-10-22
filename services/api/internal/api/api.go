@@ -20,18 +20,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
-	"github.com/parisnakitakejser/codesynapse/internal/forge"
-	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/query"
-	"github.com/parisnakitakejser/codesynapse/internal/review"
-	"github.com/parisnakitakejser/codesynapse/internal/security"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/offload"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/recall"
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/forge"
+	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/review"
+	"github.com/astrona-io/codesynapse/internal/security"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/services/api/internal/annotation"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
+	"github.com/astrona-io/codesynapse/services/api/internal/offload"
+	"github.com/astrona-io/codesynapse/services/api/internal/recall"
 )
 
 const maxBodyBytes = 4 << 20
@@ -93,9 +94,10 @@ type Config struct {
 
 // Server is the API handler.
 type Server struct {
-	cfg  Config
-	st   store.Store
-	jobs *Jobs
+	annotations *annotation.Worker
+	cfg         Config
+	st          store.Store
+	jobs        *Jobs
 	// offload extracts memory triples from conversation turns (local model only).
 	offload *offload.Worker
 	recall  *recall.Service
@@ -112,6 +114,11 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	s := &Server{cfg: cfg, st: st, logger: logger, mux: http.NewServeMux()}
 	s.jobs = NewJobs(ctx, st, logger, cfg.CommitLimit, cfg.AllowNetwork, cfg.VulnScan)
 	s.jobs.licenseLookup = cfg.LicenseLookup
+	s.jobs.Policy = s.approveIngestPolicy
+	s.jobs.Publish = s.publishRepo
+	s.jobs.Ingested = s.annotateIngest
+	s.annotations = annotation.New(cfg.LLM, s.persistAnnotations)
+	go s.annotations.Run(ctx)
 	if cfg.Accounts != nil {
 		if cfg.AuditRetention <= 0 {
 			s.cfg.AuditRetention = accounts.DefaultRetention
@@ -227,6 +234,7 @@ func (s *Server) routes() {
 	s.accountRoutes()
 	s.executionRoutes()
 	s.sessionMemoryRoutes()
+	s.repoPolicyRoutes()
 	s.route("GET /api/v1/overview", visibleOnly, s.handleWorkspaceOverview)
 	s.route("GET /api/v1/attention", visibleOnly, s.handleAttention)
 	s.route("GET /api/v1/stats", visibleOnly, s.handleStats)
@@ -972,7 +980,7 @@ func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, fmt.Errorf("unknown severity %q", minSev))
 		return
 	}
-	rep, err := security.Build(r.Context(), store.ForRepository(s.st, r.PathValue("repo")), r.PathValue("repo"), security.Options{MinSeverity: minSev})
+	rep, err := security.Build(r.Context(), store.ForRepository(s.st, r.PathValue("repo")), r.PathValue("repo"), s.repositorySecurityOptions(r.Context(), r.PathValue("repo"), minSev))
 	if err != nil {
 		s.problem(w, 500, err)
 		return

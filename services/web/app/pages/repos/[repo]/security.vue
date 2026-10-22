@@ -106,6 +106,14 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
         <p v-if="rep.head" class="muted small">Indexed at commit <span class="mono">{{ rep.head.slice(0, 10) }}</span> · {{ relTime(rep.indexed_at) }}. If your checkout moved on, sync before relying on this report.<template v-if="rep.unanalysed_findings"> {{ rep.unanalysed_findings }} more findings count in the grade but are not listed.</template></p>
       </section>
 
+      <section v-if="rep.suppressed?.length" class="panel stack">
+        <h2>Approved exceptions · {{ rep.suppressed.length }}</h2>
+        <p class="muted">These findings remain stored. This organisation's current approval excludes them from this report's active findings and grade.</p>
+        <article v-for="finding in rep.suppressed" :key="finding.id">
+          <strong>{{ finding.title }}</strong><p class="small mono">{{ finding.location }} · {{ finding.rule }}</p><p>{{ finding.suppression_reason }}</p>
+        </article>
+      </section>
+
       <div class="panel panel--glass filters">
         <div class="row">
           <span class="label">Severity</span>

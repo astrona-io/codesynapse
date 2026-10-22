@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 )
 
 func TestStdioAccountsRequirePersonalCredential(t *testing.T) {

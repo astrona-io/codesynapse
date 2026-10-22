@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
 var now = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)

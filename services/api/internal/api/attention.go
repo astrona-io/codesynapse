@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
-	"github.com/parisnakitakejser/codesynapse/internal/history"
-	"github.com/parisnakitakejser/codesynapse/internal/security"
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/history"
+	"github.com/astrona-io/codesynapse/internal/security"
 )
 
 // What needs attention, worst first, in words a team lead understands:

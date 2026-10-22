@@ -9,12 +9,17 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
+	"github.com/astrona-io/codesynapse/internal/model"
 )
 
 // Coverage records what the security rules could read in one ingest, so a
 // grade is always shown next to what was and was not checked.
 type Coverage struct {
+	ExcludedFiles           int  `json:"excluded_files,omitempty"`
+	KubernetesExcludedFiles int  `json:"kubernetes_excluded_files,omitempty"`
+	KubernetesDisabled      bool `json:"kubernetes_disabled,omitempty"`
+	InventoryIncomplete     bool `json:"inventory_incomplete,omitempty"`
 	// Code counts source files per language the code rules ran on.
 	Code map[string]int `json:"code,omitempty"`
 	// YAML counts parsed YAML files; YAMLUnparseable those the parser rejected.
@@ -135,6 +140,18 @@ func (c Coverage) Lines() (checked, notChecked []string) {
 	if c.HelmTotal > c.HelmScanned {
 		notChecked = append(notChecked, fmt.Sprintf("%d Helm template(s) that do not render Kubernetes manifests", c.HelmTotal-c.HelmScanned))
 	}
+	if c.ExcludedFiles > 0 {
+		notChecked = append(notChecked, fmt.Sprintf("%d files excluded by approved repository policy", c.ExcludedFiles))
+	}
+	if c.KubernetesDisabled {
+		notChecked = append(notChecked, "Kubernetes scanner disabled by approved repository policy")
+	}
+	if c.KubernetesExcludedFiles > 0 {
+		notChecked = append(notChecked, fmt.Sprintf("%d files excluded from Kubernetes scanning", c.KubernetesExcludedFiles))
+	}
+	if c.InventoryIncomplete {
+		notChecked = append(notChecked, "file coverage inventory incomplete")
+	}
 	for _, kind := range sortedKeys(c.NotCovered) {
 		notChecked = append(notChecked, fmt.Sprintf("%d %s file(s): no rules yet", c.NotCovered[kind], kind))
 	}
@@ -175,11 +192,18 @@ var (
 
 // Inventory counts files under root of kinds no rule reads yet. It never
 // follows symlinks and ignores unreadable entries.
-func Inventory(root string) map[string]int {
+func Inventory(root string, policies ...*repoconfig.Policy) map[string]int {
+	var policy *repoconfig.Policy
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
 	out := map[string]int{}
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil //nolint:nilerr // unreadable entries are skipped, not fatal
+		}
+		if allowed, policyErr := policy.WalkEntry(root, p, d); !allowed || policyErr != nil {
+			return policyErr
 		}
 		if d.IsDir() {
 			if p != root && skipInventory[d.Name()] {

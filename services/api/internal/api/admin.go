@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // Platform administration (SaaS phase 4): organisations and users across

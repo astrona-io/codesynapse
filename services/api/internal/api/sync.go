@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
-	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/aitasks"
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/services/api/internal/aitasks"
 )
 
 // inWorkspace reports whether root is a clone managed by the API.

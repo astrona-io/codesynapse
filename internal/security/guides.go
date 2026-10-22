@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/rules"
+	"github.com/astrona-io/codesynapse/rules"
 )
 
 // Guide is a rule with its explanation and fix examples (rules/*/*.yaml).

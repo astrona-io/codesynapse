@@ -16,10 +16,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/parisnakitakejser/codesynapse/internal/forge"
-	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/redact"
+	"github.com/astrona-io/codesynapse/internal/forge"
+	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/redact"
 )
 
 // Limits for the code shown next to review comments. The code is read from

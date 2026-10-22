@@ -7,9 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
 func TestTraceRetainsTrustedAttributionAndCountsTimeout(t *testing.T) {

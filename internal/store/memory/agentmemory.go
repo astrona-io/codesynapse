@@ -7,9 +7,9 @@ import (
 	"slices"
 	"unicode/utf8"
 
-	agentmem "github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/internal/vector"
+	agentmem "github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/vector"
 )
 
 type memRepo struct {

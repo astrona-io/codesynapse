@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/model"
 )
 
 // ForRepository confines code queries to an already-authorized graph. Callers

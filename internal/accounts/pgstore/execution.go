@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
 // RegisterExecutionSession serializes admission across replicas and retains IDs.

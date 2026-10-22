@@ -255,6 +255,11 @@ Check budget omissions and the suggested next step before treating an answer as 
 | What the docs say about something | `get_doc_section` | `query: "install"` or `file: "docs/"` | Sections with line ranges and the symbols each mentions. Text is not stored: read the lines. |
 | Findings in one place | `security_report` | `path: "internal/api/"` | Findings (and counts) in a file or directory; score and grade stay repository-wide. |
 
+`security_report` applies only the calling organisation's active suppression approval for the indexed configuration digest. Approved findings remain in `suppressed`, with reasons and separate counts; they do not reduce another organisation's grade. Missing, expired, revoked or changed approvals leave findings active. Findings beyond the report's analysis limit remain active at full weight. The aggregate dashboard overview uses raw grades.
+
+Repository ingestion exclusions filter current source-derived nodes and public symbol identity evidence. The private identity baseline retains tombstones for matching. Deliberately saved memory and authored catalog records remain historical knowledge; their references may become unavailable. An exclusion is not a request to erase those records. Use `codesynapse config inspect <path>` to validate `.codesynapse.yaml` and inspect its approval digest before requesting an ingest.
+
+
 Repositories indexed from a URL or an organisation are named `owner/name` on github.com (for example `astrona-io/astrona-cli`) and `host/owner/name` on every other provider (for example `codeberg.org/team/api`), so the same organisation and repository on two providers never collide; pass that as `repo`. `search_all_repos` with `repo_prefix: "codeberg.org/"` searches one provider. Mounted folders and older indexes keep a plain name.
 
 Every answer uses `qualified_id` values (`store.(*Store).Get`) that you can pass back to any tool. Ambiguous names return an error listing the exact `qualified_id`s to retry with.

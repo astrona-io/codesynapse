@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 var errExecutionRegistry = errors.New("execution requires an authenticated runtime session registry; enable accounts before starting jobs")

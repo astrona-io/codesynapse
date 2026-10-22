@@ -15,7 +15,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/model"
 )
 
 // Caps keep the stored report and the answers small.

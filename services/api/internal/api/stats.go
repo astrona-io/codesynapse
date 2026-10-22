@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/license"
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/internal/usage"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
+	"github.com/astrona-io/codesynapse/internal/license"
+	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/usage"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
 // navigationTools answer questions an agent would otherwise answer by

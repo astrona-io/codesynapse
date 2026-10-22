@@ -14,10 +14,10 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/query"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/duplicates"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // ErrNotFound is returned when no such duplicate group is stored.

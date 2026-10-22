@@ -25,11 +25,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
-	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
-	"github.com/parisnakitakejser/codesynapse/internal/license"
-	"github.com/parisnakitakejser/codesynapse/internal/query"
-	"github.com/parisnakitakejser/codesynapse/internal/security"
+	"github.com/astrona-io/codesynapse/internal/cleanup"
+	"github.com/astrona-io/codesynapse/internal/duplicates"
+	"github.com/astrona-io/codesynapse/internal/license"
+	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/security"
 )
 
 // Step kinds.

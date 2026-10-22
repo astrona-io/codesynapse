@@ -138,7 +138,7 @@ func (b *builder) scanTemplate(rel, ownerID string, content []byte) bool {
 	}
 	for _, doc := range docs {
 		if root := docRoot(doc); root != nil && root.Kind == yaml.MappingNode {
-			if _, ok := k8sResource(root); ok || strings.TrimSpace(scalar(mapGet(root, "kind"))) == tplValue {
+			if _, ok := k8sResource(root); b.policy.KubernetesAllowed(rel) && (ok || strings.TrimSpace(scalar(mapGet(root, "kind"))) == tplValue) {
 				b.k8sRules(rel, ownerID, root)
 			}
 		}

@@ -5,17 +5,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/agentctx"
+	"github.com/astrona-io/codesynapse/internal/catalog"
+	"github.com/astrona-io/codesynapse/internal/identity"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/store/memory"
+	"github.com/astrona-io/codesynapse/internal/store/storetest"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
-	"github.com/parisnakitakejser/codesynapse/internal/agentctx"
-	"github.com/parisnakitakejser/codesynapse/internal/catalog"
-	"github.com/parisnakitakejser/codesynapse/internal/identity"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/query"
-	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
 )
 
 func TestIdentityToolsAndSharedCatalog(t *testing.T) {

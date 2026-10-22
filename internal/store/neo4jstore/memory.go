@@ -8,9 +8,9 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/internal/store/nodeprops"
+	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/store/nodeprops"
 )
 
 // Agent memory lives in :MemoryEntity nodes joined by :FACT relationships.

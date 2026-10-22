@@ -93,7 +93,7 @@ export interface RuleGuide {
 }
 export interface SecFinding {
   id: string; rule: string; title: string; severity: string; cwe?: string[]; location: string; detail: string; language?: string
-  owner?: NodeRef; exposed: boolean; tested: boolean; priority: number
+  owner?: NodeRef; exposed: boolean; tested: boolean; priority: number; suppression_reason?: string
 }
 export interface SecVuln {
   id: string; cve?: string[]; aliases?: string[]; summary: string; severity: string; cwe?: string[]
@@ -104,10 +104,12 @@ export interface SecurityReport {
   repo: string; score: number; grade: string
   finding_counts: Record<string, number>; vuln_counts: Record<string, number>
   findings: SecFinding[]; vulnerabilities: SecVuln[]
+  suppressed?: SecFinding[]; suppressed_counts?: Record<string, number>
   modules: { total: number; direct: number; indirect: number; vulnerable: number; stdlib?: string }
   rules: { rule: string; title: string; severity: string; count: number }[]
   sensitive_functions?: NodeRef[]
   head?: string; indexed_at?: string; checked?: string[]; not_checked?: string[]; unanalysed_findings?: number
+  coverage?: { excluded_files?: number; kubernetes_excluded_files?: number; kubernetes_disabled?: boolean; inventory_incomplete?: boolean }
 }
 export interface Distribution { count: number; min: number; max: number; mean: number; p50: number; p90: number; p99: number; buckets: { label: string; count: number }[] }
 export interface MetricsReport {
@@ -118,7 +120,7 @@ export interface MetricsReport {
   distributions: Record<string, Distribution>
   packages: { name: string; files: number; loc: number; functions: number; afferent: number; efferent: number; instability: number; avg_complexity: number; doc_pct: number; tested_pct: number }[]
   dead_code: NodeRef[]
-  benchmark: { method: string; samples: number; graph_tokens: Distribution; baseline_tokens: Distribution; median_savings_x: number; median_reduction_pct: number; total_reduction_pct: number; total_graph_tokens: number; total_baseline_tokens: number; examples: { symbol: string; graph_tokens: number; baseline_tokens: number; files: number; savings_x: number; reduction_pct: number }[] }
+  benchmark: { policy_digest?: string; method: string; samples: number; graph_tokens: Distribution; baseline_tokens: Distribution; median_savings_x: number; median_reduction_pct: number; total_reduction_pct: number; total_graph_tokens: number; total_baseline_tokens: number; examples: { symbol: string; graph_tokens: number; baseline_tokens: number; files: number; savings_x: number; reduction_pct: number }[] }
 }
 
 export interface RepoSummary {
@@ -414,4 +416,21 @@ export interface ArchProposal {
   topic?: string; components?: string[]; labels?: string[]; supersedes?: string[]; relates?: string[]
   implements?: { ref: string; found: boolean; names?: string[]; why?: string }[]
   suggested_id: string; suggested_path: string; created_at: string; created_by?: string; client?: string; notes: string[]
+}
+
+export interface RepositoryConfig {
+  version: number
+  ignore: { paths: string[] | null }
+  scanners: { kubernetes: { enabled?: boolean; ignore_paths: string[] | null }; security: { ignore_rules: { rule_id: string; paths: string[] }[] | null } }
+  annotation: { enabled?: boolean; provider_task: string; max_batch_size: number; ignore_paths: string[] | null; taxonomy_hints: string[] | null }
+}
+export interface PolicyDiagnostic { code: string; field: string; line: number }
+export interface RepoPolicyPreview { digest: string; config: RepositoryConfig; diagnostics: PolicyDiagnostic[]; requires_exclusion_approval: boolean }
+export interface RepoPolicy {
+  indexed: { present: boolean; digest?: string; config: RepositoryConfig; diagnostics?: PolicyDiagnostic[]; exclusions_approved: boolean; excluded_files: number; kubernetes_excluded_files: number; kubernetes_disabled: boolean; inventory_incomplete?: boolean }
+  approval: { org_id: string; graph: string; digest: string; config_json: string; reason: string; actor_id: string; allow_exclusions: boolean; allow_suppressions: boolean; allow_annotation: boolean; updated_at: string; expires_at?: string }
+  approval_active: boolean
+}
+export interface RepositoryAnnotation {
+  org_id: string; graph: string; symbol_id: string; commit: string; revision: string; fingerprint: string; policy_digest: string; job_id: string; origin_session_id: string; summary: string; taxonomy: string[]; confidence?: number; updated_at: string
 }

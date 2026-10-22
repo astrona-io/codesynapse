@@ -7,14 +7,14 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/sessionmemory"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/offload"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/recall"
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/sessionmemory"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
+	"github.com/astrona-io/codesynapse/services/api/internal/offload"
+	"github.com/astrona-io/codesynapse/services/api/internal/recall"
 )
 
 func (s *Server) sessionMemoryRoutes() {

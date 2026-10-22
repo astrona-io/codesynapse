@@ -14,9 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/query"
-	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/store/memory"
 )
 
 // testReachDepth is how many call hops a test may be away from a function and
@@ -117,6 +118,7 @@ type Package struct {
 // learn the same things: the defining file plus the files of direct callers,
 // callees and reaching tests. Tokens are estimated as bytes/4.
 type Benchmark struct {
+	PolicyDigest   string       `json:"policy_digest,omitempty"`
 	Method         string       `json:"method"`
 	Samples        int          `json:"samples"`
 	GraphTokens    Distribution `json:"graph_tokens"`
@@ -505,7 +507,20 @@ func (x *index) packages(reached map[string]bool) []Package {
 // benchmark samples functions deterministically and compares real
 // symbol_card output with the files an agent would otherwise read.
 func benchmark(ctx context.Context, repo string, g *model.Graph, x *index, samples int) (Benchmark, error) {
-	b := Benchmark{Method: "graph = symbol_card JSON; baseline = defining file + files of direct callers, callees and reaching tests; tokens ≈ bytes/4"}
+	b := Benchmark{PolicyDigest: repoconfig.FromContext(ctx).Digest(), Method: "graph = symbol_card JSON; baseline = defining file + files of direct callers, callees and reaching tests; tokens ≈ bytes/4"}
+	if b.PolicyDigest == "" {
+		if node, ok := g.Node(model.NodeID(repo, model.KindRepository, repo)); ok && node.Meta != "" {
+			var metadata struct {
+				Policy struct {
+					Digest string `json:"digest"`
+				} `json:"repository_policy"`
+			}
+			if err := json.Unmarshal([]byte(node.Meta), &metadata); err != nil {
+				return Benchmark{}, fmt.Errorf("decode benchmark policy: %w", err)
+			}
+			b.PolicyDigest = metadata.Policy.Digest
+		}
+	}
 	fileBytes := map[string]int{}
 	for _, n := range x.nodes {
 		if n.Kind == model.KindFile {

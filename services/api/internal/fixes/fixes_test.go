@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
-	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/reviews"
-	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
+	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/reviews"
+	"github.com/astrona-io/codesynapse/internal/store/memory"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
 const original = "package app\n\nfunc Run(cmd string) {\n\texec(\"sh\", \"-c\", cmd)\n}\n"

@@ -13,10 +13,10 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 
-	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
 func TestAnthropicCachesTheSystemPrompt(t *testing.T) {

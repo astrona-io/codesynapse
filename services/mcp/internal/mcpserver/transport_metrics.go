@@ -8,7 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // MeasureHTTP runs inside bearer authentication. Framing, notifications and

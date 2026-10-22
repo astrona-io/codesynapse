@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/redact"
+	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/redact"
 )
 
 // Turn is one message of the conversation being offloaded.

@@ -4,15 +4,15 @@ import (
 	"context"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
-	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
-	"github.com/parisnakitakejser/codesynapse/internal/license"
-	"github.com/parisnakitakejser/codesynapse/internal/metrics"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/cleanup"
+	"github.com/astrona-io/codesynapse/internal/duplicates"
+	"github.com/astrona-io/codesynapse/internal/license"
+	"github.com/astrona-io/codesynapse/internal/metrics"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store/memory"
+	"github.com/astrona-io/codesynapse/internal/store/storetest"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
 func repoWithReports(t *testing.T) (*memory.Store, *model.Graph) {

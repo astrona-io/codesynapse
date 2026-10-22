@@ -11,6 +11,9 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
+	"github.com/astrona-io/codesynapse/internal/execution"
 )
 
 // Paths say how an indirect dependency got into the project: the shortest
@@ -41,6 +44,9 @@ func GoGraph(ctx context.Context, root string, allowNetwork bool) map[string][]s
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error { //nolint:errcheck // best effort: paths are an enrichment
 		if err != nil {
 			return nil //nolint:nilerr // unreadable entries are skipped
+		}
+		if allowed, policyErr := repoconfig.FromContext(ctx).WalkEntry(root, p, d); !allowed || policyErr != nil {
+			return policyErr
 		}
 		if d.IsDir() {
 			name := d.Name()
@@ -80,6 +86,11 @@ func goListDeps(ctx context.Context, dir string, allowNetwork bool) []byte {
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOTOOLCHAIN=local", "GOFLAGS=", "GOWORK=off")
 	if !allowNetwork {
 		cmd.Env = append(cmd.Env, "GOPROXY=off", "GONOSUMDB=*")
+	}
+	var err error
+	cmd.Env, err = execution.Environment(ctx, cmd.Env)
+	if err != nil {
+		return nil
 	}
 	out, _ := cmd.Output() //nolint:errcheck // -e reports package errors in the stream; what loaded is still useful
 	return out

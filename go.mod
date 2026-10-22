@@ -1,4 +1,4 @@
-module github.com/parisnakitakejser/codesynapse
+module github.com/astrona-io/codesynapse
 
 go 1.27.3
 

@@ -9,11 +9,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
-	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
-	"github.com/parisnakitakejser/codesynapse/internal/metrics"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/security"
+	"github.com/astrona-io/codesynapse/internal/cleanup"
+	"github.com/astrona-io/codesynapse/internal/duplicates"
+	"github.com/astrona-io/codesynapse/internal/metrics"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/security"
 )
 
 // staleAfter marks repositories whose index is older than this.

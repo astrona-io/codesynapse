@@ -4,7 +4,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 type measuredTransport struct{ next http.RoundTripper }

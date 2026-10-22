@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/internal/vector"
+	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/vector"
 )
 
 // Agent memory: :mem_entity vertices joined by :fact edges (one edge per

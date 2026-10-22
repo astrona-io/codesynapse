@@ -4,9 +4,9 @@ import (
 	"math"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/vector"
-	"github.com/parisnakitakejser/codesynapse/internal/vector/vectortest"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/vector"
+	"github.com/astrona-io/codesynapse/internal/vector/vectortest"
 )
 
 func TestFlatContract(t *testing.T) { vectortest.Run(t, vector.NewFlat()) }

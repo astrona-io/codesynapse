@@ -8,9 +8,9 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/internal/store/nodeprops"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/store/nodeprops"
 )
 
 // TraverseRepository restricts each quantified hop before it can expand again.

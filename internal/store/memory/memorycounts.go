@@ -4,7 +4,7 @@ import (
 	"context"
 	"slices"
 
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // MemoryFactCounts implements store.MemoryStore.

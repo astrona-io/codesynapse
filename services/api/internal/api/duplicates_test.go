@@ -9,15 +9,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
-	"github.com/parisnakitakejser/codesynapse/internal/cleanupplan"
-	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
-	"github.com/parisnakitakejser/codesynapse/internal/history"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/refactorplan"
-	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/cleanup"
+	"github.com/astrona-io/codesynapse/internal/cleanupplan"
+	"github.com/astrona-io/codesynapse/internal/duplicates"
+	"github.com/astrona-io/codesynapse/internal/history"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/refactorplan"
+	"github.com/astrona-io/codesynapse/internal/store/memory"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
 func dupGraph(t *testing.T, repo string, names ...string) *model.Graph {

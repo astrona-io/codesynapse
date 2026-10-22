@@ -17,22 +17,22 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/parisnakitakejser/codesynapse/internal/agentcfg"
-	"github.com/parisnakitakejser/codesynapse/internal/app"
-	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
-	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
-	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/ingest"
-	"github.com/parisnakitakejser/codesynapse/internal/license"
-	"github.com/parisnakitakejser/codesynapse/internal/metrics"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/query"
-	"github.com/parisnakitakejser/codesynapse/internal/review"
-	"github.com/parisnakitakejser/codesynapse/internal/sbom"
-	"github.com/parisnakitakejser/codesynapse/internal/security"
-	"github.com/parisnakitakejser/codesynapse/internal/snapshot"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
+	"github.com/astrona-io/codesynapse/internal/agentcfg"
+	"github.com/astrona-io/codesynapse/internal/app"
+	"github.com/astrona-io/codesynapse/internal/cleanup"
+	"github.com/astrona-io/codesynapse/internal/duplicates"
+	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/ingest"
+	"github.com/astrona-io/codesynapse/internal/license"
+	"github.com/astrona-io/codesynapse/internal/metrics"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/review"
+	"github.com/astrona-io/codesynapse/internal/sbom"
+	"github.com/astrona-io/codesynapse/internal/security"
+	"github.com/astrona-io/codesynapse/internal/snapshot"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/store/memory"
 )
 
 var version = "dev"
@@ -40,24 +40,26 @@ var version = "dev"
 func main() {
 	os.Exit(app.Main("codesynapse", "Index code, docs and history into a graph for review and AI assistants", version,
 		func(ec *app.Env) []*cobra.Command {
-			return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), statsCmd(ec), mcpCmd(ec), memoryCmd(ec), schemaCmd(ec)}
+			return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), statsCmd(ec), mcpCmd(ec), memoryCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
 		}))
 }
 
 // ingestOptions configures `codesynapse ingest`.
 type ingestOptions struct {
-	EC           *app.Env
-	neo4j        app.Neo4jFlags
-	repo         string
-	commitLimit  int
-	allowNetwork bool
-	vulns        bool
-	licenses     bool
-	root         string
+	approvedPolicyDigest string
+	EC                   *app.Env
+	neo4j                app.Neo4jFlags
+	repo                 string
+	commitLimit          int
+	allowNetwork         bool
+	vulns                bool
+	licenses             bool
+	root                 string
 }
 
 func (o *ingestOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f := o.EC.Command.Flags()
+	f.StringVar(&o.approvedPolicyDigest, "approved-policy-digest", "", "Approve the exact repository policy digest for ingestion exclusions")
 	o.neo4j.AddFlags(f)
 	f.StringVar(&o.repo, "repo", "", "Repository name in the graph (default: directory name)")
 	f.IntVar(&o.commitLimit, "commits", 500, "Number of recent commits to index (0 disables history)")
@@ -104,7 +106,7 @@ func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return err
 	}
-	g, err := ingest.Run(ctx, ingest.Options{Repo: o.repo, Root: o.root, CommitLimit: o.commitLimit, AllowNetwork: o.allowNetwork, VulnScan: o.vulns, LicenseLookup: o.licenses, PreviousIdentities: previous})
+	g, err := ingest.Run(ctx, ingest.Options{Repo: o.repo, Root: o.root, CommitLimit: o.commitLimit, AllowNetwork: o.allowNetwork, VulnScan: o.vulns, LicenseLookup: o.licenses, PreviousIdentities: previous, ApprovedPolicyDigest: o.approvedPolicyDigest})
 	if err != nil {
 		return err
 	}
@@ -128,18 +130,20 @@ func ingestCmd(ec *app.Env) *cobra.Command {
 
 // reviewOptions configures `codesynapse review`.
 type reviewOptions struct {
-	EC       *app.Env
-	neo4j    app.Neo4jFlags
-	repo     string
-	base     string
-	head     string
-	diffFile string
-	depth    int
-	offline  bool
-	root     string
+	approvedPolicyDigest string
+	EC                   *app.Env
+	neo4j                app.Neo4jFlags
+	repo                 string
+	base                 string
+	head                 string
+	diffFile             string
+	depth                int
+	offline              bool
+	root                 string
 }
 
 func (o *reviewOptions) SetupFlags(_ context.Context, _ *app.Env) error {
+	o.EC.Command.Flags().StringVar(&o.approvedPolicyDigest, "approved-policy-digest", "", "Approve the exact repository policy digest for ingestion exclusions")
 	f := o.EC.Command.Flags()
 	o.neo4j.AddFlags(f)
 	f.StringVar(&o.repo, "repo", "", "Repository name in the graph (default: directory name)")
@@ -188,7 +192,7 @@ func (o *reviewOptions) Run(ctx context.Context, _ *app.Env) error {
 
 	var r store.Reader
 	if o.offline {
-		g, err := ingest.Run(ctx, ingest.Options{Repo: o.repo, Root: o.root})
+		g, err := ingest.Run(ctx, ingest.Options{ApprovedPolicyDigest: o.approvedPolicyDigest, Repo: o.repo, Root: o.root})
 		if err != nil {
 			return err
 		}
@@ -272,12 +276,14 @@ func schemaCmd(ec *app.Env) *cobra.Command {
 
 // statsOptions configures `codesynapse stats`.
 type statsOptions struct {
-	EC      *app.Env
-	samples int
-	root    string
+	approvedPolicyDigest string
+	EC                   *app.Env
+	samples              int
+	root                 string
 }
 
 func (o *statsOptions) SetupFlags(_ context.Context, _ *app.Env) error {
+	o.EC.Command.Flags().StringVar(&o.approvedPolicyDigest, "approved-policy-digest", "", "Approve the exact repository policy digest for ingestion exclusions")
 	o.EC.Command.Flags().IntVar(&o.samples, "samples", 150, "Functions sampled for the token benchmark")
 	return nil
 }
@@ -297,7 +303,7 @@ func (o *statsOptions) Validate(context.Context, *app.Env) error { return nil }
 func (o *statsOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
 	repo := filepath.Base(o.root)
-	g, err := ingest.Run(ctx, ingest.Options{Repo: repo, Root: o.root, CommitLimit: 500})
+	g, err := ingest.Run(ctx, ingest.Options{ApprovedPolicyDigest: o.approvedPolicyDigest, Repo: repo, Root: o.root, CommitLimit: 500})
 	if err != nil {
 		return err
 	}
@@ -347,11 +353,12 @@ func statsCmd(ec *app.Env) *cobra.Command {
 
 // auditOptions configures `codesynapse audit`.
 type auditOptions struct {
-	EC          *app.Env
-	vulns       bool
-	minSeverity string
-	failOn      string
-	root        string
+	approvedPolicyDigest string
+	EC                   *app.Env
+	vulns                bool
+	minSeverity          string
+	failOn               string
+	root                 string
 }
 
 // errThreshold makes the process exit non-zero for CI without printing an
@@ -359,6 +366,7 @@ type auditOptions struct {
 var errThreshold = errors.New("security findings at or above the --fail-on threshold")
 
 func (o *auditOptions) SetupFlags(_ context.Context, _ *app.Env) error {
+	o.EC.Command.Flags().StringVar(&o.approvedPolicyDigest, "approved-policy-digest", "", "Approve the exact repository policy digest for ingestion exclusions")
 	f := o.EC.Command.Flags()
 	f.BoolVar(&o.vulns, "vulns", true, "Check dependencies against osv.dev (sends module paths and versions)")
 	f.StringVar(&o.minSeverity, "min-severity", "low", "Hide findings below this severity (info, low, medium, high, critical)")
@@ -388,7 +396,7 @@ func (o *auditOptions) Validate(context.Context, *app.Env) error {
 func (o *auditOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
 	repo := filepath.Base(o.root)
-	g, err := ingest.Run(ctx, ingest.Options{Repo: repo, Root: o.root, VulnScan: o.vulns})
+	g, err := ingest.Run(ctx, ingest.Options{ApprovedPolicyDigest: o.approvedPolicyDigest, Repo: repo, Root: o.root, VulnScan: o.vulns})
 	if err != nil {
 		return err
 	}
@@ -429,16 +437,18 @@ func auditCmd(ec *app.Env) *cobra.Command {
 
 // licensesOptions configures `codesynapse licenses`.
 type licensesOptions struct {
-	EC     *app.Env
-	lookup bool
-	failOn string
-	root   string
+	approvedPolicyDigest string
+	EC                   *app.Env
+	lookup               bool
+	failOn               string
+	root                 string
 }
 
 // errLicenses makes `licenses --fail-on` exit non-zero without an error banner.
 var errLicenses = errors.New("dependency licences at or above the --fail-on level")
 
 func (o *licensesOptions) SetupFlags(_ context.Context, _ *app.Env) error {
+	o.EC.Command.Flags().StringVar(&o.approvedPolicyDigest, "approved-policy-digest", "", "Approve the exact repository policy digest for ingestion exclusions")
 	f := o.EC.Command.Flags()
 	f.BoolVar(&o.lookup, "license-lookup", false, "Look up licences not found on disk on deps.dev (sends package names and versions)")
 	f.StringVar(&o.failOn, "fail-on", "", "Exit 1 on any dependency with this verdict or worse: conflict or review")
@@ -464,7 +474,7 @@ func (o *licensesOptions) Validate(context.Context, *app.Env) error {
 
 func (o *licensesOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
-	rep, err := ingest.Licenses(ctx, o.root, ingest.Options{LicenseLookup: o.lookup})
+	rep, err := ingest.Licenses(ctx, o.root, ingest.Options{ApprovedPolicyDigest: o.approvedPolicyDigest, LicenseLookup: o.lookup})
 	if err != nil {
 		return err
 	}
@@ -588,13 +598,15 @@ func mcpCmd(ec *app.Env) *cobra.Command {
 
 // cleanupOptions configures `codesynapse cleanup`.
 type cleanupOptions struct {
-	EC    *app.Env
-	vulns bool
-	limit int
-	root  string
+	approvedPolicyDigest string
+	EC                   *app.Env
+	vulns                bool
+	limit                int
+	root                 string
 }
 
 func (o *cleanupOptions) SetupFlags(_ context.Context, _ *app.Env) error {
+	o.EC.Command.Flags().StringVar(&o.approvedPolicyDigest, "approved-policy-digest", "", "Approve the exact repository policy digest for ingestion exclusions")
 	f := o.EC.Command.Flags()
 	f.BoolVar(&o.vulns, "vulns", true, "Check dependencies against osv.dev, to show CVEs removable with unused modules")
 	f.IntVar(&o.limit, "limit", 100, "Max functions listed in Markdown output (0 = all)")
@@ -616,7 +628,7 @@ func (o *cleanupOptions) Validate(context.Context, *app.Env) error { return nil 
 func (o *cleanupOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
 	repo := filepath.Base(o.root)
-	g, err := ingest.Run(ctx, ingest.Options{Repo: repo, Root: o.root, VulnScan: o.vulns})
+	g, err := ingest.Run(ctx, ingest.Options{ApprovedPolicyDigest: o.approvedPolicyDigest, Repo: repo, Root: o.root, VulnScan: o.vulns})
 	if err != nil {
 		return err
 	}
@@ -649,13 +661,15 @@ func cleanupCmd(ec *app.Env) *cobra.Command {
 
 // duplicatesOptions configures `codesynapse duplicates`.
 type duplicatesOptions struct {
-	EC         *app.Env
-	limit      int
-	maxPercent float64
-	roots      []string
+	approvedPolicyDigest string
+	EC                   *app.Env
+	limit                int
+	maxPercent           float64
+	roots                []string
 }
 
 func (o *duplicatesOptions) SetupFlags(_ context.Context, _ *app.Env) error {
+	o.EC.Command.Flags().StringVar(&o.approvedPolicyDigest, "approved-policy-digest", "", "Approve the exact repository policy digest for ingestion exclusions")
 	f := o.EC.Command.Flags()
 	f.IntVar(&o.limit, "limit", 20, "Max groups listed in Markdown output (0 = all)")
 	f.Float64Var(&o.maxPercent, "max-percent", 0, "Exit with an error when a repository repeats more than this share of its function lines, exact and edited copies together (0 = never fail)")
@@ -690,7 +704,7 @@ func (o *duplicatesOptions) Run(ctx context.Context, _ *app.Env) error {
 	var names []string
 	for _, root := range o.roots {
 		repo := filepath.Base(root)
-		g, err := ingest.Run(ctx, ingest.Options{Repo: repo, Root: root})
+		g, err := ingest.Run(ctx, ingest.Options{ApprovedPolicyDigest: o.approvedPolicyDigest, Repo: repo, Root: root})
 		if err != nil {
 			return fmt.Errorf("%s: %w", root, err)
 		}
@@ -761,13 +775,15 @@ func duplicatesCmd(ec *app.Env) *cobra.Command {
 
 // sbomOptions configures `codesynapse sbom`.
 type sbomOptions struct {
-	EC    *app.Env
-	vulns bool
-	file  string
-	root  string
+	approvedPolicyDigest string
+	EC                   *app.Env
+	vulns                bool
+	file                 string
+	root                 string
 }
 
 func (o *sbomOptions) SetupFlags(_ context.Context, _ *app.Env) error {
+	o.EC.Command.Flags().StringVar(&o.approvedPolicyDigest, "approved-policy-digest", "", "Approve the exact repository policy digest for ingestion exclusions")
 	f := o.EC.Command.Flags()
 	f.BoolVar(&o.vulns, "vulns", false, "Also look up known vulnerabilities at osv.dev and list them in the SBOM (sends ecosystem, package names and versions)")
 	f.StringVar(&o.file, "file", "", "Write the SBOM to this file instead of standard output")
@@ -789,7 +805,7 @@ func (o *sbomOptions) Validate(context.Context, *app.Env) error { return nil }
 func (o *sbomOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
 	repo := filepath.Base(o.root)
-	g, err := ingest.Run(ctx, ingest.Options{Repo: repo, Root: o.root, VulnScan: o.vulns})
+	g, err := ingest.Run(ctx, ingest.Options{ApprovedPolicyDigest: o.approvedPolicyDigest, Repo: repo, Root: o.root, VulnScan: o.vulns})
 	if err != nil {
 		return err
 	}

@@ -26,11 +26,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
-	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/logx"
-	"github.com/parisnakitakejser/codesynapse/internal/reviews"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
+	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/logx"
+	"github.com/astrona-io/codesynapse/internal/reviews"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
 // Task is the LLM routing task for fixes.

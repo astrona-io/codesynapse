@@ -145,7 +145,7 @@ mcp-config:
 
 # --- container images and Kubernetes --------------------------------------
 
-registry := env("REGISTRY", "ghcr.io/parisnakitakejser")
+registry := env("REGISTRY", "ghcr.io/astrona-io")
 platform := env("PLATFORM", "")
 engine := env("CONTAINER_ENGINE", `if command -v docker >/dev/null 2>&1; then echo docker; elif command -v podman >/dev/null 2>&1; then echo podman; else echo missing-container-runtime; fi`)
 

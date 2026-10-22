@@ -154,4 +154,4 @@ flowchart LR
     accounts -. authz .-> store
 ```
 
-See the [AGENTS.md layout section](https://github.com/parisnakitakejser/codesynapse/blob/main/AGENTS.md) for the full directory list.
+See the [AGENTS.md layout section](https://github.com/astrona-io/codesynapse/blob/main/AGENTS.md) for the full directory list.

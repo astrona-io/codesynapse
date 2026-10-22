@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
-	"github.com/parisnakitakejser/codesynapse/internal/accounts/accountstest"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts/accountstest"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
 // TestContract runs against an empty PostgreSQL database named by
@@ -25,7 +25,7 @@ func TestContract(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(st.Close)
 	// Start from an empty schema: the contract creates fixed emails.
-	_, err = st.db.Exec(ctx, "DROP TABLE IF EXISTS execution_sessions, access_policy_outbox, relation_tuples, teams, org_git_tokens, repositories, audit_head, events, api_keys, sessions, memberships, orgs, users, schema_migrations CASCADE")
+	_, err = st.db.Exec(ctx, "DROP TABLE IF EXISTS repository_annotations, repository_policy_approvals, execution_sessions, access_policy_outbox, relation_tuples, teams, org_git_tokens, repositories, audit_head, events, api_keys, sessions, memberships, orgs, users, schema_migrations CASCADE")
 	require.NoError(t, err)
 	accountstest.Run(t, st)
 	accountstest.RunConcurrentAudit(t, st)
@@ -34,6 +34,7 @@ func TestContract(t *testing.T) {
 	accountstest.RunAccessBounds(t, st)
 	accountstest.RunPolicyRecovery(t, st)
 	accountstest.RunExecutionSessions(t, st)
+	accountstest.RunRepoPolicy(t, st)
 
 	// Tampering with a stored entry is detected.
 	_, err = st.db.Exec(ctx, "UPDATE events SET detail = 'edited' WHERE id = (SELECT max(id) FROM events)")

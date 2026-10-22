@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/parisnakitakejser/codesynapse/internal/reviews"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/reviews"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // Reviews are :Review nodes (not :Node), so repository replacement and

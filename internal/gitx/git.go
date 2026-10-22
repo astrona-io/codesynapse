@@ -15,7 +15,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/execution"
 )
 
 // ErrInvalidRev is returned for revisions that could be parsed as options or

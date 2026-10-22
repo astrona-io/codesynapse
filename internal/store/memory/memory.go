@@ -10,14 +10,14 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/parisnakitakejser/codesynapse/internal/curation"
-	"github.com/parisnakitakejser/codesynapse/internal/history"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/reviews"
-	"github.com/parisnakitakejser/codesynapse/internal/sessionmemory"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/internal/usage"
-	"github.com/parisnakitakejser/codesynapse/internal/vector"
+	"github.com/astrona-io/codesynapse/internal/curation"
+	"github.com/astrona-io/codesynapse/internal/history"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/reviews"
+	"github.com/astrona-io/codesynapse/internal/sessionmemory"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/usage"
+	"github.com/astrona-io/codesynapse/internal/vector"
 )
 
 // Store keeps graphs per repository. It is safe for concurrent use.
@@ -65,15 +65,19 @@ func (s *Store) System() string { return "memory" }
 func (s *Store) Close(context.Context) error { return nil }
 
 // ReplaceRepo implements store.Writer.
-func (s *Store) ReplaceRepo(_ context.Context, repo string, g *model.Graph) error {
+func (s *Store) ReplaceRepo(ctx context.Context, repo string, g *model.Graph) error {
+	nodes, edges, err := store.Replacement(ctx, repo, g)
+	if err != nil {
+		return err
+	}
 	rg := &repoGraph{nodes: map[string]model.Node{}, out: map[string][]model.Edge{}, in: map[string][]model.Edge{}}
-	for _, n := range g.Nodes() {
+	for _, n := range nodes {
 		if n.Repo != repo {
 			return fmt.Errorf("node %s belongs to repo %q, not %q", n.ID, n.Repo, repo)
 		}
 		rg.nodes[n.ID] = n
 	}
-	for _, e := range g.Edges() {
+	for _, e := range edges {
 		if _, ok := rg.nodes[e.From]; !ok {
 			continue
 		}
@@ -82,6 +86,9 @@ func (s *Store) ReplaceRepo(_ context.Context, repo string, g *model.Graph) erro
 		}
 		rg.out[e.From] = append(rg.out[e.From], e)
 		rg.in[e.To] = append(rg.in[e.To], e)
+	}
+	if err := store.CommitCheck(ctx); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	s.repos[repo] = rg

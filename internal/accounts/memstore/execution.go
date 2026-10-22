@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
 // RegisterExecutionSession serializes admission and keeps closed IDs reserved.

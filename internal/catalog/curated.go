@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/arch"
-	"github.com/parisnakitakejser/codesynapse/internal/curation"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/query"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/arch"
+	"github.com/astrona-io/codesynapse/internal/curation"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // Actor is who adds something: the organisation that owns the work, the user

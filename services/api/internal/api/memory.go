@@ -6,12 +6,12 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/memory/extract"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/offload"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/recall"
+	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/memory/extract"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/services/api/internal/offload"
+	"github.com/astrona-io/codesynapse/services/api/internal/recall"
 )
 
 // handleMemory lists a repository's agent memory for review in the UI.

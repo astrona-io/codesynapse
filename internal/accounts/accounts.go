@@ -302,6 +302,11 @@ type Store interface {
 	GraphRepositories(ctx context.Context, graph string) ([]Repository, error)
 	// SetRepositoryAccess records the outcome of an access check.
 	SetRepositoryAccess(ctx context.Context, orgID, graph, access string, at time.Time) error
+	GetRepoPolicy(ctx context.Context, orgID, graph string) (RepoPolicyApproval, error)
+	PutRepoPolicy(ctx context.Context, approval RepoPolicyApproval) error
+	DeleteRepoPolicy(ctx context.Context, orgID, graph string) error
+	UpsertAnnotations(ctx context.Context, records []RepositoryAnnotation) error
+	ListAnnotations(ctx context.Context, orgID, graph string, limit int) ([]RepositoryAnnotation, error)
 
 	CreateTeam(ctx context.Context, t Team) error // ErrExists on a taken slug in the organisation
 	TeamByID(ctx context.Context, id string) (Team, error)

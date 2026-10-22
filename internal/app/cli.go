@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/parisnakitakejser/codesynapse/internal/logx"
+	"github.com/astrona-io/codesynapse/internal/logx"
 )
 
 // Output formats accepted by -o/--output.

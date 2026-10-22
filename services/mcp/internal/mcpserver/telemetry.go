@@ -7,7 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // telemetryMiddleware records sessions, tool and prompt calls, latency and

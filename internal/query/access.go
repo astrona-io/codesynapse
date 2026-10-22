@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // ProjectAccessPolicies retries the durable dirty-org outbox. A failed build

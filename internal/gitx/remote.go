@@ -12,7 +12,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/execution"
 )
 
 // HistoryDepth is how many commits clones and fetches keep. Enough for

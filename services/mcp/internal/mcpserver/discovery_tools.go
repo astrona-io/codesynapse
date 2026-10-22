@@ -12,11 +12,11 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/query"
-	"github.com/parisnakitakejser/codesynapse/internal/security"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/security"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // staleAfter matches the dashboard: an index older than a week is stale.
@@ -343,6 +343,16 @@ func filterFindingsByPath(rep *security.Report, path string) {
 		}
 		rc.Count++
 	}
+	suppressed := rep.Suppressed[:0:0]
+	suppressedCounts := map[string]int{}
+	for _, f := range rep.Suppressed {
+		file, _, _ := strings.Cut(f.Location, ":")
+		if file == path || strings.HasPrefix(file, path+"/") {
+			suppressed = append(suppressed, f)
+			suppressedCounts[f.Severity]++
+		}
+	}
+	rep.Suppressed, rep.SuppressedCounts = suppressed, suppressedCounts
 	rep.Findings, rep.FindingCounts = kept, counts
 	rep.Rules = rep.Rules[:0:0]
 	for _, rc := range rules {

@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/curation"
-	"github.com/parisnakitakejser/codesynapse/internal/identity"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/query"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/curation"
+	"github.com/astrona-io/codesynapse/internal/identity"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/store/memory"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
 func codeGraph(t *testing.T, repo string, previous identity.Report, revision, body string) (*model.Graph, identity.Report) {

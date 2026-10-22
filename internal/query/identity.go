@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/identity"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/identity"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // IdentityPage is shared by the API and MCP. Available distinguishes an older
@@ -32,6 +32,9 @@ func IdentityReport(ctx context.Context, r store.Reader, repo string) (identity.
 		return identity.Report{}, false, err
 	}
 	report, err := identity.Decode(n.Identities, repo)
+	if err == nil {
+		report, err = filterIdentityPolicy(report, n.Meta)
+	}
 	return report, n.Identities != "", err
 }
 

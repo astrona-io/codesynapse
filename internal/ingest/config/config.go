@@ -9,7 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
+	"github.com/astrona-io/codesynapse/internal/model"
 )
 
 const maxFileSize = 2 << 20
@@ -23,7 +24,7 @@ var templateExts = map[string]bool{".tmpl": true, ".gotmpl": true, ".tpl": true,
 
 // Extract indexes YAML files and Go templates under root.
 func Extract(ctx context.Context, repo, root string) (*model.Graph, error) {
-	b := &builder{repo: repo, g: model.NewGraph()}
+	b := &builder{repo: repo, g: model.NewGraph(), policy: repoconfig.FromContext(ctx)}
 	b.g.AddNode(model.Node{ID: model.NodeID(repo, model.KindRepository, repo), Kind: model.KindRepository, Repo: repo, Name: repo})
 
 	charts := map[string]bool{} // chart roots (repo-relative, slash)
@@ -42,6 +43,9 @@ func Extract(ctx context.Context, repo, root string) (*model.Graph, error) {
 			return relErr
 		}
 		rel = filepath.ToSlash(rel)
+		if allowed, policyErr := repoconfig.FromContext(ctx).WalkEntry(root, p, d); !allowed || policyErr != nil {
+			return policyErr
+		}
 		if d.IsDir() {
 			if p == root {
 				return nil

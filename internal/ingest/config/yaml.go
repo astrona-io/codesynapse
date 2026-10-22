@@ -18,9 +18,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/redact"
-	"github.com/parisnakitakejser/codesynapse/rules"
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/redact"
+	"github.com/astrona-io/codesynapse/rules"
 )
 
 // maxKeyDepth bounds key-path entries for plain YAML; values files of Helm
@@ -31,8 +32,9 @@ const (
 )
 
 type builder struct {
-	repo string
-	g    *model.Graph
+	policy *repoconfig.Policy
+	repo   string
+	g      *model.Graph
 }
 
 func (b *builder) id(kind model.NodeKind, local string) string {
@@ -74,7 +76,7 @@ func (b *builder) yamlFile(rel string, content []byte, valuesFile bool) {
 		if i+1 < len(docs) {
 			end = max(root.Line, docs[i+1].Line-1)
 		}
-		if res, ok := k8sResource(root); ok {
+		if res, ok := k8sResource(root); ok && b.policy.KubernetesAllowed(rel) {
 			entryID := b.id(model.KindConfigEntry, fmt.Sprintf("%s#%s", rel, res))
 			b.g.AddNode(model.Node{
 				ID: entryID, Kind: model.KindConfigEntry, Repo: b.repo, Name: res, QualifiedName: res, File: rel,

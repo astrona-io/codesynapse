@@ -7,13 +7,13 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/store/nodeprops"
-	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
-	"github.com/parisnakitakejser/codesynapse/internal/vector"
-	"github.com/parisnakitakejser/codesynapse/internal/vector/milvus"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store/nodeprops"
+	"github.com/astrona-io/codesynapse/internal/store/storetest"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/vector"
+	"github.com/astrona-io/codesynapse/internal/vector/milvus"
 )
 
 // TestContract runs against a real HugeGraph when CODESYNAPSE_TEST_HUGEGRAPH_URL

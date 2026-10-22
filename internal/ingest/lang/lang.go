@@ -19,8 +19,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/redact"
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/redact"
 )
 
 // Languages.
@@ -122,6 +123,9 @@ func Extract(ctx context.Context, repo, root string) (*Result, error) {
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if allowed, policyErr := repoconfig.FromContext(ctx).WalkEntry(root, p, d); !allowed || policyErr != nil {
+			return policyErr
 		}
 		if d.IsDir() {
 			if p != root && (skipDirs[d.Name()] || strings.HasPrefix(d.Name(), ".") || isNestedRepo(p)) {

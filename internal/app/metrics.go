@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // Metrics settings. The password is read from the environment only.

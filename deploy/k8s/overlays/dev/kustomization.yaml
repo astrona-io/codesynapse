@@ -10,11 +10,11 @@ resources:
 # Same names as the base (images from `just image-build dev`), tag dev. The
 # registry prefix is kept so docker and podman both resolve the loaded images.
 images:
-  - name: ghcr.io/parisnakitakejser/codesynapse-api
+  - name: ghcr.io/astrona-io/codesynapse-api
     newTag: dev
-  - name: ghcr.io/parisnakitakejser/codesynapse-mcp
+  - name: ghcr.io/astrona-io/codesynapse-mcp
     newTag: dev
-  - name: ghcr.io/parisnakitakejser/codesynapse-web
+  - name: ghcr.io/astrona-io/codesynapse-web
     newTag: dev
 secretGenerator:
   - name: codesynapse-secrets

@@ -5,12 +5,12 @@ import (
 	"errors"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/sessionmemory"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
-	"github.com/parisnakitakejser/codesynapse/internal/vector"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
+	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/sessionmemory"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/internal/vector"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
 // RecallSession never falls back to repository memory, including on model failure.

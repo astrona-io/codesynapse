@@ -20,8 +20,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
-	"github.com/parisnakitakejser/codesynapse/internal/redact"
+	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/redact"
 )
 
 // Limits on what one call and one repository may hold.

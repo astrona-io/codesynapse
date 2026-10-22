@@ -10,13 +10,13 @@ resources:
   - ingress.yaml
 images:
   - name: codesynapse-api
-    newName: ghcr.io/parisnakitakejser/codesynapse-api
+    newName: ghcr.io/astrona-io/codesynapse-api
     newTag: latest # pin to a version tag, e.g. v0.3.0
   - name: codesynapse-mcp
-    newName: ghcr.io/parisnakitakejser/codesynapse-mcp
+    newName: ghcr.io/astrona-io/codesynapse-mcp
     newTag: latest
   - name: codesynapse-web
-    newName: ghcr.io/parisnakitakejser/codesynapse-web
+    newName: ghcr.io/astrona-io/codesynapse-web
     newTag: latest
 secretGenerator:
   - name: codesynapse-secrets

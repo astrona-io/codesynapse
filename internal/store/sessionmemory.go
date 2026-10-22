@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/sessionmemory"
+	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/sessionmemory"
 )
 
 // SessionMemoryStore contains ephemeral chat facts and never repository memory.

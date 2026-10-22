@@ -39,7 +39,7 @@ Every reader goes through `internal/query` (and `internal/agentctx` for the comp
 1. **Go** (`internal/ingest/golang`): `go/packages` loads all packages with tests. Pass 1 handles primary packages; pass 2 adds `_test.go` files from test variants. For each declaration it records the location, signature, doc summary, cyclomatic complexity, a body hash, and calls resolved through `types.Info.Uses`. Calls to sensitive external APIs become `External` nodes with security tags. Interface satisfaction is computed with `types.Implements` across in-repo types.
 2. **Docs** (`internal/ingest/docs`): Markdown files are split into heading sections with line ranges and summaries. Inline code spans that name an exported symbol become `MENTIONS` edges (ambiguous short names are skipped).
 3. **History** (`internal/ingest/githistory`): the last N commits with numstat give `Commit`/`Author` nodes, `MODIFIES` edges and per-file churn.
-4. **Persist**: batched `UNWIND … MERGE`, tagged with a run ID, then stale nodes and edges for the repo are deleted in bounded batches.
+4. **Persist**: validate a bounded replacement, then publish nodes, edges and stale removals atomically. Neo4j uses one transaction with batched `UNWIND … MERGE`; HugeGraph stages bounded chunks outside the code labels and publishes them in one transaction. Recheck authorization and the pinned policy before commit; failed publication preserves the previous graph.
 
 ### Schema
 
@@ -47,7 +47,7 @@ Every code node has the label `Node` plus its kind, and the properties `id`, `re
 
 | Node | Key properties |
 |---|---|
-| Repository | head, branch, url (origin, no credentials), root, time (ingested at), metrics (JSON), license, license_source, licenses (JSON report) |
+| Repository | head, branch, url (origin, no credentials), root, time (ingested at), meta (JSON, including repository_policy), metrics (JSON), license, license_source, licenses (JSON report) |
 | Package | qualified_name, summary |
 | File | file, loc, churn, is_test |
 | Function / Method | qualified_name, file, start_line, end_line, signature, summary, complexity, loc, body_hash, exported, is_test, security_tags |
@@ -220,6 +220,16 @@ Fix branches (`services/api/internal/fixes`, opt-in with `CODESYNAPSE_ALLOW_PUSH
 
 Next: Postgres for reviews, decisions with an audit trail, a persistent job queue, finding/score history and AI usage; an in-process TTL cache for overview/security/metrics invalidated on ingest; container security (Dockerfile rules and opt-in Trivy image scans).
 
+## Repository policy and generated annotations
+
+`internal/config` loads optional `.codesynapse.yaml` once per ingest and shares its immutable matcher with extractors, inventory, dependency discovery and annotation. `Repository.meta.repository_policy` records the canonical configuration, digest, diagnostics and exclusion coverage. A changed policy needs a new approval. Global and Kubernetes exclusions require an active matching approval from every organisation linked to a shared graph; offline CLI commands require `--approved-policy-digest`.
+
+PostgreSQL migration `0008_repository_policy.sql` adds organisation/repository approval and annotation tables. Approvals retain the actor, reason, expiry and separate exclusion, suppression and annotation permissions. Annotation records carry symbol fingerprints, policy/commit/revision, originating session and job ID. These tables cascade on unlink; annotations do not add graph labels or vector entries. Current reads validate policy and symbol fingerprints, allowing reuse across ingests only when the indexed symbol metadata is unchanged.
+
+`services/api/internal/annotation` runs a bounded queue through the local `code-annotation` LLM route. Inputs contain indexed names, signatures and summaries; outputs pass schema validation and redaction. Runtime identity, the original credential, access, policy and revision are checked again before persistence. Graph publication, repository linking and annotation publication share the accounts policy transaction. This holds the governance lock during graph writes; HugeGraph publication currently assumes one server instance. See the [configuration reference](REPO_CONFIG_PLAN.md) for limits and API routes.
+
+Approved suppressions affect the calling organisation's detailed security report. Raw findings remain stored, and aggregate overview/history grades remain conservative. Phase 4i will add exact per-run file accounting and savings dashboards; the exclusion coverage in 4h is not that accounting report.
+
 ## Repository lifecycle
 
 Repositories are added by URL (cloned into the workspace volume) or mounted under `./sources`. **Auto-sync** schedules (off, 5/15/30 min, 1 h, 6 h, daily; default 30 min, counted from the end of the previous sync; pausable) are stored in `workspace/.codesynapse/schedules.json` and run by a scheduler in the API; the next run and last result show in the UI. Removing a repository deletes its graph, schedule and optionally its clone. Private repositories use a server-side token set with `just git-token`; `GET /api/v1/settings` reports the hosts with a token and a masked preview (first and last five characters; tokens under 20 characters show only `***`), never the full value.
@@ -286,6 +296,6 @@ What would put security more in front of developers, ordered by value for the ef
 
 ## Tenant controls, telemetry and retrieval roadmap
 
-The SaaS roadmap includes completed phases [platform isolation and repository permissions](ACCESS_CONTROL_PLAN.md) (4d), [OTel telemetry](TELEMETRY_PLAN.md) (4e), [graph/vector context reduction](RETRIEVAL_PLAN.md) (4f), and [immutable session context](SESSION_CONTEXT_PLAN.md) (4g). Phase 4g requires accounts and runtime-provided identity for execution; existing clients need the documented header/startup integration, and browser execution controls still need trusted runtime binding. Next are [repository configuration and annotation](REPO_CONFIG_PLAN.md) (4h), [ingestion transparency](INGEST_TRANSPARENCY_PLAN.md) (4i), [the code architecture audit and upgrade assessment](CODE_ARCHITECTURE_AUDIT_PLAN.md) (4j), and SSO. Development and production Kubernetes work remains deferred until these application phases are complete. See [the phase order](SAAS.md#phases).
+The SaaS roadmap includes completed phases [platform isolation and repository permissions](ACCESS_CONTROL_PLAN.md) (4d), [OTel telemetry](TELEMETRY_PLAN.md) (4e), [graph/vector context reduction](RETRIEVAL_PLAN.md) (4f), and [immutable session context](SESSION_CONTEXT_PLAN.md) (4g). Phase 4g requires accounts and runtime-provided identity for execution; existing clients need the documented header/startup integration, and browser execution controls still need trusted runtime binding. [Repository configuration and annotation](REPO_CONFIG_PLAN.md) (4h) adds approved ingestion boundaries, tenant-local suppressions and local metadata annotation. Next are [ingestion transparency](INGEST_TRANSPARENCY_PLAN.md) (4i), [the code architecture audit and upgrade assessment](CODE_ARCHITECTURE_AUDIT_PLAN.md) (4j), and SSO. Development and production Kubernetes work remains deferred until these application phases are complete. See [the phase order](SAAS.md#phases).
 
 Development and production Kubernetes manifests are deferred to the final deployment phase, after the application phases and SSO. Prepared deployment work remains on `feat/k8s-production` for later review and revalidation; it is not part of the active development phase.

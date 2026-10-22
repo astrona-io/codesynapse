@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	agentmem "github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/offload"
+	agentmem "github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/store/storetest"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
+	"github.com/astrona-io/codesynapse/services/api/internal/offload"
 )
 
 func TestOffloadEndpoints(t *testing.T) {

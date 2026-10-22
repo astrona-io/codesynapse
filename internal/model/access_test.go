@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 )
 
 func TestAccessSnapshotValidation(t *testing.T) {

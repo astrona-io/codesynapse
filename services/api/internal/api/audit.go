@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
 // requestIDRe accepts client-supplied request IDs that are safe to log.

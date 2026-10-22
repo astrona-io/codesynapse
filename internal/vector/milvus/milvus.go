@@ -25,10 +25,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/sessionmemory"
-	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
-	"github.com/parisnakitakejser/codesynapse/internal/vector"
+	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/sessionmemory"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/internal/vector"
 )
 
 const (

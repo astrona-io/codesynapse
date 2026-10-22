@@ -3,18 +3,20 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
-	"github.com/parisnakitakejser/codesynapse/internal/execution"
-	"github.com/parisnakitakejser/codesynapse/internal/gitx"
-	"github.com/parisnakitakejser/codesynapse/internal/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/query"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
-	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/ingest"
+	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // OrgHeader selects the organisation a request acts in when the caller
@@ -283,12 +285,58 @@ func (s *Server) linkRepo(r *http.Request, graph, remote, visibility string) err
 	if _, err := s.cfg.Accounts.ResolveExecutionSession(r.Context(), p.User.ID, m.Org.ID, id.SessionID); err != nil {
 		return err
 	}
-	err = s.cfg.Accounts.St.AddRepository(r.Context(), accounts.Repository{OrgID: m.Org.ID, Graph: graph, Remote: remote,
-		Visibility: visibility, AddedBy: p.User.ID, AddedAt: time.Now().UTC().Truncate(time.Microsecond)})
+	err = s.linkPolicyRepository(r.Context(), accounts.Repository{OrgID: m.Org.ID, Graph: graph, Remote: remote,
+		Visibility: visibility, AddedBy: p.User.ID, AddedAt: time.Now().UTC().Truncate(time.Microsecond)}, accounts.Member)
 	if errors.Is(err, accounts.ErrExists) {
 		return nil // already linked: adding it again is fine
 	}
 	return err
+}
+
+// A shared filtered graph is usable only under the same reviewed policy. The
+// accounts lock also serializes this decision with policy approval changes.
+func (s *Server) linkPolicyRepository(ctx context.Context, entry accounts.Repository, least accounts.Role) error {
+	p, ok := principal(ctx)
+	id, err := execution.Require(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok || p.Via != "session" || p.User.ID != entry.AddedBy || id.SubjectID != p.User.ID || id.TenantID != entry.OrgID {
+		return accounts.ErrForbidden
+	}
+	return s.cfg.Accounts.St.PolicyTransaction(ctx, entry.OrgID, func(st accounts.Store) error {
+		service := *s.cfg.Accounts
+		service.St, service.Sink = st, nil
+		if err := service.ValidatePrincipal(ctx, p); err != nil {
+			return err
+		}
+		if err := service.Require(ctx, p, entry.OrgID, least); err != nil {
+			return err
+		}
+		if _, err := service.ResolveExecutionSession(ctx, p.User.ID, entry.OrgID, id.SessionID); err != nil {
+			return err
+		}
+		node, err := s.st.Node(ctx, model.NodeID(entry.Graph, model.KindRepository, entry.Graph))
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		if err == nil {
+			if entry.Remote != "" && (node.URL == "" || !sameRemote(node.URL, entry.Remote)) {
+				return fmt.Errorf("%w: indexed repository source changed before attachment", accounts.ErrForbidden)
+			}
+			meta, err := ingest.RepositoryPolicy(node)
+			if err != nil {
+				return err
+			}
+			if meta.ExclusionsApproved {
+				approval, err := st.GetRepoPolicy(ctx, entry.OrgID, entry.Graph)
+				if err != nil || !approval.AllowExclusions || !policyActive(approval, meta.Digest) {
+					return fmt.Errorf("%w: this indexed graph contains approved exclusions; use an unfiltered graph until this organisation has a matching policy", accounts.ErrForbidden)
+				}
+			}
+		}
+		return st.AddRepository(ctx, entry)
+	})
 }
 
 // publicRemote reports whether remote can be read without credentials,
@@ -355,8 +403,8 @@ func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	err = s.cfg.Accounts.St.AddRepository(r.Context(), accounts.Repository{OrgID: o.ID, Graph: req.Graph, Remote: n.URL, Visibility: vis,
-		AddedBy: p.User.ID, AddedAt: now})
+	err = s.linkPolicyRepository(r.Context(), accounts.Repository{OrgID: o.ID, Graph: req.Graph, Remote: n.URL, Visibility: vis,
+		AddedBy: p.User.ID, AddedAt: now}, accounts.Owner)
 	if err == nil && vis == accounts.Private {
 		// Recheck the organisation credential before exposing private content.
 		s.verifyLink(r.Context(), accounts.Repository{OrgID: o.ID, Graph: req.Graph, Remote: n.URL, Visibility: vis, Access: accounts.AccessOK})

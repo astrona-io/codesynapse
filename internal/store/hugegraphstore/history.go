@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/parisnakitakejser/codesynapse/internal/history"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/history"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // Snapshots are their own vertex label, so repository replacement and

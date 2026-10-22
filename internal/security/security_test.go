@@ -8,16 +8,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
-	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
 
-	"github.com/parisnakitakejser/codesynapse/internal/ingest/config"
-	"github.com/parisnakitakejser/codesynapse/internal/ingest/golang"
-	"github.com/parisnakitakejser/codesynapse/internal/ingest/lang"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
-	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
-	"github.com/parisnakitakejser/codesynapse/rules"
+	"github.com/astrona-io/codesynapse/internal/ingest/config"
+	"github.com/astrona-io/codesynapse/internal/ingest/golang"
+	"github.com/astrona-io/codesynapse/internal/ingest/lang"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store/memory"
+	"github.com/astrona-io/codesynapse/internal/store/storetest"
+	"github.com/astrona-io/codesynapse/rules"
 )
 
 func fixture(t *testing.T) *memory.Store {

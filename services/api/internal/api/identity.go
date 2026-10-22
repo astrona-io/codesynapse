@@ -3,9 +3,9 @@ package api
 import (
 	"net/http"
 
-	"github.com/parisnakitakejser/codesynapse/internal/curation"
-	"github.com/parisnakitakejser/codesynapse/internal/query"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/curation"
+	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 func (s *Server) handleIdentities(w http.ResponseWriter, r *http.Request) {

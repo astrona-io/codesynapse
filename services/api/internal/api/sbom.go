@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/internal/sbom"
-	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/sbom"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // handleSBOM serves the repository's software bill of materials as

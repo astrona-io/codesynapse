@@ -11,10 +11,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/parisnakitakejser/codesynapse/internal/accounts"
-	"github.com/parisnakitakejser/codesynapse/internal/model"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/aitasks"
-	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
+	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/services/api/internal/aitasks"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
 // ProviderInfo describes a configured AI provider for the UI. It never
