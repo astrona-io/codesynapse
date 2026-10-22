@@ -179,7 +179,7 @@ async function toggleFile(file: string) {
 .files li { border-bottom: 1px dashed var(--line); }
 .files li:last-child { border-bottom: 0; }
 .file { all: unset; box-sizing: border-box; cursor: pointer; width: 100%; display: grid; grid-template-columns: auto minmax(0, 1.2fr) minmax(0, 2fr) auto; gap: 12px; align-items: center; padding: 10px 6px; }
-.file:hover { background: rgba(236, 231, 245, 0.03); }
+.file:hover { background: var(--hover); }
 .file:focus-visible { box-shadow: var(--focus); }
 .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }

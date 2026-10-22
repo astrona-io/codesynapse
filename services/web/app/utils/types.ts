@@ -221,3 +221,52 @@ export interface SeriesPanel {
   times: number[]
   series: SeriesLine[]
 }
+
+// Accounts (GET /api/v1/auth/status, /me and the settings endpoints).
+export interface AuthStatus {
+  mode: 'single' | 'accounts'
+  needs_setup?: boolean
+  signup_open?: boolean
+}
+export interface AccountUser {
+  id: string
+  email: string
+  name: string
+  platform_admin: boolean
+  created_at: string
+}
+export interface AccountOrg {
+  id: string
+  slug: string
+  name: string
+  created_at: string
+}
+export type Role = 'owner' | 'admin' | 'member' | 'viewer'
+export interface Membership {
+  org: AccountOrg
+  user: AccountUser
+  role: Role
+  added_at: string
+}
+export interface Me {
+  user: AccountUser
+  via: 'session' | 'key' | 'service'
+  org_id?: string
+  memberships: Membership[]
+}
+export interface ApiKey {
+  id: string
+  org_id: string
+  name: string
+  prefix: string
+  created_at: string
+  last_used_at?: string
+  expires_at?: string
+  revoked_at?: string
+}
+export interface GitToken {
+  org_id: string
+  host: string
+  preview: string
+  updated_at: string
+}

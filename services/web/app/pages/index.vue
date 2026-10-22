@@ -7,6 +7,10 @@ const { data: ov, refresh: refreshOverview } = useApiGet<WorkspaceOverview>('ove
 const { data: sources } = useApiGet<{ sources: Source[] }>('sources')
 const { data: jobs, refresh: refreshJobs } = useApiGet<{ jobs: Job[] }>('jobs')
 const { data: settings } = useApiGet<Settings>('settings')
+const session = useSession()
+// Installation tokens and mounted folders belong to whoever runs
+// CodeSynapse; organisations use their own Git tokens.
+const operator = computed(() => !session.accounts.value || session.isPlatformAdmin.value)
 
 // One row per repository, GitHub-style.
 const PAGE_SIZE = 25
@@ -118,7 +122,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
       <span class="muted small">Page {{ page }} of {{ pageCount }} · {{ plural(ov?.repos.length ?? 0, 'repository', 'repositories') }}</span>
       <button class="secondary tiny" :disabled="page >= pageCount" @click="page++">Next</button>
     </nav>
-    <div v-else-if="!ov?.repos.length" class="empty"><strong>No repositories yet</strong>Clone one by URL or index a mounted source below — it takes about a minute.</div>
+    <div v-else-if="!ov?.repos.length" class="empty"><strong>No repositories yet</strong>Add one by its Git URL below. It takes about a minute.</div>
 
     <div class="grid cols-2">
       <section class="panel edge--cyan">
@@ -140,7 +144,8 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
         <p v-if="regOk" class="ok">{{ regOk }}</p>
         <p v-if="regError" class="error">{{ regError }}</p>
 
-        <div class="token" :class="settings?.git_token_configured ? 'token--ok' : 'token--missing'">
+        <p v-if="!operator" class="notice">Public repositories work right away. For private ones, an admin of your organisation adds a Git token under <NuxtLink to="/settings/git-tokens">Settings → Git tokens</NuxtLink>.</p>
+        <div v-else class="token" :class="settings?.git_token_configured ? 'token--ok' : 'token--missing'">
           <template v-if="settings?.git_token_configured">
             <strong>Private repositories on {{ (settings.git_token_hosts?.length ? settings.git_token_hosts : [settings.git_token_host]).join(', ') }}: enabled</strong>
             <ul v-if="settings.git_tokens?.length" class="tokens">
@@ -160,7 +165,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
         </div>
       </section>
 
-      <section class="panel">
+      <section v-if="operator" class="panel">
         <p class="eyebrow">Mounted sources</p>
         <h2>Folders available to index</h2>
         <p class="muted small">Everything under <code>./sources</code> in the project folder. Copy a checkout there with <code>just ingest ~/src/repo</code>.</p>
@@ -229,7 +234,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
 .grow { flex: 1 1 180px; }
 .ok { color: var(--green); }
 .token { margin-top: 8px; padding: 14px 16px; border-radius: var(--radius-sm); border: 1px dashed var(--line-strong); background: var(--panel-faint); display: grid; gap: 6px; }
-.token--ok { border-style: solid; border-color: rgba(57, 255, 136, 0.35); }
+.token--ok { border-style: solid; border-color: var(--success); }
 .token--ok strong { color: var(--green); }
 .token--missing strong { color: var(--amber); }
 .tokens { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-family: var(--mono); font-size: 12px; }

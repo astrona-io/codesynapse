@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -180,4 +181,21 @@ func TestSingleTenantUnchanged(t *testing.T) {
 	require.Equal(t, c.do("GET", "/api/v1/auth/status", "", &status), 200)
 	assert.Equal(t, status["mode"], "single")
 	assert.Equal(t, c.do("POST", "/api/v1/auth/login", `{"email":"a@b.cd","password":"x"}`, nil), 409)
+}
+
+func TestClientAddrTrustsOnlyConfiguredProxies(t *testing.T) {
+	s := &Server{cfg: Config{TrustedProxies: []netip.Prefix{netip.MustParsePrefix("172.16.0.0/12")}}}
+	req := func(remote, xff string) *http.Request {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = remote
+		if xff != "" {
+			r.Header.Set("X-Forwarded-For", xff)
+		}
+		return r
+	}
+	assert.Equal(t, s.clientAddr(req("172.18.0.5:4000", "203.0.113.9")), "203.0.113.9", "the web app reports the user")
+	assert.Equal(t, s.clientAddr(req("172.18.0.5:4000", "1.1.1.1, 203.0.113.9")), "203.0.113.9", "the last hop is the one the proxy saw")
+	assert.Equal(t, s.clientAddr(req("198.51.100.7:4000", "203.0.113.9")), "198.51.100.7", "others cannot spoof it")
+	assert.Equal(t, s.clientAddr(req("172.18.0.5:4000", "not-an-ip")), "172.18.0.5")
+	assert.Equal(t, s.clientAddr(req("172.18.0.5:4000", "")), "172.18.0.5")
 }

@@ -89,7 +89,7 @@ const tokens = (bytes?: number) => Math.round((bytes ?? 0) / 4)
 .doc-list { position: sticky; top: 24px; max-height: calc(100vh - 48px); overflow-y: auto; }
 .doc-list nav { display: flex; flex-direction: column; gap: 2px; }
 .doc-link { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-left: 2px solid transparent; border-radius: var(--radius-xs); }
-.doc-link:hover { background: rgba(236, 231, 245, 0.04); }
+.doc-link:hover { background: var(--hover); }
 .doc-link.is-active { background: var(--tint-orange); border-left-color: var(--orange); }
 .doc-title { font-size: 14px; font-weight: 500; color: var(--ink); }
 .outline { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Astrona-style page opener: breadcrumbs above a glass topbar with eyebrow,
+// Page opener: breadcrumbs above a quiet header with an optional label,
 // title and lede on the left and actions on the right.
 defineProps<{ eyebrow?: string; title: string; lede?: string; crumbs?: { label: string; to?: string }[] }>()
 </script>
@@ -15,7 +15,7 @@ defineProps<{ eyebrow?: string; title: string; lede?: string; crumbs?: { label: 
     </nav>
     <header class="panel panel--glass topbar">
       <div class="topbar__text">
-        <p v-if="eyebrow" class="eyebrow eyebrow--green">{{ eyebrow }}</p>
+        <p v-if="eyebrow" class="eyebrow">{{ eyebrow }}</p>
         <h1>{{ title }}</h1>
         <p v-if="lede" class="muted">{{ lede }}</p>
         <slot name="meta" />

@@ -33,12 +33,10 @@ const canConfirm = computed(() => !props.busy && (!props.confirmText || typed.va
 </template>
 
 <style scoped>
-.confirm { border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); color: var(--ink); padding: 0; width: min(480px, calc(100vw - 32px)); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45); }
-.confirm::backdrop { background: rgba(10, 7, 17, 0.72); backdrop-filter: blur(4px); }
+.confirm { border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); color: var(--ink); padding: 0; width: min(480px, calc(100vw - 32px)); box-shadow: var(--shadow-pop); }
+.confirm::backdrop { background: rgba(15, 17, 21, 0.45); backdrop-filter: blur(4px); }
 .body { display: grid; gap: 14px; padding: 22px 24px; }
 .content { color: var(--muted); font-size: 14px; display: grid; gap: 8px; }
 label { display: grid; gap: 6px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; }
-button.danger { background: var(--pink); color: #2a0015; }
-button.danger:hover:not(:disabled) { background: #ff7cc2; }
 </style>

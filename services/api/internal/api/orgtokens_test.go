@@ -179,3 +179,20 @@ func TestOrgTokensNeedASecretKey(t *testing.T) {
 	assert.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+signed.Org.Slug+"/git-tokens/github.com", `{"token":"ghp_abcdefghijklmnop"}`, &body), 409)
 	assert.Contains(t, body, "CODESYNAPSE_SECRET_KEY")
 }
+
+func TestSettingsHideInstallationTokensFromOrganisations(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	acc := accounts.NewService(acctmem.New(), true)
+	srv := New(ctx, Config{Accounts: acc, GitAuths: []gitx.Auth{{Host: "github.com", Token: "ghp_installation_secret_token"}}}, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+	ada, bob := newClient(t, ts), newClient(t, ts)
+	require.Equal(t, ada.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 201)
+	var asAdmin, asBob string
+	require.Equal(t, ada.do("GET", "/api/v1/settings", "", &asAdmin), 200)
+	require.Equal(t, bob.do("GET", "/api/v1/settings", "", &asBob), 200)
+	assert.Contains(t, asAdmin, "github.com", "the platform admin sees the installation's hosts")
+	assert.False(t, strings.Contains(asBob, "github.com") || strings.Contains(asBob, "ghp_i"), "organisation users do not")
+}

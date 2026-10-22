@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -101,12 +102,33 @@ func (s *Server) clearSession(w http.ResponseWriter) {
 }
 
 // clientAddr is the address login attempts are limited by.
-func clientAddr(r *http.Request) string {
+// It is the connection's address, or, when the connection comes from a
+// trusted proxy (the web app), the last X-Forwarded-For hop: behind the
+// proxy every user would otherwise share one address, one login limit and
+// one audit IP. Senders outside TrustedProxies cannot set it.
+func (s *Server) clientAddr(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil || !s.trustedProxy(ip.Unmap()) {
+		return host
+	}
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	if last, err := netip.ParseAddr(strings.TrimSpace(hops[len(hops)-1])); err == nil {
+		return last.Unmap().String()
 	}
 	return host
+}
+
+func (s *Server) trustedProxy(ip netip.Addr) bool {
+	for _, p := range s.cfg.TrustedProxies {
+		if p.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // accountError maps account errors to HTTP statuses.
@@ -191,7 +213,7 @@ func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	tok, _, err := s.cfg.Accounts.Login(r.Context(), u.Email, c.Password, clientAddr(r))
+	tok, _, err := s.cfg.Accounts.Login(r.Context(), u.Email, c.Password, s.clientAddr(r))
 	if err != nil {
 		s.accountError(w, err)
 		return
@@ -209,7 +231,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	tok, u, err := s.cfg.Accounts.Login(r.Context(), c.Email, c.Password, clientAddr(r))
+	tok, u, err := s.cfg.Accounts.Login(r.Context(), c.Email, c.Password, s.clientAddr(r))
 	if err != nil {
 		s.accountError(w, err)
 		return
