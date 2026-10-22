@@ -171,6 +171,10 @@ func (s *Server) guard(pol policy, h http.HandlerFunc) http.HandlerFunc {
 				s.problem(w, http.StatusNotFound, errors.New("no such review"))
 				return
 			}
+			if !seesReview(sc, rv.OrgID) {
+				s.problem(w, http.StatusNotFound, errors.New("no such review"))
+				return
+			}
 			if !s.allowRepo(w, sc, rv.Repo, pol.least) {
 				return
 			}
@@ -301,4 +305,74 @@ func (s *Server) handleOrgRepos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"org": o, "repositories": repos})
+}
+
+// repoOrg is the organisation a request acts in for graph: the one of the
+// caller's organisations that uses it (OrgHeader picks when several do).
+// "" for platform admins without a selected organisation and single-tenant
+// installs.
+func (s *Server) repoOrg(r *http.Request, graph string) (string, error) {
+	if s.cfg.Accounts == nil {
+		return "", nil
+	}
+	sc := scopeFrom(r.Context())
+	if sc.all {
+		return "", nil
+	}
+	links, err := s.cfg.Accounts.St.GraphRepositories(r.Context(), graph)
+	if err != nil {
+		return "", err
+	}
+	var orgs []string
+	for _, m := range sc.orgs {
+		for _, l := range links {
+			if l.OrgID == m.Org.ID {
+				orgs = append(orgs, m.Org.ID)
+			}
+		}
+	}
+	switch len(orgs) {
+	case 0:
+		return "", accounts.ErrNotFound
+	case 1:
+		return orgs[0], nil
+	}
+	return "", errors.New("several of your organisations use this repository: say which one with the " + OrgHeader + " header")
+}
+
+// memNamespace is the agent-memory namespace of graph for the request:
+// organisations sharing a graph keep separate memories ("org|graph").
+func (s *Server) memNamespace(r *http.Request, graph string) (string, error) {
+	org, err := s.repoOrg(r, graph)
+	if err != nil || org == "" {
+		return graph, err
+	}
+	return org + "|" + graph, nil
+}
+
+// seesReview applies the review rule: an organisation sees its own reviews
+// and the organisation-less ones (scheduled reviews of shared code).
+func seesReview(sc scope, orgID string) bool {
+	if sc.all || orgID == "" {
+		return true
+	}
+	for _, m := range sc.orgs {
+		if m.Org.ID == orgID {
+			return true
+		}
+	}
+	return false
+}
+
+// seesOrg reports whether the scope includes an organisation.
+func seesOrg(sc scope, orgID string) bool {
+	if sc.all {
+		return true
+	}
+	for _, m := range sc.orgs {
+		if m.Org.ID == orgID {
+			return true
+		}
+	}
+	return false
 }

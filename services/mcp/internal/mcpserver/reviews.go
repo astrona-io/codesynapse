@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -77,7 +78,7 @@ func (h *handlers) submitReview(ctx context.Context, req *mcp.CallToolRequest, i
 		return nil, submitReviewOut{}, err
 	}
 	r := reviews.Review{
-		Repo: repo, Kind: in.Kind, Title: in.Title, Summary: in.Summary, Verdict: in.Verdict, Base: in.Base, Head: in.Head,
+		Repo: repo, OrgID: reviewOrg(ctx), Kind: in.Kind, Title: in.Title, Summary: in.Summary, Verdict: in.Verdict, Base: in.Base, Head: in.Head,
 		Author: clientName(req), Source: "mcp", Commit: repoNode.Head,
 	}
 	for _, c := range in.Comments {
@@ -138,6 +139,9 @@ func (h *handlers) updateReviewComment(ctx context.Context, req *mcp.CallToolReq
 	if err != nil {
 		return nil, reviews.Counts{}, err
 	}
+	if err := h.canSeeReview(ctx, r.Repo, r.OrgID); err != nil {
+		return nil, reviews.Counts{}, err
+	}
 	by := clientName(req)
 	if by == "" {
 		by = "mcp"
@@ -164,6 +168,9 @@ func (h *handlers) listReviews(ctx context.Context, _ *mcp.CallToolRequest, in l
 	if err != nil {
 		return nil, listReviewsOut{}, err
 	}
+	if c := callerFrom(ctx); c != nil {
+		list = slices.DeleteFunc(list, func(r reviews.Review) bool { return r.OrgID != c.OrgID && r.OrgID != "" })
+	}
 	out := listReviewsOut{Reviews: []reviews.Summary{}}
 	for _, r := range list {
 		out.Reviews = append(out.Reviews, reviews.SummaryOf(r))
@@ -183,6 +190,9 @@ func (h *handlers) getReview(ctx context.Context, _ *mcp.CallToolRequest, in get
 	r, err := h.reviews.GetReview(ctx, in.ID)
 	if err != nil {
 		return nil, r, err
+	}
+	if err := h.canSeeReview(ctx, r.Repo, r.OrgID); err != nil {
+		return nil, reviews.Review{}, err
 	}
 	if in.Status != "" {
 		kept := r.Comments[:0:0]

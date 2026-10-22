@@ -47,7 +47,7 @@ func (s *Store) Usage(_ context.Context, sinceDay string) ([]usage.Bucket, error
 		}
 	}
 	slices.SortFunc(out, func(a, b usage.Bucket) int {
-		return cmp.Or(cmp.Compare(a.Day, b.Day), cmp.Compare(a.Repo, b.Repo), cmp.Compare(a.Tool, b.Tool), cmp.Compare(a.Client, b.Client))
+		return cmp.Or(cmp.Compare(a.Day, b.Day), cmp.Compare(a.Org, b.Org), cmp.Compare(a.Repo, b.Repo), cmp.Compare(a.Tool, b.Tool), cmp.Compare(a.Client, b.Client))
 	})
 	return out, nil
 }

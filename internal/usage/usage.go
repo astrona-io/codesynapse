@@ -22,7 +22,10 @@ const maxBuckets = 5000
 
 // Bucket is one day of usage for a (repository, tool, client) triple.
 type Bucket struct {
-	Day    string `json:"day"` // YYYY-MM-DD, UTC
+	Day string `json:"day"` // YYYY-MM-DD, UTC
+	// Org is the organisation of calls made with personal API keys ("" for
+	// the MCP token and single-tenant installs).
+	Org    string `json:"org,omitempty"`
 	Repo   string `json:"repo"`
 	Tool   string `json:"tool"`
 	Client string `json:"client"`
@@ -35,7 +38,9 @@ type Bucket struct {
 }
 
 // Key identifies a bucket.
-func (b Bucket) Key() string { return b.Day + "|" + b.Repo + "|" + b.Tool + "|" + b.Client }
+func (b Bucket) Key() string {
+	return b.Day + "|" + b.Org + "|" + b.Repo + "|" + b.Tool + "|" + b.Client
+}
 
 // Add merges o's counters into b.
 func (b *Bucket) Add(o Bucket) {
@@ -71,8 +76,8 @@ func NewRecorder(sink Sink) *Recorder {
 
 // Record counts one call. tokens is the response size estimate; failed marks
 // tool or protocol errors.
-func (r *Recorder) Record(repo, tool, client string, d time.Duration, tokens int, failed bool) {
-	b := Bucket{Day: Day(r.now()), Repo: clean(repo, 200), Tool: clean(tool, 64), Client: clean(client, 64), Calls: 1,
+func (r *Recorder) Record(org, repo, tool, client string, d time.Duration, tokens int, failed bool) {
+	b := Bucket{Day: Day(r.now()), Org: clean(org, 64), Repo: clean(repo, 200), Tool: clean(tool, 64), Client: clean(client, 64), Calls: 1,
 		ResponseTokens: tokens, DurationMs: int(d.Milliseconds()), MaxDurationMs: int(d.Milliseconds())}
 	if failed {
 		b.Errors = 1

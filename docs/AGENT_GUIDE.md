@@ -4,6 +4,8 @@ CodeSynapse is a deterministic code graph layer that gives AI assistants precise
 
 Connecting is one command: `just mcp` (or `codesynapse mcp install`) registers the server with every agent it finds. The system instructions below are sent automatically by the server on connect (MCP `instructions`); paste them into your assistant's rules only if your client ignores server instructions.
 
+**Personal API keys.** When the installation has accounts (PostgreSQL configured), create a key under your profile and use it as the bearer token: `CODESYNAPSE_MCP_TOKEN=csk_… just mcp`. The agent then sees only your organisation's repositories, and its memory, reviews and usage statistics belong to your organisation, even when another organisation uses the same repository. Revoking the key or leaving the organisation cuts the agent off on its next call. The installation's own MCP token still sees everything; keep it for operators.
+
 ---
 
 ## 1. MCP server system instructions

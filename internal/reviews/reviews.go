@@ -113,9 +113,12 @@ type Fix struct {
 
 // Review is a submitted review.
 type Review struct {
-	ID        string        `json:"id"`
-	Kind      string        `json:"kind"`
-	Repo      string        `json:"repo"`
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	Repo string `json:"repo"`
+	// OrgID is the organisation the review belongs to ("" before accounts or
+	// for the service token); organisations see only their own.
+	OrgID     string        `json:"org_id,omitempty"`
 	Title     string        `json:"title"`
 	Summary   string        `json:"summary"`
 	Verdict   string        `json:"verdict"`
@@ -172,6 +175,7 @@ type Summary struct {
 	ID        string `json:"id"`
 	Kind      string `json:"kind"`
 	Repo      string `json:"repo"`
+	OrgID     string `json:"org_id,omitempty"`
 	Title     string `json:"title"`
 	Verdict   string `json:"verdict"`
 	Author    string `json:"author"`
@@ -184,7 +188,7 @@ type Summary struct {
 
 // SummaryOf builds the list view of r.
 func SummaryOf(r Review) Summary {
-	return Summary{ID: r.ID, Kind: r.Kind, Repo: r.Repo, Title: r.Title, Verdict: r.Verdict, Author: r.Author, Source: r.Source,
+	return Summary{ID: r.ID, Kind: r.Kind, Repo: r.Repo, OrgID: r.OrgID, Title: r.Title, Verdict: r.Verdict, Author: r.Author, Source: r.Source,
 		Commit: r.Commit, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, Counts: r.Counts()}
 }
 

@@ -14,9 +14,12 @@ func (s *Server) handleListReviews(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 500, err)
 		return
 	}
+	sc := scopeFrom(r.Context())
 	out := make([]reviews.Summary, 0, len(list))
 	for _, rv := range list {
-		out = append(out, reviews.SummaryOf(rv))
+		if seesReview(sc, rv.OrgID) {
+			out = append(out, reviews.SummaryOf(rv))
+		}
 	}
 	writeJSON(w, 200, map[string]any{"reviews": out})
 }

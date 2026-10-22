@@ -13,9 +13,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
+	"github.com/parisnakitakejser/codesynapse/internal/accounts"
+	"github.com/parisnakitakejser/codesynapse/internal/accounts/pgstore"
 	"github.com/parisnakitakejser/codesynapse/internal/app"
 	"github.com/parisnakitakejser/codesynapse/internal/ingest"
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
@@ -73,7 +76,8 @@ func (o *serveOptions) Validate(_ context.Context, _ *app.Env) error {
 	case "stdio":
 		return nil
 	case "http":
-		if os.Getenv(EnvToken) == "" && !app.IsLoopback(o.addr) {
+		// With accounts, personal API keys protect the endpoint.
+		if os.Getenv(EnvToken) == "" && os.Getenv(EnvDatabaseURL) == "" && !app.IsLoopback(o.addr) {
 			return fmt.Errorf("%w (%s)", app.ErrTokenRequired, EnvToken)
 		}
 		return nil
@@ -137,6 +141,14 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		// Stop the recorder and wait for its final flush before exiting.
 		defer func() { stopUsage(); <-flushed }()
 	}
+	acc, closeAccounts, err := o.openAccounts(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeAccounts()
+	if acc != nil {
+		opts.Access = mcpserver.OrgAccess{St: acc.St}
+	}
 	server := mcpserver.New(r, version, opts)
 
 	if o.transport == "stdio" {
@@ -150,10 +162,36 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", app.RequireBearer(os.Getenv(EnvToken), handler))
+	if acc != nil {
+		// Personal API keys or the MCP token; tools are scoped to the key's organisation.
+		mux.Handle("/mcp", auth.RequireBearerToken(mcpserver.KeyVerifier(acc, os.Getenv(EnvToken)),
+			&auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(handler))
+	} else {
+		mux.Handle("/mcp", app.RequireBearer(os.Getenv(EnvToken), handler))
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) }) //nolint:errcheck // health probe
-	o.EC.Logger.Info("mcp http listening", "addr", o.addr, "path", "/mcp", "auth", os.Getenv(EnvToken) != "")
+	o.EC.Logger.Info("mcp http listening", "addr", o.addr, "path", "/mcp", "auth", os.Getenv(EnvToken) != "" || acc != nil, "accounts", acc != nil)
 	return app.Serve(ctx, app.NewServer(o.addr, mux))
+}
+
+// EnvDatabaseURL turns on personal API keys. It holds a password, so it is
+// read from the environment only. The API owns the schema and migrates it.
+const EnvDatabaseURL = "CODESYNAPSE_DATABASE_URL" //nolint:gosec // env var name
+
+// openAccounts connects to the accounts database, or returns nil without one
+// (the MCP token alone, every repository).
+func (o *serveOptions) openAccounts(ctx context.Context) (*accounts.Service, func(), error) {
+	url := os.Getenv(EnvDatabaseURL)
+	if url == "" || o.transport != "http" {
+		return nil, func() {}, nil
+	}
+	st, err := pgstore.OpenWait(ctx, url, func(attempt int, err error) {
+		o.EC.Logger.Warn("waiting for PostgreSQL", "attempt", attempt, "error", err)
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return accounts.NewService(st, false), st.Close, nil
 }
 
 func serveCmd(ec *app.Env) *cobra.Command {

@@ -138,7 +138,7 @@ func (h *handlers) searchAll(ctx context.Context, _ *mcp.CallToolRequest, in sea
 	}
 	limit := clampInt(in.Limit, searchAllDefaultLimit, searchAllMaxLimit)
 	perRepo := clampInt(in.PerRepo, 3, searchAllPerRepoMax)
-	repos, err := h.svc.R.Repos(ctx)
+	repos, err := h.visibleRepos(ctx)
 	if err != nil {
 		return nil, searchAllOut{}, err
 	}

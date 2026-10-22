@@ -58,8 +58,11 @@ type Store interface {
 
 // Job is one extraction; turns are dropped when it finishes.
 type Job struct {
-	ID         string `json:"id"`
-	Repo       string `json:"repo"`
+	ID   string `json:"id"`
+	Repo string `json:"repo"`
+	// Namespace is where the facts go: the repository, or "org|repo" when an
+	// organisation asked (organisations sharing a graph keep separate memory).
+	Namespace  string `json:"-"`
 	Source     string `json:"source"`
 	State      string `json:"state"`
 	Turns      int    `json:"turns"`
@@ -112,8 +115,9 @@ func (w *Worker) Provider() (string, error) {
 	return name, nil
 }
 
-// Submit validates and queues an extraction without waiting for it.
-func (w *Worker) Submit(repo, source string, turns []extract.Turn) (Job, error) {
+// Submit validates and queues an extraction into namespace without waiting
+// for it ("" means the repository's own namespace).
+func (w *Worker) Submit(repo, namespace, source string, turns []extract.Turn) (Job, error) {
 	if len(turns) == 0 || len(turns) > extract.MaxTurns {
 		return Job{}, fmt.Errorf("give 1 to %d turns", extract.MaxTurns)
 	}
@@ -124,7 +128,7 @@ func (w *Worker) Submit(repo, source string, turns []extract.Turn) (Job, error) 
 	if err != nil {
 		return Job{}, err
 	}
-	j := &Job{ID: id, Repo: repo, Source: cmp.Or(source, "agent"), State: Queued, Turns: len(turns),
+	j := &Job{ID: id, Repo: repo, Namespace: cmp.Or(namespace, repo), Source: cmp.Or(source, "agent"), State: Queued, Turns: len(turns),
 		QueuedAt: w.now().UTC().Format(time.RFC3339), turns: slices.Clone(turns)}
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -170,7 +174,7 @@ func (w *Worker) run(ctx context.Context, id string) {
 
 	ctx, cancel := context.WithTimeout(ctx, jobTimeout)
 	defer cancel()
-	res, err := w.extract(ctx, j.Repo, j.Source, turns, func(provider, model string) {
+	res, err := w.extract(ctx, j.Namespace, j.Source, turns, func(provider, model string) {
 		w.mu.Lock()
 		j.Provider, j.Model = provider, model
 		w.mu.Unlock()

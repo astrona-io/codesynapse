@@ -41,7 +41,9 @@ type Runner struct {
 
 // Input selects what a task works on.
 type Input struct {
-	Repo     string
+	Repo string
+	// OrgID stamps the review with the organisation that asked for it.
+	OrgID    string
 	Provider string // optional override of the task's routed provider
 	Diff     []byte // review task: analyse this change instead of hotspots
 	// OnlyFindings limits triage to these finding IDs (new findings after a sync).
@@ -88,7 +90,7 @@ func (r Runner) Run(ctx context.Context, task string, in Input) (string, error) 
 	if in.Title != "" {
 		rv.Title = in.Title
 	}
-	rv.Repo, rv.Source, rv.Commit = in.Repo, "ai", repoNode.Head
+	rv.Repo, rv.OrgID, rv.Source, rv.Commit = in.Repo, in.OrgID, "ai", repoNode.Head
 	rv, err = reviews.Prepare(rv, time.Now())
 	if err != nil {
 		return "", fmt.Errorf("model output did not form a valid review: %w", err)

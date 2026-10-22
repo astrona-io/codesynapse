@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -46,6 +47,9 @@ type Options struct {
 	Memory store.MemoryStore
 	// Usage, when set, counts sessions, tool calls and prompt requests.
 	Usage *usage.Recorder
+	// Access scopes calls made with personal API keys to the key's
+	// organisation; without it such calls see no repositories.
+	Access Access
 	// Offload, with Memory, adds offload_turns: background extraction of
 	// triples from conversation turns by the API's local model.
 	Offload *APIClient
@@ -63,7 +67,11 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	if len(opts) > 0 && opts[0].Usage != nil {
 		s.AddReceivingMiddleware(usageMiddleware(opts[0].Usage))
 	}
+	s.AddReceivingMiddleware(callerMiddleware())
 	h := &handlers{svc: query.Service{R: r}}
+	if len(opts) > 0 {
+		h.access = opts[0].Access
+	}
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true}
 	add := func(name, desc string) *mcp.Tool {
 		return &mcp.Tool{Name: name, Description: desc, Annotations: readOnly}
@@ -103,19 +111,30 @@ type handlers struct {
 	reviews store.ReviewStore
 	memory  store.MemoryStore
 	offload *APIClient
+	access  Access
 }
 
 // repo resolves an optional repo argument: empty means "the only repo".
 func (h *handlers) repo(ctx context.Context, repo string) (string, error) {
+	allowed, restricted, err := h.allowed(ctx)
+	if err != nil {
+		return "", err
+	}
 	if repo != "" {
+		if restricted && !slices.Contains(allowed, repo) {
+			return "", fmt.Errorf("repository %q is not available to your organisation", repo)
+		}
 		return repo, nil
 	}
-	repos, err := h.svc.R.Repos(ctx)
+	repos, err := h.visibleRepos(ctx)
 	if err != nil {
 		return "", err
 	}
 	switch len(repos) {
 	case 0:
+		if restricted {
+			return "", errors.New("your organisation has no repositories yet; add one in CodeSynapse first")
+		}
 		return "", errors.New("no repositories are indexed; run `codesynapse ingest` first")
 	case 1:
 		return repos[0].Name, nil
@@ -125,6 +144,19 @@ func (h *handlers) repo(ctx context.Context, repo string) (string, error) {
 		names = append(names, r.Name)
 	}
 	return "", fmt.Errorf("several repositories are indexed; pass repo as one of: %s", strings.Join(names, ", "))
+}
+
+// visibleRepos lists the repository nodes the caller may use.
+func (h *handlers) visibleRepos(ctx context.Context) ([]model.Node, error) {
+	repos, err := h.svc.R.Repos(ctx)
+	if err != nil {
+		return nil, err
+	}
+	allowed, restricted, err := h.allowed(ctx)
+	if err != nil || !restricted {
+		return repos, err
+	}
+	return slices.DeleteFunc(repos, func(n model.Node) bool { return !slices.Contains(allowed, n.Name) }), nil
 }
 
 // RepoArg is embedded in every input.
@@ -146,7 +178,7 @@ type repoListOut struct {
 }
 
 func (h *handlers) repoList(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, repoListOut, error) {
-	repos, err := h.svc.R.Repos(ctx)
+	repos, err := h.visibleRepos(ctx)
 	if err != nil {
 		return nil, repoListOut{}, err
 	}

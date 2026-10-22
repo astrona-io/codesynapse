@@ -69,7 +69,7 @@ func TestWorkerExtractsAndSaves(t *testing.T) {
 	w := New(st, registry(srv.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	go w.Run(ctx)
 
-	j, err := w.Submit("repo", "claude-code", []extract.Turn{{Role: "user", Text: "I prefer small PRs. Payments is owned by Team Blue."}})
+	j, err := w.Submit("repo", "", "claude-code", []extract.Turn{{Role: "user", Text: "I prefer small PRs. Payments is owned by Team Blue."}})
 	require.NoError(t, err)
 	assert.Equal(t, j.State, Queued)
 	done := waitDone(t, w, j.ID)
@@ -86,7 +86,7 @@ func TestWorkerExtractsAndSaves(t *testing.T) {
 	assert.Equal(t, g.Facts[0].Confidence, 0.9)
 
 	// The next extraction is told which entities exist.
-	j, err = w.Submit("repo", "claude-code", []extract.Turn{{Role: "user", Text: "anything"}})
+	j, err = w.Submit("repo", "", "claude-code", []extract.Turn{{Role: "user", Text: "anything"}})
 	require.NoError(t, err)
 	waitDone(t, w, j.ID)
 	assert.True(t, strings.Contains(prompt, "- Payments"), "known entities are passed to the model")
@@ -97,9 +97,9 @@ func TestWorkerLocalOnly(t *testing.T) {
 	reg := registry("http://127.0.0.1:1")
 	require.NoError(t, reg.SetRoutes(llm.Routes{Default: "local", Tasks: map[string]string{Task: "cloud"}}))
 	w := New(memory.New(), reg, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	_, err := w.Submit("repo", "a", []extract.Turn{{Role: "user", Text: "x"}})
+	_, err := w.Submit("repo", "", "a", []extract.Turn{{Role: "user", Text: "x"}})
 	assert.True(t, errors.Is(err, ErrNoLocalModel), "a cloud provider is refused")
-	_, err = New(memory.New(), nil, slog.New(slog.NewTextHandler(io.Discard, nil))).Submit("repo", "a", []extract.Turn{{Role: "user", Text: "x"}})
+	_, err = New(memory.New(), nil, slog.New(slog.NewTextHandler(io.Discard, nil))).Submit("repo", "", "a", []extract.Turn{{Role: "user", Text: "x"}})
 	assert.True(t, errors.Is(err, ErrNoLocalModel), "no providers at all")
 }
 
@@ -108,15 +108,15 @@ func TestWorkerFailuresAndLimits(t *testing.T) {
 	t.Cleanup(cancel)
 	srv := fakeModel(t, "Sorry, I cannot do that.", nil)
 	w := New(memory.New(), registry(srv.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	_, err := w.Submit("repo", "a", nil)
+	_, err := w.Submit("repo", "", "a", nil)
 	require.Error(t, err)
 
 	// Without a running worker the queue fills up instead of blocking.
 	for range queueSize {
-		_, err := w.Submit("repo", "a", []extract.Turn{{Role: "user", Text: "x"}})
+		_, err := w.Submit("repo", "", "a", []extract.Turn{{Role: "user", Text: "x"}})
 		require.NoError(t, err)
 	}
-	_, err = w.Submit("repo", "a", []extract.Turn{{Role: "user", Text: "x"}})
+	_, err = w.Submit("repo", "", "a", []extract.Turn{{Role: "user", Text: "x"}})
 	assert.True(t, errors.Is(err, ErrBusy))
 
 	go w.Run(ctx)
