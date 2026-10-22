@@ -21,6 +21,7 @@ import (
 const maxDiffBytes = 4 << 20
 
 func registerAgentTools(s *mcp.Server, h *handlers, add func(name, desc string) *mcp.Tool) {
+	mcp.AddTool(s, add("code_identities", "Permanent symbol IDs with current and historical revision-specific locations, evidence for renames and moves, and uncertain identity or possible-copy candidates for review. Candidates are evidence, not verified lineage. Removed symbols stay historical. Bounded pagination reports omissions; available=false means the index predates identity analysis. Pass a sym- ID to inspect it, or review_only for unresolved matches."), h.codeIdentities)
 	mcp.AddTool(s, add("get_symbol_context",
 		"Composite snapshot of one symbol or package: signature, doc summary, location, risk score, callers, callees, tests, implementations and findings. verbosity=outline (default) is cheap; full adds transitive callers, untested public callers, docs and file churn. Packages return exported API, interfaces, hub symbols and imports."),
 		h.symbolContext)

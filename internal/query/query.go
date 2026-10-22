@@ -93,6 +93,9 @@ func DuplicateOf(ctx context.Context, r store.Reader, repo string, n model.Node)
 // with an ID instead of guessing.
 func (s Service) Resolve(ctx context.Context, repo, idOrName string) (model.Node, error) {
 	s.R = store.ForRepository(s.R, repo)
+	if IsSymbolID(idOrName) {
+		return ResolveSymbolID(ctx, s.R, repo, idOrName)
+	}
 	if strings.Count(idOrName, "|") >= 2 {
 		return s.R.Node(ctx, idOrName)
 	}

@@ -69,6 +69,25 @@ Edges: `CONTAINS`, `DEFINES`, `HAS_METHOD`, `CALLS` (with `count`), `DISPATCHES_
 
 Access projections are separate from code nodes. `Organization` carries `tenant_id`, `default_repo_access` and `policy_revision`; tenant-local `User` carries `user_id`, `active` and `inherits_default`; `Team` carries `team_id`; `AccessRepository` carries `repo_id`, `graph_id` and `usable`. `MEMBER_OF`, `BELONGS_TO` and `HAS_ACCESS` connect only these access vertices within a tenant. Grants carry `role` and numeric `rank`. HugeGraph maps each source/target pair to a fixed physical edge label. Revision/digest-scoped IDs and completion records make rebuilds retryable; PostgreSQL remains authoritative. See [the access-control implementation](ACCESS_CONTROL_PLAN.md#implementation-and-upgrade).
 
+Code declarations also carry `symbol_id` (a random permanent identity) and
+`revision`; the existing `id` remains the current graph locator. A repository's
+`identities` property stores the versioned identity baseline, including removed
+declarations, matching evidence and at most ten earlier occurrences per symbol.
+There are at most 50,000 retained identities and 64 MiB of encoded state: exhaustion fails ingest rather
+than dropping identities. Matching work and review candidates are bounded;
+omissions are explicit. The baseline and graph are replaced together, using
+the stored baseline read before the existing serialized ingest job. Avoid
+concurrent CLI/API ingests of the same repository. No source bodies are stored.
+
+`Curated` code records add organisation-scoped annotations and explicit
+same-repository reuse, adaptation, split and merge lineage. Each pins symbol
+IDs, revisions and fingerprints, actor/client and the author's reason,
+modifications, compatibility, licence/attribution and validation assessment.
+Freshness and endpoint changes are computed on reads, without rewriting the
+historical record. These are attributed claims, not independently verified
+outcomes. Cross-repository provenance and identity reassignment remain future
+work. See [the agent contracts](AGENT_GUIDE.md#permanent-code-identities-and-reuse-evidence).
+
 ### Risk scoring
 
 `review.Score` is a transparent, additive 0-100 score: direct callers (×3, max 25), transitive impact (max 20), exported (+10), complexity (+5/10/15), security tags (+15 high-risk / +8 other, max 30), and +15 when no test reaches the symbol. Levels: low < 20 ≤ medium < 40 ≤ high < 60 ≤ critical. Every point added comes with a reason string, so reviewers and agents can see why something scored high.

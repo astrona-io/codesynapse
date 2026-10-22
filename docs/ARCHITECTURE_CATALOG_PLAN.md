@@ -15,9 +15,9 @@ One connected system for understanding the intended architecture, finding and re
 | Proposals and links by people and agents, audited | Done: `internal/curation`, `store.CuratedStore`, `architecture_propose`, `architecture_link`, API and pages. Annotations on symbols follow in slice 2 | 1b |
 | Component pages joining architecture, code, dependencies, findings, reuse | Records and code links only | 4 |
 | Code catalog: symbols with signature, range, fingerprint, tests, callers, dependencies | Exists in the code graph | done |
-| Stable symbol identity across renames and moves, ambiguous matches for review, lineage | Not yet (IDs are qualified names) | 2 |
-| Annotations, purpose, labels on symbols | Not yet | 2 |
-| Reuse records, derivation, divergence of copies | Duplicate and near-duplicate detection exists (`duplicate_code`, `shared_code`, `refactor_duplicates`); no provenance | 2 |
+| Stable symbol identity across renames and moves, ambiguous matches for review, lineage | Conservative fingerprint matching; permanent IDs alongside current locators, historical occurrences, ambiguous candidates and explicit split/merge records. Call-neighbourhood matching and identity reassignment remain | 2 |
+| Annotations, purpose, labels on symbols | Organisation-scoped attributed code records, UI/API/MCP | 2 |
+| Reuse records, derivation, divergence of copies | Same-repository explicit provenance, revision fingerprints and freshness checks. Cross-repository provenance remains; duplicate detection is not verified lineage | 2 |
 | Recursive dependency graph, paths, licences, advisories, cycles, no silent truncation | Done for Go, npm, PyPI, Cargo, Composer, Bundler, NuGet, Gradle (`DependencyGraph`, paths, SBOM) | done |
 | Dependency replacement analysis (before/after graph, API, licences, advisories, artifact) | Review page and prompt; no before/after comparison | 3 |
 | Unified search, filters, comparison view, analysis workflow states | Per-area pages; no unified search; ingest jobs have running/succeeded/failed | 4 |

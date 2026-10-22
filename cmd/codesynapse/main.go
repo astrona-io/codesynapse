@@ -92,16 +92,20 @@ func (o *ingestOptions) Validate(_ context.Context, _ *app.Env) error {
 
 func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
-	g, err := ingest.Run(ctx, ingest.Options{Repo: o.repo, Root: o.root, CommitLimit: o.commitLimit, AllowNetwork: o.allowNetwork, VulnScan: o.vulns, LicenseLookup: o.licenses})
-	if err != nil {
-		return err
-	}
 	st, err := o.neo4j.Open(ctx)
 	if err != nil {
 		return err
 	}
 	defer st.Close(ctx) //nolint:errcheck // best-effort close
 	if err := st.EnsureSchema(ctx); err != nil {
+		return err
+	}
+	previous, err := ingest.IdentityBaseline(ctx, st, o.repo)
+	if err != nil {
+		return err
+	}
+	g, err := ingest.Run(ctx, ingest.Options{Repo: o.repo, Root: o.root, CommitLimit: o.commitLimit, AllowNetwork: o.allowNetwork, VulnScan: o.vulns, LicenseLookup: o.licenses, PreviousIdentities: previous})
+	if err != nil {
 		return err
 	}
 	if err := st.ReplaceRepo(ctx, o.repo, g); err != nil {

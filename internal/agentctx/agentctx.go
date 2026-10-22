@@ -38,6 +38,8 @@ func (s Service) q() query.Service { return query.Service{R: s.R} }
 // Symbol is the compact description of the subject of an answer.
 type Symbol struct {
 	ID          string         `json:"id"`
+	SymbolID    string         `json:"symbol_id,omitempty"`
+	Revision    string         `json:"revision,omitempty"`
 	QualifiedID string         `json:"qualified_id"`
 	Kind        model.NodeKind `json:"kind"`
 	Location    string         `json:"location,omitempty"`
@@ -55,6 +57,7 @@ type Symbol struct {
 func symbolOf(n model.Node) Symbol {
 	return Symbol{
 		ID: n.ID, QualifiedID: n.ShortName(), Kind: n.Kind, Location: n.Location(), Signature: n.Signature,
+		SymbolID: n.SymbolID, Revision: n.Revision,
 		Summary: n.Summary, Exported: n.Exported, IsTest: n.IsTest, Complexity: n.Complexity, LOC: n.LOC, Tags: n.SecurityTags, Liveness: n.Liveness,
 	}
 }
@@ -281,6 +284,9 @@ func (s Service) churn(ctx context.Context, repo, file string) (*Churn, error) {
 func (s Service) Resolve(ctx context.Context, repo, symbol string) (model.Node, error) {
 	s.R = store.ForRepository(s.R, repo)
 	symbol = strings.TrimSpace(symbol)
+	if query.IsSymbolID(symbol) {
+		return query.ResolveSymbolID(ctx, s.R, repo, symbol)
+	}
 	if symbol == "" {
 		return model.Node{}, errors.New("symbol is required")
 	}

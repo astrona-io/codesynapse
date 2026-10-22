@@ -173,6 +173,19 @@ This tool reads untrusted repositories and serves their contents to LLMs. Keep i
 
 ## Web (Nuxt 4)
 
+Code identity and reuse: `code_identities` reads permanent symbol IDs and
+revision-specific evidence; `code_records` reads attributed annotations and
+explicit lineage. `code_annotate` and `code_record_reuse` are approved narrow
+catalog writes under the existing `--allow-catalog` switch: `Curated` records
+only, organisation-scoped, write permission required and audited before writes
+in accounts mode. They never edit code, approve decisions, resolve identities
+or propagate changes. Free text is redacted and bounded. Reuse pins original
+and destination IDs/revisions/fingerprints and the author's licence,
+attribution, compatibility and validation assessment. Reads flag changed or
+unavailable evidence without rewriting history. Uncertain matches are data for
+review, never verified lineage. This version supports provenance within one
+repository. See `docs/AGENT_GUIDE.md` for contracts and limits.
+
 - `services/web/app/` is the source dir. Pages under `app/pages/repos/[repo]/`.
 - All data goes through `useApiGet` / `apiPost` in `app/composables/useApi.ts`, which hit `/api/cg/*`. Never call the Go API from the browser directly.
 - No UI or chart libraries; the graph canvas, bars and backdrop are plain canvas/SVG/CSS.
