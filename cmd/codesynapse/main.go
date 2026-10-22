@@ -642,13 +642,16 @@ func cleanupCmd(ec *app.Env) *cobra.Command {
 
 // duplicatesOptions configures `codesynapse duplicates`.
 type duplicatesOptions struct {
-	EC    *app.Env
-	limit int
-	roots []string
+	EC         *app.Env
+	limit      int
+	maxPercent float64
+	roots      []string
 }
 
 func (o *duplicatesOptions) SetupFlags(_ context.Context, _ *app.Env) error {
-	o.EC.Command.Flags().IntVar(&o.limit, "limit", 20, "Max groups listed in Markdown output (0 = all)")
+	f := o.EC.Command.Flags()
+	f.IntVar(&o.limit, "limit", 20, "Max groups listed in Markdown output (0 = all)")
+	f.Float64Var(&o.maxPercent, "max-percent", 0, "Exit with an error when a repository repeats more than this share of its function lines, exact and edited copies together (0 = never fail)")
 	return nil
 }
 
@@ -667,7 +670,12 @@ func (o *duplicatesOptions) Complete(_ context.Context, _ *app.Env) error {
 	return nil
 }
 
-func (o *duplicatesOptions) Validate(context.Context, *app.Env) error { return nil }
+func (o *duplicatesOptions) Validate(context.Context, *app.Env) error {
+	if o.maxPercent < 0 || o.maxPercent > 100 {
+		return fmt.Errorf("--max-percent must be between 0 and 100, got %v", o.maxPercent)
+	}
+	return nil
+}
 
 func (o *duplicatesOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
@@ -698,6 +706,13 @@ func (o *duplicatesOptions) Run(ctx context.Context, _ *app.Env) error {
 	} else {
 		out = duplicates.Across(reports)
 	}
+	if err := o.write(names, out); err != nil {
+		return err
+	}
+	return o.gate(names, reports)
+}
+
+func (o *duplicatesOptions) write(names []string, out any) error {
 	if o.EC.Output == app.OutputJSON {
 		enc := json.NewEncoder(o.EC.Stdout)
 		enc.SetIndent("", "  ")
@@ -709,12 +724,30 @@ func (o *duplicatesOptions) Run(ctx context.Context, _ *app.Env) error {
 	return duplicates.WriteMarkdown(o.EC.Stdout, names[0], out.(duplicates.Report), o.limit)
 }
 
+// gate fails a CI run when a repository repeats more than --max-percent of
+// its function lines. The report has already been printed.
+func (o *duplicatesOptions) gate(names []string, reports map[string]duplicates.Report) error {
+	if o.maxPercent <= 0 {
+		return nil
+	}
+	var over []string
+	for _, name := range names {
+		if p := reports[name].Summary.Percent; p > o.maxPercent {
+			over = append(over, fmt.Sprintf("%s repeats %.1f%% of its function lines", name, p))
+		}
+	}
+	if len(over) > 0 {
+		return fmt.Errorf("duplicate code above %.1f%%: %s", o.maxPercent, strings.Join(over, "; "))
+	}
+	return nil
+}
+
 func duplicatesCmd(ec *app.Env) *cobra.Command {
 	o := &duplicatesOptions{EC: ec}
 	return app.NewSubCommand("duplicates [path...]", o, ec).
 		WithShortDesc("Find code that exists more than once, in one repository or across several (offline graph)").
 		WithLongDesc("Groups functions and methods with the same structure (names and literal values ignored) and ranks them by redundant lines. With several paths it also finds code copied between the repositories and recommends where a shared library or framework would pay off.").
-		WithExample("  codesynapse duplicates .\n  codesynapse duplicates ~/src/api ~/src/worker ~/src/cli -o json").
+		WithExample("  codesynapse duplicates .\n  codesynapse duplicates ~/src/api ~/src/worker ~/src/cli -o json\n  codesynapse duplicates . --max-percent 5   # fail a CI job above 5%").
 		WithGroupID(app.GroupBase).
 		Build()
 }

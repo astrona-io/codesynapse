@@ -84,3 +84,11 @@ A repository whose report hit the cap is listed as partial, because copies of it
 | `GET /api/v1/repos/{repo}/duplicates`, `GET /api/v1/shared-code` | JSON for both |
 
 Re-ingest (Sync) existing repositories once to create the first report.
+
+## Failing a CI job
+
+`codesynapse duplicates . --max-percent 5` prints the report and exits with an error when a repository repeats more than 5% of its function lines (exact and edited copies together). With several paths, each repository is checked on its own. Without the flag the command never fails. Pick a limit just above today's figure and lower it as you clean up, so new copies are caught without blocking old debt:
+
+```yaml
+- run: codesynapse duplicates . --max-percent 5 --limit 10
+```
