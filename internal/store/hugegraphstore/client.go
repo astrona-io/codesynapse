@@ -31,11 +31,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 	"github.com/parisnakitakejser/codesynapse/internal/vector"
 )
 
@@ -100,6 +102,9 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	return s, nil
 }
 
+// System names the database for metrics.
+func (s *Store) System() string { return "hugegraph" }
+
 // Close implements store.Store.
 func (s *Store) Close(ctx context.Context) error {
 	s.http.CloseIdleConnections()
@@ -112,13 +117,29 @@ func (s *Store) Close(ctx context.Context) error {
 func (s *Store) read(ctx context.Context, script string, bindings map[string]any, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
-	return s.gremlin(ctx, script, bindings, out)
+	return s.timed(ctx, "read", script, bindings, out)
 }
 
 func (s *Store) write(ctx context.Context, script string, bindings map[string]any, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, 4*s.timeout)
 	defer cancel()
-	return s.gremlin(ctx, script, bindings, out)
+	return s.timed(ctx, "write", script, bindings, out)
+}
+
+// timed records the round trip and, for reads, how many rows came back.
+func (s *Store) timed(ctx context.Context, op, script string, bindings map[string]any, out any) error {
+	start := time.Now()
+	err := s.gremlin(ctx, script, bindings, out)
+	tenant := telemetry.Tenant(ctx)
+	telemetry.DBDuration.Observe(time.Since(start).Seconds(), tenant, "hugegraph", op)
+	if err != nil {
+		telemetry.DBErrors.Inc(tenant, "hugegraph", op)
+		return err
+	}
+	if v := reflect.ValueOf(out); op == "read" && v.Kind() == reflect.Pointer && v.Elem().Kind() == reflect.Slice {
+		telemetry.GraphTraversed.Add(float64(v.Elem().Len()), tenant, "hugegraph")
+	}
+	return nil
 }
 
 // gremlin runs a constant script with bindings and decodes result.data.

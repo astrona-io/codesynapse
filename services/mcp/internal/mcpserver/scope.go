@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 )
 
 // Caller is who a tool call acts for when it came with a personal API key:
@@ -55,6 +56,7 @@ func callerMiddleware() mcp.Middleware {
 					key, _ := ti.Extra[ExtraKeyID].(string)
 					tok, _ := ti.Extra[ExtraToken].(string)
 					ctx = context.WithValue(ctx, callerKey{}, &Caller{UserID: ti.UserID, Email: email, OrgID: org, KeyID: key, token: tok})
+					ctx = telemetry.WithTenant(ctx, org)
 				}
 			}
 			return next(ctx, method, req)

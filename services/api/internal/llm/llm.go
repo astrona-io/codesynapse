@@ -23,6 +23,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/parisnakitakejser/codesynapse/internal/redact"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 )
 
 // Kinds of provider.
@@ -43,11 +44,32 @@ type Request struct {
 
 // Response is a completion.
 type Response struct {
-	Text         string
-	Model        string
-	InputTokens  int
-	OutputTokens int
-	Duration     time.Duration
+	Text  string
+	Model string
+	// InputTokens counts the whole prompt; CachedInputTokens is the part
+	// the provider served from its prompt cache.
+	InputTokens       int
+	CachedInputTokens int
+	OutputTokens      int
+	Duration          time.Duration
+	// FirstToken is the time to the first streamed token (0 when the
+	// provider does not stream).
+	FirstToken time.Duration
+}
+
+type taskKey struct{}
+
+// WithTask labels LLM calls made with ctx by task (one of Tasks) for the
+// metrics.
+func WithTask(ctx context.Context, task string) context.Context {
+	return context.WithValue(ctx, taskKey{}, task)
+}
+
+func taskOf(ctx context.Context) string {
+	if t, ok := ctx.Value(taskKey{}).(string); ok && slices.Contains(Tasks, t) {
+		return t
+	}
+	return "other"
 }
 
 // Provider completes prompts.
@@ -114,6 +136,12 @@ type ProviderConfig struct {
 	// EmbeddingModel names the model the provider's /embeddings endpoint
 	// uses (e.g. nomic-embed-text on Ollama); empty means no embeddings.
 	EmbeddingModel string `yaml:"embedding_model" json:"embedding_model,omitempty"`
+	// Prices in US dollars per million tokens, for the cost estimate in the
+	// statistics. Unset prices count as free (local models). Cached input
+	// falls back to the input price.
+	PriceInputPerMTok       float64 `yaml:"price_input_per_mtok" json:"price_input_per_mtok,omitempty"`
+	PriceCachedInputPerMTok float64 `yaml:"price_cached_input_per_mtok" json:"price_cached_input_per_mtok,omitempty"`
+	PriceOutputPerMTok      float64 `yaml:"price_output_per_mtok" json:"price_output_per_mtok,omitempty"`
 
 	apiKey string
 }
@@ -387,6 +415,7 @@ func (r *Registry) Complete(ctx context.Context, name string, req Request) (Resp
 	start := time.Now()
 	resp, err := p.Complete(ctx, req)
 	resp.Duration = time.Since(start)
+	record(ctx, name, cfg, resp, err)
 	r.mu.Lock()
 	u := r.usage[name]
 	u.AvgSeconds = (u.AvgSeconds*float64(u.Requests) + resp.Duration.Seconds()) / float64(u.Requests+1)
@@ -401,6 +430,39 @@ func (r *Registry) Complete(ctx context.Context, name string, req Request) (Resp
 	}
 	r.mu.Unlock()
 	return resp, err
+}
+
+// Cost estimates the dollars resp cost under cfg's prices.
+func Cost(cfg ProviderConfig, resp Response) float64 {
+	cachedPrice := cfg.PriceCachedInputPerMTok
+	if cachedPrice == 0 {
+		cachedPrice = cfg.PriceInputPerMTok
+	}
+	fresh := max(resp.InputTokens-resp.CachedInputTokens, 0)
+	return (float64(fresh)*cfg.PriceInputPerMTok + float64(resp.CachedInputTokens)*cachedPrice +
+		float64(resp.OutputTokens)*cfg.PriceOutputPerMTok) / 1e6
+}
+
+// record sends one completion to the metrics. Provider and model come from
+// the configuration (a bounded set), never from the answer.
+func record(ctx context.Context, name string, cfg ProviderConfig, resp Response, err error) {
+	tenant, task := telemetry.Tenant(ctx), taskOf(ctx)
+	outcome := "ok"
+	if err != nil {
+		outcome = "error"
+	}
+	telemetry.LLMRequests.Inc(tenant, name, cfg.Model, task, outcome)
+	telemetry.LLMDuration.Observe(resp.Duration.Seconds(), tenant, name, cfg.Model)
+	if err != nil {
+		return
+	}
+	telemetry.LLMInput.Add(float64(resp.InputTokens), tenant, name, cfg.Model, task)
+	telemetry.LLMOutput.Add(float64(resp.OutputTokens), tenant, name, cfg.Model, task)
+	telemetry.LLMSaved.Add(float64(resp.CachedInputTokens), tenant, name, cfg.Model, task)
+	telemetry.LLMCost.Add(Cost(cfg, resp), tenant, name, cfg.Model)
+	if resp.FirstToken > 0 {
+		telemetry.LLMTTFT.Observe(resp.FirstToken.Seconds(), tenant, name, cfg.Model)
+	}
 }
 
 // Embedding limits per call: entity names and queries are short.

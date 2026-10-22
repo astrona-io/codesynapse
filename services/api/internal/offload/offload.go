@@ -22,6 +22,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/memory/extract"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
 )
 
@@ -139,6 +140,13 @@ func (w *Worker) Submit(repo, namespace, source string, turns []extract.Turn) (J
 	}
 	w.jobs[id] = j
 	w.order = append(w.order, id)
+	tenant := telemetry.TenantLabel(memory.OrgOf(j.Namespace))
+	telemetry.OffloadTurns.Add(float64(len(turns)), tenant)
+	chars := 0
+	for _, t := range turns {
+		chars += len(t.Text)
+	}
+	telemetry.OffloadTokens.Add(float64(chars/4), tenant)
 	for len(w.order) > keepJobs {
 		if old := w.jobs[w.order[0]]; old != nil && (old.State == Queued || old.State == Running) {
 			break // never forget a job that has not finished
@@ -172,7 +180,7 @@ func (w *Worker) run(ctx context.Context, id string) {
 	turns := j.turns
 	w.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(ctx, jobTimeout)
+	ctx, cancel := context.WithTimeout(llm.WithTask(telemetry.WithTenant(ctx, memory.OrgOf(j.Namespace)), "memory"), jobTimeout)
 	defer cancel()
 	res, err := w.extract(ctx, j.Namespace, j.Source, turns, func(provider, model string) {
 		w.mu.Lock()
@@ -191,6 +199,7 @@ func (w *Worker) run(ctx context.Context, id string) {
 		return
 	}
 	j.State = Succeeded
+	telemetry.MemoryFacts.Add(float64(j.Saved), telemetry.Tenant(ctx), "offload")
 	if j.Saved > 0 && w.OnSaved != nil {
 		w.OnSaved()
 	}

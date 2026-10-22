@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	agentmem "github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
 	"github.com/parisnakitakejser/codesynapse/internal/usage"
@@ -129,6 +131,24 @@ func TestAPIKeyScoping(t *testing.T) {
 		}
 		assert.Equal(t, len(orgs), 4, "three organisations and the MCP token (no organisation)")
 	})
+}
+
+func TestTelemetryCarriesTenant(t *testing.T) {
+	url, keys, acc, _, _ := keyServer(t)
+	p, err := acc.AuthenticateKey(context.Background(), keys["a"])
+	require.NoError(t, err)
+	a, err := connectKey(t, url, keys["a"])
+	require.NoError(t, err)
+	require.False(t, call(t, a, "repo_list", map[string]any{}, nil).IsError)
+	_, err = a.CallTool(context.Background(), &mcp.CallToolParams{Name: "no_such_tool_" + p.OrgID, Arguments: map[string]any{}})
+	assert.Error(t, err)
+
+	var b strings.Builder
+	require.NoError(t, telemetry.Default.WriteText(&b))
+	out := b.String()
+	assert.Contains(t, out, `mcp_tool_calls_total{tenant_id="`+p.OrgID+`",mcp_tool="repo_list",outcome="ok"}`)
+	assert.Contains(t, out, `mcp_tool_calls_total{tenant_id="`+p.OrgID+`",mcp_tool="unknown",outcome="error"}`, "names a client invents are not labels")
+	assert.False(t, strings.Contains(out, "no_such_tool_"), "the invented name never reaches a series")
 }
 
 func TestRevokedKeyStopsWorking(t *testing.T) {

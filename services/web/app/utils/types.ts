@@ -202,3 +202,22 @@ export interface WorkspaceStats {
   jobs: WorkspaceOverview['jobs']
   repos: RepoSummary[]
 }
+
+// Time series from GET /api/v1/stats/series (VictoriaMetrics).
+export type SeriesRange = '1h' | '6h' | '24h' | '7d' | '30d'
+export interface SeriesLine {
+  name: string
+  values: (number | null)[]
+  total: number
+}
+export interface SeriesPanel {
+  panel: string
+  title: string
+  unit: string
+  kind: 'count' | 'gauge'
+  help: string
+  range: SeriesRange
+  step_seconds: number
+  times: number[]
+  series: SeriesLine[]
+}

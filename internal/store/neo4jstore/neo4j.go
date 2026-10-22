@@ -21,6 +21,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/internal/store/nodeprops"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 )
 
 const (
@@ -70,16 +71,38 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 // Close implements store.Store.
 func (s *Store) Close(ctx context.Context) error { return s.driver.Close(ctx) }
 
+// System names the database for metrics.
+func (s *Store) System() string { return "neo4j" }
+
 func (s *Store) write(ctx context.Context, query string, params map[string]any) (*neo4j.EagerResult, error) {
-	return neo4j.ExecuteQuery(ctx, s.driver, query, params, neo4j.EagerResultTransformer,
+	defer observe(ctx, "write", time.Now())
+	res, err := neo4j.ExecuteQuery(ctx, s.driver, query, params, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(s.db))
+	failed(ctx, "write", err)
+	return res, err
 }
 
 func (s *Store) read(ctx context.Context, query string, params map[string]any) (*neo4j.EagerResult, error) {
+	defer observe(ctx, "read", time.Now())
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
-	return neo4j.ExecuteQuery(ctx, s.driver, query, params, neo4j.EagerResultTransformer,
+	res, err := neo4j.ExecuteQuery(ctx, s.driver, query, params, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(s.db), neo4j.ExecuteQueryWithReadersRouting())
+	failed(ctx, "read", err)
+	if err == nil {
+		telemetry.GraphTraversed.Add(float64(len(res.Records)), telemetry.Tenant(ctx), "neo4j")
+	}
+	return res, err
+}
+
+func observe(ctx context.Context, op string, start time.Time) {
+	telemetry.DBDuration.Observe(time.Since(start).Seconds(), telemetry.Tenant(ctx), "neo4j", op)
+}
+
+func failed(ctx context.Context, op string, err error) {
+	if err != nil {
+		telemetry.DBErrors.Inc(telemetry.Tenant(ctx), "neo4j", op)
+	}
 }
 
 // EnsureSchema implements store.Writer.

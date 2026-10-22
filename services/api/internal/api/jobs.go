@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 
 	"github.com/parisnakitakejser/codesynapse/internal/ingest"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
@@ -152,6 +153,7 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 			return
 		}
 	}
+	started := time.Now()
 	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Branch: opts.Branch})
 	if err == nil {
 		err = j.st.EnsureSchema(ctx)
@@ -163,6 +165,14 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 	if g != nil {
 		nodes, edges = len(g.Nodes()), len(g.Edges())
 	}
+	system, outcome := store.System(j.st), "ok"
+	if err != nil {
+		outcome = "error"
+	} else {
+		telemetry.IngestNodes.Add(float64(nodes), system)
+	}
+	telemetry.IngestRuns.Inc(system, outcome)
+	telemetry.IngestDuration.Observe(time.Since(started).Seconds(), system)
 	fin(job, nodes, edges, err)
 	if err == nil && opts.After != nil {
 		go opts.After(j.ctx)

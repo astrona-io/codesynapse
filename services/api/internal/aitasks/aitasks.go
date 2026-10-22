@@ -23,6 +23,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 	"github.com/parisnakitakejser/codesynapse/internal/security"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 	"github.com/parisnakitakejser/codesynapse/rules"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
 )
@@ -65,6 +66,7 @@ func (r Runner) Run(ctx context.Context, task string, in Input) (string, error) 
 	if err != nil {
 		return "", err
 	}
+	ctx = llm.WithTask(telemetry.WithTenant(ctx, in.OrgID), task)
 	cfg, _ := r.LLM.Config(provider)
 	repoNode, err := r.St.Node(ctx, model.NodeID(in.Repo, model.KindRepository, in.Repo))
 	if err != nil {

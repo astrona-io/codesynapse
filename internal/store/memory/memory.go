@@ -42,6 +42,9 @@ func New() *Store {
 // EnsureSchema is a no-op.
 func (s *Store) EnsureSchema(context.Context) error { return nil }
 
+// System names the store for metrics.
+func (s *Store) System() string { return "memory" }
+
 // Close is a no-op.
 func (s *Store) Close(context.Context) error { return nil }
 

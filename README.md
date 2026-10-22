@@ -100,6 +100,17 @@ On the **AI models** page you pick a **global** model, the fallback for everythi
 
 **Background reviews:** in a repository's auto-sync settings, turn on "AI-review new commits" and "AI-triage new findings". After each successful sync (manual or scheduled) CodeSynapse reviews the commits that arrived and triages security findings of medium severity or above that are new since the previous sync. Results appear as reviews waiting for your decisions.
 
+## Live statistics (by the minute and hour)
+
+The compose stack runs [VictoriaMetrics](https://victoriametrics.com/) (Apache-2.0). The API and MCP services push metrics to it every 15 seconds, and the **Statistics** page charts them per minute, 5 or 15 minutes, hour or 6 hours (`/stats?range=1h|6h|24h|7d|30d`):
+
+- agent sessions, tool calls, failed calls, latency and tokens served;
+- AI model tokens (input, output, served from the prompt cache), time to first token, and cost estimated from the prices you set in `config/llm.yaml`;
+- database latency (Neo4j or HugeGraph, Milvus, PostgreSQL), graph rows and vector matches;
+- agent memory: facts saved, turns offloaded, recalls.
+
+Every number belongs to an organisation: members see their organisation's activity, platform admins see everyone's. Metrics never contain prompts, queries, file paths or user IDs. Upgrading: `just init` adds `METRICS_PASSWORD` to `.env`. Without VictoriaMetrics (`CODESYNAPSE_METRICS_URL` unset) the page explains how to turn it on.
+
 ## Keeping repositories up to date
 
 - **Sync** fetches the chosen branch (cloned repositories) or re-indexes the folder (mounted sources). The branch picker lists every branch of the remote (cloned) or of the checkout (mounted; only the checked-out one can be synced).

@@ -11,6 +11,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 )
 
 // MemoryInstructions are appended to the server instructions when the
@@ -85,6 +86,7 @@ func (h *handlers) upsertTriples(ctx context.Context, req *mcp.CallToolRequest, 
 	if err := h.memory.UpsertMemory(ctx, b); err != nil {
 		return nil, upsertTriplesOut{}, err
 	}
+	telemetry.MemoryFacts.Add(float64(len(b.Facts)), telemetry.Tenant(ctx), "tool")
 	out := upsertTriplesOut{Repo: repo, Entities: len(b.Entities), Facts: len(b.Facts), FactIDs: []string{}, Replaced: len(b.Replace)}
 	for _, f := range b.Facts {
 		out.FactIDs = append(out.FactIDs, f.ID)
@@ -104,6 +106,7 @@ func (h *handlers) searchMemory(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, memory.Graph{}, err
 	}
+	telemetry.MemoryRecalls.Inc(telemetry.Tenant(ctx), "text")
 	g, err := h.memory.SearchMemory(ctx, memRepo(ctx, repo), in.Query, in.Limit, in.History)
 	return nil, g, err
 }
@@ -128,6 +131,7 @@ func (h *handlers) querySubgraph(ctx context.Context, _ *mcp.CallToolRequest, in
 	for i, name := range in.Entities {
 		ids[i] = memory.EntityID(memRepo(ctx, repo), name)
 	}
+	telemetry.MemoryRecalls.Inc(telemetry.Tenant(ctx), "graph")
 	g, err := h.memory.MemorySubgraph(ctx, memRepo(ctx, repo), ids, in.Depth, in.Limit, in.History)
 	return nil, g, err
 }

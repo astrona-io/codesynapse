@@ -67,6 +67,7 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	if len(opts) > 0 && opts[0].Usage != nil {
 		s.AddReceivingMiddleware(usageMiddleware(opts[0].Usage))
 	}
+	s.AddReceivingMiddleware(telemetryMiddleware())
 	s.AddReceivingMiddleware(callerMiddleware())
 	h := &handlers{svc: query.Service{R: r}}
 	if len(opts) > 0 {

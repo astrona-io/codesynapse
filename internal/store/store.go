@@ -186,6 +186,15 @@ type UsageStore interface {
 	Usage(ctx context.Context, sinceDay string) ([]usage.Bucket, error)
 }
 
+// System names a store's database ("neo4j", "hugegraph", "memory") for
+// metrics; every Store implements it.
+func System(s any) string {
+	if n, ok := s.(interface{ System() string }); ok {
+		return n.System()
+	}
+	return "other"
+}
+
 // Store is a full read/write backend.
 type Store interface {
 	Reader

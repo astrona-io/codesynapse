@@ -33,3 +33,13 @@ export function fmtCompact(n: number | undefined): string {
   if (abs < 1_000_000) return `${(v / 1000).toFixed(abs < 100_000 ? 1 : 0)}K`
   return `${(v / 1_000_000).toFixed(1)}M`
 }
+
+// fmtUnit formats a chart value in its unit: seconds as ms or s, dollars
+// with cents, everything else compact.
+export function fmtUnit(v: number | null | undefined, unit: string): string {
+  if (v == null) return '–'
+  if (unit === 'seconds') return v < 1 ? `${Math.round(v * 1000)} ms` : `${v.toFixed(v < 10 ? 2 : 1)} s`
+  if (unit === 'USD') return `$${v < 1 ? v.toFixed(3) : v.toFixed(2)}`
+  if (Math.abs(v) < 10 && !Number.isInteger(v)) return v.toFixed(1)
+  return fmtCompact(v)
+}
