@@ -12,6 +12,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/cleanupplan"
 	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/parisnakitakejser/codesynapse/internal/refactorplan"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 )
 
@@ -103,4 +104,22 @@ func (h *handlers) cleanupPlan(ctx context.Context, _ *mcp.CallToolRequest, in c
 		plan.Notes = append(plan.Notes, fmt.Sprintf("%d more steps; raise limit or filter by kind.", total-len(plan.Steps)))
 	}
 	return nil, plan, nil
+}
+
+type refactorIn struct {
+	RepoArg
+	Hash string `json:"hash" jsonschema:"the group's hash, from duplicate_code"`
+	Kind string `json:"kind,omitempty" jsonschema:"exact (default) or near, as in duplicate_code"`
+}
+
+func (h *handlers) refactorDuplicates(ctx context.Context, _ *mcp.CallToolRequest, in refactorIn) (*mcp.CallToolResult, refactorplan.Plan, error) {
+	repo, err := h.repo(ctx, in.Repo)
+	if err != nil {
+		return nil, refactorplan.Plan{}, err
+	}
+	if len(in.Hash) != 16 || (in.Kind != "" && in.Kind != "exact" && in.Kind != "near") {
+		return nil, refactorplan.Plan{}, errors.New("hash (16 hex digits, from duplicate_code) is required; kind is exact or near")
+	}
+	plan, err := refactorplan.ForGroup(ctx, store.ForRepository(h.svc.R, repo), repo, in.Hash, in.Kind)
+	return nil, plan, err
 }

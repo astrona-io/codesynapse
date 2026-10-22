@@ -13,6 +13,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/cleanupplan"
 	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/parisnakitakejser/codesynapse/internal/refactorplan"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
@@ -106,4 +107,33 @@ func TestCleanupPlanEndpoint(t *testing.T) {
 	assert.True(t, kinds[cleanupplan.MergeDuplicates], "the two identical functions")
 	assert.Equal(t, plan.Summary.Steps, len(plan.Steps))
 	assert.Equal(t, get(t, ts, "/api/v1/repos/nope/cleanup/plan", nil), 404)
+}
+
+func TestRefactorPlanEndpoint(t *testing.T) {
+	ctx := context.Background()
+	const hash = "0123456789abcdef"
+	g := model.NewGraph()
+	rn := g.AddNode(model.Node{ID: model.NodeID("org/a", model.KindRepository, "org/a"), Kind: model.KindRepository, Repo: "org/a", Name: "org/a"})
+	for _, name := range []string{"One", "Two"} {
+		g.AddNode(model.Node{ID: model.NodeID("org/a", model.KindFunction, "pkg."+name), Kind: model.KindFunction, Repo: "org/a", Name: name, QualifiedName: "pkg." + name,
+			Package: "x/pkg", File: name + ".go", StartLine: 1, EndLine: 40, LOC: 40, CloneHash: hash, Signature: "func " + name + "() error"})
+	}
+	enc, err := duplicates.Encode(duplicates.Analyze(g))
+	require.NoError(t, err)
+	rn.Duplicates = enc
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, "org/a", g))
+	ts := httptest.NewServer(New(ctx, Config{SourcesRoot: t.TempDir(), Version: "test"}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	t.Cleanup(ts.Close)
+
+	var plan refactorplan.Plan
+	require.Equal(t, get(t, ts, "/api/v1/repos/org%2Fa/duplicates/refactor?hash="+hash+"&kind=exact", &plan), 200)
+	assert.Equal(t, plan.Scope, "package")
+	assert.Equal(t, len(plan.Copies), 2)
+	assert.True(t, plan.Name != "" && len(plan.Steps) > 3)
+
+	assert.Equal(t, get(t, ts, "/api/v1/repos/org%2Fa/duplicates/refactor?hash=ffffffffffffffff", nil), 404)
+	assert.Equal(t, get(t, ts, "/api/v1/repos/org%2Fa/duplicates/refactor?hash=zz", nil), 400)
+	assert.Equal(t, get(t, ts, "/api/v1/repos/org%2Fa/duplicates/refactor?hash="+hash+"&kind=other", nil), 400)
+	assert.Equal(t, get(t, ts, "/api/v1/repos/nope/duplicates/refactor?hash="+hash, nil), 404)
 }

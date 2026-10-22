@@ -114,6 +114,10 @@ Follow-ups: measure `minimal_context` recall on real tasks (does it surface the 
 
 Known limits: no type inference for Python/JS, so dynamic dispatch and higher-order calls are under-reported; tree-sitter (roadmap) would give exact parsing and more languages.
 
+## Merging duplicates
+
+`internal/refactorplan.ForGroup` takes one group of the stored duplicate report (hash and kind) and, from the graph only, returns the suggested shared name (the common or most frequent bare name, public if a copy is), a home (same file, same package, or the closest shared directory), the approach, each copy with its callers (tests excluded) and the tests that reach it, risks (exported copies, several packages, signatures that differ after dropping receivers and names, untested copies, unreachable copies, sensitive tags, edited copies) and ordered steps. Served by `GET /api/v1/repos/{repo}/duplicates/refactor` and `refactor_duplicates`; the cleanup plan's merge steps carry `group` (hash, kind) and a link that opens the plan on the Duplicates page. No source is read and nothing is written.
+
 ## Cleanup plan
 
 `internal/cleanupplan` ranks the stored findings: `Assemble` decodes the Repository node's cleanup, duplicates and licence reports, takes vulnerabilities from `security.Build` and the top ten hotspots with whether any test reaches them, and `Build` turns them into steps. Each step has `value` (0 to 100), `effort` (1 to 3) and `safety` (high, medium, low); `priority = value x {1.0, 0.8, 0.6} / {1.0, 1.5, 2.0}`, ties broken by a stable step ID. Dead code is grouped per directory (security-relevant first), unused modules and vulnerable upgrades per module (an indirect one targets the first link of its dependency path; modules removed anyway are not also upgraded), licence conflicts exclude development dependencies, exact duplicates are ranked by redundant lines with effort by scope. Exported and test-only unused code, low-severity uncalled advisories and licence reviews are counted in `notes`, not planned. Served by `GET /api/v1/repos/{repo}/cleanup/plan`, the `cleanup_plan` MCP tool and the Code health Plan page. Nothing edits code.

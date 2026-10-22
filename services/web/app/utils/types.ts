@@ -351,6 +351,12 @@ export interface PlanTarget { id?: string; name: string; location?: string }
 export interface PlanStep {
   id: string; kind: string; title: string; why: string
   value: number; effort: 1 | 2 | 3; safety: 'high' | 'medium' | 'low'; priority: number
-  lines?: number; advisories?: number; targets: PlanTarget[]; verify: string; link?: string
+  lines?: number; advisories?: number; targets: PlanTarget[]; verify: string; link?: string; group?: { hash: string; kind: string }
 }
 export interface CleanupPlan { steps: PlanStep[]; summary: { steps: number; lines_up_to: number; advisories: number }; notes: string[] }
+
+export interface RefactorCopy extends NodeRef { signature?: string; exported?: boolean; security_tags?: string[]; liveness?: string; callers: NodeRef[]; tests: NodeRef[] }
+export interface RefactorPlan {
+  hash: string; kind: string; similarity: number; scope: string; name: string; home: string; approach: string
+  copies: RefactorCopy[]; steps: string[]; risks: string[]; truncated?: boolean
+}

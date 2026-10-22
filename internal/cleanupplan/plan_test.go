@@ -104,6 +104,9 @@ func TestBuildRanksAndExplains(t *testing.T) {
 	assert.Equal(t, k[ResolveLicence][0].Safety, "low")
 	require.Len(t, k[MergeDuplicates], 1)
 	assert.Equal(t, k[MergeDuplicates][0].Effort, 1, "same file")
+	require.NotNil(t, k[MergeDuplicates][0].Group)
+	assert.Equal(t, *k[MergeDuplicates][0].Group, GroupRef{Hash: "h1", Kind: "exact"}, "enough to ask refactor_duplicates how to merge it")
+	assert.Contains(t, k[MergeDuplicates][0].Link, "/duplicates?group=h1&kind=exact")
 	require.Len(t, k[ReviewEditedCopies], 1)
 	require.Len(t, k[TestHotspot], 1, "a tested hotspot needs no tests")
 

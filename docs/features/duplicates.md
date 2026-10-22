@@ -94,3 +94,15 @@ Re-ingest (Sync) existing repositories once to create the first report.
 ```yaml
 - run: codesynapse duplicates . --max-percent 5 --limit 10
 ```
+
+## How to merge a group
+
+Each group on the Duplicates page has **How to merge**; the Plan page links its merge steps there, and the `refactor_duplicates` MCP tool answers the same for an agent (pass the `hash` and `kind` that `duplicate_code` lists). It works from the graph only and never edits code. For one group it gives:
+
+- **A name and a home** for the shared function: the name every copy shares, or the most common one (alphabetical on a tie), made exported if any copy is public; the home is the same file, the same package, or the closest directory the copies share (a new package when they share none).
+- **The approach**: extract one function and make the copies call it; for methods of different types, a function that takes what the methods use from their receivers; for edited copies, list the differences first and turn each into a parameter or a thin wrapper.
+- **The copies** with their callers (what to update) and the tests that reach them.
+- **Risks** worked out from the graph: public API, copies in different packages (import cycles), signatures that differ beyond names, copies no test reaches, copies nothing calls (delete rather than merge), copies that touch sensitive APIs, and for edited copies that a difference may be the point.
+- **Steps in order**: confirm, pin behaviour with tests, create the function, point the copies at it, run the build and tests, delete the copies, Sync.
+
+`GET /api/v1/repos/{repo}/duplicates/refactor?hash=…&kind=exact|near` returns the same as JSON.

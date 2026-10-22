@@ -39,6 +39,9 @@ func registerAgentTools(s *mcp.Server, h *handlers, add func(name, desc string) 
 	mcp.AddTool(s, add("cleanup_plan",
 		"A ranked list of changes worth making in a repository: delete unreachable code (security-relevant first), remove unused dependencies, upgrade vulnerable ones (indirect ones through the package that pulls them in), resolve licence conflicts, merge duplicate code and cover untested hotspots. Each step has a value, effort and safety, why it matters, its targets with file:line and how to verify it. Use it to pick what to do next."),
 		h.cleanupPlan)
+	mcp.AddTool(s, add("refactor_duplicates",
+		"How to merge one group of duplicate functions found by duplicate_code (pass its hash and kind): a suggested name and home for the shared function, the approach, the copies with their callers and tests, the risks (public API, import cycles, differing signatures, untested copies, unused copies) and the steps in order. Plans only; it never edits code."),
+		h.refactorDuplicates)
 	mcp.AddTool(s, add("duplicate_code",
 		"Code that exists more than once in a repository: groups of functions with the same structure (names and literal values ignored) and of edited copies (kind near), the redundant lines, how far apart the copies are (file, package, repository) and where each copy is. Use it before writing a helper, and to find what to merge."),
 		h.duplicateCode)
