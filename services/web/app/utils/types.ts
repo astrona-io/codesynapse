@@ -90,6 +90,7 @@ export interface SecurityReport {
   modules: { total: number; direct: number; indirect: number; vulnerable: number; stdlib?: string }
   rules: { rule: string; title: string; severity: string; count: number }[]
   sensitive_functions?: NodeRef[]
+  head?: string; indexed_at?: string; checked?: string[]; not_checked?: string[]; unanalysed_findings?: number
 }
 export interface Distribution { count: number; min: number; max: number; mean: number; p50: number; p90: number; p99: number; buckets: { label: string; count: number }[] }
 export interface MetricsReport {

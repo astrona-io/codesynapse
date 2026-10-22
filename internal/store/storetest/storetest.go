@@ -459,6 +459,19 @@ func Run(t *testing.T, s store.Store) {
 		assert.Equal(t, got[0].Day, "2000-01-02", "older days pruned")
 	})
 
+	t.Run("finding counts", func(t *testing.T) {
+		require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
+		got, err := s.FindingCounts(ctx, Repo)
+		require.NoError(t, err)
+		want := map[string]int{}
+		for _, n := range Fixture().Nodes() {
+			if n.Kind == model.KindFinding {
+				want[n.Severity]++
+			}
+		}
+		assert.Equal(t, got, want)
+	})
+
 	t.Run("delete", func(t *testing.T) {
 		require.NoError(t, s.DeleteRepo(ctx, Repo))
 		_, ok := findRepo(ctx, t, s)

@@ -23,6 +23,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/ingest/lang"
 	"github.com/parisnakitakejser/codesynapse/internal/metrics"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
+	"github.com/parisnakitakejser/codesynapse/internal/security"
 	"github.com/parisnakitakejser/codesynapse/internal/vuln"
 )
 
@@ -147,6 +148,9 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	}
 	if repoNode.Metrics, err = metrics.Encode(rep); err != nil {
 		return nil, fmt.Errorf("encoding metrics: %w", err)
+	}
+	if repoNode.Coverage, err = security.EncodeCoverage(security.CoverageOf(g, security.Inventory(root))); err != nil {
+		return nil, fmt.Errorf("encoding security coverage: %w", err)
 	}
 	logger.Info("ingest complete", "repo", opts.Repo, "nodes", len(g.Nodes()), "edges", len(g.Edges()),
 		"pruned_edges", pruned, "duration", time.Since(start).Round(time.Millisecond).String())

@@ -103,6 +103,9 @@ type Reader interface {
 	Repos(ctx context.Context) ([]model.Node, error)
 	// Stats summarises one repository.
 	Stats(ctx context.Context, repo string) (model.Stats, error)
+	// FindingCounts counts every finding of repo by severity (List stops
+	// at MaxLimit; a grade must not).
+	FindingCounts(ctx context.Context, repo string) (map[string]int, error)
 	// Node returns a node by ID, or ErrNotFound.
 	Node(ctx context.Context, id string) (model.Node, error)
 	// Search finds nodes whose name or qualified name contains q

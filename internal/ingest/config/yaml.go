@@ -268,10 +268,25 @@ var dangerousCaps = map[string]bool{"SYS_ADMIN": true, "NET_ADMIN": true, "ALL":
 
 func (b *builder) k8sRules(rel, entryID string, root *yaml.Node) {
 	kind := scalar(mapGet(root, "kind"))
-	if kind == "Secret" {
+	switch kind {
+	case "CustomResourceDefinition":
+		return // its schema describes fields such as hostPath; it sets nothing
+	case "Secret":
 		for _, field := range []string{"data", "stringData"} {
-			if d := mapGet(root, field); d != nil && d.Kind == yaml.MappingNode && len(d.Content) > 0 && !templated(d.Content[1].Value) {
-				b.report(rel, entryID, "k8s-secret-in-repo", d.Line, fmt.Sprintf("Secret %s has %d literal %s keys", scalar(mapGet(mapGet(root, "metadata"), "name")), len(d.Content)/2, field))
+			d := mapGet(root, field)
+			if d == nil || d.Kind != yaml.MappingNode {
+				continue
+			}
+			// Only literal values count: templated or empty ones are filled in
+			// at deploy time.
+			literal := 0
+			for i := 1; i < len(d.Content); i += 2 {
+				if v := d.Content[i]; v.Kind == yaml.ScalarNode && strings.TrimSpace(v.Value) != "" && !templated(v.Value) {
+					literal++
+				}
+			}
+			if literal > 0 {
+				b.report(rel, entryID, "k8s-secret-in-repo", d.Line, fmt.Sprintf("Secret %s has %d literal %s keys", scalar(mapGet(mapGet(root, "metadata"), "name")), literal, field))
 			}
 		}
 		return
@@ -334,7 +349,7 @@ var (
 )
 
 func templated(v string) bool {
-	return strings.Contains(v, "{{") || strings.Contains(v, "${") || strings.HasPrefix(v, "$")
+	return strings.Contains(v, "{{") || strings.Contains(v, "${") || strings.HasPrefix(v, "$") || strings.Contains(v, tplValue)
 }
 
 // genericRules flags literal secrets: key: value pairs and Kubernetes /

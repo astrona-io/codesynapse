@@ -46,7 +46,7 @@ func TestPropsRoundTrip(t *testing.T) {
 	mod := model.Node{ID: "r|Module|npm:x", Kind: model.KindModule, Repo: "r", Name: "x", Version: "1.0.0", Ecosystem: "npm",
 		License: "MIT OR Apache-2.0", LicenseSource: "package-lock.json", Dev: true}
 	assert.Equal(t, fromProps(toProps(mod)), mod)
-	repoNode := model.Node{ID: "r|Repository|r", Kind: model.KindRepository, Repo: "r", Name: "r", License: "Apache-2.0", LicenseSource: "LICENSE", Licenses: `{"total":1}`}
+	repoNode := model.Node{ID: "r|Repository|r", Kind: model.KindRepository, Repo: "r", Name: "r", License: "Apache-2.0", LicenseSource: "LICENSE", Licenses: `{"total":1}`, Coverage: `{"yaml":3}`}
 	assert.Equal(t, fromProps(toProps(repoNode)), repoNode)
 	assert.Equal(t, fromProps(toProps(mod)), mod)
 }

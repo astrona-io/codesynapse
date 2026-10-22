@@ -2,6 +2,9 @@ package security
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -127,4 +130,92 @@ func TestEveryDetectorHasARule(t *testing.T) {
 	for _, r := range rules.All() {
 		assert.True(t, detected[r.ID], "%s has no detector", r.File)
 	}
+}
+
+func TestYAMLRepositoryIsGradedWithCoverage(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	write := func(rel, s string) {
+		p := root + "/" + rel
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o750))
+		require.NoError(t, os.WriteFile(p, []byte(s), 0o600))
+	}
+	write("chart/Chart.yaml", "apiVersion: v2\nname: app\nversion: 0.1.0\n")
+	write("chart/templates/ds.yaml", "apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: {{ .Release.Name }}\nspec:\n  template:\n    spec:\n      hostPID: true\n      containers:\n        - name: a\n          image: x:latest\n          securityContext:\n            privileged: true\n")
+	write("Dockerfile", "FROM scratch\n")
+	g, err := config.Extract(ctx, "y", root)
+	require.NoError(t, err)
+	repoID := model.NodeID("y", model.KindRepository, "y")
+	cov, err := EncodeCoverage(CoverageOf(g, Inventory(root)))
+	require.NoError(t, err)
+	repoNode := g.AddNode(model.Node{ID: repoID, Kind: model.KindRepository, Repo: "y", Name: "y"})
+	repoNode.Head, repoNode.Time, repoNode.Coverage = "a82019c0ffee", "2026-10-22T08:00:00Z", cov
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, "y", g))
+
+	rep, err := Build(ctx, st, "y", Options{})
+	require.NoError(t, err)
+	assert.True(t, rep.Grade != "A" && rep.Grade != NotApplicable, "Helm template findings count: "+rep.Grade)
+	assert.True(t, rep.FindingCounts["critical"]+rep.FindingCounts["high"] >= 2)
+	assert.Equal(t, rep.Head, "a82019c0ffee")
+	require.NotNil(t, rep.Coverage)
+	assert.Equal(t, rep.Coverage.HelmScanned, 1)
+	joined := strings.Join(append(rep.Checked, rep.NotChecked...), "\n")
+	assert.True(t, strings.Contains(joined, "1 of 1 Helm template(s)"), joined)
+	assert.True(t, strings.Contains(joined, "1 Dockerfile file(s): no rules yet"), joined)
+
+	var md strings.Builder
+	require.NoError(t, WriteMarkdown(&md, rep))
+	assert.True(t, strings.Contains(md.String(), "Indexed at commit `a82019c0ff`"))
+	assert.True(t, strings.Contains(md.String(), "**Not checked (review by hand):**"))
+}
+
+func TestNothingScannableIsNotApplicable(t *testing.T) {
+	ctx := context.Background()
+	g := model.NewGraph()
+	cov, err := EncodeCoverage(Coverage{Code: map[string]int{}, NotCovered: map[string]int{"Terraform": 12}})
+	require.NoError(t, err)
+	g.AddNode(model.Node{ID: model.NodeID("t", model.KindRepository, "t"), Kind: model.KindRepository, Repo: "t", Name: "t", Coverage: cov})
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, "t", g))
+	rep, err := Build(ctx, st, "t", Options{})
+	require.NoError(t, err)
+	assert.Equal(t, rep.Grade, NotApplicable, "no A for a repository nothing could check")
+	var md strings.Builder
+	require.NoError(t, WriteMarkdown(&md, rep))
+	assert.True(t, strings.Contains(md.String(), "**No grade:**"))
+	assert.True(t, strings.Contains(md.String(), "12 Terraform file(s): no rules yet"))
+}
+
+func TestFindingsBeyondTheListLimitCount(t *testing.T) {
+	ctx := context.Background()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("big", model.KindRepository, "big"), Kind: model.KindRepository, Repo: "big", Name: "big"})
+	for i := range 700 {
+		g.AddNode(model.Node{ID: model.NodeID("big", model.KindFinding, fmt.Sprintf("f%d", i)), Kind: model.KindFinding, Repo: "big",
+			Name: "x", Rule: "k8s-host-path", Severity: "low", File: "a.yaml", StartLine: i + 1})
+	}
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, "big", g))
+	rep, err := Build(ctx, st, "big", Options{})
+	require.NoError(t, err)
+	assert.Equal(t, rep.FindingCounts["low"], 700)
+	assert.Equal(t, rep.Unanalysed, 200)
+	assert.Equal(t, rep.Grade, "F", "700 findings, not 500, make the score")
+}
+
+func TestModulesBeyondTheListLimitCount(t *testing.T) {
+	ctx := context.Background()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("m", model.KindRepository, "m"), Kind: model.KindRepository, Repo: "m", Name: "m"})
+	for i := range 541 {
+		g.AddNode(model.Node{ID: model.NodeID("m", model.KindModule, fmt.Sprintf("npm:p%d", i)), Kind: model.KindModule, Repo: "m",
+			Name: fmt.Sprintf("p%d", i), Version: "1.0.0", Indirect: i > 0, Ecosystem: "npm"})
+	}
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, "m", g))
+	rep, err := Build(ctx, st, "m", Options{})
+	require.NoError(t, err)
+	assert.Equal(t, rep.Modules.Total, 541)
+	assert.Equal(t, rep.Modules.Direct+rep.Modules.Indirect, 541)
 }

@@ -60,7 +60,7 @@ const vulns = computed(() =>
   ),
 )
 const total = (m: Record<string, number> | undefined) => Object.values(m ?? {}).reduce((a, b) => a + b, 0)
-const gradeColor = computed(() => ({ A: 'var(--green)', B: 'var(--cyan)', C: 'var(--amber)', D: 'var(--orange)', F: 'var(--pink)' }[rep.value?.grade ?? 'A']))
+const gradeColor = computed(() => ({ A: 'var(--green)', B: 'var(--cyan)', C: 'var(--amber)', D: 'var(--orange)', F: 'var(--pink)', 'N/A': 'var(--muted)' }[rep.value?.grade ?? 'A']))
 const explore = (id: string) => ({ path: `/repos/${encodeURIComponent(repo.value)}/explore`, query: { id } })
 const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--amber', required: '' }[r] ?? '')
 </script>
@@ -81,13 +81,30 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
       <div class="grid grid--stats">
         <div class="panel stat-card grade" :style="{ borderLeftColor: gradeColor }">
           <p class="eyebrow">Security grade</p>
-          <p class="stat__value" :style="{ color: gradeColor }">{{ rep.grade }} <span class="score">{{ rep.score }}/100</span></p>
-          <p class="stat__hint">Weighted by severity, exposure and reachability</p>
+          <p class="stat__value" :style="{ color: gradeColor }">{{ rep.grade }} <span v-if="rep.grade !== 'N/A'" class="score">{{ rep.score }}/100</span></p>
+          <p class="stat__hint">{{ rep.grade === 'N/A' ? 'Nothing here is covered by the rules yet' : 'Weighted by severity, exposure and reachability' }}</p>
         </div>
         <StatTile label="Code findings" :value="total(rep.finding_counts)" :hint="SEVERITIES.filter((s) => rep!.finding_counts[s]).map((s) => `${rep!.finding_counts[s]} ${s}`).join(' · ') || 'none'" />
         <StatTile label="Vulnerabilities" :value="total(rep.vuln_counts)" :hint="SEVERITIES.filter((s) => rep!.vuln_counts[s]).map((s) => `${rep!.vuln_counts[s]} ${s}`).join(' · ') || 'none'" />
         <StatTile label="Dependencies" :value="rep.modules.total" :hint="`${rep.modules.direct} direct · ${rep.modules.vulnerable} vulnerable${rep.modules.stdlib ? ` · Go ${rep.modules.stdlib.replace(/^v/, '')}` : ''}`" />
       </div>
+
+      <section v-if="rep.checked?.length || rep.not_checked?.length || rep.head" class="panel coverage">
+        <p class="eyebrow">Coverage</p>
+        <div class="grid cols-2">
+          <div>
+            <p class="label">Checked</p>
+            <ul><li v-for="c in rep.checked ?? []" :key="c">{{ c }}</li></ul>
+            <p v-if="!rep.checked?.length" class="muted small">Re-sync the repository to see what the rules checked.</p>
+          </div>
+          <div>
+            <p class="label">Not checked: review by hand</p>
+            <ul><li v-for="c in rep.not_checked ?? []" :key="c">{{ c }}</li></ul>
+            <p v-if="!rep.not_checked?.length" class="muted small">Every file type found is covered.</p>
+          </div>
+        </div>
+        <p v-if="rep.head" class="muted small">Indexed at commit <span class="mono">{{ rep.head.slice(0, 10) }}</span> · {{ relTime(rep.indexed_at) }}. If your checkout moved on, sync before relying on this report.<template v-if="rep.unanalysed_findings"> {{ rep.unanalysed_findings }} more findings count in the grade but are not listed.</template></p>
+      </section>
 
       <div class="panel panel--glass filters">
         <div class="row">
@@ -210,6 +227,9 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
 
 <style scoped>
 .grade .score { font-size: 15px; color: var(--muted); font-weight: 500; }
+.coverage ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
+.coverage .label { display: block; margin-bottom: 6px; }
+.small { font-size: 12.5px; }
 .filters { gap: 10px; padding: 16px 20px; }
 .filter-input { max-width: 280px; margin-left: auto; }
 .compact { gap: 6px; }

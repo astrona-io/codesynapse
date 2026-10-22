@@ -7,6 +7,7 @@ package security
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
@@ -72,7 +73,23 @@ type Report struct {
 	Modules         ModuleStats     `json:"modules"`
 	Rules           []RuleCount     `json:"rules"`
 	Sensitive       []query.Ref     `json:"sensitive_functions"`
+	// Head and IndexedAt say which commit the report describes; a checkout
+	// that moved on needs a sync before the report covers it.
+	Head      string `json:"head,omitempty"`
+	IndexedAt string `json:"indexed_at,omitempty"`
+	// Coverage says what the rules could read; Checked and NotChecked are
+	// the same in words. Nil for repositories indexed before it existed.
+	Coverage   *Coverage `json:"coverage,omitempty"`
+	Checked    []string  `json:"checked,omitempty"`
+	NotChecked []string  `json:"not_checked,omitempty"`
+	// Unanalysed counts findings beyond the first store.MaxLimit: they count
+	// towards the grade at full weight but are not listed or analysed for
+	// exposure.
+	Unanalysed int `json:"unanalysed_findings,omitempty"`
 }
+
+// NotApplicable is the grade when no rule had anything to read.
+const NotApplicable = "N/A"
 
 // ModuleStats counts dependencies.
 type ModuleStats struct {
@@ -228,6 +245,22 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 		}
 	}
 	rep.Modules.Vulnerable = len(vulnerableMods)
+	// The list stops at MaxLimit; the node count does not. Modules beyond the
+	// list are counted as indirect, which large lockfiles mostly are.
+	if len(mods) == store.MaxLimit {
+		st, err := r.Stats(ctx, repo)
+		if err != nil {
+			return rep, err
+		}
+		all := st.Nodes[model.KindModule]
+		if rep.Modules.Stdlib != "" {
+			all--
+		}
+		if all > rep.Modules.Total {
+			rep.Modules.Indirect += all - rep.Modules.Total
+			rep.Modules.Total = all
+		}
+	}
 
 	sensitive, err := r.List(ctx, repo, store.Filter{Kinds: []model.NodeKind{model.KindFunction, model.KindMethod}, ExcludeTests: true}, store.ByFanIn, store.MaxLimit)
 	if err != nil {
@@ -253,9 +286,36 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 	slices.SortFunc(rep.Vulnerabilities, func(a, b Vulnerability) int {
 		return cmp.Or(cmp.Compare(b.Priority, a.Priority), cmp.Compare(a.Module, b.Module), cmp.Compare(a.ID, b.ID))
 	})
+	// List stops at MaxLimit; findings beyond it still count, at full
+	// weight since their exposure was not analysed.
+	all, err := r.FindingCounts(ctx, repo)
+	if err != nil {
+		return rep, err
+	}
+	for sev, total := range all {
+		if extra := total - rep.FindingCounts[sev]; extra > 0 {
+			penalty += float64(extra * severityWeight[sev])
+			rep.Unanalysed += extra
+			rep.FindingCounts[sev] = total
+		}
+	}
 	penalty += min(requiredPenalty, 10)
 	rep.Score = max(0, 100-int(penalty+0.5))
 	rep.Grade = grade(rep.Score)
+
+	if n, err := r.Node(ctx, model.NodeID(repo, model.KindRepository, repo)); err == nil {
+		rep.Head, rep.IndexedAt = n.Head, n.Time
+		var c Coverage
+		if n.Coverage != "" && json.Unmarshal([]byte(n.Coverage), &c) == nil {
+			rep.Coverage = &c
+			rep.Checked, rep.NotChecked = c.Lines()
+			if !c.Scannable() {
+				// An A for a repository nothing could be checked in would
+				// read as a clean bill of health.
+				rep.Score, rep.Grade = 0, NotApplicable
+			}
+		}
+	}
 	return rep, nil
 }
 
@@ -357,12 +417,36 @@ func (r Report) ExceedsThreshold(severity string) bool {
 func WriteMarkdown(w io.Writer, r Report) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Security review: %s\n\n", r.Repo)
-	fmt.Fprintf(&b, "**Grade %s (%d/100)** · findings: %s · vulnerabilities: %s · %d modules (%d direct), %d vulnerable",
-		r.Grade, r.Score, counts(r.FindingCounts), counts(r.VulnCounts), r.Modules.Total, r.Modules.Direct, r.Modules.Vulnerable)
+	if r.Grade == NotApplicable {
+		b.WriteString("**No grade:** nothing in this repository is covered by the security rules (see below).")
+	} else {
+		fmt.Fprintf(&b, "**Grade %s (%d/100)**", r.Grade, r.Score)
+	}
+	fmt.Fprintf(&b, " · findings: %s · vulnerabilities: %s · %d modules (%d direct), %d vulnerable",
+		counts(r.FindingCounts), counts(r.VulnCounts), r.Modules.Total, r.Modules.Direct, r.Modules.Vulnerable)
 	if r.Modules.Stdlib != "" {
 		fmt.Fprintf(&b, " · Go %s", strings.TrimPrefix(r.Modules.Stdlib, "v"))
 	}
 	b.WriteString("\n\n")
+	if r.Head != "" {
+		fmt.Fprintf(&b, "Indexed at commit `%s` (%s). If your checkout is on another commit, sync the repository first.\n\n", short(r.Head), r.IndexedAt)
+	}
+	if len(r.Checked) > 0 || len(r.NotChecked) > 0 {
+		b.WriteString("**What was checked:**\n")
+		for _, c := range r.Checked {
+			fmt.Fprintf(&b, "- %s\n", c)
+		}
+		if len(r.NotChecked) > 0 {
+			b.WriteString("\n**Not checked (review by hand):**\n")
+			for _, c := range r.NotChecked {
+				fmt.Fprintf(&b, "- %s\n", c)
+			}
+		}
+		b.WriteString("\n")
+	}
+	if r.Unanalysed > 0 {
+		fmt.Fprintf(&b, "%d more findings are counted in the grade but not listed (the report lists the first %d).\n\n", r.Unanalysed, store.MaxLimit)
+	}
 	if len(r.Vulnerabilities) > 0 {
 		b.WriteString("## Vulnerable dependencies\n\n| Sev | ID | CVE | Module | Version → Fixed | Reach | Summary |\n|---|---|---|---|---|---|---|\n")
 		for _, v := range r.Vulnerabilities {
@@ -430,4 +514,11 @@ func findingLanguage(n model.Node) string {
 		return "json"
 	}
 	return ""
+}
+
+func short(h string) string {
+	if len(h) > 10 {
+		return h[:10]
+	}
+	return h
 }

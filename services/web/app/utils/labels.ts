@@ -26,6 +26,7 @@ export const GRADE_TEXT: Record<string, string> = {
   C: 'Needs attention',
   D: 'Serious issues to address',
   F: 'Critical issues — act now',
+  'N/A': 'Nothing here is covered by the security rules yet',
 }
 
 export const SEVERITY_TEXT: Record<string, string> = {

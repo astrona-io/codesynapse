@@ -45,6 +45,8 @@ codesynapse audit . --fail-on high   # CI gate: exit 1 on high/critical (reachab
 codesynapse audit . -o json
 ```
 
+Every report says **what the rules checked** (code files per language, YAML files, Kubernetes resources, Helm templates, workflows, Compose files, dependencies) and **what they did not** (YAML that does not parse, Helm templates whose output is not YAML, and file kinds without rules yet such as Dockerfiles, Terraform or shell scripts), plus the commit it describes. Helm templates are checked on their literal values (`privileged: true`, `hostPath`, `image: x:latest`); values set through `{{ .Values }}` cannot be judged without rendering. A repository where nothing is covered gets **N/A** instead of a grade.
+
 Only module paths and versions are sent to osv.dev. Set `--vulns=false` (or `CODESYNAPSE_VULN_SCAN=false`) to stay offline.
 
 ### Dependency licences
