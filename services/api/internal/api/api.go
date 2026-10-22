@@ -113,12 +113,18 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/version", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]string{"version": s.cfg.Version})
 	})
-	// Settings report what is configured, never secret values.
+	// Settings report what is configured, never full secret values.
 	m.HandleFunc("GET /api/v1/settings", func(w http.ResponseWriter, _ *http.Request) {
+		tokens := s.gitTokens()
+		hosts := make([]string, len(tokens))
+		for i, t := range tokens {
+			hosts[i] = t.Host
+		}
 		writeJSON(w, 200, map[string]any{
-			"git_token_configured": s.cfg.GitAuth.Token != "",
+			"git_token_configured": len(tokens) > 0,
 			"git_token_host":       s.cfg.GitAuth.Host,
-			"git_token_hosts":      s.tokenHosts(),
+			"git_token_hosts":      hosts,
+			"git_tokens":           tokens,
 			"clone_enabled":        s.cfg.Workspace != "",
 			"allow_private_git":    s.cfg.AllowPrivateGit,
 			"vuln_scan":            s.cfg.VulnScan,
@@ -644,15 +650,34 @@ func (s *Server) authFor(remote string) gitx.Auth {
 	return gitx.AuthFor(remote, append([]gitx.Auth{s.cfg.GitAuth}, s.cfg.GitAuths...)...)
 }
 
-// tokenHosts lists the hosts a token is configured for (never the tokens).
-func (s *Server) tokenHosts() []string {
-	hosts := []string{}
+// gitToken is what the settings endpoint shows about a configured token.
+type gitToken struct {
+	Host    string `json:"host"`
+	Preview string `json:"preview"`
+}
+
+// gitTokens lists one entry per host, in the order authFor picks them, with
+// the token masked.
+func (s *Server) gitTokens() []gitToken {
+	out := []gitToken{}
 	for _, a := range append([]gitx.Auth{s.cfg.GitAuth}, s.cfg.GitAuths...) {
-		if a.Token != "" && a.Host != "" && !slices.Contains(hosts, strings.ToLower(a.Host)) {
-			hosts = append(hosts, strings.ToLower(a.Host))
+		host := strings.ToLower(a.Host)
+		if a.Token == "" || host == "" || slices.ContainsFunc(out, func(t gitToken) bool { return t.Host == host }) {
+			continue
 		}
+		out = append(out, gitToken{Host: host, Preview: maskToken(a.Token)})
 	}
-	return hosts
+	return out
+}
+
+// maskToken keeps the first and last five characters so a user can tell which
+// token is loaded. Short tokens are hidden completely: five plus five would
+// give away most of them.
+func maskToken(t string) string {
+	if len(t) < 20 {
+		return "***"
+	}
+	return t[:5] + "***" + t[len(t)-5:]
 }
 
 // validRepoName restricts repo names to a safe, URL-friendly alphabet: "name",

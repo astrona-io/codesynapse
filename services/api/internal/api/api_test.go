@@ -19,6 +19,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
 
+	"github.com/parisnakitakejser/codesynapse/internal/gitx"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
@@ -127,6 +128,45 @@ func TestIngestRejectsEscapes(t *testing.T) {
 			assert.Equal(t, post(t, ts, "/api/v1/ingest", body), 400)
 		})
 	}
+}
+
+func TestMaskToken(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"ghp_abcdefghijklmnopqrstuvwxyz0123456789", "ghp_a***56789"},
+		{"glpat-0123456789abcdefghij", "glpat***fghij"},
+		{"short-token-123", "***"},
+		{"", "***"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			assert.Equal(t, maskToken(tt.in), tt.want)
+		})
+	}
+}
+
+func TestSettingsTokens(t *testing.T) {
+	// Only CODESYNAPSE_GIT_TOKENS set, as `just git-token` writes it: the
+	// legacy single-token field stays empty.
+	srv := New(context.Background(), Config{
+		GitAuth: gitx.Auth{Host: "github.com"},
+		GitAuths: []gitx.Auth{
+			{Host: "GitHub.com", Token: "ghp_abcdefghijklmnopqrstuvwxyz0123456789"},
+			{Host: "github.com", Token: "ghp_second_token_never_used_0000000000"},
+			{Host: "codeberg.org", Token: "0123456789abcdefghijklmn"},
+		},
+	}, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	var got struct {
+		Configured bool       `json:"git_token_configured"`
+		Hosts      []string   `json:"git_token_hosts"`
+		Tokens     []gitToken `json:"git_tokens"`
+	}
+	require.Equal(t, get(t, ts, "/api/v1/settings", &got), 200)
+	assert.True(t, got.Configured)
+	assert.Equal(t, got.Hosts, []string{"github.com", "codeberg.org"})
+	assert.Equal(t, got.Tokens, []gitToken{{Host: "github.com", Preview: "ghp_a***56789"}, {Host: "codeberg.org", Preview: "01234***jklmn"}})
 }
 
 func TestValidRepoName(t *testing.T) {
