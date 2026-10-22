@@ -8,8 +8,8 @@ const { data: sources } = useApiGet<{ sources: Source[] }>('sources')
 const { data: jobs, refresh: refreshJobs } = useApiGet<{ jobs: Job[] }>('jobs')
 const { data: settings } = useApiGet<Settings>('settings')
 
-// 4 columns x 3 rows per page; the grid drops columns on narrow screens.
-const PAGE_SIZE = 12
+// One row per repository, GitHub-style.
+const PAGE_SIZE = 25
 const page = ref(1)
 const pageCount = computed(() => Math.max(1, Math.ceil((ov.value?.repos.length ?? 0) / PAGE_SIZE)))
 watch(pageCount, (n) => { if (page.value > n) page.value = n })
@@ -54,6 +54,11 @@ async function register() {
   }
 }
 
+// "host/owner/name" or "owner/name": the prefix is shown dimmed before the name.
+const splitName = (name: string) => {
+  const i = name.lastIndexOf('/')
+  return i < 0 ? { prefix: '', base: name } : { prefix: name.slice(0, i + 1), base: name.slice(i + 1) }
+}
 const gradeColor: Record<string, string> = { A: 'var(--green)', B: 'var(--cyan)', C: 'var(--amber)', D: 'var(--orange)', F: 'var(--pink)' }
 const syncText = (s?: { state: string; interval_minutes: number }) => {
   if (!s || s.state === 'manual') return 'Manual sync'
@@ -70,33 +75,43 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
       <span class="pill"><span class="dot" :class="running ? 'dot--warn' : 'dot--ok'" />{{ running ? 'Indexing…' : `${plural(ov?.repos.length ?? 0, 'repository', 'repositories')} indexed` }}</span>
     </PageHeader>
 
-    <section v-if="ov?.repos.length" class="cards">
-      <NuxtLink v-for="r in visibleRepos" :key="r.name" :to="`/repos/${encodeURIComponent(r.name)}`" class="panel repo-card">
-        <div class="repo-top">
-          <div class="repo-name">
-            <strong>{{ r.name }}</strong>
-            <span class="mono dim">{{ r.branch || 'no branch' }} · {{ r.managed ? 'cloned' : 'mounted' }}</span>
+    <section v-if="ov?.repos.length" class="panel repo-panel">
+      <ul class="repo-list">
+        <li v-for="r in visibleRepos" :key="r.name" class="repo-row">
+          <div class="repo-main">
+            <div class="repo-title">
+              <NuxtLink :to="`/repos/${encodeURIComponent(r.name)}`" class="repo-link">
+                <span v-if="splitName(r.name).prefix" class="repo-owner">{{ splitName(r.name).prefix }}</span><strong>{{ splitName(r.name).base }}</strong>
+              </NuxtLink>
+              <span class="badge">{{ r.managed ? 'cloned' : 'mounted' }}</span>
+              <span v-if="r.stale" class="badge badge--amber">out of date</span>
+            </div>
+            <p class="repo-verdict" :class="{ bad: (r.findings.critical ?? 0) + (r.findings.high ?? 0) }">
+              <template v-if="(r.findings.critical ?? 0) + (r.findings.high ?? 0)">{{ plural((r.findings.critical ?? 0) + (r.findings.high ?? 0), 'critical/high issue') }} to fix</template>
+              <template v-else>{{ GRADE_TEXT[r.grade] }}</template>
+              <span v-if="r.dead_functions" class="muted"> · {{ plural(r.dead_functions, 'unused function') }}</span>
+            </p>
+            <div class="repo-facts">
+              <span class="mono dim branch">{{ r.branch || 'no branch' }}</span>
+              <FormatChips :formats="r.formats" :helm-charts="r.helm_charts" :k8s="r.k8s_resources" compact />
+            </div>
           </div>
-          <span class="grade" :style="{ color: gradeColor[r.grade], borderColor: gradeColor[r.grade] }" :title="`Security grade ${r.grade}: ${GRADE_TEXT[r.grade]}`">{{ r.grade }}</span>
-        </div>
-        <FormatChips :formats="r.formats" :helm-charts="r.helm_charts" :k8s="r.k8s_resources" compact />
-        <p class="repo-verdict" :class="{ bad: (r.findings.critical ?? 0) + (r.findings.high ?? 0) }">
-          <template v-if="(r.findings.critical ?? 0) + (r.findings.high ?? 0)">{{ plural((r.findings.critical ?? 0) + (r.findings.high ?? 0), 'critical/high issue') }} to fix</template>
-          <template v-else>{{ GRADE_TEXT[r.grade] }}</template>
-          <span v-if="r.dead_functions" class="muted"> · {{ plural(r.dead_functions, 'unused function') }}</span>
-        </p>
-        <div class="repo-foot">
-          <p class="muted small">
-            Indexed {{ relTime(r.ingested_at) }}<span v-if="r.stale" class="stale"> · out of date</span>
-            <br>
-            <span :class="`sync sync--${r.schedule?.state ?? 'manual'}`">{{ syncText(r.schedule) }}</span>
-          </p>
-          <span class="row tight-actions">
-            <SwitchToRemote v-if="!r.managed" :repo="r.name" :remote="r.remote" :branch="r.branch" small @switched="refreshOverview" />
-            <RemoveRepo :repo="r.name" :managed="r.managed" small @removed="refreshOverview" />
-          </span>
-        </div>
-      </NuxtLink>
+          <div class="repo-meta">
+            <div class="repo-status">
+              <span class="grade" :style="{ color: gradeColor[r.grade], borderColor: gradeColor[r.grade] }" :title="`Security grade ${r.grade}: ${GRADE_TEXT[r.grade]}`">{{ r.grade }}</span>
+              <p class="muted small">
+                Indexed {{ relTime(r.ingested_at) }}
+                <br>
+                <span :class="`sync sync--${r.schedule?.state ?? 'manual'}`">{{ syncText(r.schedule) }}</span>
+              </p>
+            </div>
+            <span class="row tight-actions">
+              <SwitchToRemote v-if="!r.managed" :repo="r.name" :remote="r.remote" :branch="r.branch" small @switched="refreshOverview" />
+              <RemoveRepo :repo="r.name" :managed="r.managed" small @removed="refreshOverview" />
+            </span>
+          </div>
+        </li>
+      </ul>
     </section>
     <nav v-if="pageCount > 1" class="pager" aria-label="Repository pages">
       <button class="secondary tiny" :disabled="page <= 1" @click="page--">Previous</button>
@@ -182,23 +197,32 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
 </template>
 
 <style scoped>
-.cards { display: grid; gap: 16px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-@media (max-width: 1500px) { .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 1100px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .cards { grid-template-columns: minmax(0, 1fr); } }
-.pager { display: flex; justify-content: center; align-items: center; gap: 14px; }
-.repo-card { gap: 10px; color: var(--ink); transition: transform 0.15s, border-color 0.15s; }
-.repo-card:hover { transform: translateY(-2px); border-color: var(--line-bright); color: var(--ink); }
-.repo-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
-.repo-name { display: grid; gap: 2px; min-width: 0; }
-.repo-name strong { font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.grade { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; border: 1px solid; font: 700 20px var(--font-sans); flex: none; }
+.repo-panel { padding: 4px 24px; gap: 0; }
+.repo-list { list-style: none; margin: 0; padding: 0; }
+.repo-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 18px 12px; margin: 0 -12px; border-bottom: 1px dashed var(--line); border-radius: var(--radius-xs); transition: background 0.15s; }
+.repo-row:last-child { border-bottom: 0; }
+.repo-row:hover { background: var(--panel-2); }
+.repo-main { display: grid; gap: 6px; min-width: 0; flex: 1 1 auto; }
+.repo-title { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.repo-link { font-size: 17px; min-width: 0; overflow-wrap: anywhere; }
+.repo-link strong { font-weight: 700; }
+.repo-owner { color: var(--dim); }
+.repo-link:hover .repo-owner { color: var(--muted); }
 .repo-verdict { font-size: 14px; }
 .repo-verdict.bad { color: var(--pink); }
-.stale { color: var(--amber); }
-.repo-foot { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; }
+.repo-facts { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.branch { overflow-wrap: anywhere; }
+.repo-meta { display: grid; justify-items: end; gap: 10px; flex: none; text-align: right; }
+.repo-status { display: flex; align-items: center; gap: 12px; }
+.grade { display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--radius-xs); border: 1px solid; font: 700 17px var(--font-sans); flex: none; }
 .sync--active { color: var(--green); }
 .sync--paused { color: var(--amber); }
+.pager { display: flex; justify-content: center; align-items: center; gap: 14px; }
+@media (max-width: 640px) {
+  .repo-panel { padding: 4px 16px; }
+  .repo-row { flex-direction: column; gap: 12px; }
+  .repo-meta { justify-items: start; text-align: left; width: 100%; }
+}
 .small { font-size: 12.5px; }
 .clone { display: grid; gap: 10px; }
 .clone label { display: grid; gap: 4px; }
