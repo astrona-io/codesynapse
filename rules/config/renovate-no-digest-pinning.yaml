@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../schema.json
+id: renovate-no-digest-pinning
+title: Renovate does not pin action and image digests
+severity: low
+cwe: [CWE-829]
+category: config
+languages: [json]
+why: Renovate keeps GitHub Actions and Docker images on tags, which their owners can move to different code; with digest pinning every change arrives as a reviewable PR instead.
+fix: Extend config:best-practices, or add helpers:pinGitHubActionDigests and docker:pinDigests (or pinDigests true).
+references:
+  - https://cwe.mitre.org/data/definitions/829.html
+  - https://docs.renovatebot.com/configuration-options/#pindigests
+  - https://docs.renovatebot.com/presets-config/#configbest-practices
+examples:
+  - language: json
+    vulnerable: |-
+      {
+        "extends": ["config:recommended"]
+      }
+    fixed: |-
+      {
+        "extends": ["config:recommended", "helpers:pinGitHubActionDigests", "docker:pinDigests"]
+      }

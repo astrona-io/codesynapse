@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../schema.json
+id: renovate-disabled
+title: Renovate is disabled
+severity: medium
+cwe: [CWE-1104]
+category: config
+languages: [json]
+why: 'A config with enabled: false, or a package rule that disables every dependency, keeps the repository looking managed while no updates, including security fixes, are proposed.'
+fix: Remove the top-level enabled false or narrow the disabling package rule to the specific packages that must stay put.
+references:
+  - https://cwe.mitre.org/data/definitions/1104.html
+  - https://docs.renovatebot.com/configuration-options/#enabled
+examples:
+  - language: json
+    vulnerable: |-
+      {
+        "packageRules": [
+          {"matchPackageNames": ["*"], "enabled": false}
+        ]
+      }
+    fixed: |-
+      {
+        "packageRules": [
+          {"matchPackageNames": ["legacy-sdk"], "enabled": false}
+        ]
+      }

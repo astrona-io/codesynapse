@@ -154,7 +154,8 @@ Done:
 - Agent guide implemented: composite tools, `qualified_id` suggestions, four MCP prompts, server instructions
 - Python, JavaScript, TypeScript and Vue indexing with security rules; npm and PyPI dependency CVEs
 - Unused-code analysis (liveness, unused modules/config) and per-rule fix guides with examples
-- Rule catalogue as static YAML files in `rules/` (39 rules), embedded and schema-validated
+- Rule catalogue as static YAML files in `rules/` (45 rules), embedded and schema-validated
+- Dependency update automation: `dependency-updates-missing` when a repository has manifests (go.mod, package.json, Python, Dockerfiles, compose, workflows, charts) but no Renovate or Dependabot config; the Renovate config (JSON/JSON5, read without following symlinks) is checked by `renovate-config-invalid`, `renovate-disabled`, `renovate-vulnerability-alerts-off`, `renovate-automerge-no-release-age` and `renovate-no-digest-pinning`. These findings hang off the Repository node, anchored to the top-level manifest or the config line; absence checks are skipped when the config extends a preset from outside Renovate's built-ins
 - Code reviews over MCP with a Reviews page; auto-sync schedules; repository removal; private-repo tokens
 - UX pass: repository summary with health verdicts and next steps, plain-language labels and inline explanations, Kubernetes & Helm page, content detection for sources
 - MCP server (18 read-only tools + 2 review write tools, 5 prompts, stdio + HTTP with bearer auth) and `codesynapse mcp install` for local agents

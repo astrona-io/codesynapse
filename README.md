@@ -34,6 +34,7 @@ All ports bind to 127.0.0.1.
 
 - **Code findings** from type-aware rules: shell and command injection, SQL/Cypher built from strings, disabled TLS verification, old TLS versions, weak hashes and ciphers, hardcoded credentials, `template.HTML` from variables, HTTP servers and clients without timeouts, paths and URLs taken from requests, unbounded request bodies, world-writable files, unverified JWTs, `unsafe`.
 - **Configuration findings** in YAML: privileged pods, privilege escalation, host namespaces, `hostPath`, root users, dangerous capabilities, unpinned images, literal secrets, GitHub Actions script injection, `pull_request_target` checkouts, unpinned third-party actions, privileged compose services.
+- **Dependency update automation**: repositories with manifests but no Renovate or Dependabot config, and Renovate configs that cannot be parsed, are disabled, turn off vulnerability alerts, automerge without `minimumReleaseAge`, or leave actions and images unpinned by digest.
 - **Vulnerable dependencies** from go.mod and the Go standard library, checked against osv.dev (Go vulnerability DB + GitHub advisories): CVE, severity, CWE, fixed version, and reachability: *called* (your code calls the vulnerable symbol, with call sites), *imported*, or *required*.
 
 Each finding has a severity (info, low, medium, high, critical), its CWE, its location and owning function, whether it is **exposed** (reachable from `main`, an exported API or a handler) and whether a test reaches it. Priority combines all of these.
@@ -55,7 +56,7 @@ Every rule is a readable YAML file in [`rules/`](rules/README.md) with why it ma
 | Go | type-checked (go/types), interface dispatch | `_test.go` | ~20 rules | go.mod + stdlib, symbol-level reachability |
 | Python | structural parser, imports, `self.` calls | pytest files/functions | shell, eval, pickle/yaml, SQL, TLS, JWT, secrets, debug | requirements*.txt, poetry.lock, uv.lock, Pipfile.lock |
 | JavaScript / TypeScript / Vue | structural parser, ES imports/require, `this.` calls | `*.test.*`, `*.spec.*`, `__tests__` | child_process, eval, DOM XSS, `v-html`, SQL, TLS, JWT, secrets, redirects | package-lock.json, yarn.lock, pnpm-lock.yaml |
-| YAML, Helm, Go templates | resources, key paths, `include`/`.Values` links | – | Kubernetes, compose, GitHub Actions | – |
+| YAML, Helm, Go templates | resources, key paths, `include`/`.Values` links | – | Kubernetes, compose, GitHub Actions, Renovate/Dependabot | – |
 
 Non-Go call edges are name-based (imports, enclosing class, names unique in the repo), so they can miss dynamic dispatch; Go keeps exact type-checked edges. Parsers are pure Go: no cgo, static binaries.
 

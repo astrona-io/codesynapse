@@ -29,6 +29,7 @@ func Extract(ctx context.Context, repo, root string) (*model.Graph, error) {
 	charts := map[string]bool{} // chart roots (repo-relative, slash)
 	type file struct{ rel, abs string }
 	var yamls, templates []file
+	var manifests []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -58,6 +59,9 @@ func Extract(ctx context.Context, repo, root string) (*model.Graph, error) {
 		name := d.Name()
 		if name == "Chart.yaml" {
 			charts[path.Dir(rel)] = true
+		}
+		if isDependencyManifest(rel) {
+			manifests = append(manifests, rel)
 		}
 		ext := strings.ToLower(filepath.Ext(name))
 		switch {
@@ -108,6 +112,7 @@ func Extract(ctx context.Context, repo, root string) (*model.Graph, error) {
 		}
 	}
 	b.resolve(refs, valuesFiles)
+	b.dependencyUpdateRules(root, manifests)
 	return b.g, nil
 }
 

@@ -129,9 +129,12 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 			o := owners[0].Node
 			ref := query.RefOf(o)
 			fv.Owner = &ref
-			if o.Kind == model.KindFile || o.Kind == model.KindConfig || o.Kind == model.KindConfigEntry || o.Kind == model.KindTemplate {
-				fv.Exposed = true // package-level declarations and deployed config are always live
-			} else {
+			switch o.Kind {
+			case model.KindFile, model.KindConfig, model.KindConfigEntry, model.KindTemplate, model.KindRepository:
+				// Package-level declarations, deployed config and
+				// repository-wide settings are always live.
+				fv.Exposed = true
+			default:
 				exp, ok := exposure[o.ID]
 				if !ok {
 					exp, err = exposed(ctx, r, o)
@@ -423,6 +426,8 @@ func findingLanguage(n model.Node) string {
 		return "github-actions"
 	case strings.HasSuffix(n.File, ".yaml"), strings.HasSuffix(n.File, ".yml"):
 		return "yaml"
+	case strings.HasSuffix(n.File, ".json"), strings.HasSuffix(n.File, ".json5"), strings.HasSuffix(n.File, ".renovaterc"):
+		return "json"
 	}
 	return ""
 }

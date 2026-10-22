@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../schema.json
+id: renovate-automerge-no-release-age
+title: Renovate automerges releases without a minimum age
+severity: medium
+cwe: [CWE-829]
+category: config
+languages: [json]
+why: Automerging a version minutes after it is published puts a hijacked release into the default branch before the registry or maintainers can pull it; compromised packages are usually removed within days.
+fix: Set minimumReleaseAge (for example "3 days") wherever automerge is enabled, or extend config:best-practices.
+references:
+  - https://cwe.mitre.org/data/definitions/829.html
+  - https://docs.renovatebot.com/configuration-options/#minimumreleaseage
+  - https://docs.renovatebot.com/key-concepts/minimum-release-age/
+examples:
+  - language: json
+    vulnerable: |-
+      {
+        "packageRules": [
+          {"matchUpdateTypes": ["minor", "patch"], "automerge": true}
+        ]
+      }
+    fixed: |-
+      {
+        "packageRules": [
+          {"matchUpdateTypes": ["minor", "patch"], "automerge": true, "minimumReleaseAge": "3 days"}
+        ]
+      }

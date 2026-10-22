@@ -1,6 +1,7 @@
 // Package config indexes YAML files and Go templates (including Helm charts)
-// and runs security rules over Kubernetes manifests, compose files and
-// GitHub Actions workflows.
+// and runs security rules over Kubernetes manifests, compose files,
+// GitHub Actions workflows and dependency update automation (Renovate,
+// Dependabot).
 //
 // Only structure is stored: file nodes, entries with line ranges (a
 // Kubernetes resource or a key path), template define blocks and the edges
@@ -227,6 +228,12 @@ var RuleIDs = []string{
 	"gha-pr-target-checkout",
 	"gha-unpinned-action",
 	"compose-privileged",
+	"dependency-updates-missing",
+	"renovate-config-invalid",
+	"renovate-disabled",
+	"renovate-vulnerability-alerts-off",
+	"renovate-automerge-no-release-age",
+	"renovate-no-digest-pinning",
 }
 
 func (b *builder) report(rel, ownerID, ruleID string, line int, detail string) {
