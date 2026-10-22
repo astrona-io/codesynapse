@@ -67,6 +67,12 @@ var taskPrompts = []taskPrompt{
 		},
 	},
 	{
+		name: "dependency-review", arg: "target",
+		description:    "Analyse dependencies recursively for licences and vulnerabilities, and look for smaller alternatives, in any language and package manager.",
+		argDescription: "What to analyse: a package to add or replace, a manifest or lockfile, or the whole repository",
+		render:         dependencyReviewPrompt,
+	},
+	{
 		name: "reuse-first", arg: "task",
 		description:    "Search for existing code before implementing a feature or fixing a bug, and reuse or extend it instead of adding a duplicate.",
 		argDescription: "The feature or bug you are about to work on, in a sentence",

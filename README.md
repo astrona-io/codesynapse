@@ -224,6 +224,7 @@ Prompts (`prompts/list`; clients show them as slash commands):
 | `pr-impact-review` | Risk-scored review pack for changed files |
 | `package-onboarding` | How a package fits into the codebase |
 | `bug-investigation` | Caller chain, interface dispatch and churn around a suspected bug |
+| `dependency-review` | Recursive dependency, licence and vulnerability analysis with smaller-alternative checks, with commands for each language and package manager |
 | `reuse-first` | Look for existing code (exact search, meaning, duplicates) before implementing, then reuse or extend it |
 | `code-review` | Review a change or area and submit it so it appears in the UI |
 | `security-triage` | Triage a repository's findings yourself and submit the result |
