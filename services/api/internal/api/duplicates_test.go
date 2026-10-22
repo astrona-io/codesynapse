@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -48,4 +50,33 @@ func TestDuplicateEndpoints(t *testing.T) {
 	require.Len(t, cross.Groups, 1)
 	assert.Equal(t, cross.Groups[0].Copies, 3)
 	assert.Equal(t, cross.Groups[0].Repos, []string{"org/a", "org/b"})
+}
+
+func TestSBOMEndpoint(t *testing.T) {
+	ctx := context.Background()
+	st := memory.New()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("org/a", model.KindRepository, "org/a"), Kind: model.KindRepository, Repo: "org/a", Name: "org/a", Head: "abc", Time: "2026-10-22T10:00:00Z"})
+	for _, name := range []string{"github.com/x/x", "github.com/y/y"} {
+		g.AddNode(model.Node{ID: model.NodeID("org/a", model.KindModule, name), Kind: model.KindModule, Repo: "org/a", Name: name, Version: "v1.0.0", Ecosystem: "Go", License: "MIT"})
+	}
+	g.AddEdge(model.Edge{From: model.NodeID("org/a", model.KindModule, "github.com/x/x"), To: model.NodeID("org/a", model.KindModule, "github.com/y/y"), Kind: model.EdgeDependsOn})
+	require.NoError(t, st.ReplaceRepo(ctx, "org/a", g))
+	ts := httptest.NewServer(New(ctx, Config{SourcesRoot: t.TempDir(), Version: "test"}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	t.Cleanup(ts.Close)
+
+	res, err := http.Get(ts.URL + "/api/v1/repos/org%2Fa/sbom") //nolint:noctx // test
+	require.NoError(t, err)
+	defer res.Body.Close() //nolint:errcheck // test
+	require.Equal(t, res.StatusCode, 200)
+	assert.Equal(t, res.Header.Get("Content-Type"), "application/vnd.cyclonedx+json")
+	assert.Equal(t, res.Header.Get("Content-Disposition"), `attachment; filename="org-a.cdx.json"`)
+	var doc map[string]any
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&doc))
+	assert.Equal(t, doc["specVersion"], "1.5")
+	assert.Len(t, doc["components"], 2)
+	assert.Len(t, doc["dependencies"], 2, "the project's and x's")
+
+	assert.Equal(t, get(t, ts, "/api/v1/repos/nope/sbom", nil), 404)
+	assert.Equal(t, sbomFileName("host.example/team/../x y"), "host.example-team-..-x-y.cdx.json")
 }

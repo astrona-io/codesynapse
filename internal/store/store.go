@@ -27,6 +27,11 @@ const (
 	MaxLimit = 500
 	// MaxSubgraphEdges bounds Subgraph results (graph views).
 	MaxSubgraphEdges = 5000
+	// MaxDependencies bounds the modules and the vulnerabilities returned by
+	// DependencyGraph (the lockfile reader stops at the same number of modules);
+	// edges are bounded by MaxDependencyEdges.
+	MaxDependencies    = 20000
+	MaxDependencyEdges = 100000
 )
 
 // Direction selects which way a traversal follows edges.
@@ -96,6 +101,18 @@ type Writer interface {
 	DeleteRepo(ctx context.Context, repo string) error
 }
 
+// DependencyGraph is everything a software bill of materials needs: the
+// modules of a repository, the vulnerabilities found in them and which module
+// requires which. Unlike List it is complete up to MaxDependencies.
+type DependencyGraph struct {
+	Modules         []model.Node
+	Vulnerabilities []model.Node
+	// Edges are the DEPENDS_ON edges between modules: From requires To.
+	Edges []model.Edge
+	// Truncated is set when a limit cut one of the lists.
+	Truncated bool
+}
+
 // Reader answers graph queries. Every method is bounded by MaxLimit and
 // MaxDepth; implementations clamp out-of-range values instead of failing.
 type Reader interface {
@@ -120,6 +137,9 @@ type Reader interface {
 	// List returns nodes of repo matching f, ordered by m (descending for
 	// numeric metrics).
 	List(ctx context.Context, repo string, f Filter, m Metric, limit int) ([]Ranked, error)
+	// DependencyGraph returns the modules, vulnerabilities and module
+	// requirements of repo, each ordered by ID.
+	DependencyGraph(ctx context.Context, repo string) (DependencyGraph, error)
 	// Subgraph returns the edges whose endpoints are both in ids, optionally
 	// restricted to kinds. At most MaxSubgraphEdges are returned.
 	Subgraph(ctx context.Context, ids []string, kinds []model.EdgeKind) ([]model.Edge, error)

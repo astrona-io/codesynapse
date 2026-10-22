@@ -4,6 +4,7 @@ import type { CleanupReport, LicenseReport, Ranked, SecurityReport, SecVuln } fr
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
 useHead({ title: () => `Dependency review · ${repo.value}` })
+const sbomHref = computed(() => apiPath(repoPath(repo.value, 'sbom')))
 const { data: mods, error } = useApiGet<{ results: Ranked[] }>(() => repoPath(repo.value, 'list?kind=Module&metric=name&limit=500'))
 const { data: sec } = useApiGet<SecurityReport>(() => repoPath(repo.value, 'security'))
 const { data: lic } = useApiGet<LicenseReport>(() => repoPath(repo.value, 'licenses'))
@@ -124,7 +125,9 @@ const agentText = computed(() => `Run the dependency-review prompt for ${repo.va
 <template>
   <div class="stack">
     <PageHeader eyebrow="Dependencies" title="Dependency review" lede="Packages that need a decision: known vulnerabilities, licences to check and dependencies nothing imports, each with a suggested action. The suggestions come from CodeSynapse's data; check them before you change anything."
-      :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Dependency review' }]" />
+      :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Dependency review' }]">
+      <a :href="sbomHref" download class="btn btn--ghost" title="Dependencies resolved by go.mod and the lockfiles, as CycloneDX 1.5 JSON. Not the contents of a built artifact.">Download SBOM</a>
+    </PageHeader>
     <p v-if="error" class="notice notice--danger">{{ apiErrorMessage(error) }}</p>
 
     <div class="grid cols-4">

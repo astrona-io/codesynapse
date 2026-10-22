@@ -90,7 +90,8 @@ const (
 	EdgeAuthored EdgeKind = "AUTHORED"
 	// EdgeHasFinding links a function, method or file to a security Finding.
 	EdgeHasFinding EdgeKind = "HAS_FINDING"
-	// EdgeDependsOn links the Repository to a Module it requires.
+	// EdgeDependsOn links the Repository to a Module it requires, and a Module
+	// to the Modules it requires.
 	EdgeDependsOn EdgeKind = "DEPENDS_ON"
 	// EdgeAffects links a Vulnerability to the Module (and External symbols) it affects.
 	EdgeAffects EdgeKind = "AFFECTS"

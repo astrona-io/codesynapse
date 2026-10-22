@@ -114,6 +114,10 @@ Follow-ups: measure `minimal_context` recall on real tasks (does it surface the 
 
 Known limits: no type inference for Python/JS, so dynamic dispatch and higher-order calls are under-reported; tree-sitter (roadmap) would give exact parsing and more languages.
 
+## Dependency graph and SBOM
+
+`Module -DEPENDS_ON-> Module` edges (from `vuln.Module.Requires` plus the Go package-import edges) record which module requires which, next to the existing `Repository -DEPENDS_ON-> Module`. The new `store.Reader.DependencyGraph(repo)` returns every Module, every Vulnerability and the module-to-module edges, complete up to `MaxDependencies` (20,000; 100,000 edges) and flagged `Truncated` beyond, because `List` stops at 500 and an SBOM must not be silently partial. It is implemented in the memory, Neo4j (two node queries and one edge query, constant text) and HugeGraph (one constant script) stores and covered by the `dependency_graph` contract test. `internal/sbom` turns it into CycloneDX 1.5 (`Build`, `PURL`, `Marshal`); the output is deterministic for an ingest. Served by `GET /api/v1/repos/{repo}/sbom` (repository viewer) and `codesynapse sbom`; the web proxy forwards the one `attachment` Content-Disposition with a plain file name.
+
 ## Dependency paths
 
 `vuln.Module` carries `Requires` (module keys it requires, from npm `package-lock.json` v2/v3 and `uv.lock`/`poetry.lock`), and `vuln.GoGraph` reads Go edges from `go list -deps -test -json` (an import crossing from one module into another; local toolchain, `CGO_ENABLED=0`, `GOTOOLCHAIN=local`, `GOPROXY=off` unless the user opts into network, no shell). `vuln.AssignPaths` then sets `Via` (shortest chain from a declared dependency, multi-source breadth-first, ties broken by name) and `Roots` (declared dependencies that reach it; skipped above 5 million roots times edges) on indirect modules, stored as `Node.Via` and `Node.Roots` (`via`, `roots` in `nodeprops` and the HugeGraph schema). `security.Vulnerability` repeats them. No new edge kinds: the chain is a string, not a traversal. Yarn and pnpm lockfiles and lockfile v1 carry no edges yet.

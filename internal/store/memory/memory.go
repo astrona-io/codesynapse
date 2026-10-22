@@ -104,6 +104,48 @@ func (s *Store) repo(name string) (*repoGraph, error) {
 	return rg, nil
 }
 
+// DependencyGraph implements store.Reader.
+func (s *Store) DependencyGraph(_ context.Context, repo string) (store.DependencyGraph, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rg, err := s.repo(repo)
+	if err != nil {
+		return store.DependencyGraph{}, err
+	}
+	var g store.DependencyGraph
+	isModule := map[string]bool{}
+	for id, n := range rg.nodes {
+		switch n.Kind {
+		case model.KindModule:
+			g.Modules = append(g.Modules, n)
+			isModule[id] = true
+		case model.KindVulnerability:
+			g.Vulnerabilities = append(g.Vulnerabilities, n)
+		}
+	}
+	for id := range isModule {
+		for _, e := range rg.out[id] {
+			if e.Kind == model.EdgeDependsOn && isModule[e.To] {
+				g.Edges = append(g.Edges, e)
+			}
+		}
+	}
+	byID := func(a, b model.Node) int { return cmp.Compare(a.ID, b.ID) }
+	slices.SortFunc(g.Modules, byID)
+	slices.SortFunc(g.Vulnerabilities, byID)
+	slices.SortFunc(g.Edges, func(a, b model.Edge) int { return cmp.Or(cmp.Compare(a.From, b.From), cmp.Compare(a.To, b.To)) })
+	if len(g.Modules) > store.MaxDependencies {
+		g.Modules, g.Truncated = g.Modules[:store.MaxDependencies], true
+	}
+	if len(g.Vulnerabilities) > store.MaxDependencies {
+		g.Vulnerabilities, g.Truncated = g.Vulnerabilities[:store.MaxDependencies], true
+	}
+	if len(g.Edges) > store.MaxDependencyEdges {
+		g.Edges, g.Truncated = g.Edges[:store.MaxDependencyEdges], true
+	}
+	return g, nil
+}
+
 // FindingCounts implements store.Reader.
 func (s *Store) FindingCounts(_ context.Context, repo string) (map[string]int, error) {
 	s.mu.RLock()

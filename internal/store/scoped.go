@@ -44,6 +44,12 @@ func (s repositoryReader) Stats(ctx context.Context, repo string) (model.Stats, 
 	}
 	return s.reader.Stats(ctx, repo)
 }
+func (s repositoryReader) DependencyGraph(ctx context.Context, repo string) (DependencyGraph, error) {
+	if !s.allows(repo) {
+		return DependencyGraph{}, ErrNotFound
+	}
+	return s.reader.DependencyGraph(ctx, repo)
+}
 func (s repositoryReader) FindingCounts(ctx context.Context, repo string) (map[string]int, error) {
 	if !s.allows(repo) {
 		return nil, ErrNotFound

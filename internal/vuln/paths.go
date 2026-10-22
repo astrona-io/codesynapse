@@ -140,7 +140,7 @@ func AssignPaths(mods []Module, goEdges map[string][]string) {
 	name := map[string]string{} // key -> display name
 	direct := map[string]bool{}
 	edges := map[string][]string{}
-	for _, m := range mods {
+	for i, m := range mods {
 		k := m.Key()
 		name[k] = m.Path
 		if !m.Indirect {
@@ -149,6 +149,12 @@ func AssignPaths(mods []Module, goEdges map[string][]string) {
 		edges[k] = append(edges[k], m.Requires...)
 		if m.ecosystem() == EcosystemGo {
 			edges[k] = append(edges[k], goEdges[m.Path]...)
+			// Keep the Go edges on the module too: they become DEPENDS_ON edges.
+			for _, c := range goEdges[m.Path] {
+				if !slices.Contains(mods[i].Requires, c) {
+					mods[i].Requires = append(mods[i].Requires, c)
+				}
+			}
 		}
 	}
 	// Shortest chain from any direct dependency: a breadth-first walk from

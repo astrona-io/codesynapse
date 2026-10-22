@@ -110,3 +110,14 @@ Not covered yet: yarn and pnpm lockfiles, `requirements.txt`, Pipfile.lock and l
 | Java and Kotlin | `gradle.lockfile` | coordinates named in `build.gradle(.kts)` next to it | no |
 
 Advisories come from osv.dev for all of them. Not read: Maven `pom.xml` (it holds ranges and properties, not the resolved graph), Gradle without dependency locking, NuGet without `packages.lock.json`, Swift, Dart, Elixir, C/C++. For those the agent prompt gives the commands to run. Versions that are not semver (four-part Ruby or NuGet versions) are matched against advisories but the suggested "fixed in" version is the first one OSV lists, which may belong to another release branch: check it.
+
+## SBOM export
+
+**Download SBOM** on the Dependencies and Dependency review pages, `GET /api/v1/repos/{repo}/sbom` and `codesynapse sbom [path] --file sbom.cdx.json` produce a CycloneDX 1.5 JSON software bill of materials.
+
+- **Components**: every module go.mod and the lockfiles resolved, with name, version, package URL (`pkg:golang/…`, `pkg:npm/%40scope/…`, `pkg:cargo/…`, `pkg:composer/…`, `pkg:gem/…`, `pkg:nuget/…`, `pkg:maven/…`, `pkg:pypi/…`), licence (an SPDX expression, a known identifier, or the name as written), scope (`excluded` for development dependencies) and properties for the ecosystem, whether the project declares it, and its dependency path.
+- **Dependencies**: the project depends on the declared modules, and each module on the modules it requires, where the lockfile records that (Go, npm `package-lock.json`, uv, poetry, Cargo, Composer, Bundler, NuGet). Yarn, pnpm, Gradle and requirements files have no edges; the document says so in a property instead of claiming that those packages have no dependencies.
+- **Vulnerabilities** (when the repository was synced with the vulnerability scan on): id, severity, fix and reachability, pointing at the affected component.
+- The timestamp is the ingest time and the serial number is derived from the repository, commit and ingest time, so exporting the same ingest twice gives identical bytes. A list cut by a size limit (20,000 modules) is marked with a `codesynapse:truncated` property.
+
+It lists what the lockfiles resolve, not what a build finally ships: a bundler may leave packages out, a container image adds its own, and vendored or copied code is not included. Treat it as the input to a build-time check, not a replacement for one. The CLI is offline by default; `--vulns` adds an osv.dev lookup (ecosystem, package names and versions only).

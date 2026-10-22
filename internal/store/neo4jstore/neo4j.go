@@ -262,6 +262,42 @@ func (s *Store) repoExists(ctx context.Context, repo string) error {
 	return nil
 }
 
+// DependencyGraph implements store.Reader.
+func (s *Store) DependencyGraph(ctx context.Context, repo string) (store.DependencyGraph, error) {
+	if err := s.repoExists(ctx, repo); err != nil {
+		return store.DependencyGraph{}, err
+	}
+	var g store.DependencyGraph
+	for _, q := range []struct {
+		kind string
+		into *[]model.Node
+	}{{"Module", &g.Modules}, {"Vulnerability", &g.Vulnerabilities}} {
+		res, err := s.read(ctx, "MATCH (n:Node {repo: $repo, kind: $kind}) RETURN n ORDER BY n.id LIMIT $limit",
+			map[string]any{"repo": repo, "kind": q.kind, "limit": store.MaxDependencies + 1})
+		if err != nil {
+			return g, err
+		}
+		if *q.into, err = nodes(res); err != nil {
+			return g, err
+		}
+		if len(*q.into) > store.MaxDependencies {
+			*q.into, g.Truncated = (*q.into)[:store.MaxDependencies], true
+		}
+	}
+	res, err := s.read(ctx, `MATCH (a:Node {repo: $repo, kind: 'Module'})-[:DEPENDS_ON]->(b:Node {repo: $repo, kind: 'Module'})
+RETURN a.id AS from, b.id AS to ORDER BY from, to LIMIT $limit`, map[string]any{"repo": repo, "limit": store.MaxDependencyEdges + 1})
+	if err != nil {
+		return g, err
+	}
+	for _, r := range res.Records {
+		g.Edges = append(g.Edges, model.Edge{From: str(r, "from"), To: str(r, "to"), Kind: model.EdgeDependsOn, Count: 1})
+	}
+	if len(g.Edges) > store.MaxDependencyEdges {
+		g.Edges, g.Truncated = g.Edges[:store.MaxDependencyEdges], true
+	}
+	return g, nil
+}
+
 // FindingCounts implements store.Reader.
 func (s *Store) FindingCounts(ctx context.Context, repo string) (map[string]int, error) {
 	res, err := s.read(ctx, "MATCH (n:Finding {repo: $repo}) RETURN n.severity AS severity, count(n) AS n", map[string]any{"repo": repo})
