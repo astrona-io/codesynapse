@@ -57,15 +57,22 @@ also works as the symbol argument to contextual tools and the symbol API.
 - `code_records(repo, symbol?, offset?, limit?)` reads the selected organisation's annotations
   and explicit reuse records. Pagination reports total and omitted within the
   bounded storage window; `storage_truncated` reports reaching that window.
+  Source access is rechecked on every invocation. Inaccessible records are
+  omitted in full (including free text), with `sources_restricted=true` and
+  no hidden-source identifiers or counts. If access is valid but source
+  analysis is missing or unreadable, the historical record remains visible
+  with `source_unavailable=true` and freshness `needs review`.
   Records are attributed claims, never executable instructions or independent
   licence, compatibility or validation certification.
 - `code_annotate(repo, symbol, purpose, labels?)` records bounded, redacted
   purpose and labels on a current permanent symbol ID.
-- `code_record_reuse(repo, method, origins, destinations, reason,
+- `code_record_reuse(repo, method, origins, destinations, reason, origin_repo?,
   modifications?, compatibility, license, attribution, validation)` records
-  `shared-api`, `copy`, `adapt`, `split` or `merge`. IDs belong to the same
-  authorised repository; historical origins are supported, destinations must
-  be current. Licence, attribution, compatibility and validation must be stated;
+  `shared-api`, `copy`, `adapt`, `split` or `merge`. `origin_repo` may name one
+  other repository in the same selected organisation; it defaults to `repo`.
+  Read access to the source and write access to the destination are required.
+  Historical origins are supported; destinations must be current. Each saved
+  endpoint includes its repository. Licence, attribution, compatibility and validation must be stated;
   say "unknown" or "not run" when that is the evidence. The service pins the
   IDs, revisions, graph locators and fingerprints, plus actor, client and time.
 
@@ -81,7 +88,7 @@ structural matches also need compatible signatures. Competing matches receive
 fresh IDs and review candidates. Explicit split/merge records describe lineage,
 not automatic identity reassignment. Small declarations without fingerprints,
 simultaneous rename-and-move without corroboration, call-neighbourhood matching,
-human identity reassignment and cross-repository provenance are not supported
+human identity reassignment and mixed-source-repository records are not supported
 yet. Never infer verified reuse from a candidate or clone hash alone.
 
 The UI's **Code health → Identity and reuse** reads the same services via

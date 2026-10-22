@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -12,7 +13,8 @@ import (
 
 type toolPolicy struct {
 	role accounts.Role
-	// target is repository, review, list, or catalog. Review IDs resolve from storage.
+	// target is repository, reuse, review, list, or catalog. Reuse also checks
+	// an optional source; review IDs resolve from storage.
 	target string
 }
 
@@ -26,7 +28,7 @@ var toolPolicies = map[string]toolPolicy{
 	"code_identities":        {accounts.Viewer, "repository"},
 	"code_records":           {accounts.Viewer, "repository"},
 	"code_annotate":          {accounts.Member, "repository"},
-	"code_record_reuse":      {accounts.Member, "repository"},
+	"code_record_reuse":      {accounts.Member, "reuse"},
 	"get_call_graph":         {accounts.Viewer, "repository"},
 	"get_implementations":    {accounts.Viewer, "repository"},
 	"get_pr_context":         {accounts.Viewer, "repository"},
@@ -111,9 +113,10 @@ func (h *handlers) authorizeTool(ctx context.Context, policy toolPolicy, raw jso
 		return nil
 	}
 	var args struct {
-		Repo     string `json:"repo"`
-		ID       string `json:"id"`
-		ReviewID string `json:"review_id"`
+		Repo       string `json:"repo"`
+		ID         string `json:"id"`
+		ReviewID   string `json:"review_id"`
+		OriginRepo string `json:"origin_repo"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return fmt.Errorf("invalid tool arguments")
@@ -141,7 +144,17 @@ func (h *handlers) authorizeTool(ctx context.Context, policy toolPolicy, raw jso
 		return err
 	}
 	if policy.role == accounts.Member {
-		return h.canWrite(ctx, resolved)
+		if err := h.canWrite(ctx, resolved); err != nil {
+			return err
+		}
+	}
+	if source := strings.TrimSpace(args.OriginRepo); policy.target == "reuse" && source != "" && source != resolved {
+		svc, _, err := h.catalogFor(ctx, resolved)
+		if err != nil {
+			return err
+		}
+		_, err = svc.ReadRepository(ctx, source)
+		return err
 	}
 	return nil
 }

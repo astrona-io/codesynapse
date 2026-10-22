@@ -1,6 +1,7 @@
 package curation
 
 import (
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"strings"
@@ -9,9 +10,11 @@ import (
 )
 
 // CodeInput describes an annotation or an explicitly recorded reuse, split
-// or merge. Origins and destinations are permanent IDs in one repository.
+// or merge. Origins belong to OriginRepo (or the destination repository when
+// empty); destinations always belong to the repository storing the record.
 type CodeInput struct {
 	Method        string   `json:"method"`
+	OriginRepo    string   `json:"origin_repo,omitempty"`
 	Origins       []string `json:"origins"`
 	Destinations  []string `json:"destinations"`
 	Purpose       string   `json:"purpose"`
@@ -27,6 +30,7 @@ type CodeInput struct {
 // SymbolSource pins evidence to the revision recorded at creation time.
 type SymbolSource struct {
 	ID          string `json:"id"`
+	Repo        string `json:"repo,omitempty"`
 	Revision    string `json:"revision"`
 	NodeID      string `json:"node_id"`
 	Fingerprint string `json:"fingerprint"`
@@ -42,6 +46,13 @@ type CodeRecord struct {
 // PrepareCode validates bounded user text. The catalog fills evidence only
 // after resolving every reference in the authorised repository.
 func PrepareCode(repo, org, user, client string, in CodeInput, now time.Time) (Item, error) {
+	in.OriginRepo = strings.TrimSpace(in.OriginRepo)
+	if len(in.OriginRepo) > 300 || strings.ContainsAny(in.OriginRepo, "|\\\x00\r\n") {
+		return Item{}, fmt.Errorf("%w: invalid origin repository", ErrInvalid)
+	}
+	if in.Method == "annotation" && in.OriginRepo != "" {
+		return Item{}, fmt.Errorf("%w: annotations cannot name an origin repository", ErrInvalid)
+	}
 	if !slices.Contains([]string{"annotation", "shared-api", "copy", "adapt", "split", "merge"}, in.Method) {
 		return Item{}, fmt.Errorf("%w: unsupported reuse method", ErrInvalid)
 	}
@@ -60,11 +71,14 @@ func PrepareCode(repo, org, user, client string, in CodeInput, now time.Time) (I
 			if !strings.HasPrefix(id, "sym-") || len(id) != 36 || seen[id] {
 				return Item{}, fmt.Errorf("%w: unique permanent symbol IDs required", ErrInvalid)
 			}
+			if _, err := hex.DecodeString(id[4:]); err != nil {
+				return Item{}, fmt.Errorf("%w: invalid permanent symbol ID", ErrInvalid)
+			}
 			seen[id] = true
 		}
 	}
 	for _, id := range in.Origins {
-		if slices.Contains(in.Destinations, id) {
+		if (in.OriginRepo == "" || in.OriginRepo == repo) && slices.Contains(in.Destinations, id) {
 			return Item{}, fmt.Errorf("%w: origin and destination must differ", ErrInvalid)
 		}
 	}

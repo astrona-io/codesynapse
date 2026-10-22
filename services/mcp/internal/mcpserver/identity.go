@@ -56,8 +56,9 @@ func (h *handlers) codeAnnotate(ctx context.Context, req *mcp.CallToolRequest, i
 
 type codeReuseIn struct {
 	RepoArg
+	OriginRepo    string   `json:"origin_repo,omitempty" jsonschema:"source repository in the same organisation; defaults to repo; current read access required"`
 	Method        string   `json:"method" jsonschema:"shared-api, copy, adapt, split or merge; an explicit assertion by the caller"`
-	Origins       []string `json:"origins" jsonschema:"permanent source IDs in the same repository (may be historical)"`
+	Origins       []string `json:"origins" jsonschema:"permanent source IDs in origin_repo (may be historical)"`
 	Destinations  []string `json:"destinations" jsonschema:"current permanent destination IDs in this repository"`
 	Reason        string   `json:"reason" jsonschema:"why this reuse was chosen"`
 	Modifications string   `json:"modifications,omitempty" jsonschema:"what was changed"`
@@ -75,7 +76,7 @@ func (h *handlers) codeRecordReuse(ctx context.Context, req *mcp.CallToolRequest
 	if err := h.audit(ctx, "mcp.code.record_reuse", repo); err != nil {
 		return nil, catalog.CodeView{}, err
 	}
-	v, err := svc.RecordCode(ctx, repo, actorOf(ctx, req), curation.CodeInput{Method: in.Method, Origins: in.Origins, Destinations: in.Destinations, Reason: in.Reason, Modifications: in.Modifications, Compatibility: in.Compatibility, License: in.License, Attribution: in.Attribution, Validation: in.Validation})
+	v, err := svc.RecordCode(ctx, repo, actorOf(ctx, req), curation.CodeInput{Method: in.Method, OriginRepo: in.OriginRepo, Origins: in.Origins, Destinations: in.Destinations, Reason: in.Reason, Modifications: in.Modifications, Compatibility: in.Compatibility, License: in.License, Attribution: in.Attribution, Validation: in.Validation})
 	return nil, v, err
 }
 

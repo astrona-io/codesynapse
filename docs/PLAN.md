@@ -80,13 +80,17 @@ the stored baseline read before the existing serialized ingest job. Avoid
 concurrent CLI/API ingests of the same repository. No source bodies are stored.
 
 `Curated` code records add organisation-scoped annotations and explicit
-same-repository reuse, adaptation, split and merge lineage. Each pins symbol
+reuse, adaptation, split and merge lineage. An optional source repository may
+be another repository in the same selected organisation. Every creation checks
+source read access and destination write access; every read rechecks source
+access and omits the whole record if it is lost. An allowed but unavailable
+source is marked as needing review, never clean. Each record pins symbol
 IDs, revisions and fingerprints, actor/client and the author's reason,
 modifications, compatibility, licence/attribution and validation assessment.
 Freshness and endpoint changes are computed on reads, without rewriting the
 historical record. These are attributed claims, not independently verified
-outcomes. Cross-repository provenance and identity reassignment remain future
-work. See [the agent contracts](AGENT_GUIDE.md#permanent-code-identities-and-reuse-evidence).
+outcomes. Mixed-source-repository records and identity reassignment remain
+future work. See [the agent contracts](AGENT_GUIDE.md#permanent-code-identities-and-reuse-evidence).
 
 ### Risk scoring
 
