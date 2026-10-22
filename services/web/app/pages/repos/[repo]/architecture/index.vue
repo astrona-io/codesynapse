@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ArchIssue, ArchPage } from '~/utils/types'
+import type { ArchIssue, ArchPage, ArchProposal } from '~/utils/types'
 
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
@@ -25,6 +25,37 @@ watch([type, status, component, q, bindingOnly], () => { offset.value = 0 })
 const { data: page, error, pending } = useApiGet<ArchPage>(() => repoPath(repo.value, `architecture?${query.value}`))
 const { data: issuesData } = useApiGet<{ issues: ArchIssue[] }>(() => repoPath(repo.value, 'architecture/issues'))
 
+const { data: proposalData, refresh: refreshProposals } = useApiGet<{ proposals: ArchProposal[] }>(() => repoPath(repo.value, 'architecture/proposals'))
+const proposals = computed(() => (proposalData.value?.proposals ?? []).filter((p) => p.state !== 'withdrawn'))
+const form = reactive({ type: 'adr', title: '', body: '', topic: '', components: '', supersedes: '', implements: '' })
+const formError = ref('')
+const saving = ref(false)
+const list = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean)
+async function propose() {
+  formError.value = ''
+  saving.value = true
+  try {
+    await apiPost(repoPath(repo.value, 'architecture/proposals'), {
+      type: form.type, title: form.title, body: form.body, topic: form.topic,
+      components: list(form.components), supersedes: list(form.supersedes), implements: list(form.implements),
+    })
+    Object.assign(form, { title: '', body: '', topic: '', components: '', supersedes: '', implements: '' })
+    await refreshProposals()
+  } catch (e) {
+    formError.value = apiErrorMessage(e)
+  } finally {
+    saving.value = false
+  }
+}
+async function withdraw(id: string) {
+  try {
+    await apiPost(repoPath(repo.value, `architecture/proposals/${id}/withdraw`), {})
+    await refreshProposals()
+  } catch (e) {
+    formError.value = apiErrorMessage(e)
+  }
+}
+const exportHref = (id: string) => apiPath(repoPath(repo.value, `architecture/proposals/${id}/export`))
 const TYPE: Record<string, string> = { adr: 'Decisions (ADR)', rfc: 'RFCs', standard: 'Standards', policy: 'Policies', overview: 'Overviews', runbook: 'Runbooks', diagram: 'Diagrams' }
 const total = computed(() => Object.values(page.value?.facets.types ?? {}).reduce((a, b) => a + b, 0))
 const inForce = computed(() => (page.value?.entries ?? []).filter((e) => e.binding).length)
@@ -92,6 +123,38 @@ implements: [internal/store]
         </section>
 
         <section class="panel">
+          <p class="eyebrow">Proposals, not decisions</p>
+          <h2>Drafts waiting to become records <span class="muted">· {{ proposals.length }}</span></h2>
+          <p class="muted small">A proposal is stored here and is not in the repository. Nothing is in force until someone commits it as a file with an accepted status; download the file, put it in the suggested place and review it like any change.</p>
+          <ul v-if="proposals.length" class="plain">
+            <li v-for="p in proposals" :key="p.id">
+              <strong>{{ p.title }}</strong> <span class="badge">{{ p.type }}</span> <span class="badge badge--amber">{{ p.state === 'merged' ? 'merged: now a record' : p.status + ' · not a decision' }}</span>
+              <div class="muted small">Suggested file <span class="mono">{{ p.suggested_path }}</span> · by {{ p.client || p.created_by || 'a user' }} · {{ when(p.created_at) }}</div>
+              <div class="row">
+                <a :href="exportHref(p.id)" download class="chip">Download file</a>
+                <button v-if="p.state === 'open'" class="chip" @click="withdraw(p.id)">Withdraw</button>
+              </div>
+            </li>
+          </ul>
+          <details class="propose">
+            <summary>Propose a record</summary>
+            <form class="stack" @submit.prevent="propose">
+              <label>Type
+                <select v-model="form.type"><option value="adr">Decision (ADR)</option><option value="rfc">RFC</option><option value="standard">Standard</option><option value="policy">Policy</option></select>
+              </label>
+              <label>Title <input v-model="form.title" required maxlength="200"></label>
+              <label>Text (Markdown) <textarea v-model="form.body" rows="6" maxlength="20000" /></label>
+              <label>Topic <input v-model="form.topic" placeholder="storage"></label>
+              <label>Components, comma separated <input v-model="form.components" placeholder="api, store"></label>
+              <label>Replaces these records (IDs) <input v-model="form.supersedes" placeholder="ADR-0002"></label>
+              <label>Code it would govern (file, package or symbol) <input v-model="form.implements" placeholder="internal/store, store.Reader"></label>
+              <p v-if="formError" class="notice notice--danger" role="alert">{{ formError }}</p>
+              <button type="submit" class="btn" :disabled="saving || !form.title.trim()">{{ saving ? 'Saving…' : 'Save proposal' }}</button>
+            </form>
+          </details>
+        </section>
+
+        <section class="panel">
           <div class="row" role="group" aria-label="Filter by type">
             <span class="label">Type</span>
             <button class="chip" :class="{ active: !type }" @click="type = ''">All</button>
@@ -154,6 +217,9 @@ implements: [internal/store]
 <style scoped>
 .plain { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
 .compact { gap: 6px; }
+.propose { margin-top: 12px; }
+.propose form { margin-top: 10px; max-width: 640px; }
+.propose label { display: grid; gap: 4px; }
 .search { width: 220px; min-height: 30px; padding: 4px 10px; }
 .small { font-size: 12.5px; }
 </style>

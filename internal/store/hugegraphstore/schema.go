@@ -24,9 +24,10 @@ var (
 	factProps     = []string{"fid", "tenant_id", "ns", "subj", "obj", "predicate", "source", "confirmations", "confidence", "valid_from", "valid_to", "created_at", "updated_at"}
 	reviewProps   = []string{"rid", "repo", "created_at", "updated_at", "doc"}
 	snapshotProps = []string{"sid", "repo", "at", "doc"}
+	curatedProps  = []string{"cid", "repo", "kind", "created_at", "doc"}
 	usageProps    = []string{"ukey", "day", "daynum", "org", "repo", "tool", "client", "calls", "errors", "response_tokens", "duration_ms", "max_duration_ms"}
 	otherTexts    = []string{"eid", "tenant_id", "ns", "type", "created_at", "updated_at", "emb_model", "fid", "subj", "obj", "predicate", "source",
-		"valid_from", "valid_to", "rid", "doc", "ukey", "day", "org", "tool", "client", "sid", "at"}
+		"valid_from", "valid_to", "rid", "doc", "ukey", "day", "org", "tool", "client", "sid", "at", "cid", "kind"}
 	otherLongs = []string{"count", "confirmations", "daynum", "calls", "errors", "response_tokens", "duration_ms", "max_duration_ms"}
 )
 
@@ -51,6 +52,7 @@ label('mem_entity', ['eid', 'tenant_id', 'ns'], entityProps)
 label('review', ['rid', 'repo'], reviewProps)
 label('usage', ['ukey', 'daynum'], usageProps)
 label('snapshot', ['sid', 'repo'], snapshotProps)
+label('curated', ['cid', 'repo'], curatedProps)
 
 edgeKinds.each { k ->
   s.edgeLabel(k).sourceLabel('node').targetLabel('node').properties('count', 'run').nullableKeys('count', 'run').ifNotExist().create()
@@ -66,6 +68,7 @@ s.indexLabel('memEntityByNs').onV('mem_entity').by('tenant_id', 'ns').secondary(
 s.indexLabel('factByFid').onE('fact').by('fid').secondary().ifNotExist().create()
 s.indexLabel('factByNs').onE('fact').by('tenant_id', 'ns').secondary().ifNotExist().create()
 s.indexLabel('reviewByRepo').onV('review').by('repo').secondary().ifNotExist().create()
+s.indexLabel('curatedByRepo').onV('curated').by('repo').secondary().ifNotExist().create()
 s.indexLabel('snapshotByRepo').onV('snapshot').by('repo').secondary().ifNotExist().create()
 s.indexLabel('usageByDay').onV('usage').by('daynum').range().ifNotExist().create()
 1`
@@ -81,7 +84,7 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	err := s.write(ctx, schemaScript, map[string]any{
 		"texts": append(append([]string{}, nodeTexts...), otherTexts...), "longs": append(append([]string{}, nodeLongs...), otherLongs...),
 		"bools": nodeBools, "lists": nodeLists,
-		"nodeProps": nodeProps, "entityProps": entityProps, "factProps": factProps, "reviewProps": reviewProps, "snapshotProps": snapshotProps, "usageProps": usageProps,
+		"nodeProps": nodeProps, "entityProps": entityProps, "factProps": factProps, "reviewProps": reviewProps, "snapshotProps": snapshotProps, "curatedProps": curatedProps, "usageProps": usageProps,
 		"edgeKinds": edges,
 	}, nil)
 	if err != nil {

@@ -35,7 +35,10 @@ func (s *Server) handleSBOM(w http.ResponseWriter, r *http.Request) {
 }
 
 // sbomFileName turns owner/name into a file name made of safe characters.
-func sbomFileName(repo string) string {
+func sbomFileName(repo string) string { return sbomFileNameBase(repo) + ".cdx.json" }
+
+// sbomFileNameBase turns a name into a file name made of safe characters.
+func sbomFileNameBase(repo string) string {
 	var b strings.Builder
 	for _, c := range repo {
 		switch {
@@ -45,5 +48,5 @@ func sbomFileName(repo string) string {
 			b.WriteByte('-')
 		}
 	}
-	return strings.Trim(b.String(), "-.") + ".cdx.json"
+	return strings.Trim(b.String(), "-.")
 }

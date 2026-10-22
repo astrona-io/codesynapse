@@ -5,7 +5,29 @@ const route = useRoute()
 const repo = computed(() => route.params.repo as string)
 const id = computed(() => route.params.id as string)
 useHead({ title: () => `${id.value} · Architecture · ${repo.value}` })
-const { data: rec, error } = useApiGet<ArchDetail>(() => repoPath(repo.value, `architecture/record?id=${encodeURIComponent(id.value)}`))
+const { data: rec, error, refresh } = useApiGet<ArchDetail>(() => repoPath(repo.value, `architecture/record?id=${encodeURIComponent(id.value)}`))
+const link = reactive({ kind: 'implements', target: '', note: '' })
+const linkError = ref('')
+async function addLink() {
+  linkError.value = ''
+  try {
+    await apiPost(repoPath(repo.value, 'architecture/links'), { kind: link.kind, record: id.value, target: link.target, note: link.note })
+    Object.assign(link, { target: '', note: '' })
+    await refresh()
+  } catch (e) {
+    linkError.value = apiErrorMessage(e)
+  }
+}
+async function removeLink(linkId: string) {
+  linkError.value = ''
+  try {
+    await apiDelete(repoPath(repo.value, `architecture/links/${linkId}`))
+    await refresh()
+  } catch (e) {
+    linkError.value = apiErrorMessage(e)
+  }
+}
+const targetHint = computed(() => ({ implements: 'internal/store, store.Reader or a file', relates: 'ADR-0004', 'applies-to': 'api' }[link.kind] ?? ''))
 
 const base = computed(() => `/repos/${encodeURIComponent(repo.value)}`)
 const detail = (rid: string) => `${base.value}/architecture/${encodeURIComponent(rid)}`
@@ -88,12 +110,32 @@ const explain = computed(() => {
         <div v-if="rec.implemented_by.length" class="table-wrap"><table><tbody>
           <tr v-for="c in rec.implemented_by" :key="c.id">
             <td><NuxtLink v-if="isCode(c.id)" :to="explore(c.id)" class="mono">{{ c.name }}</NuxtLink><span v-else class="mono">{{ c.name }}</span></td>
-            <td><span class="badge">{{ c.kind }}</span></td>
+            <td><span class="badge">{{ c.kind || 'code' }}</span></td>
             <td class="mono muted">{{ c.location }}</td>
-            <td class="muted small">named as <span class="mono">{{ c.declared }}</span></td>
+            <td class="muted small">
+              <template v-if="c.source === 'link'">
+                <span class="badge badge--violet">linked by {{ c.by || 'a user' }}</span>
+                <span v-if="c.stale" class="badge badge--amber" :title="c.problem">needs re-linking: {{ c.problem }}</span>
+                <button class="chip" :aria-label="`Remove the link to ${c.declared}`" @click="removeLink(c.link_id!)">Remove</button>
+              </template>
+              <template v-else>declared in the file<template v-if="c.declared"> as <span class="mono">{{ c.declared }}</span></template></template>
+            </td>
           </tr>
         </tbody></table></div>
-        <p v-else class="muted">No code is linked. Add <span class="mono">implements: [path or symbol]</span> to the record's front matter.</p>
+        <p v-else class="muted">No code is linked. Add <span class="mono">implements: [path or symbol]</span> to the record's front matter, or link it below.</p>
+        <details class="link-form">
+          <summary>Add a link</summary>
+          <form class="stack" @submit.prevent="addLink">
+            <label>Kind
+              <select v-model="link.kind"><option value="implements">Code carries out this record</option><option value="relates">Related record</option><option value="applies-to">Applies to a component</option></select>
+            </label>
+            <label>Target <input v-model="link.target" required :placeholder="targetHint"></label>
+            <label>Note <input v-model="link.note" maxlength="1000"></label>
+            <p v-if="linkError" class="notice notice--danger" role="alert">{{ linkError }}</p>
+            <button type="submit" class="btn" :disabled="!link.target.trim()">Add link</button>
+          </form>
+          <p class="muted small">A link is recorded with who added it and is shown beside what the file declares. It does not change the record or the code, and it is flagged if the code is renamed.</p>
+        </details>
         <template v-if="rec.mentions.length">
           <h3>Code its text mentions</h3>
           <p class="muted small">Weaker than a link: the name appears in the text, which does not mean the code follows the decision.</p>
@@ -130,4 +172,7 @@ const explain = computed(() => {
 .meta dd { margin: 0; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .small { font-size: 12.5px; }
+.link-form { margin-top: 12px; }
+.link-form form { margin-top: 10px; max-width: 560px; }
+.link-form label { display: grid; gap: 4px; }
 </style>

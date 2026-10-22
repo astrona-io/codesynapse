@@ -12,8 +12,10 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/arch"
+	"github.com/parisnakitakejser/codesynapse/internal/curation"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/query"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
@@ -23,6 +25,13 @@ import (
 type Service struct {
 	// R must be fenced to the repository (store.ForRepository).
 	R store.Reader
+	// Items keeps proposals and links; nil leaves them unavailable.
+	Items store.CuratedStore
+	// Org is the organisation whose proposals and links are shown ("" outside
+	// accounts mode). Organisations sharing a code graph never see each other's.
+	Org string
+	// Now is the clock; nil uses time.Now.
+	Now func() time.Time
 }
 
 // Source says which revision of the repository an answer describes.
@@ -105,10 +114,14 @@ type loaded struct {
 	order     []string
 	source    Source
 	truncated bool
+	// links are the links added through the catalog (this organisation's).
+	links []curation.Item
+	// extraComponents are components added by applies-to links.
+	extraComponents map[string][]string
 }
 
 func (s Service) load(ctx context.Context, repo string) (*loaded, error) {
-	l := &loaded{nodes: map[string]model.Node{}, metas: map[string]arch.Meta{}, source: Source{Repo: repo}}
+	l := &loaded{nodes: map[string]model.Node{}, metas: map[string]arch.Meta{}, source: Source{Repo: repo}, extraComponents: map[string][]string{}}
 	rn, err := s.R.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
 	if err != nil {
 		return nil, err
@@ -132,6 +145,15 @@ func (s Service) load(ctx context.Context, repo string) (*loaded, error) {
 		l.order = append(l.order, id)
 	}
 	slices.Sort(l.order)
+	if l.links, err = s.items(ctx, repo, curation.KindLink); err != nil {
+		return nil, err
+	}
+	for _, it := range l.links {
+		if k := it.Link; k != nil && k.Kind == curation.AppliesTo {
+			id := canonical(l, k.Record)
+			l.extraComponents[id] = append(l.extraComponents[id], k.Target)
+		}
+	}
 	return l, nil
 }
 
@@ -153,9 +175,13 @@ func (l *loaded) superseded(id string) bool {
 
 func (l *loaded) entry(id string, issues map[string]int) Entry {
 	n, m := l.nodes[id], l.metas[id]
+	components := m.Components
+	if extra := l.extraComponents[id]; len(extra) > 0 {
+		components = slices.Compact(slices.Sorted(slices.Values(append(slices.Clone(components), extra...))))
+	}
 	return Entry{
 		ID: id, NodeID: n.ID, Type: n.DocType, Status: n.Status, Binding: l.binding(id), Title: n.Name, Summary: n.Summary,
-		Owner: m.Owner, Topic: m.Topic, Date: m.Date, Components: m.Components, Labels: m.Labels, Location: n.Location(),
+		Owner: m.Owner, Topic: m.Topic, Date: m.Date, Components: components, Labels: m.Labels, Location: n.Location(),
 		Supersedes: m.Supersedes, SupersededBy: m.SupersededBy, Fingerprint: n.BodyHash, Issues: issues[id],
 	}
 }
@@ -256,7 +282,19 @@ func (s Service) Issues(ctx context.Context, repo string) ([]Issue, Source, erro
 	if err != nil {
 		return nil, Source{}, err
 	}
-	return l.issues(), l.source, nil
+	out := l.issues()
+	for i, it := range l.links {
+		if i >= maxLinks {
+			break
+		}
+		if k := it.Link; k != nil && k.Kind == curation.Implements {
+			if _, err := s.resolveCode(ctx, repo, k.Target); err != nil {
+				out = append(out, Issue{Kind: "stale-link", Severity: "warning", Records: []string{canonical(l, k.Record)},
+					Message: fmt.Sprintf("the link from %s to %q no longer resolves: %v. Re-link it to the code's new name, or remove it", canonical(l, k.Record), k.Target, err)})
+			}
+		}
+	}
+	return out, l.source, nil
 }
 
 func (l *loaded) issues() []Issue {
@@ -305,7 +343,7 @@ func (l *loaded) issues() []Issue {
 		if !l.binding(id) || m.Topic == "" {
 			continue
 		}
-		comps := m.Components
+		comps := l.entry(id, nil).Components
 		if len(comps) == 0 {
 			comps = []string{"(whole system)"}
 		}
@@ -386,8 +424,16 @@ type ChainLink struct {
 // CodeLink is code that carries out a record, or code its text mentions.
 type CodeLink struct {
 	query.Ref
-	// Declared is how the record named it, when it did.
+	// Declared is how the record or the link named it.
 	Declared string `json:"declared,omitempty"`
+	// Source is "record" (declared in the file) or "link" (added through the
+	// catalog by a person or agent: By says who, LinkID removes it).
+	Source string `json:"source"`
+	LinkID string `json:"link_id,omitempty"`
+	By     string `json:"by,omitempty"`
+	// Stale is set when a link no longer resolves to exactly one place.
+	Stale   bool   `json:"stale,omitempty"`
+	Problem string `json:"problem,omitempty"`
 }
 
 // Revision is a commit that changed the record's file.
@@ -415,12 +461,14 @@ type Detail struct {
 	ImplementedBy []CodeLink `json:"implemented_by"`
 	// Mentions is code whose name appears in the record's text; it is
 	// weaker than ImplementedBy and never presented as an implementation.
-	Mentions  []query.Ref `json:"mentions"`
-	Related   []Entry     `json:"related"`
-	Problems  []Issue     `json:"problems"`
-	Outline   []Section   `json:"outline"`
-	Revisions []Revision  `json:"revisions"`
-	Source    Source      `json:"source"`
+	Mentions []query.Ref `json:"mentions"`
+	// Links are the links added through the catalog that touch this record.
+	Links     []LinkView `json:"links"`
+	Related   []Entry    `json:"related"`
+	Problems  []Issue    `json:"problems"`
+	Outline   []Section  `json:"outline"`
+	Revisions []Revision `json:"revisions"`
+	Source    Source     `json:"source"`
 	// Unresolved are the references in the record that matched nothing.
 	Unresolved []string `json:"unresolved,omitempty"`
 }
@@ -480,9 +528,41 @@ func (s Service) Get(ctx context.Context, repo, id string) (Detail, error) {
 		return d, err
 	}
 	for _, h := range hits {
-		d.ImplementedBy = append(d.ImplementedBy, CodeLink{Ref: query.RefOf(h.Node), Declared: declared[h.Node.ID]})
+		d.ImplementedBy = append(d.ImplementedBy, CodeLink{Ref: query.RefOf(h.Node), Declared: declared[h.Node.ID], Source: "record"})
 	}
-	slices.SortFunc(d.ImplementedBy, func(a, b CodeLink) int { return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Name, b.Name)) })
+	d.Links = []LinkView{}
+	for _, it := range l.links {
+		k := it.Link
+		if k == nil {
+			continue
+		}
+		touches := strings.EqualFold(k.Record, key) || (k.Kind == curation.Relates && strings.EqualFold(k.Target, key))
+		if !touches {
+			continue
+		}
+		v := s.linkView(ctx, repo, it)
+		d.Links = append(d.Links, v)
+		switch k.Kind {
+		case curation.Implements:
+			by := cmp.Or(v.Client, v.CreatedBy)
+			if v.Stale {
+				d.ImplementedBy = append(d.ImplementedBy, CodeLink{Ref: query.Ref{Name: k.Target}, Declared: k.Target, Source: "link", LinkID: v.ID, By: by, Stale: true, Problem: v.Problem})
+			} else if !slices.ContainsFunc(d.ImplementedBy, func(c CodeLink) bool { return c.ID == v.Resolved[0].ID }) {
+				d.ImplementedBy = append(d.ImplementedBy, CodeLink{Ref: v.Resolved[0], Declared: k.Target, Source: "link", LinkID: v.ID, By: by})
+			}
+		case curation.Relates:
+			other := canonical(l, k.Target)
+			if strings.EqualFold(k.Target, key) {
+				other = canonical(l, k.Record)
+			}
+			if _, ok := l.nodes[other]; ok && !slices.ContainsFunc(d.Related, func(e Entry) bool { return e.ID == other }) {
+				d.Related = append(d.Related, l.entry(other, counts))
+			}
+		}
+	}
+	slices.SortFunc(d.ImplementedBy, func(a, b CodeLink) int {
+		return cmp.Or(cmp.Compare(boolRank(a.Stale), boolRank(b.Stale)), cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Name, b.Name))
+	})
 
 	sections, err := s.R.NodesInFile(ctx, repo, n.File)
 	if err != nil {
@@ -536,4 +616,11 @@ func (l *loaded) chain(id string) []ChainLink {
 	walk(id, "superseded-by", 1, func(x string) []string { return l.metas[x].SupersededBy })
 	walk(id, "supersedes", 1, func(x string) []string { return l.metas[x].Supersedes })
 	return out
+}
+
+func boolRank(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

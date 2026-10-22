@@ -120,6 +120,8 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		"CREATE TEXT INDEX node_name IF NOT EXISTS FOR (n:Node) ON (n.name)",
 		"CREATE CONSTRAINT review_id IF NOT EXISTS FOR (r:Review) REQUIRE r.id IS UNIQUE",
 		"CREATE INDEX review_repo IF NOT EXISTS FOR (r:Review) ON (r.repo, r.created_at)",
+		"CREATE INDEX curated_repo_kind IF NOT EXISTS FOR (c:Curated) ON (c.repo, c.kind, c.created_at)",
+		"CREATE INDEX curated_id IF NOT EXISTS FOR (c:Curated) ON (c.id)",
 		"CREATE INDEX snapshot_repo_at IF NOT EXISTS FOR (s:Snapshot) ON (s.repo, s.at)",
 		"CREATE CONSTRAINT memory_entity_id IF NOT EXISTS FOR (e:MemoryEntity) REQUIRE e.id IS UNIQUE",
 		"CREATE INDEX memory_entity_repo IF NOT EXISTS FOR (e:MemoryEntity) ON (e.repo)",

@@ -241,6 +241,14 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/repos/{repo}/architecture/record", repoRole(accounts.Viewer), s.handleArchitectureRecord)
 	s.route("GET /api/v1/repos/{repo}/architecture/issues", repoRole(accounts.Viewer), s.handleArchitectureIssues)
 	s.route("GET /api/v1/repos/{repo}/architecture/context", repoRole(accounts.Viewer), s.handleArchitectureContext)
+	s.route("GET /api/v1/repos/{repo}/architecture/proposals", repoRole(accounts.Viewer), s.handleProposals)
+	s.route("POST /api/v1/repos/{repo}/architecture/proposals", repoRole(accounts.Member), s.handlePropose)
+	s.route("GET /api/v1/repos/{repo}/architecture/proposals/{id}", repoRole(accounts.Viewer), s.handleProposal)
+	s.route("POST /api/v1/repos/{repo}/architecture/proposals/{id}/withdraw", repoRole(accounts.Member), s.handleWithdrawProposal)
+	s.route("GET /api/v1/repos/{repo}/architecture/proposals/{id}/export", repoRole(accounts.Viewer), s.handleExportProposal)
+	s.route("GET /api/v1/repos/{repo}/architecture/links", repoRole(accounts.Viewer), s.handleLinks)
+	s.route("POST /api/v1/repos/{repo}/architecture/links", repoRole(accounts.Member), s.handleAddLink)
+	s.route("DELETE /api/v1/repos/{repo}/architecture/links/{id}", repoRole(accounts.Member), s.handleRemoveLink)
 	s.route("GET /api/v1/repos/{repo}/history", repoRole(accounts.Viewer), s.handleHistory)
 	s.route("GET /api/v1/repos/{repo}/cleanup/plan", repoRole(accounts.Viewer), s.handleCleanupPlan)
 	s.route("GET /api/v1/repos/{repo}/licenses", repoRole(accounts.Viewer), s.handleLicenses)
@@ -446,6 +454,9 @@ func (s *Server) deleteRepo(ctx context.Context, repo string, files bool) (int, 
 	}
 	if err := s.st.DeleteSnapshots(ctx, repo); err != nil {
 		s.logger.Warn("removing history", "repo", repo, "error", err)
+	}
+	if err := s.st.DeleteAllCurated(ctx, repo); err != nil {
+		s.logger.Warn("removing proposals and links", "repo", repo, "error", err)
 	}
 	if err := s.sched.remove(repo); err != nil {
 		s.logger.Warn("removing schedule", "repo", repo, "error", err)

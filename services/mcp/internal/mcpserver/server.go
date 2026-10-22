@@ -39,11 +39,21 @@ Rules for context efficiency:
 10. Architecture: before designing or changing code call architecture_context with the files, symbols or components you touch and the task. Follow the rules in force it returns (accepted ADRs, active standards). Proposals, drafts, RFCs, overviews and superseded records are background and never requirements. If it reports records that may conflict, tell the user and let them decide; do not choose between decisions yourself. architecture_search and architecture_get read a record; its text is in the file, at the lines they give.
 Locations are repo-relative. The graph reflects the last ingest; files edited since may differ.`
 
+// CatalogInstructions are appended to the server instructions when the
+// catalog write tools are enabled.
+const CatalogInstructions = `
+   You may propose a record with architecture_propose (a draft, always proposed or draft, never accepted) and tie code to a record with architecture_link. Search architecture_proposals first so you do not duplicate one. A proposal is not a decision and you cannot approve, accept, reject or supersede anything: tell the user what you proposed and that a person turns it into a decision by committing the file with an accepted status.`
+
 // Options configure the MCP server.
 type Options struct {
 	// Reviews enables the review tools (submit_review and friends), which
 	// write to this store. Nil leaves the server strictly read-only.
 	Reviews store.ReviewStore
+	// Curated keeps the proposals and links of the architecture catalog; the
+	// read tools show them. With CatalogWrites the propose and link tools are
+	// added, which write only there, never to code or the code graph.
+	Curated       store.CuratedStore
+	CatalogWrites bool
 	// History enables repo_trend, which reads the snapshots taken after each
 	// ingest. Nil leaves the tool out.
 	History store.HistoryStore
@@ -65,6 +75,9 @@ type Options struct {
 // New builds an MCP server backed by r.
 func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	instructions := Instructions
+	if len(opts) > 0 && opts[0].CatalogWrites && opts[0].Curated != nil {
+		instructions = strings.Replace(instructions, "\nLocations are repo-relative.", CatalogInstructions+"\nLocations are repo-relative.", 1)
+	}
 	if len(opts) > 0 && opts[0].Memory != nil {
 		instructions += MemoryInstructions
 	}
@@ -95,7 +108,10 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	mcp.AddTool(s, add("search", "Find symbols, files or doc sections by name substring. Returns ids for the other tools."), h.search)
 	registerAgentTools(s, h, add)
 	registerDiscoveryTools(s, h, add)
-	registerArchitectureTools(s, h, add)
+	if len(opts) > 0 {
+		h.curated = opts[0].Curated
+	}
+	registerArchitectureTools(s, h, add, len(opts) > 0 && opts[0].CatalogWrites && opts[0].Curated != nil)
 	registerPrompts(s)
 	if len(opts) > 0 && opts[0].History != nil {
 		h.history = opts[0].History
@@ -130,6 +146,7 @@ type handlers struct {
 	svc     query.Service
 	reviews store.ReviewStore
 	history store.HistoryStore
+	curated store.CuratedStore
 	memory  store.MemoryStore
 	offload *APIClient
 	access  Access

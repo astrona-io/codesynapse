@@ -12,7 +12,7 @@ One connected system for understanding the intended architecture, finding and re
 | Requirement | Today | Slice |
 |---|---|---|
 | Architecture catalog: records of seven types, lifecycle per type, stable IDs, revisions, supersession, relationships to code, conflict detection | Done: `internal/arch`, `internal/catalog`, API, MCP read tools, web pages | 1a |
-| Proposals, links and notes by people and agents, audited | Not yet | 1b |
+| Proposals and links by people and agents, audited | Done: `internal/curation`, `store.CuratedStore`, `architecture_propose`, `architecture_link`, API and pages. Annotations on symbols follow in slice 2 | 1b |
 | Component pages joining architecture, code, dependencies, findings, reuse | Records and code links only | 4 |
 | Code catalog: symbols with signature, range, fingerprint, tests, callers, dependencies | Exists in the code graph | done |
 | Stable symbol identity across renames and moves, ambiguous matches for review, lineage | Not yet (IDs are qualified names) | 2 |
@@ -27,7 +27,7 @@ One connected system for understanding the intended architecture, finding and re
 
 ## Slices
 
-1. **Architecture catalog.** 1a (this change): indexing, lifecycle, supersession, conflicts, read API and tools, pages. 1b: proposals and links stored in the graph store, `architecture_propose` and `architecture_link`, audited.
+1. **Architecture catalog.** 1a: indexing, lifecycle, supersession, conflicts, read API and tools, pages. 1b: proposals and links stored in the graph store, `architecture_propose` and `architecture_link`, audited.
 2. **Code identity and reuse lineage.** Match symbols across ingests by evidence (same file and signature, same fingerprint, call neighbourhood), keep the ID when the match is confident, surface ambiguous ones, record splits and merges; annotations; reuse records with original symbol and revision, method, licence and attribution, validation; divergence tracking. Never propagate changes automatically.
 3. **Dependency replacement analysis.** From the imports and symbols actually used, find a smaller supported alternative, then compare the complete resolved graph, licences, advisories and API surface before and after. A subpath import or tree shaking alone proves nothing, and copying or vendoring code to avoid a licence is never recommended. Proposals and verified outcomes are stored apart.
 4. **Unified experience.** Search across records, symbols, dependencies and reports; component pages; comparison view; analysis jobs with queued, running, completed, partial and failed states; `context_build` within a token budget; linked reports that go stale, never silently rewritten.

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/parisnakitakejser/codesynapse/internal/curation"
 	"github.com/parisnakitakejser/codesynapse/internal/history"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
@@ -24,6 +25,7 @@ type Store struct {
 	repos   map[string]*repoGraph
 	reviews map[string]reviews.Review
 	history map[string][]history.Snapshot
+	curated map[string]curation.Item
 	mem     map[string]*memRepo
 	usage   map[string]usage.Bucket
 	vecs    map[string]embedding // memory entity ID -> vector
@@ -39,7 +41,7 @@ var _ store.Store = (*Store)(nil)
 
 // New returns an empty store.
 func New() *Store {
-	return &Store{repos: map[string]*repoGraph{}, reviews: map[string]reviews.Review{}, history: map[string][]history.Snapshot{}, mem: map[string]*memRepo{}, usage: map[string]usage.Bucket{}, vecs: map[string]embedding{}}
+	return &Store{repos: map[string]*repoGraph{}, reviews: map[string]reviews.Review{}, history: map[string][]history.Snapshot{}, curated: map[string]curation.Item{}, mem: map[string]*memRepo{}, usage: map[string]usage.Bucket{}, vecs: map[string]embedding{}}
 }
 
 // EnsureSchema is a no-op.
@@ -489,5 +491,61 @@ func (s *Store) DeleteSnapshots(_ context.Context, repo string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.history, repo)
+	return nil
+}
+
+// SaveCurated implements store.CuratedStore.
+func (s *Store) SaveCurated(_ context.Context, it curation.Item) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.curated[it.Repo+"|"+it.ID] = it
+	return nil
+}
+
+// GetCurated implements store.CuratedStore.
+func (s *Store) GetCurated(_ context.Context, repo, id string) (curation.Item, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	it, ok := s.curated[repo+"|"+id]
+	if !ok {
+		return curation.Item{}, fmt.Errorf("item %q: %w", id, store.ErrNotFound)
+	}
+	return it, nil
+}
+
+// ListCurated implements store.CuratedStore.
+func (s *Store) ListCurated(_ context.Context, repo, kind string, limit int) ([]curation.Item, error) {
+	limit = store.ClampLimit(limit, 100)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []curation.Item
+	for _, it := range s.curated {
+		if it.Repo == repo && (kind == "" || it.Kind == kind) {
+			out = append(out, it)
+		}
+	}
+	slices.SortFunc(out, func(a, b curation.Item) int {
+		return cmp.Or(cmp.Compare(b.CreatedAt, a.CreatedAt), cmp.Compare(a.ID, b.ID))
+	})
+	return out[:min(len(out), limit)], nil
+}
+
+// DeleteCurated implements store.CuratedStore.
+func (s *Store) DeleteCurated(_ context.Context, repo, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.curated, repo+"|"+id)
+	return nil
+}
+
+// DeleteAllCurated implements store.CuratedStore.
+func (s *Store) DeleteAllCurated(_ context.Context, repo string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, it := range s.curated {
+		if it.Repo == repo {
+			delete(s.curated, k)
+		}
+	}
 	return nil
 }

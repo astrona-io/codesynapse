@@ -391,7 +391,17 @@ export interface ArchIssue { kind: string; severity: 'warning' | 'info'; message
 export interface ArchChainLink { id: string; title: string; status: string; relation: 'supersedes' | 'superseded-by'; depth: number }
 export interface ArchDetail extends ArchEntry {
   raw_status?: string; format?: string; lifecycle: string[]; chain: ArchChainLink[]
-  implemented_by: (NodeRef & { declared?: string })[]; mentions: NodeRef[]; related: ArchEntry[]; problems: ArchIssue[]
+  implemented_by: (NodeRef & { declared?: string; source: 'record' | 'link'; link_id?: string; by?: string; stale?: boolean; problem?: string })[]; mentions: NodeRef[]; links: ArchLink[]; related: ArchEntry[]; problems: ArchIssue[]
   outline: { name: string; lines: string; level?: number }[]; revisions: { commit: string; time?: string; subject?: string }[]
   source: ArchSource; unresolved?: string[]
+}
+export interface ArchLink {
+  id: string; kind: 'implements' | 'relates' | 'applies-to'; record: string; target: string; note?: string
+  created_at: string; created_by?: string; client?: string; resolved?: NodeRef[]; stale?: boolean; problem?: string
+}
+export interface ArchProposal {
+  id: string; type: string; title: string; body?: string; status: string; state: 'open' | 'withdrawn' | 'merged'; binding: boolean
+  topic?: string; components?: string[]; labels?: string[]; supersedes?: string[]; relates?: string[]
+  implements?: { ref: string; found: boolean; names?: string[]; why?: string }[]
+  suggested_id: string; suggested_path: string; created_at: string; created_by?: string; client?: string; notes: string[]
 }
