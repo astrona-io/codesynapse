@@ -93,6 +93,7 @@ func TestReadEndpoints(t *testing.T) {
 		{base + "/hotspots", 200},
 		{base + "/packages/graph", 200},
 		{"/api/v1/repos/nope/dashboard", 404},
+		{base + "/licenses", 404}, // fixture repository has no stored report
 		{"/api/v1/sources", 200},
 		{"/api/v1/settings", 200},
 	}
@@ -128,6 +129,24 @@ func TestIngestRejectsEscapes(t *testing.T) {
 			assert.Equal(t, post(t, ts, "/api/v1/ingest", body), 400)
 		})
 	}
+}
+
+func TestLicensesEndpoint(t *testing.T) {
+	ctx := context.Background()
+	st := memory.New()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindRepository, "r"), Kind: model.KindRepository, Repo: "r", Name: "r",
+		License: "MIT", Licenses: `{"project":{"license":"MIT","source":"LICENSE"},"total":3,"conflict":1}`})
+	require.NoError(t, st.ReplaceRepo(ctx, "r", g))
+	ts := httptest.NewServer(New(ctx, Config{}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	t.Cleanup(ts.Close)
+	var got struct {
+		Project  struct{ License string }
+		Conflict int
+	}
+	require.Equal(t, get(t, ts, "/api/v1/repos/r/licenses", &got), 200)
+	assert.Equal(t, got.Project.License, "MIT")
+	assert.Equal(t, got.Conflict, 1)
 }
 
 func TestMaskToken(t *testing.T) {

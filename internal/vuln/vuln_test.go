@@ -133,7 +133,7 @@ func TestManifestModules(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(root, p), []byte(s), 0o600))
 	}
 	write("web/package.json", `{"dependencies":{"lodash":"^4.17.0"},"devDependencies":{"vitest":"^1"}}`)
-	write("web/package-lock.json", `{"lockfileVersion":3,"packages":{"":{},"node_modules/lodash":{"version":"4.17.20"},"node_modules/vitest":{"version":"1.0.0","dev":true},"node_modules/lodash/node_modules/x":{"version":"1.0.0"}}}`)
+	write("web/package-lock.json", `{"lockfileVersion":3,"packages":{"":{},"node_modules/lodash":{"version":"4.17.20","license":"MIT"},"node_modules/vitest":{"version":"1.0.0","dev":true,"license":{"type":"Apache 2.0"}},"node_modules/lodash/node_modules/x":{"version":"1.0.0"}}}`)
 	write("svc/requirements.txt", "Flask==2.0.1  # web\nrequests>=2\nPyYAML==5.3\n")
 	write("api/pyproject.toml", "[project]\ndependencies = [\"fastapi>=0.1\"]\n")
 	write("api/uv.lock", "[[package]]\nname = \"fastapi\"\nversion = \"0.100.0\"\n\n[[package]]\nname = \"starlette\"\nversion = \"0.27.0\"\n")
@@ -148,6 +148,11 @@ func TestManifestModules(t *testing.T) {
 	assert.Equal(t, got["npm:lodash"].Version, "4.17.20")
 	assert.False(t, got["npm:lodash"].Indirect)
 	assert.True(t, got["npm:x"].Indirect, "nested node_modules are transitive")
+	assert.Equal(t, got["npm:lodash"].License, "MIT")
+	assert.Equal(t, got["npm:lodash"].LicenseSource, "package-lock.json")
+	assert.False(t, got["npm:lodash"].Dev)
+	assert.True(t, got["npm:vitest"].Dev)
+	assert.Equal(t, got["npm:vitest"].License, "Apache-2.0", "deprecated {type} form, normalised")
 	assert.Equal(t, got["PyPI:flask"].Version, "2.0.1", "PEP 503 normalised")
 	_, ranged := got["PyPI:requests"]
 	assert.False(t, ranged, "unpinned requirements cannot be checked")

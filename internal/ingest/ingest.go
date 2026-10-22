@@ -3,6 +3,7 @@
 package ingest
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/parisnakitakejser/codesynapse/internal/license"
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
 
 	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
@@ -37,6 +39,11 @@ type Options struct {
 	VulnScan bool
 	// OSV overrides the vulnerability client (tests, mirrors).
 	OSV *vuln.Client
+	// LicenseLookup asks deps.dev for dependency licences that are not found
+	// on disk. Sends ecosystem, package name and version.
+	LicenseLookup bool
+	// DepsDev overrides the licence lookup client (tests, mirrors).
+	DepsDev *license.DepsDev
 	// Branch is recorded on the Repository node; when empty the checked-out
 	// branch is used.
 	Branch string
@@ -71,6 +78,8 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	if repoNode.Branch == "" {
 		repoNode.Branch = gitx.CurrentBranch(ctx, root)
 	}
+	own := license.Project(root)
+	repoNode.License, repoNode.LicenseSource = own.License, own.Source
 
 	extImports := map[string][]string{}
 	var goRes *golang.Result
@@ -105,8 +114,12 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	if len(langRes.Languages) > 0 {
 		logger.Info("extracted source code", "files", langRes.Languages)
 	}
-	if err := addDependencies(ctx, opts, root, g, goRes, extImports); err != nil {
+	mods, err := addDependencies(ctx, opts, root, g, goRes, extImports)
+	if err != nil {
 		return nil, err
+	}
+	if repoNode.Licenses, err = license.Encode(license.Build(own, licenseDeps(mods), opts.LicenseLookup)); err != nil {
+		return nil, fmt.Errorf("licence report: %w", err)
 	}
 
 	cfgGraph, err := config.Extract(ctx, opts.Repo, root)
@@ -158,22 +171,22 @@ func hasGoModule(root string) bool {
 	return found
 }
 
-// addDependencies records go.mod modules and, when enabled, their known
-// vulnerabilities. A failed vulnerability lookup is logged, not fatal: the
+// addDependencies records go.mod and lockfile modules with their licences
+// and, when enabled, their known vulnerabilities. A failed vulnerability lookup is logged, not fatal: the
 // code graph is still useful without it.
-func addDependencies(ctx context.Context, opts Options, root string, g *model.Graph, goRes *golang.Result, imports map[string][]string) error {
+func addDependencies(ctx context.Context, opts Options, root string, g *model.Graph, goRes *golang.Result, imports map[string][]string) ([]vuln.Module, error) {
 	logger := logx.FromContext(ctx)
 	var mods []vuln.Module
 	if goRes != nil {
 		goMods, err := vuln.Modules(root, runtime.Version())
 		if err != nil {
-			return fmt.Errorf("reading go.mod: %w", err)
+			return nil, fmt.Errorf("reading go.mod: %w", err)
 		}
 		mods = goMods
 	}
 	other, err := vuln.ManifestModules(root)
 	if err != nil {
-		return fmt.Errorf("reading lockfiles: %w", err)
+		return nil, fmt.Errorf("reading lockfiles: %w", err)
 	}
 	mods = append(mods, other...)
 	var calls map[string][]string
@@ -194,6 +207,58 @@ func addDependencies(ctx context.Context, opts Options, root string, g *model.Gr
 			logger.Info("vulnerability scan complete", "modules", len(mods), "vulnerabilities", len(vulns))
 		}
 	}
+	resolveLicenses(ctx, opts, root, mods)
 	vuln.Apply(opts.Repo, g, mods, vulns, calls, imports)
-	return nil
+	return mods, nil
+}
+
+// resolveLicenses fills in licences the lockfiles did not record.
+func resolveLicenses(ctx context.Context, opts Options, root string, mods []vuln.Module) {
+	var deps []license.Dep
+	for _, m := range mods {
+		if m.License == "" {
+			deps = append(deps, license.Dep{Ecosystem: cmp.Or(m.Ecosystem, vuln.EcosystemGo), Name: m.Path, Version: m.Version})
+		}
+	}
+	r := license.Resolver{Root: root}
+	if opts.LicenseLookup {
+		r.Online = cmp.Or(opts.DepsDev, &license.DepsDev{})
+	}
+	found := r.Resolve(ctx, deps)
+	for i, m := range mods {
+		d := license.Dep{Ecosystem: cmp.Or(m.Ecosystem, vuln.EcosystemGo), Name: m.Path, Version: m.Version}
+		if f, ok := found[d.Key()]; ok && m.License == "" {
+			mods[i].License, mods[i].LicenseSource = f.License, f.Source
+		}
+	}
+	logx.FromContext(ctx).Info("licences resolved", "dependencies", len(mods), "found", len(found), "online", opts.LicenseLookup)
+}
+
+// Licenses checks the dependency licences of the repository at root without
+// indexing its code: the quick path for `codesynapse licenses` in CI.
+func Licenses(ctx context.Context, root string, opts Options) (license.Report, error) {
+	var mods []vuln.Module
+	if hasGoModule(root) {
+		goMods, err := vuln.Modules(root, runtime.Version())
+		if err != nil {
+			return license.Report{}, fmt.Errorf("reading go.mod: %w", err)
+		}
+		mods = goMods
+	}
+	other, err := vuln.ManifestModules(root)
+	if err != nil {
+		return license.Report{}, fmt.Errorf("reading lockfiles: %w", err)
+	}
+	mods = append(mods, other...)
+	resolveLicenses(ctx, opts, root, mods)
+	return license.Build(license.Project(root), licenseDeps(mods), opts.LicenseLookup), nil
+}
+
+func licenseDeps(mods []vuln.Module) []license.Dependency {
+	deps := make([]license.Dependency, len(mods))
+	for i, m := range mods {
+		deps[i] = license.Dependency{Ecosystem: cmp.Or(m.Ecosystem, vuln.EcosystemGo), Name: m.Path, Version: m.Version,
+			License: m.License, Source: m.LicenseSource, Indirect: m.Indirect, Dev: m.Dev}
+	}
+	return deps
 }

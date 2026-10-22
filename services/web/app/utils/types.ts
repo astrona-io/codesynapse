@@ -152,3 +152,16 @@ export interface AIProvider {
   sends_source: boolean; max_output_tokens: number; max_input_tokens: number; context_window?: number; tasks: string[]
   usage: { requests: number; failures: number; input_tokens: number; output_tokens: number; avg_seconds: number; last_error?: string }
 }
+
+export type LicenseCategory = 'public-domain' | 'permissive' | 'weak-copyleft' | 'strong-copyleft' | 'network-copyleft' | 'restricted' | 'unknown'
+export interface LicenseVerdict { level: 'ok' | 'review' | 'conflict'; reason: string }
+export interface LicenseEntry {
+  ecosystem: string; name: string; version: string; license?: string; source?: string
+  category: LicenseCategory; direct: boolean; dev?: boolean; verdict: LicenseVerdict
+}
+export interface LicenseReport {
+  project: { license: string; source: string }; category: LicenseCategory
+  total: number; ok: number; review: number; conflict: number; unknown: number
+  by_license: { license: string; category: LicenseCategory; count: number }[]
+  issues: LicenseEntry[]; truncated?: number; online: boolean
+}

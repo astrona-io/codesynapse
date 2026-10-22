@@ -12,6 +12,7 @@ import (
 
 	"github.com/parisnakitakejser/codesynapse/internal/agentctx"
 	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
+	"github.com/parisnakitakejser/codesynapse/internal/license"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/security"
 )
@@ -35,6 +36,9 @@ func registerAgentTools(s *mcp.Server, h *handlers, add func(name, desc string) 
 	mcp.AddTool(s, add("unused_code",
 		"Unused code to remove: unreachable and test-only functions (with confidence and security relevance), files with nothing live, unused go.mod modules (and CVEs removing them eliminates), unused Helm values and template defines."),
 		h.unusedCode)
+	mcp.AddTool(s, add("license_report",
+		"Dependency licences checked against the repository's own licence: conflicts (e.g. GPL or AGPL in an Apache/MIT project, non-open-source licences), items to review (weak copyleft, unknown licences) and counts per licence. Each verdict says why and where the licence was read. Guidance, not legal advice."),
+		h.licenseReport)
 	mcp.AddTool(s, add("rule_guide",
 		"How to fix a security finding: why the rule matters, the fix, CWE, and vulnerable -> fixed code examples (language-specific first). Call it before fixing a finding from security_report or get_pr_context."),
 		h.ruleGuide)
@@ -222,4 +226,40 @@ func (h *handlers) ruleGuide(_ context.Context, _ *mcp.CallToolRequest, in ruleG
 		g.Examples = g.Examples[:2] // keep the answer small
 	}
 	return nil, g, nil
+}
+
+type licenseReportIn struct {
+	RepoArg
+	Verdict string `json:"verdict,omitempty" jsonschema:"conflict, review or all (default all): which dependencies to list"`
+	Limit   int    `json:"limit,omitempty" jsonschema:"max dependencies listed, default 30"`
+}
+
+func (h *handlers) licenseReport(ctx context.Context, _ *mcp.CallToolRequest, in licenseReportIn) (*mcp.CallToolResult, license.Report, error) {
+	repo, err := h.repo(ctx, in.Repo)
+	if err != nil {
+		return nil, license.Report{}, err
+	}
+	n, err := h.svc.R.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
+	if err != nil {
+		return nil, license.Report{}, err
+	}
+	if n.Licenses == "" {
+		return nil, license.Report{}, errors.New("no licence report stored; re-ingest the repository")
+	}
+	var rep license.Report
+	if err := json.Unmarshal([]byte(n.Licenses), &rep); err != nil {
+		return nil, rep, fmt.Errorf("decoding licence report: %w", err)
+	}
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 30
+	}
+	issues := rep.Issues[:0:0]
+	for _, e := range rep.Issues {
+		if (in.Verdict == "" || in.Verdict == "all" || in.Verdict == e.Verdict.Level) && len(issues) < limit {
+			issues = append(issues, e)
+		}
+	}
+	rep.Issues = issues
+	return nil, rep, nil
 }
