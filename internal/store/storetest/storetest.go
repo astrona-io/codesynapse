@@ -17,6 +17,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 	"github.com/parisnakitakejser/codesynapse/internal/usage"
+	"github.com/parisnakitakejser/codesynapse/internal/vector"
 )
 
 // Repo is the repository name used by Fixture.
@@ -395,9 +396,10 @@ func Run(t *testing.T, s store.Store) {
 		}))
 		near, err := s.MemoryNearest(ctx, Repo, "m1", []float32{0.9, 0.1, 0}, 2)
 		require.NoError(t, err)
-		require.Len(t, near, 2)
+		require.Len(t, near, vector.MinK, "a search returns at least MinK hits")
 		assert.Equal(t, near[0].Name, "payments")
 		assert.Equal(t, near[1].Name, "billing")
+		assert.Equal(t, near[2].Name, "frontend")
 		assert.Equal(t, math.Round(near[0].Score*1000)/1000, math.Round(memory.Similarity([]float32{0.9, 0.1, 0}, []float32{1, 0, 0})*1000)/1000, "(1+cos)/2 like Neo4j")
 		other, err := s.MemoryNearest(ctx, Repo, "m2", []float32{0.9, 0.1, 0}, 2)
 		require.NoError(t, err)

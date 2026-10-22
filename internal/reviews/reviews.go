@@ -200,9 +200,10 @@ func newID() string {
 	return hex.EncodeToString(b)
 }
 
-// clean redacts secrets and bounds length, keeping line breaks.
+// clean redacts secrets and personal data and bounds length, keeping line
+// breaks.
 func clean(s string, limit int) string {
-	s = strings.ToValidUTF8(strings.TrimSpace(redact.Text(s)), "")
+	s = strings.ToValidUTF8(strings.TrimSpace(redact.Free(s)), "")
 	if utf8.RuneCountInString(s) > limit {
 		r := []rune(s)
 		s = string(r[:limit-1]) + "…"

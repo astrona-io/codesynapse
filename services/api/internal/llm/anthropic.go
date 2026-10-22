@@ -36,7 +36,11 @@ func (a *anthropicProvider) Complete(ctx context.Context, req Request) (Response
 	params := anthropic.BetaMessageNewParams{
 		Model:     a.cfg.Model,
 		MaxTokens: int64(req.MaxTokens),
-		System:    []anthropic.BetaTextBlockParam{{Text: req.System}},
+		// The system prompts are constants and come first, so they are the
+		// cache prefix: batches of one task (triage runs several) read it
+		// from the cache. The user part changes every call and stays after
+		// the breakpoint. Prompts below the model's minimum are not cached.
+		System: []anthropic.BetaTextBlockParam{{Text: req.System, CacheControl: anthropic.NewBetaCacheControlEphemeralParam()}},
 		Messages: []anthropic.BetaMessageParam{
 			anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(req.User)),
 		},

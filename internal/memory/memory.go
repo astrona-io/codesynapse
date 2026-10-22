@@ -260,7 +260,7 @@ func canonByName(ents []Entity, canon map[string]string) map[string]string {
 }
 
 // cleanName trims, collapses whitespace, drops control characters, redacts
-// secrets and truncates to limit runes.
+// secrets and personal data and truncates to limit runes.
 func cleanName(s string, limit int) string {
 	s = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
@@ -268,7 +268,7 @@ func cleanName(s string, limit int) string {
 		}
 		return r
 	}, s)
-	return redact.Summary(s, limit)
+	return redact.Summary(redact.Personal(s), limit)
 }
 
 // NormalizePredicate turns "uses framework" or "uses-framework" into

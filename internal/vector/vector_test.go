@@ -22,3 +22,9 @@ func TestIsolateDropsForeignHits(t *testing.T) {
 	assert.Equal(t, got[0].ID, "d")
 	assert.Equal(t, got[1].ID, "a")
 }
+
+func TestClampK(t *testing.T) {
+	for k, want := range map[int]int{-1: vector.DefaultK, 0: vector.DefaultK, 1: vector.MinK, 5: 5, 50: vector.MaxK} {
+		assert.Equal(t, vector.ClampK(k), want, k)
+	}
+}

@@ -9,6 +9,7 @@ import (
 
 	agentmem "github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/internal/vector"
 )
 
 type memRepo struct {
@@ -278,5 +279,5 @@ func (s *Store) MemoryNearest(_ context.Context, repo, model string, vec []float
 		}
 	}
 	slices.SortFunc(out, func(a, b agentmem.Scored) int { return cmp.Or(cmp.Compare(b.Score, a.Score), cmp.Compare(a.ID, b.ID)) })
-	return out[:min(len(out), store.ClampLimit(k, 10))], nil
+	return out[:min(len(out), vector.ClampK(k))], nil
 }

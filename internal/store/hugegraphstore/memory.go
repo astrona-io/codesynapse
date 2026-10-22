@@ -417,7 +417,7 @@ func (s *Store) MemoryNearest(ctx context.Context, repo, model string, vec []flo
 	if s.vec == nil {
 		return out, nil
 	}
-	k = store.ClampLimit(k, 10)
+	k = vector.ClampK(k)
 	hits, err := s.vec.Search(ctx, model, memory.TenantOf(repo), repo, vec, k)
 	if err != nil || len(hits) == 0 {
 		return out, err
