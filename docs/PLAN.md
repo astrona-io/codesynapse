@@ -123,6 +123,8 @@ Rules are static, human-readable files: `rules/code/*.yaml` and `rules/config/*.
 
 Agents submit structured reviews with `submit_review` (title, summary, verdict, comments anchored to file:line with severity, category, message, suggestion, optional security rule). CodeSynapse validates and redacts them (`internal/reviews`), anchors each comment to the symbol at its line, and stores them as `:Review` nodes apart from repository graphs, so re-indexing keeps them. The **Reviews** page lists reviews and groups open comments by file; people resolve or reopen comments there, agents with `update_review_comment`. The `code-review` prompt walks an agent through review with the graph tools. These two tools are the only MCP writes, scoped to the review store.
 
+Each comment card shows the code around its lines: `GET /api/v1/reviews/{id}/code` reads them on request with `git cat-file` at the reviewed commit (falling back to the working tree, e.g. after a shallow fetch), redacts each line and returns at most 80 lines per comment; nothing is stored. When the suggestion has a fenced code block, the page applies it to `line..end_line` and shows a before/after line diff. Locations link to the lines on GitHub, GitLab or Forgejo at that commit (provider from the host or a configured organisation).
+
 Follow-ups: link comments to the diff hunk they were made on and flag them "outdated" when that code changes; per-review export to Markdown or a GitHub PR review.
 
 ## AI providers and background work

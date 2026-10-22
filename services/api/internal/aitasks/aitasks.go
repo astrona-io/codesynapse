@@ -256,7 +256,7 @@ func triageComment(f security.Finding, it triageItem, rv *reviews.Review) review
 
 const reviewSystem = `You are a meticulous senior engineer doing code review. Look for bugs, security problems, missing tests, error handling, concurrency and performance issues, and maintainability problems. Only comment where you can point to a specific line in the code shown. Prefer a few important comments over many small ones.
 Answer with one JSON object only:
-{"summary": "<overall assessment>", "verdict": "approve" | "comment" | "request_changes", "comments": [{"file": "<path as given>", "line": <number>, "severity": "info|low|medium|high|critical", "category": "security|bug|performance|maintainability|style|test|docs|other", "message": "<what and why>", "suggestion": "<concrete fix or replacement code>"}]}`
+{"summary": "<overall assessment>", "verdict": "approve" | "comment" | "request_changes", "comments": [{"file": "<path as given>", "line": <number>, "severity": "info|low|medium|high|critical", "category": "security|bug|performance|maintainability|style|test|docs|other", "message": "<what and why>", "suggestion": "<concrete fix; replacement code for that line goes in a fenced code block (three backticks), which the review page shows as a diff>"}]}`
 
 func (r Runner) codeReview(ctx context.Context, provider string, in Input, src sourceReader, lim limits) (reviews.Review, error) {
 	ac := agentctx.Service{R: r.St}

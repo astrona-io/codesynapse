@@ -27,14 +27,20 @@ const fixBlocked = computed(() => {
 
 const review = ref<Review | null>(null)
 const counts = ref<ReviewCounts | null>(null)
+// Code around each comment, read from the checkout on demand (never stored).
+const code = ref<Record<string, CommentCode>>({})
 const loadError = ref('')
 const view = ref<View>('open')
 const summaryOpen = ref(false)
 watch(selectedId, async (id) => {
   review.value = null
+  code.value = {}
   loadError.value = ''
   summaryOpen.value = false
   if (!id) return
+  $fetch<{ code: Record<string, CommentCode> }>(apiPath(`reviews/${id}/code`))
+    .then((res) => { if (selectedId.value === id) code.value = res.code })
+    .catch(() => {}) // the cards work without code
   try {
     const res = await $fetch<{ review: Review; counts: ReviewCounts }>(apiPath(`reviews/${id}`))
     review.value = res.review
@@ -353,7 +359,8 @@ async function removeReview() {
                 <header class="row tight meta">
                   <SevBadge :severity="c.severity" />
                   <span class="tag">{{ c.category }}</span>
-                  <span class="mono loc">{{ loc(c) }}</span>
+                  <a v-if="code[c.id]?.url" :href="code[c.id]!.url" target="_blank" rel="noopener noreferrer" class="mono loc" :title="`Open on ${forgeName(code[c.id]!.url!)}`">{{ loc(c) }} ↗</a>
+                  <span v-else class="mono loc">{{ loc(c) }}</span>
                   <NuxtLink v-if="c.symbol_id" :to="explore(c.symbol_id)" class="mono small" title="Open this symbol in the explorer">{{ c.symbol }}</NuxtLink>
                   <NuxtLink v-if="c.rule" :to="`${base}/security`" class="tag sec">{{ ruleTitle(c.rule) ?? c.rule }}</NuxtLink>
                 </header>
@@ -366,6 +373,7 @@ async function removeReview() {
                   <div class="md" v-html="md(c.suggestion)" />
                 </div>
                 <!-- eslint-enable vue/no-v-html -->
+                <ReviewCode :comment="c" :code="code[c.id]" />
 
                 <!-- Undecided: the four choices -->
                 <footer v-if="c.status === 'open' || c.status === 'deferred'" class="decide">
@@ -541,6 +549,8 @@ async function removeReview() {
 .card.closed { opacity: 0.65; }
 .meta { flex-wrap: wrap; }
 .loc { color: var(--dim); font-size: 12px; }
+a.loc { color: var(--cyan); text-decoration: none; }
+a.loc:hover { text-decoration: underline; }
 .headline { margin: 0; font-size: 15.5px; font-weight: 600; line-height: 1.45; }
 .headline :deep(p) { margin: 0; }
 .why { color: var(--muted); font-size: 14px; }
