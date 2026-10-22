@@ -92,6 +92,11 @@ To make it automatic beyond the server instructions: `codesynapse mcp agents-md 
 ### F. Dead-code cleanup (CodeSynapse addition)
 > "Use `unused_code` (security_only first, then min_confidence "high") to list code nothing reaches. Remove security-relevant items first, then unused go.mod modules (and confirm with `security_report` that their CVEs are gone). For exported or low-confidence items, check for reflection and external consumers before deleting."
 
+### J. Dependency, licence and vulnerability review — prompt `dependency-review`
+> "Run `dependency-review` with what you are about to add, replace or audit."
+
+The prompt works for any language. It starts from what CodeSynapse already has (`security_report` for advisories and Go reachability, `license_report`, `unused_code` for unused go.mod modules, `search` and `get_symbol_context` for where a package is used), then gives a reference of manifests, lockfiles, resolver commands, scope and feature pitfalls, vulnerability scanners and licence tools for Go, JavaScript and TypeScript, Python, Java, Kotlin and Scala, C# and .NET, Rust, Ruby, PHP, Swift and Objective-C, Dart and Flutter, Elixir and Erlang, C and C++, Haskell, R, and container, CI and infrastructure files. CodeSynapse itself reads go.mod and npm and PyPI lockfiles (only ecosystem, names and versions leave the machine); for every other ecosystem the agent has to use that ecosystem's tools, and the prompt tells it to report a missing tool as a gap, never as a clean result. The output is the findings table (dependency and version, introduced by, usage, licence, advisory, proposed action, verified outcome) with facts, proposals and open questions kept apart. Source: `services/mcp/internal/mcpserver/dependency_prompt.go`.
+
 ---
 
 ## 3. Tool usage best practices
@@ -145,6 +150,8 @@ Every answer uses `qualified_id` values (`store.(*Store).Get`) that you can pass
       "arguments": [{ "name": "package", "description": "Package path or name (e.g., internal/store)", "required": true }] },
     { "name": "bug-investigation", "description": "Traces callers, interface dispatch and recent churn around a suspected bug location.",
       "arguments": [{ "name": "symbol", "description": "Symbol or file location where the bug appears", "required": true }] },
+    { "name": "dependency-review", "description": "Analyse dependencies recursively for licences and vulnerabilities, and look for smaller alternatives, in any language and package manager.",
+      "arguments": [{ "name": "target", "description": "What to analyse: a package to add or replace, a manifest or lockfile, or the whole repository", "required": true }] },
     { "name": "reuse-first", "description": "Search for existing code before implementing a feature or fixing a bug, and reuse or extend it instead of adding a duplicate.",
       "arguments": [{ "name": "task", "description": "The feature or bug you are about to work on, in a sentence", "required": true }] },
     { "name": "code-review", "description": "Review a change or area of the code with CodeSynapse and submit the review so it appears in the UI.",

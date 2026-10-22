@@ -228,6 +228,33 @@ func TestReuseFirstGuidance(t *testing.T) {
 	}
 }
 
+func TestDependencyReviewPrompt(t *testing.T) {
+	ctx := context.Background()
+	cs := connect(t)
+	got, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{Name: "dependency-review", Arguments: map[string]string{"target": "replace left-pad"}})
+	require.NoError(t, err)
+	text := got.Messages[0].Content.(*mcp.TextContent).Text
+	assert.Contains(t, text, "replace left-pad")
+	assert.Contains(t, text, "| Dependency and version | Introduced by | Usage | License | Advisory | Proposed action | Verified outcome |")
+	for _, eco := range []string{"Go:", "JavaScript and TypeScript:", "Python:", "Java, Kotlin and Scala:", "C# and .NET:", "Rust:", "Ruby:", "PHP:", "Swift and Objective-C:", "Dart and Flutter:", "Elixir and Erlang:", "C and C++:", "Haskell:", "R:", "Containers, CI and infrastructure:"} {
+		assert.Contains(t, text, "- "+eco)
+	}
+	_, err = cs.GetPrompt(ctx, &mcp.GetPromptParams{Name: "dependency-review", Arguments: map[string]string{}})
+	assert.Error(t, err, "the target is required")
+
+	// The tools it points at must exist.
+	tools, err := cs.ListTools(ctx, nil)
+	require.NoError(t, err)
+	have := map[string]bool{}
+	for _, tl := range tools.Tools {
+		have[tl.Name] = true
+	}
+	for _, name := range []string{"security_report", "license_report", "unused_code", "search", "get_symbol_context", "get_call_graph", "get_config_entries", "repo_status"} {
+		assert.True(t, have[name], name)
+		assert.Contains(t, text, name)
+	}
+}
+
 func TestErrorsAreToolErrors(t *testing.T) {
 	cs := connect(t)
 	res := call(t, cs, "search", map[string]any{"query": "x", "kinds": []string{"Bogus"}}, nil)
