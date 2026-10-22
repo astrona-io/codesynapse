@@ -75,9 +75,9 @@ async function assign(graph: string) {
         <p v-if="!h.metrics.ok" class="muted">{{ off(h.metrics) ? 'Live statistics are off. Set CODESYNAPSE_METRICS_URL to VictoriaMetrics to see usage per organisation by the minute and hour.' : 'Live statistics are not answering right now; see System health above.' }}</p>
         <div v-else class="grid cols-2">
           <SeriesCard panel="tenants" :range="range" :tick="0" />
-          <SeriesCard panel="llm_cost" :range="range" :tick="0" />
-          <SeriesCard panel="tool_latency" :range="range" :tick="0" />
-          <SeriesCard panel="db_latency" :range="range" :tick="0" />
+          <SeriesCard panel="platform_llm_cost" :range="range" :tick="0" />
+          <SeriesCard panel="platform_tool_latency" :range="range" :tick="0" />
+          <SeriesCard panel="platform_db_latency" :range="range" :tick="0" />
         </div>
       </section>
     </template>

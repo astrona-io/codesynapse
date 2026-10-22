@@ -131,13 +131,17 @@ func (s *Store) timed(ctx context.Context, op, script string, bindings map[strin
 	start := time.Now()
 	err := s.gremlin(ctx, script, bindings, out)
 	tenant := telemetry.Tenant(ctx)
-	telemetry.DBDuration.Observe(time.Since(start).Seconds(), tenant, "hugegraph", op)
+	telemetry.DBDuration.ObserveContext(ctx, time.Since(start).Seconds(), tenant, "hugegraph", op)
 	if err != nil {
-		telemetry.DBErrors.Inc(tenant, "hugegraph", op)
+		telemetry.DBErrors.IncContext(ctx, tenant, "hugegraph", op)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			telemetry.DBTimeouts.IncContext(ctx, tenant, "hugegraph", op)
+		}
 		return err
 	}
 	if v := reflect.ValueOf(out); op == "read" && v.Kind() == reflect.Pointer && v.Elem().Kind() == reflect.Slice {
-		telemetry.GraphTraversed.Add(float64(v.Elem().Len()), tenant, "hugegraph")
+		telemetry.GraphTraversed.AddContext(ctx, float64(v.Elem().Len()), tenant, "hugegraph")
+		telemetry.GraphRowsReturned.AddContext(ctx, float64(v.Elem().Len()), tenant, "hugegraph")
 	}
 	return nil
 }

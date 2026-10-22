@@ -12,48 +12,48 @@ var (
 
 // MCP: sessions, tool calls, latency and the size of what agents receive.
 var (
-	MCPSessions       = Default.Counter("mcp_sessions_total", "MCP sessions started.", "tenant_id")
-	MCPToolCalls      = Default.Counter("mcp_tool_calls_total", "MCP tool and prompt calls by outcome (ok, error).", "tenant_id", "mcp_tool", "outcome")
-	MCPToolDuration   = Default.Histogram("mcp_tool_duration_seconds", "MCP tool execution time.", latency, "tenant_id", "mcp_tool")
-	MCPResponseTokens = Default.Counter("mcp_response_tokens_total", "Estimated tokens MCP tools returned to agents.", "tenant_id", "mcp_tool")
+	MCPSessions       = Default.ScopedCounter("mcp_sessions_total", "MCP sessions started.", "tenant_id")
+	MCPToolCalls      = Default.ScopedCounter("mcp_tool_calls_total", "MCP tool and prompt calls by outcome (ok, error).", "tenant_id", "mcp_tool", "outcome")
+	MCPToolDuration   = Default.ScopedHistogram("mcp_tool_duration_seconds", "MCP tool execution time.", latency, "tenant_id", "mcp_tool")
+	MCPResponseTokens = Default.ScopedCounter("mcp_response_tokens_total", "Estimated tokens MCP tools returned to agents.", "tenant_id", "mcp_tool")
 )
 
 // LLM calls made by CodeSynapse itself (reviews, triage, briefings,
 // memory extraction).
 var (
-	LLMRequests = Default.Counter("llm_requests_total", "LLM requests by outcome.", "tenant_id", "llm_provider", "llm_model", "task", "outcome")
-	LLMInput    = Default.Counter("llm_tokens_input_total", "Prompt tokens consumed.", "tenant_id", "llm_provider", "llm_model", "task")
-	LLMOutput   = Default.Counter("llm_tokens_output_total", "Completion tokens generated.", "tenant_id", "llm_provider", "llm_model", "task")
-	LLMSaved    = Default.Counter("llm_tokens_saved_total", "Input tokens served from the provider's prompt cache.", "tenant_id", "llm_provider", "llm_model", "task")
-	LLMCost     = Default.Counter("llm_cost_estimated_dollars", "Estimated cost in US dollars from the configured token prices.", "tenant_id", "llm_provider", "llm_model")
-	LLMDuration = Default.Histogram("llm_request_duration_seconds", "LLM request time.", latency, "tenant_id", "llm_provider", "llm_model")
-	LLMTTFT     = Default.Histogram("llm_time_to_first_token_seconds", "Time to the first streamed token (streaming providers only).", ttft, "tenant_id", "llm_provider", "llm_model")
+	LLMRequests = Default.ScopedCounter("llm_requests_total", "LLM requests by outcome.", "tenant_id", "llm_provider", "llm_model", "task", "outcome")
+	LLMInput    = Default.ScopedCounter("llm_tokens_input_total", "Prompt tokens consumed.", "tenant_id", "llm_provider", "llm_model", "task")
+	LLMOutput   = Default.ScopedCounter("llm_tokens_output_total", "Completion tokens generated.", "tenant_id", "llm_provider", "llm_model", "task")
+	LLMSaved    = Default.ScopedCounter("llm_tokens_saved_total", "Input tokens served from the provider's prompt cache.", "tenant_id", "llm_provider", "llm_model", "task")
+	LLMCost     = Default.ScopedCounter("llm_cost_estimated_dollars", "Estimated cost in US dollars from the configured token prices.", "tenant_id", "llm_provider", "llm_model")
+	LLMDuration = Default.ScopedHistogram("llm_request_duration_seconds", "LLM request time.", latency, "tenant_id", "llm_provider", "llm_model")
+	LLMTTFT     = Default.ScopedHistogram("llm_time_to_first_token_seconds", "Time to the first streamed token (streaming providers only).", ttft, "tenant_id", "llm_provider", "llm_model")
 )
 
 // Databases.
 var (
-	DBDuration     = Default.Histogram("db_query_duration_seconds", "Database round-trip time by system and operation.", latency, "tenant_id", "db_system", "operation")
-	DBErrors       = Default.Counter("db_query_errors_total", "Failed database round trips.", "tenant_id", "db_system", "operation")
-	VectorMatches  = Default.Counter("db_vector_matches_count", "Vectors returned by vector searches.", "tenant_id", "db_system")
-	GraphTraversed = Default.Counter("db_graph_nodes_traversed", "Rows (nodes, edges, facts) returned by graph reads.", "tenant_id", "db_system")
+	DBDuration     = Default.ScopedHistogram("db_query_duration_seconds", "Database round-trip time by system and operation.", latency, "tenant_id", "db_system", "operation")
+	DBErrors       = Default.ScopedCounter("db_query_errors_total", "Failed database round trips.", "tenant_id", "db_system", "operation")
+	VectorMatches  = Default.ScopedCounter("db_vector_matches_count", "Vectors returned by vector searches.", "tenant_id", "db_system")
+	GraphTraversed = Default.ScopedCounter("db_graph_nodes_traversed", "Rows (nodes, edges, facts) returned by graph reads.", "tenant_id", "db_system")
 )
 
 // Agent memory and context offloading.
 var (
-	MemoryFacts      = Default.Counter("memory_facts_saved_total", "Facts written to agent memory, by source (tool, offload).", "tenant_id", "source")
-	OffloadTurns     = Default.Counter("memory_offload_turns_total", "Conversation turns handed to background extraction.", "tenant_id")
-	OffloadTokens    = Default.Counter("memory_offload_tokens_total", "Estimated context tokens offloaded from agent sessions.", "tenant_id")
-	MemoryRecalls    = Default.Counter("memory_recall_total", "Memory recalls by mode (text, vector).", "tenant_id", "mode")
-	EmbeddedEntities = Default.Counter("memory_entities_embedded_total", "Memory entities embedded for recall by meaning.", "llm_model")
+	MemoryFacts      = Default.ScopedCounter("memory_facts_saved_total", "Facts written to agent memory, by source (tool, offload).", "tenant_id", "source")
+	OffloadTurns     = Default.ScopedCounter("memory_offload_turns_total", "Conversation turns handed to background extraction.", "tenant_id")
+	OffloadTokens    = Default.ScopedCounter("memory_offload_tokens_total", "Estimated context tokens offloaded from agent sessions.", "tenant_id")
+	MemoryRecalls    = Default.ScopedCounter("memory_recall_total", "Memory recalls by mode (text, vector).", "tenant_id", "mode")
+	EmbeddedEntities = Default.ScopedCounter("memory_entities_embedded_total", "Memory entities embedded for recall by meaning.", "llm_model")
 )
 
 // API and ingestion.
 var (
-	HTTPRequests   = Default.Counter("http_requests_total", "API requests by route pattern and status class.", "tenant_id", "route", "method", "code")
-	HTTPDuration   = Default.Histogram("http_request_duration_seconds", "API request time by route pattern.", latency, "route", "method")
-	IngestRuns     = Default.Counter("ingest_runs_total", "Repository indexing runs by outcome.", "db_system", "outcome")
-	IngestDuration = Default.Histogram("ingest_duration_seconds", "Repository indexing time, extraction and storage.", latency, "db_system")
-	IngestNodes    = Default.Counter("ingest_nodes_total", "Nodes written by indexing.", "db_system")
+	HTTPRequests   = Default.ScopedCounter("http_requests_total", "API requests by route pattern and status class.", "tenant_id", "route", "method", "code")
+	HTTPDuration   = Default.ScopedHistogram("http_request_duration_seconds", "API request time by route pattern.", latency, "route", "method")
+	IngestRuns     = Default.ScopedCounter("ingest_runs_total", "Repository indexing runs by outcome.", "db_system", "outcome")
+	IngestDuration = Default.ScopedHistogram("ingest_duration_seconds", "Repository indexing time, extraction and storage.", latency, "db_system")
+	IngestNodes    = Default.ScopedCounter("ingest_nodes_total", "Nodes written by indexing.", "db_system")
 )
 
 var (
@@ -80,3 +80,20 @@ func ToolLabel(name string) string {
 	}
 	return "unknown"
 }
+
+// Coverage and savings are observations, not assumptions about missing usage.
+var (
+	LLMCostSaved                = Default.ScopedCounter("llm_cost_saved_estimated_dollars_total", "Estimated cached-input cost savings at the configured prices.", "tenant_id", "llm_provider", "llm_model")
+	LLMUsageUnknown             = Default.ScopedCounter("llm_usage_unknown_total", "Model calls without complete reported token usage.", "tenant_id", "llm_provider", "llm_model")
+	LLMPriceMissing             = Default.ScopedCounter("llm_pricing_missing_total", "Model calls without sufficient configured prices.", "tenant_id", "llm_provider", "llm_model")
+	NetBytesReceived            = Default.ScopedCounter("net_bytes_received_total", "MCP application payload bytes read, excluding HTTP headers and transport overhead.", "tenant_id", "mcp_tool")
+	NetBytesSent                = Default.ScopedCounter("net_bytes_sent_total", "MCP application payload bytes successfully written, including stream framing.", "tenant_id", "mcp_tool")
+	CloudBytesSent              = Default.ScopedCounter("cloud_bytes_sent_total", "Cloud model request body bytes consumed by HTTP transports, including retries.", "tenant_id", "llm_provider", "llm_model")
+	CloudBytesSaved             = Default.ScopedCounter("cloud_bytes_saved_total", "Estimated avoided cloud request bytes with a measured equivalent fallback baseline.", "tenant_id", "llm_provider", "llm_model")
+	GraphRowsReturned           = Default.ScopedCounter("db_graph_rows_returned_total", "Graph result rows returned; not internally visited nodes.", "tenant_id", "db_system")
+	DBTimeouts                  = Default.ScopedCounter("db_query_timeouts_total", "Database requests that timed out.", "tenant_id", "db_system", "operation")
+	AgentMemoryRecalls          = Default.ScopedCounter("agent_memory_recalls_total", "Logical memory recall requests, counted once before retrieval.", "tenant_id")
+	MemoryFactsCurrent          = Default.ScopedGauge("agent_memory_facts_count", "Current unique active durable memory facts per tenant.", "tenant_id")
+	MemoryFactsObservedAt       = Default.ScopedGauge("agent_memory_facts_observed_at_seconds", "Time of the last complete durable memory count snapshot.", "tenant_id")
+	MemoryFactsCollectionErrors = Default.Counter("platform_memory_facts_collection_errors_total", "Failed or incomplete durable memory count collections.")
+)

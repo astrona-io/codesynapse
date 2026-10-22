@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/accounts"
 	acctmem "github.com/parisnakitakejser/codesynapse/internal/accounts/memstore"
@@ -52,7 +53,8 @@ func TestSeriesScopedByTenant(t *testing.T) {
 	defer ts.Close()
 
 	admin := newClient(t, ts)
-	require.Equal(t, admin.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil), 201)
+	var adminSigned struct{ Org accounts.Org }
+	require.Equal(t, admin.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, &adminSigned), 201)
 	bob := newClient(t, ts)
 	var signed struct{ Org accounts.Org }
 	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 201)
@@ -76,6 +78,29 @@ func TestSeriesScopedByTenant(t *testing.T) {
 	filter, query = vm.last()
 	assert.Equal(t, filter, "", "platform admins see every tenant")
 	assert.Contains(t, query, "[1h]")
+
+	require.Equal(t, admin.do("GET", "/api/v1/stats/series?panel=llm_cost", "", &p), 200)
+	filter, _ = vm.last()
+	assert.Equal(t, filter, `{tenant_id=~"`+adminSigned.Org.ID+`"}`, "ordinary panels never elevate platform users")
+	for _, panel := range []string{"platform_llm_cost", "platform_tool_latency", "platform_db_latency"} {
+		assert.Equal(t, bob.do("GET", "/api/v1/stats/series?panel="+panel, "", nil), 403)
+		require.Equal(t, admin.do("GET", "/api/v1/stats/series?panel="+panel, "", nil), 200)
+		filter, _ = vm.last()
+		assert.Equal(t, filter, "")
+	}
+	for name, panel := range seriesPanels {
+		if panel.platform {
+			continue
+		}
+		require.Equal(t, bob.do("GET", "/api/v1/stats/series?panel="+name+"&tenant_id=other&query=up", "", &p), 200)
+		filter, query = vm.last()
+		assert.Equal(t, filter, `{tenant_id=~"`+signed.Org.ID+`"}`, name)
+		assert.False(t, strings.Contains(query, "other"), "client filters cannot enter MetricsQL")
+		assert.True(t, p.Empty != "", "each panel explains missing measurements")
+		if p.Kind == "gauge" {
+			assert.True(t, p.Times[len(p.Times)-1] <= time.Now().Unix(), "freshness is never evaluated against a future step")
+		}
+	}
 
 	plain := httptest.NewServer(New(ctx, Config{}, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil))))
 	defer plain.Close()
@@ -101,4 +126,31 @@ func TestFoldSeries(t *testing.T) {
 	assert.Equal(t, got[0].Name, "a", "named series are ordered by name, not size, so colours stay with them")
 	b, _ := json.Marshal(foldSeries(lines[:7], "gauge", 2))
 	assert.False(t, strings.Contains(string(b), "other"), "levels are not summed")
+}
+
+func TestSeriesPlatformWithoutMembershipHasNoTenantData(t *testing.T) {
+	vm := &fakeVM{}
+	ts := httptest.NewServer(vm)
+	defer ts.Close()
+	s := &Server{cfg: Config{Metrics: &telemetry.Querier{URL: ts.URL}}}
+	ctx := context.WithValue(context.Background(), principalKey{}, accounts.Principal{User: accounts.User{PlatformAdmin: true}, Via: "session"})
+	ctx = context.WithValue(ctx, scopeKey{}, scope{})
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/stats/series?panel=memory_facts", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+	s.handleSeries(w, r)
+	require.Equal(t, w.Code, http.StatusOK)
+	var out SeriesPanel
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+	assert.Len(t, out.Series, 0)
+	assert.Len(t, vm.queries, 0, "empty scope must not query VictoriaMetrics")
+}
+
+func TestSeriesQueryMeasurementSemantics(t *testing.T) {
+	facts := seriesPanels["memory_facts"].queries[0].expr
+	assert.Contains(t, facts, "max by (tenant_id)", "replicas are not summed")
+	assert.Contains(t, facts, "== on (tenant_id) group_left", "only newest replica observations contribute")
+	assert.Contains(t, facts, "time() - 90", "stale gauges disappear")
+	assert.Contains(t, seriesPanels["cloud_savings"].queries[0].expr, "> 0", "zero denominators produce no result")
+	assert.Contains(t, seriesPanels["db_rows"].queries[0].expr, "db_graph_rows_returned_total")
+	assert.False(t, strings.Contains(seriesPanels["llm_cost"].Help, "free"))
 }

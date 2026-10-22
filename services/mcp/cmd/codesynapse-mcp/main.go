@@ -152,7 +152,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		// Stop the recorder and wait for its final flush before exiting.
 		defer func() { stopUsage(); <-flushed }()
 	}
-	stopMetrics, err := app.StartMetrics(ctx, o.EC.Logger, "mcp")
+	stopMetrics, err := app.StartMetrics(ctx, o.EC.Logger, "mcp", version)
 	if err != nil {
 		return err
 	}
@@ -176,14 +176,14 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 
 	if o.transport == "stdio" {
 		// stdout carries the protocol; all logs go to stderr.
-		err := server.Run(ctx, &mcp.StdioTransport{})
+		err := server.Run(ctx, mcpserver.MeasureStdio(ctx, os.Stdin, os.Stdout))
 		if errors.Is(err, context.Canceled) {
 			return nil
 		}
 		return err
 	}
 
-	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+	handler := mcpserver.MeasureHTTP(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
 	mux := http.NewServeMux()
 	if acc != nil {
 		// Personal API keys are required in accounts mode.

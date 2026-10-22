@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
@@ -69,9 +70,11 @@ type Result struct {
 
 // Recall runs the gate, finds entry entities and expands them.
 func (s *Service) Recall(ctx context.Context, repo string, q Query) (Result, error) {
+	ctx = telemetry.WithTenant(ctx, memory.OrgOf(repo))
+	telemetry.AgentMemoryRecalls.IncContext(ctx, telemetry.Tenant(ctx))
 	res, err := s.recall(ctx, repo, q)
 	if err == nil {
-		telemetry.MemoryRecalls.Inc(telemetry.TenantLabel(memory.OrgOf(repo)), res.Mode) // names or hybrid
+		telemetry.MemoryRecalls.IncContext(ctx, telemetry.Tenant(ctx), res.Mode) // names or hybrid
 	}
 	return res, err
 }
@@ -125,6 +128,7 @@ func (s *Service) nearest(ctx context.Context, repo, text string) ([]memory.Scor
 	if err != nil {
 		return nil, err
 	}
+	ctx = telemetry.WithModel(ctx, name, cfg.EmbeddingModel)
 	vecs, err := s.LLM.Embed(ctx, name, []string{text})
 	if err != nil {
 		return nil, err
@@ -182,23 +186,46 @@ func (s *Service) EmbedPending(ctx context.Context) (int, error) {
 		if err != nil || len(todo) == 0 {
 			return done, err
 		}
-		texts := make([]string, len(todo))
-		for i, e := range todo {
-			texts[i] = memory.EmbeddingText(e)
+		// A background batch can span organisations; split it before model and
+		// database calls so one tenant never receives another tenant's usage.
+		groups := map[string][]memory.Entity{}
+		var tenants []string
+		for _, entity := range todo {
+			tenant := memory.OrgOf(entity.Repo)
+			if _, ok := groups[tenant]; !ok {
+				tenants = append(tenants, tenant)
+			}
+			groups[tenant] = append(groups[tenant], entity)
 		}
-		vecs, err := s.LLM.Embed(ctx, name, texts)
-		if err != nil {
-			return done, err
+		slices.Sort(tenants)
+		for _, tenant := range tenants {
+			groupCtx := telemetry.WithTenant(ctx, tenant)
+			groupCtx = telemetry.WithModel(groupCtx, name, cfg.EmbeddingModel)
+			if err := s.embedEntities(groupCtx, name, cfg.EmbeddingModel, groups[tenant]); err != nil {
+				return done, err
+			}
+			done += len(groups[tenant])
 		}
-		set := make(map[string][]float32, len(todo))
-		for i, e := range todo {
-			set[e.ID] = vecs[i]
-		}
-		telemetry.EmbeddedEntities.Add(float64(len(set)), cfg.EmbeddingModel)
-		if err := s.St.SetMemoryEmbeddings(ctx, cfg.EmbeddingModel, set); err != nil {
-			return done, err
-		}
-		done += len(todo)
 	}
 	return done, nil
+}
+
+func (s *Service) embedEntities(ctx context.Context, provider, model string, entities []memory.Entity) error {
+	texts := make([]string, len(entities))
+	for i, entity := range entities {
+		texts[i] = memory.EmbeddingText(entity)
+	}
+	vecs, err := s.LLM.Embed(ctx, provider, texts)
+	if err != nil {
+		return err
+	}
+	set := make(map[string][]float32, len(entities))
+	for i, entity := range entities {
+		set[entity.ID] = vecs[i]
+	}
+	if err := s.St.SetMemoryEmbeddings(ctx, model, set); err != nil {
+		return err
+	}
+	telemetry.EmbeddedEntities.AddContext(ctx, float64(len(set)), model)
+	return nil
 }

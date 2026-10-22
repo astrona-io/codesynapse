@@ -13,6 +13,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"net/netip"
+	"net/url"
 	"os"
 	"regexp"
 	"slices"
@@ -48,10 +51,14 @@ type Response struct {
 	Model string
 	// InputTokens counts the whole prompt; CachedInputTokens is the part
 	// the provider served from its prompt cache.
-	InputTokens       int
-	CachedInputTokens int
-	OutputTokens      int
-	Duration          time.Duration
+	InputTokens           int
+	CachedInputTokens     int
+	CacheWriteInputTokens int
+	// UsageKnown requires final input and output usage from the provider.
+	UsageKnown    bool
+	UsageReported bool
+	OutputTokens  int
+	Duration      time.Duration
 	// FirstToken is the time to the first streamed token (0 when the
 	// provider does not stream).
 	FirstToken time.Duration
@@ -137,10 +144,12 @@ type ProviderConfig struct {
 	// uses (e.g. nomic-embed-text on Ollama); empty means no embeddings.
 	EmbeddingModel string `yaml:"embedding_model" json:"embedding_model,omitempty"`
 	// Prices in US dollars per million tokens, for the cost estimate in the
-	// statistics. Unset prices count as free (local models). Cached input
-	// falls back to the input price.
+	// statistics. Missing remote rates leave cost unknown. PricingConfigured
+	// explicitly supplies all rates, including intentionally zero rates.
 	PriceInputPerMTok       float64 `yaml:"price_input_per_mtok" json:"price_input_per_mtok,omitempty"`
 	PriceCachedInputPerMTok float64 `yaml:"price_cached_input_per_mtok" json:"price_cached_input_per_mtok,omitempty"`
+	PricingConfigured       bool    `yaml:"pricing_configured" json:"pricing_configured,omitempty"`
+	PriceCacheWritePerMTok  float64 `yaml:"price_cache_write_per_mtok" json:"price_cache_write_per_mtok,omitempty"`
 	PriceOutputPerMTok      float64 `yaml:"price_output_per_mtok" json:"price_output_per_mtok,omitempty"`
 
 	apiKey string
@@ -160,13 +169,16 @@ func (p ProviderConfig) Local() bool {
 	if p.Kind == KindAnthropic && p.BaseURL == "" {
 		return false
 	}
-	u := strings.ToLower(p.BaseURL)
-	for _, h := range []string{"://localhost", "://127.", "://host.docker.internal", "://host.containers.internal", "://10.", "://192.168.", "://172.", ".local:", ".local/", ".lan"} {
-		if strings.Contains(u, h) {
-			return true
-		}
+	u, err := url.Parse(p.BaseURL)
+	if err != nil {
+		return false
 	}
-	return false
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || host == "host.docker.internal" || host == "host.containers.internal" || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".lan") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && (addr.IsLoopback() || addr.IsPrivate())
 }
 
 // AllowsSource reports whether source snippets may be sent.
@@ -217,6 +229,11 @@ func (c *Config) normalise(getenv func(string) string) error {
 		}
 		if p.BaseURL != "" && !strings.HasPrefix(p.BaseURL, "http://") && !strings.HasPrefix(p.BaseURL, "https://") {
 			return fmt.Errorf("provider %q: base_url must be http(s)", p.Name)
+		}
+		for _, price := range []float64{p.PriceInputPerMTok, p.PriceCachedInputPerMTok, p.PriceCacheWritePerMTok, p.PriceOutputPerMTok} {
+			if price < 0 || math.IsNaN(price) || math.IsInf(price, 0) {
+				return fmt.Errorf("provider %q: token prices must be finite and nonnegative", p.Name)
+			}
 		}
 		p.BaseURL = strings.TrimRight(p.BaseURL, "/")
 		budgets(p)
@@ -291,6 +308,7 @@ type Registry struct {
 func NewRegistry(cfg Config) *Registry {
 	r := &Registry{cfg: cfg, impl: map[string]Provider{}, usage: map[string]*Usage{}}
 	for _, p := range cfg.Providers {
+		telemetry.AllowModels(p.Name, p.Model, p.EmbeddingModel)
 		switch p.Kind {
 		case KindAnthropic:
 			r.impl[p.Name] = newAnthropic(p)
@@ -407,6 +425,7 @@ func (r *Registry) Complete(ctx context.Context, name string, req Request) (Resp
 		return Response{}, fmt.Errorf("unknown AI provider %q", name)
 	}
 	cfg, _ := r.Config(name)
+	ctx = telemetry.WithModel(ctx, name, cfg.Model)
 	req.System, req.User = redact.Free(req.System), redact.Free(req.User)
 	if req.MaxTokens <= 0 || req.MaxTokens > cfg.MaxOutputTokens {
 		req.MaxTokens = cfg.MaxOutputTokens
@@ -421,48 +440,80 @@ func (r *Registry) Complete(ctx context.Context, name string, req Request) (Resp
 	u := r.usage[name]
 	u.AvgSeconds = (u.AvgSeconds*float64(u.Requests) + resp.Duration.Seconds()) / float64(u.Requests+1)
 	u.Requests++
+	u.InputTokens += max(resp.InputTokens, 0)
+	u.OutputTokens += max(resp.OutputTokens, 0)
 	if err != nil {
 		u.Failures++
 		u.LastError = err.Error()
 	} else {
-		u.InputTokens += resp.InputTokens
-		u.OutputTokens += resp.OutputTokens
 		u.LastError = ""
 	}
 	r.mu.Unlock()
 	return resp, err
 }
 
-// Cost estimates the dollars resp cost under cfg's prices.
+// Cost estimates dollars using configured token rates. Callers must check
+// price availability before publishing an estimate.
 func Cost(cfg ProviderConfig, resp Response) float64 {
-	cachedPrice := cfg.PriceCachedInputPerMTok
-	if cachedPrice == 0 {
-		cachedPrice = cfg.PriceInputPerMTok
+	cachedPrice, writePrice := cfg.PriceCachedInputPerMTok, cfg.PriceCacheWritePerMTok
+	if !cfg.PricingConfigured {
+		if cachedPrice == 0 {
+			cachedPrice = cfg.PriceInputPerMTok
+		}
+		if writePrice == 0 {
+			writePrice = cfg.PriceInputPerMTok
+		}
 	}
-	fresh := max(resp.InputTokens-resp.CachedInputTokens, 0)
-	return (float64(fresh)*cfg.PriceInputPerMTok + float64(resp.CachedInputTokens)*cachedPrice +
-		float64(resp.OutputTokens)*cfg.PriceOutputPerMTok) / 1e6
+	input := max(resp.InputTokens, 0)
+	cached := min(max(resp.CachedInputTokens, 0), input)
+	written := min(max(resp.CacheWriteInputTokens, 0), input-cached)
+	fresh := input - cached - written
+	return (float64(fresh)*cfg.PriceInputPerMTok + float64(cached)*cachedPrice + float64(written)*writePrice + float64(max(resp.OutputTokens, 0))*cfg.PriceOutputPerMTok) / 1e6
 }
 
-// record sends one completion to the metrics. Provider and model come from
-// the configuration (a bounded set), never from the answer.
+func pricesKnown(cfg ProviderConfig, resp Response) bool {
+	if cfg.PricingConfigured {
+		return true
+	}
+	if cfg.Local() && cfg.PriceInputPerMTok == 0 && cfg.PriceOutputPerMTok == 0 && cfg.PriceCachedInputPerMTok == 0 && cfg.PriceCacheWritePerMTok == 0 {
+		return true
+	}
+	return (resp.InputTokens == 0 || cfg.PriceInputPerMTok > 0) &&
+		(resp.OutputTokens == 0 || cfg.PriceOutputPerMTok > 0) &&
+		(resp.CachedInputTokens == 0 || cfg.PriceCachedInputPerMTok > 0) &&
+		(resp.CacheWriteInputTokens == 0 || cfg.PriceCacheWritePerMTok > 0)
+}
+
+// record uses configured model identities, never provider response labels.
 func record(ctx context.Context, name string, cfg ProviderConfig, resp Response, err error) {
+	ctx = telemetry.WithModel(ctx, name, cfg.Model)
 	tenant, task := telemetry.Tenant(ctx), taskOf(ctx)
 	outcome := "ok"
 	if err != nil {
 		outcome = "error"
 	}
-	telemetry.LLMRequests.Inc(tenant, name, cfg.Model, task, outcome)
-	telemetry.LLMDuration.Observe(resp.Duration.Seconds(), tenant, name, cfg.Model)
-	if err != nil {
-		return
+	telemetry.LLMRequests.IncContext(ctx, tenant, name, cfg.Model, task, outcome)
+	telemetry.LLMDuration.ObserveContext(ctx, resp.Duration.Seconds(), tenant, name, cfg.Model)
+	if !resp.UsageKnown {
+		telemetry.LLMUsageUnknown.IncContext(ctx, tenant, name, cfg.Model)
 	}
-	telemetry.LLMInput.Add(float64(resp.InputTokens), tenant, name, cfg.Model, task)
-	telemetry.LLMOutput.Add(float64(resp.OutputTokens), tenant, name, cfg.Model, task)
-	telemetry.LLMSaved.Add(float64(resp.CachedInputTokens), tenant, name, cfg.Model, task)
-	telemetry.LLMCost.Add(Cost(cfg, resp), tenant, name, cfg.Model)
+	if resp.UsageReported {
+		telemetry.LLMInput.AddContext(ctx, float64(max(resp.InputTokens, 0)), tenant, name, cfg.Model, task)
+		telemetry.LLMOutput.AddContext(ctx, float64(max(resp.OutputTokens, 0)), tenant, name, cfg.Model, task)
+		telemetry.LLMSaved.AddContext(ctx, float64(min(max(resp.CachedInputTokens, 0), max(resp.InputTokens, 0))), tenant, name, cfg.Model, task)
+	}
+	if resp.UsageKnown {
+		if pricesKnown(cfg, resp) {
+			cost := Cost(cfg, resp)
+			telemetry.LLMCost.AddContext(ctx, cost, tenant, name, cfg.Model)
+			baseline := (float64(max(resp.InputTokens, 0))*cfg.PriceInputPerMTok + float64(max(resp.OutputTokens, 0))*cfg.PriceOutputPerMTok) / 1e6
+			telemetry.LLMCostSaved.AddContext(ctx, max(baseline-cost, 0), tenant, name, cfg.Model)
+		} else {
+			telemetry.LLMPriceMissing.IncContext(ctx, tenant, name, cfg.Model)
+		}
+	}
 	if resp.FirstToken > 0 {
-		telemetry.LLMTTFT.Observe(resp.FirstToken.Seconds(), tenant, name, cfg.Model)
+		telemetry.LLMTTFT.ObserveContext(ctx, resp.FirstToken.Seconds(), tenant, name, cfg.Model)
 	}
 }
 
@@ -516,6 +567,7 @@ func (r *Registry) Embed(ctx context.Context, name string, inputs []string) ([][
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(max(cfg.TimeoutSeconds, 10))*time.Second)
 	defer cancel()
+	ctx = telemetry.WithModel(ctx, name, cfg.EmbeddingModel)
 	vecs, err := p.Embed(ctx, cfg.EmbeddingModel, clean)
 	if err == nil && len(vecs) != len(inputs) {
 		err = fmt.Errorf("%s: %d embeddings for %d inputs", name, len(vecs), len(inputs))

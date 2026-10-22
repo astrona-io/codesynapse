@@ -1,9 +1,11 @@
 {
   "mcpServers": {
     "codesynapse": {
-      "type": "stdio",
-      "command": "go",
-      "args": ["run", "./services/mcp/cmd/codesynapse-mcp", "serve", "--offline", "."]
+      "type": "http",
+      "url": "http://localhost:8090/mcp",
+      "headers": {
+        "Authorization": "Bearer ${CODESYNAPSE_MCP_TOKEN}"
+      }
     }
   }
 }

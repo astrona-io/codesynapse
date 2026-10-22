@@ -79,6 +79,7 @@ type Job struct {
 
 	turns     []extract.Turn
 	authorize func(context.Context) error
+	tool      string
 }
 
 // Worker runs extraction jobs.
@@ -125,6 +126,11 @@ func (w *Worker) Submit(repo, namespace, source string, turns []extract.Turn) (J
 
 // SubmitAuthorized rechecks the initiating caller before extraction and storage.
 func (w *Worker) SubmitAuthorized(repo, namespace, source string, turns []extract.Turn, authorize func(context.Context) error) (Job, error) {
+	return w.SubmitAuthorizedContext(context.Background(), repo, namespace, source, turns, authorize)
+}
+
+// SubmitAuthorizedContext carries accepted tool attribution into queued work.
+func (w *Worker) SubmitAuthorizedContext(ctx context.Context, repo, namespace, source string, turns []extract.Turn, authorize func(context.Context) error) (Job, error) {
 	if len(turns) == 0 || len(turns) > extract.MaxTurns {
 		return Job{}, fmt.Errorf("give 1 to %d turns", extract.MaxTurns)
 	}
@@ -136,7 +142,7 @@ func (w *Worker) SubmitAuthorized(repo, namespace, source string, turns []extrac
 		return Job{}, err
 	}
 	j := &Job{ID: id, Repo: repo, Namespace: cmp.Or(namespace, repo), Source: cmp.Or(source, "agent"), State: Queued, Turns: len(turns),
-		QueuedAt: w.now().UTC().Format(time.RFC3339), turns: slices.Clone(turns), authorize: authorize}
+		QueuedAt: w.now().UTC().Format(time.RFC3339), turns: slices.Clone(turns), authorize: authorize, tool: telemetry.Tool(ctx)}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	select {
@@ -146,13 +152,14 @@ func (w *Worker) SubmitAuthorized(repo, namespace, source string, turns []extrac
 	}
 	w.jobs[id] = j
 	w.order = append(w.order, id)
-	tenant := telemetry.TenantLabel(memory.OrgOf(j.Namespace))
-	telemetry.OffloadTurns.Add(float64(len(turns)), tenant)
+	ctx = telemetry.WithTenant(ctx, memory.OrgOf(j.Namespace))
+	tenant := telemetry.Tenant(ctx)
+	telemetry.OffloadTurns.AddContext(ctx, float64(len(turns)), tenant)
 	chars := 0
 	for _, t := range turns {
 		chars += len(t.Text)
 	}
-	telemetry.OffloadTokens.Add(float64(chars/4), tenant)
+	telemetry.OffloadTokens.AddContext(ctx, float64(chars/4), tenant)
 	for len(w.order) > keepJobs {
 		if old := w.jobs[w.order[0]]; old != nil && (old.State == Queued || old.State == Running) {
 			break // never forget a job that has not finished
@@ -186,6 +193,7 @@ func (w *Worker) run(ctx context.Context, id string) {
 	turns := j.turns
 	w.mu.Unlock()
 
+	ctx = telemetry.WithTool(ctx, j.tool)
 	ctx, cancel := context.WithTimeout(llm.WithTask(telemetry.WithTenant(ctx, memory.OrgOf(j.Namespace)), "memory"), jobTimeout)
 	defer cancel()
 	res, err := w.extract(ctx, j.Namespace, j.Source, turns, j.authorize, func(provider, model string) {
@@ -205,7 +213,7 @@ func (w *Worker) run(ctx context.Context, id string) {
 		return
 	}
 	j.State = Succeeded
-	telemetry.MemoryFacts.Add(float64(j.Saved), telemetry.Tenant(ctx), "offload")
+	telemetry.MemoryFacts.AddContext(telemetry.WithModel(ctx, j.Provider, j.Model), float64(j.Saved), telemetry.Tenant(ctx), "offload")
 	if j.Saved > 0 && w.OnSaved != nil {
 		w.OnSaved()
 	}
@@ -224,6 +232,8 @@ func (w *Worker) extract(ctx context.Context, repo, source string, turns []extra
 	if err != nil {
 		return outcome{}, err
 	}
+	cfg, _ := w.llm.Config(provider)
+	ctx = telemetry.WithModel(ctx, provider, cfg.Model)
 	g, err := w.st.SearchMemory(ctx, repo, "", extract.MaxKnown, false)
 	if err != nil {
 		return outcome{}, fmt.Errorf("reading known entities: %w", err)
@@ -236,7 +246,6 @@ func (w *Worker) extract(ctx context.Context, repo, source string, turns []extra
 	if err != nil {
 		return outcome{}, err
 	}
-	cfg, _ := w.llm.Config(provider)
 	started(provider, cfg.Model)
 	resp, err := w.llm.Complete(ctx, provider, llm.Request{System: sys, User: user, MaxTokens: maxAnswer})
 	if err != nil {

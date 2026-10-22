@@ -120,7 +120,7 @@ RETURN `+entityProj+`, score ORDER BY score DESC, e.id LIMIT $k`,
 		score, _ := rec.AsMap()["score"].(float64)
 		out = append(out, memory.Scored{Entity: toEntity(rec), Score: score})
 	}
-	telemetry.VectorMatches.Add(float64(len(out)), telemetry.Tenant(ctx), "neo4j")
+	telemetry.VectorMatches.AddContext(ctx, float64(len(out)), telemetry.Tenant(ctx), "neo4j")
 	return out, nil
 }
 

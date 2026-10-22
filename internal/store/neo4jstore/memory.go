@@ -3,6 +3,7 @@ package neo4jstore
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
@@ -28,6 +29,7 @@ const current = "($history OR coalesce(f.valid_to, '') = '')"
 
 // UpsertMemory implements store.MemoryStore.
 func (s *Store) UpsertMemory(ctx context.Context, b memory.Batch) error {
+	defer observe(ctx, "write", time.Now())
 	sess := s.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: s.db, AccessMode: neo4j.AccessModeWrite})
 	defer sess.Close(ctx) //nolint:errcheck // nothing to do on close failure
 	_, err := sess.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
@@ -116,6 +118,7 @@ SET r.repo = f.repo, r.predicate = f.predicate, r.source = f.source, r.confirmat
 		}
 		return nil, nil
 	})
+	failed(ctx, "write", err)
 	return err
 }
 

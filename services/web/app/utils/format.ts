@@ -39,7 +39,14 @@ export function fmtCompact(n: number | undefined): string {
 export function fmtUnit(v: number | null | undefined, unit: string): string {
   if (v == null) return '–'
   if (unit === 'seconds') return v < 1 ? `${Math.round(v * 1000)} ms` : `${v.toFixed(v < 10 ? 2 : 1)} s`
-  if (unit === 'USD') return `$${v < 1 ? v.toFixed(3) : v.toFixed(2)}`
+  if (unit === 'USD') return v > 0 && v < 0.001 ? '<$0.001' : `$${v < 1 ? v.toFixed(3) : v.toFixed(2)}`
+  if (unit === '%') return `${v.toFixed(1)}%`
+  if (unit === 'bytes' || unit === 'bytes/s') {
+    const suffix = unit === 'bytes/s' ? '/s' : ''
+    if (Math.abs(v) >= 1024 * 1024) return `${(v / (1024 * 1024)).toFixed(1)} MiB${suffix}`
+    if (Math.abs(v) >= 1024) return `${(v / 1024).toFixed(1)} KiB${suffix}`
+    return `${Math.round(v)} B${suffix}`
+  }
   if (Math.abs(v) < 10 && !Number.isInteger(v)) return v.toFixed(1)
   return fmtCompact(v)
 }

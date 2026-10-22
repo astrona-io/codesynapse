@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"net/http"
 	"strings"
 	"time"
 
@@ -22,7 +24,7 @@ type anthropicProvider struct {
 }
 
 func newAnthropic(cfg ProviderConfig) *anthropicProvider {
-	opts := []option.RequestOption{option.WithAPIKey(cfg.apiKey)}
+	opts := []option.RequestOption{option.WithAPIKey(cfg.apiKey), option.WithHTTPClient(&http.Client{Transport: modelTransport(cfg, nil)})}
 	if cfg.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(cfg.BaseURL))
 	}
@@ -55,24 +57,45 @@ func (a *anthropicProvider) Complete(ctx context.Context, req Request) (Response
 	stream := a.client.Beta.Messages.NewStreaming(ctx, params)
 	var msg anthropic.BetaMessage
 	var first time.Duration
+	var inputKnown, outputKnown, stopped bool
+	response := func() Response {
+		usage := msg.Usage
+		if usage.InputTokens < 0 || usage.CacheReadInputTokens < 0 || usage.CacheCreationInputTokens < 0 || usage.OutputTokens < 0 ||
+			usage.InputTokens > math.MaxInt64-usage.CacheReadInputTokens || usage.InputTokens+usage.CacheReadInputTokens > math.MaxInt64-usage.CacheCreationInputTokens {
+			return Response{Model: msg.Model, FirstToken: first}
+		}
+		return Response{Model: msg.Model, InputTokens: int(usage.InputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens), CachedInputTokens: int(usage.CacheReadInputTokens), CacheWriteInputTokens: int(usage.CacheCreationInputTokens), OutputTokens: int(usage.OutputTokens), FirstToken: first, UsageReported: inputKnown || outputKnown, UsageKnown: inputKnown && outputKnown && stopped}
+	}
+	defer stream.Close() //nolint:errcheck // read-only stream
 	for stream.Next() {
+		event := stream.Current()
+		switch event.Type {
+		case "message_start":
+			inputKnown = event.Message.Usage.JSON.InputTokens.Valid()
+			outputKnown = event.Message.Usage.JSON.OutputTokens.Valid()
+		case "message_delta":
+			inputKnown = inputKnown || event.Usage.JSON.InputTokens.Valid()
+			outputKnown = outputKnown || event.Usage.JSON.OutputTokens.Valid()
+		case "message_stop":
+			stopped = true
+		}
 		if first == 0 && stream.Current().Type == "content_block_delta" {
 			first = time.Since(start)
 		}
 		if err := msg.Accumulate(stream.Current()); err != nil {
-			return Response{}, fmt.Errorf("%s: %w", a.cfg.Name, err)
+			return response(), fmt.Errorf("%s: %w", a.cfg.Name, err)
 		}
 	}
 	if err := stream.Err(); err != nil {
 		var apiErr *anthropic.Error
 		if errors.As(err, &apiErr) {
-			return Response{}, fmt.Errorf("%s: HTTP %d: %s", a.cfg.Name, apiErr.StatusCode, strings.TrimSpace(apiErr.Error()))
+			return response(), fmt.Errorf("%s: HTTP %d: %s", a.cfg.Name, apiErr.StatusCode, strings.TrimSpace(apiErr.Error()))
 		}
-		return Response{}, fmt.Errorf("%s: %w", a.cfg.Name, err)
+		return response(), fmt.Errorf("%s: %w", a.cfg.Name, err)
 	}
 	switch msg.StopReason {
 	case anthropic.BetaStopReasonRefusal:
-		return Response{}, fmt.Errorf("%s: the model declined the request", a.cfg.Name)
+		return response(), fmt.Errorf("%s: the model declined the request", a.cfg.Name)
 	case anthropic.BetaStopReasonMaxTokens:
 		// Keep what was produced; callers validate structure.
 	}
@@ -82,12 +105,9 @@ func (a *anthropicProvider) Complete(ctx context.Context, req Request) (Response
 			b.WriteString(t.Text)
 		}
 	}
-	return Response{
-		Text: strings.TrimSpace(b.String()), Model: msg.Model,
-		// Anthropic reports cache reads and writes apart from input_tokens.
-		InputTokens:       int(msg.Usage.InputTokens + msg.Usage.CacheReadInputTokens + msg.Usage.CacheCreationInputTokens),
-		CachedInputTokens: int(msg.Usage.CacheReadInputTokens), OutputTokens: int(msg.Usage.OutputTokens), FirstToken: first,
-	}, nil
+	resp := response()
+	resp.Text = strings.TrimSpace(b.String())
+	return resp, nil
 }
 
 func (a *anthropicProvider) Models(ctx context.Context) ([]string, error) {

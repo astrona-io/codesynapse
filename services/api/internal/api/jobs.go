@@ -194,10 +194,10 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 	if err != nil {
 		outcome = "error"
 	} else {
-		telemetry.IngestNodes.Add(float64(nodes), system)
+		telemetry.IngestNodes.AddContext(ctx, float64(nodes), system)
 	}
-	telemetry.IngestRuns.Inc(system, outcome)
-	telemetry.IngestDuration.Observe(time.Since(started).Seconds(), system)
+	telemetry.IngestRuns.IncContext(ctx, system, outcome)
+	telemetry.IngestDuration.ObserveContext(ctx, time.Since(started).Seconds(), system)
 	fin(job, nodes, edges, err)
 	if err == nil && opts.After != nil {
 		go func() {

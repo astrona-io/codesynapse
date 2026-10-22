@@ -100,9 +100,12 @@ func (x *Index) call(ctx context.Context, path string, body map[string]any, out 
 	start := time.Now()
 	err := x.do(ctx, path, body, out)
 	tenant := telemetry.Tenant(ctx)
-	telemetry.DBDuration.Observe(time.Since(start).Seconds(), tenant, "milvus", path)
+	telemetry.DBDuration.ObserveContext(ctx, time.Since(start).Seconds(), tenant, "milvus", path)
 	if err != nil {
-		telemetry.DBErrors.Inc(tenant, "milvus", path)
+		telemetry.DBErrors.IncContext(ctx, tenant, "milvus", path)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			telemetry.DBTimeouts.IncContext(ctx, tenant, "milvus", path)
+		}
 	}
 	return err
 }
@@ -314,7 +317,7 @@ func (x *Index) Search(ctx context.Context, model, tenant, namespace string, vec
 		hits = append(hits, vector.Hit{ID: r.ID, Tenant: r.Tenant, Namespace: r.NS, Score: (1 + r.Distance) / 2})
 	}
 	hits = vector.Isolate(hits, tenant, namespace, k)
-	telemetry.VectorMatches.Add(float64(len(hits)), telemetry.TenantLabel(orgOf(tenant)), "milvus")
+	telemetry.VectorMatches.AddContext(ctx, float64(len(hits)), telemetry.TenantLabel(orgOf(tenant)), "milvus")
 	return hits, nil
 }
 

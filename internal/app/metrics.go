@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
@@ -15,12 +16,13 @@ const (
 	EnvMetricsURL      = "CODESYNAPSE_METRICS_URL"
 	EnvMetricsUser     = "CODESYNAPSE_METRICS_USER"
 	EnvMetricsPassword = "CODESYNAPSE_METRICS_PASSWORD" //nolint:gosec // env var name, not a credential
+	EnvMetricsExporter = "CODESYNAPSE_METRICS_EXPORTER"
+	EnvEnvironment     = "CODESYNAPSE_ENVIRONMENT"
 )
 
-// StartMetrics pushes telemetry.Default to VictoriaMetrics every 15s when
-// CODESYNAPSE_METRICS_URL is set. The returned stop pushes a last time and
-// waits for it.
-func StartMetrics(ctx context.Context, logger *slog.Logger, job string) (stop func(), err error) {
+// StartMetrics exports one cumulative metric stream every 15s when a URL is
+// configured. Stop flushes once with a five-second deadline, even after ctx ends.
+func StartMetrics(ctx context.Context, logger *slog.Logger, job string, versions ...string) (stop func(), err error) {
 	url := os.Getenv(EnvMetricsURL)
 	if url == "" {
 		return func() {}, nil
@@ -28,14 +30,53 @@ func StartMetrics(ctx context.Context, logger *slog.Logger, job string) (stop fu
 	if err := telemetry.CheckURL(url); err != nil {
 		return nil, fmt.Errorf("%s: %w", EnvMetricsURL, err)
 	}
-	host, _ := os.Hostname() //nolint:errcheck // an empty instance label is acceptable
-	p := &telemetry.Pusher{URL: url, User: Getenv(EnvMetricsUser, ""), Password: os.Getenv(EnvMetricsPassword), Job: job, Instance: host}
+	exporter := Getenv(EnvMetricsExporter, "otlp")
+	switch exporter {
+	case "otlp":
+		version := "unknown"
+		if len(versions) > 0 && versions[0] != "" {
+			version = versions[0]
+		}
+		provider, initErr := telemetry.NewOTLP(ctx, telemetry.OTLPConfig{
+			URL: url, User: os.Getenv(EnvMetricsUser), Password: os.Getenv(EnvMetricsPassword),
+			Service: "codesynapse-" + job, Instance: telemetry.InstanceID(), Version: version,
+			Environment: Getenv(EnvEnvironment, "unknown"), Interval: 15 * time.Second, Timeout: 10 * time.Second,
+		})
+		if initErr != nil {
+			return nil, fmt.Errorf("initializing metrics: %w", initErr)
+		}
+		logger.Info("metrics push enabled", "exporter", exporter, "job", job, "every", "15s")
+		return sync.OnceFunc(func() {
+			final, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if shutdownErr := provider.Shutdown(final); shutdownErr != nil {
+				logger.Warn("flushing metrics failed", "error", shutdownErr)
+			}
+		}), nil
+	case "prometheus":
+		return startPrometheusMetrics(ctx, logger, job, url), nil
+	default:
+		return nil, fmt.Errorf("%s must be otlp or prometheus", EnvMetricsExporter)
+	}
+}
+
+func startPrometheusMetrics(ctx context.Context, logger *slog.Logger, job, url string) func() {
+	p := &telemetry.Pusher{URL: url, User: os.Getenv(EnvMetricsUser), Password: os.Getenv(EnvMetricsPassword), Job: job, Instance: telemetry.InstanceID()}
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		p.Run(ctx, 15*time.Second, func(err error) { logger.Warn("pushing metrics failed", "error", err) })
 	}()
-	logger.Info("metrics push enabled", "job", job, "every", "15s")
-	return func() { cancel(); <-done }, nil
+	logger.Info("metrics push enabled", "exporter", "prometheus", "job", job, "every", "15s")
+	return sync.OnceFunc(func() {
+		cancel()
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+			logger.Warn("metrics shutdown deadline exceeded")
+		}
+	})
 }

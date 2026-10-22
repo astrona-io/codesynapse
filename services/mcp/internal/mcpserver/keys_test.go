@@ -55,7 +55,7 @@ func keyServer(t *testing.T) (url string, keys map[string]string, acc *accounts.
 	server := New(s, "test", Options{Reviews: s, Memory: s, Usage: rec, Curated: s, CatalogWrites: true, Access: AccountsAccess{Acc: acc}})
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 	ts := httptest.NewServer(auth.RequireBearerToken(KeyVerifier(acc, "svc-token"),
-		&auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(handler))
+		&auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(MeasureHTTP(handler)))
 	t.Cleanup(ts.Close)
 	return ts.URL, keys, acc, rec, s
 }
@@ -151,15 +151,17 @@ func TestTelemetryCarriesTenant(t *testing.T) {
 	a, err := connectKey(t, url, keys["a"])
 	require.NoError(t, err)
 	require.False(t, call(t, a, "repo_list", map[string]any{}, nil).IsError)
+	require.False(t, call(t, a, "search_graph_nodes", map[string]any{"repo": storetest.Repo}, nil).IsError)
 	_, err = a.CallTool(context.Background(), &mcp.CallToolParams{Name: "no_such_tool_" + p.OrgID, Arguments: map[string]any{}})
 	assert.Error(t, err)
 
 	var b strings.Builder
 	require.NoError(t, telemetry.Default.WriteText(&b))
 	out := b.String()
-	assert.Contains(t, out, `mcp_tool_calls_total{tenant_id="`+p.OrgID+`",mcp_tool="repo_list",outcome="ok"}`)
-	assert.Contains(t, out, `mcp_tool_calls_total{tenant_id="`+p.OrgID+`",mcp_tool="unknown",outcome="error"}`, "names a client invents are not labels")
+	assert.Contains(t, out, `mcp_tool_calls_total{tenant_id="`+p.OrgID+`",mcp_tool="repo_list",outcome="ok",llm_provider="none",llm_model="none"}`)
+	assert.Contains(t, out, `mcp_tool_calls_total{tenant_id="`+p.OrgID+`",mcp_tool="unknown",outcome="error",llm_provider="none",llm_model="none"}`, "names a client invents are not labels")
 	assert.False(t, strings.Contains(out, "no_such_tool_"), "the invented name never reaches a series")
+	assert.Contains(t, out, `agent_memory_recalls_total{tenant_id="`+p.OrgID+`",mcp_tool="search_graph_nodes",llm_provider="none",llm_model="none"}`, "accepted tool context reaches memory instrumentation")
 }
 
 func TestLostPrivateAccessLeavesScope(t *testing.T) {

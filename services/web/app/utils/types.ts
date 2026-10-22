@@ -234,6 +234,7 @@ export interface SeriesPanel {
   kind: 'count' | 'gauge'
   help: string
   range: SeriesRange
+  empty: string
   step_seconds: number
   times: number[]
   series: SeriesLine[]

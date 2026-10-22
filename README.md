@@ -108,12 +108,16 @@ The **Overview** page ranks what to fix across your repositories, worst first: v
 
 The compose stack runs [VictoriaMetrics](https://victoriametrics.com/) (Apache-2.0). The API and MCP services push metrics to it every 15 seconds, and the **Statistics** page charts them per minute, 5 or 15 minutes, hour or 6 hours (`/stats?range=1h|6h|24h|7d|30d`):
 
-- agent sessions, tool calls, failed calls, latency and tokens served;
-- AI model tokens (input, output, served from the prompt cache), time to first token, and cost estimated from the prices you set in `config/llm.yaml`;
-- database latency (Neo4j or HugeGraph, Milvus, PostgreSQL), graph rows and vector matches;
-- agent memory: facts saved, turns offloaded, recalls.
+- **Tokens and model cost:** provider-reported input, output and cached tokens, estimated spend and prompt-cache savings, and calls with missing usage or prices.
+- **Network and cloud bandwidth:** MCP request/response payload bytes and cloud model request bytes. Avoided cloud traffic stays “Not measured” until an equivalent fallback provides a comparable baseline.
+- **Database performance:** request volume, latency percentiles, errors/timeouts, graph rows returned and vector matches. Returned rows do not measure internal nodes traversed.
+- **Agent memory and offloading:** current durable facts, recalls, saved-fact operations, offloaded turns and MCP activity. Fact counts refresh every 30 seconds, deduplicate API replicas and disappear from the chart after 90 seconds without a successful observation.
 
-Every number belongs to an organisation: members see their organisation's activity, platform admins see everyone's. Metrics never contain prompts, queries, file paths or user IDs. Upgrading: `just init` adds `METRICS_PASSWORD` to `.env`. Without VictoriaMetrics (`CODESYNAPSE_METRICS_URL` unset) the page explains how to turn it on.
+Ordinary panels show your organisation's activity, including when you are a platform administrator. The Administration area has separate platform-wide panels. Metrics never contain prompts, queries, file paths, repository names or user/session IDs. Missing model prices mean unknown cost; cached tokens may still be billed. Application payload bytes exclude HTTP headers, TLS and TCP overhead.
+
+Metrics use OpenTelemetry cumulative OTLP/HTTP by default. Set `CODESYNAPSE_METRICS_URL` to the internal VictoriaMetrics base URL; the exporter appends `/opentelemetry/v1/metrics`. Authentication uses `CODESYNAPSE_METRICS_USER` and `CODESYNAPSE_METRICS_PASSWORD` from the environment. `CODESYNAPSE_ENVIRONMENT` optionally identifies the deployment environment, otherwise `unknown` is used. Each process has a separate opaque instance ID so replicas and restarts do not share a cumulative stream; this ID is unrelated to agent sessions.
+
+`CODESYNAPSE_METRICS_EXPORTER=prometheus` selects the legacy Prometheus-text push path for rollback; the default is `otlp`. Restart the services when switching and use one exporter per process. No scrape endpoint is exposed. Failed exports do not block requests, and shutdown flushing has a five-second deadline. Upgrading: `just init` adds `METRICS_PASSWORD` to `.env` for the Compose stack. Without `CODESYNAPSE_METRICS_URL`, metrics export is disabled and the Statistics page explains how to enable it. Kubernetes configuration remains deferred to the final deployment phase.
 
 ## Keeping repositories up to date
 
@@ -145,7 +149,7 @@ claude mcp add --transport http codesynapse http://localhost:8090/mcp \
 claude mcp add codesynapse -- go run github.com/parisnakitakejser/codesynapse/services/mcp/cmd/codesynapse-mcp@latest serve --offline .
 ```
 
-This repository's own `.mcp.json` does that, so agents working on CodeSynapse use CodeSynapse. Connected to the **stack** instead, an agent sees every indexed repository, including whole organisations: call `repo_list` (or `search_all_repos`), then pass `repo` to the other tools. Repositories cloned by URL or through an organisation are named `owner/name` (for example `astrona-io/astrona-cli`), so equally named repositories of two organisations never clash; mounted folders and older indexes keep a plain name.
+This repository's `.mcp.json` connects directly to the running stack at `http://localhost:8090/mcp`, using `CODESYNAPSE_MCP_TOKEN` for bearer authentication. In accounts mode, set that variable to a personal organisation API key before starting the agent. The registration launches no local process or Python helper. Call `repo_list` (or `search_all_repos`) to find repositories your account may access, then pass `repo` to the other tools. Repositories cloned by URL or through an organisation are named `owner/name` (for example `astrona-io/astrona-cli`), so equally named repositories of two organisations never clash; mounted folders and older indexes keep a plain name.
 
 ### Working efficiently
 

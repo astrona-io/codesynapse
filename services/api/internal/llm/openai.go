@@ -19,7 +19,7 @@ type openAI struct {
 }
 
 func newOpenAI(cfg ProviderConfig) *openAI {
-	return &openAI{cfg: cfg, http: &http.Client{}}
+	return &openAI{cfg: cfg, http: &http.Client{Transport: modelTransport(cfg, nil)}}
 }
 
 const maxResponseBytes = 8 << 20
@@ -86,8 +86,8 @@ func (o *openAI) Complete(ctx context.Context, req Request) (Response, error) {
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 		Usage struct {
-			PromptTokens        int `json:"prompt_tokens"`
-			CompletionTokens    int `json:"completion_tokens"`
+			PromptTokens        *int `json:"prompt_tokens"`
+			CompletionTokens    *int `json:"completion_tokens"`
 			PromptTokensDetails struct {
 				CachedTokens int `json:"cached_tokens"`
 			} `json:"prompt_tokens_details"`
@@ -96,19 +96,32 @@ func (o *openAI) Complete(ctx context.Context, req Request) (Response, error) {
 	if err := o.do(ctx, http.MethodPost, "/chat/completions", body, &res); err != nil {
 		return Response{}, err
 	}
+	resp := Response{Model: o.cfg.Model}
+	if res.Model != "" {
+		resp.Model = res.Model
+	}
+	resp.UsageReported = res.Usage.PromptTokens != nil || res.Usage.CompletionTokens != nil
+	resp.UsageKnown = res.Usage.PromptTokens != nil && res.Usage.CompletionTokens != nil
+	if res.Usage.PromptTokens != nil {
+		resp.InputTokens = max(*res.Usage.PromptTokens, 0)
+		resp.UsageKnown = resp.UsageKnown && *res.Usage.PromptTokens >= 0
+	}
+	if res.Usage.CompletionTokens != nil {
+		resp.OutputTokens = max(*res.Usage.CompletionTokens, 0)
+		resp.UsageKnown = resp.UsageKnown && *res.Usage.CompletionTokens >= 0
+	}
+	resp.UsageKnown = resp.UsageKnown && res.Usage.PromptTokensDetails.CachedTokens >= 0 && res.Usage.PromptTokensDetails.CachedTokens <= resp.InputTokens
+	if res.Usage.PromptTokensDetails.CachedTokens >= 0 && res.Usage.PromptTokensDetails.CachedTokens <= resp.InputTokens {
+		resp.CachedInputTokens = res.Usage.PromptTokensDetails.CachedTokens
+	}
 	if len(res.Choices) == 0 {
-		return Response{}, fmt.Errorf("%s: empty response", o.cfg.Name)
+		return resp, fmt.Errorf("%s: empty response", o.cfg.Name)
 	}
-	text := CleanText(res.Choices[0].Message.Content)
-	if text == "" && res.Choices[0].FinishReason == "length" {
-		return Response{}, fmt.Errorf("%s: answer cut off at max_output_tokens=%d before any output; raise it for reasoning models", o.cfg.Name, req.MaxTokens)
+	resp.Text = CleanText(res.Choices[0].Message.Content)
+	if resp.Text == "" && res.Choices[0].FinishReason == "length" {
+		return resp, fmt.Errorf("%s: answer cut off at max_output_tokens=%d before any output; raise it for reasoning models", o.cfg.Name, req.MaxTokens)
 	}
-	model := res.Model
-	if model == "" {
-		model = o.cfg.Model
-	}
-	return Response{Text: text, Model: model, InputTokens: res.Usage.PromptTokens, CachedInputTokens: res.Usage.PromptTokensDetails.CachedTokens,
-		OutputTokens: res.Usage.CompletionTokens}, nil
+	return resp, nil
 }
 
 func (o *openAI) Models(ctx context.Context) ([]string, error) {

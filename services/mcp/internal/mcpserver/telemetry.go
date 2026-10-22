@@ -21,7 +21,7 @@ func telemetryMiddleware() mcp.Middleware {
 			case "initialize", "server/discover":
 				res, err := next(ctx, method, req)
 				if err == nil {
-					telemetry.MCPSessions.Inc(telemetry.Tenant(ctx))
+					telemetry.MCPSessions.IncContext(ctx, telemetry.Tenant(ctx))
 				}
 				return res, err
 			case "tools/call", "prompts/get":
@@ -37,16 +37,17 @@ func telemetryMiddleware() mcp.Middleware {
 				if err == nil {
 					telemetry.AllowTools(name)
 				}
-				tool, tenant := telemetry.ToolLabel(name), telemetry.Tenant(ctx)
+				ctx = telemetry.WithTool(ctx, name)
+				tool, tenant := telemetry.Tool(ctx), telemetry.Tenant(ctx)
 				outcome := "ok"
 				if r, ok := res.(*mcp.CallToolResult); err != nil || (ok && r != nil && r.IsError) {
 					outcome = "error"
 				}
-				telemetry.MCPToolCalls.Inc(tenant, tool, outcome)
-				telemetry.MCPToolDuration.Observe(time.Since(start).Seconds(), tenant, tool)
+				telemetry.MCPToolCalls.IncContext(ctx, tenant, tool, outcome)
+				telemetry.MCPToolDuration.ObserveContext(ctx, time.Since(start).Seconds(), tenant, tool)
 				if res != nil {
 					if b, merr := json.Marshal(res); merr == nil {
-						telemetry.MCPResponseTokens.Add(float64(len(b)/4), tenant, tool)
+						telemetry.MCPResponseTokens.AddContext(ctx, float64(len(b)/4), tenant, tool)
 					}
 				}
 				return res, err

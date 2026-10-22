@@ -270,7 +270,7 @@ test-metrics: _runtime
     trap '{{engine}} stop "$name" >/dev/null 2>&1' EXIT
     until curl -sf http://127.0.0.1:58428/health >/dev/null; do sleep 1; done
     CODESYNAPSE_TEST_METRICS_URL=http://127.0.0.1:58428 CODESYNAPSE_TEST_METRICS_USER=cs CODESYNAPSE_TEST_METRICS_PASSWORD="$pw" \
-        go test -race -count=1 -run TestVictoriaMetrics ./internal/telemetry/
+        go test -race -count=1 -run TestVictoriaMetrics ./internal/telemetry/ ./services/api/internal/api/
 
 test-integration: db
     CODESYNAPSE_TEST_NEO4J_URI=neo4j://localhost:7687 CODESYNAPSE_TEST_NEO4J_PASSWORD="$NEO4J_PASSWORD" \

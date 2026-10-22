@@ -15,6 +15,7 @@ import (
 
 	"github.com/parisnakitakejser/codesynapse/internal/memory/extract"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
+	"github.com/parisnakitakejser/codesynapse/internal/telemetry"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/assert"
 	"github.com/parisnakitakejser/codesynapse/internal/testutil/require"
 	"github.com/parisnakitakejser/codesynapse/services/api/internal/llm"
@@ -152,4 +153,26 @@ func TestWorkerFailuresAndLimits(t *testing.T) {
 	done := waitDone(t, w, last.ID)
 	assert.Equal(t, done.State, Failed)
 	assert.True(t, strings.Contains(done.Error, "no JSON object"), done.Error)
+}
+
+func TestWorkerPreservesAcceptedToolAfterRequestEnds(t *testing.T) {
+	const tenant = "dddddddddddddddddddddddd"
+	telemetry.AllowTools("offload_turns")
+	ctx, cancel := context.WithCancel(telemetry.WithTool(telemetry.WithTenant(context.Background(), tenant), "offload_turns"))
+	srv := fakeModel(t, `{"triples":[{"subject":"Payments","predicate":"OWNED_BY","object":"Team Blue","confidence":0.95}]}`, nil)
+	w := New(memory.New(), registry(srv.URL), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	checks := 0
+	job, err := w.SubmitAuthorizedContext(ctx, "repo", tenant+"|repo", "agent", []extract.Turn{{Role: "user", Text: "Payments is owned by Team Blue."}}, func(workerCtx context.Context) error {
+		checks++
+		assert.Equal(t, telemetry.Tenant(workerCtx), tenant)
+		assert.Equal(t, telemetry.Tool(workerCtx), "offload_turns")
+		return workerCtx.Err()
+	})
+	require.NoError(t, err)
+	cancel()
+	w.run(t.Context(), job.ID)
+	done, ok := w.Get(job.ID)
+	require.True(t, ok)
+	assert.Equal(t, done.State, Succeeded, done.Error)
+	assert.Equal(t, checks, 2)
 }
