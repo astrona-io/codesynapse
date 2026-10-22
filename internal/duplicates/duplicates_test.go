@@ -218,3 +218,24 @@ func TestAcrossNear(t *testing.T) {
 	assert.Equal(t, got.Groups[0].Redundant, 30)
 	assert.Equal(t, got.RedundantLOC, 30)
 }
+
+func TestLookup(t *testing.T) {
+	m := func(id string) Member { return Member{ID: id, Name: id} }
+	rep := Report{Groups: []Group{
+		{Kind: "near", Similarity: 0.8, Scope: "package", Copies: 2, Members: []Member{m("a"), m("c")}},
+		{Kind: "exact", Similarity: 1, Scope: "file", Copies: 8, Members: []Member{m("a"), m("b"), m("d"), m("e"), m("f"), m("g"), m("h"), m("i")}},
+	}}
+	got := rep.Lookup("a")
+	require.NotNil(t, got)
+	assert.Equal(t, got.Kind, "exact", "exact copies come first")
+	assert.Equal(t, got.Copies, 8)
+	assert.Len(t, got.Others, 5, "capped, and never the function itself")
+	for _, o := range got.Others {
+		assert.True(t, o.ID != "a")
+	}
+	near := rep.Lookup("c")
+	require.NotNil(t, near)
+	assert.Equal(t, near.Kind, "near")
+	assert.Equal(t, near.Others[0].ID, "a")
+	assert.True(t, rep.Lookup("zzz") == nil)
+}

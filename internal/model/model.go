@@ -146,7 +146,7 @@ type Node struct {
 	CloneHash string `json:"clone_hash,omitempty"`
 	// CloneSig is a MinHash signature of the same normalised tokens, used to
 	// find copies that were edited a little (see package duplicates).
-	CloneSig string `json:"clone_sig,omitempty"`
+	CloneSig string `json:"-"`
 	// SecurityTags are the sensitive API categories this node touches.
 	SecurityTags []string `json:"security_tags,omitempty"`
 	// Level is the heading level for Section nodes.

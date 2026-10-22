@@ -79,6 +79,7 @@ A repository whose report hit the cap is listed as partial, because copies of it
 | Dashboard, repository, Code health, Duplicates | Groups, scope and locations for one repository |
 | Overview, Code quality | A low-priority item per repository that repeats 5% or more of its function lines (and at least 100 lines), and up to three recommendations to share code between repositories |
 | Dashboard, Shared code | Cross-repository groups and recommendations |
+| Symbol explorer, `get_symbol_context` | A "Duplicate code" panel / `duplicate` field on any function that has exact or edited copies, with where the others are |
 | MCP `duplicate_code`, `shared_code` | Agents check before writing a helper or copying code |
 | CLI `codesynapse duplicates [path...]` | One path for one repository; several paths also compare them |
 | `GET /api/v1/repos/{repo}/duplicates`, `GET /api/v1/shared-code` | JSON for both |

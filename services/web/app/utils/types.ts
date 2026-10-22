@@ -60,7 +60,8 @@ export interface Dashboard {
 export interface RepoInfo { name: string; head?: string; ingested_at?: string; root?: string; branch?: string; remote?: string; managed?: boolean }
 export interface Source { name: string; is_git: boolean; is_go: boolean; content?: Record<string, number>; truncated?: boolean }
 export interface Job { id: string; repo: string; kind?: string; branch?: string; task?: string; result?: string; state: 'running' | 'succeeded' | 'failed'; started_at: string; finished_at?: string; nodes?: number; edges?: number; error?: string }
-export interface SymbolCard { symbol: GraphNodeData; callers: NodeRef[]; callees: NodeRef[]; tests: NodeRef[]; implementations?: NodeRef[]; docs?: NodeRef[] }
+export interface DuplicateInfo { kind: 'exact' | 'near'; similarity: number; scope: string; copies: number; others: DuplicateMember[] }
+export interface SymbolCard { duplicate?: DuplicateInfo; symbol: GraphNodeData; callers: NodeRef[]; callees: NodeRef[]; tests: NodeRef[]; implementations?: NodeRef[]; docs?: NodeRef[] }
 export interface ViewNode extends NodeRef { complexity?: number; security_tags?: string[]; is_test?: boolean }
 export interface ViewEdge { from: string; to: string; kind: string; count?: number }
 export interface GraphView { nodes: ViewNode[]; edges: ViewEdge[]; root?: string }
