@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
 )
@@ -59,6 +60,25 @@ type SymbolCard struct {
 	Tests           []Ref      `json:"tests"`
 	Implementations []Ref      `json:"implementations,omitempty"`
 	Docs            []Ref      `json:"docs,omitempty"`
+	// Duplicate is set when the function has exact or edited copies.
+	Duplicate *duplicates.Info `json:"duplicate,omitempty"`
+}
+
+// DuplicateOf looks the function up in the repository's duplicate report. A
+// missing or unreadable report just means nothing to show.
+func DuplicateOf(ctx context.Context, r store.Reader, repo string, n model.Node) *duplicates.Info {
+	if !n.Kind.IsCallable() {
+		return nil
+	}
+	rn, err := r.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
+	if err != nil || rn.Duplicates == "" {
+		return nil
+	}
+	rep, err := duplicates.Decode(rn.Duplicates)
+	if err != nil {
+		return nil
+	}
+	return rep.Lookup(n.ID)
 }
 
 // Resolve turns a node ID or a name into exactly one node. Names that match
@@ -151,6 +171,7 @@ func (s Service) Card(ctx context.Context, repo, idOrName string, limit int) (Sy
 		return card, err
 	}
 	card.Docs = refsOf(docs)
+	card.Duplicate = DuplicateOf(ctx, s.R, repo, n)
 	return card, nil
 }
 

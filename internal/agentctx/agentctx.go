@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/query"
 	"github.com/parisnakitakejser/codesynapse/internal/review"
@@ -111,7 +112,9 @@ type SymbolContext struct {
 	Findings        []Ref       `json:"findings,omitempty"`
 	Churn           *Churn      `json:"churn,omitempty"`
 	Package         *PackageCtx `json:"package,omitempty"`
-	Hint            string      `json:"hint,omitempty"`
+	// Duplicate is set when the function has exact or edited copies elsewhere.
+	Duplicate *duplicates.Info `json:"duplicate,omitempty"`
+	Hint      string           `json:"hint,omitempty"`
 }
 
 // Counts are totals before list truncation.
@@ -207,6 +210,8 @@ func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts Co
 		})
 		out.Risk = &Risk{Score: score, Level: review.LevelFor(score), Reasons: reasons}
 	}
+
+	out.Duplicate = query.DuplicateOf(ctx, s.R, repo, n)
 
 	if full {
 		// Public callers with no test of their own: where a refactor can break

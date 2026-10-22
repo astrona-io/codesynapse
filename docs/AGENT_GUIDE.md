@@ -93,7 +93,7 @@ To make it automatic beyond the server instructions: `codesynapse mcp agents-md 
 | Task | Tool | Recommended settings | Strategy |
 |---|---|---|---|
 | Start a new task | `minimal_context` | `max_tokens: 1500` | Describe the task; read only the returned line ranges. |
-| Quick lookup | `get_symbol_context` | `verbosity: "outline"` | Signature, doc, risk, direct callers/callees, tests. |
+| Quick lookup | `get_symbol_context` | `verbosity: "outline"` | Signature, doc, risk, direct callers/callees, tests, and `duplicate` (exact or edited copies elsewhere, with their locations) when the function has any. |
 | Before editing | `get_symbol_context` | `verbosity: "full"` | Adds transitive callers, untested public callers, docs, churn. |
 | Change analysis | `get_pr_context` | default | Diff, file list or base/head; risk, tests, findings in one call. |
 | Interface navigation | `get_implementations` | default | Resolve `DISPATCHES_TO` / `IMPLEMENTS` without guessing types. |

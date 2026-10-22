@@ -210,3 +210,37 @@ func Decode(s string) (Report, error) {
 	}
 	return r, nil
 }
+
+// Info says whether one function has copies, for symbol cards.
+type Info struct {
+	Kind       string   `json:"kind"`
+	Similarity float64  `json:"similarity"`
+	Scope      string   `json:"scope"`
+	Copies     int      `json:"copies"`
+	Others     []Member `json:"others"`
+}
+
+const maxOthers = 5
+
+// Lookup finds the group that contains the function id: its exact copies
+// when it has any, else the edited copies. It returns nil when there are
+// none (or the group listing was capped before reaching it).
+func (r Report) Lookup(id string) *Info {
+	var near *Info
+	for _, g := range r.Groups {
+		if !slices.ContainsFunc(g.Members, func(m Member) bool { return m.ID == id }) {
+			continue
+		}
+		info := &Info{Kind: g.Kind, Similarity: g.Similarity, Scope: g.Scope, Copies: g.Copies, Others: []Member{}}
+		for _, m := range g.Members {
+			if m.ID != id && len(info.Others) < maxOthers {
+				info.Others = append(info.Others, m)
+			}
+		}
+		if g.Kind == "exact" {
+			return info
+		}
+		near = info
+	}
+	return near
+}

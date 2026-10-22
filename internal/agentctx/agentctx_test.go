@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/store/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store/storetest"
@@ -79,4 +80,32 @@ func TestMinimalContextBudget(t *testing.T) {
 	require.NoError(t, err)
 	assert.LessOrEqual(t, out.UsedTokens, 120)
 	assert.Greater(t, out.Omitted, 0, "tight budget drops items")
+}
+
+func TestSymbolContextShowsDuplicates(t *testing.T) {
+	ctx := context.Background()
+	g := storetest.Fixture()
+	handler := storetest.ID(model.KindFunction, "app.Handler")
+	repoID := storetest.ID(model.KindRepository, storetest.Repo)
+	rn, ok := g.Node(repoID)
+	require.True(t, ok)
+	enc, err := duplicates.Encode(duplicates.Report{Groups: []duplicates.Group{{
+		Hash: "h", Kind: "exact", Similarity: 1, Scope: "repository", Copies: 2,
+		Members: []duplicates.Member{{ID: handler, Name: "app.Handler"}, {ID: "other|Function|x.Copy", Name: "x.Copy", File: "x/copy.go", StartLine: 3, EndLine: 20}},
+	}}})
+	require.NoError(t, err)
+	rn.Duplicates = enc
+	s := memory.New()
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, g))
+
+	got, err := Service{R: s}.SymbolContext(ctx, storetest.Repo, handler, ContextOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, got.Duplicate)
+	assert.Equal(t, got.Duplicate.Copies, 2)
+	require.Len(t, got.Duplicate.Others, 1)
+	assert.Equal(t, got.Duplicate.Others[0].Name, "x.Copy")
+
+	got, err = Service{R: s}.SymbolContext(ctx, storetest.Repo, storetest.ID(model.KindFunction, "app.main"), ContextOptions{})
+	require.NoError(t, err)
+	assert.True(t, got.Duplicate == nil, "no copies, no field")
 }

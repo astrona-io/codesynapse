@@ -83,6 +83,22 @@ const isCode = (r: NodeRef) => ['Function', 'Method', 'InterfaceMethod', 'Type']
         </div>
       </div>
 
+      <section v-if="card.duplicate" class="panel edge--orange">
+        <p class="eyebrow">Duplicate code</p>
+        <h2>
+          {{ card.duplicate.kind === 'near' ? 'Edited copies exist' : 'Exact copies exist' }}
+          <span class="muted">· {{ card.duplicate.copies }} in total<template v-if="card.duplicate.kind === 'near'">, ~{{ Math.round(card.duplicate.similarity * 100) }}% alike</template></span>
+        </h2>
+        <p class="muted">{{ card.duplicate.kind === 'near' ? 'Copied and then changed: look at what differs before merging them.' : 'The same logic with other names or values: keep one and call it.' }}</p>
+        <div class="table-wrap"><table><tbody>
+          <tr v-for="o in card.duplicate.others" :key="o.id">
+            <td><a href="#" class="mono" @click.prevent="pick(o.id)">{{ o.name }}</a></td>
+            <td class="mono muted">{{ o.file }}:{{ o.start_line }}-{{ o.end_line }}</td>
+          </tr>
+        </tbody></table></div>
+        <NuxtLink :to="`/repos/${encodeURIComponent(repo)}/duplicates`" class="small">All duplicates in this repository</NuxtLink>
+      </section>
+
       <div v-if="graph" class="panel">
         <h2>Call neighbourhood <span class="muted">· click a node to follow it</span></h2>
         <GraphCanvas :nodes="graph.nodes" :edges="graph.edges" :root="graph.root" @select="pick" />
