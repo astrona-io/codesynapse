@@ -14,6 +14,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/license"
 	"github.com/parisnakitakejser/codesynapse/internal/logx"
 
+	"github.com/parisnakitakejser/codesynapse/internal/arch"
 	"github.com/parisnakitakejser/codesynapse/internal/cleanup"
 	"github.com/parisnakitakejser/codesynapse/internal/duplicates"
 	"github.com/parisnakitakejser/codesynapse/internal/gitx"
@@ -115,6 +116,9 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	}
 	if len(langRes.Languages) > 0 {
 		logger.Info("extracted source code", "files", langRes.Languages)
+	}
+	if err := arch.Extract(ctx, opts.Repo, root, g); err != nil {
+		return nil, fmt.Errorf("architecture records: %w", err)
 	}
 	mods, err := addDependencies(ctx, opts, root, g, goRes, extImports)
 	if err != nil {

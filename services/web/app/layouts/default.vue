@@ -46,6 +46,7 @@ const repoGroups = computed(() => {
   return [
     { label: 'Repository', links: [
       { to: base, label: 'Summary' },
+      { to: `${base}/architecture`, label: 'Architecture' },
       { to: `${base}/security`, label: 'Security' },
       { to: `${base}/dependencies`, label: 'Dependencies' },
       { to: `${base}/licenses`, label: 'Licences' },

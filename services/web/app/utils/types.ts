@@ -375,3 +375,23 @@ export interface HistoryTrend {
   snapshots: HistorySnapshot[]; series: HistorySeries[]
   regressions: HistoryChange[]; improvements: HistoryChange[]; since?: string
 }
+
+// GET /api/v1/repos/{repo}/architecture
+export interface ArchSource { repo: string; head?: string; indexed_at?: string; path?: string }
+export interface ArchEntry {
+  id: string; node_id: string; type: string; status: string; binding: boolean; title: string; summary?: string
+  owner?: string; topic?: string; date?: string; components?: string[]; labels?: string[]; location: string
+  supersedes?: string[]; superseded_by?: string[]; fingerprint?: string; issues: number
+}
+export interface ArchPage {
+  entries: ArchEntry[]; total: number; limit: number; offset: number; source: ArchSource; issues: number; truncated?: boolean
+  facets: { types: Record<string, number>; statuses: Record<string, number>; components: Record<string, number>; labels: Record<string, number> }
+}
+export interface ArchIssue { kind: string; severity: 'warning' | 'info'; message: string; records: string[] }
+export interface ArchChainLink { id: string; title: string; status: string; relation: 'supersedes' | 'superseded-by'; depth: number }
+export interface ArchDetail extends ArchEntry {
+  raw_status?: string; format?: string; lifecycle: string[]; chain: ArchChainLink[]
+  implemented_by: (NodeRef & { declared?: string })[]; mentions: NodeRef[]; related: ArchEntry[]; problems: ArchIssue[]
+  outline: { name: string; lines: string; level?: number }[]; revisions: { commit: string; time?: string; subject?: string }[]
+  source: ArchSource; unresolved?: string[]
+}

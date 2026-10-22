@@ -55,6 +55,7 @@ nav:
       - Duplicate and shared code: features/duplicates.md
       - Cleanup plan: features/cleanup-plan.md
       - Trends: features/trends.md
+      - Architecture catalog: features/architecture.md
       - Agent memory: features/memory.md
       - Reviews and fix branches: features/reviews-fixes.md
   - Operations:
@@ -64,6 +65,7 @@ nav:
   - Reference:
       - Agent guide: AGENT_GUIDE.md
       - Plan and decisions: PLAN.md
+      - Architecture catalog plan: ARCHITECTURE_CATALOG_PLAN.md
       - Access control plan: ACCESS_CONTROL_PLAN.md
       - Retrieval plan: RETRIEVAL_PLAN.md
       - Telemetry plan: TELEMETRY_PLAN.md

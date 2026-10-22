@@ -3,6 +3,9 @@
 - Status: accepted
 - Date: 2026-10-22
 - Phase: SaaS 4c (`docs/SAAS.md`)
+- Topic: search
+- Components: store, memory
+- Implements: internal/store, internal/memory, memory.FuseRRF
 
 ## Context
 

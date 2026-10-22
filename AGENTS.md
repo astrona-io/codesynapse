@@ -50,6 +50,8 @@ internal/model/         Node/Edge kinds, Graph, IDs. The schema lives here.
 internal/ingest/        Pipeline: golang/ (go/packages + go/types; security rules in findings.go),
                         lang/ (Python, JS/TS, Vue: pure-Go structural parsers + rules),
                         docs/ (Markdown), config/ (YAML, Go templates, Helm; YAML security rules), githistory/
+internal/arch/           Reads architecture records (ADR, RFC, standard, policy, overview, runbook, diagram) kept as files into Record and Component nodes
+internal/catalog/        The one service the API and MCP tools use to list, read and find the records that apply to a task
 internal/history/        Snapshot and Trend: what a repository looked like after each ingest, and what got worse or better
 internal/snapshot/       Takes a snapshot from the stored reports and records it after each ingest
 internal/refactorplan/   How to merge one duplicate group (name, home, callers, tests, risks, steps); plans only
