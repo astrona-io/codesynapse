@@ -18,6 +18,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/query"
 	"github.com/parisnakitakejser/codesynapse/internal/security"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/internal/usage"
 )
 
 // Instructions are sent to clients on initialize and tell the model how to
@@ -43,6 +44,8 @@ type Options struct {
 	// Memory enables the agent-memory tools (upsert_graph_triples and
 	// friends), which write to this store. Nil leaves them out entirely.
 	Memory store.MemoryStore
+	// Usage, when set, counts sessions, tool calls and prompt requests.
+	Usage *usage.Recorder
 }
 
 // New builds an MCP server backed by r.
@@ -54,6 +57,9 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "codesynapse", Version: version}, &mcp.ServerOptions{
 		Instructions: instructions,
 	})
+	if len(opts) > 0 && opts[0].Usage != nil {
+		s.AddReceivingMiddleware(usageMiddleware(opts[0].Usage))
+	}
 	h := &handlers{svc: query.Service{R: r}}
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true}
 	add := func(name, desc string) *mcp.Tool {

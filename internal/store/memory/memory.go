@@ -13,6 +13,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/internal/usage"
 )
 
 // Store keeps graphs per repository. It is safe for concurrent use.
@@ -21,6 +22,7 @@ type Store struct {
 	repos   map[string]*repoGraph
 	reviews map[string]reviews.Review
 	mem     map[string]*memRepo
+	usage   map[string]usage.Bucket
 }
 
 type repoGraph struct {
@@ -33,7 +35,7 @@ var _ store.Store = (*Store)(nil)
 
 // New returns an empty store.
 func New() *Store {
-	return &Store{repos: map[string]*repoGraph{}, reviews: map[string]reviews.Review{}, mem: map[string]*memRepo{}}
+	return &Store{repos: map[string]*repoGraph{}, reviews: map[string]reviews.Review{}, mem: map[string]*memRepo{}, usage: map[string]usage.Bucket{}}
 }
 
 // EnsureSchema is a no-op.

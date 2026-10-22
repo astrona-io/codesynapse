@@ -162,6 +162,8 @@ Tips: pass `diff` rather than refs whenever you have it, since it works even whe
 
 `docs/AGENT_GUIDE.md` explains when to use which, with ready-made task prompts. Every tool is read-only except `submit_review` and `update_review_comment`, which write only to the review store (turn them off with `CODESYNAPSE_MCP_REVIEWS=false`), and the opt-in agent-memory tool below.
 
+**Statistics.** The **Statistics** page shows MCP sessions and tool calls per day, the most used tools, clients and repositories, tokens served and an estimate of tokens avoided, agent memory use with a model of what offloading saves, and workspace-wide security, licence, update-automation, review, AI and sync figures. The MCP server records only daily counters (never arguments or results); turn it off with `CODESYNAPSE_MCP_USAGE=false`.
+
 **Agent memory.** Agents can offload durable facts from their context window as triples (`upsert_graph_triples`) and recall them in later sessions (`search_graph_nodes`, `query_subgraph`, prompt `context-offload`). Facts are scoped to one indexed repository, redacted, size-limited, tagged with the agent that saved them, and listed on the **Agent memory** page, where you can delete them. Turn it off with `CODESYNAPSE_ALLOW_MEMORY=false`.
 
 | Tool | Returns |

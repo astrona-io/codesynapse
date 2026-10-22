@@ -15,6 +15,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
+	"github.com/parisnakitakejser/codesynapse/internal/usage"
 )
 
 // Repo is the repository name used by Fixture.
@@ -289,6 +290,52 @@ func Run(t *testing.T, s store.Store) {
 		require.NoError(t, err)
 		assert.Len(t, g.Facts, 0, "deleting an entity deletes its facts")
 		assert.True(t, errors.Is(s.DeleteMemoryEntity(ctx, "other-repo", memory.EntityID(Repo, "User")), store.ErrNotFound), "repositories are isolated")
+	})
+
+	t.Run("memory stats", func(t *testing.T) {
+		t.Cleanup(func() { _ = s.DeleteMemoryEntity(ctx, Repo, memory.EntityID(Repo, "Team")) })
+		b, err := memory.Prepare(Repo, []memory.Triple{{Subject: "Team", Predicate: "OWNS", Object: "api"}}, "agent-a", time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
+		require.NoError(t, err)
+		require.NoError(t, s.UpsertMemory(ctx, b))
+		require.NoError(t, s.UpsertMemory(ctx, b))
+		stats, err := s.MemoryStats(ctx)
+		require.NoError(t, err)
+		var got memory.Stats
+		for _, st := range stats {
+			if st.Repo == Repo {
+				got = st
+			}
+		}
+		assert.Equal(t, got.Entities, 2)
+		assert.Equal(t, got.Facts, 1)
+		assert.Equal(t, got.Confirmations, 2)
+		assert.Equal(t, got.FactChars, len("Team")+len("OWNS")+len("api"))
+		assert.Equal(t, got.Sources, map[string]int{"agent-a": 1})
+		assert.Equal(t, got.LastUpdated, "2026-02-01T00:00:00Z")
+	})
+
+	t.Run("usage counters", func(t *testing.T) {
+		// Days in 2000 keep the integration run away from real counters.
+		t.Cleanup(func() { _ = s.PruneUsage(ctx, "2000-01-03") })
+		b := usage.Bucket{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 2, Errors: 1, ResponseTokens: 300, DurationMs: 40, MaxDurationMs: 30}
+		require.NoError(t, s.AddUsage(ctx, []usage.Bucket{b}))
+		require.NoError(t, s.AddUsage(ctx, []usage.Bucket{{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 1, ResponseTokens: 100, DurationMs: 50, MaxDurationMs: 50},
+			{Day: "2000-01-02", Repo: Repo, Tool: usage.Session, Client: "codex", Calls: 1}}))
+		got, err := s.Usage(ctx, "2000-01-01")
+		require.NoError(t, err)
+		var mine []usage.Bucket
+		for _, g := range got {
+			if g.Day < "2000-01-03" {
+				mine = append(mine, g)
+			}
+		}
+		require.Len(t, mine, 2)
+		assert.Equal(t, mine[0], usage.Bucket{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 3, Errors: 1, ResponseTokens: 400, DurationMs: 90, MaxDurationMs: 50})
+		assert.Equal(t, mine[1].Tool, usage.Session)
+		require.NoError(t, s.PruneUsage(ctx, "2000-01-02"))
+		got, err = s.Usage(ctx, "2000-01-01")
+		require.NoError(t, err)
+		assert.Equal(t, got[0].Day, "2000-01-02", "older days pruned")
 	})
 
 	t.Run("delete", func(t *testing.T) {

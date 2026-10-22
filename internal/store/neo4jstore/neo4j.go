@@ -95,6 +95,8 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		"CREATE INDEX memory_entity_repo IF NOT EXISTS FOR (e:MemoryEntity) ON (e.repo)",
 		"CREATE INDEX memory_fact_id IF NOT EXISTS FOR ()-[f:FACT]-() ON (f.id)",
 		"CREATE INDEX memory_fact_repo IF NOT EXISTS FOR ()-[f:FACT]-() ON (f.repo)",
+		"CREATE CONSTRAINT mcp_usage_key IF NOT EXISTS FOR (u:McpUsage) REQUIRE u.key IS UNIQUE",
+		"CREATE INDEX mcp_usage_day IF NOT EXISTS FOR (u:McpUsage) ON (u.day)",
 	}
 	for _, q := range stmts {
 		if _, err := s.write(ctx, q, nil); err != nil {

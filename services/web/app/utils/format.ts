@@ -25,3 +25,11 @@ export function shortName(n: { kind?: string; qualified_name?: string; name: str
   if (n.kind === 'File' || n.kind === 'Package' || n.kind === 'Document' || n.kind === 'Section') return q
   return q.replace(/(?:[A-Za-z0-9_.~-]+\/)+/g, '')
 }
+// fmtCompact shortens large numbers for stat tiles and axes: 1,284 / 12.9K / 4.2M.
+export function fmtCompact(n: number | undefined): string {
+  const v = n ?? 0
+  const abs = Math.abs(v)
+  if (abs < 10_000) return Math.round(v).toLocaleString('en-US')
+  if (abs < 1_000_000) return `${(v / 1000).toFixed(abs < 100_000 ? 1 : 0)}K`
+  return `${(v / 1_000_000).toFixed(1)}M`
+}

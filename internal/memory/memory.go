@@ -215,3 +215,16 @@ func Score(e Entity, words []string) int {
 	}
 	return n
 }
+
+// Stats summarises one repository's memory for the statistics page.
+type Stats struct {
+	Repo          string `json:"repo"`
+	Entities      int    `json:"entities"`
+	Facts         int    `json:"facts"`
+	Confirmations int    `json:"confirmations"`
+	// FactChars is the total length of subject, predicate and object of all
+	// facts: what recalling every fact costs, before JSON overhead.
+	FactChars   int            `json:"fact_chars"`
+	Sources     map[string]int `json:"sources"`
+	LastUpdated string         `json:"last_updated,omitempty"`
+}

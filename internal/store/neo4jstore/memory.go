@@ -227,3 +227,31 @@ func (s *Store) DeleteMemoryEntity(ctx context.Context, repo, id string) error {
 	}
 	return nil
 }
+
+// MemoryStats implements store.MemoryStore.
+func (s *Store) MemoryStats(ctx context.Context) ([]memory.Stats, error) {
+	res, err := s.read(ctx, `MATCH (e:MemoryEntity)
+WITH e.repo AS repo, count(e) AS entities, max(e.updated_at) AS entity_updated
+OPTIONAL MATCH (a:MemoryEntity {repo: repo})-[f:FACT]->(b:MemoryEntity)
+RETURN repo, entities, entity_updated, count(f) AS facts, sum(coalesce(f.confirmations, 0)) AS confirmations,
+  sum(size(a.name) + size(f.predicate) + size(b.name)) AS chars, max(f.updated_at) AS fact_updated, collect(f.source) AS sources
+ORDER BY repo`, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := []memory.Stats{}
+	for _, rec := range res.Records {
+		m := rec.AsMap()
+		n := func(k string) int { v, _ := m[k].(int64); return int(v) }
+		st := memory.Stats{Repo: str(rec, "repo"), Entities: n("entities"), Facts: n("facts"), Confirmations: n("confirmations"),
+			FactChars: n("chars"), Sources: map[string]int{}, LastUpdated: max(str(rec, "entity_updated"), str(rec, "fact_updated"))}
+		sources, _ := m["sources"].([]any)
+		for _, v := range sources {
+			if src, ok := v.(string); ok {
+				st.Sources[src]++
+			}
+		}
+		out = append(out, st)
+	}
+	return out, nil
+}

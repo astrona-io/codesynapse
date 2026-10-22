@@ -10,6 +10,7 @@ import (
 	"github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/model"
 	"github.com/parisnakitakejser/codesynapse/internal/reviews"
+	"github.com/parisnakitakejser/codesynapse/internal/usage"
 )
 
 // ErrNotFound is returned when a requested node or repository does not exist.
@@ -156,6 +157,18 @@ type MemoryStore interface {
 	// entity and its facts. Both return ErrNotFound for unknown IDs.
 	DeleteMemoryFact(ctx context.Context, repo, id string) error
 	DeleteMemoryEntity(ctx context.Context, repo, id string) error
+	// MemoryStats summarises every repository that has memory, by repo name.
+	MemoryStats(ctx context.Context) ([]memory.Stats, error)
+}
+
+// UsageStore keeps daily MCP usage counters (package usage).
+type UsageStore interface {
+	// AddUsage adds the buckets' counters to the stored ones (creating them).
+	AddUsage(ctx context.Context, buckets []usage.Bucket) error
+	// PruneUsage deletes buckets of days before beforeDay (YYYY-MM-DD).
+	PruneUsage(ctx context.Context, beforeDay string) error
+	// Usage returns buckets from sinceDay on, ordered by day, repo, tool, client.
+	Usage(ctx context.Context, sinceDay string) ([]usage.Bucket, error)
 }
 
 // Store is a full read/write backend.
@@ -164,6 +177,7 @@ type Store interface {
 	Writer
 	ReviewStore
 	MemoryStore
+	UsageStore
 	Close(ctx context.Context) error
 }
 

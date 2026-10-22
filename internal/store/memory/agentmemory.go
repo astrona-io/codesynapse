@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"unicode/utf8"
 
 	agentmem "github.com/parisnakitakejser/codesynapse/internal/memory"
 	"github.com/parisnakitakejser/codesynapse/internal/store"
@@ -199,4 +200,29 @@ func (s *Store) DeleteMemoryEntity(_ context.Context, repo, id string) error {
 		}
 	}
 	return nil
+}
+
+// MemoryStats implements store.MemoryStore.
+func (s *Store) MemoryStats(context.Context) ([]agentmem.Stats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []agentmem.Stats{}
+	for repo, m := range s.mem {
+		if len(m.entities) == 0 && len(m.facts) == 0 {
+			continue
+		}
+		st := agentmem.Stats{Repo: repo, Entities: len(m.entities), Facts: len(m.facts), Sources: map[string]int{}}
+		for _, e := range m.entities {
+			st.LastUpdated = max(st.LastUpdated, e.UpdatedAt)
+		}
+		for _, f := range m.facts {
+			st.Confirmations += f.Confirmations
+			st.FactChars += utf8.RuneCountInString(m.entities[f.Subject].Name) + utf8.RuneCountInString(f.Predicate) + utf8.RuneCountInString(m.entities[f.Object].Name)
+			st.Sources[f.Source]++
+			st.LastUpdated = max(st.LastUpdated, f.UpdatedAt)
+		}
+		out = append(out, st)
+	}
+	slices.SortFunc(out, func(a, b agentmem.Stats) int { return cmp.Compare(a.Repo, b.Repo) })
+	return out, nil
 }
