@@ -71,3 +71,15 @@ codesynapse licenses . --license-lookup --fail-on conflict  # CI gate
 ```
 
 `--license-lookup` (or `CODESYNAPSE_LICENSE_LOOKUP=true`) is what sends package names and versions to deps.dev; without it, nothing leaves the machine.
+
+## Dependency review page
+
+**Dependency review** (per repository, under Dependencies and Licences) puts the packages that need a decision in one table: known advisories, licences to check and dependencies nothing imports. Each row shows the columns an agent-run review reports: dependency and version, how it was introduced, usage, licence, advisory, a proposed action and a verified-outcome column.
+
+- **Introduced by** says "direct" for packages in your own manifest. For indirect packages CodeSynapse does not store the path, so the row says so and copies the command that finds it (`go mod why -m`, `npm explain`, `pipdeptree -r -p`).
+- **Usage** comes from reachability for advisories (Go: your code calls a vulnerable symbol, imports the package, or only requires it; npm and PyPI: a source file imports the package or none does) and from the unused-modules report.
+- **Proposed action** is a suggestion from the data: remove an unused dependency, upgrade to the fixed version (marked urgent when your code calls the vulnerable symbol), replace or mitigate when no fix exists, ask about a licence conflict. Licence findings are flags for review, not legal findings.
+- **Verified outcome** always starts as "Not verified": run the tests, build and scans after a change and Sync again.
+- Below the table the page lists the package-manager commands for the ecosystems the repository uses, and the text to give an agent to run the full `dependency-review` prompt (any language, with smaller-alternative checks).
+
+CodeSynapse reads go.mod and npm and PyPI lockfiles only; a clean page is not proof that a project is free of vulnerabilities or compliant with a licence policy.
