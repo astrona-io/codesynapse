@@ -24,7 +24,7 @@ func scopedContract(t *testing.T, db store.Store) {
 	for _, name := range []string{"root", "leaf", "reentry", "branch-root", "branch-a", "branch-b", "leaf-a", "leaf-z"} {
 		g.AddNode(model.Node{ID: id(repo, name), Repo: repo, Kind: model.KindFunction, Name: name})
 	}
-	g.AddEdge(model.Edge{From: root, To: leaf, Kind: model.EdgeCalls})
+	g.AddEdge(model.Edge{From: root, To: leaf, Kind: model.EdgeCalls, Evidence: model.EvidenceSyntactic})
 	for _, pair := range [][2]string{{"branch-root", "branch-a"}, {"branch-root", "branch-b"}, {"branch-a", "leaf-z"}, {"branch-b", "leaf-a"}} {
 		g.AddEdge(model.Edge{From: id(repo, pair[0]), To: id(repo, pair[1]), Kind: model.EdgeCalls})
 	}
@@ -62,6 +62,7 @@ func scopedContract(t *testing.T, db store.Store) {
 	require.Len(t, es, 1)
 	assert.Equal(t, es[0].From, root)
 	assert.Equal(t, es[0].To, leaf)
+	assert.Equal(t, es[0].Evidence, model.EvidenceSyntactic)
 	es, err = r.Subgraph(ctx, []string{leaf, reentry}, nil)
 	require.NoError(t, err)
 	assert.Len(t, es, 0)

@@ -288,8 +288,9 @@ type fileIn struct {
 }
 
 type outlineOut struct {
-	File    string               `json:"file"`
-	Entries []query.OutlineEntry `json:"entries"`
+	File     string               `json:"file"`
+	Analysis *model.Analysis      `json:"analysis,omitempty"`
+	Entries  []query.OutlineEntry `json:"entries"`
 }
 
 func (h *handlers) fileOutline(ctx context.Context, _ *mcp.CallToolRequest, in fileIn) (*mcp.CallToolResult, outlineOut, error) {
@@ -304,7 +305,11 @@ func (h *handlers) fileOutline(ctx context.Context, _ *mcp.CallToolRequest, in f
 	if entries == nil {
 		entries = []query.OutlineEntry{}
 	}
-	return nil, outlineOut{File: in.File, Entries: entries}, nil
+	analysis, err := h.svc.FileAnalysis(ctx, repo, in.File)
+	if err != nil {
+		return nil, outlineOut{}, err
+	}
+	return nil, outlineOut{File: in.File, Analysis: analysis, Entries: entries}, nil
 }
 
 type limitIn struct {

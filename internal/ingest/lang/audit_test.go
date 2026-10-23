@@ -64,6 +64,11 @@ def caller(foreign):
 	from := model.NodeID("audit", model.KindFunction, "calls.py::caller")
 	to := model.NodeID("audit", model.KindMethod, "calls.py::Local.save")
 	assert.True(t, hasEdge(res.Graph, from, to, model.EdgeCalls), "audit baseline: unique-name fallback does not prove the receiver's type")
+	for _, e := range res.Graph.Edges() {
+		if e.From == from && e.To == to {
+			assert.Equal(t, e.Evidence, model.EvidenceInferred, "4j.4: the guess is labelled, not presented as resolved")
+		}
+	}
 }
 
 func BenchmarkAuditStructuralParse(b *testing.B) {

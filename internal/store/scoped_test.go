@@ -114,3 +114,12 @@ func TestRepositoryReaderUsesNativeBoundary(t *testing.T) {
 	assert.True(t, errors.Is(err, store.ErrNotFound))
 	assert.Equal(t, backend.calls, 2, "foreign selectors are rejected before querying")
 }
+
+func TestReadEvidence(t *testing.T) {
+	for in, want := range map[string]model.Evidence{
+		"typed": model.EvidenceTyped, "syntactic": model.EvidenceSyntactic, "inferred": model.EvidenceInferred,
+		"": "", "unknown": "", "ssa": "", "TYPED": "",
+	} {
+		assert.Equal(t, store.ReadEvidence(in), want, in)
+	}
+}

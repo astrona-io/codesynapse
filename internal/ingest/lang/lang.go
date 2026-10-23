@@ -88,6 +88,26 @@ type fileResult struct {
 	topCalls []call // module-level calls, attributed to the file
 	findings []finding
 	isTest   bool
+	// partial is set when the source ended with open brackets or an open
+	// string: declarations after the problem may be missing or misplaced.
+	partial bool
+}
+
+// unbalanced reports whether opening and closing brackets in masked source
+// fail to pair up: a close without an open, or opens left at the end.
+func unbalanced(masked string, opening, closing byte) bool {
+	d := 0
+	for i := range len(masked) {
+		switch masked[i] {
+		case opening:
+			d++
+		case closing:
+			if d--; d < 0 {
+				return true
+			}
+		}
+	}
+	return d != 0
 }
 
 // importRef is one import: spec as written ("./api", "pkg.mod", "lodash")
@@ -231,9 +251,13 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 	module := moduleName(rel, lang)
 	lines := strings.Count(string(src), "\n") + 1
 	fileID := ix.id(model.KindFile, rel)
+	analysis := model.Analysis{Level: model.LevelSyntactic, Status: model.StatusComplete}
+	if fr.partial {
+		analysis.Status, analysis.Errors = model.StatusPartial, 1
+	}
 	ix.g.AddNode(model.Node{
 		ID: fileID, Kind: model.KindFile, Repo: ix.repo, Name: path.Base(rel), File: rel, Package: module,
-		IsTest: fr.isTest, LOC: lines, Bytes: len(src), Language: lang,
+		IsTest: fr.isTest, LOC: lines, Bytes: len(src), Language: lang, Analysis: analysis.Encode(),
 	})
 	pkgID := ix.id(model.KindPackage, module)
 	ix.g.AddNode(model.Node{ID: pkgID, Kind: model.KindPackage, Repo: ix.repo, Name: path.Base(module), QualifiedName: module, Package: module, Language: lang})
@@ -269,7 +293,7 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 		if s.root {
 			// Decorated (Flask/FastAPI routes, pytest fixtures, click commands)
 			// or registered functions run by a framework: referenced by the file.
-			ix.g.AddEdge(model.Edge{From: fileID, To: sid, Kind: model.EdgeReferences})
+			ix.g.AddEdge(model.Edge{From: fileID, To: sid, Kind: model.EdgeReferences, Evidence: model.EvidenceSyntactic})
 		}
 	}
 	// A test file's module-level code (describe/it blocks) is test code:
@@ -348,11 +372,11 @@ func (ix *indexer) link() {
 			}
 		}
 	}
-	unique := func(m map[string][]string, key string) string {
+	unique := func(m map[string][]string, key string) (string, model.Evidence) {
 		if ids := m[key]; len(ids) == 1 {
-			return ids[0]
+			return ids[0], model.EvidenceInferred
 		}
-		return ""
+		return "", ""
 	}
 	for _, pf := range ix.files {
 		// local name -> target node id, via imports
@@ -381,47 +405,55 @@ func (ix *indexer) link() {
 		if family == Vue || family == TypeScript {
 			family = JavaScript
 		}
-		resolve := func(c call, class string) string {
+		// resolve finds a call's target and says how: through declarations
+		// and imports (syntactic) or a repository-unique name (inferred).
+		resolve := func(c call, class string) (string, model.Evidence) {
+			declared := func(sid string) (string, model.Evidence) {
+				if sid == "" {
+					return "", ""
+				}
+				return sid, model.EvidenceSyntactic
+			}
 			switch c.recv {
 			case "":
 				if sid, ok := pf.symIDs[c.name]; ok {
-					return sid
+					return declared(sid)
 				}
 				if sid, ok := bound[c.name]; ok {
-					return sid
+					return declared(sid)
 				}
 				if pf.lang != Python {
 					return unique(funcsByName, family+":"+c.name)
 				}
-				return ""
 			case "self", "this", "cls":
 				if class != "" {
-					return pf.symIDs[class+"."+c.name]
+					return declared(pf.symIDs[class+"."+c.name])
 				}
 			default:
 				if m, ok := moduleAlias[c.recv]; ok {
-					return m.symIDs[c.name]
+					return declared(m.symIDs[c.name])
 				}
 				if sid, ok := pf.symIDs[c.recv+"."+c.name]; ok { // Class.static()
-					return sid
+					return declared(sid)
 				}
 				return unique(methodsByName, pf.lang+":"+c.name)
 			}
-			return ""
+			return "", ""
 		}
-		link := func(from, to string) {
+		link := func(from string, c call, class string) {
+			to, evidence := resolve(c, class)
 			if to == "" || to == from {
 				return
 			}
-			ix.g.AddEdge(model.Edge{From: from, To: to, Kind: model.EdgeCalls})
+			ix.g.AddEdge(model.Edge{From: from, To: to, Kind: model.EdgeCalls, Evidence: evidence})
 			if ctor, ok := ctorOf[to]; ok { // Class(...) runs its constructor
-				ix.g.AddEdge(model.Edge{From: from, To: ctor, Kind: model.EdgeCalls})
+				ix.g.AddEdge(model.Edge{From: from, To: ctor, Kind: model.EdgeCalls, Evidence: evidence})
 			}
 		}
 		for _, s := range pf.fr.symbols {
 			from := pf.symIDs[s.name]
 			for _, c := range s.calls {
-				link(from, resolve(c, s.class))
+				link(from, c, s.class)
 			}
 		}
 		top := pf.id
@@ -429,7 +461,7 @@ func (ix *indexer) link() {
 			top = tid
 		}
 		for _, c := range pf.fr.topCalls {
-			link(top, resolve(c, ""))
+			link(top, c, "")
 		}
 		for _, f := range pf.fr.findings {
 			if pf.fr.isTest {

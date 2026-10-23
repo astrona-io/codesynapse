@@ -12,7 +12,7 @@ import (
 var (
 	nodeTexts = []string{"nid", "kind", "repo", "name", "qualified_name", "package", "file", "signature", "summary", "body_hash", "clone_hash", "clone_sig", "via", "doc_type", "status", "meta", "duplicates",
 		"time", "head", "root", "branch", "metrics", "severity", "rule", "version", "fixed_version", "reachability", "url",
-		"liveness", "cleanup", "licenses", "coverage", "language", "ecosystem", "license", "license_source", "run", "symbol_id", "revision", "identities"}
+		"liveness", "cleanup", "licenses", "coverage", "language", "ecosystem", "license", "license_source", "run", "symbol_id", "revision", "identities", "analysis"}
 	nodeLongs = []string{"bytes", "start_line", "end_line", "complexity", "loc", "level", "churn", "roots"}
 	nodeBools = []string{"exported", "is_test", "indirect", "dev"}
 	nodeLists = []string{"cwe", "aliases", "security_tags"}
@@ -26,7 +26,7 @@ var (
 	snapshotProps = []string{"sid", "repo", "at", "doc"}
 	curatedProps  = []string{"cid", "repo", "kind", "created_at", "doc"}
 	usageProps    = []string{"ukey", "day", "daynum", "org", "repo", "tool", "client", "calls", "errors", "response_tokens", "duration_ms", "max_duration_ms"}
-	otherTexts    = []string{"origin_session_id", "eid", "tenant_id", "ns", "type", "created_at", "updated_at", "emb_model", "fid", "subj", "obj", "predicate", "source",
+	otherTexts    = []string{"evidence", "origin_session_id", "eid", "tenant_id", "ns", "type", "created_at", "updated_at", "emb_model", "fid", "subj", "obj", "predicate", "source",
 		"valid_from", "valid_to", "rid", "doc", "ukey", "day", "org", "tool", "client", "sid", "at", "cid", "kind"}
 	otherLongs = []string{"count", "confirmations", "daynum", "calls", "errors", "response_tokens", "duration_ms", "max_duration_ms"}
 )
@@ -55,7 +55,11 @@ label('snapshot', ['sid', 'repo'], snapshotProps)
 label('curated', ['cid', 'repo'], curatedProps)
 
 edgeKinds.each { k ->
-  s.edgeLabel(k).sourceLabel('node').targetLabel('node').properties('count', 'run').nullableKeys('count', 'run').ifNotExist().create()
+  s.edgeLabel(k).sourceLabel('node').targetLabel('node').properties('count', 'run', 'evidence').nullableKeys('count', 'run', 'evidence').ifNotExist().create()
+  // Edge labels created before evidence was recorded get it appended.
+  if (!s.getEdgeLabel(k).properties().collect { graph.propertyKey(it).name() }.contains('evidence')) {
+    s.edgeLabel(k).properties('evidence').nullableKeys('evidence').append()
+  }
 }
 def factNullable = factProps - ['fid', 'tenant_id', 'ns', 'subj', 'obj']
 s.edgeLabel('fact').sourceLabel('mem_entity').targetLabel('mem_entity').multiTimes().properties(factProps as String[])

@@ -53,6 +53,7 @@ func To(n model.Node) map[string]any {
 	setStr("root", n.Root)
 	setStr("branch", n.Branch)
 	setStr("metrics", n.Metrics)
+	setStr("analysis", n.Analysis)
 	setInt("bytes", n.Bytes)
 	setInt("start_line", n.StartLine)
 	setInt("end_line", n.EndLine)
@@ -101,7 +102,7 @@ func From(p map[string]any) model.Node {
 		SymbolID: s("symbol_id"), Revision: s("revision"), Identities: s("identities"),
 		QualifiedName: s("qualified_name"), Package: s("package"), File: s("file"),
 		Signature: s("signature"), Summary: s("summary"), BodyHash: s("body_hash"), CloneHash: s("clone_hash"), DocType: s("doc_type"), Status: s("status"), Meta: s("meta"), Via: s("via"), Roots: i("roots"), CloneSig: s("clone_sig"), Duplicates: s("duplicates"),
-		Time: s("time"), Head: s("head"), Root: s("root"), Branch: s("branch"), Metrics: s("metrics"), Bytes: i("bytes"),
+		Time: s("time"), Head: s("head"), Root: s("root"), Branch: s("branch"), Metrics: s("metrics"), Analysis: s("analysis"), Bytes: i("bytes"),
 		StartLine: i("start_line"), EndLine: i("end_line"), Complexity: i("complexity"),
 		LOC: i("loc"), Level: i("level"), Churn: i("churn"),
 		Exported: b("exported"), IsTest: b("is_test"),

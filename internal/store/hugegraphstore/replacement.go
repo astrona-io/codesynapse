@@ -81,7 +81,7 @@ doc.nodes.each{r->
  r.p.each{k,val->kv<<k;kv<<val}
  vertices[r.v]=graph.addVertex(kv as Object[])
 }
-doc.edges.each{r->vertices[r.a].addEdge(r.l,vertices[r.b],'count',r.c as Long,'run',run)}
+doc.edges.each{r->def kv=['count',r.c as Long,'run',run];if(r.e){kv<<'evidence';kv<<r.e};vertices[r.a].addEdge(r.l,vertices[r.b],kv as Object[])}
 chunks.each{it.remove()}
 head.get().property('stage_run','');head.get().property('stage_expires',0L)
 graph.tx().commit();return ['ok']
@@ -101,7 +101,11 @@ func (s *Store) replaceAtomic(ctx context.Context, repo string, nodes []model.No
 	}
 	edgeRows := make([]map[string]any, 0, len(edges))
 	for _, e := range edges {
-		edgeRows = append(edgeRows, map[string]any{"a": nodeVID(e.From), "b": nodeVID(e.To), "l": string(e.Kind), "c": int64(max(e.Count, 1))})
+		row := map[string]any{"a": nodeVID(e.From), "b": nodeVID(e.To), "l": string(e.Kind), "c": int64(max(e.Count, 1))}
+		if e.Evidence != "" {
+			row["e"] = string(e.Evidence)
+		}
+		edgeRows = append(edgeRows, row)
 	}
 	payload, err := json.Marshal(map[string]any{"nodes": nodeRows, "edges": edgeRows})
 	if err != nil {

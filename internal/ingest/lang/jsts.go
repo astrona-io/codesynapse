@@ -191,7 +191,7 @@ func parseJS(src []byte, _ bool) *fileResult {
 	masked := maskJS(string(src))
 	lines := strings.Split(masked, "\n")
 	depth := depths(masked)
-	fr := &fileResult{}
+	fr := &fileResult{partial: unbalanced(masked, '{', '}')}
 
 	type classCtx struct {
 		name  string

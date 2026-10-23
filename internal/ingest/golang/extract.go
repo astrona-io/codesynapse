@@ -30,6 +30,11 @@ import (
 // summaryLen bounds stored doc summaries (runes).
 const summaryLen = 200
 
+// maxCallSitesPerPackage bounds call-graph work per package. Once a package
+// has spent it, further function bodies are skipped and the package is
+// marked truncated, so one enormous generated package cannot stall ingest.
+const maxCallSitesPerPackage = 100_000
+
 // Options configures extraction.
 type Options struct {
 	// Repo is the repository name used to scope node IDs.
@@ -41,6 +46,8 @@ type Options struct {
 	// AllowNetwork permits module downloads. Off by default so indexing an
 	// untrusted repository cannot reach the network through `go list`.
 	AllowNetwork bool
+	// MaxCallSites overrides maxCallSitesPerPackage (tests).
+	MaxCallSites int
 }
 
 // Result is the output of Extract.
@@ -111,13 +118,17 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 		}
 	})
 
+	if opts.MaxCallSites <= 0 {
+		opts.MaxCallSites = maxCallSitesPerPackage
+	}
 	x := &extractor{
-		opts:    opts,
-		policy:  repoconfig.FromContext(ctx),
-		g:       model.NewGraph(),
-		modules: map[string]bool{},
-		srcs:    map[string][]byte{},
-		res:     &Result{ExternalCalls: map[string][]string{}, ExternalImports: map[string][]string{}},
+		opts:     opts,
+		policy:   repoconfig.FromContext(ctx),
+		g:        model.NewGraph(),
+		modules:  map[string]bool{},
+		srcs:     map[string][]byte{},
+		res:      &Result{ExternalCalls: map[string][]string{}, ExternalImports: map[string][]string{}},
+		analysis: map[string]*packageAnalysis{},
 	}
 	x.g.AddNode(model.Node{ID: x.repoID(), Kind: model.KindRepository, Repo: opts.Repo, Name: opts.Repo})
 	x.nested = nestedRepos(opts.Root, x.policy)
@@ -146,6 +157,7 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 		x.pkg(p, true)
 	}
 	x.implementations(primary)
+	x.recordAnalysis()
 	x.g.PruneDanglingEdges()
 	for _, node := range x.g.Nodes() {
 		if node.Kind == model.KindFile {
@@ -177,6 +189,55 @@ type extractor struct {
 	// generated is set while a generated file is walked: machine output is
 	// not worth sharing.
 	generated bool
+	// analysis accumulates per package ID what was analysed and left out.
+	analysis map[string]*packageAnalysis
+}
+
+type packageAnalysis struct {
+	model.Analysis
+	callSites int // spent against Options.MaxCallSites
+}
+
+// pkgAnalysis returns the record of the package p belongs to; test
+// variants share their package's record.
+func (x *extractor) pkgAnalysis(p *packages.Package) *packageAnalysis {
+	id := x.id(model.KindPackage, strings.TrimSuffix(p.PkgPath, "_test"))
+	a, ok := x.analysis[id]
+	if !ok {
+		a = &packageAnalysis{Analysis: model.Analysis{Level: model.LevelTyped}}
+		x.analysis[id] = a
+	}
+	return a
+}
+
+// recordAnalysis stamps Package and File nodes with their package's record.
+// Test variants repeat their package's errors and ignored files, so those
+// are the maximum over variants, not a sum.
+func (x *extractor) recordAnalysis() {
+	status := func(a model.Analysis) string {
+		switch {
+		case a.OmittedBodies > 0:
+			return model.StatusTruncated
+		case a.Errors > 0:
+			return model.StatusPartial
+		}
+		return model.StatusComplete
+	}
+	for id, a := range x.analysis {
+		a.Status = status(a.Analysis)
+		if n, ok := x.g.Node(id); ok {
+			n.Analysis = a.Encode()
+		}
+	}
+	for _, n := range x.g.Nodes() {
+		if n.Kind != model.KindFile {
+			continue
+		}
+		if a, ok := x.analysis[x.id(model.KindPackage, n.Package)]; ok {
+			file, _ := x.g.Node(n.ID)
+			file.Analysis = model.Analysis{Level: a.Level, Status: a.Status}.Encode()
+		}
+	}
 }
 
 // nestedRepos finds directories below root that contain their own .git.
@@ -271,6 +332,15 @@ func (x *extractor) pkg(p *packages.Package, testOnly bool) {
 		Name: p.Name, QualifiedName: pkgPath, Package: pkgPath,
 	})
 	x.g.AddEdge(model.Edge{From: x.repoID(), To: pkgID, Kind: model.EdgeContains})
+	a := x.pkgAnalysis(p)
+	a.Errors = max(a.Errors, len(p.Errors))
+	ignored := 0
+	for _, f := range p.IgnoredFiles {
+		if rel := x.relPath(f); rel != "" && !x.inNested(rel) && x.policy.PathAllowed(rel) {
+			ignored++
+		}
+	}
+	a.IgnoredFiles = max(a.IgnoredFiles, ignored)
 
 	if !testOnly {
 		for imp := range x.permittedImports(p) {
@@ -405,7 +475,15 @@ func (x *extractor) funcDecl(p *packages.Package, d *ast.FuncDecl, abs, rel, fil
 	}
 	if d.Body != nil {
 		n.Complexity = cyclomatic(d.Body)
-		n.SecurityTags = x.calls(p, d.Body, n.ID)
+		var body bodyResult
+		body, n.SecurityTags = x.calls(p, d.Body, n.ID)
+		if body.unresolved > 0 || body.omitted {
+			fn := model.Analysis{Level: model.LevelTyped, Status: model.StatusComplete, UnresolvedCalls: body.unresolved}
+			if body.omitted {
+				fn.Status, fn.OmittedBodies = model.StatusTruncated, 1
+			}
+			n.Analysis = fn.Encode()
+		}
 		if !isTestFile {
 			x.scan(p.TypesInfo, p.Fset, d.Body, n.ID, rel)
 		}
@@ -505,17 +583,41 @@ func typeKind(t types.Type) string {
 	}
 }
 
+// bodyResult is what calls found out about one body beyond its edges.
+type bodyResult struct {
+	unresolved int  // dynamic call sites
+	omitted    bool // skipped: the package's call-site budget was spent
+}
+
 // calls records CALLS edges for every call inside body and returns the
-// security tags implied by the callees.
-func (x *extractor) calls(p *packages.Package, body ast.Node, callerID string) []string {
+// security tags implied by the callees. Once the package has spent its
+// call-site budget the body is skipped and reported as omitted.
+func (x *extractor) calls(p *packages.Package, body ast.Node, callerID string) (bodyResult, []string) {
+	var res bodyResult
+	a := x.pkgAnalysis(p)
+	if a.callSites >= x.opts.MaxCallSites {
+		a.OmittedBodies++
+		res.omitted = true
+		return res, nil
+	}
 	var tags []string
 	ast.Inspect(body, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
 		if !ok {
 			return true
 		}
+		a.callSites++
 		fn := calleeFunc(p.TypesInfo, call.Fun)
-		if fn == nil || fn.Pkg() == nil {
+		if fn == nil {
+			// Conversions and builtins have no callee to find; anything
+			// else is a call through a value the type checker cannot follow.
+			if tv, ok := p.TypesInfo.Types[call.Fun]; !ok || !tv.IsType() && !tv.IsBuiltin() {
+				res.unresolved++
+				a.UnresolvedCalls++
+			}
+			return true
+		}
+		if fn.Pkg() == nil {
 			return true
 		}
 		fn = fn.Origin()
@@ -532,7 +634,7 @@ func (x *extractor) calls(p *packages.Package, body ast.Node, callerID string) [
 					kind = model.KindInterfaceMethod
 				}
 			}
-			x.g.AddEdge(model.Edge{From: callerID, To: x.id(kind, fn.FullName()), Kind: model.EdgeCalls})
+			x.g.AddEdge(model.Edge{From: callerID, To: x.id(kind, fn.FullName()), Kind: model.EdgeCalls, Evidence: model.EvidenceTyped})
 		default:
 			x.res.ExternalCalls[fn.FullName()] = append(x.res.ExternalCalls[fn.FullName()], callerID)
 			if tag == "" {
@@ -546,7 +648,7 @@ func (x *extractor) calls(p *packages.Package, body ast.Node, callerID string) [
 				ID: extID, Kind: model.KindExternal, Repo: x.opts.Repo, Name: fn.Name(),
 				QualifiedName: fn.FullName(), Package: calleePkg, SecurityTags: []string{tag},
 			})
-			x.g.AddEdge(model.Edge{From: callerID, To: extID, Kind: model.EdgeCalls})
+			x.g.AddEdge(model.Edge{From: callerID, To: extID, Kind: model.EdgeCalls, Evidence: model.EvidenceTyped})
 		}
 		return true
 	})
@@ -565,7 +667,7 @@ func (x *extractor) calls(p *packages.Package, body ast.Node, callerID string) [
 		}
 		return true
 	})
-	return tags
+	return res, tags
 }
 
 // references records REFERENCES edges for in-repo functions and methods
@@ -605,7 +707,7 @@ func (x *extractor) references(p *packages.Package, node ast.Node, fromID string
 				kind = model.KindInterfaceMethod
 			}
 		}
-		x.g.AddEdge(model.Edge{From: fromID, To: x.id(kind, fn.FullName()), Kind: model.EdgeReferences})
+		x.g.AddEdge(model.Edge{From: fromID, To: x.id(kind, fn.FullName()), Kind: model.EdgeReferences, Evidence: model.EvidenceTyped})
 		return true
 	})
 }
@@ -687,7 +789,7 @@ func (x *extractor) implementations(pkgs []*packages.Package) {
 			if !types.Implements(ct.Type(), iface) && !types.Implements(ptr, iface) {
 				continue
 			}
-			x.g.AddEdge(model.Edge{From: x.typeID(ct), To: x.typeID(it), Kind: model.EdgeImplements})
+			x.g.AddEdge(model.Edge{From: x.typeID(ct), To: x.typeID(it), Kind: model.EdgeImplements, Evidence: model.EvidenceTyped})
 			for m := range iface.Methods() {
 				obj, _, _ := types.LookupFieldOrMethod(ptr, true, m.Pkg(), m.Name())
 				impl, ok := obj.(*types.Func)
@@ -697,7 +799,7 @@ func (x *extractor) implementations(pkgs []*packages.Package) {
 				x.g.AddEdge(model.Edge{
 					From: x.id(model.KindInterfaceMethod, m.FullName()),
 					To:   x.id(model.KindMethod, impl.Origin().FullName()),
-					Kind: model.EdgeDispatchesTo,
+					Kind: model.EdgeDispatchesTo, Evidence: model.EvidenceTyped,
 				})
 			}
 		}

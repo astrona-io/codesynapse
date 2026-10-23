@@ -125,6 +125,7 @@ func (s Service) CallGraph(ctx context.Context, repo, symbol, direction string, 
 			continue
 		}
 		e.From, e.To = names[e.From], names[e.To]
+		e.Evidence = e.Evidence.OrUnknown()
 		g.Edges = append(g.Edges, e)
 	}
 	if g.Nodes == nil {
