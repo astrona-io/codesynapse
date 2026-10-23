@@ -36,6 +36,14 @@ Resource names assume the release is called `codesynapse`.
 
 `helm rollback codesynapse <revision>` returns the Deployments to the previous images. Migrations are not reversed. For additive migrations that is safe: the older release ignores what it doesn't know. To return to the state before the upgrade instead, restore the PostgreSQL dump and the volume snapshots.
 
+## Docker compose installs
+
+Run `just init` (it adds missing keys such as `POSTGRES_PASSWORD`, `SECRET_KEY`, `HUGEGRAPH_PASSWORD` and `METRICS_PASSWORD` to `.env`), then `just up`.
+
+- **PostgreSQL 17 to 18.** The compose stack runs PostgreSQL 18, which cannot open a data volume written by PostgreSQL 17. If your install predates the upgrade, dump the accounts database with the old image first (`docker compose exec postgres pg_dumpall -U codesynapse > accounts.sql`), remove the `postgres-data` volume, run `just up`, and restore (`docker compose exec -T postgres psql -U codesynapse -d codesynapse < accounts.sql`).
+- **From Neo4j.** Neo4j support was removed and graphs are not migrated: after `just up`, sync your repositories again to rebuild them in HugeGraph. The old data stays in the `neo4j-data` volume until you delete it (`docker volume rm codesynapse_neo4j-data`). `CODESYNAPSE_GRAPH_BACKEND`, `COMPOSE_PROFILES=hugegraph` and `NEO4J_*` lines in `.env` are no longer used; a CLI or service still configured with `CODESYNAPSE_GRAPH_BACKEND=neo4j` stops with an error that says so.
+- **Module path.** The repository and Go module are `github.com/astrona-io/codesynapse`, and images are under `ghcr.io/astrona-io`. Update existing clones with `git remote set-url origin git@github.com:astrona-io/codesynapse.git`; consumers of the Go module must update their imports.
+
 ## Release candidates
 
 A `vX.Y.Z-rcN` tag publishes the chart and images at `X.Y.Z-rcN` and runs the same checks. It never becomes `latest`. Try one on a throwaway cluster with `just chart-install-published X.Y.Z-rcN`.
