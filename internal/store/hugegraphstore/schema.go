@@ -12,7 +12,9 @@ import (
 var (
 	nodeTexts = []string{"nid", "kind", "repo", "name", "qualified_name", "package", "file", "signature", "summary", "body_hash", "clone_hash", "clone_sig", "via", "doc_type", "status", "meta", "duplicates",
 		"time", "head", "root", "branch", "metrics", "severity", "rule", "version", "fixed_version", "reachability", "url",
-		"liveness", "cleanup", "licenses", "coverage", "language", "ecosystem", "license", "license_source", "run", "symbol_id", "revision", "identities", "analysis"}
+		"liveness", "cleanup", "licenses", "coverage", "language", "ecosystem", "license", "license_source", "run", "symbol_id", "revision", "identities", "analysis",
+		// Written by the store itself for incremental publication (delta.go).
+		"content_hash", "edges_hash"}
 	nodeLongs = []string{"bytes", "start_line", "end_line", "complexity", "loc", "level", "churn", "roots"}
 	nodeBools = []string{"exported", "is_test", "indirect", "dev"}
 	nodeLists = []string{"cwe", "aliases", "security_tags"}

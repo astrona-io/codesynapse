@@ -100,8 +100,13 @@ func TestReplacementTxCapacity(t *testing.T) {
 	small, err := New(ctx, Config{URL: url, User: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_USER"), Password: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_PASSWORD"), TxCapacity: 5})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = small.Close(ctx) })
+	// Ten new nodes do not fit five operations, even written as a delta.
 	grown := storetest.Fixture()
 	grown.AddNode(model.Node{ID: storetest.ID(model.KindFunction, "app.extra"), Repo: storetest.Repo, Kind: model.KindFunction, Name: "extra"})
+	for i := range 9 {
+		name := "extra" + string(rune('a'+i))
+		grown.AddNode(model.Node{ID: storetest.ID(model.KindFunction, "app."+name), Repo: storetest.Repo, Kind: model.KindFunction, Name: name})
+	}
 	err = small.ReplaceRepo(ctx, storetest.Repo, grown)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTxCapacity), err.Error())
@@ -114,6 +119,17 @@ func TestReplacementTxCapacity(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, main.Name, "main")
 	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, grown))
+
+	// One changed node is written as a delta, which fits where rewriting the
+	// whole repository would not.
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+	one := storetest.Fixture()
+	m, _ := one.Node(storetest.ID(model.KindFunction, "app.main"))
+	m.Summary = "changed"
+	one.AddNode(*m)
+	require.NoError(t, small.ReplaceRepo(ctx, storetest.Repo, one))
+	assert.Equal(t, small.lastPublish.Load(), "delta")
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
 }
 
 func TestTxCapacityAboveServerMaximum(t *testing.T) {
