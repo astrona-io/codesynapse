@@ -236,6 +236,10 @@ chart-install-published version pull_secret="": _kind-secret
 chart-test:
     helm test codesynapse --kube-context "{{kind_context}}" --namespace "{{kind_ns}}" --logs
 
+# Point the kind install at a three-instance CloudNativePG cluster and kill its primary (after chart-install)
+chart-failover-postgres:
+    sh .github/scripts/postgres-failover.sh "{{kind_context}}" "{{kind_ns}}"
+
 # Build, load, install and test on a throwaway kind cluster (just kind-down removes it)
 chart-e2e: chart-check kind-up chart-images chart-install chart-test
     @echo "the chart works on {{kind_context}}; reach the dashboard with:"

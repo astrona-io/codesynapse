@@ -29,6 +29,12 @@ const (
 	jobPoll = 2 * time.Second
 )
 
+// errLeaseLost stops this process's durable jobs when it could not renew
+// their leases in time (the accounts database was unreachable, e.g. during
+// a failover): once a lease runs out another process may claim the job, so
+// carrying on could run it twice. The record stays for that process.
+var errLeaseLost = errors.New("job leases could not be renewed in time; leaving the job to another process")
+
 // Job roles (docs/SAAS.md, 5e): which durable job kinds a process runs. The
 // API with workers runs none and only records jobs; a worker runs its roles;
 // a process on its own (development, tests) runs all of them.
@@ -125,22 +131,51 @@ func newOwner() string {
 	return hex.EncodeToString(b)
 }
 
-// heartbeat renews this process's leases until ctx ends.
+// heartbeat renews this process's leases until ctx ends. When the last
+// successful renewal is so old that the leases may expire before the next
+// one, it stops this process's durable jobs (errLeaseLost).
 func (j *Jobs) heartbeat(ctx context.Context) {
 	t := time.NewTicker(jobHeartbeat)
 	defer t.Stop()
+	renewed := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 			work, cancel := context.WithTimeout(ctx, 10*time.Second)
-			if err := j.store.RenewJobLeases(work, j.owner, time.Now().Add(jobLease)); err != nil {
-				j.logger.Warn("renewing job leases", "error", err)
-			}
+			now := time.Now()
+			err := j.store.RenewJobLeases(work, j.owner, now.Add(jobLease))
 			cancel()
+			if err == nil {
+				renewed = now
+				continue
+			}
+			j.logger.Warn("renewing job leases", "error", err)
+			if now.Sub(renewed) >= jobLease-jobHeartbeat {
+				j.logger.Error("job leases may expire before the next renewal; stopping this process's jobs for another to resume", "since", renewed)
+				j.dropLeases()
+				renewed = now
+			}
 		}
 	}
+}
+
+// dropLeases gives up this process's durable jobs: j.held, which each job
+// took when it was queued, is cancelled with errLeaseLost, and jobs queued
+// afterwards get a fresh one.
+func (j *Jobs) dropLeases() {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.drop(errLeaseLost)
+	j.held, j.drop = context.WithCancelCause(j.ctx)
+}
+
+// leftBehind reports whether a durable job stopped only because this process
+// is stopping or gave up its leases: its record stays active, so another
+// process resumes it once the lease runs out, instead of it failing.
+func (j *Jobs) leftBehind(ctx context.Context, err error) bool {
+	return err != nil && (j.ctx.Err() != nil || errors.Is(context.Cause(ctx), errLeaseLost))
 }
 
 // fromRecord is the job view of a stored record.

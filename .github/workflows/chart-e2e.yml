@@ -9,6 +9,7 @@ on:
       - 'deploy/helm/**'
       - '.github/workflows/chart-e2e.yml'
       - '.github/scripts/check-chart.sh'
+      - '.github/scripts/postgres-failover.sh'
   push:
     branches: [main]
   workflow_dispatch:
@@ -24,7 +25,7 @@ jobs:
   kind:
     name: Install on kind and test
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,6 +42,8 @@ jobs:
           cluster_name: codesynapse-dev
       - name: Build, load, install and test
         run: just chart-e2e
+      - name: PostgreSQL failover
+        run: just chart-failover-postgres
       - name: State on failure
         if: failure()
         run: |

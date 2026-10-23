@@ -67,6 +67,8 @@ type Job struct {
 	// Attempts counts starts; above 1 the job was resumed after a restart.
 	Attempts int `json:"attempts,omitempty"`
 	durable  bool
+	// leases is j.held when the job was queued (jobs_durable.go).
+	leases context.Context
 }
 
 // Jobs runs ingest jobs, at most one per repository at a time and one
@@ -95,6 +97,9 @@ type Jobs struct {
 
 	mu   sync.Mutex
 	jobs map[string]*Job
+	// held and drop: see leases (jobs_durable.go).
+	held context.Context
+	drop context.CancelCauseFunc
 }
 
 // UseStore makes every job durable in st and keeps this process's leases
@@ -102,6 +107,7 @@ type Jobs struct {
 // process runs; jobs of other kinds are recorded for workers.
 func (j *Jobs) UseStore(st jobStore, kinds []string) {
 	j.store, j.owner, j.kinds = st, newOwner(), kinds
+	j.held, j.drop = context.WithCancelCause(j.ctx)
 	go j.heartbeat(j.ctx)
 }
 
@@ -238,13 +244,20 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 	j.jobs[job.ID] = job
 	j.prune()
 	result := *job
+	job.leases = j.held
 	go j.run(job, root, opts, ledger)
 	return result, nil
 }
 
 func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.Ledger) {
-	ctx, cancel := context.WithTimeout(j.ctx, time.Hour)
-	defer cancel()
+	ctx, cancelTimeout := context.WithTimeout(j.ctx, time.Hour)
+	defer cancelTimeout()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	if job.durable && job.leases != nil {
+		stop := context.AfterFunc(job.leases, func() { cancel(errLeaseLost) })
+		defer stop()
+	}
 	if opts.Durable != nil {
 		ctx = telemetry.WithTraceParent(ctx, opts.Durable.Trace)
 	}
@@ -283,7 +296,10 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 		if err != nil {
 			span.SetStatus(codes.Error, "job failed")
 		}
-		if job.durable {
+		switch {
+		case job.durable && j.leftBehind(ctx, err):
+			j.logger.Info("job left for another process to resume", "job", job.ID, "cause", context.Cause(ctx))
+		case job.durable:
 			j.endDurable(ctx, job, err)
 		}
 		if opts.Done != nil {

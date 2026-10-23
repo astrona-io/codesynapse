@@ -62,7 +62,7 @@ Each store is a subchart in `charts/`, declared in `Chart.yaml` with `condition:
 
 | Store | Disable | Link instead |
 |---|---|---|
-| PostgreSQL (accounts, jobs, audit log) | `postgresql.enabled=false` | `CODESYNAPSE_DATABASE_URL` in the Secret; drop `POSTGRES_PASSWORD`. A managed database or CloudNativePG |
+| PostgreSQL (accounts, jobs, audit log) | `postgresql.enabled=false` | `CODESYNAPSE_DATABASE_URL` in the Secret; drop `POSTGRES_PASSWORD`. A managed database, or CloudNativePG with three instances (the `uri` of its `<cluster>-app` Secret); `just chart-failover-postgres` tests a primary failover |
 | HugeGraph (code graph) | `hugegraph.enabled=false` | `hugegraph.externalURL` (required); `HUGEGRAPH_PASSWORD` stays in the Secret. Authentication must be on |
 | Milvus (memory vectors) | `milvus.enabled=false` | `milvus.externalURL`; empty turns memory vectors off |
 | VictoriaMetrics (metrics) | `victoriametrics.enabled=false` | `victoriametrics.externalURL`; empty turns export off |
