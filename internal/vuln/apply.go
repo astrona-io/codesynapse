@@ -1,7 +1,11 @@
 package vuln
 
 import (
+	"cmp"
+	"slices"
 	"strings"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/astrona-io/codesynapse/internal/model"
 )
@@ -19,6 +23,7 @@ const (
 // paths mapped to importing package IDs.
 func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability, externalCalls, externalImports map[string][]string) {
 	repoID := model.NodeID(repo, model.KindRepository, repo)
+	modules = preferred(modules)
 	eco := map[string]string{} // module key -> ecosystem
 	for _, m := range modules {
 		id := model.NodeID(repo, model.KindModule, m.Key())
@@ -147,4 +152,35 @@ func matchesSymbol(syms []string, sym string) bool {
 		}
 	}
 	return false
+}
+
+// preferred keeps one module per key, the same one on every run: lockfiles
+// can hold several versions of a package (npm nests them), and they arrive
+// in map order. A direct dependency wins over an indirect one, then the
+// highest version.
+func preferred(modules []Module) []Module {
+	out := slices.Clone(modules)
+	slices.SortStableFunc(out, func(a, b Module) int {
+		return cmp.Or(strings.Compare(a.Key(), b.Key()), boolOrder(a.Indirect, b.Indirect), -compareVersions(a.Version, b.Version))
+	})
+	return slices.CompactFunc(out, func(a, b Module) bool { return a.Key() == b.Key() })
+}
+
+func boolOrder(a, b bool) int {
+	switch {
+	case a == b:
+		return 0
+	case a:
+		return 1
+	}
+	return -1
+}
+
+// compareVersions orders semantic versions as such, anything else as text.
+func compareVersions(a, b string) int {
+	va, vb := "v"+strings.TrimPrefix(a, "v"), "v"+strings.TrimPrefix(b, "v")
+	if semver.IsValid(va) && semver.IsValid(vb) {
+		return semver.Compare(va, vb)
+	}
+	return strings.Compare(a, b)
 }

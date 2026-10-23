@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/astrona-io/codesynapse/internal/logx"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/store/nodeprops"
@@ -100,10 +101,6 @@ return ['ok']
 }`
 
 func (s *Store) replaceAtomic(ctx context.Context, repo string, nodes []model.Node, edges []model.Edge) error {
-	run, err := newRunID()
-	if err != nil {
-		return fmt.Errorf("generate ingest run: %w", err)
-	}
 	nodeRows := make([]map[string]any, 0, len(nodes))
 	for _, n := range nodes {
 		p := nodeprops.To(n)
@@ -119,6 +116,7 @@ func (s *Store) replaceAtomic(ctx context.Context, repo string, nodes []model.No
 		}
 		edgeRows = append(edgeRows, row)
 	}
+	bySource := hashRows(nodeRows, edgeRows)
 	payload, err := json.Marshal(map[string]any{"nodes": nodeRows, "edges": edgeRows})
 	if err != nil {
 		return err
@@ -126,25 +124,81 @@ func (s *Store) replaceAtomic(ctx context.Context, repo string, nodes []model.No
 	if len(payload) > store.MaxReplacementBytes {
 		return errors.New("repository replacement exceeds 64 MiB")
 	}
-	chunks := (len(payload) + stageChunkBytes - 1) / stageChunkBytes
-	now := time.Now()
-	bindings := map[string]any{"repo": repo, "headID": vid("ih", repo), "run": run, "now": now.UnixMilli(), "expires": now.Add(2 * time.Hour).UnixMilli(), "maxChunks": maxStageChunks}
-	if err := s.write(ctx, pruneStages, map[string]any{"now": now.UnixMilli()}, nil); err != nil {
+	if err := s.write(ctx, pruneStages, map[string]any{"now": time.Now().UnixMilli()}, nil); err != nil {
 		return fmt.Errorf("prune abandoned ingest stages: %w", err)
 	}
-	if err := s.stageWrite(ctx, acquireStage, bindings); err != nil {
-		return fmt.Errorf("reserve ingest stage: %w", err)
-	}
-	committed := false
-	defer func() {
-		if committed {
-			return
+	// Under the stage lease nobody else publishes this repository, so the
+	// hashes read here describe what the delta is applied to.
+	return s.underStage(ctx, repo, func(bindings map[string]any) (bool, error) {
+		stored, err := s.storedHashes(ctx, repo)
+		if err != nil {
+			return false, fmt.Errorf("read stored hashes: %w", err)
 		}
-		// Cleanup keeps the original identity but survives request cancellation.
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		_ = s.stageWrite(cleanup, abandonStage, bindings)
-	}()
+		d := planDelta(stored, nodeRows, bySource)
+		if d == nil {
+			s.lastPublish.Store("full")
+			err := s.stageAndCommit(ctx, bindings, payload, commitStage)
+			if err == nil {
+				logx.FromContext(ctx).Info("graph published", "mode", "full", "nodes", len(nodeRows), "edges", len(edgeRows))
+			}
+			return true, err
+		}
+		small, err := json.Marshal(d)
+		if err != nil {
+			return false, err
+		}
+		err = s.stageAndCommit(ctx, bindings, small, commitDelta)
+		if errors.Is(err, errStale) {
+			return false, nil // released; a full replacement follows under a fresh lease
+		}
+		s.lastPublish.Store("delta")
+		if err == nil {
+			logx.FromContext(ctx).Info("graph published", "mode", "delta", "nodes", len(d.Nodes), "gone", len(d.Gone), "edges", len(d.Edges), "unchanged", len(nodeRows)-len(d.Nodes))
+		}
+		return true, err
+	}, func(bindings map[string]any) error {
+		s.lastPublish.Store("full")
+		logx.FromContext(ctx).Warn("stored graph changed while publishing; writing it in full")
+		return s.stageAndCommit(ctx, bindings, payload, commitStage)
+	})
+}
+
+// underStage runs try under a fresh stage lease. When try reports it did not
+// finish (false, nil), the lease is released and fallback runs under
+// another. A lease left by an error is released too.
+func (s *Store) underStage(ctx context.Context, repo string, try func(map[string]any) (bool, error), fallback func(map[string]any) error) error {
+	attempt := func(f func(map[string]any) (bool, error)) (bool, error) {
+		run, err := newRunID()
+		if err != nil {
+			return false, fmt.Errorf("generate ingest run: %w", err)
+		}
+		now := time.Now()
+		bindings := map[string]any{"repo": repo, "headID": vid("ih", repo), "run": run, "now": now.UnixMilli(), "expires": now.Add(2 * time.Hour).UnixMilli(), "maxChunks": maxStageChunks}
+		if err := s.stageWrite(ctx, acquireStage, bindings); err != nil {
+			return false, fmt.Errorf("reserve ingest stage: %w", err)
+		}
+		done, err := f(bindings)
+		if !done || err != nil {
+			// Cleanup keeps the original identity but survives request cancellation.
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = s.stageWrite(cleanup, abandonStage, bindings)
+		}
+		return done, err
+	}
+	done, err := attempt(try)
+	if done || err != nil {
+		return err
+	}
+	_, err = attempt(func(b map[string]any) (bool, error) { return true, fallback(b) })
+	return err
+}
+
+// stageAndCommit uploads payload in chunks under the lease in bindings and
+// runs commit, which reassembles and applies it in one transaction.
+func (s *Store) stageAndCommit(ctx context.Context, bindings map[string]any, payload []byte, commit string) error {
+	run := bindings["run"].(string)
+	chunks := (len(payload) + stageChunkBytes - 1) / stageChunkBytes
 	for index, start := 0, 0; start < len(payload); index, start = index+1, start+stageChunkBytes {
 		b := map[string]any{}
 		for key, value := range bindings {
@@ -158,17 +212,23 @@ func (s *Store) replaceAtomic(ctx context.Context, repo string, nodes []model.No
 			return fmt.Errorf("upload ingest stage: %w", err)
 		}
 	}
-	bindings["chunkCount"] = chunks
-	bindings["maxBytes"] = store.MaxReplacementBytes
-	bindings["txCapacity"] = s.txCapacity
-	bindings["now"] = time.Now().UnixMilli()
+	b := map[string]any{}
+	for key, value := range bindings {
+		b[key] = value
+	}
+	b["chunkCount"] = chunks
+	b["maxBytes"] = store.MaxReplacementBytes
+	b["txCapacity"] = s.txCapacity
+	b["now"] = time.Now().UnixMilli()
 	if err := store.CommitCheck(ctx); err != nil {
 		return err
 	}
-	if err := s.stageWrite(ctx, commitStage, bindings); err != nil {
+	if err := s.stageWrite(ctx, commit, b); err != nil {
+		if errors.Is(err, errStale) {
+			return err
+		}
 		return fmt.Errorf("commit ingest stage: %w", err)
 	}
-	committed = true
 	return nil
 }
 
@@ -180,6 +240,12 @@ func (s *Store) stageWrite(ctx context.Context, script string, bindings map[stri
 	var result []string
 	if err := s.write(ctx, script, bindings, &result); err != nil {
 		return err
+	}
+	if len(result) == 1 && result[0] == "stale" {
+		return errStale
+	}
+	if len(result) == 3 && result[0] == "ok" {
+		return nil // a delta: ok, nodes written, nodes removed
 	}
 	if len(result) == 3 && result[0] == "capacity" {
 		return fmt.Errorf("%w: it needs %s edge and %s vertex operations, the limit is %d; raise edge.tx_capacity and vertex.tx_capacity on the server and %s to match",

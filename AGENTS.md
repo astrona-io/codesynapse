@@ -155,7 +155,7 @@ Rules are static files: `rules/code/<id>.yaml` and `rules/config/<id>.yaml` (see
 
 1. Add the kind to `internal/model/model.go` and to `AllNodeKinds`/`AllEdgeKinds`. Those lists are the label allowlist for Gremlin.
 2. New node fields need entries in `internal/store/nodeprops` (both directions, `TestPropsRoundTrip`) and a type in `hugegraphstore/schema.go` (`TestSchemaCoversNodeProps` fails otherwise). `EnsureSchema` appends new HugeGraph properties to existing labels.
-3. New `store.Reader` methods must be implemented in `memory` and `hugegraphstore` and covered in `storetest.Run`. The stores must behave identically; the contract test (`just test-hugegraph`) and `TestParityWithReference` are how we know.
+3. New `store.Reader` methods must be implemented in `memory` and `hugegraphstore` and covered in `storetest.Run`. HugeGraph publishes incrementally (`delta.go`): node vertices carry `content_hash`/`edges_hash`, and `ReplaceRepo` writes only what changed, falling back to a full write; `successiveContract` keeps the result identical to the in-memory reference. Keep the graph an ingest produces deterministic (sort what comes out of maps), or every publish rewrites the nodes that differ by chance. The stores must behave identically; the contract test (`just test-hugegraph`) and `TestParityWithReference` are how we know.
 4. Update `docs/PLAN.md` (schema section) and `services/web/app/utils/types.ts` if the API shape changes.
 
 ## Security rules (non-negotiable)

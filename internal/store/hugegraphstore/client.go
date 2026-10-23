@@ -34,6 +34,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -90,6 +91,9 @@ type Store struct {
 	vec            vector.Index
 	maxRequest     int
 	txCapacity     int
+	// lastPublish is "delta" or "full": how the last replacement was
+	// written (tests and logs).
+	lastPublish atomic.Value
 }
 
 var _ store.Store = (*Store)(nil)
