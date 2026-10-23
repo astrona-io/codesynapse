@@ -43,6 +43,7 @@ type serveOptions struct {
 	network     bool
 	vulnScan    bool
 	licenses    bool
+	dataflow    bool
 	workspace   string
 	llmConfig   string
 }
@@ -57,6 +58,7 @@ func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.workspace, "workspace", app.Getenv("CODESYNAPSE_WORKSPACE", ""), "Writable directory for repositories registered by git URL")
 	f.BoolVar(&o.vulnScan, "vulns", app.Getenv("CODESYNAPSE_VULN_SCAN", "") == "true", "Check dependencies against osv.dev on ingest (sends module paths and versions)")
 	f.BoolVar(&o.licenses, "license-lookup", app.Getenv("CODESYNAPSE_LICENSE_LOOKUP", "") == "true", "Look up dependency licences not found on disk on deps.dev (sends package names and versions)")
+	f.BoolVar(&o.dataflow, "dataflow", app.Getenv("CODESYNAPSE_INGEST_DATAFLOW", "") == "true", "Resolve Go calls through function values with SSA and VTA on ingest (slower; edges marked dataflow)")
 	f.BoolVar(&o.network, "allow-network", app.Getenv("CODESYNAPSE_ALLOW_NETWORK", "") == "true", "Let ingest download Go modules (trusted repos only)")
 	return nil
 }
@@ -136,7 +138,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return fmt.Errorf("CODESYNAPSE_GIT_TOKENS: %w", err)
 	}
-	srv := api.New(ctx, api.Config{GitAuths: gitAuths, LLM: registry, SourcesRoot: o.sources, CommitLimit: o.commitLimit, AllowNetwork: o.network, VulnScan: o.vulnScan, LicenseLookup: o.licenses, Version: version,
+	srv := api.New(ctx, api.Config{GitAuths: gitAuths, LLM: registry, SourcesRoot: o.sources, CommitLimit: o.commitLimit, AllowNetwork: o.network, VulnScan: o.vulnScan, LicenseLookup: o.licenses, Dataflow: o.dataflow, Version: version,
 		Workspace: o.workspace, AllowPrivateGit: app.Getenv("CODESYNAPSE_ALLOW_PRIVATE_GIT", "") == "true",
 		GitAuth:   gitx.Auth{Host: app.Getenv("CODESYNAPSE_GIT_TOKEN_HOST", "github.com"), Token: os.Getenv("CODESYNAPSE_GIT_TOKEN")},
 		AllowPush: app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true",

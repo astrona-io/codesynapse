@@ -51,6 +51,8 @@ type Config struct {
 	VulnScan bool
 	// LicenseLookup asks deps.dev for licences not found on disk.
 	LicenseLookup bool
+	// Dataflow runs the optional Go data-flow call analysis on ingest.
+	Dataflow bool
 	// Accounts enables users, organisations and API keys (PostgreSQL);
 	// nil keeps the single-tenant mode behind one bearer token.
 	Accounts *accounts.Service
@@ -115,6 +117,7 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	s := &Server{cfg: cfg, st: st, logger: logger, mux: http.NewServeMux()}
 	s.jobs = NewJobs(ctx, st, logger, cfg.CommitLimit, cfg.AllowNetwork, cfg.VulnScan)
 	s.jobs.licenseLookup = cfg.LicenseLookup
+	s.jobs.dataflow = cfg.Dataflow
 	s.jobs.Policy = s.approveIngestPolicy
 	s.jobs.Publish = s.publishRepo
 	s.jobs.Ingested = s.annotateIngest

@@ -74,8 +74,8 @@ export interface Job { id: string; repo: string; kind?: string; branch?: string;
 export interface DuplicateInfo { kind: 'exact' | 'near'; similarity: number; scope: string; copies: number; others: DuplicateMember[] }
 export interface SymbolCard { duplicate?: DuplicateInfo; symbol: GraphNodeData; callers: NodeRef[]; callees: NodeRef[]; tests: NodeRef[]; implementations?: NodeRef[]; docs?: NodeRef[] }
 export interface ViewNode extends NodeRef { complexity?: number; security_tags?: string[]; is_test?: boolean }
-// evidence: typed, syntactic or inferred for CALLS/REFERENCES/IMPLEMENTS/DISPATCHES_TO; absent means unknown (indexed before it was recorded).
-export interface ViewEdge { from: string; to: string; kind: string; count?: number; evidence?: 'typed' | 'syntactic' | 'inferred' }
+// evidence: typed, dataflow, syntactic or inferred for CALLS/REFERENCES/IMPLEMENTS/DISPATCHES_TO; absent means unknown (indexed before it was recorded).
+export interface ViewEdge { from: string; to: string; kind: string; count?: number; evidence?: 'typed' | 'dataflow' | 'syntactic' | 'inferred' }
 export interface GraphView { nodes: ViewNode[]; edges: ViewEdge[]; root?: string }
 export interface ChangedSymbol extends NodeRef { signature?: string; risk: number; level: string; reasons: string[]; security_tags?: string[]; fan_in: number; impacted: number; tests: NodeRef[]; duplicate?: DuplicateInfo }
 export interface Report {

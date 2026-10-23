@@ -30,6 +30,7 @@ func analysisSummary(g *model.Graph) model.Analysis {
 		sum.IgnoredFiles += a.IgnoredFiles
 		sum.UnresolvedCalls += a.UnresolvedCalls
 		sum.OmittedBodies += a.OmittedBodies
+		sum.DataflowCalls += a.DataflowCalls
 	}
 	for _, e := range g.Edges() {
 		if model.ResolutionEdge(e.Kind) {

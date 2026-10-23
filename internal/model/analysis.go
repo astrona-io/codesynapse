@@ -15,6 +15,11 @@ type Evidence string
 const (
 	// EvidenceTyped edges were resolved by a type checker (go/types).
 	EvidenceTyped Evidence = "typed"
+	// EvidenceDataflow edges link a call through a function value to a
+	// function whose value can reach it, found by type-based data-flow
+	// analysis (SSA and VTA). The target is possible, not proven: the
+	// analysis over-approximates.
+	EvidenceDataflow Evidence = "dataflow"
 	// EvidenceSyntactic edges were resolved from declarations and imports
 	// in the source, without types: a same-file symbol, an imported name,
 	// self/this inside a class.
@@ -28,7 +33,7 @@ const (
 
 // evidenceRank orders evidence from weakest to strongest; the empty value
 // ranks lowest.
-var evidenceRank = []Evidence{"", EvidenceInferred, EvidenceSyntactic, EvidenceTyped}
+var evidenceRank = []Evidence{"", EvidenceInferred, EvidenceSyntactic, EvidenceDataflow, EvidenceTyped}
 
 // Stronger reports whether e is better evidence than other.
 func (e Evidence) Stronger(other Evidence) bool {
@@ -55,6 +60,12 @@ func ResolutionEdge(k EdgeKind) bool {
 // extractors write. Readers accept older and newer versions: unknown fields
 // are ignored, and a missing version means nothing was recorded.
 const AnalysisVersion = 1
+
+// Data-flow analysis outcomes (Analysis.Dataflow).
+const (
+	DataflowVTA     = "vta"
+	DataflowSkipped = "skipped"
+)
 
 // Analysis levels.
 const (
@@ -93,6 +104,12 @@ type Analysis struct {
 	UnresolvedCalls int `json:"unresolved_calls,omitempty"`
 	// OmittedBodies are function bodies skipped after the work budget ran out.
 	OmittedBodies int `json:"omitted_bodies,omitempty"`
+	// Dataflow says whether the optional data-flow analysis ran: "vta" or
+	// "skipped" (type errors, too large or failed). Empty when not enabled.
+	Dataflow string `json:"dataflow,omitempty"`
+	// DataflowCalls are unresolved call sites that data-flow analysis linked
+	// to at least one function in the repository.
+	DataflowCalls int `json:"dataflow_calls,omitempty"`
 
 	// Repository totals.
 	Partial   int              `json:"partial,omitempty"`

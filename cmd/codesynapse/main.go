@@ -59,6 +59,7 @@ type ingestOptions struct {
 	allowNetwork         bool
 	vulns                bool
 	licenses             bool
+	dataflow             bool
 	root                 string
 }
 
@@ -72,6 +73,7 @@ func (o *ingestOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.BoolVar(&o.allowNetwork, "allow-network", false, "Allow `go list` to download modules (off by default for untrusted repos)")
 	f.BoolVar(&o.vulns, "vulns", false, "Check dependencies against osv.dev (sends module paths and versions)")
 	f.BoolVar(&o.licenses, "license-lookup", false, "Look up dependency licences not found on disk on deps.dev (sends package names and versions)")
+	f.BoolVar(&o.dataflow, "dataflow", false, "Resolve Go calls through function values with SSA and VTA (slower; edges marked dataflow)")
 	return nil
 }
 
@@ -155,7 +157,7 @@ func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) (result error) {
 	if err != nil {
 		return err
 	}
-	g, err := ingest.Run(ctx, ingest.Options{Repo: o.repo, Root: o.root, CommitLimit: o.commitLimit, AllowNetwork: o.allowNetwork, VulnScan: o.vulns, LicenseLookup: o.licenses, PreviousIdentities: previous, ApprovedPolicyDigest: o.approvedPolicyDigest})
+	g, err := ingest.Run(ctx, ingest.Options{Repo: o.repo, Root: o.root, CommitLimit: o.commitLimit, AllowNetwork: o.allowNetwork, VulnScan: o.vulns, LicenseLookup: o.licenses, Dataflow: o.dataflow, PreviousIdentities: previous, ApprovedPolicyDigest: o.approvedPolicyDigest})
 	if err != nil {
 		return err
 	}

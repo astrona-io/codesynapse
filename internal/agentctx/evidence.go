@@ -19,6 +19,9 @@ type AnalysisNote struct {
 	// UnresolvedCalls are call sites through function values: callees may be
 	// missing.
 	UnresolvedCalls int `json:"unresolved_calls,omitempty"`
+	// DataflowCalls of those were linked by the optional data-flow analysis
+	// to callees marked with dataflow evidence.
+	DataflowCalls int `json:"dataflow_calls,omitempty"`
 	// OmittedBody is set when the body was not analysed at all.
 	OmittedBody bool `json:"omitted_body,omitempty"`
 }
@@ -30,7 +33,7 @@ func (s Service) analysisOf(ctx context.Context, repo string, n model.Node) (*An
 	if err != nil {
 		return nil, nil //nolint:nilerr // a damaged record is the same as none
 	}
-	note.UnresolvedCalls, note.OmittedBody = own.UnresolvedCalls, own.OmittedBodies > 0
+	note.UnresolvedCalls, note.DataflowCalls, note.OmittedBody = own.UnresolvedCalls, own.DataflowCalls, own.OmittedBodies > 0
 	if n.File != "" {
 		f, err := s.R.Node(ctx, model.NodeID(repo, model.KindFile, n.File))
 		switch {

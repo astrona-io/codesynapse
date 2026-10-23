@@ -48,6 +48,11 @@ type Options struct {
 	AllowNetwork bool
 	// MaxCallSites overrides maxCallSitesPerPackage (tests).
 	MaxCallSites int
+	// Dataflow adds CALLS edges for calls through function values using SSA
+	// and VTA (see dataflow.go). Off by default: it costs time and memory.
+	Dataflow bool
+	// MaxDataflowFunctions overrides maxDataflowFunctions (tests).
+	MaxDataflowFunctions int
 }
 
 // Result is the output of Extract.
@@ -157,6 +162,11 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 		x.pkg(p, true)
 	}
 	x.implementations(primary)
+	if opts.Dataflow {
+		if err := x.dataflow(ctx, primary); err != nil {
+			return nil, err
+		}
+	}
 	x.recordAnalysis()
 	x.g.PruneDanglingEdges()
 	for _, node := range x.g.Nodes() {
@@ -627,14 +637,7 @@ func (x *extractor) calls(p *packages.Package, body ast.Node, callerID string) (
 
 		switch {
 		case x.inRepo(strings.TrimSuffix(calleePkg, "_test")):
-			kind := model.KindFunction
-			if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() != nil {
-				kind = model.KindMethod
-				if types.IsInterface(sig.Recv().Type()) {
-					kind = model.KindInterfaceMethod
-				}
-			}
-			x.g.AddEdge(model.Edge{From: callerID, To: x.id(kind, fn.FullName()), Kind: model.EdgeCalls, Evidence: model.EvidenceTyped})
+			x.g.AddEdge(model.Edge{From: callerID, To: x.funcID(fn), Kind: model.EdgeCalls, Evidence: model.EvidenceTyped})
 		default:
 			x.res.ExternalCalls[fn.FullName()] = append(x.res.ExternalCalls[fn.FullName()], callerID)
 			if tag == "" {
@@ -699,17 +702,21 @@ func (x *extractor) references(p *packages.Package, node ast.Node, fromID string
 		if !ok || fn.Pkg() == nil || !x.inRepo(strings.TrimSuffix(fn.Pkg().Path(), "_test")) {
 			return true
 		}
-		fn = fn.Origin()
-		kind := model.KindFunction
-		if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() != nil {
-			kind = model.KindMethod
-			if types.IsInterface(sig.Recv().Type()) {
-				kind = model.KindInterfaceMethod
-			}
-		}
-		x.g.AddEdge(model.Edge{From: fromID, To: x.id(kind, fn.FullName()), Kind: model.EdgeReferences, Evidence: model.EvidenceTyped})
+		x.g.AddEdge(model.Edge{From: fromID, To: x.funcID(fn.Origin()), Kind: model.EdgeReferences, Evidence: model.EvidenceTyped})
 		return true
 	})
+}
+
+// funcID is the node ID of a function, method or interface method.
+func (x *extractor) funcID(fn *types.Func) string {
+	kind := model.KindFunction
+	if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() != nil {
+		kind = model.KindMethod
+		if types.IsInterface(sig.Recv().Type()) {
+			kind = model.KindInterfaceMethod
+		}
+	}
+	return x.id(kind, fn.FullName())
 }
 
 // calleeFunc resolves the static callee of a call expression, or nil for

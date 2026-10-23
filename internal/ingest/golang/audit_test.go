@@ -102,8 +102,12 @@ func Entry() { Dispatch(Used{}) }
 }
 
 func BenchmarkAuditGoExtract(b *testing.B) {
-	for _, functions := range []int{10, 1000} {
-		b.Run(fmt.Sprintf("functions_%d", functions), func(b *testing.B) {
+	for _, tc := range []struct {
+		functions int
+		dataflow  bool
+	}{{10, false}, {1000, false}, {10, true}, {1000, true}} {
+		functions := tc.functions
+		b.Run(fmt.Sprintf("functions_%d/dataflow_%v", functions, tc.dataflow), func(b *testing.B) {
 			root := b.TempDir()
 			var source strings.Builder
 			source.WriteString("package audit\n")
@@ -115,7 +119,7 @@ func BenchmarkAuditGoExtract(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(source.Len()))
 			for b.Loop() {
-				res, err := Extract(context.Background(), Options{Repo: "audit", Root: root})
+				res, err := Extract(context.Background(), Options{Repo: "audit", Root: root, Dataflow: tc.dataflow})
 				require.NoError(b, err)
 				require.Equal(b, len(res.Graph.Nodes()), functions+3)
 			}
