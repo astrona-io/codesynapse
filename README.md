@@ -53,6 +53,8 @@ Only module paths and versions are sent to osv.dev. Set `--vulns=false` (or `COD
 
 `codesynapse licenses` (and the **Licences** page, and the `license_report` MCP tool) checks every Go, npm and PyPI dependency's licence against the repository's own and explains each verdict: GPL or AGPL in an Apache/MIT project is a conflict, MPL/LGPL or an unknown licence needs a review, development-only dependencies are flagged but not blocking. Licences are read from lockfiles, `vendor/`, the Go module cache, `node_modules` and `site-packages`; `--license-lookup` (or `CODESYNAPSE_LICENSE_LOOKUP=true`) asks deps.dev for the rest, sending only package names and versions.
 
+Go calls through function values (handler tables, injected functions) have no typed edge. `--dataflow` (or `CODESYNAPSE_INGEST_DATAFLOW=true`) runs an optional SSA/VTA analysis that links them, marked as `dataflow` evidence; it makes Go extraction about 40% slower and finds only targets declared in the repository. See [edge evidence](docs/EDGE_EVIDENCE.md).
+
 ```sh
 codesynapse licenses .                                        # Markdown report
 codesynapse licenses . --license-lookup --fail-on conflict    # CI gate

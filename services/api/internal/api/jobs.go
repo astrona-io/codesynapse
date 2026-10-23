@@ -74,8 +74,10 @@ type Jobs struct {
 	commitLimit int
 	network     bool
 	vulnScan    bool
-	// licenseLookup is set after NewJobs; it is read only by running jobs.
+	// licenseLookup and dataflow are set after NewJobs; they are read only
+	// by running jobs.
 	licenseLookup bool
+	dataflow      bool
 	sem           chan struct{}
 
 	mu   sync.Mutex
@@ -263,7 +265,7 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 		return
 	}
 	ctx = repoconfig.WithPolicy(ctx, policy)
-	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Branch: opts.Branch, PreviousIdentities: previous, ApprovedPolicyDigest: approved})
+	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Dataflow: j.dataflow, Branch: opts.Branch, PreviousIdentities: previous, ApprovedPolicyDigest: approved})
 	if err == nil && ledger != nil {
 		report := ledger.Prepare(g)
 		err = checkJob(ctx, opts.Authorize)

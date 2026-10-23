@@ -149,6 +149,8 @@ services:
       # Dependency licences not found on disk are looked up on deps.dev
       # (package names and versions only).
       CODESYNAPSE_LICENSE_LOOKUP: ${CODESYNAPSE_LICENSE_LOOKUP:-true}
+      # Resolve Go calls through function values with SSA/VTA (slower ingest).
+      CODESYNAPSE_INGEST_DATAFLOW: ${CODESYNAPSE_INGEST_DATAFLOW:-false}
       # Repositories added by URL are cloned here; "Sync" fetches into them.
       CODESYNAPSE_WORKSPACE: /workspace
       # Optional token for private repositories on one host (never logged).

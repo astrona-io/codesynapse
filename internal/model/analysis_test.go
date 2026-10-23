@@ -16,6 +16,8 @@ func TestEdgeEvidenceMerge(t *testing.T) {
 		want  Evidence
 	}{
 		{"typed survives a guess", EvidenceTyped, EvidenceInferred, EvidenceTyped},
+		{"typed survives dataflow", EvidenceTyped, EvidenceDataflow, EvidenceTyped},
+		{"dataflow replaces syntactic", EvidenceSyntactic, EvidenceDataflow, EvidenceDataflow},
 		{"syntactic replaces a guess", EvidenceInferred, EvidenceSyntactic, EvidenceSyntactic},
 		{"unknown never replaces evidence", EvidenceSyntactic, "", EvidenceSyntactic},
 		{"evidence replaces unknown", "", EvidenceInferred, EvidenceInferred},
@@ -34,7 +36,7 @@ func TestEdgeEvidenceMerge(t *testing.T) {
 }
 
 func TestEvidenceValues(t *testing.T) {
-	for _, e := range []Evidence{"", EvidenceTyped, EvidenceSyntactic, EvidenceInferred} {
+	for _, e := range []Evidence{"", EvidenceTyped, EvidenceDataflow, EvidenceSyntactic, EvidenceInferred} {
 		assert.True(t, e.Valid(), string(e))
 	}
 	for _, e := range []Evidence{EvidenceUnknown, "TYPED", "ssa"} {

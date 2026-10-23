@@ -2,8 +2,12 @@ package golang
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/tools/go/packages"
 
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
@@ -117,4 +121,87 @@ func TestCallSiteBudget(t *testing.T) {
 		}
 	}
 	assert.True(t, truncated > 0, "skipped bodies are marked on their functions")
+}
+
+// dataflowTruth lists the targets of the fixture's calls through function
+// values that a correct analysis must find: fn(2) and f(x) both call double.
+var dataflowTruth = func() map[labelledEdge]bool {
+	id := func(k model.NodeKind, local string) string { return model.NodeID("evidence", k, local) }
+	double := id(model.KindFunction, "example.com/evidence/app.double")
+	return map[labelledEdge]bool{
+		{id(model.KindFunction, "example.com/evidence/app.Run"), double, model.EdgeCalls}: true,
+		{id(model.KindFunction, "example.com/evidence/app.Map"), double, model.EdgeCalls}: true,
+	}
+}()
+
+// TestDataflowPrecisionRecall checks the optional analysis against the
+// labels; the numbers are reported in docs/EDGE_EVIDENCE.md.
+func TestDataflowPrecisionRecall(t *testing.T) {
+	g := extractEvidence(t, Options{Dataflow: true})
+	typed, found, correct := 0, 0, 0
+	for _, e := range g.Edges() {
+		switch {
+		case !model.ResolutionEdge(e.Kind):
+		case e.Evidence == model.EvidenceTyped:
+			typed++
+			assert.True(t, evidenceTruth[labelledEdge{e.From, e.To, e.Kind}], "typed edges are unchanged")
+		case e.Evidence == model.EvidenceDataflow:
+			found++
+			if dataflowTruth[labelledEdge{e.From, e.To, e.Kind}] {
+				correct++
+			} else {
+				t.Errorf("unlabelled dataflow edge %s -> %s", e.From, e.To)
+			}
+		default:
+			t.Errorf("unexpected evidence %q", e.Evidence)
+		}
+	}
+	assert.Equal(t, typed, len(evidenceTruth))
+	assert.Equal(t, found, len(dataflowTruth), "precision")
+	assert.Equal(t, correct, len(dataflowTruth), "recall")
+
+	id := func(k model.NodeKind, local string) string { return model.NodeID("evidence", k, local) }
+	app := analysisOf(t, g, id(model.KindPackage, "example.com/evidence/app"))
+	assert.Equal(t, app.Dataflow, model.DataflowVTA)
+	assert.Equal(t, app.UnresolvedCalls, 3, "the typed count does not change")
+	assert.Equal(t, app.DataflowCalls, 2, "fn(2) and f(x); the immediately called closure is static in SSA")
+	run := analysisOf(t, g, id(model.KindFunction, "example.com/evidence/app.Run"))
+	assert.Equal(t, run.UnresolvedCalls, 2)
+	assert.Equal(t, run.DataflowCalls, 1)
+	broken := analysisOf(t, g, id(model.KindPackage, "example.com/evidence/broken"))
+	assert.Equal(t, broken.Dataflow, model.DataflowSkipped, "SSA needs well-typed code")
+
+	off := extractEvidence(t, Options{})
+	for _, e := range off.Edges() {
+		assert.False(t, e.Evidence == model.EvidenceDataflow, "the analysis is opt-in")
+	}
+	assert.Equal(t, analysisOf(t, off, id(model.KindPackage, "example.com/evidence/app")).Dataflow, "")
+}
+
+func TestDataflowBounds(t *testing.T) {
+	id := func(k model.NodeKind, local string) string { return model.NodeID("evidence", k, local) }
+	g := extractEvidence(t, Options{Dataflow: true, MaxDataflowFunctions: 1})
+	app := analysisOf(t, g, id(model.KindPackage, "example.com/evidence/app"))
+	assert.Equal(t, app.Dataflow, model.DataflowSkipped, "too large: skipped, not failed")
+	for _, e := range g.Edges() {
+		assert.False(t, e.Evidence == model.EvidenceDataflow)
+	}
+	assert.Equal(t, len(g.Edges()), len(extractEvidence(t, Options{}).Edges()), "the typed graph is kept")
+}
+
+func TestDataflowCancellation(t *testing.T) {
+	root, err := filepath.EvalSymlinks("testdata/evidence")
+	require.NoError(t, err)
+	root, err = filepath.Abs(root)
+	require.NoError(t, err)
+	pkgs, err := packages.Load(&packages.Config{
+		Dir: root, Env: append(os.Environ(), "GOPROXY=off", "GOWORK=off", "CGO_ENABLED=0"),
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedSyntax |
+			packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedModule,
+	}, "./...")
+	require.NoError(t, err)
+	x := &extractor{opts: Options{Repo: "evidence", Root: root}, g: model.NewGraph(), modules: map[string]bool{"example.com/evidence": true}, analysis: map[string]*packageAnalysis{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	assert.True(t, errors.Is(x.dataflow(ctx, pkgs), context.Canceled), "a cancelled ingest stops instead of skipping")
 }

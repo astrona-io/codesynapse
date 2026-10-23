@@ -46,6 +46,9 @@ type Options struct {
 	CommitLimit int
 	// AllowNetwork lets `go list` download modules.
 	AllowNetwork bool
+	// Dataflow adds CALLS edges for Go calls through function values (SSA
+	// and VTA). Off by default; see docs/EDGE_EVIDENCE.md.
+	Dataflow bool
 	// VulnScan queries osv.dev for known vulnerabilities in go.mod
 	// dependencies and the standard library. Sends module paths and versions.
 	VulnScan bool
@@ -125,7 +128,7 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	extImports := map[string][]string{}
 	var goRes *golang.Result
 	if hasGoModule(root, policy) {
-		res, err := golang.Extract(ctx, golang.Options{Repo: opts.Repo, Root: root, AllowNetwork: opts.AllowNetwork})
+		res, err := golang.Extract(ctx, golang.Options{Repo: opts.Repo, Root: root, AllowNetwork: opts.AllowNetwork, Dataflow: opts.Dataflow})
 		if err != nil {
 			return nil, fmt.Errorf("go extraction: %w", err)
 		}
