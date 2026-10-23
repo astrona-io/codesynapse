@@ -14,6 +14,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/astrona-io/codesynapse/internal/coretools"
 	"github.com/astrona-io/codesynapse/internal/metrics"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
@@ -198,9 +199,8 @@ func (h *handlers) visibleRepos(ctx context.Context) ([]model.Node, error) {
 }
 
 // RepoArg is embedded in every input.
-type RepoArg struct {
-	Repo string `json:"repo,omitempty" jsonschema:"repository name; optional when only one is indexed"`
-}
+// RepoArg selects the repository (internal/coretools).
+type RepoArg = coretools.RepoArg
 
 type empty struct{}
 
@@ -237,53 +237,20 @@ func (h *handlers) repoOverview(ctx context.Context, _ *mcp.CallToolRequest, in 
 	return nil, ov, err
 }
 
-type searchIn struct {
-	RepoArg
-	Query string   `json:"query" jsonschema:"case-insensitive name substring"`
-	Kinds []string `json:"kinds,omitempty" jsonschema:"filter by node kind: Function, Method, InterfaceMethod, Type, Package, File, Document, Section, Config, ConfigEntry, Template, TemplateDef, Finding, Vulnerability, Module"`
-	Limit int      `json:"limit,omitempty" jsonschema:"max results, default 20"`
-}
-
-type refsOut struct {
-	Results []query.Ref `json:"results"`
-}
+type (
+	searchIn   = coretools.SearchIn
+	refsOut    = coretools.RefsOut
+	fileIn     = coretools.FileIn
+	outlineOut = coretools.OutlineOut
+)
 
 func (h *handlers) search(ctx context.Context, _ *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, refsOut, error) {
 	repo, err := h.repo(ctx, in.Repo)
 	if err != nil {
 		return nil, refsOut{}, err
 	}
-	if strings.TrimSpace(in.Query) == "" {
-		return nil, refsOut{}, errors.New("query is required")
-	}
-	kinds := make([]model.NodeKind, 0, len(in.Kinds))
-	for _, k := range in.Kinds {
-		nk := model.NodeKind(k)
-		if !nk.Valid() {
-			return nil, refsOut{}, fmt.Errorf("unknown kind %q", k)
-		}
-		kinds = append(kinds, nk)
-	}
-	ns, err := h.svc.R.Search(ctx, repo, in.Query, kinds, in.Limit)
-	if err != nil {
-		return nil, refsOut{}, err
-	}
-	out := refsOut{Results: make([]query.Ref, 0, len(ns))}
-	for _, n := range ns {
-		out.Results = append(out.Results, query.RefOf(n))
-	}
-	return nil, out, nil
-}
-
-type fileIn struct {
-	RepoArg
-	File string `json:"file" jsonschema:"repo-relative path, e.g. internal/store/store.go"`
-}
-
-type outlineOut struct {
-	File     string               `json:"file"`
-	Analysis *model.Analysis      `json:"analysis,omitempty"`
-	Entries  []query.OutlineEntry `json:"entries"`
+	out, err := coretools.Search(ctx, h.svc.R, repo, in)
+	return nil, out, err
 }
 
 func (h *handlers) fileOutline(ctx context.Context, _ *mcp.CallToolRequest, in fileIn) (*mcp.CallToolResult, outlineOut, error) {
@@ -291,18 +258,8 @@ func (h *handlers) fileOutline(ctx context.Context, _ *mcp.CallToolRequest, in f
 	if err != nil {
 		return nil, outlineOut{}, err
 	}
-	entries, err := h.svc.Outline(ctx, repo, in.File)
-	if err != nil {
-		return nil, outlineOut{}, err
-	}
-	if entries == nil {
-		entries = []query.OutlineEntry{}
-	}
-	analysis, err := h.svc.FileAnalysis(ctx, repo, in.File)
-	if err != nil {
-		return nil, outlineOut{}, err
-	}
-	return nil, outlineOut{File: in.File, Analysis: analysis, Entries: entries}, nil
+	out, err := coretools.FileOutline(ctx, h.svc.R, repo, in)
+	return nil, out, err
 }
 
 type limitIn struct {

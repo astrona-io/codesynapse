@@ -5,20 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/astrona-io/codesynapse/internal/agentctx"
 	"github.com/astrona-io/codesynapse/internal/cleanup"
+	"github.com/astrona-io/codesynapse/internal/coretools"
 	"github.com/astrona-io/codesynapse/internal/license"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/security"
 )
-
-// maxDiffBytes bounds diffs submitted to get_pr_context.
-const maxDiffBytes = 4 << 20
 
 func registerAgentTools(s *mcp.Server, h *handlers, add func(name, desc string) *mcp.Tool) {
 	mcp.AddTool(s, add("code_identities", "Permanent symbol IDs with current and historical revision-specific locations, evidence for renames and moves, and uncertain identity or possible-copy candidates for review. Candidates are evidence, not verified lineage. Removed symbols stay historical. Bounded pagination reports omissions; available=false means the index predates identity analysis. Pass a sym- ID to inspect it, or review_only for unresolved matches."), h.codeIdentities)
@@ -60,38 +57,23 @@ func registerAgentTools(s *mcp.Server, h *handlers, add func(name, desc string) 
 		h.minimalContext)
 }
 
-func (h *handlers) agent() agentctx.Service { return agentctx.Service{R: h.svc.R} }
-
-type symbolContextIn struct {
-	RepoArg
-	Symbol    string `json:"symbol" jsonschema:"qualified_id (e.g. store.(*Store).Get), node id, name, or package path"`
-	Verbosity string `json:"verbosity,omitempty" jsonschema:"outline (default) or full"`
-	Depth     int    `json:"depth,omitempty" jsonschema:"caller depth for verbosity=full (1-4, default 1)"`
-	Limit     int    `json:"limit,omitempty" jsonschema:"max entries per list (default 5 outline, 20 full)"`
-	MaxTokens int    `json:"max_tokens,omitempty" jsonschema:"estimated JSON token budget, bytes/4; 256-20000, default 20000"`
-}
+// The core tools' inputs and answers live in internal/coretools, which the
+// Claude Code bridge also answers from a working tree.
+type (
+	symbolContextIn   = coretools.SymbolContextIn
+	callGraphIn       = coretools.CallGraphIn
+	implementationsIn = coretools.ImplementationsIn
+	prContextIn       = coretools.PRContextIn
+	minimalContextIn  = coretools.MinimalContextIn
+)
 
 func (h *handlers) symbolContext(ctx context.Context, _ *mcp.CallToolRequest, in symbolContextIn) (*mcp.CallToolResult, agentctx.SymbolContext, error) {
 	repo, err := h.repo(ctx, in.Repo)
 	if err != nil {
 		return nil, agentctx.SymbolContext{}, err
 	}
-	switch in.Verbosity {
-	case "", agentctx.Outline, agentctx.Full:
-	default:
-		return nil, agentctx.SymbolContext{}, fmt.Errorf("verbosity must be outline or full, not %q", in.Verbosity)
-	}
-	out, err := h.agent().SymbolContext(ctx, repo, in.Symbol, agentctx.ContextOptions{Verbosity: in.Verbosity, Depth: in.Depth, Limit: in.Limit, MaxTokens: in.MaxTokens})
+	out, err := coretools.SymbolContext(ctx, h.svc.R, repo, in)
 	return nil, out, err
-}
-
-type callGraphIn struct {
-	RepoArg
-	Symbol    string `json:"symbol" jsonschema:"qualified_id, node id or name"`
-	Direction string `json:"direction,omitempty" jsonschema:"callers, callees or both (default both)"`
-	Depth     int    `json:"depth,omitempty" jsonschema:"hops, default 2, max 4"`
-	Limit     int    `json:"limit,omitempty" jsonschema:"max nodes per direction, default 60"`
-	MaxTokens int    `json:"max_tokens,omitempty" jsonschema:"estimated JSON token budget, bytes/4; 256-20000, default 20000"`
 }
 
 func (h *handlers) callGraph(ctx context.Context, _ *mcp.CallToolRequest, in callGraphIn) (*mcp.CallToolResult, agentctx.CallGraph, error) {
@@ -99,19 +81,8 @@ func (h *handlers) callGraph(ctx context.Context, _ *mcp.CallToolRequest, in cal
 	if err != nil {
 		return nil, agentctx.CallGraph{}, err
 	}
-	switch in.Direction {
-	case "", "both", "callers", "callees":
-	default:
-		return nil, agentctx.CallGraph{}, fmt.Errorf("direction must be callers, callees or both")
-	}
-	g, err := h.agent().CallGraph(ctx, repo, in.Symbol, in.Direction, in.Depth, in.Limit, in.MaxTokens)
-	return nil, g, err
-}
-
-type implementationsIn struct {
-	RepoArg
-	Symbol string `json:"symbol" jsonschema:"interface or concrete type, or a method"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"max results, default 50"`
+	out, err := coretools.CallGraph(ctx, h.svc.R, repo, in)
+	return nil, out, err
 }
 
 func (h *handlers) implementations(ctx context.Context, _ *mcp.CallToolRequest, in implementationsIn) (*mcp.CallToolResult, agentctx.RefList, error) {
@@ -119,18 +90,8 @@ func (h *handlers) implementations(ctx context.Context, _ *mcp.CallToolRequest, 
 	if err != nil {
 		return nil, agentctx.RefList{}, err
 	}
-	out, err := h.agent().Implementations(ctx, repo, in.Symbol, in.Limit)
+	out, err := coretools.Implementations(ctx, h.svc.R, repo, in)
 	return nil, out, err
-}
-
-type prContextIn struct {
-	RepoArg
-	Diff      string   `json:"diff,omitempty" jsonschema:"unified diff text (git diff output)"`
-	Files     []string `json:"files,omitempty" jsonschema:"modified file paths; every symbol in them counts as changed"`
-	Base      string   `json:"base,omitempty" jsonschema:"base git ref (with head) when neither diff nor files is given"`
-	Head      string   `json:"head,omitempty" jsonschema:"head git ref, default HEAD"`
-	Depth     int      `json:"depth,omitempty" jsonschema:"caller depth for blast radius, default 3"`
-	MaxTokens int      `json:"max_tokens,omitempty" jsonschema:"estimated JSON token budget, bytes/4; 256-20000, default 20000"`
 }
 
 func (h *handlers) prContext(ctx context.Context, _ *mcp.CallToolRequest, in prContextIn) (*mcp.CallToolResult, agentctx.PRContext, error) {
@@ -138,32 +99,8 @@ func (h *handlers) prContext(ctx context.Context, _ *mcp.CallToolRequest, in prC
 	if err != nil {
 		return nil, agentctx.PRContext{}, err
 	}
-	if len(in.Diff) > maxDiffBytes {
-		return nil, agentctx.PRContext{}, fmt.Errorf("diff exceeds %d bytes", maxDiffBytes)
-	}
-	opts := agentctx.PROptions{Diff: []byte(in.Diff), Files: in.Files, Base: in.Base, Head: in.Head, Depth: in.Depth, MaxTokens: in.MaxTokens}
-	if len(opts.Diff) == 0 && len(opts.Files) == 0 && in.Base != "" {
-		n, err := h.svc.R.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
-		if err != nil {
-			return nil, agentctx.PRContext{}, err
-		}
-		if n.Root == "" {
-			return nil, agentctx.PRContext{}, errors.New("repository root unknown; pass a diff or files instead")
-		}
-		if _, err := os.Stat(n.Root); err != nil {
-			return nil, agentctx.PRContext{}, errors.New("repository checkout is not reachable from this server; pass a diff or files instead")
-		}
-		opts.Root = n.Root
-	}
-	out, err := h.agent().PRContext(ctx, repo, opts)
+	out, err := coretools.PRContext(ctx, h.svc.R, repo, in)
 	return nil, out, err
-}
-
-type minimalContextIn struct {
-	RepoArg
-	Task      string   `json:"task" jsonschema:"what you are trying to do, in plain words; include symbol names you know"`
-	Files     []string `json:"files,omitempty" jsonschema:"files already known to be relevant (boosted)"`
-	MaxTokens int      `json:"max_tokens,omitempty" jsonschema:"estimated JSON token budget, bytes/4; 256-20000, default 1500"`
 }
 
 func (h *handlers) minimalContext(ctx context.Context, _ *mcp.CallToolRequest, in minimalContextIn) (*mcp.CallToolResult, agentctx.MinimalContext, error) {
@@ -171,10 +108,7 @@ func (h *handlers) minimalContext(ctx context.Context, _ *mcp.CallToolRequest, i
 	if err != nil {
 		return nil, agentctx.MinimalContext{}, err
 	}
-	if strings.TrimSpace(in.Task) == "" {
-		return nil, agentctx.MinimalContext{}, errors.New("task is required")
-	}
-	out, err := h.agent().MinimalContext(ctx, repo, in.Task, in.Files, in.MaxTokens)
+	out, err := coretools.MinimalContext(ctx, h.svc.R, repo, in)
 	return nil, out, err
 }
 
