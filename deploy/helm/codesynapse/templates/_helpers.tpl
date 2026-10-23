@@ -30,6 +30,7 @@
 - {name: CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES, value: "8388608"}
 - {name: CODESYNAPSE_HUGEGRAPH_TX_CAPACITY, value: {{ int64 .Values.hugegraph.txCapacity | quote }}}
 - {name: CODESYNAPSE_MILVUS_URL, value: {{ include "cs.milvusURL" . | quote }}}
+{{ include "cs.secretEnv" (list . "CODESYNAPSE_MILVUS_TOKEN" "MILVUS_TOKEN" true) }}
 - {name: CODESYNAPSE_METRICS_URL, value: {{ include "cs.metricsURL" . | quote }}}
 - {name: CODESYNAPSE_METRICS_USER, value: codesynapse}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_METRICS_PASSWORD" "METRICS_PASSWORD") }}
