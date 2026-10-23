@@ -44,7 +44,7 @@ var version = "dev"
 func main() {
 	os.Exit(app.Main("codesynapse", "Index code, docs and history into a graph for review and AI assistants", version,
 		func(ec *app.Env) []*cobra.Command {
-			return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), statsCmd(ec), mcpCmd(ec), memoryCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
+			return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), statsCmd(ec), evalCmd(ec), mcpCmd(ec), memoryCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
 		}))
 }
 

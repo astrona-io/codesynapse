@@ -35,6 +35,24 @@ jobs:
       - name: Tests (race detector)
         run: go test -race ./...
 
+  eval:
+    # docs/PLAN.md, agent workflow roadmap step 1: minimal_context and
+    # search must keep finding the files past commits touched.
+    name: Task eval
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: Score against the baseline
+        # The base commit may need module versions the cache lacks.
+        run: just eval --allow-network
+
   web:
     name: Web build and licences
     runs-on: ubuntu-latest
