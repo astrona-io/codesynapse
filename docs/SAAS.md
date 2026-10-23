@@ -117,7 +117,9 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
        - bulk inputs leave only a digest;
        - the chain still verifies under concurrent calls.
      - **Open decision:** how much free text to keep. Queries help tracing but can carry personal data or pasted code; the default above keeps them redacted and capped.
-   - **5d, CI/CD baseline (planned; recommended next):** today the only workflows build the Homebrew formula and release the CLI on a tag. Pull requests and merges run no tests, lint or security checks, so everything depends on running `just ci` locally.
+   - **5d, CI/CD baseline (in progress):** before 5d, the only workflows built the Homebrew formula and released the CLI on a tag.
+     - **Done, pull request and merge checks:** `.github/workflows/ci.yml` runs `just ci`. The integration contracts run when stores or accounts change, and nightly. Accepted findings live in the tools' ignore files, with reasons. Actions are pinned by SHA, and Renovate updates the digests and the tools' versions.
+     - **Next:** images on merge and release. The Helm checks arrive with the chart in 6a.
      - **On every pull request** (required checks; the same commands work locally through `just`):
        - `go test -race` (`just test`), `golangci-lint` with gosec (`just lint`), and `govulncheck`;
        - the Nuxt typecheck and build (`just web-check`), plus `npm audit` for production dependencies;

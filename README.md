@@ -278,7 +278,7 @@ CODESYNAPSE_HUGEGRAPH_PASSWORD=... codesynapse ingest . --repo my-service --vuln
 just up        # the stack, including HugeGraph and Milvus
 just dev-web   # Nuxt dev server on :3000 against the API of `just up`
 just dev-mcp   # MCP on stdio with an in-memory graph of the checkout
-just ci        # lint, race tests, web typecheck + build
+just ci        # what CI runs: lint, race tests, web build, licences, just checks (workflows, Dockerfiles, shell, YAML, secrets, Trivy, govulncheck)
 ```
 
 HugeGraph runs Gremlin scripts and is never published to the host, so the API and MCP services run in compose; `just dev-mcp` and the `--offline` CLI commands need no database at all.

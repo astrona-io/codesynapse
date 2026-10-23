@@ -1,0 +1,14 @@
+# yamllint for workflows, compose, manifests, rules and config (`just lint-yaml`).
+extends: default
+ignore: |
+  **/testdata/
+  services/web/node_modules/
+rules:
+  line-length: disable
+  document-start: disable
+  # GitHub Actions' `on:` key is not a boolean.
+  truthy: {check-keys: false}
+  comments: {min-spaces-from-content: 1}
+  # Example files keep commented-out entries at their list's indentation.
+  comments-indentation: disable
+  indentation: {spaces: consistent, indent-sequences: whatever}

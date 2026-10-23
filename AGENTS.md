@@ -99,7 +99,8 @@ just            # list recipes
 just test       # go test -race ./...
 just lint       # golangci-lint (must report 0 issues)
 just web-check  # nuxt typecheck + build
-just ci         # all of the above
+just checks     # actionlint, hadolint, shellcheck, yamllint, gitleaks, Trivy, govulncheck
+just ci         # all of the above plus the licence check: what CI runs on a pull request
 just up         # full stack in docker compose (creates .env with random secrets)
 just dev-mcp    # MCP on stdio with an in-memory graph of the checkout (no database)
 just dev-web    # Nuxt dev server against the API of `just up`
@@ -114,7 +115,7 @@ just mcp        # register the MCP server with Claude Code, Codex, Gemini, OpenC
 
 Test Kubernetes manifests only on a throwaway kind cluster, with `--context` set explicitly; never on a shared or production cluster.
 
-Run `just test` and `just lint` before you call a Go change done, and `just web-check` for anything under `services/web/`.
+Run `just test` and `just lint` before you call a Go change done, and `just web-check` for anything under `services/web/`. CI (`.github/workflows/ci.yml`) runs `just ci` on every pull request and merge, plus the integration contracts when stores or accounts change; run `just checks` before touching workflows, Dockerfiles, scripts or YAML. Accepted findings go in `.gitleaks.toml`/`.gitleaksignore`, `.trivyignore` or `.hadolint.yaml`, each with a reason. Pin new GitHub actions by commit SHA.
 
 Defer both development and production Kubernetes manifest work to the final deployment phase, after application features and SSO.
 
