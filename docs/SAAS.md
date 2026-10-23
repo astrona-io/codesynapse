@@ -143,6 +143,47 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
        - Workflows pin actions by commit SHA, run with least-privilege `permissions`, and never expose secrets to pull requests from forks.
        - Renovate keeps actions, tools and base images current, with approval for majors.
        - CI-only tools are not distributed: GPL tools such as hadolint and shellcheck are acceptable there, never inside images.
+   - **5e, service split by workload (planned; before 6a so the chart describes the final topology).**
+     - **Why:** today one `api` process serves HTTP and also runs every kind of work: clone and index jobs on untrusted repositories, AI tasks, fix branches that push, and eleven background loops (scheduler, annotations, offload extraction, access projections, audit and session-memory pruning, ingest-report recovery and metrics, memory-fact metrics, fix recovery). Jobs are in-memory, so a restart loses queued work. One slow ingest competes with every dashboard request for CPU and memory, the API image must carry the Go toolchain and git, and the process holding the accounts database also parses untrusted code.
+     - **Recommendation:** split by workload, not by domain.
+       - Accounts, reviews, memory and the catalog stay in the API. They share PostgreSQL transactions (policy, audit and outbox commit together) and the graph, so separate domain services would add network hops and failure modes without making anything faster or safer.
+       - What scales, fails and is attacked differently gets its own process and image.
+
+     | Component | Image | Scales | Holds |
+     |---|---|---|---|
+     | `api` | `codesynapse-api`, distroless or alpine, no Go toolchain or git | horizontally, stateless | HTTP API, dashboard backend, enqueues work |
+     | `mcp` | `codesynapse-mcp` | horizontally, stateless | MCP server, read-only graph access and the narrow audited writes |
+     | `web` | `codesynapse-web` | horizontally, stateless | dashboard |
+     | `worker` (ingest role) | `codesynapse-worker` with the Go toolchain and git | by queue depth; memory sized from ingest peaks | clone, sync, index, annotation; parses untrusted repositories, so it never holds push tokens or the SSO secrets |
+     | `worker` (ai role) | same image, `--roles ai` | by queue depth | AI tasks and offload extraction (model calls) |
+     | `worker` (fix role) | same image, `--roles fix` | one or few | fix branches; the only role given push credentials (`CODESYNAPSE_ALLOW_PUSH`) |
+     | `worker` (system role) | same image, `--roles system` | one active (leader lease) | scheduler, access projections, pruning, recovery, metrics export |
+
+     - **Steps:**
+       1. **Durable job queue in PostgreSQL** (no new dependency).
+          - A `jobs` table holds the kind, repository, organisation, serialized execution identity (never bearer tokens), state (queued, running, succeeded, failed, cancelled), attempts, lease owner and expiry, heartbeat, a trace context and an error.
+          - Workers claim jobs with `FOR UPDATE SKIP LOCKED`, renew their lease while running, and requeue it if they die.
+          - Retries keep the original primary session ID, as the session rules require. Every claim rechecks session, membership, key and repository permission before work and before persistence, as jobs do today.
+          - The in-memory `Jobs` runner becomes one implementation of a `Queue` interface. Local development and the CLI keep it, as an in-process worker.
+       2. **The `codesynapse-worker` binary and image:** `cmd/codesynapse-worker` with `--roles ingest,ai,fix,system`, defaulting to all. The background loops move out of `api.New`. The system role takes a PostgreSQL advisory-lock leader lease, so loops never run twice; this also removes the single-API-replica limit noted for 6b. The API image drops the toolchain and git. Compose runs one worker with all roles, so `just up` stays simple.
+       3. **Tracing and debugging:**
+          - W3C trace context crosses every hop: from web through api (HTTP headers) into the job row, then to the worker, the stores and model calls; MCP gets its own spans.
+          - Logs carry `trace_id`, `request_id` and `job_id`.
+          - The audit entry, the job and the trace share the request ID, so one ID finds everything.
+          - Spans never carry prompts, code, arguments or repository names, following the telemetry rules.
+          - Needs `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`, from the same Apache-2.0 project as the metrics exporter already in use; approval needed per AGENTS.md. Needs a trace store: VictoriaTraces or Jaeger (both Apache-2.0); Grafana Tempo is AGPL and excluded.
+       4. **Isolation for the ingest role:**
+          - A read-only root filesystem with a writable workspace volume.
+          - No route to PostgreSQL beyond what its checks need: a database role limited to job and permission reads plus ingest reports.
+          - Network policies that allow only git hosts, osv.dev and deps.dev.
+          - The fix role is the only one with push tokens, and the API never sees them.
+       5. **Compose and the chart (6a)** get one Deployment per component and role, each with its own resources, autoscaling on queue depth, and per-component dashboards.
+     - **Tests:**
+       - the queue contract (claim, lease expiry, requeue, cancel, the identity recheck, no double run) on PostgreSQL;
+       - a worker killed mid-job is retried once by another;
+       - the API image no longer contains `go` or `git`;
+       - an end-to-end trace from a dashboard click to the graph write.
+     - **Not planned:** a message broker (PostgreSQL is enough at this scale and keeps the transactional audit); splitting accounts, reviews, memory or the catalog into separate services; a sidecar per tenant.
 6. **Kubernetes deployment and releases (final phase)**: after the application features, access/session controls, telemetry, ingestion work and SSO are complete. Existing local development stays independent of Kubernetes, and nothing has been deployed to a production cluster. The earlier Kustomize work is parked on `feat/k8s-production`; it is reused as input for the chart, not shipped as is.
    - **6a, Helm chart and local build-and-test loop:**
      - A Helm chart in `deploy/helm/codesynapse` replaces the Kustomize overlays.
