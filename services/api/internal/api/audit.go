@@ -188,16 +188,18 @@ func (s *Server) handleVerifyAudit(w http.ResponseWriter, r *http.Request) {
 
 // exportAudit writes entries as JSON (default), JSON Lines or CSV. Query:
 // since, until (RFC 3339), after_id (cursor), limit (max 10000), action
-// (prefix), actor (email or user ID), outcome (success, failure), format.
+// (prefix), actor (email or user ID), outcome (success, failure), session,
+// tool and repo (MCP requests), format.
 func (s *Server) exportAudit(w http.ResponseWriter, r *http.Request, orgID string) {
 	q := r.URL.Query()
 	f := accounts.EventFilter{OrgID: orgID, Limit: clamp(atoi(q.Get("limit")), 1, 10000, 500), Ascending: q.Get("order") == "asc",
-		Action: q.Get("action"), Actor: accounts.NormalizeEmail(q.Get("actor")), Outcome: q.Get("outcome")}
+		Action: q.Get("action"), Actor: accounts.NormalizeEmail(q.Get("actor")), Outcome: q.Get("outcome"),
+		Session: q.Get("session"), Tool: q.Get("tool"), Repo: q.Get("repo")}
 	if f.Outcome != "" && f.Outcome != accounts.Success && f.Outcome != accounts.Failure {
 		s.problem(w, 400, errors.New("outcome must be success or failure"))
 		return
 	}
-	if len(f.Action) > 100 || len(f.Actor) > 320 {
+	if len(f.Action) > 100 || len(f.Actor) > 320 || len(f.Session) > 128 || len(f.Tool) > 120 || len(f.Repo) > 300 {
 		s.problem(w, 400, errors.New("filter too long"))
 		return
 	}
@@ -233,10 +235,22 @@ func (s *Server) exportAudit(w http.ResponseWriter, r *http.Request, orgID strin
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="audit.csv"`)
 		cw := csv.NewWriter(w)
-		_ = cw.Write([]string{"id", "at", "action", "outcome", "status", "actor_email", "user_id", "via", "key_id", "org_id", "target", "ip", "user_agent", "request_id", "detail", "prev_hash", "hash"}) //nolint:errcheck // client went away
+		_ = cw.Write([]string{"id", "at", "action", "outcome", "status", "actor_email", "user_id", "via", "key_id", "org_id", "target", "ip", "user_agent", "request_id", "detail", //nolint:errcheck // client went away
+			"mcp_session", "mcp_transport", "mcp_client", "mcp_tool", "mcp_repo", "mcp_duration_ms", "mcp_bytes", "mcp_args_digest", "mcp_args", "mcp_error", "prev_hash", "hash"})
 		for _, e := range events {
+			m := e.MCP
+			if m == nil {
+				m = &accounts.MCPRequest{}
+			}
+			args := ""
+			if len(m.Args) > 0 {
+				b, _ := json.Marshal(m.Args) //nolint:errchkjson // string map
+				args = string(b)
+			}
 			_ = cw.Write([]string{strconv.FormatInt(e.ID, 10), e.At.Format(time.RFC3339Nano), e.Action, e.Outcome, strconv.Itoa(e.Status), //nolint:errcheck // as above
-				csvSafe(e.ActorEmail), e.UserID, e.Via, e.KeyID, e.OrgID, csvSafe(e.Target), e.IP, csvSafe(e.UserAgent), e.RequestID, csvSafe(e.Detail), e.PrevHash, e.Hash})
+				csvSafe(e.ActorEmail), e.UserID, e.Via, e.KeyID, e.OrgID, csvSafe(e.Target), e.IP, csvSafe(e.UserAgent), e.RequestID, csvSafe(e.Detail),
+				m.SessionID, m.TransportID, csvSafe(m.Client), csvSafe(m.Name), csvSafe(m.Repo), strconv.FormatInt(m.DurationMS, 10), strconv.FormatInt(m.Bytes, 10),
+				m.ArgsDigest, csvSafe(args), csvSafe(m.Error), e.PrevHash, e.Hash})
 		}
 		cw.Flush()
 	default:

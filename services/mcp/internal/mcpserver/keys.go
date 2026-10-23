@@ -82,6 +82,15 @@ func (a AccountsAccess) Changed(ctx context.Context, c *Caller, action, target s
 	return err
 }
 
+// Request records one MCP request (audit.go) for the caller.
+func (a AccountsAccess) Request(ctx context.Context, c *Caller, e accounts.Event) error {
+	if c != nil {
+		e.UserID, e.ActorEmail, e.OrgID, e.KeyID, e.Via = c.UserID, c.Email, c.OrgID, c.KeyID, "key"
+	}
+	_, err := a.Acc.Record(ctx, e)
+	return err
+}
+
 // Denied records authorization failures without storing tool arguments.
 func (a AccountsAccess) Denied(ctx context.Context, c *Caller, tool string) error {
 	e := accounts.Event{Action: "mcp.access_denied", Target: tool, Outcome: accounts.Failure, Status: http.StatusForbidden}

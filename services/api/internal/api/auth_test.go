@@ -206,9 +206,22 @@ func TestAuditTrail(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, denied.Status, 401)
 
+	// MCP requests filter by chat session, tool and repository.
+	_, err := acc.Record(context.Background(), accounts.Event{Action: "mcp.tools.call", Target: "search", Via: "key",
+		MCP: &accounts.MCPRequest{Method: "tools/call", Name: "search", Repo: "acme/api", SessionID: "chat-9", Args: map[string]string{"query": "=cmd()"}}})
+	require.NoError(t, err)
+	var mcpOut struct{ Events []accounts.Event }
+	require.Equal(t, root.do("GET", "/api/v1/admin/audit?session=chat-9&tool=search&repo=acme/api", "", &mcpOut), 200)
+	require.Len(t, mcpOut.Events, 1)
+	assert.Equal(t, mcpOut.Events[0].MCP.SessionID, "chat-9")
+	require.Equal(t, root.do("GET", "/api/v1/admin/audit?session=other", "", &mcpOut), 200)
+	assert.Len(t, mcpOut.Events, 0)
+
 	var csv string
 	require.Equal(t, root.do("GET", "/api/v1/admin/audit?format=csv", "", &csv), 200)
 	assert.True(t, strings.HasPrefix(csv, "id,at,action,outcome"))
+	assert.Contains(t, csv, "mcp_session")
+	assert.Contains(t, csv, `"{""query"":""=cmd()""}"`, "arguments export as one JSON cell, which cannot start a formula")
 	var v accounts.Verification
 	require.Equal(t, root.do("GET", "/api/v1/admin/audit/verify", "", &v), 200)
 	assert.True(t, v.OK, v.Reason)

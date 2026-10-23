@@ -87,36 +87,37 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
 5. **Single sign-on**: OpenID Connect login and just-in-time accounts, built on the completed tenant and session rules.
    - **5a, API (implemented):** one provider per organisation with sealed client secret, PKCE/nonce/browser-bound state, SSRF-guarded discovery and exchange, guarded email linking, passwordless just-in-time accounts, group-mapped roles and teams on provider-managed memberships, last-owner and root protection, full audit. [Plan](SSO_PLAN.md).
    - **5b, dashboard (implemented):** single sign-on on the sign-in page (with `/login?sso=<org>` links), the `/sso/callback` page, Settings → Single sign-on for owners and admins, linked identities on the profile; the proxy forwards the `cs_sso` binder on SSO paths only.
-   - **5c, MCP request audit trail (planned):** today the MCP server audits only authentication failures, access denials and its few write tools. Ordinary tool calls appear only in anonymous daily usage counters. Every MCP request should be traceable afterwards to who made it, with which key, from which chat, and what it asked for.
-     - **What is recorded:** every request, whether accepted, refused or failed. That covers `initialize`, list calls, `prompts/get`, `tools/call`, resource reads, transport open, resume and close, and requests refused before a tool runs (bad key, root, missing or closed runtime session, policy denial, unknown tool).
+   - **5c, MCP request audit trail (implemented):** every MCP request is traceable afterwards to who made it, with which key, from which chat and what it asked for.
+     - **What is recorded:** every request except `ping` and notifications, whether accepted, refused (authorization), failed or answered with a tool error. Requests refused earlier, for a bad key, root or a missing runtime session, keep their existing `mcp.authentication_failed`, `root.denied` and `mcp.access_denied` entries.
      - **Fields per event:**
+       - action `mcp.<method>` (`mcp.tools.call`, `mcp.prompts.get`, `mcp.initialize`, …);
        - time and request ID;
-       - user ID and email;
-       - organisation;
-       - how they authenticated: the API key's ID, name and display prefix, never the key or its hash;
-       - runtime session ID (primary and parent) and the MCP transport session ID;
-       - client name and version from `initialize`, cleaned and capped, plus the bridge's version when one is used;
+       - user ID and email, organisation, and the API key's ID (never the key or its hash);
+       - runtime (chat) session and MCP transport session;
+       - client name and version (from `initialize` or the sessionless `_meta`);
        - client address (trusted proxies only) and user agent;
-       - JSON-RPC method, tool or prompt name and repository;
-       - outcome, status and error class;
+       - tool or prompt name and repository;
+       - outcome, status (200, 400 for tool errors and refusals, 500 for errors) and the redacted first line of the error;
        - duration and response size.
      - **Arguments:**
-       - Identifying fields are stored as values after `redact.Free` and length caps: repository, symbol or `qualified_id`, file paths, depth, limit, verbosity, memory scope.
-       - Free text (queries, task descriptions) is stored redacted and capped.
-       - Diffs, code, offloaded turns and other bulk inputs are never stored. They get a size and a SHA-256 digest of the canonical arguments, so a payload found later can be matched to its request.
-       - Results are never stored, only their size.
+       - Values pass `redact.Free` (secrets, card, national ID and phone numbers) and are capped at 400 characters and 32 keys.
+       - `diff`, `patch`, `code`, `content`, `body`, `text`, `turns`, `messages`, `triples` and `comments`, and any value longer than the cap, keep only `sha256:<hex> (<n> bytes)`.
+       - A digest of the canonical arguments links a payload found later to its request.
+       - Results are never stored.
      - **Storage:**
-       - The same append-only, hash-chained `events` log, with new columns for runtime session, transport session, client, method, tool, repository, duration, size, argument digest and redacted arguments.
-       - Appends are batched so busy agents do not serialise on the chain lock.
-       - It fails closed like the rest of the audit log: if the event cannot be written, the tool does not run.
-       - Same retention (`CODESYNAPSE_AUDIT_RETENTION_DAYS`), export and SIEM `audit` log line.
-     - **Who sees it:** platform admins see everything. Organisation owners and admins see their organisation's MCP events in the audit view, filterable by user, key, runtime session, tool and repository.
+       - The same hash-chained `events` table, with a `mcp jsonb` column (migration 0012). MCP details join the hash only when present, so earlier entries verify unchanged.
+       - Entries are written synchronously after the request. If the entry cannot be written, the result is withheld; tools that change something still audit before the change.
+       - Batching appends is a follow-up if measurements show lock contention.
+     - **Who sees it:**
+       - **Platform admins:** Administration → Audit log.
+       - **Organisation owners and admins:** the new Settings → Audit log tab.
+       - **Filters:** what (including "Agent (MCP) requests"), who, outcome, chat session, tool, repository and period; clicking a session, tool or repository narrows to it.
+       - **Exports:** CSV (with `mcp_*` columns) and JSON Lines.
+     - **Client address:** `RequestInfoHTTP` sets it, with the request ID, from the connection and trusted proxies (`app.ClientAddr`, now shared with the API); copies a client sends are overwritten. Compose trusts no proxy for MCP unless `CODESYNAPSE_MCP_TRUSTED_PROXIES` is set.
      - **Tests:**
-       - every tool in the fixed policy table produces an event, including refusals;
-       - keys, key hashes and secrets in arguments never appear;
-       - bulk inputs leave only a digest;
-       - the chain still verifies under concurrent calls.
-     - **Open decision:** how much free text to keep. Queries help tracing but can carry personal data or pasted code; the default above keeps them redacted and capped.
+       - the store contract (round trip, caps, filters, chain verification on memstore and PostgreSQL);
+       - `TestEveryMCPRequestIsAudited`: caller, key, session, client and address; redaction; bulk inputs digested; the key never logged; refusals recorded; filters; the chain intact; the result withheld while the audit store is down;
+       - `TestAuditTrail`: API filters and the CSV export.
    - **5d, CI/CD baseline (in progress):** before 5d, the only workflows built the Homebrew formula and released the CLI on a tag.
      - **Done, pull request and merge checks:** `.github/workflows/ci.yml` runs `just ci`. The integration contracts run when stores or accounts change, and nightly. Accepted findings live in the tools' ignore files, with reasons. Actions are pinned by SHA, and Renovate updates the digests and the tools' versions.
      - **Done, images:** `.github/workflows/images.yml` builds and scans api, mcp and web on every relevant pull request, with read-only permissions. Merges to `main` build and scan only. Only a release publishes: a `vX.Y.Z` or `vX.Y.Z-rcN` tag on a commit on `main` (the workflow refuses any other tag). It publishes amd64 and arm64 images to ghcr.io with SBOM and provenance, signed with cosign (keyless). Release candidates are tagged `:X.Y.Z-rcN` only; final releases are tagged `:X.Y.Z`, `:X.Y` and `:latest`. Go and the web app are cross-built on the runner. The web runtime image drops npm, which was the source of its fixable vulnerabilities.
@@ -143,6 +144,47 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
        - Workflows pin actions by commit SHA, run with least-privilege `permissions`, and never expose secrets to pull requests from forks.
        - Renovate keeps actions, tools and base images current, with approval for majors.
        - CI-only tools are not distributed: GPL tools such as hadolint and shellcheck are acceptable there, never inside images.
+   - **5e, service split by workload (planned; before 6a so the chart describes the final topology).**
+     - **Why:** today one `api` process serves HTTP and also runs every kind of work: clone and index jobs on untrusted repositories, AI tasks, fix branches that push, and eleven background loops (scheduler, annotations, offload extraction, access projections, audit and session-memory pruning, ingest-report recovery and metrics, memory-fact metrics, fix recovery). Jobs are in-memory, so a restart loses queued work. One slow ingest competes with every dashboard request for CPU and memory, the API image must carry the Go toolchain and git, and the process holding the accounts database also parses untrusted code.
+     - **Recommendation:** split by workload, not by domain.
+       - Accounts, reviews, memory and the catalog stay in the API. They share PostgreSQL transactions (policy, audit and outbox commit together) and the graph, so separate domain services would add network hops and failure modes without making anything faster or safer.
+       - What scales, fails and is attacked differently gets its own process and image.
+
+     | Component | Image | Scales | Holds |
+     |---|---|---|---|
+     | `api` | `codesynapse-api`, distroless or alpine, no Go toolchain or git | horizontally, stateless | HTTP API, dashboard backend, enqueues work |
+     | `mcp` | `codesynapse-mcp` | horizontally, stateless | MCP server, read-only graph access and the narrow audited writes |
+     | `web` | `codesynapse-web` | horizontally, stateless | dashboard |
+     | `worker` (ingest role) | `codesynapse-worker` with the Go toolchain and git | by queue depth; memory sized from ingest peaks | clone, sync, index, annotation; parses untrusted repositories, so it never holds push tokens or the SSO secrets |
+     | `worker` (ai role) | same image, `--roles ai` | by queue depth | AI tasks and offload extraction (model calls) |
+     | `worker` (fix role) | same image, `--roles fix` | one or few | fix branches; the only role given push credentials (`CODESYNAPSE_ALLOW_PUSH`) |
+     | `worker` (system role) | same image, `--roles system` | one active (leader lease) | scheduler, access projections, pruning, recovery, metrics export |
+
+     - **Steps:**
+       1. **Durable job queue in PostgreSQL** (no new dependency).
+          - A `jobs` table holds the kind, repository, organisation, serialized execution identity (never bearer tokens), state (queued, running, succeeded, failed, cancelled), attempts, lease owner and expiry, heartbeat, a trace context and an error.
+          - Workers claim jobs with `FOR UPDATE SKIP LOCKED`, renew their lease while running, and requeue it if they die.
+          - Retries keep the original primary session ID, as the session rules require. Every claim rechecks session, membership, key and repository permission before work and before persistence, as jobs do today.
+          - The in-memory `Jobs` runner becomes one implementation of a `Queue` interface. Local development and the CLI keep it, as an in-process worker.
+       2. **The `codesynapse-worker` binary and image:** `cmd/codesynapse-worker` with `--roles ingest,ai,fix,system`, defaulting to all. The background loops move out of `api.New`. The system role takes a PostgreSQL advisory-lock leader lease, so loops never run twice; this also removes the single-API-replica limit noted for 6b. The API image drops the toolchain and git. Compose runs one worker with all roles, so `just up` stays simple.
+       3. **Tracing and debugging:**
+          - W3C trace context crosses every hop: from web through api (HTTP headers) into the job row, then to the worker, the stores and model calls; MCP gets its own spans.
+          - Logs carry `trace_id`, `request_id` and `job_id`.
+          - The audit entry, the job and the trace share the request ID, so one ID finds everything.
+          - Spans never carry prompts, code, arguments or repository names, following the telemetry rules.
+          - Needs `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`, from the same Apache-2.0 project as the metrics exporter already in use; approval needed per AGENTS.md. Needs a trace store: VictoriaTraces or Jaeger (both Apache-2.0); Grafana Tempo is AGPL and excluded.
+       4. **Isolation for the ingest role:**
+          - A read-only root filesystem with a writable workspace volume.
+          - No route to PostgreSQL beyond what its checks need: a database role limited to job and permission reads plus ingest reports.
+          - Network policies that allow only git hosts, osv.dev and deps.dev.
+          - The fix role is the only one with push tokens, and the API never sees them.
+       5. **Compose and the chart (6a)** get one Deployment per component and role, each with its own resources, autoscaling on queue depth, and per-component dashboards.
+     - **Tests:**
+       - the queue contract (claim, lease expiry, requeue, cancel, the identity recheck, no double run) on PostgreSQL;
+       - a worker killed mid-job is retried once by another;
+       - the API image no longer contains `go` or `git`;
+       - an end-to-end trace from a dashboard click to the graph write.
+     - **Not planned:** a message broker (PostgreSQL is enough at this scale and keeps the transactional audit); splitting accounts, reviews, memory or the catalog into separate services; a sidecar per tenant.
 6. **Kubernetes deployment and releases (final phase)**: after the application features, access/session controls, telemetry, ingestion work and SSO are complete. Existing local development stays independent of Kubernetes, and nothing has been deployed to a production cluster. The earlier Kustomize work is parked on `feat/k8s-production`; it is reused as input for the chart, not shipped as is.
    - **6a, Helm chart and local build-and-test loop:**
      - A Helm chart in `deploy/helm/codesynapse` replaces the Kustomize overlays.
