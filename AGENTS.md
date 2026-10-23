@@ -52,6 +52,7 @@ services/mcp/           MCP service: cmd/codesynapse-mcp, Dockerfile
   internal/mcpserver/   MCP tools, prompts (prompts.go) and server instructions
 services/web/           Nuxt 4 dashboard (app/ pages+components, server/api/cg proxy, Dockerfile)
 deploy/helm/codesynapse/ Helm chart; stores are subcharts in charts/ (on by default, disable to link external ones), common/ holds shared helpers
+                        values.schema.json (one per chart) validates every value; keep it in step with values.yaml
 internal/ingestreport/  Bounded file ledger, commit-confirmed outcomes and metadata-only context estimates
 internal/config/        Strict repository .codesynapse.yaml policy, digest and shared path matcher
 internal/model/         Node/Edge kinds, Graph, IDs. The schema lives here.
@@ -123,6 +124,8 @@ just mcp        # register the MCP server with Claude Code, Codex, Gemini, OpenC
 ```
 
 Test the Helm chart only on the throwaway kind cluster of `just chart-e2e` (`kind-codesynapse-dev`), with `--context`/`--kube-context` set explicitly; never on a shared or production cluster. Run `just chart-check` for any chart change.
+
+Every value lives in the chart's `values.schema.json` (and a store's in `charts/<store>/values.schema.json`): Helm checks installs against it and Artifact Hub shows it as the chart's settings. When you add, rename, remove or retype a value, change `values.yaml` and its schema in the same change, with a description and strict types (`additionalProperties: false`, enums, patterns); a value missing from the schema makes every install fail. `just chart-check` renders the chart with valid values and makes sure bad ones are refused; add a case there for a new rule.
 
 Run `just test` and `just lint` before you call a Go change done, and `just web-check` for anything under `services/web/`. CI (`.github/workflows/ci.yml`) runs `just ci` on every pull request and merge, plus the integration contracts when stores or accounts change; run `just checks` before touching workflows, Dockerfiles, scripts or YAML. Accepted findings go in `.gitleaks.toml`/`.gitleaksignore`, `.trivyignore` or `.hadolint.yaml`, each with a reason. Pin new GitHub actions by commit SHA.
 

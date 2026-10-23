@@ -13,6 +13,21 @@ helm lint --strict "$chart" -f "$values"
 helm template codesynapse "$chart" -f "$values" > "$out/rendered.yaml"
 # The kind values must render too.
 helm template codesynapse "$chart" -f "$chart/ci/kind-values.yaml" > /dev/null
+# So must every store linked from outside (no subchart schema applies then).
+helm template codesynapse "$chart" -f "$values" \
+    --set postgresql.enabled=false,hugegraph.enabled=false,milvus.enabled=false \
+    --set victoriametrics.enabled=false,victoriatraces.enabled=false \
+    --set hugegraph.externalURL=https://hugegraph.example.com:8080 > /dev/null
+
+# values.schema.json (and each store's) must refuse what the chart would
+# ignore or break on: unknown keys, wrong types, invalid enums.
+for bad in api.replica=2 'worker.roles=ingest\,typo' image.pullPolicy=Sometimes \
+    auditRetentionDays=7 postgresql.sizee=1Gi hugegraph.size=lots; do
+    if helm template codesynapse "$chart" -f "$values" --set "$bad" > /dev/null 2>&1; then
+        echo "values.schema.json accepted $bad" >&2
+        exit 1
+    fi
+done
 
 go run github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0 -strict -summary -kubernetes-version 1.33.0 "$out/rendered.yaml"
 go run golang.stackrox.io/kube-linter/cmd/kube-linter@v0.8.3 lint "$out/rendered.yaml"

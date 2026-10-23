@@ -38,6 +38,8 @@ Installs CodeSynapse on Kubernetes: the dashboard (`web`), the API (`api`), job 
 
 ## Values worth knowing
 
+Every value is described and type-checked in `values.schema.json` (each store's in `charts/<store>/values.schema.json`), so `helm install` and `helm upgrade` refuse a misspelt key or a wrong type instead of ignoring it.
+
 | Value | Default | Meaning |
 |---|---|---|
 | `global.existingSecret` | required | The Secret above |
