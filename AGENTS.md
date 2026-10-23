@@ -21,7 +21,7 @@ Three services plus their stores, all in `docker-compose.yml`:
 
 ## Use the graph before reading files
 
-If the codesynapse MCP server is connected (see `.mcp.json`), use it on this repo too. Full guide with task prompts: `docs/AGENT_GUIDE.md`.
+If the codesynapse MCP server is connected (`just mcp` installs it for Claude Code), use it on this repo too. Full guide with task prompts: `docs/AGENT_GUIDE.md`.
 
 1. `minimal_context` with the task description first; read only the line ranges it returns.
 2. `get_symbol_context` (verbosity "outline", then "full" before editing) for signature, risk, callers, callees, tests.

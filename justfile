@@ -131,11 +131,9 @@ review base="origin/main":
 # Register the MCP server with your AI agents (asks per agent: Claude Code, Codex, Gemini, OpenCode, Cursor, project)
 mcp:
     go install ./cmd/codesynapse
+    @# macOS scans a new binary on its first start, which can outlast Claude Code's 30 s connect timeout.
+    "$(go env GOPATH)/bin/codesynapse" --help >/dev/null
     "$(go env GOPATH)/bin/codesynapse" mcp install
-
-# Print runtime-aware MCP configuration without expanding credentials
-mcp-config:
-    @cat .mcp.json
 
 # --- container images and Kubernetes --------------------------------------
 

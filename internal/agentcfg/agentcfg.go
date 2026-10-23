@@ -113,9 +113,16 @@ func Detect(home, cwd string) []Target {
 	out = append(out, Target{
 		ID: "project", Description: "This project's .mcp.json (shared with the repo; any MCP client)", Path: p,
 		install: func(_ context.Context, s Server) error {
+			// Shared with the repository, so the bridge is found on PATH,
+			// not at this machine's install path; the key stays in the
+			// user's config folder.
+			if s.Token != "" && s.StoreToken != nil {
+				if _, err := s.StoreToken(s.Token); err != nil {
+					return err
+				}
+			}
 			return mergeJSON(p, []string{"mcpServers", Name}, map[string]any{
-				"type": "http", "url": s.URL,
-				"headers": runtimeHeaders("Bearer ${"+TokenEnv+"}", "${"+SessionEnv+"}", "${"+ParentSessionEnv+"}"),
+				"type": "stdio", "command": "codesynapse", "args": []string{"mcp", "bridge", "--url", s.URL, "--api-url", s.APIURL},
 			})
 		},
 	})
