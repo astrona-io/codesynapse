@@ -287,7 +287,7 @@ The code is split by service: `services/api`, `services/mcp` and `services/web`,
 
 ## Container images and Kubernetes
 
-CI publishes signed multi-arch images to ghcr.io: `ghcr.io/astrona-io/codesynapse-{api,mcp,web}` with `:main` and `:sha-<short>` from `main`, `:X.Y.Z` and `:latest` from releases. Verify one with `cosign verify ghcr.io/astrona-io/codesynapse-api:main --certificate-identity-regexp 'https://github.com/astrona-io/codesynapse/' --certificate-oidc-issuer https://token.actions.githubusercontent.com`.
+Releases publish signed multi-arch images to ghcr.io: `ghcr.io/astrona-io/codesynapse-{api,mcp,web}`. A release is a `vX.Y.Z` tag (`:X.Y.Z`, `:X.Y`, `:latest`) or a release candidate `vX.Y.Z-rcN` (`:X.Y.Z-rcN`) on a commit on `main`; merges only build and scan. Verify an image with `cosign verify ghcr.io/astrona-io/codesynapse-api:1.3.0 --certificate-identity-regexp 'https://github.com/astrona-io/codesynapse/' --certificate-oidc-issuer https://token.actions.githubusercontent.com`.
 
 ```sh
 just image-build v0.1.0     # api, mcp and web images (PLATFORM=linux/amd64, REGISTRY=ghcr.io/you)

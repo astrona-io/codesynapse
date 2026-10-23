@@ -119,7 +119,7 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
      - **Open decision:** how much free text to keep. Queries help tracing but can carry personal data or pasted code; the default above keeps them redacted and capped.
    - **5d, CI/CD baseline (in progress):** before 5d, the only workflows built the Homebrew formula and released the CLI on a tag.
      - **Done, pull request and merge checks:** `.github/workflows/ci.yml` runs `just ci`. The integration contracts run when stores or accounts change, and nightly. Accepted findings live in the tools' ignore files, with reasons. Actions are pinned by SHA, and Renovate updates the digests and the tools' versions.
-     - **Done, images:** `.github/workflows/images.yml` builds and scans api, mcp and web on every relevant pull request, with read-only permissions. On merge and on release tags it publishes amd64 and arm64 images to ghcr.io with SBOM and provenance, signed with cosign (keyless). Tags: `:main` and `:sha-<short>` on merge; `:X.Y.Z`, `:X.Y` and `:latest` on release. Go and the web app are cross-built on the runner. The web runtime image drops npm, which was the source of its fixable vulnerabilities.
+     - **Done, images:** `.github/workflows/images.yml` builds and scans api, mcp and web on every relevant pull request, with read-only permissions. Merges to `main` build and scan only. Only a release publishes: a `vX.Y.Z` or `vX.Y.Z-rcN` tag on a commit on `main` (the workflow refuses any other tag). It publishes amd64 and arm64 images to ghcr.io with SBOM and provenance, signed with cosign (keyless). Release candidates are tagged `:X.Y.Z-rcN` only; final releases are tagged `:X.Y.Z`, `:X.Y` and `:latest`. Go and the web app are cross-built on the runner. The web runtime image drops npm, which was the source of its fixable vulnerabilities.
      - **Next:** the Helm checks arrive with the chart in 6a.
      - **On every pull request** (required checks; the same commands work locally through `just`):
        - `go test -race` (`just test`), `golangci-lint` with gosec (`just lint`), and `govulncheck`;
@@ -131,11 +131,11 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
        - Trivy config and filesystem scans;
        - the integration contracts (`just test-postgres`, `just test-hugegraph`) when stores or accounts change, and nightly otherwise.
      - **On merge to `main` (prebuild):**
-       - build all three images multi-arch (amd64, arm64), scan them with Trivy, and push `:main` and `:sha-<commit>` tags to ghcr.io;
+       - build and scan all three images; nothing is published (only releases publish);
        - package the chart as a development version;
        - install it on a throwaway kind cluster and run a smoke test (health, sign-up, index a small public repository, an MCP `repo_list` through the bridge).
-     - **On a release tag (`v*`):**
-       - versioned, signed images (cosign keyless, provenance attestation, CycloneDX SBOM);
+     - **On a release (a `vX.Y.Z` or release-candidate `vX.Y.Z-rcN` tag on a commit on `main`):**
+       - versioned, signed images (cosign keyless, provenance attestation, CycloneDX SBOM); a release candidate gets only its exact version tag, a final release also `X.Y` and `latest`;
        - the chart published as an OCI artifact at `oci://ghcr.io/astrona-io/charts/codesynapse`;
        - the CLI binaries and Homebrew formula as today;
        - release notes generated from conventional commits.
