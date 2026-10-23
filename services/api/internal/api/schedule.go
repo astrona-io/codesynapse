@@ -73,13 +73,71 @@ func (s Schedule) MarshalJSON() ([]byte, error) {
 	}{plain(s), s.State()})
 }
 
-// schedules persists auto-sync settings in a JSON file in the API's
-// writable state directory (the workspace volume). They live outside the
-// graph because every ingest replaces a repository's graph.
+// schedules persists auto-sync settings outside the graph, because every
+// ingest replaces a repository's graph. With accounts they live in the
+// accounts store, shared by every API and worker process; without, in a
+// JSON file in the API's workspace.
 type schedules struct {
 	mu   sync.Mutex
 	path string
 	all  map[string]*Schedule
+	// db, when set, holds every schedule; all and path are unused.
+	db     accounts.Store
+	logger *slog.Logger
+}
+
+// useStore keeps schedules in st. When importFile is set, a schedules file
+// from before moves in once (existing rows win) and is renamed, so it is
+// never read again.
+func (s *schedules) useStore(ctx context.Context, st accounts.Store, importFile bool, logger *slog.Logger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.db, s.logger = st, logger
+	if !importFile || len(s.all) == 0 || s.path == "" {
+		return
+	}
+	for _, sc := range s.all {
+		if err := st.EnsureSchedule(ctx, scheduleRecord(*sc)); err != nil {
+			logger.Error("schedules file not moved into the database; it stays in place", "error", err)
+			return
+		}
+	}
+	if err := os.Rename(s.path, s.path+".imported"); err != nil {
+		logger.Warn("schedules moved into the database; renaming the file failed", "error", err)
+		return
+	}
+	logger.Info("schedules moved into the database", "schedules", len(s.all))
+}
+
+func scheduleRecord(sc Schedule) accounts.Schedule {
+	r := accounts.Schedule{Repo: sc.Repo, OrgID: sc.OrgID, ActorID: sc.ActorID, Execution: sc.Execution, IntervalMinutes: sc.IntervalMinutes,
+		Paused: sc.Paused, AutoReview: sc.AutoReview, AutoTriage: sc.AutoTriage, LastStatus: sc.LastStatus, LastError: sc.LastError, Missing: sc.Missing}
+	r.LastRun, _ = time.Parse(time.RFC3339, sc.LastRun) //nolint:errcheck // empty or unreadable means never
+	r.NextRun, _ = time.Parse(time.RFC3339, sc.NextRun) //nolint:errcheck // as above
+	return r
+}
+
+func scheduleView(r accounts.Schedule) Schedule {
+	sc := Schedule{Repo: r.Repo, OrgID: r.OrgID, ActorID: r.ActorID, Execution: r.Execution, IntervalMinutes: r.IntervalMinutes,
+		Paused: r.Paused, AutoReview: r.AutoReview, AutoTriage: r.AutoTriage, LastStatus: r.LastStatus, LastError: r.LastError, Missing: r.Missing}
+	if !r.LastRun.IsZero() {
+		sc.LastRun = r.LastRun.UTC().Format(time.RFC3339)
+	}
+	if !r.NextRun.IsZero() {
+		sc.NextRun = r.NextRun.UTC().Format(time.RFC3339)
+	}
+	return sc
+}
+
+// dbCtx bounds one store call.
+func dbCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, 10*time.Second)
+}
+
+func (s *schedules) warn(what string, err error) {
+	if err != nil && s.logger != nil {
+		s.logger.Warn(what, "error", err)
+	}
 }
 
 func loadSchedules(dir string) (*schedules, error) {
@@ -134,7 +192,19 @@ func (s *schedules) save() error {
 	return os.Rename(tmp, s.path)
 }
 
-func (s *schedules) get(repo string) Schedule {
+func (s *schedules) get(ctx context.Context, repo string) Schedule {
+	if s.db != nil {
+		ctx, cancel := dbCtx(ctx)
+		defer cancel()
+		r, err := s.db.ScheduleByRepo(ctx, repo)
+		if err == nil {
+			return scheduleView(r)
+		}
+		if !errors.Is(err, accounts.ErrNotFound) {
+			s.warn("reading a schedule", err)
+		}
+		return Schedule{Repo: repo, IntervalMinutes: defaultInterval}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if sc, ok := s.all[repo]; ok {
@@ -155,7 +225,14 @@ func stagger(repo string, interval int) time.Duration {
 
 // ensure stores the default schedule for repo when it has none, so the
 // scheduler has a next run to count down to.
-func (s *schedules) ensure(repo string, now time.Time) {
+func (s *schedules) ensure(ctx context.Context, repo string, now time.Time) {
+	if s.db != nil {
+		ctx, cancel := dbCtx(ctx)
+		defer cancel()
+		s.warn("adding a default schedule", s.db.EnsureSchedule(ctx, accounts.Schedule{Repo: repo, IntervalMinutes: defaultInterval,
+			NextRun: now.Add(stagger(repo, defaultInterval)).UTC().Truncate(time.Second)}))
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.all[repo]; ok {
@@ -166,14 +243,42 @@ func (s *schedules) ensure(repo string, now time.Time) {
 	_ = s.save() //nolint:errcheck // best effort; the next tick retries
 }
 
-func (s *schedules) set(repo string, interval int, paused, autoReview, autoTriage bool, now time.Time, delegate ...Schedule) (Schedule, error) {
+func (s *schedules) set(ctx context.Context, repo string, interval int, paused, autoReview, autoTriage bool, now time.Time, delegate ...Schedule) (Schedule, error) {
+	if s.db != nil {
+		ctx, cancel := dbCtx(ctx)
+		defer cancel()
+		current := Schedule{Repo: repo}
+		r, err := s.db.ScheduleByRepo(ctx, repo)
+		switch {
+		case err == nil:
+			current = scheduleView(r)
+		case !errors.Is(err, accounts.ErrNotFound):
+			return Schedule{}, err
+		}
+		next, err := applySettings(&current, interval, paused, autoReview, autoTriage, now, delegate...)
+		if err != nil {
+			return Schedule{}, err
+		}
+		return next, s.db.PutSchedule(ctx, scheduleRecord(next))
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sc, ok := s.all[repo]
 	if !ok {
 		sc = &Schedule{Repo: repo}
-		s.all[repo] = sc
 	}
+	next, err := applySettings(sc, interval, paused, autoReview, autoTriage, now, delegate...)
+	if err != nil {
+		return Schedule{}, err
+	}
+	*sc = next
+	s.all[repo] = sc
+	return next, s.save()
+}
+
+// applySettings is sc with new settings (and delegated identity) applied.
+func applySettings(cur *Schedule, interval int, paused, autoReview, autoTriage bool, now time.Time, delegate ...Schedule) (Schedule, error) {
+	sc := *cur
 	if len(delegate) > 0 {
 		if sc.OrgID != "" && sc.OrgID != delegate[0].OrgID {
 			return Schedule{}, accounts.ErrForbidden
@@ -186,10 +291,15 @@ func (s *schedules) set(repo string, interval int, paused, autoReview, autoTriag
 	if sc.State() == "active" {
 		sc.NextRun = now.Add(time.Duration(interval) * time.Minute).UTC().Format(time.RFC3339)
 	}
-	return *sc, s.save()
+	return sc, nil
 }
 
-func (s *schedules) remove(repo string) error {
+func (s *schedules) remove(ctx context.Context, repo string) error {
+	if s.db != nil {
+		ctx, cancel := dbCtx(ctx)
+		defer cancel()
+		return s.db.DeleteSchedule(ctx, repo)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.all, repo)
@@ -197,7 +307,14 @@ func (s *schedules) remove(repo string) error {
 }
 
 // due returns active schedules whose next run has passed.
-func (s *schedules) due(now time.Time) []string {
+func (s *schedules) due(ctx context.Context, now time.Time) []string {
+	if s.db != nil {
+		ctx, cancel := dbCtx(ctx)
+		defer cancel()
+		repos, err := s.db.DueSchedules(ctx, now)
+		s.warn("listing due schedules", err)
+		return repos
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []string
@@ -216,7 +333,19 @@ func (s *schedules) due(now time.Time) []string {
 
 // started records a run (status: started, or unchanged when nothing was new)
 // and schedules the next one.
-func (s *schedules) started(repo string, now time.Time, status string, err error) {
+func (s *schedules) started(ctx context.Context, repo string, now time.Time, status string, err error) {
+	if s.db != nil {
+		ctx, cancel := dbCtx(ctx)
+		defer cancel()
+		run := accounts.ScheduleRun{LastRun: now.UTC().Truncate(time.Second), LastStatus: status, ResetMissing: err == nil}
+		if err != nil {
+			run.LastStatus, run.LastError = "failed", err.Error()
+		}
+		sc := s.get(ctx, repo)
+		run.NextRun = now.Add(time.Duration(sc.IntervalMinutes) * time.Minute).UTC().Truncate(time.Second)
+		s.warn("recording a scheduled run", s.db.RecordScheduleRun(ctx, repo, run))
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sc, ok := s.all[repo]
@@ -236,7 +365,19 @@ func (s *schedules) started(repo string, now time.Time, status string, err error
 
 // finished schedules the next run one interval after a scheduled sync ended,
 // so a long sync never eats into the gap and repositories drift apart.
-func (s *schedules) finished(repo string, now time.Time, err error) {
+func (s *schedules) finished(ctx context.Context, repo string, now time.Time, err error) {
+	if s.db != nil {
+		ctx, cancel := dbCtx(ctx)
+		defer cancel()
+		run := accounts.ScheduleRun{LastStatus: "succeeded"}
+		if err != nil {
+			run.LastStatus, run.LastError = "failed", err.Error()
+		}
+		sc := s.get(ctx, repo)
+		run.NextRun = now.Add(time.Duration(sc.IntervalMinutes) * time.Minute).UTC().Truncate(time.Second)
+		s.warn("recording a scheduled run", s.db.RecordScheduleRun(ctx, repo, run))
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sc, ok := s.all[repo]
@@ -255,7 +396,14 @@ func (s *schedules) finished(repo string, now time.Time, err error) {
 
 // setMissing bumps (gone) or clears the count of consecutive confirmed-missing
 // checks and returns the new count.
-func (s *schedules) setMissing(repo string, gone bool) int {
+func (s *schedules) setMissing(ctx context.Context, repo string, gone bool) int {
+	if s.db != nil {
+		ctx, cancel := dbCtx(ctx)
+		defer cancel()
+		n, err := s.db.AddScheduleMissing(ctx, repo, gone)
+		s.warn("counting a missing repository", err)
+		return n
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sc, ok := s.all[repo]
@@ -318,7 +466,7 @@ func (s *Server) reapIfGone(ctx context.Context, repo string, logger *slog.Logge
 	if err != nil {
 		return
 	}
-	count := s.sched.setMissing(repo, !exists)
+	count := s.sched.setMissing(ctx, repo, !exists)
 	if exists || count < goneStrikes {
 		if !exists {
 			logger.Warn("repository not found at its provider", "repo", repo, "checks", count, "of", goneStrikes)
@@ -345,31 +493,31 @@ func (s *Server) runScheduler(ctx context.Context, logger *slog.Logger) {
 				logger.Warn("listing repositories for auto-sync", "error", err)
 			} else {
 				for _, n := range repos {
-					s.sched.ensure(n.Name, now)
+					s.sched.ensure(ctx, n.Name, now)
 				}
 			}
 			if s.cfg.Accounts == nil {
 				s.scanDue(ctx, now, logger)
 			}
-			for _, repo := range s.sched.due(now) {
-				sc := s.sched.get(repo)
+			for _, repo := range s.sched.due(ctx, now) {
+				sc := s.sched.get(ctx, repo)
 				jobCtx, err := s.scheduleContext(ctx, sc)
 				if err != nil {
-					s.sched.started(repo, now, "failed", err)
+					s.sched.started(ctx, repo, now, "failed", err)
 					continue
 				}
-				_, err = s.startSync(jobCtx, repo, "", true, func(err error) { s.sched.finished(repo, time.Now(), err) })
+				_, err = s.startSync(jobCtx, repo, "", true, func(err error) { s.sched.finished(context.WithoutCancel(ctx), repo, time.Now(), err) })
 				switch {
 				case errors.Is(err, errConflict):
 					continue // a sync is already running; try again next interval
 				case errors.Is(err, errUnchanged):
-					s.sched.started(repo, now, "unchanged", nil)
+					s.sched.started(ctx, repo, now, "unchanged", nil)
 				case err != nil:
 					logger.Warn("scheduled sync not started", "repo", repo, "error", err)
-					s.sched.started(repo, now, "failed", err)
+					s.sched.started(ctx, repo, now, "failed", err)
 					s.reapIfGone(jobCtx, repo, logger)
 				default:
-					s.sched.started(repo, now, "started", nil)
+					s.sched.started(ctx, repo, now, "started", nil)
 				}
 			}
 		}
@@ -408,7 +556,7 @@ type scheduleRequest struct {
 }
 
 func (s *Server) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
-	sc := s.sched.get(r.PathValue("repo"))
+	sc := s.sched.get(r.Context(), r.PathValue("repo"))
 	if s.cfg.Accounts != nil {
 		org, err := s.repoOrg(r, sc.Repo)
 		if err != nil {
@@ -461,7 +609,7 @@ func (s *Server) handlePutSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 		delegate.OrgID, delegate.ActorID = org, p.User.ID
 	}
-	sc, err := s.sched.set(repo, req.IntervalMinutes, req.Paused, req.AutoReview, req.AutoTriage, time.Now(), delegate)
+	sc, err := s.sched.set(r.Context(), repo, req.IntervalMinutes, req.Paused, req.AutoReview, req.AutoTriage, time.Now(), delegate)
 	if err != nil {
 		s.accountError(w, err)
 		return

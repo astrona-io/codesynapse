@@ -219,10 +219,11 @@ func (s *Server) resumeJob(ctx context.Context, rec accounts.JobRecord) error {
 			return err
 		}
 		var done func(error)
-		// A worker leaves the schedule file to the API, which owns it.
-		if p.Scheduled && !s.cfg.Worker {
+		// Shared schedules (accounts) take a worker's report; a schedule
+		// file belongs to the API process alone.
+		if p.Scheduled && (s.sched.db != nil || !s.cfg.Worker) {
 			repo := rec.Repo
-			done = func(err error) { s.sched.finished(repo, time.Now(), err) }
+			done = func(err error) { s.sched.finished(context.WithoutCancel(ctx), repo, time.Now(), err) }
 		}
 		_, err = s.startSync(jobCtx, rec.Repo, p.Branch, false, done)
 	case "clone":

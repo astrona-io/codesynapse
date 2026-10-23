@@ -18,6 +18,8 @@ Four services plus their stores, all in `docker-compose.yml`:
 | `milvus` | image | internal only | Agent-memory vectors |
 | `postgres` | image | internal only | Accounts, organisations, audit log |
 
+With accounts, schedules and jobs live in PostgreSQL, and one API process at a time (the `api-loops` lease, `services/api/internal/api/singleton.go`) runs the scheduler and maintenance loops, so the API can run as several replicas.
+
 `cmd/codesynapse` is the CLI (ingest, audit, stats, review, mcp install) for CI and local use. It is not a service.
 
 ## Use the graph before reading files

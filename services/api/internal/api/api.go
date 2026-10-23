@@ -159,10 +159,7 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 			cfg.Accounts.Sink = s.logAudit
 		}
 		if !cfg.Worker {
-			go s.pruneAudit(ctx)
-			go s.projectAccess(ctx)
-			go s.pruneExecutionMemory(ctx)
-			go s.recoverIngestReports(ctx)
+			// exportIngestMetrics is fenced across replicas on its own.
 			go s.exportIngestMetrics(ctx)
 		}
 	}
@@ -179,6 +176,10 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 		sched, _ = loadSchedules("") //nolint:errcheck // in-memory fallback cannot fail
 	}
 	s.sched = sched
+	if cfg.Accounts != nil {
+		// Shared by every process (schedule.go); a file from before moves in once.
+		s.sched.useStore(ctx, cfg.Accounts.St, !cfg.Worker, logger)
+	}
 	s.orgs, err = loadOrgs(cfg.Workspace)
 	if err != nil {
 		logger.Error("watched organisations unreadable; starting with none", "error", err)
@@ -186,9 +187,13 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	}
 	s.loadRoutes()
 	if !cfg.Worker {
-		// One process owns these; workers only run jobs (docs/SAAS.md, 5e).
-		go s.recoverFixes(ctx)
-		go s.runScheduler(ctx, logger)
+		// One API process at a time runs these (singleton.go); workers only
+		// run jobs (docs/SAAS.md, 5e).
+		loops := []func(context.Context){s.recoverFixes, func(ctx context.Context) { s.runScheduler(ctx, logger) }}
+		if cfg.Accounts != nil {
+			loops = append(loops, s.pruneAudit, s.projectAccess, s.pruneExecutionMemory, s.recoverIngestReports)
+		}
+		s.singleton(ctx, loops...)
 	}
 	if s.jobs.store != nil && len(kinds) > 0 {
 		go s.runQueue(ctx)
@@ -518,7 +523,7 @@ func (s *Server) deleteRepo(ctx context.Context, repo string, files bool) (int, 
 	if err := s.st.DeleteAllCurated(ctx, repo); err != nil {
 		s.logger.Warn("removing proposals and links", "repo", repo, "error", err)
 	}
-	if err := s.sched.remove(repo); err != nil {
+	if err := s.sched.remove(ctx, repo); err != nil {
 		s.logger.Warn("removing schedule", "repo", repo, "error", err)
 	}
 	return http.StatusNoContent, nil
