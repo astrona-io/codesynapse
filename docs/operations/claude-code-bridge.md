@@ -29,7 +29,17 @@ Claude Code starts one bridge per chat and keeps it across `/compact` and `/clea
 
 ## Install the binary
 
-There are no prebuilt releases yet. The repository is private, so you need read access to `astrona-io/codesynapse` and Go 1.27 or later.
+With Homebrew, on macOS or Linux:
+
+```sh
+brew install astrona-io/tap/codesynapse
+```
+
+`brew upgrade codesynapse` updates it, and the bridge keeps working across upgrades. The tap gets a new formula with every `vX.Y.Z` release once the repository is public (see [Releasing](releasing.md)).
+
+Each release also has bare binaries for macOS and Linux (amd64 and arm64) with a `SHA256SUMS` file. Make the download executable and put it on your `PATH` as `codesynapse`.
+
+With Go 1.27 or later, from source. While the repository is private, this needs read access to `astrona-io/codesynapse`.
 
 From a checkout:
 
@@ -46,7 +56,9 @@ go install github.com/astrona-io/codesynapse/cmd/codesynapse@main
 
 Go fetches the module with your git credentials, so `git ls-remote https://github.com/astrona-io/codesynapse` has to work first. With SSH keys, add `git config --global url."git@github.com:".insteadOf "https://github.com/"`.
 
-Either way the binary lands in `$(go env GOPATH)/bin`, usually `~/go/bin`. Claude Code's config stores that absolute path, so it doesn't need to be on `PATH` for the bridge to start. You'll want it on `PATH` to run the commands below, though.
+Either way the binary lands in `$(go env GOPATH)/bin`, usually `~/go/bin`.
+
+Claude Code's config stores the binary's absolute path, so it doesn't need to be on `PATH` for the bridge to start. You'll want it on `PATH` to run the commands below, though. For a Homebrew install, `mcp install` stores the `opt` path (`/opt/homebrew/opt/codesynapse/bin/codesynapse`), which follows upgrades.
 
 ## Get a personal key
 
@@ -121,13 +133,13 @@ A JSON-RPC `result` with the server's instructions means the key and session reg
 
 ## Update and uninstall
 
-To update, reinstall the binary the same way. The config points at the same path, so new chats pick up the new build.
+To update, run `brew upgrade codesynapse`, or reinstall the binary the same way you installed it. The config points at the same path, so new chats pick up the new build.
 
 To remove it:
 
 ```sh
 claude mcp remove codesynapse -s user
-rm "$(go env GOPATH)/bin/codesynapse"
+brew uninstall codesynapse                # or: rm "$(go env GOPATH)/bin/codesynapse"
 rm ~/Library/Application\ Support/codesynapse/api-token   # macOS
 rm ~/.config/codesynapse/api-token                        # Linux
 ```
