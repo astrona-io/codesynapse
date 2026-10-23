@@ -127,6 +127,10 @@ type Server struct {
 func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *Server {
 	s := &Server{cfg: cfg, st: st, logger: logger, mux: http.NewServeMux()}
 	s.jobs = NewJobs(ctx, st, logger, cfg.CommitLimit, cfg.AllowNetwork, cfg.VulnScan)
+	if cfg.Accounts != nil {
+		// Jobs are rows before they run and survive restarts (jobs_durable.go).
+		s.jobs.UseStore(cfg.Accounts.St)
+	}
 	s.jobs.licenseLookup = cfg.LicenseLookup
 	s.jobs.dataflow = cfg.Dataflow
 	s.jobs.Policy = s.approveIngestPolicy
@@ -166,6 +170,9 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	}
 	s.loadRoutes()
 	go s.recoverFixes(ctx)
+	if s.jobs.store != nil {
+		go s.resumeJobs(ctx)
+	}
 	go s.runScheduler(ctx, logger)
 	s.routes()
 	return s
@@ -458,7 +465,7 @@ func (s *Server) unlinkRepo(r *http.Request, graph string) (int, error) {
 // deleteRepo removes a repository's graph and schedule and, when files is
 // set, its clone. On failure it returns the HTTP status to report.
 func (s *Server) deleteRepo(ctx context.Context, repo string, files bool) (int, error) {
-	for _, j := range s.jobs.List() {
+	for _, j := range s.jobs.List(ctx) {
 		if j.Repo == repo && j.State == JobRunning {
 			return http.StatusConflict, fmt.Errorf("%s is being indexed; try again when the job finishes", repo)
 		}
@@ -980,12 +987,12 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 	sc := scopeFrom(r.Context())
-	jobs := slices.DeleteFunc(s.jobs.List(), func(j Job) bool { return !seesReview(sc, j.Repo, j.OrgID) })
+	jobs := slices.DeleteFunc(s.jobs.List(r.Context()), func(j Job) bool { return !seesReview(sc, j.Repo, j.OrgID) })
 	writeJSON(w, 200, map[string]any{"jobs": jobs})
 }
 
 func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {
-	job, ok := s.jobs.Get(r.PathValue("id"))
+	job, ok := s.jobs.Get(r.Context(), r.PathValue("id"))
 	if !ok || !seesReview(scopeFrom(r.Context()), job.Repo, job.OrgID) {
 		s.problem(w, 404, store.ErrNotFound)
 		return

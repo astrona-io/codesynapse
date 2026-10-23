@@ -189,6 +189,7 @@ func (s *Store) snapshot() *Store {
 	tx.ingestMetrics = s.ingestMetrics
 	tx.setup = s.setup
 	tx.idps, tx.identities, tx.ssoStates, tx.managed = maps.Clone(s.idps), maps.Clone(s.identities), maps.Clone(s.ssoStates), maps.Clone(s.managed)
+	tx.jobs = s.jobTable() // shared, not transactional
 	for key, annotations := range tx.annotations {
 		tx.annotations[key] = maps.Clone(annotations)
 	}

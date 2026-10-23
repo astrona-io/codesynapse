@@ -185,21 +185,36 @@ func (s *Server) handleAITask(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 500, err)
 		return
 	}
-	_, authorize := s.jobAuthorization(r.Context(), repo, accounts.Member)
-	runner := aitasks.Runner{St: s.st, LLM: s.cfg.LLM, Authorize: authorize}
-	org, err := s.repoOrg(r, repo)
-	if err != nil {
+	if _, err := s.repoOrg(r, repo); err != nil {
 		s.accountError(w, err)
 		return
 	}
-	in := aitasks.Input{Repo: repo, OrgID: org, Provider: req.Provider, Diff: []byte(req.Diff)}
-	job, err := s.jobs.Start(repo, "", JobOptions{ //nolint:contextcheck // jobs outlive the request
-		Kind: "ai", Task: task, OrgID: org, Identity: identityOf(r.Context()), Authorize: authorize,
-		Run: func(ctx context.Context) (string, error) { return runner.Run(ctx, task, in) },
-	})
+	job, err := s.startAITask(r.Context(), repo, aiTaskParams{Task: task, Provider: req.Provider, Diff: []byte(req.Diff)}) //nolint:contextcheck // jobs outlive the request
 	if err != nil {
 		s.problem(w, http.StatusConflict, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, job)
+}
+
+// aiTaskParams rebuild an AI task after a restart (jobs_durable.go).
+type aiTaskParams struct {
+	Task     string `json:"task"`
+	Provider string `json:"provider,omitempty"`
+	Diff     []byte `json:"diff,omitempty"`
+}
+
+// startAITask queues task for repo as the requester in ctx.
+func (s *Server) startAITask(ctx context.Context, repo string, p aiTaskParams) (Job, error) {
+	org, authorize := s.jobAuthorization(ctx, repo, accounts.Member)
+	d, err := s.durableIf(ctx, "ai", accounts.Member, p)
+	if err != nil {
+		return Job{}, err
+	}
+	runner := aitasks.Runner{St: s.st, LLM: s.cfg.LLM, Authorize: authorize}
+	in := aitasks.Input{Repo: repo, OrgID: org, Provider: p.Provider, Diff: p.Diff}
+	return s.jobs.Start(repo, "", JobOptions{ //nolint:contextcheck // jobs outlive the request
+		Kind: "ai", Task: p.Task, OrgID: org, Identity: identityOf(ctx), Authorize: authorize, Durable: d,
+		Run: func(ctx context.Context) (string, error) { return runner.Run(ctx, p.Task, in) },
+	})
 }

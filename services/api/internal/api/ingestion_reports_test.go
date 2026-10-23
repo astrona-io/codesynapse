@@ -130,7 +130,7 @@ func TestJobsReportGraphAcknowledgement(t *testing.T) {
 			}})
 			require.NoError(t, err)
 			for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
-				current, _ := jobs.Get(job.ID)
+				current, _ := jobs.Get(t.Context(), job.ID)
 				if current.State != JobRunning {
 					break
 				}

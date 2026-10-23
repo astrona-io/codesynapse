@@ -325,7 +325,7 @@ func (s *Server) indexMissing(ctx context.Context, o *Org, now time.Time) {
 			indexed[n.Name] = n
 		}
 	}
-	latest := s.latestJobs()
+	latest := s.latestJobs(ctx)
 	started := 0
 	for i := range o.Repos {
 		r := &o.Repos[i]
@@ -385,9 +385,9 @@ func (s *Server) cloneOrgRepo(ctx context.Context, o Org, name string) (Job, err
 }
 
 // latestJobs maps repository to its most recent job.
-func (s *Server) latestJobs() map[string]Job {
+func (s *Server) latestJobs(ctx context.Context) map[string]Job {
 	out := map[string]Job{}
-	for _, j := range s.jobs.List() { // newest first
+	for _, j := range s.jobs.List(ctx) { // newest first
 		if _, ok := out[j.Repo]; !ok && (j.Kind == "clone" || j.Kind == "sync" || j.Kind == "ingest") {
 			out[j.Repo] = j
 		}
@@ -452,7 +452,7 @@ func (s *Server) orgView(ctx context.Context, o Org) OrgView {
 			indexed[n.Name] = n
 		}
 	}
-	latest := s.latestJobs()
+	latest := s.latestJobs(ctx)
 	v := OrgView{Org: o, Key: o.ident(), Repos: make([]OrgRepoView, 0, len(o.Repos)), Counts: map[string]int{}}
 	for _, r := range o.Repos {
 		rv := OrgRepoView{OrgRepo: r, Repo: o.fullName(r.Name)}

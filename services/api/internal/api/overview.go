@@ -225,7 +225,7 @@ func (s *Server) overviewOf(ctx context.Context, only string) (Overview, error) 
 	// Worst security posture first: that is what an operator acts on.
 	slices.SortFunc(ov.Repos, func(a, b RepoSummary) int { return cmp.Or(cmp.Compare(a.Score, b.Score), cmp.Compare(a.Name, b.Name)) })
 	sc := scopeFrom(ctx)
-	ov.Jobs = jobHealth(slices.DeleteFunc(s.jobs.List(), func(j Job) bool { return !seesReview(sc, j.Repo, j.OrgID) }))
+	ov.Jobs = jobHealth(slices.DeleteFunc(s.jobs.List(ctx), func(j Job) bool { return !seesReview(sc, j.Repo, j.OrgID) }))
 	return ov, nil
 }
 

@@ -27,7 +27,7 @@ func TestJobExecutionInheritanceAndMissingContext(t *testing.T) {
 	jobs := NewJobs(ctx, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)), 0, false, false)
 	_, err := jobs.Start("missing", "", JobOptions{})
 	require.Error(t, err)
-	assert.Len(t, jobs.List(), 0, "missing context is rejected before queue insertion")
+	assert.Len(t, jobs.List(t.Context()), 0, "missing context is rejected before queue insertion")
 	id := fixedExecution()
 	done := make(chan error, 1)
 	job, err := jobs.Start("repo", "", JobOptions{Identity: id, OrgID: id.TenantID,

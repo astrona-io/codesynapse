@@ -43,6 +43,8 @@ type Store struct {
 	identities     map[string]accounts.ExternalIdentity // by ID
 	ssoStates      map[string]accounts.SSOState         // by state hash
 	managed        map[string]bool                      // org|user
+	jobs           *jobTable
+	jobsOnce       sync.Once
 }
 
 type member struct {
