@@ -155,7 +155,7 @@ All paths below are under `/api/v1/repos/{repo}` and enforce the selected tenant
 
 Without explicit symbol IDs, manual annotation examines the first 500 eligible symbols by name and reports `limited` when that bound is reached. Use explicit IDs to select later symbols. Submission responses distinguish queued, deferred, skipped and retained work. Annotation reads default to 100 results, cap each page at 500 results or examined records, and use a ten-second deadline. The accounts read itself is bounded by the 5,000-record repository quota.
 
-The repository's **Indexing policy & annotations** page shows indexed configuration, coverage exclusions, approval state and current annotations. Administrators can preview YAML, approve selected requests with a reason/expiry, and revoke approval. Starting or cancelling jobs requires a runtime-aware API client: the dashboard does not create chat session identifiers. The page initially displays the first annotation page; the API exposes continuation cursors for larger result sets.
+The repository's **Indexing policy & annotations** page shows indexed configuration, coverage exclusions, approval state and current annotations. Administrators can preview YAML, approve selected requests with a reason/expiry, and revoke approval. Jobs are started and cancelled through the API or an agent; the page shows their results. The page initially displays the first annotation page; the API exposes continuation cursors for larger result sets.
 
 ## Upgrade and verification
 

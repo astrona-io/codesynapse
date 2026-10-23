@@ -54,11 +54,14 @@ func TestPlatformContentIsolation(t *testing.T) {
 	assert.Equal(t, keyClient.do("GET", reportPath, "", nil), 403, "the report requires an owner session")
 	assert.Equal(t, keyClient.do("POST", "/api/v1/repos", `{}`, nil), 403, "keys cannot create an initial administrator grant")
 	assert.Equal(t, keyClient.do("POST", "/api/v1/accounts/orgs/"+signed.Org.Slug+"/repos", `{"graph":"`+storetest.Repo+`"}`, nil), 403, "keys cannot attach a graph and grant access")
-	assert.Equal(t, owner.do("POST", "/api/v1/repos", `{}`, nil, OrgHeader, signed.Org.Slug), 403, "repository registration requires runtime metadata before side effects")
+	assert.Equal(t, owner.do("POST", "/api/v1/repos", `{}`, nil, OrgHeader, signed.Org.Slug, execution.SessionHeader, "unregistered", execution.ParentSessionHeader, "unregistered"), 403,
+		"repository registration requires a registered runtime session before side effects")
+	assert.Equal(t, owner.do("POST", "/api/v1/repos", `{}`, nil, OrgHeader, signed.Org.Slug), 501, "a signed-in browser uses its dashboard binding")
 	require.Equal(t, owner.do("POST", "/api/v1/execution/sessions", `{"session_id":"owner-registration"}`, nil, OrgHeader, signed.Org.Slug), 201)
 	headers := append([]string{OrgHeader, signed.Org.Slug}, runtimeHeaders("owner-registration")...)
 	assert.Equal(t, owner.do("POST", "/api/v1/repos", `{}`, nil, headers...), 501, "registered owner reaches the workspace configuration check")
-	assert.Equal(t, owner.do("POST", "/api/v1/accounts/orgs/"+signed.Org.Slug+"/repos", `{}`, nil), 403, "attachment also requires runtime metadata")
+	assert.Equal(t, owner.do("POST", "/api/v1/accounts/orgs/"+signed.Org.Slug+"/repos", `{}`, nil, execution.SessionHeader, "unregistered", execution.ParentSessionHeader, "unregistered"), 403,
+		"attachment also requires a registered runtime session")
 	foreign := model.NewGraph()
 	secretID := model.NodeID("private", model.KindFunction, "Secret")
 	foreign.AddNode(model.Node{ID: secretID, Repo: "private", Kind: model.KindFunction, Name: "Secret", Summary: "Hidden source summary"})

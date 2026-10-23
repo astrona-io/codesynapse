@@ -374,7 +374,7 @@ type attachRequest struct {
 
 // handleAttachRepo requires the organisation owner to prove remote access.
 //
-//nolint:contextcheck // bindExecutionRequest adds validated identity to the incoming request context
+//nolint:contextcheck // executionIn adds validated identity to the incoming request context
 func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request) {
 	p, o, ok := s.orgFor(w, r, accounts.Owner)
 	if !ok {
@@ -384,12 +384,7 @@ func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, accounts.ErrForbidden)
 		return
 	}
-	session, err := executionHeader(r)
-	if err != nil {
-		s.problem(w, http.StatusForbidden, err)
-		return
-	}
-	r, ok = s.bindExecutionRequest(w, r, p.User.ID, o.ID, session)
+	r, ok = s.executionIn(w, r, p, o.ID)
 	if !ok {
 		return
 	}
@@ -417,7 +412,8 @@ func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, err := s.cfg.Accounts.ResolveExecutionSession(r.Context(), p.User.ID, o.ID, session); err != nil {
+	bound, _ := execution.From(r.Context())
+	if _, err := s.cfg.Accounts.ResolveExecutionSession(r.Context(), p.User.ID, o.ID, bound.SessionID); err != nil {
 		s.accountError(w, err)
 		return
 	}

@@ -138,7 +138,8 @@ func TestAttachmentRequiresRuntimeBeforeGraphLookup(t *testing.T) {
 	f.client.auth = ""
 	require.Equal(t, f.client.do("POST", "/api/v1/auth/login", `{"email":"runtime@example.com","password":"`+pw+`"}`, nil), 200)
 	path := "/api/v1/accounts/orgs/" + f.org.Slug + "/repos"
-	assert.Equal(t, f.client.do("POST", path, `{"graph":"missing"}`, nil), 403)
+	assert.Equal(t, f.client.do("POST", path, `{"graph":"missing"}`, nil, runtimeHeaders("unregistered")...), 403)
+	assert.Equal(t, f.client.do("POST", path, `{"graph":"missing"}`, nil), 404, "a signed-in browser uses its dashboard binding")
 	assert.Equal(t, f.client.do("POST", path, `{"graph":"missing"}`, nil, runtimeHeaders("thread-a")...), 404)
 }
 
