@@ -309,7 +309,7 @@ lint-docker:
 
 # Lint shell scripts
 lint-shell:
-    uvx --quiet --from shellcheck-py==0.10.0.1 shellcheck $(git ls-files '*.sh')
+    uvx --quiet --from shellcheck-py==0.11.0.1 shellcheck $(git ls-files '*.sh')
 
 # Lint YAML (.yamllint.yml)
 lint-yaml:
