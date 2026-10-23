@@ -41,15 +41,30 @@ type Service struct {
 	policy     bool
 	policyOrgs map[string]bool
 	policyErr  error
-	byEmail    *limiter
-	byClient   *limiter
 }
+
+// Login limits, counted in the store so every API replica shares them.
+const (
+	loginsPerEmail  = 5
+	loginsPerClient = 20
+	loginWindow     = time.Minute
+)
 
 // NewService returns a service; logins are limited to 5 per minute per
 // email and 20 per minute per client address.
 func NewService(st Store, signupOpen bool) *Service {
-	return &Service{St: st, SignupOpen: signupOpen, Now: time.Now,
-		byEmail: newLimiter(5, time.Minute), byClient: newLimiter(20, time.Minute)}
+	return &Service{St: st, SignupOpen: signupOpen, Now: time.Now}
+}
+
+// allowLogin records a login attempt against both limits. Keys are hashes:
+// the table holds neither emails nor addresses.
+func (s *Service) allowLogin(ctx context.Context, email, client string, now time.Time) (bool, error) {
+	since := now.Add(-loginWindow)
+	ok, err := s.St.TakeAttempt(ctx, "email:"+HashToken(email), loginsPerEmail, since, now)
+	if err != nil || !ok {
+		return false, err
+	}
+	return s.St.TakeAttempt(ctx, "client:"+HashToken(client), loginsPerClient, since, now)
 }
 
 func (s *Service) now() time.Time { return s.Now().UTC().Truncate(time.Microsecond) }
@@ -132,7 +147,11 @@ func (s *Service) SignUp(ctx context.Context, email, name, password string) (Use
 func (s *Service) Login(ctx context.Context, email, password, client string) (string, User, error) {
 	email = NormalizeEmail(email)
 	now := s.now()
-	if !s.byEmail.allow(email, now) || !s.byClient.allow(client, now) {
+	allowed, err := s.allowLogin(ctx, email, client, now)
+	if err != nil {
+		return "", User{}, fmt.Errorf("checking login limits: %w", err)
+	}
+	if !allowed {
 		s.audit(ctx, Event{Via: "anonymous", Action: "user.login", Target: email, Outcome: Failure, Detail: "rate limited"})
 		return "", User{}, ErrRateLimited
 	}

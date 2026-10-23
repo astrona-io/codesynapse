@@ -8,11 +8,15 @@ image:
   pullPolicy: Never
 cookieSecure: false
 environment: kind
+# Two API and MCP replicas, so the shared limits, the loops lease and
+# stateless MCP run as they would in production.
 api:
+  replicas: 2
   resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 1Gi}}
 worker:
   resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 3Gi}}
 mcp:
+  replicas: 2
   resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 512Mi}}
 web:
   resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 512Mi}}

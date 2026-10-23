@@ -1,0 +1,46 @@
+# Disruption budgets for every component with more than one pod, and
+# optional CPU autoscaling for the stateless ones (docs/SAAS.md, 6c). The
+# worker scales by hand: a worker stopped by a scale-down leaves its job to
+# another one only after the job's lease ran out.
+{{- range $c := list "api" "worker" "mcp" "web" }}
+{{- $v := index $.Values $c }}
+{{- $auto := and $v.autoscaling $v.autoscaling.enabled }}
+{{- if or $auto (gt (int $v.replicas) 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "cs.name" (list $ $c) }}
+  labels:
+    {{- include "cs.labels" (list $ $c) | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  # A pod that never became ready may be evicted, so a broken rollout
+  # cannot block node drains.
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      {{- include "cs.selector" (list $ $c) | nindent 6 }}
+{{- end }}
+{{- if $auto }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "cs.name" (list $ $c) }}
+  labels:
+    {{- include "cs.labels" (list $ $c) | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "cs.name" (list $ $c) }}
+  minReplicas: {{ $v.autoscaling.minReplicas }}
+  maxReplicas: {{ $v.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: {{ $v.autoscaling.targetCPU }}}
+{{- end }}
+{{- end }}

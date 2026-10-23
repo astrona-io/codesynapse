@@ -235,7 +235,15 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
      - Chart and app versions follow the release tag.
      - Upgrade notes cover migrations, which run on start, and the single API replica that owns jobs and the scheduler.
      - The kind smoke test runs against the published artifacts before the release is marked latest.
-   - **6c, horizontal scaling:** MCP and web as stateless Deployments with several replicas; the API's job runner and scheduler behind a leader lease so more than one API replica can serve requests; HugeGraph and Milvus in their clustered modes (Milvus then needs object storage that is not MinIO: a cloud S3 bucket or an Apache-2.0 store).
+   - **6c, horizontal scaling of the services (done; see [Scaling out](../deploy/helm/codesynapse/README.md#scaling-out)):**
+     - **What's built:** login limits move from process memory to PostgreSQL (`login_attempts`, migration 0016, keys stored as SHA-256 hashes), so N API replicas still allow 5 attempts per email and 20 per client address a minute. A flood of distinct keys no longer resets them either. MCP gets `--stateless` (`CODESYNAPSE_MCP_STATELESS`, on in the chart and compose): no transport session between requests, so any replica answers any request, with the key and runtime session checked on each one. The chart adds optional CPU autoscaling for api, mcp and web, a disruption budget for any component with more than one pod, and preferred anti-affinity with zone spreading. The kind end-to-end run uses two API and two MCP replicas.
+     - **Already in place from 5e:** durable jobs, workers by role, schedules in PostgreSQL and the `api-loops` lease.
+     - **Limits:** annotation and memory extraction job status is per API replica (follow-up: a durable annotation queue); the shared workspace needs ReadWriteMany across nodes; MCP usage counters are read and rewritten in one Gremlin script, so two replicas flushing the same daily bucket at once may lose an increment (not yet measured).
+   - **6d, clustered stores (planned):**
+     - **PostgreSQL:** high availability through an operator or a managed service by URL (`postgresql.enabled: false`). CloudNativePG is Apache-2.0. The chart needs no change beyond documentation and a failover test.
+     - **HugeGraph:** the distributed mode (PD and HStore with Raft, Apache-2.0) in place of the standalone RocksDB server, as an optional sub-chart or by URL. Check that the store contract and the parity test pass against it.
+     - **Milvus:** distributed mode needs etcd, object storage and its write-ahead log. MinIO is AGPLv3, so object storage is a cloud S3 bucket or an Apache-2.0 S3-compatible store; verify each candidate's licence before choosing.
+     - **Done when:** each store survives the loss of one pod on a kind cluster with three nodes while an ingest and MCP calls run, with no lost writes.
 
 ## Standing architecture review
 

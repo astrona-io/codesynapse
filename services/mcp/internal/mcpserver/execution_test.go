@@ -43,19 +43,55 @@ func (r *runtimeTransport) metadata(primary, parent string) {
 
 func runtimeProbe(t *testing.T, acc *accounts.Service) (string, *atomic.Int64) {
 	t.Helper()
+	calls := &atomic.Int64{}
+	ts := httptest.NewServer(runtimeReplica(t, acc, calls, nil))
+	t.Cleanup(ts.Close)
+	return ts.URL, calls
+}
+
+// runtimeReplica is one MCP server process behind bearer authentication.
+func runtimeReplica(t *testing.T, acc *accounts.Service, calls *atomic.Int64, opts *mcp.StreamableHTTPOptions) http.Handler {
+	t.Helper()
 	access := AccountsAccess{Acc: acc}
 	runtime := NewRuntime(access, "", "", "")
 	s := New(memory.New(), "test", Options{Access: access, Runtime: runtime})
-	calls := &atomic.Int64{}
 	mcp.AddTool(s, &mcp.Tool{Name: "rule_guide"}, func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, execution.Identity, error) {
 		id, err := execution.Require(ctx)
 		calls.Add(1)
 		return nil, id, err
 	})
-	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s }, nil)
-	ts := httptest.NewServer(auth.RequireBearerToken(KeyVerifier(acc, ""), &auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(runtime.HTTP(handler)))
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s }, opts)
+	return auth.RequireBearerToken(KeyVerifier(acc, ""), &auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(runtime.HTTP(handler))
+}
+
+// Stateless replicas behind a round-robin balancer answer one client's
+// requests in turn, and every request still checks the runtime session.
+func TestRuntimeStatelessReplicas(t *testing.T) {
+	_, keys, acc, _, _ := keyServer(t)
+	calls := &atomic.Int64{}
+	stateless := &mcp.StreamableHTTPOptions{Stateless: true}
+	replicas := []http.Handler{runtimeReplica(t, acc, calls, stateless), runtimeReplica(t, acc, calls, stateless)}
+	var next atomic.Int64
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		replicas[next.Add(1)%2].ServeHTTP(w, r)
+	}))
 	t.Cleanup(ts.Close)
-	return ts.URL, calls
+	tr := &runtimeTransport{token: keys["a"], primary: "chat-a", parent: "chat-a"}
+	cs := runtimeConnect(t, ts.URL, tr)
+	for range 4 {
+		var id execution.Identity
+		require.False(t, call(t, cs, "rule_guide", map[string]any{}, &id).IsError)
+		assert.Equal(t, id.SessionID, "chat-a")
+	}
+	tr.mu.Lock()
+	assert.Equal(t, tr.protocol, "", "no transport session to pin a replica")
+	tr.mu.Unlock()
+	before := calls.Load()
+	tr.metadata("chat-b", "chat-b")
+	runtimeDenied(t, cs)
+	tr.metadata("guessed-chat", "guessed-chat")
+	runtimeDenied(t, cs)
+	assert.Equal(t, calls.Load(), before, "other tenants' and unregistered chats never reach a tool")
 }
 
 func runtimeConnect(t *testing.T, url string, tr *runtimeTransport) *mcp.ClientSession {

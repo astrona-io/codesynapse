@@ -154,3 +154,32 @@ volumeClaimTemplates:
         requests:
           storage: {{ $v.size }}
 {{- end -}}
+
+{{/* Replicas, unless an autoscaler owns them. Args: root, component. */}}
+{{- define "cs.replicas" -}}
+{{- $v := index (index . 0).Values (index . 1) -}}
+{{- if not (and $v.autoscaling $v.autoscaling.enabled) -}}
+replicas: {{ $v.replicas }}
+{{- end -}}
+{{- end -}}
+
+{{/* Prefer one pod per node, and spread over zones, when the cluster can. */}}
+{{- define "cs.spread" -}}
+{{- $root := index . 0 -}}
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              {{- include "cs.selector" (list $root (index . 1)) | nindent 14 }}
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        {{- include "cs.selector" (list $root (index . 1)) | nindent 8 }}
+{{- end -}}
