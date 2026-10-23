@@ -36,7 +36,7 @@ func main() {
 
 type serveOptions struct {
 	EC          *app.Env
-	neo4j       app.Neo4jFlags
+	graph       app.GraphFlags
 	addr        string
 	sources     string
 	commitLimit int
@@ -50,7 +50,7 @@ type serveOptions struct {
 
 func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f := o.EC.Command.Flags()
-	o.neo4j.AddFlags(f)
+	o.graph.AddFlags(f)
 	f.StringVar(&o.addr, "addr", app.Getenv("CODESYNAPSE_API_ADDR", "127.0.0.1:8080"), "Listen address")
 	f.StringVar(&o.sources, "sources-root", app.Getenv("CODESYNAPSE_SOURCES_ROOT", ""), "Directory whose subdirectories may be ingested")
 	f.IntVar(&o.commitLimit, "commits", 500, "Commits to index per ingest")
@@ -90,7 +90,7 @@ func (o *serveOptions) Validate(context.Context, *app.Env) error {
 
 func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
-	st, err := o.neo4j.OpenWithRetry(ctx, func(err error) { o.EC.Logger.Warn("waiting for neo4j", "error", err) })
+	st, err := o.graph.OpenWithRetry(ctx, func(err error) { o.EC.Logger.Warn("waiting for the graph database", "error", err) })
 	if err != nil {
 		return err
 	}

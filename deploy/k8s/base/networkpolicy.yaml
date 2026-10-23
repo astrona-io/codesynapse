@@ -1,21 +1,9 @@
 # Only the paths that are needed: web and mcp -> api (mcp hands turns to
-# memory extraction), api and mcp -> neo4j. The
-# browser-facing pods (web, mcp) accept traffic from anywhere in the cluster
-# or the ingress controller. Egress stays open: the API reaches git hosts,
-# api.github.com, osv.dev and api.deps.dev.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: neo4j-from-services
-spec:
-  podSelector: {matchLabels: {app.kubernetes.io/name: neo4j}}
-  policyTypes: [Ingress]
-  ingress:
-    - from:
-        - podSelector: {matchLabels: {app.kubernetes.io/name: api}}
-        - podSelector: {matchLabels: {app.kubernetes.io/name: mcp}}
-      ports: [{port: 7687}]
----
+# memory extraction). The graph and vector stores (HugeGraph, Milvus) are not
+# deployed yet (phase 6a, see README). The browser-facing pods (web, mcp)
+# accept traffic from anywhere in the cluster or the ingress controller.
+# Egress stays open: the API reaches git hosts, api.github.com, osv.dev and
+# api.deps.dev.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

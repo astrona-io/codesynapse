@@ -1,5 +1,5 @@
 // Package memory is an in-process store.Store. It serves tests, offline
-// review in CI, and the MCP server when no Neo4j instance is available.
+// review in CI, and the MCP server when no graph database is available.
 package memory
 
 import (
@@ -417,7 +417,7 @@ func (s *Store) List(_ context.Context, repo string, f store.Filter, m store.Met
 }
 
 // Matches reports whether n passes f. Exported for reuse by other stores'
-// tests; the Neo4j store expresses the same rules in Cypher.
+// tests; the HugeGraph store expresses the same rules in Gremlin.
 func Matches(n model.Node, f store.Filter) bool {
 	if len(f.Kinds) > 0 && !slices.Contains(f.Kinds, n.Kind) {
 		return false

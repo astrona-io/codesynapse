@@ -32,9 +32,6 @@ spec:
           ports:
             - {name: http, containerPort: 8090}
           env:
-            - {name: CODESYNAPSE_NEO4J_URI, valueFrom: {configMapKeyRef: {name: codesynapse-config, key: CODESYNAPSE_NEO4J_URI}}}
-            - name: CODESYNAPSE_NEO4J_PASSWORD
-              valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: NEO4J_PASSWORD}}
             - name: CODESYNAPSE_MCP_TOKEN
               valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: CODESYNAPSE_MCP_TOKEN}}
             # offload_turns: the API extracts memory triples with a local model.
@@ -45,7 +42,7 @@ spec:
           readinessProbe:
             httpGet: {path: /healthz, port: http}
             periodSeconds: 10
-          # The service waits for Neo4j before it listens; do not let liveness kill it meanwhile.
+          # The service waits for the graph database before it listens; do not let liveness kill it meanwhile.
           startupProbe:
             httpGet: {path: /healthz, port: http}
             periodSeconds: 5

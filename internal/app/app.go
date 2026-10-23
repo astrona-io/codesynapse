@@ -1,5 +1,5 @@
-// Package app holds wiring shared by the codesynapse binaries: Neo4j
-// connection flags, store construction and HTTP hardening helpers.
+// Package app holds wiring shared by the codesynapse binaries: graph store
+// flags (HugeGraph and Milvus), store construction and HTTP hardening helpers.
 package app
 
 import (
@@ -18,7 +18,6 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/store/hugegraphstore"
-	"github.com/astrona-io/codesynapse/internal/store/neo4jstore"
 	"github.com/astrona-io/codesynapse/internal/vector"
 	"github.com/astrona-io/codesynapse/internal/vector/milvus"
 )
@@ -26,12 +25,9 @@ import (
 // Environment variables. The password is only read from the environment so
 // it never appears in process listings or shell history.
 const (
-	EnvNeo4jURI      = "CODESYNAPSE_NEO4J_URI"
-	EnvNeo4jUser     = "CODESYNAPSE_NEO4J_USER"
-	EnvNeo4jPassword = "CODESYNAPSE_NEO4J_PASSWORD" //nolint:gosec // env var name, not a credential
-	EnvNeo4jDatabase = "CODESYNAPSE_NEO4J_DATABASE"
-
-	// EnvGraphBackend picks the graph database: neo4j (default) or hugegraph.
+	// EnvGraphBackend once chose between Neo4j and HugeGraph. HugeGraph is
+	// now the only graph database; any other value is refused so an
+	// upgraded installation does not silently start on an empty graph.
 	EnvGraphBackend      = "CODESYNAPSE_GRAPH_BACKEND"
 	EnvHugeGraphURL      = "CODESYNAPSE_HUGEGRAPH_URL"
 	EnvHugeGraphGraph    = "CODESYNAPSE_HUGEGRAPH_GRAPH"
@@ -41,18 +37,14 @@ const (
 	// bytes (default 60000, under HugeGraph's 65536).
 	EnvHugeGraphMaxRequest = "CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES"
 	EnvHugeGraphTxCapacity = "CODESYNAPSE_HUGEGRAPH_TX_CAPACITY"
-	// EnvMilvusURL turns on Milvus for agent-memory vectors with HugeGraph.
+	// EnvMilvusURL turns on Milvus for agent-memory vectors.
 	EnvMilvusURL   = "CODESYNAPSE_MILVUS_URL"
 	EnvMilvusToken = "CODESYNAPSE_MILVUS_TOKEN" //nolint:gosec // env var name, not a credential
 )
 
-// Neo4jFlags are the store settings shared by all binaries. Despite the
-// name they also select HugeGraph (with Milvus for vectors).
-type Neo4jFlags struct {
-	URI      string
-	User     string
-	Database string
-
+// GraphFlags are the graph store settings shared by all binaries: HugeGraph,
+// with Milvus for agent-memory vectors.
+type GraphFlags struct {
 	Backend        string
 	HugeGraphURL   string
 	HugeGraphGraph string
@@ -60,35 +52,29 @@ type Neo4jFlags struct {
 }
 
 // AddFlags registers the flags on fs with environment-derived defaults.
-func (f *Neo4jFlags) AddFlags(fs *pflag.FlagSet) {
-	fs.StringVar(&f.URI, "neo4j-uri", Getenv(EnvNeo4jURI, "neo4j://localhost:7687"), "Neo4j URI (env "+EnvNeo4jURI+")")
-	fs.StringVar(&f.User, "neo4j-user", Getenv(EnvNeo4jUser, "neo4j"), "Neo4j user (env "+EnvNeo4jUser+")")
-	fs.StringVar(&f.Database, "neo4j-database", Getenv(EnvNeo4jDatabase, "neo4j"), "Neo4j database (env "+EnvNeo4jDatabase+")")
-	fs.StringVar(&f.Backend, "graph-backend", Getenv(EnvGraphBackend, "neo4j"), "Graph database: neo4j or hugegraph (env "+EnvGraphBackend+")")
+func (f *GraphFlags) AddFlags(fs *pflag.FlagSet) {
+	fs.StringVar(&f.Backend, "graph-backend", Getenv(EnvGraphBackend, "hugegraph"), "Graph database; only hugegraph is supported (env "+EnvGraphBackend+")")
 	fs.StringVar(&f.HugeGraphURL, "hugegraph-url", Getenv(EnvHugeGraphURL, "http://localhost:8180"), "HugeGraph server URL (env "+EnvHugeGraphURL+"; user and password from "+EnvHugeGraphUser+"/"+EnvHugeGraphPassword+")")
 	fs.StringVar(&f.HugeGraphGraph, "hugegraph-graph", Getenv(EnvHugeGraphGraph, "hugegraph"), "HugeGraph graph name (env "+EnvHugeGraphGraph+")")
-	fs.StringVar(&f.MilvusURL, "milvus-url", Getenv(EnvMilvusURL, ""), "Milvus REST URL for agent-memory vectors with HugeGraph, e.g. http://milvus:19530 (env "+EnvMilvusURL+"; token from "+EnvMilvusToken+")")
+	fs.StringVar(&f.MilvusURL, "milvus-url", Getenv(EnvMilvusURL, ""), "Milvus REST URL for agent-memory vectors, e.g. http://milvus:19530 (env "+EnvMilvusURL+"; token from "+EnvMilvusToken+")")
 }
 
-// Open connects to the selected graph database.
-func (f *Neo4jFlags) Open(ctx context.Context) (store.Store, error) {
+// ErrNeo4jRemoved refuses a configuration that still asks for Neo4j.
+var ErrNeo4jRemoved = errors.New("the Neo4j graph backend was removed: run HugeGraph (README, \"Graph database\"), unset " + EnvGraphBackend + " and re-index")
+
+// Open connects to HugeGraph.
+func (f *GraphFlags) Open(ctx context.Context) (store.Store, error) {
 	switch f.Backend {
-	case "", "neo4j":
-	case "hugegraph":
+	case "", "hugegraph":
 		return f.openHugeGraph(ctx)
+	case "neo4j":
+		return nil, ErrNeo4jRemoved
 	default:
-		return nil, fmt.Errorf("unknown graph backend %q (%s is not set to neo4j or hugegraph)", f.Backend, EnvGraphBackend)
+		return nil, fmt.Errorf("unknown graph backend %q: only hugegraph is supported (%s)", f.Backend, EnvGraphBackend)
 	}
-	pw := os.Getenv(EnvNeo4jPassword)
-	if pw == "" {
-		return nil, fmt.Errorf("%s is not set", EnvNeo4jPassword)
-	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	return neo4jstore.New(ctx, neo4jstore.Config{URI: f.URI, User: f.User, Password: pw, Database: f.Database})
 }
 
-func (f *Neo4jFlags) openHugeGraph(ctx context.Context) (store.Store, error) {
+func (f *GraphFlags) openHugeGraph(ctx context.Context) (store.Store, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	maxRequest, err := strconv.Atoi(Getenv(EnvHugeGraphMaxRequest, "0"))
@@ -116,8 +102,11 @@ func (f *Neo4jFlags) openHugeGraph(ctx context.Context) (store.Store, error) {
 }
 
 // OpenWithRetry retries Open until it succeeds or ctx ends. Services use it
-// so they can start before Neo4j finishes booting under docker compose.
-func (f *Neo4jFlags) OpenWithRetry(ctx context.Context, onRetry func(error)) (store.Store, error) {
+// so they can start before HugeGraph finishes booting under docker compose.
+func (f *GraphFlags) OpenWithRetry(ctx context.Context, onRetry func(error)) (store.Store, error) {
+	if f.Backend != "" && f.Backend != "hugegraph" {
+		return f.Open(ctx) // a configuration error: retrying cannot help
+	}
 	delay := time.Second
 	for {
 		s, err := f.Open(ctx)

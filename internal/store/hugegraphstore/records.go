@@ -16,7 +16,7 @@ import (
 
 // Reviews and usage counters are their own vertex labels, so repository
 // replacement and deletion (label "node") never touch them. A review is one
-// JSON document, as in the Neo4j store.
+// JSON document.
 
 const (
 	saveReview = `graph.addVertex(T.label, 'review', T.id, v, 'rid', rid, 'repo', repo, 'created_at', created, 'updated_at', updated, 'doc', doc)

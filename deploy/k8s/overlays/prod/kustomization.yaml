@@ -29,8 +29,3 @@ secretGenerator:
 #       - op: add
 #         path: /spec/storageClassName
 #         value: fast-ssd
-#   - target: {kind: StatefulSet, name: neo4j}
-#     patch: |-
-#       - op: add
-#         path: /spec/volumeClaimTemplates/0/spec/storageClassName
-#         value: fast-ssd

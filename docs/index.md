@@ -28,7 +28,7 @@ flowchart LR
         P[Pipeline<br/>Go, lang, docs, config, git]
         V[Vuln and licence lookup]
     end
-    DB[(Graph store<br/>Neo4j or HugeGraph)]
+    DB[(Graph store<br/>HugeGraph + Milvus)]
     subgraph Readers
         MCP[MCP server<br/>:8090]
         API[JSON API<br/>:8080]

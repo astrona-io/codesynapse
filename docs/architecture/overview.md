@@ -9,7 +9,8 @@ Three services plus the graph database, all defined in `docker-compose.yml`.
 | `mcp` | `services/mcp` | 8090 | MCP server for AI agents (stdio or streamable HTTP) |
 | `api` | `services/api` | 8080 | JSON API for the dashboard; runs ingest, clone and sync jobs |
 | `web` | `services/web` (Nuxt 4) | 3000 | Dashboard; proxies to `api` server-side |
-| `neo4j` | image | 7474 / 7687 | Graph store (HugeGraph + Milvus is the alternative) |
+| `hugegraph` | image | internal only | Graph store (Gremlin; never published to the host) |
+| `milvus` | image | internal only | Agent-memory vectors |
 
 `cmd/codesynapse` is the CLI (`ingest`, `audit`, `stats`, `review`, `licenses`, `cleanup`, `mcp install`). It is not a service; it is for CI and local use.
 
@@ -36,7 +37,7 @@ flowchart TB
         store[internal/store]
     end
 
-    neo[(Neo4j / HugeGraph)]
+    neo[(HugeGraph)]
     pg[(PostgreSQL<br/>accounts)]
     vm[(VictoriaMetrics)]
     milvus[(Milvus<br/>vectors)]
@@ -74,7 +75,7 @@ sequenceDiagram
     participant Auth as policy + accounts
     participant Ctx as agentctx
     participant Store as store (scoped)
-    participant DB as Neo4j
+    participant DB as HugeGraph
 
     Agent->>MCP: tools/call get_symbol_context {name, repo}
     MCP->>Auth: authenticate key, check tool policy and repo access
@@ -82,7 +83,7 @@ sequenceDiagram
     MCP->>Ctx: SymbolContext(repo, name, verbosity)
     Ctx->>Store: ForRepository(repo) fence
     Ctx->>Store: resolve name / qualified_id
-    Store->>DB: parameterised Cypher
+    Store->>DB: constant Gremlin, values in bindings
     DB-->>Store: nodes and edges
     Store-->>Ctx: symbol, callers, callees, tests
     Ctx-->>MCP: compact JSON with file:line, risk score

@@ -116,7 +116,7 @@ func (s *Store) factsTouching(ctx context.Context, namespace string, ids, fids [
 }
 
 // toFact decodes an F map. Facts without confidence read as 1 and without
-// valid_from as valid from their creation, as in the Neo4j store.
+// valid_from as valid from their creation, as in the memory store.
 func toFact(raw json.RawMessage) (memory.Fact, error) {
 	var f memory.Fact
 	if err := json.Unmarshal(raw, &f); err != nil {

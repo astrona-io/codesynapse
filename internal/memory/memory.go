@@ -378,7 +378,7 @@ type Stats struct {
 	LastUpdated string         `json:"last_updated,omitempty"`
 }
 
-// MaxDimensions bounds embedding vectors (the Neo4j index takes this many).
+// MaxDimensions bounds embedding vectors stored for recall.
 const MaxDimensions = 8192
 
 // Scored is an entity with its similarity to a query, 0 to 1.
@@ -395,8 +395,8 @@ func EmbeddingText(e Entity) string {
 	return e.Name + " (" + e.Type + ")"
 }
 
-// Similarity is cosine similarity mapped to 0..1, as Neo4j's vector index
-// reports it: (1 + cos) / 2.
+// Similarity is cosine similarity mapped to 0..1, (1 + cos) / 2: the score
+// every store reports for vector matches.
 func Similarity(a, b []float32) float64 {
 	if len(a) != len(b) || len(a) == 0 {
 		return 0

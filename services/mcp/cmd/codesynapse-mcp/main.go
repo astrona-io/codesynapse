@@ -40,7 +40,7 @@ func main() {
 
 type serveOptions struct {
 	EC        *app.Env
-	neo4j     app.Neo4jFlags
+	graph     app.GraphFlags
 	transport string
 	addr      string
 	offline   string
@@ -53,10 +53,10 @@ type serveOptions struct {
 
 func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f := o.EC.Command.Flags()
-	o.neo4j.AddFlags(f)
+	o.graph.AddFlags(f)
 	f.StringVar(&o.transport, "transport", app.Getenv("CODESYNAPSE_MCP_TRANSPORT", "stdio"), "stdio or http")
 	f.StringVar(&o.addr, "addr", app.Getenv("CODESYNAPSE_MCP_ADDR", "127.0.0.1:8090"), "Listen address for the http transport")
-	f.StringVar(&o.offline, "offline", "", "Serve an in-memory graph of this directory instead of Neo4j")
+	f.StringVar(&o.offline, "offline", "", "Serve an in-memory graph of this directory instead of HugeGraph")
 	f.BoolVar(&o.catalog, "allow-catalog", app.Getenv("CODESYNAPSE_ALLOW_CATALOG", "true") == "true", "Enable architecture_propose and architecture_link (they write only proposals and links of the architecture catalog; proposals are never decisions)")
 	f.BoolVar(&o.memory, "allow-memory", app.Getenv("CODESYNAPSE_ALLOW_MEMORY", "true") == "true", "Enable the agent-memory tools upsert_graph_triples, search_graph_nodes and query_subgraph (writes only to the memory store)")
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", ""), "CodeSynapse API base URL; enables offload_turns (background triple extraction by the API's local model). Token from CODESYNAPSE_API_TOKEN")
@@ -107,8 +107,8 @@ func (o *serveOptions) open(ctx context.Context) (store.Reader, func(), error) {
 		}
 		return mem, func() {}, nil
 	}
-	st, err := o.neo4j.OpenWithRetry(ctx, func(err error) {
-		o.EC.Logger.Warn("waiting for neo4j", "error", err)
+	st, err := o.graph.OpenWithRetry(ctx, func(err error) {
+		o.EC.Logger.Warn("waiting for the graph database", "error", err)
 	})
 	if err != nil {
 		return nil, nil, err
@@ -222,7 +222,7 @@ func serveCmd(ec *app.Env) *cobra.Command {
 	o := &serveOptions{EC: ec}
 	return app.NewSubCommand("serve", o, ec).
 		WithShortDesc("Run the MCP server").
-		WithExample("  codesynapse-mcp serve                       # stdio, Neo4j\n  codesynapse-mcp serve --offline .           # stdio, no database\n  codesynapse-mcp serve --transport http --addr 0.0.0.0:8090").
+		WithExample("  codesynapse-mcp serve                       # stdio, HugeGraph\n  codesynapse-mcp serve --offline .           # stdio, no database\n  codesynapse-mcp serve --transport http --addr 0.0.0.0:8090").
 		WithGroupID(app.GroupBase).
 		WithNoArgs().
 		Build()

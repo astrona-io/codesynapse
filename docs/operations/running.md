@@ -16,7 +16,6 @@ open http://localhost:3000
 | http://localhost:3000 | Dashboard |
 | http://localhost:8080 | API (bearer `CODESYNAPSE_API_TOKEN`) |
 | http://localhost:8090/mcp | MCP over streamable HTTP (bearer `CODESYNAPSE_MCP_TOKEN`) |
-| http://localhost:7474 | Neo4j browser |
 
 All ports bind to 127.0.0.1.
 
@@ -28,7 +27,6 @@ flowchart TB
         web[web :3000]
         api[api :8080]
         mcp[mcp :8090]
-        neo[(neo4j :7687)]
         pg[(postgres)]
         vm[(victoriametrics)]
         hg[(hugegraph)]
@@ -37,12 +35,12 @@ flowchart TB
     user[Browser] --> web
     agent[Agent] --> mcp
     web --> api
-    api --> neo
-    mcp --> neo
+    api --> hg
+    mcp --> hg
+    api --> mv
+    mcp --> mv
     api --> pg
     mcp --> pg
-    api -.-> hg
-    api -.-> mv
     api --> vm
     mcp --> vm
     api -- host.docker.internal --> llm[Local model on host]
@@ -60,8 +58,9 @@ Dashed boxes are the optional HugeGraph/Milvus backend (`docker-compose.hugegrap
 | `just lint` | golangci-lint, must report 0 issues |
 | `just web-check` | Nuxt typecheck and build |
 | `just ci` | All of the above |
-| `just db` | Only Neo4j; then `just dev-api`, `just dev-mcp`, `just dev-web` |
-| `just test-integration` | Store contract against compose Neo4j |
+| `just dev-mcp` | MCP on stdio with an in-memory graph of the checkout (no database) |
+| `just dev-web` | Nuxt dev server against the API of `just up` |
+| `just test-integration` | `test-hugegraph` and `test-postgres` together |
 | `just test-postgres` | Accounts contract on a throwaway PostgreSQL |
 | `just test-hugegraph` | HugeGraph/Milvus contract and parity |
 | `just test-metrics` | Telemetry on a throwaway VictoriaMetrics |

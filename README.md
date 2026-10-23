@@ -1,6 +1,6 @@
 # CodeSynapse
 
-A code graph for security reviews, code quality and AI coding assistants, backed by Neo4j or Apache HugeGraph (with Milvus for vector search).
+A code graph for security reviews, code quality and AI coding assistants, backed by Apache HugeGraph (with Milvus for vector search).
 
 CodeSynapse indexes a repository into one graph: Go code (type-checked, so calls and interface dispatch are exact), Python, JavaScript, TypeScript and Vue, Markdown docs, YAML (Kubernetes, compose, CI, Helm values), Go templates and Helm charts, git history, and Go/npm/PyPI dependencies with their known CVEs. Agents query it over MCP and get answers like "here is `ReplaceRepo`: signature, location, 3 callers, 2 tests that reach it, the doc section that describes it" in a few hundred tokens, instead of opening five files. On this repository the context an agent needs per question is reduced by a median 92% (measured by `codesynapse stats`).
 
@@ -24,7 +24,6 @@ The dashboard supports sign-in, governance and repository browsing. Execution co
 | http://localhost:3000 | Dashboard |
 | http://localhost:8080 | API (bearer token: `CODESYNAPSE_API_TOKEN` in `.env`) |
 | http://localhost:8090/mcp | MCP over streamable HTTP (bearer token: `CODESYNAPSE_MCP_TOKEN`) |
-| http://localhost:7474 | Neo4j browser (user `neo4j`, password `NEO4J_PASSWORD`) |
 
 All ports bind to 127.0.0.1.
 
@@ -264,18 +263,21 @@ codesynapse stats .                      # metrics + token benchmark (offline gr
 codesynapse review . --base origin/main --offline   # review pack for the current branch
 git diff | codesynapse review --diff - --offline -o json
 
-export CODESYNAPSE_NEO4J_PASSWORD=...
-codesynapse ingest . --repo my-service --vulns      # index into Neo4j
+# index into a HugeGraph you can reach (the compose one is internal only)
+CODESYNAPSE_HUGEGRAPH_URL=https://graph.example CODESYNAPSE_HUGEGRAPH_USER=admin \
+CODESYNAPSE_HUGEGRAPH_PASSWORD=... codesynapse ingest . --repo my-service --vulns
 ```
 
 ## Local development
 
 ```sh
-just db        # Neo4j only
-just dev-api   # API on :8080 against ./sources
-just dev-web   # Nuxt dev server on :3000
+just up        # the stack, including HugeGraph and Milvus
+just dev-web   # Nuxt dev server on :3000 against the API of `just up`
+just dev-mcp   # MCP on stdio with an in-memory graph of the checkout
 just ci        # lint, race tests, web typecheck + build
 ```
+
+HugeGraph runs Gremlin scripts and is never published to the host, so the API and MCP services run in compose; `just dev-mcp` and the `--offline` CLI commands need no database at all.
 
 The code is split by service: `services/api`, `services/mcp` and `services/web`, with the shared core in `internal/` and the CLI in `cmd/codesynapse`.
 
@@ -289,7 +291,7 @@ just k8s-render prod        # review the manifests
 just k8s-apply prod
 ```
 
-`deploy/k8s` holds Kustomize manifests: a `base` (Neo4j StatefulSet, api, mcp, web, network policies) and `dev` and `prod` overlays. Test on a throwaway kind cluster first (`just image-load-kind`). See `deploy/k8s/README.md`.
+`deploy/k8s` holds Kustomize manifests: a `base` (api, mcp, web, network policies; outdated until HugeGraph and Milvus are added in phase 6a) and `dev` and `prod` overlays. Test on a throwaway kind cluster first (`just image-load-kind`). See `deploy/k8s/README.md`.
 
 See `AGENTS.md` for conventions and security rules and `docs/PLAN.md` for architecture and roadmap.
 
@@ -297,23 +299,15 @@ See `AGENTS.md` for conventions and security rules and `docs/PLAN.md` for archit
 
 Indexing untrusted code is the normal case, so: `go list` runs without cgo, toolchain downloads or network; git runs with hooks, fsmonitor and diff drivers disabled, and clones only over HTTPS to public hosts; no source bodies or YAML values are stored and summaries are redacted for secrets; services require bearer tokens off loopback; MCP tools cannot edit source code; their approved writes are confined to reviews, memory and catalog records. Details in `AGENTS.md`.
 
-## Graph backend: Neo4j or HugeGraph + Milvus
+## Graph database: HugeGraph + Milvus
 
-Neo4j is the default. To run on [Apache HugeGraph](https://hugegraph.apache.org/) with [Milvus](https://milvus.io/) for agent-memory vectors instead:
+The graph lives in [Apache HugeGraph](https://hugegraph.apache.org/), with [Milvus](https://milvus.io/) for agent-memory vectors. `just up` starts both; `just init` adds `HUGEGRAPH_PASSWORD` to `.env`.
 
-```sh
-just init                                # adds HUGEGRAPH_PASSWORD to .env
-# in .env: CODESYNAPSE_GRAPH_BACKEND=hugegraph and COMPOSE_PROFILES=hugegraph
-just up                                  # then re-index your repositories
-```
+**Upgrading from a Neo4j installation:** Neo4j support was removed. Graphs are not migrated: after `just up`, sync your repositories again to rebuild them in HugeGraph. The old data stays in the `neo4j-data` volume until you delete it (`docker volume rm codesynapse_neo4j-data`); `CODESYNAPSE_GRAPH_BACKEND`, `COMPOSE_PROFILES=hugegraph` and `NEO4J_*` lines in `.env` are no longer used. A CLI or service still configured with `CODESYNAPSE_GRAPH_BACKEND=neo4j` stops with an error that says so.
 
-`just` adds `docker-compose.hugegraph.yml` (start-up order for HugeGraph and Milvus) when `COMPOSE_PROFILES` contains `hugegraph`. Without `just`, pass `-f docker-compose.yml -f docker-compose.hugegraph.yml` yourself.
+Indexing replaces a repository's graph in one HugeGraph transaction, so its old and new edges must fit the server's `edge.tx_capacity` and `vertex.tx_capacity`. HugeGraph's default of 10,000 is too small for most repositories; the compose service sets 1,000,000, the most HugeGraph accepts. If you run your own HugeGraph, set both options on the server and `CODESYNAPSE_HUGEGRAPH_TX_CAPACITY` to the same value for `api` and `mcp`. A replacement that does not fit is refused before anything is written, and the error names the setting. At 1,000,000 that is roughly a repository of 500,000 edges; larger ones cannot be indexed yet.
 
-Neo4j still starts in this mode (the services depend on it) but holds nothing; removing it from the default stack comes once HugeGraph has run on real installs for a while.
-
-Indexing replaces a repository's graph in one HugeGraph transaction, so its old and new edges must fit the server's `edge.tx_capacity` and `vertex.tx_capacity`. HugeGraph's default of 10,000 is too small for most repositories; the compose service sets 1,000,000, the most HugeGraph accepts. If you run your own HugeGraph, set both options on the server and `CODESYNAPSE_HUGEGRAPH_TX_CAPACITY` to the same value for `api` and `mcp`. A replacement that does not fit is refused before anything is written, and the error names the setting. At 1,000,000 that is roughly a repository of 500,000 edges; larger ones need Neo4j for now.
-
-Both are Apache-2.0, scale out, and keep each organisation's memory and vectors apart in the data itself (tenant partitions in Milvus, `tenant_id` on every memory vertex). HugeGraph runs Groovy scripts, so it always has a password and is never published to the host. Graphs are not migrated between backends: switching means indexing again, which is the same `just up` plus a sync. `just test-hugegraph` runs the store contract and a parity check against the in-memory reference on throwaway containers.
+Both are Apache-2.0, scale out, and keep each organisation's memory and vectors apart in the data itself (tenant partitions in Milvus, `tenant_id` on every memory vertex). HugeGraph runs Groovy scripts, so it always has a password and is never published to the host. `just test-hugegraph` runs the store contract and a parity check against the in-memory reference on throwaway containers.
 
 ## Accounts, organisations and audit log
 
@@ -333,4 +327,4 @@ The compose stack runs PostgreSQL 18, which cannot open a data volume written by
 
 Copyright 2026 Astrona.io. Licensed under the [Apache License, Version 2.0](LICENSE); see [NOTICE](NOTICE) for attributions.
 
-All Go and production npm dependencies use permissive licences (Apache-2.0, MIT, BSD, ISC). Neo4j Community Edition, which the compose stack and Kubernetes manifests pull as a separate image, is licensed under GPL-3.0 and is not part of this distribution; Apache HugeGraph and Milvus, the alternative backend, are Apache-2.0. Both are spoken to over HTTP with the Go standard library, so neither adds Go dependencies.
+All Go and production npm dependencies use permissive licences (Apache-2.0, MIT, BSD, ISC). Apache HugeGraph and Milvus, which the compose stack pulls as separate images, are Apache-2.0. Both are spoken to over HTTP with the Go standard library, so neither adds Go dependencies.

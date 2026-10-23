@@ -2,7 +2,7 @@
 
 The schema lives in `internal/model/model.go`. Every code node has the label `Node` plus its kind, and the properties `id`, `repo`, `kind` and `name`. IDs are `repo|Kind|local`.
 
-`AllNodeKinds` and `AllEdgeKinds` are the allowlist for labels and relationship types in Cypher and Gremlin, because those cannot be passed as parameters.
+`AllNodeKinds` and `AllEdgeKinds` are the allowlist for labels and edge labels in Gremlin, because those cannot be passed as bindings.
 
 ## Entity relationships
 
@@ -101,5 +101,5 @@ Access vertices (`Organization`, `User`, `Team`, `AccessRepository`) are never a
 
 1. Add the kind to `internal/model/model.go` and to `AllNodeKinds` / `AllEdgeKinds`.
 2. New node fields need entries in `internal/store/nodeprops` (both directions; `TestPropsRoundTrip`) and a type in `hugegraphstore/schema.go` (`TestSchemaCoversNodeProps`).
-3. New `store.Reader` methods must exist in `memory`, `neo4jstore` and `hugegraphstore`, and be covered by `storetest.Run`.
+3. New `store.Reader` methods must exist in `memory` and `hugegraphstore`, and be covered by `storetest.Run`.
 4. Update `docs/PLAN.md` and `services/web/app/utils/types.ts` if the API shape changes.

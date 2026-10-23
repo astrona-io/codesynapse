@@ -1,6 +1,6 @@
-// Package store defines the persistence contract for code graphs. The Neo4j
-// implementation is the production backend; the in-memory implementation
-// backs tests and offline use. Both must pass storetest.Run.
+// Package store defines the persistence contract for code graphs. The
+// HugeGraph implementation is the production backend; the in-memory
+// implementation backs tests and offline use. Both must pass storetest.Run.
 package store
 
 import (
@@ -199,7 +199,7 @@ type MemoryFactCount struct {
 // never touch.
 //
 // Search and subgraph results are ordered deterministically so the memory and
-// Neo4j stores answer identically: entities by match score (query words found
+// HugeGraph stores answer identically: entities by match score (query words found
 // in the name, or equal to the type) then most recently updated then name;
 // facts by most recently updated then ID.
 type MemoryStore interface {
@@ -253,7 +253,7 @@ type UsageStore interface {
 	Usage(ctx context.Context, sinceDay string) ([]usage.Bucket, error)
 }
 
-// System names a store's database ("neo4j", "hugegraph", "memory") for
+// System names a store's database ("hugegraph", "memory") for
 // metrics; every Store implements it.
 func System(s any) string {
 	if n, ok := s.(interface{ System() string }); ok {
