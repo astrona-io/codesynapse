@@ -36,7 +36,7 @@ services:
   # Agent-memory vectors (standalone, embedded etcd, local storage).
   # Internal network only.
   milvus:
-    image: docker.io/milvusdb/milvus:v3.0.3
+    image: docker.io/milvusdb/milvus:v3.0.4
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_USE_EMBED: "true"
