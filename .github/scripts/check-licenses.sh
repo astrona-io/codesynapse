@@ -11,7 +11,7 @@ echo "Go dependencies of the codesynapse, codesynapse-api and codesynapse-mcp bi
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
 status=0
-go run github.com/google/go-licenses@v1.6.0 check \
+go run github.com/google/go-licenses@v2.0.1 check \
 	./cmd/codesynapse ./services/api/cmd/codesynapse-api ./services/mcp/cmd/codesynapse-mcp \
 	--allowed_licenses="$allowed" >"$log" 2>&1 || status=$?
 # Assembly files cannot be inspected; go-licenses warns about each one.
