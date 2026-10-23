@@ -18,6 +18,7 @@ if (route.path === '/settings') await navigateTo('/settings/profile', { replace:
           <NuxtLink to="/settings/teams">Teams</NuxtLink>
           <NuxtLink to="/settings/git-tokens">Git tokens</NuxtLink>
           <NuxtLink v-if="session.can('admin')" to="/settings/sso">Single sign-on</NuxtLink>
+          <NuxtLink v-if="session.can('admin')" to="/settings/audit">Audit log</NuxtLink>
         </template>
       </nav>
       <NuxtPage />

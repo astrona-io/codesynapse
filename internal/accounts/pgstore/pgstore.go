@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -635,7 +636,7 @@ func (s *Store) GraphRepositories(ctx context.Context, graph string) ([]accounts
 	return s.repos(ctx, "graph", graph)
 }
 
-const eventCols = "id, at, request_id, user_id, actor_email, via, key_id, org_id, ip, user_agent, action, target, outcome, status, detail, prev_hash, hash"
+const eventCols = "id, at, request_id, user_id, actor_email, via, key_id, org_id, ip, user_agent, action, target, outcome, status, detail, mcp, prev_hash, hash"
 
 // AddEvent implements accounts.Store: the chain tip is locked, the entry is
 // hashed onto it and inserted, and the tip moves, in one transaction.
@@ -646,11 +647,18 @@ func (s *Store) AddEvent(ctx context.Context, e accounts.Event) (accounts.Event,
 			return err
 		}
 		e = e.Prepare(prev)
+		var mcp []byte
+		if e.MCP != nil {
+			var err error
+			if mcp, err = json.Marshal(e.MCP); err != nil {
+				return err
+			}
+		}
 		if err := tx.QueryRow(ctx, `INSERT INTO events (at, request_id, user_id, actor_email, via, key_id, org_id, ip, user_agent,
-  action, target, outcome, status, detail, prev_hash, hash)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id`,
+  action, target, outcome, status, detail, mcp, prev_hash, hash)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
 			e.At, e.RequestID, e.UserID, e.ActorEmail, e.Via, e.KeyID, e.OrgID, e.IP, e.UserAgent,
-			e.Action, e.Target, e.Outcome, e.Status, e.Detail, e.PrevHash, e.Hash).Scan(&e.ID); err != nil {
+			e.Action, e.Target, e.Outcome, e.Status, e.Detail, mcp, e.PrevHash, e.Hash).Scan(&e.ID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, "UPDATE audit_head SET hash = $1 WHERE id = 1", e.Hash)
@@ -679,15 +687,21 @@ func (s *Store) ListEvents(ctx context.Context, f accounts.EventFilter) ([]accou
 	rows, err := s.db.Query(ctx, "SELECT "+eventCols+` FROM events
 WHERE ($1 = '' OR org_id = $1) AND ($2::timestamptz IS NULL OR at >= $2) AND ($3::timestamptz IS NULL OR at < $3) AND id > $4
   AND ($6 = '' OR starts_with(action, $6)) AND ($7 = '' OR actor_email = $7 OR user_id = $7) AND ($8 = '' OR outcome = $8)
-ORDER BY id `+order+" LIMIT $5", f.OrgID, since, until, f.AfterID, limit, f.Action, f.Actor, f.Outcome)
+  AND ($9 = '' OR mcp->>'session_id' = $9) AND ($10 = '' OR mcp->>'name' = $10) AND ($11 = '' OR mcp->>'repo' = $11)
+ORDER BY id `+order+" LIMIT $5", f.OrgID, since, until, f.AfterID, limit, f.Action, f.Actor, f.Outcome, f.Session, f.Tool, f.Repo)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (accounts.Event, error) {
 		var e accounts.Event
+		var mcp []byte
 		err := r.Scan(&e.ID, &e.At, &e.RequestID, &e.UserID, &e.ActorEmail, &e.Via, &e.KeyID, &e.OrgID, &e.IP, &e.UserAgent,
-			&e.Action, &e.Target, &e.Outcome, &e.Status, &e.Detail, &e.PrevHash, &e.Hash)
+			&e.Action, &e.Target, &e.Outcome, &e.Status, &e.Detail, &mcp, &e.PrevHash, &e.Hash)
 		e.At = e.At.UTC()
+		if err == nil && mcp != nil {
+			e.MCP = &accounts.MCPRequest{}
+			err = json.Unmarshal(mcp, e.MCP)
+		}
 		return e, err
 	})
 }

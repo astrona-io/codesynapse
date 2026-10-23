@@ -87,36 +87,37 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
 5. **Single sign-on**: OpenID Connect login and just-in-time accounts, built on the completed tenant and session rules.
    - **5a, API (implemented):** one provider per organisation with sealed client secret, PKCE/nonce/browser-bound state, SSRF-guarded discovery and exchange, guarded email linking, passwordless just-in-time accounts, group-mapped roles and teams on provider-managed memberships, last-owner and root protection, full audit. [Plan](SSO_PLAN.md).
    - **5b, dashboard (implemented):** single sign-on on the sign-in page (with `/login?sso=<org>` links), the `/sso/callback` page, Settings → Single sign-on for owners and admins, linked identities on the profile; the proxy forwards the `cs_sso` binder on SSO paths only.
-   - **5c, MCP request audit trail (planned):** today the MCP server audits only authentication failures, access denials and its few write tools. Ordinary tool calls appear only in anonymous daily usage counters. Every MCP request should be traceable afterwards to who made it, with which key, from which chat, and what it asked for.
-     - **What is recorded:** every request, whether accepted, refused or failed. That covers `initialize`, list calls, `prompts/get`, `tools/call`, resource reads, transport open, resume and close, and requests refused before a tool runs (bad key, root, missing or closed runtime session, policy denial, unknown tool).
+   - **5c, MCP request audit trail (implemented):** every MCP request is traceable afterwards to who made it, with which key, from which chat and what it asked for.
+     - **What is recorded:** every request except `ping` and notifications, whether accepted, refused (authorization), failed or answered with a tool error. Requests refused earlier, for a bad key, root or a missing runtime session, keep their existing `mcp.authentication_failed`, `root.denied` and `mcp.access_denied` entries.
      - **Fields per event:**
+       - action `mcp.<method>` (`mcp.tools.call`, `mcp.prompts.get`, `mcp.initialize`, …);
        - time and request ID;
-       - user ID and email;
-       - organisation;
-       - how they authenticated: the API key's ID, name and display prefix, never the key or its hash;
-       - runtime session ID (primary and parent) and the MCP transport session ID;
-       - client name and version from `initialize`, cleaned and capped, plus the bridge's version when one is used;
+       - user ID and email, organisation, and the API key's ID (never the key or its hash);
+       - runtime (chat) session and MCP transport session;
+       - client name and version (from `initialize` or the sessionless `_meta`);
        - client address (trusted proxies only) and user agent;
-       - JSON-RPC method, tool or prompt name and repository;
-       - outcome, status and error class;
+       - tool or prompt name and repository;
+       - outcome, status (200, 400 for tool errors and refusals, 500 for errors) and the redacted first line of the error;
        - duration and response size.
      - **Arguments:**
-       - Identifying fields are stored as values after `redact.Free` and length caps: repository, symbol or `qualified_id`, file paths, depth, limit, verbosity, memory scope.
-       - Free text (queries, task descriptions) is stored redacted and capped.
-       - Diffs, code, offloaded turns and other bulk inputs are never stored. They get a size and a SHA-256 digest of the canonical arguments, so a payload found later can be matched to its request.
-       - Results are never stored, only their size.
+       - Values pass `redact.Free` (secrets, card, national ID and phone numbers) and are capped at 400 characters and 32 keys.
+       - `diff`, `patch`, `code`, `content`, `body`, `text`, `turns`, `messages`, `triples` and `comments`, and any value longer than the cap, keep only `sha256:<hex> (<n> bytes)`.
+       - A digest of the canonical arguments links a payload found later to its request.
+       - Results are never stored.
      - **Storage:**
-       - The same append-only, hash-chained `events` log, with new columns for runtime session, transport session, client, method, tool, repository, duration, size, argument digest and redacted arguments.
-       - Appends are batched so busy agents do not serialise on the chain lock.
-       - It fails closed like the rest of the audit log: if the event cannot be written, the tool does not run.
-       - Same retention (`CODESYNAPSE_AUDIT_RETENTION_DAYS`), export and SIEM `audit` log line.
-     - **Who sees it:** platform admins see everything. Organisation owners and admins see their organisation's MCP events in the audit view, filterable by user, key, runtime session, tool and repository.
+       - The same hash-chained `events` table, with a `mcp jsonb` column (migration 0012). MCP details join the hash only when present, so earlier entries verify unchanged.
+       - Entries are written synchronously after the request. If the entry cannot be written, the result is withheld; tools that change something still audit before the change.
+       - Batching appends is a follow-up if measurements show lock contention.
+     - **Who sees it:**
+       - **Platform admins:** Administration → Audit log.
+       - **Organisation owners and admins:** the new Settings → Audit log tab.
+       - **Filters:** what (including "Agent (MCP) requests"), who, outcome, chat session, tool, repository and period; clicking a session, tool or repository narrows to it.
+       - **Exports:** CSV (with `mcp_*` columns) and JSON Lines.
+     - **Client address:** `RequestInfoHTTP` sets it, with the request ID, from the connection and trusted proxies (`app.ClientAddr`, now shared with the API); copies a client sends are overwritten. Compose trusts no proxy for MCP unless `CODESYNAPSE_MCP_TRUSTED_PROXIES` is set.
      - **Tests:**
-       - every tool in the fixed policy table produces an event, including refusals;
-       - keys, key hashes and secrets in arguments never appear;
-       - bulk inputs leave only a digest;
-       - the chain still verifies under concurrent calls.
-     - **Open decision:** how much free text to keep. Queries help tracing but can carry personal data or pasted code; the default above keeps them redacted and capped.
+       - the store contract (round trip, caps, filters, chain verification on memstore and PostgreSQL);
+       - `TestEveryMCPRequestIsAudited`: caller, key, session, client and address; redaction; bulk inputs digested; the key never logged; refusals recorded; filters; the chain intact; the result withheld while the audit store is down;
+       - `TestAuditTrail`: API filters and the CSV export.
    - **5d, CI/CD baseline (in progress):** before 5d, the only workflows built the Homebrew formula and released the CLI on a tag.
      - **Done, pull request and merge checks:** `.github/workflows/ci.yml` runs `just ci`. The integration contracts run when stores or accounts change, and nightly. Accepted findings live in the tools' ignore files, with reasons. Actions are pinned by SHA, and Renovate updates the digests and the tools' versions.
      - **Done, images:** `.github/workflows/images.yml` builds and scans api, mcp and web on every relevant pull request, with read-only permissions. Merges to `main` build and scan only. Only a release publishes: a `vX.Y.Z` or `vX.Y.Z-rcN` tag on a commit on `main` (the workflow refuses any other tag). It publishes amd64 and arm64 images to ghcr.io with SBOM and provenance, signed with cosign (keyless). Release candidates are tagged `:X.Y.Z-rcN` only; final releases are tagged `:X.Y.Z`, `:X.Y` and `:latest`. Go and the web app are cross-built on the runner. The web runtime image drops npm, which was the source of its fixable vulnerabilities.
