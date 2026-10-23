@@ -1,0 +1,169 @@
+name: Release
+
+# A vX.Y.Z tag builds the codesynapse CLI for macOS and Linux, publishes a
+# GitHub release and updates the Homebrew tap (brew install
+# astrona-io/tap/codesynapse). A tag with a "-" (v0.4.0-rc1) is a
+# pre-release: it gets a GitHub release but no formula.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    # Signed build provenance: proves each binary was built by this workflow
+    # from this repo (`gh attestation verify`).
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      matrix:
+        goos: [linux, darwin]
+        goarch: [amd64, arm64]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+          # Passed through env, never interpolated into the script: a tag
+          # name is attacker-influenced text as far as the shell is concerned.
+          VERSION: ${{ github.ref_name }}
+        run: |
+          go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
+            -o "codesynapse-$GOOS-$GOARCH" ./cmd/codesynapse
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: codesynapse-${{ matrix.goos }}-${{ matrix.goarch }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: codesynapse-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: codesynapse-${{ matrix.goos }}-${{ matrix.goarch }}
+
+  create-release:
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir dist
+          find artifacts -type f -exec cp {} dist/ \;
+          # For checking a download by hand: sha256sum -c SHA256SUMS
+          (cd dist && sha256sum codesynapse-* > SHA256SUMS)
+          ls -l dist/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          tag_name: ${{ github.ref_name }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+
+  # Needs secret HOMEBREW_TAP_TOKEN: a fine-grained PAT with Contents
+  # read/write on astrona-io/homebrew-tap only. Skipped for pre-release tags
+  # (the script only accepts vX.Y.Z) and while this repository is private,
+  # since Homebrew can't download private release assets.
+  update-homebrew-tap:
+    name: Update Homebrew tap
+    needs: create-release
+    if: ${{ !contains(github.ref_name, '-') && !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Generate formula
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir dist
+          find artifacts -type f -exec cp {} dist/ \;
+          (cd dist && sha256sum codesynapse-* > SHA256SUMS)
+          .github/scripts/homebrew-formula.sh "$TAG" dist/SHA256SUMS > codesynapse.rb
+          cat codesynapse.rb
+
+      - name: Checkout tap
+        uses: actions/checkout@v7
+        with:
+          repository: astrona-io/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Push formula
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p homebrew-tap/Formula
+          cp codesynapse.rb homebrew-tap/Formula/codesynapse.rb
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/codesynapse.rb
+          if git diff --cached --quiet; then
+            echo "Formula already up to date for $TAG"
+            exit 0
+          fi
+          git commit -m "codesynapse ${TAG#v}"
+          git push
+
+  # Installs the release from the tap the way a user would, once the
+  # formula is pushed, and checks it's the version just tagged.
+  verify-homebrew-install:
+    name: Verify Homebrew install (${{ matrix.os }})
+    needs: update-homebrew-tap
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Preinstalled on GitHub's macOS and Ubuntu runners; on Ubuntu it just
+      # isn't on PATH.
+      - name: Put Homebrew on PATH
+        run: |
+          if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+            echo /home/linuxbrew/.linuxbrew/bin >> "$GITHUB_PATH"
+            echo /home/linuxbrew/.linuxbrew/sbin >> "$GITHUB_PATH"
+          fi
+
+      - name: brew install astrona-io/tap/codesynapse
+        env:
+          TAG: ${{ github.ref_name }}
+          HOMEBREW_NO_ANALYTICS: '1'
+          HOMEBREW_NO_ENV_HINTS: '1'
+        run: |
+          brew install astrona-io/tap/codesynapse
+          brew test codesynapse
+          codesynapse --version | grep -q "$TAG"

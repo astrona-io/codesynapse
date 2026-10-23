@@ -156,7 +156,7 @@ MCP tool execution requires PostgreSQL accounts, a personal organisation API key
 
 **Claude Code:** sign in to the dashboard, create a key under Settings → API keys, then run `CODESYNAPSE_MCP_TOKEN=<key> just mcp`. This installs the `codesynapse` binary (`go install`) and registers it as a stdio server that Claude Code starts once per chat (`codesynapse mcp bridge`). Claude Code gives that process the chat's ID; the bridge registers it and forwards every MCP request to `http://localhost:8090/mcp` with the key and both session headers. The key is stored in your user config folder (0600), not in Claude Code's settings. Claude Code keeps the process, and so the ID, across `/compact` and `/clear`; start a new chat for a new session.
 
-Each machine needs the `codesynapse` binary locally. Installing it without a checkout, remote servers, verification and troubleshooting: [Claude Code bridge](docs/operations/claude-code-bridge.md).
+Each machine needs the `codesynapse` binary locally (`brew install astrona-io/tap/codesynapse`, once releases are public). Installing it without a checkout, remote servers, verification and troubleshooting: [Claude Code bridge](docs/operations/claude-code-bridge.md).
 
 Other clients: `just mcp` installs connection settings for them too, but supplies no chat identity and registers no session. Before the first tool call, a runtime-aware launcher or client integration must:
 
