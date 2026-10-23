@@ -2,7 +2,10 @@ package accounts
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/execution"
@@ -156,4 +159,24 @@ func (s *Service) RevokeExecutionSession(ctx context.Context, userID, orgID, ses
 		return struct{}{}, err
 	})
 	return err
+}
+
+// DashboardExecutionSession is the runtime binding of one signed-in browser in
+// one organisation. The dashboard has no chat thread to name, so the ID comes
+// from the login session's hash, the organisation and a window as long as
+// ExecutionSessionTTL: only that browser session reaches it, a new sign-in
+// gets a new one, and the binding a window opens is still active when the
+// next window starts, so there is no gap. API keys and the service token never
+// get one; their runtimes register their own IDs.
+func (s *Service) DashboardExecutionSession(ctx context.Context, p Principal, orgID string) (execution.Identity, error) {
+	if p.Via != "session" || p.SessionHash == "" {
+		return execution.Identity{}, ErrForbidden
+	}
+	window := s.now().Unix() / int64(ExecutionSessionTTL/time.Second)
+	sum := sha256.Sum256([]byte("dashboard|" + p.SessionHash + "|" + orgID + "|" + strconv.FormatInt(window, 10)))
+	id := "web:" + hex.EncodeToString(sum[:20])
+	if got, err := s.ResolveExecutionSession(ctx, p.User.ID, orgID, id); err == nil {
+		return got, nil
+	}
+	return s.RegisterExecutionSession(ctx, p.User.ID, orgID, id)
 }

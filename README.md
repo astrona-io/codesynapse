@@ -17,7 +17,7 @@ just mcp                      # install client config; runtime session setup is 
 open http://localhost:3000
 ```
 
-The dashboard supports sign-in, governance and repository browsing. Execution controls such as cloning, sync and model tasks now require a registered runtime session. The web proxy does not yet carry that trusted binding, so these controls are unavailable through the dashboard. Use the authenticated API with runtime metadata; offline CLI ingest remains available.
+The dashboard supports sign-in, governance, repository browsing and execution controls such as cloning, sync and model tasks. A signed-in browser gets its own runtime session binding for those (see [session context](docs/SESSION_CONTEXT_PLAN.md#runtime-integration)); agents and API clients register theirs.
 
 | URL | What |
 |---|---|

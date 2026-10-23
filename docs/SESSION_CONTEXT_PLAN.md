@@ -43,7 +43,14 @@ API middleware authenticates the caller, resolves the binding and injects the im
 
 Stdio requires a personal API key plus `CODESYNAPSE_SESSION_ID` and `CODESYNAPSE_PARENT_SESSION_ID` at startup. Use one process per chat thread. The launcher supplies the runtime values; hooks cannot change the environment of an already-running process. URL-based MCP configuration alone does not establish thread identity. Unsupported clients fail closed until their launcher can register and forward trusted runtime metadata.
 
-Authentication, health, governance and ordinary dashboard reads do not require a chat session. Ingest, repository attachment, sync, AI tasks, fix jobs, memory mutations and tool execution do. Legacy accountless service tokens cannot authorize these operations. The current web proxy drops runtime headers, so dashboard execution controls remain unavailable pending a trusted browser/runtime binding integration; registering an ID alone does not enable those controls.
+Authentication, health, governance and ordinary dashboard reads do not require a chat session. Ingest, repository attachment, sync, AI tasks, fix jobs, memory mutations and tool execution do. Legacy accountless service tokens cannot authorize these operations. The web proxy forwards no runtime headers. Instead, a request authenticated by a browser session cookie that sends neither header is bound to that browser's dashboard session (`accounts.DashboardExecutionSession`). Its ID is `web:` plus a hash of the login session's token hash, the selected organisation and the current seven-day window, so:
+
+- only the signed-in browser reaches it, and a new sign-in starts a new one;
+- it is registered, audited, limited and tombstoned like any runtime session, and resolving it rechecks membership and suspension;
+- the binding a window opens lives seven days, so it is still active when the next window starts; a long sign-in moves to a new ID at the window boundary (the dashboard has no chat thread to keep);
+- signing out makes it unreachable; it then expires and its session memory is pruned.
+
+API keys and the service token never get this binding, and a request that names a session must name a registered one: the dashboard binding is not a fallback for it.
 
 ## Propagation and jobs
 

@@ -86,7 +86,7 @@ async function revoke() {
     </section>
     <section class="panel stack">
       <div class="row"><h2>Current annotations</h2><button class="btn--ghost" @click="refreshAnnotations()">Refresh</button></div>
-      <p class="muted">Approved jobs run after ingestion using a local model. Starting or cancelling jobs requires a runtime-aware API client; this dashboard does not supply chat session identity.</p>
+      <p class="muted">Approved jobs run after ingestion using a local model. Start or cancel them through the API or an agent.</p>
       <p v-if="annotations?.notice" class="small muted">{{ annotations.notice }}</p>
       <p v-if="!annotations?.annotations.length" class="muted">No annotations match the current ingest revision.</p>
       <article v-for="item in annotations?.annotations" :key="item.symbol_id" class="stack">

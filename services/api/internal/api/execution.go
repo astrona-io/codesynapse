@@ -71,14 +71,17 @@ func (s *Server) handleRevokeExecution(w http.ResponseWriter, r *http.Request) {
 
 // Runtime headers select a registered binding, never an arbitrary memory scope.
 func (s *Server) executionRequest(w http.ResponseWriter, r *http.Request, required bool) (*http.Request, bool) {
-	primary, parent := r.Header.Values(execution.SessionHeader), r.Header.Values(execution.ParentSessionHeader)
-	if len(primary) == 0 && len(parent) == 0 && !required {
-		return r, true
-	}
-	session, err := executionHeader(r)
-	if err != nil {
-		s.problem(w, http.StatusForbidden, err)
-		return r, false
+	if !namesSession(r) {
+		if !required {
+			return r, true
+		}
+		// Only a signed-in browser may omit the headers; everyone else is
+		// refused before anything else is checked.
+		if p, ok := principal(r.Context()); !ok || p.Via != "session" {
+			_, err := executionHeader(r)
+			s.problem(w, http.StatusForbidden, err)
+			return r, false
+		}
 	}
 	p, ok := s.caller(w, r)
 	if !ok {
@@ -89,7 +92,36 @@ func (s *Server) executionRequest(w http.ResponseWriter, r *http.Request, requir
 		s.problem(w, http.StatusForbidden, errors.New("execution requires one authenticated organisation"))
 		return r, false
 	}
-	return s.bindExecutionRequest(w, r, p.User.ID, m.Org.ID, session)
+	return s.executionIn(w, r, p, m.Org.ID)
+}
+
+// executionIn binds the request to the runtime session it names in orgID or,
+// for a signed-in browser that names none, to the browser's dashboard binding
+// (accounts.DashboardExecutionSession).
+func (s *Server) executionIn(w http.ResponseWriter, r *http.Request, p accounts.Principal, orgID string) (*http.Request, bool) {
+	if !namesSession(r) && p.Via == "session" {
+		id, err := s.cfg.Accounts.DashboardExecutionSession(r.Context(), p, orgID)
+		if err != nil {
+			s.problem(w, http.StatusForbidden, errors.New("this browser session cannot start work; sign in again"))
+			return r, false
+		}
+		ctx, err := execution.With(r.Context(), id)
+		if err != nil {
+			s.problem(w, http.StatusForbidden, err)
+			return r, false
+		}
+		return r.WithContext(ctx), true
+	}
+	session, err := executionHeader(r)
+	if err != nil {
+		s.problem(w, http.StatusForbidden, err)
+		return r, false
+	}
+	return s.bindExecutionRequest(w, r, p.User.ID, orgID, session)
+}
+
+func namesSession(r *http.Request) bool {
+	return len(r.Header.Values(execution.SessionHeader)) != 0 || len(r.Header.Values(execution.ParentSessionHeader)) != 0
 }
 
 func executionHeader(r *http.Request) (string, error) {
