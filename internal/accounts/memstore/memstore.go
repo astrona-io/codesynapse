@@ -45,6 +45,8 @@ type Store struct {
 	managed        map[string]bool                      // org|user
 	jobs           *jobTable
 	jobsOnce       sync.Once
+	sched          *scheduleTable
+	schedOnce      sync.Once
 }
 
 type member struct {

@@ -152,7 +152,7 @@ func (s *Server) overviewOf(ctx context.Context, only string) (Overview, error) 
 			Grade: sec.Grade, Score: sec.Score, Findings: sec.FindingCounts, Vulns: sec.VulnCounts,
 			AvgComplexity: math.Round(st.AvgComplexity*10) / 10,
 			Formats:       st.Formats, K8sResources: st.K8sResources, HelmCharts: st.HelmCharts,
-			Schedule: s.sched.get(name),
+			Schedule: s.sched.get(ctx, name),
 		}
 		for k, c := range st.Nodes {
 			rs.Nodes += c

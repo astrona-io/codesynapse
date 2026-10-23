@@ -219,9 +219,9 @@ func TestScheduleRecordsUnchangedChecks(t *testing.T) {
 	s, err := loadSchedules("")
 	require.NoError(t, err)
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	s.ensure("a", now)
-	s.started("a", now.Add(5*time.Minute), "unchanged", nil)
-	sc := s.get("a")
+	s.ensure(t.Context(), "a", now)
+	s.started(t.Context(), "a", now.Add(5*time.Minute), "unchanged", nil)
+	sc := s.get(t.Context(), "a")
 	assert.Equal(t, sc.LastStatus, "unchanged")
 	assert.Equal(t, sc.NextRun, now.Add(35*time.Minute).Format(time.RFC3339), "an unchanged check still waits a full interval")
 }
@@ -345,7 +345,7 @@ func TestMissingRepositoryIsRemovedAfterThreeConfirmedChecks(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := New(ctx, Config{Workspace: ws, ForgeAPI: fake.URL, Version: "test"}, st, logger)
 	for _, r := range []string{"acme/api", "acme/flaky", "mnt"} {
-		srv.sched.ensure(r, time.Now())
+		srv.sched.ensure(t.Context(), r, time.Now())
 	}
 	has := func(name string) bool {
 		_, err := st.Node(ctx, model.NodeID(name, model.KindRepository, name))
@@ -357,7 +357,7 @@ func TestMissingRepositoryIsRemovedAfterThreeConfirmedChecks(t *testing.T) {
 	assert.True(t, has("acme/api"), "two checks are not enough")
 	exists = true
 	srv.reapIfGone(ctx, "acme/api", logger)
-	assert.Equal(t, srv.sched.get("acme/api").Missing, 0, "it exists again: the count starts over")
+	assert.Equal(t, srv.sched.get(t.Context(), "acme/api").Missing, 0, "it exists again: the count starts over")
 	exists = false
 	for range goneStrikes {
 		srv.reapIfGone(ctx, "acme/api", logger)
@@ -365,7 +365,7 @@ func TestMissingRepositoryIsRemovedAfterThreeConfirmedChecks(t *testing.T) {
 	assert.True(t, !has("acme/api"), "three confirmed 404s in a row remove the graph")
 	_, err = os.Stat(root)
 	assert.True(t, os.IsNotExist(err), "and the clone")
-	assert.Equal(t, srv.sched.get("acme/api").Missing, 0)
+	assert.Equal(t, srv.sched.get(t.Context(), "acme/api").Missing, 0)
 
 	for range 2 * goneStrikes {
 		srv.reapIfGone(ctx, "acme/flaky", logger)

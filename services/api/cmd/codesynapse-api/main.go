@@ -127,7 +127,11 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return fmt.Errorf("CODESYNAPSE_TRUSTED_PROXIES: %w", err)
 	}
-	stopMetrics, err := app.StartMetrics(ctx, o.EC.Logger, "api", version)
+	service := "api"
+	if o.worker {
+		service = "worker"
+	}
+	stopMetrics, err := app.StartMetrics(ctx, o.EC.Logger, service, version)
 	if err != nil {
 		return err
 	}

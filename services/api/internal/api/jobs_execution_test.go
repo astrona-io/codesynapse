@@ -88,12 +88,12 @@ func TestSchedulesPersistRuntimeIdentity(t *testing.T) {
 	schedules, err := loadSchedules(dir)
 	require.NoError(t, err)
 	id := fixedExecution()
-	_, err = schedules.set("repo", 15, false, true, false, time.Now(), Schedule{OrgID: id.TenantID, ActorID: id.SubjectID, Execution: id})
+	_, err = schedules.set(t.Context(), "repo", 15, false, true, false, time.Now(), Schedule{OrgID: id.TenantID, ActorID: id.SubjectID, Execution: id})
 	require.NoError(t, err)
 	reloaded, err := loadSchedules(dir)
 	require.NoError(t, err)
-	assert.Equal(t, reloaded.get("repo").Execution, id)
-	assert.True(t, execution.Validate(reloaded.get("legacy-missing").Execution) != nil, "legacy schedules never get fabricated runtime identities")
+	assert.Equal(t, reloaded.get(t.Context(), "repo").Execution, id)
+	assert.True(t, execution.Validate(reloaded.get(t.Context(), "legacy-missing").Execution) != nil, "legacy schedules never get fabricated runtime identities")
 }
 
 func TestAccountslessAutomationRejectsPersistedIdentity(t *testing.T) {
@@ -121,7 +121,7 @@ func TestScheduleRequiresLiveRuntimeDelegation(t *testing.T) {
 	require.Equal(t, f.client.do("POST", "/api/v1/auth/login", `{"email":"runtime@example.com","password":"`+pw+`"}`, nil), 200)
 	path := "/api/v1/repos/" + storetest.Repo + "/schedule"
 	require.Equal(t, f.client.do("PUT", path, `{"interval_minutes":60}`, nil, runtimeHeaders("thread-a")...), 200)
-	sc := f.server.sched.get(storetest.Repo)
+	sc := f.server.sched.get(t.Context(), storetest.Repo)
 	assert.Equal(t, sc.Execution, f.identity)
 	ctx, err := f.server.scheduleContext(t.Context(), sc)
 	require.NoError(t, err)

@@ -352,6 +352,19 @@ type Store interface {
 	DeleteUserSessions(ctx context.Context, userID string) error
 
 	// Execution sessions retain closed rows permanently to reject replay.
+	// Schedules (schedules.go). EnsureSchedule adds one only when the
+	// repository has none. DueSchedules lists repositories whose next run
+	// has passed. RecordScheduleRun and AddScheduleMissing change only
+	// their fields. TakeLease gives owner the named lease until until when
+	// it is free, expired or already owner's.
+	ScheduleByRepo(ctx context.Context, repo string) (Schedule, error)
+	PutSchedule(ctx context.Context, sc Schedule) error
+	EnsureSchedule(ctx context.Context, sc Schedule) error
+	DeleteSchedule(ctx context.Context, repo string) error
+	DueSchedules(ctx context.Context, now time.Time) ([]string, error)
+	RecordScheduleRun(ctx context.Context, repo string, run ScheduleRun) error
+	AddScheduleMissing(ctx context.Context, repo string, gone bool) (int, error)
+	TakeLease(ctx context.Context, name, owner string, until, now time.Time) (bool, error)
 	// Durable jobs (jobs.go). AddJob refuses a second active job for the
 	// same repository (ErrJobActive). RenewJobLeases extends every active
 	// job owner holds. FinishJob ends a job owner still holds and clears its

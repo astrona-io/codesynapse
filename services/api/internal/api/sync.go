@@ -445,7 +445,7 @@ type syncParams struct {
 // is enabled. It snapshots the current head and findings now, so the hook can
 // review exactly the commits and triage exactly the findings that are new.
 func (s *Server) automation(ctx context.Context, repo string, before model.Node) func(context.Context) {
-	sc := s.sched.get(repo)
+	sc := s.sched.get(ctx, repo)
 	org, _ := s.jobAuthorization(ctx, repo, accounts.Admin)
 	if s.cfg.LLM == nil || (!sc.AutoReview && !sc.AutoTriage) || (s.cfg.Accounts != nil && sc.OrgID != org) {
 		return nil
