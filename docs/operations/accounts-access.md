@@ -28,6 +28,18 @@ flowchart LR
 - An API key acts in exactly one organisation and stops working when its owner is removed or suspended. It can never mutate access.
 - Cookie-authenticated changes must be same-origin.
 
+The web app has sign-in, a first-run setup, Settings for your profile, API keys, members and Git tokens, an Agents page with client connection settings (runtime session integration is still required), and Help that explains every figure. Organisations have the roles owner, admin, member and viewer. An agent connected with a personal key and a registered runtime session sees only its organisation's repositories and keeps its memory, reviews and statistics apart from other organisations.
+
+## Root account and sign-up
+
+The first account becomes the installation's root account. It administers the platform (settings, health, people, the audit log) and never does organisation work. Its one organisation task is setup, which creates the first organisation and a separate owner account in one step, then signs root out; the owner signs in for everything else. Set `CODESYNAPSE_SIGNUP_OPEN=true` to let others sign up after setup.
+
+On an installation that predates this, the API identifies the root at start-up from its setup history. If that history is missing (for example, pruned by audit retention), platform administrators stay limited to administration until an operator runs `codesynapse-api designate-root --email <root>`. See [root bootstrap](../ROOT_BOOTSTRAP_PLAN.md).
+
+## Single sign-on
+
+An organisation can connect its own OpenID Connect provider (Entra ID, Okta, Keycloak, …). People then sign in through it, get an account on first use, and the provider's groups decide their role and teams. Register `CODESYNAPSE_PUBLIC_URL` + `/sso/callback` as the redirect URI; `SECRET_KEY` must be set. Owners and admins set it up under Settings → Single sign-on and share the sign-in link it shows. See [single sign-on](../SSO_PLAN.md).
+
 ## Repository permission resolution
 
 Memberships and relation tuples in PostgreSQL are authoritative. Every subject must be an active, explicit member of the owning organisation; platform administration gives no code access.
@@ -52,6 +64,8 @@ flowchart TD
 | ADMIN | Sync, schedules, settings, grants, repository configuration |
 
 Organisation owner and admin roles manage membership and policy; they do not grant repository permissions. An explicit owner can recover administration through an audited action. `AccessOf` uses bounded bulk reads; overflow or invalid grants fail closed.
+
+Settings → Organisation controls the default and owner recovery; Settings → Teams and each repository's Access page manage grants. Changes are audited. See the [upgrade notes](../ACCESS_CONTROL_PLAN.md#implementation-and-upgrade) before upgrading an existing accounts database.
 
 ## API route scoping
 
@@ -113,6 +127,10 @@ flowchart TD
     res -- network error --> keep[No change]
     res -- works --> restore[Restore]
 ```
+
+An organisation admin stores a token per host (`PUT /api/v1/accounts/orgs/{org}/git-tokens/github.com`, or Settings). Keep `SECRET_KEY` from `.env`: tokens sealed with a lost key have to be set again.
+
+To add many repositories at once, **Import** lists the public repositories of an organisation or user on GitHub, Forgejo/Gitea or GitLab and adds the ones you pick. Private repositories are added by URL, if the organisation can read them with its own token.
 
 Organisations never use the installation's tokens. A public repository is cloned anonymously. An existing graph is linked only for the same remote (`sameRemote`), so a name cannot open someone else's graph. Tokens are shown only as previews and never logged or audited in clear.
 

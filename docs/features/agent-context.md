@@ -91,15 +91,26 @@ Pass `diff` rather than refs whenever possible; refs only work for repositories 
 
 ## Usage counters
 
-Unless `--record-usage=false`, the server adds daily aggregates per repository, tool and client (calls, errors, response size, latency) to `:McpUsage` nodes for the Statistics page. Only the `repo` argument is read. Other arguments and results are measured, never stored. Data older than 180 days is pruned.
+Unless `--record-usage=false` (or `CODESYNAPSE_MCP_USAGE=false`), the server adds daily aggregates per repository, tool and client (calls, errors, response size, latency) to `:McpUsage` nodes for the Statistics page. Only the `repo` argument is read. Other arguments and results are measured, never stored. Data older than 180 days is pruned.
 
 ## Connecting an agent
 
-```sh
-just mcp          # registers with Claude Code, Codex, Gemini, OpenCode, Cursor
-just mcp-config   # prints a JSON client config for the running stack
-```
+MCP tool execution requires PostgreSQL accounts, a personal organisation API key and an immutable chat ID supplied by the calling runtime. The installation token alone cannot execute tools. Offline CLI indexing still works without accounts; MCP tools fail closed without the execution-session registry.
 
-Claude Code connects through a local per-chat bridge; see [Claude Code bridge](../operations/claude-code-bridge.md).
+**Claude Code:** sign in to the dashboard, create a key under Settings → API keys, then run `CODESYNAPSE_MCP_TOKEN=<key> just mcp`. This installs the `codesynapse` binary (`go install`) and registers it as a stdio server that Claude Code starts once per chat (`codesynapse mcp bridge`). Claude Code gives that process the chat's ID; the bridge registers it and forwards every MCP request to `http://localhost:8090/mcp` with the key and both session headers. The key is stored in your user config folder (0600), not in Claude Code's settings. Claude Code keeps the process, and so the ID, across `/compact` and `/clear`; start a new chat for a new session. Installing without a checkout, remote servers and troubleshooting: [Claude Code bridge](../operations/claude-code-bridge.md).
 
-Without a database, the server can index one directory into memory at startup (`serve --offline .`), which is what this repository's `.mcp.json` does.
+**Other clients:** `just mcp` also writes connection settings for Codex, Gemini, OpenCode and Cursor, but supplies no chat identity and registers no session. Before the first tool call, a runtime-aware launcher or client integration must:
+
+1. Read the existing thread ID from its runtime and register it with `POST /api/v1/execution/sessions`, using the personal key and body `{"session_id":"<runtime-provided thread ID>"}`.
+2. Send that same value in both `X-CodeSynapse-Session` and `X-CodeSynapse-Parent-Session` on every MCP HTTP request, together with `Authorization: Bearer <personal key>`.
+3. Keep the identity unchanged across reconnects, compaction and delegated work. Each new chat needs its own runtime-provided ID. Do not generate an ID inside a tool, substitute an MCP transport ID or share one static value across chats.
+
+**Codex:** the CLI's `mcp add` supports the URL and bearer-token environment variable but has no HTTP header setter, so its installer does not complete runtime-header setup. Configure headers through a supported client configuration or runtime integration and verify that they reach the server. See the [runtime contract and client limitations](../AGENT_GUIDE.md#runtime-session-setup).
+
+**Stdio:** launch one MCP server process per chat, with `CODESYNAPSE_DATABASE_URL`, the personal key in `CODESYNAPSE_API_TOKEN`, and the already-registered primary and parent IDs in `CODESYNAPSE_SESSION_ID` and `CODESYNAPSE_PARENT_SESSION_ID`. Both IDs must match. A process cannot switch to another chat; the server rechecks credentials and registration on each tool call.
+
+The repository ships no `.mcp.json`: a project-scoped entry would override the user-scope bridge in Claude Code. `codesynapse mcp install --only project` writes one that starts `codesynapse mcp bridge` (the binary must be on `PATH`), for clients that pass their chat ID in `CODESYNAPSE_SESSION_ID` or `CLAUDE_CODE_SESSION_ID`.
+
+Once connected, call `repo_list` or `search_all_repos`, then pass an authorised `repo` to other tools. Cloned repositories use names such as `owner/name`; mounted folders and older indexes can have plain names.
+
+Write tools are limited to reviews, explicitly requested durable memory, session offloading and catalog proposals/annotations; none edits source code. `CODESYNAPSE_MCP_REVIEWS=false` disables the review tools and `CODESYNAPSE_ALLOW_MEMORY=false` the memory tools. Without a database, `just dev-mcp` serves an in-memory graph of a checkout on stdio for development.
