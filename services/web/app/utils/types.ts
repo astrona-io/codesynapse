@@ -434,3 +434,24 @@ export interface RepoPolicy {
 export interface RepositoryAnnotation {
   org_id: string; graph: string; symbol_id: string; commit: string; revision: string; fingerprint: string; policy_digest: string; job_id: string; origin_session_id: string; summary: string; taxonomy: string[]; confidence?: number; updated_at: string
 }
+
+
+export interface IngestFile {
+  path: string; outcome: string; skip_reason?: string; diagnostic?: string; size_bytes: number | null
+  stages?: { stage: string; outcome: string; diagnostic?: string }[]
+}
+export interface IngestReport {
+  version: number; run_id: string; revision?: string; policy_digest?: string; extractor_version: string
+  started_at: string; finished_at?: string; status: string; graph_commit: string
+  total_files_scanned: number; files_indexed: number; files_written: number; files_reused: number
+  files_skipped: number; files_failed: number; files_unprocessed: number; skip_breakdown: Record<string, number>
+  discovery_complete: boolean; pruned_directories: number; estimated_tokens_saved_on_ingest: number | null
+  estimate: { name: string; version: number; bytes_per_token: number; baseline: string; observed_metadata_bytes: number; covered_files: number; unknown_files: number; excluded_binary_files: number; partial: boolean; explanation: string }
+}
+export interface IngestRun {
+  report: IngestReport; repository_id: string; metric_coverage: boolean; last_exported_at?: string
+}
+export interface IngestionOverview {
+  latest_attempt: IngestRun | null; last_successful: IngestRun | null; metrics: IngestReport | null
+  history: IngestRun[]; next: string; annotation_notice: string
+}

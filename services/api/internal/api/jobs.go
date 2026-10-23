@@ -20,6 +20,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 
 	"github.com/astrona-io/codesynapse/internal/ingest"
+	"github.com/astrona-io/codesynapse/internal/ingestreport"
 	"github.com/astrona-io/codesynapse/internal/snapshot"
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/services/api/internal/aitasks"
@@ -63,6 +64,7 @@ type Job struct {
 // Jobs runs ingest jobs, at most one per repository at a time and one
 // overall, since type-checking a large module is memory hungry.
 type Jobs struct {
+	Report      func(context.Context, Job, ingestreport.Report) error
 	Policy      func(context.Context, string, *repoconfig.Policy) (string, error)
 	Publish     func(context.Context, string, func(context.Context) error) error
 	Ingested    func(context.Context, string, *model.Graph, func(context.Context) error)
@@ -136,14 +138,50 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 		kind = "ingest"
 	}
 	job := &Job{ID: hex.EncodeToString(b), Repo: repo, OrgID: opts.OrgID, Identity: opts.Identity, Kind: kind, Branch: opts.Branch, State: JobRunning, StartedAt: time.Now().UTC().Format(time.RFC3339), Task: opts.Task, Waiting: true}
+	var ledger *ingestreport.Ledger
+	if opts.Run == nil {
+		ledger, err = ingestreport.New(job.ID, time.Now().UTC())
+		if err != nil {
+			return Job{}, err
+		}
+		if j.Report != nil {
+			reportCtx, reportCancel := context.WithTimeout(ctx, 10*time.Second)
+			err := j.writeReport(reportCtx, *job, ledger.Snapshot(), opts.Authorize)
+			reportCancel()
+			if err != nil {
+				return Job{}, err
+			}
+		}
+	}
 	j.jobs[job.ID] = job
 	j.prune()
-	go j.run(job, root, opts)
-	return *job, nil
+	result := *job
+	go j.run(job, root, opts, ledger)
+	return result, nil
 }
 
-func (j *Jobs) run(job *Job, root string, opts JobOptions) {
+func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.Ledger) {
+	ctx, cancel := context.WithTimeout(j.ctx, time.Hour)
+	defer cancel()
+	ctx, identityErr := execution.With(ctx, job.Identity)
+	graphAttempted, reportPublished := false, false
 	fin := func(job *Job, nodes, edges int, err error) {
+		if ledger != nil && j.Report != nil && !reportPublished && identityErr == nil {
+			status, commit := ingestreport.Failed, ingestreport.CommitNone
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				status = ingestreport.Cancelled
+			}
+			if graphAttempted {
+				commit = ingestreport.CommitUnknown
+			}
+			report := ledger.Finish(status, commit)
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			if reportErr := j.Report(cleanupCtx, *job, report); reportErr != nil {
+				j.logger.Error("ingest accounting remains pending", "job", job.ID, "error", reportErr)
+				err = errors.Join(err, reportErr)
+			}
+			cleanupCancel()
+		}
 		j.finish(job, nodes, edges, err)
 		if opts.Done != nil {
 			opts.Done(err)
@@ -155,17 +193,28 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 		j.mu.Lock()
 		job.Waiting = false
 		j.mu.Unlock()
-	case <-j.ctx.Done():
-		fin(job, 0, 0, j.ctx.Err())
+	case <-ctx.Done():
+		fin(job, 0, 0, ctx.Err())
 		return
 	}
-	ctx, err := execution.With(j.ctx, job.Identity)
-	if err != nil {
-		fin(job, 0, 0, err)
+	if identityErr != nil {
+		fin(job, 0, 0, identityErr)
 		return
 	}
 	ctx = logx.WithLogger(ctx, j.logger.With("job", job.ID, "repo", job.Repo))
 	ctx = telemetry.WithTenant(ctx, opts.OrgID)
+	if ledger != nil {
+		ctx = ingestreport.WithLedger(ctx, ledger)
+		ledger.SetCheckpoint(func(checkCtx context.Context, report ingestreport.Report) error {
+			if j.Report == nil {
+				return nil
+			}
+			if err := checkJob(checkCtx, opts.Authorize); err != nil {
+				return err
+			}
+			return j.writeReport(checkCtx, *job, report, opts.Authorize)
+		})
+	}
 	if err := checkJob(ctx, opts.Authorize); err != nil {
 		fin(job, 0, 0, err)
 		return
@@ -215,6 +264,16 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 	}
 	ctx = repoconfig.WithPolicy(ctx, policy)
 	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Branch: opts.Branch, PreviousIdentities: previous, ApprovedPolicyDigest: approved})
+	if err == nil && ledger != nil {
+		report := ledger.Prepare(g)
+		err = checkJob(ctx, opts.Authorize)
+		if err == nil && j.Report != nil {
+			err = j.writeReport(ctx, *job, report, opts.Authorize)
+		}
+		if err == nil {
+			err = attachIngestReceipt(g, job.OrgID, job.Repo, job.ID)
+		}
+	}
 	if err == nil {
 		err = checkJob(ctx, opts.Authorize)
 	}
@@ -261,12 +320,26 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 			}
 			return err
 		})
-		publish := func(publishCtx context.Context) error { return j.st.ReplaceRepo(publishCtx, job.Repo, g) }
+		publish := func(publishCtx context.Context) error {
+			graphAttempted = true
+			if err := j.st.ReplaceRepo(publishCtx, job.Repo, g); err != nil {
+				return err
+			}
+			if ledger != nil && j.Report != nil {
+				report, err := ledger.Snapshot().Finish(ingestreport.Succeeded, ingestreport.CommitCommitted)
+				if err != nil {
+					return err
+				}
+				return j.writeReport(publishCtx, *job, report, opts.Authorize)
+			}
+			return nil
+		}
 		if j.Publish != nil {
 			err = j.Publish(ctx, job.Repo, publish)
 		} else {
 			err = publish(ctx)
 		}
+		reportPublished = err == nil
 		if hs, ok := j.st.(snapshot.Store); ok && err == nil {
 			snapshot.Record(ctx, hs, job.Repo)
 		}
@@ -288,11 +361,11 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions) {
 		j.Ingested(ctx, job.Repo, g, opts.Authorize)
 	}
 	if err == nil && opts.After != nil {
-		go func() {
-			if checkJob(ctx, opts.Authorize) == nil {
-				opts.After(ctx)
-			}
-		}()
+		// The hook queues its own work and must finish before this inherited
+		// execution context is cancelled on return.
+		if checkJob(ctx, opts.Authorize) == nil {
+			opts.After(ctx)
+		}
 	}
 }
 

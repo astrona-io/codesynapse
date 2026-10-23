@@ -305,3 +305,14 @@ Calls forwarded to the API retain the caller's key, organisation and validated p
 MCP HTTP bandwidth counts request-body bytes read and response-body bytes written, including stream frames. It excludes HTTP headers, TLS and TCP overhead. HTTP framing uses the fixed `transport` tool category because notifications and streamed responses cannot always be assigned to one tool. Stdio counts newline frames in platform totals: a read can contain several requests before authentication. Accepted stdio tool calls still have tenant attribution.
 
 Provider cache metrics count input tokens actually reported as cache reads. Cached tokens may still be sent and billed. Cost estimates use configured input, output, cache-read and cache-write rates; missing rates or incomplete usage leave cost unknown. Cloud payload counters include consumed retry bodies. Local-only operations have no assumed cloud-savings baseline and do not claim avoided traffic. See [the telemetry plan](TELEMETRY_PLAN.md) for metric definitions and dashboard limits.
+
+
+## Ingestion accounting
+
+Call `ingestion_report` with an authorized `repo` to read the last five tenant-owned attempts and the last successful report. It requires repository READ and the same registered runtime context as other MCP calls. A different organisation sharing the graph has its own reports. The tool returns summaries only, with no file ledger or originating session IDs.
+
+Use `total_files_scanned`, `files_indexed`, `files_written`, `files_reused`, `files_skipped`, `files_failed` and `files_unprocessed` together. Pending runs have no confirmed indexed count. At completion, scanned equals indexed + skipped + failed + unprocessed. Discovery scope and pruned directories explain which descendants were never encountered. Kubernetes-only exclusions are stage decisions when ordinary YAML indexing still contributes.
+
+`estimated_tokens_saved_on_ingest` is a metadata-based estimate of excluded raw-text context, not tokens billed to a provider or cloud bytes saved. A null value means the baseline is unavailable; partial coverage must not be extrapolated. Inspect the estimator provenance before quoting a value. Annotation jobs do not change the file counts.
+
+The API exposes bounded history at `GET /api/v1/repos/{repo}/ingestion` and paginated file decisions at `GET /api/v1/repos/{repo}/ingestion/{run}?offset=0&limit=100`. `metrics` is the selected organisation's last successful report, separate from shared graph metrics. Use the dashboard's **Ingestion reports** page for these details. History IDs and cursors do not authorize access.

@@ -16,6 +16,7 @@ import (
 )
 
 func (s *Server) repoPolicyRoutes() {
+	s.ingestionRoutes()
 	s.route("GET /api/v1/repos/{repo}/policy", repoRole(accounts.Viewer), s.handleRepositoryConfig)
 	s.route("POST /api/v1/repos/{repo}/policy/preview", repoRole(accounts.Viewer), s.handlePreviewRepoPolicy)
 	s.route("PUT /api/v1/repos/{repo}/policy", repoRole(accounts.Admin), s.handleApproveRepoPolicy)

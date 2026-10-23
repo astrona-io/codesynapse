@@ -20,6 +20,7 @@ type toolPolicy struct {
 }
 
 var toolPolicies = map[string]toolPolicy{
+	"ingestion_report":       {accounts.Viewer, "repository"},
 	"repo_list":              {accounts.Viewer, "list"},
 	"search_all_repos":       {accounts.Viewer, "list"},
 	"rule_guide":             {accounts.Viewer, "catalog"},

@@ -23,6 +23,7 @@ import (
 const staleAfter = 7 * 24 * time.Hour
 
 func registerDiscoveryTools(s *mcp.Server, h *handlers, add func(name, desc string) *mcp.Tool) {
+	mcp.AddTool(s, add("ingestion_report", "Tenant-scoped summaries of the last five ingest attempts and the last successful report: file outcomes, exclusion reasons, discovery completeness, context estimate provenance and metric coverage. No source, file ledger or session identifiers are returned."), h.ingestionReport)
 	mcp.AddTool(s, add("repo_status",
 		"How fresh the graph of a repository is: indexed branch, commit and time, whether the index is stale, and whether the checkout on disk has moved on since (newer commit or uncommitted changes). Call it when answers look out of date."),
 		h.repoStatus)

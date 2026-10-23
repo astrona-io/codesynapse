@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
+	"github.com/astrona-io/codesynapse/internal/ingestreport"
 	"github.com/astrona-io/codesynapse/internal/model"
 )
 
@@ -94,7 +95,7 @@ func Extract(ctx context.Context, repo, root string) (*model.Graph, error) {
 	valuesFiles := map[string]string{}
 	refs := &templateRefs{}
 	for _, f := range yamls {
-		content, ok := read(f.abs)
+		content, ok := readObserved(ctx, f.rel, f.abs)
 		if !ok {
 			continue
 		}
@@ -102,6 +103,7 @@ func Extract(ctx context.Context, repo, root string) (*model.Graph, error) {
 		// Files under a chart's templates/ are Go templates producing YAML.
 		if chart != "" && strings.HasPrefix(f.rel, path.Join(chart, "templates")+"/") {
 			b.templateFile(f.rel, content, chart, refs)
+			observeConfig(ctx, b, f.rel)
 			continue
 		}
 		isValues := chart != "" && f.rel == path.Join(chart, "values.yaml")
@@ -109,10 +111,12 @@ func Extract(ctx context.Context, repo, root string) (*model.Graph, error) {
 			valuesFiles[chart] = f.rel
 		}
 		b.yamlFile(f.rel, content, isValues)
+		observeConfig(ctx, b, f.rel)
 	}
 	for _, f := range templates {
-		if content, ok := read(f.abs); ok {
+		if content, ok := readObserved(ctx, f.rel, f.abs); ok {
 			b.templateFile(f.rel, content, chartOf(f.rel), refs)
+			observeConfig(ctx, b, f.rel)
 		}
 	}
 	b.resolve(refs, valuesFiles)
@@ -132,4 +136,44 @@ func read(p string) ([]byte, bool) {
 func isNestedRepo(dir string) bool {
 	_, err := os.Lstat(filepath.Join(dir, ".git"))
 	return err == nil
+}
+
+func readObserved(ctx context.Context, rel, filename string) ([]byte, bool) {
+	info, err := os.Lstat(filename)
+	diagnostic := ""
+	switch {
+	case err != nil:
+		diagnostic = "metadata_unavailable"
+	case !info.Mode().IsRegular():
+		diagnostic = "special_file"
+	case info.Size() > maxFileSize:
+		diagnostic = "size_limit"
+	}
+	if diagnostic != "" {
+		ingestreport.Observe(ctx, rel, ingestreport.Config, ingestreport.StageFailed, diagnostic)
+		return nil, false
+	}
+	content, err := os.ReadFile(filename) //nolint:gosec // filename comes from the repository walker
+	if err != nil {
+		ingestreport.Observe(ctx, rel, ingestreport.Config, ingestreport.StageFailed, "read_failed")
+		return nil, false
+	}
+	return content, true
+}
+func observeConfig(ctx context.Context, b *builder, rel string) {
+	for _, kind := range []model.NodeKind{model.KindConfig, model.KindTemplate} {
+		node, _ := b.g.Node(b.id(kind, rel))
+		if node == nil {
+			continue
+		}
+		outcome, diagnostic := ingestreport.StageSucceeded, ""
+		yamlTemplate := kind == model.KindTemplate && node.Package != "" && (strings.HasSuffix(rel, ".yaml") || strings.HasSuffix(rel, ".yml"))
+		if strings.HasPrefix(node.Summary, "unparseable ") || yamlTemplate && node.Language != "yaml" {
+			outcome, diagnostic = ingestreport.StageFailed, "parse_failed"
+		}
+		ingestreport.Observe(ctx, rel, ingestreport.Config, outcome, diagnostic)
+	}
+	if !b.policy.KubernetesAllowed(rel) {
+		ingestreport.Observe(ctx, rel, ingestreport.Kubernetes, ingestreport.StageExcluded, "stage_excluded")
+	}
 }

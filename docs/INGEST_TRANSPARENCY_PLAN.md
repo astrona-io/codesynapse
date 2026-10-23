@@ -1,117 +1,96 @@
 # Ingestion transparency and pruning reports
 
-Status: planned, SaaS phase 4i. Extends [repository policy](REPO_CONFIG_PLAN.md) in phase 4h, [tenant access](ACCESS_CONTROL_PLAN.md), [telemetry](TELEMETRY_PLAN.md), [retrieval benchmarks](RETRIEVAL_PLAN.md) and [immutable execution context](SESSION_CONTEXT_PLAN.md). The counters, report schema and annotation behavior below are proposed contracts, not claims about the current ingest pipeline.
+Status: implemented, SaaS phase 4i. This builds on [repository policy](REPO_CONFIG_PLAN.md), [repository permissions](ACCESS_CONTROL_PLAN.md), [telemetry](TELEMETRY_PLAN.md) and [execution identity](SESSION_CONTEXT_PLAN.md).
 
 ## File accounting
 
-Create one bounded outcome ledger per logical ingestion run, keyed by the authenticated repository entry, source revision, run identity and normalized repository-relative file path. A fresh requested run receives its own job identity; a retry or worker restart retains the original run. Job identity never replaces the inherited primary session ID.
+`internal/ingestreport` maintains one ledger per ingestion run. Its run ID is separate from the immutable runtime session ID. API jobs inherit and validate their original tenant, subject and execution session; the standalone CLI creates only a local accounting run ID.
 
-Record a file as scanned once when the walker encounters its entry. Count files, not directories, graph nodes, parser invocations or retry attempts. Do not follow symlinks. Metadata-only discovery may establish an entry without opening its contents. Report the discovery scope, including whether ignored directory contents were enumerated.
+Discovery reads directory entries and size metadata without following symlinks. It records at most 10,000 encountered files, with a maximum serialized report size of 16 MiB. Git metadata, nested repositories and policy-pruned directories are not enumerated. Their descendants are unknown: they increment neither scanned nor skipped totals. Reports expose `discovery_complete` and `pruned_directories`; limits and traversal errors make discovery incomplete.
 
-If the walker prunes an ignored directory before visiting its children, those children are unknown and cannot increment scanned or skipped counts. Record the pruned-directory count separately. An optional bounded metadata-only inventory can count permitted entries, but must obey the same filesystem restrictions and may not read ignored contents just to improve statistics. Reaching inventory limits makes discovery incomplete; do not extrapolate a complete file count.
+Each terminal file has one outcome:
 
-Each encountered file has one final outcome:
-
-| Outcome | Meaning |
+| Outcome | Evidence |
 |---|---|
-| `indexed` | All required eligible extraction stages succeeded and their file contribution was committed to the selected graph backend |
-| `skipped` | Deliberate whole-file exclusion under one of the reviewed reasons below; no index contribution was committed |
-| `failed` | Extraction or graph persistence failed; include whether a partial contribution needs cleanup |
-| `unprocessed` | Encountered but never completed, including cancellation, a limit or an unsupported file class |
+| `indexed` | Successful eligible extraction contributed to a confirmed committed graph snapshot |
+| `skipped` | Effective policy excluded the entire encountered file |
+| `failed` | A recorded extraction stage failed, or graph persistence is known to have failed |
+| `unprocessed` | No completed contribution, including unsupported formats, cancellation, limits or an unknown commit |
 
-During execution, files may be pending. At terminal completion, pending entries become failed or unprocessed as appropriate. The report must satisfy:
+Stage outcomes are recorded separately for Go, other languages, documentation, configuration, architecture, dependencies and Kubernetes scanning. Read errors, unavailable metadata and size limits on an eligible extraction stage are failures. A failed stage prevents a file being counted as successfully indexed even if other metadata reached the graph; `contribution` retains that distinction. Excluding Kubernetes detection does not skip general YAML extraction. Unsupported files are unprocessed, not inferred to be binary.
+
+Terminal reports validate these identities before persistence:
 
 ```text
 total_files_scanned = files_indexed + files_skipped + files_failed + files_unprocessed
 files_skipped = sum(skip_breakdown)
+files_indexed = files_written + files_reused
 ```
 
-Only a complete, successful run with no failures or unprocessed entries can simplify this to scanned = indexed + skipped. Discovery-incomplete runs expose that status even if every encountered file has a terminal outcome. A successful parse alone does not count as an indexed file. A reused, unchanged contribution is indexed only after the backend confirms it belongs to the committed run snapshot; separately report actual writes and reused contributions so reuse is not presented as new database writes.
+Current ingestion replaces a repository snapshot, so confirmed contributions are writes and `files_reused` is zero. The schema reserves reuse accounting for a future backend that can prove reuse. A successful run can still contain failed or unprocessed files; its success describes confirmed graph publication, not complete extraction of every encountered file.
 
-Maintain separate stage decisions when several parsers inspect the same file. Excluding a YAML document from Kubernetes detection does not skip the whole file if general YAML/config extraction still commits useful metadata. Mixed-document YAML with any accepted contribution is indexed; its rejected Kubernetes documents remain stage-level statistics. `non_k8s_yaml` is a file skip reason only when the effective policy excludes the entire file from every eligible indexing path.
+## Skip reasons and estimates
 
-## Requested metrics and skip reasons
+The fixed reason vocabulary is `ignored_path`, `generated_code`, `binary`, `non_k8s_yaml`, in that precedence order. Current whole-file decisions emit `ignored_path`. The other reasons are reserved for explicit future classifiers or policies; this phase does not add content reads or new exclusions to manufacture those counts. Generated-file paths excluded by reviewed glob rules are therefore reported as `ignored_path`. Kubernetes-only exclusions appear as scanner-stage decisions.
 
-Export these cumulative file counters through the phase 4e OTel/VictoriaMetrics path:
+`estimated_tokens_saved_on_ingest` is a hypothetical raw-context estimate, shown as **Estimated context tokens excluded**. It uses metadata bytes divided by four for excluded text candidates selected by extension, with a 10 MiB per-file size ceiling. Extensions identify candidates, not verified text. The report records estimator name/version, byte assumption, baseline, covered and unknown files, observed bytes and partial coverage. Binary classifications are excluded. No covered baseline produces `null`, not zero.
 
-| Exported metric | Increment condition |
+No ignored content is opened for the estimate. It does not extrapolate pruned directories or count scanner-only exclusions and reused contributions as saved context. It measures neither billed tokens nor cloud traffic. The earlier illustrative 1,850,000-token figure is not a measured result or a default. Actual retrieval reduction remains covered by the [phase 4f benchmarks](RETRIEVAL_PLAN.md).
+
+## Durable reports and graph receipts
+
+PostgreSQL migration `0009_ingest_reports.sql` adds tenant-owned runs, cumulative totals and a permanent metric-stream identity. The memory accounts adapter implements the same contract. A queued reservation, each checkpoint and final accounting update run under the existing policy transaction. Audit records `ingest.started` and `ingest.completed` commit with accounting. Starting work and publishing checkpoints require the original registered execution identity and current repository administrator permission; the API also rechecks the original credential.
+
+The inventory is checkpointed before content parsing. A prepared checkpoint records file contributions before graph publication. The shared graph contains only `Repository.meta.ingest_receipt`, a hash of the organisation, graph and run identity. Tenant counts, file details and session provenance remain in accounts storage. The existing shared `Repository.metrics` code-quality data is unchanged; the ingestion API exposes its logical tenant-owned `metrics` object from the last successful report.
+
+Publication reconciles prior receipts under the policy lock before replacing the graph. If the graph committed but the process died before its PostgreSQL transaction committed, recovery finalizes the prepared report from that receipt. It does not repeat the graph write or reactivate the originating user/session. Duplicate finalization cannot increment totals twice. An unknown acknowledgement alone cannot count a file as indexed.
+
+Recovery checks every 15 seconds. API jobs have a one-hour lifetime; unmatched pending runs older than two hours close with an unknown commit. A graph read failure leaves the run pending for a later check. External CLI writers do not participate in the accounts publication lock: an overwritten receipt cannot prove a past write and remains unknown. Run through the API when durable tenant accounting is required.
+
+Reports retain the newest 50 terminal attempts plus the last successful report if older. Summary reads omit per-file payloads at the store; details are paginated separately. Unlinking a repository removes terminal report payloads and its latest-success pointer, while keeping replay tombstones and cumulative identities. A pending checkpoint stays internal until reconciliation and cannot authorize any work.
+
+Permanent replay guards have installation/tenant/repository limits of 100,000 / 8,192 / 2,048 runs. Pending runs are limited to 16 globally, four per tenant and one per tenant repository entry. Capacity exhaustion refuses new ingestion; it never forgets a run to permit duplicate accounting. These are explicit operational limits, not an unlimited retention promise.
+
+## Metrics and VictoriaMetrics
+
+The exporter sends durable absolute totals without replaying increments into the ordinary in-process accumulator:
+
+| Metric | Accounting point |
 |---|---|
-| `codesynapse_files_scanned_total` | First encounter of a distinct file entry in a logical run |
-| `codesynapse_files_indexed_total` | First confirmed successful graph write of the file's eligible contribution in that run, to Neo4j or HugeGraph |
-| `codesynapse_files_skipped_total` | First terminal whole-file skip decision in that run |
+| `codesynapse_files_scanned_total` | Newly encountered entries in persisted checkpoints |
+| `codesynapse_files_indexed_total` | Confirmed written contributions at finalization |
+| `codesynapse_files_skipped_total` | Newly recorded whole-file exclusions in persisted checkpoints |
 
-The report's indexed count includes confirmed reused contributions; this requested indexed-write counter counts actual successful writes only. Publish `files_written` and `files_reused` in the report, with `files_indexed = files_written + files_reused`, and label dashboards accordingly. Do not compare a write-only counter to the report's indexed total without including reuse.
+Counters describe processing across runs, not unique files currently in a repository. Each carries authenticated `tenant_id`, a stable server-owned opaque `repo` ID, and `mcp_tool`, `llm_provider`, `llm_model` set to `none`. Skips add a fixed `skip_reason`. Repository names, paths, run/session IDs, source revisions and model text never become labels.
 
-Every instrument has authenticated `tenant_id` and server-resolved `repo`, plus the phase 4e `mcp_tool`, `llm_provider` and `llm_model` attributes. File accounting describes ingestion, so provider/model are `none`; the tool is an accepted originating tool or fixed `none` for API/scheduled work. The skipped counter additionally has exactly one `skip_reason` from this initial allowlist:
+Admission allows 800 repositories globally and 64 per tenant, with six series per repository. IDs and admission slots survive unlink/relink. Overflow preserves exact reports, marks `metric_coverage` false and emits a platform-only dropped-series count. The opaque `repo` label is limited to these three instruments; it is not a general exception to telemetry label rules.
 
-| `skip_reason` | Whole-file decision |
-|---|---|
-| `ignored_path` | An encountered file is excluded by an effective ignore policy |
-| `non_k8s_yaml` | The policy permits only Kubernetes YAML for this indexing path and the file has no eligible contribution elsewhere |
-| `generated_code` | The effective policy excludes a recognized generated file |
-| `binary` | A bounded, approved classifier identifies a binary file that no enabled extractor indexes |
+One fenced exporter owns a database stream through the network call. Its persisted stream ID, counter start times and sample timestamps survive process restarts. It uses the configured OTLP/HTTP transport by default, or the existing explicit Prometheus push mode, never both for one stream. A failed export leaves accounting intact. Repeated snapshots and replacement exporters preserve the same cumulative series. The UI flags missing or stale telemetry; report totals remain authoritative.
 
-Choose one primary reason in deterministic order: ignored path, generated code, binary, then non-Kubernetes YAML. Evaluate only classifiers permitted by policy; a path decision must not trigger a content read. Record additional stage decisions only in the scoped report. Parse errors, store errors, missing permissions, cancellation and size limits are not successful skips. An unsupported text format remains unprocessed with a fixed diagnostic until an explicit skip category is designed; never mislabel it binary. Review any enum extension, rather than accepting arbitrary strings from configuration or a model.
+`GET /api/v1/stats/series` adds fixed `ingest_files` and `ingest_skips` panels. Each requires a repository selector with current read permission, then passes both tenant and opaque repository ID as VictoriaMetrics `extra_filters`. Platform administration grants no repository panel access. The `annotation_jobs` panel is explicitly organisation-wide and uses the existing annotation outcome counters.
 
-The `repo` attribute is an explicit, narrow extension to the current bounded-label rules: an opaque, stable, server-owned repository-entry ID, never a repository name, URL, path, shared graph ID, session ID or model argument. Validate that it belongs to `tenant_id`. Retain display names in authorized API reports and UI lookup data only. Update `AGENTS.md` with this scoped exception when implementing it.
+## API, MCP and dashboard
 
-Opaque IDs still have cardinality. Admit repository series through a capped registry with per-tenant and installation-wide budgets, a bounded retention/churn policy and limits for the entire tool/provider/reason combination. Preserve tenant identity and never merge overflow into another tenant's series. If admission fails, retain the exact report, emit a bounded platform-only dropped-series signal and show metric coverage as incomplete. IDs must not rotate on each run. Session, job, revision, policy hash, filename and annotation text are never metric labels.
+All report reads require repository `READ` permission in the selected organisation, including when organisations share one code graph:
 
-## Retries, persistence and reconciliation
+- `GET /api/v1/repos/{repo}/ingestion`: latest attempt, last successful report, logical `metrics`, and history. History defaults to 10 entries, capped at 50, with a `before` run cursor.
+- `GET /api/v1/repos/{repo}/ingestion/{run}`: one summary and file outcomes; default 100 files, capped at 500, with `offset` and `next_offset`.
+- MCP `ingestion_report`: read-only latest five summaries and last successful report. It uses the existing authenticated tool policy, runtime session and repository scope. It omits file lists and originating session identity. See [the agent guide](AGENT_GUIDE.md).
 
-Commit a ledger transition and its cumulative metric totals atomically in the job/report store, with a uniqueness guard on run/file/outcome. Graph writes use an idempotent file/run commit receipt or snapshot marker. After a crash between graph commit and ledger update, reconcile the receipt before marking the file indexed; an ambiguous backend acknowledgement is not proof of success. A batch failure must not mark every attempted file indexed. Retry counters for diagnostics are separate from file outcome counters.
+The repository **Ingestion reports** page separates the latest attempt from the last successful run. It shows publication state, revision/policy evidence, outcome totals, exclusion reasons, discovery limits, estimate provenance, paginated files/history and processing trends. Annotation status links to **Indexing policy** and remains independent of deterministic file accounting. Local annotation continues to use the phase 4h registry, redaction, revision and permission checks; model output cannot alter file outcomes or counters.
 
-Export persisted cumulative totals from one fenced owner per stream, preserving counter identity across restarts. Do not increment a second in-process counter by replaying ledger events. Validate counter start times, restart behavior and duplicate OTLP delivery against VictoriaMetrics. The ledger/report is the accounting authority; telemetry transport is not an exactly-once transaction with the graph. An exporter outage does not roll back ingestion, and the UI exposes telemetry lag or incomplete series coverage.
+The standalone CLI always logs an accounting summary. To save full local details, choose a new file:
 
-Keep the original report for each completed run; a new ingest does not overwrite historical counts. Label aggregate trends as file processing across runs, rather than unique files in the repository. Bound report/ledger retention and avoid storing raw source, YAML values, secrets or unredacted diagnostic bodies.
-
-## End-of-ingest `Repository.metrics` report
-
-Expose a logical `Repository.metrics` JSON object on the authorized organisation repository entry, backed by a tenant-owned ingestion report. The example below is illustrative arithmetic, not a measured CodeSynapse result:
-
-```json
-{
-  "total_files_scanned": 1420,
-  "files_indexed": 380,
-  "files_skipped": 1040,
-  "skip_breakdown": {
-    "ignored_path": 850,
-    "non_k8s_yaml": 120,
-    "generated_code": 70
-  },
-  "estimated_tokens_saved_on_ingest": 1850000
-}
+```sh
+codesynapse ingest /path/to/repository --ingest-report /tmp/ingestion-report.json
 ```
 
-This example assumes complete discovery, no failures or unprocessed entries, and a declared estimate with adequate baseline coverage. A zero binary count can be omitted from the compact breakdown. The full versioned report also carries files written/reused/failed/unprocessed, completion and discovery status, pruned-directory counts, run/revision, effective policy fingerprint, extractor versions, timestamps, graph-commit status and the token-estimate provenance below. Validate totals before publication. Preserve the last successful report separately from the most recent failed attempt.
+Existing output files are refused and new files use mode `0600`. Local reports do not create tenant counters or PostgreSQL history. A failed or ambiguous store write is reported conservatively; CLI reports have no background reconciliation.
 
-The existing graph `Repository` node can be shared by several organisations. Do not put tenant-specific ignore rules, suppressions, annotations, session provenance or per-tenant counts into a shared `Repository.metrics` property. Store tenant reports under their organisation-owned repository entries in the accounts/report store. A shared graph aggregate is allowed only for the exact same source revision, effective extraction policy and extractor versions, and contains no tenant-specific metadata. Different effective policies require separate ingestion artifacts or a policy-aware isolation design before deployment; one tenant must never prune another tenant's shared graph.
+## Validation
 
-Authorize report reads and MCP summaries through phase 4d repository `READ`; starting or changing ingestion requires `ADMIN`. Every lookup resolves the organisation entry rather than reading a report by shared graph ID alone. Apply the same scope to report history, failures, pagination and counts. A platform administrator without repository permission cannot see pruning paths or policy details. MCP report access remains read-only and bounded; define its tool/API shape and update `docs/AGENT_GUIDE.md` during implementation.
+Shared accounts contracts exercise atomic checkpoints, duplicate completion, replay protection after retention, recovery after session revocation, unlink/relink identity, metric admission and exporter fencing. API/MCP tests cover tenant isolation, graph acknowledgement loss, revoked access and repository-scoped metric queries. Ledger tests cover pruned subtrees, symlinks, unsupported/generated/binary candidates, scanner exclusions, malformed content, missing stage evidence, cancellation and estimate bounds. VictoriaMetrics integration tests cover both transports, duplicate delivery, restart identity, cumulative increases and tenant/repository filters.
 
-## Token estimate and evidence
+A local validation benchmark for 1,000 file entries measured 0.373 ms/op, 297,533 B/op and 26 allocations/op on an Apple M5 Pro. This measures report validation only; it is not an ingestion latency SLA.
 
-`estimated_tokens_saved_on_ingest` estimates context tokens excluded from a declared hypothetical raw-text ingestion/context baseline. It is not billed tokens, provider-cache savings, runtime model consumption or cloud bytes avoided. Many ingestion stages consume no model tokens at all. Use the UI label “Estimated context tokens excluded” and link to the baseline definition.
-
-Record the estimator name/version, intended tokenizer or bytes-per-token assumption, baseline definition, observed metadata bytes, eligible file classes, covered-file count, unknown-file count and uncertainty/coverage. For safe text candidates whose size metadata is already available, a documented bytes-based estimator can approximate excluded text without opening it. Treat it as an estimate, not a tokenizer measurement. Exclude binary files and classes for which text size is not a defensible baseline. Never traverse pruned trees, read ignored secrets, open huge payloads, follow symlinks or send content to a model to manufacture savings.
-
-Compute the estimate once per excluded file and sum only comparable, covered estimates. Reused index contributions and scanner-only Kubernetes exclusions are not excluded context. An unknown baseline is `null` with an explanation, not zero. Partial coverage produces a clearly labeled partial estimate; do not scale it to the whole repository. The illustrative 1,850,000 figure requires its own declared assumptions and must not become a default value or a product claim. Use phase 4f's controlled workload when comparing actual returned context and answer quality.
-
-## Annotation jobs and context propagation
-
-Make the report's counts deterministic before optional annotation. An annotation job can explain pruning decisions or summarize existing metadata, but cannot edit counters, choose skip reasons, relax ignore policy or silently mark a failed file indexed. Keep annotation status and failure separate from ingestion status. Treat configuration descriptions and model output as untrusted data; validate output shape and repository-relative paths and redact free text before persistence.
-
-Queue envelopes inherit the authenticated tenant, subject, repository entry, source revision, effective policy, immutable `session_id` and matching `parent_session_id` from phases 4g/4h. The runtime supplies that identity, including for scheduled work; missing parent context rejects queue insertion and execution. Record job/attempt IDs separately. Recheck session validity, repository permission and private-repository access before reading inputs and before storing results. A stale revision or changed policy must cancel or explicitly supersede the annotation rather than attaching it to a newer report.
-
-Use only the existing LLM registry, redaction and local-provider restrictions. Do not send repository source to a cloud model for annotations. Persist bounded, redacted provenance: producing component/model, input report version, source/policy identity, timestamps and scoped execution references. Provenance is access-controlled report/audit data, never VictoriaMetrics labels. Retry annotation writes idempotently and keep conversation turns transient. Phase 4g session-memory storage remains separate from repository-level ingest reports; omit session details from reports served to unrelated repository readers.
-
-## Dashboard and implementation sequence
-
-Add an ingestion detail panel showing scanned, indexed, written/reused, skipped by reason, failed and unprocessed files, discovery coverage, last successful run and the latest attempt. Link every displayed total to its report and effective policy. Use fixed MetricsQL templates through the existing tenant-filtered series endpoint for trends; authorize any repository selector before binding its opaque ID. VictoriaMetrics `extra_filters` must still enforce tenant scope. A latest-run report is the source for exact totals; counter increases show activity across runs and cannot reconstruct one run without a report.
-
-1. Define the outcome ledger/report schema and effective-policy identity with phase 4h. Inventory current parser decisions, including scanner-only exclusions and unsupported file types, before enabling the initial reason enum.
-2. Implement bounded discovery and stage accounting, graph commit reconciliation, exact report publication and retention. Keep policy-specific data isolated from shared graph nodes.
-3. Add the three requested counters, admitted repository-ID labels and cumulative exporter recovery under phase 4e. Document exact exported names, units and coverage behavior.
-4. Add the optional annotation workflow, scoped API/MCP report summaries and dashboard. Carry phase 4g context throughout and keep annotation failures independent of ingest accounting.
-5. Test mixed YAML, ignored subtrees, symlinks, generated text, binary files, classifier overlap, size limits, reused snapshots, partial writes, cancellation, duplicate deliveries, worker restarts and backend acknowledgement loss. Test two tenants sharing a graph with different policies, revoked access mid-job, a foreign report ID, missing/forged session context and metric-series overflow. Verify no ignored contents are read for estimates and unavailable baselines remain unavailable.
-6. Run `just test`, `just lint`, graph/store contracts, PostgreSQL report contracts and VictoriaMetrics integration checks; run `just web-check` for the UI. Measure ledger, inventory and telemetry overhead on representative repositories. Update `AGENTS.md` and `docs/AGENT_GUIDE.md` with implemented contracts before rollout.
+Required checks are the Go race suite, lint, vet, web typecheck/build, PostgreSQL contracts and graph/metrics integration tests. No dependencies or Kubernetes manifests are added in this phase. The next application phase is [the code architecture audit](CODE_ARCHITECTURE_AUDIT_PLAN.md), followed by SSO; deployment work remains last.

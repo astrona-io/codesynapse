@@ -6,6 +6,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -23,6 +26,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/duplicates"
 	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/ingest"
+	"github.com/astrona-io/codesynapse/internal/ingestreport"
 	"github.com/astrona-io/codesynapse/internal/license"
 	"github.com/astrona-io/codesynapse/internal/metrics"
 	"github.com/astrona-io/codesynapse/internal/model"
@@ -47,6 +51,7 @@ func main() {
 // ingestOptions configures `codesynapse ingest`.
 type ingestOptions struct {
 	approvedPolicyDigest string
+	reportFile           string
 	EC                   *app.Env
 	neo4j                app.Neo4jFlags
 	repo                 string
@@ -60,6 +65,7 @@ type ingestOptions struct {
 func (o *ingestOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f := o.EC.Command.Flags()
 	f.StringVar(&o.approvedPolicyDigest, "approved-policy-digest", "", "Approve the exact repository policy digest for ingestion exclusions")
+	f.StringVar(&o.reportFile, "ingest-report", "", "Write the per-file JSON report to a new file (existing files are refused)")
 	o.neo4j.AddFlags(f)
 	f.StringVar(&o.repo, "repo", "", "Repository name in the graph (default: directory name)")
 	f.IntVar(&o.commitLimit, "commits", 500, "Number of recent commits to index (0 disables history)")
@@ -92,8 +98,51 @@ func (o *ingestOptions) Validate(_ context.Context, _ *app.Env) error {
 	return nil
 }
 
-func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) error {
+func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) (result error) {
 	ctx = app.Ctx(ctx, o.EC)
+	var runID [16]byte
+	if _, err := rand.Read(runID[:]); err != nil {
+		return err
+	}
+	ledger, err := ingestreport.New(hex.EncodeToString(runID[:]), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	var output *os.File
+	if o.reportFile != "" {
+		output, err = os.OpenFile(o.reportFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return fmt.Errorf("create ingest report: %w", err)
+		}
+	}
+	commit := ingestreport.CommitNone
+	defer func() {
+		status := ingestreport.Failed
+		if commit == ingestreport.CommitCommitted {
+			status = ingestreport.Succeeded
+		} else if errors.Is(result, context.Canceled) || errors.Is(result, context.DeadlineExceeded) {
+			status = ingestreport.Cancelled
+		}
+		report, err := ledger.Snapshot().Finish(status, commit)
+		if err != nil {
+			result = errors.Join(result, err)
+		} else {
+			o.EC.Logger.Info("ingest accounting completed", "run", report.RunID, "repo", o.repo,
+				"scanned", report.TotalFilesScanned, "indexed", report.FilesIndexed,
+				"skipped", report.FilesSkipped, "failed", report.FilesFailed,
+				"unprocessed", report.FilesUnprocessed, "graph_commit", report.GraphCommit,
+				"discovery_complete", report.DiscoveryComplete)
+			if output != nil {
+				enc := json.NewEncoder(output)
+				enc.SetIndent("", "  ")
+				result = errors.Join(result, enc.Encode(report))
+			}
+		}
+		if output != nil {
+			result = errors.Join(result, output.Close())
+		}
+	}()
+	ctx = ingestreport.WithLedger(ctx, ledger)
 	st, err := o.neo4j.Open(ctx)
 	if err != nil {
 		return err
@@ -110,9 +159,12 @@ func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return err
 	}
+	ledger.Prepare(g)
+	commit = ingestreport.CommitUnknown
 	if err := st.ReplaceRepo(ctx, o.repo, g); err != nil {
 		return err
 	}
+	commit = ingestreport.CommitCommitted
 	snapshot.Record(ctx, st, o.repo)
 	o.EC.Logger.Info("graph stored", "repo", o.repo, "nodes", len(g.Nodes()), "edges", len(g.Edges()))
 	return nil

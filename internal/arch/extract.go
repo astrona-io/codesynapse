@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
+	"github.com/astrona-io/codesynapse/internal/ingestreport"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/redact"
 )
@@ -93,15 +94,22 @@ func Extract(ctx context.Context, repo, root string, g *model.Graph) error {
 			return nil
 		}
 		info, err := d.Info()
-		if err != nil || info.Size() > maxRecordSize {
-			return nil //nolint:nilerr // unreadable or oversized files are skipped, not fatal
+		if err != nil {
+			ingestreport.Observe(ctx, rel, ingestreport.Architecture, ingestreport.StageFailed, "metadata_unavailable")
+			return nil //nolint:nilerr // record the failure while other files remain eligible
+		}
+		if info.Size() > maxRecordSize {
+			ingestreport.Observe(ctx, rel, ingestreport.Architecture, ingestreport.StageFailed, "size_limit")
+			return nil
 		}
 		content, err := os.ReadFile(p) //nolint:gosec // inside root and not a symlink
 		if err != nil {
+			ingestreport.Observe(ctx, rel, ingestreport.Architecture, ingestreport.StageFailed, "read_failed")
 			return fmt.Errorf("reading %s: %w", rel, err)
 		}
 		if r := readRecord(repo, rel, typ, content); r != nil {
 			recs = append(recs, r)
+			ingestreport.Observe(ctx, rel, ingestreport.Architecture, ingestreport.StageSucceeded, "")
 		}
 		return nil
 	})

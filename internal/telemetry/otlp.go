@@ -62,6 +62,22 @@ func NewOTLP(ctx context.Context, cfg OTLPConfig) (*sdkmetric.MeterProvider, err
 	if cfg.Environment == "" {
 		cfg.Environment = "unknown"
 	}
+	exporter, err := newOTLPExporter(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	reader := sdkmetric.NewPeriodicReader(&firstValueExporter{Exporter: exporter, seen: map[seriesIdentity]bool{}}, sdkmetric.WithProducer(cfg.Registry), sdkmetric.WithInterval(cfg.Interval), sdkmetric.WithTimeout(cfg.Timeout), sdkmetric.WithMaxExportBatchSize(512))
+	res := resource.NewSchemaless(
+		attribute.String("service.namespace", "codesynapse"), attribute.String("service.name", cfg.Service),
+		attribute.String("service.instance.id", cfg.Instance), attribute.String("service.version", cfg.Version),
+		attribute.String("deployment.environment.name", cfg.Environment),
+		attribute.String("job", cfg.Service), attribute.String("instance", cfg.Instance),
+	)
+	return sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(reader)), nil
+}
+
+// newOTLPExporter shares transport and retry limits across process and durable streams.
+func newOTLPExporter(ctx context.Context, cfg OTLPConfig) (sdkmetric.Exporter, error) {
 	client := http.Client{Timeout: cfg.Timeout}
 	if cfg.HTTP != nil {
 		client = *cfg.HTTP
@@ -82,12 +98,5 @@ func NewOTLP(ctx context.Context, cfg OTLPConfig) (*sdkmetric.MeterProvider, err
 	if err != nil {
 		return nil, fmt.Errorf("initializing OTLP metrics: %w", err)
 	}
-	reader := sdkmetric.NewPeriodicReader(&firstValueExporter{Exporter: exporter, seen: map[seriesIdentity]bool{}}, sdkmetric.WithProducer(cfg.Registry), sdkmetric.WithInterval(cfg.Interval), sdkmetric.WithTimeout(cfg.Timeout), sdkmetric.WithMaxExportBatchSize(512))
-	res := resource.NewSchemaless(
-		attribute.String("service.namespace", "codesynapse"), attribute.String("service.name", cfg.Service),
-		attribute.String("service.instance.id", cfg.Instance), attribute.String("service.version", cfg.Version),
-		attribute.String("deployment.environment.name", cfg.Environment),
-		attribute.String("job", cfg.Service), attribute.String("instance", cfg.Instance),
-	)
-	return sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(reader)), nil
+	return exporter, nil
 }

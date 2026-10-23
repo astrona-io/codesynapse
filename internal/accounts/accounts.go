@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/astrona-io/codesynapse/internal/ingestreport"
 )
 
 // Role is a user's role in an organisation, weakest first.
@@ -307,6 +309,14 @@ type Store interface {
 	DeleteRepoPolicy(ctx context.Context, orgID, graph string) error
 	UpsertAnnotations(ctx context.Context, records []RepositoryAnnotation) error
 	ListAnnotations(ctx context.Context, orgID, graph string, limit int) ([]RepositoryAnnotation, error)
+	BeginIngestRun(ctx context.Context, run IngestRun) error
+	SaveIngestRun(ctx context.Context, run IngestRun) error
+	ReconcileIngestRun(ctx context.Context, orgID, graph, runID string, commit ingestreport.GraphCommit) error
+	GetIngestRun(ctx context.Context, orgID, graph, runID string) (IngestRun, error)
+	ListIngestRuns(ctx context.Context, orgID, graph string, limit int) ([]IngestRun, error)
+	LatestSuccessfulIngestRun(ctx context.Context, orgID, graph string) (IngestRun, error)
+	PendingIngestRuns(ctx context.Context, graph string, limit int) ([]IngestRun, error)
+	ExportIngestTotals(ctx context.Context, export func(context.Context, IngestMetricSnapshot) error) error
 
 	CreateTeam(ctx context.Context, t Team) error // ErrExists on a taken slug in the organisation
 	TeamByID(ctx context.Context, id string) (Team, error)

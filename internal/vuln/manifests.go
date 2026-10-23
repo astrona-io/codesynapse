@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"io/fs"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
+	"github.com/astrona-io/codesynapse/internal/ingestreport"
 	"github.com/astrona-io/codesynapse/internal/license"
 )
 
@@ -54,6 +56,11 @@ var lockfiles = map[string]func([]byte, string, ...manifestScope) []Module{
 // ManifestModules reads npm, Python, Rust, PHP, Ruby, .NET and Gradle lockfiles under root. dir is the
 // lockfile's directory, used to find direct dependencies next to it.
 func ManifestModules(root string, policies ...*repoconfig.Policy) ([]Module, error) {
+	return ManifestModulesContext(context.Background(), root, policies...)
+}
+
+// ManifestModulesContext records lockfile contributions without guessing parse success for empty results.
+func ManifestModulesContext(ctx context.Context, root string, policies ...*repoconfig.Policy) ([]Module, error) {
 	var policy *repoconfig.Policy
 	if len(policies) > 0 {
 		policy = policies[0]
@@ -81,12 +88,26 @@ func ManifestModules(root string, policies ...*repoconfig.Policy) ([]Module, err
 		if !ok && !isReq {
 			return nil
 		}
+		rel, relErr := filepath.Rel(root, p)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		info, err := d.Info()
-		if err != nil || info.Size() > maxManifest {
-			return nil //nolint:nilerr // skip unreadable or huge files
+		if err != nil {
+			ingestreport.Observe(ctx, rel, ingestreport.Dependencies, ingestreport.StageFailed, "metadata_unavailable")
+			return nil //nolint:nilerr // the ledger retains the file failure while extraction continues
+		}
+		if info.Size() > maxManifest {
+			ingestreport.Observe(ctx, rel, ingestreport.Dependencies, ingestreport.StageFailed, "size_limit")
+			return nil
 		}
 		data, err := os.ReadFile(p) //nolint:gosec // inside root, not a symlink
 		if err != nil {
+			ingestreport.Observe(ctx, rel, ingestreport.Dependencies, ingestreport.StageFailed, "read_failed")
 			return nil //nolint:nilerr // skip unreadable files
 		}
 		var mods []Module
@@ -94,6 +115,9 @@ func ManifestModules(root string, policies ...*repoconfig.Policy) ([]Module, err
 			mods = parseRequirements(data)
 		} else {
 			mods = parse(data, filepath.Dir(p), manifestScope{root: root, policy: policy})
+		}
+		if len(mods) > 0 {
+			ingestreport.Contribute(ctx, rel, ingestreport.Dependencies)
 		}
 		for _, m := range mods {
 			key := m.Ecosystem + "|" + m.Path + "|" + m.Version

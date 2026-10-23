@@ -32,6 +32,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
+	"github.com/astrona-io/codesynapse/internal/ingestreport"
 )
 
 // Module is a required module version.
@@ -85,6 +86,11 @@ const StdlibPath = "stdlib"
 // `toolchain` line. The `go` directive is only a minimum, so using it would
 // report years of fixed CVEs for any library that supports old releases.
 func Modules(root, buildGo string, policies ...*repoconfig.Policy) ([]Module, error) {
+	return ModulesContext(context.Background(), root, buildGo, policies...)
+}
+
+// ModulesContext records manifest extraction decisions in the ingest ledger.
+func ModulesContext(ctx context.Context, root, buildGo string, policies ...*repoconfig.Policy) ([]Module, error) {
 	var policy *repoconfig.Policy
 	if len(policies) > 0 {
 		policy = policies[0]
@@ -109,8 +115,17 @@ func Modules(root, buildGo string, policies ...*repoconfig.Policy) ([]Module, er
 		if d.Name() != "go.mod" || d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		data, err := os.ReadFile(path) //nolint:gosec // path is inside root and not a symlink
 		if err != nil {
+			ingestreport.Observe(ctx, rel, ingestreport.Dependencies, ingestreport.StageFailed, "read_failed")
 			return err
 		}
 		// Parse (not ParseLax) so toolchain directives are read; fall back to
@@ -118,9 +133,11 @@ func Modules(root, buildGo string, policies ...*repoconfig.Policy) ([]Module, er
 		mf, err := modfile.Parse(path, data, nil)
 		if err != nil {
 			if mf, err = modfile.ParseLax(path, data, nil); err != nil {
+				ingestreport.Observe(ctx, rel, ingestreport.Dependencies, ingestreport.StageFailed, "parse_failed")
 				return fmt.Errorf("parsing %s: %w", path, err)
 			}
 		}
+		ingestreport.Contribute(ctx, rel, ingestreport.Dependencies)
 		if mf.Module != nil {
 			own[mf.Module.Mod.Path] = true
 		}

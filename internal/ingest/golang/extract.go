@@ -22,6 +22,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/logx"
 	"golang.org/x/tools/go/packages"
 
+	"github.com/astrona-io/codesynapse/internal/ingestreport"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/redact"
 )
@@ -98,6 +99,13 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 
 	logger := logx.FromContext(ctx)
 	packages.Visit(pkgs, nil, func(p *packages.Package) {
+		if len(p.Errors) > 0 {
+			for _, filename := range p.GoFiles {
+				if rel, err := filepath.Rel(root, filename); err == nil && repoconfig.FromContext(ctx).PathAllowed(filepath.ToSlash(rel)) {
+					ingestreport.Observe(ctx, filepath.ToSlash(rel), ingestreport.Go, ingestreport.StageFailed, "package_load_failed")
+				}
+			}
+		}
 		for _, e := range p.Errors {
 			logger.Debug("package load error", "package", p.ID, "error", e.Msg)
 		}
@@ -139,6 +147,11 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 	}
 	x.implementations(primary)
 	x.g.PruneDanglingEdges()
+	for _, node := range x.g.Nodes() {
+		if node.Kind == model.KindFile {
+			ingestreport.Observe(ctx, node.File, ingestreport.Go, ingestreport.StageSucceeded, "")
+		}
+	}
 	x.res.Graph = x.g
 	return x.res, nil
 }

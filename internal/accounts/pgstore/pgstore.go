@@ -531,6 +531,9 @@ func (s *Store) RemoveRepository(ctx context.Context, orgID, graph string) (int,
 	err := s.PolicyTransaction(ctx, orgID, func(st accounts.Store) error {
 		var err error
 		count, err = st.(*Store).removeRepository(ctx, orgID, graph)
+		if err == nil {
+			err = st.(*Store).expireIngestReports(ctx, orgID, graph)
+		}
 		if err != nil {
 			return err
 		}

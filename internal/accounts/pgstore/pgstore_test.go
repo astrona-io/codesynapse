@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strconv"
 	"testing"
@@ -25,7 +26,7 @@ func TestContract(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(st.Close)
 	// Start from an empty schema: the contract creates fixed emails.
-	_, err = st.db.Exec(ctx, "DROP TABLE IF EXISTS repository_annotations, repository_policy_approvals, execution_sessions, access_policy_outbox, relation_tuples, teams, org_git_tokens, repositories, audit_head, events, api_keys, sessions, memberships, orgs, users, schema_migrations CASCADE")
+	_, err = st.db.Exec(ctx, "DROP TABLE IF EXISTS ingest_runs, ingest_repository_totals, ingest_metric_stream, repository_annotations, repository_policy_approvals, execution_sessions, access_policy_outbox, relation_tuples, teams, org_git_tokens, repositories, audit_head, events, api_keys, sessions, memberships, orgs, users, schema_migrations CASCADE")
 	require.NoError(t, err)
 	accountstest.Run(t, st)
 	accountstest.RunConcurrentAudit(t, st)
@@ -35,6 +36,24 @@ func TestContract(t *testing.T) {
 	accountstest.RunPolicyRecovery(t, st)
 	accountstest.RunExecutionSessions(t, st)
 	accountstest.RunRepoPolicy(t, st)
+	accountstest.RunIngest(t, st)
+
+	// A fresh connection pool resumes the same stream and obeys its owner fence.
+	replica, err := Open(ctx, url)
+	require.NoError(t, err)
+	t.Cleanup(replica.Close)
+	var before, after accounts.IngestMetricSnapshot
+	require.NoError(t, st.ExportIngestTotals(ctx, func(ctx context.Context, snapshot accounts.IngestMetricSnapshot) error {
+		before = snapshot
+		err := replica.ExportIngestTotals(ctx, func(context.Context, accounts.IngestMetricSnapshot) error { return nil })
+		assert.True(t, errors.Is(err, accounts.ErrIngestExporterBusy))
+		return nil
+	}))
+	require.NoError(t, replica.ExportIngestTotals(ctx, func(_ context.Context, snapshot accounts.IngestMetricSnapshot) error { after = snapshot; return nil }))
+	assert.Equal(t, after.StreamID, before.StreamID)
+	assert.Equal(t, after.StartedAt, before.StartedAt)
+	assert.Equal(t, after.Totals, before.Totals)
+	assert.True(t, after.SampleAt.After(before.SampleAt))
 
 	// Tampering with a stored entry is detected.
 	_, err = st.db.Exec(ctx, "UPDATE events SET detail = 'edited' WHERE id = (SELECT max(id) FROM events)")

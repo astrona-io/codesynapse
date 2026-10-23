@@ -89,7 +89,7 @@ func TestSeriesScopedByTenant(t *testing.T) {
 		assert.Equal(t, filter, "")
 	}
 	for name, panel := range seriesPanels {
-		if panel.platform {
+		if panel.platform || panel.repository {
 			continue
 		}
 		require.Equal(t, bob.do("GET", "/api/v1/stats/series?panel="+name+"&tenant_id=other&query=up", "", &p), 200)

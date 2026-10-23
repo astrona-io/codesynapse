@@ -31,18 +31,7 @@ func TestVictoriaMetrics(t *testing.T) {
 	require.NoError(t, p.Push(ctx))
 
 	q := &Querier{URL: url, User: user, Password: pass}
-	var got []Series
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		end := time.Now().Add(time.Minute)
-		var err error
-		got, err = q.QueryRange(ctx, `sum by (tenant_id) (max_over_time(cs_test_calls_total{job="test",instance="`+p.Instance+`"}[5m]))`, end.Add(-10*time.Minute), end, time.Minute, []string{a})
-		require.NoError(t, err)
-		if len(got) > 0 && len(got[0].Points) > 0 && got[0].Points[len(got[0].Points)-1].V == 6 {
-			break
-		}
-		time.Sleep(time.Second)
-	}
+	got := awaitOTLPValue(ctx, t, q, `sum by (tenant_id) (max_over_time(cs_test_calls_total{job="test",instance="`+p.Instance+`"}[5m]))`, []string{a}, 6)
 	require.Len(t, got, 1, "only tenant a's series comes back")
 	assert.Equal(t, got[0].Labels["tenant_id"], a)
 	assert.Equal(t, got[0].Points[len(got[0].Points)-1].V, 6.0)
@@ -52,18 +41,7 @@ func TestVictoriaMetrics(t *testing.T) {
 	burst := r.Counter("cs_test_burst_total", "Burst.", "tenant_id")
 	burst.Add(37809, a)
 	require.NoError(t, p.Push(ctx))
-	var inc []Series
-	deadline = time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		end := time.Now().Add(time.Minute)
-		var err error
-		inc, err = q.QueryRange(ctx, `sum(increase(cs_test_burst_total{instance="`+p.Instance+`"}[10m]))`, end.Add(-5*time.Minute), end, time.Minute, nil)
-		require.NoError(t, err)
-		if len(inc) > 0 && len(inc[0].Points) > 0 && inc[0].Points[len(inc[0].Points)-1].V == 37809 {
-			break
-		}
-		time.Sleep(time.Second)
-	}
+	inc := awaitOTLPValue(ctx, t, q, `sum(increase(cs_test_burst_total{instance="`+p.Instance+`"}[10m]))`, nil, 37809)
 	require.Len(t, inc, 1)
 	assert.Equal(t, inc[0].Points[len(inc[0].Points)-1].V, 37809.0, "a large first value is an increase, not a pre-existing counter")
 
