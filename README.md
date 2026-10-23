@@ -156,25 +156,7 @@ MCP tool execution requires PostgreSQL accounts, a personal organisation API key
 
 **Claude Code:** sign in to the dashboard, create a key under Settings → API keys, then run `CODESYNAPSE_MCP_TOKEN=<key> just mcp`. This installs the `codesynapse` binary (`go install`) and registers it as a stdio server that Claude Code starts once per chat (`codesynapse mcp bridge`). Claude Code gives that process the chat's ID; the bridge registers it and forwards every MCP request to `http://localhost:8090/mcp` with the key and both session headers. The key is stored in your user config folder (0600), not in Claude Code's settings. Claude Code keeps the process, and so the ID, across `/compact` and `/clear`; start a new chat for a new session.
 
-Use a personal key (`csk_…`) from a standard account. The `CODESYNAPSE_MCP_TOKEN` and `CODESYNAPSE_API_TOKEN` values in `.env` are installation tokens and won't work here, and neither will a key belonging to the root account.
-
-**Claude Code troubleshooting**
-
-| Symptom | Cause and fix |
-|---|---|
-| `/mcp` shows `AUTH_HEADER_REJECTED` (HTTP 403) mentioning `X-CodeSynapse-Session` | An older direct-HTTP `codesynapse` entry is still configured. Remove it from every scope, then reinstall: `claude mcp remove codesynapse -s local` (in each project that has one), `claude mcp remove codesynapse -s user`, `CODESYNAPSE_MCP_TOKEN=<key> just mcp`. A local or project entry overrides the user-scope bridge. |
-| `register runtime session: log in or use a valid API key` | The stored key isn't a personal key, or it was revoked. Rerun `CODESYNAPSE_MCP_TOKEN=<key> just mcp` with a fresh `csk_…` key; it overwrites the stored one. |
-| `claude mcp get codesynapse` reports `Failed to connect` | Expected outside a chat: the CLI starts the bridge without `CLAUDE_CODE_SESSION_ID`, so it exits. Check from a new chat with `/mcp` instead. |
-| Fixed the config but the current chat still fails | Each chat keeps the bridge it started with. Open a new chat. |
-
-To test the key and registration without Claude Code, send one `initialize` message through the bridge with a throwaway ID:
-
-```sh
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"check","version":"0"}}}' \
-  | CLAUDE_CODE_SESSION_ID=check-$(date +%s) codesynapse mcp bridge
-```
-
-A JSON-RPC result means the key and session registration work. Each run registers a session that expires after seven days.
+Each machine needs the `codesynapse` binary locally. Installing it without a checkout, remote servers, verification and troubleshooting: [Claude Code bridge](docs/operations/claude-code-bridge.md).
 
 Other clients: `just mcp` installs connection settings for them too, but supplies no chat identity and registers no session. Before the first tool call, a runtime-aware launcher or client integration must:
 

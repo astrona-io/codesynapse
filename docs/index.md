@@ -51,7 +51,7 @@ flowchart LR
 
 - **I want to understand the system:** [Architecture overview](architecture/overview.md).
 - **I want to know what is stored:** [Graph schema](architecture/graph-schema.md).
-- **I am wiring up an agent:** [Agent context (MCP)](features/agent-context.md), then the [Agent guide](AGENT_GUIDE.md).
+- **I am wiring up an agent:** [Agent context (MCP)](features/agent-context.md), then the [Agent guide](AGENT_GUIDE.md). For Claude Code, start with the [Claude Code bridge](operations/claude-code-bridge.md).
 - **I am reviewing security posture:** [Security review](features/security.md) and [Security model](operations/security-model.md).
 - **I am deploying it:** [Running the stack](operations/running.md).
 
