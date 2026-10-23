@@ -210,7 +210,7 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
    - **6a, Helm chart and local build-and-test loop (done; see [the chart README](../deploy/helm/codesynapse/README.md)):**
      - **What's built:** `deploy/helm/codesynapse` replaces the Kustomize tree. It has the four services, plus PostgreSQL, HugeGraph, Milvus, VictoriaMetrics and VictoriaTraces as StatefulSets, each replaceable by an external address. It uses one required Secret with no defaults, non-root pods (HugeGraph is the documented exception) and network policies. `GOMEMLIMIT` is set at 90% of each memory limit, there's an optional ingress (`/mcp` and the dashboard), and a `helm test` checks every service.
      - **Checks:** `just chart-check` (`helm lint --strict`, kubeconform, kube-linter, kubesec) runs on every pull request. `just chart-e2e` builds, loads, installs and tests on the throwaway `kind-codesynapse-dev` cluster, and the `Chart end to end` workflow runs it on chart changes, merges and on demand. Every command names its context explicitly.
-     - **Follow-ups:** mount secrets as files (kubesec `SecretsAsEnvironmentVariables`), measure ingest peaks for default memory limits, backups and upgrade notes, and chart-testing (`ct`) once the chart is versioned in 6b.
+     - **Follow-ups:** mount secrets as files (kubesec `SecretsAsEnvironmentVariables`), and measure ingest peaks for default memory limits. Backups, upgrade notes and versioning arrived with 6b.
 
      The original plan for this step:
      - A Helm chart in `deploy/helm/codesynapse` replaces the Kustomize overlays.
@@ -224,7 +224,12 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
        - load the images and `helm install` the chart from the working tree;
        - run the same smoke test and lint/scan set as CI, then tear down.
      - The loop and CI share the same scripts, so a green local run predicts a green pipeline.
-   - **6b, release pipeline:**
+   - **6b, release pipeline (done; see [Releasing](operations/releasing.md#server-release) and [Upgrading](operations/upgrading.md)):**
+     - **What's built:** a `vX.Y.Z` or `vX.Y.Z-rcN` tag on `main` publishes the four images (multi-arch, signed, SBOM and provenance) and the chart as a signed OCI artifact at `oci://ghcr.io/astrona-io/charts/codesynapse`. Chart, app and image versions are the tag without the `v`. A throwaway kind cluster then verifies the signatures, installs the published chart with the published images through a pull secret and runs `helm test`. Only after that does a final release get the images' `:latest` tag and become the latest GitHub release; release candidates never do. `image.pullSecrets` covers private registries, and `just chart-install-published` runs the same install locally.
+     - **Upgrade notes** cover migrations on start (under an advisory lock), the `api-loops` lease, durable jobs across restarts, backups and rollback.
+     - **Follow-ups:** `ct lint` and `ct install --upgrade` against the previous published chart, and Artifact Hub listing once the repository is public.
+
+     The original plan for this step:
      - Images on ghcr.io: multi-arch, signed, with SBOM and provenance.
      - The chart as an OCI artifact, so anyone installs from GitHub with `helm install codesynapse oci://ghcr.io/astrona-io/charts/codesynapse --version X.Y.Z`.
      - Chart and app versions follow the release tag.

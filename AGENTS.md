@@ -115,6 +115,7 @@ just review     # offline review pack for the current branch
 just image-build  # api, worker, mcp and web images
 just chart-check  # helm lint, kubeconform, kube-linter, kubesec
 just chart-e2e    # chart on a throwaway kind cluster: build, load, install, helm test (just kind-down)
+just chart-install-published X.Y.Z   # a released chart and images on the kind cluster (release check)
 just mcp        # register the MCP server with Claude Code, Codex, Gemini, OpenCode, Cursor
 ```
 

@@ -25,6 +25,13 @@ app.kubernetes.io/instance: {{ $root.Release.Name }}
 {{- printf "%s/codesynapse-%s:%s" $root.Values.image.registry (index . 1) ($root.Values.image.tag | default $root.Chart.AppVersion) -}}
 {{- end -}}
 
+{{- define "cs.pullSecrets" -}}
+{{- with .Values.image.pullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end -}}
+
 {{/* The one Secret with every credential; the chart never invents one. */}}
 {{- define "cs.secret" -}}
 {{- required "secrets.existingSecret is required: create a Secret with the keys listed in values.yaml" .Values.secrets.existingSecret -}}

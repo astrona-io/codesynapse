@@ -1,6 +1,6 @@
 # Releasing
 
-A release publishes the `codesynapse` CLI: bare binaries on GitHub and a formula in the Homebrew tap [astrona-io/homebrew-tap](https://github.com/astrona-io/homebrew-tap). The server stack ships as container images, separately (see [Running the stack](running.md)).
+A release publishes the `codesynapse` CLI (bare binaries on GitHub and a formula in the Homebrew tap [astrona-io/homebrew-tap](https://github.com/astrona-io/homebrew-tap)) and the server stack (container images and the Helm chart, see [Server release](#server-release)).
 
 ## Cut a release
 
@@ -20,6 +20,29 @@ git push origin v0.3.0
 4. Installs the formula from the tap on macOS and Ubuntu runners and checks the version matches the tag.
 
 A tag with a `-`, such as `v0.3.0-rc1`, is a pre-release. It gets a GitHub release, never becomes "latest", and doesn't touch the tap.
+
+The Release workflow doesn't mark a final release "latest" itself. The Images workflow does that once the published stack passed its install test (below).
+
+## Server release
+
+The same tag runs `.github/workflows/images.yml`. It refuses a tag that isn't `vX.Y.Z` or `vX.Y.Z-rcN` on a commit on `main` (`.github/scripts/release-tag.sh`), then:
+
+1. **Images:** builds `codesynapse-{api,worker,mcp,web}` for amd64 and arm64, pushes them as `:X.Y.Z` and `:X.Y` (an RC only as `:X.Y.Z-rcN`), with SBOM and provenance, and signs them with cosign (keyless, GitHub OIDC).
+2. **Chart:** packages `deploy/helm/codesynapse` with chart and app version `X.Y.Z`, pushes it to `oci://ghcr.io/astrona-io/charts/codesynapse` and signs it.
+3. **Verify:** checks the signatures of the chart and the four images, creates a throwaway kind cluster, installs the **published** chart with the **published** images (`just chart-install-published`) and runs `helm test`.
+4. **Latest:** for a final release only, moves the images' `:latest` tag to the verified manifests and marks the GitHub release latest.
+
+A failure in steps 1 to 3 leaves the previous release as latest. Fix forward with a new tag; don't move a published tag.
+
+Try a published version on your own kind cluster (`just kind-up` first). For a private package, create a `docker-registry` Secret in the `codesynapse` namespace and pass its name:
+
+```sh
+just chart-install-published 0.3.0          # public packages
+just chart-install-published 0.3.0 ghcr     # with the pull secret ghcr
+just chart-test
+```
+
+Upgrading an installation: [Upgrading](upgrading.md).
 
 ## Requirements
 
