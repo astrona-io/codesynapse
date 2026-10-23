@@ -58,7 +58,7 @@ func TestParityWithReference(t *testing.T) {
 		ja, _ := json.Marshal(a)
 		jb, _ := json.Marshal(b)
 		if !reflect.DeepEqual(ja, jb) {
-			t.Errorf("%s differs:\nmem %.400s\nhg  %.400s", name, ja, jb)
+			t.Errorf("%s differs:\nmem %s\nhg  %s", name, ja, jb)
 		}
 	}
 	timed := func(name string, f func()) { t0 := time.Now(); f(); t.Logf("%s %v", name, time.Since(t0)) }
