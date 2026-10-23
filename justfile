@@ -301,7 +301,7 @@ web-check:
 
 # Lint GitHub workflows
 lint-actions:
-    go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+    go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
 # Lint the service Dockerfiles (.hadolint.yaml)
 lint-docker:
@@ -309,11 +309,11 @@ lint-docker:
 
 # Lint shell scripts
 lint-shell:
-    uvx --quiet --from shellcheck-py==0.10.0.1 shellcheck $(git ls-files '*.sh')
+    uvx --quiet --from shellcheck-py==0.11.0.1 shellcheck $(git ls-files '*.sh')
 
 # Lint YAML (.yamllint.yml)
 lint-yaml:
-    uvx --quiet --from yamllint==1.35.1 yamllint --strict $(git ls-files '*.yml' '*.yaml')
+    uvx --quiet --from yamllint==1.38.0 yamllint --strict $(git ls-files '*.yml' '*.yaml')
 
 # Scan the git history for secrets (.gitleaks.toml, .gitleaksignore)
 secrets:
