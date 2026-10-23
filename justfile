@@ -313,7 +313,7 @@ lint-shell:
 
 # Lint YAML (.yamllint.yml)
 lint-yaml:
-    uvx --quiet --from yamllint==1.35.1 yamllint --strict $(git ls-files '*.yml' '*.yaml')
+    uvx --quiet --from yamllint==1.38.0 yamllint --strict $(git ls-files '*.yml' '*.yaml')
 
 # Scan the git history for secrets (.gitleaks.toml, .gitleaksignore)
 secrets:
