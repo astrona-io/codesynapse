@@ -169,7 +169,7 @@ export interface Review extends Omit<ReviewSummary, 'counts'> { summary: string;
 
 export interface AIProvider {
   name: string; kind: string; model: string; endpoint: string; local: boolean; has_key: boolean; key_env?: string
-  sends_source: boolean; max_output_tokens: number; max_input_tokens: number; context_window?: number; tasks: string[]
+  sends_source: boolean; max_output_tokens: number; max_input_tokens: number; input_budget_policy?: 'estimate' | 'require_exact'; context_window?: number; tasks: string[]
   usage: { requests: number; failures: number; input_tokens: number; output_tokens: number; avg_seconds: number; last_error?: string }
 }
 

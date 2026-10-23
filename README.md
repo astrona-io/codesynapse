@@ -93,6 +93,8 @@ Ask your agent to review a change ("review my changes with CodeSynapse and submi
 
 Every comment needs a decision: **Accept** (agreed, to fix), **Reject** (disagree or false positive, with an optional reason), **Defer** (later) or **Mark fixed**. The Reviews page shows progress and tabs for To decide, To fix, Later and Done; agents record the same decisions with `update_review_comment` and read the to-do list with `get_review` status "accepted".
 
+**Prompt budgets.** Every completion checks its final redacted provider request before sending. Input counts are conservative estimates, separate from billed usage; oversized requests are refused. `input_budget_policy: require_exact` refuses calls until a verified model/template counter is available. See [configuration and limits](docs/PROMPT_BUDGETS.md).
+
 **Fix branches.** For an accepted comment on a Go function or method, **Create fix branch & PR** asks the local model routed to "Fixes" to rewrite the affected file, commits it to a new `codesynapse/fix-…` branch, pushes it and opens a draft pull request, so your CI/CD pipeline runs on it. You review and merge the PR, then mark the comment fixed. "Fix all on one branch" does the same for every accepted item. It is off by default:
 
 ```sh

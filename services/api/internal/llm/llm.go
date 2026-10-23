@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net/netip"
 	"net/url"
@@ -50,6 +51,8 @@ type Request struct {
 type Response struct {
 	Text  string
 	Model string
+	// Preflight is admission accounting, separate from reported usage and cost.
+	Preflight InputCount
 	// InputTokens counts the whole prompt; CachedInputTokens is the part
 	// the provider served from its prompt cache.
 	InputTokens           int
@@ -87,13 +90,16 @@ type Provider interface {
 	Models(ctx context.Context) ([]string, error)
 }
 
-// contextMargin leaves room for the system prompt and chat template.
+// contextMargin reserves space for provider framing the estimate cannot verify.
 const contextMargin = 1024
 
 // budgets fills in token budgets and the timeout. Without a context window
 // the defaults are conservative, because CodeSynapse cannot know what an
 // unknown server accepts.
 func budgets(p *ProviderConfig) {
+	if p.InputBudgetPolicy == "" {
+		p.InputBudgetPolicy = "estimate"
+	}
 	if p.MaxOutputTokens <= 0 {
 		p.MaxOutputTokens = 8192
 	}
@@ -110,7 +116,7 @@ func budgets(p *ProviderConfig) {
 	if p.TimeoutSeconds <= 0 {
 		// Prefill on local hardware runs at hundreds of tokens a second, so
 		// large prompts need minutes.
-		p.TimeoutSeconds = max(300, p.MaxInputTokens/100)
+		p.TimeoutSeconds = min(86400, max(300, p.MaxInputTokens/100))
 	}
 }
 
@@ -128,6 +134,8 @@ type ProviderConfig struct {
 	// MaxInputTokens caps the context CodeSynapse packs into a prompt.
 	// Defaults to the context window minus the output budget.
 	MaxInputTokens int `yaml:"max_input_tokens" json:"max_input_tokens"`
+	// InputBudgetPolicy allows labelled estimates or requires a verified exact count.
+	InputBudgetPolicy string `yaml:"input_budget_policy" json:"input_budget_policy,omitempty"`
 	// ContextWindow is the model's total context (prompt + answer). Input
 	// and output budgets are kept inside it.
 	ContextWindow  int `yaml:"context_window" json:"context_window"`
@@ -199,6 +207,9 @@ func (c *Config) normalise(getenv func(string) string) error {
 	seen := map[string]bool{}
 	for i := range c.Providers {
 		p := &c.Providers[i]
+		if err := validateBudgetConfig(*p); err != nil {
+			return fmt.Errorf("provider %q: %w", p.Name, err)
+		}
 		if !nameRe.MatchString(p.Name) {
 			return fmt.Errorf("provider name %q must match %s", p.Name, nameRe)
 		}
@@ -237,7 +248,11 @@ func (c *Config) normalise(getenv func(string) string) error {
 			}
 		}
 		p.BaseURL = strings.TrimRight(p.BaseURL, "/")
-		budgets(p)
+		normalized, err := effectiveBudgets(*p)
+		if err != nil {
+			return fmt.Errorf("provider %q: %w", p.Name, err)
+		}
+		*p = normalized
 		if p.APIKeyEnv != "" {
 			p.apiKey = getenv(p.APIKeyEnv)
 		}
@@ -299,15 +314,28 @@ type Usage struct {
 
 // Registry holds the configured providers.
 type Registry struct {
-	cfg   Config
-	impl  map[string]Provider
-	mu    sync.Mutex
-	usage map[string]*Usage
+	cfg     Config
+	impl    map[string]Provider
+	mu      sync.Mutex
+	usage   map[string]*Usage
+	counter promptCounter
 }
 
 // NewRegistry builds providers from cfg.
 func NewRegistry(cfg Config) *Registry {
-	r := &Registry{cfg: cfg, impl: map[string]Provider{}, usage: map[string]*Usage{}}
+	// Providers and preflight must retain the same configuration after startup.
+	cfg.Providers = slices.Clone(cfg.Providers)
+	for i := range cfg.Providers {
+		if normalized, err := effectiveBudgets(cfg.Providers[i]); err == nil {
+			cfg.Providers[i] = normalized
+		}
+		if cfg.Providers[i].SendSource != nil {
+			allowed := *cfg.Providers[i].SendSource
+			cfg.Providers[i].SendSource = &allowed
+		}
+	}
+	cfg.Tasks = maps.Clone(cfg.Tasks)
+	r := &Registry{cfg: cfg, impl: map[string]Provider{}, usage: map[string]*Usage{}, counter: requestByteCounter{}}
 	for _, p := range cfg.Providers {
 		telemetry.AllowModels(p.Name, p.Model, p.EmbeddingModel)
 		switch p.Kind {
@@ -428,16 +456,16 @@ func (r *Registry) Complete(ctx context.Context, name string, req Request) (Resp
 	if !ok {
 		return Response{}, fmt.Errorf("unknown AI provider %q", name)
 	}
-	cfg, _ := r.Config(name)
-	ctx = telemetry.WithModel(ctx, name, cfg.Model)
-	req.System, req.User = redact.Free(req.System), redact.Free(req.User)
-	if req.MaxTokens <= 0 || req.MaxTokens > cfg.MaxOutputTokens {
-		req.MaxTokens = cfg.MaxOutputTokens
+	req, cfg, count, err := r.prepare(ctx, name, req)
+	if err != nil {
+		return Response{Preflight: count}, err
 	}
+	ctx = telemetry.WithModel(ctx, name, cfg.Model)
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
 	defer cancel()
 	start := time.Now()
 	resp, err := p.Complete(ctx, req)
+	resp.Preflight = count
 	resp.Duration = time.Since(start)
 	record(ctx, name, cfg, resp, err)
 	r.mu.Lock()

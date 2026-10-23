@@ -122,7 +122,7 @@ func (r Runner) Run(ctx context.Context, task string, in Input) (string, error) 
 // context window gets more findings, more symbols and longer snippets per
 // request instead of the minimum.
 type limits struct {
-	chars       int // prompt budget in characters (about 4 per token)
+	chars       int // preliminary byte cap; Preflight checks the complete request
 	findings    int // findings triaged per run
 	batch       int // findings per triage request
 	symbols     int // changed symbols reviewed
@@ -135,7 +135,7 @@ type limits struct {
 func limitsFor(cfg llm.ProviderConfig) limits {
 	in, out := cfg.MaxInputTokens, cfg.MaxOutputTokens
 	return limits{
-		chars:       in * 4,
+		chars:       min(max(in, 0), llm.MaxPromptBytes),
 		findings:    clamp(in/1500, 18, reviews.MaxComments),
 		batch:       clamp(out/600, 6, 40),
 		symbols:     clamp(in/2500, 10, 100),
@@ -150,6 +150,19 @@ func clamp(v, lo, hi int) int { return max(lo, min(v, hi)) }
 
 func (r Runner) ask(ctx context.Context, provider, system, user string) (llm.Response, error) {
 	return r.LLM.Complete(ctx, provider, llm.Request{System: system, User: user})
+}
+
+// appendPrompt admits complete evidence units; a finding or symbol is never
+// cut in the middle to make its request fit.
+func (r Runner) appendPrompt(ctx context.Context, provider, system string, b *strings.Builder, part string, lim limits) error {
+	if len(part) > lim.chars-b.Len() {
+		return fmt.Errorf("%w: task prompt exceeds the assembly byte limit", llm.ErrInputBudget)
+	}
+	if _, err := r.LLM.Preflight(ctx, provider, llm.Request{System: system, User: b.String() + part}); err != nil {
+		return err
+	}
+	b.WriteString(part)
+	return nil
 }
 
 func author(provider string, resp llm.Response) string {
@@ -192,9 +205,13 @@ func (r Runner) securityTriage(ctx context.Context, provider string, in Input, s
 	}
 	var summaries []string
 	var lastResp llm.Response
-	for start := 0; start < len(findings); start += lim.batch {
+	for start := 0; start < len(findings); {
 		batch := findings[start:min(start+lim.batch, len(findings))]
-		prompt, used := triagePrompt(in.Repo, batch, src, lim)
+		prompt, used, err := r.triagePrompt(ctx, provider, in.Repo, batch, src, lim)
+		if err != nil {
+			return reviews.Review{}, err
+		}
+		start += len(used)
 		resp, err := r.ask(ctx, provider, triageSystem, prompt)
 		if err != nil {
 			if len(rv.Comments) > 0 {
@@ -228,7 +245,7 @@ func (r Runner) securityTriage(ctx context.Context, provider string, in Input, s
 	return rv, nil
 }
 
-func triagePrompt(repo string, findings []security.Finding, src sourceReader, lim limits) (string, []security.Finding) {
+func (r Runner) triagePrompt(ctx context.Context, provider, repo string, findings []security.Finding, src sourceReader, lim limits) (string, []security.Finding, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Repository %s. Findings, most important first:\n", repo)
 	var used []security.Finding
@@ -245,13 +262,15 @@ func triagePrompt(repo string, findings []security.Finding, src sourceReader, li
 		if snip := src.around(f.Location, lim.padLines); snip != "" {
 			fmt.Fprintf(&part, "code:\n```\n%s\n```\n", snip)
 		}
-		if b.Len()+part.Len() > lim.chars && len(used) > 0 {
-			break
+		if err := r.appendPrompt(ctx, provider, triageSystem, &b, part.String(), lim); err != nil {
+			if errors.Is(err, llm.ErrInputBudget) && len(used) > 0 {
+				break
+			}
+			return "", nil, err
 		}
-		b.WriteString(part.String())
 		used = append(used, f)
 	}
-	return b.String(), used
+	return b.String(), used, nil
 }
 
 func triageComment(f security.Finding, it triageItem, rv *reviews.Review) reviews.CommentItem {
@@ -333,11 +352,16 @@ func (r Runner) codeReview(ctx context.Context, provider string, in Input, src s
 		if snip := src.lines(n.File, n.StartLine, min(n.EndLine, n.StartLine+lim.symbolLines)); snip != "" {
 			fmt.Fprintf(&part, "code (line numbers prefixed):\n```\n%s\n```\n", snip)
 		}
-		if b.Len()+part.Len() > lim.chars && len(files) > 0 {
-			break
+		if err := r.appendPrompt(ctx, provider, reviewSystem, &b, part.String(), lim); err != nil {
+			if errors.Is(err, llm.ErrInputBudget) && len(files) > 0 {
+				break
+			}
+			return reviews.Review{}, err
 		}
-		b.WriteString(part.String())
 		files[n.File] = true
+	}
+	if len(files) == 0 {
+		return reviews.Review{}, ErrNothingToDo
 	}
 	resp, err := r.ask(ctx, provider, reviewSystem, b.String())
 	if err != nil {
@@ -385,20 +409,41 @@ func (r Runner) briefing(ctx context.Context, provider string, in Input, lim lim
 	fmt.Fprintf(&b, "Repository: %s\nFiles by format: %v\nLines of code: %d; functions: %d; tests: %d; average complexity %.1f\n", in.Repo, st.Formats, st.TotalLOC, st.Nodes[model.KindFunction]+st.Nodes[model.KindMethod], st.Tests, st.AvgComplexity)
 	fmt.Fprintf(&b, "Documented public API: %d of %d. Kubernetes resources: %d. Helm charts: %d.\n", st.Documented, st.Exported, st.K8sResources, st.HelmCharts)
 	fmt.Fprintf(&b, "Security grade %s (%d/100); findings %v; vulnerabilities %v.\n", sec.Grade, sec.Score, sec.FindingCounts, sec.VulnCounts)
+	if _, err := r.LLM.Preflight(ctx, provider, llm.Request{System: briefingSystem, User: b.String()}); err != nil {
+		return reviews.Review{}, err
+	}
 	for _, f := range sec.Findings[:min(len(sec.Findings), lim.briefItems)] {
-		fmt.Fprintf(&b, "- finding: %s at %s\n", f.Title, f.Location)
-	}
-	b.WriteString("\nPackages:\n")
-	for _, p := range ov.Packages {
-		line := fmt.Sprintf("- %s: %s\n", p.Name, p.Summary)
-		if b.Len()+len(line) > lim.chars {
-			break
+		part := fmt.Sprintf("- finding: %s at %s\n", f.Title, f.Location)
+		if err := r.appendPrompt(ctx, provider, briefingSystem, &b, part, lim); err != nil {
+			if errors.Is(err, llm.ErrInputBudget) {
+				break
+			}
+			return reviews.Review{}, err
 		}
-		b.WriteString(line)
 	}
-	b.WriteString("\nDocuments:\n")
-	for _, d := range ov.Docs[:min(len(ov.Docs), lim.briefItems)] {
-		fmt.Fprintf(&b, "- %s: %s\n", d.Name, d.Summary)
+	for i, p := range ov.Packages {
+		part := fmt.Sprintf("- %s: %s\n", p.Name, p.Summary)
+		if i == 0 {
+			part = "\nPackages:\n" + part
+		}
+		if err := r.appendPrompt(ctx, provider, briefingSystem, &b, part, lim); err != nil {
+			if errors.Is(err, llm.ErrInputBudget) {
+				break
+			}
+			return reviews.Review{}, err
+		}
+	}
+	for i, d := range ov.Docs[:min(len(ov.Docs), lim.briefItems)] {
+		part := fmt.Sprintf("- %s: %s\n", d.Name, d.Summary)
+		if i == 0 {
+			part = "\nDocuments:\n" + part
+		}
+		if err := r.appendPrompt(ctx, provider, briefingSystem, &b, part, lim); err != nil {
+			if errors.Is(err, llm.ErrInputBudget) {
+				break
+			}
+			return reviews.Review{}, err
+		}
 	}
 	resp, err := r.ask(ctx, provider, briefingSystem, b.String())
 	if err != nil {

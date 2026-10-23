@@ -60,7 +60,7 @@ func (o *openAI) do(ctx context.Context, method, path string, body any, out any)
 	return json.Unmarshal(data, out)
 }
 
-func (o *openAI) Complete(ctx context.Context, req Request) (Response, error) {
+func openAIRequest(cfg ProviderConfig, req Request) map[string]any {
 	type msg struct {
 		Role    string `json:"role"`
 		Content string `json:"content"`
@@ -71,12 +71,17 @@ func (o *openAI) Complete(ctx context.Context, req Request) (Response, error) {
 		"temperature": 0.2,
 		"stream":      false,
 	}
-	if o.cfg.Model != "" {
-		body["model"] = o.cfg.Model
+	if cfg.Model != "" {
+		body["model"] = cfg.Model
 	}
-	if o.cfg.DisableThinking {
+	if cfg.DisableThinking {
 		body["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
 	}
+	return body
+}
+
+func (o *openAI) Complete(ctx context.Context, req Request) (Response, error) {
+	body := openAIRequest(o.cfg, req)
 	var res struct {
 		Model   string `json:"model"`
 		Choices []struct {
