@@ -16,7 +16,11 @@ providers:
     context_window: 262144    # the model's full context (max_position_embeddings in its config.json)
     max_output_tokens: 32768  # longest answer; also sets how many findings go into one triage request
     disable_thinking: true    # Qwen3/R1-style models: skip the reasoning phase for fast JSON answers
-    # max_input_tokens:       # defaults to context_window - max_output_tokens; lower it for faster answers
+    # max_input_tokens:       # defaults to context_window - max_output_tokens - 1024
+    input_budget_policy: estimate # counts final redacted request JSON bytes conservatively
+    # require_exact refuses completions until a verified model/template counter is available.
+    # Estimates are not billing usage and cannot guarantee an arbitrary model's window.
+    # See docs/PROMPT_BUDGETS.md for byte caps, policy and retry behavior.
     # timeout_seconds:        # defaults to max(300, max_input_tokens/100) seconds: big prompts take minutes on a Mac
     # send_source: true       # default for local providers: short code snippets allowed
 

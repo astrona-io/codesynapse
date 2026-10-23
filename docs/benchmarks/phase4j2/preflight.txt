@@ -1,0 +1,41 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/astrona-io/codesynapse/services/api/internal/llm
+cpu: Apple M5 Pro
+BenchmarkPromptPreflight/small-code-4         	    2330	     98379 ns/op	   5.45 MB/s	   18745 B/op	     100 allocs/op
+BenchmarkPromptPreflight/small-code-4         	    2488	     99618 ns/op	   5.38 MB/s	   18717 B/op	     100 allocs/op
+BenchmarkPromptPreflight/small-code-4         	    2133	    100432 ns/op	   5.34 MB/s	   18713 B/op	     100 allocs/op
+BenchmarkPromptPreflight/code-32KiB-4         	      33	   6745634 ns/op	   4.86 MB/s	 1121377 B/op	     112 allocs/op
+BenchmarkPromptPreflight/code-32KiB-4         	      34	   6814512 ns/op	   4.81 MB/s	 1117778 B/op	     109 allocs/op
+BenchmarkPromptPreflight/code-32KiB-4         	      34	   6922560 ns/op	   4.74 MB/s	 1115572 B/op	     110 allocs/op
+BenchmarkPromptPreflight/unicode-4            	      84	   3085378 ns/op	  15.27 MB/s	 1092798 B/op	      93 allocs/op
+BenchmarkPromptPreflight/unicode-4            	      85	   2973691 ns/op	  15.85 MB/s	 1084828 B/op	      91 allocs/op
+BenchmarkPromptPreflight/unicode-4            	      82	   3088035 ns/op	  15.26 MB/s	 1090859 B/op	      93 allocs/op
+BenchmarkPromptPreflight/escaping-4           	     100	   2234208 ns/op	  12.84 MB/s	  772386 B/op	      89 allocs/op
+BenchmarkPromptPreflight/escaping-4           	     100	   2167086 ns/op	  13.24 MB/s	  756720 B/op	      88 allocs/op
+BenchmarkPromptPreflight/escaping-4           	     100	   2133807 ns/op	  13.45 MB/s	  772776 B/op	      89 allocs/op
+BenchmarkPromptPreflight/registry-startup-4   	  131109	      2028 ns/op	    2793 B/op	      74 allocs/op
+BenchmarkPromptPreflight/registry-startup-4   	  123907	      1982 ns/op	    2793 B/op	      74 allocs/op
+BenchmarkPromptPreflight/registry-startup-4   	  122816	      2007 ns/op	    2793 B/op	      74 allocs/op
+BenchmarkPromptPreflight/parallel-code-4      	     111	   2041587 ns/op	 1144011 B/op	     117 allocs/op
+BenchmarkPromptPreflight/parallel-code-4      	     120	   1988826 ns/op	 1150920 B/op	     119 allocs/op
+BenchmarkPromptPreflight/parallel-code-4      	     112	   2193859 ns/op	 1141098 B/op	     118 allocs/op
+PASS
+        5.13 real         7.15 user         0.18 sys
+            37814272  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                2786  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                6398  signals received
+                2881  voluntary context switches
+               30781  involuntary context switches
+        198608311269  instructions retired
+         31043129684  cycles elapsed
+            23708248  peak memory footprint

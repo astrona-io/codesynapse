@@ -127,7 +127,7 @@ func TestLimitsScaleWithBudget(t *testing.T) {
 	assert.Equal(t, small.symbolLines, 80)
 
 	large := limitsFor(llm.ProviderConfig{MaxInputTokens: 228_352, MaxOutputTokens: 32_768})
-	assert.Equal(t, large.chars, 228_352*4)
+	assert.Equal(t, large.chars, 228_352)
 	assert.Equal(t, large.findings, 152)
 	assert.Equal(t, large.batch, 40)
 	assert.Equal(t, large.symbols, 91)

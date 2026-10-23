@@ -1,0 +1,19 @@
+{
+  "base_revision": "b4d47ba49545dd5cff4edee132f2023d0670b0b3",
+  "measured_at": "2026-10-23",
+  "go": "go1.27.3",
+  "os": "darwin",
+  "arch": "arm64",
+  "cpu": "Apple M5 Pro",
+  "ram_bytes": 51539607552,
+  "gomaxprocs": 4,
+  "iterations": "200ms per benchmark, 3 runs",
+  "sha256": {
+    "services/api/internal/llm/budget.go": "6a1a9cd37d309e9ec25471ca9e28b71ee8b61089b6ace362b5f163097b6beadd",
+    "services/api/internal/llm/budget_bench_test.go": "70e85554d485e448c04d17c9ccb03ca0966077e55da52ecc4ce6701c8e154a2c",
+    "services/api/internal/llm/llm.go": "cc9d7ab0dee69ed493d4d87c925042c1a5c5ac0031f9307a145b291183b6c1f8",
+    "services/api/internal/llm/openai.go": "8f4d163372ac4e64e35e8eaf70e2b3b7e291db6eaef261b3bf16a747c586db90",
+    "services/api/internal/llm/anthropic.go": "2e494615db3ef790b352e806ae4b6e14a1cd00a78ab6d8d79a6fd065f6fe84ce"
+  },
+  "artifact_sha256": "da70a3742d613dbef6b4dc94cabdc28aa7ab4ee648817177e43e3c194608c1bd"
+}

@@ -20,19 +20,20 @@ import (
 // ProviderInfo describes a configured AI provider for the UI. It never
 // includes API keys.
 type ProviderInfo struct {
-	Name        string    `json:"name"`
-	Kind        string    `json:"kind"`
-	Model       string    `json:"model"`
-	Endpoint    string    `json:"endpoint"`
-	Local       bool      `json:"local"`
-	HasKey      bool      `json:"has_key"`
-	KeyEnv      string    `json:"key_env,omitempty"`
-	SendsSource bool      `json:"sends_source"`
-	MaxOutput   int       `json:"max_output_tokens"`
-	MaxInput    int       `json:"max_input_tokens"`
-	Context     int       `json:"context_window,omitempty"`
-	Tasks       []string  `json:"tasks"`
-	Usage       llm.Usage `json:"usage"`
+	Name              string    `json:"name"`
+	Kind              string    `json:"kind"`
+	Model             string    `json:"model"`
+	Endpoint          string    `json:"endpoint"`
+	Local             bool      `json:"local"`
+	HasKey            bool      `json:"has_key"`
+	KeyEnv            string    `json:"key_env,omitempty"`
+	SendsSource       bool      `json:"sends_source"`
+	MaxOutput         int       `json:"max_output_tokens"`
+	MaxInput          int       `json:"max_input_tokens"`
+	InputBudgetPolicy string    `json:"input_budget_policy"`
+	Context           int       `json:"context_window,omitempty"`
+	Tasks             []string  `json:"tasks"`
+	Usage             llm.Usage `json:"usage"`
 }
 
 // endpointHost shows scheme://host only, hiding paths and query strings.
@@ -60,7 +61,7 @@ func (s *Server) handleAIProviders(w http.ResponseWriter, _ *http.Request) {
 			out = append(out, ProviderInfo{
 				Name: p.Name, Kind: p.Kind, Model: p.Model, Endpoint: endpointHost(p.BaseURL), Local: p.Local(),
 				HasKey: p.HasKey(), KeyEnv: p.APIKeyEnv, SendsSource: p.AllowsSource(),
-				MaxOutput: p.MaxOutputTokens, MaxInput: p.MaxInputTokens, Context: p.ContextWindow, Tasks: append([]string{}, tasks...),
+				MaxOutput: p.MaxOutputTokens, MaxInput: p.MaxInputTokens, InputBudgetPolicy: p.InputBudgetPolicy, Context: p.ContextWindow, Tasks: append([]string{}, tasks...),
 				Usage: s.cfg.LLM.Usage(p.Name),
 			})
 		}

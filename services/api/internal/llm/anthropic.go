@@ -31,12 +31,9 @@ func newAnthropic(cfg ProviderConfig) *anthropicProvider {
 	return &anthropicProvider{cfg: cfg, client: anthropic.NewClient(opts...)}
 }
 
-func (a *anthropicProvider) Complete(ctx context.Context, req Request) (Response, error) {
-	if a.cfg.apiKey == "" {
-		return Response{}, fmt.Errorf("%s: %s is not set", a.cfg.Name, a.cfg.APIKeyEnv)
-	}
+func anthropicRequest(cfg ProviderConfig, req Request) anthropic.BetaMessageNewParams {
 	params := anthropic.BetaMessageNewParams{
-		Model:     a.cfg.Model,
+		Model:     cfg.Model,
 		MaxTokens: int64(req.MaxTokens),
 		// The system prompts are constants and come first, so they are the
 		// cache prefix: batches of one task (triage runs several) read it
@@ -49,9 +46,17 @@ func (a *anthropicProvider) Complete(ctx context.Context, req Request) (Response
 		Betas:     []anthropic.AnthropicBeta{anthropic.AnthropicBetaServerSideFallback2026_07_01},
 		Fallbacks: anthropic.BetaFallbacksParamUnion{OfDefault: constant.ValueOf[constant.Default]()},
 	}
-	if a.cfg.Effort != "" {
-		params.OutputConfig = anthropic.BetaOutputConfigParam{Effort: anthropic.BetaOutputConfigEffort(a.cfg.Effort)}
+	if cfg.Effort != "" {
+		params.OutputConfig = anthropic.BetaOutputConfigParam{Effort: anthropic.BetaOutputConfigEffort(cfg.Effort)}
 	}
+	return params
+}
+
+func (a *anthropicProvider) Complete(ctx context.Context, req Request) (Response, error) {
+	if a.cfg.apiKey == "" {
+		return Response{}, fmt.Errorf("%s: %s is not set", a.cfg.Name, a.cfg.APIKeyEnv)
+	}
+	params := anthropicRequest(a.cfg, req)
 	// Streamed so long answers are not cut by request timeouts.
 	start := time.Now()
 	stream := a.client.Beta.Messages.NewStreaming(ctx, params)

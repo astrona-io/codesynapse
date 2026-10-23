@@ -92,7 +92,7 @@ func TestOpenAICompatible(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	r := NewRegistry(Config{Providers: []ProviderConfig{{Name: "mlx", Kind: KindOpenAI, BaseURL: srv.URL + "/v1", Model: "m", MaxOutputTokens: 100, MaxInputTokens: 100, TimeoutSeconds: 5}}, Default: "mlx"})
+	r := NewRegistry(Config{Providers: []ProviderConfig{{Name: "mlx", Kind: KindOpenAI, BaseURL: srv.URL + "/v1", Model: "m", MaxOutputTokens: 100, MaxInputTokens: 1000, TimeoutSeconds: 5}}, Default: "mlx"})
 	models, err := r.Models(context.Background(), "mlx")
 	require.NoError(t, err)
 	assert.Equal(t, models, []string{"mlx-community/Qwen3.8-27B-4bit"})
