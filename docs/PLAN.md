@@ -284,6 +284,11 @@ Ordered by value.
 7. **GitHub Action** running `codesynapse audit --fail-on high` and `review --offline`, posting the result as a PR comment.
 8. **Scheduled sync** of registered repositories and webhooks from the forge.
 9. **Read-only HugeGraph role** for the MCP and API services, separate from the ingest writer.
+10. **Repository navigation that fits the repository.** The repository menu in the dashboard (`services/web/app/layouts/default.vue`) is a fixed list of about twenty links, so a small Python service shows Kubernetes & Helm, Packages, Architecture and Licences pages that can only be empty. Show what the repository has, and keep the rest one click away:
+    - **What the repository has:** one small API answer per repository, `GET /api/v1/repos/{repo}/sections`, derived from the stored graph and reports (no new ingest work): Go packages, Markdown documents, Kubernetes/Helm/Compose/CI files, architecture records, dependency manifests and licences, security findings, history snapshots, reviews, agent memory and the person's role. Counts, not content, and scoped like every repository route.
+    - **The menu:** each link declares what it needs (Kubernetes & Helm needs config files, Packages needs Go packages, Architecture needs records or the catalog, Licences and Dependency review need manifests, Agent memory needs memory enabled, Access and Indexing policy need repository admin). Links without content move into a collapsed "More" group with a short reason ("no Helm charts or Kubernetes manifests indexed"), instead of disappearing, so a deep link or a later sync never strands anyone. Summary, Security, Code health and Symbols stay for every repository.
+    - **Grouping:** fewer, clearer groups (overview, quality and security, dependencies, work, explore), and a person can pin or hide links per repository (stored per user, not shared).
+    - **Done when:** each page's empty state matches the menu's rule (no page in the menu that the menu says has nothing), the web typecheck passes, and a repository with only Go code, one with only a Helm chart and one with only Python each show a visibly shorter menu.
 
 ## Security roadmap
 
