@@ -9,8 +9,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
-// These fixtures record the phase 4j baseline. Change the gap expectations when
-// implementing rename and quoted-path support; they are not desired contracts.
+// The phase 4j audit fixtures now enforce the corrected path handling.
 func TestAuditDiffCapabilities(t *testing.T) {
 	tests := []struct {
 		name string
@@ -18,8 +17,9 @@ func TestAuditDiffCapabilities(t *testing.T) {
 		want []FileChange
 	}{
 		{
-			name: "rename without edits is omitted",
+			name: "rename without edits retains paths",
 			diff: "diff --git a/old.go b/new.go\nsimilarity index 100%\nrename from old.go\nrename to new.go\n",
+			want: []FileChange{{Path: "new.go", OldPath: "old.go"}},
 		},
 		{
 			name: "rename with edits retains paths",
@@ -27,9 +27,9 @@ func TestAuditDiffCapabilities(t *testing.T) {
 			want: []FileChange{{Path: "new.go", OldPath: "old.go", Ranges: []LineRange{{Start: 2, End: 2}}}},
 		},
 		{
-			name: "quoted tab remains escaped",
+			name: "quoted tab is decoded",
 			diff: "diff --git \"a/tab\\tname.go\" \"b/tab\\tname.go\"\n--- \"a/tab\\tname.go\"\n+++ \"b/tab\\tname.go\"\n@@ -1 +1 @@\n-old\n+new\n",
-			want: []FileChange{{Path: "tab\\tname.go", Ranges: []LineRange{{Start: 1, End: 1}}}},
+			want: []FileChange{{Path: "tab\tname.go", Ranges: []LineRange{{Start: 1, End: 1}}}},
 		},
 		{
 			name: "repeated blocks retain separate hunk positions",

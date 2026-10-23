@@ -73,6 +73,10 @@ func (s *Server) handleFixReview(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, errors.New("sync the repository first: its branch and head commit are unknown"))
 		return
 	}
+	if err := fixes.ValidateRevision(rv, n.Head); err != nil {
+		s.problem(w, http.StatusConflict, err)
+		return
+	}
 	remote, err := gitx.ValidateRemote(r.Context(), n.URL, gitx.RemoteOptions{AllowPrivate: s.cfg.AllowPrivateGit})
 	if err != nil {
 		s.problem(w, 400, err)
@@ -85,8 +89,13 @@ func (s *Server) handleFixReview(w http.ResponseWriter, r *http.Request) {
 	}
 	org, authorize := s.jobAuthorization(r.Context(), rv.Repo, accounts.Member)
 	runner := fixes.Runner{Authorize: authorize, St: s.st, LLM: s.cfg.LLM, Auth: auth, Author: s.cfg.GitAuthor,
-		Workdir: filepath.Join(s.cfg.Workspace, ".codesynapse", "fixes")}
-	in := fixes.Request{ReviewID: rv.ID, CommentIDs: req.CommentIDs, Provider: req.Provider, Root: n.Root, Remote: remote, Base: n.Head, BaseBranch: n.Branch}
+		Workdir: filepath.Join(s.cfg.Workspace, ".codesynapse", "fixes"),
+		CurrentRevision: func(ctx context.Context) (string, error) {
+			current, err := s.st.Node(ctx, model.NodeID(rv.Repo, model.KindRepository, rv.Repo))
+			return current.Head, err
+		},
+	}
+	in := fixes.Request{ValidationVersion: fixes.ValidationVersion, ReviewID: rv.ID, CommentIDs: req.CommentIDs, Provider: req.Provider, Root: n.Root, Remote: remote, Base: n.Head, BaseBranch: n.Branch}
 	job, err := s.jobs.Start(rv.Repo, "", JobOptions{ //nolint:contextcheck // jobs outlive the request
 		Kind: "fix", Task: fixes.Task, OrgID: org, Identity: identityOf(r.Context()), Authorize: authorize,
 		Run: func(ctx context.Context) (string, error) {

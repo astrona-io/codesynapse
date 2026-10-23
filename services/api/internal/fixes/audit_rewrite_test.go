@@ -2,18 +2,16 @@ package fixes
 
 import (
 	"fmt"
-	"go/parser"
-	"go/token"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/astrona-io/codesynapse/internal/reviews"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
-// The audit records missing validation so later work can replace these baseline
-// expectations with explicit refusals before a generated branch is pushed.
+// The audit gaps must now be refused before publishing a generated branch.
 func TestAuditRewriteValidationGaps(t *testing.T) {
 	orig := []byte("// Copyright example\npackage app\n\nfunc Run() { first(); second() }\n")
 	tests := []struct {
@@ -26,27 +24,24 @@ func TestAuditRewriteValidationGaps(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.NoError(t, plausible(orig, []byte(tt.out)))
+			require.Error(t, validateRewrite("a.go", orig, []byte(tt.out), []reviews.CommentItem{{File: "a.go", Line: 4, Status: reviews.Accepted}}))
 		})
 	}
-	t.Run("multiple fences become one file", func(t *testing.T) {
-		out, err := extractFile("```go\npackage app\n```\nexplanation\n```go\nfunc Other() {}\n```\n")
-		require.NoError(t, err)
-		assert.Contains(t, out, "explanation")
-		_, err = parser.ParseFile(token.NewFileSet(), "a.go", out, parser.AllErrors)
+	t.Run("multiple fences are refused", func(t *testing.T) {
+		_, err := extractFile("```go\npackage app\n```\nexplanation\n```go\nfunc Other() {}\n```\n")
 		require.Error(t, err)
 	})
 }
 
-func TestAuditMalformedRewriteReachesPushCallback(t *testing.T) {
+func TestAuditMalformedRewriteCannotReachPush(t *testing.T) {
 	ctx := fixContext(t)
 	f := setup(ctx, t, "```go\npackage app\nfunc Run( {\n```\n", http.StatusCreated)
 	_, err := f.r.Run(ctx, f.req)
-	require.NoError(t, err)
-	assert.Len(t, f.pushed, 1)
+	require.Error(t, err)
+	assert.Len(t, f.pushed, 0)
 }
 
-func TestAuditReviewRevisionIsNotComparedWithFixBase(t *testing.T) {
+func TestAuditReviewRevisionMustMatchFixBase(t *testing.T) {
 	ctx := fixContext(t)
 	f := setup(ctx, t, fixed, http.StatusCreated)
 	rv, err := f.st.GetReview(ctx, f.req.ReviewID)
@@ -55,12 +50,12 @@ func TestAuditReviewRevisionIsNotComparedWithFixBase(t *testing.T) {
 	require.NoError(t, f.st.SaveReview(ctx, rv))
 	assert.NotEqual(t, rv.Head, f.req.Base)
 	_, err = f.r.Run(ctx, f.req)
-	require.NoError(t, err)
-	assert.Len(t, f.pushed, 1)
+	require.Error(t, err)
+	assert.Len(t, f.pushed, 0)
 }
 
 func BenchmarkAuditRewriteEnvelope(b *testing.B) {
-	for _, size := range []int{4096, 65536, maxFileBytes} {
+	for _, size := range []int{4096, 65536, maxFileBytes - 32} {
 		b.Run(fmt.Sprintf("bytes_%d", size), func(b *testing.B) {
 			orig := []byte(strings.Repeat("// retained comment\n", size/19+1)[:size])
 			answer := "```go\n" + string(orig) + "// changed\n```\n"
