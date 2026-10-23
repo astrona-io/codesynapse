@@ -85,6 +85,36 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
    - **4j.4b, optional data-flow call analysis (implemented):** [`--dataflow` / `CODESYNAPSE_INGEST_DATAFLOW`](EDGE_EVIDENCE.md#optional-data-flow-analysis-4j4b) builds SSA for well-typed repository packages and runs VTA, adding CALLS edges with `dataflow` evidence for calls through function values. Off by default. All 16 edges it adds on this repository are correct, but it links only 6 of 4,389 dynamic sites, because most values come from outside the repository; extraction takes 39% longer. Bounded, cancellable between phases and skipped on type errors, size or failure.
    - **Neo4j removal (implemented):** HugeGraph with Milvus is the only graph database. The Neo4j store, driver, flags, compose service and manifest are gone; a configuration that still asks for Neo4j stops with an explanation, and upgraded installations re-index. Kubernetes manifests are marked outdated until 6a adds HugeGraph and Milvus.
 5. **Single sign-on**: OpenID Connect login and just-in-time accounts, built on the completed tenant and session rules.
+   - **5c, MCP request audit trail (planned):** today the MCP server audits only authentication failures, access denials and its few write tools. Ordinary tool calls appear only in anonymous daily usage counters. Every MCP request should be traceable afterwards to who made it, with which key, from which chat, and what it asked for.
+     - **What is recorded:** every request, whether accepted, refused or failed. That covers `initialize`, list calls, `prompts/get`, `tools/call`, resource reads, transport open, resume and close, and requests refused before a tool runs (bad key, root, missing or closed runtime session, policy denial, unknown tool).
+     - **Fields per event:**
+       - time and request ID;
+       - user ID and email;
+       - organisation;
+       - how they authenticated: the API key's ID, name and display prefix, never the key or its hash;
+       - runtime session ID (primary and parent) and the MCP transport session ID;
+       - client name and version from `initialize`, cleaned and capped, plus the bridge's version when one is used;
+       - client address (trusted proxies only) and user agent;
+       - JSON-RPC method, tool or prompt name and repository;
+       - outcome, status and error class;
+       - duration and response size.
+     - **Arguments:**
+       - Identifying fields are stored as values after `redact.Free` and length caps: repository, symbol or `qualified_id`, file paths, depth, limit, verbosity, memory scope.
+       - Free text (queries, task descriptions) is stored redacted and capped.
+       - Diffs, code, offloaded turns and other bulk inputs are never stored. They get a size and a SHA-256 digest of the canonical arguments, so a payload found later can be matched to its request.
+       - Results are never stored, only their size.
+     - **Storage:**
+       - The same append-only, hash-chained `events` log, with new columns for runtime session, transport session, client, method, tool, repository, duration, size, argument digest and redacted arguments.
+       - Appends are batched so busy agents do not serialise on the chain lock.
+       - It fails closed like the rest of the audit log: if the event cannot be written, the tool does not run.
+       - Same retention (`CODESYNAPSE_AUDIT_RETENTION_DAYS`), export and SIEM `audit` log line.
+     - **Who sees it:** platform admins see everything. Organisation owners and admins see their organisation's MCP events in the audit view, filterable by user, key, runtime session, tool and repository.
+     - **Tests:**
+       - every tool in the fixed policy table produces an event, including refusals;
+       - keys, key hashes and secrets in arguments never appear;
+       - bulk inputs leave only a digest;
+       - the chain still verifies under concurrent calls.
+     - **Open decision:** how much free text to keep. Queries help tracing but can carry personal data or pasted code; the default above keeps them redacted and capped.
 6. **Kubernetes deployment (final phase, deferred)**: update both development and production manifests after the application features, access/session controls, telemetry, ingestion work and SSO are complete. Existing local development stays independent of Kubernetes; nothing has been deployed to a production cluster. The earlier manifest work is parked on `feat/k8s-production` and must be rebased and revalidated against the completed application before reuse. Deliver in two parts:
    - **6a:** refresh the development overlay and build a production overlay whose data path is Apache-2.0 or permissive only (see the review below): HugeGraph and Milvus as the graph and vector stores, Milvus standalone on its own volume (no MinIO, which is AGPLv3), PostgreSQL (in-cluster StatefulSet, or a managed or CloudNativePG database by URL), VictoriaMetrics; Every secret the services need (`CODESYNAPSE_SECRET_KEY`, database, HugeGraph, metrics and API passwords) comes from one Secret with no defaults; HugeGraph refuses to start without its password; network policies let each store accept only the services that use it. TLS at the ingress with secure cookies and trusted proxies set. Memory requests and limits sized from measured ingest peaks, with `GOMEMLIMIT` so the API collects garbage before the kernel kills it. Backups (PostgreSQL dump, HugeGraph and Milvus volume snapshots, the audit export) and upgrade notes (migrations run on start; one API replica owns jobs and the scheduler). Tested on a throwaway kind cluster only.
    - **6b:** horizontal scaling: MCP and web as stateless Deployments with several replicas; the API's job runner and scheduler behind a leader lease so more than one API replica can serve requests; HugeGraph and Milvus in their clustered modes (Milvus then needs object storage that is not MinIO: a cloud S3 bucket or an Apache-2.0 store).
