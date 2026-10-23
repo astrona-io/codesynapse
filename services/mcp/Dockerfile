@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
     CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/codesynapse-mcp ./services/mcp/cmd/codesynapse-mcp
 
 # git is needed for impact analysis by base/head refs.
-FROM docker.io/library/alpine:3.22
+FROM docker.io/library/alpine:3.24
 RUN apk add --no-cache git ca-certificates && adduser -D -u 10001 codesynapse
 ENV CODESYNAPSE_MCP_TRANSPORT=http CODESYNAPSE_MCP_ADDR=0.0.0.0:8090
 LABEL org.opencontainers.image.licenses="Apache-2.0" org.opencontainers.image.vendor="Astrona.io"
