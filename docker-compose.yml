@@ -51,7 +51,7 @@ services:
   # Agent-memory vectors for the HugeGraph backend (standalone, embedded etcd,
   # local storage). Internal network only.
   milvus:
-    image: docker.io/milvusdb/milvus:v2.6.25
+    image: docker.io/milvusdb/milvus:v3.0.3
     profiles: [hugegraph]
     command: ["milvus", "run", "standalone"]
     environment:
