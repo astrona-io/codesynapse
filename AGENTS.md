@@ -36,7 +36,7 @@ If the codesynapse MCP server is connected (`just mcp` installs it for Claude Co
 
 The graph reflects the last ingest. Files you edited in this session may differ.
 
-When you change MCP tools, prompts or the server instructions, update `docs/AGENT_GUIDE.md` in the same change.
+When you change MCP tools, prompts or the server instructions, update `docs/AGENT_GUIDE.md` in the same change. A new tool goes into one toolset in `internal/toolsets` (`TestEveryToolInOneToolset`), and instruction text that names it goes into a clause tied to that toolset (`instructionRules` in `services/mcp/internal/mcpserver/toolsets.go`).
 
 ## Layout
 

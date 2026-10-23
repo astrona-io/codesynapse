@@ -36,6 +36,7 @@ spec:
             - {name: CODESYNAPSE_ALLOW_MEMORY, value: {{ .Values.features.allowMemory | quote }}}
             - {name: CODESYNAPSE_MCP_USAGE, value: {{ .Values.features.mcpUsage | quote }}}
             - {name: CODESYNAPSE_MCP_STATELESS, value: {{ .Values.mcp.stateless | quote }}}
+            - {name: CODESYNAPSE_MCP_TOOLSETS, value: {{ .Values.mcp.toolsets | quote }}}
             - {name: GOMEMLIMIT, value: {{ include "cs.gomemlimit" .Values.mcp.resources | quote }}}
           readinessProbe:
             httpGet: {path: /healthz, port: http}

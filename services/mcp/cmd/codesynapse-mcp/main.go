@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
@@ -49,6 +50,7 @@ type serveOptions struct {
 	catalog   bool
 	usage     bool
 	stateless bool
+	toolsets  string
 	apiURL    string
 }
 
@@ -62,6 +64,7 @@ func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.BoolVar(&o.memory, "allow-memory", app.Getenv("CODESYNAPSE_ALLOW_MEMORY", "true") == "true", "Enable the agent-memory tools upsert_graph_triples, search_graph_nodes and query_subgraph (writes only to the memory store)")
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", ""), "CodeSynapse API base URL; enables offload_turns (background triple extraction by the API's local model). Token from CODESYNAPSE_API_TOKEN")
 	f.BoolVar(&o.usage, "record-usage", app.Getenv("CODESYNAPSE_MCP_USAGE", "true") == "true", "Count sessions and tool calls per day, repository, tool and client for the Statistics page (never arguments or results)")
+	f.StringVar(&o.toolsets, "toolsets", app.Getenv("CODESYNAPSE_MCP_TOOLSETS", "all"), "Toolsets served to connections that name none: all, or core plus a comma list of "+strings.Join(mcpserver.ToolsetNames(), ", ")+". HTTP clients choose their own with /mcp?toolsets=...")
 	f.BoolVar(&o.stateless, "stateless", app.Getenv("CODESYNAPSE_MCP_STATELESS", "false") == "true", "HTTP: keep no transport session between requests, so any replica answers any request (docs/SAAS.md 6c)")
 	f.BoolVar(&o.reviews, "allow-reviews", app.Getenv("CODESYNAPSE_MCP_REVIEWS", "true") == "true", "Enable submit_review/update_review_comment (writes only to the review store)")
 	return nil
@@ -180,7 +183,13 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		}
 	}
 	opts.Runtime = mcpserver.NewRuntime(opts.Access, opts.StdioToken, os.Getenv("CODESYNAPSE_SESSION_ID"), os.Getenv("CODESYNAPSE_PARENT_SESSION_ID"))
-	server := mcpserver.New(r, version, opts)
+	sel, err := mcpserver.ParseToolsets(o.toolsets)
+	if err != nil {
+		return fmt.Errorf("--toolsets: %w", err)
+	}
+	opts.Toolsets = sel
+	servers := mcpserver.NewServers(r, version, opts)
+	server := servers.For(sel)
 
 	if o.transport == "stdio" {
 		// stdout carries the protocol; all logs go to stderr.
@@ -195,7 +204,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return fmt.Errorf("CODESYNAPSE_TRUSTED_PROXIES: %w", err)
 	}
-	handler := opts.Runtime.HTTP(mcpserver.MeasureHTTP(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server },
+	handler := opts.Runtime.HTTP(mcpserver.MeasureHTTP(mcp.NewStreamableHTTPHandler(servers.ForRequest,
 		// The tools send no server-initiated messages, so nothing needs a
 		// session; the runtime session is checked on every request anyway.
 		&mcp.StreamableHTTPOptions{Stateless: o.stateless})))
