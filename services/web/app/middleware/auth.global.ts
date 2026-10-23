@@ -2,7 +2,8 @@
 // accounts. The API enforces every rule itself; this only routes people.
 const OPEN = new Set(['/login', '/signup'])
 // Reachable without a session: the handover just ended root's.
-const PUBLIC = new Set(['/setup/done'])
+// The single sign-on return works signed in (linking) or not (sign-in).
+const PUBLIC = new Set(['/setup/done', '/sso/callback'])
 
 // The bootstrap root does governance only (docs/ROOT_BOOTSTRAP_PLAN.md).
 function rootMay(path: string): boolean {

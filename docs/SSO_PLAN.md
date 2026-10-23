@@ -2,7 +2,7 @@
 
 Each organisation can connect one OpenID Connect provider (Entra ID, Okta, Keycloak, Google Workspace, Authentik, …). People sign in through it, get an account on first use, and the provider's groups decide their role and teams in that organisation. Passwords keep working for everyone else.
 
-Phase 5a (this document) is the API and the rules. Phase 5b is the dashboard: the sign-in option, the callback page, the organisation's SSO settings and linked identities on the profile.
+Phase 5a is the API and the rules; phase 5b is the dashboard (see [Dashboard](#dashboard-5b)).
 
 ## Decisions
 
@@ -108,6 +108,18 @@ memstore and PostgreSQL pass the same contract (`accountstest.RunSSOStore`).
 | `CODESYNAPSE_PUBLIC_URL` | `http://localhost:3000` | The dashboard's address; the redirect URI is this plus `/sso/callback`. Register it with the provider. |
 | `CODESYNAPSE_SSO_ALLOW_PRIVATE` | `false` | Allow providers on private or loopback addresses. |
 | `CODESYNAPSE_SECRET_KEY` | — | Required; seals client secrets. |
+
+## Dashboard (5b)
+
+- **Proxy:** forwards the `cs_sso` binder cookie, and returns the API's `Set-Cookie` for it, only on `auth/sso/*` and `me/sso/*`. Like `cs_session`, it must look like a token.
+- **Sign-in page:** has a "Sign in with single sign-on" option that asks for the organisation's short name. An administrator's sign-in link, `/login?sso=<org>`, fills it in, and the last one used is remembered on that device. The browser follows the provider URL the API returns only if it is https.
+- **`/sso/callback`:** reachable signed in or not. It posts `code` and `state`, loads the session and goes to the API's `next` path, which must start with `/`. A provider error is shown as text, capped at 300 characters.
+- **Settings → Single sign-on (owners and admins):**
+  - shows the redirect URI to register and the sign-in link to share;
+  - edits the provider: name, issuer, client ID, secret (left empty to keep it), groups claim, role for everyone else, extra scopes, group → role and group → team mappings, on/off;
+  - disconnects after a confirmation.
+  Saving waits for the API's discovery check.
+- **Settings → Profile:** lists linked identities (organisation, issuer, email, linked, last used). Unlinking asks for confirmation. Each of the user's organisations has a button to link its provider; the API refuses organisations without one. Root sees neither.
 
 ## Tests
 

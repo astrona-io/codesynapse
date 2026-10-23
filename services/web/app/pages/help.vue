@@ -61,6 +61,13 @@ const terms = [
       <p v-if="!session.accounts.value" class="notice">This installation runs without accounts. To turn them on, configure PostgreSQL (<code>CODESYNAPSE_DATABASE_URL</code>); the docker compose setup does this for you.</p>
     </section>
 
+    <section id="sso" class="panel">
+      <h2>Single sign-on</h2>
+      <p>An organisation can let people sign in through its own identity provider (Entra ID, Okta, Keycloak, Google Workspace and other OpenID Connect providers). An owner or admin connects it under <NuxtLink to="/settings/sso">Settings → Single sign-on</NuxtLink>, registers the redirect URI shown there with the provider, and shares the sign-in link.</p>
+      <p>The first sign-in creates the account. The provider's groups then decide the role and teams on every sign-in; members you added by hand keep the role you gave them, and the last owner is never removed. Someone who already has an account with the same email links it from <NuxtLink to="/settings/profile">their profile</NuxtLink>, or is linked automatically if they are already a member of that organisation.</p>
+      <p class="muted small">For whoever runs CodeSynapse: set <code>CODESYNAPSE_PUBLIC_URL</code> to the dashboard's address (the redirect URI is that plus <code>/sso/callback</code>) and keep <code>CODESYNAPSE_SECRET_KEY</code>, which encrypts the providers' client secrets. Providers on a private network need <code>CODESYNAPSE_SSO_ALLOW_PRIVATE=true</code>.</p>
+    </section>
+
     <section id="git-tokens" class="panel">
       <h2>Private repositories</h2>
       <p>An organisation admin stores a <strong>read-only</strong> token for each Git host under <NuxtLink to="/settings/git-tokens">Settings → Git tokens</NuxtLink>: a GitHub fine-grained token with “Contents: read”, or a GitLab project or group token with “read_repository”. CodeSynapse encrypts it and uses it only to clone and sync your organisation’s repositories.</p>
