@@ -561,15 +561,17 @@ func licensesCmd(ec *app.Env) *cobra.Command {
 
 // mcpInstallOptions configures `codesynapse mcp install`.
 type mcpInstallOptions struct {
-	EC   *app.Env
-	url  string
-	yes  bool
-	only []string
+	EC     *app.Env
+	url    string
+	apiURL string
+	yes    bool
+	only   []string
 }
 
 func (o *mcpInstallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f := o.EC.Command.Flags()
 	f.StringVar(&o.url, "url", app.Getenv("CODESYNAPSE_MCP_URL", "http://localhost:8090/mcp"), "MCP endpoint to register")
+	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "API the Claude Code bridge registers chat sessions with")
 	f.BoolVarP(&o.yes, "yes", "y", false, "Install into every detected agent without asking")
 	f.StringSliceVar(&o.only, "only", nil, "Limit to these agents (claude, codex, gemini, opencode, cursor, project)")
 	return nil
@@ -591,7 +593,15 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return err
 	}
-	server := agentcfg.Server{URL: o.url, Token: os.Getenv(agentcfg.TokenEnv)}
+	bin, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if strings.Contains(bin, "go-build") {
+		// `go run` builds into a temporary folder the bridge would vanish from.
+		return errors.New("run an installed codesynapse binary (go install ./cmd/codesynapse, or just mcp), not go run")
+	}
+	server := agentcfg.Server{URL: o.url, Token: os.Getenv(agentcfg.TokenEnv), Command: bin, APIURL: o.apiURL, StoreToken: storeToken}
 	in := bufio.NewReader(o.EC.Stdin)
 	installed := 0
 	for _, t := range agentcfg.Detect(home, cwd) {
@@ -635,6 +645,11 @@ func mcpCmd(ec *app.Env) *cobra.Command {
 	parent.AddCommand(app.NewSubCommand("install", o, ec).
 		WithShortDesc("Register the MCP server with Claude Code, Codex, Gemini, OpenCode, Cursor or a project .mcp.json").
 		WithExample("  codesynapse mcp install\n  codesynapse mcp install --yes --only claude,codex").
+		WithNoArgs().
+		Build())
+	parent.AddCommand(app.NewSubCommand("bridge", &mcpBridgeOptions{EC: ec}, ec).
+		WithShortDesc("Stdio MCP server for one chat: registers the chat's session and forwards to the HTTP server").
+		WithLongDesc("Claude Code starts this per chat (`codesynapse mcp install` configures it). It reads the chat ID from CLAUDE_CODE_SESSION_ID (or CODESYNAPSE_SESSION_ID), registers it through the API with the key from CODESYNAPSE_API_TOKEN or the file `mcp install` wrote, and forwards every MCP message with the key and the runtime session headers.").
 		WithNoArgs().
 		Build())
 	parent.AddCommand(app.NewSubCommand("agents-md [dir]", &mcpAgentsMdOptions{EC: ec}, ec).

@@ -21,6 +21,9 @@ const Name = "codesynapse"
 // TokenEnv is the environment variable agents read the bearer token from.
 const TokenEnv = "CODESYNAPSE_MCP_TOKEN" //nolint:gosec // env var name
 
+// personalKeyPrefix mirrors accounts.KeyPrefix without pulling in the accounts package.
+const personalKeyPrefix = "csk_"
+
 // Runtime variables must be supplied by the launcher for one chat thread.
 const (
 	SessionEnv       = "CODESYNAPSE_SESSION_ID"
@@ -31,6 +34,13 @@ const (
 type Server struct {
 	URL   string
 	Token string
+	// Command is the codesynapse binary Claude Code starts as a per-chat
+	// bridge, and APIURL the API it registers the chat with.
+	Command string
+	APIURL  string
+	// StoreToken keeps the key in the user's config folder for the bridge,
+	// so Claude Code's settings never hold it.
+	StoreToken func(token string) (string, error)
 }
 
 // Target is one agent configuration that can be installed.
@@ -53,7 +63,7 @@ func Detect(home, cwd string) []Target {
 	var out []Target
 	if _, err := exec.LookPath("claude"); err == nil {
 		out = append(out, Target{
-			ID: "claude", Description: "Claude Code (user scope, all projects)", StoresSecret: true,
+			ID: "claude", Description: "Claude Code (user scope, all projects; one bridge per chat)",
 			install: installClaude,
 		})
 	}
@@ -130,13 +140,27 @@ func run(ctx context.Context, name string, args ...string) error {
 	return nil
 }
 
+// installClaude registers `codesynapse mcp bridge` as a stdio server. Claude
+// Code gives stdio servers the chat's ID (CLAUDE_CODE_SESSION_ID) but not
+// remote servers or their header helpers, and the MCP server needs that ID
+// in its runtime headers.
 func installClaude(ctx context.Context, s Server) error {
 	if s.Token == "" {
-		return errors.New("claude needs the token itself; set " + TokenEnv)
+		return errors.New("the bridge needs your personal key; set " + TokenEnv)
+	}
+	if !strings.HasPrefix(s.Token, personalKeyPrefix) {
+		// The .env tokens are installation tokens; session registration refuses them.
+		return fmt.Errorf("%s is not a personal key (%s…); create one in the dashboard under Settings → API keys", TokenEnv, personalKeyPrefix)
+	}
+	if s.Command == "" || s.StoreToken == nil {
+		return errors.New("no codesynapse binary to start as the bridge")
+	}
+	if _, err := s.StoreToken(s.Token); err != nil {
+		return err
 	}
 	cfg, err := json.Marshal(map[string]any{
-		"type": "http", "url": s.URL,
-		"headers": runtimeHeaders("Bearer "+s.Token, "${"+SessionEnv+"}", "${"+ParentSessionEnv+"}"),
+		"type": "stdio", "command": s.Command,
+		"args": []string{"mcp", "bridge", "--url", s.URL, "--api-url", s.APIURL},
 	})
 	if err != nil {
 		return err

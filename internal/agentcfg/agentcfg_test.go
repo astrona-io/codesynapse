@@ -49,6 +49,16 @@ func TestMergeJSONRefusesJSONC(t *testing.T) {
 	assert.Equal(t, string(data), original, "file untouched")
 }
 
+func TestInstallClaudeRefusesInstallationToken(t *testing.T) {
+	stored := false
+	s := Server{Token: "0123456789abcdef", Command: "/bin/codesynapse", StoreToken: func(string) (string, error) {
+		stored = true
+		return "", nil
+	}}
+	assert.Error(t, installClaude(t.Context(), s))
+	assert.False(t, stored, "token not stored")
+}
+
 func TestDetectAlwaysOffersProject(t *testing.T) {
 	targets := Detect(t.TempDir(), t.TempDir())
 	ids := map[string]bool{}
