@@ -1,0 +1,15 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/astrona-io/codesynapse/internal/agentctx
+cpu: Apple M5 Pro
+BenchmarkAuditMinimalContext/small-4         	     540	   2186634 ns/op	 3389873 B/op	   10573 allocs/op
+BenchmarkAuditMinimalContext/small-4         	     562	   2320174 ns/op	 3392378 B/op	   10539 allocs/op
+BenchmarkAuditMinimalContext/small-4         	     555	   2292436 ns/op	 3389963 B/op	   10441 allocs/op
+BenchmarkAuditMinimalContext/large-4         	      10	 101066404 ns/op	219648771 B/op	 1523165 allocs/op
+BenchmarkAuditMinimalContext/large-4         	      12	  99349771 ns/op	219603312 B/op	 1520558 allocs/op
+BenchmarkAuditMinimalContext/large-4         	      12	  97034562 ns/op	219671413 B/op	 1524814 allocs/op
+BenchmarkAuditMinimalContext/escaped-4       	      10	 102595683 ns/op	220569524 B/op	 1518165 allocs/op
+BenchmarkAuditMinimalContext/escaped-4       	      10	 108546171 ns/op	220637848 B/op	 1522443 allocs/op
+BenchmarkAuditMinimalContext/escaped-4       	      10	 104529700 ns/op	220621294 B/op	 1521409 allocs/op
+PASS
+ok  	github.com/astrona-io/codesynapse/internal/agentctx	11.279s

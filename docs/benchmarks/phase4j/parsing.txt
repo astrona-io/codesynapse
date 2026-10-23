@@ -1,0 +1,30 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/astrona-io/codesynapse/internal/ingest/golang
+cpu: Apple M5 Pro
+BenchmarkAuditGoExtract/functions_10-18         	       3	  38083819 ns/op	   0.02 MB/s	  296053 B/op	    2459 allocs/op
+BenchmarkAuditGoExtract/functions_10-18         	       3	  27192097 ns/op	   0.03 MB/s	  274640 B/op	    2329 allocs/op
+BenchmarkAuditGoExtract/functions_10-18         	       3	  26074167 ns/op	   0.03 MB/s	  277373 B/op	    2334 allocs/op
+BenchmarkAuditGoExtract/functions_1000-18       	       3	  43831042 ns/op	   1.82 MB/s	12698434 B/op	  120311 allocs/op
+BenchmarkAuditGoExtract/functions_1000-18       	       3	  45024361 ns/op	   1.77 MB/s	12687688 B/op	  120297 allocs/op
+BenchmarkAuditGoExtract/functions_1000-18       	       3	  42992139 ns/op	   1.86 MB/s	12686757 B/op	  120295 allocs/op
+PASS
+ok  	github.com/astrona-io/codesynapse/internal/ingest/golang	0.894s
+goos: darwin
+goarch: arm64
+pkg: github.com/astrona-io/codesynapse/internal/ingest/lang
+cpu: Apple M5 Pro
+BenchmarkAuditStructuralParse/python/functions_10-18         	       3	    537361 ns/op	   1.43 MB/s	   26333 B/op	     194 allocs/op
+BenchmarkAuditStructuralParse/python/functions_10-18         	       3	    585486 ns/op	   1.32 MB/s	   26333 B/op	     194 allocs/op
+BenchmarkAuditStructuralParse/python/functions_10-18         	       3	    518361 ns/op	   1.49 MB/s	   26333 B/op	     194 allocs/op
+BenchmarkAuditStructuralParse/python/functions_1000-18       	       3	  25109097 ns/op	   3.22 MB/s	 1243477 B/op	   18023 allocs/op
+BenchmarkAuditStructuralParse/python/functions_1000-18       	       3	  19143069 ns/op	   4.22 MB/s	 1255941 B/op	   18026 allocs/op
+BenchmarkAuditStructuralParse/python/functions_1000-18       	       3	  18630667 ns/op	   4.34 MB/s	 1255946 B/op	   18026 allocs/op
+BenchmarkAuditStructuralParse/typescript/functions_10-18     	       3	    289861 ns/op	   3.17 MB/s	   27432 B/op	     118 allocs/op
+BenchmarkAuditStructuralParse/typescript/functions_10-18     	       3	    289958 ns/op	   3.17 MB/s	   27432 B/op	     118 allocs/op
+BenchmarkAuditStructuralParse/typescript/functions_10-18     	       3	    280194 ns/op	   3.28 MB/s	   14925 B/op	     115 allocs/op
+BenchmarkAuditStructuralParse/typescript/functions_1000-18   	       3	  32224389 ns/op	   2.97 MB/s	 1371125 B/op	   10030 allocs/op
+BenchmarkAuditStructuralParse/typescript/functions_1000-18   	       3	  31989014 ns/op	   2.99 MB/s	 1371125 B/op	   10030 allocs/op
+BenchmarkAuditStructuralParse/typescript/functions_1000-18   	       3	  32163070 ns/op	   2.98 MB/s	 1371125 B/op	   10030 allocs/op
+PASS
+ok  	github.com/astrona-io/codesynapse/internal/ingest/lang	0.767s

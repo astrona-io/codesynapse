@@ -1,0 +1,22 @@
+=== RUN   TestArchitectureAuditReport
+    audit_test.go:153: architecture report: /private/tmp/codesynapse-4j-indexing-final.json
+--- PASS: TestArchitectureAuditReport (8.05s)
+PASS
+        8.26 real         4.37 user         4.15 sys
+            59621376  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+             1071342  page reclaims
+                1600  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                5390  signals received
+                2312  voluntary context switches
+               98929  involuntary context switches
+         61474938821  instructions retired
+         18551484462  cycles elapsed
+            46154304  peak memory footprint

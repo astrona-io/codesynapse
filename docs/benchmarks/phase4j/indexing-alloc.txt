@@ -1,0 +1,19 @@
+File: codesynapse-4j-ingest.test
+Type: alloc_space
+Time: 2026-10-23 07:23:53 CEST
+Showing nodes accounting for 3363.70MB, 77.98% of 4313.32MB total
+Dropped 401 nodes (cum <= 21.57MB)
+Showing top 12 nodes out of 104
+      flat  flat%   sum%        cum   cum%
+ 1198.85MB 27.79% 27.79%  1198.85MB 27.79%  github.com/astrona-io/codesynapse/internal/model.(*Graph).Nodes (inline)
+  294.64MB  6.83% 34.63%   299.69MB  6.95%  github.com/astrona-io/codesynapse/internal/arch.parseDoc
+  277.12MB  6.42% 41.05%   309.26MB  7.17%  github.com/astrona-io/codesynapse/internal/ingest/docs.addDocument
+  274.83MB  6.37% 47.42%   902.94MB 20.93%  github.com/astrona-io/codesynapse/internal/store/memory.(*Store).ReplaceRepo
+  202.71MB  4.70% 52.12%   202.71MB  4.70%  github.com/astrona-io/codesynapse/internal/model.(*Graph).AddNode (inline)
+  200.38MB  4.65% 56.77%   289.90MB  6.72%  github.com/astrona-io/codesynapse/internal/identity.Reconcile
+  199.66MB  4.63% 61.40%   628.12MB 14.56%  github.com/astrona-io/codesynapse/internal/store.Replacement
+  191.65MB  4.44% 65.84%   191.65MB  4.44%  reflect.unsafe_New
+  141.76MB  3.29% 69.13%   218.27MB  5.06%  github.com/astrona-io/codesynapse/internal/metrics.newIndex
+  134.42MB  3.12% 72.24%   216.82MB  5.03%  github.com/astrona-io/codesynapse/internal/cleanup.Analyze
+  127.10MB  2.95% 75.19%   127.10MB  2.95%  bytes.Clone (inline)
+  120.57MB  2.80% 77.98%   588.03MB 13.63%  github.com/astrona-io/codesynapse/internal/metrics.benchmark

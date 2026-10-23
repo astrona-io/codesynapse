@@ -1,6 +1,6 @@
 # Code architecture audit and upgrade assessment
 
-Status: planned, SaaS phase 4j. Run after repository configuration/annotation (4h) and ingestion transparency (4i), before SSO and the final Kubernetes phase. Use the retrieval benchmarks from 4f and ingestion measurements from 4i as the baseline.
+Status: assessment completed, SaaS phase 4j (2026-10-23). See the [audit results and proposed upgrade PRs](CODE_ARCHITECTURE_AUDIT.md) and [reproduction artifacts](benchmarks/phase4j/README.md). Production upgrades and dependencies remain conditional; this phase adds assessment tests and documentation only. It follows repository configuration/annotation (4h) and ingestion transparency (4i), before SSO and the final Kubernetes phase.
 
 ## Purpose and scope
 

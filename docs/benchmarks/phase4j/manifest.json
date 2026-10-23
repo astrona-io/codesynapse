@@ -1,0 +1,24 @@
+{
+  "base_revision": "ddf78a3ce7bcddd4f162d3af70b99d183ce86eb0",
+  "measured_at": "2026-10-23",
+  "harness_sha256": {
+    "internal/ingest/audit_test.go": "d2ec314556aa5a25c4b134df10bb8b7b173bda467d24936c4aabba30b4f38618",
+    "internal/ingest/golang/audit_test.go": "b3c650075069e225ae48f8fea252aeeca1b0b9ec51134c3d0ef7099134546d9b",
+    "internal/ingest/lang/audit_test.go": "d4b0ffa90177809e9306871e374c366db0763cfe9f4593caf774baddd23b04d0",
+    "internal/gitx/audit_diff_test.go": "dafa86a80bfdae85935a66266ea2ca981ccec5d22c32a406754f25312489b5c9",
+    "internal/agentctx/audit_context_test.go": "5b5705be8f7e550027cb38116cb836cb48e02505a1312943b1032d0559396a53",
+    "services/api/internal/fixes/audit_rewrite_test.go": "432c1fe712b701525ab91fc12ee293678c1780ca91820ae2ac686d39b20f777f"
+  },
+  "artifact_sha256": {
+    "indexing.json": "9f5c920a10335d5c7b72452881cd0b14d83fe74e17a0fb321c587dc28853eedd",
+    "indexing-process.txt": "fd324b499e83b6041ee4eb0da64f9bcbf89aebe4ad8ee83ff2ded547e8cf3743",
+    "indexing-alloc.txt": "5ac8feec57a3f6dc05a34e253515d6c55bb84f2066a690173deea54ca4c216c9",
+    "parsing.txt": "e9c55369962bb1878b75ae11a2424ea2d20d1d6ea36866b66cd6937aa4bf8a15",
+    "typescript-cpu.txt": "402a7dc2f5e657829165be9e1d498dbeb228c24658a4fb5ccce07626d1786662",
+    "diff.txt": "2d44a06f7976b8149e2495be3243a13a3ed789fdc41045e9ea76c630f5a0ff21",
+    "context.txt": "09c66b73071a62bf0528c49665e66ca8465ebee5c022cc9b11052df566c97f41",
+    "context-cpu.txt": "971415d2bc4621a2c45aa96a5c432e469a8d3a4c7a638c8092f73bacff3e58df",
+    "context-alloc.txt": "de2ee1659d46544ec69ce5b43f2aec47f8406a350dffc8dfd2d5ae33a0215894",
+    "retrieval.json": "ff68219a65c42c833095a3c37698efc3b45e30be0901625ea8216840b95ae45f"
+  }
+}

@@ -1,0 +1,458 @@
+{
+  "fixture_version": "retrieval-v1",
+  "run_label": "phase4j-ddf78a3",
+  "fixture_sha256": "f71a25e030badb4d6fbe2a6834e924a67ef14105ed8eb210773575d4dffa084e",
+  "policy_sha256": "5dbc27b408f32b49615bc8bc6e48ba697a6ded68b95febfee0f407c8015e7227",
+  "generated_at": "2026-10-23T05:13:24Z",
+  "go": "go1.27.3",
+  "os": "darwin",
+  "arch": "arm64",
+  "cpu_description": "Apple M5 Pro; 48 GiB RAM",
+  "logical_cpus": 18,
+  "gomaxprocs": 4,
+  "concurrency": 1,
+  "source_files": 4,
+  "source_bytes": 1134,
+  "graph_nodes": 15,
+  "estimator": "ceil(serialized UTF-8 bytes / 4), not a model tokenizer",
+  "envelope": "MCP SDK v1.8.0 default negotiation; structuredContent plus duplicate content text; serverInfo codesynapse/fixture-v1; resultType complete; JSON-RPC id 1; no HTTP/SSE framing",
+  "scope": "synthetic versioned source/metadata fixture; in-process memory store; fresh-store cold excludes construction and is not OS cache cold; warm excludes envelope serialization (reported separately); evidence coverage is exact fixture facts, not LLM answer quality; no auth, network, embedding model or Milvus benchmark; null reduction means no baseline or incomplete evidence; successful results include both SDK structuredContent and duplicate text content in both baselines; shared one-time tool schemas/system prefix and HTTP/SSE transport framing excluded",
+  "complete_raw_tokens": 3108,
+  "complete_response_tokens": 4523,
+  "aggregate_reduction_percent": -45.53,
+  "tasks": [
+    {
+      "task": "symbol-explanation",
+      "raw_bytes": 2286,
+      "response_bytes": 3223,
+      "raw_tokens": 572,
+      "response_tokens": 806,
+      "required_evidence": 7,
+      "found_evidence": 7,
+      "complete": true,
+      "reduction_percent": -40.91,
+      "tool_calls": 1,
+      "cold_errors": 0,
+      "warm_errors": 0,
+      "expected_error": false,
+      "cold_fresh_store": {
+        "samples": 100,
+        "p50_ms": 0.011708,
+        "p95_ms": 0.031125,
+        "p99_ms": 0.11375
+      },
+      "warm_same_store": {
+        "samples": 100,
+        "p50_ms": 0.0115,
+        "p95_ms": 0.020875,
+        "p99_ms": 0.049709
+      },
+      "serialization": {
+        "samples": 100,
+        "p50_ms": 0.008292,
+        "p95_ms": 0.032833,
+        "p99_ms": 0.103833
+      },
+      "warm_total": {
+        "samples": 100,
+        "p50_ms": 0.020041,
+        "p95_ms": 0.088042,
+        "p99_ms": 0.152042
+      }
+    },
+    {
+      "task": "callers-callees",
+      "raw_bytes": 2286,
+      "response_bytes": 3001,
+      "raw_tokens": 572,
+      "response_tokens": 751,
+      "required_evidence": 5,
+      "found_evidence": 5,
+      "complete": true,
+      "reduction_percent": -31.29,
+      "tool_calls": 1,
+      "cold_errors": 0,
+      "warm_errors": 0,
+      "expected_error": false,
+      "cold_fresh_store": {
+        "samples": 100,
+        "p50_ms": 0.012375,
+        "p95_ms": 0.028834,
+        "p99_ms": 0.107958
+      },
+      "warm_same_store": {
+        "samples": 100,
+        "p50_ms": 0.012167,
+        "p95_ms": 0.030125,
+        "p99_ms": 0.081708
+      },
+      "serialization": {
+        "samples": 100,
+        "p50_ms": 0.007833,
+        "p95_ms": 0.02075,
+        "p99_ms": 0.061833
+      },
+      "warm_total": {
+        "samples": 100,
+        "p50_ms": 0.020041,
+        "p95_ms": 0.050958,
+        "p99_ms": 0.120667
+      }
+    },
+    {
+      "task": "change-impact",
+      "raw_bytes": 2286,
+      "response_bytes": 5253,
+      "raw_tokens": 572,
+      "response_tokens": 1314,
+      "required_evidence": 5,
+      "found_evidence": 5,
+      "complete": true,
+      "reduction_percent": -129.72,
+      "tool_calls": 1,
+      "cold_errors": 0,
+      "warm_errors": 0,
+      "expected_error": false,
+      "cold_fresh_store": {
+        "samples": 100,
+        "p50_ms": 0.019625,
+        "p95_ms": 0.065375,
+        "p99_ms": 0.08425
+      },
+      "warm_same_store": {
+        "samples": 100,
+        "p50_ms": 0.019042,
+        "p95_ms": 0.078333,
+        "p99_ms": 0.123625
+      },
+      "serialization": {
+        "samples": 100,
+        "p50_ms": 0.011792,
+        "p95_ms": 0.026084,
+        "p99_ms": 0.063625
+      },
+      "warm_total": {
+        "samples": 100,
+        "p50_ms": 0.030917,
+        "p95_ms": 0.098875,
+        "p99_ms": 0.144791
+      }
+    },
+    {
+      "task": "error-identifier",
+      "raw_bytes": 817,
+      "response_bytes": 1093,
+      "raw_tokens": 205,
+      "response_tokens": 274,
+      "required_evidence": 2,
+      "found_evidence": 2,
+      "complete": true,
+      "reduction_percent": -33.66,
+      "tool_calls": 2,
+      "cold_errors": 0,
+      "warm_errors": 0,
+      "expected_error": false,
+      "cold_fresh_store": {
+        "samples": 100,
+        "p50_ms": 0.005,
+        "p95_ms": 0.009625,
+        "p99_ms": 0.012583
+      },
+      "warm_same_store": {
+        "samples": 100,
+        "p50_ms": 0.004708,
+        "p95_ms": 0.006708,
+        "p99_ms": 0.010125
+      },
+      "serialization": {
+        "samples": 100,
+        "p50_ms": 0.003917,
+        "p95_ms": 0.006042,
+        "p99_ms": 0.011125
+      },
+      "warm_total": {
+        "samples": 100,
+        "p50_ms": 0.008625,
+        "p95_ms": 0.012375,
+        "p99_ms": 0.024083
+      }
+    },
+    {
+      "task": "policy-clause",
+      "raw_bytes": 817,
+      "response_bytes": 1089,
+      "raw_tokens": 205,
+      "response_tokens": 273,
+      "required_evidence": 2,
+      "found_evidence": 2,
+      "complete": true,
+      "reduction_percent": -33.17,
+      "tool_calls": 2,
+      "cold_errors": 0,
+      "warm_errors": 0,
+      "expected_error": false,
+      "cold_fresh_store": {
+        "samples": 100,
+        "p50_ms": 0.005292,
+        "p95_ms": 0.009292,
+        "p99_ms": 0.01175
+      },
+      "warm_same_store": {
+        "samples": 100,
+        "p50_ms": 0.005,
+        "p95_ms": 0.007041,
+        "p99_ms": 0.010458
+      },
+      "serialization": {
+        "samples": 100,
+        "p50_ms": 0.003875,
+        "p95_ms": 0.0065,
+        "p99_ms": 0.010542
+      },
+      "warm_total": {
+        "samples": 100,
+        "p50_ms": 0.008917,
+        "p95_ms": 0.013875,
+        "p99_ms": 0.021083
+      }
+    },
+    {
+      "task": "hostname",
+      "raw_bytes": 817,
+      "response_bytes": 1137,
+      "raw_tokens": 205,
+      "response_tokens": 285,
+      "required_evidence": 2,
+      "found_evidence": 2,
+      "complete": true,
+      "reduction_percent": -39.02,
+      "tool_calls": 2,
+      "cold_errors": 0,
+      "warm_errors": 0,
+      "expected_error": false,
+      "cold_fresh_store": {
+        "samples": 100,
+        "p50_ms": 0.005167,
+        "p95_ms": 0.011083,
+        "p99_ms": 0.031375
+      },
+      "warm_same_store": {
+        "samples": 100,
+        "p50_ms": 0.004875,
+        "p95_ms": 0.008917,
+        "p99_ms": 0.019042
+      },
+      "serialization": {
+        "samples": 100,
+        "p50_ms": 0.004,
+        "p95_ms": 0.007584,
+        "p99_ms": 0.011708
+      },
+      "warm_total": {
+        "samples": 100,
+        "p50_ms": 0.008917,
+        "p95_ms": 0.017875,
+        "p99_ms": 0.030792
+      }
+    },
+    {
+      "task": "mixed-language",
+      "raw_bytes": 817,
+      "response_bytes": 1129,
+      "raw_tokens": 205,
+      "response_tokens": 283,
+      "required_evidence": 2,
+      "found_evidence": 2,
+      "complete": true,
+      "reduction_percent": -38.05,
+      "tool_calls": 2,
+      "cold_errors": 0,
+      "warm_errors": 0,
+      "expected_error": false,
+      "cold_fresh_store": {
+        "samples": 100,
+        "p50_ms": 0.006583,
+        "p95_ms": 0.009875,
+        "p99_ms": 0.013417
+      },
+      "warm_same_store": {
+        "samples": 100,
+        "p50_ms": 0.006292,
+        "p95_ms": 0.007583,
+        "p99_ms": 0.012459
+      },
+      "serialization": {
+        "samples": 100,
+        "p50_ms": 0.004208,
+        "p95_ms": 0.007334,
+        "p99_ms": 0.009167
+      },
+      "warm_total": {
+        "samples": 100,
+        "p50_ms": 0.010541,
+        "p95_ms": 0.014459,
+        "p99_ms": 0.021709
+      }
+    },
+    {
+      "task": "no-match",
+      "raw_bytes": 0,
+      "response_bytes": 257,
+      "raw_tokens": 0,
+      "response_tokens": 65,
+      "required_evidence": 0,
+      "found_evidence": 0,
+      "complete": true,
+      "reduction_percent": null,
+      "tool_calls": 1,
+      "cold_errors": 100,
+      "warm_errors": 100,
+      "expected_error": true,
+      "cold_fresh_store": {
+        "samples": 100,
+        "p50_ms": 0.001541,
+        "p95_ms": 0.002791,
+        "p99_ms": 0.003292
+      },
+      "warm_same_store": {
+        "samples": 100,
+        "p50_ms": 0.001417,
+        "p95_ms": 0.001792,
+        "p99_ms": 0.003541
+      },
+      "serialization": {
+        "samples": 100,
+        "p50_ms": 0.002083,
+        "p95_ms": 0.004542,
+        "p99_ms": 0.021708
+      },
+      "warm_total": {
+        "samples": 100,
+        "p50_ms": 0.003583,
+        "p95_ms": 0.006542,
+        "p99_ms": 0.025
+      }
+    },
+    {
+      "task": "foreign-id",
+      "raw_bytes": 0,
+      "response_bytes": 214,
+      "raw_tokens": 0,
+      "response_tokens": 54,
+      "required_evidence": 0,
+      "found_evidence": 0,
+      "complete": true,
+      "reduction_percent": null,
+      "tool_calls": 1,
+      "cold_errors": 100,
+      "warm_errors": 100,
+      "expected_error": true,
+      "cold_fresh_store": {
+        "samples": 100,
+        "p50_ms": 0.000541,
+        "p95_ms": 0.001167,
+        "p99_ms": 0.001792
+      },
+      "warm_same_store": {
+        "samples": 100,
+        "p50_ms": 0.0005,
+        "p95_ms": 0.000625,
+        "p99_ms": 0.000834
+      },
+      "serialization": {
+        "samples": 100,
+        "p50_ms": 0.001792,
+        "p95_ms": 0.003916,
+        "p99_ms": 0.006042
+      },
+      "warm_total": {
+        "samples": 100,
+        "p50_ms": 0.002375,
+        "p95_ms": 0.004625,
+        "p99_ms": 0.006917
+      }
+    },
+    {
+      "task": "minimal-context",
+      "raw_bytes": 2286,
+      "response_bytes": 2147,
+      "raw_tokens": 572,
+      "response_tokens": 537,
+      "required_evidence": 2,
+      "found_evidence": 2,
+      "complete": true,
+      "reduction_percent": 6.12,
+      "tool_calls": 1,
+      "cold_errors": 0,
+      "warm_errors": 0,
+      "expected_error": false,
+      "cold_fresh_store": {
+        "samples": 100,
+        "p50_ms": 0.016,
+        "p95_ms": 0.02725,
+        "p99_ms": 0.056958
+      },
+      "warm_same_store": {
+        "samples": 100,
+        "p50_ms": 0.015625,
+        "p95_ms": 0.0345,
+        "p99_ms": 0.098792
+      },
+      "serialization": {
+        "samples": 100,
+        "p50_ms": 0.00575,
+        "p95_ms": 0.011833,
+        "p99_ms": 0.022416
+      },
+      "warm_total": {
+        "samples": 100,
+        "p50_ms": 0.021459,
+        "p95_ms": 0.049583,
+        "p99_ms": 0.121375
+      }
+    }
+  ],
+  "memory": {
+    "entities": 5000,
+    "query": "payments settlement",
+    "k": 8,
+    "lexical": {
+      "samples": 100,
+      "p50_ms": 4.587084,
+      "p95_ms": 4.799167,
+      "p99_ms": 4.851166
+    },
+    "fusion_synthetic_dense": {
+      "samples": 100,
+      "p50_ms": 0.001042,
+      "p95_ms": 0.002042,
+      "p99_ms": 0.003458
+    },
+    "migration_threshold_ms": 50,
+    "migration_threshold_exceeded": false,
+    "lexical_expected_entity_found": true,
+    "synthetic_dense_expected_entity_found": true,
+    "fused_expected_entity_found": true,
+    "synthetic_quality_at_k": {
+      "dense": {
+        "returned": 2,
+        "relevant": 1,
+        "precision": 0.5,
+        "recall": 1
+      },
+      "fused": {
+        "returned": 2,
+        "relevant": 1,
+        "precision": 0.5,
+        "recall": 1
+      },
+      "lexical": {
+        "returned": 1,
+        "relevant": 1,
+        "precision": 1,
+        "recall": 1
+      }
+    },
+    "note": "BM25 over 5,000 short names, aliases and types; Go RRF k=60 over real lexical results and fixed synthetic dense candidates; one relevant fixture entity; no embedding latency, model accuracy, vector backend, graph hydration or session-memory measurement"
+  }
+}
