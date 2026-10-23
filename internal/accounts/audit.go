@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 )
@@ -16,6 +18,12 @@ const (
 	Failure = "failure"
 )
 
+// Bounds on the arguments an MCP request leaves in the audit log.
+const (
+	MaxMCPArgs     = 32
+	MaxMCPArgValue = 400
+)
+
 // DefaultRetention keeps audit entries a little over a year.
 const DefaultRetention = 400 * 24 * time.Hour
 
@@ -23,12 +31,17 @@ const DefaultRetention = 400 * 24 * time.Hour
 const GenesisHash = "0000000000000000000000000000000000000000000000000000000000000000"
 
 // ChainHash is SHA-256 over PrevHash and the entry's fields (not its ID,
-// which the database assigns, nor Hash itself).
+// which the database assigns, nor Hash itself). MCP details join the list
+// only when present, so entries written before they existed still verify.
 func (e Event) ChainHash() string {
-	canon, _ := json.Marshal([]any{ //nolint:errcheck // plain values always marshal
+	fields := []any{
 		e.PrevHash, e.At.UTC().Format(time.RFC3339Nano), e.RequestID, e.UserID, e.ActorEmail, e.Via, e.KeyID,
 		e.OrgID, e.IP, e.UserAgent, e.Action, e.Target, e.Outcome, e.Status, e.Detail,
-	})
+	}
+	if e.MCP != nil {
+		fields = append(fields, e.MCP)
+	}
+	canon, _ := json.Marshal(fields) //nolint:errcheck // plain values always marshal
 	h := sha256.Sum256(canon)
 	return hex.EncodeToString(h[:])
 }
@@ -49,6 +62,23 @@ func (e *Event) clean() {
 	}
 	e.RequestID, e.UserAgent, e.Target, e.Detail = clip(e.RequestID, 64), clip(e.UserAgent, 200), clip(e.Target, 300), clip(e.Detail, 500)
 	e.Action, e.ActorEmail, e.IP = clip(e.Action, 120), clip(e.ActorEmail, 254), clip(e.IP, 64)
+	if m := e.MCP; m != nil {
+		c := *m
+		c.Method, c.Name, c.Repo = clip(c.Method, 64), clip(c.Name, 120), clip(c.Repo, 300)
+		c.SessionID, c.TransportID, c.Client = clip(c.SessionID, 128), clip(c.TransportID, 128), clip(c.Client, 200)
+		c.ArgsDigest, c.Error = clip(c.ArgsDigest, 120), clip(c.Error, 300)
+		if len(c.Args) > 0 {
+			args := make(map[string]string, min(len(c.Args), MaxMCPArgs))
+			for _, k := range slices.Sorted(maps.Keys(c.Args)) {
+				if len(args) == MaxMCPArgs {
+					break
+				}
+				args[clip(k, 64)] = clip(c.Args[k], MaxMCPArgValue)
+			}
+			c.Args = args
+		}
+		e.MCP = &c
+	}
 	if e.Outcome == "" {
 		e.Outcome = Success
 	}

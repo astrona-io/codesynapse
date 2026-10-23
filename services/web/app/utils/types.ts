@@ -353,6 +353,12 @@ export interface AdminHealth {
 export interface AuditEvent {
   id: number; at: string; request_id?: string; user_id?: string; actor_email?: string; via?: string; key_id?: string; org_id?: string
   ip?: string; user_agent?: string; action: string; target?: string; outcome: string; status?: number; detail?: string; hash: string
+  mcp?: AuditMCP
+}
+// An MCP request in the audit log (docs/SAAS.md, 5c).
+export interface AuditMCP {
+  method: string; name?: string; repo?: string; session_id?: string; transport_id?: string; client?: string
+  duration_ms: number; bytes: number; args_digest?: string; args?: Record<string, string>; error?: string
 }
 
 export interface DuplicateMember { id: string; name: string; package?: string; file: string; start_line: number; end_line: number; loc: number }

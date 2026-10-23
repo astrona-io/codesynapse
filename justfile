@@ -289,7 +289,7 @@ lint:
 
 # Vulnerability scan of Go dependencies
 vuln:
-    go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+    go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
 # Type-check and build the web app
 web-check:

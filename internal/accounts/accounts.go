@@ -207,8 +207,30 @@ type Event struct {
 	Outcome    string    `json:"outcome"` // success or failure
 	Status     int       `json:"status,omitempty"`
 	Detail     string    `json:"detail,omitempty"`
-	PrevHash   string    `json:"prev_hash"`
-	Hash       string    `json:"hash"`
+	// MCP describes an MCP request (docs/SAAS.md, 5c); nil for everything else.
+	MCP      *MCPRequest `json:"mcp,omitempty"`
+	PrevHash string      `json:"prev_hash"`
+	Hash     string      `json:"hash"`
+}
+
+// MCPRequest is what the audit log keeps about one MCP request: enough to
+// trace it back to a person, key, chat and client, never the results. Args
+// holds identifying values and redacted, capped free text; bulk inputs (a
+// diff, code, conversation turns) appear only as "sha256:<hex> (<n> bytes)".
+// ArgsDigest is SHA-256 over the canonical arguments, so a payload found
+// later can be matched to its request.
+type MCPRequest struct {
+	Method      string            `json:"method"`
+	Name        string            `json:"name,omitempty"` // tool or prompt
+	Repo        string            `json:"repo,omitempty"`
+	SessionID   string            `json:"session_id,omitempty"`   // runtime (chat) session
+	TransportID string            `json:"transport_id,omitempty"` // MCP transport session
+	Client      string            `json:"client,omitempty"`       // name and version from initialize
+	DurationMS  int64             `json:"duration_ms"`
+	Bytes       int64             `json:"bytes"`
+	ArgsDigest  string            `json:"args_digest,omitempty"`
+	Args        map[string]string `json:"args,omitempty"`
+	Error       string            `json:"error,omitempty"`
 }
 
 // EventFilter selects audit entries. Zero values mean no bound; OrgID
@@ -223,6 +245,9 @@ type EventFilter struct {
 	// event); Actor matches the actor's email or user ID; Outcome is
 	// success, failure or empty for both.
 	Action, Actor, Outcome string
+	// Session, Tool and Repo match MCP requests by runtime session, tool or
+	// prompt name and repository.
+	Session, Tool, Repo string
 	// Ascending orders oldest first (export, verification).
 	Ascending bool
 }

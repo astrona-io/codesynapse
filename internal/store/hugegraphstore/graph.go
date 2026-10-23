@@ -28,7 +28,7 @@ const props = `def P = { v -> def m = [:]; v.properties().each { m[it.key()] = i
 // Node writes and stale removal. Code-graph scripts always start at
 // hasLabel('node'): reviews also carry a "repo" property.
 const (
-	dropRepo = `def vs = g.V().hasLabel('node').has('repo', repo).limit(batch).toList()
+	dropRepo = `def vs = g.V().hasLabel('node').has('repo', repo).dedup().limit(batch).toList()
 vs.each { it.remove() }
 vs.size()`
 )
@@ -157,7 +157,7 @@ func (s *Store) Node(ctx context.Context, id string) (model.Node, error) {
 // FindingCounts implements store.Reader.
 func (s *Store) FindingCounts(ctx context.Context, repo string) (map[string]int, error) {
 	var out []map[string]int
-	err := s.read(ctx, `[g.V().hasLabel('node').has('repo', repo).has('kind', 'Finding').toList().countBy { it.property('severity').orElse('') }]`,
+	err := s.read(ctx, `[g.V().hasLabel('node').has('repo', repo).has('kind', 'Finding').dedup().toList().countBy { it.property('severity').orElse('') }]`,
 		map[string]any{"repo": repo}, &out)
 	if err != nil || len(out) == 0 {
 		return map[string]int{}, err
@@ -168,7 +168,8 @@ func (s *Store) FindingCounts(ctx context.Context, repo string) (map[string]int,
 const searchScript = props + `def t = g.V().hasLabel('node').has('repo', repo)
 if (kinds) { t = t.has('kind', within(kinds)) }
 def out = []
-t.toList().each { v ->
+// dedup: a lazily cleaned index can return a re-written vertex twice.
+t.dedup().toList().each { v ->
   def name = v.property('name').orElse('').toLowerCase()
   def qn = v.property('qualified_name').orElse('')
   if (name.contains(q) || qn.toLowerCase().contains(q)) { out << [v, name == q ? 0 : 1, qn.length(), v.value('nid')] }
@@ -186,7 +187,7 @@ func (s *Store) Search(ctx context.Context, repo, q string, kinds []model.NodeKi
 	return toNodes(maps), err
 }
 
-const nodesInFileScript = props + `def out = g.V().hasLabel('node').has('repo', repo).has('file', file).toList().findAll { v ->
+const nodesInFileScript = props + `def out = g.V().hasLabel('node').has('repo', repo).has('file', file).dedup().toList().findAll { v ->
   v.property('start_line').orElse(0L) > 0 && !(v.value('kind') in ['File', 'Document', 'Config', 'Template'])
 }
 out.sort { a, b -> a.property('start_line').orElse(0L) <=> b.property('start_line').orElse(0L) ?: a.value('nid') <=> b.value('nid') }
@@ -255,7 +256,7 @@ func (s *Store) Traverse(ctx context.Context, id string, edges []model.EdgeKind,
 const listScript = props + `def t = g.V().hasLabel('node').has('repo', repo)
 if (kinds) { t = t.has('kind', within(kinds)) }
 def out = []
-t.toList().each { v ->
+t.dedup().toList().each { v ->
   if (tag && !v.property('security_tags').orElse([]).contains(tag)) { return }
   if (prefix && !v.property('file').orElse('').startsWith(prefix)) { return }
   if (exported && !v.property('exported').orElse(false)) { return }
@@ -317,9 +318,9 @@ g.V(ids as Object[]).toList().each { a ->
 }
 out`
 
-const dependencyScript = props + `def mods = g.V().hasLabel('node').has('repo', repo).has('kind', 'Module').toList()
+const dependencyScript = props + `def mods = g.V().hasLabel('node').has('repo', repo).has('kind', 'Module').dedup().toList()
 mods.sort { it.value('nid') }
-def vulns = g.V().hasLabel('node').has('repo', repo).has('kind', 'Vulnerability').toList()
+def vulns = g.V().hasLabel('node').has('repo', repo).has('kind', 'Vulnerability').dedup().toList()
 vulns.sort { it.value('nid') }
 def ids = mods.collect { it.id().toString() } as Set
 def edges = []
@@ -400,7 +401,7 @@ func (s *Store) Subgraph(ctx context.Context, ids []string, kinds []model.EdgeKi
 // returns sums per group; store.StatsBuilder applies the rules.
 const statsScript = `def groups = [:]
 def tags = [:]
-g.V().hasLabel('node').has('repo', repo).toList().each { v ->
+g.V().hasLabel('node').has('repo', repo).dedup().toList().each { v ->
   def kind = v.value('kind')
   def test = v.property('is_test').orElse(false)
   def callable = kind == 'Function' || kind == 'Method'
@@ -413,7 +414,7 @@ g.V().hasLabel('node').has('repo', repo).toList().each { v ->
   gr[0] += 1L; gr[1] += v.property('loc').orElse(0L); gr[2] += v.property('complexity').orElse(0L)
   if (callable && !test) { v.property('security_tags').orElse([]).each { tags[it] = (tags[it] ?: 0L) + 1L } }
 }
-def edges = g.V().hasLabel('node').has('repo', repo).outE().groupCount().by(label).next()
+def edges = g.V().hasLabel('node').has('repo', repo).dedup().outE().groupCount().by(label).next()
 [[groups: groups.collect { k, c -> k + c }, tags: tags, edges: edges]]`
 
 // Stats implements store.Reader.
