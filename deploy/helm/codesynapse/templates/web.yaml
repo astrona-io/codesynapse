@@ -7,7 +7,7 @@ metadata:
   labels:
     {{- include "cs.labels" (list . "web") | nindent 4 }}
 spec:
-  replicas: {{ .Values.web.replicas }}
+  {{- include "cs.replicas" (list . "web") | nindent 2 }}
   selector:
     matchLabels:
       {{- include "cs.selector" (list . "web") | nindent 6 }}
@@ -20,6 +20,7 @@ spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
       {{- include "cs.pullSecrets" . | nindent 6 }}
+      {{- include "cs.spread" (list . "web") | nindent 6 }}
       securityContext:
         {{- include "cs.podSecurity" 1000 | nindent 8 }}
       containers:

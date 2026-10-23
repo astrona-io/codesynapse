@@ -6,7 +6,7 @@ metadata:
   labels:
     {{- include "cs.labels" (list . "mcp") | nindent 4 }}
 spec:
-  replicas: {{ .Values.mcp.replicas }}
+  {{- include "cs.replicas" (list . "mcp") | nindent 2 }}
   selector:
     matchLabels:
       {{- include "cs.selector" (list . "mcp") | nindent 6 }}
@@ -19,6 +19,7 @@ spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
       {{- include "cs.pullSecrets" . | nindent 6 }}
+      {{- include "cs.spread" (list . "mcp") | nindent 6 }}
       securityContext:
         {{- include "cs.podSecurity" 10001 | nindent 8 }}
       containers:
@@ -34,6 +35,7 @@ spec:
             - {name: CODESYNAPSE_API_URL, value: "http://{{ include "cs.name" (list . "api") }}:8080"}
             - {name: CODESYNAPSE_ALLOW_MEMORY, value: {{ .Values.features.allowMemory | quote }}}
             - {name: CODESYNAPSE_MCP_USAGE, value: {{ .Values.features.mcpUsage | quote }}}
+            - {name: CODESYNAPSE_MCP_STATELESS, value: {{ .Values.mcp.stateless | quote }}}
             - {name: GOMEMLIMIT, value: {{ include "cs.gomemlimit" .Values.mcp.resources | quote }}}
           readinessProbe:
             httpGet: {path: /healthz, port: http}

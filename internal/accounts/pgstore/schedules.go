@@ -124,3 +124,28 @@ ON CONFLICT (name) DO UPDATE SET owner = $2, until = $3 WHERE leases.owner = $2 
 	}
 	return tag.RowsAffected() == 1, nil
 }
+
+// TakeAttempt implements accounts.Store. A transaction-scoped advisory lock
+// on the key makes count and insert one step across replicas.
+func (s *Store) TakeAttempt(ctx context.Context, key string, limit int, since, now time.Time) (bool, error) {
+	var taken bool
+	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 1668244584))", key); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "DELETE FROM login_attempts WHERE at <= $1", since); err != nil {
+			return err
+		}
+		var n int
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM login_attempts WHERE key = $1", key).Scan(&n); err != nil {
+			return err
+		}
+		if n >= limit {
+			return nil
+		}
+		taken = true
+		_, err := tx.Exec(ctx, "INSERT INTO login_attempts (key, at) VALUES ($1, $2)", key, now)
+		return err
+	})
+	return taken, err
+}

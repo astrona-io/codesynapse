@@ -44,12 +44,32 @@ Installs CodeSynapse on Kubernetes: the dashboard (`web`), the API (`api`), job 
 | `worker.replicas`, `worker.roles` | `1`, `ingest,ai,fix` | Job workers. Split roles across Deployments to scale them apart |
 | `worker.resources.limits.memory` | `6Gi` | Ingest type-checks whole modules; size it for your largest repository. `GOMEMLIMIT` is set to 90% |
 | `workspace.accessModes` | `[ReadWriteOnce]` | `api`, `worker` and `mcp` share clones. Use a ReadWriteMany class on more than one node |
-| `api.replicas` | `1` | Safe to raise: one replica at a time runs the scheduler and maintenance loops |
+| `api.replicas`, `mcp.replicas`, `web.replicas` | `1` | Raise to 2 or more for availability; see [Scaling out](#scaling-out) |
+| `<api,mcp,web>.autoscaling` | off | CPU autoscaling (`minReplicas`, `maxReplicas`, `targetCPU`); needs metrics-server |
+| `mcp.stateless` | `true` | No MCP transport session between requests, so no sticky sessions are needed |
 | `ingress.*` | off | One host: `/mcp` to MCP, the rest to the dashboard. The API is never exposed |
 | `<store>.enabled`, `<store>.externalURL` | in-chart | For production prefer managed or operator-run PostgreSQL, and a hardened HugeGraph |
 | `features.allowPush` | `false` | Fix branches for accepted review comments |
 | `traces.sample` | `1` | Share of new traces kept |
 | `llmConfig` | empty | The content of `config/llm.yaml`; keys go in the Secret |
+
+## Scaling out
+
+`api`, `mcp` and `web` keep nothing between requests that another replica would need:
+
+- **API:** login limits, jobs, schedules and the audit chain live in PostgreSQL. One replica at a time holds the `api-loops` lease and runs the scheduler and maintenance loops; another takes over within a minute when it stops.
+- **MCP:** runs stateless (`mcp.stateless`). Every request carries the personal key and the chat's runtime session and is checked on its own, so any replica answers it. The tools send no server-initiated messages, so nothing is lost.
+- **Web:** forwards each visitor's session cookie to the API and keeps no state.
+
+With more than one replica, or with autoscaling, a component gets a PodDisruptionBudget (`maxUnavailable: 1`). Its pods prefer different nodes and spread over zones where the cluster has them.
+
+**Workers** scale by `worker.replicas`, not by autoscaling: a worker removed mid-job leaves the job to another worker once its two-minute lease runs out. Split roles over separate releases or Deployments to size ingest apart from AI work.
+
+**Limits that remain:**
+
+- `api`, `worker` and `mcp` mount the same workspace volume. Spread over several nodes, it needs a ReadWriteMany storage class.
+- Status lookups for annotation jobs (`/annotations/jobs/{id}`) and memory extraction jobs (`/memory/jobs/{id}`) answer only on the API replica that took the job. The work itself is unaffected, and the dashboard doesn't poll them. A durable annotation queue is a follow-up.
+- PostgreSQL, HugeGraph and Milvus run as single instances. Clustered stores are 6d in [docs/SAAS.md](../../../docs/SAAS.md).
 
 ## Security
 

@@ -89,4 +89,24 @@ func RunSchedules(t *testing.T, newStore func(*testing.T) accounts.Store) {
 		require.NoError(t, err)
 		assert.True(t, ok, "leases are per name")
 	})
+
+	t.Run("attempts", func(t *testing.T) {
+		st := newStore(t)
+		since := now.Add(-time.Minute)
+		for i := range 3 {
+			ok, err := st.TakeAttempt(ctx, "k", 3, since, now.Add(time.Duration(i)*time.Second))
+			require.NoError(t, err)
+			assert.True(t, ok, "within the limit")
+		}
+		ok, err := st.TakeAttempt(ctx, "k", 3, since, now.Add(5*time.Second))
+		require.NoError(t, err)
+		assert.False(t, ok, "over the limit")
+		ok, err = st.TakeAttempt(ctx, "other", 3, since, now.Add(5*time.Second))
+		require.NoError(t, err)
+		assert.True(t, ok, "limits are per key")
+		later := now.Add(time.Minute + 30*time.Second)
+		ok, err = st.TakeAttempt(ctx, "k", 3, later.Add(-time.Minute), later)
+		require.NoError(t, err)
+		assert.True(t, ok, "old attempts leave the window")
+	})
 }

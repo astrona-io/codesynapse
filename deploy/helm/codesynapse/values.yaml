@@ -47,8 +47,13 @@ llmConfig: ""
 traces:
   sample: "1"
 
+# api, mcp and web keep no state between requests (docs/SAAS.md, 6c): run
+# two or more for availability. With replicas > 1 each gets a disruption
+# budget, and pods spread over nodes and zones where they can.
 api:
   replicas: 1
+  # CPU autoscaling; replicas is then ignored. Needs metrics-server.
+  autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 6, targetCPU: 70}
   resources:
     requests: {cpu: 250m, memory: 256Mi}
     limits: {memory: 1Gi}
@@ -62,11 +67,18 @@ worker:
     limits: {memory: 6Gi}
 mcp:
   replicas: 1
+  # No transport session between requests, so any replica answers any
+  # request without sticky sessions.
+  stateless: true
+  # CPU autoscaling; replicas is then ignored. Needs metrics-server.
+  autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 6, targetCPU: 70}
   resources:
     requests: {cpu: 100m, memory: 128Mi}
     limits: {memory: 1Gi}
 web:
   replicas: 1
+  # CPU autoscaling; replicas is then ignored. Needs metrics-server.
+  autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 6, targetCPU: 70}
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {memory: 512Mi}

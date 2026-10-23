@@ -12,9 +12,10 @@ import (
 
 // scheduleTable is shared by a store and its transaction snapshots, like jobs.
 type scheduleTable struct {
-	mu     sync.Mutex
-	all    map[string]accounts.Schedule
-	leases map[string]lease
+	mu       sync.Mutex
+	all      map[string]accounts.Schedule
+	leases   map[string]lease
+	attempts map[string][]time.Time
 }
 
 type lease struct {
@@ -25,7 +26,7 @@ type lease struct {
 func (s *Store) scheduleTable() *scheduleTable {
 	s.schedOnce.Do(func() {
 		if s.sched == nil {
-			s.sched = &scheduleTable{all: map[string]accounts.Schedule{}, leases: map[string]lease{}}
+			s.sched = &scheduleTable{all: map[string]accounts.Schedule{}, leases: map[string]lease{}, attempts: map[string][]time.Time{}}
 		}
 	})
 	return s.sched
@@ -138,5 +139,25 @@ func (s *Store) TakeLease(_ context.Context, name, owner string, until, now time
 		return false, nil
 	}
 	t.leases[name] = lease{owner: owner, until: until}
+	return true, nil
+}
+
+// TakeAttempt implements accounts.Store.
+func (s *Store) TakeAttempt(_ context.Context, key string, limit int, since, now time.Time) (bool, error) {
+	t := s.scheduleTable()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for k, at := range t.attempts {
+		at = slices.DeleteFunc(at, func(a time.Time) bool { return !a.After(since) })
+		if len(at) == 0 {
+			delete(t.attempts, k)
+		} else {
+			t.attempts[k] = at
+		}
+	}
+	if len(t.attempts[key]) >= limit {
+		return false, nil
+	}
+	t.attempts[key] = append(t.attempts[key], now)
 	return true, nil
 }
