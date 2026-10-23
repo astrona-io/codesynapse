@@ -325,6 +325,8 @@ Private repositories: an organisation admin stores a Git token per host (`PUT /a
 
 Upgrading an existing install: run `just init` (adds missing keys such as `POSTGRES_PASSWORD` and `SECRET_KEY` to `.env`), then `just up`.
 
+The compose stack runs PostgreSQL 18, which cannot open a data volume written by PostgreSQL 17. If your install predates the upgrade, dump the accounts database with the old image first (`docker compose exec postgres pg_dumpall -U codesynapse > accounts.sql`), remove the `postgres-data` volume, run `just up`, and restore (`docker compose exec -T postgres psql -U codesynapse -d codesynapse < accounts.sql`).
+
 ## License
 
 Copyright 2026 Astrona.io. Licensed under the [Apache License, Version 2.0](LICENSE); see [NOTICE](NOTICE) for attributions.
