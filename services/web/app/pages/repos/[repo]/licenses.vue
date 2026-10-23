@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { LicenseCategory, LicenseReport } from '~/utils/types'
+import type { DependencyList, DependencyPackage, LicenseCategory, LicenseReport } from '~/utils/types'
 
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
@@ -22,6 +22,20 @@ const CATEGORY: Record<LicenseCategory, { label: string; cls: string }> = {
 const cat = (c: LicenseCategory) => CATEGORY[c] ?? CATEGORY.unknown
 const levelCls = (l: string) => ({ conflict: 'sev--critical', review: 'sev--medium', ok: 'sev--info' }[l] ?? '')
 const maxCount = computed(() => Math.max(1, ...(rep.value?.by_license ?? []).map((c) => c.count)))
+
+// Which packages a licence covers: click a licence to open its packages,
+// grouped by language.
+const { data: deps } = useApiGet<DependencyList>(() => repoPath(repo.value, 'dependencies'))
+const open = ref<string | null>(null)
+const toggle = (license: string) => { open.value = open.value === license ? null : license }
+const packagesOf = (license: string) => {
+  const groups = new Map<string, DependencyPackage[]>()
+  for (const p of deps.value?.packages ?? []) {
+    if (p.license === license) groups.set(p.ecosystem, [...(groups.get(p.ecosystem) ?? []), p])
+  }
+  return [...groups.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+}
+const dependenciesLink = (license: string) => ({ path: `/repos/${encodeURIComponent(repo.value)}/dependencies`, query: { license } })
 </script>
 
 <template>
@@ -86,12 +100,31 @@ const maxCount = computed(() => Math.max(1, ...(rep.value?.by_license ?? []).map
 
       <section class="panel">
         <p class="eyebrow">Inventory</p><h2>Licences in use</h2>
+        <p class="muted small">Select a licence to see the packages it covers.</p>
         <ul class="bars">
           <li v-for="c in rep.by_license" :key="c.license">
-            <span class="mono name">{{ c.license }}</span>
-            <span class="badge" :class="cat(c.category).cls">{{ cat(c.category).label }}</span>
-            <span class="bar"><span :style="{ width: `${(c.count / maxCount) * 100}%` }" :class="`fill--${cat(c.category).cls.replace('badge--', '')}`" /></span>
-            <span class="num">{{ c.count }}</span>
+            <button class="bars__row" :aria-expanded="open === c.license" @click="toggle(c.license)">
+              <span class="mono name">{{ c.license }}</span>
+              <span class="badge" :class="cat(c.category).cls">{{ cat(c.category).label }}</span>
+              <span class="bar"><span :style="{ width: `${(c.count / maxCount) * 100}%` }" :class="`fill--${cat(c.category).cls.replace('badge--', '')}`" /></span>
+              <span class="num">{{ c.count }}</span>
+            </button>
+            <div v-if="open === c.license" class="packages">
+              <p v-if="!deps" class="muted small">Loading…</p>
+              <template v-else>
+                <div v-for="[eco, list] in packagesOf(c.license)" :key="eco" class="packages__group">
+                  <p class="label">{{ ecosystemLabel(eco) }} <span class="muted">· {{ list.length }}</span></p>
+                  <ul class="plain">
+                    <li v-for="p in list" :key="p.name + p.version">
+                      <span class="mono">{{ p.name }}</span> <span class="mono muted">{{ p.version }}</span>
+                      <span v-if="!p.direct" class="badge">indirect</span><span v-if="p.dev" class="badge">dev</span>
+                    </li>
+                  </ul>
+                </div>
+                <p v-if="!packagesOf(c.license).length" class="muted small">No package list for this licence; sync the repository to refresh it.</p>
+                <NuxtLink :to="dependenciesLink(c.license)" class="small">Open in Dependencies →</NuxtLink>
+              </template>
+            </div>
           </li>
         </ul>
       </section>
@@ -104,7 +137,12 @@ const maxCount = computed(() => Math.max(1, ...(rep.value?.by_license ?? []).map
 .compact { gap: 6px; }
 .small { font-size: 12.5px; margin-top: 4px; }
 .bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.bars li { display: grid; grid-template-columns: minmax(120px, 1.2fr) auto 2fr 48px; gap: 12px; align-items: center; }
+.bars__row { display: grid; grid-template-columns: minmax(120px, 1.2fr) auto 2fr 48px; gap: 12px; align-items: center; width: 100%;
+  background: none; border: 0; padding: 4px 6px; margin: 0 -6px; border-radius: 6px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.bars__row:hover, .bars__row[aria-expanded="true"] { background: var(--surface-2); }
+.packages { margin: 6px 0 10px 12px; padding-left: 12px; border-left: 2px solid var(--line); display: grid; gap: 8px; }
+.packages__group .plain { list-style: none; padding: 0; margin: 4px 0 0; display: grid; gap: 4px; font-size: 13px; }
+.packages .badge { margin-left: 4px; }
 .bars .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .bar > span { display: block; height: 100%; }
@@ -114,7 +152,7 @@ const maxCount = computed(() => Math.max(1, ...(rep.value?.by_license ?? []).map
 .fill--violet { background: var(--violet); }
 .num { text-align: right; }
 @media (max-width: 640px) {
-  .bars li { grid-template-columns: 1fr auto 48px; }
+  .bars__row { grid-template-columns: 1fr auto 48px; }
   .bars .bar { grid-column: 1 / -1; }
 }
 </style>
