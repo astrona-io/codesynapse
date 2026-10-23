@@ -243,6 +243,7 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/repos", visibleOnly, s.handleRepos)
 	s.accountRoutes()
 	s.executionRoutes()
+	s.importRoutes()
 	s.sessionMemoryRoutes()
 	s.repoPolicyRoutes()
 	s.route("GET /api/v1/overview", visibleOnly, s.handleWorkspaceOverview)
