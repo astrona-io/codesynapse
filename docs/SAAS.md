@@ -119,7 +119,8 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
      - **Open decision:** how much free text to keep. Queries help tracing but can carry personal data or pasted code; the default above keeps them redacted and capped.
    - **5d, CI/CD baseline (in progress):** before 5d, the only workflows built the Homebrew formula and released the CLI on a tag.
      - **Done, pull request and merge checks:** `.github/workflows/ci.yml` runs `just ci`. The integration contracts run when stores or accounts change, and nightly. Accepted findings live in the tools' ignore files, with reasons. Actions are pinned by SHA, and Renovate updates the digests and the tools' versions.
-     - **Next:** images on merge and release. The Helm checks arrive with the chart in 6a.
+     - **Done, images:** `.github/workflows/images.yml` builds and scans api, mcp and web on every relevant pull request, with read-only permissions. On merge and on release tags it publishes amd64 and arm64 images to ghcr.io with SBOM and provenance, signed with cosign (keyless). Tags: `:main` and `:sha-<short>` on merge; `:X.Y.Z`, `:X.Y` and `:latest` on release. Go and the web app are cross-built on the runner. The web runtime image drops npm, which was the source of its fixable vulnerabilities.
+     - **Next:** the Helm checks arrive with the chart in 6a.
      - **On every pull request** (required checks; the same commands work locally through `just`):
        - `go test -race` (`just test`), `golangci-lint` with gosec (`just lint`), and `govulncheck`;
        - the Nuxt typecheck and build (`just web-check`), plus `npm audit` for production dependencies;

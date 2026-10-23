@@ -152,6 +152,15 @@ image-build tag="dev":
     done
     {{engine}} build $plat -f services/web/Dockerfile -t codesynapse-web:{{tag}} -t {{registry}}/codesynapse-web:{{tag}} .
 
+# Scan a built image for fixable HIGH/CRITICAL vulnerabilities (.trivyignore). Works the same with Docker and Podman: the image is saved and scanned as a file.
+scan-image image:
+    #!/usr/bin/env sh
+    set -eu
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    {{engine}} save -o "$tmp/image.tar" "{{image}}"
+    {{engine}} run --rm -v "$tmp:/scan:ro" -v "$PWD/.trivyignore:/src/.trivyignore:ro" -w /src -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.62.1 \
+        image --quiet --exit-code 1 --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --input /scan/image.tar
+
 # Push the images to REGISTRY (log in first: docker login ghcr.io)
 image-push tag="dev":
     #!/usr/bin/env sh
