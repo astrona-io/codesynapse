@@ -19,6 +19,7 @@ spec:
       serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
       automountServiceAccountToken: false
       enableServiceLinks: false
+      {{- include "cs.pullSecrets" . | nindent 6 }}
       securityContext:
         {{- include "cs.podSecurity" 1000 | nindent 8 }}
       containers:

@@ -13,6 +13,7 @@ spec:
   restartPolicy: Never
   serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
   automountServiceAccountToken: false
+  {{- include "cs.pullSecrets" . | nindent 2 }}
   securityContext:
     {{- include "cs.podSecurity" 10001 | nindent 4 }}
   containers:

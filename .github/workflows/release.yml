@@ -85,6 +85,9 @@ jobs:
           tag_name: ${{ github.ref_name }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
+          # The Images workflow marks it latest once the published chart
+          # and images installed and passed their tests (docs/SAAS.md, 6b).
+          make_latest: false
 
   # Needs secret HOMEBREW_TAP_TOKEN: a fine-grained PAT with Contents
   # read/write on astrona-io/homebrew-tap only. Skipped for pre-release tags

@@ -7,6 +7,8 @@ image:
   # Defaults to the chart's appVersion (the release tag).
   tag: ""
   pullPolicy: IfNotPresent
+  # Secrets for a private registry, e.g. [{name: ghcr}].
+  pullSecrets: []
 
 secrets:
   # Required. Keys: CODESYNAPSE_API_TOKEN, CODESYNAPSE_MCP_TOKEN,

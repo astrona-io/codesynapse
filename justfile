@@ -202,8 +202,8 @@ chart-images tag="e2e":
         kind load image-archive "$tmp/$svc.tar" --name "{{kind_cluster}}"
     done
 
-# Install the chart from the working tree into the kind cluster (random secrets, created once)
-chart-install:
+# The Secret every install needs, with random values (created once)
+_kind-secret:
     #!/usr/bin/env sh
     set -eu
     k="kubectl --context {{kind_context}} --namespace {{kind_ns}}"
@@ -217,8 +217,20 @@ chart-install:
             --from-literal=METRICS_PASSWORD="$(openssl rand -hex 24)" \
             --from-literal=SECRET_KEY="$(openssl rand -base64 32)"
     fi
+
+# Install the chart from the working tree into the kind cluster (random secrets, created once)
+chart-install: _kind-secret
     helm upgrade --install codesynapse deploy/helm/codesynapse --kube-context "{{kind_context}}" --namespace "{{kind_ns}}" \
         -f deploy/helm/codesynapse/ci/kind-values.yaml --wait --timeout 15m
+
+# Install a published chart version and its images into the kind cluster (release verification). pull_secret names a docker-registry Secret for private packages.
+chart-install-published version pull_secret="": _kind-secret
+    #!/usr/bin/env sh
+    set -eu
+    pull=""; [ -z "{{pull_secret}}" ] || pull="--set image.pullSecrets[0].name={{pull_secret}}"
+    helm upgrade --install codesynapse oci://ghcr.io/astrona-io/charts/codesynapse --version "{{version}}" \
+        --kube-context "{{kind_context}}" --namespace "{{kind_ns}}" -f deploy/helm/codesynapse/ci/kind-values.yaml \
+        --set image.tag="{{version}}" --set image.pullPolicy=IfNotPresent $pull --wait --timeout 15m
 
 # Run the chart's tests (every service answers) in the kind cluster
 chart-test:

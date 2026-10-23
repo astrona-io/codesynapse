@@ -291,7 +291,7 @@ The code is split by service: `services/api`, `services/mcp` and `services/web`,
 
 ## Container images and Kubernetes
 
-Releases publish signed multi-arch images to ghcr.io: `ghcr.io/astrona-io/codesynapse-{api,mcp,web}`. A release is a `vX.Y.Z` tag (`:X.Y.Z`, `:X.Y`, `:latest`) or a release candidate `vX.Y.Z-rcN` (`:X.Y.Z-rcN`) on a commit on `main`; merges only build and scan. Verify an image with `cosign verify ghcr.io/astrona-io/codesynapse-api:1.3.0 --certificate-identity-regexp 'https://github.com/astrona-io/codesynapse/' --certificate-oidc-issuer https://token.actions.githubusercontent.com`.
+Releases publish signed multi-arch images to ghcr.io, `ghcr.io/astrona-io/codesynapse-{api,worker,mcp,web}`, and the Helm chart at the same version: `helm install codesynapse oci://ghcr.io/astrona-io/charts/codesynapse --version X.Y.Z` ([chart README](deploy/helm/codesynapse/README.md)). A release is a `vX.Y.Z` tag (`:X.Y.Z`, `:X.Y`, and `:latest` once the published chart installed and passed `helm test` on kind) or a release candidate `vX.Y.Z-rcN` (`:X.Y.Z-rcN`) on a commit on `main`; merges only build and scan. See [Releasing](docs/operations/releasing.md) and [Upgrading](docs/operations/upgrading.md). Verify an image with `cosign verify ghcr.io/astrona-io/codesynapse-api:1.3.0 --certificate-identity-regexp 'https://github.com/astrona-io/codesynapse/' --certificate-oidc-issuer https://token.actions.githubusercontent.com`.
 
 ```sh
 just image-build v0.1.0     # api, worker, mcp and web images (PLATFORM=linux/amd64, REGISTRY=ghcr.io/you)
