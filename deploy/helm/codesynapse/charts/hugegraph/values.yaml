@@ -1,0 +1,9 @@
+# Defaults for the in-chart hugegraph. Override them under `hugegraph:` in the
+# codesynapse chart's values.
+image: docker.io/hugegraph/hugegraph:1.7.0
+size: 20Gi
+storageClass: ""
+txCapacity: 1000000
+resources:
+  requests: {cpu: 500m, memory: 2Gi}
+  limits: {memory: 4Gi}

@@ -11,3 +11,23 @@ sources:
 keywords: [code-intelligence, mcp, graph, security]
 annotations:
   artifacthub.io/license: Apache-2.0
+dependencies:
+  # Helpers for this chart and the stores below.
+  - name: common
+    version: 0.1.0
+  # The stores, each switched off by <store>.enabled=false to use your own.
+  - name: postgresql
+    version: 0.1.0
+    condition: postgresql.enabled
+  - name: hugegraph
+    version: 0.1.0
+    condition: hugegraph.enabled
+  - name: milvus
+    version: 0.1.0
+    condition: milvus.enabled
+  - name: victoriametrics
+    version: 0.1.0
+    condition: victoriametrics.enabled
+  - name: victoriatraces
+    version: 0.1.0
+    condition: victoriatraces.enabled

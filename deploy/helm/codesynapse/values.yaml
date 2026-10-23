@@ -1,21 +1,24 @@
 # CodeSynapse Helm chart (docs/SAAS.md, 6a). Every credential comes from one
-# Secret you create (secrets.existingSecret); the chart has no default
+# Secret you create (global.existingSecret); the chart has no default
 # passwords. `just chart-e2e` installs it on a throwaway kind cluster.
+
+# Shared with the store subcharts.
+global:
+  # Required. Keys: CODESYNAPSE_API_TOKEN, CODESYNAPSE_MCP_TOKEN,
+  # HUGEGRAPH_PASSWORD, METRICS_PASSWORD, SECRET_KEY, and POSTGRES_PASSWORD
+  # (in-chart PostgreSQL) or CODESYNAPSE_DATABASE_URL (external). Optional:
+  # CODESYNAPSE_GIT_TOKENS, ANTHROPIC_API_KEY, OPENROUTER_API_KEY.
+  existingSecret: ""
+  # Secrets for a private registry or mirror, e.g. [{name: ghcr}].
+  imagePullSecrets: []
+  # Each component and store accepts only the pods that need it.
+  networkPolicies: true
 
 image:
   registry: ghcr.io/astrona-io
   # Defaults to the chart's appVersion (the release tag).
   tag: ""
   pullPolicy: IfNotPresent
-  # Secrets for a private registry, e.g. [{name: ghcr}].
-  pullSecrets: []
-
-secrets:
-  # Required. Keys: CODESYNAPSE_API_TOKEN, CODESYNAPSE_MCP_TOKEN,
-  # HUGEGRAPH_PASSWORD, METRICS_PASSWORD, SECRET_KEY, and POSTGRES_PASSWORD
-  # (in-chart PostgreSQL) or CODESYNAPSE_DATABASE_URL (external). Optional:
-  # CODESYNAPSE_GIT_TOKENS, ANTHROPIC_API_KEY, OPENROUTER_API_KEY.
-  existingSecret: ""
 
 # Where browsers reach the dashboard and agents reach MCP.
 publicURL: http://localhost:3000
@@ -97,56 +100,32 @@ ingress:
   # Path /mcp goes to the MCP service, everything else to the dashboard.
   tlsSecretName: ""
 
-networkPolicies:
-  enabled: true
-
-# Stores. Each runs in the chart unless disabled, then the external address
-# is used. All images are Apache-2.0 or PostgreSQL licensed.
+# Stores. Each is a subchart of this chart (charts/), on by default so a
+# plain install runs everything. For production, prefer stores you run and
+# back up yourself: set <store>.enabled=false and point the services at
+# them. Every in-chart image is Apache-2.0 or PostgreSQL licensed; each
+# subchart's values.yaml lists what else can be set here (image, size,
+# storageClass, resources, retention).
 postgresql:
   enabled: true
-  image: docker.io/library/postgres:18-alpine
-  size: 5Gi
-  storageClass: ""
-  resources:
-    requests: {cpu: 100m, memory: 256Mi}
-    limits: {memory: 1Gi}
+  # When disabled, put the database URL in the Secret as
+  # CODESYNAPSE_DATABASE_URL.
 hugegraph:
   enabled: true
-  image: docker.io/hugegraph/hugegraph:1.7.0
-  size: 20Gi
-  storageClass: ""
-  txCapacity: 1000000
-  resources:
-    requests: {cpu: 500m, memory: 2Gi}
-    limits: {memory: 4Gi}
+  # When disabled: the HugeGraph REST URL (http(s)://host:8080). The
+  # password stays HUGEGRAPH_PASSWORD in the Secret.
   externalURL: ""
+  # Both the server and the services use it.
+  txCapacity: 1000000
 milvus:
   enabled: true
-  image: docker.io/milvusdb/milvus:v3.0.4
-  size: 10Gi
-  storageClass: ""
-  resources:
-    requests: {cpu: 250m, memory: 1Gi}
-    limits: {memory: 4Gi}
+  # When disabled: the Milvus REST URL; empty turns memory vectors off.
   externalURL: ""
 victoriametrics:
   enabled: true
-  image: quay.io/victoriametrics/victoria-metrics:v1.154.1
-  retention: 90d
-  size: 10Gi
-  storageClass: ""
-  resources:
-    requests: {cpu: 50m, memory: 128Mi}
-    limits: {memory: 1Gi}
+  # When disabled: the base URL; empty turns metrics export off.
   externalURL: ""
 victoriatraces:
   enabled: true
-  image: quay.io/victoriametrics/victoria-traces:v0.12.1
-  retention: 7d
-  size: 10Gi
-  storageClass: ""
-  resources:
-    requests: {cpu: 50m, memory: 128Mi}
-    limits: {memory: 1Gi}
-  # Full OTLP/HTTP traces endpoint when disabled; empty turns export off.
+  # When disabled: the full OTLP/HTTP traces endpoint; empty turns export off.
   externalURL: ""
