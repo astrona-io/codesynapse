@@ -181,7 +181,7 @@ jobs:
           # Artifact Hub lists and scans the images the release deploys, and
           # shows an RC as a pre-release.
           chart=deploy/helm/codesynapse
-          images=$(helm template codesynapse "$chart" --set image.tag="$VERSION" --set secrets.existingSecret=x \
+          images=$(helm template codesynapse "$chart" --set image.tag="$VERSION" --set global.existingSecret=x \
             | sed -n 's/^ *image: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' | sort -u \
             | awk '{ n = $0; sub(/.*\//, "", n); sub(/[:@].*/, "", n); printf "- name: %s\n  image: %s\n", n, $0 }')
           [ -n "$images" ] || { echo "::error::no images rendered"; exit 1; }
