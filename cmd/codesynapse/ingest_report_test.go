@@ -17,7 +17,7 @@ import (
 func TestIngestReportBeforeExtractionFailure(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "report.json")
 	env := &app.Env{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	options := &ingestOptions{EC: env, reportFile: output, neo4j: app.Neo4jFlags{Backend: "invalid"}}
+	options := &ingestOptions{EC: env, reportFile: output, graph: app.GraphFlags{Backend: "invalid"}}
 	require.Error(t, options.Run(t.Context(), env))
 	data, err := os.ReadFile(output)
 	require.NoError(t, err)

@@ -53,7 +53,7 @@ type ingestOptions struct {
 	approvedPolicyDigest string
 	reportFile           string
 	EC                   *app.Env
-	neo4j                app.Neo4jFlags
+	graph                app.GraphFlags
 	repo                 string
 	commitLimit          int
 	allowNetwork         bool
@@ -67,7 +67,7 @@ func (o *ingestOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f := o.EC.Command.Flags()
 	f.StringVar(&o.approvedPolicyDigest, "approved-policy-digest", "", "Approve the exact repository policy digest for ingestion exclusions")
 	f.StringVar(&o.reportFile, "ingest-report", "", "Write the per-file JSON report to a new file (existing files are refused)")
-	o.neo4j.AddFlags(f)
+	o.graph.AddFlags(f)
 	f.StringVar(&o.repo, "repo", "", "Repository name in the graph (default: directory name)")
 	f.IntVar(&o.commitLimit, "commits", 500, "Number of recent commits to index (0 disables history)")
 	f.BoolVar(&o.allowNetwork, "allow-network", false, "Allow `go list` to download modules (off by default for untrusted repos)")
@@ -145,7 +145,7 @@ func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) (result error) {
 		}
 	}()
 	ctx = ingestreport.WithLedger(ctx, ledger)
-	st, err := o.neo4j.Open(ctx)
+	st, err := o.graph.Open(ctx)
 	if err != nil {
 		return err
 	}
@@ -175,8 +175,8 @@ func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) (result error) {
 func ingestCmd(ec *app.Env) *cobra.Command {
 	o := &ingestOptions{EC: ec}
 	return app.NewSubCommand("ingest [path]", o, ec).
-		WithShortDesc("Index a repository into Neo4j").
-		WithExample("  CODESYNAPSE_NEO4J_PASSWORD=... codesynapse ingest . --repo my-service").
+		WithShortDesc("Index a repository into HugeGraph").
+		WithExample("  CODESYNAPSE_HUGEGRAPH_PASSWORD=... codesynapse ingest . --repo my-service").
 		WithGroupID(app.GroupBase).
 		WithMaxArgs(1).
 		Build()
@@ -186,7 +186,7 @@ func ingestCmd(ec *app.Env) *cobra.Command {
 type reviewOptions struct {
 	approvedPolicyDigest string
 	EC                   *app.Env
-	neo4j                app.Neo4jFlags
+	graph                app.GraphFlags
 	repo                 string
 	base                 string
 	head                 string
@@ -199,13 +199,13 @@ type reviewOptions struct {
 func (o *reviewOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	o.EC.Command.Flags().StringVar(&o.approvedPolicyDigest, "approved-policy-digest", "", "Approve the exact repository policy digest for ingestion exclusions")
 	f := o.EC.Command.Flags()
-	o.neo4j.AddFlags(f)
+	o.graph.AddFlags(f)
 	f.StringVar(&o.repo, "repo", "", "Repository name in the graph (default: directory name)")
 	f.StringVar(&o.base, "base", "origin/main", "Base ref of the change")
 	f.StringVar(&o.head, "head", "HEAD", "Head ref of the change")
 	f.StringVar(&o.diffFile, "diff", "", "Read a unified diff from this file ('-' for stdin) instead of running git")
 	f.IntVar(&o.depth, "depth", 3, "Caller traversal depth")
-	f.BoolVar(&o.offline, "offline", false, "Build the graph in memory from the working tree instead of querying Neo4j")
+	f.BoolVar(&o.offline, "offline", false, "Build the graph in memory from the working tree instead of querying HugeGraph")
 	return nil
 }
 
@@ -256,7 +256,7 @@ func (o *reviewOptions) Run(ctx context.Context, _ *app.Env) error {
 		}
 		r = mem
 	} else {
-		st, err := o.neo4j.Open(ctx)
+		st, err := o.graph.Open(ctx)
 		if err != nil {
 			return err
 		}
@@ -301,17 +301,17 @@ func reviewCmd(ec *app.Env) *cobra.Command {
 // schemaOptions configures `codesynapse schema`.
 type schemaOptions struct {
 	EC    *app.Env
-	neo4j app.Neo4jFlags
+	graph app.GraphFlags
 }
 
 func (o *schemaOptions) SetupFlags(_ context.Context, _ *app.Env) error {
-	o.neo4j.AddFlags(o.EC.Command.Flags())
+	o.graph.AddFlags(o.EC.Command.Flags())
 	return nil
 }
 func (o *schemaOptions) Complete(context.Context, *app.Env) error { return nil }
 func (o *schemaOptions) Validate(context.Context, *app.Env) error { return nil }
 func (o *schemaOptions) Run(ctx context.Context, _ *app.Env) error {
-	st, err := o.neo4j.Open(ctx)
+	st, err := o.graph.Open(ctx)
 	if err != nil {
 		return err
 	}
@@ -322,7 +322,7 @@ func (o *schemaOptions) Run(ctx context.Context, _ *app.Env) error {
 func schemaCmd(ec *app.Env) *cobra.Command {
 	o := &schemaOptions{EC: ec}
 	return app.NewSubCommand("schema", o, ec).
-		WithShortDesc("Create Neo4j constraints and indexes").
+		WithShortDesc("Create the HugeGraph schema (property keys, labels, indexes)").
 		WithGroupID(app.GroupOther).
 		WithNoArgs().
 		Build()

@@ -1,17 +1,18 @@
 # Kubernetes
 
+> **Outdated until phase 6a.** Neo4j support was removed; the services now need HugeGraph and Milvus, which these manifests do not deploy yet, so `api` and `mcp` cannot start from them as they are. Phase 6a ([docs/SAAS.md](../../docs/SAAS.md)) adds HugeGraph, Milvus, PostgreSQL and their secrets and network policies. Until then, run the compose stack (`just up`).
+
 Kustomize manifests for the whole stack, built from the Dockerfiles in `services/`.
 
 ```
 deploy/k8s/
-  base/            neo4j (StatefulSet), api, mcp, web, config, network policies
+  base/            api, mcp, web, config, network policies (graph and vector stores: phase 6a)
   overlays/dev/    local cluster: images from `just image-build dev`, small volume, no ingress
   overlays/prod/   registry images, Ingress for the dashboard and MCP endpoint
 ```
 
 | Service | Image | Port | State |
 |---|---|---|---|
-| `neo4j` | `neo4j:5.26-community` | 7687 | 10Gi volume (StatefulSet) |
 | `api` | `services/api/Dockerfile` | 8080 | `workspace` volume (clones), Go build cache in `emptyDir` |
 | `mcp` | `services/mcp/Dockerfile` | 8090 | reads the same `workspace` volume read-only |
 | `web` | `services/web/Dockerfile` | 3000 (service port 80) | none |
@@ -46,4 +47,4 @@ kubectl -n codesynapse port-forward svc/web 3000:80     # http://localhost:3000
 - **AI providers:** optional. `kubectl -n codesynapse create configmap codesynapse-llm --from-file=llm.yaml=config/llm.yaml`, and put cloud API keys in `secrets.env`.
 - **Settings** such as `CODESYNAPSE_ALLOW_PUSH` live in `base/config.yaml`.
 - **Pod security:** the namespace enforces `restricted`: non-root, read-only root filesystem, no capabilities, `RuntimeDefault` seccomp.
-- **Exposure:** only `web` and `mcp` are meant to be reachable from outside. The API is behind the dashboard, and `neo4j` accepts connections only from `api` and `mcp`. The network policies need a CNI that enforces them.
+- **Exposure:** only `web` and `mcp` are meant to be reachable from outside. The API is behind the dashboard. The network policies need a CNI that enforces them.

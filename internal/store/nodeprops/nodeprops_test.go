@@ -18,7 +18,7 @@ func TestPropsRoundTrip(t *testing.T) {
 	_, hasSummary := p["summary"]
 	assert.False(t, hasSummary, "zero values are omitted")
 
-	// Neo4j and JSON return lists as []any.
+	// JSON returns lists as []any.
 	p["security_tags"] = []any{"exec", "sql"}
 	assert.Equal(t, From(p), n)
 

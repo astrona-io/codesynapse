@@ -439,7 +439,7 @@ func Run(t *testing.T, s store.Store) {
 		assert.Equal(t, near[0].Name, "payments")
 		assert.Equal(t, near[1].Name, "billing")
 		assert.Equal(t, near[2].Name, "frontend")
-		assert.Equal(t, math.Round(near[0].Score*1000)/1000, math.Round(memory.Similarity([]float32{0.9, 0.1, 0}, []float32{1, 0, 0})*1000)/1000, "(1+cos)/2 like Neo4j")
+		assert.Equal(t, math.Round(near[0].Score*1000)/1000, math.Round(memory.Similarity([]float32{0.9, 0.1, 0}, []float32{1, 0, 0})*1000)/1000, "(1+cos)/2 in every store")
 		other, err := s.MemoryNearest(ctx, Repo, "m2", []float32{0.9, 0.1, 0}, 2)
 		require.NoError(t, err)
 		assert.Equal(t, len(other), 0, "vectors of another model are not compared")

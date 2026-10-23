@@ -1,6 +1,6 @@
 # Stores and backends
 
-All persistence goes through the `store.Store` interface in `internal/store`. Three implementations must behave identically.
+All persistence goes through the `store.Store` interface in `internal/store`. Two implementations must behave identically: HugeGraph in production and an in-memory twin for tests and offline use.
 
 ```mermaid
 flowchart TB
@@ -14,37 +14,29 @@ flowchart TB
     consumers --> iface
 
     iface --> mem[memory/<br/>tests and --offline]
-    iface --> neo[neo4jstore/<br/>default, Cypher]
     iface --> hg[hugegraphstore/<br/>Gremlin over HTTP]
 
     hg -.-> milvus[(Milvus<br/>memory vectors)]
-    neo --> neodb[(Neo4j 5)]
     hg --> hgdb[(HugeGraph)]
 
     contract[storetest.Run<br/>contract + parity tests] -. verifies .-> mem
-    contract -. verifies .-> neo
     contract -. verifies .-> hg
 ```
 
-Select the backend with `CODESYNAPSE_GRAPH_BACKEND` (`neo4j` default, or `hugegraph`).
+| | memory | hugegraphstore |
+|---|---|---|
+| Query language | Go | Gremlin (constant scripts, values in `bindings`) |
+| Use | Unit tests, `--offline` | Every deployment |
+| Vectors | `vector.Flat` in process | Milvus REST v2 |
+| Licence | in repo | Apache-2.0 |
 
-| | memory | neo4jstore | hugegraphstore |
-|---|---|---|---|
-| Query language | Go | Cypher (values as parameters) | Gremlin (constant scripts, values in `bindings`) |
-| Use | Unit tests, `--offline` | Default deployment | Apache-2.0 alternative that scales out |
-| Vectors | `vector.Flat` in process | Neo4j vector index | Milvus REST v2 |
-| Licence | in repo | Community is GPL-3.0 | Apache-2.0 |
+Neo4j was supported until October 2026. It was removed so the whole data path is Apache-2.0 and there is one production backend to keep correct; graphs are not migrated, so an upgraded installation re-indexes.
 
 ## Why contract tests matter
 
-`storetest.Run` is the single definition of correct behaviour. `just test-integration` runs it against the compose Neo4j; `just test-hugegraph` runs it, and `TestParityWithReference`, against throwaway HugeGraph and Milvus containers. A new `store.Reader` method is not done until all three pass.
+`storetest.Run` is the single definition of correct behaviour. `just test-hugegraph` runs it, and `TestParityWithReference`, against throwaway HugeGraph and Milvus containers; the memory store runs it in `just test`. A new `store.Reader` method is not done until both pass.
 
 ## Backend-specific rules
-
-**Neo4j**
-
-- Labels, relationship types, depth and ORDER BY are interpolated only from `model` allowlists, `store.ClampDepth` or the `metricCypher` table.
-- The vector index length is the single interpolated value, an int checked against `memory.MaxDimensions`.
 
 **HugeGraph**
 

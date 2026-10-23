@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// NodeKind classifies a node. Each kind maps 1:1 to a Neo4j label.
+// NodeKind classifies a node. Each kind is a graph label (Kind property in HugeGraph).
 type NodeKind string
 
 // Node kinds.
@@ -67,7 +67,7 @@ func (k NodeKind) IsCallable() bool {
 	return k == KindFunction || k == KindMethod || k == KindInterfaceMethod || k == KindExternal
 }
 
-// EdgeKind classifies an edge. Each kind maps 1:1 to a Neo4j relationship type.
+// EdgeKind classifies an edge. Each kind maps 1:1 to a HugeGraph edge label.
 type EdgeKind string
 
 // Edge kinds.

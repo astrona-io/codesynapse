@@ -1,4 +1,4 @@
-# Local stack: Neo4j (or HugeGraph + Milvus) + PostgreSQL + API + MCP + web dashboard.
+# Local stack: HugeGraph + Milvus + PostgreSQL + VictoriaMetrics + API + MCP + web dashboard.
 #   cp .env.example .env   # set passwords/tokens
 #   just up                # or: docker compose up -d --build
 # Repositories to index live under ${SOURCES_DIR} (default ./sources) and are
@@ -6,29 +6,10 @@
 name: codesynapse
 
 services:
-  neo4j:
-    image: docker.io/library/neo4j:5.26-community
-    environment:
-      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env}
-      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP:-1G}
-      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-512M}
-    ports:
-      - "127.0.0.1:7474:7474" # browser
-      - "127.0.0.1:7687:7687" # bolt
-    volumes:
-      - neo4j-data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-
-  # Optional graph backend (COMPOSE_PROFILES=hugegraph and
-  # CODESYNAPSE_GRAPH_BACKEND=hugegraph). Gremlin runs Groovy on the server,
-  # so HugeGraph always has a password and is never published to the host.
+  # The graph database. Gremlin runs Groovy on the server, so HugeGraph
+  # always has a password and is never published to the host.
   hugegraph:
     image: docker.io/hugegraph/hugegraph:1.7.0
-    profiles: [hugegraph]
     # Without a password the image would start in no-auth mode: refuse instead.
     # The image enables auth by editing its config files once and records
     # that on the volume, so a recreated container would come back without
@@ -52,11 +33,10 @@ services:
       timeout: 5s
       retries: 30
 
-  # Agent-memory vectors for the HugeGraph backend (standalone, embedded etcd,
-  # local storage). Internal network only.
+  # Agent-memory vectors (standalone, embedded etcd, local storage).
+  # Internal network only.
   milvus:
     image: docker.io/milvusdb/milvus:v3.0.3
-    profiles: [hugegraph]
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_USE_EMBED: "true"
@@ -115,12 +95,9 @@ services:
       context: .
       dockerfile: services/api/Dockerfile
     environment:
-      CODESYNAPSE_NEO4J_URI: neo4j://neo4j:7687
-      CODESYNAPSE_NEO4J_PASSWORD: ${NEO4J_PASSWORD}
-      CODESYNAPSE_GRAPH_BACKEND: ${CODESYNAPSE_GRAPH_BACKEND:-neo4j}
       CODESYNAPSE_HUGEGRAPH_URL: http://hugegraph:8080
       CODESYNAPSE_HUGEGRAPH_USER: admin
-      CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_PASSWORD:-}
+      CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_PASSWORD:?run "just init" to add HUGEGRAPH_PASSWORD to .env}
       CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES: "8388608"
       CODESYNAPSE_HUGEGRAPH_TX_CAPACITY: "1000000"
       CODESYNAPSE_MILVUS_URL: http://milvus:19530
@@ -190,7 +167,9 @@ services:
       timeout: 3s
       retries: 30
     depends_on:
-      neo4j:
+      hugegraph:
+        condition: service_healthy
+      milvus:
         condition: service_healthy
       postgres:
         condition: service_healthy
@@ -200,12 +179,9 @@ services:
       context: .
       dockerfile: services/mcp/Dockerfile
     environment:
-      CODESYNAPSE_NEO4J_URI: neo4j://neo4j:7687
-      CODESYNAPSE_NEO4J_PASSWORD: ${NEO4J_PASSWORD}
-      CODESYNAPSE_GRAPH_BACKEND: ${CODESYNAPSE_GRAPH_BACKEND:-neo4j}
       CODESYNAPSE_HUGEGRAPH_URL: http://hugegraph:8080
       CODESYNAPSE_HUGEGRAPH_USER: admin
-      CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_PASSWORD:-}
+      CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_PASSWORD:?run "just init" to add HUGEGRAPH_PASSWORD to .env}
       CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES: "8388608"
       CODESYNAPSE_HUGEGRAPH_TX_CAPACITY: "1000000"
       CODESYNAPSE_MILVUS_URL: http://milvus:19530
@@ -240,7 +216,9 @@ services:
       timeout: 3s
       retries: 30
     depends_on:
-      neo4j:
+      hugegraph:
+        condition: service_healthy
+      milvus:
         condition: service_healthy
       postgres:
         condition: service_healthy
@@ -273,6 +251,5 @@ volumes:
   milvus-data:
   metrics-data:
   postgres-data:
-  neo4j-data:
   workspace:
   go-cache:

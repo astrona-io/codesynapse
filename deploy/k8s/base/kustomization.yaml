@@ -4,7 +4,6 @@ namespace: codesynapse
 resources:
   - namespace.yaml
   - config.yaml
-  - neo4j.yaml
   - api.yaml
   - mcp.yaml
   - web.yaml

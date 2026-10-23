@@ -7,9 +7,7 @@ ldflags := "-s -w -X main.version=" + version
 
 # Container runtime: Docker if present, else Podman. Override with COMPOSE="...".
 runtime := `if command -v docker >/dev/null 2>&1; then echo "docker compose"; elif command -v podman >/dev/null 2>&1; then echo "podman compose"; else echo "missing-container-runtime"; fi`
-# The HugeGraph/Milvus start-up ordering lives in its own file, loaded only with that profile.
-files := if env("COMPOSE_PROFILES", "") =~ "hugegraph" { "-f docker-compose.yml -f docker-compose.hugegraph.yml" } else { "" }
-compose := env("COMPOSE", trim(runtime + " " + files))
+compose := env("COMPOSE", runtime)
 
 default:
     @just --list
@@ -35,13 +33,12 @@ init:
             echo "added METRICS_PASSWORD to .env"
         fi
         if ! grep -q '^HUGEGRAPH_PASSWORD=' .env; then
-            printf '\n# HugeGraph admin password (only used with CODESYNAPSE_GRAPH_BACKEND=hugegraph).\nHUGEGRAPH_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
+            printf '\n# HugeGraph admin password (the graph database).\nHUGEGRAPH_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
             echo "added HUGEGRAPH_PASSWORD to .env"
         fi
         exit 0
     fi
-    sed -e "s/change-me-please/$(openssl rand -hex 24)/" \
-        -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
+    sed -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-postgres/$(openssl rand -hex 24)/" \
         -e "s/change-me-hugegraph/$(openssl rand -hex 24)/" \
@@ -86,14 +83,10 @@ git-token host="github.com": init _runtime
     echo "token stored in .env for $host; the API was restarted. Run again with another host (just git-token codeberg.org) to add more."
     echo "read-only token: Contents read. For fix branches and PRs (CODESYNAPSE_ALLOW_PUSH=true): Contents and Pull requests read and write."
 
-# Build and start Neo4j, API, MCP and web
+# Build and start HugeGraph, Milvus, PostgreSQL, API, MCP and web
 up: init _runtime
     {{compose}} up -d --build
-    @echo "web http://localhost:3000 · api http://localhost:8080 · mcp http://localhost:8090/mcp · neo4j http://localhost:7474"
-
-# Start only Neo4j (for running the Go services or web locally)
-db: init _runtime
-    {{compose}} up -d neo4j
+    @echo "web http://localhost:3000 · api http://localhost:8080 · mcp http://localhost:8090/mcp"
 
 # Stop the stack (data is kept)
 down:
@@ -109,7 +102,7 @@ reset: init _runtime
     {{compose}} down -v --remove-orphans --rmi local
     {{compose}} build --no-cache
     {{compose}} up -d --force-recreate
-    @echo "web http://localhost:3000 · api http://localhost:8080 · mcp http://localhost:8090/mcp · neo4j http://localhost:7474"
+    @echo "web http://localhost:3000 · api http://localhost:8080 · mcp http://localhost:8090/mcp"
 
 # Follow logs, optionally for one service: just logs api
 logs service="":
@@ -182,8 +175,7 @@ k8s-secrets overlay="dev":
     set -eu
     dir=deploy/k8s/overlays/{{overlay}}
     if [ -f "$dir/secrets.env" ]; then echo "$dir/secrets.env exists, leaving it alone"; exit 0; fi
-    sed -e "s/change-me-please/$(openssl rand -hex 24)/" \
-        -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
+    sed -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" "$dir/secrets.env.example" > "$dir/secrets.env"
     echo "wrote $dir/secrets.env (git-ignored); add CODESYNAPSE_GIT_TOKEN etc. there if you need them"
 
@@ -196,19 +188,15 @@ k8s-apply overlay="dev":
     kubectl apply -k deploy/k8s/overlays/{{overlay}}
     @echo "kubectl -n codesynapse get pods · kubectl -n codesynapse port-forward svc/web 3000:80"
 
-# --- local development (no containers except Neo4j) ------------------------
+# --- local development --------------------------------------------------------
+# HugeGraph runs Gremlin and is never published to the host, so the API runs
+# in compose (`just up`); these recipes work alongside it or without it.
 
-# Run the API against the compose Neo4j, serving ./sources
-dev-api: db
-    CODESYNAPSE_NEO4J_URI=neo4j://localhost:7687 CODESYNAPSE_NEO4J_PASSWORD="$NEO4J_PASSWORD" \
-    go run ./services/api/cmd/codesynapse-api serve --sources-root ./sources
+# Run the MCP server on stdio with an in-memory graph of a directory (no database)
+dev-mcp dir=".":
+    go run ./services/mcp/cmd/codesynapse-mcp serve --offline {{dir}}
 
-# Run the MCP server on stdio against the compose Neo4j
-dev-mcp: db
-    CODESYNAPSE_NEO4J_URI=neo4j://localhost:7687 CODESYNAPSE_NEO4J_PASSWORD="$NEO4J_PASSWORD" \
-    go run ./services/mcp/cmd/codesynapse-mcp serve
-
-# Run the Nuxt dev server against `just dev-api`
+# Run the Nuxt dev server against the API of `just up`
 dev-web:
     cd services/web && npm install --no-fund --no-audit && NUXT_API_BASE=http://127.0.0.1:8080 npm run dev
 
@@ -230,7 +218,6 @@ build:
 test:
     go test -race ./...
 
-# Store contract tests against the compose Neo4j (uses repo name "fixture")
 # Accounts contract against a throwaway PostgreSQL container (never the compose database: the test drops its tables)
 test-postgres: _runtime
     #!/usr/bin/env sh
@@ -275,9 +262,8 @@ test-metrics: _runtime
     CODESYNAPSE_TEST_METRICS_URL=http://127.0.0.1:58428 CODESYNAPSE_TEST_METRICS_USER=cs CODESYNAPSE_TEST_METRICS_PASSWORD="$pw" \
         go test -race -count=1 -run TestVictoriaMetrics ./internal/telemetry/ ./services/api/internal/api/
 
-test-integration: db
-    CODESYNAPSE_TEST_NEO4J_URI=neo4j://localhost:7687 CODESYNAPSE_TEST_NEO4J_PASSWORD="$NEO4J_PASSWORD" \
-    go test -race -run TestContract ./internal/store/...
+# Store and accounts contracts against throwaway HugeGraph, Milvus and PostgreSQL containers
+test-integration: test-hugegraph test-postgres
 
 # Coverage report
 cover:

@@ -42,8 +42,6 @@ spec:
           envFrom:
             - configMapRef: {name: codesynapse-config}
           env:
-            - name: CODESYNAPSE_NEO4J_PASSWORD
-              valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: NEO4J_PASSWORD}}
             - name: CODESYNAPSE_API_TOKEN
               valueFrom: {secretKeyRef: {name: codesynapse-secrets, key: CODESYNAPSE_API_TOKEN}}
             - name: CODESYNAPSE_GIT_TOKEN
@@ -59,7 +57,7 @@ spec:
           readinessProbe:
             httpGet: {path: /healthz, port: http}
             periodSeconds: 10
-          # The service waits for Neo4j before it listens; do not let liveness kill it meanwhile.
+          # The service waits for the graph database before it listens; do not let liveness kill it meanwhile.
           startupProbe:
             httpGet: {path: /healthz, port: http}
             periodSeconds: 5

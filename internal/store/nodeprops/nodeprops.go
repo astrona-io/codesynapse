@@ -91,7 +91,7 @@ func To(n model.Node) map[string]any {
 	return p
 }
 
-// From restores a node. Integers may arrive as int64 (Neo4j), float64 or
+// From restores a node. Integers may arrive as int64, float64 or
 // json.Number (JSON), lists as []any or []string.
 func From(p map[string]any) model.Node {
 	s := func(k string) string { v, _ := p[k].(string); return v }
