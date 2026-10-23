@@ -161,7 +161,7 @@ scan-image image:
     set -eu
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
     {{engine}} save -o "$tmp/image.tar" "{{image}}"
-    {{engine}} run --rm -v "$tmp:/scan:ro" -v "$PWD/.trivyignore:/src/.trivyignore:ro" -w /src -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.62.1 \
+    {{engine}} run --rm -v "$tmp:/scan:ro" -v "$PWD/.trivyignore:/src/.trivyignore:ro" -w /src -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.76.1 \
         image --quiet --exit-code 1 --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --input /scan/image.tar
 
 # Push the images to REGISTRY (log in first: docker login ghcr.io)
@@ -372,7 +372,7 @@ secrets:
 
 # Vulnerabilities with a fix and misconfigurations, HIGH and CRITICAL (.trivyignore)
 scan:
-    {{engine}} run --rm -v "$PWD:/src:ro" -w /src -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.62.1 \
+    {{engine}} run --rm -v "$PWD:/src:ro" -w /src -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.76.1 \
         fs --quiet --exit-code 1 --scanners vuln,misconfig --severity HIGH,CRITICAL --ignore-unfixed \
         --skip-dirs '**/node_modules' --skip-dirs '**/testdata' --skip-dirs .claude --skip-dirs sources --skip-dirs bin .
 
