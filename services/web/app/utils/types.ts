@@ -187,6 +187,12 @@ export interface LicenseReport {
   issues: LicenseEntry[]; truncated?: number; online: boolean
 }
 
+export interface DependencyPackage {
+  ecosystem: string; name: string; version?: string; license: string
+  direct: boolean; dev?: boolean; via?: string; roots?: number
+}
+export interface DependencyList { packages: DependencyPackage[]; by_ecosystem: { ecosystem: string; count: number }[]; truncated?: boolean }
+
 export interface MemoryEntity { id: string; repo: string; name: string; type: string; created_at: string; updated_at: string }
 export interface MemoryFact {
   id: string; repo: string; subject: string; predicate: string; object: string
