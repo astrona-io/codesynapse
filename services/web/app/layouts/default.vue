@@ -39,9 +39,11 @@ const more = computed(() => session.restricted.value ? [
   { to: '/settings/profile', label: 'Profile', hint: 'Your name and password' },
   { to: '/help', label: 'Help', hint: 'Getting started and what things mean' },
 ] : [
-  // Import uses the installation-wide organisation list, which accounts mode
-  // does not serve; repositories are added one at a time there for now.
-  ...(session.accounts.value ? [] : [{ to: '/orgs', label: 'Import', hint: 'Index every repository of a GitHub, GitLab or Forgejo organisation' }]),
+  // With accounts, import adds picked repositories to the selected
+  // organisation; without, it watches organisations installation-wide.
+  session.accounts.value
+    ? { to: '/import', label: 'Import', hint: 'Add repositories of a GitHub, GitLab or Forgejo organisation' }
+    : { to: '/orgs', label: 'Import', hint: 'Index every repository of a GitHub, GitLab or Forgejo organisation' },
   { to: '/ai', label: 'AI models', hint: 'Local and cloud language models' },
   ...(session.accounts.value ? [{ to: '/settings', label: 'Settings', hint: 'Profile, API keys, organisation, Git tokens' }] : []),
   ...(session.accounts.value && session.isPlatformAdmin.value ? [{ to: '/admin', label: 'Administration', hint: 'Organisations, people, health and the audit log' }] : []),
