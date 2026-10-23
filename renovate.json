@@ -9,6 +9,12 @@
       "matchManagers": ["npm"],
       "matchPackageNames": ["typescript"],
       "allowedVersions": "<6"
+    },
+    {
+      "description": "A Go major version is a new import path: bumping go.mod alone leaves the code on the old version and can break the build (#82, #83, #85, #86). Wait for approval on the dependency dashboard and migrate the imports in the same change.",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
     }
   ]
 }
