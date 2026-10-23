@@ -41,6 +41,55 @@ type repoGraph struct {
 	nodes map[string]model.Node
 	out   map[string][]model.Edge
 	in    map[string][]model.Edge
+	// search holds every node in Search's tie-break order (qualified name
+	// length, then ID) with names folded once at ingest, so a query neither
+	// folds every name again nor sorts all matches. byName holds positions in
+	// search ordered by folded name, which finds exact matches by binary
+	// search instead of a full scan.
+	search []searchKey
+	byName []int
+}
+
+type searchKey struct {
+	id              string
+	name, qualified string // strings.ToLower, as model.ContainsFold compares
+	kind            model.NodeKind
+	qualifiedLen    int // of the original name: folding can change byte length
+}
+
+// searchCancelEvery bounds how many candidates Search scans between context
+// checks.
+const searchCancelEvery = 1024
+
+func indexSearch(rg *repoGraph) {
+	rg.search = make([]searchKey, 0, len(rg.nodes))
+	for _, n := range rg.nodes {
+		rg.search = append(rg.search, searchKey{
+			id: n.ID, name: strings.ToLower(n.Name), qualified: strings.ToLower(n.QualifiedName),
+			kind: n.Kind, qualifiedLen: len(n.QualifiedName),
+		})
+	}
+	slices.SortFunc(rg.search, func(a, b searchKey) int {
+		return cmp.Or(cmp.Compare(a.qualifiedLen, b.qualifiedLen), cmp.Compare(a.id, b.id))
+	})
+	rg.byName = make([]int, len(rg.search))
+	for i := range rg.byName {
+		rg.byName[i] = i
+	}
+	slices.SortFunc(rg.byName, func(a, b int) int {
+		return cmp.Or(strings.Compare(rg.search[a].name, rg.search[b].name), cmp.Compare(a, b))
+	})
+}
+
+// exactMatches returns the positions in search whose folded name is lq, in
+// search order.
+func (rg *repoGraph) exactMatches(lq string) []int {
+	first, _ := slices.BinarySearchFunc(rg.byName, lq, func(i int, q string) int { return strings.Compare(rg.search[i].name, q) })
+	last := first
+	for last < len(rg.byName) && rg.search[rg.byName[last]].name == lq {
+		last++
+	}
+	return rg.byName[first:last]
 }
 
 var _ store.Store = (*Store)(nil)
@@ -87,6 +136,7 @@ func (s *Store) ReplaceRepo(ctx context.Context, repo string, g *model.Graph) er
 		rg.out[e.From] = append(rg.out[e.From], e)
 		rg.in[e.To] = append(rg.in[e.To], e)
 	}
+	indexSearch(rg)
 	if err := store.CommitCheck(ctx); err != nil {
 		return err
 	}
@@ -217,8 +267,12 @@ func (s *Store) Node(_ context.Context, id string) (model.Node, error) {
 	return model.Node{}, fmt.Errorf("node %q: %w", id, store.ErrNotFound)
 }
 
-// Search implements store.Reader.
-func (s *Store) Search(_ context.Context, repo, q string, kinds []model.NodeKind, limit int) ([]model.Node, error) {
+// Search implements store.Reader. Matches are exact names first, then by
+// qualified name length and ID, the same order as the other stores.
+func (s *Store) Search(ctx context.Context, repo, q string, kinds []model.NodeKind, limit int) ([]model.Node, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	limit = store.ClampLimit(limit, 20)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -227,26 +281,36 @@ func (s *Store) Search(_ context.Context, repo, q string, kinds []model.NodeKind
 		return nil, err
 	}
 	lq := strings.ToLower(q)
+	wanted := func(k searchKey) bool { return len(kinds) == 0 || slices.Contains(kinds, k.kind) }
 	var out []model.Node
-	for _, n := range rg.nodes {
-		if len(kinds) > 0 && !slices.Contains(kinds, n.Kind) {
-			continue
+	add := func(k searchKey) {
+		if out == nil { // a query that matches nothing allocates nothing
+			out = make([]model.Node, 0, min(limit, len(rg.search)))
 		}
-		if model.ContainsFold(n.Name, q) || model.ContainsFold(n.QualifiedName, q) {
-			out = append(out, n)
+		out = append(out, rg.nodes[k.id])
+	}
+	for _, i := range rg.exactMatches(lq) {
+		if len(out) == limit {
+			return out, nil
+		}
+		if wanted(rg.search[i]) {
+			add(rg.search[i])
 		}
 	}
-	slices.SortFunc(out, func(a, b model.Node) int {
-		ea, eb := strings.ToLower(a.Name) == lq, strings.ToLower(b.Name) == lq
-		if ea != eb {
-			if ea {
-				return -1
-			}
-			return 1
+	for i, k := range rg.search {
+		if len(out) == limit {
+			break
 		}
-		return cmp.Or(cmp.Compare(len(a.QualifiedName), len(b.QualifiedName)), cmp.Compare(a.ID, b.ID))
-	})
-	return out[:min(len(out), limit)], nil
+		if i > 0 && i%searchCancelEvery == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		if k.name != lq && wanted(k) && (strings.Contains(k.name, lq) || strings.Contains(k.qualified, lq)) {
+			add(k)
+		}
+	}
+	return out, nil
 }
 
 // NodesInFile implements store.Reader.
