@@ -21,8 +21,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/memory"
@@ -42,7 +44,19 @@ const (
 	searchFilter = "tenant_id == {tenant} && ns == {ns}"
 	maxResponse  = 16 << 20
 	upsertBatch  = 500
+	// retryBudget bounds retries of transient failures: a clustered Milvus
+	// answers "not ready" or drops connections while a node fails over.
+	// Every call is safe to repeat: upserts and deletes go by ID, searches
+	// read, and collection setup checks before it creates.
+	retryBudget = 15 * time.Second
 )
+
+// retriable are Milvus error codes for a service, replica, channel or node
+// that is not available yet (merr: ServiceNotReady, ServiceUnavailable,
+// RequestLimitExceeded, ServiceRateLimit, ReplicaNotAvailable,
+// ChannelNotAvailable, NodeNotFound, NodeOffline, NodeLack,
+// NodeNotAvailable).
+var retriable = []int{1, 2, 4, 8, 402, 503, 901, 902, 903, 905}
 
 // Config holds connection settings. Token is never logged.
 type Config struct {
@@ -68,6 +82,8 @@ type Index struct {
 	ready       map[string]bool // collections known to exist and be loaded
 	sessionMode bool
 	sessions    *Index
+	// retries counts retried calls (tests read it).
+	retries atomic.Int64
 }
 
 var _ vector.Index = (*Index)(nil)
@@ -103,6 +119,16 @@ func (x *Index) Close(context.Context) error { x.http.CloseIdleConnections(); re
 func (x *Index) call(ctx context.Context, path string, body map[string]any, out any) error {
 	start := time.Now()
 	err := x.do(ctx, path, body, out)
+	for wait := 200 * time.Millisecond; transient(err) && time.Since(start)+wait < retryBudget; wait = min(2*wait, 2*time.Second) {
+		select {
+		case <-ctx.Done():
+		case <-time.After(wait):
+			x.retries.Add(1)
+			err = x.do(ctx, path, body, out)
+			continue
+		}
+		break
+	}
 	tenant := telemetry.Tenant(ctx)
 	telemetry.DBDuration.ObserveContext(ctx, time.Since(start).Seconds(), tenant, "milvus", path)
 	if err != nil {
@@ -145,10 +171,10 @@ func (x *Index) do(ctx context.Context, path string, body map[string]any, out an
 		Data    json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return fmt.Errorf("milvus %s: HTTP %d, unreadable answer", path, res.StatusCode)
+		return &apiError{path: path, status: res.StatusCode, msg: "unreadable answer"}
 	}
 	if res.StatusCode != http.StatusOK || env.Code != 0 {
-		return &apiError{path: path, code: env.Code, msg: env.Message}
+		return &apiError{path: path, status: res.StatusCode, code: env.Code, msg: env.Message}
 	}
 	if out == nil || len(env.Data) == 0 {
 		return nil
@@ -157,13 +183,29 @@ func (x *Index) do(ctx context.Context, path string, body map[string]any, out an
 }
 
 type apiError struct {
-	path string
-	code int
-	msg  string
+	path   string
+	status int
+	code   int
+	msg    string
 }
 
 func (e *apiError) Error() string {
-	return fmt.Sprintf("milvus %s: code %d: %s", e.path, e.code, e.msg)
+	return fmt.Sprintf("milvus %s: HTTP %d, code %d: %s", e.path, e.status, e.code, e.msg)
+}
+
+// transient reports a failure worth retrying: a connection that failed, a
+// gateway or server error, or Milvus saying a part is not available yet.
+// Cancellation, deadlines and answers about the request itself are final.
+func transient(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var ae *apiError
+	if errors.As(err, &ae) {
+		return ae.status >= 500 || slices.Contains(retriable, ae.code)
+	}
+	var ue *url.Error
+	return errors.As(err, &ue)
 }
 
 // gone reports Milvus answering that a collection is missing or not loaded

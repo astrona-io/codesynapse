@@ -116,6 +116,7 @@ just image-build  # api, worker, mcp and web images
 just chart-check  # helm lint, kubeconform, kube-linter, kubesec
 just chart-e2e    # chart on a throwaway kind cluster: build, load, install, helm test (just kind-down)
 just chart-failover-postgres   # after chart-e2e: CloudNativePG with three instances, kill the primary under writes
+just chart-failover-milvus     # after chart-e2e: Milvus cluster (SeaweedFS, Woodpecker), kill nodes under writes
 just chart-install-published X.Y.Z   # a released chart and images on the kind cluster (release check)
 just mcp        # register the MCP server with Claude Code, Codex, Gemini, OpenCode, Cursor
 ```

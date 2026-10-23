@@ -7,7 +7,9 @@ global:
   # Required. Keys: CODESYNAPSE_API_TOKEN, CODESYNAPSE_MCP_TOKEN,
   # HUGEGRAPH_PASSWORD, METRICS_PASSWORD, SECRET_KEY, and POSTGRES_PASSWORD
   # (in-chart PostgreSQL) or CODESYNAPSE_DATABASE_URL (external). Optional:
-  # CODESYNAPSE_GIT_TOKENS, ANTHROPIC_API_KEY, OPENROUTER_API_KEY.
+  # CODESYNAPSE_GIT_TOKENS, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, and
+  # MILVUS_TOKEN ("user:password" or an API key) for an external Milvus
+  # with authentication.
   existingSecret: ""
   # Secrets for a private registry or mirror, e.g. [{name: ghcr}].
   imagePullSecrets: []
@@ -119,7 +121,8 @@ hugegraph:
   txCapacity: 1000000
 milvus:
   enabled: true
-  # When disabled: the Milvus REST URL; empty turns memory vectors off.
+  # When disabled: the Milvus proxy URL (http(s)://host:19530); empty turns
+  # memory vectors off. With authentication, MILVUS_TOKEN in the Secret.
   externalURL: ""
 victoriametrics:
   enabled: true
