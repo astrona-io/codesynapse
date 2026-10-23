@@ -91,7 +91,7 @@ services:
 
   # Users, organisations, API keys and the audit log.
   postgres:
-    image: docker.io/library/postgres:17-alpine
+    image: docker.io/library/postgres:18-alpine
     environment:
       POSTGRES_USER: codesynapse
       POSTGRES_DB: codesynapse
