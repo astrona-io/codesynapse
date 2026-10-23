@@ -1,0 +1,19 @@
+File: codesynapse-4j-context.test
+Type: alloc_space
+Time: 2026-10-23 07:11:50 CEST
+Showing nodes accounting for 8357.41MB, 99.11% of 8432.51MB total
+Dropped 73 nodes (cum <= 42.16MB)
+Showing top 12 nodes out of 20
+      flat  flat%   sum%        cum   cum%
+ 7368.84MB 87.39% 87.39%  8292.85MB 98.34%  github.com/astrona-io/codesynapse/internal/store/memory.(*Store).Search
+  924.01MB 10.96% 98.34%   924.01MB 10.96%  internal/bytealg.MakeNoZero
+   56.80MB  0.67% 99.02%    56.80MB  0.67%  bytes.Clone (inline)
+    6.75MB  0.08% 99.10%  8372.01MB 99.28%  github.com/astrona-io/codesynapse/internal/agentctx.Service.MinimalContext
+       1MB 0.012% 99.11%  8423.12MB 99.89%  github.com/astrona-io/codesynapse/internal/agentctx.BenchmarkAuditMinimalContext.func1
+         0     0% 99.11%    67.81MB   0.8%  encoding/json.Marshal (inline)
+         0     0% 99.11%    67.81MB   0.8%  encoding/json/v2.Marshal
+         0     0% 99.11%    53.80MB  0.64%  github.com/astrona-io/codesynapse/internal/agentctx.measuredTokens
+         0     0% 99.11%    66.50MB  0.79%  github.com/astrona-io/codesynapse/internal/model.ContainsFold
+         0     0% 99.11%  8301.23MB 98.44%  github.com/astrona-io/codesynapse/internal/store.repositoryReader.Search
+         0     0% 99.11%   857.51MB 10.17%  github.com/astrona-io/codesynapse/internal/store/memory.(*Store).Search.func1
+         0     0% 99.11%   857.51MB 10.17%  slices.SortFunc[go.shape.[]github.com/astrona-io/codesynapse/internal/model.Node,go.shape.af16dcc4d2d313bdda8e01206a7cb613bf3b5345f70c94ee50f1562ada467c15] (inline)

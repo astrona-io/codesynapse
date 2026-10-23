@@ -1,0 +1,20 @@
+File: codesynapse-4j-context.test
+Type: cpu
+Time: 2026-10-23 07:11:46 CEST
+Duration: 4.03s, Total samples = 6370ms (158.21%)
+Showing nodes accounting for 4970ms, 78.02% of 6370ms total
+Dropped 82 nodes (cum <= 31.85ms)
+Showing top 12 nodes out of 107
+      flat  flat%   sum%        cum   cum%
+     820ms 12.87% 12.87%      820ms 12.87%  runtime.madvise
+     780ms 12.24% 25.12%      780ms 12.24%  runtime.pthread_kill
+     620ms  9.73% 34.85%      620ms  9.73%  runtime.pthread_cond_wait
+     540ms  8.48% 43.33%     1240ms 19.47%  strings.ToLower
+     460ms  7.22% 50.55%     1390ms 21.82%  slices.partitionCmpFunc[go.shape.af16dcc4d2d313bdda8e01206a7cb613bf3b5345f70c94ee50f1562ada467c15]
+     450ms  7.06% 57.61%      450ms  7.06%  runtime.usleep
+     440ms  6.91% 64.52%      910ms 14.29%  runtime.scanObject
+     260ms  4.08% 68.60%      260ms  4.08%  runtime.pthread_cond_signal
+     190ms  2.98% 71.59%      250ms  3.92%  runtime.tryDeferToSpanScan
+     140ms  2.20% 73.78%      290ms  4.55%  runtime.mallocgcSmallNoScanSC2
+     140ms  2.20% 75.98%      140ms  2.20%  runtime.memmove
+     130ms  2.04% 78.02%      130ms  2.04%  runtime.typePointers.nextFast (inline)

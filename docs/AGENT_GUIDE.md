@@ -52,6 +52,56 @@ This is a documented header configuration, not an end-to-end tested Codex launch
 
 ---
 
+## Capability and freshness check before editing
+
+Check the tools actually registered in the current client, not just `.mcp.json`.
+For CodeSynapse, verify `minimal_context`, `search`, `get_symbol_context`,
+`file_outline`, `get_implementations`, `duplicate_code` and `get_pr_context`.
+Git status/history/diff may come from a trusted Git connector or local Git;
+record which path was used. Never infer index freshness from tool registration.
+
+1. Check `/healthz` for process health, then verify an authenticated read using
+   the personal key and the runtime's existing primary/parent session identity.
+   A 200 health response proves neither tool authorization nor repository access.
+2. Match the selected repository, indexed revision and returned symbol/file
+   ranges to the checkout and working-tree diff. Edited files can be newer than
+   the index. Ask the graph for task context first, then inspect current source
+   before changing or reusing it.
+3. Search for existing names and behavior; inspect signatures, callers and tests.
+   Reuse a suitable module or extend it safely before adding a duplicate. The
+   approximate 80% reuse guideline is a judgment about behavior and ownership,
+   not permission to ignore security differences.
+4. Read relevant history/diffs and follow the existing architecture. Before
+   finishing, request `get_pr_context` and resolve or explain its findings.
+   Report which MCP symbols/modules were queried and reused, and disclose local
+   search or offline review when MCP was unavailable.
+
+If tools are missing, unhealthy or stale, stop before major code alterations and
+state: “I detected a `.git` repository, but optimal codebase MCP tools (such as
+AST/Symbol Indexers or Git Context Servers) are missing or outdated.” Explain the
+specific gap. Read-only assessment and bounded test/documentation work can use
+an explicitly disclosed local fallback. Reconnect the existing CodeSynapse HTTP
+URL with the supported runtime bridge; never generate a replacement session or
+borrow another chat's credentials. An optional Git MCP connection requires its
+own capability and access review; installing it is not part of this fallback.
+
+Acceptance scenarios for client integration (manual unless noted):
+
+| Setup | Expected result |
+|---|---|
+| No codebase tools registered | Emit the notice, inventory local alternatives, avoid major production changes and disclose fallback |
+| Tools registered but health/read fails | Report the failed capability; do not call the index verified |
+| Indexed revision differs from checkout or touched files | Identify stale evidence; inspect current source and refresh through an authorized ingest before relying on graph completeness |
+| Personal key or immutable parent identity missing | Refuse execution; do not invent an ID or use an installation-token bypass |
+| Valid connection but foreign tenant/repository | Deny or hide content; do not broaden scope to make the query succeed |
+| Healthy, authorized, current index | Run context/search/signature/history workflow, reuse existing code and review the diff |
+
+`TestRuntimeHTTPBindingAndRevocation` covers missing, forged and cross-tenant
+identity plus revocation using an isolated test server. Client registration and
+freshness scenarios above need a connected-client run; server unit tests do not
+prove them. See the [phase 4j assessment](CODE_ARCHITECTURE_AUDIT.md#5-mcp-capability-and-reuse-assessment)
+for the observed environment and a worked reuse example.
+
 ## 1. MCP server system instructions
 
 ```text

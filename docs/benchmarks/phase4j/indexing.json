@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "source_revision": "ddf78a3",
+  "generated_at": "2026-10-23T05:23:44Z",
+  "go": "go1.27.3",
+  "os": "darwin",
+  "arch": "arm64",
+  "cpu": "Apple M5 Pro; 48 GiB RAM",
+  "gomaxprocs": 4,
+  "concurrency": 1,
+  "scope": "Synthetic Go/Python/TypeScript/YAML/Markdown repository; full extraction, ledger preparation, in-memory graph replacement and report validation. No database/network/authentication/model cost. First run is not OS-cache cold; unchanged and edited runs reuse filesystem/toolchain caches and prior identity evidence but rebuild the graph. Allocation deltas include parent Go process only, not go-list/compiler children. Corpus creation and read-memstats are outside timing. Each edit changes one Go file between two values.",
+  "corpora": [
+    {
+      "name": "bundles-10",
+      "corpus_sha256": "8a9aa49239fc8c288d0a993c6da04ae920e425eb32b238ba596ca1d5e3641703",
+      "policy_digest": "",
+      "files": 51,
+      "source_bytes": 4939,
+      "nodes": 224,
+      "edges": 223,
+      "first_run_ms": 99.403542,
+      "unchanged_reingest": {
+        "samples": 20,
+        "p50_ms": 58.77725,
+        "p95_ms": 65.279292,
+        "mean_allocated_bytes": 9961554
+      },
+      "one_file_edit_reingest": {
+        "samples": 20,
+        "p50_ms": 63.576125,
+        "p95_ms": 76.323542,
+        "mean_allocated_bytes": 9967649
+      }
+    },
+    {
+      "name": "bundles-100",
+      "corpus_sha256": "dcb59ca88d59f070b31ad06734d94b227a8d95ad7b579e8cc2c29846d35394f4",
+      "policy_digest": "",
+      "files": 501,
+      "source_bytes": 50209,
+      "nodes": 2204,
+      "edges": 2203,
+      "first_run_ms": 155.974875,
+      "unchanged_reingest": {
+        "samples": 20,
+        "p50_ms": 124.391583,
+        "p95_ms": 131.111458,
+        "mean_allocated_bytes": 96015052
+      },
+      "one_file_edit_reingest": {
+        "samples": 20,
+        "p50_ms": 130.338333,
+        "p95_ms": 167.65675,
+        "mean_allocated_bytes": 96011581
+      }
+    }
+  ]
+}

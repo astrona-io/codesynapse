@@ -1,0 +1,30 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/astrona-io/codesynapse/internal/gitx
+cpu: Apple M5 Pro
+BenchmarkAuditParseDiff/files_1-18         	   49399	      4663 ns/op	  15.65 MB/s	   65874 B/op	      12 allocs/op
+BenchmarkAuditParseDiff/files_1-18         	   56034	      4833 ns/op	  15.11 MB/s	   65874 B/op	      12 allocs/op
+BenchmarkAuditParseDiff/files_1-18         	   45483	      5826 ns/op	  12.53 MB/s	   65875 B/op	      12 allocs/op
+BenchmarkAuditParseDiff/files_100-18       	    9134	     22791 ns/op	 336.10 MB/s	  106994 B/op	     910 allocs/op
+BenchmarkAuditParseDiff/files_100-18       	   10000	     23415 ns/op	 327.14 MB/s	  106994 B/op	     910 allocs/op
+BenchmarkAuditParseDiff/files_100-18       	   10000	     20134 ns/op	 380.45 MB/s	  106993 B/op	     910 allocs/op
+BenchmarkAuditParseDiff/files_1000-18      	    1390	    171329 ns/op	 470.21 MB/s	  440373 B/op	    9013 allocs/op
+BenchmarkAuditParseDiff/files_1000-18      	    1384	    167657 ns/op	 480.50 MB/s	  440373 B/op	    9013 allocs/op
+BenchmarkAuditParseDiff/files_1000-18      	    1508	    160493 ns/op	 501.95 MB/s	  440372 B/op	    9013 allocs/op
+PASS
+ok  	github.com/astrona-io/codesynapse/internal/gitx	2.312s
+goos: darwin
+goarch: arm64
+pkg: github.com/astrona-io/codesynapse/services/api/internal/fixes
+cpu: Apple M5 Pro
+BenchmarkAuditRewriteEnvelope/bytes_4096-18         	   49082	      4434 ns/op	 928.55 MB/s	   13184 B/op	       3 allocs/op
+BenchmarkAuditRewriteEnvelope/bytes_4096-18         	   56280	      4219 ns/op	 975.73 MB/s	   13184 B/op	       3 allocs/op
+BenchmarkAuditRewriteEnvelope/bytes_4096-18         	   57802	      4166 ns/op	 988.24 MB/s	   13184 B/op	       3 allocs/op
+BenchmarkAuditRewriteEnvelope/bytes_65536-18        	    3729	     64293 ns/op	1019.65 MB/s	  204800 B/op	       3 allocs/op
+BenchmarkAuditRewriteEnvelope/bytes_65536-18        	    3825	     68529 ns/op	 956.63 MB/s	  204801 B/op	       3 allocs/op
+BenchmarkAuditRewriteEnvelope/bytes_65536-18        	    3616	     66812 ns/op	 981.21 MB/s	  204800 B/op	       3 allocs/op
+BenchmarkAuditRewriteEnvelope/bytes_262144-18       	     907	    264138 ns/op	 992.53 MB/s	  753667 B/op	       3 allocs/op
+BenchmarkAuditRewriteEnvelope/bytes_262144-18       	     926	    271562 ns/op	 965.40 MB/s	  753669 B/op	       3 allocs/op
+BenchmarkAuditRewriteEnvelope/bytes_262144-18       	     850	    278500 ns/op	 941.35 MB/s	  753669 B/op	       3 allocs/op
+PASS
+ok  	github.com/astrona-io/codesynapse/services/api/internal/fixes	2.686s

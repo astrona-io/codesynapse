@@ -1,0 +1,22 @@
+File: codesynapse-4j-lang.test
+Type: cpu
+Time: 2026-10-23 07:12:16 CEST
+Duration: 2.52s, Total samples = 2110ms (83.75%)
+Showing nodes accounting for 1950ms, 92.42% of 2110ms total
+Dropped 38 nodes (cum <= 10.55ms)
+Showing top 14 nodes out of 59
+      flat  flat%   sum%        cum   cum%
+     590ms 27.96% 27.96%     1380ms 65.40%  regexp.(*Regexp).tryBacktrack
+     300ms 14.22% 42.18%      300ms 14.22%  runtime.madvise
+     170ms  8.06% 50.24%      170ms  8.06%  regexp.(*bitState).shouldVisit (inline)
+     170ms  8.06% 58.29%      250ms 11.85%  regexp/syntax.(*Inst).MatchRunePos
+     130ms  6.16% 64.45%      130ms  6.16%  github.com/astrona-io/codesynapse/internal/ingest/lang.parseJS.func1
+     100ms  4.74% 69.19%      120ms  5.69%  regexp.(*inputString).step
+      90ms  4.27% 73.46%      150ms  7.11%  regexp.lazyFlag.match
+      80ms  3.79% 77.25%       80ms  3.79%  unicode.SimpleFold
+      70ms  3.32% 80.57%       70ms  3.32%  runtime.pthread_cond_signal
+      60ms  2.84% 83.41%       60ms  2.84%  regexp/syntax.IsWordChar (inline)
+      60ms  2.84% 86.26%       60ms  2.84%  unicode/utf8.DecodeLastRuneInString
+      50ms  2.37% 88.63%     1530ms 72.51%  regexp.(*Regexp).backtrack
+      40ms  1.90% 90.52%       60ms  2.84%  regexp.(*bitState).push (inline)
+      40ms  1.90% 92.42%       40ms  1.90%  unicode/utf8.DecodeRuneInString (inline)
