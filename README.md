@@ -182,7 +182,7 @@ Other clients: `just mcp` installs connection settings for them too, but supplie
 2. Send that same value in both `X-CodeSynapse-Session` and `X-CodeSynapse-Parent-Session` on every MCP HTTP request, together with `Authorization: Bearer <personal key>`.
 3. Keep the identity unchanged across reconnects, compaction and delegated work. Each new chat needs its own runtime-provided ID. Do not generate an ID inside a tool, substitute an MCP transport ID or share one static value across chats.
 
-The checked-in `.mcp.json` connects to `http://localhost:8090/mcp` and contains environment placeholders for `CODESYNAPSE_MCP_TOKEN`, `CODESYNAPSE_SESSION_ID` and `CODESYNAPSE_PARENT_SESSION_ID`. A launcher must supply these before the client reads its configuration, after registration. Placeholder syntax and per-chat headers vary by client; the template is not a verified integration for every client. It launches no local process or Python helper.
+The repository ships no `.mcp.json`: a project-scoped entry would override the user-scope bridge in Claude Code. `codesynapse mcp install --only project` writes one that starts `codesynapse mcp bridge` (the binary must be on `PATH`), for clients that pass their chat ID in `CODESYNAPSE_SESSION_ID` or `CLAUDE_CODE_SESSION_ID`.
 
 **Codex:** the installed CLI's `mcp add` supports the URL and bearer-token environment variable but has no HTTP header setter. Its installer therefore does not complete runtime-header setup. Configure headers through a supported client configuration or runtime integration and verify that they reach the server before using tools. See the [runtime contract and client limitations](docs/AGENT_GUIDE.md#runtime-session-setup).
 
