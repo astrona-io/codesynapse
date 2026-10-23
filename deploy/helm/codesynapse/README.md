@@ -1,5 +1,7 @@
 # CodeSynapse Helm chart
 
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/codesynapse)](https://artifacthub.io/packages/search?repo=codesynapse)
+
 Installs CodeSynapse on Kubernetes: the dashboard (`web`), the API (`api`), job workers (`worker`) and the MCP server (`mcp`). The stores it needs are subcharts, all on by default, so a plain install runs everything: PostgreSQL, HugeGraph, Milvus, VictoriaMetrics and VictoriaTraces. For production, run them yourself and link them (see [Stores](#stores)). Every image is Apache-2.0, or PostgreSQL-licensed for the database.
 
 ## Install
