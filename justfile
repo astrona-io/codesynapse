@@ -128,6 +128,10 @@ ingest-self:
 review base="origin/main":
     go run ./cmd/codesynapse review . --offline --base {{base}}
 
+# Score minimal_context and search on past commits against the committed baseline (needs full history)
+eval *args:
+    go run ./cmd/codesynapse eval . --repo codesynapse --baseline docs/benchmarks/task-eval/codesynapse.json {{args}}
+
 # Register the MCP server with your AI agents (asks per agent: Claude Code, Codex, Gemini, OpenCode, Cursor, project)
 mcp:
     go install ./cmd/codesynapse
@@ -392,7 +396,7 @@ licenses-check:
 checks: lint-actions lint-docker lint-shell lint-yaml secrets scan vuln
 
 # Everything CI runs on a pull request (the integration contracts run separately)
-ci: lint test web-check licenses-check checks
+ci: lint test web-check licenses-check checks eval
 
 # --- docs (mkdocs) ------------------------------------------------------------
 

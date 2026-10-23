@@ -112,6 +112,7 @@ just test-postgres      # accounts contract against a throwaway PostgreSQL conta
 just test-hugegraph     # HugeGraph/Milvus store contract and parity on throwaway containers
 just test-metrics       # telemetry push and tenant-filtered queries on a throwaway VictoriaMetrics
 just review     # offline review pack for the current branch
+just eval       # score minimal_context and search on past commits against docs/benchmarks/task-eval (needs full history)
 just image-build  # api, worker, mcp and web images
 just chart-check  # helm lint, kubeconform, kube-linter, kubesec
 just chart-e2e    # chart on a throwaway kind cluster: build, load, install, helm test (just kind-down)
