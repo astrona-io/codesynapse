@@ -1,0 +1,64 @@
+{{- if .Values.victoriatraces.enabled }}
+# Traces: one request through the API, its job and the worker (no content).
+# Password protected with the metrics login; only the services reach it.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "cs.name" (list . "victoriatraces") }}
+  labels:
+    {{- include "cs.labels" (list . "victoriatraces") | nindent 4 }}
+spec:
+  serviceName: {{ include "cs.name" (list . "victoriatraces") }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cs.selector" (list . "victoriatraces") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cs.labels" (list . "victoriatraces") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "cs.podSecurity" 65534 | nindent 8 }}
+      containers:
+        - name: victoriatraces
+          image: {{ .Values.victoriatraces.image }}
+          args:
+            - -retentionPeriod={{ .Values.victoriatraces.retention }}
+            - -storageDataPath=/victoria-traces-data
+            - -httpAuth.username=codesynapse
+            - -httpAuth.password=$(METRICS_PASSWORD)
+          env:
+            {{- include "cs.secretEnv" (list . "METRICS_PASSWORD" "METRICS_PASSWORD") | nindent 12 }}
+          ports:
+            - {name: http, containerPort: 10428}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.victoriatraces.resources | nindent 12 }}
+          securityContext:
+            {{- include "cs.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /victoria-traces-data}
+  {{- include "cs.volumeClaim" (list . .Values.victoriatraces) | nindent 2 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cs.name" (list . "victoriatraces") }}
+  labels:
+    {{- include "cs.labels" (list . "victoriatraces") | nindent 4 }}
+spec:
+  selector:
+    {{- include "cs.selector" (list . "victoriatraces") | nindent 4 }}
+  ports:
+    - {name: http, port: 10428, targetPort: http}
+{{- end }}

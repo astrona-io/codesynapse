@@ -1,0 +1,10 @@
+CodeSynapse {{ .Chart.AppVersion }} is installed as "{{ .Release.Name }}".
+
+Check it:  helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }}
+{{- if .Values.ingress.enabled }}
+Dashboard: https://{{ .Values.ingress.host }}   MCP: https://{{ .Values.ingress.host }}/mcp
+{{- else }}
+Dashboard: kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "cs.name" (list . "web") }} 3000:3000
+MCP:       kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "cs.name" (list . "mcp") }} 8090:8090
+{{- end }}
+The first account to sign up becomes the installation's root account.

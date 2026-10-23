@@ -51,7 +51,7 @@ services/api/           API service: cmd/codesynapse-api, Dockerfile, and packag
 services/mcp/           MCP service: cmd/codesynapse-mcp, Dockerfile
   internal/mcpserver/   MCP tools, prompts (prompts.go) and server instructions
 services/web/           Nuxt 4 dashboard (app/ pages+components, server/api/cg proxy, Dockerfile)
-deploy/k8s/             Kustomize manifests (base + dev/prod overlays); docker-compose.yml stays at the repo root
+deploy/helm/codesynapse/ Helm chart (stores in-chart or external, network policies, helm test); docker-compose.yml stays at the repo root
 internal/ingestreport/  Bounded file ledger, commit-confirmed outcomes and metadata-only context estimates
 internal/config/        Strict repository .codesynapse.yaml policy, digest and shared path matcher
 internal/model/         Node/Edge kinds, Graph, IDs. The schema lives here.
@@ -112,11 +112,13 @@ just test-postgres      # accounts contract against a throwaway PostgreSQL conta
 just test-hugegraph     # HugeGraph/Milvus store contract and parity on throwaway containers
 just test-metrics       # telemetry push and tenant-filtered queries on a throwaway VictoriaMetrics
 just review     # offline review pack for the current branch
-just image-build  # api, mcp and web images; then just k8s-secrets/k8s-apply (see deploy/k8s/README.md)
+just image-build  # api, worker, mcp and web images
+just chart-check  # helm lint, kubeconform, kube-linter, kubesec
+just chart-e2e    # chart on a throwaway kind cluster: build, load, install, helm test (just kind-down)
 just mcp        # register the MCP server with Claude Code, Codex, Gemini, OpenCode, Cursor
 ```
 
-Test Kubernetes manifests only on a throwaway kind cluster, with `--context` set explicitly; never on a shared or production cluster.
+Test the Helm chart only on the throwaway kind cluster of `just chart-e2e` (`kind-codesynapse-dev`), with `--context`/`--kube-context` set explicitly; never on a shared or production cluster. Run `just chart-check` for any chart change.
 
 Run `just test` and `just lint` before you call a Go change done, and `just web-check` for anything under `services/web/`. CI (`.github/workflows/ci.yml`) runs `just ci` on every pull request and merge, plus the integration contracts when stores or accounts change; run `just checks` before touching workflows, Dockerfiles, scripts or YAML. Accepted findings go in `.gitleaks.toml`/`.gitleaksignore`, `.trivyignore` or `.hadolint.yaml`, each with a reason. Pin new GitHub actions by commit SHA.
 

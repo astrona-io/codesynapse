@@ -1,0 +1,25 @@
+# AI providers (config/llm.yaml). Keys stay in the Secret (api_key_env).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cs.name" (list . "llm") }}
+  labels:
+    {{- include "cs.labels" (list . "llm") | nindent 4 }}
+data:
+  llm.yaml: |
+    {{- .Values.llmConfig | default "providers: []" | nindent 4 }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "cs.name" (list . "workspace") }}
+  labels:
+    {{- include "cs.labels" (list . "workspace") | nindent 4 }}
+spec:
+  accessModes: {{ toJson .Values.workspace.accessModes }}
+  {{- with .Values.workspace.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.workspace.size }}

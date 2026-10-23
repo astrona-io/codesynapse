@@ -1,0 +1,13 @@
+apiVersion: v2
+name: codesynapse
+description: CodeSynapse indexes code, docs, configuration and dependencies into a graph and serves precise answers to AI agents (MCP) and a dashboard.
+type: application
+# The chart version follows the release tag (docs/SAAS.md, 6b).
+version: 0.1.0
+appVersion: "dev"
+home: https://github.com/astrona-io/codesynapse
+sources:
+  - https://github.com/astrona-io/codesynapse
+keywords: [code-intelligence, mcp, graph, security]
+annotations:
+  artifacthub.io/license: Apache-2.0

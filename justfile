@@ -170,34 +170,70 @@ image-push tag="dev":
     set -eu
     for svc in api worker mcp web; do {{engine}} push {{registry}}/codesynapse-$svc:{{tag}}; done
 
-# Load the dev images into a local kind cluster
-image-load-kind tag="dev" cluster="kind":
+# --- Helm chart and a throwaway kind cluster (docs/SAAS.md, 6a) ---------------
+# Every kubectl and helm call names the kind context explicitly: these
+# recipes never touch another cluster.
+
+kind_cluster := env("KIND_CLUSTER", "codesynapse-dev")
+kind_context := "kind-" + kind_cluster
+kind_ns := "codesynapse"
+
+# Lint and scan the chart: helm lint, kubeconform, kube-linter, kubesec
+chart-check:
+    sh .github/scripts/check-chart.sh
+
+# Create the throwaway kind cluster (Podman when Docker is absent)
+kind-up:
     #!/usr/bin/env sh
     set -eu
+    [ "{{engine}}" = podman ] && export KIND_EXPERIMENTAL_PROVIDER=podman
+    if kind get clusters 2>/dev/null | grep -qx "{{kind_cluster}}"; then echo "kind cluster {{kind_cluster}} exists"; exit 0; fi
+    kind create cluster --name "{{kind_cluster}}" --wait 120s
+
+# Build the four images and load them into the kind cluster
+chart-images tag="e2e":
+    #!/usr/bin/env sh
+    set -eu
+    [ "{{engine}}" = podman ] && export KIND_EXPERIMENTAL_PROVIDER=podman
+    just image-build {{tag}}
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
     for svc in api worker mcp web; do
         {{engine}} save -o "$tmp/$svc.tar" {{registry}}/codesynapse-$svc:{{tag}}
-        kind load image-archive "$tmp/$svc.tar" --name {{cluster}}
+        kind load image-archive "$tmp/$svc.tar" --name "{{kind_cluster}}"
     done
 
-# Create deploy/k8s/overlays/<overlay>/secrets.env with random secrets if it does not exist
-k8s-secrets overlay="dev":
+# Install the chart from the working tree into the kind cluster (random secrets, created once)
+chart-install:
     #!/usr/bin/env sh
     set -eu
-    dir=deploy/k8s/overlays/{{overlay}}
-    if [ -f "$dir/secrets.env" ]; then echo "$dir/secrets.env exists, leaving it alone"; exit 0; fi
-    sed -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
-        -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" "$dir/secrets.env.example" > "$dir/secrets.env"
-    echo "wrote $dir/secrets.env (git-ignored); add CODESYNAPSE_GIT_TOKEN etc. there if you need them"
+    k="kubectl --context {{kind_context}} --namespace {{kind_ns}}"
+    kubectl --context "{{kind_context}}" get namespace "{{kind_ns}}" >/dev/null 2>&1 || kubectl --context "{{kind_context}}" create namespace "{{kind_ns}}"
+    if ! $k get secret codesynapse >/dev/null 2>&1; then
+        $k create secret generic codesynapse \
+            --from-literal=CODESYNAPSE_API_TOKEN="$(openssl rand -hex 24)" \
+            --from-literal=CODESYNAPSE_MCP_TOKEN="$(openssl rand -hex 24)" \
+            --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)" \
+            --from-literal=HUGEGRAPH_PASSWORD="$(openssl rand -hex 24)" \
+            --from-literal=METRICS_PASSWORD="$(openssl rand -hex 24)" \
+            --from-literal=SECRET_KEY="$(openssl rand -base64 32)"
+    fi
+    helm upgrade --install codesynapse deploy/helm/codesynapse --kube-context "{{kind_context}}" --namespace "{{kind_ns}}" \
+        -f deploy/helm/codesynapse/ci/kind-values.yaml --wait --timeout 15m
 
-# Print the manifests an overlay produces
-k8s-render overlay="dev":
-    kustomize build deploy/k8s/overlays/{{overlay}}
+# Run the chart's tests (every service answers) in the kind cluster
+chart-test:
+    helm test codesynapse --kube-context "{{kind_context}}" --namespace "{{kind_ns}}" --logs
 
-# Apply an overlay to the current kubectl context
-k8s-apply overlay="dev":
-    kubectl apply -k deploy/k8s/overlays/{{overlay}}
-    @echo "kubectl -n codesynapse get pods · kubectl -n codesynapse port-forward svc/web 3000:80"
+# Build, load, install and test on a throwaway kind cluster (just kind-down removes it)
+chart-e2e: chart-check kind-up chart-images chart-install chart-test
+    @echo "the chart works on {{kind_context}}; reach the dashboard with:"
+    @echo "  kubectl --context {{kind_context}} --namespace {{kind_ns}} port-forward svc/codesynapse-web 3000:3000"
+
+# Delete the throwaway kind cluster
+kind-down:
+    #!/usr/bin/env sh
+    [ "{{engine}}" = podman ] && export KIND_EXPERIMENTAL_PROVIDER=podman
+    kind delete cluster --name "{{kind_cluster}}"
 
 # --- local development --------------------------------------------------------
 # HugeGraph runs Gremlin and is never published to the host, so the API runs

@@ -1,0 +1,36 @@
+# helm test: every service answers, and the API runs with accounts.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "cs.name" (list . "test") }}
+  labels:
+    {{- include "cs.labels" (list . "test") | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    # Kept until the next run, so `helm test --logs` can read it.
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
+  automountServiceAccountToken: false
+  securityContext:
+    {{- include "cs.podSecurity" 10001 | nindent 4 }}
+  containers:
+    - name: test
+      image: {{ include "cs.image" (list . "api") }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command:
+        - sh
+        - -c
+        - >-
+          set -e;
+          wget -qO- http://{{ include "cs.name" (list . "api") }}:8080/healthz;
+          wget -qO- http://{{ include "cs.name" (list . "mcp") }}:8090/healthz;
+          wget -qO- http://{{ include "cs.name" (list . "web") }}:3000/api/health;
+          wget -qO- http://{{ include "cs.name" (list . "api") }}:8080/api/v1/auth/status | grep -q '"mode":"accounts"';
+          echo all services answer
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+        limits: {memory: 64Mi}
+      securityContext:
+        {{- include "cs.containerSecurity" . | nindent 8 }}

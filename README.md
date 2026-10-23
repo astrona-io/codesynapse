@@ -294,15 +294,14 @@ The code is split by service: `services/api`, `services/mcp` and `services/web`,
 Releases publish signed multi-arch images to ghcr.io: `ghcr.io/astrona-io/codesynapse-{api,mcp,web}`. A release is a `vX.Y.Z` tag (`:X.Y.Z`, `:X.Y`, `:latest`) or a release candidate `vX.Y.Z-rcN` (`:X.Y.Z-rcN`) on a commit on `main`; merges only build and scan. Verify an image with `cosign verify ghcr.io/astrona-io/codesynapse-api:1.3.0 --certificate-identity-regexp 'https://github.com/astrona-io/codesynapse/' --certificate-oidc-issuer https://token.actions.githubusercontent.com`.
 
 ```sh
-just image-build v0.1.0     # api, mcp and web images (PLATFORM=linux/amd64, REGISTRY=ghcr.io/you)
+just image-build v0.1.0     # api, worker, mcp and web images (PLATFORM=linux/amd64, REGISTRY=ghcr.io/you)
 just scan-image ghcr.io/astrona-io/codesynapse-web:v0.1.0   # fixable HIGH/CRITICAL vulnerabilities, as CI checks
-just image-push v0.1.0
-just k8s-secrets prod       # writes deploy/k8s/overlays/prod/secrets.env (git-ignored)
-just k8s-render prod        # review the manifests
-just k8s-apply prod
+just chart-check            # helm lint, kubeconform, kube-linter, kubesec
+just chart-e2e              # the chart on a throwaway kind cluster: build, load, install, helm test
+just kind-down
 ```
 
-`deploy/k8s` holds Kustomize manifests: a `base` (api, mcp, web, network policies; outdated) and `dev` and `prod` overlays. Phase 6a replaces them with a Helm chart, later published on ghcr.io (see [docs/SAAS.md](docs/SAAS.md)). Test on a throwaway kind cluster first (`just image-load-kind`). See `deploy/k8s/README.md`.
+`deploy/helm/codesynapse` is the Helm chart: the four services, and PostgreSQL, HugeGraph, Milvus, VictoriaMetrics and VictoriaTraces unless you point it at your own. It uses one Secret for every credential, network policies, non-root pods and a `helm test`. See [its README](deploy/helm/codesynapse/README.md) for installing it on a cluster. Test only on the throwaway kind cluster the recipes create.
 
 See `AGENTS.md` for conventions and security rules and `docs/PLAN.md` for architecture and roadmap.
 

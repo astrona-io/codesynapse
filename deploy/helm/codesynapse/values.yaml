@@ -1,0 +1,138 @@
+# CodeSynapse Helm chart (docs/SAAS.md, 6a). Every credential comes from one
+# Secret you create (secrets.existingSecret); the chart has no default
+# passwords. `just chart-e2e` installs it on a throwaway kind cluster.
+
+image:
+  registry: ghcr.io/astrona-io
+  # Defaults to the chart's appVersion (the release tag).
+  tag: ""
+  pullPolicy: IfNotPresent
+
+secrets:
+  # Required. Keys: CODESYNAPSE_API_TOKEN, CODESYNAPSE_MCP_TOKEN,
+  # HUGEGRAPH_PASSWORD, METRICS_PASSWORD, SECRET_KEY, and POSTGRES_PASSWORD
+  # (in-chart PostgreSQL) or CODESYNAPSE_DATABASE_URL (external). Optional:
+  # CODESYNAPSE_GIT_TOKENS, ANTHROPIC_API_KEY, OPENROUTER_API_KEY.
+  existingSecret: ""
+
+# Where browsers reach the dashboard and agents reach MCP.
+publicURL: http://localhost:3000
+publicMCPURL: http://localhost:8090/mcp
+environment: dev
+signupOpen: false
+# Session cookies need TLS; set false only for plain-HTTP local tests.
+cookieSecure: true
+# The web pods forward each user's address from the pod network.
+trustedProxies: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+auditRetentionDays: 400
+
+features:
+  vulnScan: true
+  licenseLookup: true
+  # Module downloads during ingest: trusted repositories only.
+  allowNetwork: false
+  dataflow: false
+  # Fix branches for accepted review comments (needs Git tokens with write access).
+  allowPush: false
+  allowPrivateGit: false
+  allowMemory: true
+  mcpUsage: true
+
+# AI providers: the content of config/llm.yaml (see config/llm.example.yaml).
+# Empty: no AI tasks. API keys go in the Secret, referenced by api_key_env.
+llmConfig: ""
+
+traces:
+  sample: "1"
+
+api:
+  replicas: 1
+  resources:
+    requests: {cpu: 250m, memory: 256Mi}
+    limits: {memory: 1Gi}
+worker:
+  replicas: 1
+  # ingest (clone, sync, index), ai, fix (pushes fix branches).
+  roles: "ingest,ai,fix"
+  # Ingest type-checks whole modules: size for your largest repository.
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {memory: 6Gi}
+mcp:
+  replicas: 1
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {memory: 1Gi}
+web:
+  replicas: 1
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}
+
+# Clones of repositories added by URL. api, worker and mcp mount it: on a
+# multi-node cluster use a ReadWriteMany storage class.
+workspace:
+  size: 20Gi
+  accessModes: [ReadWriteOnce]
+  storageClass: ""
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  # Path /mcp goes to the MCP service, everything else to the dashboard.
+  tlsSecretName: ""
+
+networkPolicies:
+  enabled: true
+
+# Stores. Each runs in the chart unless disabled, then the external address
+# is used. All images are Apache-2.0 or PostgreSQL licensed.
+postgresql:
+  enabled: true
+  image: docker.io/library/postgres:18-alpine
+  size: 5Gi
+  storageClass: ""
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+hugegraph:
+  enabled: true
+  image: docker.io/hugegraph/hugegraph:1.7.0
+  size: 20Gi
+  storageClass: ""
+  txCapacity: 1000000
+  resources:
+    requests: {cpu: 500m, memory: 2Gi}
+    limits: {memory: 4Gi}
+  externalURL: ""
+milvus:
+  enabled: true
+  image: docker.io/milvusdb/milvus:v3.0.4
+  size: 10Gi
+  storageClass: ""
+  resources:
+    requests: {cpu: 250m, memory: 1Gi}
+    limits: {memory: 4Gi}
+  externalURL: ""
+victoriametrics:
+  enabled: true
+  image: quay.io/victoriametrics/victoria-metrics:v1.154.1
+  retention: 90d
+  size: 10Gi
+  storageClass: ""
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 1Gi}
+  externalURL: ""
+victoriatraces:
+  enabled: true
+  image: quay.io/victoriametrics/victoria-traces:v0.12.1
+  retention: 7d
+  size: 10Gi
+  storageClass: ""
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 1Gi}
+  # Full OTLP/HTTP traces endpoint when disabled; empty turns export off.
+  externalURL: ""

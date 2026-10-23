@@ -1,0 +1,90 @@
+{{- if .Values.hugegraph.enabled }}
+# The graph database. Gremlin runs Groovy on the server, so it always has a
+# password and only api, worker and mcp reach it (network policy).
+# Its image runs as root and rewrites its own configuration at start, so the
+# container keeps root but drops every capability and cannot escalate; for
+# production run a hardened HugeGraph outside the chart (hugegraph.externalURL).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "cs.name" (list . "hugegraph") }}
+  labels:
+    {{- include "cs.labels" (list . "hugegraph") | nindent 4 }}
+  annotations:
+    ignore-check.kube-linter.io/run-as-non-root: "the upstream image edits its root-owned configuration at start; capabilities are dropped"
+    ignore-check.kube-linter.io/no-read-only-root-fs: "the upstream image writes its configuration at start"
+spec:
+  serviceName: {{ include "cs.name" (list . "hugegraph") }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cs.selector" (list . "hugegraph") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cs.labels" (list . "hugegraph") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: hugegraph
+          image: {{ .Values.hugegraph.image }}
+          # Same start as docker-compose.yml: refuse without a password,
+          # enable authentication, raise Gremlin's request limit and the
+          # transaction capacity a repository replacement needs. The start
+          # script runs lsof, which walks every possible file descriptor and
+          # all but hangs under the huge open-file limit some nodes give
+          # containers: cap it first (lowering needs no privilege).
+          command:
+            - sh
+            - -c
+            - >-
+              ulimit -n 65536;
+              [ -n "$PASSWORD" ] || { echo 'HUGEGRAPH_PASSWORD is not set' >&2; exit 1; };
+              ./bin/enable-auth.sh && grep -q HugeFactoryAuthProxy conf/graphs/hugegraph.properties || { echo 'could not enable authentication' >&2; exit 1; };
+              sed -i 's/^maxContentLength: .*/maxContentLength: 16777216/' conf/gremlin-server.yaml &&
+              sed -i -e '/^vertex.tx_capacity=/d' -e '/^edge.tx_capacity=/d' conf/graphs/hugegraph.properties &&
+              printf '\nvertex.tx_capacity={{ int64 .Values.hugegraph.txCapacity }}\nedge.tx_capacity={{ int64 .Values.hugegraph.txCapacity }}\n' >> conf/graphs/hugegraph.properties &&
+              exec ./docker-entrypoint.sh
+          env:
+            {{- include "cs.secretEnv" (list . "PASSWORD" "HUGEGRAPH_PASSWORD") | nindent 12 }}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            tcpSocket: {port: http}
+            periodSeconds: 10
+          startupProbe:
+            tcpSocket: {port: http}
+            periodSeconds: 5
+            failureThreshold: 120
+          livenessProbe:
+            tcpSocket: {port: http}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.hugegraph.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              # The start script and RocksDB need to own their files.
+              add: [CHOWN, DAC_OVERRIDE, FOWNER]
+          volumeMounts:
+            - {name: data, mountPath: /hugegraph-server/rocksdb-data}
+  {{- include "cs.volumeClaim" (list . .Values.hugegraph) | nindent 2 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cs.name" (list . "hugegraph") }}
+  labels:
+    {{- include "cs.labels" (list . "hugegraph") | nindent 4 }}
+spec:
+  selector:
+    {{- include "cs.selector" (list . "hugegraph") | nindent 4 }}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+{{- end }}

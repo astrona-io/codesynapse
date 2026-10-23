@@ -1,0 +1,60 @@
+# The dashboard. It forwards each visitor's own session to the API and
+# never holds the API token in accounts mode.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cs.name" (list . "web") }}
+  labels:
+    {{- include "cs.labels" (list . "web") | nindent 4 }}
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector:
+    matchLabels:
+      {{- include "cs.selector" (list . "web") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cs.labels" (list . "web") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "cs.podSecurity" 1000 | nindent 8 }}
+      containers:
+        - name: web
+          image: {{ include "cs.image" (list . "web") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - {name: http, containerPort: 3000}
+          env:
+            - {name: NUXT_API_BASE, value: "http://{{ include "cs.name" (list . "api") }}:8080"}
+            {{- include "cs.secretEnv" (list . "NUXT_API_TOKEN" "CODESYNAPSE_API_TOKEN") | nindent 12 }}
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+          securityContext:
+            {{- include "cs.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cs.name" (list . "web") }}
+  labels:
+    {{- include "cs.labels" (list . "web") | nindent 4 }}
+spec:
+  selector:
+    {{- include "cs.selector" (list . "web") | nindent 4 }}
+  ports:
+    - {name: http, port: 3000, targetPort: http}
