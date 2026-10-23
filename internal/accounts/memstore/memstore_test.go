@@ -24,6 +24,7 @@ func TestContract(t *testing.T) {
 	accountstest.RunIngest(t, st)
 	accountstest.RunBootstrap(t, func(*testing.T) accounts.Store { return New() })
 	accountstest.RunSSOStore(t, func(*testing.T) accounts.Store { return New() })
+	accountstest.RunJobs(t, func(*testing.T) accounts.Store { return New() })
 }
 
 func TestAuditTamperDetected(t *testing.T) {

@@ -96,8 +96,14 @@ func (s *Server) handleFixReview(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	in := fixes.Request{ValidationVersion: fixes.ValidationVersion, ReviewID: rv.ID, CommentIDs: req.CommentIDs, Provider: req.Provider, Root: n.Root, Remote: remote, Base: n.Head, BaseBranch: n.Branch}
+	// Recorded for history, never resumed: a restarted fix could push twice.
+	d, err := s.durableIf(r.Context(), "fix", accounts.Member, map[string]string{"review": rv.ID})
+	if err != nil {
+		s.problem(w, http.StatusInternalServerError, err)
+		return
+	}
 	job, err := s.jobs.Start(rv.Repo, "", JobOptions{ //nolint:contextcheck // jobs outlive the request
-		Kind: "fix", Task: fixes.Task, OrgID: org, Identity: identityOf(r.Context()), Authorize: authorize,
+		Kind: "fix", Task: fixes.Task, OrgID: org, Identity: identityOf(r.Context()), Authorize: authorize, Durable: d,
 		Run: func(ctx context.Context) (string, error) {
 			res, err := runner.Run(ctx, in)
 			if res.PRURL != "" {
@@ -119,8 +125,8 @@ func (s *Server) handleFixReview(w http.ResponseWriter, r *http.Request) {
 }
 
 // recoverFixes marks fixes that were queued or running when the API stopped
-// as failed: their jobs lived in memory and are gone, so nothing will finish
-// them.
+// as failed: fix jobs are never restarted (a second run could push twice),
+// so nothing will finish them.
 func (s *Server) recoverFixes(ctx context.Context) {
 	repos, err := s.st.Repos(ctx)
 	if err != nil {

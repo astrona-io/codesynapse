@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/astrona-io/codesynapse/internal/accounts"
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/gitx"
@@ -59,6 +60,9 @@ type Job struct {
 	// Waiting is true while the job waits for another job to finish; jobs
 	// run one at a time.
 	Waiting bool `json:"waiting,omitempty"`
+	// Attempts counts starts; above 1 the job was resumed after a restart.
+	Attempts int `json:"attempts,omitempty"`
+	durable  bool
 }
 
 // Jobs runs ingest jobs, at most one per repository at a time and one
@@ -79,9 +83,19 @@ type Jobs struct {
 	licenseLookup bool
 	dataflow      bool
 	sem           chan struct{}
+	// store keeps jobs durable (jobs_durable.go); owner is this process.
+	store jobStore
+	owner string
 
 	mu   sync.Mutex
 	jobs map[string]*Job
+}
+
+// UseStore makes every job durable in st and keeps this process's leases
+// alive until the runner's context ends.
+func (j *Jobs) UseStore(st jobStore) {
+	j.store, j.owner = st, newOwner()
+	go j.heartbeat(j.ctx)
 }
 
 // NewJobs returns a runner whose jobs are cancelled with ctx.
@@ -110,6 +124,8 @@ type JobOptions struct {
 	Run func(ctx context.Context) (string, error)
 	// Done is called once the job ended, whatever the outcome.
 	Done func(err error)
+	// Durable describes the job for the store; required once UseStore ran.
+	Durable *durableJob
 }
 
 // Start queues an ingest of root into repo.
@@ -124,10 +140,13 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 	if err := checkJob(ctx, opts.Authorize); err != nil {
 		return Job{}, err
 	}
+	if j.store != nil && opts.Durable == nil {
+		return Job{}, errors.New("with accounts every job must be durable")
+	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	for _, existing := range j.jobs {
-		if existing.Repo == repo && existing.State == JobRunning {
+		if existing.Repo == repo && existing.State == JobRunning && (opts.Durable == nil || opts.Durable.resume == nil || existing.ID != opts.Durable.resume.ID) {
 			return Job{}, fmt.Errorf("an ingest of %q is already running (job %s)", repo, existing.ID)
 		}
 	}
@@ -139,19 +158,51 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 	if kind == "" {
 		kind = "ingest"
 	}
-	job := &Job{ID: hex.EncodeToString(b), Repo: repo, OrgID: opts.OrgID, Identity: opts.Identity, Kind: kind, Branch: opts.Branch, State: JobRunning, StartedAt: time.Now().UTC().Format(time.RFC3339), Task: opts.Task, Waiting: true}
+	now := time.Now().UTC()
+	job := &Job{ID: hex.EncodeToString(b), Repo: repo, OrgID: opts.OrgID, Identity: opts.Identity, Kind: kind, Branch: opts.Branch, State: JobRunning, StartedAt: now.Format(time.RFC3339), Task: opts.Task, Waiting: true}
+	runID := job.ID
+	if d := opts.Durable; j.store != nil {
+		job.durable = true
+		if d.resume != nil {
+			// Same job, next attempt; its ingest run gets its own ID so the
+			// interrupted run is reconciled, not overwritten.
+			job.ID, job.Attempts = d.resume.ID, d.resume.Attempts
+			job.StartedAt = d.resume.CreatedAt.Format(time.RFC3339)
+			runID = fmt.Sprintf("%s.%d", job.ID, d.resume.Attempts+1)
+		} else {
+			rec := accounts.JobRecord{ID: job.ID, Kind: d.Kind, Repo: repo, OrgID: opts.OrgID, ActorID: d.ActorID, Via: d.Via, KeyID: d.KeyID,
+				Role: d.Role, Execution: opts.Identity, Params: d.Params, Branch: opts.Branch, Task: opts.Task, State: accounts.JobQueued,
+				LeaseOwner: j.owner, LeaseUntil: now.Add(jobLease), CreatedAt: now.Truncate(time.Microsecond)}
+			addCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			err := j.store.AddJob(addCtx, rec)
+			cancel()
+			if errors.Is(err, accounts.ErrJobActive) {
+				return Job{}, fmt.Errorf("%q already has a queued or running job", repo)
+			}
+			if err != nil {
+				return Job{}, fmt.Errorf("recording the job: %w", err)
+			}
+		}
+	}
+	// abandon ends a recorded job that never got going (mu is held).
+	abandon := func(cause error) error {
+		if job.durable {
+			j.recordEnd(ctx, job.ID, accounts.JobOutcome{State: accounts.JobFailed, Error: cause.Error(), At: time.Now().UTC()})
+		}
+		return cause
+	}
 	var ledger *ingestreport.Ledger
 	if opts.Run == nil {
-		ledger, err = ingestreport.New(job.ID, time.Now().UTC())
+		ledger, err = ingestreport.New(runID, now)
 		if err != nil {
-			return Job{}, err
+			return Job{}, abandon(err)
 		}
 		if j.Report != nil {
 			reportCtx, reportCancel := context.WithTimeout(ctx, 10*time.Second)
 			err := j.writeReport(reportCtx, *job, ledger.Snapshot(), opts.Authorize)
 			reportCancel()
 			if err != nil {
-				return Job{}, err
+				return Job{}, abandon(err)
 			}
 		}
 	}
@@ -185,6 +236,9 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 			cleanupCancel()
 		}
 		j.finish(job, nodes, edges, err)
+		if job.durable {
+			j.endDurable(ctx, job, err)
+		}
 		if opts.Done != nil {
 			opts.Done(err)
 		}
@@ -192,6 +246,23 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 	select {
 	case j.sem <- struct{}{}:
 		defer func() { <-j.sem }()
+		if job.durable {
+			startCtx, startCancel := context.WithTimeout(ctx, 10*time.Second)
+			now := time.Now().UTC()
+			err := j.store.StartJob(startCtx, job.ID, j.owner, now.Add(jobLease), now)
+			startCancel()
+			if err != nil {
+				// Another process took it over (or the store is down): do
+				// not run it twice.
+				j.logger.Warn("job not started: lease lost", "job", job.ID, "error", err)
+				job.durable = false
+				fin(job, 0, 0, fmt.Errorf("job handed to another process or not recorded: %w", err))
+				return
+			}
+			j.mu.Lock()
+			job.Attempts++
+			j.mu.Unlock()
+		}
 		j.mu.Lock()
 		job.Waiting = false
 		j.mu.Unlock()
@@ -404,8 +475,37 @@ func (j *Jobs) prune() {
 	}
 }
 
+// endDurable records how a durable job ended.
+func (j *Jobs) endDurable(ctx context.Context, job *Job, cause error) {
+	j.mu.Lock()
+	out := accounts.JobOutcome{State: accounts.JobSucceeded, Result: job.Result, Nodes: job.Nodes, Edges: job.Edges, At: time.Now().UTC()}
+	j.mu.Unlock()
+	if cause != nil {
+		out.State, out.Error = accounts.JobFailed, cause.Error()
+	}
+	j.recordEnd(ctx, job.ID, out)
+}
+
+// recordEnd stores how a job ended, even when ctx was cancelled (shutdown).
+func (j *Jobs) recordEnd(ctx context.Context, id string, out accounts.JobOutcome) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := j.store.FinishJob(ctx, id, j.owner, out); err != nil {
+		j.logger.Error("job outcome not recorded", "job", id, "error", err)
+	}
+}
+
 // Get returns a snapshot of one job.
-func (j *Jobs) Get(id string) (Job, bool) {
+func (j *Jobs) Get(ctx context.Context, id string) (Job, bool) {
+	if j.store != nil {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		rec, err := j.store.JobByID(ctx, id)
+		if err != nil {
+			return Job{}, false
+		}
+		return fromRecord(rec), true
+	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	job, ok := j.jobs[id]
@@ -416,7 +516,21 @@ func (j *Jobs) Get(id string) (Job, bool) {
 }
 
 // List returns snapshots of all jobs, newest first.
-func (j *Jobs) List() []Job {
+func (j *Jobs) List(ctx context.Context) []Job {
+	if j.store != nil {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		recs, err := j.store.ListJobs(ctx, nil, 500)
+		if err != nil {
+			j.logger.Warn("listing jobs", "error", err)
+			return []Job{}
+		}
+		out := make([]Job, 0, len(recs))
+		for _, r := range recs {
+			out = append(out, fromRecord(r))
+		}
+		return out
+	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	out := make([]Job, 0, len(j.jobs))

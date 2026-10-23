@@ -161,7 +161,16 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
      | `worker` (system role) | same image, `--roles system` | one active (leader lease) | scheduler, access projections, pruning, recovery, metrics export |
 
      - **Steps:**
-       1. **Durable job queue in PostgreSQL** (no new dependency).
+       1. **Durable job queue in PostgreSQL** (no new dependency). **Done, in process:** jobs are rows before they run, and interrupted jobs are resumed after a restart. The separate worker follows in step 2.
+          - **Record:** `jobs` (migration 0013) holds the kind, repository, organisation, requester (user, how they authenticated, API key ID), required role, execution identity, the parameters to rebuild the work (cleared at the end; no credentials), state, attempts, lease, timestamps, result and error. There is one queued or running job per repository (a unique index).
+          - **Runner:** the API's runner adds the row before queueing, marks it running when the job gets its turn, renews this process's leases every 30 seconds (2-minute lease) and records the outcome.
+          - **Recovery:** after a restart, `resumeJobs` claims jobs whose lease expired (`FOR UPDATE SKIP LOCKED`). It rebuilds the requester's context: session, account, API key, membership and repository permission are checked again, and tokens are derived again. Then it starts the work through the same function that built it (`startSync`, `startCloneAuth`, `startSwitch`, `startAITask`, `startAutoAI`), keeping the job ID.
+          - **Retries:** a retried ingest gets its own run ID (`<job>.<attempt>`), so the interrupted run is reconciled, not overwritten. A job interrupted three times is failed. Fix jobs are recorded but never restarted; a second run could push twice.
+          - **History:** job history lists from the store, so it survives restarts (newest 5,000 kept).
+          - **Without accounts:** jobs stay in memory, as they also need accounts to run.
+          - **Tests:** `accountstest.RunJobs` (memstore and PostgreSQL: one active job per repository, owner-only start and finish, orphan claims, the attempt limit, concurrent claims never doubling) and `TestJobsSurviveRestart` (an interrupted sync resumes and indexes; fix, revoked-session and exhausted jobs fail with a reason; new jobs record their requester and dashboard session).
+
+          The original plan for this step:
           - A `jobs` table holds the kind, repository, organisation, serialized execution identity (never bearer tokens), state (queued, running, succeeded, failed, cancelled), attempts, lease owner and expiry, heartbeat, a trace context and an error.
           - Workers claim jobs with `FOR UPDATE SKIP LOCKED`, renew their lease while running, and requeue it if they die.
           - Retries keep the original primary session ID, as the session rules require. Every claim rechecks session, membership, key and repository permission before work and before persistence, as jobs do today.

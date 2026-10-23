@@ -253,7 +253,7 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 		}
 		return plural(v.Checked, "entry verifies", "entries verify"), nil
 	})
-	h.Jobs = jobHealth(s.jobs.List())
+	h.Jobs = jobHealth(s.jobs.List(r.Context()))
 	h.Jobs.RecentFailures = []Job{}
 	writeJSON(w, 200, h)
 }

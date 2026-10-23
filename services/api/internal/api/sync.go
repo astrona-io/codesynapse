@@ -71,6 +71,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	// with the organisation's own token after it proved access. An indexed
 	// graph is shared only for the same remote.
 	auth := s.authFor(remote)
+	private := false
 	if s.cfg.Accounts != nil {
 		m, err := scopeFrom(r.Context()).selected()
 		if err != nil {
@@ -95,7 +96,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 				s.problem(w, http.StatusBadGateway, err)
 				return
 			}
-			vis, auth = accounts.Private, orgAuth
+			vis, auth, private = accounts.Private, orgAuth, true
 		}
 		if n, err := s.st.Node(r.Context(), model.NodeID(req.Name, model.KindRepository, req.Name)); err == nil {
 			// The name alone must not open a graph: an organisation could
@@ -121,7 +122,12 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	org, authorize := s.jobAuthorization(r.Context(), req.Name, accounts.Admin)
-	job, err := s.startCloneAuth(remote, req.Name, req.Branch, auth, JobOptions{OrgID: org, Identity: identityOf(r.Context()), Authorize: authorize}) //nolint:contextcheck // jobs outlive the request
+	d, err := s.durableIf(r.Context(), "clone", accounts.Admin, cloneParams{Remote: remote, Name: req.Name, Branch: req.Branch, Private: private})
+	if err != nil {
+		s.problem(w, http.StatusInternalServerError, err)
+		return
+	}
+	job, err := s.startCloneAuth(remote, req.Name, req.Branch, auth, JobOptions{OrgID: org, Identity: identityOf(r.Context()), Authorize: authorize, Durable: d}) //nolint:contextcheck // jobs outlive the request
 	switch {
 	case errors.Is(err, errConflict):
 		s.problem(w, http.StatusConflict, err)
@@ -154,7 +160,7 @@ func (s *Server) startCloneAuth(remote, name, branch string, auth gitx.Auth, acc
 		return Job{}, fmt.Errorf("%w: %q already exists; use sync", errConflict, name)
 	}
 	job, err := s.jobs.Start(name, dir, JobOptions{
-		Kind: "clone", Branch: branch, OrgID: opts.OrgID, Identity: opts.Identity, Authorize: opts.Authorize,
+		Kind: "clone", Branch: branch, OrgID: opts.OrgID, Identity: opts.Identity, Authorize: opts.Authorize, Durable: opts.Durable,
 		Prepare: func(ctx context.Context) error {
 			if err := gitx.Clone(ctx, remote, branch, dir, auth); err != nil {
 				_ = os.RemoveAll(dir) //nolint:errcheck,gosec // best-effort cleanup of a partial clone; dir is workspace/<validated name>
@@ -237,10 +243,37 @@ func (s *Server) handleSwitchToRemote(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	branch := req.Branch
-	org, authorize := s.jobAuthorization(r.Context(), repo, accounts.Admin)
-	job, err := s.jobs.Start(repo, dir, JobOptions{ //nolint:contextcheck // jobs outlive the request
-		Kind: "clone", Branch: branch, OrgID: org, Identity: identityOf(r.Context()), Authorize: authorize,
+	job, err := s.startSwitch(r.Context(), repo, dir, remote, req.Branch, auth) //nolint:contextcheck // jobs outlive the request
+	if err != nil {
+		s.problem(w, http.StatusConflict, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+// cloneParams rebuild a clone after a restart; switchParams a switch to a
+// remote. Credentials are derived again, never stored.
+type cloneParams struct {
+	Remote  string `json:"remote"`
+	Name    string `json:"name"`
+	Branch  string `json:"branch,omitempty"`
+	Private bool   `json:"private,omitempty"`
+}
+
+type switchParams struct {
+	Remote string `json:"remote"`
+	Branch string `json:"branch,omitempty"`
+}
+
+// startSwitch clones remote into dir for repo, then re-indexes it there.
+func (s *Server) startSwitch(ctx context.Context, repo, dir, remote, branch string, auth gitx.Auth) (Job, error) {
+	org, authorize := s.jobAuthorization(ctx, repo, accounts.Admin)
+	d, err := s.durableIf(ctx, "switch", accounts.Admin, switchParams{Remote: remote, Branch: branch})
+	if err != nil {
+		return Job{}, err
+	}
+	return s.jobs.Start(repo, dir, JobOptions{ //nolint:contextcheck // jobs outlive the request
+		Kind: "clone", Branch: branch, OrgID: org, Identity: identityOf(ctx), Authorize: authorize, Durable: d,
 		Prepare: func(ctx context.Context) error {
 			if err := gitx.Clone(ctx, remote, branch, dir, auth); err != nil {
 				_ = os.RemoveAll(dir) //nolint:errcheck,gosec // best-effort cleanup; dir is a validated workspace child
@@ -249,11 +282,6 @@ func (s *Server) handleSwitchToRemote(w http.ResponseWriter, r *http.Request) {
 			return nil
 		},
 	})
-	if err != nil {
-		s.problem(w, http.StatusConflict, err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, job)
 }
 
 type syncRequest struct {
@@ -356,6 +384,9 @@ func (s *Server) startSync(ctx context.Context, repo, branch string, onlyIfChang
 	}
 	opts.After = s.automation(ctx, repo, n)
 	opts.Done = done
+	if opts.Durable, err = s.durableIf(ctx, "sync", accounts.Admin, syncParams{Branch: requested, Scheduled: done != nil}); err != nil {
+		return Job{}, err
+	}
 	job, err := s.jobs.Start(repo, n.Root, opts) //nolint:contextcheck // jobs outlive the request
 	if err != nil {
 		return Job{}, fmt.Errorf("%w: %w", errConflict, err)
@@ -363,12 +394,59 @@ func (s *Server) startSync(ctx context.Context, repo, branch string, onlyIfChang
 	return job, nil
 }
 
+// autoAIParams rebuild the automatic triage and review that follow a sync.
+type autoAIParams struct {
+	Findings []string `json:"findings,omitempty"`
+	Diff     []byte   `json:"diff,omitempty"`
+	Title    string   `json:"title,omitempty"`
+}
+
+// startAutoAI triages new findings and reviews new commits as one job.
+func (s *Server) startAutoAI(ctx context.Context, repo string, p autoAIParams) error {
+	org, authorize := s.jobAuthorization(ctx, repo, accounts.Admin)
+	d, err := s.durableIf(ctx, "ai-auto", accounts.Admin, p)
+	if err != nil {
+		return err
+	}
+	runner := aitasks.Runner{St: s.st, LLM: s.cfg.LLM, Authorize: authorize}
+	_, err = s.jobs.Start(repo, "", JobOptions{Kind: "ai", Task: "automatic", OrgID: org, Identity: identityOf(ctx), Authorize: authorize, Durable: d, //nolint:contextcheck // runs as its own job
+		Run: func(ctx context.Context) (string, error) {
+			var last string
+			var errs []error
+			if len(p.Findings) > 0 {
+				id, err := runner.Run(ctx, "security-triage", aitasks.Input{Repo: repo, OrgID: org, OnlyFindings: p.Findings})
+				if err == nil {
+					last = id
+				} else if !errors.Is(err, aitasks.ErrNothingToDo) {
+					errs = append(errs, fmt.Errorf("triage: %w", err))
+				}
+			}
+			if len(p.Diff) > 0 {
+				id, err := runner.Run(ctx, "review", aitasks.Input{Repo: repo, OrgID: org, Diff: p.Diff, Title: p.Title})
+				if err == nil {
+					last = id
+				} else if !errors.Is(err, aitasks.ErrNothingToDo) {
+					errs = append(errs, fmt.Errorf("review: %w", err))
+				}
+			}
+			return last, errors.Join(errs...)
+		}})
+	return err
+}
+
+// syncParams rebuild a sync after a restart. A resumed sync always runs (it
+// was due when queued); a scheduled one reports back to the schedule.
+type syncParams struct {
+	Branch    string `json:"branch,omitempty"`
+	Scheduled bool   `json:"scheduled,omitempty"`
+}
+
 // automation returns the post-sync hook for repo, or nil when no automation
 // is enabled. It snapshots the current head and findings now, so the hook can
 // review exactly the commits and triage exactly the findings that are new.
 func (s *Server) automation(ctx context.Context, repo string, before model.Node) func(context.Context) {
 	sc := s.sched.get(repo)
-	org, authorize := s.jobAuthorization(ctx, repo, accounts.Admin)
+	org, _ := s.jobAuthorization(ctx, repo, accounts.Admin)
 	if s.cfg.LLM == nil || (!sc.AutoReview && !sc.AutoTriage) || (s.cfg.Accounts != nil && sc.OrgID != org) {
 		return nil
 	}
@@ -384,7 +462,6 @@ func (s *Server) automation(ctx context.Context, repo string, before model.Node)
 		if err != nil {
 			return
 		}
-		runner := aitasks.Runner{St: s.st, LLM: s.cfg.LLM, Authorize: authorize}
 		var newFindings []string
 		if sc.AutoTriage {
 			if list, err := s.st.List(ctx, repo, store.Filter{Kinds: []model.NodeKind{model.KindFinding}}, store.ByName, store.MaxLimit); err == nil {
@@ -406,28 +483,8 @@ func (s *Server) automation(ctx context.Context, repo string, before model.Node)
 		if len(newFindings) == 0 && len(diff) == 0 {
 			return
 		}
-		_, err = s.jobs.Start(repo, "", JobOptions{Kind: "ai", Task: "automatic", OrgID: org, Identity: identityOf(ctx), Authorize: authorize, Run: func(ctx context.Context) (string, error) { //nolint:contextcheck // runs as its own job
-			var last string
-			var errs []error
-			if len(newFindings) > 0 {
-				id, err := runner.Run(ctx, "security-triage", aitasks.Input{Repo: repo, OrgID: org, OnlyFindings: newFindings})
-				if err == nil {
-					last = id
-				} else if !errors.Is(err, aitasks.ErrNothingToDo) {
-					errs = append(errs, fmt.Errorf("triage: %w", err))
-				}
-			}
-			if len(diff) > 0 {
-				title := fmt.Sprintf("AI review of new commits %s..%s", short(oldHead), short(after.Head))
-				id, err := runner.Run(ctx, "review", aitasks.Input{Repo: repo, OrgID: org, Diff: diff, Title: title})
-				if err == nil {
-					last = id
-				} else if !errors.Is(err, aitasks.ErrNothingToDo) {
-					errs = append(errs, fmt.Errorf("review: %w", err))
-				}
-			}
-			return last, errors.Join(errs...)
-		}})
+		title := fmt.Sprintf("AI review of new commits %s..%s", short(oldHead), short(after.Head))
+		err = s.startAutoAI(ctx, repo, autoAIParams{Findings: newFindings, Diff: diff, Title: title}) //nolint:contextcheck // runs as its own job
 		if err != nil {
 			s.logger.Warn("auto-review not started", "repo", repo, "error", err)
 		}

@@ -174,7 +174,7 @@ func (s *Server) buildAttention(ctx context.Context, only string, now time.Time)
 	// A repository whose latest index or sync run failed (a later success
 	// clears it). AI tasks are not counted.
 	latest := map[string]Job{}
-	for _, j := range s.jobs.List() {
+	for _, j := range s.jobs.List(ctx) {
 		if j.Kind == "ai" || j.Kind == "fix" {
 			continue // tasks, not indexing
 		}
