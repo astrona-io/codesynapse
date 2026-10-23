@@ -48,7 +48,7 @@ This is a documented header configuration, not an end-to-end tested Codex launch
 
 **Stdio.** Run one MCP server process per chat with `CODESYNAPSE_DATABASE_URL`, the personal key in `CODESYNAPSE_API_TOKEN`, and the already-registered primary/parent IDs in the two session environment variables above. The server revalidates that binding on every call. Missing accounts or metadata refuses tools; there is no anonymous stdio fallback. Offline CLI ingest remains available independently.
 
-**Hooks and the dashboard.** Claude hooks use the `session_id` in their runtime-supplied hook payload, register it and forward the same primary/parent values to the API. A hook cannot inject environment variables or headers into an already-running MCP process. The dashboard proxy currently forwards login and organisation context but drops runtime headers. Governance and repository browsing remain usable; execution controls such as clone, sync, model tasks and session-memory operations need a trusted browser binding that is not implemented in this phase. Do not work around this by generating a browser ID.
+**Hooks and the dashboard.** Claude hooks use the `session_id` in their runtime-supplied hook payload, register it and forward the same primary/parent values to the API. A hook cannot inject environment variables or headers into an already-running MCP process. The dashboard proxy forwards login and organisation context but no runtime headers. Instead, the API binds a signed-in browser to its own dashboard session, derived from the login session (see [session context](SESSION_CONTEXT_PLAN.md#runtime-integration)). That binding exists only for browser session cookies; agents and API keys must register their own runtime ID.
 
 ---
 
