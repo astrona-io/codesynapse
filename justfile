@@ -301,7 +301,7 @@ web-check:
 
 # Lint GitHub workflows
 lint-actions:
-    go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+    go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
 # Lint the service Dockerfiles (.hadolint.yaml)
 lint-docker:
