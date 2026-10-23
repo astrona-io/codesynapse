@@ -39,6 +39,17 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (*http.Req
 	if publicPaths[r.Method+" "+r.URL.Path] {
 		return r, true
 	}
+	// Single sign-on starts and finishes before anyone is signed in. Linking
+	// an identity finishes on the same callback, so a valid session cookie
+	// is still read there; without one the request stays anonymous.
+	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/auth/sso/") {
+		if c, err := r.Cookie(SessionCookie); err == nil && sameOrigin(r) {
+			if p, err := s.cfg.Accounts.Authenticate(r.Context(), c.Value); err == nil {
+				return r.WithContext(context.WithValue(r.Context(), principalKey{}, p)), true
+			}
+		}
+		return r, true
+	}
 	var p accounts.Principal
 	var err error
 	authz := r.Header.Get("Authorization")
@@ -167,6 +178,14 @@ func (s *Server) accountRoutes() {
 	s.account("POST /api/v1/auth/login", publicRoute, s.handleLogin)
 	s.account("POST /api/v1/auth/logout", publicRoute, s.handleLogout)
 	s.account("POST /api/v1/auth/setup", governanceRoute, s.handleSetup)
+	s.account("POST /api/v1/auth/sso/{org}/start", publicRoute, s.handleSSOStart(accounts.SSOLogin))
+	s.account("POST /api/v1/auth/sso/callback", publicRoute, s.handleSSOCallback)
+	s.account("POST /api/v1/me/sso/{org}/link", businessRoute, s.handleSSOStart(accounts.SSOLink))
+	s.account("GET /api/v1/me/identities", businessRoute, s.handleSSOIdentities)
+	s.account("DELETE /api/v1/me/identities/{id}", businessRoute, s.handleUnlinkIdentity)
+	s.account("GET /api/v1/accounts/orgs/{org}/sso", businessRoute, s.handleGetSSO)
+	s.account("PUT /api/v1/accounts/orgs/{org}/sso", businessRoute, s.handleSetSSO)
+	s.account("DELETE /api/v1/accounts/orgs/{org}/sso", businessRoute, s.handleDeleteSSO)
 	s.account("GET /api/v1/me", governanceRoute, s.handleMe)
 	s.account("POST /api/v1/me/password", governanceRoute, s.handlePassword)
 	s.account("GET /api/v1/me/keys", businessRoute, s.handleListKeys)

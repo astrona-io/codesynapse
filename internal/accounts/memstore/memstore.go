@@ -39,6 +39,10 @@ type Store struct {
 	ingestMetrics  accounts.IngestMetricSnapshot
 	ingestExportMu sync.Mutex
 	setup          accounts.Setup
+	idps           map[string]accounts.IdentityProvider // by org
+	identities     map[string]accounts.ExternalIdentity // by ID
+	ssoStates      map[string]accounts.SSOState         // by state hash
+	managed        map[string]bool                      // org|user
 }
 
 type member struct {
@@ -52,7 +56,8 @@ var _ accounts.Store = (*Store)(nil)
 func New() *Store {
 	return &Store{outbox: map[string]int64{}, users: map[string]accounts.User{}, orgs: map[string]accounts.Org{}, members: map[string]map[string]member{},
 		sessions: map[string]accounts.Session{}, executions: map[string]accounts.ExecutionSession{}, keys: map[string]accounts.APIKey{}, repos: map[string]accounts.Repository{}, tokens: map[string]accounts.GitToken{},
-		teams: map[string]accounts.Team{}, tuples: map[accounts.Tuple]bool{}, tupleAt: map[accounts.Tuple]accounts.Tuple{}, repoPolicies: map[string]accounts.RepoPolicyApproval{}, annotations: map[string]map[string]accounts.RepositoryAnnotation{}, ingestRuns: map[string]ingestRecord{}, ingestEntries: map[string]ingestEntry{}}
+		teams: map[string]accounts.Team{}, tuples: map[accounts.Tuple]bool{}, tupleAt: map[accounts.Tuple]accounts.Tuple{}, repoPolicies: map[string]accounts.RepoPolicyApproval{}, annotations: map[string]map[string]accounts.RepositoryAnnotation{}, ingestRuns: map[string]ingestRecord{}, ingestEntries: map[string]ingestEntry{},
+		idps: map[string]accounts.IdentityProvider{}, identities: map[string]accounts.ExternalIdentity{}, ssoStates: map[string]accounts.SSOState{}, managed: map[string]bool{}}
 }
 
 // Migrate implements accounts.Store.
@@ -274,6 +279,7 @@ func (s *Store) removeMember(_ context.Context, orgID, userID string) error {
 		return fmt.Errorf("membership: %w", accounts.ErrNotFound)
 	}
 	delete(s.members[orgID], userID)
+	delete(s.managed, orgID+"|"+userID)
 	for tuple := range s.tuples {
 		org, _, ok := accounts.SplitRepoObject(tuple.ObjectID)
 		if ok && tuple.ObjectType == accounts.TypeRepository && org == orgID && tuple.SubjectType == accounts.TypeUser && tuple.SubjectID == userID {

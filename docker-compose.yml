@@ -115,6 +115,10 @@ services:
       CODESYNAPSE_TRUSTED_PROXIES: ${CODESYNAPSE_TRUSTED_PROXIES:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       # Where agents reach the MCP server, shown on the Agents page.
       CODESYNAPSE_PUBLIC_MCP_URL: ${CODESYNAPSE_PUBLIC_MCP_URL:-http://localhost:8090/mcp}
+      # The dashboard's address: single sign-on returns to <this>/sso/callback.
+      CODESYNAPSE_PUBLIC_URL: ${CODESYNAPSE_PUBLIC_URL:-http://localhost:3000}
+      # Allow identity providers on a private network (self-hosted Keycloak).
+      CODESYNAPSE_SSO_ALLOW_PRIVATE: ${CODESYNAPSE_SSO_ALLOW_PRIVATE:-false}
       CODESYNAPSE_SIGNUP_OPEN: ${CODESYNAPSE_SIGNUP_OPEN:-false}
       # The local stack is served over plain HTTP on 127.0.0.1; set true behind TLS.
       CODESYNAPSE_COOKIE_SECURE: ${CODESYNAPSE_COOKIE_SECURE:-false}

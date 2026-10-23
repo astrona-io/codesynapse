@@ -53,29 +53,56 @@ func NewSealer(key []byte) (*Sealer, error) {
 	return &Sealer{aead: aead, KeyID: hex.EncodeToString(sum[:4])}, nil
 }
 
-func tokenAAD(orgID, host string) []byte { return []byte("git-token\x00" + orgID + "\x00" + host) }
+func tokenAAD(orgID, host string) []byte { return sealAAD("git-token", orgID, host) }
+
+// sealAAD binds a ciphertext to what it is for (a purpose such as
+// "git-token" or "oidc-client-secret"), its organisation and a scope (a Git
+// host, an issuer), so a secret copied to another row, organisation or use
+// does not open.
+func sealAAD(purpose, orgID, scope string) []byte {
+	return []byte(purpose + "\x00" + orgID + "\x00" + scope)
+}
 
 // Seal encrypts plaintext for orgID and host: nonce || ciphertext.
 func (s *Sealer) Seal(plaintext, orgID, host string) ([]byte, error) {
-	nonce := make([]byte, s.aead.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
-	return s.aead.Seal(nonce, nonce, []byte(plaintext), tokenAAD(orgID, host)), nil
+	return s.seal(plaintext, tokenAAD(orgID, host))
 }
 
 // Open decrypts what Seal produced for the same organisation and host.
 func (s *Sealer) Open(sealed []byte, keyID, orgID, host string) (string, error) {
+	return s.open(sealed, keyID, tokenAAD(orgID, host))
+}
+
+// SealFor encrypts plaintext for a purpose other than Git tokens.
+func (s *Sealer) SealFor(purpose, plaintext, orgID, scope string) ([]byte, error) {
+	return s.seal(plaintext, sealAAD(purpose, orgID, scope))
+}
+
+// OpenFor decrypts what SealFor produced for the same purpose, organisation
+// and scope.
+func (s *Sealer) OpenFor(purpose string, sealed []byte, keyID, orgID, scope string) (string, error) {
+	return s.open(sealed, keyID, sealAAD(purpose, orgID, scope))
+}
+
+func (s *Sealer) seal(plaintext string, aad []byte) ([]byte, error) {
+	nonce := make([]byte, s.aead.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	return s.aead.Seal(nonce, nonce, []byte(plaintext), aad), nil
+}
+
+func (s *Sealer) open(sealed []byte, keyID string, aad []byte) (string, error) {
 	if keyID != s.KeyID {
-		return "", fmt.Errorf("token was sealed with key %s, the API has key %s: set it again", keyID, s.KeyID)
+		return "", fmt.Errorf("secret was sealed with key %s, the API has key %s: set it again", keyID, s.KeyID)
 	}
 	n := s.aead.NonceSize()
 	if len(sealed) < n {
-		return "", errors.New("sealed token is truncated")
+		return "", errors.New("sealed secret is truncated")
 	}
-	b, err := s.aead.Open(nil, sealed[:n], sealed[n:], tokenAAD(orgID, host))
+	b, err := s.aead.Open(nil, sealed[:n], sealed[n:], aad)
 	if err != nil {
-		return "", errors.New("sealed token does not open (wrong key, organisation or host)")
+		return "", errors.New("sealed secret does not open (wrong key, organisation, scope or purpose)")
 	}
 	return string(b), nil
 }
