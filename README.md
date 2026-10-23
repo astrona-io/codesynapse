@@ -1,5 +1,7 @@
 # CodeSynapse
 
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/codesynapse)](https://artifacthub.io/packages/search?repo=codesynapse)
+
 A code graph for security reviews, code quality and AI coding assistants, backed by Apache HugeGraph (with Milvus for vector search).
 
 CodeSynapse indexes a repository into one graph: Go code (type-checked, so calls and interface dispatch are exact), Python, JavaScript, TypeScript and Vue, Markdown docs, YAML (Kubernetes, compose, CI, Helm values), Go templates and Helm charts, git history, and Go/npm/PyPI dependencies with their known CVEs. Agents query it over MCP and get answers like "here is `ReplaceRepo`: signature, location, 3 callers, 2 tests that reach it, the doc section that describes it" in a few hundred tokens, instead of opening five files. On this repository the context an agent needs per question is reduced by a median 92% (measured by `codesynapse stats`).
