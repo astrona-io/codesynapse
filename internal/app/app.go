@@ -40,6 +40,7 @@ const (
 	// EnvHugeGraphMaxRequest is the server's Gremlin maxContentLength in
 	// bytes (default 60000, under HugeGraph's 65536).
 	EnvHugeGraphMaxRequest = "CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES"
+	EnvHugeGraphTxCapacity = "CODESYNAPSE_HUGEGRAPH_TX_CAPACITY"
 	// EnvMilvusURL turns on Milvus for agent-memory vectors with HugeGraph.
 	EnvMilvusURL   = "CODESYNAPSE_MILVUS_URL"
 	EnvMilvusToken = "CODESYNAPSE_MILVUS_TOKEN" //nolint:gosec // env var name, not a credential
@@ -94,6 +95,10 @@ func (f *Neo4jFlags) openHugeGraph(ctx context.Context) (store.Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", EnvHugeGraphMaxRequest, err)
 	}
+	txCapacity, err := strconv.Atoi(Getenv(EnvHugeGraphTxCapacity, "0"))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", EnvHugeGraphTxCapacity, err)
+	}
 	var vec vector.Index
 	if f.MilvusURL != "" {
 		mx, err := milvus.New(ctx, milvus.Config{URL: f.MilvusURL, Token: os.Getenv(EnvMilvusToken)})
@@ -103,7 +108,7 @@ func (f *Neo4jFlags) openHugeGraph(ctx context.Context) (store.Store, error) {
 		vec = mx
 	}
 	s, err := hugegraphstore.New(ctx, hugegraphstore.Config{URL: f.HugeGraphURL, Graph: f.HugeGraphGraph,
-		User: os.Getenv(EnvHugeGraphUser), Password: os.Getenv(EnvHugeGraphPassword), Vectors: vec, MaxRequestBytes: maxRequest})
+		User: os.Getenv(EnvHugeGraphUser), Password: os.Getenv(EnvHugeGraphPassword), Vectors: vec, MaxRequestBytes: maxRequest, TxCapacity: txCapacity})
 	if err != nil && vec != nil {
 		_ = vec.Close(ctx) //nolint:errcheck // the connection error is the one worth returning
 	}

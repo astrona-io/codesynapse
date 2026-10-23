@@ -59,7 +59,19 @@ type Config struct {
 	// gremlin-server.yaml maxContentLength defaults to 65536; writes are
 	// batched to stay under this. 0 means 60000.
 	MaxRequestBytes int
+	// TxCapacity must match the server's vertex.tx_capacity and
+	// edge.tx_capacity: a repository replacement is one transaction and is
+	// refused, before writing, when it needs more operations. 0 means
+	// HugeGraph's default, 10000.
+	TxCapacity int
 }
+
+// defaultTxCapacity is HugeGraph's own vertex.tx_capacity and edge.tx_capacity;
+// maxTxCapacity is the largest value HugeGraph 1.5 accepts for either.
+const (
+	defaultTxCapacity = 10000
+	maxTxCapacity     = 1000000
+)
 
 // Store is a HugeGraph-backed store.Store.
 type Store struct {
@@ -70,6 +82,7 @@ type Store struct {
 	timeout        time.Duration
 	vec            vector.Index
 	maxRequest     int
+	txCapacity     int
 }
 
 var _ store.Store = (*Store)(nil)
@@ -97,6 +110,13 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	s.Engine = sessionmemory.Engine{Backend: s}
 	if s.maxRequest <= 0 {
 		s.maxRequest = 60000
+	}
+	s.txCapacity = cfg.TxCapacity
+	if s.txCapacity <= 0 {
+		s.txCapacity = defaultTxCapacity
+	}
+	if s.txCapacity > maxTxCapacity {
+		return nil, fmt.Errorf("hugegraph transaction capacity %d exceeds the server maximum %d", s.txCapacity, maxTxCapacity)
 	}
 	var one []int
 	if err := s.read(ctx, "1", nil, &one); err != nil {

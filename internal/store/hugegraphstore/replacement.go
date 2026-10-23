@@ -72,9 +72,16 @@ def doc=new groovy.json.JsonSlurperClassic().parseText(buffer.toString('UTF-8'))
 def old=g.V().hasLabel('node').has('repo',repo).toList()
 def oldEdges=old.collectMany{it.edges(Direction.OUT).toList()}
 def ids=doc.nodes.collect{it.v} as Set
+def gone=old.findAll{!ids.contains(it.id().asString())}
+// The whole replacement is one transaction; refuse before writing when it
+// cannot fit the server's vertex.tx_capacity or edge.tx_capacity.
+def edgeOps=oldEdges.size()+doc.edges.size()
+def vertexOps=gone.size()+doc.nodes.size()+chunks.size()+1
+if(edgeOps>txCapacity||vertexOps>txCapacity)return ['capacity',edgeOps.toString(),vertexOps.toString()]
+try{
 // Read every index before modifying the graph; HugeGraph refuses indexed reads after writes.
 oldEdges.each{it.remove()}
-old.findAll{!ids.contains(it.id().asString())}.each{it.remove()}
+gone.each{it.remove()}
 def vertices=[:]
 doc.nodes.each{r->
  def kv=[T.label,'node',T.id,r.v,'run',run]
@@ -84,7 +91,12 @@ doc.nodes.each{r->
 doc.edges.each{r->def kv=['count',r.c as Long,'run',run];if(r.e){kv<<'evidence';kv<<r.e};vertices[r.a].addEdge(r.l,vertices[r.b],kv as Object[])}
 chunks.each{it.remove()}
 head.get().property('stage_run','');head.get().property('stage_expires',0L)
-graph.tx().commit();return ['ok']
+graph.tx().commit()
+}catch(Throwable t){
+// Never leave a half-applied replacement for the next request on this thread to commit.
+graph.tx().rollback();throw t
+}
+return ['ok']
 }`
 
 func (s *Store) replaceAtomic(ctx context.Context, repo string, nodes []model.Node, edges []model.Edge) error {
@@ -148,6 +160,7 @@ func (s *Store) replaceAtomic(ctx context.Context, repo string, nodes []model.No
 	}
 	bindings["chunkCount"] = chunks
 	bindings["maxBytes"] = store.MaxReplacementBytes
+	bindings["txCapacity"] = s.txCapacity
 	bindings["now"] = time.Now().UnixMilli()
 	if err := store.CommitCheck(ctx); err != nil {
 		return err
@@ -159,10 +172,18 @@ func (s *Store) replaceAtomic(ctx context.Context, repo string, nodes []model.No
 	return nil
 }
 
+// ErrTxCapacity reports a replacement too large for one HugeGraph
+// transaction. Nothing was written.
+var ErrTxCapacity = errors.New("repository replacement exceeds the HugeGraph transaction capacity")
+
 func (s *Store) stageWrite(ctx context.Context, script string, bindings map[string]any) error {
 	var result []string
 	if err := s.write(ctx, script, bindings, &result); err != nil {
 		return err
+	}
+	if len(result) == 3 && result[0] == "capacity" {
+		return fmt.Errorf("%w: it needs %s edge and %s vertex operations, the limit is %d; raise edge.tx_capacity and vertex.tx_capacity on the server and %s to match",
+			ErrTxCapacity, result[1], result[2], s.txCapacity, "CODESYNAPSE_HUGEGRAPH_TX_CAPACITY")
 	}
 	if len(result) != 1 || result[0] != "ok" {
 		return errors.New("ingest stage rejected; retry after the active replacement completes")

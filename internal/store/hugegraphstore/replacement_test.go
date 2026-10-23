@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +25,7 @@ func TestContractAtomicReplacement(t *testing.T) {
 		t.Skip("CODESYNAPSE_TEST_HUGEGRAPH_URL not set")
 	}
 	ctx := context.Background()
-	s, err := New(ctx, Config{URL: url, User: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_USER"), Password: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_PASSWORD")})
+	s, err := New(ctx, Config{URL: url, User: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_USER"), Password: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_PASSWORD"), TxCapacity: testTxCapacity()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close(ctx) })
 	require.NoError(t, s.EnsureSchema(ctx))
@@ -58,8 +60,15 @@ func TestContractAtomicReplacement(t *testing.T) {
 	assert.Equal(t, before.Head, "abc")
 	b["chunkCount"] = 1
 	b["maxBytes"] = store.MaxReplacementBytes
+	b["txCapacity"] = s.txCapacity
 	require.Error(t, s.stageWrite(ctx, commitStage, b))
 	after, err := s.Node(ctx, root.ID)
+	require.NoError(t, err)
+	assert.Equal(t, after.Head, "abc")
+	// Abandoning commits its own transaction: the failed replacement must
+	// have been rolled back, not left for this commit to publish.
+	require.NoError(t, s.stageWrite(ctx, abandonStage, b))
+	after, err = s.Node(ctx, root.ID)
 	require.NoError(t, err)
 	assert.Equal(t, after.Head, "abc")
 	main, err := s.Node(ctx, storetest.ID(model.KindFunction, "app.main"))
@@ -68,4 +77,47 @@ func TestContractAtomicReplacement(t *testing.T) {
 	edges, err := s.Subgraph(ctx, []string{main.ID, storetest.ID(model.KindFunction, "app.Handler")}, nil)
 	require.NoError(t, err)
 	assert.Len(t, edges, 1)
+}
+
+// testTxCapacity is the transaction capacity the test recipe gave the server.
+func testTxCapacity() int {
+	capacity, _ := strconv.Atoi(os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_TX_CAPACITY"))
+	return capacity
+}
+
+func TestReplacementTxCapacity(t *testing.T) {
+	url := os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_URL")
+	if url == "" {
+		t.Skip("CODESYNAPSE_TEST_HUGEGRAPH_URL not set")
+	}
+	ctx := context.Background()
+	s, err := New(ctx, Config{URL: url, User: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_USER"), Password: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_PASSWORD"), TxCapacity: testTxCapacity()})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close(ctx) })
+	require.NoError(t, s.EnsureSchema(ctx))
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+
+	small, err := New(ctx, Config{URL: url, User: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_USER"), Password: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_PASSWORD"), TxCapacity: 5})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = small.Close(ctx) })
+	grown := storetest.Fixture()
+	grown.AddNode(model.Node{ID: storetest.ID(model.KindFunction, "app.extra"), Repo: storetest.Repo, Kind: model.KindFunction, Name: "extra"})
+	err = small.ReplaceRepo(ctx, storetest.Repo, grown)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrTxCapacity), err.Error())
+	assert.Contains(t, err.Error(), "CODESYNAPSE_HUGEGRAPH_TX_CAPACITY")
+
+	// Nothing was written, and the stage was released for the next attempt.
+	_, err = s.Node(ctx, storetest.ID(model.KindFunction, "app.extra"))
+	assert.True(t, errors.Is(err, store.ErrNotFound))
+	main, err := s.Node(ctx, storetest.ID(model.KindFunction, "app.main"))
+	require.NoError(t, err)
+	assert.Equal(t, main.Name, "main")
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, grown))
+}
+
+func TestTxCapacityAboveServerMaximum(t *testing.T) {
+	_, err := New(context.Background(), Config{URL: "http://127.0.0.1:1", TxCapacity: maxTxCapacity + 1})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds the server maximum")
 }
