@@ -46,6 +46,9 @@ const (
 type policy struct {
 	kind  policyKind
 	least accounts.Role
+	// governance routes stay open to accounts limited to governance (the
+	// bootstrap root, root.go); every other route refuses them.
+	governance bool
 }
 
 var (
@@ -155,6 +158,11 @@ func (s *Server) scopeOf(r *http.Request, p accounts.Principal) (scope, error) {
 
 // route registers h under pattern with an authorisation policy.
 func (s *Server) route(pattern string, pol policy, h http.HandlerFunc) {
+	class := businessRoute
+	if pol.governance {
+		class = governanceRoute
+	}
+	s.classify(pattern, class)
 	s.mux.HandleFunc(pattern, s.guard(pol, h))
 }
 
@@ -173,14 +181,25 @@ func (s *Server) guard(pol policy, h http.HandlerFunc) http.HandlerFunc {
 			}
 			return
 		}
+		restricted, err := s.restricted(r.Context(), p)
+		if err != nil {
+			s.accountError(w, err)
+			return
+		}
+		if restricted && !pol.governance {
+			s.denyRoot(w, r, p)
+			return
+		}
 		resolveScope := s.membershipScope
 		if pol.kind == onRepo || pol.kind == onReview || pol.kind == listed {
 			resolveScope = s.scopeOf
 		}
-		sc, err := resolveScope(r, p)
-		if err != nil {
-			s.accountError(w, err)
-			return
+		var sc scope
+		if !restricted { // governance-only accounts see no tenant scope
+			if sc, err = resolveScope(r, p); err != nil {
+				s.accountError(w, err)
+				return
+			}
 		}
 		ctx := context.WithValue(r.Context(), scopeKey{}, sc)
 		org := ""

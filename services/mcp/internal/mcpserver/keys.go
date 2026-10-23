@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -18,6 +19,13 @@ import (
 func KeyVerifier(acc *accounts.Service, _ string) auth.TokenVerifier {
 	return func(ctx context.Context, token string, _ *http.Request) (*auth.TokenInfo, error) {
 		p, err := acc.AuthenticateKey(ctx, token)
+		if errors.Is(err, accounts.ErrRootAccount) {
+			// The caller holds a valid key; tell them why it no longer works.
+			if _, auditErr := acc.Record(ctx, accounts.Event{Action: "root.denied", Target: "mcp", Outcome: accounts.Failure, Status: http.StatusUnauthorized}); auditErr != nil {
+				return nil, fmt.Errorf("%w: authentication unavailable", auth.ErrInvalidToken)
+			}
+			return nil, fmt.Errorf("%w: %s", auth.ErrInvalidToken, err.Error())
+		}
 		if err != nil {
 			if _, auditErr := acc.Record(ctx, accounts.Event{Action: "mcp.authentication_failed", Outcome: accounts.Failure, Status: http.StatusUnauthorized}); auditErr != nil {
 				return nil, fmt.Errorf("%w: authentication unavailable", auth.ErrInvalidToken)

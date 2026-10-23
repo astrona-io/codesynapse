@@ -25,11 +25,16 @@ func TestPlatformContentIsolation(t *testing.T) {
 	st := memory.New()
 	require.NoError(t, st.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
 	acc := accounts.NewService(acctmem.New(), true)
+	root := bootstrapAccounts(t, acc)
 	srv := New(ctx, Config{Accounts: acc, ServiceToken: "svc"}, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 	admin, owner := newClient(t, ts), newClient(t, ts)
-	require.Equal(t, admin.do("POST", "/api/v1/auth/signup", `{"email":"admin@example.com","name":"Admin","password":"`+pw+`"}`, nil), 201)
+	var adminUser struct{ User accounts.User }
+	require.Equal(t, admin.do("POST", "/api/v1/auth/signup", `{"email":"admin@example.com","name":"Admin","password":"`+pw+`"}`, &adminUser), 201)
+	// A standard account with platform administration keeps business work
+	// but sees no tenant content without membership.
+	require.NoError(t, acc.SetPlatformAdmin(ctx, root, adminUser.User.ID, true))
 	var signed struct {
 		User accounts.User
 		Org  accounts.Org
@@ -88,6 +93,7 @@ func TestQueuedJobRechecksSession(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	acc := accounts.NewService(acctmem.New(), true)
+	bootstrapAccounts(t, acc)
 	user, org, err := acc.SignUp(ctx, "actor@example.com", "Actor", pw)
 	require.NoError(t, err)
 	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: org.ID, Graph: "repo", AddedBy: user.ID, AddedAt: time.Now()}))
@@ -128,6 +134,7 @@ func TestQueuedJobRechecksSession(t *testing.T) {
 
 func TestMalformedRepositoryPolicyDoesNotBlockOwnerRecovery(t *testing.T) {
 	ts, acc := accountsServer(t)
+	acc.SignupOpen = true
 	owner := newClient(t, ts)
 	var signed struct {
 		User accounts.User
@@ -135,6 +142,7 @@ func TestMalformedRepositoryPolicyDoesNotBlockOwnerRecovery(t *testing.T) {
 	}
 	require.Equal(t, owner.do("POST", "/api/v1/auth/signup", `{"email":"owner@example.com","name":"Owner","password":"`+pw+`"}`, &signed), 201)
 	ctx := context.Background()
+	require.NoError(t, acc.SetPlatformAdmin(ctx, rootSession(t, acc), signed.User.ID, true))
 	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: signed.Org.ID, Graph: storetest.Repo, AddedBy: signed.User.ID, AddedAt: time.Now()}))
 	object := accounts.RepoObject(signed.Org.ID, storetest.Repo)
 	_, err := acc.St.DeleteTuples(ctx, accounts.TupleFilter{ObjectType: accounts.TypeRepository, ObjectID: object})

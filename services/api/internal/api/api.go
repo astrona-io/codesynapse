@@ -108,6 +108,9 @@ type Server struct {
 	orgs    *orgs
 	logger  *slog.Logger
 	mux     *http.ServeMux
+	// classes records every registered pattern's class for governance-only
+	// accounts (root.go).
+	classes map[string]routeClass
 	// cloneHook replaces the clone job for organisation repositories (tests).
 	cloneHook func(remote, name string) (Job, error)
 }
@@ -206,12 +209,12 @@ func (s *Server) observe(r *http.Request, status int, tenant string, start time.
 }
 
 func (s *Server) routes() {
-	s.route("GET /healthz", anyone, func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
-	s.route("GET /api/v1/version", anyone, func(w http.ResponseWriter, _ *http.Request) {
+	s.route("GET /healthz", governance(anyone), func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
+	s.route("GET /api/v1/version", governance(anyone), func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]string{"version": s.cfg.Version})
 	})
 	// Settings report what is configured, never full secret values.
-	s.route("GET /api/v1/settings", anyone, func(w http.ResponseWriter, r *http.Request) {
+	s.route("GET /api/v1/settings", governance(anyone), func(w http.ResponseWriter, r *http.Request) {
 		tokens, tokenHost := s.gitTokens(), s.cfg.GitAuth.Host
 		// The installation's own tokens are the operator's business:
 		// organisation users manage theirs under their organisation.
@@ -245,7 +248,7 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/overview", visibleOnly, s.handleWorkspaceOverview)
 	s.route("GET /api/v1/attention", visibleOnly, s.handleAttention)
 	s.route("GET /api/v1/stats", visibleOnly, s.handleStats)
-	s.route("GET /api/v1/stats/series", anyone, s.handleSeries)
+	s.route("GET /api/v1/stats/series", governance(anyone), s.handleSeries)
 	s.route("DELETE /api/v1/repos/{repo}", repoRole(accounts.Admin), s.handleDeleteRepo)
 	s.route("GET /api/v1/repos/{repo}/overview", repoRole(accounts.Viewer), s.handleOverview)
 	s.route("GET /api/v1/repos/{repo}/dashboard", repoRole(accounts.Viewer), s.handleDashboard)
@@ -305,7 +308,7 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/repos/{repo}/schedule", repoRole(accounts.Viewer), s.handleGetSchedule)
 	s.route("PUT /api/v1/repos/{repo}/schedule", repoRole(accounts.Admin), s.handlePutSchedule)
 	s.route("GET /api/v1/repos/{repo}/branches", repoRole(accounts.Viewer), s.handleBranches)
-	s.route("GET /api/v1/rules", anyone, func(w http.ResponseWriter, _ *http.Request) {
+	s.route("GET /api/v1/rules", governance(anyone), func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{"rules": security.Catalog()})
 	})
 	s.route("GET /api/v1/repos/{repo}/reviews", repoRole(accounts.Viewer), s.handleListReviews)
@@ -315,9 +318,9 @@ func (s *Server) routes() {
 	s.route("PATCH /api/v1/reviews/{id}/comments/{comment}", reviewRole(accounts.Member), s.handleUpdateReviewComment)
 	s.route("POST /api/v1/reviews/{id}/fix", reviewRole(accounts.Member), s.withExecution(s.handleFixReview))
 	s.route("POST /api/v1/repos/{repo}/remote", repoRole(accounts.Admin), s.withExecution(s.handleSwitchToRemote))
-	s.route("GET /api/v1/ai/providers", anyone, s.handleAIProviders)
-	s.route("PUT /api/v1/ai/routing", platformOnly, s.handlePutRouting)
-	s.route("POST /api/v1/ai/providers/{name}/test", platformOnly, s.withExecution(s.handleAITest))
+	s.route("GET /api/v1/ai/providers", governance(anyone), s.handleAIProviders)
+	s.route("PUT /api/v1/ai/routing", governance(platformOnly), s.handlePutRouting)
+	s.route("POST /api/v1/ai/providers/{name}/test", governance(platformOnly), s.withExecution(s.handleAITest))
 	s.route("POST /api/v1/repos/{repo}/ai/{task}", repoRole(accounts.Member), s.withExecution(s.handleAITask))
 	s.route("GET /api/v1/jobs", visibleOnly, s.handleJobs)
 	s.route("GET /api/v1/jobs/{id}", visibleOnly, s.handleJob)

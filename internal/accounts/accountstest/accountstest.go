@@ -32,15 +32,18 @@ func Run(t *testing.T, st accounts.Store) {
 	require.NoError(t, err)
 	assert.True(t, setup, "an empty store needs its first account")
 
-	// Sign-up: the first account is a platform admin with its own organisation.
+	// Sign-up: the first account is the bootstrap root, which hands over to
+	// a standard owner (RunBootstrap covers the details).
+	_, err = Bootstrap(ctx, svc)
+	require.NoError(t, err)
+	_, _, err = svc.SignUp(ctx, "bob@example.com", "Bob", pw)
+	assert.True(t, errors.Is(err, accounts.ErrSignupClosed), "sign-up is closed after setup")
+	svc.SignupOpen = true
 	ada, adaOrg, err := svc.SignUp(ctx, "  Ada@Example.com ", "Ada Lovelace", pw)
 	require.NoError(t, err)
 	assert.Equal(t, ada.Email, "ada@example.com")
-	assert.True(t, ada.PlatformAdmin)
+	assert.False(t, ada.PlatformAdmin)
 	assert.Equal(t, adaOrg.Slug, "ada-lovelace-s-organisation")
-	_, _, err = svc.SignUp(ctx, "bob@example.com", "Bob", pw)
-	assert.True(t, errors.Is(err, accounts.ErrSignupClosed), "sign-up is closed after the first account")
-	svc.SignupOpen = true
 	_, _, err = svc.SignUp(ctx, "ADA@example.com", "Ada again", pw)
 	assert.True(t, errors.Is(err, accounts.ErrExists), "emails are unique, case-insensitively")
 	_, _, err = svc.SignUp(ctx, "carol@example.com", "Carol", "short")
@@ -275,7 +278,7 @@ func Run(t *testing.T, st accounts.Store) {
 
 	orgs, err := st.ListOrgs(ctx, 100)
 	require.NoError(t, err)
-	assert.Equal(t, len(orgs), 5)
+	assert.Equal(t, len(orgs), 6, "including the setup organisation")
 	users, err := st.ListUsers(ctx, 100)
 	require.NoError(t, err)
 	assert.Equal(t, users[0].Email, "ada@example.com", "by email")

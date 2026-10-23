@@ -9,13 +9,14 @@ const repo = computed(() => (route.params.repo as string | undefined) ?? '')
 const menuOpen = ref(false)
 watch(() => route.fullPath, () => (menuOpen.value = false))
 
-const { data: repos, refresh: refreshRepos } = useApiGet<{ repos: RepoInfo[] }>('repos')
+// The root account does no organisation work: no repositories to load.
+const { data: repos, refresh: refreshRepos } = useApiGet<{ repos: RepoInfo[] }>('repos', { immediate: !session.restricted.value })
 // Newest index first, so a repository that was just (re)indexed moves to the top.
 const latest = computed(() => [...(repos.value?.repos ?? [])].sort((a, b) => (b.ingested_at ?? '').localeCompare(a.ingested_at ?? '')).slice(0, 6))
 // Syncs finish in the background: poll while the tab is visible, and catch
 // up as soon as it is shown again.
 let repoTimer: ReturnType<typeof setInterval> | undefined
-const refreshIfVisible = () => { if (document.visibilityState === 'visible') refreshRepos() }
+const refreshIfVisible = () => { if (document.visibilityState === 'visible' && !session.restricted.value) refreshRepos() }
 onMounted(() => {
   repoTimer = setInterval(refreshIfVisible, 15_000)
   document.addEventListener('visibilitychange', refreshIfVisible)
@@ -26,14 +27,18 @@ onBeforeUnmount(() => {
 })
 const { data: health, error: healthError } = useFetch<{ status: string }>('/api/cg/version', { key: 'version' })
 
-const main = [
+const main = computed(() => session.restricted.value ? [] : [
   { to: '/overview', label: 'Overview', hint: 'What needs attention' },
   { to: '/', label: 'Repositories', hint: 'Everything you indexed' },
   { to: '/shared-code', label: 'Shared code', hint: 'Code several repositories copy' },
   { to: '/agents', label: 'Agents', hint: 'Connect Claude Code, Codex, Cursor' },
   { to: '/stats', label: 'Statistics', hint: 'Usage, tokens, cost, latency' },
-]
-const more = computed(() => [
+])
+const more = computed(() => session.restricted.value ? [
+  { to: '/admin', label: 'Administration', hint: 'Organisations, people, health and the audit log' },
+  { to: '/settings/profile', label: 'Profile', hint: 'Your name and password' },
+  { to: '/help', label: 'Help', hint: 'Getting started and what things mean' },
+] : [
   { to: '/orgs', label: 'Import', hint: 'Index every repository of a GitHub, GitLab or Forgejo organisation' },
   { to: '/ai', label: 'AI models', hint: 'Local and cloud language models' },
   ...(session.accounts.value ? [{ to: '/settings', label: 'Settings', hint: 'Profile, API keys, organisation, Git tokens' }] : []),
@@ -141,7 +146,14 @@ const orgValue = computed({
         </p>
       </div>
     </aside>
-    <main id="main" class="shell__main"><slot /></main>
+    <main id="main" class="shell__main">
+      <p v-if="session.restricted.value" class="notice">
+        You are signed in as the root account: administration only.
+        <template v-if="session.me.value?.setup === 'ambiguous'">This installation's setup history did not identify its root account, so every platform administrator is limited to administration until an operator runs <code>codesynapse-api designate-root --email …</code>.</template>
+        <template v-else>For organisation work, sign out and sign in with a standard account.</template>
+      </p>
+      <slot />
+    </main>
   </div>
 </template>
 

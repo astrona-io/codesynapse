@@ -26,8 +26,7 @@ func TestContract(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(st.Close)
 	// Start from an empty schema: the contract creates fixed emails.
-	_, err = st.db.Exec(ctx, "DROP TABLE IF EXISTS ingest_runs, ingest_repository_totals, ingest_metric_stream, repository_annotations, repository_policy_approvals, execution_sessions, access_policy_outbox, relation_tuples, teams, org_git_tokens, repositories, audit_head, events, api_keys, sessions, memberships, orgs, users, schema_migrations CASCADE")
-	require.NoError(t, err)
+	reset(ctx, t, st)
 	accountstest.Run(t, st)
 	accountstest.RunConcurrentAudit(t, st)
 	accountstest.RunReBAC(t, st)
@@ -86,4 +85,30 @@ func BenchmarkAccessOf(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+// TestBootstrapContract gives each bootstrap scenario an empty database; it
+// shares CODESYNAPSE_TEST_DATABASE_URL with TestContract, so packages run
+// their tests one at a time.
+func TestBootstrapContract(t *testing.T) {
+	url := os.Getenv("CODESYNAPSE_TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("CODESYNAPSE_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	accountstest.RunBootstrap(t, func(t *testing.T) accounts.Store {
+		st, err := Open(ctx, url)
+		require.NoError(t, err)
+		t.Cleanup(st.Close)
+		reset(ctx, t, st)
+		require.NoError(t, st.Migrate(ctx))
+		return st
+	})
+}
+
+// reset drops every table the migrations create.
+func reset(ctx context.Context, t *testing.T, st *Store) {
+	t.Helper()
+	_, err := st.db.Exec(ctx, "DROP TABLE IF EXISTS installation_setup, ingest_runs, ingest_repository_totals, ingest_metric_stream, repository_annotations, repository_policy_approvals, execution_sessions, access_policy_outbox, relation_tuples, teams, org_git_tokens, repositories, audit_head, events, api_keys, sessions, memberships, orgs, users, schema_migrations CASCADE")
+	require.NoError(t, err)
 }

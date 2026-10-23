@@ -167,11 +167,11 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return n, err
 }
 
-const userCols = "id, email, name, password_hash, platform_admin, created_at, disabled_at"
+const userCols = "id, email, name, password_hash, platform_admin, created_at, disabled_at, bootstrap_root"
 
 func scanUser(row pgx.Row) (accounts.User, error) {
 	var u accounts.User
-	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.PlatformAdmin, &u.CreatedAt, &u.DisabledAt)
+	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.PlatformAdmin, &u.CreatedAt, &u.DisabledAt, &u.BootstrapRoot)
 	u.CreatedAt = u.CreatedAt.UTC()
 	if u.DisabledAt != nil {
 		t := u.DisabledAt.UTC()
@@ -182,9 +182,71 @@ func scanUser(row pgx.Row) (accounts.User, error) {
 
 // CreateUser implements accounts.Store.
 func (s *Store) CreateUser(ctx context.Context, u accounts.User) error {
-	_, err := s.db.Exec(ctx, "INSERT INTO users ("+userCols+") VALUES ($1, $2, $3, $4, $5, $6, $7)",
-		u.ID, u.Email, u.Name, u.PasswordHash, u.PlatformAdmin, u.CreatedAt, u.DisabledAt)
+	_, err := s.db.Exec(ctx, "INSERT INTO users ("+userCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+		u.ID, u.Email, u.Name, u.PasswordHash, u.PlatformAdmin, u.CreatedAt, u.DisabledAt, u.BootstrapRoot)
+	if isConstraint(err, "users_one_bootstrap_root") {
+		return fmt.Errorf("bootstrap root: %w", accounts.ErrExists)
+	}
 	return mapErr(err, "email")
+}
+
+// isConstraint reports a violation of the named constraint or index.
+func isConstraint(err error, name string) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.ConstraintName == name
+}
+
+// MarkBootstrapRoot implements accounts.Store.
+func (s *Store) MarkBootstrapRoot(ctx context.Context, userID string) error {
+	tag, err := s.db.Exec(ctx, "UPDATE users SET bootstrap_root = true WHERE id = $1", userID)
+	if isConstraint(err, "users_one_bootstrap_root") {
+		return fmt.Errorf("bootstrap root: %w", accounts.ErrExists)
+	}
+	return affected(tag, err, "user")
+}
+
+// Setup implements accounts.Store.
+func (s *Store) Setup(ctx context.Context) (accounts.Setup, error) {
+	var st accounts.Setup
+	var root, org, owner *string
+	err := s.db.QueryRow(ctx, "SELECT state, root_user_id, org_id, owner_id, completed_at FROM installation_setup").
+		Scan(&st.State, &root, &org, &owner, &st.CompletedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return accounts.Setup{}, nil
+	}
+	if err != nil {
+		return accounts.Setup{}, err
+	}
+	st.RootUserID, st.OrgID, st.OwnerID = deref(root), deref(org), deref(owner)
+	if st.CompletedAt != nil {
+		t := st.CompletedAt.UTC()
+		st.CompletedAt = &t
+	}
+	return st, nil
+}
+
+// SaveSetup implements accounts.Store. A completed record is fixed by a
+// trigger.
+func (s *Store) SaveSetup(ctx context.Context, st accounts.Setup) error {
+	_, err := s.db.Exec(ctx, `INSERT INTO installation_setup (id, state, root_user_id, org_id, owner_id, completed_at)
+VALUES (true, $1, $2, $3, $4, $5)
+ON CONFLICT (id) DO UPDATE SET state = $1, root_user_id = $2, org_id = $3, owner_id = $4, completed_at = $5`,
+		st.State, nullable(st.RootUserID), nullable(st.OrgID), nullable(st.OwnerID), st.CompletedAt)
+	return mapErr(err, "setup")
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func nullable(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // UserByID implements accounts.Store.
@@ -261,14 +323,14 @@ func (s *Store) ListOrgs(ctx context.Context, limit int) ([]accounts.Org, error)
 }
 
 const membershipQuery = `SELECT o.id, o.slug, o.name, o.created_at, o.default_repo_access, o.policy_revision,
-  u.id, u.email, u.name, u.password_hash, u.platform_admin, u.created_at, u.disabled_at, m.role, m.added_at
+  u.id, u.email, u.name, u.password_hash, u.platform_admin, u.created_at, u.disabled_at, u.bootstrap_root, m.role, m.added_at
 FROM memberships m JOIN orgs o ON o.id = m.org_id JOIN users u ON u.id = m.user_id `
 
 func scanMembership(r pgx.CollectableRow) (accounts.Membership, error) {
 	var m accounts.Membership
 	var role string
 	err := r.Scan(&m.Org.ID, &m.Org.Slug, &m.Org.Name, &m.Org.CreatedAt, &m.Org.DefaultRepoAccess, &m.Org.PolicyRevision,
-		&m.User.ID, &m.User.Email, &m.User.Name, &m.User.PasswordHash, &m.User.PlatformAdmin, &m.User.CreatedAt, &m.User.DisabledAt, &role, &m.AddedAt)
+		&m.User.ID, &m.User.Email, &m.User.Name, &m.User.PasswordHash, &m.User.PlatformAdmin, &m.User.CreatedAt, &m.User.DisabledAt, &m.User.BootstrapRoot, &role, &m.AddedAt)
 	m.Role = accounts.Role(role)
 	m.Org.CreatedAt, m.User.CreatedAt, m.AddedAt = m.Org.CreatedAt.UTC(), m.User.CreatedAt.UTC(), m.AddedAt.UTC()
 	m.User.PasswordHash = "" // never leaves the store in a membership

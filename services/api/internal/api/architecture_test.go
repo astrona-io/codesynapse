@@ -166,6 +166,7 @@ func TestCatalogWritesNeedTheEditorRole(t *testing.T) {
 	st := memory.New()
 	require.NoError(t, st.ReplaceRepo(ctx, "acme/web", recordsGraph(t, "acme/web", map[string]string{"docs/adr/0001-a.md": "# A\n\n- Status: accepted\n"})))
 	acc := accounts.NewService(acctmem.New(), true)
+	bootstrapAccounts(t, acc)
 	ts := httptest.NewServer(New(ctx, Config{Accounts: acc}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
 	t.Cleanup(ts.Close)
 	signup := func(email string) *client {

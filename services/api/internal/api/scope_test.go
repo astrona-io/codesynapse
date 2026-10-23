@@ -30,6 +30,7 @@ func TestTenantIsolation(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, st.SaveReview(ctx, rv))
 	acc := accounts.NewService(acctmem.New(), true)
+	bootstrapAccounts(t, acc)
 	ts := httptest.NewServer(New(ctx, Config{Accounts: acc, ServiceToken: "svc"}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
 	t.Cleanup(ts.Close)
 

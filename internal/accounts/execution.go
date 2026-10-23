@@ -61,6 +61,9 @@ func executionMember(ctx context.Context, st Store, userID, orgID string) error 
 	if err != nil || u.DisabledAt != nil {
 		return ErrForbidden
 	}
+	if err := businessAllowed(ctx, st, u); err != nil {
+		return err
+	}
 	role, err := st.MemberRole(ctx, orgID, userID)
 	if err != nil || !role.Valid() {
 		return ErrForbidden

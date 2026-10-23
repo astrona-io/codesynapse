@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts/accountstest"
 	acctmem "github.com/astrona-io/codesynapse/internal/accounts/memstore"
 	"github.com/astrona-io/codesynapse/internal/store/memory"
 	"github.com/astrona-io/codesynapse/internal/store/storetest"
@@ -62,7 +64,16 @@ func (c *client) do(method, path, body string, out any, headers ...string) int {
 	return res.StatusCode
 }
 
+// accountsServer serves an installation already handed to a setup owner.
 func accountsServer(t *testing.T) (*httptest.Server, *accounts.Service) {
+	t.Helper()
+	ts, acc := freshAccountsServer(t)
+	bootstrapAccounts(t, acc)
+	return ts, acc
+}
+
+// freshAccountsServer serves an installation with no accounts yet.
+func freshAccountsServer(t *testing.T) (*httptest.Server, *accounts.Service) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -75,7 +86,7 @@ func accountsServer(t *testing.T) (*httptest.Server, *accounts.Service) {
 }
 
 func TestAccountsFlow(t *testing.T) {
-	ts, acc := accountsServer(t)
+	ts, acc := freshAccountsServer(t)
 	anon := newClient(t, ts)
 
 	var status map[string]any
@@ -83,21 +94,53 @@ func TestAccountsFlow(t *testing.T) {
 	assert.Equal(t, status["needs_setup"], true)
 	assert.Equal(t, anon.do("GET", "/api/v1/repos", "", nil), 401, "everything else needs a login")
 
-	ada := newClient(t, ts)
+	// The first account is the bootstrap root: governance only, and its one
+	// task is handing the installation to a standard owner.
+	root := newClient(t, ts)
 	var signed struct {
 		User accounts.User
 		Org  accounts.Org
 	}
-	require.Equal(t, ada.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, &signed), 201)
-	assert.True(t, signed.User.PlatformAdmin, "the first account administers the platform")
+	require.Equal(t, root.do("POST", "/api/v1/auth/signup", `{"email":"root@example.com","name":"Root","password":"`+pw+`"}`, &signed), 201)
+	assert.True(t, signed.User.BootstrapRoot && signed.User.PlatformAdmin)
+	assert.Equal(t, signed.Org.ID, "", "root gets no organisation")
+	var rootMe struct {
+		Restricted bool
+		Setup      string
+	}
+	require.Equal(t, root.do("GET", "/api/v1/me", "", &rootMe), 200, "signing up logs in (cookie)")
+	assert.True(t, rootMe.Restricted)
+	assert.Equal(t, rootMe.Setup, accounts.SetupPending)
+	var refused map[string]any
+	assert.Equal(t, root.do("GET", "/api/v1/repos", "", &refused), 403)
+	assert.Equal(t, refused["detail"], any(accounts.ErrRootAccount.Error()))
+	assert.Equal(t, root.do("POST", "/api/v1/accounts/orgs", `{"name":"Root's"}`, nil), 403)
+	assert.Equal(t, root.do("GET", "/api/v1/admin/health", "", nil), 200, "governance stays open")
+	assert.Equal(t, anon.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 403, "sign-up is closed")
+	assert.Equal(t, root.do("POST", "/api/v1/auth/setup", `{"org_name":"Acme","email":"ada@example.com","name":"Ada","password":"short"}`, nil), 400)
+	var done map[string]any
+	require.Equal(t, root.do("POST", "/api/v1/auth/setup", `{"org_name":"Acme","email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, &done), 200)
+	assert.Equal(t, done["message"], SetupComplete)
+	assert.False(t, strings.Contains(fmt.Sprint(done), pw), "the password is never returned")
+	assert.Equal(t, root.do("GET", "/api/v1/me", "", nil), 401, "the setup session ended")
+	require.Equal(t, root.do("POST", "/api/v1/auth/login", `{"email":"root@example.com","password":"`+pw+`"}`, nil), 200)
+	assert.Equal(t, root.do("POST", "/api/v1/auth/setup", `{"org_name":"Again","email":"eve@example.com","name":"Eve","password":"`+pw+`"}`, nil), 409, "setup happens once")
+	require.Equal(t, anon.do("GET", "/api/v1/auth/status", "", &status), 200)
+	assert.Equal(t, status["needs_setup"], false)
+
+	ada := newClient(t, ts)
+	require.Equal(t, ada.do("POST", "/api/v1/auth/login", `{"email":"ada@example.com","password":"`+pw+`"}`, nil), 200, "the owner signs in for organisation work")
 	var me struct {
 		User        accounts.User
 		Memberships []accounts.Membership
 	}
-	require.Equal(t, ada.do("GET", "/api/v1/me", "", &me), 200, "signing up logs in (cookie)")
+	require.Equal(t, ada.do("GET", "/api/v1/me", "", &me), 200)
 	require.Len(t, me.Memberships, 1)
-	assert.Equal(t, ada.do("GET", "/api/v1/repos", "", nil), 200, "platform admins see repository data")
-	assert.Equal(t, anon.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 403, "sign-up closes after the first account")
+	assert.Equal(t, me.Memberships[0].Role, accounts.Owner)
+	assert.False(t, me.User.PlatformAdmin)
+	signed.Org = me.Memberships[0].Org
+	assert.Equal(t, ada.do("GET", "/api/v1/repos", "", nil), 200)
+	assert.Equal(t, anon.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 403, "sign-up stays closed unless opened")
 
 	acc.SignupOpen = true
 	bob := newClient(t, ts)
@@ -137,15 +180,18 @@ func TestAccountsFlow(t *testing.T) {
 }
 
 func TestAuditTrail(t *testing.T) {
-	ts, _ := accountsServer(t)
+	ts, acc := accountsServer(t)
+	acc.SignupOpen = true
 	ada := newClient(t, ts)
 	require.Equal(t, ada.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil, "User-Agent", "audit-test/1"), 201)
 	assert.Equal(t, ada.do("PUT", "/api/v1/repos/"+storetest.Repo+"/schedule", `{"bogus":true}`, nil), 404, "an inaccessible repository")
 	anon := newClient(t, ts)
 	assert.Equal(t, anon.do("DELETE", "/api/v1/repos/"+storetest.Repo, "", nil), 401, "a refused request")
 
+	root := newClient(t, ts)
+	require.Equal(t, root.do("POST", "/api/v1/auth/login", `{"email":"`+accountstest.RootEmail+`","password":"`+accountstest.SetupPassword+`"}`, nil), 200)
 	var out struct{ Events []accounts.Event }
-	require.Equal(t, ada.do("GET", "/api/v1/admin/audit?limit=100", "", &out), 200)
+	require.Equal(t, root.do("GET", "/api/v1/admin/audit?limit=100", "", &out), 200)
 	actions := map[string]accounts.Event{}
 	for _, e := range out.Events {
 		actions[e.Action+" "+e.Outcome] = e
@@ -161,10 +207,10 @@ func TestAuditTrail(t *testing.T) {
 	assert.Equal(t, denied.Status, 401)
 
 	var csv string
-	require.Equal(t, ada.do("GET", "/api/v1/admin/audit?format=csv", "", &csv), 200)
+	require.Equal(t, root.do("GET", "/api/v1/admin/audit?format=csv", "", &csv), 200)
 	assert.True(t, strings.HasPrefix(csv, "id,at,action,outcome"))
 	var v accounts.Verification
-	require.Equal(t, ada.do("GET", "/api/v1/admin/audit/verify", "", &v), 200)
+	require.Equal(t, root.do("GET", "/api/v1/admin/audit/verify", "", &v), 200)
 	assert.True(t, v.OK, v.Reason)
 }
 
@@ -198,4 +244,32 @@ func TestClientAddrTrustsOnlyConfiguredProxies(t *testing.T) {
 	assert.Equal(t, s.clientAddr(req("198.51.100.7:4000", "203.0.113.9")), "198.51.100.7", "others cannot spoof it")
 	assert.Equal(t, s.clientAddr(req("172.18.0.5:4000", "not-an-ip")), "172.18.0.5")
 	assert.Equal(t, s.clientAddr(req("172.18.0.5:4000", "")), "172.18.0.5")
+}
+
+// bootstrapAccounts hands a fresh installation to a setup owner, as an
+// operator does, so the test's own sign-ups are standard accounts.
+func bootstrapAccounts(t *testing.T, acc *accounts.Service) accounts.Principal {
+	t.Helper()
+	root, err := accountstest.Bootstrap(context.Background(), acc)
+	require.NoError(t, err)
+	return root
+}
+
+// rootSession signs the bootstrap root in for governance calls.
+func rootSession(t *testing.T, acc *accounts.Service) accounts.Principal {
+	t.Helper()
+	ctx := context.Background()
+	token, _, err := acc.Login(ctx, accountstest.RootEmail, accountstest.SetupPassword, "test")
+	require.NoError(t, err)
+	p, err := acc.Authenticate(ctx, token)
+	require.NoError(t, err)
+	return p
+}
+
+// rootClient signs the bootstrap root in over HTTP.
+func rootClient(t *testing.T, ts *httptest.Server) *client {
+	t.Helper()
+	c := newClient(t, ts)
+	require.Equal(t, c.do("POST", "/api/v1/auth/login", `{"email":"`+accountstest.RootEmail+`","password":"`+accountstest.SetupPassword+`"}`, nil), 200)
+	return c
 }

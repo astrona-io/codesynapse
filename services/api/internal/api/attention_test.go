@@ -81,6 +81,7 @@ func TestAttentionNamesLostAccessToItsOrganisation(t *testing.T) {
 	t.Cleanup(cancel)
 	st := memory.New()
 	acc := accounts.NewService(acctmem.New(), true)
+	bootstrapAccounts(t, acc)
 	ts := httptest.NewServer(New(ctx, Config{Accounts: acc}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
 	t.Cleanup(ts.Close)
 	newClient(t, ts).do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil)

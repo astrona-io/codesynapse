@@ -140,7 +140,7 @@ func (s *Server) accountError(w http.ResponseWriter, err error) {
 		s.problem(w, http.StatusBadRequest, err)
 	case errors.Is(err, accounts.ErrUnauthorized), errors.Is(err, accounts.ErrKeyRevoked):
 		s.problem(w, http.StatusUnauthorized, err)
-	case errors.Is(err, accounts.ErrForbidden), errors.Is(err, accounts.ErrSignupClosed), errors.Is(err, accounts.ErrSuspended):
+	case errors.Is(err, accounts.ErrForbidden), errors.Is(err, accounts.ErrSignupClosed), errors.Is(err, accounts.ErrSuspended), errors.Is(err, accounts.ErrRootAccount):
 		s.problem(w, http.StatusForbidden, err)
 	case errors.Is(err, accounts.ErrNotFound):
 		s.problem(w, http.StatusNotFound, err)
@@ -148,7 +148,8 @@ func (s *Server) accountError(w http.ResponseWriter, err error) {
 		s.problem(w, http.StatusGone, err)
 	case errors.Is(err, accounts.ErrIngestConflict):
 		s.problem(w, http.StatusConflict, err)
-	case errors.Is(err, execution.ErrConflict), errors.Is(err, accounts.ErrExecutionSessionClosed), errors.Is(err, accounts.ErrExists), errors.Is(err, accounts.ErrLastOwner), errors.Is(err, accounts.ErrNoSecretKey), errors.Is(err, accounts.ErrLastAdmin):
+	case errors.Is(err, execution.ErrConflict), errors.Is(err, accounts.ErrExecutionSessionClosed), errors.Is(err, accounts.ErrExists), errors.Is(err, accounts.ErrLastOwner), errors.Is(err, accounts.ErrNoSecretKey), errors.Is(err, accounts.ErrLastAdmin),
+		errors.Is(err, accounts.ErrSetupComplete), errors.Is(err, accounts.ErrSetupRequired):
 		s.problem(w, http.StatusConflict, err)
 	case errors.Is(err, accounts.ErrExecutionSessionLimit), errors.Is(err, accounts.ErrIngestLimit), errors.Is(err, accounts.ErrRateLimited):
 		w.Header().Set("Retry-After", "60")
@@ -158,50 +159,53 @@ func (s *Server) accountError(w http.ResponseWriter, err error) {
 	}
 }
 
+// accountRoutes registers account, organisation and administration routes,
+// each classified for governance-only accounts (root.go).
 func (s *Server) accountRoutes() {
-	m := s.mux
-	m.HandleFunc("GET /api/v1/auth/status", s.handleAuthStatus)
-	m.HandleFunc("POST /api/v1/auth/signup", s.handleSignup)
-	m.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
-	m.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
-	m.HandleFunc("GET /api/v1/me", s.handleMe)
-	m.HandleFunc("POST /api/v1/me/password", s.handlePassword)
-	m.HandleFunc("GET /api/v1/me/keys", s.handleListKeys)
-	m.HandleFunc("POST /api/v1/me/keys", s.handleCreateKey)
-	m.HandleFunc("DELETE /api/v1/me/keys/{id}", s.handleRevokeKey)
-	m.HandleFunc("GET /api/v1/accounts/orgs", s.handleMyOrgs)
-	m.HandleFunc("POST /api/v1/accounts/orgs", s.handleCreateOrg)
-	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/members", s.handleMembers)
-	m.HandleFunc("PUT /api/v1/accounts/orgs/{org}/members", s.handleSetMember)
-	m.HandleFunc("DELETE /api/v1/accounts/orgs/{org}/members/{user}", s.handleRemoveMember)
-	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/audit", s.handleOrgAudit)
-	m.HandleFunc("GET /api/v1/admin/audit", s.handleAdminAudit)
-	m.HandleFunc("GET /api/v1/admin/audit/verify", s.handleVerifyAudit)
-	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/repos", s.handleOrgRepos)
-	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/repo-policy", s.handleRepoPolicy)
-	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/access-changes", s.handleAccessChanges)
-	m.HandleFunc("PUT /api/v1/accounts/orgs/{org}/repo-policy", s.handleRepoPolicy)
-	m.HandleFunc("POST /api/v1/accounts/orgs/{org}/repos/{repo}/recover-admin", s.handleRecoverRepoAdmin)
-	m.HandleFunc("POST /api/v1/accounts/orgs/{org}/repos", s.handleAttachRepo)
-	m.HandleFunc("GET /api/v1/me/access", s.handleMyAccess)
-	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/teams", s.handleTeams)
-	m.HandleFunc("POST /api/v1/accounts/orgs/{org}/teams", s.handleCreateTeam)
-	m.HandleFunc("DELETE /api/v1/accounts/orgs/{org}/teams/{team}", s.handleDeleteTeam)
-	m.HandleFunc("PUT /api/v1/accounts/orgs/{org}/teams/{team}/members", s.handleSetTeamMember)
-	m.HandleFunc("DELETE /api/v1/accounts/orgs/{org}/teams/{team}/members/{user}", s.handleRemoveTeamMember)
-	m.HandleFunc("PUT /api/v1/accounts/orgs/{org}/teams/{team}/role", s.handleSetTeamRole)
-	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/repos/{repo}/access", s.handleRepoGrants)
-	m.HandleFunc("PUT /api/v1/accounts/orgs/{org}/repos/{repo}/access", s.handleSetRepoGrant)
-	m.HandleFunc("DELETE /api/v1/accounts/orgs/{org}/repos/{repo}/access", s.handleRemoveRepoGrant)
-	m.HandleFunc("GET /api/v1/accounts/orgs/{org}/git-tokens", s.handleGitTokens)
-	m.HandleFunc("PUT /api/v1/accounts/orgs/{org}/git-tokens/{host}", s.handleSetGitToken)
-	m.HandleFunc("DELETE /api/v1/accounts/orgs/{org}/git-tokens/{host}", s.handleRemoveGitToken)
-	m.HandleFunc("GET /api/v1/admin/users", s.handleAdminUsersDetail)
-	m.HandleFunc("GET /api/v1/admin/orgs", s.handleAdminOrgsDetail)
-	m.HandleFunc("POST /api/v1/admin/users/{id}/suspend", s.handleSuspendUser)
-	m.HandleFunc("POST /api/v1/admin/users/{id}/resume", s.handleResumeUser)
-	m.HandleFunc("PUT /api/v1/admin/users/{id}/platform-admin", s.handleSetPlatformAdmin)
-	m.HandleFunc("GET /api/v1/admin/health", s.handleAdminHealth)
+	s.account("GET /api/v1/auth/status", publicRoute, s.handleAuthStatus)
+	s.account("POST /api/v1/auth/signup", publicRoute, s.handleSignup)
+	s.account("POST /api/v1/auth/login", publicRoute, s.handleLogin)
+	s.account("POST /api/v1/auth/logout", publicRoute, s.handleLogout)
+	s.account("POST /api/v1/auth/setup", governanceRoute, s.handleSetup)
+	s.account("GET /api/v1/me", governanceRoute, s.handleMe)
+	s.account("POST /api/v1/me/password", governanceRoute, s.handlePassword)
+	s.account("GET /api/v1/me/keys", businessRoute, s.handleListKeys)
+	s.account("POST /api/v1/me/keys", businessRoute, s.handleCreateKey)
+	s.account("DELETE /api/v1/me/keys/{id}", businessRoute, s.handleRevokeKey)
+	s.account("GET /api/v1/accounts/orgs", businessRoute, s.handleMyOrgs)
+	s.account("POST /api/v1/accounts/orgs", businessRoute, s.handleCreateOrg)
+	s.account("GET /api/v1/accounts/orgs/{org}/members", businessRoute, s.handleMembers)
+	s.account("PUT /api/v1/accounts/orgs/{org}/members", businessRoute, s.handleSetMember)
+	s.account("DELETE /api/v1/accounts/orgs/{org}/members/{user}", businessRoute, s.handleRemoveMember)
+	s.account("GET /api/v1/accounts/orgs/{org}/audit", businessRoute, s.handleOrgAudit)
+	s.account("GET /api/v1/admin/audit", governanceRoute, s.handleAdminAudit)
+	s.account("GET /api/v1/admin/audit/verify", governanceRoute, s.handleVerifyAudit)
+	s.account("GET /api/v1/accounts/orgs/{org}/repos", businessRoute, s.handleOrgRepos)
+	s.account("GET /api/v1/accounts/orgs/{org}/repo-policy", businessRoute, s.handleRepoPolicy)
+	s.account("GET /api/v1/accounts/orgs/{org}/access-changes", businessRoute, s.handleAccessChanges)
+	s.account("PUT /api/v1/accounts/orgs/{org}/repo-policy", businessRoute, s.handleRepoPolicy)
+	s.account("POST /api/v1/accounts/orgs/{org}/repos/{repo}/recover-admin", businessRoute, s.handleRecoverRepoAdmin)
+	s.account("POST /api/v1/accounts/orgs/{org}/repos", businessRoute, s.handleAttachRepo)
+	s.account("GET /api/v1/me/access", businessRoute, s.handleMyAccess)
+	s.account("GET /api/v1/accounts/orgs/{org}/teams", businessRoute, s.handleTeams)
+	s.account("POST /api/v1/accounts/orgs/{org}/teams", businessRoute, s.handleCreateTeam)
+	s.account("DELETE /api/v1/accounts/orgs/{org}/teams/{team}", businessRoute, s.handleDeleteTeam)
+	s.account("PUT /api/v1/accounts/orgs/{org}/teams/{team}/members", businessRoute, s.handleSetTeamMember)
+	s.account("DELETE /api/v1/accounts/orgs/{org}/teams/{team}/members/{user}", businessRoute, s.handleRemoveTeamMember)
+	s.account("PUT /api/v1/accounts/orgs/{org}/teams/{team}/role", businessRoute, s.handleSetTeamRole)
+	s.account("GET /api/v1/accounts/orgs/{org}/repos/{repo}/access", businessRoute, s.handleRepoGrants)
+	s.account("PUT /api/v1/accounts/orgs/{org}/repos/{repo}/access", businessRoute, s.handleSetRepoGrant)
+	s.account("DELETE /api/v1/accounts/orgs/{org}/repos/{repo}/access", businessRoute, s.handleRemoveRepoGrant)
+	s.account("GET /api/v1/accounts/orgs/{org}/git-tokens", businessRoute, s.handleGitTokens)
+	s.account("PUT /api/v1/accounts/orgs/{org}/git-tokens/{host}", businessRoute, s.handleSetGitToken)
+	s.account("DELETE /api/v1/accounts/orgs/{org}/git-tokens/{host}", businessRoute, s.handleRemoveGitToken)
+	s.account("GET /api/v1/admin/users", governanceRoute, s.handleAdminUsersDetail)
+	s.account("GET /api/v1/admin/orgs", governanceRoute, s.handleAdminOrgsDetail)
+	s.account("POST /api/v1/admin/users/{id}/suspend", governanceRoute, s.handleSuspendUser)
+	s.account("POST /api/v1/admin/users/{id}/resume", governanceRoute, s.handleResumeUser)
+	s.account("PUT /api/v1/admin/users/{id}/platform-admin", governanceRoute, s.handleSetPlatformAdmin)
+	s.account("GET /api/v1/admin/health", governanceRoute, s.handleAdminHealth)
+	s.account("POST /api/v1/admin/orgs/{id}/owner", governanceRoute, s.handleRecoverOwner)
 }
 
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
@@ -301,14 +305,29 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ms := []accounts.Membership{}
-	if p.Via != "service" {
-		var err error
+	restricted, err := s.restricted(r.Context(), p)
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	out := map[string]any{"user": p.User, "via": p.Via, "org_id": p.OrgID, "memberships": ms, "restricted": restricted}
+	if restricted {
+		// Governance only: no organisation to switch to; the UI needs the
+		// setup state to offer the handover.
+		setup, err := s.cfg.Accounts.SetupState(r.Context())
+		if err != nil {
+			s.problem(w, 500, err)
+			return
+		}
+		out["setup"] = setup.State
+	} else if p.Via != "service" {
 		if ms, err = s.cfg.Accounts.St.UserMemberships(r.Context(), p.User.ID); err != nil {
 			s.problem(w, 500, err)
 			return
 		}
+		out["memberships"] = ms
 	}
-	writeJSON(w, 200, map[string]any{"user": p.User, "via": p.Via, "org_id": p.OrgID, "memberships": ms})
+	writeJSON(w, 200, out)
 }
 
 type passwordChange struct {
