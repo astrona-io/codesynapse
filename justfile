@@ -368,7 +368,7 @@ lint-yaml:
 
 # Scan the git history for secrets (.gitleaks.toml, .gitleaksignore)
 secrets:
-    go run github.com/zricethezav/gitleaks/v8@v8.24.0 git . --no-banner --redact
+    go run github.com/zricethezav/gitleaks/v8@v8.30.1 git . --no-banner --redact
 
 # Vulnerabilities with a fix and misconfigurations, HIGH and CRITICAL (.trivyignore)
 scan:
