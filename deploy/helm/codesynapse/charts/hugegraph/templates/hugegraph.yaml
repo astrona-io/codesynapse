@@ -1,4 +1,3 @@
-{{- if .Values.hugegraph.enabled }}
 # The graph database. Gremlin runs Groovy on the server, so it always has a
 # password and only api, worker and mcp reach it (network policy).
 # Its image runs as root and rewrites its own configuration at start, so the
@@ -24,14 +23,14 @@ spec:
       labels:
         {{- include "cs.labels" (list . "hugegraph") | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
+      serviceAccountName: {{ include "cs.serviceAccount" . }}
       automountServiceAccountToken: false
       enableServiceLinks: false
       securityContext:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: hugegraph
-          image: {{ .Values.hugegraph.image }}
+          image: {{ .Values.image }}
           # Same start as docker-compose.yml: refuse without a password,
           # enable authentication, raise Gremlin's request limit and the
           # transaction capacity a repository replacement needs. The start
@@ -47,7 +46,7 @@ spec:
               ./bin/enable-auth.sh && grep -q HugeFactoryAuthProxy conf/graphs/hugegraph.properties || { echo 'could not enable authentication' >&2; exit 1; };
               sed -i 's/^maxContentLength: .*/maxContentLength: 16777216/' conf/gremlin-server.yaml &&
               sed -i -e '/^vertex.tx_capacity=/d' -e '/^edge.tx_capacity=/d' conf/graphs/hugegraph.properties &&
-              printf '\nvertex.tx_capacity={{ int64 .Values.hugegraph.txCapacity }}\nedge.tx_capacity={{ int64 .Values.hugegraph.txCapacity }}\n' >> conf/graphs/hugegraph.properties &&
+              printf '\nvertex.tx_capacity={{ int64 .Values.txCapacity }}\nedge.tx_capacity={{ int64 .Values.txCapacity }}\n' >> conf/graphs/hugegraph.properties &&
               exec ./docker-entrypoint.sh
           env:
             {{- include "cs.secretEnv" (list . "PASSWORD" "HUGEGRAPH_PASSWORD") | nindent 12 }}
@@ -65,7 +64,7 @@ spec:
             periodSeconds: 20
             failureThreshold: 6
           resources:
-            {{- toYaml .Values.hugegraph.resources | nindent 12 }}
+            {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -74,7 +73,7 @@ spec:
               add: [CHOWN, DAC_OVERRIDE, FOWNER]
           volumeMounts:
             - {name: data, mountPath: /hugegraph-server/rocksdb-data}
-  {{- include "cs.volumeClaim" (list . .Values.hugegraph) | nindent 2 }}
+  {{- include "cs.volumeClaim" (list . .Values) | nindent 2 }}
 ---
 apiVersion: v1
 kind: Service
@@ -87,4 +86,3 @@ spec:
     {{- include "cs.selector" (list . "hugegraph") | nindent 4 }}
   ports:
     - {name: http, port: 8080, targetPort: http}
-{{- end }}

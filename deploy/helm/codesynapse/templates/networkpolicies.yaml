@@ -1,33 +1,11 @@
-{{- if .Values.networkPolicies.enabled }}
+{{- if .Values.global.networkPolicies }}
 {{- $root := . }}
-# Only the paths that are needed. Stores accept api, worker and mcp; the API
-# accepts the dashboard, mcp (memory offload) and the chart's test; workers
-# accept nothing (they parse untrusted repositories). web and mcp face users
-# and agents through the ingress. Egress stays open: workers reach git hosts,
-# osv.dev and deps.dev, and model providers.
-{{- range $store := list "postgresql" "hugegraph" "milvus" "victoriametrics" "victoriatraces" }}
-{{- if (index $root.Values $store).enabled }}
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: {{ include "cs.name" (list $root $store) }}
-  labels:
-    {{- include "cs.labels" (list $root $store) | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      {{- include "cs.selector" (list $root $store) | nindent 6 }}
-  policyTypes: [Ingress]
-  ingress:
-    - from:
-        {{- range $client := list "api" "worker" "mcp" }}
-        - podSelector:
-            matchLabels:
-              {{- include "cs.selector" (list $root $client) | nindent 14 }}
-        {{- end }}
-{{- end }}
-{{- end }}
+# Only the paths that are needed. Stores accept api, worker and mcp (their
+# policies live in the store subcharts); the API accepts the dashboard, mcp
+# (memory offload) and the chart's test; workers accept nothing (they parse
+# untrusted repositories). web and mcp face users and agents through the
+# ingress. Egress stays open: workers reach git hosts, osv.dev and deps.dev,
+# and model providers.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

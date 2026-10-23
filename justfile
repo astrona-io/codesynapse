@@ -227,7 +227,7 @@ chart-install: _kind-secret
 chart-install-published version pull_secret="": _kind-secret
     #!/usr/bin/env sh
     set -eu
-    pull=""; [ -z "{{pull_secret}}" ] || pull="--set image.pullSecrets[0].name={{pull_secret}}"
+    pull=""; [ -z "{{pull_secret}}" ] || pull="--set global.imagePullSecrets[0].name={{pull_secret}}"
     helm upgrade --install codesynapse oci://ghcr.io/astrona-io/charts/codesynapse --version "{{version}}" \
         --kube-context "{{kind_context}}" --namespace "{{kind_ns}}" -f deploy/helm/codesynapse/ci/kind-values.yaml \
         --set image.tag="{{version}}" --set image.pullPolicy=IfNotPresent $pull --wait --timeout 15m

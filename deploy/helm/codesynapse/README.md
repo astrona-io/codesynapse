@@ -1,6 +1,6 @@
 # CodeSynapse Helm chart
 
-Installs CodeSynapse on Kubernetes: the dashboard (`web`), the API (`api`), job workers (`worker`), the MCP server (`mcp`), and, unless you point it elsewhere, PostgreSQL, HugeGraph, Milvus, VictoriaMetrics and VictoriaTraces. Every image is Apache-2.0, or PostgreSQL-licensed for the database.
+Installs CodeSynapse on Kubernetes: the dashboard (`web`), the API (`api`), job workers (`worker`) and the MCP server (`mcp`). The stores it needs are subcharts, all on by default, so a plain install runs everything: PostgreSQL, HugeGraph, Milvus, VictoriaMetrics and VictoriaTraces. For production, run them yourself and link them (see [Stores](#stores)). Every image is Apache-2.0, or PostgreSQL-licensed for the database.
 
 ## Install
 
@@ -24,7 +24,7 @@ Installs CodeSynapse on Kubernetes: the dashboard (`web`), the API (`api`), job 
    ```sh
    helm upgrade --install codesynapse oci://ghcr.io/astrona-io/charts/codesynapse --version <X.Y.Z> \
      --kube-context <ctx> --namespace codesynapse \
-     --set secrets.existingSecret=codesynapse \
+     --set global.existingSecret=codesynapse \
      --set ingress.enabled=true --set ingress.host=codesynapse.example.com --set ingress.tlsSecretName=codesynapse-tls \
      --set publicURL=https://codesynapse.example.com --set publicMCPURL=https://codesynapse.example.com/mcp
    helm test codesynapse --kube-context <ctx> --namespace codesynapse
@@ -38,9 +38,10 @@ Installs CodeSynapse on Kubernetes: the dashboard (`web`), the API (`api`), job 
 
 | Value | Default | Meaning |
 |---|---|---|
-| `secrets.existingSecret` | required | The Secret above |
+| `global.existingSecret` | required | The Secret above |
 | `image.tag` | chart appVersion | Image tag on `ghcr.io/astrona-io/codesynapse-{api,worker,mcp,web}` |
-| `image.pullSecrets` | `[]` | Pull secrets for a private registry, e.g. `[{name: ghcr}]` |
+| `global.imagePullSecrets` | `[]` | Pull secrets for a private registry or mirror, e.g. `[{name: ghcr}]`; the stores use them too |
+| `global.networkPolicies` | `true` | Each component and store accepts only the pods that need it |
 | `worker.replicas`, `worker.roles` | `1`, `ingest,ai,fix` | Job workers. Split roles across Deployments to scale them apart |
 | `worker.resources.limits.memory` | `6Gi` | Ingest type-checks whole modules; size it for your largest repository. `GOMEMLIMIT` is set to 90% |
 | `workspace.accessModes` | `[ReadWriteOnce]` | `api`, `worker` and `mcp` share clones. Use a ReadWriteMany class on more than one node |
@@ -48,10 +49,32 @@ Installs CodeSynapse on Kubernetes: the dashboard (`web`), the API (`api`), job 
 | `<api,mcp,web>.autoscaling` | off | CPU autoscaling (`minReplicas`, `maxReplicas`, `targetCPU`); needs metrics-server |
 | `mcp.stateless` | `true` | No MCP transport session between requests, so no sticky sessions are needed |
 | `ingress.*` | off | One host: `/mcp` to MCP, the rest to the dashboard. The API is never exposed |
-| `<store>.enabled`, `<store>.externalURL` | in-chart | For production prefer managed or operator-run PostgreSQL, and a hardened HugeGraph |
+| `<store>.enabled`, `<store>.externalURL` | in-chart | See [Stores](#stores) |
 | `features.allowPush` | `false` | Fix branches for accepted review comments |
 | `traces.sample` | `1` | Share of new traces kept |
 | `llmConfig` | empty | The content of `config/llm.yaml`; keys go in the Secret |
+
+## Stores
+
+Each store is a subchart in `charts/`, declared in `Chart.yaml` with `condition: <store>.enabled`. All are enabled and configured by default, which is right for trying CodeSynapse, a kind cluster or a small team. **For production, the recommended way is to run the stores yourself** (managed services or operators you already back up and monitor), disable the subcharts and link them:
+
+| Store | Disable | Link instead |
+|---|---|---|
+| PostgreSQL (accounts, jobs, audit log) | `postgresql.enabled=false` | `CODESYNAPSE_DATABASE_URL` in the Secret; drop `POSTGRES_PASSWORD`. A managed database or CloudNativePG |
+| HugeGraph (code graph) | `hugegraph.enabled=false` | `hugegraph.externalURL` (required); `HUGEGRAPH_PASSWORD` stays in the Secret. Authentication must be on |
+| Milvus (memory vectors) | `milvus.enabled=false` | `milvus.externalURL`; empty turns memory vectors off |
+| VictoriaMetrics (metrics) | `victoriametrics.enabled=false` | `victoriametrics.externalURL`; empty turns export off |
+| VictoriaTraces (traces) | `victoriatraces.enabled=false` | `victoriatraces.externalURL`, the full OTLP/HTTP traces endpoint; empty turns export off |
+
+Settings of an in-chart store go under its name, for example `--set hugegraph.size=50Gi`. Each subchart's `values.yaml` lists them: image, size, storageClass, resources, and retention for the Victoria stores. The subcharts take the Secret, pull secrets and network policies from `global`, and share the helpers in the `common` library chart.
+
+```sh
+# PostgreSQL and HugeGraph run elsewhere; the rest stays in the chart.
+helm upgrade --install codesynapse oci://ghcr.io/astrona-io/charts/codesynapse --version <X.Y.Z> \
+  --kube-context <ctx> --namespace codesynapse --set global.existingSecret=codesynapse \
+  --set postgresql.enabled=false \
+  --set hugegraph.enabled=false --set hugegraph.externalURL=https://hugegraph.internal:8080
+```
 
 ## Scaling out
 

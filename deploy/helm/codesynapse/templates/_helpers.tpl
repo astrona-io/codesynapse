@@ -1,70 +1,12 @@
-{{/* Names: <release>-<component>, at most 63 characters. */}}
-{{- define "cs.name" -}}
-{{- $root := index . 0 -}}
-{{- printf "%s-%s" $root.Release.Name (index . 1) | trunc 63 | trimSuffix "-" -}}
-{{- end -}}
-
-{{- define "cs.labels" -}}
-{{- $root := index . 0 -}}
-app.kubernetes.io/name: {{ index . 1 }}
-app.kubernetes.io/instance: {{ $root.Release.Name }}
-app.kubernetes.io/part-of: codesynapse
-app.kubernetes.io/version: {{ $root.Values.image.tag | default $root.Chart.AppVersion | quote }}
-app.kubernetes.io/managed-by: {{ $root.Release.Service }}
-helm.sh/chart: {{ printf "%s-%s" $root.Chart.Name $root.Chart.Version }}
-{{- end -}}
-
-{{- define "cs.selector" -}}
-{{- $root := index . 0 -}}
-app.kubernetes.io/name: {{ index . 1 }}
-app.kubernetes.io/instance: {{ $root.Release.Name }}
-{{- end -}}
-
 {{- define "cs.image" -}}
 {{- $root := index . 0 -}}
 {{- printf "%s/codesynapse-%s:%s" $root.Values.image.registry (index . 1) ($root.Values.image.tag | default $root.Chart.AppVersion) -}}
 {{- end -}}
 
-{{- define "cs.pullSecrets" -}}
-{{- with .Values.image.pullSecrets }}
-imagePullSecrets:
-  {{- toYaml . | nindent 2 }}
-{{- end }}
-{{- end -}}
 
-{{/* The one Secret with every credential; the chart never invents one. */}}
-{{- define "cs.secret" -}}
-{{- required "secrets.existingSecret is required: create a Secret with the keys listed in values.yaml" .Values.secrets.existingSecret -}}
-{{- end -}}
 
-{{- define "cs.secretEnv" -}}
-{{- $root := index . 0 -}}
-- name: {{ index . 1 }}
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "cs.secret" $root }}
-      key: {{ index . 2 }}
-      {{- if gt (len .) 3 }}
-      optional: {{ index . 3 }}
-      {{- end }}
-{{- end -}}
 
-{{/* Pods: non-root, no privilege escalation, read-only root, nothing extra. */}}
-{{- define "cs.podSecurity" -}}
-runAsNonRoot: true
-runAsUser: {{ . }}
-runAsGroup: {{ . }}
-fsGroup: {{ . }}
-seccompProfile:
-  type: RuntimeDefault
-{{- end -}}
 
-{{- define "cs.containerSecurity" -}}
-allowPrivilegeEscalation: false
-readOnlyRootFilesystem: true
-capabilities:
-  drop: [ALL]
-{{- end -}}
 
 {{/* Store addresses: in-chart service or the external value. */}}
 {{- define "cs.hugegraphURL" -}}
@@ -139,21 +81,6 @@ capabilities:
 - {name: CODESYNAPSE_LLM_CONFIG, value: /config/llm.yaml}
 {{- end -}}
 
-{{/* A store: one StatefulSet with its own volume and a Service. */}}
-{{- define "cs.volumeClaim" -}}
-{{- $root := index . 0 -}}{{- $v := index . 1 -}}
-volumeClaimTemplates:
-  - metadata:
-      name: data
-    spec:
-      accessModes: [ReadWriteOnce]
-      {{- with $v.storageClass }}
-      storageClassName: {{ . }}
-      {{- end }}
-      resources:
-        requests:
-          storage: {{ $v.size }}
-{{- end -}}
 
 {{/* Replicas, unless an autoscaler owns them. Args: root, component. */}}
 {{- define "cs.replicas" -}}

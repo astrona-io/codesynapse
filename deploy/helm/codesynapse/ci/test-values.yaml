@@ -1,6 +1,6 @@
 # Values the chart checks render with (`just chart-check`): every optional
 # part on, so every template is validated.
-secrets:
+global:
   existingSecret: codesynapse
 ingress:
   enabled: true

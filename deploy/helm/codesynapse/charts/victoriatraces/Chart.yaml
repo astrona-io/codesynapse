@@ -1,0 +1,5 @@
+apiVersion: v2
+name: victoriatraces
+description: "VictoriaTraces single node for request traces. Part of the codesynapse chart; disable it there to use your own."
+type: application
+version: 0.1.0

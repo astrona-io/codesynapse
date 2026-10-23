@@ -51,7 +51,7 @@ services/api/           API service: cmd/codesynapse-api, Dockerfile, and packag
 services/mcp/           MCP service: cmd/codesynapse-mcp, Dockerfile
   internal/mcpserver/   MCP tools, prompts (prompts.go) and server instructions
 services/web/           Nuxt 4 dashboard (app/ pages+components, server/api/cg proxy, Dockerfile)
-deploy/helm/codesynapse/ Helm chart (stores in-chart or external, network policies, helm test); docker-compose.yml stays at the repo root
+deploy/helm/codesynapse/ Helm chart; stores are subcharts in charts/ (on by default, disable to link external ones), common/ holds shared helpers
 internal/ingestreport/  Bounded file ledger, commit-confirmed outcomes and metadata-only context estimates
 internal/config/        Strict repository .codesynapse.yaml policy, digest and shared path matcher
 internal/model/         Node/Edge kinds, Graph, IDs. The schema lives here.

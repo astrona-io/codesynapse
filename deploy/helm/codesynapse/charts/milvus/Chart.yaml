@@ -1,0 +1,5 @@
+apiVersion: v2
+name: milvus
+description: "Milvus standalone for agent-memory vectors, local storage (no MinIO). Part of the codesynapse chart; disable it there to use your own."
+type: application
+version: 0.1.0
