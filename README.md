@@ -295,7 +295,7 @@ just k8s-render prod        # review the manifests
 just k8s-apply prod
 ```
 
-`deploy/k8s` holds Kustomize manifests: a `base` (api, mcp, web, network policies; outdated until HugeGraph and Milvus are added in phase 6a) and `dev` and `prod` overlays. Test on a throwaway kind cluster first (`just image-load-kind`). See `deploy/k8s/README.md`.
+`deploy/k8s` holds Kustomize manifests: a `base` (api, mcp, web, network policies; outdated) and `dev` and `prod` overlays. Phase 6a replaces them with a Helm chart, later published on ghcr.io (see [docs/SAAS.md](docs/SAAS.md)). Test on a throwaway kind cluster first (`just image-load-kind`). See `deploy/k8s/README.md`.
 
 See `AGENTS.md` for conventions and security rules and `docs/PLAN.md` for architecture and roadmap.
 

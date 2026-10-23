@@ -117,9 +117,49 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
        - bulk inputs leave only a digest;
        - the chain still verifies under concurrent calls.
      - **Open decision:** how much free text to keep. Queries help tracing but can carry personal data or pasted code; the default above keeps them redacted and capped.
-6. **Kubernetes deployment (final phase, deferred)**: update both development and production manifests after the application features, access/session controls, telemetry, ingestion work and SSO are complete. Existing local development stays independent of Kubernetes; nothing has been deployed to a production cluster. The earlier manifest work is parked on `feat/k8s-production` and must be rebased and revalidated against the completed application before reuse. Deliver in two parts:
-   - **6a:** refresh the development overlay and build a production overlay whose data path is Apache-2.0 or permissive only (see the review below): HugeGraph and Milvus as the graph and vector stores, Milvus standalone on its own volume (no MinIO, which is AGPLv3), PostgreSQL (in-cluster StatefulSet, or a managed or CloudNativePG database by URL), VictoriaMetrics; Every secret the services need (`CODESYNAPSE_SECRET_KEY`, database, HugeGraph, metrics and API passwords) comes from one Secret with no defaults; HugeGraph refuses to start without its password; network policies let each store accept only the services that use it. TLS at the ingress with secure cookies and trusted proxies set. Memory requests and limits sized from measured ingest peaks, with `GOMEMLIMIT` so the API collects garbage before the kernel kills it. Backups (PostgreSQL dump, HugeGraph and Milvus volume snapshots, the audit export) and upgrade notes (migrations run on start; one API replica owns jobs and the scheduler). Tested on a throwaway kind cluster only.
-   - **6b:** horizontal scaling: MCP and web as stateless Deployments with several replicas; the API's job runner and scheduler behind a leader lease so more than one API replica can serve requests; HugeGraph and Milvus in their clustered modes (Milvus then needs object storage that is not MinIO: a cloud S3 bucket or an Apache-2.0 store).
+   - **5d, CI/CD baseline (planned; recommended next):** today the only workflows build the Homebrew formula and release the CLI on a tag. Pull requests and merges run no tests, lint or security checks, so everything depends on running `just ci` locally.
+     - **On every pull request** (required checks; the same commands work locally through `just`):
+       - `go test -race` (`just test`), `golangci-lint` with gosec (`just lint`), and `govulncheck`;
+       - the Nuxt typecheck and build (`just web-check`), plus `npm audit` for production dependencies;
+       - licence check of Go and npm dependencies against the Apache-2.0 allowlist (permissive only);
+       - secret scanning (gitleaks), `actionlint` for workflows, Dockerfile lint (hadolint), `shellcheck`, `yamllint`;
+       - Helm: `helm lint`, chart-testing (`ct lint`), `kubeconform` on rendered manifests;
+       - `kubesec` and `kube-linter` on the rendered chart, failing on high findings;
+       - Trivy config and filesystem scans;
+       - the integration contracts (`just test-postgres`, `just test-hugegraph`) when stores or accounts change, and nightly otherwise.
+     - **On merge to `main` (prebuild):**
+       - build all three images multi-arch (amd64, arm64), scan them with Trivy, and push `:main` and `:sha-<commit>` tags to ghcr.io;
+       - package the chart as a development version;
+       - install it on a throwaway kind cluster and run a smoke test (health, sign-up, index a small public repository, an MCP `repo_list` through the bridge).
+     - **On a release tag (`v*`):**
+       - versioned, signed images (cosign keyless, provenance attestation, CycloneDX SBOM);
+       - the chart published as an OCI artifact at `oci://ghcr.io/astrona-io/charts/codesynapse`;
+       - the CLI binaries and Homebrew formula as today;
+       - release notes generated from conventional commits.
+     - **Rules:**
+       - Workflows pin actions by commit SHA, run with least-privilege `permissions`, and never expose secrets to pull requests from forks.
+       - Renovate keeps actions, tools and base images current, with approval for majors.
+       - CI-only tools are not distributed: GPL tools such as hadolint and shellcheck are acceptable there, never inside images.
+6. **Kubernetes deployment and releases (final phase)**: after the application features, access/session controls, telemetry, ingestion work and SSO are complete. Existing local development stays independent of Kubernetes, and nothing has been deployed to a production cluster. The earlier Kustomize work is parked on `feat/k8s-production`; it is reused as input for the chart, not shipped as is.
+   - **6a, Helm chart and local build-and-test loop:**
+     - A Helm chart in `deploy/helm/codesynapse` replaces the Kustomize overlays.
+     - Values cover development and production.
+     - The production data path is Apache-2.0 or permissive only (see the review below): HugeGraph and Milvus as the graph and vector stores, Milvus standalone on its own volume (no MinIO, which is AGPLv3), PostgreSQL (in-cluster StatefulSet, or a managed or CloudNativePG database by URL), VictoriaMetrics. Every secret the services need (`CODESYNAPSE_SECRET_KEY`, database, HugeGraph, metrics and API passwords) comes from one Secret with no defaults; HugeGraph refuses to start without its password; network policies let each store accept only the services that use it. TLS at the ingress with secure cookies and trusted proxies set. Memory requests and limits sized from measured ingest peaks, with `GOMEMLIMIT` so the API collects garbage before the kernel kills it. Backups (PostgreSQL dump, HugeGraph and Milvus volume snapshots, the audit export) and upgrade notes (migrations run on start; one API replica owns jobs and the scheduler). Tested on a throwaway kind cluster only.
+     - Charts for the stores are optional dependencies or bring-your-own by URL.
+     - The chart passes `helm lint`, `ct lint`, `kubeconform`, `kubesec` and `kube-linter` with no high findings. It has `helm test` hooks for health, sign-up and MCP reachability.
+     - **Local loop before anything ships**, all through `just`:
+       - build every image locally (`image-build`, multi-arch optional);
+       - create a throwaway kind cluster with an explicit `--context`;
+       - load the images and `helm install` the chart from the working tree;
+       - run the same smoke test and lint/scan set as CI, then tear down.
+     - The loop and CI share the same scripts, so a green local run predicts a green pipeline.
+   - **6b, release pipeline:**
+     - Images on ghcr.io: multi-arch, signed, with SBOM and provenance.
+     - The chart as an OCI artifact, so anyone installs from GitHub with `helm install codesynapse oci://ghcr.io/astrona-io/charts/codesynapse --version X.Y.Z`.
+     - Chart and app versions follow the release tag.
+     - Upgrade notes cover migrations, which run on start, and the single API replica that owns jobs and the scheduler.
+     - The kind smoke test runs against the published artifacts before the release is marked latest.
+   - **6c, horizontal scaling:** MCP and web as stateless Deployments with several replicas; the API's job runner and scheduler behind a leader lease so more than one API replica can serve requests; HugeGraph and Milvus in their clustered modes (Milvus then needs object storage that is not MinIO: a cloud S3 bucket or an Apache-2.0 store).
 
 ## Standing architecture review
 
@@ -128,7 +168,7 @@ Every phase is checked against these constraints, taken from the architecture an
 | Constraint | Where it holds today | Open, and where it is closed |
 |---|---|---|
 | **Zero-trust tenancy.** Tenant and repository come from the authenticated context, never from the model. | The tenant is never a tool argument: API routes resolve it from the session or key (`scopeOf`, `s.route` policies), MCP from the key (`Caller`, `memRepo`). `repo` is an argument, but `h.repo` and `visibleRepos` accept only graphs in the caller's scope and answer 404 otherwise. Memory traversals start at `tenant_id`/`ns`; vector searches require a tenant (`vector.ErrNoTenant`) and drop foreign hits (`vector.Isolate`). | Platform and service credentials cannot bypass content permissions. Repository-scoped readers reject foreign node IDs and traversals. Parent-session enforcement is implemented; final deployment still waits for the remaining application phases and client integration. |
-| **Apache-2.0 or permissive licences on the production data path.** No SSPL or BSL. | Go dependencies (cobra, the MCP SDK, x/tools, pgx, the Anthropic SDK), Nuxt, HugeGraph, Milvus, PostgreSQL and VictoriaMetrics are Apache-2.0, MIT, BSD or the PostgreSQL licence. Search stays out of Elasticsearch (`docs/adr/0001-search.md`). | Milvus' usual object store, MinIO, is AGPLv3 (Neo4j Community, the former default store, was GPLv3 and has been removed). HugeGraph and Milvus (local storage) are the only stores, and 6a deploys them in production; 6b names object stores for clustered Milvus. A licence check of the Go and npm dependency trees in CI is still to be added (needs a decision on the tool). |
+| **Apache-2.0 or permissive licences on the production data path.** No SSPL or BSL. | Go dependencies (cobra, the MCP SDK, x/tools, pgx, the Anthropic SDK), Nuxt, HugeGraph, Milvus, PostgreSQL and VictoriaMetrics are Apache-2.0, MIT, BSD or the PostgreSQL licence. Search stays out of Elasticsearch (`docs/adr/0001-search.md`). | Milvus' usual object store, MinIO, is AGPLv3 (Neo4j Community, the former default store, was GPLv3 and has been removed). HugeGraph and Milvus (local storage) are the only stores, and 6a deploys them in production; 6c names object stores for clustered Milvus. A licence check of the Go and npm dependency trees runs in CI from 5d. |
 | **Graph and vector parity.** HugeGraph (Gremlin) and the in-memory reference answer alike; Milvus serves vectors. | `storetest.Run` is the contract every store passes; `TestParityWithReference` compares HugeGraph with the in-memory reference; `vectortest.Run` holds every vector index to tenant isolation. The lexical leg uses one ranker for all stores. | 4f validates candidate identity and current graph evidence across all stores. Milvus-native BM25/RRF remains conditional on ADR 0001; the measured lexical latency does not trigger migration. |
 | **Token density and prefix caching.** Short qualified names; full IDs only on request; static instructions first. | Tools take and print `qualified_id` (`store.(*Store).Get`) and answer ambiguity with suggestions; composite tools (`get_symbol_context`, `get_pr_context`, `minimal_context`) cut round trips; recall returns 3–8 entries; system prompts are constants and cached (4b). | 4f bounds composite structured answers and records omissions. Its benchmark compares full MCP responses with raw text using explicit evidence checks and cold/warm percentiles; model answer quality and production latency remain unmeasured. |
 | **Ingestion fits in memory.** Batched writes; no OOM kills on large codebases. | HugeGraph writes are size-bounded (`MaxRequestBytes`) and staged in chunks before one bounded transaction. | Extraction loads and type-checks the whole program with `go/packages` and assembles the graph before writing, so peak memory grows with the repository, not the batch. 6a measures peaks on large repositories and sets limits and `GOMEMLIMIT`; loading per module or package group, writing each group as it is done, is the follow-up if the peaks are too high. |
