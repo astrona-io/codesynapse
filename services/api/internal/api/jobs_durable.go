@@ -13,6 +13,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // Durable jobs (docs/SAAS.md, 5e). With accounts, every job is a row in the
@@ -75,6 +76,9 @@ type durableJob struct {
 	Via     string
 	KeyID   string
 	Params  json.RawMessage
+	// Trace continues the queueing request's trace in whichever process
+	// runs the job.
+	Trace string
 	// resume is the record being started again; nil for a new job.
 	resume *accounts.JobRecord
 }
@@ -100,9 +104,9 @@ func durable(ctx context.Context, kind string, role accounts.Role, params any) (
 	if len(raw) > accounts.MaxJobParams {
 		return nil, fmt.Errorf("%w: job parameters are too large", errBadRequest)
 	}
-	d := &durableJob{Kind: kind, Role: role, ActorID: p.User.ID, Via: p.Via, KeyID: p.KeyID, Params: raw}
+	d := &durableJob{Kind: kind, Role: role, ActorID: p.User.ID, Via: p.Via, KeyID: p.KeyID, Params: raw, Trace: telemetry.TraceParent(ctx)}
 	if rec, ok := ctx.Value(resumeKey{}).(accounts.JobRecord); ok && rec.Kind == kind {
-		d.resume = &rec
+		d.resume, d.Trace = &rec, rec.Trace
 	}
 	return d, nil
 }

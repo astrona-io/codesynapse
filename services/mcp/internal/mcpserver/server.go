@@ -98,6 +98,7 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	// Inside the caller and runtime checks (so it knows who and which chat),
 	// outside authorization (so it records refusals too).
 	s.AddReceivingMiddleware(h.auditMiddleware())
+	s.AddReceivingMiddleware(traceMiddleware())
 	stdioToken := ""
 	if len(opts) > 0 {
 		stdioToken = opts[0].StdioToken

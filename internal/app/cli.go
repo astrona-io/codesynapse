@@ -121,7 +121,7 @@ func Main(name, short, version string, build func(env *Env) []*cobra.Command) in
 		IsTerminal: isTerminal(os.Stdin) && isTerminal(os.Stderr),
 		level:      new(slog.LevelVar),
 	}
-	env.Logger = slog.New(slog.NewTextHandler(env.Stderr, &slog.HandlerOptions{Level: env.level}))
+	env.Logger = slog.New(traceHandler{slog.NewTextHandler(env.Stderr, &slog.HandlerOptions{Level: env.level})})
 
 	root := &cobra.Command{
 		Use:           name,
@@ -163,9 +163,9 @@ func (e *Env) configureLogger() error {
 	e.level.Set(lvl)
 	switch e.logFormat {
 	case "text":
-		e.Logger = slog.New(slog.NewTextHandler(e.Stderr, &slog.HandlerOptions{Level: e.level}))
+		e.Logger = slog.New(traceHandler{slog.NewTextHandler(e.Stderr, &slog.HandlerOptions{Level: e.level})})
 	case "json":
-		e.Logger = slog.New(slog.NewJSONHandler(e.Stderr, &slog.HandlerOptions{Level: e.level}))
+		e.Logger = slog.New(traceHandler{slog.NewJSONHandler(e.Stderr, &slog.HandlerOptions{Level: e.level})})
 	default:
 		return fmt.Errorf("--log-format must be text or json, not %q", e.logFormat)
 	}

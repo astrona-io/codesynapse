@@ -24,6 +24,10 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"gopkg.in/yaml.v3"
 
 	"github.com/astrona-io/codesynapse/internal/execution"
@@ -463,8 +467,16 @@ func (r *Registry) Complete(ctx context.Context, name string, req Request) (Resp
 	ctx = telemetry.WithModel(ctx, name, cfg.Model)
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
 	defer cancel()
+	// Configured provider and model only; never the prompt or the answer.
+	ctx, span := telemetry.Tracer().Start(ctx, "llm complete", trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(attribute.String("gen_ai.provider.name", name), attribute.String("gen_ai.request.model", cfg.Model)))
+	defer span.End()
 	start := time.Now()
 	resp, err := p.Complete(ctx, req)
+	if err != nil {
+		span.SetStatus(codes.Error, "completion failed")
+	}
+	span.SetAttributes(attribute.Int("gen_ai.usage.input_tokens", resp.InputTokens), attribute.Int("gen_ai.usage.output_tokens", resp.OutputTokens))
 	resp.Preflight = count
 	resp.Duration = time.Since(start)
 	record(ctx, name, cfg, resp, err)
