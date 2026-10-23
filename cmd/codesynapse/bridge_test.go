@@ -119,3 +119,19 @@ func TestBrewStablePath(t *testing.T) {
 		})
 	}
 }
+
+func TestWithToolsets(t *testing.T) {
+	for _, tc := range []struct {
+		url  string
+		sel  []string
+		want string
+	}{
+		{"http://localhost:8090/mcp", nil, "http://localhost:8090/mcp"},
+		{"http://localhost:8090/mcp", []string{"core"}, "http://localhost:8090/mcp?toolsets=core"},
+		{"https://cs.example.com/mcp?x=1", []string{"core", "memory"}, "https://cs.example.com/mcp?toolsets=core%2Cmemory&x=1"},
+	} {
+		got, err := withToolsets(tc.url, tc.sel)
+		require.NoError(t, err)
+		assert.Equal(t, got, tc.want, tc.url)
+	}
+}

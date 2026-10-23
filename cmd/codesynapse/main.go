@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -37,6 +38,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/snapshot"
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/store/memory"
+	"github.com/astrona-io/codesynapse/internal/toolsets"
 )
 
 var version = "dev"
@@ -561,11 +563,12 @@ func licensesCmd(ec *app.Env) *cobra.Command {
 
 // mcpInstallOptions configures `codesynapse mcp install`.
 type mcpInstallOptions struct {
-	EC     *app.Env
-	url    string
-	apiURL string
-	yes    bool
-	only   []string
+	profile string
+	EC      *app.Env
+	url     string
+	apiURL  string
+	yes     bool
+	only    []string
 }
 
 func (o *mcpInstallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -574,6 +577,7 @@ func (o *mcpInstallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "API the Claude Code bridge registers chat sessions with")
 	f.BoolVarP(&o.yes, "yes", "y", false, "Install into every detected agent without asking")
 	f.StringSliceVar(&o.only, "only", nil, "Limit to these agents (claude, codex, gemini, opencode, cursor, project)")
+	f.StringVar(&o.profile, "profile", toolsets.Core, "Toolsets the agents get: core (the eight everyday tools), all, or core plus a comma list of "+strings.Join(toolsets.Names(), ", "))
 	return nil
 }
 func (o *mcpInstallOptions) Complete(context.Context, *app.Env) error { return nil }
@@ -581,7 +585,28 @@ func (o *mcpInstallOptions) Validate(context.Context, *app.Env) error {
 	if !o.yes && !o.EC.IsTerminal {
 		return errors.New("not a terminal: pass --yes (and --only) to install without prompts")
 	}
-	return nil
+	sel, err := toolsets.Parse(o.profile)
+	if err != nil {
+		return fmt.Errorf("--profile: %w", err)
+	}
+	o.url, err = withToolsets(o.url, sel)
+	return err
+}
+
+// withToolsets adds the selection to the MCP URL (?toolsets=core,memory);
+// nil (all) leaves it as is, so the server's default applies.
+func withToolsets(raw string, sel []string) (string, error) {
+	if sel == nil {
+		return raw, nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("--url: %w", err)
+	}
+	q := u.Query()
+	q.Set("toolsets", strings.Join(sel, ","))
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {

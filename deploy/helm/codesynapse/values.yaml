@@ -75,6 +75,10 @@ mcp:
   # No transport session between requests, so any replica answers any
   # request without sticky sessions.
   stateless: true
+  # Toolsets for connections that name none: all, or core plus a comma list
+  # (repos, docs, security, architecture, memory, cleanup, reviews,
+  # identity). Clients choose their own with /mcp?toolsets=...
+  toolsets: all
   # CPU autoscaling; replicas is then ignored. Needs metrics-server.
   autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 6, targetCPU: 70}
   resources:
