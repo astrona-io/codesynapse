@@ -2,5 +2,13 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
+  ],
+  "packageRules": [
+    {
+      "description": "vue-tsc (nuxt typecheck) loads typescript/lib/tsc, which TypeScript 7 no longer exports; AGENTS.md pins 5.x until vue-tsc supports newer releases",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<6"
+    }
   ]
 }
