@@ -24,6 +24,7 @@ One connected system for understanding the intended architecture, finding and re
 | `context.build` with a token budget, omissions explained, targeted expansion | `minimal_context`, `architecture_context`; no combined budgeted package | 4 |
 | Reports linked to decisions, code, dependencies and validation, with freshness | Trends, cleanup plan, SBOM; no linked report | 4 |
 | End-to-end scenario: ADR to function to dependency finding to alternative to report | Not yet | 5 |
+| Decision-first planning: detect the domains a task touches, propose options as an ADR, wait for the person's choice, then build against it | Catalog reads, draft proposals and Markdown export exist; no detection, prompt or gate | 6 |
 
 ## Slices
 
@@ -32,6 +33,30 @@ One connected system for understanding the intended architecture, finding and re
 3. **Dependency replacement analysis.** From the imports and symbols actually used, find a smaller supported alternative, then compare the complete resolved graph, licences, advisories and API surface before and after. A subpath import or tree shaking alone proves nothing, and copying or vendoring code to avoid a licence is never recommended. Proposals and verified outcomes are stored apart.
 4. **Unified experience.** Search across records, symbols, dependencies and reports; component pages; comparison view; analysis jobs with queued, running, completed, partial and failed states; `context_build` within a token budget; linked reports that go stale, never silently rewritten.
 5. **Scenario and documentation.** The complete walk-through, its test, and the contracts.
+6. **Decision-first planning (ADR gate).** Before an agent writes code for a task with architectural weight, it inspects the context, proposes options as an architecture decision record, waits for the person's choice, and only then builds against it.
+   - **Detection** (new read tool `architecture_plan`). Given the task in words and optionally files or a diff, it answers from the indexed graph, so the bridge stays a plain forwarder and nothing scans the workspace on its own. Local changes not yet indexed arrive as the diff, as with `get_pr_context`. The answer covers:
+     - **Domains:** Go (from `go.mod` and Go packages), Kubernetes manifests and Helm charts (YAML with `kind:`, templates), Node/TypeScript (`package.json`, `tsconfig.json`), and the other indexed languages.
+     - **Target files and symbols** the task is likely to touch.
+     - **Records that apply** (accepted ADRs, standards, policies, as `architecture_context` returns them).
+     - **Per-domain checks** to respect: Go layout and concurrency rules from the records; resource limits, RBAC and security context for manifests (the existing YAML rules).
+   - **"Stick together" topology.** Components that span languages are grouped under one boundary with the evidence for each link, for example a Go service, the Deployment that runs its image and the Keycloak settings it reads through environment and config keys. These become `Component` nodes with `APPLIES_TO` edges, so later records and pages use the same grouping. Uncertain links are marked as candidates, never merged silently.
+   - **Interactive gate** (new MCP prompt `decision-first`). The agent presents:
+     - the detected context (primary domain, target files, applicable records with links);
+     - two or three explicit options, with the recommended standard first and its trade-offs;
+     - a question asking which option to lock into an ADR.
+     Then it stops until the person answers. The gate is the client's behaviour; the server's guarantee is that nothing it stores can be an accepted decision.
+   - **Recording the choice.** There is no file-writing MCP tool: MCP tools never write to code or the repository, and an agent's proposal is never an accepted decision.
+     - After the person picks, the agent calls `architecture_propose` with type ADR, the options, the chosen option and the reason. That stores a draft, as today: audited and redacted.
+     - It then takes the Markdown from the existing export, with the next free number (`docs/adr/NNNN-<slug>.md`).
+     - The agent writes that file into the working tree. The person reviews it and commits it with an accepted status, which is when it becomes a decision.
+   - **Building against it.** Code written for the decision carries `@see ADR-NNNN` comments. Ingest turns those comments into `IMPLEMENTS_DECISION` edges, the same edges `architecture_link` makes by hand. `get_pr_context` then flags changes to that code that drift from the record or touch it without a reference.
+   - **Tests:**
+     - detection on fixtures for each domain and a mixed Go + Kubernetes + Keycloak fixture;
+     - topology links with their evidence;
+     - the prompt's layout;
+     - the proposal is always a draft;
+     - the exported file numbering does not collide;
+     - `@see` comments become edges, and unknown ADR numbers are reported, not linked.
 
 ## Rules that apply to every slice
 
