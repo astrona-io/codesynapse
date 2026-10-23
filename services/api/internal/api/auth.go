@@ -4,15 +4,14 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
-	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/execution"
 )
 
@@ -120,28 +119,7 @@ func (s *Server) clearSession(w http.ResponseWriter) {
 // proxy every user would otherwise share one address, one login limit and
 // one audit IP. Senders outside TrustedProxies cannot set it.
 func (s *Server) clientAddr(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	ip, err := netip.ParseAddr(host)
-	if err != nil || !s.trustedProxy(ip.Unmap()) {
-		return host
-	}
-	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
-	if last, err := netip.ParseAddr(strings.TrimSpace(hops[len(hops)-1])); err == nil {
-		return last.Unmap().String()
-	}
-	return host
-}
-
-func (s *Server) trustedProxy(ip netip.Addr) bool {
-	for _, p := range s.cfg.TrustedProxies {
-		if p.Contains(ip) {
-			return true
-		}
-	}
-	return false
+	return app.ClientAddr(r, s.cfg.TrustedProxies)
 }
 
 // accountError maps account errors to HTTP statuses.
