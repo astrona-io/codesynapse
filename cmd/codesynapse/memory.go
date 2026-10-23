@@ -39,6 +39,18 @@ func tokenFile() (string, error) {
 	return filepath.Join(dir, "codesynapse", "api-token"), nil
 }
 
+// storeToken writes the key where the hooks and the bridge read it (0600).
+func storeToken(tok string) (string, error) {
+	p, err := tokenFile()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return "", err
+	}
+	return p, os.WriteFile(p, []byte(tok+"\n"), 0o600)
+}
+
 // apiClient talks to the CodeSynapse API for the memory commands.
 type apiClient struct {
 	base  string
@@ -490,14 +502,8 @@ func (o *mcpHooksOptions) Run(ctx context.Context, _ *app.Env) error {
 		}
 	}
 	// Store the token for the hooks; settings files and argv never hold it.
-	p, err := tokenFile()
+	p, err := storeToken(c.token)
 	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return err
-	}
-	if err := os.WriteFile(p, []byte(c.token+"\n"), 0o600); err != nil {
 		return err
 	}
 	bin, err := os.Executable()

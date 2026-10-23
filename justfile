@@ -130,7 +130,8 @@ review base="origin/main":
 
 # Register the MCP server with your AI agents (asks per agent: Claude Code, Codex, Gemini, OpenCode, Cursor, project)
 mcp:
-    go run ./cmd/codesynapse mcp install
+    go install ./cmd/codesynapse
+    "$(go env GOPATH)/bin/codesynapse" mcp install
 
 # Print runtime-aware MCP configuration without expanding credentials
 mcp-config:

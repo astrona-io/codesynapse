@@ -13,7 +13,7 @@ Requires [just](https://github.com/casey/just) and Docker or Podman (`podman mac
 ```sh
 just up                       # writes .env with random secrets, builds and starts everything
 just ingest ~/src/my-service  # copies the checkout into ./sources and indexes it
-just mcp                      # install client config; runtime session setup is also required
+just mcp                      # install client config (Claude Code: per-chat bridge; others need runtime session setup)
 open http://localhost:3000
 ```
 
@@ -154,7 +154,9 @@ Metrics use OpenTelemetry cumulative OTLP/HTTP by default. Set `CODESYNAPSE_METR
 
 MCP tool execution requires PostgreSQL accounts, a personal organisation API key and an immutable chat ID supplied by the calling runtime. The installation token alone cannot execute tools. Offline CLI indexing still works without accounts; MCP tools fail closed without the execution-session registry.
 
-`just mcp` (`codesynapse mcp install`) installs connection settings for detected clients. It does not supply a chat identity or register a session. Before the first tool call, a runtime-aware launcher or client integration must:
+**Claude Code:** sign in to the dashboard, create a key under Settings → API keys, then run `CODESYNAPSE_MCP_TOKEN=<key> just mcp`. This installs the `codesynapse` binary (`go install`) and registers it as a stdio server that Claude Code starts once per chat (`codesynapse mcp bridge`). Claude Code gives that process the chat's ID; the bridge registers it and forwards every MCP request to `http://localhost:8090/mcp` with the key and both session headers. The key is stored in your user config folder (0600), not in Claude Code's settings. Claude Code keeps the process, and so the ID, across `/compact` and `/clear`; start a new chat for a new session.
+
+Other clients: `just mcp` installs connection settings for them too, but supplies no chat identity and registers no session. Before the first tool call, a runtime-aware launcher or client integration must:
 
 1. Read the existing thread ID from its runtime and register it with `POST /api/v1/execution/sessions`, using the personal key and body `{"session_id":"<runtime-provided thread ID>"}`.
 2. Send that same value in both `X-CodeSynapse-Session` and `X-CodeSynapse-Parent-Session` on every MCP HTTP request, together with `Authorization: Bearer <personal key>`.
