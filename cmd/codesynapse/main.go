@@ -601,6 +601,7 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 		// `go run` builds into a temporary folder the bridge would vanish from.
 		return errors.New("run an installed codesynapse binary (go install ./cmd/codesynapse, or just mcp), not go run")
 	}
+	bin = brewStablePath(bin)
 	server := agentcfg.Server{URL: o.url, Token: os.Getenv(agentcfg.TokenEnv), Command: bin, APIURL: o.apiURL, StoreToken: storeToken}
 	in := bufio.NewReader(o.EC.Stdin)
 	installed := 0
@@ -623,6 +624,19 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 			agentcfg.TokenEnv, agentcfg.TokenEnv, agentcfg.TokenEnv, filepath.Join(cwd, ".env"))
 	}
 	return nil
+}
+
+// brewStablePath swaps a Homebrew Cellar path, which `brew upgrade` removes,
+// for the opt symlink that follows upgrades.
+func brewStablePath(bin string) string {
+	prefix, rest, ok := strings.Cut(bin, "/Cellar/codesynapse/")
+	if !ok {
+		return bin
+	}
+	if _, file, ok := strings.Cut(rest, "/"); ok {
+		return prefix + "/opt/codesynapse/" + file
+	}
+	return bin
 }
 
 func confirm(w io.Writer, in *bufio.Reader, t agentcfg.Target) bool {

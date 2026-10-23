@@ -106,3 +106,16 @@ func TestCheckBridgeURL(t *testing.T) {
 		})
 	}
 }
+
+func TestBrewStablePath(t *testing.T) {
+	for bin, want := range map[string]string{
+		"/opt/homebrew/Cellar/codesynapse/0.2.0/bin/codesynapse":              "/opt/homebrew/opt/codesynapse/bin/codesynapse",
+		"/home/linuxbrew/.linuxbrew/Cellar/codesynapse/0.2.0/bin/codesynapse": "/home/linuxbrew/.linuxbrew/opt/codesynapse/bin/codesynapse",
+		"/opt/homebrew/bin/codesynapse":                                       "/opt/homebrew/bin/codesynapse",
+		"/Users/me/go/bin/codesynapse":                                        "/Users/me/go/bin/codesynapse",
+	} {
+		t.Run(bin, func(t *testing.T) {
+			assert.Equal(t, brewStablePath(bin), want)
+		})
+	}
+}

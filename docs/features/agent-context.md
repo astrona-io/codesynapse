@@ -100,4 +100,6 @@ just mcp          # registers with Claude Code, Codex, Gemini, OpenCode, Cursor
 just mcp-config   # prints a JSON client config for the running stack
 ```
 
+Claude Code connects through a local per-chat bridge; see [Claude Code bridge](../operations/claude-code-bridge.md).
+
 Without a database, the server can index one directory into memory at startup (`serve --offline .`), which is what this repository's `.mcp.json` does.

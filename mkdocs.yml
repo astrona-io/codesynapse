@@ -62,6 +62,8 @@ nav:
       - Accounts and access: operations/accounts-access.md
       - Security model: operations/security-model.md
       - Running the stack: operations/running.md
+      - Claude Code bridge: operations/claude-code-bridge.md
+      - Releasing: operations/releasing.md
   - Reference:
       - Agent guide: AGENT_GUIDE.md
       - Plan and decisions: PLAN.md
