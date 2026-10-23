@@ -206,13 +206,21 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
+	r, span := s.traceRequest(r)
 	rid := requestID(r)
+	if id := telemetry.TraceID(r.Context()); id != "" {
+		rid = id // one ID for the audit entry, the logs and the trace
+	}
 	w.Header().Set("X-Request-ID", rid)
 	r = r.WithContext(accounts.WithRequestInfo(r.Context(), accounts.RequestInfo{RequestID: rid, IP: s.clientAddr(r), UserAgent: r.UserAgent()}))
 	rec := &statusRecorder{ResponseWriter: w}
 	start, tenant := time.Now(), new(string)
 	r = r.WithContext(context.WithValue(r.Context(), tenantSlot{}, tenant))
-	defer func() { s.observe(r, rec.status, *tenant, start) }()
+	defer func() {
+		s.observe(r, rec.status, *tenant, start)
+		_, pattern := s.mux.Handler(r)
+		endRequestSpan(span, r.Method, pattern, rec.status)
+	}()
 	if s.cfg.Accounts != nil {
 		var ok bool
 		if r, ok = s.authenticate(rec, r); !ok {

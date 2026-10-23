@@ -13,12 +13,12 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
-const jobCols = "id, kind, repo, org_id, actor_id, via, key_id, role, execution, params, branch, task, state, attempts, lease_owner, lease_until, created_at, started_at, finished_at, result, error, nodes, edges"
+const jobCols = "id, kind, repo, org_id, actor_id, via, key_id, role, execution, params, trace, branch, task, state, attempts, lease_owner, lease_until, created_at, started_at, finished_at, result, error, nodes, edges"
 
 func scanJob(row pgx.Row) (accounts.JobRecord, error) {
 	var j accounts.JobRecord
 	var exec []byte
-	err := row.Scan(&j.ID, &j.Kind, &j.Repo, &j.OrgID, &j.ActorID, &j.Via, &j.KeyID, &j.Role, &exec, &j.Params, &j.Branch, &j.Task,
+	err := row.Scan(&j.ID, &j.Kind, &j.Repo, &j.OrgID, &j.ActorID, &j.Via, &j.KeyID, &j.Role, &exec, &j.Params, &j.Trace, &j.Branch, &j.Task,
 		&j.State, &j.Attempts, &j.LeaseOwner, &j.LeaseUntil, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.Result, &j.Error, &j.Nodes, &j.Edges)
 	if err != nil {
 		return j, err
@@ -45,9 +45,9 @@ func (s *Store) AddJob(ctx context.Context, j accounts.JobRecord) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `INSERT INTO jobs (id, kind, repo, org_id, actor_id, via, key_id, role, execution, params, branch, task, state, lease_owner, lease_until, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
-		j.ID, j.Kind, j.Repo, j.OrgID, j.ActorID, j.Via, j.KeyID, j.Role, exec, []byte(j.Params), j.Branch, j.Task, j.State, j.LeaseOwner, j.LeaseUntil, j.CreatedAt)
+	_, err = s.db.Exec(ctx, `INSERT INTO jobs (id, kind, repo, org_id, actor_id, via, key_id, role, execution, params, trace, branch, task, state, lease_owner, lease_until, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+		j.ID, j.Kind, j.Repo, j.OrgID, j.ActorID, j.Via, j.KeyID, j.Role, exec, []byte(j.Params), j.Trace, j.Branch, j.Task, j.State, j.LeaseOwner, j.LeaseUntil, j.CreatedAt)
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) && pg.Code == "23505" && pg.ConstraintName == "jobs_active_repo" {
 		return accounts.ErrJobActive

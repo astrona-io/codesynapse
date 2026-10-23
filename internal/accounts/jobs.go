@@ -54,20 +54,22 @@ type JobRecord struct {
 	Role      Role               `json:"role"`
 	Execution execution.Identity `json:"execution"`
 	// Params rebuild the work; cleared when the job ends.
-	Params     json.RawMessage `json:"-"`
-	Branch     string          `json:"branch,omitempty"`
-	Task       string          `json:"task,omitempty"`
-	State      string          `json:"state"`
-	Attempts   int             `json:"attempts"`
-	LeaseOwner string          `json:"-"`
-	LeaseUntil time.Time       `json:"-"`
-	CreatedAt  time.Time       `json:"created_at"`
-	StartedAt  *time.Time      `json:"started_at,omitempty"`
-	FinishedAt *time.Time      `json:"finished_at,omitempty"`
-	Result     string          `json:"result,omitempty"`
-	Error      string          `json:"error,omitempty"`
-	Nodes      int             `json:"nodes,omitempty"`
-	Edges      int             `json:"edges,omitempty"`
+	Params json.RawMessage `json:"-"`
+	// Trace is the queueing request's W3C traceparent (no content).
+	Trace      string     `json:"-"`
+	Branch     string     `json:"branch,omitempty"`
+	Task       string     `json:"task,omitempty"`
+	State      string     `json:"state"`
+	Attempts   int        `json:"attempts"`
+	LeaseOwner string     `json:"-"`
+	LeaseUntil time.Time  `json:"-"`
+	CreatedAt  time.Time  `json:"created_at"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Result     string     `json:"result,omitempty"`
+	Error      string     `json:"error,omitempty"`
+	Nodes      int        `json:"nodes,omitempty"`
+	Edges      int        `json:"edges,omitempty"`
 }
 
 // Active reports whether the job is queued or running.
@@ -76,7 +78,7 @@ func (j JobRecord) Active() bool { return j.State == JobQueued || j.State == Job
 // ValidateJob checks a new record before a store admits it.
 func ValidateJob(j JobRecord) error {
 	if j.ID == "" || len(j.ID) > 64 || j.Kind == "" || len(j.Kind) > 32 || j.Repo == "" || len(j.Repo) > 300 ||
-		j.OrgID == "" || j.ActorID == "" || !j.Role.Valid() || len(j.Params) > MaxJobParams ||
+		j.OrgID == "" || j.ActorID == "" || !j.Role.Valid() || len(j.Params) > MaxJobParams || len(j.Trace) > 128 ||
 		j.State != JobQueued || j.CreatedAt.IsZero() {
 		return ErrInvalidInput
 	}

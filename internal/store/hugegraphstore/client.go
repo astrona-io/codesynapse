@@ -36,6 +36,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/astrona-io/codesynapse/internal/sessionmemory"
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
@@ -211,8 +215,15 @@ func (s *Store) write(ctx context.Context, script string, bindings map[string]an
 
 // timed records the round trip and, for reads, how many rows came back.
 func (s *Store) timed(ctx context.Context, op, script string, bindings map[string]any, out any) error {
+	// The span names the operation, never the script or its bindings.
+	ctx, span := telemetry.Tracer().Start(ctx, "hugegraph "+op, trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(attribute.String("db.system.name", "hugegraph"), attribute.String("db.operation.name", op)))
+	defer span.End()
 	start := time.Now()
 	err := s.gremlin(ctx, script, bindings, out)
+	if err != nil {
+		span.SetStatus(codes.Error, op+" failed")
+	}
 	tenant := telemetry.Tenant(ctx)
 	telemetry.DBDuration.ObserveContext(ctx, time.Since(start).Seconds(), tenant, "hugegraph", op)
 	if err != nil {

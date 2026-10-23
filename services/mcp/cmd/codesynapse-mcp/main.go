@@ -157,6 +157,11 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		return err
 	}
 	defer stopMetrics()
+	stopTracing, err := app.StartTracing(ctx, o.EC.Logger, "mcp", version)
+	if err != nil {
+		return err
+	}
+	defer stopTracing()
 	acc, closeAccounts, err := o.openAccounts(ctx)
 	if err != nil {
 		return err

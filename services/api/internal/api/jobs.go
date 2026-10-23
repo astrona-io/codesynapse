@@ -20,6 +20,10 @@ import (
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/astrona-io/codesynapse/internal/ingest"
 	"github.com/astrona-io/codesynapse/internal/ingestreport"
 	"github.com/astrona-io/codesynapse/internal/snapshot"
@@ -188,7 +192,7 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 			runID = fmt.Sprintf("%s.%d", job.ID, d.resume.Attempts+1)
 		} else {
 			rec := accounts.JobRecord{ID: job.ID, Kind: d.Kind, Repo: repo, OrgID: opts.OrgID, ActorID: d.ActorID, Via: d.Via, KeyID: d.KeyID,
-				Role: d.Role, Execution: opts.Identity, Params: d.Params, Branch: opts.Branch, Task: opts.Task, State: accounts.JobQueued,
+				Role: d.Role, Execution: opts.Identity, Params: d.Params, Trace: d.Trace, Branch: opts.Branch, Task: opts.Task, State: accounts.JobQueued,
 				LeaseOwner: j.owner, LeaseUntil: now.Add(jobLease), CreatedAt: now.Truncate(time.Microsecond)}
 			local := j.runs(d.Kind)
 			if !local {
@@ -241,6 +245,21 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.Ledger) {
 	ctx, cancel := context.WithTimeout(j.ctx, time.Hour)
 	defer cancel()
+	if opts.Durable != nil {
+		ctx = telemetry.WithTraceParent(ctx, opts.Durable.Trace)
+	}
+	ctx, span := telemetry.Tracer().Start(ctx, "job "+job.Kind, trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(attribute.String("job.kind", job.Kind), attribute.String("job.id", job.ID), attribute.Int("job.attempt", job.Attempts+1)))
+	defer span.End()
+	phase := func(name string) func(error) {
+		_, s := telemetry.Tracer().Start(ctx, name)
+		return func(err error) {
+			if err != nil {
+				s.SetStatus(codes.Error, "failed")
+			}
+			s.End()
+		}
+	}
 	ctx, identityErr := execution.With(ctx, job.Identity)
 	graphAttempted, reportPublished := false, false
 	fin := func(job *Job, nodes, edges int, err error) {
@@ -261,6 +280,9 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 			cleanupCancel()
 		}
 		j.finish(job, nodes, edges, err)
+		if err != nil {
+			span.SetStatus(codes.Error, "job failed")
+		}
 		if job.durable {
 			j.endDurable(ctx, job, err)
 		}
@@ -332,7 +354,10 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 		return
 	}
 	if opts.Prepare != nil {
-		if err := opts.Prepare(ctx); err != nil {
+		end := phase("job.prepare")
+		err := opts.Prepare(ctx)
+		end(err)
+		if err != nil {
 			fin(job, 0, 0, err)
 			return
 		}
@@ -361,7 +386,9 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 		return
 	}
 	ctx = repoconfig.WithPolicy(ctx, policy)
+	endIngest := phase("job.ingest")
 	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Dataflow: j.dataflow, Branch: opts.Branch, PreviousIdentities: previous, ApprovedPolicyDigest: approved})
+	endIngest(err)
 	if err == nil && ledger != nil {
 		report := ledger.Prepare(g)
 		err = checkJob(ctx, opts.Authorize)
@@ -432,11 +459,13 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 			}
 			return nil
 		}
+		endPublish := phase("job.publish")
 		if j.Publish != nil {
 			err = j.Publish(ctx, job.Repo, publish)
 		} else {
 			err = publish(ctx)
 		}
+		endPublish(err)
 		reportPublished = err == nil
 		if hs, ok := j.st.(snapshot.Store); ok && err == nil {
 			snapshot.Record(ctx, hs, job.Repo)

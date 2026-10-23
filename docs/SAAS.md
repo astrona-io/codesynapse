@@ -188,7 +188,7 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
           - **Tests:** `TestWorkersRunWhatTheAPIRecords` (the API records only; an ai-only worker leaves a sync alone; an ingest worker runs it, and the API shows the outcome). The contract covers claims by kind and unowned jobs.
 
           The original plan for this step: `cmd/codesynapse-worker` with `--roles ingest,ai,fix,system`, defaulting to all. The background loops move out of `api.New`. The system role takes a PostgreSQL advisory-lock leader lease, so loops never run twice; this also removes the single-API-replica limit noted for 6b. The API image drops the toolchain and git. Compose runs one worker with all roles, so `just up` stays simple.
-       3. **Tracing and debugging:**
+       3. **Tracing and debugging (done; see [traces](TELEMETRY_PLAN.md#traces)):**
           - W3C trace context crosses every hop: from web through api (HTTP headers) into the job row, then to the worker, the stores and model calls; MCP gets its own spans.
           - Logs carry `trace_id`, `request_id` and `job_id`.
           - The audit entry, the job and the trace share the request ID, so one ID finds everything.

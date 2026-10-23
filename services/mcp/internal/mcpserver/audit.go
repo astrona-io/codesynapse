@@ -14,11 +14,16 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/redact"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // Every MCP request is recorded in the audit log (docs/SAAS.md, 5c): who
@@ -44,11 +49,44 @@ type RequestAuditor interface {
 // key check and, through headers, of the MCP request itself.
 func RequestInfoHTTP(trusted []netip.Prefix, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ri := accounts.RequestInfo{RequestID: newRequestID(), IP: app.ClientAddr(r, trusted), UserAgent: r.UserAgent()}
+		// MCP clients are outside: their traceparent is never continued.
+		ctx, span := telemetry.Tracer().Start(r.Context(), "MCP "+r.Method, trace.WithSpanKind(trace.SpanKindServer))
+		defer span.End()
+		ri := accounts.RequestInfo{RequestID: cmp.Or(telemetry.TraceID(ctx), newRequestID()), IP: app.ClientAddr(r, trusted), UserAgent: r.UserAgent()}
 		r.Header.Set(clientAddrHeader, ri.IP)
 		r.Header.Set(requestIDHeader, ri.RequestID)
-		next.ServeHTTP(w, r.WithContext(accounts.WithRequestInfo(r.Context(), ri)))
+		// The SDK hands middleware the headers, not this context.
+		r.Header.Del("traceparent")
+		r.Header.Del("tracestate")
+		propagation.TraceContext{}.Inject(ctx, propagation.HeaderCarrier(r.Header))
+		next.ServeHTTP(w, r.WithContext(accounts.WithRequestInfo(ctx, ri)))
 	})
+}
+
+// traceMiddleware continues the HTTP layer's trace with one span per MCP
+// method, carrying the tool or prompt name (a fixed set), never arguments.
+func traceMiddleware() mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			if extra := req.GetExtra(); extra != nil && extra.Header != nil {
+				ctx = propagation.TraceContext{}.Extract(ctx, propagation.HeaderCarrier(extra.Header))
+			}
+			attrs := []attribute.KeyValue{attribute.String("mcp.method", method)}
+			switch p := req.GetParams().(type) {
+			case *mcp.CallToolParamsRaw:
+				attrs = append(attrs, attribute.String("mcp.tool", p.Name))
+			case *mcp.GetPromptParams:
+				attrs = append(attrs, attribute.String("mcp.prompt", p.Name))
+			}
+			ctx, span := telemetry.Tracer().Start(ctx, "mcp "+method, trace.WithAttributes(attrs...))
+			defer span.End()
+			res, err := next(ctx, method, req)
+			if r, ok := res.(*mcp.CallToolResult); err != nil || (ok && r != nil && r.IsError) {
+				span.SetStatus(codes.Error, "failed")
+			}
+			return res, err
+		}
+	}
 }
 
 func newRequestID() string {

@@ -113,6 +113,25 @@ histogram_quantile(0.95,
 
 Keep time windows and panel IDs allowlisted in `services/api/internal/api/series.go`; the UI uses `useApiGet` and the existing plain SVG/CSS charts. The Statistics page groups panels into these four categories with units, missing-data states and “estimated” labels where required. A measured zero remains a plotted value; absent series display “No measurements recorded”, and an absent cloud baseline displays “Not measured”. Cost values retain sub-cent precision in the API; small nonzero amounts display as `<$0.001` rather than `$0.000`. Database failures and their timeout subset are not added into a misleading combined headline.
 
+## Traces
+
+One request is followed through the API, its job, the worker, HugeGraph and model calls (docs/SAAS.md, 5e).
+
+- **Export:** OTLP/HTTP to `CODESYNAPSE_TRACES_URL`, the full traces endpoint. Compose runs VictoriaTraces (Apache-2.0) at `http://victoriatraces:10428/insert/opentelemetry/v1/traces` with the metrics login; its UI is at `http://localhost:10428/select/vmui`.
+  - `CODESYNAPSE_TRACES_SAMPLE` keeps that share of new traces (default 1); children follow their parent's decision.
+  - Spans are batched in a bounded queue, so a slow or absent trace store drops spans and never blocks work.
+  - Without a URL nothing is exported, but trace context still crosses processes.
+- **Spans:**
+  - API requests, named by route pattern (`POST /api/v1/repos/{repo}/sync`), with method, route and status;
+  - MCP HTTP requests and one span per MCP method, with the tool or prompt name;
+  - `job <kind>`, with kind, opaque job ID and attempt, and its `job.prepare`, `job.ingest` and `job.publish` phases;
+  - `hugegraph read`/`write`;
+  - `llm complete`, with the configured provider and model and the token counts.
+- **No content:** spans never carry paths, repository names, people, prompts, code, arguments, scripts or bindings. A test checks that no span names or attributes contain the repository name.
+- **Across processes:** the queueing request's `traceparent` is stored on the job row (migration 0015). The worker that runs the job, now or after a restart, continues the trace.
+- **Trust:** the API continues an incoming `traceparent` only from `CODESYNAPSE_TRUSTED_PROXIES` (the dashboard). The MCP server never continues one: an outside caller could otherwise force sampling or splice into other traces.
+- **One ID:** with a valid span, the request ID (`X-Request-ID`, the audit entry's `request_id`) is the trace ID. Log lines written with a context carry `trace_id` and `span_id`. An audit entry, a log line and a trace therefore lead to each other.
+
 ## Implementation and checks
 
 The approved dependency set is `go.opentelemetry.io/otel/sdk`, `go.opentelemetry.io/otel/sdk/metric`, and `go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp`, each at `v1.47.0`, with matching OTel API modules and required transitive dependencies. The upstream licence is Apache-2.0 with BSD-3-Clause portions. Matching API and transitive dependencies are recorded in `go.mod` and `go.sum`.

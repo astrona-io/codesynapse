@@ -73,6 +73,28 @@ services:
       timeout: 3s
       retries: 20
 
+  # Traces: one request followed through the API, its job, the worker, the
+  # graph store and model calls (docs/SAAS.md, 5e). Spans carry no content.
+  # Search them at http://localhost:10428/select/vmui (same login as metrics).
+  victoriatraces:
+    image: quay.io/victoriametrics/victoria-traces:v0.12.1
+    command:
+      - -retentionPeriod=${TRACES_RETENTION:-7d}
+      - -httpAuth.username=codesynapse
+      - -httpAuth.password=${METRICS_PASSWORD:?run "just init" to add METRICS_PASSWORD to .env}
+    volumes:
+      - traces-data:/victoria-traces-data
+    ports:
+      - "127.0.0.1:${CODESYNAPSE_TRACES_PORT:-10428}:10428"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:10428/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+
   # Users, organisations, API keys and the audit log.
   postgres:
     image: docker.io/library/postgres:18-alpine
@@ -107,6 +129,10 @@ services:
       CODESYNAPSE_METRICS_URL: http://victoriametrics:8428
       CODESYNAPSE_METRICS_USER: codesynapse
       CODESYNAPSE_METRICS_PASSWORD: ${METRICS_PASSWORD}
+      CODESYNAPSE_TRACES_URL: http://victoriatraces:10428/insert/opentelemetry/v1/traces
+      CODESYNAPSE_TRACES_USER: codesynapse
+      CODESYNAPSE_TRACES_PASSWORD: ${METRICS_PASSWORD}
+      CODESYNAPSE_TRACES_SAMPLE: ${CODESYNAPSE_TRACES_SAMPLE:-1}
       CODESYNAPSE_API_TOKEN: ${CODESYNAPSE_API_TOKEN:?set CODESYNAPSE_API_TOKEN in .env}
       # Accounts: users, organisations, API keys and the audit log.
       CODESYNAPSE_DATABASE_URL: postgres://codesynapse:${POSTGRES_PASSWORD}@postgres:5432/codesynapse?sslmode=disable
@@ -224,6 +250,10 @@ services:
       CODESYNAPSE_METRICS_URL: http://victoriametrics:8428
       CODESYNAPSE_METRICS_USER: codesynapse
       CODESYNAPSE_METRICS_PASSWORD: ${METRICS_PASSWORD}
+      CODESYNAPSE_TRACES_URL: http://victoriatraces:10428/insert/opentelemetry/v1/traces
+      CODESYNAPSE_TRACES_USER: codesynapse
+      CODESYNAPSE_TRACES_PASSWORD: ${METRICS_PASSWORD}
+      CODESYNAPSE_TRACES_SAMPLE: ${CODESYNAPSE_TRACES_SAMPLE:-1}
       CODESYNAPSE_MCP_TOKEN: ${CODESYNAPSE_MCP_TOKEN:?set CODESYNAPSE_MCP_TOKEN in .env}
       # Personal API keys (csk_...) scope every tool to the key's organisation.
       # The API owns and migrates this database.
@@ -288,6 +318,7 @@ volumes:
   hugegraph-init:
   milvus-data:
   metrics-data:
+  traces-data:
   postgres-data:
   workspace:
   go-cache:
