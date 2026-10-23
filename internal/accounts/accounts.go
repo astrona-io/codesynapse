@@ -46,10 +46,15 @@ func (r Role) AtLeast(least Role) bool {
 
 // User is a person who can log in.
 type User struct {
-	ID            string    `json:"id"`
-	Email         string    `json:"email"`
-	Name          string    `json:"name"`
-	PlatformAdmin bool      `json:"platform_admin"`
+	ID            string `json:"id"`
+	Email         string `json:"email"`
+	Name          string `json:"name"`
+	PlatformAdmin bool   `json:"platform_admin"`
+	// BootstrapRoot marks the account that set up the installation. It is
+	// fixed when the account is created or designated and never cleared:
+	// unlike PlatformAdmin it cannot be granted or revoked. Root may do
+	// governance only (see bootstrap.go).
+	BootstrapRoot bool      `json:"bootstrap_root,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	// DisabledAt is set while the account is suspended: no sign-in, and
 	// its sessions and API keys stop working.
@@ -237,7 +242,20 @@ var (
 	ErrKeyRevoked    = errors.New("API key revoked or expired")
 	ErrSuspended     = errors.New("this account is suspended; ask an administrator")
 	ErrNoSecretKey   = errors.New("organisation Git tokens need CODESYNAPSE_SECRET_KEY (32 random bytes, base64 or hex) on the API")
+	// ErrRootAccount denies business work to the bootstrap root account.
+	ErrRootAccount error = rootAccountError{}
+	// ErrSetupComplete refuses a second bootstrap.
+	ErrSetupComplete = errors.New("setup is already complete")
+	// ErrSetupRequired refuses work that needs the installation set up.
+	ErrSetupRequired = errors.New("finish setup first: create an organisation and its owner")
 )
+
+type rootAccountError struct{}
+
+// Error is shown to people as is, so it is a full sentence.
+func (rootAccountError) Error() string {
+	return "Root accounts cannot perform organisation work. Sign out and sign in with a standard account in your organisation."
+}
 
 // Store persists accounts. Implementations must be safe for concurrent use
 // and behave identically; accountstest.Run is the contract.
@@ -255,7 +273,16 @@ type Store interface {
 	AcknowledgeAccessPolicy(ctx context.Context, orgID string, revision int64) error
 
 	CountUsers(ctx context.Context) (int, error)
-	CreateUser(ctx context.Context, u User) error // ErrExists on a taken email
+	CreateUser(ctx context.Context, u User) error // ErrExists on a taken email; ErrExists for a second bootstrap root
+	// MarkBootstrapRoot classifies an existing account as the bootstrap
+	// root (migration and explicit designation). ErrExists when another
+	// account already is; the classification is never removed.
+	MarkBootstrapRoot(ctx context.Context, userID string) error
+	// Setup returns the installation's setup record; State is empty before
+	// the first account exists.
+	Setup(ctx context.Context) (Setup, error)
+	// SaveSetup writes the single setup record.
+	SaveSetup(ctx context.Context, s Setup) error
 	UserByID(ctx context.Context, id string) (User, error)
 	UserByEmail(ctx context.Context, email string) (User, error)
 	SetPassword(ctx context.Context, userID, hash string) error

@@ -119,7 +119,8 @@ func (s *Service) hasRepoAdmin(ctx context.Context, orgID, graph string) (bool, 
 			continue
 		}
 		a, err := s.accessOf(ctx, u.ID)
-		if errors.Is(err, ErrInvalidInput) || errors.Is(err, ErrAccessLimit) {
+		// Root's grants never make it a working administrator.
+		if errors.Is(err, ErrInvalidInput) || errors.Is(err, ErrAccessLimit) || errors.Is(err, ErrRootAccount) {
 			continue
 		}
 		if err != nil {

@@ -86,7 +86,7 @@ func TestPlatformFlagDoesNotGrantMCPReach(t *testing.T) {
 	ctx := context.Background()
 	admin, err := acc.AuthenticateKey(ctx, keys["a"])
 	require.NoError(t, err)
-	require.True(t, admin.User.PlatformAdmin, "the bootstrap user is the platform admin")
+	require.True(t, admin.User.PlatformAdmin, "a has platform administration")
 	other, err := acc.AuthenticateKey(ctx, keys["b"])
 	require.NoError(t, err)
 	reach, err := (AccountsAccess{Acc: acc}).Reach(ctx, admin.User.ID, other.OrgID)

@@ -12,6 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts/accountstest"
 	acctmem "github.com/astrona-io/codesynapse/internal/accounts/memstore"
 	"github.com/astrona-io/codesynapse/internal/execution"
 	agentmem "github.com/astrona-io/codesynapse/internal/memory"
@@ -42,10 +43,16 @@ func keyServer(t *testing.T) (url string, keys map[string]string, acc *accounts.
 	s = memory.New()
 	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
 	acc = accounts.NewService(acctmem.New(), true)
+	root, err := accountstest.Bootstrap(ctx, acc)
+	require.NoError(t, err)
 	keys = map[string]string{}
 	for _, name := range []string{"a", "b", "c"} {
 		u, org, err := acc.SignUp(ctx, name+"@example.com", name, "correct horse battery staple")
 		require.NoError(t, err)
+		if name == "a" { // a standard account with platform administration
+			require.NoError(t, acc.SetPlatformAdmin(ctx, root, u.ID, true))
+			u.PlatformAdmin = true
+		}
 		key, _, err := acc.CreateKey(ctx, accounts.Principal{User: u, Via: "session"}, org.ID, "agent", 0)
 		require.NoError(t, err)
 		keys[name] = key
@@ -56,14 +63,21 @@ func keyServer(t *testing.T) (url string, keys map[string]string, acc *accounts.
 				Visibility: accounts.Public, AddedBy: u.ID, AddedAt: time.Now().UTC().Truncate(time.Microsecond)}))
 		}
 	}
-	rec = usage.NewRecorder(s)
+	url, rec = serveAccounts(t, acc, s)
+	return url, keys, acc, rec, s
+}
+
+// serveAccounts serves s over HTTP behind acc's personal API keys.
+func serveAccounts(t *testing.T, acc *accounts.Service, s *memory.Store) (string, *usage.Recorder) {
+	t.Helper()
+	rec := usage.NewRecorder(s)
 	runtime := NewRuntime(AccountsAccess{Acc: acc}, "", "", "")
 	server := New(s, "test", Options{Reviews: s, Memory: s, Usage: rec, Curated: s, CatalogWrites: true, Access: AccountsAccess{Acc: acc}, Runtime: runtime})
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 	ts := httptest.NewServer(auth.RequireBearerToken(KeyVerifier(acc, "svc-token"),
 		&auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(runtime.HTTP(MeasureHTTP(handler))))
 	t.Cleanup(ts.Close)
-	return ts.URL, keys, acc, rec, s
+	return ts.URL, rec
 }
 
 func connectKey(t *testing.T, url, token string, sessions ...string) (*mcp.ClientSession, error) {

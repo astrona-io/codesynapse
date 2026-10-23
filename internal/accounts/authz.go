@@ -97,6 +97,10 @@ func (s *Service) accessOf(ctx context.Context, userID string) (Access, error) {
 	if u.DisabledAt != nil {
 		return a, ErrSuspended
 	}
+	// Before memberships and grants: none of them give root business access.
+	if err := businessAllowed(ctx, s.St, u); err != nil {
+		return a, err
+	}
 	ms, err := s.St.UserMemberships(ctx, userID)
 	if err != nil {
 		return a, err

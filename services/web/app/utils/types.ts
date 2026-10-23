@@ -254,8 +254,12 @@ export interface AccountUser {
   email: string
   name: string
   platform_admin: boolean
+  // The account that set up the installation: governance only.
+  bootstrap_root?: boolean
   created_at: string
 }
+export type SetupState = 'pending' | 'complete' | 'ambiguous'
+export interface SetupInput { org_name?: string; org_id?: string; email: string; name: string; password: string }
 export interface AccountOrg {
   id: string
   slug: string
@@ -276,6 +280,9 @@ export interface Me {
   via: 'session' | 'key' | 'service'
   org_id?: string
   memberships: Membership[]
+  // Governance only (the bootstrap root): no organisation work.
+  restricted?: boolean
+  setup?: SetupState
 }
 export interface ApiKey {
   id: string

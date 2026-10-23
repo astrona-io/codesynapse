@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts/accountstest"
 	acctmem "github.com/astrona-io/codesynapse/internal/accounts/memstore"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/store"
@@ -19,6 +20,14 @@ func accessFixture(t *testing.T) (*accounts.Service, accounts.Principal, account
 	t.Helper()
 	ctx := context.Background()
 	acc := accounts.NewService(acctmem.New(), true)
+	_, err := accountstest.Bootstrap(ctx, acc)
+	require.NoError(t, err)
+	// Start with no pending projections: the setup organisation's is not under test.
+	pending, err := acc.St.PendingAccessPolicies(ctx, 20)
+	require.NoError(t, err)
+	for _, o := range pending {
+		require.NoError(t, acc.St.AcknowledgeAccessPolicy(ctx, o.ID, o.PolicyRevision))
+	}
 	u, org, err := acc.SignUp(ctx, "owner@example.com", "Owner", "correct horse battery staple")
 	require.NoError(t, err)
 	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: org.ID, Graph: "example/repo", Visibility: accounts.Public, AddedBy: u.ID, AddedAt: time.Now()}))

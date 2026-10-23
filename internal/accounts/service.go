@@ -89,40 +89,38 @@ func (s *Service) Status(ctx context.Context) (needsSetup bool, err error) {
 	return n == 0, err
 }
 
-// SignUp creates an account and a personal organisation. The first account
-// becomes a platform admin; later ones need SignupOpen.
+// SignUp creates an account. The first account becomes the bootstrap root,
+// with platform administration and no organisation (bootstrap.go). Later
+// ones need SignupOpen and get a personal organisation; none are accepted
+// while root is the only account and setup is pending.
 func (s *Service) SignUp(ctx context.Context, email, name, password string) (User, Org, error) {
-	email = NormalizeEmail(email)
-	if !emailRe.MatchString(email) {
-		return User{}, Org{}, fmt.Errorf("%w: a valid email address is needed", ErrInvalidInput)
-	}
-	name, err := checkName(name, "a name")
+	u, err := s.newAccount(email, name, password)
 	if err != nil {
-		return User{}, Org{}, err
-	}
-	if err := CheckPassword(password); err != nil {
 		return User{}, Org{}, err
 	}
 	n, err := s.St.CountUsers(ctx)
 	if err != nil {
 		return User{}, Org{}, err
 	}
-	if n > 0 && !s.SignupOpen {
+	if n == 0 {
+		root, err := s.signUpRoot(ctx, u)
+		if !errors.Is(err, errNotFirst) {
+			return root, Org{}, err
+		}
+		n = 1 // another sign-up became root first
+	}
+	if !s.SignupOpen {
 		return User{}, Org{}, ErrSignupClosed
 	}
-	hash, err := HashPassword(password)
-	if err != nil {
+	if setup, err := s.St.Setup(ctx); err != nil {
 		return User{}, Org{}, err
+	} else if setup.State == SetupPending && n == 1 {
+		return User{}, Org{}, ErrSetupRequired
 	}
-	id, err := newID()
-	if err != nil {
-		return User{}, Org{}, err
-	}
-	u := User{ID: id, Email: email, Name: name, PlatformAdmin: n == 0, CreatedAt: s.now(), PasswordHash: hash}
 	if err := s.St.CreateUser(ctx, u); err != nil {
 		return User{}, Org{}, err
 	}
-	org, err := s.createOrg(ctx, u.ID, name+"'s organisation", "")
+	org, err := s.createOrg(ctx, u.ID, u.Name+"'s organisation", "")
 	if err != nil {
 		return u, Org{}, err
 	}
@@ -210,6 +208,10 @@ func (s *Service) AuthenticateKey(ctx context.Context, key string) (Principal, e
 	if err != nil || u.DisabledAt != nil {
 		return Principal{}, ErrUnauthorized
 	}
+	// Keys exist for organisation work, which root may not do.
+	if err := businessAllowed(ctx, s.St, u); err != nil {
+		return Principal{}, err
+	}
 	// A key outlives a membership only on paper: removed members lose access.
 	if _, err := s.St.MemberRole(ctx, k.OrgID, u.ID); err != nil {
 		return Principal{}, ErrForbidden
@@ -228,6 +230,13 @@ func (s *Service) RoleIn(ctx context.Context, p Principal, orgID string) (Role, 
 	}
 	if err := s.ValidatePrincipal(ctx, p); err != nil {
 		return "", ErrForbidden
+	}
+	u, err := s.St.UserByID(ctx, p.User.ID)
+	if err != nil {
+		return "", ErrForbidden
+	}
+	if err := businessAllowed(ctx, s.St, u); err != nil {
+		return "", err
 	}
 	r, err := s.St.MemberRole(ctx, orgID, p.User.ID)
 	if errors.Is(err, ErrNotFound) {
@@ -279,6 +288,13 @@ func (s *Service) Require(ctx context.Context, p Principal, orgID string, least 
 func (s *Service) CreateOrg(ctx context.Context, p Principal, name, slug string) (Org, error) {
 	if p.Via == "key" {
 		return Org{}, ErrForbidden // keys act inside one organisation
+	}
+	u, err := s.St.UserByID(ctx, p.User.ID)
+	if err != nil {
+		return Org{}, ErrForbidden
+	}
+	if err := businessAllowed(ctx, s.St, u); err != nil {
+		return Org{}, err
 	}
 	o, err := s.createOrg(ctx, p.User.ID, name, slug)
 	if err == nil {
@@ -395,7 +411,8 @@ func (s *Service) removeMemberPolicy(ctx context.Context, p Principal, orgID, us
 	return nil
 }
 
-// guardLastOwner refuses to leave org without an owner.
+// guardLastOwner refuses to leave org without an owner who can act: an
+// owner limited to governance (the bootstrap root) does not count.
 func (s *Service) guardLastOwner(ctx context.Context, orgID, userID string, newRole Role) error {
 	if newRole == Owner {
 		return nil
@@ -406,11 +423,17 @@ func (s *Service) guardLastOwner(ctx context.Context, orgID, userID string, newR
 	}
 	owners, target := 0, false
 	for _, m := range members {
-		if m.Role == Owner {
-			owners++
-			if m.User.ID == userID {
-				target = true
-			}
+		if m.Role != Owner {
+			continue
+		}
+		if err := businessAllowed(ctx, s.St, m.User); errors.Is(err, ErrRootAccount) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		owners++
+		if m.User.ID == userID {
+			target = true
 		}
 	}
 	if target && owners == 1 {

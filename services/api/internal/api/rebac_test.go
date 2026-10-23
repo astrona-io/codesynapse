@@ -30,6 +30,7 @@ func TestReBACOverHTTP(t *testing.T) {
 		require.NoError(t, st.ReplaceRepo(ctx, name, g))
 	}
 	acc := accounts.NewService(acctmem.New(), true)
+	bootstrapAccounts(t, acc)
 	srv := New(ctx, Config{Accounts: acc}, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
@@ -38,7 +39,6 @@ func TestReBACOverHTTP(t *testing.T) {
 		require.Equal(t, c.do("POST", "/api/v1/auth/signup", `{"email":"`+email+`","name":"`+email+`","password":"`+pw+`"}`, nil), 201)
 		return c
 	}
-	ada := signup("ada@example.com") // platform admin
 	bob := signup("bob@example.com")
 	carol := signup("carol@example.com")
 	dave := signup("dave@example.com")
@@ -158,7 +158,7 @@ func TestReBACOverHTTP(t *testing.T) {
 	assert.Equal(t, visible(carol, inAcme), []string{"acme/api"})
 
 	var audit string
-	require.Equal(t, ada.do("GET", "/api/v1/admin/audit?limit=500&format=jsonl", "", &audit), 200)
+	require.Equal(t, rootClient(t, ts).do("GET", "/api/v1/admin/audit?limit=500&format=jsonl", "", &audit), 200)
 	for _, a := range []string{"repo.grant.set", "repo.grant.remove", "team.create", "team.member.set"} {
 		assert.True(t, strings.Contains(audit, a), "audited: "+a)
 	}

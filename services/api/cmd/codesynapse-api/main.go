@@ -31,7 +31,7 @@ const EnvToken = "CODESYNAPSE_API_TOKEN" //nolint:gosec // env var name
 
 func main() {
 	os.Exit(app.Main("codesynapse-api", "HTTP API for the codesynapse dashboard", version,
-		func(ec *app.Env) []*cobra.Command { return []*cobra.Command{serveCmd(ec)} }))
+		func(ec *app.Env) []*cobra.Command { return []*cobra.Command{serveCmd(ec), designateRootCmd(ec)} }))
 }
 
 type serveOptions struct {
@@ -202,8 +202,66 @@ func openAccounts(ctx context.Context, logger *slog.Logger) (*accounts.Service, 
 	} else {
 		logger.Warn("organisation Git tokens are off: set " + EnvSecretKey + " to allow private repositories for organisations")
 	}
-	logger.Info("accounts enabled", "signup_open", svc.SignupOpen)
+	setup, err := svc.ReconcileBootstrap(ctx)
+	if err != nil {
+		st.Close()
+		return nil, nil, fmt.Errorf("classifying the bootstrap root: %w", err)
+	}
+	switch setup.State {
+	case accounts.SetupAmbiguous:
+		logger.Warn("the bootstrap root could not be identified from setup history: platform administrators are limited to governance until an operator runs `codesynapse-api designate-root --email <root>`")
+	case accounts.SetupPending:
+		logger.Warn("setup is not complete: sign in as the root account and create an organisation and its owner")
+	}
+	logger.Info("accounts enabled", "signup_open", svc.SignupOpen, "setup", setup.State)
 	return svc, st.Close, nil
+}
+
+type designateRootOptions struct {
+	EC    *app.Env
+	email string
+}
+
+func (o *designateRootOptions) SetupFlags(_ context.Context, _ *app.Env) error {
+	o.EC.Command.Flags().StringVar(&o.email, "email", "", "Email of the platform administrator who set up the installation")
+	return nil
+}
+
+func (o *designateRootOptions) Complete(context.Context, *app.Env) error { return nil }
+
+func (o *designateRootOptions) Validate(context.Context, *app.Env) error {
+	if o.email == "" {
+		return fmt.Errorf("--email is required")
+	}
+	if os.Getenv(EnvDatabaseURL) == "" {
+		return fmt.Errorf("%s is required", EnvDatabaseURL)
+	}
+	return nil
+}
+
+// Run records the operator's audited decision for an installation whose
+// bootstrap root is ambiguous (docs/ROOT_BOOTSTRAP_PLAN.md).
+func (o *designateRootOptions) Run(ctx context.Context, _ *app.Env) error {
+	svc, closeDB, err := openAccounts(ctx, o.EC.Logger)
+	if err != nil {
+		return err
+	}
+	defer closeDB()
+	setup, err := svc.DesignateRoot(ctx, o.email)
+	if err != nil {
+		return err
+	}
+	o.EC.Logger.Info("bootstrap root designated", "setup", setup.State)
+	return nil
+}
+
+func designateRootCmd(ec *app.Env) *cobra.Command {
+	o := &designateRootOptions{EC: ec}
+	return app.NewSubCommand("designate-root", o, ec).
+		WithShortDesc("Name the bootstrap root of an installation whose setup history is ambiguous").
+		WithGroupID(app.GroupBase).
+		WithNoArgs().
+		Build()
 }
 
 // parsePrefixes reads "10.0.0.0/8,192.168.1.5" (single addresses allowed).

@@ -14,7 +14,7 @@ async function submit() {
   try {
     await $fetch('/api/cg/auth/signup', { method: 'POST', body: { name: name.value, email: email.value, password: password.value } })
     await session.load()
-    await navigateTo(setup.value ? '/settings/organisation' : '/overview')
+    await navigateTo(setup.value ? '/setup' : '/overview')
   } catch (e) {
     error.value = apiErrorMessage(e)
   } finally {
@@ -26,7 +26,7 @@ async function submit() {
 <template>
   <div class="stack--tight">
     <h1>{{ setup ? 'Set up CodeSynapse' : 'Create an account' }}</h1>
-    <p v-if="setup" class="muted">This is the first account. It administers the installation: it sees every organisation and the audit log. You also get an organisation of your own to invite your team to.</p>
+    <p v-if="setup" class="muted">This is the installation's root account. It administers the platform (settings, health, people and the audit log) and never works in an organisation. Next you create the first organisation and the separate account that owns it.</p>
     <p v-else class="muted">You get an organisation of your own. To join an existing one, ask its owner to add your email.</p>
   </div>
   <template v-if="setup || session.status.value?.signup_open">
@@ -39,7 +39,7 @@ async function submit() {
         <span class="hint">At least 12 characters. A sentence of a few words works well.</span>
       </div>
       <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
-      <button type="submit" :disabled="busy">{{ busy ? 'Creating…' : setup ? 'Create the administrator account' : 'Create account' }}</button>
+      <button type="submit" :disabled="busy">{{ busy ? 'Creating…' : setup ? 'Create the root account' : 'Create account' }}</button>
     </form>
     <p v-if="!setup" class="muted small">Already have an account? <NuxtLink to="/login">Sign in</NuxtLink></p>
   </template>

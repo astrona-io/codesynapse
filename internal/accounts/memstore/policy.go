@@ -43,6 +43,7 @@ func (s *Store) PolicyTransaction(ctx context.Context, _ string, fn func(account
 	s.ingestRuns = tx.ingestRuns
 	s.ingestEntries = tx.ingestEntries
 	s.ingestMetrics = tx.ingestMetrics
+	s.setup = tx.setup
 	return nil
 }
 
@@ -185,6 +186,7 @@ func (s *Store) snapshot() *Store {
 	tx.ingestRuns = maps.Clone(s.ingestRuns)
 	tx.ingestEntries = maps.Clone(s.ingestEntries)
 	tx.ingestMetrics = s.ingestMetrics
+	tx.setup = s.setup
 	for key, annotations := range tx.annotations {
 		tx.annotations[key] = maps.Clone(annotations)
 	}

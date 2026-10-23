@@ -49,12 +49,17 @@ func TestSeriesScopedByTenant(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	acc := accounts.NewService(acctmem.New(), true)
+	bootstrapAccounts(t, acc)
 	ts := httptest.NewServer(New(ctx, Config{Accounts: acc, Metrics: &telemetry.Querier{URL: vmSrv.URL}}, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil))))
 	defer ts.Close()
 
 	admin := newClient(t, ts)
-	var adminSigned struct{ Org accounts.Org }
+	var adminSigned struct {
+		User accounts.User
+		Org  accounts.Org
+	}
 	require.Equal(t, admin.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, &adminSigned), 201)
+	require.NoError(t, acc.SetPlatformAdmin(ctx, rootSession(t, acc), adminSigned.User.ID, true))
 	bob := newClient(t, ts)
 	var signed struct{ Org accounts.Org }
 	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 201)

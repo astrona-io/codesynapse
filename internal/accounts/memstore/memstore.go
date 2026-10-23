@@ -38,6 +38,7 @@ type Store struct {
 	ingestEntries  map[string]ingestEntry
 	ingestMetrics  accounts.IngestMetricSnapshot
 	ingestExportMu sync.Mutex
+	setup          accounts.Setup
 }
 
 type member struct {
@@ -71,6 +72,9 @@ func (s *Store) CreateUser(_ context.Context, u accounts.User) error {
 	for _, x := range s.users {
 		if x.Email == u.Email {
 			return fmt.Errorf("email: %w", accounts.ErrExists)
+		}
+		if x.BootstrapRoot && u.BootstrapRoot {
+			return fmt.Errorf("bootstrap root: %w", accounts.ErrExists)
 		}
 	}
 	s.users[u.ID] = u

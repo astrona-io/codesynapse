@@ -37,6 +37,7 @@ func newRuntimeFixture(t *testing.T, cfg Config) runtimeFixture {
 	st := memstore.New()
 	require.NoError(t, st.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
 	acc := accounts.NewService(acctmem.New(), true)
+	bootstrapAccounts(t, acc)
 	u, org, err := acc.SignUp(ctx, "runtime@example.com", "Runtime", pw)
 	require.NoError(t, err)
 	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: org.ID, Graph: storetest.Repo, AddedBy: u.ID, AddedAt: time.Now()}))

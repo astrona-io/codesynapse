@@ -12,10 +12,12 @@ if (route.path === '/settings') await navigateTo('/settings/profile', { replace:
     <template v-else>
       <nav class="tabs" aria-label="Settings">
         <NuxtLink to="/settings/profile">Profile</NuxtLink>
-        <NuxtLink to="/settings/keys">API keys</NuxtLink>
-        <NuxtLink to="/settings/organisation">Organisation</NuxtLink>
-        <NuxtLink to="/settings/teams">Teams</NuxtLink>
-        <NuxtLink to="/settings/git-tokens">Git tokens</NuxtLink>
+        <template v-if="!session.restricted.value">
+          <NuxtLink to="/settings/keys">API keys</NuxtLink>
+          <NuxtLink to="/settings/organisation">Organisation</NuxtLink>
+          <NuxtLink to="/settings/teams">Teams</NuxtLink>
+          <NuxtLink to="/settings/git-tokens">Git tokens</NuxtLink>
+        </template>
       </nav>
       <NuxtPage />
     </template>

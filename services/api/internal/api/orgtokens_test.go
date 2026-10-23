@@ -65,6 +65,7 @@ func TestPrivateRepositoriesWithOrgTokens(t *testing.T) {
 	g.AddNode(model.Node{ID: model.NodeID(secretRepo, model.KindRepository, secretRepo), Kind: model.KindRepository, Repo: secretRepo, Name: secretRepo, URL: secret})
 	require.NoError(t, st.ReplaceRepo(ctx, secretRepo, g))
 	acc := accounts.NewService(acctmem.New(), true)
+	bootstrapAccounts(t, acc)
 	key := make([]byte, 32)
 	key[5] = 9
 	sealer, err := accounts.NewSealer(key)
@@ -79,7 +80,6 @@ func TestPrivateRepositoriesWithOrgTokens(t *testing.T) {
 		require.Equal(t, c.do("POST", "/api/v1/auth/signup", `{"email":"`+email+`","name":"`+email+`","password":"`+pw+`"}`, nil), 201)
 		return c
 	}
-	ada := signup("ada@example.com") // platform admin
 	bob := signup("bob@example.com")
 	carol := signup("carol@example.com")
 	dave := signup("dave@example.com")
@@ -162,7 +162,7 @@ func TestPrivateRepositoriesWithOrgTokens(t *testing.T) {
 	assert.Error(t, err, "an organisation that does not use the repository cannot push to it")
 
 	var audit string
-	require.Equal(t, ada.do("GET", "/api/v1/admin/audit?limit=500&format=jsonl", "", &audit), 200)
+	require.Equal(t, rootClient(t, ts).do("GET", "/api/v1/admin/audit?limit=500&format=jsonl", "", &audit), 200)
 	for _, action := range []string{"org.git_token.set", "repo.access_lost", "repo.access_restored"} {
 		assert.Contains(t, audit, action)
 	}
@@ -175,7 +175,8 @@ func TestPrivateRepositoriesWithOrgTokens(t *testing.T) {
 }
 
 func TestOrgTokensNeedASecretKey(t *testing.T) {
-	ts, _ := accountsServer(t)
+	ts, acc := accountsServer(t)
+	acc.SignupOpen = true
 	bob := newClient(t, ts)
 	var signed struct{ Org accounts.Org }
 	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 201)
@@ -188,11 +189,11 @@ func TestSettingsHideInstallationTokensFromOrganisations(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	acc := accounts.NewService(acctmem.New(), true)
+	bootstrapAccounts(t, acc)
 	srv := New(ctx, Config{Accounts: acc, GitAuths: []gitx.Auth{{Host: "github.com", Token: "ghp_installation_secret_token"}}}, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
-	ada, bob := newClient(t, ts), newClient(t, ts)
-	require.Equal(t, ada.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil), 201)
+	ada, bob := rootClient(t, ts), newClient(t, ts)
 	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 201)
 	var asAdmin, asBob string
 	require.Equal(t, ada.do("GET", "/api/v1/settings", "", &asAdmin), 200)

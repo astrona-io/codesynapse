@@ -57,7 +57,7 @@ const terms = [
         <li><strong>Owner</strong> also manages ownership and can explicitly recover repository administration.</li>
       </ul>
       <p>Repository permissions are separate: <strong>read</strong> permits navigation and recall, <strong>write</strong> adds reviews and memory updates, and <strong>admin</strong> adds sync, schedules and access management. A direct user grant overrides team grants, then the organisation default applies.</p>
-      <p>The first account is the <strong>platform administrator</strong>, who manages accounts and operational settings. Code access still requires organisation membership and repository permission. Changes and sign-ins are recorded in the audit log.</p>
+      <p>The first account is the installation's <strong>root account</strong>. It administers the platform (accounts, operational settings, health and the audit log) and never works in an organisation, whatever memberships or grants it holds. During setup it creates the first organisation and a separate owner account, then signs out; organisation work happens with that owner and the people they invite. Other accounts can be made <strong>platform administrators</strong> too; they keep their organisation work, and code access still requires organisation membership and repository permission. Changes and sign-ins are recorded in the audit log.</p>
       <p v-if="!session.accounts.value" class="notice">This installation runs without accounts. To turn them on, configure PostgreSQL (<code>CODESYNAPSE_DATABASE_URL</code>); the docker compose setup does this for you.</p>
     </section>
 

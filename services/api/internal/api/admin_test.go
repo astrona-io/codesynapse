@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts/accountstest"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
@@ -12,8 +13,9 @@ import (
 func TestPlatformAdministration(t *testing.T) {
 	ts, acc := accountsServer(t)
 	acc.SignupOpen = true
+	// The bootstrap root administers the platform.
 	ada := newClient(t, ts)
-	require.Equal(t, ada.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, ada.do("POST", "/api/v1/auth/login", `{"email":"`+accountstest.RootEmail+`","password":"`+accountstest.SetupPassword+`"}`, nil), 200)
 	bob := newClient(t, ts)
 	var signed struct {
 		User accounts.User
@@ -36,7 +38,7 @@ func TestPlatformAdministration(t *testing.T) {
 	}
 	var users struct{ Users []AdminUser }
 	require.Equal(t, ada.do("GET", "/api/v1/admin/users", "", &users), 200)
-	require.Len(t, users.Users, 2)
+	require.Len(t, users.Users, 3, "root, the setup owner and bob")
 	for _, u := range users.Users {
 		if u.Email == "bob@example.com" {
 			assert.Equal(t, u.ActiveKeys, 1)
@@ -67,16 +69,16 @@ func TestPlatformAdministration(t *testing.T) {
 	require.Equal(t, ada.do("GET", "/api/v1/admin/health", "", &h), 200)
 	assert.True(t, h.Graph.OK && h.Accounts.OK && h.Audit.OK, "%+v", h)
 	assert.False(t, h.Metrics.OK, "metrics are not configured in this test")
-	assert.Equal(t, h.Counts.Users, 2)
+	assert.Equal(t, h.Counts.Users, 3)
 	assert.Equal(t, h.Counts.Admins, 1)
 	assert.True(t, h.Counts.AuditEvents > 0)
 	assert.Len(t, h.Unowned, 0, "platform health does not disclose repository names")
 
 	var evs struct{ Events []accounts.Event }
-	require.Equal(t, ada.do("GET", "/api/v1/admin/audit?action=user.&actor=ada@example.com", "", &evs), 200)
+	require.Equal(t, ada.do("GET", "/api/v1/admin/audit?action=user.&actor="+accountstest.RootEmail, "", &evs), 200)
 	actions := map[string]bool{}
 	for _, e := range evs.Events {
-		assert.Equal(t, e.ActorEmail, "ada@example.com")
+		assert.Equal(t, e.ActorEmail, accountstest.RootEmail)
 		actions[e.Action] = true
 	}
 	assert.True(t, actions["user.suspend"] && actions["user.resume"])
