@@ -1,0 +1,6 @@
+# hadolint for the service Dockerfiles (`just lint-docker`).
+failure-threshold: warning
+ignored:
+  # Pinning apk package versions breaks builds whenever Alpine moves a
+  # package; base images are pinned and kept current by Renovate instead.
+  - DL3018

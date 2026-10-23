@@ -1,0 +1,3 @@
+# Reviewed false positives (fingerprint per finding).
+# A git commit hash read as a Sourcegraph token.
+5c20843063e18d546f3e771a8b11618c9438e51d:docs/CODE_ARCHITECTURE_AUDIT.md:sourcegraph-access-token:3

@@ -1,20 +1,77 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
   ],
   "packageRules": [
     {
       "description": "vue-tsc (nuxt typecheck) loads typescript/lib/tsc, which TypeScript 7 no longer exports; AGENTS.md pins 5.x until vue-tsc supports newer releases",
-      "matchManagers": ["npm"],
-      "matchPackageNames": ["typescript"],
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "typescript"
+      ],
       "allowedVersions": "<6"
     },
     {
       "description": "A Go major version is a new import path: bumping go.mod alone leaves the code on the old version and can break the build (#82, #83, #85, #86). Wait for approval on the dependency dashboard and migrate the imports in the same change.",
-      "matchManagers": ["gomod"],
-      "matchUpdateTypes": ["major"],
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "dependencyDashboardApproval": true
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "Check tools run with `go run module@version` (justfile, CI scripts)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)justfile$/",
+        "/^\\.github/scripts/.+\\.sh$/"
+      ],
+      "matchStrings": [
+        "go run (?<depName>[^@\\s]+?)(?:/cmd/[^@\\s]+)?@(?<currentValue>v[0-9][^\\s]*)"
+      ],
+      "datasourceTemplate": "go"
+    },
+    {
+      "description": "Check tool images on ghcr.io (justfile)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)justfile$/"
+      ],
+      "matchStrings": [
+        "(?<depName>ghcr\\.io/[^:\\s]+):(?<currentValue>v?[0-9][^\\s]*)"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "description": "Python check tools run with uvx (justfile)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)justfile$/"
+      ],
+      "matchStrings": [
+        "--from (?<depName>[A-Za-z0-9_.-]+)==(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "description": "golangci-lint version in CI",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/ci\\.yml$/"
+      ],
+      "matchStrings": [
+        "golangci-lint-action@.*\\n\\s+with:\\n\\s+version: (?<currentValue>v[0-9][^\\s]*)"
+      ],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases"
     }
   ]
 }

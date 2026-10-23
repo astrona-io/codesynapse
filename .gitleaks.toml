@@ -1,0 +1,15 @@
+# gitleaks (`just secrets`). CodeSynapse detects secrets, so its tests and
+# rule examples contain fake ones on purpose; those paths are allowed.
+# Everything else, including docs and workflows, is scanned.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "fake secrets in tests, fixtures and rule examples"
+paths = [
+  '''(^|/)testdata/''',
+  '''_test\.go$''',
+  # Shared contract-test packages (accountstest, storetest, ssotest, ...).
+  '''(^|/)[a-z]+test/[^/]+\.go$''',
+  '''^rules/(code|config)/[^/]+\.yaml$''',
+]

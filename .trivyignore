@@ -1,0 +1,5 @@
+# Trivy findings reviewed and accepted (`just scan`). Each needs a reason.
+
+# KSV-0109 flags CODESYNAPSE_GIT_TOKEN_HOST in the ConfigMap because its name
+# contains "TOKEN". It is a host name; tokens come from a Secret.
+AVD-KSV-0109

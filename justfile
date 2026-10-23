@@ -280,14 +280,51 @@ lint:
 
 # Vulnerability scan of Go dependencies
 vuln:
-    go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+    go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
 # Type-check and build the web app
 web-check:
     cd services/web && npm ci --no-fund --no-audit && npm run typecheck && npm run build
 
-# Everything CI runs
-ci: lint test web-check
+# --- project checks (CI runs the same recipes) ------------------------------
+# Tools run at pinned versions through `go run`, ghcr.io images or uvx, so
+# a local run matches CI. Needs Go, uv and a container engine.
+
+# Lint GitHub workflows
+lint-actions:
+    go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+# Lint the service Dockerfiles (.hadolint.yaml)
+lint-docker:
+    {{engine}} run --rm -v "$PWD:/src:ro" -w /src ghcr.io/hadolint/hadolint:v2.12.0 hadolint services/api/Dockerfile services/mcp/Dockerfile services/web/Dockerfile
+
+# Lint shell scripts
+lint-shell:
+    uvx --quiet --from shellcheck-py==0.10.0.1 shellcheck $(git ls-files '*.sh')
+
+# Lint YAML (.yamllint.yml)
+lint-yaml:
+    uvx --quiet --from yamllint==1.35.1 yamllint --strict $(git ls-files '*.yml' '*.yaml')
+
+# Scan the git history for secrets (.gitleaks.toml, .gitleaksignore)
+secrets:
+    go run github.com/zricethezav/gitleaks/v8@v8.24.0 git . --no-banner --redact
+
+# Vulnerabilities with a fix and misconfigurations, HIGH and CRITICAL (.trivyignore)
+scan:
+    {{engine}} run --rm -v "$PWD:/src:ro" -w /src -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.62.1 \
+        fs --quiet --exit-code 1 --scanners vuln,misconfig --severity HIGH,CRITICAL --ignore-unfixed \
+        --skip-dirs '**/node_modules' --skip-dirs '**/testdata' --skip-dirs .claude --skip-dirs sources --skip-dirs bin .
+
+# Licences of what we ship are permissive (run after web-check)
+licenses-check:
+    sh .github/scripts/check-licenses.sh
+
+# Every project check besides tests, Go lint and the web build
+checks: lint-actions lint-docker lint-shell lint-yaml secrets scan vuln
+
+# Everything CI runs on a pull request (the integration contracts run separately)
+ci: lint test web-check licenses-check checks
 
 # --- docs (mkdocs) ------------------------------------------------------------
 
