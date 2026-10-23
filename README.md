@@ -309,6 +309,8 @@ just up                                  # then re-index your repositories
 
 Neo4j still starts in this mode (the services depend on it) but holds nothing; removing it from the default stack comes once HugeGraph has run on real installs for a while.
 
+Indexing replaces a repository's graph in one HugeGraph transaction, so its old and new edges must fit the server's `edge.tx_capacity` and `vertex.tx_capacity`. HugeGraph's default of 10,000 is too small for most repositories; the compose service sets 1,000,000, the most HugeGraph accepts. If you run your own HugeGraph, set both options on the server and `CODESYNAPSE_HUGEGRAPH_TX_CAPACITY` to the same value for `api` and `mcp`. A replacement that does not fit is refused before anything is written, and the error names the setting. At 1,000,000 that is roughly a repository of 500,000 edges; larger ones need Neo4j for now.
+
 Both are Apache-2.0, scale out, and keep each organisation's memory and vectors apart in the data itself (tenant partitions in Milvus, `tenant_id` on every memory vertex). HugeGraph runs Groovy scripts, so it always has a password and is never published to the host. Graphs are not migrated between backends: switching means indexing again, which is the same `just up` plus a sync. `just test-hugegraph` runs the store contract and a parity check against the in-memory reference on throwaway containers.
 
 ## Accounts, organisations and audit log

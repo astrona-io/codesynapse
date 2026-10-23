@@ -35,8 +35,12 @@ func TestParityWithReference(t *testing.T) {
 	}
 	mem := memory.New()
 	_ = mem.ReplaceRepo(ctx, "parity", g)
-	hg, err := New(ctx, Config{URL: url})
+	hg, err := New(ctx, Config{URL: url, TxCapacity: testTxCapacity()})
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Run alone, nothing else has created the schema on a fresh server.
+	if err := hg.EnsureSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = hg.DeleteRepo(ctx, "parity") })

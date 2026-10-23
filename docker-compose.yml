@@ -34,7 +34,11 @@ services:
     # that on the volume, so a recreated container would come back without
     # auth: enable it on every start (the script is idempotent).
     # Requests may carry a whole review: Gremlin's 64 KB limit becomes 16 MB.
-    entrypoint: ["sh", "-c", "[ -n \"$$PASSWORD\" ] || { echo 'HUGEGRAPH_PASSWORD is not set; run just init' >&2; exit 1; }; ./bin/enable-auth.sh && grep -q HugeFactoryAuthProxy conf/graphs/hugegraph.properties || { echo 'could not enable authentication' >&2; exit 1; }; sed -i 's/^maxContentLength: .*/maxContentLength: 16777216/' conf/gremlin-server.yaml && exec ./docker-entrypoint.sh"]
+    # A repository replacement is one transaction: its old and new edges must
+    # fit edge.tx_capacity (default 10,000). 1,000,000 is HugeGraph's maximum;
+    # api and mcp get the same CODESYNAPSE_HUGEGRAPH_TX_CAPACITY, so larger
+    # replacements are refused before anything is written.
+    entrypoint: ["sh", "-c", "[ -n \"$$PASSWORD\" ] || { echo 'HUGEGRAPH_PASSWORD is not set; run just init' >&2; exit 1; }; ./bin/enable-auth.sh && grep -q HugeFactoryAuthProxy conf/graphs/hugegraph.properties || { echo 'could not enable authentication' >&2; exit 1; }; sed -i 's/^maxContentLength: .*/maxContentLength: 16777216/' conf/gremlin-server.yaml && sed -i -e '/^vertex.tx_capacity=/d' -e '/^edge.tx_capacity=/d' conf/graphs/hugegraph.properties && printf '\\nvertex.tx_capacity=1000000\\nedge.tx_capacity=1000000\\n' >> conf/graphs/hugegraph.properties && exec ./docker-entrypoint.sh"]
     environment:
       PASSWORD: ${HUGEGRAPH_PASSWORD:-}
     volumes:
@@ -116,6 +120,7 @@ services:
       CODESYNAPSE_HUGEGRAPH_USER: admin
       CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_PASSWORD:-}
       CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES: "8388608"
+      CODESYNAPSE_HUGEGRAPH_TX_CAPACITY: "1000000"
       CODESYNAPSE_MILVUS_URL: http://milvus:19530
       CODESYNAPSE_METRICS_URL: http://victoriametrics:8428
       CODESYNAPSE_METRICS_USER: codesynapse
@@ -198,6 +203,7 @@ services:
       CODESYNAPSE_HUGEGRAPH_USER: admin
       CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_PASSWORD:-}
       CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES: "8388608"
+      CODESYNAPSE_HUGEGRAPH_TX_CAPACITY: "1000000"
       CODESYNAPSE_MILVUS_URL: http://milvus:19530
       CODESYNAPSE_METRICS_URL: http://victoriametrics:8428
       CODESYNAPSE_METRICS_USER: codesynapse
