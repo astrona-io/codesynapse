@@ -9,5 +9,33 @@ home: https://github.com/astrona-io/codesynapse
 sources:
   - https://github.com/astrona-io/codesynapse
 keywords: [code-intelligence, mcp, graph, security]
+# artifacthub.io/images and artifacthub.io/prerelease are set by the Images
+# workflow at release time.
 annotations:
   artifacthub.io/license: Apache-2.0
+  artifacthub.io/category: ai-machine-learning
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://github.com/astrona-io/codesynapse/tree/main/docs
+    - name: Upgrading
+      url: https://github.com/astrona-io/codesynapse/blob/main/docs/operations/upgrading.md
+dependencies:
+  # Helpers for this chart and the stores below.
+  - name: common
+    version: 0.1.0
+  # The stores, each switched off by <store>.enabled=false to use your own.
+  - name: postgresql
+    version: 0.1.0
+    condition: postgresql.enabled
+  - name: hugegraph
+    version: 0.1.0
+    condition: hugegraph.enabled
+  - name: milvus
+    version: 0.1.0
+    condition: milvus.enabled
+  - name: victoriametrics
+    version: 0.1.0
+    condition: victoriametrics.enabled
+  - name: victoriatraces
+    version: 0.1.0
+    condition: victoriatraces.enabled

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: common
+description: Helpers shared by the codesynapse chart and its store subcharts.
+type: library
+version: 0.1.0

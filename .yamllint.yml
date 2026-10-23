@@ -4,6 +4,7 @@ ignore: |
   **/testdata/
   # Go templates, validated rendered by `just chart-check`.
   deploy/helm/*/templates/
+  deploy/helm/*/charts/*/templates/
   services/web/node_modules/
 rules:
   line-length: disable

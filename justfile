@@ -227,7 +227,7 @@ chart-install: _kind-secret
 chart-install-published version pull_secret="": _kind-secret
     #!/usr/bin/env sh
     set -eu
-    pull=""; [ -z "{{pull_secret}}" ] || pull="--set image.pullSecrets[0].name={{pull_secret}}"
+    pull=""; [ -z "{{pull_secret}}" ] || pull="--set global.imagePullSecrets[0].name={{pull_secret}}"
     helm upgrade --install codesynapse oci://ghcr.io/astrona-io/charts/codesynapse --version "{{version}}" \
         --kube-context "{{kind_context}}" --namespace "{{kind_ns}}" -f deploy/helm/codesynapse/ci/kind-values.yaml \
         --set image.tag="{{version}}" --set image.pullPolicy=IfNotPresent $pull --wait --timeout 15m
@@ -368,7 +368,7 @@ lint-yaml:
 
 # Scan the git history for secrets (.gitleaks.toml, .gitleaksignore)
 secrets:
-    go run github.com/zricethezav/gitleaks/v8@v8.24.0 git . --no-banner --redact
+    go run github.com/zricethezav/gitleaks/v8@v8.30.1 git . --no-banner --redact
 
 # Vulnerabilities with a fix and misconfigurations, HIGH and CRITICAL (.trivyignore)
 scan:

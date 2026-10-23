@@ -1,0 +1,5 @@
+apiVersion: v2
+name: victoriametrics
+description: "VictoriaMetrics single node for the metrics the services push. Part of the codesynapse chart; disable it there to use your own."
+type: application
+version: 0.1.0

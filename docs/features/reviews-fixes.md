@@ -2,7 +2,7 @@
 
 ## Review lifecycle
 
-An agent (or the API's AI tasks) analyses a change with the graph, then records the result with `submit_review`. Reviews live in the review store (`:Review` nodes), never in the code graph.
+Ask your agent to review a change ("review my changes with CodeSynapse and submit the review", or the `code-review` MCP prompt). It (or the API's AI tasks) analyses the change with the graph, then records the result with `submit_review`, and the review appears on the **Reviews** page. Reviews live in the review store (`:Review` nodes), never in the code graph. Disable the review tools with `CODESYNAPSE_MCP_REVIEWS=false`.
 
 ```mermaid
 flowchart LR
@@ -36,7 +36,9 @@ The Reviews page shows progress with tabs **To decide**, **To fix**, **Later** a
 
 ## Fix branches
 
-Off by default. Turn on with `CODESYNAPSE_ALLOW_PUSH=true` and a token with **Contents** and **Pull requests** read and write.
+For an accepted comment on a Go function or method, **Create fix branch & PR** asks the local model routed to "Fixes" to rewrite the affected file, commits it to a new `codesynapse/fix-…` branch, pushes it and opens a draft pull request, so your CI runs on it. You review and merge the PR, then mark the comment fixed. **Fix all on one branch** does the same for every accepted item.
+
+Off by default. Turn on with `CODESYNAPSE_ALLOW_PUSH=true` in `.env` and a token (`just git-token`) with **Contents** and **Pull requests** read and write.
 
 ```mermaid
 sequenceDiagram
@@ -65,7 +67,15 @@ sequenceDiagram
 - CI definitions (`.github/`, `.gitlab-ci.yml`, Jenkinsfile, ...) and git config are never touched.
 - Pushes go only to new `codesynapse/*` branches and are never forced.
 - Organisation members push with the organisation's own token (`pushAuth`).
-- Route "Fixes" to a local model; remote providers need `send_source: true`.
+- The review must pin the current commit, and the model's answer must contain exactly one bounded Go code block. Go syntax is checked, and only the accepted comments' function bodies may change; signatures, imports, headers and other bytes are preserved. Other edits need manual handling.
+- Revision, comment, permission, file-hash and commit checks run before publication.
+- Route "Fixes" to a local model; `send_source: true` does not permit cloud fixes.
+
+Workflows that run on every push run before anyone reviews the change; if that matters, limit them to pull requests. See [fix validation and retry rules](../FIX_VALIDATION.md).
+
+## Prompt budgets
+
+Every model call checks its final redacted request before sending. Input counts are conservative estimates, separate from billed usage; oversized requests are refused. `input_budget_policy: require_exact` refuses calls until a verified model/template counter is available. See [configuration and limits](../PROMPT_BUDGETS.md).
 
 ## Background AI reviews
 

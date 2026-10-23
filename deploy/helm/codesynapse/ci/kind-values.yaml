@@ -1,6 +1,6 @@
 # A throwaway kind cluster (`just chart-e2e`): images built locally and
 # loaded into the node, small requests, plain HTTP through port-forward.
-secrets:
+global:
   existingSecret: codesynapse
 image:
   registry: ghcr.io/astrona-io

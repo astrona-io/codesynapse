@@ -62,6 +62,17 @@
       "datasourceTemplate": "pypi"
     },
     {
+      "description": "Store images of the Helm chart's subcharts",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^deploy/helm/codesynapse/charts/[^/]+/values\\.yaml$/"
+      ],
+      "matchStrings": [
+        "image: (?<depName>[^:\\s]+):(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
       "description": "golangci-lint version in CI",
       "customType": "regex",
       "managerFilePatterns": [

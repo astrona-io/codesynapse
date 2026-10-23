@@ -28,7 +28,7 @@ The Release workflow doesn't mark a final release "latest" itself. The Images wo
 The same tag runs `.github/workflows/images.yml`. It refuses a tag that isn't `vX.Y.Z` or `vX.Y.Z-rcN` on a commit on `main` (`.github/scripts/release-tag.sh`), then:
 
 1. **Images:** builds `codesynapse-{api,worker,mcp,web}` for amd64 and arm64, pushes them as `:X.Y.Z` and `:X.Y` (an RC only as `:X.Y.Z-rcN`), with SBOM and provenance, and signs them with cosign (keyless, GitHub OIDC).
-2. **Chart:** packages `deploy/helm/codesynapse` with chart and app version `X.Y.Z`, pushes it to `oci://ghcr.io/astrona-io/charts/codesynapse` and signs it.
+2. **Chart:** packages `deploy/helm/codesynapse` with chart and app version `X.Y.Z`, pushes it to `oci://ghcr.io/astrona-io/charts/codesynapse` and signs it. The images it deploys are written into its `artifacthub.io/images` annotation (an RC is also marked `artifacthub.io/prerelease`), and `deploy/helm/artifacthub-repo.yml` is pushed as the `artifacthub.io` tag. [Artifact Hub](https://artifacthub.io/packages/search?repo=codesynapse) checks the repository about every 30 minutes and lists new versions on its own; the `repositoryID` in that file makes astrona.io its verified publisher. The GHCR package must be public for Artifact Hub to read it.
 3. **Verify:** checks the signatures of the chart and the four images, creates a throwaway kind cluster, installs the **published** chart with the **published** images (`just chart-install-published`) and runs `helm test`.
 4. **Latest:** for a final release only, moves the images' `:latest` tag to the verified manifests and marks the GitHub release latest.
 
