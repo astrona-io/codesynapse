@@ -463,3 +463,13 @@ export interface IngestionOverview {
   latest_attempt: IngestRun | null; last_successful: IngestRun | null; metrics: IngestReport | null
   history: IngestRun[]; next: string; annotation_notice: string
 }
+
+// Single sign-on (docs/SSO_PLAN.md). The client secret never comes back,
+// only its preview.
+export interface IdentityProvider {
+  org_id: string; name: string; issuer: string; client_id: string; secret_preview: string
+  scopes?: string[]; groups_claim: string; default_role?: Role
+  role_groups?: Record<string, Role>; team_groups?: Record<string, string>
+  enabled: boolean; created_by: string; updated_at: string
+}
+export interface ExternalIdentity { id: string; org_id: string; issuer: string; user_id: string; email: string; linked_at: string; last_login_at?: string }

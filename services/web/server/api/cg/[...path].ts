@@ -11,6 +11,11 @@ const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
 // path element, which the API decodes after routing.
 const SAFE_PATH = /^[A-Za-z0-9._~\-/%]+$/
 const SESSION_COOKIE = 'cs_session'
+// Binds a pending single sign-on to this browser; only the SSO endpoints
+// see it.
+const SSO_COOKIE = 'cs_sso'
+const SSO_PATH = /^(auth\/sso\/|me\/sso\/)/
+const TOKEN = /^[A-Za-z0-9_-]{16,128}$/
 // The organisation the user works in (a UI choice, not a credential).
 const ORG_COOKIE = 'cs_org'
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/
@@ -69,8 +74,12 @@ export default defineEventHandler(async (event) => {
   if ((await apiMode(base)) === 'single') {
     if (apiToken) headers.authorization = `Bearer ${apiToken}`
   } else {
+    const cookies: string[] = []
     const session = getCookie(event, SESSION_COOKIE)
-    if (session && /^[A-Za-z0-9_-]{16,128}$/.test(session)) headers.cookie = `${SESSION_COOKIE}=${session}`
+    if (session && TOKEN.test(session)) cookies.push(`${SESSION_COOKIE}=${session}`)
+    const binder = getCookie(event, SSO_COOKIE)
+    if (binder && TOKEN.test(binder) && SSO_PATH.test(path)) cookies.push(`${SSO_COOKIE}=${binder}`)
+    if (cookies.length) headers.cookie = cookies.join('; ')
     const org = getCookie(event, ORG_COOKIE)
     if (org && SLUG.test(org)) headers['x-codesynapse-org'] = org
   }
@@ -85,9 +94,10 @@ export default defineEventHandler(async (event) => {
   // Only the one download the API offers (the SBOM), with a plain file name.
   const disposition = res.headers.get('content-disposition')
   if (disposition && /^attachment; filename="[A-Za-z0-9._-]{1,200}"$/.test(disposition)) setResponseHeader(event, 'content-disposition', disposition)
-  // Login, sign-up and logout set or clear the session cookie.
+  // Login, sign-up and logout set or clear the session cookie; single
+  // sign-on sets and clears its binder.
   for (const c of res.headers.getSetCookie()) {
-    if (c.startsWith(`${SESSION_COOKIE}=`)) appendResponseHeader(event, 'set-cookie', c)
+    if (c.startsWith(`${SESSION_COOKIE}=`) || (c.startsWith(`${SSO_COOKIE}=`) && SSO_PATH.test(path))) appendResponseHeader(event, 'set-cookie', c)
   }
   setResponseHeader(event, 'cache-control', 'no-store')
   return res.status === 204 ? null : new Uint8Array(await res.arrayBuffer())
