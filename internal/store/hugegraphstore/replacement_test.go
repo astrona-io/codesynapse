@@ -121,3 +121,12 @@ func TestTxCapacityAboveServerMaximum(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exceeds the server maximum")
 }
+
+func TestGraphBinding(t *testing.T) {
+	for core, want := range map[string]string{
+		"1.5.0": "hugegraph", "1.6.2": "hugegraph", "1.7.0": "DEFAULT-hugegraph", "1.10.1": "DEFAULT-hugegraph",
+		"2.0.0": "DEFAULT-hugegraph", "": "hugegraph", "garbage": "hugegraph",
+	} {
+		assert.Equal(t, graphBinding(core, "hugegraph"), want, core)
+	}
+}

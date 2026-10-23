@@ -248,14 +248,15 @@ test-hugegraph: _runtime
     #!/usr/bin/env sh
     set -eu
     hg="codesynapse-hg-test-$$"; mv="codesynapse-milvus-test-$$"
-    # Same transaction capacity as docker-compose.yml: replacements are one transaction.
-    {{engine}} run --rm -d --name "$hg" -p 127.0.0.1:58080:8080 --entrypoint sh docker.io/hugegraph/hugegraph:1.5.0 \
+    # Same images and transaction capacity as docker-compose.yml, so a version bump there is tested here.
+    {{engine}} run --rm -d --name "$hg" -p 127.0.0.1:58080:8080 --entrypoint sh docker.io/hugegraph/hugegraph:1.7.0 \
         -c "printf '\nvertex.tx_capacity=1000000\nedge.tx_capacity=1000000\n' >> conf/graphs/hugegraph.properties && exec ./docker-entrypoint.sh" >/dev/null
     {{engine}} run --rm -d --name "$mv" -p 127.0.0.1:59530:19530 -e ETCD_USE_EMBED=true -e ETCD_DATA_DIR=/var/lib/milvus/etcd \
-        -e COMMON_STORAGETYPE=local -e DEPLOY_MODE=STANDALONE docker.io/milvusdb/milvus:v2.6.4 milvus run standalone >/dev/null
+        -e COMMON_STORAGETYPE=local -e DEPLOY_MODE=STANDALONE docker.io/milvusdb/milvus:v3.0.3 milvus run standalone >/dev/null
     trap '{{engine}} stop "$hg" "$mv" >/dev/null 2>&1' EXIT
-    # REST answers before the Gremlin server behind it: wait for a real query.
-    until curl -sf -X POST http://127.0.0.1:58080/gremlin -H 'Content-Type: application/json' -d '{"gremlin":"1"}' >/dev/null 2>&1; do sleep 2; done
+    # REST and Gremlin answer before the graph is bound (1.7 binds DEFAULT-hugegraph): wait for a graph query.
+    until curl -sf --compressed -X POST http://127.0.0.1:58080/gremlin -H 'Content-Type: application/json' \
+        -d '{"gremlin":"g.V().limit(0).count()","aliases":{"graph":"DEFAULT-hugegraph","g":"__g_DEFAULT-hugegraph"}}' >/dev/null 2>&1; do sleep 2; done
     until {{engine}} exec "$mv" curl -sf http://127.0.0.1:9091/healthz >/dev/null 2>&1; do sleep 2; done
     export CODESYNAPSE_TEST_HUGEGRAPH_URL=http://127.0.0.1:58080 CODESYNAPSE_TEST_MILVUS_URL=http://127.0.0.1:59530 CODESYNAPSE_TEST_HUGEGRAPH_TX_CAPACITY=1000000
     go test -race -count=1 ./internal/store/hugegraphstore/... ./internal/vector/...

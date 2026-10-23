@@ -76,7 +76,10 @@ const (
 // Store is a HugeGraph-backed store.Store.
 type Store struct {
 	sessionmemory.Engine
-	base, graph    string
+	base, graph string
+	// binding is the graph's Gremlin binding: the graph name up to HugeGraph
+	// 1.5, "<graph space>-<graph>" from 1.7 (see bindGraph).
+	binding        string
 	user, password string
 	http           *http.Client
 	timeout        time.Duration
@@ -118,11 +121,68 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	if s.txCapacity > maxTxCapacity {
 		return nil, fmt.Errorf("hugegraph transaction capacity %d exceeds the server maximum %d", s.txCapacity, maxTxCapacity)
 	}
-	var one []int
-	if err := s.read(ctx, "1", nil, &one); err != nil {
+	if err := s.bindGraph(ctx); err != nil {
 		return nil, fmt.Errorf("connecting to hugegraph at %s: %w", cfg.URL, err)
 	}
 	return s, nil
+}
+
+// defaultGraphSpace is the graph space a standalone HugeGraph 1.7+ server
+// puts its graphs in.
+const defaultGraphSpace = "DEFAULT"
+
+// bindGraph picks the name the server binds the graph under from its
+// version, then checks that the graph answers. HugeGraph 1.7 binds
+// "<graph space>-<graph>" (the plain name fails); earlier versions bind the
+// plain name. While 1.7 is still loading both names can answer for a moment,
+// so the version decides, not a probe; a graph that is not ready yet fails
+// here and the services retry.
+func (s *Store) bindGraph(ctx context.Context) error {
+	core, err := s.coreVersion(ctx)
+	if err != nil {
+		return err
+	}
+	s.binding = graphBinding(core, s.graph)
+	var one []int
+	return s.read(ctx, "1", nil, &one)
+}
+
+// graphBinding returns the Gremlin binding of graph on a server whose core
+// version is core ("1.7.0"); an unreadable version keeps the plain name.
+func graphBinding(core, graph string) string {
+	var major, minor int
+	if _, err := fmt.Sscanf(core, "%d.%d", &major, &minor); err == nil && (major > 1 || major == 1 && minor >= 7) {
+		return defaultGraphSpace + "-" + graph
+	}
+	return graph
+}
+
+// coreVersion asks the server for its core version.
+func (s *Store) coreVersion(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.base+"/versions", nil)
+	if err != nil {
+		return "", err
+	}
+	if s.user != "" {
+		req.SetBasicAuth(s.user, s.password)
+	}
+	res, err := s.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close() //nolint:errcheck // read-only body
+	var v struct {
+		Versions struct {
+			Core string `json:"core"`
+		} `json:"versions"`
+	}
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("hugegraph: versions: HTTP %d", res.StatusCode)
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&v); err != nil {
+		return "", fmt.Errorf("hugegraph: versions: %w", err)
+	}
+	return v.Versions.Core, nil
 }
 
 // System names the database for metrics.
@@ -240,6 +300,6 @@ func lower(s string) string { return strings.ToLower(s) }
 func (s *Store) gremlinBody(script string, bindings map[string]any) ([]byte, error) {
 	return json.Marshal(map[string]any{
 		"gremlin": script, "bindings": bindings, "language": "gremlin-groovy",
-		"aliases": map[string]string{"graph": s.graph, "g": "__g_" + s.graph},
+		"aliases": map[string]string{"graph": s.binding, "g": "__g_" + s.binding},
 	})
 }
