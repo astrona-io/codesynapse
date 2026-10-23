@@ -1,0 +1,64 @@
+{{- if .Values.victoriametrics.enabled }}
+# Metrics the services push every 15 s; the Statistics page queries them.
+# Password protected with the metrics login; only the services reach it.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "cs.name" (list . "victoriametrics") }}
+  labels:
+    {{- include "cs.labels" (list . "victoriametrics") | nindent 4 }}
+spec:
+  serviceName: {{ include "cs.name" (list . "victoriametrics") }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cs.selector" (list . "victoriametrics") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cs.labels" (list . "victoriametrics") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "cs.podSecurity" 65534 | nindent 8 }}
+      containers:
+        - name: victoriametrics
+          image: {{ .Values.victoriametrics.image }}
+          args:
+            - -retentionPeriod={{ .Values.victoriametrics.retention }}
+            - -storageDataPath=/victoria-metrics-data
+            - -httpAuth.username=codesynapse
+            - -httpAuth.password=$(METRICS_PASSWORD)
+          env:
+            {{- include "cs.secretEnv" (list . "METRICS_PASSWORD" "METRICS_PASSWORD") | nindent 12 }}
+          ports:
+            - {name: http, containerPort: 8428}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.victoriametrics.resources | nindent 12 }}
+          securityContext:
+            {{- include "cs.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /victoria-metrics-data}
+  {{- include "cs.volumeClaim" (list . .Values.victoriametrics) | nindent 2 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cs.name" (list . "victoriametrics") }}
+  labels:
+    {{- include "cs.labels" (list . "victoriametrics") | nindent 4 }}
+spec:
+  selector:
+    {{- include "cs.selector" (list . "victoriametrics") | nindent 4 }}
+  ports:
+    - {name: http, port: 8428, targetPort: http}
+{{- end }}

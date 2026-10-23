@@ -1,0 +1,71 @@
+# The MCP server for AI agents (personal API keys, per-chat sessions).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cs.name" (list . "mcp") }}
+  labels:
+    {{- include "cs.labels" (list . "mcp") | nindent 4 }}
+spec:
+  replicas: {{ .Values.mcp.replicas }}
+  selector:
+    matchLabels:
+      {{- include "cs.selector" (list . "mcp") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cs.labels" (list . "mcp") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "cs.podSecurity" 10001 | nindent 8 }}
+      containers:
+        - name: mcp
+          image: {{ include "cs.image" (list . "mcp") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - {name: http, containerPort: 8090}
+          env:
+            {{- include "cs.storeEnv" . | nindent 12 }}
+            {{- include "cs.secretEnv" (list . "CODESYNAPSE_MCP_TOKEN" "CODESYNAPSE_MCP_TOKEN") | nindent 12 }}
+            {{- include "cs.secretEnv" (list . "CODESYNAPSE_API_TOKEN" "CODESYNAPSE_API_TOKEN") | nindent 12 }}
+            - {name: CODESYNAPSE_API_URL, value: "http://{{ include "cs.name" (list . "api") }}:8080"}
+            - {name: CODESYNAPSE_ALLOW_MEMORY, value: {{ .Values.features.allowMemory | quote }}}
+            - {name: CODESYNAPSE_MCP_USAGE, value: {{ .Values.features.mcpUsage | quote }}}
+            - {name: GOMEMLIMIT, value: {{ include "cs.gomemlimit" .Values.mcp.resources | quote }}}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+            failureThreshold: 120
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.mcp.resources | nindent 12 }}
+          securityContext:
+            {{- include "cs.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - {name: workspace, mountPath: /workspace, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: workspace
+          persistentVolumeClaim: {claimName: {{ include "cs.name" (list . "workspace") }}}
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cs.name" (list . "mcp") }}
+  labels:
+    {{- include "cs.labels" (list . "mcp") | nindent 4 }}
+spec:
+  selector:
+    {{- include "cs.selector" (list . "mcp") | nindent 4 }}
+  ports:
+    - {name: http, port: 8090, targetPort: http}

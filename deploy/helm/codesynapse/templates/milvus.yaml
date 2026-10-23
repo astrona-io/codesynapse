@@ -1,0 +1,72 @@
+{{- if .Values.milvus.enabled }}
+# Agent-memory vectors: standalone, embedded etcd, local storage (no MinIO,
+# which is AGPLv3). Clustered Milvus needs other object storage (6c).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "cs.name" (list . "milvus") }}
+  labels:
+    {{- include "cs.labels" (list . "milvus") | nindent 4 }}
+  annotations:
+    ignore-check.kube-linter.io/no-read-only-root-fs: "Milvus writes runtime files outside its data volume"
+spec:
+  serviceName: {{ include "cs.name" (list . "milvus") }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cs.selector" (list . "milvus") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cs.labels" (list . "milvus") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "cs.podSecurity" 999 | nindent 8 }}
+      containers:
+        - name: milvus
+          image: {{ .Values.milvus.image }}
+          args: [milvus, run, standalone]
+          env:
+            - {name: ETCD_USE_EMBED, value: "true"}
+            - {name: ETCD_DATA_DIR, value: /var/lib/milvus/etcd}
+            - {name: COMMON_STORAGETYPE, value: local}
+            - {name: DEPLOY_MODE, value: STANDALONE}
+          ports:
+            - {name: grpc, containerPort: 19530}
+            - {name: metrics, containerPort: 9091}
+          readinessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 10
+          startupProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 5
+            failureThreshold: 120
+          livenessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.milvus.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/milvus}
+  {{- include "cs.volumeClaim" (list . .Values.milvus) | nindent 2 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cs.name" (list . "milvus") }}
+  labels:
+    {{- include "cs.labels" (list . "milvus") | nindent 4 }}
+spec:
+  selector:
+    {{- include "cs.selector" (list . "milvus") | nindent 4 }}
+  ports:
+    - {name: grpc, port: 19530, targetPort: grpc}
+{{- end }}

@@ -1,0 +1,70 @@
+{{- if .Values.postgresql.enabled }}
+# Accounts, organisations, jobs, schedules and the audit log. For production
+# prefer a managed or CloudNativePG database: set postgresql.enabled=false
+# and put its URL in the Secret (CODESYNAPSE_DATABASE_URL).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "cs.name" (list . "postgresql") }}
+  labels:
+    {{- include "cs.labels" (list . "postgresql") | nindent 4 }}
+spec:
+  serviceName: {{ include "cs.name" (list . "postgresql") }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cs.selector" (list . "postgresql") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cs.labels" (list . "postgresql") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "cs.podSecurity" 70 | nindent 8 }}
+      containers:
+        - name: postgresql
+          image: {{ .Values.postgresql.image }}
+          env:
+            - {name: POSTGRES_USER, value: codesynapse}
+            - {name: POSTGRES_DB, value: codesynapse}
+            {{- include "cs.secretEnv" (list . "POSTGRES_PASSWORD" "POSTGRES_PASSWORD") | nindent 12 }}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          ports:
+            - {name: postgres, containerPort: 5432}
+          readinessProbe:
+            exec: {command: [pg_isready, -U, codesynapse, -d, codesynapse]}
+            periodSeconds: 5
+          livenessProbe:
+            exec: {command: [pg_isready, -U, codesynapse, -d, codesynapse]}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.postgresql.resources | nindent 12 }}
+          securityContext:
+            {{- include "cs.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: run, mountPath: /var/run/postgresql}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+  {{- include "cs.volumeClaim" (list . .Values.postgresql) | nindent 2 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cs.name" (list . "postgresql") }}
+  labels:
+    {{- include "cs.labels" (list . "postgresql") | nindent 4 }}
+spec:
+  selector:
+    {{- include "cs.selector" (list . "postgresql") | nindent 4 }}
+  ports:
+    - {name: postgres, port: 5432, targetPort: postgres}
+{{- end }}

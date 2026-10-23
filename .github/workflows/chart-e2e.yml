@@ -1,0 +1,49 @@
+name: Chart end to end
+
+# Builds the images, installs the Helm chart on a throwaway kind cluster
+# and runs its tests (docs/SAAS.md, 6a): the same `just chart-e2e` a
+# developer runs before shipping. Chart changes, merges to main, on demand.
+on:
+  pull_request:
+    paths:
+      - 'deploy/helm/**'
+      - '.github/workflows/chart-e2e.yml'
+      - '.github/scripts/check-chart.sh'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chart-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kind:
+    name: Install on kind and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.22.1
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          cluster_name: codesynapse-dev
+      - name: Build, load, install and test
+        run: just chart-e2e
+      - name: State on failure
+        if: failure()
+        run: |
+          kubectl --context kind-codesynapse-dev --namespace codesynapse get pods -o wide || true
+          kubectl --context kind-codesynapse-dev --namespace codesynapse describe pods | tail -200 || true
+          kubectl --context kind-codesynapse-dev --namespace codesynapse logs --all-containers --tail 80 -l app.kubernetes.io/part-of=codesynapse --prefix || true

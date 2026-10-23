@@ -1,0 +1,31 @@
+{{- if .Values.ingress.enabled }}
+# One host: /mcp to the MCP server, everything else to the dashboard. The
+# API is never exposed directly; the dashboard proxies to it.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "cs.name" (list . "codesynapse") }}
+  labels:
+    {{- include "cs.labels" (list . "codesynapse") | nindent 4 }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tlsSecretName }}
+  tls:
+    - hosts: [{{ required "ingress.host is required" $.Values.ingress.host | quote }}]
+      secretName: {{ . }}
+  {{- end }}
+  rules:
+    - host: {{ required "ingress.host is required" .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service: {name: {{ include "cs.name" (list . "mcp") }}, port: {name: http}}
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: {{ include "cs.name" (list . "web") }}, port: {name: http}}
+{{- end }}

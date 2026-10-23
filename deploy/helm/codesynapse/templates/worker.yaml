@@ -1,0 +1,62 @@
+# Workers run the jobs the API records: clone, sync and index (ingest), AI
+# tasks (ai) and fix branches (fix). They parse untrusted repositories, so
+# they get no ingress at all.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cs.name" (list . "worker") }}
+  labels:
+    {{- include "cs.labels" (list . "worker") | nindent 4 }}
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      {{- include "cs.selector" (list . "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cs.labels" (list . "worker") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "cs.podSecurity" 10001 | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ include "cs.image" (list . "worker") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [worker]
+          ports:
+            - {name: health, containerPort: 8081}
+          env:
+            {{- include "cs.apiEnv" . | nindent 12 }}
+            - {name: CODESYNAPSE_WORKER_ROLES, value: {{ .Values.worker.roles | quote }}}
+            - {name: CODESYNAPSE_WORKER_ADDR, value: "0.0.0.0:8081"}
+            - {name: GOMEMLIMIT, value: {{ include "cs.gomemlimit" .Values.worker.resources | quote }}}
+          startupProbe:
+            httpGet: {path: /healthz, port: health}
+            periodSeconds: 5
+            failureThreshold: 120
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext:
+            {{- include "cs.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - {name: workspace, mountPath: /workspace}
+            - {name: llm, mountPath: /config, readOnly: true}
+            - {name: cache, mountPath: /cache}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: workspace
+          persistentVolumeClaim: {claimName: {{ include "cs.name" (list . "workspace") }}}
+        - name: llm
+          configMap: {name: {{ include "cs.name" (list . "llm") }}}
+        - name: cache
+          emptyDir: {sizeLimit: 10Gi}
+        - name: tmp
+          emptyDir: {sizeLimit: 2Gi}
