@@ -70,7 +70,7 @@ if(roots.size()!=ids.size()) return [[found:false]]
 def es=g.V(ids as Object[]).hasLabel('node').has('repo',repo).outE(labels as String[])
  .where(__.inV().hasLabel('node').has('repo',repo).hasId(within(ids)))
  .order().by(__.outV().values('nid')).by(__.inV().values('nid')).by(T.label).limit(limit).toList()
-[[found:true,edges:es.collect{[it.outVertex().value('nid'),it.inVertex().value('nid'),it.label(),it.property('count').orElse(1L)]}]]`
+[[found:true,edges:es.collect{[it.outVertex().value('nid'),it.inVertex().value('nid'),it.label(),it.property('count').orElse(1L),it.property('evidence').orElse('')]}]]`
 
 // SubgraphRepository checks all requested vertices and both edge endpoints in one query.
 func (s *Store) SubgraphRepository(ctx context.Context, repo string, ids []string, kinds []model.EdgeKind) ([]model.Edge, error) {
@@ -109,13 +109,23 @@ func (s *Store) SubgraphRepository(ctx context.Context, repo string, ids []strin
 	}
 	out := make([]model.Edge, 0, len(res[0].Edges))
 	for _, r := range res[0].Edges {
-		if len(r) != 4 {
+		if len(r) < 4 {
 			return nil, fmt.Errorf("invalid scoped subgraph result")
 		}
 		from, _ := r[0].(string)
 		to, _ := r[1].(string)
 		kind, _ := r[2].(string)
-		out = append(out, model.Edge{From: from, To: to, Kind: model.EdgeKind(kind), Count: nodeprops.Int(r[3])})
+		out = append(out, model.Edge{From: from, To: to, Kind: model.EdgeKind(kind), Count: nodeprops.Int(r[3]), Evidence: rowEvidence(r)})
 	}
 	return out, nil
+}
+
+// rowEvidence reads the optional fifth column of an edge row; rows from a
+// script without it, and unknown values, read as unknown evidence.
+func rowEvidence(r []any) model.Evidence {
+	if len(r) < 5 {
+		return ""
+	}
+	s, _ := r[4].(string)
+	return store.ReadEvidence(s)
 }

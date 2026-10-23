@@ -26,7 +26,8 @@ type pyLine struct {
 
 // pyLines classifies lines, masking string contents so "def" inside a
 // docstring is not a declaration and quotes do not confuse call matching.
-func pyLines(src []byte) []pyLine {
+// open is the triple quote still unterminated at the end of src.
+func pyLines(src []byte) (lines []pyLine, open string) {
 	raw := strings.Split(string(src), "\n")
 	out := make([]pyLine, len(raw))
 	inTriple := ""
@@ -38,7 +39,7 @@ func pyLines(src []byte) []pyLine {
 		trim := strings.TrimSpace(masked)
 		out[i] = pyLine{text: masked, indent: len(l) - len(strings.TrimLeft(l, " \t")), blank: trim == "" || strings.HasPrefix(trim, "#") || startedInString && inTriple != ""}
 	}
-	return out
+	return out, inTriple
 }
 
 // maskPyStrings replaces string literal contents with spaces and strips
@@ -89,9 +90,14 @@ func maskPyStrings(l, open string) (string, string) {
 }
 
 func parsePython(src []byte) *fileResult {
-	lines := pyLines(src)
+	lines, open := pyLines(src)
 	raw := strings.Split(string(src), "\n")
-	fr := &fileResult{}
+	var masked strings.Builder
+	for _, l := range lines {
+		masked.WriteString(l.text)
+	}
+	m := masked.String()
+	fr := &fileResult{partial: open != "" || unbalanced(m, '(', ')') || unbalanced(m, '[', ']') || unbalanced(m, '{', '}')}
 
 	var stack []openSym
 	var pendingDecorators []string

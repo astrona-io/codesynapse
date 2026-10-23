@@ -193,6 +193,9 @@ type Node struct {
 	Bytes int `json:"bytes,omitempty"`
 	// Metrics is the JSON-encoded metrics.Report on Repository nodes.
 	Metrics string `json:"-"`
+	// Analysis is the JSON-encoded Analysis of Package, File, function,
+	// method and Repository nodes; empty when nothing was recorded.
+	Analysis string `json:"-"`
 
 	// Security fields (Finding, Vulnerability, Module nodes).
 
@@ -264,6 +267,8 @@ type Edge struct {
 	Kind EdgeKind `json:"kind"`
 	// Count is how often the relationship occurs (call sites, line changes).
 	Count int `json:"count,omitempty"`
+	// Evidence says how a resolution edge was established; empty is unknown.
+	Evidence Evidence `json:"evidence,omitempty"`
 }
 
 // NodeID builds a globally unique node ID scoped to a repository. Scoping by
@@ -317,6 +322,10 @@ func (g *Graph) AddEdge(e Edge) {
 	k := edgeKey{e.From, e.To, e.Kind}
 	if existing, ok := g.edges[k]; ok {
 		existing.Count += e.Count
+		// One proof is enough: the strongest evidence for any site wins.
+		if e.Evidence.Stronger(existing.Evidence) {
+			existing.Evidence = e.Evidence
+		}
 		return
 	}
 	stored := e

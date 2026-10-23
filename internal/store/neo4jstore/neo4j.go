@@ -180,7 +180,11 @@ func (s *Store) ReplaceRepo(ctx context.Context, repo string, g *model.Graph) er
 	}
 	byEdge := map[model.EdgeKind][]map[string]any{}
 	for _, e := range edges {
-		byEdge[e.Kind] = append(byEdge[e.Kind], map[string]any{"from": e.From, "to": e.To, "count": int64(e.Count)})
+		row := map[string]any{"from": e.From, "to": e.To, "count": int64(e.Count), "evidence": nil}
+		if e.Evidence != "" {
+			row["evidence"] = string(e.Evidence)
+		}
+		byEdge[e.Kind] = append(byEdge[e.Kind], row)
 	}
 	sess := s.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: s.db})
 	defer func() { _ = sess.Close(ctx) }()
@@ -209,7 +213,7 @@ func (s *Store) ReplaceRepo(ctx context.Context, repo string, g *model.Graph) er
 			}
 		}
 		for _, kind := range model.AllEdgeKinds {
-			q := fmt.Sprintf(`UNWIND $rows AS r MATCH (a:Node {id:r.from}) MATCH (b:Node {id:r.to}) MERGE (a)-[e:%s]->(b) SET e.count=r.count,e.ingest_run=$run`, kind)
+			q := fmt.Sprintf(`UNWIND $rows AS r MATCH (a:Node {id:r.from}) MATCH (b:Node {id:r.to}) MERGE (a)-[e:%s]->(b) SET e.count=r.count,e.evidence=r.evidence,e.ingest_run=$run`, kind)
 			if err := batch(q, byEdge[kind]); err != nil {
 				return nil, fmt.Errorf("write replacement edges: %w", err)
 			}
@@ -579,7 +583,7 @@ func (s *Store) Subgraph(ctx context.Context, ids []string, kinds []model.EdgeKi
 	}
 	res, err := s.read(ctx, `MATCH (a:Node)-[e]->(b:Node)
 WHERE a.id IN $ids AND b.id IN $ids AND (size($kinds) = 0 OR type(e) IN $kinds)
-RETURN a.id AS from, b.id AS to, type(e) AS kind, coalesce(e.count, 1) AS count
+RETURN a.id AS from, b.id AS to, type(e) AS kind, coalesce(e.count, 1) AS count, coalesce(e.evidence, '') AS evidence
 ORDER BY from, to, kind LIMIT $limit`, map[string]any{
 		"ids": ids, "kinds": edgeStrings(kinds), "limit": store.MaxSubgraphEdges,
 	})
@@ -588,7 +592,7 @@ ORDER BY from, to, kind LIMIT $limit`, map[string]any{
 	}
 	out := make([]model.Edge, 0, len(res.Records))
 	for _, r := range res.Records {
-		out = append(out, model.Edge{From: str(r, "from"), To: str(r, "to"), Kind: model.EdgeKind(str(r, "kind")), Count: num(r, "count")})
+		out = append(out, model.Edge{From: str(r, "from"), To: str(r, "to"), Kind: model.EdgeKind(str(r, "kind")), Count: num(r, "count"), Evidence: store.ReadEvidence(str(r, "evidence"))})
 	}
 	return out, nil
 }

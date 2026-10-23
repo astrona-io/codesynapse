@@ -9,6 +9,7 @@ package query
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -232,6 +233,30 @@ func (s Service) Outline(ctx context.Context, repo, file string) ([]OutlineEntry
 	return out, nil
 }
 
+// FileAnalysis returns how a file was analysed, or nil when the file is not
+// indexed or its graph predates analysis records.
+func (s Service) FileAnalysis(ctx context.Context, repo, file string) (*model.Analysis, error) {
+	s.R = store.ForRepository(s.R, repo)
+	n, err := s.R.Node(ctx, model.NodeID(repo, model.KindFile, strings.TrimPrefix(file, "./")))
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return decodedAnalysis(n), nil
+}
+
+// decodedAnalysis returns a node's analysis record, or nil when it has none
+// or it cannot be read.
+func decodedAnalysis(n model.Node) *model.Analysis {
+	a, err := model.DecodeAnalysis(n.Analysis)
+	if err != nil || a.Version == 0 {
+		return nil
+	}
+	return &a
+}
+
 // SymbolsAt returns the code symbols whose line range overlaps [start, end].
 func (s Service) SymbolsAt(ctx context.Context, repo, file string, start, end int) ([]model.Node, error) {
 	s.R = store.ForRepository(s.R, repo)
@@ -262,6 +287,9 @@ type Overview struct {
 	Stats    model.Stats `json:"stats"`
 	Packages []Ref       `json:"packages"`
 	Docs     []Ref       `json:"docs"`
+	// Analysis totals partial and truncated files, omissions and edges by
+	// evidence; nil for graphs indexed before it was recorded.
+	Analysis *model.Analysis `json:"analysis,omitempty"`
 }
 
 // Overview summarises a repository: stats, packages and documents.
@@ -274,6 +302,7 @@ func (s Service) Overview(ctx context.Context, repo string) (Overview, error) {
 	ov := Overview{Stats: st}
 	if n, err := s.R.Node(ctx, model.NodeID(repo, model.KindRepository, repo)); err == nil {
 		ov.Repo = n
+		ov.Analysis = decodedAnalysis(n)
 	}
 	pkgs, err := s.R.List(ctx, repo, store.Filter{Kinds: []model.NodeKind{model.KindPackage}}, store.ByName, 200)
 	if err != nil {

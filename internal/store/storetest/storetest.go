@@ -26,13 +26,16 @@ const Repo = "fixture"
 // ID builds a fixture node ID.
 func ID(kind model.NodeKind, local string) string { return model.NodeID(Repo, kind, local) }
 
+// FileAnalysis is the analysis record of the fixture's app/app.go.
+var FileAnalysis = model.Analysis{Level: model.LevelTyped, Status: model.StatusPartial, Errors: 2, UnresolvedCalls: 1}.Encode()
+
 // Fixture returns a small graph: main -> handler -> (I).Do -> (*impl).Do -> exec.Command,
 // plus a test calling handler, a file, a doc section and a commit.
 func Fixture() *model.Graph {
 	g := model.NewGraph()
 	add := func(n model.Node) { n.Repo = Repo; g.AddNode(n) }
 	add(model.Node{ID: ID(model.KindRepository, Repo), Kind: model.KindRepository, Name: Repo, Head: "abc", Time: "2026-01-01T00:00:00Z"})
-	add(model.Node{ID: ID(model.KindFile, "app/app.go"), Kind: model.KindFile, Name: "app.go", File: "app/app.go", LOC: 40, Churn: 3})
+	add(model.Node{ID: ID(model.KindFile, "app/app.go"), Kind: model.KindFile, Name: "app.go", File: "app/app.go", LOC: 40, Churn: 3, Analysis: FileAnalysis})
 	add(model.Node{ID: ID(model.KindFile, "app/app_test.go"), Kind: model.KindFile, Name: "app_test.go", File: "app/app_test.go", LOC: 10, IsTest: true})
 	add(model.Node{ID: ID(model.KindFunction, "app.main"), Kind: model.KindFunction, Name: "main", QualifiedName: "app.main", File: "app/app.go", StartLine: 3, EndLine: 6, Complexity: 1})
 	add(model.Node{ID: ID(model.KindFunction, "app.Handler"), Kind: model.KindFunction, Name: "Handler", QualifiedName: "app.Handler", File: "app/app.go", StartLine: 8, EndLine: 20, Complexity: 7, Exported: true, Summary: "Handler serves."})
@@ -51,10 +54,14 @@ func Fixture() *model.Graph {
 	add(model.Node{ID: ID(model.KindCommit, "c2"), Kind: model.KindCommit, Name: "c2", Time: "2026-01-03T00:00:00Z"})
 
 	edge := func(from, to string, k model.EdgeKind) { g.AddEdge(model.Edge{From: from, To: to, Kind: k}) }
-	edge(ID(model.KindFunction, "app.main"), ID(model.KindFunction, "app.Handler"), model.EdgeCalls)
-	edge(ID(model.KindFunction, "app.Handler"), ID(model.KindInterfaceMethod, "(app.I).Do"), model.EdgeCalls)
-	edge(ID(model.KindInterfaceMethod, "(app.I).Do"), ID(model.KindMethod, "(*app.impl).Do"), model.EdgeDispatchesTo)
-	edge(ID(model.KindMethod, "(*app.impl).Do"), ID(model.KindExternal, "os/exec.Command"), model.EdgeCalls)
+	typed := func(from, to string, k model.EdgeKind) {
+		g.AddEdge(model.Edge{From: from, To: to, Kind: k, Evidence: model.EvidenceTyped})
+	}
+	typed(ID(model.KindFunction, "app.main"), ID(model.KindFunction, "app.Handler"), model.EdgeCalls)
+	typed(ID(model.KindFunction, "app.Handler"), ID(model.KindInterfaceMethod, "(app.I).Do"), model.EdgeCalls)
+	typed(ID(model.KindInterfaceMethod, "(app.I).Do"), ID(model.KindMethod, "(*app.impl).Do"), model.EdgeDispatchesTo)
+	typed(ID(model.KindMethod, "(*app.impl).Do"), ID(model.KindExternal, "os/exec.Command"), model.EdgeCalls)
+	// Written before evidence was recorded: must read back as unknown.
 	edge(ID(model.KindFunction, "app.TestHandler"), ID(model.KindFunction, "app.Handler"), model.EdgeCalls)
 	edge(ID(model.KindFile, "app/app.go"), ID(model.KindFunction, "app.Handler"), model.EdgeDefines)
 	edge(ID(model.KindSection, "README.md#L1"), ID(model.KindFunction, "app.Handler"), model.EdgeMentions)
@@ -175,6 +182,21 @@ func Run(t *testing.T, s store.Store) {
 		require.NoError(t, err)
 		require.Len(t, edges, 1)
 		assert.Equal(t, edges[0].Count, 1)
+		assert.Equal(t, edges[0].Evidence, model.EvidenceTyped)
+	})
+
+	t.Run("edge evidence and analysis", func(t *testing.T) {
+		edges, err := s.Subgraph(ctx, []string{ID(model.KindFunction, "app.TestHandler"), ID(model.KindFunction, "app.Handler")}, nil)
+		require.NoError(t, err)
+		require.Len(t, edges, 1)
+		assert.Equal(t, edges[0].Evidence, model.Evidence(""), "edges without evidence stay unknown")
+		edges, err = s.Subgraph(ctx, []string{ID(model.KindInterfaceMethod, "(app.I).Do"), ID(model.KindMethod, "(*app.impl).Do")}, nil)
+		require.NoError(t, err)
+		require.Len(t, edges, 1)
+		assert.Equal(t, edges[0].Evidence, model.EvidenceTyped)
+		n, err := s.Node(ctx, ID(model.KindFile, "app/app.go"))
+		require.NoError(t, err)
+		assert.Equal(t, n.Analysis, FileAnalysis)
 	})
 
 	t.Run("stats", func(t *testing.T) {

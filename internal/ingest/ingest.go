@@ -181,6 +181,7 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	}
 
 	pruned := g.PruneDanglingEdges()
+	repoNode.Analysis = analysisSummary(g).Encode()
 	cl := cleanup.Analyze(g, extImports)
 	if repoNode.Cleanup, err = cleanup.Encode(cl); err != nil {
 		return nil, fmt.Errorf("encoding cleanup report: %w", err)

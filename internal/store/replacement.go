@@ -53,6 +53,9 @@ func Replacement(ctx context.Context, repo string, g *model.Graph) ([]model.Node
 		if !e.Kind.Valid() {
 			return nil, nil, errors.New("replacement contains an invalid edge kind")
 		}
+		if !e.Evidence.Valid() {
+			return nil, nil, errors.New("replacement contains invalid edge evidence")
+		}
 		if err := measure(e); err != nil {
 			return nil, nil, fmt.Errorf("validate replacement edge: %w", err)
 		}
@@ -61,4 +64,14 @@ func Replacement(ctx context.Context, repo string, g *model.Graph) ([]model.Node
 		}
 	}
 	return nodes, valid, nil
+}
+
+// ReadEvidence converts a stored evidence value. Values this version does not
+// know, including those written by newer versions, read as unknown: never
+// as stronger evidence than was proven.
+func ReadEvidence(s string) model.Evidence {
+	if e := model.Evidence(s); e.Valid() {
+		return e
+	}
+	return ""
 }

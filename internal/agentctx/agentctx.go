@@ -75,6 +75,8 @@ type Ref struct {
 	EntryPoint  bool           `json:"entry_point,omitempty"`
 	Tags        []string       `json:"security_tags,omitempty"`
 	Summary     string         `json:"summary,omitempty"`
+	// Evidence says how a direct caller's or callee's edge was established.
+	Evidence model.Evidence `json:"evidence,omitempty"`
 }
 
 func refOf(n model.Node, depth int, withSummary bool) Ref {
@@ -117,6 +119,7 @@ type SymbolContext struct {
 	Findings        []Ref          `json:"findings,omitempty"`
 	Churn           *Churn         `json:"churn,omitempty"`
 	Package         *PackageCtx    `json:"package,omitempty"`
+	Analysis        *AnalysisNote  `json:"analysis,omitempty"`
 	// Duplicate is set when the function has exact or edited copies elsewhere.
 	Duplicate *duplicates.Info `json:"duplicate,omitempty"`
 	Hint      string           `json:"hint,omitempty"`
@@ -189,6 +192,15 @@ func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts Co
 	}
 	out.Counts.Callees = len(callees)
 	out.Callees = refs(callees, limit, full)
+	if err := s.labelEvidence(ctx, n.ID, direct, out.Callers, callees, out.Callees); err != nil {
+		return out, err
+	}
+	if err := s.labelEvidence(ctx, n.ID, tests, out.Tests, nil, nil); err != nil {
+		return out, err
+	}
+	if out.Analysis, err = s.analysisOf(ctx, repo, n); err != nil {
+		return out, err
+	}
 
 	impls, err := s.Implementations(ctx, repo, n.ID, limit)
 	if err == nil && len(impls.Results) > 0 {

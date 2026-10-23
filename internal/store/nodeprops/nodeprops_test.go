@@ -12,7 +12,7 @@ func TestPropsRoundTrip(t *testing.T) {
 	n := model.Node{
 		ID: "r|Function|f", Kind: model.KindFunction, Repo: "r", Name: "f", QualifiedName: "p.f",
 		SymbolID: "sym-0123456789abcdef0123456789abcdef", Revision: "abc", Identities: `{"version":1}`,
-		File: "a.go", StartLine: 3, EndLine: 9, Complexity: 4, Exported: true, SecurityTags: []string{"exec", "sql"}, CloneHash: "0123456789abcdef", CloneSig: "00ff", DocType: "adr", Status: "accepted", Meta: `{"owner":"x"}`,
+		File: "a.go", StartLine: 3, EndLine: 9, Complexity: 4, Exported: true, SecurityTags: []string{"exec", "sql"}, CloneHash: "0123456789abcdef", CloneSig: "00ff", DocType: "adr", Status: "accepted", Meta: `{"owner":"x"}`, Analysis: `{"version":1}`,
 	}
 	p := To(n)
 	_, hasSummary := p["summary"]

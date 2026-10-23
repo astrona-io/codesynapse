@@ -95,7 +95,7 @@ CALL {
  MATCH (a)-[e]->(b:Node {repo:$repo})
  WHERE b IN nodes AND (size($kinds)=0 OR type(e) IN $kinds)
  WITH a,e,b ORDER BY a.id,b.id,type(e) LIMIT $limit
- RETURN collect({from:a.id,to:b.id,kind:type(e),count:coalesce(e.count,1)}) AS edges
+ RETURN collect({from:a.id,to:b.id,kind:type(e),count:coalesce(e.count,1),evidence:coalesce(e.evidence,'')}) AS edges
 }
 RETURN size(nodes)=size($ids) AS found,edges`, map[string]any{"repo": repo, "ids": ids, "kinds": edgeStrings(kinds), "limit": store.MaxSubgraphEdges})
 	if err != nil {
@@ -120,7 +120,8 @@ RETURN size(nodes)=size($ids) AS found,edges`, map[string]any{"repo": repo, "ids
 		to, _ := m["to"].(string)
 		kind, _ := m["kind"].(string)
 		count, _ := m["count"].(int64)
-		out = append(out, model.Edge{From: from, To: to, Kind: model.EdgeKind(kind), Count: int(count)})
+		evidence, _ := m["evidence"].(string)
+		out = append(out, model.Edge{From: from, To: to, Kind: model.EdgeKind(kind), Count: int(count), Evidence: store.ReadEvidence(evidence)})
 	}
 	return out, nil
 }

@@ -312,7 +312,7 @@ def out = []
 g.V(ids as Object[]).toList().each { a ->
   a.edges(Direction.OUT, labels as String[]).each { e ->
     def b = e.inVertex()
-    if (want.contains(b.id().toString())) { out << [a.value('nid'), b.value('nid'), e.label(), e.property('count').orElse(1L)] }
+    if (want.contains(b.id().toString())) { out << [a.value('nid'), b.value('nid'), e.label(), e.property('count').orElse(1L), e.property('evidence').orElse('')] }
   }
 }
 out`
@@ -388,7 +388,7 @@ func (s *Store) Subgraph(ctx context.Context, ids []string, kinds []model.EdgeKi
 		from, _ := r[0].(string)
 		to, _ := r[1].(string)
 		kind, _ := r[2].(string)
-		out = append(out, model.Edge{From: from, To: to, Kind: model.EdgeKind(kind), Count: nodeprops.Int(r[3])})
+		out = append(out, model.Edge{From: from, To: to, Kind: model.EdgeKind(kind), Count: nodeprops.Int(r[3]), Evidence: rowEvidence(r)})
 	}
 	slices.SortFunc(out, func(a, b model.Edge) int {
 		return cmp.Or(cmp.Compare(a.From, b.From), cmp.Compare(a.To, b.To), cmp.Compare(a.Kind, b.Kind))
