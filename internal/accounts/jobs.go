@@ -15,7 +15,8 @@ import (
 // requester's session, membership and permission are checked again then.
 // A process owns a job through a lease it renews while the job waits or
 // runs; a job whose lease expired belongs to a process that stopped and
-// can be claimed by another.
+// can be claimed by another. A job queued for workers has no owner and an
+// expired lease from the start, so the first worker of its kind claims it.
 
 // Job states.
 const (
@@ -76,7 +77,7 @@ func (j JobRecord) Active() bool { return j.State == JobQueued || j.State == Job
 func ValidateJob(j JobRecord) error {
 	if j.ID == "" || len(j.ID) > 64 || j.Kind == "" || len(j.Kind) > 32 || j.Repo == "" || len(j.Repo) > 300 ||
 		j.OrgID == "" || j.ActorID == "" || !j.Role.Valid() || len(j.Params) > MaxJobParams ||
-		j.State != JobQueued || j.LeaseOwner == "" || j.CreatedAt.IsZero() {
+		j.State != JobQueued || j.CreatedAt.IsZero() {
 		return ErrInvalidInput
 	}
 	if err := execution.Validate(j.Execution); err != nil || j.Execution.TenantID != j.OrgID || j.Execution.SubjectID != j.ActorID {

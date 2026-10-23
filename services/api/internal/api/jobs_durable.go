@@ -24,7 +24,37 @@ import (
 const (
 	jobLease     = 2 * time.Minute
 	jobHeartbeat = 30 * time.Second
+	// jobPoll is how often an idle process looks for work.
+	jobPoll = 2 * time.Second
 )
+
+// Job roles (docs/SAAS.md, 5e): which durable job kinds a process runs. The
+// API with workers runs none and only records jobs; a worker runs its roles;
+// a process on its own (development, tests) runs all of them.
+var jobRoles = map[string][]string{
+	"ingest": {"sync", "clone", "switch"},
+	"ai":     {"ai", "ai-auto"},
+	"fix":    {"fix"},
+}
+
+// JobRoles lists the roles a worker can take.
+func JobRoles() []string { return []string{"ingest", "ai", "fix"} }
+
+// kindsFor turns roles into job kinds; nil roles mean every kind.
+func kindsFor(roles []string) ([]string, error) {
+	if roles == nil {
+		roles = JobRoles()
+	}
+	kinds := []string{}
+	for _, r := range roles {
+		k, ok := jobRoles[r]
+		if !ok {
+			return nil, fmt.Errorf("unknown job role %q (want ingest, ai or fix)", r)
+		}
+		kinds = append(kinds, k...)
+	}
+	return kinds, nil
+}
 
 // jobStore is what the runner needs from the accounts store.
 type jobStore interface {
@@ -34,7 +64,7 @@ type jobStore interface {
 	StartJob(ctx context.Context, id, owner string, leaseUntil, now time.Time) error
 	RenewJobLeases(ctx context.Context, owner string, until time.Time) error
 	FinishJob(ctx context.Context, id, owner string, out accounts.JobOutcome) error
-	ClaimOrphanedJob(ctx context.Context, owner string, leaseUntil, now time.Time) (accounts.JobRecord, bool, error)
+	ClaimOrphanedJob(ctx context.Context, owner string, kinds []string, leaseUntil, now time.Time) (accounts.JobRecord, bool, error)
 }
 
 // durableJob describes a job well enough to rebuild it after a restart.
@@ -129,33 +159,41 @@ func fromRecord(r accounts.JobRecord) Job {
 	return job
 }
 
-// resumeJobs starts again the jobs whose process stopped: at start-up and
-// then every heartbeat, it claims jobs with an expired lease, rebuilds the
-// requester's context (session, key, membership and repository permission
-// checked now, not trusted from the record) and restarts the work through
-// the function that built it. Fix jobs are never restarted: a second run
-// could push a second branch.
-func (s *Server) resumeJobs(ctx context.Context) {
-	t := time.NewTicker(jobHeartbeat)
+// runQueue claims jobs of the kinds this process runs: those queued for
+// workers and those a stopped process left behind. It claims only while
+// idle, so several workers share the work, then starts each job through the
+// function that built it, with the requester's context rebuilt and their
+// session, account, key, membership and permission checked again (never
+// trusted from the record). An interrupted fix is never restarted: a
+// second run could push a second branch.
+func (s *Server) runQueue(ctx context.Context) {
+	t := time.NewTicker(jobPoll)
 	defer t.Stop()
 	for {
-		for ctx.Err() == nil {
+		for ctx.Err() == nil && s.jobs.idle() {
 			now := time.Now().UTC()
-			rec, found, err := s.jobs.store.ClaimOrphanedJob(ctx, s.jobs.owner, now.Add(jobLease), now)
+			rec, found, err := s.jobs.store.ClaimOrphanedJob(ctx, s.jobs.owner, s.jobs.kinds, now.Add(jobLease), now)
 			if err != nil {
-				s.logger.Warn("claiming interrupted jobs", "error", err)
+				s.logger.Warn("claiming jobs", "error", err)
 				break
 			}
 			if !found {
 				break
 			}
+			what := "job started"
+			if rec.Attempts > 0 {
+				what = "interrupted job resumed"
+			}
 			if err := s.resumeJob(ctx, rec); err != nil {
-				s.logger.Warn("interrupted job not resumed", "job", rec.ID, "kind", rec.Kind, "repo", rec.Repo, "error", err)
-				s.jobs.recordEnd(ctx, rec.ID, accounts.JobOutcome{State: accounts.JobFailed, At: time.Now().UTC(),
-					Error: "interrupted by a restart and not resumed: " + err.Error()})
+				s.logger.Warn("job not started", "job", rec.ID, "kind", rec.Kind, "repo", rec.Repo, "error", err)
+				reason := "not started: "
+				if rec.Attempts > 0 {
+					reason = "interrupted by a restart and not resumed: "
+				}
+				s.jobs.recordEnd(ctx, rec.ID, accounts.JobOutcome{State: accounts.JobFailed, At: time.Now().UTC(), Error: reason + err.Error()})
 				continue
 			}
-			s.logger.Info("interrupted job resumed", "job", rec.ID, "kind", rec.Kind, "repo", rec.Repo, "attempt", rec.Attempts+1)
+			s.logger.Info(what, "job", rec.ID, "kind", rec.Kind, "repo", rec.Repo, "attempt", rec.Attempts+1)
 		}
 		select {
 		case <-ctx.Done():
@@ -166,7 +204,7 @@ func (s *Server) resumeJobs(ctx context.Context) {
 }
 
 func (s *Server) resumeJob(ctx context.Context, rec accounts.JobRecord) error {
-	if rec.Kind == "fix" {
+	if rec.Kind == "fix" && rec.Attempts > 0 {
 		return errors.New("fix branches are not restarted automatically; start the fix again")
 	}
 	jobCtx, err := s.jobContext(ctx, rec)
@@ -181,7 +219,8 @@ func (s *Server) resumeJob(ctx context.Context, rec accounts.JobRecord) error {
 			return err
 		}
 		var done func(error)
-		if p.Scheduled {
+		// A worker leaves the schedule file to the API, which owns it.
+		if p.Scheduled && !s.cfg.Worker {
 			repo := rec.Repo
 			done = func(err error) { s.sched.finished(repo, time.Now(), err) }
 		}
@@ -225,6 +264,12 @@ func (s *Server) resumeJob(ctx context.Context, rec accounts.JobRecord) error {
 			return err
 		}
 		_, err = s.startAITask(jobCtx, rec.Repo, p)
+	case "fix":
+		var p fixParams
+		if err := json.Unmarshal(rec.Params, &p); err != nil {
+			return err
+		}
+		_, err = s.startFix(jobCtx, p)
 	case "ai-auto":
 		var p autoAIParams
 		if err := json.Unmarshal(rec.Params, &p); err != nil {

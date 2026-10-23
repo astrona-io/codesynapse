@@ -192,6 +192,23 @@ func (s *Server) pushAuth(r *http.Request, graph, remote string) (gitx.Auth, err
 	return auth, nil
 }
 
+// pushAuthFor is pushAuth for a context without a request (workers): the
+// organisation comes from the one repository in scope.
+func (s *Server) pushAuthFor(ctx context.Context, graph, remote string) (gitx.Auth, error) {
+	if s.cfg.Accounts == nil {
+		return s.authFor(remote), nil
+	}
+	reach, ok := scopeFrom(ctx).reach[graph]
+	if !ok || reach.Ambiguous || reach.OrgID == "" {
+		return gitx.Auth{}, accounts.ErrNotFound
+	}
+	auth, err := s.orgAuth(ctx, reach.OrgID, remote)
+	if err != nil {
+		return gitx.Auth{}, errors.New("pushing a fix branch needs your organisation's Git token for " + hostOf(remote))
+	}
+	return auth, nil
+}
+
 // syncAuth uses only the selected tenant's credentials in accounts mode.
 func (s *Server) syncAuth(ctx context.Context, graph, remote string) gitx.Auth {
 	if s.cfg.Accounts == nil {

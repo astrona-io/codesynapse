@@ -60,34 +60,52 @@ func (s *Server) handleFixReview(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	n, err := s.st.Node(r.Context(), model.NodeID(rv.Repo, model.KindRepository, rv.Repo))
+	job, err := s.startFix(r.Context(), fixParams{ReviewID: rv.ID, CommentIDs: req.CommentIDs, Provider: req.Provider}) //nolint:contextcheck // jobs outlive the request
 	if err != nil {
-		s.problem(w, 500, err)
+		s.jobError(w, err)
 		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+// fixParams rebuild a fix job in a worker (jobs_durable.go).
+type fixParams struct {
+	ReviewID   string   `json:"review"`
+	CommentIDs []string `json:"comments"`
+	Provider   string   `json:"provider,omitempty"`
+}
+
+// startFix queues a fix of p's comments as the requester in ctx. Everything
+// is checked again from the stored review and repository: the review must
+// still match the indexed head, and the push credentials are the
+// organisation's own.
+func (s *Server) startFix(ctx context.Context, p fixParams) (Job, error) {
+	rv, err := s.st.GetReview(ctx, p.ReviewID)
+	if err != nil {
+		return Job{}, err
+	}
+	n, err := s.st.Node(ctx, model.NodeID(rv.Repo, model.KindRepository, rv.Repo))
+	if err != nil {
+		return Job{}, err
 	}
 	if !s.inWorkspace(n.Root) {
-		s.problem(w, 400, errors.New("fix branches need a repository added by URL; mounted sources are never pushed from"))
-		return
+		return Job{}, fmt.Errorf("%w: fix branches need a repository added by URL; mounted sources are never pushed from", errBadRequest)
 	}
 	if n.Branch == "" || n.Head == "" {
-		s.problem(w, 400, errors.New("sync the repository first: its branch and head commit are unknown"))
-		return
+		return Job{}, fmt.Errorf("%w: sync the repository first: its branch and head commit are unknown", errBadRequest)
 	}
 	if err := fixes.ValidateRevision(rv, n.Head); err != nil {
-		s.problem(w, http.StatusConflict, err)
-		return
+		return Job{}, fmt.Errorf("%w: %w", errConflict, err)
 	}
-	remote, err := gitx.ValidateRemote(r.Context(), n.URL, gitx.RemoteOptions{AllowPrivate: s.cfg.AllowPrivateGit})
+	remote, err := gitx.ValidateRemote(ctx, n.URL, gitx.RemoteOptions{AllowPrivate: s.cfg.AllowPrivateGit})
 	if err != nil {
-		s.problem(w, 400, err)
-		return
+		return Job{}, fmt.Errorf("%w: %w", errBadRequest, err)
 	}
-	auth, err := s.pushAuth(r, rv.Repo, remote)
+	auth, err := s.pushAuthFor(ctx, rv.Repo, remote)
 	if err != nil {
-		s.problem(w, http.StatusForbidden, err)
-		return
+		return Job{}, fmt.Errorf("%w: %w", accounts.ErrForbidden, err)
 	}
-	org, authorize := s.jobAuthorization(r.Context(), rv.Repo, accounts.Member)
+	org, authorize := s.jobAuthorization(ctx, rv.Repo, accounts.Member)
 	runner := fixes.Runner{Authorize: authorize, St: s.st, LLM: s.cfg.LLM, Auth: auth, Author: s.cfg.GitAuthor,
 		Workdir: filepath.Join(s.cfg.Workspace, ".codesynapse", "fixes"),
 		CurrentRevision: func(ctx context.Context) (string, error) {
@@ -95,15 +113,13 @@ func (s *Server) handleFixReview(w http.ResponseWriter, r *http.Request) {
 			return current.Head, err
 		},
 	}
-	in := fixes.Request{ValidationVersion: fixes.ValidationVersion, ReviewID: rv.ID, CommentIDs: req.CommentIDs, Provider: req.Provider, Root: n.Root, Remote: remote, Base: n.Head, BaseBranch: n.Branch}
-	// Recorded for history, never resumed: a restarted fix could push twice.
-	d, err := s.durableIf(r.Context(), "fix", accounts.Member, map[string]string{"review": rv.ID})
+	in := fixes.Request{ValidationVersion: fixes.ValidationVersion, ReviewID: rv.ID, CommentIDs: p.CommentIDs, Provider: p.Provider, Root: n.Root, Remote: remote, Base: n.Head, BaseBranch: n.Branch}
+	d, err := s.durableIf(ctx, "fix", accounts.Member, p)
 	if err != nil {
-		s.problem(w, http.StatusInternalServerError, err)
-		return
+		return Job{}, err
 	}
 	job, err := s.jobs.Start(rv.Repo, "", JobOptions{ //nolint:contextcheck // jobs outlive the request
-		Kind: "fix", Task: fixes.Task, OrgID: org, Identity: identityOf(r.Context()), Authorize: authorize, Durable: d,
+		Kind: "fix", Task: fixes.Task, OrgID: org, Identity: identityOf(ctx), Authorize: authorize, Durable: d,
 		Run: func(ctx context.Context) (string, error) {
 			res, err := runner.Run(ctx, in)
 			if res.PRURL != "" {
@@ -113,21 +129,58 @@ func (s *Server) handleFixReview(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	if err != nil {
-		s.problem(w, http.StatusConflict, err)
-		return
+		return Job{}, fmt.Errorf("%w: %w", errConflict, err)
 	}
-	// Shown until the job gets its turn and the runner marks it running.
-	reviews.SetFix(&rv, req.CommentIDs, reviews.Fix{State: reviews.FixQueued, Job: job.ID}, time.Now())
-	if err := s.st.SaveReview(r.Context(), rv); err != nil {
-		s.logger.Warn("fix queued state not saved", "review", rv.ID, "error", err)
+	if d == nil || d.resume == nil {
+		// Shown until the job gets its turn and the runner marks it running.
+		reviews.SetFix(&rv, p.CommentIDs, reviews.Fix{State: reviews.FixQueued, Job: job.ID}, time.Now())
+		if err := s.st.SaveReview(ctx, rv); err != nil {
+			s.logger.Warn("fix queued state not saved", "review", rv.ID, "error", err)
+		}
 	}
-	writeJSON(w, http.StatusAccepted, job)
+	return job, nil
 }
 
-// recoverFixes marks fixes that were queued or running when the API stopped
-// as failed: fix jobs are never restarted (a second run could push twice),
-// so nothing will finish them.
+// jobError maps errors from the start functions to statuses.
+func (s *Server) jobError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errBadRequest):
+		s.problem(w, http.StatusBadRequest, err)
+	case errors.Is(err, accounts.ErrForbidden):
+		s.problem(w, http.StatusForbidden, err)
+	case errors.Is(err, errConflict):
+		s.problem(w, http.StatusConflict, err)
+	default:
+		s.problem(w, http.StatusInternalServerError, err)
+	}
+}
+
+// recoverFixes marks fixes as failed whose job will never finish them. Fix
+// jobs are never restarted (a second run could push twice). Without durable
+// jobs every queued or running fix died with the process, so this runs once
+// at start-up; with them, a fix is stuck only when its job record has ended
+// (a worker may still be running it), so this checks every minute.
 func (s *Server) recoverFixes(ctx context.Context) {
+	if s.jobs == nil || s.jobs.store == nil {
+		s.failStuckFixes(ctx, func(string) bool { return true })
+		return
+	}
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		s.failStuckFixes(ctx, func(job string) bool {
+			rec, err := s.jobs.store.JobByID(ctx, job)
+			return err == nil && !rec.Active()
+		})
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (s *Server) failStuckFixes(ctx context.Context, stuck func(job string) bool) {
 	repos, err := s.st.Repos(ctx)
 	if err != nil {
 		return
@@ -140,14 +193,14 @@ func (s *Server) recoverFixes(ctx context.Context) {
 		for _, rv := range list {
 			var ids []string
 			for _, c := range rv.Comments {
-				if c.Fix != nil && (c.Fix.State == reviews.FixQueued || c.Fix.State == reviews.FixRunning) {
+				if c.Fix != nil && (c.Fix.State == reviews.FixQueued || c.Fix.State == reviews.FixRunning) && stuck(c.Fix.Job) {
 					ids = append(ids, c.ID)
 				}
 			}
 			if len(ids) == 0 {
 				continue
 			}
-			reviews.SetFix(&rv, ids, reviews.Fix{State: reviews.FixFailed, Error: "Interrupted: CodeSynapse restarted before the fix finished. Try again."}, time.Now())
+			reviews.SetFix(&rv, ids, reviews.Fix{State: reviews.FixFailed, Error: "Interrupted: the fix did not finish (CodeSynapse restarted or the job ended). Try again."}, time.Now())
 			if err := s.st.SaveReview(ctx, rv); err == nil {
 				s.logger.Info("interrupted fixes marked failed", "review", rv.ID, "comments", len(ids))
 			}

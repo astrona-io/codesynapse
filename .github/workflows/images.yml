@@ -1,6 +1,6 @@
 name: Images
 
-# Container images for api, mcp and web (docs/SAAS.md, 5d).
+# Container images for api, worker, mcp and web (docs/SAAS.md, 5d and 5e).
 # Pull requests and merges to main build and scan only. Images are published
 # only by a release: a vX.Y.Z or vX.Y.Z-rcN tag on a commit that is on main.
 # They go to ghcr.io multi-arch with SBOM and provenance, signed with cosign
@@ -38,7 +38,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [api, mcp, web]
+        service: [api, worker, mcp, web]
+        # worker is a target of the API's Dockerfile (docs/SAAS.md, 5e).
+        include:
+          - {service: api, dockerfile: services/api/Dockerfile, target: api}
+          - {service: worker, dockerfile: services/api/Dockerfile, target: worker}
+          - {service: mcp, dockerfile: services/mcp/Dockerfile, target: ''}
+          - {service: web, dockerfile: services/web/Dockerfile, target: ''}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -49,7 +55,8 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: services/${{ matrix.service }}/Dockerfile
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           platforms: linux/amd64
           load: true
           tags: codesynapse-${{ matrix.service }}:scan
@@ -72,7 +79,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [api, mcp, web]
+        service: [api, worker, mcp, web]
+        # worker is a target of the API's Dockerfile (docs/SAAS.md, 5e).
+        include:
+          - {service: api, dockerfile: services/api/Dockerfile, target: api}
+          - {service: worker, dockerfile: services/api/Dockerfile, target: worker}
+          - {service: mcp, dockerfile: services/mcp/Dockerfile, target: ''}
+          - {service: web, dockerfile: services/web/Dockerfile, target: ''}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -113,7 +126,8 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: services/${{ matrix.service }}/Dockerfile
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

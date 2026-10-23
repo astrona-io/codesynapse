@@ -141,15 +141,18 @@ registry := env("REGISTRY", "ghcr.io/astrona-io")
 platform := env("PLATFORM", "")
 engine := env("CONTAINER_ENGINE", `if command -v docker >/dev/null 2>&1; then echo docker; elif command -v podman >/dev/null 2>&1; then echo podman; else echo missing-container-runtime; fi`)
 
-# Build the api, mcp and web images, tagged codesynapse-<svc>:<tag> and <registry>/codesynapse-<svc>:<tag>. PLATFORM=linux/amd64 for a cluster of another architecture.
+# Build the api, worker, mcp and web images, tagged codesynapse-<svc>:<tag> and <registry>/codesynapse-<svc>:<tag>. PLATFORM=linux/amd64 for a cluster of another architecture.
 image-build tag="dev":
     #!/usr/bin/env sh
     set -eu
     p="{{platform}}"; plat=""; [ -z "$p" ] || plat="--platform $p"
-    for svc in api mcp; do
-        {{engine}} build $plat --build-arg VERSION={{version}} -f services/$svc/Dockerfile \
+    # api and worker are two targets of one Dockerfile (docs/SAAS.md, 5e).
+    for svc in api worker; do
+        {{engine}} build $plat --build-arg VERSION={{version}} --target $svc -f services/api/Dockerfile \
             -t codesynapse-$svc:{{tag}} -t {{registry}}/codesynapse-$svc:{{tag}} .
     done
+    {{engine}} build $plat --build-arg VERSION={{version}} -f services/mcp/Dockerfile \
+        -t codesynapse-mcp:{{tag}} -t {{registry}}/codesynapse-mcp:{{tag}} .
     {{engine}} build $plat -f services/web/Dockerfile -t codesynapse-web:{{tag}} -t {{registry}}/codesynapse-web:{{tag}} .
 
 # Scan a built image for fixable HIGH/CRITICAL vulnerabilities (.trivyignore). Works the same with Docker and Podman: the image is saved and scanned as a file.
@@ -165,14 +168,14 @@ scan-image image:
 image-push tag="dev":
     #!/usr/bin/env sh
     set -eu
-    for svc in api mcp web; do {{engine}} push {{registry}}/codesynapse-$svc:{{tag}}; done
+    for svc in api worker mcp web; do {{engine}} push {{registry}}/codesynapse-$svc:{{tag}}; done
 
 # Load the dev images into a local kind cluster
 image-load-kind tag="dev" cluster="kind":
     #!/usr/bin/env sh
     set -eu
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-    for svc in api mcp web; do
+    for svc in api worker mcp web; do
         {{engine}} save -o "$tmp/$svc.tar" {{registry}}/codesynapse-$svc:{{tag}}
         kind load image-archive "$tmp/$svc.tar" --name {{cluster}}
     done

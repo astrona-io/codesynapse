@@ -1,14 +1,16 @@
-// Command codesynapse-api serves the JSON API used by the web dashboard and
-// runs ingest jobs for repositories under the sources root.
+// Command codesynapse-api serves the JSON API used by the web dashboard
+// (serve) and runs jobs: in the same process, or in workers (worker).
 package main
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -29,7 +31,9 @@ const EnvToken = "CODESYNAPSE_API_TOKEN" //nolint:gosec // env var name
 
 func main() {
 	os.Exit(app.Main("codesynapse-api", "HTTP API for the codesynapse dashboard", version,
-		func(ec *app.Env) []*cobra.Command { return []*cobra.Command{serveCmd(ec), designateRootCmd(ec)} }))
+		func(ec *app.Env) []*cobra.Command {
+			return []*cobra.Command{serveCmd(ec), workerCmd(ec), designateRootCmd(ec)}
+		}))
 }
 
 type serveOptions struct {
@@ -44,12 +48,23 @@ type serveOptions struct {
 	dataflow    bool
 	workspace   string
 	llmConfig   string
+	// worker runs jobs of roles only (codesynapse-api worker); runJobs lets
+	// serve run jobs itself, as it does without workers.
+	worker  bool
+	roles   []string
+	runJobs bool
 }
 
 func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f := o.EC.Command.Flags()
 	o.graph.AddFlags(f)
-	f.StringVar(&o.addr, "addr", app.Getenv("CODESYNAPSE_API_ADDR", "127.0.0.1:8080"), "Listen address")
+	if o.worker {
+		f.StringVar(&o.addr, "addr", app.Getenv("CODESYNAPSE_WORKER_ADDR", "127.0.0.1:8081"), "Listen address of the health endpoint")
+		f.StringSliceVar(&o.roles, "roles", strings.Split(app.Getenv("CODESYNAPSE_WORKER_ROLES", strings.Join(api.JobRoles(), ",")), ","), "Job roles to run: ingest, ai, fix")
+	} else {
+		f.StringVar(&o.addr, "addr", app.Getenv("CODESYNAPSE_API_ADDR", "127.0.0.1:8080"), "Listen address")
+		f.BoolVar(&o.runJobs, "run-jobs", app.Getenv("CODESYNAPSE_RUN_JOBS", "true") == "true", "Run jobs in this process; false records them for codesynapse-api worker")
+	}
 	f.StringVar(&o.sources, "sources-root", app.Getenv("CODESYNAPSE_SOURCES_ROOT", ""), "Directory whose subdirectories may be ingested")
 	f.IntVar(&o.commitLimit, "commits", 500, "Commits to index per ingest")
 	f.StringVar(&o.llmConfig, "llm-config", app.Getenv("CODESYNAPSE_LLM_CONFIG", "config/llm.yaml"), "AI provider configuration (YAML); optional")
@@ -78,6 +93,9 @@ func (o *serveOptions) Complete(context.Context, *app.Env) error {
 }
 
 func (o *serveOptions) Validate(context.Context, *app.Env) error {
+	if o.worker && os.Getenv(EnvDatabaseURL) == "" {
+		return fmt.Errorf("a worker takes its jobs from the accounts database: set %s", EnvDatabaseURL)
+	}
 	// With accounts every request is authenticated; without them the one
 	// bearer token is the only lock.
 	if os.Getenv(EnvToken) == "" && os.Getenv(EnvDatabaseURL) == "" && !app.IsLoopback(o.addr) {
@@ -136,7 +154,14 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return fmt.Errorf("CODESYNAPSE_GIT_TOKENS: %w", err)
 	}
-	srv := api.New(ctx, api.Config{GitAuths: gitAuths, LLM: registry, SourcesRoot: o.sources, CommitLimit: o.commitLimit, AllowNetwork: o.network, VulnScan: o.vulnScan, LicenseLookup: o.licenses, Dataflow: o.dataflow, Version: version,
+	var roles []string // all: this process runs every job
+	switch {
+	case o.worker:
+		roles = o.roles
+	case !o.runJobs:
+		roles = []string{} // none: workers run them
+	}
+	srv := api.New(ctx, api.Config{JobRoles: roles, Worker: o.worker, GitAuths: gitAuths, LLM: registry, SourcesRoot: o.sources, CommitLimit: o.commitLimit, AllowNetwork: o.network, VulnScan: o.vulnScan, LicenseLookup: o.licenses, Dataflow: o.dataflow, Version: version,
 		Workspace: o.workspace, AllowPrivateGit: app.Getenv("CODESYNAPSE_ALLOW_PRIVATE_GIT", "") == "true",
 		GitAuth:   gitx.Auth{Host: app.Getenv("CODESYNAPSE_GIT_TOKEN_HOST", "github.com"), Token: os.Getenv("CODESYNAPSE_GIT_TOKEN")},
 		AllowPush: app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true",
@@ -146,11 +171,28 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		TrustedProxies: trusted, PublicMCPURL: app.Getenv("CODESYNAPSE_PUBLIC_MCP_URL", "http://localhost:8090/mcp"),
 		PublicURL: app.Getenv("CODESYNAPSE_PUBLIC_URL", "http://localhost:3000"), SSOAllowPrivate: app.Getenv("CODESYNAPSE_SSO_ALLOW_PRIVATE", "") == "true",
 		GitAuthor: gitx.Author{Name: app.Getenv("CODESYNAPSE_GIT_AUTHOR_NAME", "CodeSynapse"), Email: app.Getenv("CODESYNAPSE_GIT_AUTHOR_EMAIL", "codesynapse@localhost")}}, st, o.EC.Logger)
-	o.EC.Logger.Info("api listening", "addr", o.addr, "sources_root", o.sources, "auth", os.Getenv(EnvToken) != "", "accounts", acc != nil)
+	if o.worker {
+		// Jobs only; the health endpoint is for probes.
+		o.EC.Logger.Info("worker running", "roles", roles, "health", o.addr)
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) }) //nolint:errcheck // health probe
+		return app.Serve(ctx, app.NewServer(o.addr, mux))
+	}
+	o.EC.Logger.Info("api listening", "addr", o.addr, "sources_root", o.sources, "auth", os.Getenv(EnvToken) != "", "accounts", acc != nil, "run_jobs", o.runJobs)
 	if acc != nil {
 		return app.Serve(ctx, app.NewServer(o.addr, srv)) // the server authenticates every request itself
 	}
 	return app.Serve(ctx, app.NewServer(o.addr, app.RequireBearer(os.Getenv(EnvToken), srv)))
+}
+
+func workerCmd(ec *app.Env) *cobra.Command {
+	o := &serveOptions{EC: ec, worker: true}
+	return app.NewSubCommand("worker", o, ec).
+		WithShortDesc("Run jobs (clone, sync, index, AI tasks, fixes) that the API records").
+		WithLongDesc("Claims queued jobs of its roles from the accounts database and runs them as the person who asked, with their access checked again. Several workers share the work; a job a stopped worker left behind is picked up after its lease expires. Run the API with --run-jobs=false (CODESYNAPSE_RUN_JOBS=false) so it only records jobs.").
+		WithGroupID(app.GroupBase).
+		WithNoArgs().
+		Build()
 }
 
 func serveCmd(ec *app.Env) *cobra.Command {

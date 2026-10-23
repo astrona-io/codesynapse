@@ -108,13 +108,13 @@ ORDER BY created_at DESC OFFSET $1)`, accounts.JobHistory)
 
 // ClaimOrphanedJob implements accounts.Store. SKIP LOCKED lets several
 // processes look at once without claiming the same job.
-func (s *Store) ClaimOrphanedJob(ctx context.Context, owner string, leaseUntil, now time.Time) (accounts.JobRecord, bool, error) {
+func (s *Store) ClaimOrphanedJob(ctx context.Context, owner string, kinds []string, leaseUntil, now time.Time) (accounts.JobRecord, bool, error) {
 	for {
 		var claimed accounts.JobRecord
 		found, retry := false, false
 		err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
-			j, err := scanJob(tx.QueryRow(ctx, "SELECT "+jobCols+` FROM jobs WHERE state IN ('queued', 'running') AND lease_until < $1
-ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`, now))
+			j, err := scanJob(tx.QueryRow(ctx, "SELECT "+jobCols+` FROM jobs WHERE state IN ('queued', 'running') AND lease_until < $1 AND ($2::text[] IS NULL OR kind = ANY($2))
+ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`, now, kinds))
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
 			}
