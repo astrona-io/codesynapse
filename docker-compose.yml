@@ -27,7 +27,7 @@ services:
   # CODESYNAPSE_GRAPH_BACKEND=hugegraph). Gremlin runs Groovy on the server,
   # so HugeGraph always has a password and is never published to the host.
   hugegraph:
-    image: docker.io/hugegraph/hugegraph:1.5.0
+    image: docker.io/hugegraph/hugegraph:1.7.0
     profiles: [hugegraph]
     # Without a password the image would start in no-auth mode: refuse instead.
     # The image enables auth by editing its config files once and records
