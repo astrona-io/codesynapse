@@ -264,15 +264,18 @@ func parseJS(src []byte, _ bool) *fileResult {
 		}
 	}
 
-	// Attribute calls and findings to the innermost symbol containing the line.
-	owner := func(line int) *symbol {
-		var best *symbol
-		for _, s := range fr.symbols {
-			if s.kind != model.KindType && line >= s.start && line <= s.end && (best == nil || s.start >= best.start) {
-				best = s
+	// Attribute calls and findings to the innermost symbol containing the
+	// line. Filling a table once replaces a scan of every symbol per line.
+	owners := make([]*symbol, len(lines)+1)
+	for _, s := range fr.symbols {
+		if s.kind == model.KindType {
+			continue
+		}
+		for line := max(s.start, 1); line <= min(s.end, len(lines)); line++ {
+			if best := owners[line]; best == nil || s.start >= best.start {
+				owners[line] = s
 			}
 		}
-		return best
 	}
 	childProcess := false
 	for _, imp := range fr.imports {
@@ -282,7 +285,7 @@ func parseJS(src []byte, _ bool) *fileResult {
 	}
 	for i, l := range lines {
 		n := i + 1
-		o := owner(n)
+		o := owners[n]
 		for _, m := range jsCall.FindAllStringSubmatch(l, -1) {
 			if jsKeyword[m[2]] || (m[1] == "" && isDeclLine(l, m[2])) {
 				continue

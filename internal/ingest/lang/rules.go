@@ -45,22 +45,61 @@ var (
 	secretNameRe = regexp.MustCompile(`(?i)(passw(or)?d|passwd|secret|token|api[_-]?key|apikey|private[_-]?key|access[_-]?key|credential)`)
 	placeholder  = regexp.MustCompile(`(?i)^(x+|\*+|changeme|change-me.*|example.*|dummy|test|password|secret|token|redacted|todo|none|null|<.*>|\$\{.*\}|your[-_].*)$`)
 
-	pySubprocess = regexp.MustCompile(`\bsubprocess\.(run|call|Popen|check_output|check_call)\s*\(`)
-	pyShellTrue  = regexp.MustCompile(`shell\s*=\s*True`)
-	pyOsSystem   = regexp.MustCompile(`\bos\.(system|popen)\s*\(`)
-	pyEval       = regexp.MustCompile(`(^|[^\w.])(eval|exec)\s*\(`)
-	pyPickle     = regexp.MustCompile(`\b(pickle|cPickle|dill|marshal|joblib)\.loads?\s*\(|\bshelve\.open\s*\(`)
-	pyYamlLoad   = regexp.MustCompile(`\byaml\.(load|load_all|unsafe_load)\s*\(`)
-	pyVerify     = regexp.MustCompile(`verify\s*=\s*False|_create_unverified_context|CERT_NONE`)
-	pyWeakHash   = regexp.MustCompile(`\bhashlib\.(md5|sha1)\s*\(|hashlib\.new\(\s*['"](md5|sha1)['"]`)
-	pyExecute    = regexp.MustCompile(`\.(execute|executemany|raw|executescript)\s*\(\s*(f["']|["'][^"']*["']\s*(%|\.format|\+))`)
-	pyDebug      = regexp.MustCompile(`\.run\([^)]*debug\s*=\s*True|DEBUG\s*=\s*True`)
-	pyMktemp     = regexp.MustCompile(`\btempfile\.mktemp\s*\(`)
-	pyJWT        = regexp.MustCompile(`\bjwt\.decode\s*\(.*(verify\s*=\s*False|verify_signature["']?\s*:\s*False)`)
-	pyRandSecret = regexp.MustCompile(`(?i)\b\w*(token|secret|password|nonce|salt|key)\w*\s*=.*\brandom\.(random|randint|choice|choices|getrandbits)\s*\(`)
-	pyAssign     = regexp.MustCompile(`^\s*([A-Za-z_][\w.]*)\s*(:\s*\w+)?\s*=\s*['"]([^'"]{8,})['"]\s*$`)
-	pyKwSecret   = regexp.MustCompile(`\b([A-Za-z_]\w*)\s*=\s*['"]([^'"]{8,})['"]`)
+	pySubprocess = guarded(`\bsubprocess\.(run|call|Popen|check_output|check_call)\s*\(`, "subprocess.")
+	pyShellTrue  = guarded(`shell\s*=\s*True`, "True")
+	pyOsSystem   = guarded(`\bos\.(system|popen)\s*\(`, "os.")
+	pyEval       = guarded(`(^|[^\w.])(eval|exec)\s*\(`, "eval", "exec")
+	pyPickle     = guarded(`\b(pickle|cPickle|dill|marshal|joblib)\.loads?\s*\(|\bshelve\.open\s*\(`, ".load", "shelve.")
+	pyYamlLoad   = guarded(`\byaml\.(load|load_all|unsafe_load)\s*\(`, "yaml.")
+	pyVerify     = guarded(`verify\s*=\s*False|_create_unverified_context|CERT_NONE`, "False", "_create_unverified_context", "CERT_NONE")
+	pyWeakHash   = guarded(`\bhashlib\.(md5|sha1)\s*\(|hashlib\.new\(\s*['"](md5|sha1)['"]`, "hashlib.")
+	pyExecute    = guarded(`\.(execute|executemany|raw|executescript)\s*\(\s*(f["']|["'][^"']*["']\s*(%|\.format|\+))`, ".execute", ".raw")
+	pyDebug      = guarded(`\.run\([^)]*debug\s*=\s*True|DEBUG\s*=\s*True`, "True")
+	pyMktemp     = guarded(`\btempfile\.mktemp\s*\(`, "mktemp")
+	pyJWT        = guarded(`\bjwt\.decode\s*\(.*(verify\s*=\s*False|verify_signature["']?\s*:\s*False)`, "jwt.decode")
+	pyRandSecret = guarded(`(?i)\b\w*(token|secret|password|nonce|salt|key)\w*\s*=.*\brandom\.(random|randint|choice|choices|getrandbits)\s*\(`, "(")
+	pyAssign     = guarded(`^\s*([A-Za-z_][\w.]*)\s*(:\s*\w+)?\s*=\s*['"]([^'"]{8,})['"]\s*$`, `'`, `"`)
+	pyKwSecret   = guarded(`\b([A-Za-z_]\w*)\s*=\s*['"]([^'"]{8,})['"]`, `'`, `"`)
 )
+
+// literalRe skips its regular expression on lines that contain none of the
+// literals every match needs. Most lines trigger no rule, and the literal
+// scan is far cheaper than the regexp engine. TestRuleGuards and
+// FuzzRuleGuards check that each literal list is complete: for (?i)
+// expressions the literals hold no letters.
+type literalRe struct {
+	re       *regexp.Regexp
+	literals []string
+}
+
+func guarded(expr string, literals ...string) literalRe {
+	return literalRe{re: regexp.MustCompile(expr), literals: literals}
+}
+
+func (r literalRe) mayMatch(s string) bool {
+	for _, l := range r.literals {
+		if strings.Contains(s, l) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r literalRe) MatchString(s string) bool { return r.mayMatch(s) && r.re.MatchString(s) }
+
+func (r literalRe) FindStringSubmatch(s string) []string {
+	if !r.mayMatch(s) {
+		return nil
+	}
+	return r.re.FindStringSubmatch(s)
+}
+
+func (r literalRe) FindAllStringSubmatch(s string, n int) [][]string {
+	if !r.mayMatch(s) {
+		return nil
+	}
+	return r.re.FindAllStringSubmatch(s, n)
+}
 
 func looksSecret(name, value string) bool {
 	if !secretNameRe.MatchString(name) || placeholder.MatchString(value) || strings.ContainsAny(value, " /{}") {
@@ -145,20 +184,20 @@ func pyRules(raw, masked string, line int, owner string) []finding {
 }
 
 var (
-	jsEval        = regexp.MustCompile(`(^|[^\w.$])eval\s*\(|\bnew\s+Function\s*\(`)
-	jsExec        = regexp.MustCompile(`\b(exec|execSync)\s*\(`)
-	jsSpawnShell  = regexp.MustCompile(`\b(spawn|spawnSync|execFile|execFileSync)\s*\(.*shell\s*:\s*true`)
-	jsInnerHTML   = regexp.MustCompile(`\.(innerHTML|outerHTML)\s*\+?=\s*[^'"\s;]`)
-	jsInsertHTML  = regexp.MustCompile(`\.insertAdjacentHTML\s*\(|\bdocument\.write(ln)?\s*\(|dangerouslySetInnerHTML`)
-	jsWeakHash    = regexp.MustCompile(`createHash\(\s*['"](md5|sha1)['"]`)
-	jsTLS         = regexp.MustCompile(`rejectUnauthorized\s*:\s*false|NODE_TLS_REJECT_UNAUTHORIZED`)
-	jsSQLTemplate = regexp.MustCompile("(?i)\\.(query|execute|raw|unsafe|prepare)\\s*\\(\\s*`[^`]*\\$\\{")
-	jsSQLConcat   = regexp.MustCompile(`(?i)\.(query|execute|raw)\s*\(\s*['"]\s*(select|insert|update|delete)\b[^'"]*['"]\s*\+`)
-	jsFsReq       = regexp.MustCompile(`\b(readFile|readFileSync|createReadStream|writeFile|writeFileSync|unlink|unlinkSync|sendFile|download)\s*\(.*\breq\.(query|params|body)`)
-	jsRedirect    = regexp.MustCompile(`\bredirect\s*\(.*\breq\.(query|params|body)`)
-	jsJWT         = regexp.MustCompile(`\bjwt\.decode\s*\(`)
-	jsRandSecret  = regexp.MustCompile(`(?i)\b\w*(token|secret|password|nonce|salt|key)\w*\s*[=:].*Math\.random\s*\(`)
-	jsSecret      = regexp.MustCompile(`\b([A-Za-z_$][\w$]*)\s*[:=]\s*['"]([^'"]{8,})['"]`)
+	jsEval        = guarded(`(^|[^\w.$])eval\s*\(|\bnew\s+Function\s*\(`, "eval", "Function")
+	jsExec        = guarded(`\b(exec|execSync)\s*\(`, "exec")
+	jsSpawnShell  = guarded(`\b(spawn|spawnSync|execFile|execFileSync)\s*\(.*shell\s*:\s*true`, "shell")
+	jsInnerHTML   = guarded(`\.(innerHTML|outerHTML)\s*\+?=\s*[^'"\s;]`, "HTML")
+	jsInsertHTML  = guarded(`\.insertAdjacentHTML\s*\(|\bdocument\.write(ln)?\s*\(|dangerouslySetInnerHTML`, "HTML", "document.write")
+	jsWeakHash    = guarded(`createHash\(\s*['"](md5|sha1)['"]`, "createHash(")
+	jsTLS         = guarded(`rejectUnauthorized\s*:\s*false|NODE_TLS_REJECT_UNAUTHORIZED`, "rejectUnauthorized", "NODE_TLS_REJECT_UNAUTHORIZED")
+	jsSQLTemplate = guarded("(?i)\\.(query|execute|raw|unsafe|prepare)\\s*\\(\\s*`[^`]*\\$\\{", "${")
+	jsSQLConcat   = guarded(`(?i)\.(query|execute|raw)\s*\(\s*['"]\s*(select|insert|update|delete)\b[^'"]*['"]\s*\+`, "+")
+	jsFsReq       = guarded(`\b(readFile|readFileSync|createReadStream|writeFile|writeFileSync|unlink|unlinkSync|sendFile|download)\s*\(.*\breq\.(query|params|body)`, "req.")
+	jsRedirect    = guarded(`\bredirect\s*\(.*\breq\.(query|params|body)`, "req.")
+	jsJWT         = guarded(`\bjwt\.decode\s*\(`, "jwt.decode")
+	jsRandSecret  = guarded(`(?i)\b\w*(token|secret|password|nonce|salt|key)\w*\s*[=:].*Math\.random\s*\(`, "(")
+	jsSecret      = guarded(`\b([A-Za-z_$][\w$]*)\s*[:=]\s*['"]([^'"]{8,})['"]`, `'`, `"`)
 )
 
 func jsRules(raw, masked string, line int, owner string, childProcess bool) []finding {
