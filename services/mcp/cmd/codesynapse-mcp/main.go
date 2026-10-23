@@ -184,12 +184,16 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		return err
 	}
 
+	trusted, err := app.ParsePrefixes(os.Getenv("CODESYNAPSE_TRUSTED_PROXIES"))
+	if err != nil {
+		return fmt.Errorf("CODESYNAPSE_TRUSTED_PROXIES: %w", err)
+	}
 	handler := opts.Runtime.HTTP(mcpserver.MeasureHTTP(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)))
 	mux := http.NewServeMux()
 	if acc != nil {
 		// Personal API keys are required in accounts mode.
-		mux.Handle("/mcp", auth.RequireBearerToken(mcpserver.KeyVerifier(acc, os.Getenv(EnvToken)),
-			&auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(handler))
+		mux.Handle("/mcp", mcpserver.RequestInfoHTTP(trusted, auth.RequireBearerToken(mcpserver.KeyVerifier(acc, os.Getenv(EnvToken)),
+			&auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(handler)))
 	} else {
 		mux.Handle("/mcp", app.RequireBearer(os.Getenv(EnvToken), handler))
 	}

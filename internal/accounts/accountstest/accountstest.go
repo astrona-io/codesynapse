@@ -185,10 +185,34 @@ func Run(t *testing.T, st accounts.Store) {
 	assert.Equal(t, ev.IP, "10.0.0.7")
 	assert.Equal(t, ev.RequestID, "req-1")
 	assert.Equal(t, ev.PrevHash, all[len(all)-1].Hash, "entries chain onto the previous one")
+	// MCP requests carry their details; they join the hash only when present.
+	long := strings.Repeat("x", accounts.MaxMCPArgValue+50)
+	mcpReq := &accounts.MCPRequest{Method: "tools/call", Name: "get_symbol_context", Repo: "acme/api", SessionID: "chat-1", TransportID: "t-1",
+		Client: "claude-code 2.1", DurationMS: 12, Bytes: 2048, ArgsDigest: "sha256:abc", Args: map[string]string{"repo": "acme/api", "query": long, "bad\x00key": "v"}}
+	mev, err := svc.Record(ctxReq, accounts.Event{UserID: bob.ID, Via: "key", KeyID: "key-1", OrgID: team.ID, Action: "mcp.tools.call", Target: "get_symbol_context", MCP: mcpReq})
+	require.NoError(t, err)
+	_, err = svc.Record(ctxReq, accounts.Event{UserID: bob.ID, Via: "key", OrgID: team.ID, Action: "mcp.tools.call", Target: "search",
+		MCP: &accounts.MCPRequest{Method: "tools/call", Name: "search", Repo: "acme/web", SessionID: "chat-2"}})
+	require.NoError(t, err)
+	got, err := st.ListEvents(ctx, accounts.EventFilter{Session: "chat-1", Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.True(t, got[0].MCP != nil, "MCP details round-trip")
+	assert.Equal(t, got[0].Hash, mev.Hash)
+	assert.Equal(t, got[0].MCP.Name, "get_symbol_context")
+	assert.Equal(t, len([]rune(got[0].MCP.Args["query"])), accounts.MaxMCPArgValue, "argument values are capped")
+	assert.Equal(t, got[0].MCP.Args["bad key"], "v", "control characters are removed from keys")
+	for name, f := range map[string]accounts.EventFilter{"tool": {Tool: "search"}, "repo": {Repo: "acme/web"}} {
+		f.Limit = 10
+		got, err := st.ListEvents(ctx, f)
+		require.NoError(t, err)
+		require.Len(t, got, 1, name)
+		assert.Equal(t, got[0].MCP.SessionID, "chat-2", name)
+	}
 	v, err := accounts.VerifyAudit(ctx, st)
 	require.NoError(t, err)
 	assert.True(t, v.OK, v.Reason)
-	assert.Equal(t, v.Checked, len(all)+1)
+	assert.Equal(t, v.Checked, len(all)+3)
 	recent, err := st.ListEvents(ctx, accounts.EventFilter{Since: now.Add(-time.Second), Limit: 1000})
 	require.NoError(t, err)
 	assert.True(t, len(recent) >= 1 && len(recent) < len(all), "time filter")

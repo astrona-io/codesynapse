@@ -74,8 +74,8 @@ func serveAccounts(t *testing.T, acc *accounts.Service, s *memory.Store) (string
 	runtime := NewRuntime(AccountsAccess{Acc: acc}, "", "", "")
 	server := New(s, "test", Options{Reviews: s, Memory: s, Usage: rec, Curated: s, CatalogWrites: true, Access: AccountsAccess{Acc: acc}, Runtime: runtime})
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
-	ts := httptest.NewServer(auth.RequireBearerToken(KeyVerifier(acc, "svc-token"),
-		&auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(runtime.HTTP(MeasureHTTP(handler))))
+	ts := httptest.NewServer(RequestInfoHTTP(nil, auth.RequireBearerToken(KeyVerifier(acc, "svc-token"),
+		&auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(runtime.HTTP(MeasureHTTP(handler)))))
 	t.Cleanup(ts.Close)
 	return ts.URL, rec
 }

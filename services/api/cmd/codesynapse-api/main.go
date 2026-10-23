@@ -6,11 +6,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -107,7 +105,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		registry = llm.NewRegistry(llmCfg)
 		o.EC.Logger.Info("AI providers configured", "providers", len(llmCfg.Providers), "default", llmCfg.Default)
 	}
-	trusted, err := parsePrefixes(os.Getenv("CODESYNAPSE_TRUSTED_PROXIES"))
+	trusted, err := app.ParsePrefixes(os.Getenv("CODESYNAPSE_TRUSTED_PROXIES"))
 	if err != nil {
 		return fmt.Errorf("CODESYNAPSE_TRUSTED_PROXIES: %w", err)
 	}
@@ -263,31 +261,6 @@ func designateRootCmd(ec *app.Env) *cobra.Command {
 		WithGroupID(app.GroupBase).
 		WithNoArgs().
 		Build()
-}
-
-// parsePrefixes reads "10.0.0.0/8,192.168.1.5" (single addresses allowed).
-func parsePrefixes(s string) ([]netip.Prefix, error) {
-	var out []netip.Prefix
-	for _, f := range strings.Split(s, ",") {
-		f = strings.TrimSpace(f)
-		if f == "" {
-			continue
-		}
-		if !strings.Contains(f, "/") {
-			a, err := netip.ParseAddr(f)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, netip.PrefixFrom(a, a.BitLen()))
-			continue
-		}
-		p, err := netip.ParsePrefix(f)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, p.Masked())
-	}
-	return out, nil
 }
 
 // metricsQuerier reads the statistics' time series from the VictoriaMetrics

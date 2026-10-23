@@ -418,7 +418,7 @@ func (s *Store) ListEvents(_ context.Context, f accounts.EventFilter) ([]account
 		return (f.OrgID == "" || e.OrgID == f.OrgID) && (f.Since.IsZero() || !e.At.Before(f.Since)) &&
 			(f.Until.IsZero() || e.At.Before(f.Until)) && e.ID > f.AfterID &&
 			strings.HasPrefix(e.Action, f.Action) && (f.Actor == "" || e.ActorEmail == f.Actor || e.UserID == f.Actor) &&
-			(f.Outcome == "" || e.Outcome == f.Outcome)
+			(f.Outcome == "" || e.Outcome == f.Outcome) && mcpMatch(e.MCP, f)
 	}
 	out := []accounts.Event{}
 	if f.Ascending {
@@ -946,4 +946,11 @@ func (s *Store) SetPlatformAdmin(_ context.Context, userID string, admin bool) e
 	u.PlatformAdmin = admin
 	s.users[userID] = u
 	return nil
+}
+
+func mcpMatch(m *accounts.MCPRequest, f accounts.EventFilter) bool {
+	if f.Session == "" && f.Tool == "" && f.Repo == "" {
+		return true
+	}
+	return m != nil && (f.Session == "" || m.SessionID == f.Session) && (f.Tool == "" || m.Name == f.Tool) && (f.Repo == "" || m.Repo == f.Repo)
 }

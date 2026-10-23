@@ -54,6 +54,10 @@ This is a documented header configuration, not an end-to-end tested Codex launch
 
 ---
 
+### Every request is audited
+
+With accounts, each MCP request is recorded in the organisation's audit log. The entry holds who made it, which API key, the chat session, the client, the tool, the repository and the outcome. It also holds the arguments, with secrets and personal numbers removed and long values shortened. Diffs, code and conversation turns are kept only as a fingerprint. Results are never stored. Owners and admins see these entries under Settings → Audit log. If the audit log cannot be written, the tool's result is withheld; retry later. Do not put secrets in tool arguments.
+
 ## Capability and freshness check before editing
 
 Check the tools actually registered in the current client, not just `.mcp.json`.
