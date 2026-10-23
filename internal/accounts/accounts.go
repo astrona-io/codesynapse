@@ -283,6 +283,25 @@ type Store interface {
 	Setup(ctx context.Context) (Setup, error)
 	// SaveSetup writes the single setup record.
 	SaveSetup(ctx context.Context, s Setup) error
+
+	// Single sign-on (sso.go): one provider per organisation, keyed by org.
+	PutIdentityProvider(ctx context.Context, p IdentityProvider) error
+	IdentityProvider(ctx context.Context, orgID string) (IdentityProvider, error) // ErrNotFound
+	DeleteIdentityProvider(ctx context.Context, orgID string) error
+	IdentityBySubject(ctx context.Context, issuer, subject string) (ExternalIdentity, error) // ErrNotFound
+	// PutIdentity creates or updates by ID; ErrExists when another ID holds
+	// the issuer and subject.
+	PutIdentity(ctx context.Context, e ExternalIdentity) error
+	UserIdentities(ctx context.Context, userID string) ([]ExternalIdentity, error)
+	DeleteIdentity(ctx context.Context, userID, id string) error
+	PutSSOState(ctx context.Context, s SSOState) error
+	// TakeSSOState returns and deletes a state, so it works once.
+	TakeSSOState(ctx context.Context, stateHash string) (SSOState, error)
+	PruneSSOStates(ctx context.Context, now time.Time) error
+	// ManagedByIDP reports whether the organisation's provider created the
+	// membership; SetManagedByIDP marks or clears it.
+	ManagedByIDP(ctx context.Context, orgID, userID string) (bool, error)
+	SetManagedByIDP(ctx context.Context, orgID, userID string, managed bool) error
 	UserByID(ctx context.Context, id string) (User, error)
 	UserByEmail(ctx context.Context, email string) (User, error)
 	SetPassword(ctx context.Context, userID, hash string) error

@@ -154,15 +154,22 @@ func (s *Service) Login(ctx context.Context, email, password, client string) (st
 		s.audit(ctx, Event{UserID: u.ID, ActorEmail: u.Email, Via: "anonymous", Action: "user.login", Target: u.Email, Outcome: Failure, Detail: "account suspended"})
 		return "", User{}, ErrSuspended
 	}
-	tok, err := randomToken(32)
+	tok, err := s.startSession(ctx, u)
 	if err != nil {
-		return "", User{}, err
-	}
-	if err := s.St.CreateSession(ctx, Session{TokenHash: HashToken(tok), UserID: u.ID, CreatedAt: now, ExpiresAt: now.Add(SessionTTL)}); err != nil {
 		return "", User{}, err
 	}
 	s.audit(ctx, Event{UserID: u.ID, ActorEmail: u.Email, Via: "session", Action: "user.login", Target: u.Email})
 	return tok, u, nil
+}
+
+// startSession creates a session for u and returns its token.
+func (s *Service) startSession(ctx context.Context, u User) (string, error) {
+	tok, err := randomToken(32)
+	if err != nil {
+		return "", err
+	}
+	now := s.now()
+	return tok, s.St.CreateSession(ctx, Session{TokenHash: HashToken(tok), UserID: u.ID, CreatedAt: now, ExpiresAt: now.Add(SessionTTL)})
 }
 
 // Logout ends a session.

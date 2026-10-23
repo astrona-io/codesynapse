@@ -73,6 +73,14 @@ type Config struct {
 	// PublicMCPURL is where agents reach the MCP server, shown in the
 	// connection instructions.
 	PublicMCPURL string
+	// PublicURL is the dashboard's address; single sign-on returns to
+	// PublicURL + "/sso/callback".
+	PublicURL string
+	// SSOAllowPrivate lets organisations use an identity provider on a
+	// private network (self-hosted Keycloak and the like).
+	SSOAllowPrivate bool
+	// SSOClient replaces the guarded identity-provider client (tests).
+	SSOClient *http.Client
 	// Workspace is a writable directory for repositories cloned by URL.
 	Workspace string
 	// GitAuth is an optional token for cloning private repositories.

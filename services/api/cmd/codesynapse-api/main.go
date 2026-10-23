@@ -146,6 +146,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour,
 		Metrics:        metricsQuerier(), IngestMetrics: ingestMetrics,
 		TrustedProxies: trusted, PublicMCPURL: app.Getenv("CODESYNAPSE_PUBLIC_MCP_URL", "http://localhost:8090/mcp"),
+		PublicURL: app.Getenv("CODESYNAPSE_PUBLIC_URL", "http://localhost:3000"), SSOAllowPrivate: app.Getenv("CODESYNAPSE_SSO_ALLOW_PRIVATE", "") == "true",
 		GitAuthor: gitx.Author{Name: app.Getenv("CODESYNAPSE_GIT_AUTHOR_NAME", "CodeSynapse"), Email: app.Getenv("CODESYNAPSE_GIT_AUTHOR_EMAIL", "codesynapse@localhost")}}, st, o.EC.Logger)
 	o.EC.Logger.Info("api listening", "addr", o.addr, "sources_root", o.sources, "auth", os.Getenv(EnvToken) != "", "accounts", acc != nil)
 	if acc != nil {
