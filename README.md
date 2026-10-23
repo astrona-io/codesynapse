@@ -93,14 +93,14 @@ Ask your agent to review a change ("review my changes with CodeSynapse and submi
 
 Every comment needs a decision: **Accept** (agreed, to fix), **Reject** (disagree or false positive, with an optional reason), **Defer** (later) or **Mark fixed**. The Reviews page shows progress and tabs for To decide, To fix, Later and Done; agents record the same decisions with `update_review_comment` and read the to-do list with `get_review` status "accepted".
 
-**Fix branches.** For an accepted comment, **Create fix branch & PR** asks the model routed to "Fixes" to rewrite the affected file, commits it to a new `codesynapse/fix-…` branch, pushes it and opens a draft pull request, so your CI/CD pipeline runs on it. You review and merge the PR, then mark the comment fixed. "Fix all on one branch" does the same for every accepted item. It is off by default:
+**Fix branches.** For an accepted comment on a Go function or method, **Create fix branch & PR** asks the local model routed to "Fixes" to rewrite the affected file, commits it to a new `codesynapse/fix-…` branch, pushes it and opens a draft pull request, so your CI/CD pipeline runs on it. You review and merge the PR, then mark the comment fixed. "Fix all on one branch" does the same for every accepted item. It is off by default:
 
 ```sh
 # .env
 CODESYNAPSE_ALLOW_PUSH=true
 ```
 
-and needs a token (`just git-token`) with **Contents** and **Pull requests** read and write. Safety rails: work happens in a separate git worktree (the indexed checkout never changes); only files named in the comments may change; CI definitions (`.github/`, `.gitlab-ci.yml`, Jenkinsfile, …) and git config are never touched; pushes go only to new `codesynapse/*` branches and are never forced; answers that are empty, unchanged or wildly different in size are refused. The fix needs source, so route "Fixes" to a local model (remote providers need `send_source: true`). Workflows that run on every push run before anyone reviews the change; if that matters, limit them to pull requests.
+and needs a token (`just git-token`) with **Contents** and **Pull requests** read and write. Safety rails: work happens in a separate git worktree (the indexed checkout never changes); only files named in the comments may change; CI definitions (`.github/`, `.gitlab-ci.yml`, Jenkinsfile, …) and git config are never touched; pushes go only to new `codesynapse/*` branches and are never forced; the review must pin the current commit, and the response must contain exactly one bounded Go code block. Go syntax is checked, and only the accepted comments’ function bodies may change; signatures, imports, headers and other bytes are preserved. Revision, comment, permission, file-hash and commit checks run before publication. Other edits need manual handling. Route "Fixes" to a local model; `send_source: true` does not permit cloud fixes. See [fix validation and retry rules](docs/FIX_VALIDATION.md). Workflows that run on every push run before anyone reviews the change; if that matters, limit them to pull requests.
 
 ## AI models (local or cloud)
 

@@ -84,6 +84,9 @@ func TestParseDiffMalformed(t *testing.T) {
 
 func FuzzParseDiff(f *testing.F) {
 	f.Add([]byte(sampleDiff))
+	f.Add([]byte("diff --git a/old.go b/new.go\nrename from old.go\nrename to new.go\n"))
+	f.Add([]byte("--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n--- fake\n+++ fake\n"))
+	f.Add([]byte("--- a/a.go\n+++ b/a.go\n@@ -1 +9223372036854775807,2 @@\n"))
 	f.Fuzz(func(t *testing.T, b []byte) {
 		changes, err := ParseDiff(b)
 		if err != nil {
@@ -91,7 +94,7 @@ func FuzzParseDiff(f *testing.F) {
 		}
 		for _, c := range changes {
 			for _, r := range c.Ranges {
-				if r.End < r.Start {
+				if r.Start < 1 || r.End < r.Start {
 					t.Fatalf("inverted range %+v", r)
 				}
 			}

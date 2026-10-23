@@ -49,7 +49,7 @@ func setup(ctx context.Context, t *testing.T, answer string, prStatus int) *fixt
 		require.NoError(t, err)
 	}
 	st := memory.New()
-	rv, err := reviews.Prepare(reviews.Review{Repo: "r", Title: "AI review", Comments: []reviews.CommentItem{
+	rv, err := reviews.Prepare(reviews.Review{Repo: "r", Commit: gitx.HeadCommit(ctx, repo), Title: "AI review", Comments: []reviews.CommentItem{
 		{File: "app/run.go", Line: 4, Severity: "high", Category: "security", Message: "Shell injection. The command runs through sh -c.", Suggestion: "Call exec directly."},
 		{File: ".github/workflows/ci.yml", Line: 1, Severity: "low", Category: "other", Message: "Pin the action."},
 	}}, time.Now())
@@ -79,12 +79,12 @@ func setup(ctx context.Context, t *testing.T, answer string, prStatus int) *fixt
 			f.pushed = append(f.pushed, branch+"\n"+string(out))
 			return err
 		}}
-	f.req = Request{ReviewID: rv.ID, CommentIDs: []string{rv.Comments[0].ID}, Root: repo, Remote: "https://github.com/owner/app",
+	f.req = Request{ValidationVersion: ValidationVersion, ReviewID: rv.ID, CommentIDs: []string{rv.Comments[0].ID}, Root: repo, Remote: "https://github.com/owner/app",
 		Base: gitx.HeadCommit(ctx, repo), BaseBranch: "main"}
 	return f
 }
 
-const fixed = "Here you go:\n```go\npackage app\n\nfunc Run(cmd string) {\n\texec(cmd)\n}\n```\n"
+const fixed = "```go\npackage app\n\nfunc Run(cmd string) {\n\texec(cmd)\n}\n```\n"
 
 func TestRunPushesBranchAndOpensDraftPR(t *testing.T) {
 	ctx := fixContext(t)

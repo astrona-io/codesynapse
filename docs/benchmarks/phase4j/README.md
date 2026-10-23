@@ -2,7 +2,7 @@
 
 These artifacts support the [architecture assessment](../../CODE_ARCHITECTURE_AUDIT.md).
 They measure the existing implementation at `ddf78a3`, with the test-only harnesses
-added by this change. `manifest.json` records their SHA-256 hashes and the full
+added in commit `5c20843063e18d546f3e771a8b11618c9438e51d`. Later fixes change some regression expectations; use that commit to reproduce these historical harness hashes. `manifest.json` records their SHA-256 hashes and the full
 base revision. All corpora are generated fixtures; no customer source is included.
 Measurements were collected on 2026-10-23, Go 1.27.3, darwin/arm64, Apple M5 Pro,
 48 GiB RAM. Benchmark timings have one caller and no race detector.

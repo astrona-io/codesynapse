@@ -22,6 +22,23 @@ import (
 // contain characters git does not allow in ref names.
 var ErrInvalidRev = errors.New("invalid git revision")
 
+// ErrOutputLimit means git produced more output than can be retained safely.
+var ErrOutputLimit = errors.New("git output exceeds limit")
+
+type boundedOutput struct {
+	buffer   bytes.Buffer
+	limit    int
+	overflow bool
+}
+
+func (b *boundedOutput) Write(p []byte) (int, error) {
+	if len(p) > b.limit-b.buffer.Len() {
+		b.overflow = true
+		return 0, ErrOutputLimit
+	}
+	return b.buffer.Write(p)
+}
+
 var revPattern = regexp.MustCompile(`^[A-Za-z0-9._/@^~{}-]+$`)
 
 // ValidateRev rejects revisions that could be interpreted as command-line
@@ -43,6 +60,9 @@ var hardening = []string{
 
 // Run executes git in dir with args and returns stdout.
 func Run(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, errors.New("git command is required")
+	}
 	// safe.directory lets git read bind-mounted repos owned by another uid
 	// (the Docker case); it is scoped to exactly this directory.
 	full := append([]string{"-C", dir, "-c", "safe.directory=" + dir}, hardening...)
@@ -60,13 +80,18 @@ func Run(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var stdout, stderr bytes.Buffer
+	stdout := boundedOutput{limit: MaxDiffBytes}
+	stderr := boundedOutput{limit: 64 << 10}
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
+	err = cmd.Run()
+	if stdout.overflow || stderr.overflow {
+		return nil, fmt.Errorf("git %s: %w", args[0], ErrOutputLimit)
 	}
-	return stdout.Bytes(), nil
+	if err != nil {
+		return nil, fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.buffer.String()))
+	}
+	return stdout.buffer.Bytes(), nil
 }
 
 func safePath() string {

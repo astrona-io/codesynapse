@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -47,11 +48,12 @@ type Store interface {
 
 // Runner makes fix branches.
 type Runner struct {
-	Authorize func(context.Context) error
-	St        Store
-	LLM       *llm.Registry
-	Auth      gitx.Auth
-	Author    gitx.Author
+	Authorize       func(context.Context) error
+	CurrentRevision func(context.Context) (string, error)
+	St              Store
+	LLM             *llm.Registry
+	Auth            gitx.Auth
+	Author          gitx.Author
 	// Workdir holds temporary worktrees.
 	Workdir string
 	// GitHubAPI is the GitHub REST base URL; empty means api.github.com.
@@ -65,13 +67,14 @@ type Runner struct {
 // from the API, which has already checked that Root is a clone in the
 // workspace and Remote is an allowed https remote.
 type Request struct {
-	ReviewID   string
-	CommentIDs []string
-	Provider   string
-	Root       string // the repository clone
-	Remote     string // validated origin URL
-	Base       string // commit to branch from (the indexed head)
-	BaseBranch string // branch the pull request targets
+	ReviewID          string
+	ValidationVersion int
+	CommentIDs        []string
+	Provider          string
+	Root              string // the repository clone
+	Remote            string // validated origin URL
+	Base              string // commit to branch from (the indexed head)
+	BaseBranch        string // branch the pull request targets
 }
 
 // Result is what a run produced.
@@ -106,6 +109,8 @@ func Selectable(c reviews.CommentItem) string {
 		return "a fix is already " + c.Fix.State
 	case c.File == "" || strings.Contains(c.File, "..") || strings.HasPrefix(c.File, "/"):
 		return "the comment has no repository file"
+	case path.Ext(c.File) != ".go":
+		return "automatic fixes currently support Go function bodies only"
 	case protected(c.File):
 		return "CI and git configuration files are never changed automatically"
 	}
@@ -150,8 +155,8 @@ func (r Runner) Run(ctx context.Context, req Request) (res Result, err error) {
 			targets = append(targets, c)
 		}
 	}
-	if len(targets) == 0 {
-		return res, errors.New("no comments to fix")
+	if len(targets) == 0 || len(targets) != len(req.CommentIDs) {
+		return res, errors.New("select distinct existing accepted comments to fix")
 	}
 	ids := make([]string, len(targets))
 	for i, c := range targets {
@@ -165,13 +170,19 @@ func (r Runner) Run(ctx context.Context, req Request) (res Result, err error) {
 			r.mark(context.WithoutCancel(ctx), req.ReviewID, ids, reviews.Fix{State: reviews.FixFailed, Error: err.Error()})
 		}
 	}()
+	if req.ValidationVersion != ValidationVersion {
+		return res, errors.New("fix validation policy changed; queue a new fix request")
+	}
+	if err := ValidateRevision(rv, req.Base); err != nil {
+		return res, err
+	}
 	provider, err := r.LLM.ProviderFor(Task, req.Provider)
 	if err != nil {
 		return res, err
 	}
 	cfg, _ := r.LLM.Config(provider)
-	if !cfg.AllowsSource() {
-		return res, fmt.Errorf("provider %s may not receive source code; use a local model for fixes or set send_source: true", provider)
+	if !cfg.Local() || !cfg.AllowsSource() {
+		return res, fmt.Errorf("provider %s may not receive source code; use a local model for fixes", provider)
 	}
 	log = log.With("provider", provider)
 	log.Info("fix started")
@@ -201,18 +212,32 @@ func (r Runner) Run(ctx context.Context, req Request) (res Result, err error) {
 	}
 	defer root.Close() //nolint:errcheck // read-only handle
 	var model string
+	var checked []checkedFile
 	for _, f := range files {
+		if err := r.recheck(ctx, req, rv, targets); err != nil {
+			return res, err
+		}
 		log.Info("asking the model to fix a file", "file", f)
-		m, err := r.fixFile(ctx, root, provider, cfg, f, byFile[f])
+		m, output, err := r.fixFile(ctx, root, wt, req.Base, provider, cfg, f, byFile[f])
 		if err != nil {
 			return res, fmt.Errorf("%s: %w", f, err)
 		}
 		model = m
+		checked = append(checked, output)
 	}
 
+	if err := r.recheck(ctx, req, rv, targets); err != nil {
+		return res, err
+	}
+	if err := checkFiles(root, checked); err != nil {
+		return res, err
+	}
 	msg := commitMessage(rv, targets, provider, model)
 	commit, err := gitx.CommitFiles(ctx, wt, files, msg, r.Author)
 	if err != nil {
+		return res, err
+	}
+	if err := checkCommittedFiles(ctx, wt, req.Base, commit, checked); err != nil {
 		return res, err
 	}
 	branch := fmt.Sprintf("%sfix-%s-%s", gitx.FixBranchPrefix, rv.ID[:min(8, len(rv.ID))], randHex(3))
@@ -220,10 +245,11 @@ func (r Runner) Run(ctx context.Context, req Request) (res Result, err error) {
 	if push == nil {
 		push = gitx.PushBranch
 	}
-	if r.Authorize != nil {
-		if err := r.Authorize(ctx); err != nil {
-			return res, err
-		}
+	if err := r.recheck(ctx, req, rv, targets); err != nil {
+		return res, err
+	}
+	if gitx.HeadCommit(ctx, wt) != commit {
+		return res, errors.New("worktree commit changed before push")
 	}
 	log.Info("pushing fix branch", "branch", branch)
 	if err := push(ctx, wt, req.Remote, branch, r.Auth); err != nil {
@@ -257,25 +283,22 @@ func (r Runner) mark(ctx context.Context, id string, ids []string, f reviews.Fix
 }
 
 const fixSystem = `You fix code review comments. You get one complete file and the comments to address in it.
-Return the complete updated file, changing only what the comments require. Keep everything else exactly as it is: formatting, comments, ordering, license headers.
+Return the complete updated Go file. Change only the bodies of functions or methods identified by the accepted comments. Preserve signatures, imports, headers and all other bytes, including line endings. If a change needs another declaration, leave the file unchanged.
 Never add network calls, credentials, telemetry or unrelated changes. If a comment cannot be fixed safely within this file, leave that code unchanged.
 Answer with the full file inside one fenced code block and nothing else.`
 
-func (r Runner) fixFile(ctx context.Context, root *os.Root, provider string, cfg llm.ProviderConfig, file string, cs []reviews.CommentItem) (string, error) {
-	st, err := root.Stat(file)
+func (r Runner) fixFile(ctx context.Context, root *os.Root, wt, base, provider string, cfg llm.ProviderConfig, file string, cs []reviews.CommentItem) (string, checkedFile, error) {
+	var empty checkedFile
+	orig, mode, err := readRegular(root, file)
 	if err != nil {
-		return "", fmt.Errorf("not in the checkout: %w", err)
+		return "", empty, err
 	}
-	if !st.Mode().IsRegular() || st.Size() > maxFileBytes {
-		return "", fmt.Errorf("only regular files up to %d KiB are fixed automatically", maxFileBytes>>10)
-	}
-	orig, err := root.ReadFile(file)
-	if err != nil {
-		return "", err
+	if err := checkOriginal(ctx, wt, base, file, orig); err != nil {
+		return "", empty, err
 	}
 	// The whole file comes back, so it must fit the answer budget.
 	if need := len(orig)/3 + 512; need > cfg.MaxOutputTokens {
-		return "", fmt.Errorf("file needs about %d output tokens; %s allows %d (raise max_output_tokens)", need, provider, cfg.MaxOutputTokens)
+		return "", empty, fmt.Errorf("file needs about %d output tokens; %s allows %d (raise max_output_tokens)", need, provider, cfg.MaxOutputTokens)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "File: %s\n\nComments to address:\n", file)
@@ -288,47 +311,71 @@ func (r Runner) fixFile(ctx context.Context, root *os.Root, provider string, cfg
 	fmt.Fprintf(&b, "\nCurrent file:\n````\n%s\n````\n", orig)
 	resp, err := r.LLM.Complete(llm.WithTask(ctx, "fix"), provider, llm.Request{System: fixSystem, User: b.String()})
 	if err != nil {
-		return "", err
+		return "", empty, err
 	}
 	out, err := extractFile(resp.Text)
 	if err != nil {
-		return "", err
+		return "", empty, err
 	}
-	if bytes.HasSuffix(orig, []byte("\n")) && !strings.HasSuffix(out, "\n") {
-		out += "\n"
+	if !bytes.HasSuffix(orig, []byte("\n")) {
+		out = strings.TrimSuffix(strings.TrimSuffix(out, "\n"), "\r")
 	}
 	if err := plausible(orig, []byte(out)); err != nil {
-		return "", err
+		return "", empty, err
 	}
-	if err := root.WriteFile(file, []byte(out), st.Mode().Perm()); err != nil {
-		return "", err
+	if err := validateRewrite(file, orig, []byte(out), cs); err != nil {
+		return "", empty, err
 	}
-	return resp.Model, nil
-}
-
-// extractFile returns the contents of the outermost fenced block.
-func extractFile(text string) (string, error) {
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	start, end := -1, -1
-	for i, l := range lines {
-		if strings.HasPrefix(strings.TrimSpace(l), "```") {
-			if start < 0 {
-				start = i
-			} else {
-				end = i
-			}
+	if r.Authorize != nil {
+		if err := r.Authorize(ctx); err != nil {
+			return "", empty, err
 		}
 	}
-	if start < 0 || end <= start {
-		return "", errors.New("the model did not return the file in a code block")
+	before := checkedFile{name: file, hash: sha256.Sum256(orig), mode: mode}
+	if err := checkFiles(root, []checkedFile{before}); err != nil {
+		return "", empty, err
 	}
-	return strings.Join(lines[start+1:end], "\n") + "\n", nil
+	if err := root.WriteFile(file, []byte(out), mode.Perm()); err != nil {
+		return "", empty, err
+	}
+	return resp.Model, checkedFile{name: file, hash: sha256.Sum256([]byte(out)), mode: mode}, nil
+}
+
+// extractFile accepts exactly one fenced file, preserving the enclosed bytes.
+func extractFile(text string) (string, error) {
+	if len(text) > maxFileBytes+256 {
+		return "", errors.New("model response exceeds the automatic fix limit")
+	}
+	text = strings.TrimSpace(text)
+	opening, rest, ok := strings.Cut(text, "\n")
+	opening = strings.TrimSuffix(opening, "\r")
+	fence := strings.TrimRight(opening, "go")
+	if !ok || len(fence) < 3 || len(fence) > 8 || strings.Trim(fence, "`") != "" || (opening != fence && opening != fence+"go") {
+		return "", errors.New("model must return one Go code block and no surrounding text")
+	}
+	offset := 0
+	for _, line := range strings.SplitAfter(rest, "\n") {
+		content := strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+		if content == fence {
+			if strings.TrimSpace(rest[offset+len(line):]) != "" {
+				return "", errors.New("model returned more than one file or trailing text")
+			}
+			if offset > maxFileBytes {
+				return "", errors.New("model file exceeds the automatic fix limit")
+			}
+			return rest[:offset], nil
+		}
+		offset += len(line)
+	}
+	return "", errors.New("model code block is not closed")
 }
 
 // plausible rejects answers that are clearly not an edited version of the
 // file: empty, unchanged, or a different size altogether.
 func plausible(orig, out []byte) error {
 	switch {
+	case len(out) > maxFileBytes:
+		return errors.New("model file exceeds the automatic fix limit")
 	case len(bytes.TrimSpace(out)) == 0:
 		return errors.New("the model returned an empty file")
 	case bytes.Equal(orig, out):
@@ -356,7 +403,7 @@ func commitMessage(rv reviews.Review, cs []reviews.CommentItem, provider, model 
 	if model != "" {
 		who += " (" + model + ")"
 	}
-	fmt.Fprintf(&b, "\nGenerated by %s. Check the change and CI before merging.\n", who)
+	fmt.Fprintf(&b, "\nGenerated by %s. Fix validation policy %d. Check the change and CI before merging.\n", who, ValidationVersion)
 	return b.String()
 }
 
