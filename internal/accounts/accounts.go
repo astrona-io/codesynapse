@@ -356,14 +356,16 @@ type Store interface {
 	// same repository (ErrJobActive). RenewJobLeases extends every active
 	// job owner holds. FinishJob ends a job owner still holds and clears its
 	// parameters. ClaimOrphanedJob hands owner the oldest active job whose
-	// lease expired, failing those that ran out of attempts on the way.
+	// lease expired (a stopped process's, or one queued for workers),
+	// failing those that ran out of attempts on the way.
 	AddJob(ctx context.Context, job JobRecord) error
 	JobByID(ctx context.Context, id string) (JobRecord, error)
 	ListJobs(ctx context.Context, orgIDs []string, limit int) ([]JobRecord, error)
 	StartJob(ctx context.Context, id, owner string, leaseUntil, now time.Time) error
 	RenewJobLeases(ctx context.Context, owner string, until time.Time) error
 	FinishJob(ctx context.Context, id, owner string, out JobOutcome) error
-	ClaimOrphanedJob(ctx context.Context, owner string, leaseUntil, now time.Time) (JobRecord, bool, error)
+	// kinds limits the claim to those job kinds; nil claims any.
+	ClaimOrphanedJob(ctx context.Context, owner string, kinds []string, leaseUntil, now time.Time) (JobRecord, bool, error)
 	RegisterExecutionSession(ctx context.Context, session ExecutionSession) (ExecutionSession, bool, error)
 	ExecutionSessionByID(ctx context.Context, id string) (ExecutionSession, error)
 	RevokeExecutionSession(ctx context.Context, id, orgID, userID string, at time.Time) error

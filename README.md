@@ -19,6 +19,8 @@ open http://localhost:3000
 
 The dashboard supports sign-in, governance, repository browsing and execution controls such as cloning, sync and model tasks. A signed-in browser gets its own runtime session binding for those (see [session context](docs/SESSION_CONTEXT_PLAN.md#runtime-integration)); agents and API clients register theirs.
 
+The API records those jobs, and the `worker` service runs them. Jobs survive restarts, and a job a stopped worker left behind is picked up again with the requester's access checked anew. Add workers with `docker compose up --scale worker=3`, or limit one to some roles with `CODESYNAPSE_WORKER_ROLES=ingest` (`ingest`, `ai`, `fix`). Without a worker, `codesynapse-api serve` runs jobs itself, as in development.
+
 | URL | What |
 |---|---|
 | http://localhost:3000 | Dashboard |

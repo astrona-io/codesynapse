@@ -128,14 +128,14 @@ func finished(j accounts.JobRecord, out accounts.JobOutcome) accounts.JobRecord 
 }
 
 // ClaimOrphanedJob implements accounts.Store.
-func (s *Store) ClaimOrphanedJob(_ context.Context, owner string, leaseUntil, now time.Time) (accounts.JobRecord, bool, error) {
+func (s *Store) ClaimOrphanedJob(_ context.Context, owner string, kinds []string, leaseUntil, now time.Time) (accounts.JobRecord, bool, error) {
 	t := s.jobTable()
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for {
 		var oldest *accounts.JobRecord
 		for _, j := range t.jobs {
-			if j.Active() && j.LeaseUntil.Before(now) && (oldest == nil || j.CreatedAt.Before(oldest.CreatedAt)) {
+			if j.Active() && j.LeaseUntil.Before(now) && (kinds == nil || slices.Contains(kinds, j.Kind)) && (oldest == nil || j.CreatedAt.Before(oldest.CreatedAt)) {
 				oldest = &j
 			}
 		}

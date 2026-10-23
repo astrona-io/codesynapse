@@ -46,7 +46,7 @@ func RunJobs(t *testing.T, newStore func(*testing.T) accounts.Store) {
 		assert.Equal(t, string(got.Params), `{"branch":"main"}`)
 		assert.Equal(t, got.Execution.SessionID, "web:1")
 		require.NoError(t, st.RenewJobLeases(ctx, "proc-a", now.Add(time.Hour)))
-		_, found, err := st.ClaimOrphanedJob(ctx, "proc-b", now.Add(time.Minute), now.Add(30*time.Minute))
+		_, found, err := st.ClaimOrphanedJob(ctx, "proc-b", nil, now.Add(time.Minute), now.Add(30*time.Minute))
 		require.NoError(t, err)
 		assert.False(t, found, "a renewed lease is not an orphan")
 		assert.Error(t, st.FinishJob(ctx, "j1", "proc-b", accounts.JobOutcome{State: accounts.JobSucceeded, At: now}), "only the owner finishes it")
@@ -74,7 +74,7 @@ func RunJobs(t *testing.T, newStore func(*testing.T) accounts.Store) {
 		require.NoError(t, st.AddJob(ctx, job("j1", "acme/api")))
 		require.NoError(t, st.StartJob(ctx, "j1", "proc-a", now.Add(time.Minute), now))
 		later := now.Add(5 * time.Minute) // proc-a stopped renewing
-		claimed, found, err := st.ClaimOrphanedJob(ctx, "proc-b", later.Add(time.Minute), later)
+		claimed, found, err := st.ClaimOrphanedJob(ctx, "proc-b", nil, later.Add(time.Minute), later)
 		require.NoError(t, err)
 		require.True(t, found)
 		assert.Equal(t, claimed.ID, "j1")
@@ -86,18 +86,41 @@ func RunJobs(t *testing.T, newStore func(*testing.T) accounts.Store) {
 			require.NoError(t, st.StartJob(ctx, "j1", "proc-b", later.Add(time.Minute), later))
 			later = later.Add(5 * time.Minute)
 			if attempt < accounts.MaxJobAttempts {
-				_, found, err = st.ClaimOrphanedJob(ctx, "proc-b", later.Add(time.Minute), later)
+				_, found, err = st.ClaimOrphanedJob(ctx, "proc-b", nil, later.Add(time.Minute), later)
 				require.NoError(t, err)
 				require.True(t, found)
 			}
 		}
-		_, found, err = st.ClaimOrphanedJob(ctx, "proc-c", later.Add(time.Minute), later)
+		_, found, err = st.ClaimOrphanedJob(ctx, "proc-c", nil, later.Add(time.Minute), later)
 		require.NoError(t, err)
 		assert.False(t, found, "a job interrupted too often is not started again")
 		got, err := st.JobByID(ctx, "j1")
 		require.NoError(t, err)
 		assert.Equal(t, got.State, accounts.JobFailed)
 		assert.True(t, strings.Contains(got.Error, "interrupted"), got.Error)
+	})
+
+	t.Run("queued for workers", func(t *testing.T) {
+		st := newStore(t)
+		queued := job("q1", "acme/api")
+		queued.LeaseOwner, queued.LeaseUntil = "", time.Unix(0, 0).UTC()
+		require.NoError(t, st.AddJob(ctx, queued))
+		ai := job("q2", "acme/web")
+		ai.Kind, ai.LeaseOwner, ai.LeaseUntil, ai.CreatedAt = "ai", "", time.Unix(0, 0).UTC(), now.Add(time.Second)
+		require.NoError(t, st.AddJob(ctx, ai))
+		got, found, err := st.ClaimOrphanedJob(ctx, "worker-ai", []string{"ai"}, now.Add(time.Minute), now)
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, got.ID, "q2", "a worker claims only its kinds")
+		assert.Equal(t, got.Attempts, 0, "never started yet")
+		_, found, err = st.ClaimOrphanedJob(ctx, "worker-ai", []string{"ai"}, now.Add(time.Minute), now)
+		require.NoError(t, err)
+		assert.False(t, found)
+		got, found, err = st.ClaimOrphanedJob(ctx, "worker-ingest", []string{"sync", "clone"}, now.Add(time.Minute), now)
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, got.ID, "q1")
+		require.NoError(t, st.StartJob(ctx, "q1", "worker-ingest", now.Add(time.Minute), now))
 	})
 
 	t.Run("concurrent claims", func(t *testing.T) {
@@ -116,7 +139,7 @@ func RunJobs(t *testing.T, newStore func(*testing.T) accounts.Store) {
 			go func() {
 				defer wg.Done()
 				for {
-					j, found, err := st.ClaimOrphanedJob(ctx, fmt.Sprintf("proc-%d", w), later.Add(time.Hour), later)
+					j, found, err := st.ClaimOrphanedJob(ctx, fmt.Sprintf("proc-%d", w), nil, later.Add(time.Hour), later)
 					if err != nil || !found {
 						return
 					}

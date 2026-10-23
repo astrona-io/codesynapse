@@ -116,3 +116,57 @@ func TestJobsSurviveRestart(t *testing.T) {
 	assert.Equal(t, job.State, JobSucceeded)
 	assert.Equal(t, job.Attempts, 2)
 }
+
+// TestWorkersRunWhatTheAPIRecords: the API with workers only records jobs;
+// a worker claims those of its roles and runs them as the requester.
+func TestWorkersRunWhatTheAPIRecords(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	sources := t.TempDir()
+	proj := filepath.Join(sources, "proj")
+	require.NoError(t, os.Mkdir(proj, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(proj, "README.md"), []byte("# Proj\n"), 0o600))
+	st := memory.New()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("proj", model.KindRepository, "proj"), Kind: model.KindRepository, Repo: "proj", Name: "proj", Root: proj})
+	require.NoError(t, st.ReplaceRepo(ctx, "proj", g))
+	acc := accounts.NewService(acctmem.New(), true)
+	bootstrapAccounts(t, acc)
+	u, org, err := acc.SignUp(ctx, "jobs@example.com", "Jobs", pw)
+	require.NoError(t, err)
+	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: org.ID, Graph: "proj", AddedBy: u.ID, AddedAt: time.Now()}))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	api := New(ctx, Config{Accounts: acc, SourcesRoot: sources, Workspace: t.TempDir(), JobRoles: []string{}}, st, logger)
+	ts := httptest.NewServer(api)
+	t.Cleanup(ts.Close)
+	browser := newClient(t, ts)
+	require.Equal(t, browser.do("POST", "/api/v1/auth/login", `{"email":"jobs@example.com","password":"`+pw+`"}`, nil), 200)
+	var queued Job
+	require.Equal(t, browser.do("POST", "/api/v1/repos/proj/sync", `{}`, &queued, OrgHeader, org.Slug), 202)
+	assert.True(t, queued.Waiting, "the API only records it")
+	time.Sleep(3 * jobPoll)
+	rec, err := acc.St.JobByID(ctx, queued.ID)
+	require.NoError(t, err)
+	assert.Equal(t, rec.State, accounts.JobQueued, "nothing runs it without a worker")
+
+	// An ai-only worker leaves it alone; an ingest worker runs it.
+	_ = New(ctx, Config{Accounts: acc, SourcesRoot: sources, Workspace: t.TempDir(), JobRoles: []string{"ai"}, Worker: true}, st, logger)
+	time.Sleep(3 * jobPoll)
+	rec, err = acc.St.JobByID(ctx, queued.ID)
+	require.NoError(t, err)
+	assert.Equal(t, rec.State, accounts.JobQueued, "a worker claims only its roles")
+	_ = New(ctx, Config{Accounts: acc, SourcesRoot: sources, Workspace: t.TempDir(), JobRoles: []string{"ingest"}, Worker: true}, st, logger)
+	deadline := time.Now().Add(30 * time.Second)
+	for rec.Active() && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+		rec, err = acc.St.JobByID(ctx, queued.ID)
+		require.NoError(t, err)
+	}
+	assert.Equal(t, rec.State, accounts.JobSucceeded, rec.Error)
+	assert.Equal(t, rec.Attempts, 1, "a fresh job, not a resumed one")
+	assert.True(t, rec.Nodes > 0)
+	var view Job
+	require.Equal(t, browser.do("GET", "/api/v1/jobs/"+queued.ID, "", &view, OrgHeader, org.Slug), 200)
+	assert.Equal(t, view.State, JobSucceeded, "the API shows the worker's outcome")
+}

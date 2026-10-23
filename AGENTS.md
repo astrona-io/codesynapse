@@ -6,12 +6,13 @@ Instructions for AI coding agents (Claude Code, Codex, Cursor, Copilot and other
 
 CodeSynapse indexes a repository's Go code, Markdown docs, YAML, Go templates/Helm charts, git history and dependencies (with CVEs) into an Apache HugeGraph property graph, then serves small, precise answers from it: symbol cards, file outlines, callers and callees, impact of a diff, a graded security review, metrics and hotspots. The point is that a coding assistant asks the graph instead of reading whole files, which cuts tokens and gives better review context.
 
-Three services plus their stores, all in `docker-compose.yml`:
+Four services plus their stores, all in `docker-compose.yml`:
 
 | Service | Code | Port | Purpose |
 |---|---|---|---|
 | `mcp` | `services/mcp` | 8090 | MCP server for AI agents (stdio or streamable HTTP) |
-| `api` | `services/api` | 8080 | JSON API for the dashboard; runs ingest jobs |
+| `api` | `services/api` (image target `api`, no Go toolchain) | 8080 | JSON API for the dashboard; records jobs (`CODESYNAPSE_RUN_JOBS=false`) |
+| `worker` | `services/api` (`codesynapse-api worker`, image target `worker`) | 8081 (health) | Runs clone, sync, index, AI and fix jobs of its roles (`--roles ingest,ai,fix`) |
 | `web` | `services/web` (Nuxt 4) | 3000 | Dashboard; proxies to `api` server-side |
 | `hugegraph` | image | internal only | Graph store (Gremlin; never published to the host) |
 | `milvus` | image | internal only | Agent-memory vectors |

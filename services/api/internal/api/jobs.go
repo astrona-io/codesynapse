@@ -83,19 +83,36 @@ type Jobs struct {
 	licenseLookup bool
 	dataflow      bool
 	sem           chan struct{}
-	// store keeps jobs durable (jobs_durable.go); owner is this process.
+	// store keeps jobs durable (jobs_durable.go); owner is this process;
+	// kinds are the durable job kinds it runs (others are only recorded).
 	store jobStore
 	owner string
+	kinds []string
 
 	mu   sync.Mutex
 	jobs map[string]*Job
 }
 
 // UseStore makes every job durable in st and keeps this process's leases
-// alive until the runner's context ends.
-func (j *Jobs) UseStore(st jobStore) {
-	j.store, j.owner = st, newOwner()
+// alive until the runner's context ends. kinds are the job kinds this
+// process runs; jobs of other kinds are recorded for workers.
+func (j *Jobs) UseStore(st jobStore, kinds []string) {
+	j.store, j.owner, j.kinds = st, newOwner(), kinds
 	go j.heartbeat(j.ctx)
+}
+
+func (j *Jobs) runs(kind string) bool { return slices.Contains(j.kinds, kind) }
+
+// idle reports whether no job of this process waits or runs.
+func (j *Jobs) idle() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for _, job := range j.jobs {
+		if job.State == JobRunning {
+			return false
+		}
+	}
+	return true
 }
 
 // NewJobs returns a runner whose jobs are cancelled with ctx.
@@ -173,6 +190,11 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 			rec := accounts.JobRecord{ID: job.ID, Kind: d.Kind, Repo: repo, OrgID: opts.OrgID, ActorID: d.ActorID, Via: d.Via, KeyID: d.KeyID,
 				Role: d.Role, Execution: opts.Identity, Params: d.Params, Branch: opts.Branch, Task: opts.Task, State: accounts.JobQueued,
 				LeaseOwner: j.owner, LeaseUntil: now.Add(jobLease), CreatedAt: now.Truncate(time.Microsecond)}
+			local := j.runs(d.Kind)
+			if !local {
+				// A worker of this kind claims it (no owner, lease expired).
+				rec.LeaseOwner, rec.LeaseUntil = "", time.Unix(0, 0).UTC()
+			}
 			addCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := j.store.AddJob(addCtx, rec)
 			cancel()
@@ -181,6 +203,9 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 			}
 			if err != nil {
 				return Job{}, fmt.Errorf("recording the job: %w", err)
+			}
+			if !local {
+				return fromRecord(rec), nil
 			}
 		}
 	}

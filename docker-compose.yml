@@ -94,7 +94,10 @@ services:
     build:
       context: .
       dockerfile: services/api/Dockerfile
-    environment:
+      target: api
+    # The worker below runs the jobs; the API records them (docs/SAAS.md, 5e).
+    environment: &api-env
+      CODESYNAPSE_RUN_JOBS: "false"
       CODESYNAPSE_HUGEGRAPH_URL: http://hugegraph:8080
       CODESYNAPSE_HUGEGRAPH_USER: admin
       CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_PASSWORD:?run "just init" to add HUGEGRAPH_PASSWORD to .env}
@@ -150,7 +153,6 @@ services:
     volumes:
       - ${SOURCES_DIR:-./sources}:/sources:ro
       - workspace:/workspace
-      - go-cache:/cache
       - ./config:/config:ro
     # Reach model servers running on this machine (e.g. MLX on :9080) as
     # host.docker.internal. The default network is a normal NAT'd bridge, so
@@ -176,6 +178,36 @@ services:
       milvus:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+
+  # Runs clone, sync, index, AI and fix jobs the API records. Scale it with
+  # `docker compose up --scale worker=3`; each claims only its roles.
+  worker:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+      target: worker
+    environment:
+      <<: *api-env
+      CODESYNAPSE_WORKER_ROLES: ${CODESYNAPSE_WORKER_ROLES:-ingest,ai,fix}
+    volumes:
+      - ${SOURCES_DIR:-./sources}:/sources:ro
+      - workspace:/workspace
+      - go-cache:/cache
+      - ./config:/config:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      api:
         condition: service_healthy
 
   mcp:

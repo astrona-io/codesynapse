@@ -101,6 +101,13 @@ type Config struct {
 	// LLM holds configured AI providers; nil disables AI tasks.
 	LLM     *llm.Registry
 	Version string
+	// JobRoles are the job roles this process runs (ingest, ai, fix): nil
+	// runs all of them; an empty slice runs none and only records jobs for
+	// workers (docs/SAAS.md, 5e).
+	JobRoles []string
+	// Worker runs jobs only: no HTTP routes and none of the API's
+	// background loops (scheduler, pruning, projections, memory workers).
+	Worker bool
 }
 
 // Server is the API handler.
@@ -127,9 +134,14 @@ type Server struct {
 func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *Server {
 	s := &Server{cfg: cfg, st: st, logger: logger, mux: http.NewServeMux()}
 	s.jobs = NewJobs(ctx, st, logger, cfg.CommitLimit, cfg.AllowNetwork, cfg.VulnScan)
+	kinds, err := kindsFor(cfg.JobRoles)
+	if err != nil {
+		logger.Error("job roles", "error", err)
+		kinds = []string{}
+	}
 	if cfg.Accounts != nil {
 		// Jobs are rows before they run and survive restarts (jobs_durable.go).
-		s.jobs.UseStore(cfg.Accounts.St)
+		s.jobs.UseStore(cfg.Accounts.St, kinds)
 	}
 	s.jobs.licenseLookup = cfg.LicenseLookup
 	s.jobs.dataflow = cfg.Dataflow
@@ -146,17 +158,21 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 		if cfg.Accounts.Sink == nil {
 			cfg.Accounts.Sink = s.logAudit
 		}
-		go s.pruneAudit(ctx)
-		go s.projectAccess(ctx)
-		go s.pruneExecutionMemory(ctx)
-		go s.recoverIngestReports(ctx)
-		go s.exportIngestMetrics(ctx)
+		if !cfg.Worker {
+			go s.pruneAudit(ctx)
+			go s.projectAccess(ctx)
+			go s.pruneExecutionMemory(ctx)
+			go s.recoverIngestReports(ctx)
+			go s.exportIngestMetrics(ctx)
+		}
 	}
 	s.offload = offload.New(st, cfg.LLM, logger)
 	s.recall = recall.New(st, cfg.LLM, logger)
 	s.offload.OnSessionSaved = s.indexSession
-	go s.offload.Run(ctx)
-	go s.observeMemoryFacts(ctx)
+	if !cfg.Worker {
+		go s.offload.Run(ctx)
+		go s.observeMemoryFacts(ctx)
+	}
 	sched, err := loadSchedules(cfg.Workspace)
 	if err != nil {
 		logger.Error("auto-sync schedules unreadable; starting with none", "error", err)
@@ -169,11 +185,14 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 		s.orgs, _ = loadOrgs("") //nolint:errcheck // in-memory fallback cannot fail
 	}
 	s.loadRoutes()
-	go s.recoverFixes(ctx)
-	if s.jobs.store != nil {
-		go s.resumeJobs(ctx)
+	if !cfg.Worker {
+		// One process owns these; workers only run jobs (docs/SAAS.md, 5e).
+		go s.recoverFixes(ctx)
+		go s.runScheduler(ctx, logger)
 	}
-	go s.runScheduler(ctx, logger)
+	if s.jobs.store != nil && len(kinds) > 0 {
+		go s.runQueue(ctx)
+	}
 	s.routes()
 	return s
 }
