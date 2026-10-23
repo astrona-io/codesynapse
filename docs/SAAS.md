@@ -210,7 +210,7 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
    - **6a, Helm chart and local build-and-test loop (done; see [the chart README](../deploy/helm/codesynapse/README.md)):**
      - **What's built:** `deploy/helm/codesynapse` replaces the Kustomize tree. It has the four services, plus PostgreSQL, HugeGraph, Milvus, VictoriaMetrics and VictoriaTraces as StatefulSets, each replaceable by an external address. It uses one required Secret with no defaults, non-root pods (HugeGraph is the documented exception) and network policies. `GOMEMLIMIT` is set at 90% of each memory limit, there's an optional ingress (`/mcp` and the dashboard), and a `helm test` checks every service.
      - **Checks:** `just chart-check` (`helm lint --strict`, kubeconform, kube-linter, kubesec) runs on every pull request. `just chart-e2e` builds, loads, installs and tests on the throwaway `kind-codesynapse-dev` cluster, and the `Chart end to end` workflow runs it on chart changes, merges and on demand. Every command names its context explicitly.
-     - **Follow-ups:** mount secrets as files (kubesec `SecretsAsEnvironmentVariables`), measure ingest peaks for default memory limits, backups and upgrade notes, and chart-testing (`ct`) once the chart is versioned in 6b.
+     - **Follow-ups:** mount secrets as files (kubesec `SecretsAsEnvironmentVariables`), and measure ingest peaks for default memory limits. Backups, upgrade notes and versioning arrived with 6b.
 
      The original plan for this step:
      - A Helm chart in `deploy/helm/codesynapse` replaces the Kustomize overlays.
@@ -224,13 +224,26 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
        - load the images and `helm install` the chart from the working tree;
        - run the same smoke test and lint/scan set as CI, then tear down.
      - The loop and CI share the same scripts, so a green local run predicts a green pipeline.
-   - **6b, release pipeline:**
+   - **6b, release pipeline (done; see [Releasing](operations/releasing.md#server-release) and [Upgrading](operations/upgrading.md)):**
+     - **What's built:** a `vX.Y.Z` or `vX.Y.Z-rcN` tag on `main` publishes the four images (multi-arch, signed, SBOM and provenance) and the chart as a signed OCI artifact at `oci://ghcr.io/astrona-io/charts/codesynapse`. Chart, app and image versions are the tag without the `v`. A throwaway kind cluster then verifies the signatures, installs the published chart with the published images through a pull secret and runs `helm test`. Only after that does a final release get the images' `:latest` tag and become the latest GitHub release; release candidates never do. `image.pullSecrets` covers private registries, and `just chart-install-published` runs the same install locally.
+     - **Upgrade notes** cover migrations on start (under an advisory lock), the `api-loops` lease, durable jobs across restarts, backups and rollback.
+     - **Follow-ups:** `ct lint` and `ct install --upgrade` against the previous published chart, and Artifact Hub listing once the repository is public.
+
+     The original plan for this step:
      - Images on ghcr.io: multi-arch, signed, with SBOM and provenance.
      - The chart as an OCI artifact, so anyone installs from GitHub with `helm install codesynapse oci://ghcr.io/astrona-io/charts/codesynapse --version X.Y.Z`.
      - Chart and app versions follow the release tag.
      - Upgrade notes cover migrations, which run on start, and the single API replica that owns jobs and the scheduler.
      - The kind smoke test runs against the published artifacts before the release is marked latest.
-   - **6c, horizontal scaling:** MCP and web as stateless Deployments with several replicas; the API's job runner and scheduler behind a leader lease so more than one API replica can serve requests; HugeGraph and Milvus in their clustered modes (Milvus then needs object storage that is not MinIO: a cloud S3 bucket or an Apache-2.0 store).
+   - **6c, horizontal scaling of the services (done; see [Scaling out](../deploy/helm/codesynapse/README.md#scaling-out)):**
+     - **What's built:** login limits move from process memory to PostgreSQL (`login_attempts`, migration 0016, keys stored as SHA-256 hashes), so N API replicas still allow 5 attempts per email and 20 per client address a minute. A flood of distinct keys no longer resets them either. MCP gets `--stateless` (`CODESYNAPSE_MCP_STATELESS`, on in the chart and compose): no transport session between requests, so any replica answers any request, with the key and runtime session checked on each one. The chart adds optional CPU autoscaling for api, mcp and web, a disruption budget for any component with more than one pod, and preferred anti-affinity with zone spreading. The kind end-to-end run uses two API and two MCP replicas.
+     - **Already in place from 5e:** durable jobs, workers by role, schedules in PostgreSQL and the `api-loops` lease.
+     - **Limits:** annotation and memory extraction job status is per API replica (follow-up: a durable annotation queue); the shared workspace needs ReadWriteMany across nodes; MCP usage counters are read and rewritten in one Gremlin script, so two replicas flushing the same daily bucket at once may lose an increment (not yet measured).
+   - **6d, clustered stores (planned):**
+     - **PostgreSQL:** high availability through an operator or a managed service by URL (`postgresql.enabled: false`). CloudNativePG is Apache-2.0. The chart needs no change beyond documentation and a failover test.
+     - **HugeGraph:** the distributed mode (PD and HStore with Raft, Apache-2.0) in place of the standalone RocksDB server, as an optional sub-chart or by URL. Check that the store contract and the parity test pass against it.
+     - **Milvus:** distributed mode needs etcd, object storage and its write-ahead log. MinIO is AGPLv3, so object storage is a cloud S3 bucket or an Apache-2.0 S3-compatible store; verify each candidate's licence before choosing.
+     - **Done when:** each store survives the loss of one pod on a kind cluster with three nodes while an ingest and MCP calls run, with no lost writes.
 
 ## Standing architecture review
 

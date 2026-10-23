@@ -8,7 +8,7 @@ metadata:
   labels:
     {{- include "cs.labels" (list . "worker") | nindent 4 }}
 spec:
-  replicas: {{ .Values.worker.replicas }}
+  {{- include "cs.replicas" (list . "worker") | nindent 2 }}
   selector:
     matchLabels:
       {{- include "cs.selector" (list . "worker") | nindent 6 }}
@@ -20,6 +20,8 @@ spec:
       serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
       automountServiceAccountToken: false
       enableServiceLinks: false
+      {{- include "cs.pullSecrets" . | nindent 6 }}
+      {{- include "cs.spread" (list . "worker") | nindent 6 }}
       securityContext:
         {{- include "cs.podSecurity" 10001 | nindent 8 }}
       containers:

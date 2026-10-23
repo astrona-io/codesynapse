@@ -48,6 +48,7 @@ type serveOptions struct {
 	memory    bool
 	catalog   bool
 	usage     bool
+	stateless bool
 	apiURL    string
 }
 
@@ -61,6 +62,7 @@ func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.BoolVar(&o.memory, "allow-memory", app.Getenv("CODESYNAPSE_ALLOW_MEMORY", "true") == "true", "Enable the agent-memory tools upsert_graph_triples, search_graph_nodes and query_subgraph (writes only to the memory store)")
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", ""), "CodeSynapse API base URL; enables offload_turns (background triple extraction by the API's local model). Token from CODESYNAPSE_API_TOKEN")
 	f.BoolVar(&o.usage, "record-usage", app.Getenv("CODESYNAPSE_MCP_USAGE", "true") == "true", "Count sessions and tool calls per day, repository, tool and client for the Statistics page (never arguments or results)")
+	f.BoolVar(&o.stateless, "stateless", app.Getenv("CODESYNAPSE_MCP_STATELESS", "false") == "true", "HTTP: keep no transport session between requests, so any replica answers any request (docs/SAAS.md 6c)")
 	f.BoolVar(&o.reviews, "allow-reviews", app.Getenv("CODESYNAPSE_MCP_REVIEWS", "true") == "true", "Enable submit_review/update_review_comment (writes only to the review store)")
 	return nil
 }
@@ -193,7 +195,10 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return fmt.Errorf("CODESYNAPSE_TRUSTED_PROXIES: %w", err)
 	}
-	handler := opts.Runtime.HTTP(mcpserver.MeasureHTTP(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)))
+	handler := opts.Runtime.HTTP(mcpserver.MeasureHTTP(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server },
+		// The tools send no server-initiated messages, so nothing needs a
+		// session; the runtime session is checked on every request anyway.
+		&mcp.StreamableHTTPOptions{Stateless: o.stateless})))
 	mux := http.NewServeMux()
 	if acc != nil {
 		// Personal API keys are required in accounts mode.
@@ -203,7 +208,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		mux.Handle("/mcp", app.RequireBearer(os.Getenv(EnvToken), handler))
 	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) }) //nolint:errcheck // health probe
-	o.EC.Logger.Info("mcp http listening", "addr", o.addr, "path", "/mcp", "auth", os.Getenv(EnvToken) != "" || acc != nil, "accounts", acc != nil)
+	o.EC.Logger.Info("mcp http listening", "addr", o.addr, "path", "/mcp", "auth", os.Getenv(EnvToken) != "" || acc != nil, "accounts", acc != nil, "stateless", o.stateless)
 	return app.Serve(ctx, app.NewServer(o.addr, mux))
 }
 

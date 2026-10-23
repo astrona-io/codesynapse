@@ -10,7 +10,6 @@ import (
 	"math/big"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
@@ -125,37 +124,4 @@ func newID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
-}
-
-// limiter allows a few attempts per key per window (login brute force).
-type limiter struct {
-	mu     sync.Mutex
-	limit  int
-	window time.Duration
-	hits   map[string][]time.Time
-}
-
-func newLimiter(limit int, window time.Duration) *limiter {
-	return &limiter{limit: limit, window: window, hits: map[string][]time.Time{}}
-}
-
-// allow records an attempt for key and reports whether it is within limits.
-func (l *limiter) allow(key string, now time.Time) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	recent := l.hits[key][:0]
-	for _, t := range l.hits[key] {
-		if now.Sub(t) < l.window {
-			recent = append(recent, t)
-		}
-	}
-	if len(recent) >= l.limit {
-		l.hits[key] = recent
-		return false
-	}
-	l.hits[key] = append(recent, now)
-	if len(l.hits) > 100_000 { // bound memory under a flood of distinct keys
-		l.hits = map[string][]time.Time{}
-	}
-	return true
 }

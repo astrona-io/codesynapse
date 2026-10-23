@@ -365,6 +365,11 @@ type Store interface {
 	RecordScheduleRun(ctx context.Context, repo string, run ScheduleRun) error
 	AddScheduleMissing(ctx context.Context, repo string, gone bool) (int, error)
 	TakeLease(ctx context.Context, name, owner string, until, now time.Time) (bool, error)
+	// TakeAttempt records an attempt for key at now unless key already has
+	// limit attempts after since, and reports whether it was recorded.
+	// Attempts at or before since, of any key, may be deleted. Every API
+	// replica shares the count (login limits, docs/SAAS.md 6c).
+	TakeAttempt(ctx context.Context, key string, limit int, since, now time.Time) (bool, error)
 	// Durable jobs (jobs.go). AddJob refuses a second active job for the
 	// same repository (ErrJobActive). RenewJobLeases extends every active
 	// job owner holds. FinishJob ends a job owner still holds and clears its

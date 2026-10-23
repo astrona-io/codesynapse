@@ -8,3 +8,7 @@ ingress:
   tlsSecretName: codesynapse-tls
 llmConfig: |
   providers: []
+api:
+  autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4, targetCPU: 70}
+mcp:
+  replicas: 2
