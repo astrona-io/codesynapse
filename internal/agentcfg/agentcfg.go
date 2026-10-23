@@ -21,6 +21,9 @@ const Name = "codesynapse"
 // TokenEnv is the environment variable agents read the bearer token from.
 const TokenEnv = "CODESYNAPSE_MCP_TOKEN" //nolint:gosec // env var name
 
+// personalKeyPrefix mirrors accounts.KeyPrefix without pulling in the accounts package.
+const personalKeyPrefix = "csk_"
+
 // Runtime variables must be supplied by the launcher for one chat thread.
 const (
 	SessionEnv       = "CODESYNAPSE_SESSION_ID"
@@ -144,6 +147,10 @@ func run(ctx context.Context, name string, args ...string) error {
 func installClaude(ctx context.Context, s Server) error {
 	if s.Token == "" {
 		return errors.New("the bridge needs your personal key; set " + TokenEnv)
+	}
+	if !strings.HasPrefix(s.Token, personalKeyPrefix) {
+		// The .env tokens are installation tokens; session registration refuses them.
+		return fmt.Errorf("%s is not a personal key (%s…); create one in the dashboard under Settings → API keys", TokenEnv, personalKeyPrefix)
 	}
 	if s.Command == "" || s.StoreToken == nil {
 		return errors.New("no codesynapse binary to start as the bridge")
