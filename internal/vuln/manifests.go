@@ -184,6 +184,19 @@ func parseNPMLock(data []byte, dir string, scopes ...manifestScope) []Module {
 		return nil
 	}
 	direct := npmDirect(dir, scopes...)
+	// Which version sits at each path of the lockfile, to find the copy a
+	// package really uses: npm resolves a dependency by walking up the
+	// node_modules folders from the package that asks for it.
+	installed := map[string]string{}
+	for key, raw := range lock.Packages {
+		var p struct {
+			Version string `json:"version"`
+			Link    bool   `json:"link"`
+		}
+		if key != "" && json.Unmarshal(raw, &p) == nil && p.Version != "" && !p.Link {
+			installed[key] = p.Version
+		}
+	}
 	var out []Module
 	for key, raw := range lock.Packages {
 		var p struct {
@@ -203,7 +216,8 @@ func parseNPMLock(data []byte, dir string, scopes ...manifestScope) []Module {
 		}
 		name := key[i+len("node_modules/"):]
 		m := Module{Path: name, Version: p.Version, Ecosystem: EcosystemNPM, Indirect: !direct[name] || strings.Count(key, "node_modules/") > 1,
-			Dev: p.Dev, Requires: npmRequires(p.Dependencies, p.OptionalDependencies)}
+			Dev: p.Dev, Requires: npmRequires(p.Dependencies, p.OptionalDependencies),
+			Resolved: npmResolved(key, installed, p.Dependencies, p.OptionalDependencies)}
 		if id := license.NPMField(raw); id != "" {
 			m.License, m.LicenseSource = id, "package-lock.json"
 		}
@@ -226,6 +240,43 @@ func parseNPMLock(data []byte, dir string, scopes ...manifestScope) []Module {
 		}
 		walk(lock.Dependencies, false)
 	}
+	return out
+}
+
+// npmResolved names, for the package installed at lockfile path key, the
+// copy of each dependency it gets: the nearest node_modules/<name> from its
+// own folder upwards. A dependency the lockfile does not install is left out.
+func npmResolved(key string, installed map[string]string, maps ...map[string]string) []string {
+	var out []string
+	for _, deps := range maps {
+		for name := range deps {
+			for dir := key; ; {
+				path := "node_modules/" + name
+				if dir != "" {
+					path = dir + "/node_modules/" + name
+				}
+				if v, ok := installed[path]; ok {
+					k := (Module{Path: name, Ecosystem: EcosystemNPM}).Key() + "@" + v
+					if !slices.Contains(out, k) {
+						out = append(out, k)
+					}
+					break
+				}
+				if dir == "" {
+					break
+				}
+				// Leave this package's folder: ".../node_modules/<name>" or
+				// ".../node_modules/@scope/<name>" becomes its parent.
+				i := strings.LastIndex(dir, "node_modules/")
+				if i <= 0 {
+					dir = ""
+				} else {
+					dir = strings.TrimSuffix(dir[:i], "/")
+				}
+			}
+		}
+	}
+	slices.Sort(out)
 	return out
 }
 

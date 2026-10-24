@@ -5,17 +5,25 @@ import (
 	"testing"
 )
 
-func TestPreferredModule(t *testing.T) {
+// Every installed version is kept, in the same order on every run, with the
+// preferred one (direct before indirect, then the highest) first of its
+// package. The same version found twice is one module.
+func TestInstalledVersionsKeepsEveryVersionInOrder(t *testing.T) {
 	mods := []Module{
 		{Path: "pkg", Version: "0.6.1", Ecosystem: EcosystemNPM, Indirect: true},
 		{Path: "pkg", Version: "0.10.0", Ecosystem: EcosystemNPM, Indirect: true},
+		{Path: "pkg", Version: "0.10.0", Ecosystem: EcosystemNPM, Indirect: true}, // nested twice
 		{Path: "lib", Version: "1.0.0", Ecosystem: EcosystemNPM, Indirect: true},
 		{Path: "lib", Version: "0.9.0", Ecosystem: EcosystemNPM},
 	}
+	want := []string{"lib@0.9.0", "lib@1.0.0", "pkg@0.10.0", "pkg@0.6.1"}
 	for range 3 {
-		got := preferred(mods)
-		if len(got) != 2 || got[0].Path != "lib" || got[0].Version != "0.9.0" || got[1].Version != "0.10.0" {
-			t.Fatalf("preferred = %+v; want the direct lib 0.9.0 and the highest pkg 0.10.0", got)
+		var got []string
+		for _, m := range installedVersions(mods) {
+			got = append(got, m.Path+"@"+m.Version)
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("installed versions = %v; want %v (direct lib first, highest pkg first, no duplicates)", got, want)
 		}
 		slices.Reverse(mods)
 	}

@@ -142,12 +142,14 @@ func Build(repo model.Node, g store.DependencyGraph, opts Options) Document {
 		doc.Metadata.Licenses = licenseChoice(repo.License)
 	}
 
-	refOf := map[string]string{} // module node ID -> bom-ref
-	byKey := map[string]string{} // ecosystem|name -> bom-ref, for vulnerabilities
+	refOf := map[string]string{}     // module node ID -> bom-ref
+	byKey := map[string]string{}     // ecosystem|name -> bom-ref, for vulnerabilities
+	byVersion := map[string]string{} // ecosystem|name@version -> bom-ref: several versions can be installed
 	for _, m := range g.Modules {
 		c := component(m)
 		refOf[m.ID] = c.BOMRef
 		byKey[moduleKey(m.Ecosystem, m.Name)] = c.BOMRef
+		byVersion[moduleKey(m.Ecosystem, m.Name)+"@"+m.Version] = c.BOMRef
 		doc.Components = append(doc.Components, c)
 	}
 	slices.SortFunc(doc.Components, func(a, b Component) int { return cmp.Compare(a.BOMRef, b.BOMRef) })
@@ -181,7 +183,7 @@ func Build(repo model.Node, g store.DependencyGraph, opts Options) Document {
 	}
 
 	for _, v := range g.Vulnerabilities {
-		ref := byKey[moduleKey(v.Ecosystem, v.Package)]
+		ref := cmp.Or(byVersion[moduleKey(v.Ecosystem, v.Package)+"@"+v.Version], byKey[moduleKey(v.Ecosystem, v.Package)])
 		if ref == "" {
 			continue
 		}

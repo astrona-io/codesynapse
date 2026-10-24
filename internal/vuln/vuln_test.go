@@ -294,3 +294,49 @@ func TestScanAsksAboutTheBuiltModule(t *testing.T) {
 	localNode, _ := g.Node(model.NodeID("r", model.KindModule, "example.com/local"))
 	assert.Contains(t, localNode.Summary, "local directory ../local")
 }
+
+// An advisory that hits one of several installed versions is attached to that
+// version's module, and the two versions' advisories do not share a node.
+func TestApplyKeepsAdvisoriesOfEachInstalledVersion(t *testing.T) {
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindRepository, "r"), Kind: model.KindRepository, Repo: "r", Name: "r"})
+	mods := []Module{
+		{Path: "shared", Version: "1.0.0", Ecosystem: EcosystemNPM},
+		{Path: "shared", Version: "2.0.0", Ecosystem: EcosystemNPM, Indirect: true, Requires: nil},
+		{Path: "top", Version: "1.0.0", Ecosystem: EcosystemNPM, Requires: []string{"npm:shared"}, Resolved: []string{"npm:shared@2.0.0"}},
+	}
+	vulns := []Vulnerability{
+		{ID: "GHSA-x", Module: "shared", Ecosystem: EcosystemNPM, Version: "1.0.0", Severity: "high"},
+		{ID: "GHSA-x", Module: "shared", Ecosystem: EcosystemNPM, Version: "2.0.0", Severity: "high"},
+	}
+	Apply("r", g, mods, vulns, nil, nil)
+
+	plain := model.NodeID("r", model.KindModule, "npm:shared")
+	second := model.NodeID("r", model.KindModule, "npm:shared@2.0.0")
+	one, ok1 := g.Node(plain)
+	two, ok2 := g.Node(second)
+	require.True(t, ok1 && ok2)
+	assert.Equal(t, one.Version, "1.0.0")
+	assert.Equal(t, two.Version, "2.0.0")
+
+	affects := map[string]string{} // advisory version -> module version it points at
+	for _, e := range g.Edges() {
+		if e.Kind != model.EdgeAffects {
+			continue
+		}
+		v, _ := g.Node(e.From)
+		m, _ := g.Node(e.To)
+		affects[v.Version] = m.Version
+	}
+	assert.Equal(t, affects["1.0.0"], "1.0.0")
+	assert.Equal(t, affects["2.0.0"], "2.0.0")
+
+	var requires []string
+	top := model.NodeID("r", model.KindModule, "npm:top")
+	for _, e := range g.Edges() {
+		if e.Kind == model.EdgeDependsOn && e.From == top {
+			requires = append(requires, e.To)
+		}
+	}
+	assert.Equal(t, strings.Join(requires, ","), second, "top uses the copy the lockfile resolved")
+}

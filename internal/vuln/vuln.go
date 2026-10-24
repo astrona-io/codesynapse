@@ -56,6 +56,11 @@ type Module struct {
 	// module. Path stays the import path the code uses; Version is then the
 	// version actually built (empty for a local replacement, which has none).
 	Replacement *Replacement `json:"replacement,omitempty"`
+	// Resolved lists, where a lockfile says which installed copy satisfies a
+	// requirement (npm nests several versions of one package), the
+	// version-qualified keys ("npm:shared@2.0.0") of the copies this module
+	// really uses. Requires keeps the plain keys for path walks.
+	Resolved []string `json:"resolved,omitempty"`
 	// Via is the shortest chain of modules from a dependency the project
 	// declares itself to this one ("a > b" means project, a, b, this); Roots
 	// is how many such dependencies lead to it. Both are set by AssignPaths

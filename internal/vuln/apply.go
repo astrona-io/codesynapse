@@ -24,10 +24,25 @@ const (
 // paths mapped to importing package IDs.
 func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability, externalCalls, externalImports map[string][]string) {
 	repoID := model.NodeID(repo, model.KindRepository, repo)
-	modules = preferred(modules)
+	modules = installedVersions(modules)
 	eco := map[string]string{} // module key -> ecosystem
+	// Every installed version is a node. The preferred one (direct before
+	// indirect, then the highest) keeps the plain key as its ID, as before;
+	// the others are told apart by their version.
+	idOf := map[string]string{}        // key@version -> node ID
+	preferredID := map[string]string{} // key -> node ID of the preferred version
+	preferredVersion := map[string]string{}
 	for _, m := range modules {
 		id := model.NodeID(repo, model.KindModule, m.Key())
+		if _, seen := preferredID[m.Key()]; seen {
+			id = model.NodeID(repo, model.KindModule, m.Key()+"@"+m.Version)
+		} else {
+			preferredID[m.Key()], preferredVersion[m.Key()] = id, m.Version
+		}
+		idOf[m.Key()+"@"+m.Version] = id
+	}
+	for _, m := range modules {
+		id := idOf[m.Key()+"@"+m.Version]
 		eco[m.Key()] = m.ecosystem()
 		g.AddNode(model.Node{ID: id, Kind: model.KindModule, Repo: repo, Name: m.Path, QualifiedName: m.Path, Version: m.Version, Indirect: m.Indirect, Ecosystem: m.ecosystem(),
 			Dev: m.Dev, License: m.License, LicenseSource: m.LicenseSource, Via: m.Via, Roots: m.Roots,
@@ -41,10 +56,21 @@ func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability,
 		have[m.Key()] = true
 	}
 	for _, m := range modules {
-		from := model.NodeID(repo, model.KindModule, m.Key())
+		from := idOf[m.Key()+"@"+m.Version]
+		// A requirement the lockfile resolved goes to the copy it names; the
+		// rest go to the preferred version of the package.
+		resolved := map[string]bool{}
+		for _, r := range m.Resolved {
+			if to, ok := idOf[r]; ok && to != from {
+				g.AddEdge(model.Edge{From: from, To: to, Kind: model.EdgeDependsOn})
+			}
+			if i := strings.LastIndex(r, "@"); i > 0 { // the version follows the last @ ("npm:@scope/p@1.0.0")
+				resolved[r[:i]] = true
+			}
+		}
 		for _, r := range m.Requires {
-			if r != m.Key() && have[r] {
-				g.AddEdge(model.Edge{From: from, To: model.NodeID(repo, model.KindModule, r), Kind: model.EdgeDependsOn})
+			if r != m.Key() && have[r] && !resolved[r] {
+				g.AddEdge(model.Edge{From: from, To: preferredID[r], Kind: model.EdgeDependsOn})
 			}
 		}
 	}
@@ -64,13 +90,19 @@ func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability,
 
 	for _, v := range vulns {
 		mod := Module{Path: v.Module, Ecosystem: v.Ecosystem}
-		vid := model.NodeID(repo, model.KindVulnerability, mod.Key()+"@"+v.ID)
+		// An advisory that hits a version other than the preferred one is a
+		// node of its own, or both versions would share it.
+		vkey := mod.Key() + "@" + v.ID
+		if _, known := idOf[mod.Key()+"@"+v.Version]; known && v.Version != preferredVersion[mod.Key()] {
+			vkey = mod.Key() + "@" + v.Version + "@" + v.ID
+		}
+		vid := model.NodeID(repo, model.KindVulnerability, vkey)
 		n := model.Node{
 			ID: vid, Kind: model.KindVulnerability, Repo: repo, Name: v.ID, QualifiedName: v.ID,
 			Summary: v.Summary, Severity: v.Severity, CWE: v.CWE, Aliases: v.Aliases,
 			Package: v.Module, Version: v.Version, FixedVersion: v.Fixed, URL: v.URL, Reachability: Required, Ecosystem: v.Ecosystem,
 		}
-		modID := model.NodeID(repo, model.KindModule, mod.Key())
+		modID := cmp.Or(idOf[mod.Key()+"@"+v.Version], model.NodeID(repo, model.KindModule, mod.Key()))
 		if mod.ecosystem() != EcosystemGo {
 			// npm/PyPI advisories rarely list symbols: a package imported by
 			// any source file is "imported", otherwise "required".
@@ -160,16 +192,18 @@ func matchesSymbol(syms []string, sym string) bool {
 	return false
 }
 
-// preferred keeps one module per key, the same one on every run: lockfiles
-// can hold several versions of a package (npm nests them), and they arrive
-// in map order. A direct dependency wins over an indirect one, then the
-// highest version.
-func preferred(modules []Module) []Module {
+// installedVersions keeps one module per package version, in the same order
+// on every run: lockfiles can hold several versions of a package (npm nests
+// them), and they arrive in map order. Within a package a direct dependency
+// comes before an indirect one, then the highest version first, so the first
+// of each package is the preferred one. The same version found twice is one
+// module, direct if any copy is.
+func installedVersions(modules []Module) []Module {
 	out := slices.Clone(modules)
 	slices.SortStableFunc(out, func(a, b Module) int {
-		return cmp.Or(strings.Compare(a.Key(), b.Key()), boolOrder(a.Indirect, b.Indirect), -compareVersions(a.Version, b.Version))
+		return cmp.Or(strings.Compare(a.Key(), b.Key()), boolOrder(a.Indirect, b.Indirect), -compareVersions(a.Version, b.Version), strings.Compare(a.Version, b.Version))
 	})
-	return slices.CompactFunc(out, func(a, b Module) bool { return a.Key() == b.Key() })
+	return slices.CompactFunc(out, func(a, b Module) bool { return a.Key() == b.Key() && a.Version == b.Version })
 }
 
 func boolOrder(a, b bool) int {
