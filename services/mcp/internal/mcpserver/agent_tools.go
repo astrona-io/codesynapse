@@ -15,6 +15,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/license"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/security"
+	"github.com/astrona-io/codesynapse/internal/verifyplan"
 )
 
 func registerAgentTools(s *mcp.Server, h *handlers, add func(name, desc string) *mcp.Tool) {
@@ -31,6 +32,9 @@ func registerAgentTools(s *mcp.Server, h *handlers, add func(name, desc string) 
 	mcp.AddTool(s, add("get_pr_context",
 		"Change analysis in one call: pass a unified diff, a list of modified files, or base/head git refs. Returns changed symbols with risk, blast radius, covering tests, findings, docs to re-check, exported symbols without tests and security-sensitive symbols touched."),
 		h.prContext)
+	mcp.AddTool(s, add("verify_plan",
+		"What to run to check a change: pass a diff, files or base/head refs as for get_pr_context. Returns the tests that reach the changed code as exact commands (go test ./pkg -run '^(TestA|TestB)$', pytest file::test, npm test -- file), closest first, then build and lint for each language touched, and the changed functions no test reaches. Run the steps in order before you finish."),
+		h.verifyPlan)
 	mcp.AddTool(s, add("unused_code",
 		"Unused code to remove: unreachable and test-only functions (with confidence and security relevance), files with nothing live, unused go.mod modules (and CVEs removing them eliminates), unused Helm values and template defines."),
 		h.unusedCode)
@@ -100,6 +104,15 @@ func (h *handlers) prContext(ctx context.Context, _ *mcp.CallToolRequest, in prC
 		return nil, agentctx.PRContext{}, err
 	}
 	out, err := coretools.PRContext(ctx, h.svc.R, repo, in)
+	return nil, out, err
+}
+
+func (h *handlers) verifyPlan(ctx context.Context, _ *mcp.CallToolRequest, in coretools.VerifyPlanIn) (*mcp.CallToolResult, verifyplan.Plan, error) {
+	repo, err := h.repo(ctx, in.Repo)
+	if err != nil {
+		return nil, verifyplan.Plan{}, err
+	}
+	out, err := coretools.VerifyPlan(ctx, h.svc.R, repo, in)
 	return nil, out, err
 }
 

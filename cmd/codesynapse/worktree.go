@@ -219,13 +219,7 @@ var errNoChanges = errors.New("the working tree has no changes the server lacks"
 // (where it left the upstream branch, else HEAD) and a graph of it, built
 // once per commit in a temporary worktree. A nil graph means no comparison.
 func (w *worktree) base(ctx context.Context) (string, store.Reader) {
-	commit := ""
-	if out, err := gitx.Run(ctx, w.root, "merge-base", "HEAD", "@{upstream}"); err == nil {
-		commit = strings.TrimSpace(string(out))
-	}
-	if commit == "" {
-		commit = gitx.HeadCommit(ctx, w.root)
-	}
+	commit := w.baseCommitOf(ctx)
 	if commit == "" {
 		return "", nil
 	}
@@ -246,6 +240,14 @@ func (w *worktree) base(ctx context.Context) (string, store.Reader) {
 	}
 	w.baseCommit, w.baseGraph = commit, mem
 	return commit, mem
+}
+
+// baseCommitOf is where the branch left its upstream, else HEAD.
+func (w *worktree) baseCommitOf(ctx context.Context) string {
+	if out, err := gitx.Run(ctx, w.root, "merge-base", "HEAD", "@{upstream}"); err == nil {
+		return strings.TrimSpace(string(out))
+	}
+	return gitx.HeadCommit(ctx, w.root)
 }
 
 // currentChange fills a get_pr_context call that names no change with the
@@ -342,6 +344,21 @@ func (w *worktree) runCoreTool(ctx context.Context, r store.Reader, name string,
 			}
 		}
 		return coretools.PRContextAgainst(ctx, r, base, short(commit), repo, in)
+	case "verify_plan":
+		var in coretools.VerifyPlanIn
+		if err := decode(&in); err != nil {
+			return nil, err
+		}
+		if in.Diff == "" && len(in.Files) == 0 && in.Base == "" {
+			if commit := w.baseCommitOf(ctx); commit != "" {
+				change := coretools.PRContextIn{}
+				if err := w.currentChange(ctx, commit, &change); err != nil {
+					return nil, err
+				}
+				in.Diff, in.Files = change.Diff, change.Files
+			}
+		}
+		return coretools.VerifyPlan(ctx, r, repo, in)
 	}
 	return nil, fmt.Errorf("%s is not answered from the working tree", name)
 }

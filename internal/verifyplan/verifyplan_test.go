@@ -1,0 +1,60 @@
+package verifyplan
+
+import (
+	"context"
+	"math"
+	"testing"
+
+	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/review"
+	"github.com/astrona-io/codesynapse/internal/store/memory"
+	"github.com/astrona-io/codesynapse/internal/testutil/assert"
+	"github.com/astrona-io/codesynapse/internal/testutil/require"
+)
+
+func TestBuild(t *testing.T) {
+	ctx := context.Background()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindRepository, "r"), Kind: model.KindRepository, Repo: "r", Name: "r"})
+	fn := func(local, name, file string, line int, test bool) string {
+		id := model.NodeID("r", model.KindFunction, local)
+		g.AddNode(model.Node{ID: id, Kind: model.KindFunction, Repo: "r", Name: name, QualifiedName: local, File: file, StartLine: line, EndLine: line + 2, IsTest: test})
+		return id
+	}
+	calls := func(from, to string) { g.AddEdge(model.Edge{From: from, To: to, Kind: model.EdgeCalls}) }
+	f := fn("example.com/a.F", "F", "a/a.go", 1, false)
+	fn("example.com/a.U", "U", "a/a.go", 10, false)
+	h := fn("example.com/b.H", "H", "b/b.go", 1, false)
+	calls(fn("example.com/a.TestF", "TestF", "a/a_test.go", 1, true), f)
+	calls(fn("example.com/a.helper", "helper", "a/a_test.go", 10, true), f)
+	calls(h, f)
+	calls(fn("example.com/b.TestG", "TestG", "b/b_test.go", 1, true), h)
+	p := fn("pkg.py::p", "p", "pkg.py", 1, false)
+	calls(fn("tests/test_pkg.py::TestP.test_it", "test_it", "tests/test_pkg.py", 3, true), p)
+	mem := memory.New()
+	require.NoError(t, mem.ReplaceRepo(ctx, "r", g))
+
+	whole := []gitx.LineRange{{Start: 1, End: math.MaxInt32}}
+	rep, err := review.Analyze(ctx, query.Service{R: mem}, "r", []gitx.FileChange{{Path: "a/a.go", Ranges: whole}, {Path: "pkg.py", Ranges: whole}}, review.Options{Depth: 3})
+	require.NoError(t, err)
+	plan, err := Build(ctx, mem, "r", rep)
+	require.NoError(t, err)
+
+	var commands []string
+	for _, s := range plan.Steps {
+		commands = append(commands, s.Command)
+	}
+	assert.Equal(t, commands, []string{
+		"go test ./a -run '^(TestF)$'",
+		"pytest tests/test_pkg.py::TestP::test_it",
+		"go test ./b -run '^(TestG)$'",
+		"go build ./a",
+		"go vet ./a",
+		"python -m py_compile pkg.py",
+	}, "closest tests first, then build and lint; the helper in a test file is no test")
+	assert.Equal(t, plan.Steps[0].Reach, 1)
+	assert.Equal(t, plan.Steps[2].Reach, 2)
+	assert.Equal(t, plan.Untested, []string{"a.U"})
+}

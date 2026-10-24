@@ -83,6 +83,7 @@ var instructionRules = [][]clause{
 	{{nil, `Exact matches: when a lookup returns suggestions, retry with the exact qualified_id it lists (e.g. store.(*Store).Get).`}},
 	{{nil, `Test boundaries: before editing a symbol, check its tests (is_test: true callers) to confirm safety and find fixtures.`}},
 	{{nil, `Read narrowly: file_outline and the "read"/"location" fields give file:start-end ranges; read only those lines.`}},
+	{{nil, `Verify before you finish: verify_plan turns your change into the exact test, build and lint commands to run, closest tests first; run them instead of the whole suite or nothing.`}},
 	{
 		{nil, `Freshness and breadth: repo_status says whether the graph is current;`},
 		{[]string{"repos"}, `search_all_repos finds which repository owns a name across an organisation;`},
