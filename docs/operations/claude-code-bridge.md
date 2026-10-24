@@ -2,6 +2,8 @@
 
 Claude Code connects to CodeSynapse through `codesynapse mcp bridge`, a small stdio process that runs on the developer's machine. Every machine that uses CodeSynapse from Claude Code needs the `codesynapse` binary installed locally. The server stack can run anywhere.
 
+
+The [Claude Code plugin](claude-code-plugin.md) sets this up in one install, with a workflow skill and hooks; this page describes the bridge it runs.
 ## Why a bridge
 
 The MCP server only runs tools for a registered chat session. Each request must carry a personal key plus `X-CodeSynapse-Session` and `X-CodeSynapse-Parent-Session` with the chat's ID (see [runtime session setup](../AGENT_GUIDE.md#runtime-session-setup)).

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "codesynapse": {
+      "command": "codesynapse",
+      "args": ["mcp", "bridge"]
+    }
+  }
+}

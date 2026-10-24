@@ -45,9 +45,13 @@ var version = "dev"
 
 func main() {
 	os.Exit(app.Main("codesynapse", "Index code, docs and history into a graph for review and AI assistants", version,
-		func(ec *app.Env) []*cobra.Command {
-			return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), statsCmd(ec), evalCmd(ec), mcpCmd(ec), memoryCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
-		}))
+		commands))
+}
+
+// commands are the CLI's subcommands (the plugin test checks the hooks
+// call ones that exist).
+func commands(ec *app.Env) []*cobra.Command {
+	return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), statsCmd(ec), evalCmd(ec), hookCmd(ec), mcpCmd(ec), memoryCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
 }
 
 // ingestOptions configures `codesynapse ingest`.

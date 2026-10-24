@@ -128,6 +128,13 @@ ingest-self:
 review base="origin/main":
     go run ./cmd/codesynapse review . --offline --base {{base}}
 
+# Validate the Claude Code plugin and marketplace with Claude Code's own validator (needs the claude CLI)
+# Not --strict: the plugin has no version on purpose (installs follow the
+# repository's commits) and no icon (no listing in the plugin directory).
+plugin-check:
+    claude plugin validate ./plugins/codesynapse
+    claude plugin validate .
+
 # Score minimal_context and search on past commits against the committed baseline (needs full history)
 eval *args:
     go run ./cmd/codesynapse eval . --repo codesynapse --baseline docs/benchmarks/task-eval/codesynapse.json {{args}}
