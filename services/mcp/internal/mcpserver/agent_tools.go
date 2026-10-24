@@ -16,6 +16,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/license"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/security"
+	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/verifyplan"
 )
 
@@ -83,7 +84,7 @@ func (h *handlers) symbolContext(ctx context.Context, _ *mcp.CallToolRequest, in
 	if err != nil {
 		return nil, agentctx.SymbolContext{}, err
 	}
-	out, err := coretools.SymbolContext(ctx, h.svc.R, repo, in)
+	out, err := coretools.SymbolContext(h.runtimeScope(ctx, repo), h.svc.R, repo, in)
 	return nil, out, err
 }
 
@@ -110,7 +111,7 @@ func (h *handlers) prContext(ctx context.Context, _ *mcp.CallToolRequest, in prC
 	if err != nil {
 		return nil, agentctx.PRContext{}, err
 	}
-	out, err := coretools.PRContext(ctx, h.svc.R, repo, in)
+	out, err := coretools.PRContext(h.runtimeScope(ctx, repo), h.svc.R, repo, in)
 	return nil, out, err
 }
 
@@ -119,7 +120,7 @@ func (h *handlers) verifyPlan(ctx context.Context, _ *mcp.CallToolRequest, in co
 	if err != nil {
 		return nil, verifyplan.Plan{}, err
 	}
-	out, err := coretools.VerifyPlan(ctx, h.svc.R, repo, in)
+	out, err := coretools.VerifyPlan(h.runtimeScope(ctx, repo), h.svc.R, repo, in)
 	return nil, out, err
 }
 
@@ -258,4 +259,10 @@ func (h *handlers) licenseReport(ctx context.Context, _ *mcp.CallToolRequest, in
 	}
 	rep.Issues = issues
 	return nil, rep, nil
+}
+
+// runtimeScope makes measured test facts come from the caller's
+// organisation: organisations sharing a graph upload their own runs.
+func (h *handlers) runtimeScope(ctx context.Context, repo string) context.Context {
+	return store.WithRuntimeScope(ctx, h.memRepo(ctx, repo))
 }

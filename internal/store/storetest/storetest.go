@@ -85,6 +85,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("identity", func(t *testing.T) { identityContract(t, s) })
 	t.Run("memory_counts", func(t *testing.T) { memoryCountsContract(t, s) })
 	t.Run("session_memory", func(t *testing.T) { sessionMemoryContract(t, s) })
+	t.Run("runtime_facts", func(t *testing.T) { runtimeContract(t, s) })
 
 	t.Run("repos", func(t *testing.T) {
 		repo, ok := findRepo(ctx, t, s)

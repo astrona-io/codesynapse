@@ -22,6 +22,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/forge"
 	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/memory"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
 	"github.com/astrona-io/codesynapse/internal/review"
@@ -292,6 +293,7 @@ func (s *Server) routes() {
 	s.importRoutes()
 	s.sessionMemoryRoutes()
 	s.repoPolicyRoutes()
+	s.runtimeRoutes()
 	s.route("GET /api/v1/overview", visibleOnly, s.handleWorkspaceOverview)
 	s.route("GET /api/v1/attention", visibleOnly, s.handleAttention)
 	s.route("GET /api/v1/stats", visibleOnly, s.handleStats)
@@ -490,6 +492,12 @@ func (s *Server) unlinkRepo(r *http.Request, graph string) (int, error) {
 		}
 		if err := s.cfg.Accounts.DropRepoGrants(ctx, l.OrgID, graph); err != nil {
 			return 0, err
+		}
+		// The organisation's uploaded test runs leave with its link.
+		if rs, ok := s.st.(store.RuntimeStore); ok {
+			if err := rs.DeleteRuntimeFacts(ctx, memory.Namespace(l.OrgID, graph)); err != nil {
+				return 0, err
+			}
 		}
 	}
 	return left, nil
