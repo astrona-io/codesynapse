@@ -141,12 +141,6 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 		logger.Info("extracted go code", "nodes", len(code.Nodes()), "edges", len(code.Edges()))
 	}
 
-	docGraph, err := docs.Extract(ctx, opts.Repo, root, g)
-	if err != nil {
-		return nil, fmt.Errorf("docs extraction: %w", err)
-	}
-	g.Merge(docGraph)
-
 	langRes, err := lang.Extract(ctx, opts.Repo, root)
 	if err != nil {
 		return nil, fmt.Errorf("python/js/ts extraction: %w", err)
@@ -158,6 +152,13 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	if len(langRes.Languages) > 0 {
 		logger.Info("extracted source code", "files", langRes.Languages)
 	}
+	// Documentation is linked last among the code languages: a mention can
+	// only resolve to a symbol that is already in the graph.
+	docGraph, err := docs.Extract(ctx, opts.Repo, root, g)
+	if err != nil {
+		return nil, fmt.Errorf("docs extraction: %w", err)
+	}
+	g.Merge(docGraph)
 	if err := arch.Extract(ctx, opts.Repo, root, g); err != nil {
 		return nil, fmt.Errorf("architecture records: %w", err)
 	}
