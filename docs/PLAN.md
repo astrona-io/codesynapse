@@ -333,7 +333,7 @@ What would put security more in front of developers, ordered by value for the ef
 9. **Dockerfile and Terraform rules.** Root `USER`, `ADD` from URLs, unpinned base images, secrets in `ENV`/`ARG`; open security groups, public buckets, unencrypted storage.
 10. **Ownership** (done: `internal/codeowners` reads CODEOWNERS at ingest into the repository's metadata; findings carry `code_owners`, the report counts findings per owner (Security page, `audit`, SARIF), and `get_pr_context` names the owners of the changed files; handles only, e-mail owners dropped). Parse `CODEOWNERS` and route findings to owning teams on the overview.
 11. **Agent workflow.** A `security-review` MCP prompt (guide prompt E) and a `security_context` view in `get_symbol_context` showing sensitive calls, reaching routes and findings before an agent edits a symbol.
-12. **Pre-commit gate.** `codesynapse audit --changed --fail-on high` limited to staged files, fast enough for a hook.
+12. **Pre-commit gate** (done: `codesynapse audit --changed` keeps the findings of staged files, offline unless `--vulns` is given; `codesynapse git-hook install --pre-commit` installs it; about 5 s on this repository). `codesynapse audit --changed --fail-on high` limited to staged files, fast enough for a hook.
 
 ## Agent workflow roadmap
 

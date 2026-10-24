@@ -75,17 +75,20 @@ type Vulnerability struct {
 
 // Report is the security review.
 type Report struct {
-	Suppressed       []Finding       `json:"suppressed,omitempty"`
-	SuppressedCounts map[string]int  `json:"suppressed_counts,omitempty"`
-	Repo             string          `json:"repo"`
-	Score            int             `json:"score"`
-	Grade            string          `json:"grade"`
-	FindingCounts    map[string]int  `json:"finding_counts"`
-	VulnCounts       map[string]int  `json:"vuln_counts"`
-	Findings         []Finding       `json:"findings"`
-	Vulnerabilities  []Vulnerability `json:"vulnerabilities"`
-	Modules          ModuleStats     `json:"modules"`
-	Rules            []RuleCount     `json:"rules"`
+	Suppressed       []Finding      `json:"suppressed,omitempty"`
+	SuppressedCounts map[string]int `json:"suppressed_counts,omitempty"`
+	Repo             string         `json:"repo"`
+	// Scope says what a narrowed report covers (OnlyFiles); empty for the
+	// whole repository.
+	Scope           string          `json:"scope,omitempty"`
+	Score           int             `json:"score"`
+	Grade           string          `json:"grade"`
+	FindingCounts   map[string]int  `json:"finding_counts"`
+	VulnCounts      map[string]int  `json:"vuln_counts"`
+	Findings        []Finding       `json:"findings"`
+	Vulnerabilities []Vulnerability `json:"vulnerabilities"`
+	Modules         ModuleStats     `json:"modules"`
+	Rules           []RuleCount     `json:"rules"`
 	// OwnerCounts are the listed findings per CODEOWNERS owner, most
 	// severe work first; empty without a CODEOWNERS file.
 	OwnerCounts []OwnerCount `json:"owners,omitempty"`
@@ -477,32 +480,10 @@ func (r Report) ExceedsThreshold(severity string) bool {
 func WriteMarkdown(w io.Writer, r Report) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Security review: %s\n\n", r.Repo)
-	if r.Grade == NotApplicable {
-		b.WriteString("**No grade:** nothing in this repository is covered by the security rules (see below).")
+	if r.Scope != "" {
+		fmt.Fprintf(&b, "**Scope: %s** · findings: %s\n\n", r.Scope, counts(r.FindingCounts))
 	} else {
-		fmt.Fprintf(&b, "**Grade %s (%d/100)**", r.Grade, r.Score)
-	}
-	fmt.Fprintf(&b, " · findings: %s · vulnerabilities: %s · %d modules (%d direct), %d vulnerable",
-		counts(r.FindingCounts), counts(r.VulnCounts), r.Modules.Total, r.Modules.Direct, r.Modules.Vulnerable)
-	if r.Modules.Stdlib != "" {
-		fmt.Fprintf(&b, " · Go %s", strings.TrimPrefix(r.Modules.Stdlib, "v"))
-	}
-	b.WriteString("\n\n")
-	if r.Head != "" {
-		fmt.Fprintf(&b, "Indexed at commit `%s` (%s). If your checkout is on another commit, sync the repository first.\n\n", short(r.Head), r.IndexedAt)
-	}
-	if len(r.Checked) > 0 || len(r.NotChecked) > 0 {
-		b.WriteString("**What was checked:**\n")
-		for _, c := range r.Checked {
-			fmt.Fprintf(&b, "- %s\n", c)
-		}
-		if len(r.NotChecked) > 0 {
-			b.WriteString("\n**Not checked (review by hand):**\n")
-			for _, c := range r.NotChecked {
-				fmt.Fprintf(&b, "- %s\n", c)
-			}
-		}
-		b.WriteString("\n")
+		writeHeader(&b, r)
 	}
 	if r.Unanalysed > 0 {
 		fmt.Fprintf(&b, "%d more findings are counted in the grade but not listed (the report lists the first %d).\n\n", r.Unanalysed, store.MaxLimit)
@@ -554,6 +535,38 @@ func WriteMarkdown(w io.Writer, r Report) error {
 	}
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// writeHeader is the grade, dependency counts, commit and coverage of a
+// report on the whole repository.
+func writeHeader(b *strings.Builder, r Report) {
+	if r.Grade == NotApplicable {
+		b.WriteString("**No grade:** nothing in this repository is covered by the security rules (see below).")
+	} else {
+		fmt.Fprintf(b, "**Grade %s (%d/100)**", r.Grade, r.Score)
+	}
+	fmt.Fprintf(b, " · findings: %s · vulnerabilities: %s · %d modules (%d direct), %d vulnerable",
+		counts(r.FindingCounts), counts(r.VulnCounts), r.Modules.Total, r.Modules.Direct, r.Modules.Vulnerable)
+	if r.Modules.Stdlib != "" {
+		fmt.Fprintf(b, " · Go %s", strings.TrimPrefix(r.Modules.Stdlib, "v"))
+	}
+	b.WriteString("\n\n")
+	if r.Head != "" {
+		fmt.Fprintf(b, "Indexed at commit `%s` (%s). If your checkout is on another commit, sync the repository first.\n\n", short(r.Head), r.IndexedAt)
+	}
+	if len(r.Checked) > 0 || len(r.NotChecked) > 0 {
+		b.WriteString("**What was checked:**\n")
+		for _, c := range r.Checked {
+			fmt.Fprintf(b, "- %s\n", c)
+		}
+		if len(r.NotChecked) > 0 {
+			b.WriteString("\n**Not checked (review by hand):**\n")
+			for _, c := range r.NotChecked {
+				fmt.Fprintf(b, "- %s\n", c)
+			}
+		}
+		b.WriteString("\n")
+	}
 }
 
 func counts(m map[string]int) string {
