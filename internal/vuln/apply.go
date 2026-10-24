@@ -8,6 +8,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/redact"
 )
 
 // Reachability levels, strongest first.
@@ -29,7 +30,8 @@ func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability,
 		id := model.NodeID(repo, model.KindModule, m.Key())
 		eco[m.Key()] = m.ecosystem()
 		g.AddNode(model.Node{ID: id, Kind: model.KindModule, Repo: repo, Name: m.Path, QualifiedName: m.Path, Version: m.Version, Indirect: m.Indirect, Ecosystem: m.ecosystem(),
-			Dev: m.Dev, License: m.License, LicenseSource: m.LicenseSource, Via: m.Via, Roots: m.Roots})
+			Dev: m.Dev, License: m.License, LicenseSource: m.LicenseSource, Via: m.Via, Roots: m.Roots,
+			Summary: redact.Summary(m.replacementNote(), 160)})
 		g.AddEdge(model.Edge{From: repoID, To: id, Kind: model.EdgeDependsOn})
 	}
 	// Module requires module, for the dependency graph of an SBOM. Edges to

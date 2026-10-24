@@ -337,7 +337,7 @@ func Licenses(ctx context.Context, root string, opts Options) (license.Report, e
 func licenseDeps(mods []vuln.Module) []license.Dependency {
 	deps := make([]license.Dependency, len(mods))
 	for i, m := range mods {
-		deps[i] = license.Dependency{Ecosystem: cmp.Or(m.Ecosystem, vuln.EcosystemGo), Name: m.Path, Version: m.Version,
+		deps[i] = license.Dependency{Ecosystem: cmp.Or(m.Ecosystem, vuln.EcosystemGo), Name: m.BuildPath(), Version: m.Version,
 			License: m.License, Source: m.LicenseSource, Indirect: m.Indirect, Dev: m.Dev}
 	}
 	return deps
