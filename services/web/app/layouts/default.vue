@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { RepoInfo } from '~/utils/types'
+import type { RepoInfo, RepoSections } from '~/utils/types'
 import type { ThemeChoice } from '~/composables/useTheme'
 
 const route = useRoute()
@@ -49,36 +49,71 @@ const more = computed(() => session.restricted.value ? [
   ...(session.accounts.value && session.isPlatformAdmin.value ? [{ to: '/admin', label: 'Administration', hint: 'Organisations, people, health and the audit log' }] : []),
   { to: '/help', label: 'Help', hint: 'Getting started and what things mean' },
 ])
-const repoGroups = computed(() => {
-  if (!repo.value) return []
+// The repository menu shows the pages that have something in them; the
+// rest wait under "More" with the reason, so a deep link or the next sync
+// never strands anyone. Until the counts arrive (or if they fail), every
+// link counts as present.
+const sectionsRepo = ref(repo.value)
+watch(repo, (r) => { if (r) sectionsRepo.value = r })
+const { data: sections, refresh: refreshSections } = useApiGet<RepoSections>(
+  () => repoPath(sectionsRepo.value || '-', 'sections'),
+  { immediate: !!repo.value && !session.restricted.value },
+)
+const indexedAt = computed(() => repos.value?.repos.find(r => r.name === repo.value)?.ingested_at)
+watch(indexedAt, (now, before) => { if (repo.value && before && now !== before) refreshSections() })
+
+type RepoLink = { to: string; label: string; also?: string[]; missing?: string }
+const repoMenu = computed(() => {
+  if (!repo.value) return { groups: [] as { label: string; links: RepoLink[] }[], more: [] as RepoLink[] }
   const base = `/repos/${encodeURIComponent(repo.value)}`
-  return [
-    { label: 'Repository', links: [
+  // missing is why a link has nothing to show; links without a rule stay.
+  const has = sections.value && sectionsRepo.value === repo.value ? sections.value : null
+  const need = (ok: (s: RepoSections) => boolean, why: string) => (has && !ok(has) ? why : undefined)
+  const accounts = session.accounts.value
+  const groups: { label: string; links: RepoLink[] }[] = [
+    { label: 'Overview', links: [
       { to: base, label: 'Summary' },
-      { to: `${base}/architecture`, label: 'Architecture' },
+      { to: `${base}/architecture`, label: 'Architecture', missing: need(s => s.records + s.proposals > 0, 'no architecture records or proposals') },
+      { to: `${base}/history`, label: 'Trends', missing: need(s => s.snapshots > 0, 'no snapshots yet; each sync adds one') },
+    ] },
+    { label: 'Quality and security', links: [
       { to: `${base}/security`, label: 'Security' },
-      { to: `${base}/dependencies`, label: 'Dependencies' },
-      { to: `${base}/licenses`, label: 'Licences' },
-      { to: `${base}/dependency-review`, label: 'Dependency review' },
       { to: `${base}/metrics`, label: 'Code health', also: [`${base}/cleanup`] },
-      { to: `${base}/history`, label: 'Trends' },
-      ...(session.accounts.value ? [{ to: `${base}/access`, label: 'Access' }, { to: `${base}/policy`, label: 'Indexing policy' }, { to: `${base}/ingestion`, label: 'Ingestion reports' }] : []),
+    ] },
+    { label: 'Dependencies', links: [
+      { to: `${base}/dependencies`, label: 'Dependencies', missing: need(s => s.dependencies > 0, 'no dependency manifests indexed') },
+      { to: `${base}/licenses`, label: 'Licences', missing: need(s => s.licences, 'no licence report; sync to create one') },
+      { to: `${base}/dependency-review`, label: 'Dependency review', missing: need(s => s.dependencies > 0, 'no dependency manifests indexed') },
     ] },
     { label: 'Work', links: [
-      { to: `${base}/reviews`, label: 'Reviews' },
-      { to: `${base}/memory`, label: 'Agent memory' },
+      { to: `${base}/reviews`, label: 'Reviews', missing: need(s => s.reviews > 0, 'no reviews yet') },
       { to: `${base}/review`, label: 'Impact of a change' },
       { to: `${base}/ai`, label: 'AI assistant' },
+      { to: `${base}/memory`, label: 'Agent memory', missing: need(s => s.memory_facts > 0, 'agents saved nothing yet') },
     ] },
     { label: 'Explore', links: [
-      { to: `${base}/graph`, label: 'Graph' },
       { to: `${base}/explore`, label: 'Symbols' },
-      { to: `${base}/config`, label: 'Kubernetes & Helm' },
-      { to: `${base}/docs`, label: 'Docs' },
-      { to: `${base}/packages`, label: 'Packages' },
+      { to: `${base}/graph`, label: 'Graph' },
+      { to: `${base}/docs`, label: 'Docs', missing: need(s => s.documents > 0, 'no Markdown documents indexed') },
+      { to: `${base}/packages`, label: 'Packages', missing: need(s => s.packages > 0, 'no packages or modules indexed') },
+      { to: `${base}/config`, label: 'Kubernetes & Helm', missing: need(s => s.config_files > 0, 'no YAML, Helm charts or Kubernetes manifests indexed') },
     ] },
+    ...(accounts ? [{ label: 'Settings', links: [
+      { to: `${base}/ingestion`, label: 'Ingestion reports' },
+      { to: `${base}/access`, label: 'Access', missing: need(s => s.admin, 'repository admins manage access') },
+      { to: `${base}/policy`, label: 'Indexing policy', missing: need(s => s.admin, 'repository admins approve the policy') },
+    ] }] : []),
   ]
+  const more = groups.flatMap(g => g.links.filter(l => l.missing))
+  return {
+    groups: groups.map(g => ({ ...g, links: g.links.filter(l => !l.missing) })).filter(g => g.links.length),
+    more,
+  }
 })
+const linkActive = (l: RepoLink) => route.path === l.to || !!l.also?.includes(route.path)
+const moreOpen = ref(false)
+// Open "More" when the page shown is in it, so the active link is visible.
+watch(() => [route.path, repoMenu.value.more.length], () => { if (repoMenu.value.more.some(linkActive)) moreOpen.value = true }, { immediate: true })
 const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path === to || route.path.startsWith(`${to}/`))
 const themes: { id: ThemeChoice; label: string }[] = [{ id: 'system', label: 'Auto' }, { id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }]
 const orgValue = computed({
@@ -116,10 +151,17 @@ const orgValue = computed({
             <p class="nav-label">Repository</p>
             <p class="nav-repo mono" :title="repo">{{ repo }}</p>
           </div>
-          <div v-for="g in repoGroups" :key="g.label" class="nav-section">
+          <div v-for="g in repoMenu.groups" :key="g.label" class="nav-section">
             <p class="nav-label">{{ g.label }}</p>
-            <NuxtLink v-for="l in g.links" :key="l.to" :to="l.to" class="nav-link nav-link--sub" :class="{ 'is-active': route.path === l.to || ('also' in l && l.also?.includes(route.path)) }">{{ l.label }}</NuxtLink>
+            <NuxtLink v-for="l in g.links" :key="l.to" :to="l.to" class="nav-link nav-link--sub" :class="{ 'is-active': linkActive(l) }">{{ l.label }}</NuxtLink>
           </div>
+          <details v-if="repoMenu.more.length" class="nav-section nav-more" :open="moreOpen" @toggle="moreOpen = ($event.target as HTMLDetailsElement).open">
+            <summary class="nav-label nav-more__toggle">More · {{ repoMenu.more.length }} with nothing yet</summary>
+            <NuxtLink v-for="l in repoMenu.more" :key="l.to" :to="l.to" class="nav-link nav-link--sub nav-link--empty" :class="{ 'is-active': linkActive(l) }" :title="l.missing">
+              <span>{{ l.label }}</span>
+              <span class="nav-why">{{ l.missing }}</span>
+            </NuxtLink>
+          </details>
         </template>
         <div v-else-if="repos?.repos.length" class="nav-section">
           <p class="nav-label">Recently indexed</p>
@@ -185,6 +227,9 @@ const orgValue = computed({
 .nav-link--sub { min-height: 30px; font-size: 13.5px; }
 .nav-link:hover { color: var(--ink); background: var(--hover); text-decoration: none; }
 .nav-link.is-active { color: var(--ink); background: var(--accent-soft); }
+.nav-more__toggle { cursor: pointer; list-style-position: inside; }
+.nav-link--empty { flex-direction: column; align-items: flex-start; gap: 1px; }
+.nav-why { font-size: 11.5px; color: var(--dim); font-weight: 400; line-height: 1.3; }
 .nav-repo-link { justify-content: space-between; gap: 8px; }
 .nav-repo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-repo-time { flex: none; font-size: 11.5px; color: var(--dim); }

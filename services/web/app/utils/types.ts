@@ -69,6 +69,12 @@ export interface Dashboard {
   authors: Ranked[]
 }
 export interface RepoInfo { name: string; head?: string; ingested_at?: string; root?: string; branch?: string; remote?: string; managed?: boolean }
+// What a repository has, for its menu (GET /repos/{repo}/sections).
+export interface RepoSections {
+  packages: number; symbols: number; documents: number; config_files: number; k8s_resources: number; helm_charts: number
+  records: number; proposals: number; dependencies: number; licences: boolean; findings: number
+  snapshots: number; reviews: number; memory_facts: number; admin: boolean
+}
 export interface Source { name: string; is_git: boolean; is_go: boolean; content?: Record<string, number>; truncated?: boolean }
 export interface Job { id: string; repo: string; kind?: string; branch?: string; task?: string; result?: string; state: 'running' | 'succeeded' | 'failed'; started_at: string; finished_at?: string; nodes?: number; edges?: number; error?: string }
 export interface DuplicateInfo { kind: 'exact' | 'near'; similarity: number; scope: string; copies: number; others: DuplicateMember[] }
