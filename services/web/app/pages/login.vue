@@ -48,14 +48,14 @@ async function submit() {
 
 <template>
   <div class="stack--tight">
-    <h1>Sign in</h1>
+    <h1>Welcome back</h1>
     <p class="muted">Use the email and password of your CodeSynapse account.</p>
   </div>
   <form class="stack--tight" @submit.prevent="submit">
     <div class="field"><label for="email">Email</label><input id="email" v-model="email" type="email" autocomplete="username" required autofocus></div>
     <div class="field"><label for="password">Password</label><input id="password" v-model="password" type="password" autocomplete="current-password" required></div>
     <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
-    <button type="submit" :disabled="busy">{{ busy ? 'Signing in…' : 'Sign in' }}</button>
+    <button type="submit" class="accent" :disabled="busy">{{ busy ? 'Signing in…' : 'Sign in' }}</button>
   </form>
   <details class="sso" :open="!!ssoOrg">
     <summary>Sign in with single sign-on</summary>

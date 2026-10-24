@@ -9,7 +9,7 @@ const props = withDefaults(defineProps<{
   // suffix follows each value ("%"); scale fixes the full bar (100 for shares).
   suffix?: string
   scale?: number
-}>(), { color: 'var(--cyan)', limit: 10, empty: 'Nothing yet.', suffix: '', scale: 0 })
+}>(), { color: 'var(--info)', limit: 10, empty: 'Nothing yet.', suffix: '', scale: 0 })
 const shown = computed(() => props.rows.slice(0, props.limit))
 const max = computed(() => props.scale || Math.max(1, ...shown.value.map((r) => r.value)))
 </script>

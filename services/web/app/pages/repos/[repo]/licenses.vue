@@ -50,7 +50,7 @@ const dependenciesLink = (license: string) => ({ path: `/repos/${encodeURICompon
 
     <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="rep">
-      <section class="panel" :class="rep.project.license ? 'edge--green' : 'edge--pink'">
+      <section class="panel">
         <p class="eyebrow">This repository</p>
         <h2 v-if="rep.project.license" class="mono">{{ rep.project.license }} <span class="badge" :class="cat(rep.category).cls">{{ cat(rep.category).label }}</span></h2>
         <h2 v-else>No licence found</h2>
@@ -65,7 +65,7 @@ const dependenciesLink = (license: string) => ({ path: `/repos/${encodeURICompon
         <StatTile label="No licence found" :value="rep.unknown" :hint="rep.online ? 'not on disk or deps.dev' : 'enable CODESYNAPSE_LICENSE_LOOKUP'" />
       </div>
 
-      <section class="panel edge--orange">
+      <section class="panel">
         <div class="panel__header">
           <div><p class="eyebrow">Needs attention</p><h2>Conflicts and reviews <span class="muted">· {{ issues.length }}</span></h2></div>
         </div>
@@ -139,17 +139,17 @@ const dependenciesLink = (license: string) => ({ path: `/repos/${encodeURICompon
 .bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .bars__row { display: grid; grid-template-columns: minmax(120px, 1.2fr) auto 2fr 48px; gap: 12px; align-items: center; width: 100%;
   background: none; border: 0; padding: 4px 6px; margin: 0 -6px; border-radius: 6px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.bars__row:hover, .bars__row[aria-expanded="true"] { background: var(--surface-2); }
+.bars__row:hover, .bars__row[aria-expanded="true"] { background: var(--panel-2); }
 .packages { margin: 6px 0 10px 12px; padding-left: 12px; border-left: 2px solid var(--line); display: grid; gap: 8px; }
 .packages__group .plain { list-style: none; padding: 0; margin: 4px 0 0; display: grid; gap: 4px; font-size: 13px; }
 .packages .badge { margin-left: 4px; }
 .bars .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .bar > span { display: block; height: 100%; }
-.fill--green { background: var(--green); }
-.fill--amber { background: var(--amber); }
-.fill--pink { background: var(--pink); }
-.fill--violet { background: var(--violet); }
+.fill--green { background: var(--success); }
+.fill--amber { background: var(--warning); }
+.fill--pink { background: var(--danger); }
+.fill--violet { background: var(--muted); }
 .num { text-align: right; }
 @media (max-width: 640px) {
   .bars__row { grid-template-columns: 1fr auto 48px; }

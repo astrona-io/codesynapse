@@ -46,7 +46,7 @@ The same repository is indexed once, not once per organisation:
 
 ## Product structure (web app, phase 3)
 
-A calm product UI with light and dark themes, neutral surfaces, one brand accent and status colours only for meaning. Plain language, an explanation next to every figure, and costs in money where possible.
+The "Agent spark" product UI with light and dark themes: ink on white with lilac surfaces, one candy accent for the leading action and candy tints only for status. Plain language, an explanation next to every figure, and costs in money where possible.
 
 1. **Overview**: what needs attention now across the organisation (critical security findings, vulnerabilities you actually call, licence conflicts, stale repositories), and what agents saved.
 2. **Repositories**: list with health at a glance; each repository has Summary, Security, Licences, Dependencies, Code health, Reviews and Memory.

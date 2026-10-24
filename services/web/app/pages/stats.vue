@@ -90,7 +90,7 @@ const automationPct = computed(() => {
     </div>
 
     <!-- Live activity ------------------------------------------------- -->
-    <section class="panel edge--cyan">
+    <section class="panel">
       <p class="eyebrow">Live activity</p><h2>By the minute and hour</h2>
       <p class="muted small">Recorded by the services every 15 seconds: agent calls, latency, AI model tokens and cost, database work and memory. Counts are per step of the chart ({{ range === '1h' ? '1 minute' : range === '6h' ? '5 minutes' : range === '24h' ? '15 minutes' : range === '7d' ? '1 hour' : '6 hours' }}). These panels show your organisation's activity. Platform-wide telemetry is available in Administration.</p>
       <div class="row filters">
@@ -115,7 +115,7 @@ const automationPct = computed(() => {
     <template v-else-if="s && a && m && w && l && r">
       <div :class="{ refreshing: pending }" class="stack">
         <!-- Agents ------------------------------------------------------- -->
-        <section class="panel edge--cyan">
+        <section class="panel">
           <p class="eyebrow">Agents &amp; context</p><h2>MCP sessions and tool calls</h2>
           <p class="muted small">Counted by the MCP server per day, repository, tool and client. Arguments and results are never stored, only their size.</p>
           <div class="grid kpis">
@@ -126,24 +126,24 @@ const automationPct = computed(() => {
           </div>
           <div v-if="a.calls || a.sessions" class="grid cols-2">
             <div><p class="label">Tool calls per day</p><ColumnChart :points="callsPerDay" title="Tool calls per day" unit="calls" /></div>
-            <div><p class="label">Tokens avoided per day (estimate)</p><ColumnChart :points="avoidedPerDay" title="Tokens avoided per day" unit="tokens" color="var(--green)" /></div>
+            <div><p class="label">Tokens avoided per day (estimate)</p><ColumnChart :points="avoidedPerDay" title="Tokens avoided per day" unit="tokens" color="var(--success)" /></div>
           </div>
           <div v-else class="empty"><strong>No agent activity yet</strong>Connect an agent (<code>just mcp</code>) and use it on an indexed repository; counts appear here within a minute.</div>
           <div v-if="a.calls" class="grid cols-3">
             <div><p class="label">Most used tools</p><RankList :rows="tools" /></div>
-            <div><p class="label">Clients</p><RankList :rows="clients" color="var(--violet)" /></div>
+            <div><p class="label">Clients</p><RankList :rows="clients" color="var(--muted)" /></div>
             <div><p class="label">Repositories asked about</p><RankList :rows="repoUse" /></div>
           </div>
           <div v-if="a.calls" class="read-share">
             <p class="label">Answers the agent read</p>
-            <RankList :rows="readShare" suffix="%" :scale="100" color="var(--green)" empty="Install the Claude Code plugin to see which tools point agents to code they then read." />
+            <RankList :rows="readShare" suffix="%" :scale="100" color="var(--success)" empty="Install the Claude Code plugin to see which tools point agents to code they then read." />
             <p v-if="readShare.length" class="muted small">Of the file line ranges a tool's answers gave, the share the agent read afterwards. A low share means the tool answers with places that do not help; reported by the plugin's hooks as counts only.</p>
           </div>
           <details class="method"><summary>How tokens avoided are estimated</summary><p class="muted small">{{ a.avoided_method }}</p></details>
         </section>
 
         <!-- Offloading ---------------------------------------------------- -->
-        <section class="panel edge--violet">
+        <section class="panel">
           <p class="eyebrow">Context offloading</p><h2>Agent memory</h2>
           <div class="grid kpis">
             <StatTile label="Facts stored" :value="fmtCompact(m.facts)" :hint="`${fmtInt(m.entities)} entities · ${fmtInt(m.confirmations)} confirmations`" />
@@ -152,8 +152,8 @@ const automationPct = computed(() => {
             <StatTile label="Tokens per recall" :value="fmtInt(Math.round(m.model.tokens_per_recall))" :hint="`${m.model.tokens_per_fact} tokens per fact`" />
           </div>
           <div v-if="m.facts" class="grid cols-2">
-            <div><p class="label">Facts per repository</p><RankList :rows="memRepos" color="var(--violet)" /></div>
-            <div><p class="label">Saved by</p><RankList :rows="memSources" color="var(--violet)" /></div>
+            <div><p class="label">Facts per repository</p><RankList :rows="memRepos" color="var(--muted)" /></div>
+            <div><p class="label">Saved by</p><RankList :rows="memSources" color="var(--muted)" /></div>
           </div>
           <h3>What offloading should save — theoretical</h3>
           <p class="muted small">Adjust the session to match how you work. The recall cost comes from your agents once they have recalled facts.</p>
@@ -161,7 +161,7 @@ const automationPct = computed(() => {
         </section>
 
         <!-- Code & security ---------------------------------------------- -->
-        <section class="panel edge--pink">
+        <section class="panel">
           <p class="eyebrow">Code &amp; security</p><h2>{{ w.repos }} repositories, {{ fmtCompact(w.loc) }} lines</h2>
           <div class="grid kpis">
             <StatTile label="Findings" :value="fmtCompact(Object.values(w.findings).reduce((t, n) => t + n, 0))" :hint="`${w.findings.critical ?? 0} critical · ${w.findings.high ?? 0} high`" />
@@ -170,16 +170,16 @@ const automationPct = computed(() => {
             <StatTile label="Unused code" :value="fmtCompact(w.dead_loc)" :hint="`lines · ${w.unused_modules} unused modules`" />
           </div>
           <div class="grid cols-3">
-            <div><p class="label">Security grades</p><RankList :rows="grades" color="var(--cyan)" /></div>
-            <div><p class="label">Findings by severity</p><RankList :rows="findingsBySev" color="var(--pink)" empty="No findings." /></div>
-            <div><p class="label">Vulnerabilities by severity</p><RankList :rows="vulnsBySev" color="var(--pink)" empty="No known vulnerabilities." /></div>
+            <div><p class="label">Security grades</p><RankList :rows="grades" color="var(--info)" /></div>
+            <div><p class="label">Findings by severity</p><RankList :rows="findingsBySev" color="var(--danger)" empty="No findings." /></div>
+            <div><p class="label">Vulnerabilities by severity</p><RankList :rows="vulnsBySev" color="var(--danger)" empty="No known vulnerabilities." /></div>
           </div>
-          <div><p class="label">Most widespread rules (repositories affected)</p><RankList :rows="rules" color="var(--amber)" :limit="12" /></div>
+          <div><p class="label">Most widespread rules (repositories affected)</p><RankList :rows="rules" color="var(--warning)" :limit="12" /></div>
           <p class="muted small">Graph answers need {{ w.reduction_pct }}% fewer tokens than reading the files (token benchmark measured at ingest, {{ fmtCompact(w.tokens_saved) }} tokens saved over the sampled questions).</p>
         </section>
 
         <!-- Dependencies & licences -------------------------------------- -->
-        <section class="panel edge--orange">
+        <section class="panel">
           <p class="eyebrow">Dependencies &amp; licences</p><h2>{{ fmtCompact(l.dependencies) }} dependencies checked</h2>
           <div class="grid kpis">
             <StatTile label="Licence conflicts" :value="fmtInt(l.conflict)" :hint="`in ${l.conflicts.length} repositories`" />
@@ -188,12 +188,12 @@ const automationPct = computed(() => {
             <StatTile label="Update automation" :value="automationPct" :hint="`${s.hygiene.no_update_automation.length} repositories without Renovate or Dependabot`" />
           </div>
           <div class="grid cols-3">
-            <div><p class="label">Licences in use</p><RankList :rows="licences" color="var(--orange)" /></div>
-            <div><p class="label">Repository licences</p><RankList :rows="projects" color="var(--orange)" /></div>
-            <div><p class="label">Repositories with conflicts</p><RankList :rows="conflicts" color="var(--pink)" empty="No licence conflicts." /></div>
+            <div><p class="label">Licences in use</p><RankList :rows="licences" color="var(--accent)" /></div>
+            <div><p class="label">Repository licences</p><RankList :rows="projects" color="var(--accent)" /></div>
+            <div><p class="label">Repositories with conflicts</p><RankList :rows="conflicts" color="var(--danger)" empty="No licence conflicts." /></div>
           </div>
           <div v-if="s.hygiene.renovate_issues.length || s.hygiene.no_update_automation.length" class="grid cols-2">
-            <div><p class="label">Renovate configuration issues</p><RankList :rows="s.hygiene.renovate_issues.map((x) => ({ label: x.repo, value: x.count }))" color="var(--amber)" empty="No Renovate issues." /></div>
+            <div><p class="label">Renovate configuration issues</p><RankList :rows="s.hygiene.renovate_issues.map((x) => ({ label: x.repo, value: x.count }))" color="var(--warning)" empty="No Renovate issues." /></div>
             <div>
               <p class="label">No update automation</p>
               <p class="muted small mono wrap">{{ s.hygiene.no_update_automation.join(' · ') || '–' }}</p>
@@ -205,9 +205,9 @@ const automationPct = computed(() => {
         <div class="grid cols-3">
           <section class="panel">
             <p class="eyebrow">Reviews</p><h2>{{ r.reviews }} reviews, {{ r.comments }} comments</h2>
-            <p class="label">Comment decisions</p><RankList :rows="entries(r.by_status)" color="var(--cyan)" />
-            <p class="label">Source</p><RankList :rows="entries(r.by_source)" color="var(--violet)" />
-            <p v-if="Object.keys(r.fixes).length" class="label">Fix branches</p><RankList v-if="Object.keys(r.fixes).length" :rows="entries(r.fixes)" color="var(--green)" />
+            <p class="label">Comment decisions</p><RankList :rows="entries(r.by_status)" color="var(--info)" />
+            <p class="label">Source</p><RankList :rows="entries(r.by_source)" color="var(--muted)" />
+            <p v-if="Object.keys(r.fixes).length" class="label">Fix branches</p><RankList v-if="Object.keys(r.fixes).length" :rows="entries(r.fixes)" color="var(--success)" />
           </section>
           <section class="panel">
             <p class="eyebrow">AI providers</p><h2>Model usage</h2>

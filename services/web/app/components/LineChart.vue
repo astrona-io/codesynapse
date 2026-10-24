@@ -155,10 +155,10 @@ svg { width: 100%; display: block; overflow: visible; }
 .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .end-dot { stroke: var(--panel); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .end-label { fill: var(--muted); font: 11px var(--font-sans); }
-.crosshair { stroke: var(--line-bright); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.crosshair { stroke: var(--line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .hover-dot { stroke: var(--panel); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .hit { fill: transparent; cursor: crosshair; outline: none; }
-.hit:focus-visible { stroke: var(--line-bright); stroke-width: 1; }
+.hit:focus-visible { stroke: var(--line-strong); stroke-width: 1; }
 .tooltip { position: absolute; top: 0; transform: translate(-50%, -100%); pointer-events: none; padding: 6px 10px; border-radius: var(--radius-xs); background: var(--panel); border: 1px solid var(--line-strong); font-size: 12px; white-space: nowrap; z-index: 2; display: grid; gap: 2px; }
 .tooltip strong { color: var(--ink); margin-left: 4px; }
 .table-view summary { cursor: pointer; color: var(--muted); font-size: 12px; }

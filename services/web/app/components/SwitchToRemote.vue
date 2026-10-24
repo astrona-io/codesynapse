@@ -81,6 +81,6 @@ async function confirm() {
 .field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
 .field input { font-family: var(--font-mono); font-size: 13px; }
 .facts { margin: 4px 0 10px; padding-left: 18px; display: grid; gap: 4px; line-height: 1.5; }
-.warn { color: var(--amber); }
+.warn { color: var(--warning); }
 .small { font-size: 12.5px; }
 </style>

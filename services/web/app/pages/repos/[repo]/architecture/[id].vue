@@ -80,7 +80,7 @@ const explain = computed(() => {
         </dl>
       </section>
 
-      <section v-if="rec.problems.length" class="panel edge--amber">
+      <section v-if="rec.problems.length" class="panel">
         <p class="eyebrow">Needs a look</p><h2>Problems with this record</h2>
         <ul class="plain"><li v-for="p in rec.problems" :key="p.message"><span class="badge badge--amber">{{ p.kind.replace(/-/g, ' ') }}</span> {{ p.message }}</li></ul>
         <p class="muted small">Reported, not resolved: a person decides which record is right.</p>
@@ -163,7 +163,7 @@ const explain = computed(() => {
 <style scoped>
 .plain { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
 .lifecycle { display: flex; gap: 8px; flex-wrap: wrap; list-style: none; padding: 0; margin: 0 0 12px; }
-.lifecycle li { padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 12.5px; }
+.lifecycle li { padding: 2px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12.5px; }
 .lifecycle li.current { border-color: var(--accent); font-weight: 600; }
 .lifecycle li.current::before { content: '● '; }
 .meta { display: grid; gap: 6px; margin: 0; }

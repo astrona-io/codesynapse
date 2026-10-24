@@ -28,7 +28,7 @@ const explore = (repo: string, id: string) => ({ path: `/repos/${encodeURICompon
         </div>
         <p v-if="data.partial?.length" class="notice">Smaller functions of {{ data.partial.join(', ') }} were not compared (report limit).</p>
 
-        <section v-if="data.suggestions.length" class="panel edge--green">
+        <section v-if="data.suggestions.length" class="panel">
           <p class="eyebrow eyebrow--green">Recommended</p><h2>Share this work</h2>
           <article v-for="s in data.suggestions" :key="s.repos.join()" class="suggestion">
             <header class="row">
@@ -44,7 +44,7 @@ const explore = (repo: string, id: string) => ({ path: `/repos/${encodeURICompon
           </article>
         </section>
 
-        <section class="panel edge--orange">
+        <section class="panel">
           <p class="eyebrow">Code</p><h2>Shared groups <span class="muted">· {{ data.groups.length }}</span></h2>
           <div v-if="data.groups.length" class="stack">
             <article v-for="g in data.groups" :key="g.hash" class="group">
@@ -71,7 +71,7 @@ const explore = (repo: string, id: string) => ({ path: `/repos/${encodeURICompon
 </template>
 
 <style scoped>
-.group, .suggestion { border-top: 1px solid var(--border); padding-top: 12px; display: grid; gap: 8px; }
+.group, .suggestion { border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 8px; }
 .members { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .members li { display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
 .small { font-size: 12.5px; }

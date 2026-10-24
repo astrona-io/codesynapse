@@ -62,7 +62,7 @@ async function addChosen() {
   <div class="stack">
     <PageHeader eyebrow="Workspace" title="Import repositories" lede="List the public repositories of an organisation or user on GitHub, Forgejo, Gitea or GitLab, and add the ones you pick to your organisation. Each one is cloned and indexed, or linked if it is already indexed." />
 
-    <section class="panel edge--cyan">
+    <section class="panel">
       <form class="add" @submit.prevent="list">
         <label>Provider
           <select v-model="form.provider">
