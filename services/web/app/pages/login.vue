@@ -35,7 +35,7 @@ async function submit() {
   busy.value = true
   error.value = ''
   try {
-    await $fetch('/api/cg/auth/login', { method: 'POST', body: { email: email.value, password: password.value } })
+    await $fetch('/api/cg/auth/login', { method: 'POST', body: { login: email.value, password: password.value } })
     await session.load()
     await navigateTo(next.value)
   } catch (e) {
@@ -49,10 +49,10 @@ async function submit() {
 <template>
   <div class="stack--tight">
     <h1>Welcome back</h1>
-    <p class="muted">Use the email and password of your CodeSynapse account.</p>
+    <p class="muted">Use the email or username and the password of your CodeSynapse account.</p>
   </div>
   <form class="stack--tight" @submit.prevent="submit">
-    <div class="field"><label for="email">Email</label><input id="email" v-model="email" type="email" autocomplete="username" required autofocus></div>
+    <div class="field"><label for="email">Email or username</label><input id="email" v-model="email" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus></div>
     <div class="field"><label for="password">Password</label><input id="password" v-model="password" type="password" autocomplete="current-password" required></div>
     <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
     <button type="submit" class="accent" :disabled="busy">{{ busy ? 'Signing in…' : 'Sign in' }}</button>

@@ -16,13 +16,14 @@ const orgName = ref('')
 const orgId = ref('')
 const name = ref('')
 const email = ref('')
+const username = ref('')
 const password = ref('')
 const error = ref('')
 const busy = ref(false)
 async function submit() {
   busy.value = true
   error.value = ''
-  const body: SetupInput = { email: email.value, name: name.value, password: password.value }
+  const body: SetupInput = { email: email.value, username: username.value.trim(), name: name.value, password: password.value }
   if (useExisting.value) body.org_id = orgId.value
   else body.org_name = orgName.value
   try {
@@ -61,6 +62,11 @@ async function submit() {
       <label for="email">Owner's email</label>
       <input id="email" v-model="email" type="email" autocomplete="off" required>
       <span class="hint">A different person or address than the root account.</span>
+    </div>
+    <div class="field">
+      <label for="username">Owner's username <span class="muted">(optional)</span></label>
+      <input id="username" v-model="username" autocomplete="off" autocapitalize="none" spellcheck="false" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{2,31}" maxlength="32">
+      <span class="hint">A second way to sign in besides the email.</span>
     </div>
     <div class="field">
       <label for="password">Owner's password</label>

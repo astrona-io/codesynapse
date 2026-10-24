@@ -78,6 +78,23 @@ var (
 // NormalizeEmail lower-cases and trims; emails are matched case-insensitively.
 func NormalizeEmail(e string) string { return strings.ToLower(strings.TrimSpace(e)) }
 
+// usernameRe: 3 to 32 characters, starting with a letter or digit. No "@",
+// so a login name is never mistaken for an email address.
+var usernameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,31}$`)
+
+// NormalizeUsername lower-cases and trims; usernames are case-insensitive.
+func NormalizeUsername(u string) string { return strings.ToLower(strings.TrimSpace(u)) }
+
+// CheckUsername validates a username. The empty string is valid and means
+// "no username".
+func CheckUsername(raw string) (string, error) {
+	u := NormalizeUsername(raw)
+	if u != "" && !usernameRe.MatchString(u) {
+		return "", fmt.Errorf("%w: a username has 3 to 32 letters, digits, dots, dashes or underscores and no @", ErrInvalidInput)
+	}
+	return u, nil
+}
+
 func checkName(name string, what string) (string, error) {
 	name = strings.Join(strings.Fields(name), " ")
 	if n := utf8.RuneCountInString(name); n < 1 || n > 100 {
@@ -109,7 +126,20 @@ func (s *Service) Status(ctx context.Context) (needsSetup bool, err error) {
 // ones need SignupOpen and get a personal organisation; none are accepted
 // while root is the only account and setup is pending.
 func (s *Service) SignUp(ctx context.Context, email, name, password string) (User, Org, error) {
-	u, err := s.newAccount(email, name, password)
+	return s.SignUpWith(ctx, SignUpInput{Email: email, Name: name, Password: password})
+}
+
+// SignUpInput is what a new account supplies. Username is optional.
+type SignUpInput struct {
+	Email    string
+	Username string
+	Name     string
+	Password string
+}
+
+// SignUpWith is SignUp with an optional username.
+func (s *Service) SignUpWith(ctx context.Context, in SignUpInput) (User, Org, error) {
+	u, err := s.newAccount(in.Email, in.Username, in.Name, in.Password)
 	if err != nil {
 		return User{}, Org{}, err
 	}
@@ -143,9 +173,11 @@ func (s *Service) SignUp(ctx context.Context, email, name, password string) (Use
 	return u, org, nil
 }
 
-// Login checks credentials and returns a new session token.
-func (s *Service) Login(ctx context.Context, email, password, client string) (string, User, error) {
-	email = NormalizeEmail(email)
+// Login checks credentials and returns a new session token. login is an
+// email address or a username; a username never contains "@", so the two
+// cannot be confused.
+func (s *Service) Login(ctx context.Context, login, password, client string) (string, User, error) {
+	email := NormalizeEmail(login) // the identifier as audited and rate limited
 	now := s.now()
 	allowed, err := s.allowLogin(ctx, email, client, now)
 	if err != nil {
@@ -155,10 +187,15 @@ func (s *Service) Login(ctx context.Context, email, password, client string) (st
 		s.audit(ctx, Event{Via: "anonymous", Action: "user.login", Target: email, Outcome: Failure, Detail: "rate limited"})
 		return "", User{}, ErrRateLimited
 	}
-	u, err := s.St.UserByEmail(ctx, email)
+	var u User
+	if strings.Contains(email, "@") {
+		u, err = s.St.UserByEmail(ctx, email)
+	} else {
+		u, err = s.St.UserByUsername(ctx, email)
+	}
 	if errors.Is(err, ErrNotFound) {
-		VerifyPassword(password, dummyHash()) // same time for unknown emails
-		s.audit(ctx, Event{Via: "anonymous", Action: "user.login", Target: email, Outcome: Failure, Detail: "unknown email"})
+		VerifyPassword(password, dummyHash()) // same time for unknown logins
+		s.audit(ctx, Event{Via: "anonymous", Action: "user.login", Target: email, Outcome: Failure, Detail: "unknown login"})
 		return "", User{}, ErrUnauthorized
 	}
 	if err != nil {

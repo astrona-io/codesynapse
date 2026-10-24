@@ -280,6 +280,7 @@ export interface AuthStatus {
 export interface AccountUser {
   id: string
   email: string
+  username?: string
   name: string
   platform_admin: boolean
   // The account that set up the installation: governance only.
@@ -287,7 +288,7 @@ export interface AccountUser {
   created_at: string
 }
 export type SetupState = 'pending' | 'complete' | 'ambiguous'
-export interface SetupInput { org_name?: string; org_id?: string; email: string; name: string; password: string }
+export interface SetupInput { org_name?: string; org_id?: string; email: string; username?: string; name: string; password: string }
 export interface AccountOrg {
   id: string
   slug: string
