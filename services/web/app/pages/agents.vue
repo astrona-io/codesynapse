@@ -28,18 +28,23 @@ async function createKey() {
 const token = computed(() => key.value || (session.accounts.value ? 'csk_…' : '$CODESYNAPSE_MCP_TOKEN'))
 
 // Step 2: install the bridge. Step 3: register it with each agent.
-const agent = ref<'claude' | 'codex' | 'cursor' | 'other'>('claude')
+type AgentID = 'claude' | 'codex' | 'cursor' | 'other'
+const selected = ref<AgentID[]>(['claude'])
 const agents = [
   { id: 'claude', label: 'Claude Code' },
   { id: 'codex', label: 'Codex' },
   { id: 'cursor', label: 'Cursor' },
   { id: 'other', label: 'Other (JSON)' },
 ] as const
+const selectedAgents = computed(() => agents.filter(a => selected.value.includes(a.id)))
+function toggleAgent(id: AgentID) {
+  selected.value = selected.value.includes(id) ? selected.value.filter(a => a !== id) : [...selected.value, id]
+}
 const install = 'brew install astrona-io/tap/codesynapse'
 const urls = computed(() => `--url ${mcpUrl.value} --api-url ${apiUrl.value}`)
-const snippet = computed(() => {
+function snippet(agent: AgentID) {
   if (viaBridge.value) {
-    switch (agent.value) {
+    switch (agent) {
       case 'claude':
         return `CODESYNAPSE_MCP_TOKEN=${token.value} codesynapse mcp install --only claude ${urls.value}`
       case 'codex':
@@ -50,7 +55,7 @@ const snippet = computed(() => {
         return JSON.stringify({ mcpServers: { codesynapse: { url: mcpUrl.value, headers: { Authorization: `Bearer ${token.value}`, 'X-CodeSynapse-Session': '${CODESYNAPSE_SESSION_ID}', 'X-CodeSynapse-Parent-Session': '${CODESYNAPSE_PARENT_SESSION_ID}' } } } }, null, 2)
     }
   }
-  switch (agent.value) {
+  switch (agent) {
     case 'claude':
       return `claude mcp add --transport http codesynapse ${mcpUrl.value} \\\n  --header "Authorization: Bearer ${token.value}"`
     case 'codex':
@@ -58,20 +63,20 @@ const snippet = computed(() => {
     default:
       return JSON.stringify({ mcpServers: { codesynapse: { url: mcpUrl.value, headers: { Authorization: `Bearer ${token.value}` } } } }, null, 2)
   }
-})
-const where = computed(() => viaBridge.value
+}
+const where = (agent: AgentID) => viaBridge.value
   ? {
       claude: 'Run it in a terminal after installing the bridge. It stores the key in a private file (never in Claude Code’s settings) and registers the bridge, which Claude Code starts once per chat. Then open a new chat and run /mcp.',
       codex: 'Run it in a terminal. Codex connects over HTTP without the bridge, so a launcher must register the chat and supply CODESYNAPSE_SESSION_ID and CODESYNAPSE_PARENT_SESSION_ID before it starts.',
       cursor: 'Run it in a terminal. Cursor connects over HTTP without the bridge, so a launcher must register the chat and supply the two session variables before it starts.',
       other: 'Clients other than Claude Code have no bridge yet. They must register each chat (POST /api/v1/execution/sessions) and send both session headers on every request; without them the server refuses the call.',
-    }[agent.value]
+    }[agent]
   : {
       claude: 'Run it in a terminal. It registers CodeSynapse for your user; add --scope project to share it through the repository’s .mcp.json (without the key: use an environment variable there).',
       codex: 'Run it in a terminal; Codex reads the key from the environment, so put the export in your shell profile.',
       cursor: 'Paste it into ~/.cursor/mcp.json (all projects) or .cursor/mcp.json in a repository.',
       other: 'Most MCP clients accept this shape: a streamable HTTP server with a bearer token header.',
-    }[agent.value])
+    }[agent]
 
 // The last step: what the page can see happen. The key's first use says an
 // agent connected; the usage counters (flushed every 30 seconds) say it made
@@ -83,9 +88,10 @@ url = ${JSON.stringify(mcpUrl.value)}
 bearer_token_env_var = "CODESYNAPSE_MCP_TOKEN"
 env_http_headers = { "X-CodeSynapse-Session" = "CODESYNAPSE_SESSION_ID", "X-CodeSynapse-Parent-Session" = "CODESYNAPSE_PARENT_SESSION_ID" }`)
 const agentRules = 'Use the CodeSynapse MCP tools before reading files: minimal_context with the task first, get_symbol_context before editing a symbol, and get_pr_context on your diff before finishing.'
-const stepPlugin = computed(() => viaBridge.value ? 4 : 3)
-const showPluginStatus = computed(() => viaBridge.value && agent.value === 'claude')
-const stepCheck = computed(() => (viaBridge.value ? 4 : 3) + (agent.value === 'codex' || agent.value === 'cursor' || showPluginStatus.value ? 1 : 0))
+const showPluginStatus = computed(() => viaBridge.value && selected.value.includes('claude'))
+const setupAgents = computed(() => selectedAgents.value.filter(a => a.id === 'codex' || a.id === 'cursor' || (a.id === 'claude' && viaBridge.value)))
+const stepPlugin = (agent: AgentID) => (viaBridge.value ? 4 : 3) + setupAgents.value.findIndex(a => a.id === agent)
+const stepCheck = computed(() => (viaBridge.value ? 4 : 3) + setupAgents.value.length)
 const { data: keys, refresh: refreshKeys } = useApiGet<{ keys: ApiKey[] }>('me/keys', { immediate: session.accounts.value })
 const { data: status, refresh: refreshStatus } = useApiGet<AgentStatus>('agents/status')
 // What was already there when the page opened: only newer activity counts.
@@ -113,12 +119,12 @@ onBeforeUnmount(() => clearInterval(poll))
 
 <template>
   <div class="stack">
-    <PageHeader eyebrow="Agents" title="Connect an AI agent" lede="Give Claude Code, Codex, Cursor or any MCP client a map of your code. Agents ask CodeSynapse for the few lines they need instead of reading whole files: fewer tokens, better answers, and a security review on every change." />
+    <PageHeader eyebrow="Agents" title="Connect your AI agents" lede="Give Claude Code, Codex, Cursor or any MCP client a map of your code. Agents ask CodeSynapse for the few lines they need instead of reading whole files: fewer tokens, better answers, and a security review on every change." />
 
     <section class="panel step">
       <p class="step__n">1</p>
       <div class="stack--tight">
-        <h2>Create a key for this agent</h2>
+        <h2>Create a key for your agents</h2>
         <template v-if="session.accounts.value">
           <p class="muted">The key acts as you in <strong>{{ session.current.value?.org.name ?? 'your organisation' }}</strong>: the agent sees repositories you can access there, and its memory and statistics stay there. You can revoke it any time under <NuxtLink to="/settings/keys">Settings → API keys</NuxtLink>.</p>
           <form v-if="!key" class="row" @submit.prevent="createKey">
@@ -148,15 +154,20 @@ onBeforeUnmount(() => clearInterval(poll))
     <section class="panel step">
       <p class="step__n">{{ viaBridge ? 3 : 2 }}</p>
       <div class="stack--tight">
-        <h2>{{ viaBridge && agent === 'claude' ? 'Register the bridge with your agent' : 'Add CodeSynapse to your agent' }}</h2>
-        <div class="row" role="tablist">
-          <button v-for="a in agents" :key="a.id" class="chip" :class="{ active: agent === a.id }" role="tab" :aria-selected="agent === a.id" @click="agent = a.id">{{ a.label }}</button>
+        <h2>Add CodeSynapse to your agents</h2>
+        <p id="agent-selection-hint" class="muted">Choose every agent you use. Each selected agent has its own connection settings; you can connect several on the same machine.</p>
+        <div class="row" role="group" aria-label="Agents to connect" aria-describedby="agent-selection-hint">
+          <button v-for="a in agents" :key="a.id" type="button" class="chip" :class="{ active: selected.includes(a.id) }" :aria-pressed="selected.includes(a.id)" @click="toggleAgent(a.id)">{{ a.label }}</button>
         </div>
-        <CopyField :value="snippet" multiline />
-        <p class="muted small">{{ where }}</p>
+        <p v-if="!selectedAgents.length" class="muted" role="status">Choose at least one agent to see its setup instructions.</p>
+        <div v-for="a in selectedAgents" :key="a.id" class="stack--tight agent-setup">
+          <h3>{{ a.label }}</h3>
+          <CopyField :value="snippet(a.id)" multiline :label="`${a.label} connection`" />
+          <p class="muted small">{{ where(a.id) }}</p>
+        </div>
         <p class="muted small">MCP address: <code>{{ mcpUrl }}</code><template v-if="viaBridge"> · API address: <code>{{ apiUrl }}</code></template>. Several agents on one machine? Leave out <code>--only</code> and it offers every agent it finds.</p>
         <p v-if="viaBridge && apiUrl.includes('<')" class="notice notice--warn" role="status">This installation does not know its public API address. Replace <code>{{ apiUrl }}</code> with the address your API is reached at, or ask the operator to set <code>CODESYNAPSE_PUBLIC_API_URL</code>.</p>
-        <details v-if="viaBridge && agent === 'claude'">
+        <details v-if="showPluginStatus">
           <summary class="muted small">Every call reaches the server (and an opt-in for fresh answers)</summary>
           <div class="stack--tight small">
             <p>By default the bridge sends every call to your system: it is signed with your key, checked against your permissions, written to the audit log and counted here. The server's graph reflects the last sync, so it does not know edits you made since. If you prefer fast answers that include uncommitted edits, you can opt in to answering ten core tools from your working tree on your machine; those answers never reach the server, so they are not audited or counted. Set this where Claude Code starts, for example in your shell profile:</p>
@@ -167,8 +178,8 @@ onBeforeUnmount(() => clearInterval(poll))
       </div>
     </section>
 
-    <section v-if="viaBridge && agent === 'claude'" class="panel step">
-      <p class="step__n">{{ stepPlugin }}</p>
+    <section v-if="showPluginStatus" class="panel step">
+      <p class="step__n">{{ stepPlugin('claude') }}</p>
       <div class="stack--tight">
         <h2>Install the Claude Code plugin <span class="muted">(recommended)</span></h2>
         <p class="muted">The plugin makes agents use CodeSynapse without anyone pasting a prompt: every session starts with a short ruleset (served by this installation), large files are read by range, and a check runs before the agent finishes. It also reports, as counts only, whether sessions begin with CodeSynapse; see <NuxtLink to="/stats/agents">Statistics → Agents</NuxtLink>. Run this once in a terminal:</p>
@@ -179,8 +190,8 @@ onBeforeUnmount(() => clearInterval(poll))
       </div>
     </section>
 
-    <section v-if="agent === 'codex'" class="panel step">
-      <p class="step__n">{{ stepPlugin }}</p>
+    <section v-if="selected.includes('codex')" class="panel step">
+      <p class="step__n">{{ stepPlugin('codex') }}</p>
       <div class="stack--tight">
         <h2>Use CodeSynapse automatically in Codex</h2>
         <p class="muted">Codex supports plugins that bundle skills, MCP connections and lifecycle hooks. Connecting MCP makes tools available; a hook can run on every prompt to supply context or steer the agent toward CodeSynapse.</p>
@@ -205,8 +216,8 @@ onBeforeUnmount(() => clearInterval(poll))
       </div>
     </section>
 
-    <section v-if="agent === 'cursor'" class="panel step">
-      <p class="step__n">{{ stepPlugin }}</p>
+    <section v-if="selected.includes('cursor')" class="panel step">
+      <p class="step__n">{{ stepPlugin('cursor') }}</p>
       <div class="stack--tight">
         <h2>Use CodeSynapse automatically in Cursor</h2>
         <p class="muted">Cursor supports plugins that bundle rules, skills, MCP connections and hooks. A <code>beforeSubmitPrompt</code> hook can run on every prompt; connecting MCP alone makes the tools available without guaranteeing their use.</p>
@@ -233,14 +244,14 @@ onBeforeUnmount(() => clearInterval(poll))
       <p class="step__n">{{ stepCheck }}</p>
       <div class="stack--tight">
         <h2>Check that it works</h2>
-        <p class="muted">Start a <strong>new</strong> session in your agent (chats that were already open keep their old setup) and ask something about one of your repositories, for example “Use CodeSynapse to show the callers of the main handler”.</p>
+        <p class="muted">Start a <strong>new</strong> session in each selected agent (chats that were already open keep their old setup) and ask something about one of your repositories, for example “Use CodeSynapse to show the callers of the main handler”. These checks show activity across your agents; they do not verify each connection separately.</p>
         <ul class="checks" aria-live="polite">
           <li v-for="c in checks" :key="c.id" :class="{ done: c.done }">
             <span class="checks__mark" aria-hidden="true">{{ c.done ? '✓' : '' }}</span>
             <span><strong>{{ c.label }}</strong> <span class="muted small">{{ c.hint }}</span></span>
           </li>
         </ul>
-        <details v-if="agent !== 'codex' && agent !== 'cursor'">
+        <details v-if="selected.includes('claude') || selected.includes('other')">
           <summary class="muted small">Make agents use it automatically</summary>
           <div class="stack--tight small">
             <p>CodeSynapse sends its own instructions to agents when they connect. The Claude Code plugin goes further: it puts a short ruleset in every session and reports on Statistics whether agents then start with CodeSynapse. Without the plugin, add this to the repository's <code>AGENTS.md</code> or <code>CLAUDE.md</code>, or to <code>~/.claude/CLAUDE.md</code> for every project:</p>
@@ -259,6 +270,7 @@ onBeforeUnmount(() => clearInterval(poll))
 .step > div { flex: 1; min-width: 0; }
 .grow { flex: 1; min-width: 220px; }
 .align-end { align-self: flex-end; }
+.agent-setup { margin-top: 12px; }
 .checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .checks li { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border: 2px solid var(--line); border-radius: var(--radius-sm); }
 .checks li.done { background: var(--success-soft); }
