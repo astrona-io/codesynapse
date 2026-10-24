@@ -9,6 +9,7 @@ import (
 
 var (
 	pyDef        = regexp.MustCompile(`^(\s*)(async\s+)?def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)?`)
+	pyAuthBase   = regexp.MustCompile(`(?i)(?:login|permission|auth|staff|superuser)\w*(?:required|mixin)|UserPassesTest|IsAuthenticated`)
 	pyClass      = regexp.MustCompile(`^(\s*)class\s+([A-Za-z_]\w*)\s*(\([^)]*\))?\s*:`)
 	pyImport     = regexp.MustCompile(`^\s*import\s+(.+)$`)
 	pyFromImport = regexp.MustCompile(`^\s*from\s+(\.*[\w.]*)\s+import\s+(.+)$`)
@@ -126,6 +127,11 @@ func parsePython(src []byte) *fileResult {
 				s.name = stack[len(stack)-1].sym.name + "." + m[2]
 			}
 			s.isTest = strings.HasPrefix(m[2], "Test")
+			for _, base := range strings.Split(strings.Trim(m[3], "()"), ",") {
+				if base = strings.TrimSpace(base); pyAuthBase.MatchString(base) {
+					s.guards = append(s.guards, base) // LoginRequiredMixin: a class-based view's check
+				}
+			}
 			s.doc = pyDocstring(raw, i+1)
 			fr.symbols = append(fr.symbols, s)
 			stack = append(stack, openSym{s, l.indent})
@@ -154,6 +160,11 @@ func parsePython(src []byte) *fileResult {
 			}
 			s.isTest = strings.HasPrefix(name, "test_") || name == "test"
 			s.root = len(pendingDecorators) > 0 && !onlyBuiltinDecorators(pendingDecorators)
+			for j, d := range pendingDecorators {
+				if !onlyBuiltinDecorators([]string{d}) && !pyRouteDec.MatchString(pendingRaw[j]) && !pyCommandDec.MatchString(pendingRaw[j]) && !pyToolDec.MatchString(pendingRaw[j]) {
+					s.guards = append(s.guards, d) // @login_required: the routes it handles are guarded
+				}
+			}
 			s.doc = pyDocstring(raw, i+1)
 			fr.routes = append(fr.routes, pyRoutesFor(pendingRaw, pendingDecorators, s.start, s.name)...)
 			fr.symbols = append(fr.symbols, s)

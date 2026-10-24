@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -94,6 +95,9 @@ type symbol struct {
 	class      string
 	clone      string // structural fingerprint, see cloneHash
 	cloneSig   string
+	// guards are checks the declaration itself carries (@login_required,
+	// an auth mixin): a route it handles inherits them.
+	guards []string
 }
 
 type call struct {
@@ -108,8 +112,13 @@ type fileResult struct {
 	topCalls []call // module-level calls, attributed to the file
 	findings []finding
 	routes   []route // entry points registered here (routes.go)
-	pkg      string  // declared package (Java, Kotlin), "" otherwise
-	isTest   bool
+	// includes are Django include() entries: URL prefix -> urls module.
+	includes []routeInclude
+	// rbClasses holds Ruby controller callbacks (ruby.go), for the guards
+	// of the routes their actions handle.
+	rbClasses map[string]*rbClass
+	pkg       string // declared package (Java, Kotlin), "" otherwise
+	isTest    bool
 	// partial is set when the source ended with open brackets or an open
 	// string: declarations after the problem may be missing or misplaced.
 	partial bool
@@ -248,7 +257,8 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 	case Python:
 		fr = parsePython(src)
 		if path.Base(rel) == "urls.py" {
-			fr.routes = append(fr.routes, djangoRoutes(string(src))...)
+			routes, includes := djangoRoutes(string(src))
+			fr.routes, fr.includes = append(fr.routes, routes...), includes
 		}
 	case JavaScript, TypeScript:
 		fr = parseJS(src, lang == TypeScript)
@@ -343,9 +353,6 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 			ix.g.AddEdge(model.Edge{From: fileID, To: sid, Kind: model.EdgeReferences, Evidence: model.EvidenceSyntactic})
 		}
 	}
-	if !fr.isTest {
-		ix.addRoutes(pf, module)
-	}
 	// A test file's module-level code (describe/it blocks) is test code:
 	// give it a synthetic test function so test reachability works.
 	if fr.isTest && len(fr.topCalls) > 0 {
@@ -401,8 +408,14 @@ func (ix *indexer) link() {
 	// so ambiguity never produces a wrong edge.
 	methodsByName := map[string][]string{}
 	funcsByName := map[string][]string{}
-	ctorOf := map[string]string{} // class node id -> constructor id
+	ctorOf := map[string]string{}      // class node id -> constructor id
+	symOf := map[string]*symbol{}      // node id -> declaration, for handler guards
+	fileOf := map[string]*parsedFile{} // node id -> its file
 	for _, pf := range ix.files {
+		for _, s := range pf.fr.symbols {
+			symOf[pf.symIDs[s.name]] = s
+			fileOf[pf.symIDs[s.name]] = pf
+		}
 		byModule[pf.lang+":"+pf.module] = pf
 		if pf.fr.pkg != "" {
 			byPkg[pf.fr.pkg] = append(byPkg[pf.fr.pkg], pf)
@@ -475,6 +488,7 @@ func (ix *indexer) link() {
 	for _, files := range byPkg {
 		slices.SortFunc(files, func(a, b *parsedFile) int { return strings.Compare(a.rel, b.rel) })
 	}
+	djangoPrefix := ix.djangoPrefixes(byModule)
 	unique := func(m map[string][]string, key string) (string, model.Evidence) {
 		if ids := m[key]; len(ids) == 1 {
 			return ids[0], model.EvidenceInferred
@@ -660,6 +674,9 @@ func (ix *indexer) link() {
 		// declares once under that name.
 		if !pf.fr.isTest {
 			for _, r := range pf.fr.routes {
+				if p := djangoPrefix[pf]; p != "" {
+					r.name = strings.TrimSuffix(p, "/") + "/" + strings.TrimPrefix(r.name, "/")
+				}
 				to, evidence := "", model.Evidence("")
 				local := r.handler
 				if r.recv != "" {
@@ -688,8 +705,21 @@ func (ix *indexer) link() {
 						}
 					}
 				}
+				// What the handler declares counts only when it reads as an
+				// access check: a controller's before_action list or a view's
+				// decorators also load records and set headers.
+				if s := symOf[to]; s != nil {
+					r.guards = append(slices.Clip(r.guards), accessGuards(s.guards)...)
+					if c := symOf[fileOf[to].symIDs[s.class]]; c != nil && s.class != "" {
+						r.guards = append(r.guards, accessGuards(c.guards)...) // a class-based view's mixins
+					}
+					if f, typ := rubyType(s.class); pf.lang == Ruby && f != nil {
+						r.guards = append(r.guards, accessGuards(rubyActionGuards(f.fr.rbClasses, typ, lastPart(s.name), rubyType))...)
+					}
+				}
+				id := ix.addRoute(pf, r)
 				if to != "" {
-					ix.g.AddEdge(model.Edge{From: ix.id(model.KindRoute, routeLocal(r, pf.module)), To: to, Kind: model.EdgeHandledBy, Evidence: evidence})
+					ix.g.AddEdge(model.Edge{From: id, To: to, Kind: model.EdgeHandledBy, Evidence: evidence})
 				}
 			}
 		}
@@ -927,18 +957,67 @@ func isIdent(r rune) bool {
 	return r == '_' || r == '$' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
 
-// addRoutes adds the file's entry points as Route nodes; link() connects
-// them to their handlers once imports are resolved.
-func (ix *indexer) addRoutes(pf *parsedFile, module string) {
-	for _, r := range pf.fr.routes {
-		local := routeLocal(r, module)
-		id := ix.id(model.KindRoute, local)
-		ix.g.AddNode(model.Node{
-			ID: id, Kind: model.KindRoute, Repo: ix.repo, Name: r.name, QualifiedName: local, Package: module, File: pf.rel,
-			StartLine: r.line, EndLine: r.line, Signature: r.kind, Language: pf.lang,
-			Summary: redact.Summary(strings.Join(r.guards[:min(len(r.guards), 4)], "; "), 200),
-		})
+// addRoute adds one entry point as a Route node; its guards are those seen
+// at registration and those its handler carries.
+func (ix *indexer) addRoute(pf *parsedFile, r route) string {
+	local := routeLocal(r, pf.module)
+	id := ix.id(model.KindRoute, local)
+	var guards []string
+	for _, g := range r.guards {
+		if !slices.Contains(guards, g) {
+			guards = append(guards, g)
+		}
 	}
+	ix.g.AddNode(model.Node{
+		ID: id, Kind: model.KindRoute, Repo: ix.repo, Name: r.name, QualifiedName: local, Package: pf.module, File: pf.rel,
+		StartLine: r.line, EndLine: r.line, Signature: r.kind, Language: pf.lang,
+		Summary: redact.Summary(strings.Join(guards[:min(len(guards), 4)], "; "), 200),
+	})
+	return id
+}
+
+// pyModuleFile finds a Python module by name, also when the project sits in
+// a folder of the repository (blog.urls stored as site.blog.urls).
+func pyModuleFile(byModule map[string]*parsedFile, mod string) *parsedFile {
+	if f, ok := byModule[Python+":"+mod]; ok {
+		return f
+	}
+	var best *parsedFile
+	for key, f := range byModule {
+		if strings.HasPrefix(key, Python+":") && strings.HasSuffix(key, "."+mod) && (best == nil || len(f.module) < len(best.module) || len(f.module) == len(best.module) && f.rel < best.rel) {
+			best = f
+		}
+	}
+	return best
+}
+
+// routeInclude is a Django include(): the URL prefix and the urls module.
+type routeInclude struct{ prefix, module string }
+
+// djangoPrefixes gives each urls.py file the prefix its include() chain
+// mounts it under (blog/urls.py under "blog/" from the root urls.py).
+func (ix *indexer) djangoPrefixes(byModule map[string]*parsedFile) map[*parsedFile]string {
+	prefix := map[*parsedFile]string{}
+	for range 6 { // include chains are shallow; this bounds cycles
+		changed := false
+		for _, rel := range slices.Sorted(maps.Keys(ix.files)) {
+			pf := ix.files[rel]
+			for _, inc := range pf.fr.includes {
+				target := pyModuleFile(byModule, pyModulePath(pf, inc.module))
+				if target == nil || target == pf {
+					continue
+				}
+				p := strings.TrimSuffix(prefix[pf], "/") + "/" + strings.Trim(inc.prefix, "/")
+				if _, seen := prefix[target]; !seen || len(p) < len(prefix[target]) {
+					prefix[target], changed = p, true
+				}
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	return prefix
 }
 
 func routeLocal(r route, module string) string { return r.kind + " " + r.name + " (" + module + ")" }

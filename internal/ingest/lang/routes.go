@@ -24,6 +24,9 @@ type route struct {
 	handler string
 	recv    string
 	guards  []string
+	// bare marks a handler named without its class ('index'), which a
+	// controller scope supplies (Laravel's Route::controller(X::class)).
+	bare bool
 }
 
 var (
@@ -45,6 +48,13 @@ var (
 	jsRoute      = regexp.MustCompile(`\b([A-Za-z_$][\w$]*)\s*\.\s*(get|post|put|patch|delete|head|options|all)\s*\(\s*(['"` + "`" + `])(/[^'"` + "`" + `]*)['"` + "`" + `]\s*,(.*)$`)
 	jsIdent      = regexp.MustCompile(`^[A-Za-z_$][\w$.]*$`)
 	jsInlineFunc = regexp.MustCompile(`=>|\bfunction\b`)
+	// app.use(requireAuth), router.use(passport.authenticate('jwt')): only
+	// middleware whose name says it checks access counts as a guard.
+	jsUse      = regexp.MustCompile(`\b([A-Za-z_$][\w$]*)\s*\.\s*use\s*\(\s*([^'"` + "`" + `\s].*)$`)
+	jsAccessMW = accessCheck
+	// program.command('sync <dir>') … .action(syncAll): commander.
+	jsCommand = regexp.MustCompile(`\.command\(\s*['"` + "`" + `]([\w:.-]+)`)
+	jsAction  = regexp.MustCompile(`\.action\(\s*([A-Za-z_$][\w$.]*)\s*\)`)
 	// server.tool("name", …), server.registerTool("name", …): the MCP TS SDK.
 	jsTool = regexp.MustCompile(`\.\s*(?:tool|registerTool)\s*\(\s*(['"])([\w.-]+)['"]`)
 	// Clients that take a path and options but serve nothing.
@@ -114,13 +124,42 @@ func pyRoutesFor(decorators []string, names []string, line int, name string) []r
 
 // jsRoutes finds route and tool registrations in JavaScript or TypeScript
 // source; fns are the file's function names, for handlers passed by name.
-func jsRoutes(src string, fns map[string]bool) []route {
+// router.use(requireAuth) guards the routes registered on router after it,
+// and with commander, program.command('x').action(fn) is a CLI command.
+func jsRoutes(src string, fns map[string]bool, commander bool) []route {
 	var out []route
 	lines := strings.Split(src, "\n")
+	used := map[string][]string{} // receiver -> access middleware applied with use()
 	for i, l := range lines {
 		t := strings.TrimSpace(l)
 		if strings.HasPrefix(t, "//") || strings.HasPrefix(t, "*") {
 			continue
+		}
+		if m := jsUse.FindStringSubmatch(l); m != nil {
+			for _, a := range splitArgs(m[2]) {
+				name := strings.SplitN(a, "(", 2)[0]
+				if jsIdent.MatchString(name) && jsAccessMW.MatchString(name) {
+					used[m[1]] = append(used[m[1]], a)
+				}
+			}
+		}
+		if commander {
+			if m := jsCommand.FindStringSubmatch(l); m != nil {
+				r := route{kind: model.RouteCLI, name: m[1], line: i + 1}
+				for j := i; j < len(lines) && j <= i+6; j++ {
+					if j > i && strings.Contains(lines[j], ".command(") {
+						break
+					}
+					if a := jsAction.FindStringSubmatch(lines[j]); a != nil {
+						r.handler = a[1]
+						if k := strings.LastIndexByte(a[1], '.'); k > 0 {
+							r.recv, r.handler = a[1][:k], a[1][k+1:]
+						}
+						break
+					}
+				}
+				out = append(out, r)
+			}
 		}
 		if m := jsTool.FindStringSubmatch(l); m != nil {
 			out = append(out, route{kind: model.RouteMCP, name: m[2], line: i + 1})
@@ -151,6 +190,7 @@ func jsRoutes(src string, fns map[string]bool) []route {
 		default:
 			continue // options object or anything else: not a registration
 		}
+		r.guards = append(r.guards, used[m[1]]...)
 		for _, a := range args[:len(args)-1] {
 			if jsIdent.MatchString(a) || strings.HasSuffix(a, ")") && jsIdent.MatchString(strings.SplitN(a, "(", 2)[0]) {
 				r.guards = append(r.guards, a)
@@ -165,11 +205,19 @@ func jsRoutes(src string, fns map[string]bool) []route {
 // or re_path(r"^x/$", View.as_view()); include(...) adds no handler.
 var djangoPath = regexp.MustCompile(`\b(?:re_)?path\(\s*r?['"]([^'"]*)['"]\s*,\s*([A-Za-z_][\w.]*)`)
 
-// djangoRoutes reads the routes of a urls.py file.
-func djangoRoutes(src string) []route {
+var djangoInclude = regexp.MustCompile(`\b(?:re_)?path\(\s*r?['"]([^'"]*)['"]\s*,\s*include\(\s*\(?\s*['"]([\w.]+)['"]`)
+
+// djangoRoutes reads the routes of a urls.py file, and the urls modules it
+// mounts with include() under a prefix.
+func djangoRoutes(src string) ([]route, []routeInclude) {
 	var out []route
+	var incs []routeInclude
 	for i, l := range strings.Split(src, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(l), "#") {
+			continue
+		}
+		if m := djangoInclude.FindStringSubmatch(l); m != nil {
+			incs = append(incs, routeInclude{prefix: strings.TrimPrefix(m[1], "^"), module: m[2]})
 			continue
 		}
 		m := djangoPath.FindStringSubmatch(l)
@@ -184,7 +232,7 @@ func djangoRoutes(src string) []route {
 		}
 		out = append(out, r)
 	}
-	return out
+	return out, incs
 }
 
 func httpVerb(m string) string {
@@ -222,6 +270,118 @@ func splitArgs(s string) []string {
 	}
 	if a := strings.TrimSpace(s[start:]); a != "" {
 		out = append(out, a)
+	}
+	return out
+}
+
+// accessCheck matches names of middleware, callbacks and decorators that
+// check who may call (authenticate_user!, login_required, requireAuth),
+// as opposed to ones that load data or set headers (set_post, never_cache).
+var accessCheck = regexp.MustCompile(`(?i)auth|login|logged_?in|signed_?in|permission|admin|staff|superuser|role|access|authoriz|verif|token|csrf_?protect|protect|guard|acl|jwt|passport|session|require_?(?:user|login|admin|role|permission|functional|account|owner|member)|ensure_?(?:user|admin|owner|member|logged)|doorkeeper|can[_: ]`)
+
+// accessGuards keeps the names that look like access checks.
+func accessGuards(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if accessCheck.MatchString(n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// routeScope is a block of lines whose routes share a path prefix and
+// guards (a Laravel route group, an Express router after router.use).
+type routeScope struct {
+	start, end int
+	prefix     string
+	guards     []string
+	recv       string // the controller of bare handlers inside
+}
+
+// applyScopes prefixes and guards the routes registered inside scopes,
+// outer scopes first.
+func applyScopes(routes []route, scopes []routeScope) []route {
+	for i := range routes {
+		r := &routes[i]
+		verb, path, hasVerb := strings.Cut(r.name, " ")
+		if !hasVerb {
+			verb, path = "", r.name
+		}
+		prefix := ""
+		var guards []string
+		for _, s := range scopes {
+			if r.line >= s.start && r.line <= s.end {
+				prefix = strings.TrimSuffix(prefix, "/") + "/" + strings.Trim(s.prefix, "/")
+				guards = append(guards, accessGuards(s.guards)...) // a group's web/throttle middleware is not a check
+				if r.bare && s.recv != "" {
+					r.recv = s.recv
+				}
+			}
+		}
+		if r.bare && r.recv == "" {
+			r.handler = "" // a method name with no controller to find it on
+		}
+		if prefix != "" && strings.Trim(prefix, "/") != "" {
+			path = "/" + strings.Trim(strings.TrimSuffix(prefix, "/")+"/"+strings.TrimPrefix(path, "/"), "/")
+			r.name = strings.TrimSpace(verb + " " + path)
+		}
+		r.guards = append(guards, r.guards...)
+	}
+	return routes
+}
+
+var (
+	nestVerb  = map[string]string{"Get": "GET", "Post": "POST", "Put": "PUT", "Patch": "PATCH", "Delete": "DELETE", "Head": "HEAD", "Options": "OPTIONS", "All": ""}
+	nestGuard = map[string]bool{"UseGuards": true, "Roles": true, "Public": true, "Auth": true, "Permissions": true, "UseInterceptors": false}
+	jsString  = regexp.MustCompile(`['"` + "`" + `]([^'"` + "`" + `]*)['"` + "`" + `]`)
+)
+
+// nestRoutes reads NestJS routes: @Controller('users') on the class and
+// @Get(':id') on the method, with @UseGuards/@Roles/@Public as guards.
+func nestRoutes(classDecs, methodDecs []string, handler string, line int) []route {
+	prefix, controller := "", false
+	var guards []string
+	name := func(d string) string {
+		d = strings.TrimPrefix(strings.TrimSpace(d), "@")
+		if i := strings.IndexAny(d, "( "); i >= 0 {
+			d = d[:i]
+		}
+		return d
+	}
+	for _, d := range classDecs {
+		switch n := name(d); {
+		case n == "Controller":
+			controller = true
+			if m := jsString.FindStringSubmatch(d); m != nil {
+				prefix = m[1]
+			}
+		case nestGuard[n]:
+			guards = append(guards, clipGuard(d))
+		}
+	}
+	if !controller {
+		return nil
+	}
+	var out []route
+	var methodGuards []string
+	for _, d := range methodDecs {
+		if n := name(d); nestGuard[n] {
+			methodGuards = append(methodGuards, clipGuard(d))
+		}
+	}
+	for _, d := range methodDecs {
+		verb, ok := nestVerb[name(d)]
+		if !ok {
+			continue
+		}
+		path := ""
+		if m := jsString.FindStringSubmatch(d); m != nil {
+			path = m[1]
+		}
+		full := "/" + strings.Trim(strings.TrimSuffix(prefix, "/")+"/"+strings.TrimPrefix(path, "/"), "/")
+		out = append(out, route{kind: model.RouteHTTP, name: strings.TrimSpace(verb + " " + full), line: line, handler: handler,
+			guards: append(slices.Clip(guards), methodGuards...)})
 	}
 	return out
 }

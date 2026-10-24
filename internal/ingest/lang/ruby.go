@@ -42,6 +42,91 @@ var (
 // on a value (x = a % b) rather than a literal argument.
 var rbKeywordValue = map[string]bool{"self": true, "nil": true, "true": true, "false": true, "end": true}
 
+// rbClass is what a Ruby class says about its actions: its superclass and
+// the before_action callbacks it adds or skips.
+type rbClass struct {
+	super        string
+	before, skip []rbCallback
+}
+
+type rbCallback struct {
+	name         string
+	only, except []string
+}
+
+func (c rbCallback) applies(action string) bool {
+	switch {
+	case len(c.only) > 0:
+		return slices.Contains(c.only, action)
+	case len(c.except) > 0:
+		return !slices.Contains(c.except, action)
+	}
+	return true
+}
+
+var (
+	rbBeforeAction = regexp.MustCompile(`^\s*(prepend_before_action|before_action|before_filter|skip_before_action|skip_before_filter)\s*\(?\s*(.*)$`)
+	rbCallbackOpt  = regexp.MustCompile(`\b(only|except):\s*(?:\[([^\]]*)\]|%i\[([^\]]*)\]|:(\w+[?!]?))`)
+	rbSymbolName   = regexp.MustCompile(`:(\w+[?!]?)`)
+)
+
+// rbCallbacks reads "before_action :a, :b, only: [:show]" into callbacks.
+func rbCallbacks(args string) []rbCallback {
+	names := args
+	if j := rbCallbackOpt.FindStringIndex(args); j != nil {
+		names = args[:j[0]]
+	}
+	var only, except []string
+	for _, m := range rbCallbackOpt.FindAllStringSubmatch(args, -1) {
+		list := m[2] + " " + m[3] + " :" + m[4]
+		acts := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' || r == ':' })
+		if m[1] == "only" {
+			only = append(only, acts...)
+		} else {
+			except = append(except, acts...)
+		}
+	}
+	var out []rbCallback
+	for _, m := range rbSymbolName.FindAllStringSubmatch(names, -1) {
+		out = append(out, rbCallback{name: m[1], only: only, except: except})
+	}
+	return out
+}
+
+// rubyActionGuards are the before_action callbacks that run before action
+// of class typ, through its superclasses (ApplicationController), less the
+// ones a class skips.
+func rubyActionGuards(classes map[string]*rbClass, typ, action string, lookup func(string) (*parsedFile, string)) []string {
+	var levels [][]rbCallback
+	skipped := map[string]bool{}
+	for range 8 {
+		c := classes[typ]
+		if c == nil {
+			break
+		}
+		levels = append(levels, c.before)
+		for _, s := range c.skip {
+			if s.applies(action) {
+				skipped[s.name] = true
+			}
+		}
+		f, t := lookup(c.super)
+		if f == nil {
+			break
+		}
+		classes, typ = f.fr.rbClasses, t
+	}
+	var out []string
+	for i := len(levels) - 1; i >= 0; i-- { // the base class's callbacks run first
+		for _, cb := range levels[i] {
+			if cb.applies(action) && !skipped[cb.name] {
+				out = append(out, "before_action :"+cb.name)
+			}
+		}
+	}
+	return out
+}
+
 type rbFrame struct {
 	kind    string // "type", "def", "block"
 	sym     *symbol
@@ -127,6 +212,15 @@ func parseRuby(src []byte, rel string) *fileResult {
 				s.root = true // marks a controller: its public actions are entry points
 			}
 			fr.symbols = append(fr.symbols, s)
+			if fr.rbClasses == nil {
+				fr.rbClasses = map[string]*rbClass{}
+			}
+			if fr.rbClasses[name] == nil {
+				fr.rbClasses[name] = &rbClass{}
+			}
+			if m[8] >= 0 {
+				fr.rbClasses[name].super = line[m[8]:m[9]]
+			}
 			// class Foo < Bar; end and Struct.new(...) do … opens only when
 			// the line does not close it again.
 			toks = append(toks, token{pos: m[2], open: &rbFrame{kind: "type", sym: s, name: name}})
@@ -166,6 +260,14 @@ func parseRuby(src []byte, rel string) *fileResult {
 				tf.private = true
 			case "public":
 				tf.private = false
+			}
+			if m := rbBeforeAction.FindStringSubmatch(raw[i]); m != nil && fr.rbClasses[cls] != nil {
+				c := fr.rbClasses[cls]
+				if strings.HasPrefix(m[1], "skip") {
+					c.skip = append(c.skip, rbCallbacks(m[2])...)
+				} else {
+					c.before = append(c.before, rbCallbacks(m[2])...)
+				}
 			}
 			for _, m := range rbSymbolRef.FindAllStringSubmatch(line, -1) {
 				refs[cls+"."+m[1]] = true // before_action :load_user, validate :check
