@@ -34,6 +34,10 @@ type evalOptions struct {
 	cases         string
 }
 
+// evalHistory is how many commits before base the graph indexes, as an
+// ingest does by default: answers may use history, never the tasks' own.
+const evalHistory = 500
+
 // errRegression fails the run (exit 1) after the report and the list of
 // regressions are printed.
 var errRegression = errors.New("the task eval fell below its baseline")
@@ -114,7 +118,7 @@ func (o *evalOptions) Run(ctx context.Context, _ *app.Env) error {
 	// The graph is built at base, in a worktree of its own, so no answer
 	// can draw on the change it is asked about.
 	repo := cmpOr(o.repo, filepath.Base(o.root))
-	g, err := ingest.AtCommit(ctx, o.root, base, ingest.Options{Repo: repo, AllowNetwork: o.allowNetwork})
+	g, err := ingest.AtCommit(ctx, o.root, base, ingest.Options{Repo: repo, AllowNetwork: o.allowNetwork, CommitLimit: evalHistory})
 	if err != nil {
 		return err
 	}
@@ -216,7 +220,7 @@ func (o *evalOptions) runSessions(ctx context.Context) error {
 			o.EC.Logger.Warn("skipping cases of a commit this checkout lacks", "commit", short(base), "cases", len(byBase[base]))
 			continue
 		}
-		g, err := ingest.AtCommit(ctx, o.root, commit, ingest.Options{Repo: repo, AllowNetwork: o.allowNetwork})
+		g, err := ingest.AtCommit(ctx, o.root, commit, ingest.Options{Repo: repo, AllowNetwork: o.allowNetwork, CommitLimit: evalHistory})
 		if err != nil {
 			return err
 		}
