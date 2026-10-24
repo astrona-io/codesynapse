@@ -24,6 +24,19 @@
         "major"
       ],
       "dependencyDashboardApproval": true
+    },
+    {
+      "description": "The same for tools run with `go run module@version`: a new major version needs the /vN module path in the command, which Renovate does not add (#129).",
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "matchDatasources": [
+        "go"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true
     }
   ],
   "customManagers": [
