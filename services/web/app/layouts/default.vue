@@ -31,6 +31,8 @@ const main = computed(() => session.restricted.value ? [] : [
   { to: '/', label: 'Repositories', hint: 'Everything you indexed' },
   { to: '/shared-code', label: 'Shared code', hint: 'Code several repositories copy' },
   { to: '/agents', label: 'Agents', hint: 'Connect Claude Code, Codex, Cursor' },
+  // Sessions come from the audit log, which only installations with accounts keep.
+  ...(session.accounts.value ? [{ to: '/sessions', label: 'Agent sessions', hint: 'What each agent chat looked at, in order' }] : []),
   { to: '/stats', label: 'Statistics', hint: 'Usage, tokens, cost, latency' },
 ])
 const more = computed(() => session.restricted.value ? [

@@ -350,13 +350,14 @@ Ordered so that each step can be measured by the first one. New tools stay read-
 
 15. **Project conventions** (done: `internal/conventions` derives the house style at ingest from the Go extractor's typed external calls, every language's external imports, call edges and file names: how tests assert (libraries, or in-repository helper packages called from tests of three or more packages), subtests and fuzz tests, how errors are made, the logger and its in-repository wrapper, HTTP, CLI and database libraries; at most eight statements with their counts, kept in the Repository node's metadata. Served by the plugin's SessionStart hook through `GET /api/v1/repos/{repo}/conventions` (once per session), in `handoff_context` briefs, and by `minimal_context` on request (`conventions: true`): in the task eval, putting them inside `minimal_context`'s budget dropped hit@10 from 0.534 to 0.483, so they never take its matches' budget). Generated code matches the repository without the agent reading examples first.
 
+16. **Agent session timeline** (done: the Agent sessions page and `GET /api/v1/accounts/orgs/{org}/agent-sessions[/{session}]` group the MCP audit entries by runtime session: per session the client, calls, failures, bytes returned, tools and repositories over the last 1 to 30 days, and for one session its calls in order with offset, size, duration, outcome and the already redacted arguments. Members see their own sessions, owners and admins the organisation's, like the audit log; nothing new is recorded). A person reviewing an agent's pull request sees what it looked at.
+
 More ideas, not yet ordered:
 
 - **Bridge transport** (decided 2026-10-24: no gRPC). The bridge carries small JSON answers whose time is spent in the graph query, Go's client already reuses HTTP/2 connections, Streamable HTTP is the MCP standard other clients need, and gRPC would add a second listener with its own auth and audit path and a new dependency. If it ever matters: measure transport against server time in the bridge first, then response compression or mutual TLS for the bridge connection.
 
 - **Cross-repository impact.** When `get_pr_context` sees a changed exported symbol in a library, list its callers in the other repositories the caller may see, by matching `External` nodes to the library's module path. Breaking changes show up before release, not after.
 - **Dependency upgrade impact.** For `module@version`, list our call sites into that module; when both versions are in the local module cache, also the exported API that changed between them. No network, in line with the `go list` defaults.
-- **Agent session timeline.** A dashboard page built from the MCP audit log: which tools an agent session called, in order, and what it got back in size. Helps a person reviewing an agent's PR see what it looked at, under the existing tenant scoping.
 - **Context vs. edit comparison.** After an agent's change, compare the files it edited with the files the tools returned. Misses become new eval cases for step 1.
 
 ## Organisations
