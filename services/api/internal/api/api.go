@@ -339,6 +339,8 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/repos/{repo}/search", repoRole(accounts.Viewer), s.handleSearch)
 	s.route("GET /api/v1/repos/{repo}/symbol", repoRole(accounts.Viewer), s.handleSymbol)
 	s.route("GET /api/v1/repos/{repo}/identities", repoRole(accounts.Viewer), s.handleIdentities)
+	s.route("GET /api/v1/repos/{repo}/identities/reviews", repoRole(accounts.Viewer), s.handleIdentityReviews)
+	s.route("POST /api/v1/repos/{repo}/identities/reviews", repoRole(accounts.Admin), s.handleReviewIdentity)
 	s.route("GET /api/v1/repos/{repo}/code-records", repoRole(accounts.Viewer), s.handleCodeRecords)
 	s.route("POST /api/v1/repos/{repo}/code-records", repoRole(accounts.Member), s.handleRecordCode)
 	s.route("GET /api/v1/repos/{repo}/outline", repoRole(accounts.Viewer), s.handleOutline)
@@ -606,7 +608,15 @@ func (s *Server) handleSymbol(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, errors.New("id is required"))
 		return
 	}
-	card, err := s.repoQuery(r.PathValue("repo")).Card(r.Context(), r.PathValue("repo"), id, intParam(r, "limit", 20))
+	resolved, err := s.catalogOf(r.Context(), r.PathValue("repo")).ResolveSymbol(r.Context(), r.PathValue("repo"), id)
+	if err != nil {
+		s.catalogError(w, err)
+		return
+	}
+	card, err := s.repoQuery(r.PathValue("repo")).Card(r.Context(), r.PathValue("repo"), resolved.ID, intParam(r, "limit", 20))
+	if query.IsSymbolID(id) && id != card.Symbol.SymbolID {
+		card.ResolvedFrom = id
+	}
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -695,7 +705,7 @@ func graphNode(n model.Node, depth int) GraphNode {
 // callees up to depth, with the edges between them.
 func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	root, err := s.repoQuery(r.PathValue("repo")).Resolve(ctx, r.PathValue("repo"), r.URL.Query().Get("id"))
+	root, err := s.catalogOf(ctx, r.PathValue("repo")).ResolveSymbol(ctx, r.PathValue("repo"), r.URL.Query().Get("id"))
 	if err != nil {
 		s.problem(w, 500, err)
 		return

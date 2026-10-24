@@ -105,6 +105,9 @@ type LinkView struct {
 // a package (by import path or path suffix).
 func (s Service) resolveCode(ctx context.Context, repo, ref string) (model.Node, error) {
 	ref = strings.TrimSpace(strings.Trim(ref, "`"))
+	if query.IsSymbolID(ref) {
+		return s.ResolveSymbol(ctx, repo, ref)
+	}
 	clean := strings.TrimPrefix(path.Clean(ref), "./")
 	if n, err := s.R.Node(ctx, model.NodeID(repo, model.KindFile, clean)); err == nil {
 		return n, nil

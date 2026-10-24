@@ -38,4 +38,9 @@ func identityContract(t *testing.T, st store.Store) {
 	saved, err := st.GetCurated(ctx, repo, it.ID)
 	require.NoError(t, err)
 	assert.Equal(t, saved, it)
+	review := curation.Item{ID: "identity-review", Repo: repo, Kind: curation.KindIdentityReview, OrgID: "o1", CreatedBy: "u1", Client: "web", IdentityReview: &curation.IdentityReview{IdentityReviewInput: curation.IdentityReviewInput{From: it.Code.Origins[0], To: n.SymbolID, Relation: "same-symbol", Reason: "Reviewed history", Revision: "abc"}, Source: curation.SymbolSource{ID: it.Code.Origins[0], Repo: repo, Revision: "previous"}, Target: it.Code.Targets[0], Supersedes: []string{}, SourceFile: "old.go", TargetFile: "new.go"}}
+	require.NoError(t, st.SaveCurated(ctx, review))
+	stored, err := st.GetCurated(ctx, repo, review.ID)
+	require.NoError(t, err)
+	assert.Equal(t, stored, review)
 }

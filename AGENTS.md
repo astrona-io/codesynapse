@@ -205,6 +205,15 @@ This tool reads untrusted repositories and serves their contents to LLMs. Keep i
 
 ## Web (Nuxt 4)
 
+Human identity reviews: `code_identity_reviews` only reads. Only the web API's
+signed-in repository-admin route can create same-symbol, copy or distinct
+reviews in accounts mode; API keys cannot. They are organisation-scoped,
+revision-pinned `Curated` evidence, audited before saving. Same-symbol reviews
+provide aliases for retired IDs without changing shared graph identities.
+Concurrent conflicting heads fail closed; superseded evidence is retained.
+Policy exclusions apply to saved review paths as well as current symbols.
+Never add an MCP identity-review write or automatically collapse live copies.
+
 Code identity and reuse: `code_identities` reads permanent symbol IDs and
 revision-specific evidence; `code_records` reads attributed annotations and
 explicit lineage. `code_annotate` and `code_record_reuse` are approved narrow

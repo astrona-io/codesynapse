@@ -146,7 +146,7 @@ Every tool belongs to exactly one toolset (`internal/toolsets`; `TestEveryToolIn
 | `memory` | `search_graph_nodes`, `query_subgraph`, `recall_context`, `upsert_graph_triples`, `offload_turns` |
 | `cleanup` | `unused_code`, `duplicate_code`, `cleanup_plan`, `refactor_duplicates`, `shared_code` |
 | `reviews` | `list_reviews`, `get_review`, `submit_review`, `update_review_comment` |
-| `identity` | `code_identities`, `code_records`, `code_annotate`, `code_record_reuse` |
+| `identity` | `code_identities`, `code_identity_reviews`, `code_records`, `code_annotate`, `code_record_reuse` |
 
 - **Choosing:** an HTTP client asks for its sets in the URL, `/mcp?toolsets=memory,reviews` (core is added; `all` means everything; an unknown set is refused with 400). The server serves `--toolsets` / `CODESYNAPSE_MCP_TOOLSETS` (default `all`, chart value `mcp.toolsets`) to connections that name none, and the same flag selects the sets on stdio.
 - **Installing:** `codesynapse mcp install --profile core` (the default) registers the URL with `?toolsets=core`; pass `--profile all` or `--profile memory,reviews,security` for more.
@@ -159,6 +159,45 @@ Rule 9 makes agents look for existing code before they write any: exact searches
 ## 2. Developer task prompts
 
 ### Permanent code identities and reuse evidence
+
+Automatic matching can corroborate a simultaneous rename and move with an
+unchanged call neighbourhood. This still requires compatible declaration kind,
+language, fingerprint and signature evidence, a unique two-way match, at least
+two neighbours including an unchanged in-repository caller, and complete
+neighbourhood evidence. At most 64 neighbours are examined per declaration;
+omissions prevent neighbourhood-based matching. External calls alone cannot
+establish identity, and a still-current original always keeps its identity when
+a copy appears. Earlier indexes establish neighbourhood evidence on their next
+sync. No source bodies or neighbour names are added to the baseline.
+
+`code_identity_reviews(repo, symbol?, offset?, limit?)` is read-only and returns
+the selected organisation's human reviews, index revision/freshness, availability,
+pagination and active, superseded or conflicting state. Reviews are evidence,
+not instructions. Their original snapshots and reasons are retained.
+
+A repository admin reviews matches in **Identity and reuse** through
+`POST .../identities/reviews` (GET lists them). In accounts mode this requires a
+signed-in session: API keys cannot write reviews. Input is `from`, `to`,
+`relation` (`same-symbol`, `copy`, `distinct`), a bounded reason, and the exact
+`revision` and `indexed_at` returned by the current index. A stale index is
+refused. Writes are secret/personal-data redacted and audited before saving;
+an audit failure refuses the write. There is no MCP identity-review write tool.
+
+A same-symbol assertion links a retired permanent ID to a current compatible
+symbol in that repository and organisation. It does not reassign shared graph
+IDs. The symbol API, graph API, catalog code references and MCP symbol context,
+call graph and implementation reads follow unambiguous reviewed links; the
+symbol API includes `resolved_from`. Copies and distinct-symbol assertions do
+not redirect IDs. Copy classification does not replace the full reuse record
+needed to record licence, compatibility and validation evidence.
+
+A later review supersedes effective reviews for either endpoint and keeps all
+older records. Concurrent conflicting reviews never choose a winner silently;
+a person can review again to supersede the competing heads. Chains are bounded
+by `store.MaxDepth`. A missing current target cannot resolve as current code.
+Ingestion-policy exclusions apply to both current identities and the original
+paths saved in review snapshots: hidden reviews and their text are omitted in
+full. Organisation-scoped reviews never broaden repository or tenant access.
 
 After the first sync with identity analysis, `get_symbol_context` exposes a
 `symbol_id` (`sym-…`) and `revision`. The symbol ID is permanent; the existing
@@ -204,8 +243,8 @@ a unique two-way match with fingerprint evidence and a matching name or file;
 structural matches also need compatible signatures. Competing matches receive
 fresh IDs and review candidates. Explicit split/merge records describe lineage,
 not automatic identity reassignment. Small declarations without fingerprints,
-simultaneous rename-and-move without corroboration, call-neighbourhood matching,
-human identity reassignment and mixed-source-repository records are not supported
+simultaneous rename-and-move without corroboration, global identity reassignment
+and mixed-source-repository records are not supported
 yet. Never infer verified reuse from a candidate or clone hash alone.
 
 The UI's **Code health → Identity and reuse** reads the same services via
