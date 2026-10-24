@@ -158,6 +158,12 @@ func testTarget(n model.Node) (lang, key, name string) {
 			return "", "", ""
 		}
 		return "jvm", class, method
+	case ext == ".cs":
+		class, method, ok := cutLast(n.QualifiedName, ".")
+		if !ok {
+			return "", "", ""
+		}
+		return "dotnet", class, method
 	case ext == ".rs":
 		// One command per crate; libtest filters match the module path.
 		_, sym, ok := strings.Cut(local, "::")
@@ -233,6 +239,12 @@ func testStep(g *group) Step {
 		s.Command = jvmTestCommand(g.build, g.key, tests)
 	case "rust":
 		s.Command = cargo(g.key, "test -- "+strings.Join(tests, " "))
+	case "dotnet":
+		filters := make([]string, 0, len(tests))
+		for _, t := range tests {
+			filters = append(filters, "FullyQualifiedName~"+g.key+"."+t)
+		}
+		s.Command = `dotnet test --filter "` + strings.Join(filters, "|") + `"`
 	}
 
 	switch g.reach {
@@ -242,6 +254,9 @@ func testStep(g *group) Step {
 		s.Why = "call " + named + " directly"
 	default:
 		s.Why = fmt.Sprintf("reach %s through %d calls", named, g.reach)
+	}
+	if g.kind == "dotnet" {
+		s.Why += "; run where the solution or test project is"
 	}
 	if g.kind == "jvm" {
 		other := map[string]string{"gradle": "maven", "maven": "gradle"}[g.build]
@@ -254,7 +269,7 @@ func testStep(g *group) Step {
 // changed files.
 func buildAndLint(ctx context.Context, r store.Reader, repo string, files []review.FileSummary) ([]Step, error) {
 	var goDirs, pyFiles []string
-	jvm := false
+	jvm, dotnet := false, false
 	var crates []string
 	for _, f := range files {
 		if f.Status == "deleted" {
@@ -269,6 +284,8 @@ func buildAndLint(ctx context.Context, r store.Reader, repo string, files []revi
 			pyFiles = append(pyFiles, f.Path)
 		case ".java", ".kt":
 			jvm = true
+		case ".cs":
+			dotnet = true
 		case ".rs":
 			if root, _ := rustCrate(f.Path); !slices.Contains(crates, root) {
 				crates = append(crates, root)
@@ -296,6 +313,9 @@ func buildAndLint(ctx context.Context, r store.Reader, repo string, files []revi
 		}
 		cmd := map[string]string{"gradle": "./gradlew classes testClasses", "maven": "mvn -q test-compile"}[build]
 		steps = append(steps, Step{Kind: "build", Command: cmd, Why: "the changed Java and Kotlin code compiles"})
+	}
+	if dotnet {
+		steps = append(steps, Step{Kind: "build", Command: "dotnet build", Why: "the changed C# code compiles, with its analyzers"})
 	}
 	for _, c := range crates {
 		steps = append(steps,

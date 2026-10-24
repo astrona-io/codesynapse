@@ -74,7 +74,10 @@ func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability,
 			// any source file is "imported", otherwise "required".
 			name := ImportName(mod)
 			for imp := range externalImports {
-				if strings.EqualFold(imp, name) || strings.HasPrefix(imp, name+"/") {
+				// A C# using directive names a namespace, which a NuGet ID
+				// usually prefixes (Newtonsoft.Json.Linq).
+				if strings.EqualFold(imp, name) || strings.HasPrefix(imp, name+"/") ||
+					mod.Ecosystem == EcosystemNuGet && strings.HasPrefix(strings.ToLower(imp), strings.ToLower(name)+".") {
 					n.Reachability = Imported
 					break
 				}

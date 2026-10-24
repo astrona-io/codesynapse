@@ -135,3 +135,25 @@ func TestRustCrate(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildCSharp(t *testing.T) {
+	ctx := context.Background()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindRepository, "r"), Kind: model.KindRepository, Repo: "r", Name: "r"})
+	f := model.NodeID("r", model.KindMethod, "src/Svc.cs::Svc.Find")
+	g.AddNode(model.Node{ID: f, Kind: model.KindMethod, Repo: "r", Name: "Find", QualifiedName: "Acme.Svc.Find", File: "src/Svc.cs", StartLine: 1, EndLine: 5})
+	for _, m := range []string{"FindsOne", "FindsNone"} {
+		tst := model.NodeID("r", model.KindMethod, "tests/SvcTests.cs::SvcTests."+m)
+		g.AddNode(model.Node{ID: tst, Kind: model.KindMethod, Repo: "r", Name: m, QualifiedName: "Acme.Tests.SvcTests." + m, File: "tests/SvcTests.cs", StartLine: 1, EndLine: 4, IsTest: true})
+		g.AddEdge(model.Edge{From: tst, To: f, Kind: model.EdgeCalls})
+	}
+	mem := memory.New()
+	require.NoError(t, mem.ReplaceRepo(ctx, "r", g))
+	rep, err := review.Analyze(ctx, query.Service{R: mem}, "r", []gitx.FileChange{{Path: "src/Svc.cs", Ranges: []gitx.LineRange{{Start: 1, End: 5}}}}, review.Options{Depth: 3})
+	require.NoError(t, err)
+	plan, err := Build(ctx, mem, "r", rep)
+	require.NoError(t, err)
+	require.Len(t, plan.Steps, 2)
+	assert.Equal(t, plan.Steps[0].Command, `dotnet test --filter "FullyQualifiedName~Acme.Tests.SvcTests.FindsNone|FullyQualifiedName~Acme.Tests.SvcTests.FindsOne"`)
+	assert.Equal(t, plan.Steps[1].Command, "dotnet build")
+}

@@ -305,6 +305,8 @@ func tagsFor(calls []call, lang string) []string {
 			jvmTags(c.recv, n, set)
 		case lang == Rust:
 			rustTags(c.recv, n, set)
+		case lang == CSharp:
+			csTags(c.recv, n, set)
 		}
 	}
 	var out []string

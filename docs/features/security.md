@@ -55,7 +55,7 @@ flowchart LR
     call -- yes --> called[called<br/>with call sites]
 ```
 
-Symbol-level reachability exists for Go. For the other ecosystems, advisories rarely list symbols, so the levels are imported (npm, PyPI and Cargo, when a source file imports the package) or required (everything else: PHP, Ruby and C# sources are not indexed, and Java imports are not matched to Maven coordinates). `--fail-on` gates CI on reachable vulnerabilities only.
+Symbol-level reachability exists for Go. For the other ecosystems, advisories rarely list symbols, so the levels are imported (npm, PyPI, Cargo and NuGet, when a source file imports the package; for NuGet, a using directive whose namespace the package ID prefixes) or required (everything else: PHP and Ruby sources are not indexed, and Java imports are not matched to Maven coordinates). `--fail-on` gates CI on reachable vulnerabilities only.
 
 ## Priority
 

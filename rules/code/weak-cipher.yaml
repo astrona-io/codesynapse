@@ -4,7 +4,7 @@ title: DES or RC4 used
 severity: high
 cwe: [CWE-327]
 category: code
-languages: [go, java, kotlin]
+languages: [go, java, kotlin, csharp]
 why: DES and RC4 are broken; encrypted data can be recovered.
 fix: Use AES-GCM or ChaCha20-Poly1305.
 references:
@@ -18,3 +18,6 @@ examples:
   - language: java
     vulnerable: 'Cipher.getInstance("AES/ECB/PKCS5Padding");'
     fixed: 'Cipher.getInstance("AES/GCM/NoPadding");'
+  - language: csharp
+    vulnerable: 'aes.Mode = CipherMode.ECB;'
+    fixed: 'using var aes = new AesGcm(key, tagSizeInBytes: 16);'

@@ -7,7 +7,8 @@ import (
 	"github.com/astrona-io/codesynapse/internal/model"
 )
 
-// A structural parser for languages whose blocks are braces (Java, Kotlin;
+// A structural parser for languages whose blocks are braces (Java, Kotlin,
+// Rust, C#;
 // docs/PLAN.md, agent workflow roadmap step 14). Each language is a
 // braceLang: how a type and a function are declared, which words are not
 // calls, how imports and annotations look, and its rules and routes. The
@@ -28,14 +29,19 @@ type braceLang struct {
 	topFuncs bool
 	// annotation matches a line that only annotates the next declaration.
 	annotation *regexp.Regexp
-	pkgDecl    *regexp.Regexp
-	imports    func(raw string, line int) (importRef, bool)
-	keywords   map[string]bool
-	branches   []string
-	exported   func(decl string) bool
+	// pkgDecl declares the file's package or namespace (group 1). With
+	// blockPkg, a declaration that opens a block (C#'s namespace X { … })
+	// does not nest: what sits at its depth counts as top level.
+	pkgDecl  *regexp.Regexp
+	blockPkg bool
+	imports  func(raw string, line int) (importRef, bool)
+	keywords map[string]bool
+	branches []string
+	exported func(decl string) bool
 	// testAnnotated reports a test function from its annotations.
 	testAnnotated func(annotations []string) bool
-	textBlocks    bool // """ … """ strings (Java text blocks, Kotlin raw strings)
+	textBlocks    bool // """ … """ strings (Java text blocks, Kotlin raw strings, C# raw strings)
+	verbatim      bool // C#'s @"…" strings, which span lines and escape " as ""
 	// rust: 'a is a lifetime unless it closes as a character literal, and
 	// r"…" / r#"…"# are raw strings.
 	rust bool
@@ -70,24 +76,36 @@ func parseBrace(src []byte, l *braceLang) (*fileResult, string) {
 	fr := &fileResult{partial: unbalanced(masked, '{', '}')}
 	pkg := ""
 
-	var types []braceType
-	var pending []string // annotation lines above the next declaration
+	var types, spaces []braceType // spaces: open namespace blocks
+	var pending []string          // annotation lines above the next declaration
 	for i, line := range lines {
 		n := i + 1
 		for len(types) > 0 && n > types[len(types)-1].end {
 			types = types[:len(types)-1]
 		}
+		for len(spaces) > 0 && n > spaces[len(spaces)-1].end {
+			spaces = spaces[:len(spaces)-1]
+		}
+		top := 0
+		if len(spaces) > 0 {
+			top = spaces[len(spaces)-1].depth
+		}
 		t := strings.TrimSpace(line)
 		if t == "" {
 			continue
 		}
-		if pkg == "" && l.pkgDecl != nil {
+		if l.pkgDecl != nil && depth[i] == top && len(types) == 0 {
 			if m := l.pkgDecl.FindStringSubmatch(raw[i]); m != nil {
-				pkg = m[1]
+				if pkg == "" {
+					pkg = m[1]
+				}
+				if l.blockPkg && !strings.HasSuffix(t, ";") {
+					spaces = append(spaces, braceType{name: m[1], depth: depth[i] + 1, end: braceEnd(lines, n)})
+				}
 				continue
 			}
 		}
-		if depth[i] == 0 && l.imports != nil {
+		if depth[i] == top && l.imports != nil {
 			if imp, ok := l.imports(raw[i], n); ok {
 				fr.imports = append(fr.imports, imp)
 				continue
@@ -100,7 +118,7 @@ func parseBrace(src []byte, l *braceLang) (*fileResult, string) {
 			}
 		}
 		atMember := len(types) > 0 && depth[i] == types[len(types)-1].depth
-		atTop := depth[i] == 0
+		atTop := depth[i] == top && len(types) == 0
 		if l.scope != nil && (atTop || atMember) {
 			if m := l.scope.FindStringSubmatch(line); m != nil {
 				types = append(types, braceType{name: lastGroup(m), depth: depth[i] + 1, end: braceEnd(lines, n), anns: pending})
@@ -245,6 +263,7 @@ func braceDoc(raw []string, i int) string {
 			break
 		}
 		t = strings.TrimSpace(strings.TrimLeft(strings.TrimSuffix(t, "*/"), "/*!"))
+		t = strings.TrimSpace(docTag.ReplaceAllString(t, ""))
 		if t == "" || strings.HasPrefix(t, "@") {
 			continue
 		}
@@ -253,16 +272,20 @@ func braceDoc(raw []string, i int) string {
 	return strings.Join(parts, " ")
 }
 
+// docTag is the markup of C# XML doc comments (<summary>) and Javadoc
+// (<p>), not generics in prose.
+var docTag = regexp.MustCompile(`</?(?:summary|remarks|returns|value|para|p|c|code|example|exception|param|typeparam|see|seealso|inheritdoc)\b[^>]*>`)
+
 func maskBraceLang(src string, l *braceLang) string {
 	if l.rust {
 		return maskRust(src)
 	}
-	return maskBrace(src, l.textBlocks)
+	return maskBrace(src, l.textBlocks, l.verbatim)
 }
 
 // maskBrace blanks string and character literal contents and comments,
 // keeping line structure, for C-like languages.
-func maskBrace(src string, textBlocks bool) string {
+func maskBrace(src string, textBlocks, verbatim bool) string {
 	b := []byte(src)
 	out := make([]byte, len(b))
 	copy(out, b)
@@ -297,6 +320,17 @@ func maskBrace(src string, textBlocks bool) string {
 				j++
 			}
 			i = min(j+2, len(b)-1)
+		case verbatim && (strings.HasPrefix(src[i:], `@"`) || strings.HasPrefix(src[i:], `$@"`) || strings.HasPrefix(src[i:], `@$"`)):
+			j := i + strings.IndexByte(src[i:], '"') + 1
+			for j < len(b) && (b[j] != '"' || j+1 < len(b) && b[j+1] == '"') {
+				if b[j] == '"' { // "" is a quote inside the string
+					blank(j)
+					j++
+				}
+				blank(j)
+				j++
+			}
+			i = j
 		case c == '"' || c == '\'':
 			j := i + 1
 			for j < len(b) && b[j] != c && b[j] != '\n' {
