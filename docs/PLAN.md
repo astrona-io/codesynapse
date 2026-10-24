@@ -352,13 +352,14 @@ Ordered so that each step can be measured by the first one. New tools stay read-
 
 16. **Agent session timeline** (done: the Agent sessions page and `GET /api/v1/accounts/orgs/{org}/agent-sessions[/{session}]` group the MCP audit entries by runtime session: per session the client, calls, failures, bytes returned, tools and repositories over the last 1 to 30 days, and for one session its calls in order with offset, size, duration, outcome and the already redacted arguments. Members see their own sessions, owners and admins the organisation's, like the audit log; nothing new is recorded). A person reviewing an agent's pull request sees what it looked at.
 
+17. **Context vs. edit comparison** (done: SessionStart notes HEAD and the files already changed; Stop counts the indexed files (code, Markdown, YAML) the session changed since, committed or not, and how many of them a CodeSynapse answer of the session had named; the counts travel with the retrieval report as `files_edited`/`files_edited_found` workflow buckets, and the Statistics page shows the share. Paths stay in the session's state file. Still open: turning the misses into eval cases, which needs the task text and paths and so a local, opt-in export rather than a report).
+
 More ideas, not yet ordered:
 
 - **Bridge transport** (decided 2026-10-24: no gRPC). The bridge carries small JSON answers whose time is spent in the graph query, Go's client already reuses HTTP/2 connections, Streamable HTTP is the MCP standard other clients need, and gRPC would add a second listener with its own auth and audit path and a new dependency. If it ever matters: measure transport against server time in the bridge first, then response compression or mutual TLS for the bridge connection.
 
 - **Cross-repository impact.** When `get_pr_context` sees a changed exported symbol in a library, list its callers in the other repositories the caller may see, by matching `External` nodes to the library's module path. Breaking changes show up before release, not after.
 - **Dependency upgrade impact.** For `module@version`, list our call sites into that module; when both versions are in the local module cache, also the exported API that changed between them. No network, in line with the `go list` defaults.
-- **Context vs. edit comparison.** After an agent's change, compare the files it edited with the files the tools returned. Misses become new eval cases for step 1.
 
 ## Organisations
 

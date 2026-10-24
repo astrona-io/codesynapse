@@ -55,6 +55,16 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
         </template>
         <div v-else class="empty"><strong>Nothing reported yet</strong>Install the Claude Code plugin: its hooks put the ruleset in every session and report how sessions begin.</div>
       </div>
+      <div class="workflow">
+        <p class="label">Did CodeSynapse point to the code agents changed?</p>
+        <template v-if="a.workflow.files_edited">
+          <div class="grid kpis">
+            <StatTile label="Edited files it pointed to" :value="`${a.workflow.edit_recall_pct}%`" :hint="`${fmtInt(a.workflow.files_edited_found)} of ${fmtInt(a.workflow.files_edited)} files sessions changed`" />
+          </div>
+          <p class="muted small">Of the files a session changed (code, Markdown and YAML that CodeSynapse indexes; not those already changed when it began), the share a CodeSynapse answer of the same session had named. The task eval measures this on old commits; this is the same question on your agents' work. Counted by the plugin's hooks as numbers only, never paths.</p>
+        </template>
+        <div v-else class="empty"><strong>Nothing reported yet</strong>The plugin reports this when a session that used CodeSynapse changes files.</div>
+      </div>
       <details class="method"><summary>How tokens avoided are estimated</summary><p class="muted small">{{ a.avoided_method }}</p></details>
     </section>
 

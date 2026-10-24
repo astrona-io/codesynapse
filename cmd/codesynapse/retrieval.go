@@ -155,12 +155,23 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 		return
 	}
 	s := loadState(state)
-	wf := s.workflowReport()
-	if len(s.Counts) == 0 && wf == nil {
-		return
-	}
 	w := newWorktree(ctx, in.Cwd, "", logger)
 	if w == nil {
+		return
+	}
+	wf := s.workflowReport()
+	// Edits: what grew since the last report (a reverted file is not taken back).
+	edited := sessionEdits(ctx, w.root, s.Base)
+	nEdited, nFound := len(edited), found(edited, s.Ranges, w.repo)
+	for key, d := range map[string]int{"files_edited": nEdited - s.Reported.Edited, "files_edited_found": nFound - s.Reported.Found} {
+		if d > 0 {
+			if wf == nil {
+				wf = map[string]int{}
+			}
+			wf[key] = d
+		}
+	}
+	if len(s.Counts) == 0 && wf == nil {
 		return
 	}
 	// Counts of other repositories' ranges are left out of the report.
@@ -201,5 +212,6 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 		s.Sent[tool] = rangeCounts{Returned: c.Returned - foreign[tool].Returned, Read: c.Read - foreign[tool].Read}
 	}
 	s.markReported()
+	s.Reported.Edited, s.Reported.Found = max(s.Reported.Edited, nEdited), max(s.Reported.Found, nFound)
 	saveState(state, s)
 }

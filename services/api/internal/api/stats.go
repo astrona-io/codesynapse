@@ -75,6 +75,12 @@ type WorkflowStats struct {
 	ReadsTurnedBack  int `json:"reads_turned_back"`
 	// FirstSharePct is FirstCodeSynapse of both, rounded; 0 with no sessions.
 	FirstSharePct int `json:"first_share_pct"`
+	// FilesEdited are the files sessions changed, FilesEditedFound those a
+	// CodeSynapse answer of the session had pointed to, and EditRecallPct
+	// their share (0 with no edits).
+	FilesEdited      int `json:"files_edited"`
+	FilesEditedFound int `json:"files_edited_found"`
+	EditRecallPct    int `json:"edit_recall_pct"`
 }
 
 // DayStat is one day of usage.
@@ -320,6 +326,10 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 				a.Workflow.FirstNative += bk.Calls
 			case usage.ReadTurnedBack:
 				a.Workflow.ReadsTurnedBack += bk.Calls
+			case usage.FilesEdited:
+				a.Workflow.FilesEdited += bk.Calls
+			case usage.FilesEditedFound:
+				a.Workflow.FilesEditedFound += bk.Calls
 			}
 			continue
 		}
@@ -382,6 +392,9 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 	}
 	if n := a.Workflow.FirstCodeSynapse + a.Workflow.FirstNative; n > 0 {
 		a.Workflow.FirstSharePct = int(math.Round(100 * float64(a.Workflow.FirstCodeSynapse) / float64(n)))
+	}
+	if a.Workflow.FilesEdited > 0 {
+		a.Workflow.EditRecallPct = int(math.Round(100 * float64(min(a.Workflow.FilesEditedFound, a.Workflow.FilesEdited)) / float64(a.Workflow.FilesEdited)))
 	}
 	if a.Calls > 0 {
 		a.AvgLatencyMs = round1(float64(totalMs) / float64(a.Calls))
