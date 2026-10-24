@@ -80,6 +80,12 @@ At ingest `security.CoverageOf` counts what rules read, and `security.Inventory`
 
 A repository where nothing is scannable gets **N/A**, not a grade. The report also names the commit it describes.
 
+## Owners (CODEOWNERS)
+
+When the repository has a CODEOWNERS file (`.github/CODEOWNERS`, `CODEOWNERS`, `docs/CODEOWNERS` or `.gitlab/CODEOWNERS`, the first found, as GitHub looks), every finding names the owners of its file, and the report counts the listed findings per owner, most severe work first, with a "no owner" row for files no rule covers. The Security page shows that as **Findings by owner** (a row filters the findings to that owner), `codesynapse audit` as a table, SARIF as a `code_owners` property, and `get_pr_context` lists the owners of the changed files as `code_owners`, the people to ask for review.
+
+Patterns follow GitHub: gitignore style, the last matching line wins, a line without owners leaves its paths unowned, and `docs/*` covers only the files directly in `docs/`. GitLab sections are read as plain lines, without their default owners. Only `@user` and `@org/team` handles are kept; an e-mail owner is personal data and is dropped. The file is read at ingest (up to 3 MB and 1,000 rules, never through a symlink) and stored with the repository's metadata, so a change to it shows after the next sync.
+
 ## CI usage
 
 ```sh

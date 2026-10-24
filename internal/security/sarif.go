@@ -160,6 +160,9 @@ func WriteSARIF(w io.Writer, rep Report, o SARIFOptions) error {
 			},
 			Properties: map[string]any{"exposed": f.Exposed, "tested": f.Tested, "priority": f.Priority},
 		}
+		if len(f.CodeOwners) > 0 {
+			res.Properties["code_owners"] = f.CodeOwners
+		}
 		if f.SuppressionReason != "" {
 			res.Suppressions = []sarifSuppress{{Kind: "external", Justification: f.SuppressionReason}}
 		}

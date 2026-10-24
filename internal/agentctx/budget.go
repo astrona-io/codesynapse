@@ -188,7 +188,7 @@ func finishPR(out PRContext, maxTokens int) (PRContext, error) {
 				return n
 			}
 		}
-		for _, names := range []*[]string{&out.DuplicatedChanged, &out.ExportedChanged, &out.ExportedUntested, &out.SensitiveTouched, &out.Checklist} {
+		for _, names := range []*[]string{&out.DuplicatedChanged, &out.CodeOwners, &out.ExportedChanged, &out.ExportedUntested, &out.SensitiveTouched, &out.Checklist} {
 			if n := trimTail(names); n > 0 {
 				return n
 			}

@@ -510,8 +510,15 @@ func ContainsFold(s, substr string) bool {
 
 // repoMeta is what answers read from a Repository node's Meta.
 type repoMeta struct {
-	GoModule    string   `json:"go_module"`
-	Conventions []string `json:"conventions"`
+	GoModule    string      `json:"go_module"`
+	Conventions []string    `json:"conventions"`
+	CodeOwners  []OwnerRule `json:"code_owners"`
+}
+
+// OwnerRule is one line of a CODEOWNERS file (package codeowners).
+type OwnerRule struct {
+	Pattern string   `json:"p"`
+	Owners  []string `json:"o"`
 }
 
 func metaOf(repo Node) repoMeta {
@@ -529,3 +536,6 @@ func GoModuleOf(repo Node) string { return metaOf(repo).GoModule }
 // ConventionsOf is the house style found in a repository's code at ingest
 // (internal/conventions), as short statements with their evidence.
 func ConventionsOf(repo Node) []string { return metaOf(repo).Conventions }
+
+// CodeOwnersOf are the rules of the repository's CODEOWNERS file at ingest.
+func CodeOwnersOf(repo Node) []OwnerRule { return metaOf(repo).CodeOwners }

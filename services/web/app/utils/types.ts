@@ -117,7 +117,7 @@ export interface RuleGuide {
 }
 export interface SecFinding {
   id: string; rule: string; title: string; severity: string; cwe?: string[]; location: string; detail: string; language?: string
-  owner?: NodeRef; exposed: boolean; tested: boolean; priority: number; suppression_reason?: string
+  owner?: NodeRef; code_owners?: string[]; exposed: boolean; tested: boolean; priority: number; suppression_reason?: string
 }
 export interface SecVuln {
   id: string; cve?: string[]; aliases?: string[]; summary: string; severity: string; cwe?: string[]
@@ -131,6 +131,7 @@ export interface SecurityReport {
   suppressed?: SecFinding[]; suppressed_counts?: Record<string, number>
   modules: { total: number; direct: number; indirect: number; vulnerable: number; stdlib?: string }
   rules: { rule: string; title: string; severity: string; count: number }[]
+  owners?: { owner: string; findings: number; counts: Record<string, number> }[]
   sensitive_functions?: NodeRef[]
   head?: string; indexed_at?: string; checked?: string[]; not_checked?: string[]; unanalysed_findings?: number
   coverage?: { excluded_files?: number; kubernetes_excluded_files?: number; kubernetes_disabled?: boolean; inventory_incomplete?: boolean }
