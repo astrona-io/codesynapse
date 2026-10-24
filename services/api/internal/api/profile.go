@@ -22,16 +22,26 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Name string `json:"name"`
+		Name     string  `json:"name"`
+		Username *string `json:"username"` // nil: unchanged; "": remove
 	}
 	if err := decodeJSON(w, r, &in); err != nil {
 		s.problem(w, 400, err)
 		return
 	}
-	u, err := s.cfg.Accounts.UpdateName(r.Context(), p, in.Name)
-	if err != nil {
-		s.accountError(w, err)
-		return
+	u := p.User
+	var err error
+	if in.Name != "" || in.Username == nil {
+		if u, err = s.cfg.Accounts.UpdateName(r.Context(), p, in.Name); err != nil {
+			s.accountError(w, err)
+			return
+		}
+	}
+	if in.Username != nil {
+		if u, err = s.cfg.Accounts.UpdateUsername(r.Context(), p, *in.Username); err != nil {
+			s.accountError(w, err)
+			return
+		}
 	}
 	writeJSON(w, 200, u)
 }

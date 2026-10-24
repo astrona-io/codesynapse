@@ -31,6 +31,17 @@ async function saveName() {
     nameMsg.value = 'Name saved.'
   } catch (e) { nameError.value = apiErrorMessage(e) }
 }
+const username = ref(user.value?.username ?? '')
+const usernameMsg = ref('')
+const usernameError = ref('')
+async function saveUsername() {
+  usernameMsg.value = usernameError.value = ''
+  try {
+    await apiPatch('me', { username: username.value.trim() })
+    await session.load()
+    usernameMsg.value = username.value.trim() ? 'Username saved.' : 'Username removed.'
+  } catch (e) { usernameError.value = apiErrorMessage(e) }
+}
 const newEmail = ref('')
 const emailPassword = ref('')
 const emailMsg = ref('')
@@ -136,6 +147,12 @@ const manages = (role: string) => role === 'owner' || role === 'admin'
           <p v-if="nameMsg" class="notice notice--ok" role="status">{{ nameMsg }}</p>
           <p v-if="nameError" class="notice notice--danger" role="alert">{{ nameError }}</p>
           <div><button type="submit" :disabled="name.trim() === user.name">Save name</button></div>
+        </form>
+        <form class="stack--tight" @submit.prevent="saveUsername">
+          <div class="field"><label for="username">Username</label><input id="username" v-model="username" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="32"><span class="hint">Optional. Sign in with it instead of your email. Leave empty to remove it.</span></div>
+          <p v-if="usernameMsg" class="notice notice--ok" role="status">{{ usernameMsg }}</p>
+          <p v-if="usernameError" class="notice notice--danger" role="alert">{{ usernameError }}</p>
+          <div><button type="submit" :disabled="username.trim() === (user.username ?? '')">Save username</button></div>
         </form>
         <p class="muted small">Member since {{ new Date(user.created_at).toLocaleDateString() }}.</p>
       </section>

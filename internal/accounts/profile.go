@@ -159,3 +159,20 @@ func clipText(s string, n int) string {
 	}
 	return s
 }
+
+// UpdateUsername sets or (with "") clears the caller's username. A taken
+// name answers ErrExists.
+func (s *Service) UpdateUsername(ctx context.Context, p Principal, username string) (User, error) {
+	if err := signedIn(p); err != nil {
+		return User{}, err
+	}
+	username, err := CheckUsername(username)
+	if err != nil {
+		return User{}, err
+	}
+	if err := s.St.SetUsername(ctx, p.User.ID, username); err != nil {
+		return User{}, err
+	}
+	s.audit(ctx, actorEvent(p, "user.username", "", p.User.Email))
+	return s.St.UserByID(ctx, p.User.ID)
+}

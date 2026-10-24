@@ -168,11 +168,11 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return n, err
 }
 
-const userCols = "id, email, name, password_hash, platform_admin, created_at, disabled_at, bootstrap_root"
+const userCols = "id, email, name, password_hash, platform_admin, created_at, disabled_at, bootstrap_root, username"
 
 func scanUser(row pgx.Row) (accounts.User, error) {
 	var u accounts.User
-	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.PlatformAdmin, &u.CreatedAt, &u.DisabledAt, &u.BootstrapRoot)
+	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.PlatformAdmin, &u.CreatedAt, &u.DisabledAt, &u.BootstrapRoot, &u.Username)
 	u.CreatedAt = u.CreatedAt.UTC()
 	if u.DisabledAt != nil {
 		t := u.DisabledAt.UTC()
@@ -183,10 +183,13 @@ func scanUser(row pgx.Row) (accounts.User, error) {
 
 // CreateUser implements accounts.Store.
 func (s *Store) CreateUser(ctx context.Context, u accounts.User) error {
-	_, err := s.db.Exec(ctx, "INSERT INTO users ("+userCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-		u.ID, u.Email, u.Name, u.PasswordHash, u.PlatformAdmin, u.CreatedAt, u.DisabledAt, u.BootstrapRoot)
+	_, err := s.db.Exec(ctx, "INSERT INTO users ("+userCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+		u.ID, u.Email, u.Name, u.PasswordHash, u.PlatformAdmin, u.CreatedAt, u.DisabledAt, u.BootstrapRoot, u.Username)
 	if isConstraint(err, "users_one_bootstrap_root") {
 		return fmt.Errorf("bootstrap root: %w", accounts.ErrExists)
+	}
+	if isConstraint(err, "users_username") {
+		return fmt.Errorf("username: %w", accounts.ErrExists)
 	}
 	return mapErr(err, "email")
 }
@@ -260,6 +263,21 @@ func (s *Store) UserByID(ctx context.Context, id string) (accounts.User, error) 
 func (s *Store) UserByEmail(ctx context.Context, email string) (accounts.User, error) {
 	u, err := scanUser(s.db.QueryRow(ctx, "SELECT "+userCols+" FROM users WHERE email = $1", email))
 	return u, mapErr(err, "user")
+}
+
+// UserByUsername implements accounts.Store.
+func (s *Store) UserByUsername(ctx context.Context, username string) (accounts.User, error) {
+	u, err := scanUser(s.db.QueryRow(ctx, "SELECT "+userCols+" FROM users WHERE username = $1 AND username <> ''", username))
+	return u, mapErr(err, "user")
+}
+
+// SetUsername implements accounts.Store.
+func (s *Store) SetUsername(ctx context.Context, userID, username string) error {
+	tag, err := s.db.Exec(ctx, "UPDATE users SET username = $2 WHERE id = $1", userID, username)
+	if isConstraint(err, "users_username") {
+		return fmt.Errorf("username: %w", accounts.ErrExists)
+	}
+	return affected(tag, err, "user")
 }
 
 // SetPassword implements accounts.Store.

@@ -23,6 +23,7 @@ flowchart LR
     svc --> pg[(PostgreSQL)]
 ```
 
+- People sign in with an email or an optional username (3 to 32 characters, no `@`, case-insensitive, unique) and a password.
 - Passwords are argon2id. Logins are rate limited and unknown emails take as long as wrong passwords.
 - Session tokens and API keys are stored only as SHA-256 hashes.
 - An API key acts in exactly one organisation and stops working when its owner is removed or suspended. It can never mutate access.
@@ -32,7 +33,7 @@ The web app has sign-in, a first-run setup, Settings for your profile, API keys,
 
 ## Root account and sign-up
 
-The first account becomes the installation's root account, chosen by the operator at first sign-up (there is no default password; see [First run and sign-in](first-run.md)). Until an organisation connects single sign-on, everyone signs in with the local user database. It administers the platform (settings, health, people, the audit log) and never does organisation work. Its one organisation task is setup, which creates the first organisation and a separate owner account in one step, then signs root out; the owner signs in for everything else. Set `CODESYNAPSE_SIGNUP_OPEN=true` to let others sign up after setup.
+The first account becomes the installation's root account, chosen by the operator at first sign-up (there is no default password; see [First run and sign-in](first-run.md)). Until an organisation connects single sign-on, everyone signs in with the local user database, using their email or an optional username. It administers the platform (settings, health, people, the audit log) and never does organisation work. Its one organisation task is setup, which creates the first organisation and a separate owner account in one step, then signs root out; the owner signs in for everything else. Set `CODESYNAPSE_SIGNUP_OPEN=true` to let others sign up after setup.
 
 On an installation that predates this, the API identifies the root at start-up from its setup history. If that history is missing (for example, pruned by audit retention), platform administrators stay limited to administration until an operator runs `codesynapse-api designate-root --email <root>`. See [root bootstrap](../ROOT_BOOTSTRAP_PLAN.md).
 

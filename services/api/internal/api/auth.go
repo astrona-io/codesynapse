@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"crypto/subtle"
 	"errors"
@@ -221,6 +222,10 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 
 type credentials struct {
 	Email    string `json:"email"`
+	Username string `json:"username"`
+	// Login is an email or a username; the sign-in form sends it. Email is
+	// still accepted so existing clients keep working.
+	Login    string `json:"login"`
 	Name     string `json:"name"`
 	Password string `json:"password"`
 }
@@ -234,7 +239,7 @@ func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	u, org, err := s.cfg.Accounts.SignUp(r.Context(), c.Email, c.Name, c.Password)
+	u, org, err := s.cfg.Accounts.SignUpWith(r.Context(), accounts.SignUpInput{Email: c.Email, Username: c.Username, Name: c.Name, Password: c.Password})
 	if err != nil {
 		s.accountError(w, err)
 		return
@@ -257,7 +262,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	tok, u, err := s.cfg.Accounts.Login(r.Context(), c.Email, c.Password, s.clientAddr(r))
+	tok, u, err := s.cfg.Accounts.Login(r.Context(), cmp.Or(c.Login, c.Email), c.Password, s.clientAddr(r))
 	if err != nil {
 		s.accountError(w, err)
 		return

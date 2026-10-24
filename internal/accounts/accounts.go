@@ -46,8 +46,10 @@ func (r Role) AtLeast(least Role) bool {
 
 // User is a person who can log in.
 type User struct {
-	ID            string `json:"id"`
-	Email         string `json:"email"`
+	ID    string `json:"id"`
+	Email string `json:"email"`
+	// Username is an optional second login name: lower case, no "@", unique.
+	Username      string `json:"username,omitempty"`
 	Name          string `json:"name"`
 	PlatformAdmin bool   `json:"platform_admin"`
 	// BootstrapRoot marks the account that set up the installation. It is
@@ -332,6 +334,10 @@ type Store interface {
 	SetManagedByIDP(ctx context.Context, orgID, userID string, managed bool) error
 	UserByID(ctx context.Context, id string) (User, error)
 	UserByEmail(ctx context.Context, email string) (User, error)
+	// UserByUsername matches the normalised username exactly.
+	UserByUsername(ctx context.Context, username string) (User, error)
+	// SetUsername sets or (with "") clears a username; ErrExists when taken.
+	SetUsername(ctx context.Context, userID, username string) error
 	SetPassword(ctx context.Context, userID, hash string) error
 	ListUsers(ctx context.Context, limit int) ([]User, error)
 	// SetUserDisabled suspends (at != nil) or restores a user.
