@@ -187,10 +187,13 @@ func parseNPMLock(data []byte, dir string, scopes ...manifestScope) []Module {
 	var out []Module
 	for key, raw := range lock.Packages {
 		var p struct {
-			Version              string            `json:"version"`
-			Link                 bool              `json:"link"`
+			Version string `json:"version"`
+			Link    bool   `json:"link"`
+			// Dev means development-only. devOptional (a development
+			// dependency that is also an optional dependency of a
+			// non-development package) can reach production when the
+			// optional dependency is installed, so it is not Dev.
 			Dev                  bool              `json:"dev"`
-			DevOptional          bool              `json:"devOptional"`
 			Dependencies         map[string]string `json:"dependencies"`
 			OptionalDependencies map[string]string `json:"optionalDependencies"`
 		}
@@ -200,7 +203,7 @@ func parseNPMLock(data []byte, dir string, scopes ...manifestScope) []Module {
 		}
 		name := key[i+len("node_modules/"):]
 		m := Module{Path: name, Version: p.Version, Ecosystem: EcosystemNPM, Indirect: !direct[name] || strings.Count(key, "node_modules/") > 1,
-			Dev: p.Dev || p.DevOptional, Requires: npmRequires(p.Dependencies, p.OptionalDependencies)}
+			Dev: p.Dev, Requires: npmRequires(p.Dependencies, p.OptionalDependencies)}
 		if id := license.NPMField(raw); id != "" {
 			m.License, m.LicenseSource = id, "package-lock.json"
 		}
