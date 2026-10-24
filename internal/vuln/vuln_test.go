@@ -104,7 +104,7 @@ func TestScanAndApply(t *testing.T) {
 	g.AddNode(model.Node{ID: caller, Kind: model.KindFunction, Repo: "r", Name: "serve"})
 	Apply("r", g, mods, vulns,
 		map[string][]string{"(*golang.org/x/net/http2.Server).ServeConn": {caller}},
-		map[string][]string{"golang.org/x/net/http2": {"r|Package|app"}})
+		map[string][]string{"golang.org/x/net/http2": {"r|Package|app"}}, nil)
 
 	vn, ok := g.Node(model.NodeID("r", model.KindVulnerability, "golang.org/x/net@GO-2024-0001"))
 	require.True(t, ok)
@@ -161,4 +161,206 @@ func TestManifestModules(t *testing.T) {
 	assert.True(t, got["PyPI:starlette"].Indirect)
 	_, evil := got["npm:evil"]
 	assert.False(t, evil, "node_modules is never scanned")
+}
+
+func TestApplyImportedByName(t *testing.T) {
+	for _, tt := range []struct {
+		eco, module, imported string
+		want                  string
+	}{
+		{EcosystemNuGet, "Newtonsoft.Json", "Newtonsoft.Json.Linq", Imported},
+		{EcosystemNuGet, "Newtonsoft.Json", "Newtonsoft.Json", Imported},
+		{EcosystemNuGet, "Newtonsoft.Json", "Newtonsoft.JsonX", Required},
+		{EcosystemCargo, "serde-json", "serde_json", Imported},
+		{EcosystemRubyGems, "rack", "rack/utils", Imported},
+		{EcosystemRubyGems, "net-http", "net/http", Imported},
+		{EcosystemRubyGems, "rack", "rackup", Required},
+		{EcosystemNPM, "lodash", "lodash/fp", Imported},
+		{EcosystemNPM, "lodash", "lodash.merge", Required},
+	} {
+		t.Run(tt.eco+" "+tt.imported, func(t *testing.T) {
+			g := model.NewGraph()
+			v := Vulnerability{ID: "GHSA-x", Module: tt.module, Ecosystem: tt.eco, Version: "1.0.0"}
+			Apply("r", g, []Module{{Path: tt.module, Version: "1.0.0", Ecosystem: tt.eco}}, []Vulnerability{v}, nil,
+				map[string][]string{tt.imported: {"r|File|a"}}, nil)
+			n, ok := g.Node(model.NodeID("r", model.KindVulnerability, Module{Path: tt.module, Ecosystem: tt.eco}.Key()+"@GHSA-x"))
+			require.True(t, ok)
+			assert.Equal(t, n.Reachability, tt.want)
+		})
+	}
+}
+
+// A replace directive changes what is built: the version (or the module) the
+// code actually uses is what inventory, advisories and licences describe.
+func TestGoReplacementsDecideTheBuiltVersion(t *testing.T) {
+	root := t.TempDir()
+	write := func(p, s string) {
+		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(root, p)), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(root, p), []byte(s), 0o600))
+	}
+	write("go.mod", `module example.com/app
+
+go 1.22
+
+require (
+	example.com/library v1.2.0
+	example.com/pinned v1.5.0
+	example.com/forked v1.1.0
+	example.com/only v1.2.0
+	example.com/local v1.0.0
+	example.com/plain v1.0.0
+)
+
+replace example.com/library => example.com/library v1.0.0
+
+replace example.com/pinned v1.5.0 => example.com/pinned v1.4.0
+
+replace example.com/only v1.9.9 => example.com/only v1.0.0
+
+replace example.com/forked => github.com/fork/forked v1.1.1
+
+replace example.com/local => ../local
+`)
+	// A nested module's replaces apply to its own requirements, not the root's.
+	write("tools/go.mod", "module example.com/app/tools\n\ngo 1.22\n\nrequire example.com/plain v1.0.0\n\nreplace example.com/plain => example.com/plain v0.9.0\n")
+
+	mods, err := Modules(root, "go1.23.1")
+	require.NoError(t, err)
+	got := map[string]Module{}
+	for _, m := range mods {
+		got[m.Path] = m
+	}
+	assert.Equal(t, got["example.com/library"].Version, "v1.0.0", "same module at the replacement version")
+	assert.True(t, got["example.com/library"].Replacement == nil, "nothing to report beyond the version")
+	assert.Equal(t, got["example.com/pinned"].Version, "v1.4.0", "a version-specific replace")
+	assert.Equal(t, got["example.com/only"].Version, "v1.2.0", "a replace for another version does not apply")
+
+	fork := got["example.com/forked"]
+	assert.Equal(t, fork.Version, "v1.1.1")
+	require.True(t, fork.Replacement != nil)
+	assert.Equal(t, fork.Replacement.Path, "github.com/fork/forked")
+	assert.Equal(t, fork.Path, "example.com/forked", "the import path stays the identity")
+	assert.Equal(t, fork.BuildPath(), "github.com/fork/forked")
+	assert.False(t, fork.Local())
+
+	local := got["example.com/local"]
+	require.True(t, local.Replacement != nil)
+	assert.True(t, local.Local())
+	assert.Equal(t, local.Version, "", "a local directory has no published version")
+	assert.Equal(t, local.Replacement.Path, "../local")
+
+	assert.Equal(t, got["example.com/plain"].Version, "v1.0.0", "the root requirement wins; the nested module's replace is its own")
+}
+
+func TestScanAsksAboutTheBuiltModule(t *testing.T) {
+	var asked []map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Queries []struct {
+				Package struct{ Name string } `json:"package"`
+				Version string                `json:"version"`
+			} `json:"queries"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		results := make([]any, len(body.Queries))
+		for i, q := range body.Queries {
+			asked = append(asked, map[string]string{"name": q.Package.Name, "version": q.Version})
+			results[i] = map[string]any{}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
+	}))
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL}
+	_, err := c.Scan(context.Background(), []Module{
+		{Path: "example.com/library", Version: "v1.0.0"},
+		{Path: "example.com/forked", Version: "v1.1.1", Replacement: &Replacement{Path: "github.com/fork/forked"}},
+		{Path: "example.com/local", Replacement: &Replacement{Path: "../local", Local: true}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, len(asked), 2, "the local replacement is not looked up")
+	assert.Equal(t, asked[0]["name"]+"@"+asked[0]["version"], "example.com/library@v1.0.0")
+	assert.Equal(t, asked[1]["name"]+"@"+asked[1]["version"], "github.com/fork/forked@v1.1.1", "advisories of the fork, not of the original")
+
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindRepository, "r"), Kind: model.KindRepository, Repo: "r", Name: "r"})
+	Apply("r", g, []Module{
+		{Path: "example.com/forked", Version: "v1.1.1", Replacement: &Replacement{Path: "github.com/fork/forked"}},
+		{Path: "example.com/local", Replacement: &Replacement{Path: "../local", Local: true}},
+	}, nil, nil, nil, nil)
+	forked, ok := g.Node(model.NodeID("r", model.KindModule, "example.com/forked"))
+	require.True(t, ok)
+	assert.Contains(t, forked.Summary, "github.com/fork/forked")
+	localNode, _ := g.Node(model.NodeID("r", model.KindModule, "example.com/local"))
+	assert.Contains(t, localNode.Summary, "local directory ../local")
+}
+
+// An advisory that hits one of several installed versions is attached to that
+// version's module, and the two versions' advisories do not share a node.
+func TestApplyKeepsAdvisoriesOfEachInstalledVersion(t *testing.T) {
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindRepository, "r"), Kind: model.KindRepository, Repo: "r", Name: "r"})
+	mods := []Module{
+		{Path: "shared", Version: "1.0.0", Ecosystem: EcosystemNPM},
+		{Path: "shared", Version: "2.0.0", Ecosystem: EcosystemNPM, Indirect: true, Requires: nil},
+		{Path: "top", Version: "1.0.0", Ecosystem: EcosystemNPM, Requires: []string{"npm:shared"}, Resolved: []string{"npm:shared@2.0.0"}},
+	}
+	vulns := []Vulnerability{
+		{ID: "GHSA-x", Module: "shared", Ecosystem: EcosystemNPM, Version: "1.0.0", Severity: "high"},
+		{ID: "GHSA-x", Module: "shared", Ecosystem: EcosystemNPM, Version: "2.0.0", Severity: "high"},
+	}
+	Apply("r", g, mods, vulns, nil, nil, nil)
+
+	plain := model.NodeID("r", model.KindModule, "npm:shared")
+	second := model.NodeID("r", model.KindModule, "npm:shared@2.0.0")
+	one, ok1 := g.Node(plain)
+	two, ok2 := g.Node(second)
+	require.True(t, ok1 && ok2)
+	assert.Equal(t, one.Version, "1.0.0")
+	assert.Equal(t, two.Version, "2.0.0")
+
+	affects := map[string]string{} // advisory version -> module version it points at
+	for _, e := range g.Edges() {
+		if e.Kind != model.EdgeAffects {
+			continue
+		}
+		v, _ := g.Node(e.From)
+		m, _ := g.Node(e.To)
+		affects[v.Version] = m.Version
+	}
+	assert.Equal(t, affects["1.0.0"], "1.0.0")
+	assert.Equal(t, affects["2.0.0"], "2.0.0")
+
+	var requires []string
+	top := model.NodeID("r", model.KindModule, "npm:top")
+	for _, e := range g.Edges() {
+		if e.Kind == model.EdgeDependsOn && e.From == top {
+			requires = append(requires, e.To)
+		}
+	}
+	assert.Equal(t, strings.Join(requires, ","), second, "top uses the copy the lockfile resolved")
+}
+
+func TestApplyMarksCodeAbsentFromTheBuild(t *testing.T) {
+	const mod, pkg = "example.com/lib", "example.com/lib/p"
+	for _, tt := range []struct {
+		name    string
+		symbols map[string][]string
+		built   map[string]bool
+		absent  bool
+	}{
+		{"package not compiled in", map[string][]string{pkg: {"Parse"}}, map[string]bool{"example.com/lib/other": true}, true},
+		{"compiled in through a dependency", map[string][]string{pkg: {"Parse"}}, map[string]bool{pkg: true}, false},
+		{"build not loaded", map[string][]string{pkg: {"Parse"}}, nil, false},
+		{"advisory names no packages", nil, map[string]bool{}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			g := model.NewGraph()
+			v := Vulnerability{ID: "GO-1", Module: mod, Ecosystem: EcosystemGo, Version: "v1.0.0", Symbols: tt.symbols}
+			Apply("r", g, []Module{{Path: mod, Version: "v1.0.0"}}, []Vulnerability{v}, nil, nil, tt.built)
+			n, ok := g.Node(model.NodeID("r", model.KindVulnerability, mod+"@GO-1"))
+			require.True(t, ok)
+			assert.Equal(t, n.CodeAbsent, tt.absent)
+		})
+	}
 }

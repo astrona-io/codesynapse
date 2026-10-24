@@ -72,12 +72,26 @@ codesynapse licenses . --license-lookup --fail-on conflict  # CI gate
 
 `--license-lookup` (or `CODESYNAPSE_LICENSE_LOOKUP=true`) is what sends package names and versions to deps.dev; without it, nothing leaves the machine.
 
+## Upgrade impact
+
+Before upgrading a Go module, `codesynapse upgrade-impact` says where the repository uses it and what in that use changes:
+
+```sh
+codesynapse upgrade-impact github.com/spf13/cobra             # every use, with file, line and function
+codesynapse upgrade-impact github.com/spf13/cobra@v1.11.0     # and what changed between versions
+codesynapse upgrade-impact github.com/spf13/cobra@v1.11.0 --json
+```
+
+Uses are calls, types, constants, variables, methods and struct fields, field names in composite literals included, found with the type checker in the repository's own packages and tests. With a version, the exported API of the current version (from the build list) and of the new one are read from the local module cache and compared declaration by declaration. Parameter names don't count, anything else in a signature, field type or constant type does. The report names each removed or changed declaration the repository uses, with the old and new form and where it is used, and counts the rest of the module's changes.
+
+Nothing is downloaded: `go list` runs with `GOPROXY=off` as for an ingest, and a version missing from the cache is reported, with `go mod download` as the way to add it. Internal packages of the module are skipped, since no importer can use them. A new major version is another module path (`…/v2`) and is not compared. Behaviour changes behind an unchanged signature don't show; the release notes still matter.
+
 ## Dependency review page
 
 **Dependency review** (per repository, under Dependencies and Licences) puts the packages that need a decision in one table: known advisories, licences to check and dependencies nothing imports. Each row shows the columns an agent-run review reports: dependency and version, how it was introduced, usage, licence, advisory, a proposed action and a verified-outcome column.
 
 - **Introduced by** says "direct" for packages in your own manifest. For indirect packages it shows the shortest chain from a dependency you declared ("via a > b") and how many of your dependencies lead to it, so the fix is usually to upgrade the first link. Where no path is known the row says so and copies the command that finds it (`go mod why -m`, `npm explain`, `pipdeptree -r -p`).
-- **Usage** comes from reachability for advisories (Go: your code calls a vulnerable symbol, imports the package, or only requires it; npm and PyPI: a source file imports the package or none does; Rust, PHP, Ruby, .NET and Gradle: always "present, no import found", because their source is not indexed) and from the unused-modules report.
+- **Usage** comes from reachability for advisories (Go: your code calls a vulnerable symbol, imports the package, or only requires it; npm, PyPI, Cargo, NuGet and RubyGems: a source file imports the package (for NuGet, a using directive names a namespace the package ID prefixes; for RubyGems, a require names the gem, which Rails apps often leave to Bundler) or none does; PHP and Gradle: always "present, no import found", because their imports are not matched to packages) and from the unused-modules report.
 - **Proposed action** is a suggestion from the data: remove an unused dependency, upgrade to the fixed version (marked urgent when your code calls the vulnerable symbol), replace or mitigate when no fix exists, ask about a licence conflict. Licence findings are flags for review, not legal findings.
 - **Verified outcome** always starts as "Not verified": run the tests, build and scans after a change and Sync again.
 - Below the table the page lists the package-manager commands for the ecosystems the repository uses, and the text to give an agent to run the full `dependency-review` prompt (any language, with smaller-alternative checks).
@@ -117,7 +131,11 @@ Advisories come from osv.dev for all of them. Not read: Maven `pom.xml` (it hold
 
 - **Components**: every module go.mod and the lockfiles resolved, with name, version, package URL (`pkg:golang/…`, `pkg:npm/%40scope/…`, `pkg:cargo/…`, `pkg:composer/…`, `pkg:gem/…`, `pkg:nuget/…`, `pkg:maven/…`, `pkg:pypi/…`), licence (an SPDX expression, a known identifier, or the name as written), scope (`excluded` for development dependencies) and properties for the ecosystem, whether the project declares it, and its dependency path.
 - **Dependencies**: the project depends on the declared modules, and each module on the modules it requires, where the lockfile records that (Go, npm `package-lock.json`, uv, poetry, Cargo, Composer, Bundler, NuGet). Yarn, pnpm, Gradle and requirements files have no edges; the document says so in a property instead of claiming that those packages have no dependencies.
-- **Vulnerabilities** (when the repository was synced with the vulnerability scan on): id, severity, fix and reachability, pointing at the affected component.
+- **Vulnerabilities** (when the repository was synced with the vulnerability scan on): id, severity, fix and reachability, pointing at the affected component, with a VEX `analysis` that says only what the analysis proves:
+  - `not_affected` with justification `code_not_present` when the advisory names the affected Go packages and none of them is compiled into the repository's packages or tests (from `go list -deps`, loaded only when such an advisory exists; a package that fails to load means no claim at all). A module can be required while its vulnerable package is never built, like `golang.org/x/crypto/openpgp` next to `argon2`.
+  - `in_triage` for everything else, with the reason: a named function is called; the package is imported but only the repository's own direct calls are analysed (dependencies and calls through interfaces can still reach vulnerable code, so this proves nothing either way); or the package is a dependency nothing imports directly.
+
+  Scanners that read CycloneDX VEX (Grype, Trivy, Dependency-Track) can then drop the advisories whose code is not in the build.
 - The timestamp is the ingest time and the serial number is derived from the repository, commit and ingest time, so exporting the same ingest twice gives identical bytes. A list cut by a size limit (20,000 modules) is marked with a `codesynapse:truncated` property.
 
 It lists what the lockfiles resolve, not what a build finally ships: a bundler may leave packages out, a container image adds its own, and vendored or copied code is not included. Treat it as the input to a build-time check, not a replacement for one. The CLI is offline by default; `--vulns` adds an osv.dev lookup (ecosystem, package names and versions only).

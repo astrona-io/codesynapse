@@ -18,10 +18,23 @@ git push origin v0.3.0
 2. Creates the GitHub release with the four binaries, a `SHA256SUMS` file and generated release notes.
 3. Renders `Formula/codesynapse.rb` with `.github/scripts/homebrew-formula.sh` and pushes it to the tap as `codesynapse X.Y.Z`.
 4. Installs the formula from the tap on macOS and Ubuntu runners and checks the version matches the tag.
+5. Builds the tagged documentation with MkDocs and publishes it to [the documentation site](https://codesynapse.astrona.io/) on GitHub Pages.
 
 A tag with a `-`, such as `v0.3.0-rc1`, is a pre-release. It gets a GitHub release, never becomes "latest", and doesn't touch the tap.
 
 The Release workflow doesn't mark a final release "latest" itself. The Images workflow does that once the published stack passed its install test (below).
+
+## Documentation site
+
+The shareable documentation URL is **https://codesynapse.astrona.io/**. Each stable release replaces the site with documentation built from that release's tag. Pre-releases do not replace the published documentation. This is a single current-release site, not a version archive.
+
+The Release workflow calls `.github/workflows/docs.yml` directly after creating the release: releases created using `GITHUB_TOKEN` do not trigger a separate release-event workflow. The documentation workflow also handles stable releases published manually, and supports **Actions → Documentation → Run workflow** for the initial publication or a retry. Select the intended release tag when retrying; manually choosing another ref publishes that ref's documentation. Documentation pull requests build with `--strict` but cannot deploy.
+
+For initial repository setup, enable **Settings → Pages → Source → GitHub Actions**. The `github-pages` environment must allow stable release tags and any ref deliberately used for a manual publication. Deployment uses `pages: write` and `id-token: write`; it does not require a long-lived deployment token. Private repositories do not deploy. The deployment job records the published URL in its environment.
+
+Set the Pages custom domain to `codesynapse.astrona.io` and its DNS CNAME to `astrona-io.github.io` (without the repository path). `docs/CNAME` is copied into the generated site, and MkDocs uses the custom domain for canonical links. Once GitHub has verified DNS and issued the certificate, enable **Enforce HTTPS** in Pages settings. DNS is managed separately from the release workflow.
+
+Validate documentation locally with `just docs-build`. A failed documentation build leaves the existing site in place; retry the failed workflow after fixing the issue. Documentation publishing is independent of the container/chart installation check that controls the release's latest status.
 
 ## Server release
 

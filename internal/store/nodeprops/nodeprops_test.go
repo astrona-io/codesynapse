@@ -25,6 +25,8 @@ func TestPropsRoundTrip(t *testing.T) {
 	mod := model.Node{ID: "r|Module|npm:x", Kind: model.KindModule, Repo: "r", Name: "x", Version: "1.0.0", Ecosystem: "npm",
 		License: "MIT OR Apache-2.0", LicenseSource: "package-lock.json", Dev: true, Indirect: true, Via: "a > b", Roots: 2}
 	assert.Equal(t, From(To(mod)), mod)
+	vuln := model.Node{ID: "r|Vulnerability|x@GO-1", Kind: model.KindVulnerability, Repo: "r", Name: "GO-1", Reachability: "required", CodeAbsent: true}
+	assert.Equal(t, From(To(vuln)), vuln)
 	repoNode := model.Node{ID: "r|Repository|r", Kind: model.KindRepository, Repo: "r", Name: "r", License: "Apache-2.0", LicenseSource: "LICENSE", Licenses: `{"total":1}`, Coverage: `{"yaml":3}`, Duplicates: `{"groups":[]}`}
 	assert.Equal(t, From(To(repoNode)), repoNode)
 	assert.Equal(t, From(To(mod)), mod)

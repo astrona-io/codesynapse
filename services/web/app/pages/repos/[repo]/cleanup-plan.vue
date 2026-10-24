@@ -94,7 +94,7 @@ const effortLabel = (e: number) => ({ 1: 'small', 2: 'medium', 3: 'large' }[e] ?
 
 <style scoped>
 .steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 16px; }
-.step { border-top: 1px solid var(--border); padding-top: 14px; display: grid; gap: 8px; }
+.step { border-top: 1px solid var(--line); padding-top: 14px; display: grid; gap: 8px; }
 .step p { margin: 0; }
 .rank { display: inline-grid; place-items: center; min-width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 13px; }
 .meta { flex-wrap: wrap; gap: 8px; align-items: center; }

@@ -30,7 +30,13 @@ type evalOptions struct {
 	results       bool
 	repo          string
 	allowNetwork  bool
+	sessions      bool
+	cases         string
 }
+
+// evalHistory is how many commits before base the graph indexes, as an
+// ingest does by default: answers may use history, never the tasks' own.
+const evalHistory = 500
 
 // errRegression fails the run (exit 1) after the report and the list of
 // regressions are printed.
@@ -47,6 +53,8 @@ func (o *evalOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.BoolVar(&o.results, "results", false, "Include every task's answer files in JSON output")
 	f.StringVar(&o.repo, "repo", "", "Repository name in the report (default: the directory name)")
 	f.BoolVar(&o.allowNetwork, "allow-network", false, "Let go list download the modules base needs (CI; otherwise only the module cache is used)")
+	f.BoolVar(&o.sessions, "sessions", false, "Score the cases captured from your agent sessions ("+evalCaptureEnv+"=true) instead of commits")
+	f.StringVar(&o.cases, "cases", "", "Cases file for --sessions (default: "+casesFileName+" in the checkout's git directory)")
 	return nil
 }
 
@@ -61,6 +69,15 @@ func (o *evalOptions) Complete(_ context.Context, _ *app.Env) error {
 }
 
 func (o *evalOptions) Validate(context.Context, *app.Env) error {
+	if o.sessions {
+		if o.baseline != "" || o.base != "" || o.head != "" || o.writeBaseline {
+			return errors.New("--sessions scores captured cases; leave out --base, --head and --baseline")
+		}
+		return nil
+	}
+	if o.cases != "" {
+		return errors.New("--cases needs --sessions")
+	}
 	if o.writeBaseline && o.baseline == "" {
 		return errors.New("--write-baseline needs --baseline")
 	}
@@ -75,6 +92,9 @@ func (o *evalOptions) Validate(context.Context, *app.Env) error {
 
 func (o *evalOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
+	if o.sessions {
+		return o.runSessions(ctx)
+	}
 	var baseline taskeval.Report
 	if o.baseline != "" && !o.writeBaseline {
 		raw, err := os.ReadFile(o.baseline)
@@ -97,18 +117,8 @@ func (o *evalOptions) Run(ctx context.Context, _ *app.Env) error {
 
 	// The graph is built at base, in a worktree of its own, so no answer
 	// can draw on the change it is asked about.
-	tmp, err := os.MkdirTemp("", "codesynapse-eval-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tmp) //nolint:errcheck // temporary
-	wt := filepath.Join(tmp, "base")
-	if err := gitx.AddWorktree(ctx, o.root, wt, base); err != nil {
-		return err
-	}
-	defer gitx.RemoveWorktree(context.WithoutCancel(ctx), o.root, wt) //nolint:errcheck // best effort
 	repo := cmpOr(o.repo, filepath.Base(o.root))
-	g, err := ingest.Run(ctx, ingest.Options{Repo: repo, Root: wt, AllowNetwork: o.allowNetwork})
+	g, err := ingest.AtCommit(ctx, o.root, base, ingest.Options{Repo: repo, AllowNetwork: o.allowNetwork, CommitLimit: evalHistory})
 	if err != nil {
 		return err
 	}
@@ -177,6 +187,71 @@ func writeEval(ec *app.Env, rep taskeval.Report, commits []taskeval.Commit) {
 	}
 }
 
+// runSessions scores the cases captured from agent sessions: the graph is
+// built at each commit a session began at, and the cases of that commit
+// are asked against it.
+func (o *evalOptions) runSessions(ctx context.Context) error {
+	path := o.cases
+	if path == "" {
+		if path = casesFile(ctx, o.root); path == "" {
+			return errors.New("not a git checkout: name the cases file with --cases")
+		}
+	}
+	cases, err := taskeval.ReadCases(path)
+	if err != nil {
+		return err
+	}
+	if len(cases) == 0 {
+		return fmt.Errorf("no cases in %s: start Claude Code with %s=true and the CodeSynapse plugin, then work as usual", path, evalCaptureEnv)
+	}
+	byBase := map[string][]taskeval.Task{}
+	var bases []string
+	for _, c := range cases {
+		if _, ok := byBase[c.Base]; !ok {
+			bases = append(bases, c.Base)
+		}
+		byBase[c.Base] = append(byBase[c.Base], c.AsTask())
+	}
+	repo := cmpOr(o.repo, filepath.Base(o.root))
+	var parts []taskeval.Report
+	for _, base := range bases {
+		commit, err := commitOf(ctx, o.root, base)
+		if err != nil {
+			o.EC.Logger.Warn("skipping cases of a commit this checkout lacks", "commit", short(base), "cases", len(byBase[base]))
+			continue
+		}
+		g, err := ingest.AtCommit(ctx, o.root, commit, ingest.Options{Repo: repo, AllowNetwork: o.allowNetwork, CommitLimit: evalHistory})
+		if err != nil {
+			return err
+		}
+		mem := memory.New()
+		if err := mem.ReplaceRepo(ctx, repo, g); err != nil {
+			return err
+		}
+		parts = append(parts, taskeval.Run(ctx, mem, repo, byBase[base]))
+	}
+	rep := taskeval.Merge(repo, parts)
+	if rep.Tasks == 0 {
+		return errors.New("no case could be scored: their commits are not in this checkout")
+	}
+	if !o.results {
+		rep.Results = nil
+	}
+	if o.EC.Output == app.OutputJSON {
+		enc := json.NewEncoder(o.EC.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(rep)
+	}
+	w := o.EC.Stdout
+	fmt.Fprintf(w, "Session eval of %s: %d cases from %s, graphs built at the %d commits they began at\n\n", rep.Repo, rep.Tasks, path, len(parts)) //nolint:errcheck // terminal
+	fmt.Fprintf(w, "%-16s %9s %10s %7s %7s %7s\n", "tool", "recall@5", "recall@10", "hit@10", "tokens", "errors")                                   //nolint:errcheck // terminal
+	for _, tool := range []string{taskeval.ToolMinimalContext, taskeval.ToolSearch} {
+		s := rep.Summary[tool]
+		fmt.Fprintf(w, "%-16s %9.3f %10.3f %7.3f %7.0f %7d\n", tool, s.Recall5, s.Recall10, s.Hit10, s.Tokens, s.Errors) //nolint:errcheck // terminal
+	}
+	return nil
+}
+
 // commitOf resolves rev to a full commit ID.
 func commitOf(ctx context.Context, dir, rev string) (string, error) {
 	if err := gitx.ValidateRev(rev); err != nil {
@@ -202,8 +277,8 @@ func evalCmd(ec *app.Env) *cobra.Command {
 	o := &evalOptions{EC: ec}
 	return app.NewSubCommand("eval [path]", o, ec).
 		WithShortDesc("Score minimal_context and search against the files past commits touched (offline)").
-		WithLongDesc("Builds the graph at --base and turns each later commit into a task: its subject is the question, the files it changed that existed at base are the answer. Reports recall@5, recall@10, hit@10 and returned tokens per tool. With --baseline it fails when a score falls below the committed one; docs/PLAN.md, agent workflow roadmap step 1.").
-		WithExample("  codesynapse eval . --base HEAD~100\n  codesynapse eval . --baseline eval/codesynapse.json\n  codesynapse eval . --base <sha> --baseline eval/codesynapse.json --write-baseline").
+		WithLongDesc("Builds the graph at --base and turns each later commit into a task: its subject is the question, the files it changed that existed at base are the answer. Reports recall@5, recall@10, hit@10 and returned tokens per tool. With --baseline it fails when a score falls below the committed one; docs/PLAN.md, agent workflow roadmap step 1. With --sessions it scores the cases captured from your own agent sessions instead (start Claude Code with " + evalCaptureEnv + "=true; the plugin keeps each session's first prompt and the files it changed in the checkout's git directory, never sending them).").
+		WithExample("  codesynapse eval . --base HEAD~100\n  codesynapse eval . --baseline eval/codesynapse.json\n  codesynapse eval . --base <sha> --baseline eval/codesynapse.json --write-baseline\n  codesynapse eval . --sessions --results").
 		WithGroupID(app.GroupBase).
 		WithMaxArgs(1).
 		Build()

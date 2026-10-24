@@ -99,7 +99,7 @@ const steps = computed<Step[]>(() => {
       <SwitchToRemote v-if="repos && !isManaged" :repo="repo" :remote="repoInfo?.remote" :branch="repoInfo?.branch" @switched="refreshRepos" />
       <RemoveRepo :repo="repo" :managed="isManaged" @removed="navigateTo('/')" />
     </PageHeader>
-    <div class="panel panel--glass autosync-bar"><AutoSync :repo="repo" /></div>
+    <div class="panel autosync-bar"><AutoSync :repo="repo" /></div>
 
     <section v-if="attention" class="panel">
       <div class="panel__header"><h2>Needs attention <span class="muted">{{ attention.items.length }}</span></h2></div>
@@ -127,7 +127,7 @@ const steps = computed<Step[]>(() => {
       <HealthCard v-if="savingsCard" label="Context for AI agents" tip="reduction" :value="savingsCard.value" :verdict="savingsCard.verdict" tone="good" :to="`${base}/metrics`" action="See benchmark" />
     </div>
 
-    <section class="panel edge--orange">
+    <section class="panel">
       <div class="panel__header">
         <div><p class="eyebrow">Next steps</p><h2>What to do now, most important first</h2></div>
       </div>
@@ -192,10 +192,10 @@ const steps = computed<Step[]>(() => {
 .autosync-bar { padding: 10px 16px; margin-top: -14px; }
 .grid--health { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-.step { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--panel-faint); border: 1px solid var(--line); border-left: 3px solid var(--line-strong); }
-.step--bad { border-left-color: var(--pink); }
-.step--warn { border-left-color: var(--amber); }
-.step--neutral { border-left-color: var(--cyan); }
+.step { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--panel-2); }
+.step--bad { background: var(--danger-soft); }
+.step--warn { background: var(--warning-soft); }
+.step--neutral { background: var(--info-soft); }
 .num { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--panel-2); font: 600 12px var(--font-mono); color: var(--muted); }
 .step-body { display: grid; gap: 2px; min-width: 0; }
 .step-body p { font-size: 13.5px; }

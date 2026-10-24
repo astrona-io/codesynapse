@@ -46,7 +46,7 @@ The same repository is indexed once, not once per organisation:
 
 ## Product structure (web app, phase 3)
 
-A calm product UI with light and dark themes, neutral surfaces, one brand accent and status colours only for meaning. Plain language, an explanation next to every figure, and costs in money where possible.
+The "Agent spark" product UI with light and dark themes: ink on white with lilac surfaces, one candy accent for the leading action and candy tints only for status. Plain language, an explanation next to every figure, and costs in money where possible.
 
 1. **Overview**: what needs attention now across the organisation (critical security findings, vulnerabilities you actually call, licence conflicts, stale repositories), and what agents saved.
 2. **Repositories**: list with health at a glance; each repository has Summary, Security, Licences, Dependencies, Code health, Reviews and Memory.
@@ -207,7 +207,7 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
        - an end-to-end trace from a dashboard click to the graph write.
      - **Not planned:** a message broker (PostgreSQL is enough at this scale and keeps the transactional audit); splitting accounts, reviews, memory or the catalog into separate services; a sidecar per tenant.
 6. **Kubernetes deployment and releases (final phase)**: after the application features, access/session controls, telemetry, ingestion work and SSO are complete. Existing local development stays independent of Kubernetes, and nothing has been deployed to a production cluster. The earlier Kustomize work is parked on `feat/k8s-production`; it is reused as input for the chart, not shipped as is.
-   - **6a, Helm chart and local build-and-test loop (done; see [the chart README](../deploy/helm/codesynapse/README.md)):**
+   - **6a, Helm chart and local build-and-test loop (done; see [the chart README](https://github.com/astrona-io/codesynapse/blob/main/deploy/helm/codesynapse/README.md)):**
      - **What's built:** `deploy/helm/codesynapse` replaces the Kustomize tree. It has the four services, plus PostgreSQL, HugeGraph, Milvus, VictoriaMetrics and VictoriaTraces as StatefulSets, each replaceable by an external address. It uses one required Secret with no defaults, non-root pods (HugeGraph is the documented exception) and network policies. `GOMEMLIMIT` is set at 90% of each memory limit, there's an optional ingress (`/mcp` and the dashboard), and a `helm test` checks every service.
      - **Checks:** `just chart-check` (`helm lint --strict`, kubeconform, kube-linter, kubesec) runs on every pull request. `just chart-e2e` builds, loads, installs and tests on the throwaway `kind-codesynapse-dev` cluster, and the `Chart end to end` workflow runs it on chart changes, merges and on demand. Every command names its context explicitly.
      - **Follow-ups:** mount secrets as files (kubesec `SecretsAsEnvironmentVariables`), and measure ingest peaks for default memory limits. Backups, upgrade notes and versioning arrived with 6b.
@@ -235,7 +235,7 @@ A calm product UI with light and dark themes, neutral surfaces, one brand accent
      - Chart and app versions follow the release tag.
      - Upgrade notes cover migrations, which run on start, and the single API replica that owns jobs and the scheduler.
      - The kind smoke test runs against the published artifacts before the release is marked latest.
-   - **6c, horizontal scaling of the services (done; see [Scaling out](../deploy/helm/codesynapse/README.md#scaling-out)):**
+   - **6c, horizontal scaling of the services (done; see [Scaling out](https://github.com/astrona-io/codesynapse/blob/main/deploy/helm/codesynapse/README.md#scaling-out)):**
      - **What's built:** login limits move from process memory to PostgreSQL (`login_attempts`, migration 0016, keys stored as SHA-256 hashes), so N API replicas still allow 5 attempts per email and 20 per client address a minute. A flood of distinct keys no longer resets them either. MCP gets `--stateless` (`CODESYNAPSE_MCP_STATELESS`, on in the chart and compose): no transport session between requests, so any replica answers any request, with the key and runtime session checked on each one. The chart adds optional CPU autoscaling for api, mcp and web, a disruption budget for any component with more than one pod, and preferred anti-affinity with zone spreading. The kind end-to-end run uses two API and two MCP replicas.
      - **Already in place from 5e:** durable jobs, workers by role, schedules in PostgreSQL and the `api-loops` lease.
      - **Limits:** annotation and memory extraction job status is per API replica (follow-up: a durable annotation queue); the shared workspace needs ReadWriteMany across nodes; MCP usage counters are read and rewritten in one Gremlin script, so two replicas flushing the same daily bucket at once may lose an increment (not yet measured).

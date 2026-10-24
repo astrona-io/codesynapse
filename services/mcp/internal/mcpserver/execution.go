@@ -1,8 +1,11 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 
@@ -154,6 +157,15 @@ func (r *Runtime) HTTP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		primary, parent, err := runtimeHeaders(req.Header)
 		protocolID := req.Header.Get("Mcp-Session-Id")
+		if err != nil && protocolID != "" && req.Header.Get(execution.SessionHeader) == "" && req.Header.Get(execution.ParentSessionHeader) == "" && req.Method == http.MethodPost {
+			r.mu.Lock()
+			_, bound := r.protocol[protocolID]
+			r.mu.Unlock()
+			if !bound && discoveryRequest(req) {
+				next.ServeHTTP(w, req)
+				return
+			}
+		}
 		if err != nil && protocolID == "" && req.Header.Get(execution.SessionHeader) == "" && req.Method == http.MethodPost {
 			// The tool middleware still refuses a tool call without metadata.
 			next.ServeHTTP(w, req)
@@ -197,4 +209,30 @@ func (r *Runtime) HTTP(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, req.WithContext(ctx))
 	})
+}
+
+// A shared native client discovers tools before it has a chat. Only bounded
+// protocol/catalog messages may use an unbound stateful transport; execution
+// and every request on an already-bound transport still require both headers.
+func discoveryRequest(r *http.Request) bool {
+	if r.Body == nil {
+		return false
+	}
+	defer r.Body.Close() //nolint:errcheck // request body is replaced with its bounded copy
+	data, err := io.ReadAll(io.LimitReader(r.Body, 4097))
+	if err != nil || len(data) > 4096 {
+		return false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(data))
+	var message struct {
+		Method string `json:"method"`
+	}
+	if json.Unmarshal(data, &message) != nil {
+		return false
+	}
+	switch message.Method {
+	case "notifications/initialized", "ping", "tools/list", "prompts/list", "resources/list", "resources/templates/list":
+		return true
+	}
+	return false
 }

@@ -168,11 +168,11 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return n, err
 }
 
-const userCols = "id, email, name, password_hash, platform_admin, created_at, disabled_at, bootstrap_root"
+const userCols = "id, email, name, password_hash, platform_admin, created_at, disabled_at, bootstrap_root, username, auto_created"
 
 func scanUser(row pgx.Row) (accounts.User, error) {
 	var u accounts.User
-	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.PlatformAdmin, &u.CreatedAt, &u.DisabledAt, &u.BootstrapRoot)
+	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.PlatformAdmin, &u.CreatedAt, &u.DisabledAt, &u.BootstrapRoot, &u.Username, &u.AutoCreated)
 	u.CreatedAt = u.CreatedAt.UTC()
 	if u.DisabledAt != nil {
 		t := u.DisabledAt.UTC()
@@ -183,10 +183,13 @@ func scanUser(row pgx.Row) (accounts.User, error) {
 
 // CreateUser implements accounts.Store.
 func (s *Store) CreateUser(ctx context.Context, u accounts.User) error {
-	_, err := s.db.Exec(ctx, "INSERT INTO users ("+userCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-		u.ID, u.Email, u.Name, u.PasswordHash, u.PlatformAdmin, u.CreatedAt, u.DisabledAt, u.BootstrapRoot)
+	_, err := s.db.Exec(ctx, "INSERT INTO users ("+userCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+		u.ID, u.Email, u.Name, u.PasswordHash, u.PlatformAdmin, u.CreatedAt, u.DisabledAt, u.BootstrapRoot, u.Username, u.AutoCreated)
 	if isConstraint(err, "users_one_bootstrap_root") {
 		return fmt.Errorf("bootstrap root: %w", accounts.ErrExists)
+	}
+	if isConstraint(err, "users_username") {
+		return fmt.Errorf("username: %w", accounts.ErrExists)
 	}
 	return mapErr(err, "email")
 }
@@ -195,6 +198,28 @@ func (s *Store) CreateUser(ctx context.Context, u accounts.User) error {
 func isConstraint(err error, name string) bool {
 	var pg *pgconn.PgError
 	return errors.As(err, &pg) && pg.ConstraintName == name
+}
+
+// ReplaceRoot implements accounts.Store. The old account's email and
+// username are renamed first so the new account can take them, then the
+// setup record and the root classification move to the new account.
+func (s *Store) ReplaceRoot(ctx context.Context, oldID string, u accounts.User) error {
+	tag, err := s.db.Exec(ctx, "UPDATE users SET email = 'replaced:' || id, username = '' WHERE id = $1 AND bootstrap_root", oldID)
+	if err := affected(tag, err, "bootstrap root"); err != nil {
+		return err
+	}
+	u.BootstrapRoot = false
+	if err := s.CreateUser(ctx, u); err != nil {
+		return err
+	}
+	tag, err = s.db.Exec(ctx, "UPDATE installation_setup SET root_user_id = $2 WHERE root_user_id = $1", oldID, u.ID)
+	if err := affected(tag, err, "setup"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(ctx, "DELETE FROM users WHERE id = $1", oldID); err != nil {
+		return mapErr(err, "bootstrap root")
+	}
+	return s.MarkBootstrapRoot(ctx, u.ID)
 }
 
 // MarkBootstrapRoot implements accounts.Store.
@@ -260,6 +285,21 @@ func (s *Store) UserByID(ctx context.Context, id string) (accounts.User, error) 
 func (s *Store) UserByEmail(ctx context.Context, email string) (accounts.User, error) {
 	u, err := scanUser(s.db.QueryRow(ctx, "SELECT "+userCols+" FROM users WHERE email = $1", email))
 	return u, mapErr(err, "user")
+}
+
+// UserByUsername implements accounts.Store.
+func (s *Store) UserByUsername(ctx context.Context, username string) (accounts.User, error) {
+	u, err := scanUser(s.db.QueryRow(ctx, "SELECT "+userCols+" FROM users WHERE username = $1 AND username <> ''", username))
+	return u, mapErr(err, "user")
+}
+
+// SetUsername implements accounts.Store.
+func (s *Store) SetUsername(ctx context.Context, userID, username string) error {
+	tag, err := s.db.Exec(ctx, "UPDATE users SET username = $2 WHERE id = $1", userID, username)
+	if isConstraint(err, "users_username") {
+		return fmt.Errorf("username: %w", accounts.ErrExists)
+	}
+	return affected(tag, err, "user")
 }
 
 // SetPassword implements accounts.Store.
@@ -412,16 +452,16 @@ func (s *Store) CreateSession(ctx context.Context, sess accounts.Session) error 
 	if _, err := s.db.Exec(ctx, "DELETE FROM sessions WHERE user_id = $1 AND expires_at <= now()", sess.UserID); err != nil {
 		return err
 	}
-	_, err := s.db.Exec(ctx, "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES ($1, $2, $3, $4)",
-		sess.TokenHash, sess.UserID, sess.CreatedAt, sess.ExpiresAt)
+	_, err := s.db.Exec(ctx, "INSERT INTO sessions (token_hash, user_id, created_at, expires_at, user_agent) VALUES ($1, $2, $3, $4, $5)",
+		sess.TokenHash, sess.UserID, sess.CreatedAt, sess.ExpiresAt, sess.UserAgent)
 	return mapErr(err, "session")
 }
 
 // SessionByHash implements accounts.Store.
 func (s *Store) SessionByHash(ctx context.Context, hash string) (accounts.Session, error) {
 	var sess accounts.Session
-	err := s.db.QueryRow(ctx, "SELECT token_hash, user_id, created_at, expires_at FROM sessions WHERE token_hash = $1", hash).
-		Scan(&sess.TokenHash, &sess.UserID, &sess.CreatedAt, &sess.ExpiresAt)
+	err := s.db.QueryRow(ctx, "SELECT token_hash, user_id, created_at, expires_at, user_agent FROM sessions WHERE token_hash = $1", hash).
+		Scan(&sess.TokenHash, &sess.UserID, &sess.CreatedAt, &sess.ExpiresAt, &sess.UserAgent)
 	sess.CreatedAt, sess.ExpiresAt = sess.CreatedAt.UTC(), sess.ExpiresAt.UTC()
 	return sess, mapErr(err, "session")
 }

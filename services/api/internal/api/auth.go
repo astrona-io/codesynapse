@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"crypto/subtle"
 	"errors"
@@ -156,6 +157,7 @@ func (s *Server) accountRoutes() {
 	s.account("POST /api/v1/auth/login", publicRoute, s.handleLogin)
 	s.account("POST /api/v1/auth/logout", publicRoute, s.handleLogout)
 	s.account("POST /api/v1/auth/setup", governanceRoute, s.handleSetup)
+	s.account("POST /api/v1/auth/replace-admin", governanceRoute, s.handleReplaceAdmin)
 	s.account("POST /api/v1/auth/sso/{org}/start", publicRoute, s.handleSSOStart(accounts.SSOLogin))
 	s.account("POST /api/v1/auth/sso/callback", publicRoute, s.handleSSOCallback)
 	s.account("POST /api/v1/me/sso/{org}/link", businessRoute, s.handleSSOStart(accounts.SSOLink))
@@ -166,6 +168,7 @@ func (s *Server) accountRoutes() {
 	s.account("DELETE /api/v1/accounts/orgs/{org}/sso", businessRoute, s.handleDeleteSSO)
 	s.account("GET /api/v1/me", governanceRoute, s.handleMe)
 	s.account("POST /api/v1/me/password", governanceRoute, s.handlePassword)
+	s.profileRoutes()
 	s.account("GET /api/v1/me/keys", businessRoute, s.handleListKeys)
 	s.account("POST /api/v1/me/keys", businessRoute, s.handleCreateKey)
 	s.account("DELETE /api/v1/me/keys/{id}", businessRoute, s.handleRevokeKey)
@@ -215,11 +218,22 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"mode": "accounts", "needs_setup": setup, "signup_open": s.cfg.Accounts.SignupOpen || setup})
+	initial, err := s.cfg.Accounts.InitialAdminActive(r.Context())
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	// initial_admin only lets the sign-in page say where the first-start
+	// password is; the account name is public in the documentation anyway.
+	writeJSON(w, 200, map[string]any{"mode": "accounts", "needs_setup": setup, "signup_open": s.cfg.Accounts.SignupOpen || setup, "initial_admin": initial})
 }
 
 type credentials struct {
 	Email    string `json:"email"`
+	Username string `json:"username"`
+	// Login is an email or a username; the sign-in form sends it. Email is
+	// still accepted so existing clients keep working.
+	Login    string `json:"login"`
 	Name     string `json:"name"`
 	Password string `json:"password"`
 }
@@ -233,7 +247,7 @@ func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	u, org, err := s.cfg.Accounts.SignUp(r.Context(), c.Email, c.Name, c.Password)
+	u, org, err := s.cfg.Accounts.SignUpWith(r.Context(), accounts.SignUpInput{Email: c.Email, Username: c.Username, Name: c.Name, Password: c.Password})
 	if err != nil {
 		s.accountError(w, err)
 		return
@@ -256,7 +270,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	tok, u, err := s.cfg.Accounts.Login(r.Context(), c.Email, c.Password, s.clientAddr(r))
+	tok, u, err := s.cfg.Accounts.Login(r.Context(), cmp.Or(c.Login, c.Email), c.Password, s.clientAddr(r))
 	if err != nil {
 		s.accountError(w, err)
 		return

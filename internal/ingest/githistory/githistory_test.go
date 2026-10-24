@@ -1,6 +1,10 @@
 package githistory
 
 import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
@@ -36,4 +40,44 @@ func TestApply(t *testing.T) {
 	for _, e := range g.Edges() {
 		assert.NotEqual(t, e.To, model.NodeID("r", model.KindFile, "gone.go"))
 	}
+}
+
+// History links and churn attach to graph files whose names git quotes in
+// its log output: non-ASCII, tabs, quotes and backslashes.
+func TestExtractAttachesHistoryToUnicodeAndEscapedNames(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		_, err := gitx.Run(context.Background(), dir, args...)
+		require.NoError(t, err)
+	}
+	run("init", "-q")
+	run("config", "user.email", "a@example.com")
+	run("config", "user.name", "A")
+	run("config", "commit.gpgsign", "false")
+	g := model.NewGraph()
+	names := []string{"café.go", "tab\there.go", "quo\"te.go", "back\\slash.go"}
+	for _, n := range names {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, n), []byte("package x\n"), 0o600))
+		g.AddNode(model.Node{ID: model.NodeID("r", model.KindFile, n), Kind: model.KindFile, File: n})
+	}
+	run("add", "-A")
+	run("commit", "-q", "-m", "add")
+	require.NoError(t, Extract(context.Background(), "r", dir, 10, g))
+
+	for _, n := range names {
+		f, ok := g.Node(model.NodeID("r", model.KindFile, n))
+		require.True(t, ok, n)
+		assert.Equal(t, f.Churn, 1, n)
+	}
+	modifies := 0
+	for _, e := range g.Edges() {
+		if e.Kind == model.EdgeModifies {
+			modifies++
+		}
+	}
+	assert.Equal(t, modifies, len(names))
 }

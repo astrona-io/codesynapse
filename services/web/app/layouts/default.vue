@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import type { RepoInfo } from '~/utils/types'
-import type { ThemeChoice } from '~/composables/useTheme'
+import type { RepoInfo, RepoSections } from '~/utils/types'
+import type { SearchItem } from '~/components/QuickSearch.vue'
 
 const route = useRoute()
 const session = useSession()
-const { choice: theme } = useTheme()
 const repo = computed(() => (route.params.repo as string | undefined) ?? '')
 const menuOpen = ref(false)
 watch(() => route.fullPath, () => (menuOpen.value = false))
@@ -25,13 +24,15 @@ onBeforeUnmount(() => {
   clearInterval(repoTimer)
   document.removeEventListener('visibilitychange', refreshIfVisible)
 })
-const { data: health, error: healthError } = useFetch<{ status: string }>('/api/cg/version', { key: 'version' })
+const { data: health, error: healthError } = useFetch<{ status: string; version?: string }>('/api/cg/version', { key: 'version' })
 
 const main = computed(() => session.restricted.value ? [] : [
   { to: '/overview', label: 'Overview', hint: 'What needs attention' },
   { to: '/', label: 'Repositories', hint: 'Everything you indexed' },
   { to: '/shared-code', label: 'Shared code', hint: 'Code several repositories copy' },
   { to: '/agents', label: 'Agents', hint: 'Connect Claude Code, Codex, Cursor' },
+  // Sessions come from the audit log, which only installations with accounts keep.
+  ...(session.accounts.value ? [{ to: '/sessions', label: 'Agent sessions', hint: 'What each agent chat looked at, in order' }] : []),
   { to: '/stats', label: 'Statistics', hint: 'Usage, tokens, cost, latency' },
 ])
 const more = computed(() => session.restricted.value ? [
@@ -49,38 +50,82 @@ const more = computed(() => session.restricted.value ? [
   ...(session.accounts.value && session.isPlatformAdmin.value ? [{ to: '/admin', label: 'Administration', hint: 'Organisations, people, health and the audit log' }] : []),
   { to: '/help', label: 'Help', hint: 'Getting started and what things mean' },
 ])
-const repoGroups = computed(() => {
-  if (!repo.value) return []
+// The repository menu shows the pages that have something in them; the
+// rest wait under "More" with the reason, so a deep link or the next sync
+// never strands anyone. Until the counts arrive (or if they fail), every
+// link counts as present.
+const sectionsRepo = ref(repo.value)
+watch(repo, (r) => { if (r) sectionsRepo.value = r })
+const { data: sections, refresh: refreshSections } = useApiGet<RepoSections>(
+  () => repoPath(sectionsRepo.value || '-', 'sections'),
+  { immediate: !!repo.value && !session.restricted.value },
+)
+const indexedAt = computed(() => repos.value?.repos.find(r => r.name === repo.value)?.ingested_at)
+watch(indexedAt, (now, before) => { if (repo.value && before && now !== before) refreshSections() })
+
+type RepoLink = { to: string; label: string; also?: string[]; missing?: string }
+const repoMenu = computed(() => {
+  if (!repo.value) return { groups: [] as { label: string; links: RepoLink[] }[], more: [] as RepoLink[] }
   const base = `/repos/${encodeURIComponent(repo.value)}`
-  return [
-    { label: 'Repository', links: [
+  // missing is why a link has nothing to show; links without a rule stay.
+  const has = sections.value && sectionsRepo.value === repo.value ? sections.value : null
+  const need = (ok: (s: RepoSections) => boolean, why: string) => (has && !ok(has) ? why : undefined)
+  const accounts = session.accounts.value
+  const groups: { label: string; links: RepoLink[] }[] = [
+    { label: 'Overview', links: [
       { to: base, label: 'Summary' },
-      { to: `${base}/architecture`, label: 'Architecture' },
+      { to: `${base}/architecture`, label: 'Architecture', missing: need(s => s.records + s.proposals > 0, 'no architecture records or proposals') },
+      { to: `${base}/history`, label: 'Trends', missing: need(s => s.snapshots > 0, 'no snapshots yet; each sync adds one') },
+    ] },
+    { label: 'Quality and security', links: [
       { to: `${base}/security`, label: 'Security' },
-      { to: `${base}/dependencies`, label: 'Dependencies' },
-      { to: `${base}/licenses`, label: 'Licences' },
-      { to: `${base}/dependency-review`, label: 'Dependency review' },
       { to: `${base}/metrics`, label: 'Code health', also: [`${base}/cleanup`] },
-      { to: `${base}/history`, label: 'Trends' },
-      ...(session.accounts.value ? [{ to: `${base}/access`, label: 'Access' }, { to: `${base}/policy`, label: 'Indexing policy' }, { to: `${base}/ingestion`, label: 'Ingestion reports' }] : []),
+      { to: `${base}/entry-points`, label: 'Entry points', missing: need(s => s.routes > 0, 'no HTTP routes, MCP tools or CLI commands found') },
+    ] },
+    { label: 'Dependencies', links: [
+      { to: `${base}/dependencies`, label: 'Dependencies', missing: need(s => s.dependencies > 0, 'no dependency manifests indexed') },
+      { to: `${base}/licenses`, label: 'Licences', missing: need(s => s.licences, 'no licence report; sync to create one') },
+      { to: `${base}/dependency-review`, label: 'Dependency review', missing: need(s => s.dependencies > 0, 'no dependency manifests indexed') },
     ] },
     { label: 'Work', links: [
-      { to: `${base}/reviews`, label: 'Reviews' },
-      { to: `${base}/memory`, label: 'Agent memory' },
+      { to: `${base}/reviews`, label: 'Reviews', missing: need(s => s.reviews > 0, 'no reviews yet') },
       { to: `${base}/review`, label: 'Impact of a change' },
       { to: `${base}/ai`, label: 'AI assistant' },
+      { to: `${base}/memory`, label: 'Agent memory', missing: need(s => s.memory_facts > 0, 'agents saved nothing yet') },
     ] },
     { label: 'Explore', links: [
-      { to: `${base}/graph`, label: 'Graph' },
       { to: `${base}/explore`, label: 'Symbols' },
-      { to: `${base}/config`, label: 'Kubernetes & Helm' },
-      { to: `${base}/docs`, label: 'Docs' },
-      { to: `${base}/packages`, label: 'Packages' },
+      { to: `${base}/graph`, label: 'Graph' },
+      { to: `${base}/docs`, label: 'Docs', missing: need(s => s.documents > 0, 'no Markdown documents indexed') },
+      { to: `${base}/packages`, label: 'Packages', missing: need(s => s.packages > 0, 'no packages or modules indexed') },
+      { to: `${base}/config`, label: 'Kubernetes & Helm', missing: need(s => s.config_files > 0, 'no YAML, Helm charts or Kubernetes manifests indexed') },
     ] },
+    ...(accounts ? [{ label: 'Settings', links: [
+      { to: `${base}/ingestion`, label: 'Ingestion reports' },
+      { to: `${base}/access`, label: 'Access', missing: need(s => s.admin, 'repository admins manage access') },
+      { to: `${base}/policy`, label: 'Indexing policy', missing: need(s => s.admin, 'repository admins approve the policy') },
+    ] }] : []),
   ]
+  const more = groups.flatMap(g => g.links.filter(l => l.missing))
+  return {
+    groups: groups.map(g => ({ ...g, links: g.links.filter(l => !l.missing) })).filter(g => g.links.length),
+    more,
+  }
 })
+const linkActive = (l: RepoLink) => route.path === l.to || !!l.also?.includes(route.path)
+const moreOpen = ref(false)
+// Open "More" when the page shown is in it, so the active link is visible.
+watch(() => [route.path, repoMenu.value.more.length], () => { if (repoMenu.value.more.some(linkActive)) moreOpen.value = true }, { immediate: true })
 const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path === to || route.path.startsWith(`${to}/`))
-const themes: { id: ThemeChoice; label: string }[] = [{ id: 'system', label: 'Auto' }, { id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }]
+// What the top bar's search finds: the pages, the repositories and, inside
+// one, its pages.
+const searchItems = computed<SearchItem[]>(() => {
+  const items: SearchItem[] = [...main.value, ...more.value].map((l) => ({ label: l.label, to: l.to, group: 'Page', hint: l.hint }))
+  for (const r of repos.value?.repos ?? []) items.push({ label: r.name, to: `/repos/${encodeURIComponent(r.name)}`, group: 'Repository' })
+  for (const g of repoMenu.value.groups) for (const l of g.links) items.push({ label: l.label, to: l.to, group: repo.value })
+  for (const l of repoMenu.value.more) items.push({ label: l.label, to: l.to, group: repo.value })
+  return items
+})
 const orgValue = computed({
   get: () => session.current.value?.org.slug ?? '',
   set: (v: string) => session.switchOrg(v || null),
@@ -88,117 +133,171 @@ const orgValue = computed({
 </script>
 
 <template>
-  <div class="shell">
+  <div class="app">
     <a href="#main" class="skip">Skip to content</a>
-    <aside class="sidebar" :class="{ open: menuOpen }">
-      <div class="sidebar__top">
-        <NuxtLink to="/overview" class="brand">
-          <img src="/favicon.svg" alt="" width="24" height="24">
-          <span class="brand__name">CodeSynapse</span>
-        </NuxtLink>
-        <button class="secondary tiny menu-toggle" :aria-expanded="menuOpen" @click="menuOpen = !menuOpen">Menu</button>
-      </div>
-
-      <div v-if="session.accounts.value && session.memberships.value.length > 1" class="org-switch">
-        <label for="org-select" class="label">Organisation</label>
+    <header class="bar">
+      <NuxtLink to="/overview" class="brand" aria-label="CodeSynapse, overview">
+        <BrandMark :size="36" />
+        <span class="brand__name">CodeSynapse</span>
+      </NuxtLink>
+      <label v-if="session.accounts.value && session.memberships.value.length > 1" class="org" for="org-select">
+        <span class="org__label">Org</span>
         <select id="org-select" v-model="orgValue">
           <option v-for="m in session.memberships.value" :key="m.org.id" :value="m.org.slug">{{ m.org.name }}</option>
         </select>
-      </div>
-      <p v-else-if="session.current.value" class="org-single"><span class="label">Organisation</span>{{ session.current.value.org.name }}</p>
-
-      <nav class="sidebar__nav" aria-label="Main">
-        <div class="nav-section">
-          <NuxtLink v-for="l in main" :key="l.to" :to="l.to" class="nav-link" :class="{ 'is-active': isActive(l.to) && !repo }" :title="l.hint">{{ l.label }}</NuxtLink>
-        </div>
-        <template v-if="repo">
-          <div class="nav-section">
-            <p class="nav-label">Repository</p>
-            <p class="nav-repo mono" :title="repo">{{ repo }}</p>
-          </div>
-          <div v-for="g in repoGroups" :key="g.label" class="nav-section">
-            <p class="nav-label">{{ g.label }}</p>
-            <NuxtLink v-for="l in g.links" :key="l.to" :to="l.to" class="nav-link nav-link--sub" :class="{ 'is-active': route.path === l.to || ('also' in l && l.also?.includes(route.path)) }">{{ l.label }}</NuxtLink>
-          </div>
-        </template>
-        <div v-else-if="repos?.repos.length" class="nav-section">
-          <p class="nav-label">Recently indexed</p>
-          <NuxtLink v-for="r in latest" :key="r.name" :to="`/repos/${encodeURIComponent(r.name)}`" class="nav-link nav-link--sub nav-repo-link" :title="r.ingested_at ? `Indexed ${r.ingested_at}` : ''">
-            <span class="mono nav-repo-name">{{ r.name }}</span>
-            <span v-if="r.ingested_at" class="nav-repo-time">{{ relTime(r.ingested_at) }}</span>
-          </NuxtLink>
-        </div>
-        <div class="nav-section">
-          <NuxtLink v-for="l in more" :key="l.to" :to="l.to" class="nav-link" :class="{ 'is-active': isActive(l.to) }" :title="l.hint">{{ l.label }}</NuxtLink>
-        </div>
-      </nav>
-
-      <div class="sidebar__foot">
-        <div class="theme" role="radiogroup" aria-label="Theme">
-          <button v-for="t in themes" :key="t.id" class="tiny" :class="theme === t.id ? '' : 'secondary'" role="radio" :aria-checked="theme === t.id" @click="theme = t.id">{{ t.label }}</button>
-        </div>
-        <div v-if="session.me.value" class="user">
-          <div class="user__who">
-            <strong class="truncate">{{ session.me.value.user.name }}</strong>
-            <span class="muted small truncate">{{ session.me.value.user.email }}</span>
-          </div>
-          <button class="secondary tiny" @click="session.logout()">Sign out</button>
-        </div>
-        <p class="status small">
+      </label>
+      <p v-else-if="session.current.value" class="org"><span class="org__label">Org</span><span class="org__name">{{ session.current.value.org.name }}</span></p>
+      <QuickSearch v-if="!session.restricted.value" :items="searchItems" :repo="repo || undefined" />
+      <div class="bar__end">
+        <span class="status" :title="healthError ? 'API unreachable' : health ? 'Connected' : 'Connecting…'">
           <span class="dot" :class="healthError ? 'dot--bad' : health ? 'dot--ok' : 'dot--warn'" />
-          <span class="muted">{{ healthError ? 'API unreachable' : health ? 'Connected' : 'Connecting…' }}</span>
-        </p>
+          <span class="sr-only">{{ healthError ? 'API unreachable' : health ? 'Connected' : 'Connecting…' }}</span>
+        </span>
+        <NotificationBell v-if="!session.restricted.value" />
+        <UserMenu />
+        <button type="button" class="secondary menu-toggle" :aria-expanded="menuOpen" aria-controls="sidebar" :aria-label="menuOpen ? 'Close navigation' : 'Open navigation'" @click="menuOpen = !menuOpen">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path v-if="menuOpen" d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /><path v-else d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /></svg>
+        </button>
       </div>
-    </aside>
-    <main id="main" class="shell__main">
-      <p v-if="session.restricted.value" class="notice">
-        You are signed in as the root account: administration only.
-        <template v-if="session.me.value?.setup === 'ambiguous'">This installation's setup history did not identify its root account, so every platform administrator is limited to administration until an operator runs <code>codesynapse-api designate-root --email …</code>.</template>
-        <template v-else>For organisation work, sign out and sign in with a standard account.</template>
-      </p>
-      <slot />
-    </main>
+    </header>
+
+    <InitialAdminBanner />
+    <WelcomeSteps class="welcome-slot" />
+
+    <div class="app__body">
+      <aside id="sidebar" class="sidebar" :class="{ open: menuOpen }">
+        <nav class="sidebar__nav" aria-label="Main">
+          <div class="nav-section">
+            <NuxtLink v-for="l in main" :key="l.to" :to="l.to" class="nav-link" :class="{ 'is-active': isActive(l.to) && !repo }" :title="l.hint">{{ l.label }}</NuxtLink>
+          </div>
+          <template v-if="repo">
+            <div class="nav-section">
+              <p class="nav-label">Repository</p>
+              <p class="nav-repo mono" :title="repo">{{ repo }}</p>
+            </div>
+            <div v-for="g in repoMenu.groups" :key="g.label" class="nav-section">
+              <p class="nav-label">{{ g.label }}</p>
+              <NuxtLink v-for="l in g.links" :key="l.to" :to="l.to" class="nav-link nav-link--sub" :class="{ 'is-active': linkActive(l) }">{{ l.label }}</NuxtLink>
+            </div>
+            <details v-if="repoMenu.more.length" class="nav-section nav-more" :open="moreOpen" @toggle="moreOpen = ($event.target as HTMLDetailsElement).open">
+              <summary class="nav-label nav-more__toggle">More · {{ repoMenu.more.length }} with nothing yet</summary>
+              <NuxtLink v-for="l in repoMenu.more" :key="l.to" :to="l.to" class="nav-link nav-link--sub nav-link--empty" :class="{ 'is-active': linkActive(l) }" :title="l.missing">
+                <span>{{ l.label }}</span>
+                <span class="nav-why">{{ l.missing }}</span>
+              </NuxtLink>
+            </details>
+          </template>
+          <div v-else-if="repos?.repos.length" class="nav-section">
+            <p class="nav-label">Recently indexed</p>
+            <NuxtLink v-for="r in latest" :key="r.name" :to="`/repos/${encodeURIComponent(r.name)}`" class="nav-link nav-link--sub nav-repo-link" :title="r.ingested_at ? `Indexed ${r.ingested_at}` : ''">
+              <span class="mono nav-repo-name">{{ r.name }}</span>
+              <span v-if="r.ingested_at" class="nav-repo-time">{{ relTime(r.ingested_at) }}</span>
+            </NuxtLink>
+          </div>
+          <div class="nav-section">
+            <NuxtLink v-for="l in more" :key="l.to" :to="l.to" class="nav-link" :class="{ 'is-active': isActive(l.to) }" :title="l.hint">{{ l.label }}</NuxtLink>
+          </div>
+        </nav>
+        <div v-if="!session.restricted.value" class="connect">
+          <p class="connect__title">Connect your agent</p>
+          <p class="connect__text">Claude Code, Codex, Cursor and others ask the graph over MCP.</p>
+          <NuxtLink to="/agents" class="btn">Set it up</NuxtLink>
+        </div>
+      </aside>
+      <main id="main" class="main">
+        <p v-if="session.restricted.value" class="notice">
+          You are signed in as the root account: administration only.
+          <template v-if="session.me.value?.setup === 'ambiguous'">This installation's setup history did not identify its root account, so every platform administrator is limited to administration until an operator runs <code>codesynapse-api designate-root --email …</code>.</template>
+          <template v-else>For organisation work, sign out and sign in with a standard account.</template>
+        </p>
+        <slot />
+      </main>
+    </div>
+
+    <footer class="foot">
+      <div class="foot__brand">
+        <BrandMark :size="28" />
+        <div>
+          <strong>CodeSynapse</strong>
+          <span class="muted small">Open source code intelligence for your team and your AI agents.</span>
+        </div>
+      </div>
+      <nav class="foot__links" aria-label="Footer">
+        <NuxtLink to="/help">Help</NuxtLink>
+        <NuxtLink to="/agents">Connect an agent</NuxtLink>
+        <NuxtLink to="/stats">Statistics</NuxtLink>
+        <a href="https://github.com/astrona-io/codesynapse" rel="noopener">GitHub</a>
+        <a href="https://github.com/astrona-io/codesynapse/tree/main/docs" rel="noopener">Documentation</a>
+      </nav>
+      <p class="foot__meta muted small">{{ health?.version ? `Version ${health.version}` : '' }}</p>
+    </footer>
   </div>
 </template>
 
 <style scoped>
-.shell { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 100vh; }
-.shell__main { display: flex; flex-direction: column; gap: 20px; padding: 28px var(--gutter) 48px; max-width: var(--shell-max); width: 100%; min-width: 0; }
+.app { min-height: 100vh; display: flex; flex-direction: column; }
 .skip { position: absolute; left: -9999px; }
-.skip:focus { left: 12px; top: 12px; z-index: 10; background: var(--panel); padding: 8px 12px; border-radius: var(--radius-sm); }
-.sidebar {
-  position: sticky; top: 0; height: 100vh; overflow-y: auto;
-  display: flex; flex-direction: column; gap: 14px; padding: 18px 12px;
-  background: var(--panel); border-right: 1px solid var(--line);
+.skip:focus { left: 12px; top: 12px; z-index: 40; background: var(--panel); padding: 8px 12px; border-radius: var(--radius-sm); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.bar {
+  position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px;
+  padding: 10px var(--gutter); background: var(--bg); border-bottom: 2px solid var(--line);
 }
-.sidebar__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px; }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--ink); }
 .brand:hover { color: var(--ink); text-decoration: none; }
-.brand__name { font-size: 16px; font-weight: 650; letter-spacing: -0.01em; }
-.org-switch, .org-single { display: flex; flex-direction: column; gap: 4px; padding: 0 8px; }
-.org-single { font-weight: 600; font-size: 13.5px; }
-.sidebar__nav { display: flex; flex-direction: column; gap: 12px; }
-.nav-section { display: flex; flex-direction: column; gap: 1px; }
-.nav-label { font: 600 11.5px var(--font-sans); color: var(--dim); margin: 6px 10px 4px; }
-.nav-repo { margin: 0 10px 2px; color: var(--ink); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav-link { display: flex; align-items: center; min-height: 34px; padding: 6px 10px; border-radius: var(--radius-sm); color: var(--muted); font-size: 14px; font-weight: 500; }
-.nav-link--sub { min-height: 30px; font-size: 13.5px; }
-.nav-link:hover { color: var(--ink); background: var(--hover); text-decoration: none; }
-.nav-link.is-active { color: var(--ink); background: var(--accent-soft); }
+.brand__name { font: 800 22px/1 var(--font-display); letter-spacing: -0.04em; }
+.org { display: flex; align-items: center; gap: 8px; margin: 0; min-height: 44px; padding: 0 6px 0 14px; border-radius: var(--pill); background: var(--panel-2); font-size: 14px; font-weight: 600; }
+.org__label { font: 700 11.5px var(--font-mono); color: var(--muted); text-transform: uppercase; }
+.org__name { padding-right: 10px; }
+.org select { width: auto; min-height: 36px; border: 0; background: transparent; padding: 0 8px; font-weight: 700; }
+.bar__end { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.status { display: inline-flex; padding: 6px; }
+
+.app__body { flex: 1; display: flex; flex-wrap: wrap; align-items: stretch; }
+.sidebar {
+  flex: 0 0 248px; display: flex; flex-direction: column; gap: 22px; padding: 22px 16px;
+  background: var(--panel-2); position: sticky; top: 70px; align-self: flex-start; min-height: calc(100vh - 70px); max-height: calc(100vh - 70px); overflow-y: auto;
+}
+.sidebar__nav { display: flex; flex-direction: column; gap: 14px; }
+.nav-section { display: flex; flex-direction: column; gap: 2px; }
+.nav-label { font: 700 11.5px var(--font-mono); text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 6px 14px 4px; }
+.nav-repo { margin: 0 14px 2px; color: var(--ink); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-link { display: flex; align-items: center; min-height: 40px; padding: 9px 14px; border-radius: 14px; color: var(--ink); font-size: 14.5px; font-weight: 600; }
+.nav-link--sub { min-height: 36px; font-size: 14px; font-weight: 500; }
+.nav-link:hover { background: var(--bg); color: var(--ink); text-decoration: none; }
+.nav-link.is-active, .nav-link.is-active:hover { background: var(--primary); color: var(--on-primary); }
+.nav-more__toggle { cursor: pointer; list-style-position: inside; }
+.nav-link--empty { flex-direction: column; align-items: flex-start; gap: 1px; }
+.nav-why { font-size: 12px; color: var(--muted); font-weight: 400; line-height: 1.3; }
+.nav-link--empty.is-active .nav-why { color: inherit; }
 .nav-repo-link { justify-content: space-between; gap: 8px; }
 .nav-repo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav-repo-time { flex: none; font-size: 11.5px; color: var(--dim); }
-.sidebar__foot { margin-top: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px 8px 0; border-top: 1px solid var(--line); }
-.theme { display: flex; gap: 4px; }
-.theme button { flex: 1; }
-.user { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.user__who { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; font-size: 13.5px; }
-.status { display: flex; align-items: center; gap: 8px; }
-.menu-toggle { display: none; }
+.nav-repo-time { flex: none; font-size: 12px; color: var(--muted); }
+.nav-repo-link.is-active .nav-repo-time { color: inherit; }
+.connect { margin-top: auto; display: flex; flex-direction: column; gap: 6px; padding: 18px; border-radius: 20px; background: var(--bg); }
+.connect__title { font: 800 16px/1.2 var(--font-display); letter-spacing: -0.02em; }
+.connect__text { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.foot { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 32px; justify-content: space-between; padding: 22px var(--gutter); border-top: 2px solid var(--line); background: var(--panel-2); }
+.foot__brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.foot__brand > div { display: flex; flex-direction: column; }
+.foot__links { display: flex; flex-wrap: wrap; gap: 8px 20px; font-weight: 600; font-size: 14px; }
+.foot__links a { color: var(--ink); }
+.foot__links a:hover { color: var(--accent-ink); }
+.foot__meta { margin: 0; }
+.main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 22px; padding: 30px var(--gutter) 48px; }
+.menu-toggle { display: none; width: 48px; min-height: 48px; padding: 0; }
+
 @media (max-width: 960px) {
-  .shell { grid-template-columns: 1fr; }
-  .sidebar { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .sidebar { flex: 1 1 100%; position: static; max-height: none; }
+  .sidebar:not(.open) { display: none; }
   .menu-toggle { display: inline-flex; }
-  .sidebar:not(.open) > :not(.sidebar__top) { display: none; }
+  /* Brand and buttons share the first row; search gets the second. */
+  .bar :deep(.qs) { order: 3; flex: 1 1 100%; max-width: none; }
+  .status { display: none; }
+}
+@media (max-width: 480px) {
+  /* The mark alone leaves the first row to the buttons; the link keeps its label. */
+  .brand__name { display: none; }
 }
 </style>

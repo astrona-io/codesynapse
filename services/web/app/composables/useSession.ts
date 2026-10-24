@@ -39,11 +39,12 @@ export function useSession() {
   const isPlatformAdmin = computed(() => !!me.value?.user.platform_admin)
   // The bootstrap root: administration only, never organisation work.
   const restricted = computed(() => !!me.value?.restricted)
+  const autoCreated = computed(() => !!me.value?.user.auto_created)
   const setupPending = computed(() => me.value?.setup === 'pending')
   const can = (least: Role) => !accounts.value || (current.value ? ROLE_RANK[current.value.role] >= ROLE_RANK[least] : false)
   async function switchOrg(slug: string | null) {
     orgSlug.value = slug
     await refreshNuxtData()
   }
-  return { status, me, accounts, memberships, current, orgSlug, isPlatformAdmin, restricted, setupPending, can, load, ensure, logout, switchOrg }
+  return { status, me, accounts, memberships, current, orgSlug, isPlatformAdmin, restricted, setupPending, autoCreated, can, load, ensure, logout, switchOrg }
 }

@@ -29,10 +29,11 @@ export interface GraphNodeData {
   dev?: boolean
   via?: string
   roots?: number
+  code_absent?: boolean
 }
 export interface NodeRef { id: string; kind: string; name: string; location?: string; summary?: string; depth?: number }
 
-export interface SymbolLocation { node_id: string; name: string; file?: string; signature?: string; revision?: string; fingerprint?: string; start_line?: number; end_line?: number }
+export interface SymbolLocation { neighbour_count?: number; neighbours_omitted?: number; neighbourhood?: string; node_id: string; name: string; file?: string; signature?: string; revision?: string; fingerprint?: string; start_line?: number; end_line?: number }
 export interface SymbolIdentity { id: string; kind: string; language?: string; active: boolean; current: SymbolLocation; history: SymbolLocation[]; history_omitted: number; match: string; candidates: string[] | null; candidates_omitted: number }
 export interface IdentityPage { repo: string; revision?: string; indexed_at?: string; available: boolean; symbols: SymbolIdentity[]; total: number; offset: number; omitted: number; truncated: boolean }
 export interface CodeRecordInput { method: string; origin_repo?: string; origins: string[]; destinations: string[]; purpose: string; labels: string[]; reason: string; modifications: string; compatibility: string; license: string; attribution: string; validation: string }
@@ -69,10 +70,32 @@ export interface Dashboard {
   authors: Ranked[]
 }
 export interface RepoInfo { name: string; head?: string; ingested_at?: string; root?: string; branch?: string; remote?: string; managed?: boolean }
+// What a repository has, for its menu (GET /repos/{repo}/sections).
+// One result of the site search (GET /search).
+export interface SiteSearchHit { kind: string; repo: string; id?: string; name: string; location?: string; file?: string; severity?: string }
+export interface SiteSearch { results: SiteSearchHit[]; searched: number; truncated: boolean }
+
+// The dashboard's notifications (GET /notifications).
+export interface AppNotification { id: string; kind: 'findings' | 'sync_failed' | 'review'; tone: 'bad' | 'warn' | 'info'; repo: string; title: string; body?: string; link: string; at: string }
+export interface AppNotifications { items: AppNotification[]; seen_at?: string; unread: number }
+
+// One of your own sign-in sessions (GET /me/sessions).
+export interface SessionView { id: string; device: string; created_at: string; expires_at: string; current: boolean }
+
+// The attack surface of a repository (GET /repos/{repo}/entry-points).
+export interface Sink { tag: string; via: string; depth: number }
+export interface EntryPoint { kind: 'http' | 'mcp' | 'cli'; name: string; registered: string; handler?: string; inline_handler?: boolean; guards?: string[]; checks_auth?: boolean; reaches?: Sink[] }
+export interface AttackSurface { total: number; by_kind: Record<string, number>; unguarded: number; entry_points: EntryPoint[]; notes: string[] }
+
+export interface RepoSections {
+  packages: number; symbols: number; documents: number; config_files: number; k8s_resources: number; helm_charts: number
+  records: number; proposals: number; dependencies: number; licences: boolean; findings: number; routes: number
+  snapshots: number; reviews: number; memory_facts: number; admin: boolean
+}
 export interface Source { name: string; is_git: boolean; is_go: boolean; content?: Record<string, number>; truncated?: boolean }
 export interface Job { id: string; repo: string; kind?: string; branch?: string; task?: string; result?: string; state: 'running' | 'succeeded' | 'failed'; started_at: string; finished_at?: string; nodes?: number; edges?: number; error?: string }
 export interface DuplicateInfo { kind: 'exact' | 'near'; similarity: number; scope: string; copies: number; others: DuplicateMember[] }
-export interface SymbolCard { duplicate?: DuplicateInfo; symbol: GraphNodeData; callers: NodeRef[]; callees: NodeRef[]; tests: NodeRef[]; implementations?: NodeRef[]; docs?: NodeRef[] }
+export interface SymbolCard { resolved_from?: string; duplicate?: DuplicateInfo; symbol: GraphNodeData; callers: NodeRef[]; callees: NodeRef[]; tests: NodeRef[]; implementations?: NodeRef[]; docs?: NodeRef[] }
 export interface ViewNode extends NodeRef { complexity?: number; security_tags?: string[]; is_test?: boolean }
 // evidence: typed, dataflow, syntactic or inferred for CALLS/REFERENCES/IMPLEMENTS/DISPATCHES_TO; absent means unknown (indexed before it was recorded).
 export interface ViewEdge { from: string; to: string; kind: string; count?: number; evidence?: 'typed' | 'dataflow' | 'syntactic' | 'inferred' }
@@ -187,6 +210,12 @@ export interface LicenseReport {
   issues: LicenseEntry[]; truncated?: number; online: boolean
 }
 
+export interface DependencyPackage {
+  ecosystem: string; name: string; version?: string; license: string
+  direct: boolean; dev?: boolean; via?: string; roots?: number
+}
+export interface DependencyList { packages: DependencyPackage[]; by_ecosystem: { ecosystem: string; count: number }[]; truncated?: boolean }
+
 export interface MemoryEntity { id: string; repo: string; name: string; type: string; created_at: string; updated_at: string }
 export interface MemoryFact {
   id: string; repo: string; subject: string; predicate: string; object: string
@@ -195,11 +224,13 @@ export interface MemoryFact {
 export interface MemoryGraph { notice: string; entities: MemoryEntity[]; facts: MemoryFact[] }
 
 export interface UsageDay { day: string; sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number }
-export interface UsageTool { tool: string; kind: string; calls: number; errors: number; response_tokens: number; avg_tokens: number; avg_ms: number; max_ms: number }
+export interface UsageTool { tool: string; kind: string; calls: number; errors: number; response_tokens: number; avg_tokens: number; avg_ms: number; max_ms: number; ranges_returned: number; ranges_read: number }
 export interface WorkspaceStats {
   generated_at: string; days: number
   agents: {
     sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; avoided_method: string
+    // How sessions began, reported by the Claude Code plugin's hooks.
+    workflow: { first_codesynapse: number; first_native: number; reads_turned_back: number; first_share_pct: number; files_edited: number; files_edited_found: number; edit_recall_pct: number }
     avg_latency_ms: number; max_latency_ms: number; daily: UsageDay[]; tools: UsageTool[]
     clients: { client: string; sessions: number; calls: number }[]
     repos: { repo: string; calls: number; response_tokens: number; avoided_tokens: number }[]
@@ -248,18 +279,23 @@ export interface AuthStatus {
   mode: 'single' | 'accounts'
   needs_setup?: boolean
   signup_open?: boolean
+  // The administrator made at first start still exists.
+  initial_admin?: boolean
 }
 export interface AccountUser {
   id: string
   email: string
+  username?: string
   name: string
   platform_admin: boolean
   // The account that set up the installation: governance only.
   bootstrap_root?: boolean
+  // The administrator made at first start: replace it with your own account.
+  auto_created?: boolean
   created_at: string
 }
 export type SetupState = 'pending' | 'complete' | 'ambiguous'
-export interface SetupInput { org_name?: string; org_id?: string; email: string; name: string; password: string }
+export interface SetupInput { org_name?: string; org_id?: string; email: string; username?: string; name: string; password: string }
 export interface AccountOrg {
   id: string
   slug: string
@@ -327,6 +363,8 @@ export interface AttentionItem {
   action: string
   link: string
 }
+// GET /api/v1/agents/status: what agents did today.
+export interface AgentStatus { sessions: number; calls: number; workflow: number }
 export interface Attention {
   generated_at: string
   items: AttentionItem[]
@@ -334,6 +372,11 @@ export interface Attention {
   repos: number
   clean: string[]
   tokens_saved: number
+  // From agents' calls over the last agent_days days (estimates).
+  agent_days: number
+  agent_calls: number
+  tokens_returned: number
+  tokens_avoided: number
   findings: number
   vulns: number
   grades: Record<string, number>
@@ -350,6 +393,18 @@ export interface AdminHealth {
   jobs: { total: number; running: number; succeeded: number; failed: number }
   unowned: string[]
 }
+// One agent (chat) session, from the MCP audit log.
+export interface AgentSession {
+  id: string; actor: string; client?: string; first: string; last: string
+  calls: number; errors: number; bytes: number; duration_ms: number
+  tools: Record<string, number>; repos: string[]
+}
+export interface AgentSessionList { sessions: AgentSession[]; days: number; truncated: boolean; scope: 'own' | 'organisation' }
+export interface SessionCall {
+  at: string; method: string; name?: string; repo?: string; outcome: string; error?: string
+  duration_ms: number; bytes: number; args?: Record<string, string>
+}
+export interface AgentSessionDetail { id: string; actor: string; calls: SessionCall[]; truncated: boolean; limit: number }
 export interface AuditEvent {
   id: number; at: string; request_id?: string; user_id?: string; actor_email?: string; via?: string; key_id?: string; org_id?: string
   ip?: string; user_agent?: string; action: string; target?: string; outcome: string; status?: number; detail?: string; hash: string
@@ -479,3 +534,5 @@ export interface IdentityProvider {
   enabled: boolean; created_by: string; updated_at: string
 }
 export interface ExternalIdentity { id: string; org_id: string; issuer: string; user_id: string; email: string; linked_at: string; last_login_at?: string }
+
+export interface IdentityReviewPage { reviews: { item: { id: string; created_at: string; identity_review: { from: string; to: string; relation: string; reason: string; revision: string; supersedes: string[] } }; state: string }[]; total: number; offset: number; omitted: number; truncated: boolean }

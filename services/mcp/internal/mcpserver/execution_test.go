@@ -49,6 +49,25 @@ func runtimeProbe(t *testing.T, acc *accounts.Service) (string, *atomic.Int64) {
 	return ts.URL, calls
 }
 
+func TestUnboundStatefulDiscoveryCannotExecuteTools(t *testing.T) {
+	_, keys, acc, _, _ := keyServer(t)
+	url, calls := runtimeProbe(t, acc)
+	tr := &runtimeTransport{token: keys["a"]}
+	cs := runtimeConnect(t, url, tr)
+	_, err := cs.ListTools(t.Context(), &mcp.ListToolsParams{})
+	require.NoError(t, err, "native clients discover the catalog before their first chat invocation")
+	runtimeDenied(t, cs)
+	assert.Equal(t, calls.Load(), int64(0))
+	tr = &runtimeTransport{token: keys["a"], primary: "chat-a", parent: "chat-a"}
+	cs = runtimeConnect(t, url, tr)
+	var id execution.Identity
+	require.False(t, call(t, cs, "rule_guide", map[string]any{}, &id).IsError)
+	assert.Equal(t, id.SessionID, "chat-a")
+	tr.metadata("", "")
+	_, err = cs.ListTools(t.Context(), &mcp.ListToolsParams{})
+	require.Error(t, err, "a bound transport cannot drop its identity even for catalog requests")
+}
+
 // runtimeReplica is one MCP server process behind bearer authentication.
 func runtimeReplica(t *testing.T, acc *accounts.Service, calls *atomic.Int64, opts *mcp.StreamableHTTPOptions) http.Handler {
 	t.Helper()

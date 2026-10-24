@@ -13,7 +13,7 @@ defineProps<{ eyebrow?: string; title: string; lede?: string; crumbs?: { label: 
         <span v-else class="current">{{ c.label }}</span>
       </template>
     </nav>
-    <header class="panel panel--glass topbar">
+    <header class="panel topbar">
       <div class="topbar__text">
         <p v-if="eyebrow" class="eyebrow">{{ eyebrow }}</p>
         <h1>{{ title }}</h1>

@@ -42,12 +42,12 @@ const steps = [
         <StatTile label="Security-relevant" :value="rep.summary.security_relevant" hint="dead code with findings or sensitive calls" />
       </div>
 
-      <section class="panel edge--green">
+      <section class="panel">
         <p class="eyebrow eyebrow--green">How to clean up safely</p>
         <ol class="steps"><li v-for="s in steps" :key="s">{{ s }}</li></ol>
       </section>
 
-      <section v-if="rep.modules.length" class="panel edge--pink">
+      <section v-if="rep.modules.length" class="panel">
         <p class="eyebrow">Supply chain</p><h2>Dependencies nothing imports</h2>
         <div class="table-wrap"><table><tbody>
           <tr v-for="m in rep.modules" :key="m.path">
@@ -57,7 +57,7 @@ const steps = [
         </tbody></table></div>
       </section>
 
-      <section class="panel edge--orange">
+      <section class="panel">
         <div class="panel__header">
           <div><p class="eyebrow">Code</p><h2>Unused functions <span class="muted">· {{ items.length }}</span></h2></div>
         </div>

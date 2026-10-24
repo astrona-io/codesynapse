@@ -8,12 +8,22 @@ export function useApiGet<T>(path: MaybeRefOrGetter<string>, opts: { immediate?:
   return useFetch<T>(() => apiPath(toValue(path)), { key: toValue(path), immediate: opts.immediate ?? true })
 }
 
+// apiGet is a one-off GET for code that fetches on its own schedule (a
+// debounced search); pages use useApiGet.
+export function apiGet<T>(path: string, opts: { signal?: AbortSignal } = {}): Promise<T> {
+  return $fetch(apiPath(path), { signal: opts.signal }) as Promise<T>
+}
+
 export function apiPost<T>(path: string, body: unknown): Promise<T> {
   return $fetch(apiPath(path), { method: 'POST', body: body as Record<string, unknown> }) as Promise<T>
 }
 
 export function apiPut<T>(path: string, body: unknown): Promise<T> {
   return $fetch(apiPath(path), { method: 'PUT', body: body as Record<string, unknown> }) as Promise<T>
+}
+
+export function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  return $fetch(apiPath(path), { method: 'PATCH', body: body as Record<string, unknown> }) as Promise<T>
 }
 
 export function apiDelete(path: string): Promise<unknown> {

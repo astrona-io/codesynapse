@@ -109,4 +109,18 @@ func RunSchedules(t *testing.T, newStore func(*testing.T) accounts.Store) {
 		require.NoError(t, err)
 		assert.True(t, ok, "old attempts leave the window")
 	})
+
+	t.Run("notifications seen", func(t *testing.T) {
+		st := newStore(t)
+		require.NoError(t, st.CreateUser(ctx, accounts.User{ID: "u-seen", Name: "Seen", Email: "seen@example.com", CreatedAt: now}))
+		at, err := st.NotificationsSeen(ctx, "u-seen")
+		require.NoError(t, err)
+		assert.True(t, at.IsZero(), "never marked")
+		require.NoError(t, st.SetNotificationsSeen(ctx, "u-seen", now))
+		require.NoError(t, st.SetNotificationsSeen(ctx, "u-seen", now.Add(-time.Hour)))
+		at, err = st.NotificationsSeen(ctx, "u-seen")
+		require.NoError(t, err)
+		assert.True(t, at.Equal(now), "the mark only moves forward")
+		assert.Error(t, st.SetNotificationsSeen(ctx, "nobody", now), "an unknown user")
+	})
 }

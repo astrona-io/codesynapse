@@ -4,7 +4,7 @@ title: Redirect target from request input
 severity: medium
 cwe: [CWE-601]
 category: code
-languages: [javascript, typescript]
+languages: [javascript, typescript, ruby]
 why: Redirecting to a URL from the request lets phishing links borrow your domain.
 fix: Redirect only to allowlisted, relative destinations.
 references:
@@ -15,3 +15,6 @@ examples:
     fixed: |-
       const next = String(req.query.next ?? '/')
       res.redirect(next.startsWith('/') && !next.startsWith('//') ? next : '/')
+  - language: ruby
+    vulnerable: 'redirect_to params[:return_to]'
+    fixed: 'redirect_to safe_return_path(params[:return_to]) || root_path'

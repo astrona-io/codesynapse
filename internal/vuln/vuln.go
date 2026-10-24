@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
@@ -51,12 +52,56 @@ type Module struct {
 	// Requires lists the Keys of the modules this one requires, where the
 	// lockfile records them (npm, Python). Go edges come from GoGraph.
 	Requires []string `json:"requires,omitempty"`
+	// Replacement is what a go.mod replace directive substitutes for this
+	// module. Path stays the import path the code uses; Version is then the
+	// version actually built (empty for a local replacement, which has none).
+	Replacement *Replacement `json:"replacement,omitempty"`
+	// Resolved lists, where a lockfile says which installed copy satisfies a
+	// requirement (npm nests several versions of one package), the
+	// version-qualified keys ("npm:shared@2.0.0") of the copies this module
+	// really uses. Requires keeps the plain keys for path walks.
+	Resolved []string `json:"resolved,omitempty"`
 	// Via is the shortest chain of modules from a dependency the project
 	// declares itself to this one ("a > b" means project, a, b, this); Roots
 	// is how many such dependencies lead to it. Both are set by AssignPaths
 	// and stay empty for direct dependencies and unknown paths.
 	Via   string `json:"via,omitempty"`
 	Roots int    `json:"roots,omitempty"`
+}
+
+// Replacement is the target of a go.mod replace directive.
+type Replacement struct {
+	// Path is the replacement module path (a fork), or the directory of a
+	// local replacement.
+	Path string `json:"path"`
+	// Local marks a filesystem replacement (./lib, ../lib): its code is in
+	// the checkout, so no published version stands behind it.
+	Local bool `json:"local,omitempty"`
+}
+
+// BuildPath is the module path whose code is built: the replacement module
+// of a fork, otherwise the module itself. Advisories and licences of a fork
+// are looked up under this path, import identity stays Path.
+func (m Module) BuildPath() string {
+	if m.Replacement != nil && !m.Replacement.Local {
+		return m.Replacement.Path
+	}
+	return m.Path
+}
+
+// Local reports a module replaced by a directory of the checkout: it has no
+// published version, so no advisory or licence is looked up for it.
+func (m Module) Local() bool { return m.Replacement != nil && m.Replacement.Local }
+
+// replacementNote is the short text the graph shows for a replaced module.
+func (m Module) replacementNote() string {
+	switch {
+	case m.Local():
+		return "replaced by local directory " + m.Replacement.Path
+	case m.Replacement != nil:
+		return "replaced by " + m.Replacement.Path + " " + m.Version
+	}
+	return ""
 }
 
 func (m Module) ecosystem() string {
@@ -96,6 +141,7 @@ func ModulesContext(ctx context.Context, root, buildGo string, policies ...*repo
 		policy = policies[0]
 	}
 	byPath := map[string]Module{}
+	required := map[string]string{} // the version a go.mod asks for, before replacement
 	own := map[string]bool{}
 	stdlib := ""
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -146,10 +192,19 @@ func ModulesContext(ctx context.Context, root, buildGo string, policies ...*repo
 				stdlib = v
 			}
 		}
+		replaced := replacements(mf)
 		for _, r := range mf.Require {
 			prev, ok := byPath[r.Mod.Path]
-			if !ok || semver.Compare(r.Mod.Version, prev.Version) > 0 {
-				byPath[r.Mod.Path] = Module{Path: r.Mod.Path, Version: r.Mod.Version, Indirect: r.Indirect && (!ok || prev.Indirect)}
+			if !ok || semver.Compare(r.Mod.Version, required[r.Mod.Path]) > 0 {
+				required[r.Mod.Path] = r.Mod.Version
+				m := Module{Path: r.Mod.Path, Version: r.Mod.Version, Indirect: r.Indirect && (!ok || prev.Indirect)}
+				if rep, ok := replaced.find(r.Mod); ok {
+					m.Version, m.Replacement = rep.version, &Replacement{Path: rep.path, Local: rep.local}
+					if rep.path == r.Mod.Path && !rep.local {
+						m.Replacement = nil // the same module at another version
+					}
+				}
+				byPath[r.Mod.Path] = m
 			}
 		}
 		return nil
@@ -171,6 +226,43 @@ func ModulesContext(ctx context.Context, root, buildGo string, policies ...*repo
 	}
 	slices.SortFunc(out, func(a, b Module) int { return cmp.Compare(a.Path, b.Path) })
 	return out, nil
+}
+
+// replacement is one replace directive's target.
+type replacement struct {
+	path, version string
+	local         bool
+}
+
+// replaceSet holds a go.mod's replace directives. Each go.mod's own replaces
+// apply to its own requirements only: that is what the build of that module
+// uses.
+type replaceSet struct {
+	exact map[module.Version]replacement // replace old v => ...
+	all   map[string]replacement         // replace old => ...
+}
+
+func replacements(mf *modfile.File) replaceSet {
+	s := replaceSet{exact: map[module.Version]replacement{}, all: map[string]replacement{}}
+	for _, r := range mf.Replace {
+		rep := replacement{path: r.New.Path, version: r.New.Version, local: r.New.Version == ""}
+		if r.Old.Version == "" {
+			s.all[r.Old.Path] = rep
+		} else {
+			s.exact[r.Old] = rep
+		}
+	}
+	return s
+}
+
+// find returns the replacement for a requirement: a directive naming that
+// version wins over one naming every version.
+func (s replaceSet) find(m module.Version) (replacement, bool) {
+	if r, ok := s.exact[m]; ok {
+		return r, true
+	}
+	r, ok := s.all[m.Path]
+	return r, ok
 }
 
 func isRepo(dir string) bool {
@@ -335,11 +427,15 @@ func (c *Client) Scan(ctx context.Context, modules []Module) ([]Vulnerability, e
 		mod Module
 	}
 	var todo []pending
+	// A module replaced by a directory of the checkout has no published
+	// version to look up; asking about the original would report advisories
+	// of code the build does not use.
+	modules = slices.DeleteFunc(slices.Clone(modules), Module.Local)
 	for start := 0; start < len(modules); start += maxBatch {
 		batch := modules[start:min(start+maxBatch, len(modules))]
 		qs := make([]query, len(batch))
 		for i, m := range batch {
-			qs[i].Package.Name, qs[i].Package.Ecosystem, qs[i].Version = m.Path, m.ecosystem(), m.Version
+			qs[i].Package.Name, qs[i].Package.Ecosystem, qs[i].Version = m.BuildPath(), m.ecosystem(), m.Version
 		}
 		var res struct {
 			Results []struct {
@@ -551,5 +647,5 @@ func samePackage(mod Module, name string) bool {
 	case EcosystemNuGet:
 		return strings.EqualFold(name, mod.Path)
 	}
-	return name == mod.Path
+	return name == mod.BuildPath()
 }

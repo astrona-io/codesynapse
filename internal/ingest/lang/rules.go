@@ -29,6 +29,7 @@ var RuleIDs = []string{
 	"debug-enabled",
 	"insecure-temp",
 	"vue-v-html",
+	"weak-cipher",
 }
 
 func (ix *indexer) report(pf *parsedFile, owner string, f finding) {
@@ -106,7 +107,10 @@ func looksSecret(name, value string) bool {
 		return false
 	}
 	lower := strings.ToLower(name)
-	for _, ref := range []string{"name", "key_id", "file", "path", "env", "url", "type", "header", "field", "prefix", "_ref"} {
+	if strings.EqualFold(value, name) || strings.Contains(value, "%d") || strings.Contains(value, "%s") {
+		return false // CSRF_TOKEN = "csrf_token" names a field or cookie; "user.%d.token" is a key format
+	}
+	for _, ref := range []string{"name", "key_id", "file", "path", "env", "url", "type", "header", "field", "prefix", "_ref", "identifier"} {
 		if strings.HasSuffix(lower, ref) {
 			return false
 		}
@@ -297,6 +301,16 @@ func tagsFor(calls []call, lang string) []string {
 			set["sql"] = true
 		case r == "os" && (n == "getenv" || n == "environ"), r == "process" && n == "env":
 			set["env"] = true
+		case isJVM(lang):
+			jvmTags(c.recv, n, set)
+		case lang == Rust:
+			rustTags(c.recv, n, set)
+		case lang == CSharp:
+			csTags(c.recv, n, set)
+		case lang == PHP:
+			phpTags(c.recv, n, set)
+		case lang == Ruby:
+			rubyTags(c.recv, n, set)
 		}
 	}
 	var out []string
@@ -306,4 +320,25 @@ func tagsFor(calls []call, lang string) []string {
 		}
 	}
 	return out
+}
+
+// jvmTags maps Java and Kotlin library calls to security tags.
+func jvmTags(recv, n string, set map[string]bool) {
+	switch {
+	case n == "ProcessBuilder" || recv == "Runtime" || n == "exec" && recv == "":
+		set["exec"] = true
+	case n == "executeQuery" || n == "executeUpdate" || n == "prepareStatement" || n == "createNativeQuery" || n == "createQuery" ||
+		recv == "jdbcTemplate" && strings.HasPrefix(n, "query"):
+		set["sql"] = true
+	case n == "ObjectInputStream" || n == "readObject" || n == "XMLDecoder":
+		set["deserialize"] = true
+	case recv == "HttpClient" || n == "openConnection" || recv == "restTemplate" || recv == "webClient" || recv == "RestTemplate" || recv == "OkHttpClient":
+		set["http"] = true
+	case recv == "Files" || n == "FileInputStream" || n == "FileOutputStream" || n == "FileWriter" || n == "FileReader":
+		set["filesystem"] = true
+	case recv == "MessageDigest" || recv == "Cipher" || recv == "KeyGenerator" || recv == "Mac" || n == "SecureRandom":
+		set["crypto"] = true
+	case recv == "System" && (n == "getenv" || n == "getProperty"):
+		set["env"] = true
+	}
 }

@@ -42,6 +42,7 @@ type SetupInput struct {
 	OrgName  string `json:"org_name"`
 	OrgID    string `json:"org_id"`
 	Email    string `json:"email"`
+	Username string `json:"username"`
 	Name     string `json:"name"`
 	Password string `json:"password"`
 }
@@ -86,12 +87,16 @@ func (s *Service) SetupState(ctx context.Context) (Setup, error) {
 }
 
 // newAccount validates and prepares a standard account.
-func (s *Service) newAccount(email, name, password string) (User, error) {
+func (s *Service) newAccount(email, username, name, password string) (User, error) {
 	email = NormalizeEmail(email)
 	if !emailRe.MatchString(email) {
 		return User{}, fmt.Errorf("%w: a valid email address is needed", ErrInvalidInput)
 	}
-	name, err := checkName(name, "a name")
+	username, err := CheckUsername(username)
+	if err != nil {
+		return User{}, err
+	}
+	name, err = checkName(name, "a name")
 	if err != nil {
 		return User{}, err
 	}
@@ -106,7 +111,7 @@ func (s *Service) newAccount(email, name, password string) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
-	return User{ID: id, Email: email, Name: name, CreatedAt: s.now(), PasswordHash: hash}, nil
+	return User{ID: id, Email: email, Username: username, Name: name, CreatedAt: s.now(), PasswordHash: hash}, nil
 }
 
 // maxAdminScan bounds account scans for installation-wide decisions.
@@ -149,7 +154,7 @@ func (s *Service) CompleteSetup(ctx context.Context, p Principal, in SetupInput)
 	if p.Via != "session" {
 		return Setup{}, ErrForbidden
 	}
-	owner, err := s.newAccount(in.Email, in.Name, in.Password)
+	owner, err := s.newAccount(in.Email, in.Username, in.Name, in.Password)
 	if err != nil {
 		return Setup{}, err
 	}

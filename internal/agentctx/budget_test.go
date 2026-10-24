@@ -57,7 +57,8 @@ func TestMinimalContextCompleteJSONBudget(t *testing.T) {
 			require.True(t, len(got.Items) > 0)
 			assert.Equal(t, got.Items[0].QualifiedID, "app.RareTarget")
 			assert.Equal(t, got.Items[0].Retrieval, "exact")
-			assert.Equal(t, got.Items[0].Revision, "revision-a")
+			assert.Equal(t, got.Revision, "revision-a", "said once for every item")
+			assert.Equal(t, got.Items[0].Revision, "", "not repeated on the item")
 			if requested <= 1500 {
 				assert.True(t, got.Items[0].DetailOmitted)
 			}
@@ -126,7 +127,7 @@ func TestCallGraphLimitPreservesBothDirections(t *testing.T) {
 	got, err := s.CallGraph(context.Background(), storetest.Repo, "app.Handler", "both", 1, 1)
 	require.NoError(t, err)
 	require.Len(t, got.Nodes, 2, "limit applies per direction")
-	assert.Equal(t, got.Budget.Omitted, 0)
+	assert.True(t, got.Budget == nil, "a complete answer carries no budget block")
 	incoming, outgoing := false, false
 	for _, edge := range got.Edges {
 		incoming = incoming || edge.To == "app.Handler"

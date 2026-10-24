@@ -1,0 +1,442 @@
+// Package verifyplan turns a change into the commands that check it
+// (docs/PLAN.md, agent workflow roadmap step 7): the tests that reach the
+// changed code, closest first, then build and lint for each language
+// touched. Agents lose turns running everything, or the wrong thing; the
+// graph already knows which tests call what changed.
+package verifyplan
+
+import (
+	"cmp"
+	"context"
+	"fmt"
+	"path"
+	"slices"
+	"strings"
+
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/review"
+	"github.com/astrona-io/codesynapse/internal/store"
+)
+
+// Step is one command to run.
+type Step struct {
+	// Kind is test, build or lint.
+	Kind    string `json:"kind"`
+	Command string `json:"command"`
+	Why     string `json:"why"`
+	// Reach is how many calls separate the closest test from the change:
+	// 0 when the change is to the test itself, 1 for a direct caller.
+	Reach int      `json:"reach,omitempty"`
+	Tests []string `json:"tests,omitempty"`
+}
+
+// Plan is what to run, in order.
+type Plan struct {
+	Steps []Step `json:"steps"`
+	// Untested names changed functions no test reaches: check them by hand
+	// or add a test.
+	Untested []string `json:"untested,omitempty"`
+	// Notes include what the last recorded test run measured: coverage of
+	// untested functions and tests that were flaky or failing.
+	Notes []string `json:"notes,omitempty"`
+}
+
+// Limits keep commands readable and answers small.
+const (
+	maxTestsPerCommand = 40
+	maxTestSteps       = 12
+)
+
+// group is the tests one command runs.
+type group struct {
+	kind, key string // language and package directory, file or test class
+	build     string // gradle or maven, for JVM tests
+	reach     int
+	covers    map[string]bool // changed symbols it reaches
+	tests     []string
+}
+
+// Build plans the checks for a change analysed against the head graph r.
+func Build(ctx context.Context, r store.Reader, repo string, rep review.Report) (Plan, error) {
+	groups := map[string]*group{}
+	build, err := jvmBuild(ctx, r, repo)
+	if err != nil {
+		return Plan{}, err
+	}
+	add := func(n model.Node, reach int, changed string) {
+		lang, key, name := testTarget(n)
+		if key == "" {
+			return
+		}
+		g := groups[lang+"\x00"+key]
+		if g == nil {
+			g = &group{kind: lang, key: key, reach: reach, covers: map[string]bool{}, build: build}
+			groups[lang+"\x00"+key] = g
+		}
+		g.reach = min(g.reach, reach)
+		g.covers[changed] = true
+		if !slices.Contains(g.tests, name) {
+			g.tests = append(g.tests, name)
+		}
+	}
+	plan := Plan{Steps: []Step{}}
+	for _, c := range rep.Changes {
+		n, err := r.Node(ctx, c.ID)
+		if err != nil {
+			continue
+		}
+		if n.IsTest {
+			add(n, 0, c.Name)
+			continue
+		}
+		for _, t := range c.Tests {
+			tn, err := r.Node(ctx, t.ID)
+			if err != nil {
+				continue
+			}
+			add(tn, max(t.Depth, 1), c.Name)
+		}
+		if len(c.Tests) == 0 && n.Kind.IsCallable() {
+			plan.Untested = append(plan.Untested, c.Name)
+		}
+	}
+
+	ordered := make([]*group, 0, len(groups))
+	for _, g := range groups {
+		ordered = append(ordered, g)
+	}
+	slices.SortFunc(ordered, func(a, b *group) int {
+		return cmp.Or(cmp.Compare(a.reach, b.reach), cmp.Compare(len(b.covers), len(a.covers)), cmp.Compare(a.key, b.key))
+	})
+	for i, g := range ordered {
+		if i == maxTestSteps {
+			plan.Notes = append(plan.Notes, fmt.Sprintf("%d more test groups reach the change more distantly; run the suite before merging", len(ordered)-i))
+			break
+		}
+		slices.Sort(g.tests)
+		plan.Steps = append(plan.Steps, testStep(g))
+	}
+
+	checks, err := buildAndLint(ctx, r, repo, rep.Files)
+	if err != nil {
+		return Plan{}, err
+	}
+	plan.Steps = append(plan.Steps, checks...)
+	if len(ordered) == 0 {
+		plan.Notes = append(plan.Notes, "no indexed test reaches the change")
+	}
+	notes, err := measuredNotes(ctx, r, repo, rep)
+	if err != nil {
+		return Plan{}, err
+	}
+	plan.Notes = append(plan.Notes, notes...)
+	return plan, nil
+}
+
+// testTarget is how a test is run: its language, what one command covers
+// (a Go package directory, a Python or JavaScript file) and its name there.
+func testTarget(n model.Node) (lang, key, name string) {
+	_, local, _ := strings.Cut(strings.TrimPrefix(n.ID, n.Repo+"|"), "|")
+	switch ext := path.Ext(n.File); {
+	case ext == ".go":
+		if !strings.HasPrefix(n.Name, "Test") && !strings.HasPrefix(n.Name, "Fuzz") && !strings.HasPrefix(n.Name, "Benchmark") && !strings.HasPrefix(n.Name, "Example") {
+			return "", "", "" // a helper in a test file: its callers are the tests
+		}
+		return "go", path.Dir(n.File), n.Name
+	case ext == ".py":
+		_, sym, ok := strings.Cut(local, "::")
+		if !ok {
+			return "", "", ""
+		}
+		return "python", n.File, strings.ReplaceAll(sym, ".", "::")
+	case slices.Contains([]string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue"}, ext):
+		return "javascript", n.File, n.Name
+	case ext == ".java" || ext == ".kt":
+		// One command per test class: com.acme.FooTest, method name.
+		class, method, ok := cutLast(n.QualifiedName, ".")
+		if !ok {
+			return "", "", ""
+		}
+		return "jvm", class, method
+	case ext == ".rb":
+		// RSpec runs a spec file; Minitest a file filtered to its methods.
+		if strings.HasSuffix(n.File, "_spec.rb") {
+			return "rspec", n.File, n.Name
+		}
+		return "minitest", n.File, n.Name
+	case ext == ".php":
+		// One command per test file; Pest files are their <tests> body.
+		return "php", n.File, n.Name
+	case ext == ".cs":
+		class, method, ok := cutLast(n.QualifiedName, ".")
+		if !ok {
+			return "", "", ""
+		}
+		return "dotnet", class, method
+	case ext == ".rs":
+		// One command per crate; libtest filters match the module path.
+		_, sym, ok := strings.Cut(local, "::")
+		if !ok {
+			return "", "", ""
+		}
+		root, module := rustCrate(n.File)
+		name := strings.ReplaceAll(sym, ".", "::")
+		if module != "" {
+			name = module + "::" + name
+		}
+		return "rust", root, name
+	}
+	return "", "", ""
+}
+
+// rustCrate splits a Rust file into its crate directory (the one holding
+// Cargo.toml, before src/, tests/, benches/ or examples/) and its module
+// path inside src/ (empty for the crate root and for test targets).
+func rustCrate(file string) (root, module string) {
+	for _, dir := range []string{"src", "tests", "benches", "examples"} {
+		i := strings.LastIndex("/"+file, "/"+dir+"/")
+		if i < 0 {
+			continue
+		}
+		root = strings.TrimSuffix(file[:i], "/")
+		if dir == "src" {
+			m := strings.TrimSuffix(strings.TrimSuffix(file[i+len(dir)+1:], ".rs"), "mod")
+			if m = strings.Trim(m, "/"); m != "lib" && m != "main" {
+				module = strings.ReplaceAll(m, "/", "::")
+			}
+		}
+		return root, module
+	}
+	return path.Dir(file), ""
+}
+
+// cargo runs cargo for the crate at root (the repository root when empty).
+func cargo(root, args string) string {
+	if root == "" || root == "." {
+		return "cargo " + args
+	}
+	cmd, rest, _ := strings.Cut(args, " ")
+	return "cargo " + cmd + " --manifest-path " + root + "/Cargo.toml " + rest
+}
+
+func testStep(g *group) Step {
+	tests := g.tests[:min(len(g.tests), maxTestsPerCommand)]
+	s := Step{Kind: "test", Reach: g.reach, Tests: tests}
+	covers := make([]string, 0, len(g.covers))
+	for c := range g.covers {
+		covers = append(covers, c)
+	}
+	slices.Sort(covers)
+	named := strings.Join(covers[:min(len(covers), 3)], ", ")
+	if len(covers) > 3 {
+		named += fmt.Sprintf(" and %d more", len(covers)-3)
+	}
+	switch g.kind {
+	case "go":
+		s.Command = fmt.Sprintf("go test ./%s -run '^(%s)$'", g.key, strings.Join(tests, "|"))
+	case "python":
+		ids := make([]string, 0, len(tests))
+		for _, t := range tests {
+			ids = append(ids, g.key+"::"+t)
+		}
+		s.Command = "pytest " + strings.Join(ids, " ")
+	case "javascript":
+		// The package's own test script, filtered to the file: jest and
+		// vitest both take file filters.
+		s.Command = "npm test -- " + g.key
+	case "jvm":
+		s.Command = jvmTestCommand(g.build, g.key, tests)
+	case "rust":
+		s.Command = cargo(g.key, "test -- "+strings.Join(tests, " "))
+	case "rspec":
+		s.Command = "bundle exec rspec " + g.key
+	case "minitest":
+		s.Command = "bundle exec ruby -Itest " + g.key + " -n '/^(" + strings.Join(tests, "|") + ")$/'"
+	case "php":
+		if slices.Contains(tests, "<tests>") {
+			s.Command = "vendor/bin/pest " + g.key
+		} else {
+			s.Command = "vendor/bin/phpunit --filter '" + strings.Join(tests, "|") + "' " + g.key
+		}
+	case "dotnet":
+		filters := make([]string, 0, len(tests))
+		for _, t := range tests {
+			filters = append(filters, "FullyQualifiedName~"+g.key+"."+t)
+		}
+		s.Command = `dotnet test --filter "` + strings.Join(filters, "|") + `"`
+	}
+
+	switch g.reach {
+	case 0:
+		s.Why = "the change edits these tests"
+	case 1:
+		s.Why = "call " + named + " directly"
+	default:
+		s.Why = fmt.Sprintf("reach %s through %d calls", named, g.reach)
+	}
+	if g.kind == "dotnet" {
+		s.Why += "; run where the solution or test project is"
+	}
+	if g.kind == "jvm" {
+		other := map[string]string{"gradle": "maven", "maven": "gradle"}[g.build]
+		s.Why += "; with " + other + ": " + jvmTestCommand(other, g.key, tests)
+	}
+	return s
+}
+
+// buildAndLint lists the build and lint commands for the languages of the
+// changed files.
+func buildAndLint(ctx context.Context, r store.Reader, repo string, files []review.FileSummary) ([]Step, error) {
+	var goDirs, pyFiles, phpFiles, rbFiles []string
+	jvm, dotnet := false, false
+	var crates []string
+	for _, f := range files {
+		if f.Status == "deleted" {
+			continue
+		}
+		switch path.Ext(f.Path) {
+		case ".go":
+			if d := "./" + path.Dir(f.Path); !slices.Contains(goDirs, d) {
+				goDirs = append(goDirs, d)
+			}
+		case ".py":
+			pyFiles = append(pyFiles, f.Path)
+		case ".java", ".kt":
+			jvm = true
+		case ".cs":
+			dotnet = true
+		case ".php":
+			phpFiles = append(phpFiles, f.Path)
+		case ".rb":
+			rbFiles = append(rbFiles, f.Path)
+		case ".rs":
+			if root, _ := rustCrate(f.Path); !slices.Contains(crates, root) {
+				crates = append(crates, root)
+			}
+		}
+	}
+	slices.Sort(goDirs)
+	slices.Sort(crates)
+	var steps []Step
+	if len(goDirs) > 0 {
+		pkgs := strings.Join(goDirs, " ")
+		steps = append(steps,
+			Step{Kind: "build", Command: "go build " + pkgs, Why: "the changed packages compile"},
+			Step{Kind: "lint", Command: "go vet " + pkgs, Why: "go vet on the changed packages"})
+		if ok, err := hasFile(ctx, r, repo, ".golangci"); err != nil {
+			return nil, err
+		} else if ok {
+			steps = append(steps, Step{Kind: "lint", Command: "golangci-lint run " + strings.ReplaceAll(pkgs, " ", "/... ") + "/...", Why: "the repository's golangci-lint configuration"})
+		}
+	}
+	if jvm {
+		build, err := jvmBuild(ctx, r, repo)
+		if err != nil {
+			return nil, err
+		}
+		cmd := map[string]string{"gradle": "./gradlew classes testClasses", "maven": "mvn -q test-compile"}[build]
+		steps = append(steps, Step{Kind: "build", Command: cmd, Why: "the changed Java and Kotlin code compiles"})
+	}
+	if dotnet {
+		steps = append(steps, Step{Kind: "build", Command: "dotnet build", Why: "the changed C# code compiles, with its analyzers"})
+	}
+	for _, c := range crates {
+		steps = append(steps,
+			Step{Kind: "build", Command: cargo(c, "check --all-targets"), Why: "the changed Rust code and its tests compile"},
+			Step{Kind: "lint", Command: cargo(c, "clippy --all-targets"), Why: "clippy on the changed crate"})
+	}
+	if len(rbFiles) > 0 {
+		check := make([]string, 0, len(rbFiles))
+		for _, f := range rbFiles {
+			check = append(check, "ruby -c "+f)
+		}
+		steps = append(steps, Step{Kind: "build", Command: strings.Join(check, " && "), Why: "the changed Ruby files parse"})
+	}
+	if len(phpFiles) > 0 {
+		lint := make([]string, 0, len(phpFiles))
+		for _, f := range phpFiles {
+			lint = append(lint, "php -l "+f)
+		}
+		steps = append(steps, Step{Kind: "build", Command: strings.Join(lint, " && "), Why: "the changed PHP files parse"})
+	}
+	if len(pyFiles) > 0 {
+		steps = append(steps, Step{Kind: "build", Command: "python -m py_compile " + strings.Join(pyFiles, " "), Why: "the changed Python files parse"})
+	}
+	return steps, nil
+}
+
+// hasFile reports whether the graph knows a top-level file named prefix…
+// (a configuration file the repository keeps at its root).
+func hasFile(ctx context.Context, r store.Reader, repo, prefix string) (bool, error) {
+	nodes, err := r.Search(ctx, repo, prefix, []model.NodeKind{model.KindConfig, model.KindFile}, 5)
+	if err != nil {
+		return false, err
+	}
+	for _, n := range nodes {
+		if strings.HasPrefix(n.File, prefix) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// measuredNotes adds what the last recorded test run (internal/runtimefacts)
+// says: a function the graph sees no test reach may still be covered, and
+// a test reaching it that was flaky or failing before should not be blamed
+// on the change.
+func measuredNotes(ctx context.Context, r store.Reader, repo string, rep review.Report) ([]string, error) {
+	f, ok, err := store.RuntimeFactsOf(ctx, r, repo)
+	if err != nil || !ok {
+		return nil, err
+	}
+	var notes []string
+	seen := map[string]bool{}
+	for _, c := range rep.Changes {
+		if len(c.Tests) == 0 {
+			if note, ok := f.CoverageNote(c.ID); ok {
+				notes = append(notes, fmt.Sprintf("%s: no test reaches it in the graph, but the run at %s measured %s", c.Name, f.At(), note))
+			}
+		}
+		for _, t := range c.Tests {
+			if note, ok := f.RunNote(t.ID); ok && !seen[t.ID] {
+				seen[t.ID] = true
+				notes = append(notes, t.Name+": "+note)
+			}
+		}
+	}
+	return notes, nil
+}
+
+func cutLast(s, sep string) (before, after string, ok bool) {
+	i := strings.LastIndex(s, sep)
+	if i < 0 {
+		return s, "", false
+	}
+	return s[:i], s[i+len(sep):], true
+}
+
+// jvmBuild is the repository's JVM build tool. Only Kotlin build scripts
+// are indexed (pom.xml and Groovy build.gradle are not), so a
+// build.gradle.kts or settings.gradle.kts at the root means Gradle and
+// anything else Maven; test steps also name the other tool's form.
+func jvmBuild(ctx context.Context, r store.Reader, repo string) (string, error) {
+	for _, f := range []string{"build.gradle.kts", "settings.gradle.kts"} {
+		if ok, err := hasFile(ctx, r, repo, f); err != nil || ok {
+			return "gradle", err
+		}
+	}
+	return "maven", nil
+}
+
+func jvmTestCommand(build, class string, methods []string) string {
+	if build == "maven" {
+		short := class[strings.LastIndex(class, ".")+1:]
+		return fmt.Sprintf("mvn -q -Dtest='%s#%s' test", short, strings.Join(methods, "+"))
+	}
+	var b strings.Builder
+	b.WriteString("./gradlew test")
+	for _, m := range methods {
+		fmt.Fprintf(&b, " --tests '%s.%s'", class, m)
+	}
+	return b.String()
+}

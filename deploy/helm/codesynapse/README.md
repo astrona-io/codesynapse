@@ -4,6 +4,24 @@
 
 Installs CodeSynapse on Kubernetes: the dashboard (`web`), the API (`api`), job workers (`worker`) and the MCP server (`mcp`). The stores it needs are subcharts, all on by default, so a plain install runs everything: PostgreSQL, HugeGraph, Milvus, VictoriaMetrics and VictoriaTraces. For production, run them yourself and link them (see [Stores](#stores)). Every image is Apache-2.0, or PostgreSQL-licensed for the database.
 
+## Install with the CLI
+
+The quickest way, like `cilium install`: the `codesynapse` CLI creates the namespace and a Secret with random credentials, installs the chart at the CLI's own version and waits until every service answers. It uses the `helm` and `kubectl` on your machine and asks before it changes the cluster.
+
+```sh
+codesynapse install --local            # a laptop cluster: kind, k3d, Docker Desktop, minikube
+codesynapse status                     # every component's ready replicas; --wait, --test
+codesynapse uninstall                  # the release; --keep-data=false also deletes the namespace and its data
+```
+
+- **Target:** `--context` and `--namespace` pick it; the default is kubectl's current context, which it names and confirms first (`--yes` skips the question).
+- **Version:** `--version` picks a chart version and `--chart deploy/helm/codesynapse` installs from a checkout. `-f values.yaml` and `--set key=value` pass values through, and `--dry-run` renders the chart without installing.
+- **`--local`:** small resource requests and plain-HTTP cookies, for port-forwarding.
+- **The Secret:** made once and never replaced, so a reinstall keeps the stores' passwords. Its credentials go to kubectl on standard input, never on a command line. Back it up: losing `SECRET_KEY` means re-entering sealed Git tokens and identity provider secrets.
+- **`status`:** exits 1 when something is not ready, so scripts can use it.
+
+The steps below do the same by hand.
+
 ## Install
 
 1. Create the one Secret every credential comes from. The chart never invents passwords.
@@ -34,9 +52,17 @@ Installs CodeSynapse on Kubernetes: the dashboard (`web`), the API (`api`), job 
 
    Every release publishes the chart at its version, signed like the images (`cosign verify ghcr.io/astrona-io/charts/codesynapse:<X.Y.Z> ...`). To install from a checkout, use `deploy/helm/codesynapse` in place of the `oci://` reference. Upgrades and backups: [docs/operations/upgrading.md](../../../docs/operations/upgrading.md).
 
-3. Open the dashboard. The first account becomes the installation's root account and hands over to an organisation owner.
+3. Open the dashboard and sign in as `admin`. The chart generated its password into the Secret `<release>-admin` (kept across upgrades; `admin.existingSecret` brings your own, `admin.enabled=false` skips it):
+
+   ```sh
+   kubectl --namespace codesynapse get secret <release>-admin -o jsonpath='{.data.CODESYNAPSE_ADMIN_PASSWORD}' | base64 -d
+   ```
+
+   Replace that account with your own, then create the organisation owner. Locked out: `kubectl exec deploy/<release>-api -- codesynapse-api reset-admin --generate`.
 
 ## Values worth knowing
+
+Every value is described and type-checked in `values.schema.json` (each store's in `charts/<store>/values.schema.json`), so `helm install` and `helm upgrade` refuse a misspelt key or a wrong type instead of ignoring it.
 
 | Value | Default | Meaning |
 |---|---|---|

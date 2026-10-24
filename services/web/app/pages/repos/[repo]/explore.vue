@@ -53,7 +53,7 @@ const isCode = (r: NodeRef) => ['Function', 'Method', 'InterfaceMethod', 'Type']
   <div class="stack">
     <PageHeader eyebrow="Explore" title="Symbol explorer" lede="Signature, callers, callees, tests and docs for any symbol — the same card agents get over MCP."
       :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Explore' }]" />
-    <div class="panel panel--glass">
+    <div class="panel">
       <input v-model="q" type="search" placeholder="Search functions, types, files, doc sections…" aria-label="Search">
       <p v-if="searchError" class="error">{{ searchError }}</p>
       <div v-if="results.length" class="results">
@@ -73,6 +73,7 @@ const isCode = (r: NodeRef) => ['Function', 'Method', 'InterfaceMethod', 'Type']
           <span class="tag">{{ card.symbol.kind }}</span>
         </div>
         <p class="mono muted">{{ location(card.symbol) }}</p>
+        <p v-if="card.resolved_from" class="small" role="status">Resolved through a human identity review from <span class="mono">{{ card.resolved_from }}</span>.</p>
         <p v-if="card.symbol.symbol_id" class="small">
           <NuxtLink :to="`/repos/${encodeURIComponent(repo)}/identities?id=${card.symbol.symbol_id}`">Identity, annotations and reuse: <span class="mono">{{ card.symbol.symbol_id }}</span></NuxtLink>
           <span v-if="card.symbol.revision" class="muted"> · revision {{ card.symbol.revision.slice(0, 12) }}</span>
@@ -87,7 +88,7 @@ const isCode = (r: NodeRef) => ['Function', 'Method', 'InterfaceMethod', 'Type']
         </div>
       </div>
 
-      <section v-if="card.duplicate" class="panel edge--orange">
+      <section v-if="card.duplicate" class="panel">
         <p class="eyebrow">Duplicate code</p>
         <h2>
           {{ card.duplicate.kind === 'near' ? 'Edited copies exist' : 'Exact copies exist' }}
@@ -143,5 +144,5 @@ const isCode = (r: NodeRef) => ['Function', 'Method', 'InterfaceMethod', 'Type']
 .results { display: grid; gap: 4px; margin-top: 10px; max-height: 320px; overflow-y: auto; }
 .result { text-align: left; display: flex; gap: 8px; align-items: center; }
 .result .loc { margin-left: auto; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sig { background: var(--surface-2); padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
+.sig { background: var(--panel-2); padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
 </style>

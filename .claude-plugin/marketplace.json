@@ -1,0 +1,11 @@
+{
+  "name": "codesynapse",
+  "owner": { "name": "Astrona" },
+  "plugins": [
+    {
+      "name": "codesynapse",
+      "source": "./plugins/codesynapse",
+      "description": "The CodeSynapse code graph for Claude Code: MCP bridge, workflow skill and hooks."
+    }
+  ]
+}

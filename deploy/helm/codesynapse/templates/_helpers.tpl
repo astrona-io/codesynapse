@@ -63,12 +63,22 @@
 {{ include "cs.storeEnv" . }}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_API_TOKEN" "CODESYNAPSE_API_TOKEN") }}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_SECRET_KEY" "SECRET_KEY") }}
+{{- if .Values.admin.enabled }}
+- name: CODESYNAPSE_ADMIN_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.admin.existingSecret | default (include "cs.name" (list . "admin")) }}
+      key: CODESYNAPSE_ADMIN_PASSWORD
+{{- else }}
+- {name: CODESYNAPSE_AUTO_ADMIN, value: "false"}
+{{- end }}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_GIT_TOKENS" "CODESYNAPSE_GIT_TOKENS" true) }}
 {{ include "cs.secretEnv" (list . "ANTHROPIC_API_KEY" "ANTHROPIC_API_KEY" true) }}
 {{ include "cs.secretEnv" (list . "OPENROUTER_API_KEY" "OPENROUTER_API_KEY" true) }}
 - {name: CODESYNAPSE_TRUSTED_PROXIES, value: {{ .Values.trustedProxies | quote }}}
 - {name: CODESYNAPSE_PUBLIC_URL, value: {{ .Values.publicURL | quote }}}
 - {name: CODESYNAPSE_PUBLIC_MCP_URL, value: {{ .Values.publicMCPURL | quote }}}
+- {name: CODESYNAPSE_PUBLIC_API_URL, value: {{ .Values.publicAPIURL | quote }}}
 - {name: CODESYNAPSE_SIGNUP_OPEN, value: {{ .Values.signupOpen | quote }}}
 - {name: CODESYNAPSE_COOKIE_SECURE, value: {{ .Values.cookieSecure | quote }}}
 - {name: CODESYNAPSE_AUDIT_RETENTION_DAYS, value: {{ .Values.auditRetentionDays | quote }}}

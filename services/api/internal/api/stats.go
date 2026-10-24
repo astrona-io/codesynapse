@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -52,14 +53,34 @@ type AgentStats struct {
 	ResponseTokens int `json:"response_tokens"`
 	// AvoidedTokens estimates tokens an agent would have read from files to
 	// answer the same questions (see AvoidedMethod).
-	AvoidedTokens int          `json:"avoided_tokens"`
-	AvoidedMethod string       `json:"avoided_method"`
-	AvgLatencyMs  float64      `json:"avg_latency_ms"`
-	MaxLatencyMs  int          `json:"max_latency_ms"`
-	Daily         []DayStat    `json:"daily"`
-	Tools         []ToolStat   `json:"tools"`
-	Clients       []ClientStat `json:"clients"`
-	Repos         []RepoUsage  `json:"repos"`
+	AvoidedTokens int        `json:"avoided_tokens"`
+	AvoidedMethod string     `json:"avoided_method"`
+	AvgLatencyMs  float64    `json:"avg_latency_ms"`
+	MaxLatencyMs  int        `json:"max_latency_ms"`
+	Daily         []DayStat  `json:"daily"`
+	Tools         []ToolStat `json:"tools"`
+	// Workflow says how sessions began, as the plugin's hooks reported.
+	Workflow WorkflowStats `json:"workflow"`
+	Clients  []ClientStat  `json:"clients"`
+	Repos    []RepoUsage   `json:"repos"`
+}
+
+// WorkflowStats answer "do agents use CodeSynapse first?": of the sessions
+// that looked at code, how many began with a CodeSynapse tool rather than
+// Read, Grep or Glob, and how many whole-file reads the guard turned back.
+// Only the plugin's hooks report them.
+type WorkflowStats struct {
+	FirstCodeSynapse int `json:"first_codesynapse"`
+	FirstNative      int `json:"first_native"`
+	ReadsTurnedBack  int `json:"reads_turned_back"`
+	// FirstSharePct is FirstCodeSynapse of both, rounded; 0 with no sessions.
+	FirstSharePct int `json:"first_share_pct"`
+	// FilesEdited are the files sessions changed, FilesEditedFound those a
+	// CodeSynapse answer of the session had pointed to, and EditRecallPct
+	// their share (0 with no edits).
+	FilesEdited      int `json:"files_edited"`
+	FilesEditedFound int `json:"files_edited_found"`
+	EditRecallPct    int `json:"edit_recall_pct"`
 }
 
 // DayStat is one day of usage.
@@ -82,6 +103,10 @@ type ToolStat struct {
 	AvgTokens      float64 `json:"avg_tokens"`
 	AvgMs          float64 `json:"avg_ms"`
 	MaxMs          int     `json:"max_ms"`
+	// RangesReturned and RangesRead say how many of the file line ranges
+	// the tool's answers gave were then read (Claude Code plugin hooks).
+	RangesReturned int `json:"ranges_returned"`
+	RangesRead     int `json:"ranges_read"`
 }
 
 // ClientStat is one MCP client (Claude Code, Codex, Cursor, ...).
@@ -199,30 +224,11 @@ func (s *Server) buildStats(ctx context.Context, days int, now time.Time) (Stats
 	}
 	st := Stats{GeneratedAt: now.UTC().Format(time.RFC3339), Days: days, Workspace: ov.Totals, Jobs: ov.Jobs, Repos: ov.Repos, AI: []AIStat{}}
 
-	// Tokens a file-reading agent needs per graph token, per repository,
-	// from the benchmark measured at ingest.
-	ratio := map[string]float64{}
-	var g, b int
-	for _, rs := range ov.Repos {
-		if rs.GraphTokens > 0 {
-			ratio[rs.Name] = float64(rs.BaseTokens) / float64(rs.GraphTokens)
-			g, b = g+rs.GraphTokens, b+rs.BaseTokens
-		}
-	}
-	workspaceRatio := 1.0
-	if g > 0 {
-		workspaceRatio = float64(b) / float64(g)
-	}
-	buckets, err := s.st.Usage(ctx, usage.Day(now.AddDate(0, 0, -(days-1))))
+	buckets, err := s.usageBuckets(ctx, days, now)
 	if err != nil {
 		return st, err
 	}
-	if sc := scopeFrom(ctx); !sc.all {
-		// An organisation sees its own agents' usage only, even on a
-		// repository it shares with others.
-		buckets = slices.DeleteFunc(buckets, func(b usage.Bucket) bool { return !seesReview(sc, b.Repo, b.Org) })
-	}
-	st.Agents = agentStats(buckets, days, now, ratio, workspaceRatio)
+	st.Agents = agentUsage(buckets, ov.Repos, days, now)
 
 	if st.Memory, err = s.memoryStats(ctx, buckets, st.Agents.Sessions); err != nil {
 		return st, err
@@ -244,6 +250,56 @@ func (s *Server) buildStats(ctx context.Context, days int, now time.Time) (Stats
 	return st, nil
 }
 
+// usageBuckets reads the MCP usage of the last days days that the caller's
+// organisations may see.
+func (s *Server) usageBuckets(ctx context.Context, days int, now time.Time) ([]usage.Bucket, error) {
+	buckets, err := s.st.Usage(ctx, usage.Day(now.AddDate(0, 0, -(days-1))))
+	if err != nil {
+		return nil, err
+	}
+	return visibleUsage(scopeFrom(ctx), buckets), nil
+}
+
+// visibleUsage keeps the usage an organisation may see: its own agents'
+// calls, even on a repository it shares with others. Calls that named no
+// repository (and the sessions that connected) have none to check, so they
+// belong to the organisation that made them.
+func visibleUsage(sc scope, buckets []usage.Bucket) []usage.Bucket {
+	if sc.all {
+		return buckets
+	}
+	mine := map[string]bool{}
+	for _, m := range sc.orgs {
+		mine[m.Org.ID] = true
+	}
+	return slices.DeleteFunc(buckets, func(b usage.Bucket) bool {
+		if b.Repo == "" {
+			return b.Org == "" || !mine[b.Org]
+		}
+		return !seesReview(sc, b.Repo, b.Org)
+	})
+}
+
+// agentUsage compares what agents' calls returned with what reading the
+// files would have cost, using each repository's benchmark ratio.
+func agentUsage(buckets []usage.Bucket, repos []RepoSummary, days int, now time.Time) AgentStats {
+	// Tokens a file-reading agent needs per graph token, per repository,
+	// from the benchmark measured at ingest.
+	ratio := map[string]float64{}
+	var g, b int
+	for _, rs := range repos {
+		if rs.GraphTokens > 0 {
+			ratio[rs.Name] = float64(rs.BaseTokens) / float64(rs.GraphTokens)
+			g, b = g+rs.GraphTokens, b+rs.BaseTokens
+		}
+	}
+	workspaceRatio := 1.0
+	if g > 0 {
+		workspaceRatio = float64(b) / float64(g)
+	}
+	return agentStats(buckets, days, now, ratio, workspaceRatio)
+}
+
 func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[string]float64, workspaceRatio float64) AgentStats {
 	a := AgentStats{Daily: []DayStat{}, Tools: []ToolStat{}, Clients: []ClientStat{}, Repos: []RepoUsage{},
 		AvoidedMethod: "For successful calls of navigation tools (symbol context, call graph, outlines, search, ...), each response is compared with the tokens of the files an agent would read instead, using the ratio measured by that repository's token benchmark at ingest (workspace ratio when the call named no repository). Tokens are bytes/4."}
@@ -260,6 +316,21 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 	for _, bk := range buckets {
 		day := daily[bk.Day]
 		if day == nil {
+			continue
+		}
+		if usage.IsWorkflow(bk.Tool) {
+			switch bk.Tool {
+			case usage.FirstCodeSynapse:
+				a.Workflow.FirstCodeSynapse += bk.Calls
+			case usage.FirstNative:
+				a.Workflow.FirstNative += bk.Calls
+			case usage.ReadTurnedBack:
+				a.Workflow.ReadsTurnedBack += bk.Calls
+			case usage.FilesEdited:
+				a.Workflow.FilesEdited += bk.Calls
+			case usage.FilesEditedFound:
+				a.Workflow.FilesEditedFound += bk.Calls
+			}
 			continue
 		}
 		cl := clients[bk.Client]
@@ -305,6 +376,8 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 		t.ResponseTokens += bk.ResponseTokens
 		t.AvgMs += float64(bk.DurationMs) // summed here, averaged below
 		t.MaxMs = max(t.MaxMs, bk.MaxDurationMs)
+		t.RangesReturned += bk.RangesReturned
+		t.RangesRead += bk.RangesRead
 		ru := repos[bk.Repo]
 		if ru == nil {
 			ru = &RepoUsage{Repo: bk.Repo}
@@ -316,6 +389,12 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 	}
 	for i := range a.Daily {
 		a.Daily[i] = *daily[a.Daily[i].Day]
+	}
+	if n := a.Workflow.FirstCodeSynapse + a.Workflow.FirstNative; n > 0 {
+		a.Workflow.FirstSharePct = int(math.Round(100 * float64(a.Workflow.FirstCodeSynapse) / float64(n)))
+	}
+	if a.Workflow.FilesEdited > 0 {
+		a.Workflow.EditRecallPct = int(math.Round(100 * float64(min(a.Workflow.FilesEditedFound, a.Workflow.FilesEdited)) / float64(a.Workflow.FilesEdited)))
 	}
 	if a.Calls > 0 {
 		a.AvgLatencyMs = round1(float64(totalMs) / float64(a.Calls))

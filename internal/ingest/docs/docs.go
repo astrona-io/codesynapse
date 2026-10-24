@@ -173,7 +173,7 @@ func addDocument(g *model.Graph, repo, repoID, rel string, content []byte, index
 	var (
 		sections []*section
 		cur      = &section{title: "(preamble)", level: 0, start: 1}
-		inFence  bool
+		fence    fenceState
 		lineNo   int
 	)
 	sc := bufio.NewScanner(bytes.NewReader(content))
@@ -181,11 +181,10 @@ func addDocument(g *model.Graph, repo, repoID, rel string, content []byte, index
 	for sc.Scan() {
 		lineNo++
 		line := sc.Text()
-		if strings.HasPrefix(strings.TrimSpace(line), "```") {
-			inFence = !inFence
+		if fence.consume(line) {
 			continue
 		}
-		if !inFence {
+		if !fence.open {
 			if m := headingRe.FindStringSubmatch(line); m != nil {
 				cur.end = lineNo - 1
 				sections = append(sections, cur)
@@ -212,7 +211,7 @@ func addDocument(g *model.Graph, repo, repoID, rel string, content []byte, index
 		}
 	}
 	g.AddNode(model.Node{
-		ID: docID, Kind: model.KindDocument, Repo: repo, Name: title, File: rel,
+		ID: docID, Kind: model.KindDocument, Repo: repo, Name: redact.Summary(title, 120), File: rel,
 		StartLine: 1, EndLine: lineNo, LOC: lineNo, Bytes: len(content),
 		Summary: redact.Summary(firstBody(sections), summaryLen),
 	})
@@ -236,6 +235,42 @@ func addDocument(g *model.Graph, repo, repoID, rel string, content []byte, index
 			}
 		}
 	}
+}
+
+// fenceState follows fenced code blocks the way CommonMark does: a fence is
+// three or more backticks or tildes (indented at most three spaces) and
+// closes only on a fence of the same character that is at least as long and
+// carries nothing else. An unclosed fence runs to the end of the file, so
+// code never leaks into summaries, headings or mentions.
+type fenceState struct {
+	open bool
+	char byte
+	size int
+}
+
+// consume reports whether line is part of the fence (its opening or closing
+// line, or code inside), updating the state.
+func (f *fenceState) consume(line string) bool {
+	indent := len(line) - len(strings.TrimLeft(line, " "))
+	rest := line[indent:]
+	char, size := byte(0), 0
+	if indent <= 3 && len(rest) > 0 && (rest[0] == '`' || rest[0] == '~') {
+		char = rest[0]
+		for size < len(rest) && rest[size] == char {
+			size++
+		}
+	}
+	if f.open {
+		if char == f.char && size >= f.size && strings.TrimSpace(rest[size:]) == "" {
+			f.open = false
+		}
+		return true
+	}
+	if size >= 3 && (char != '`' || !strings.ContainsRune(rest[size:], '`')) {
+		f.open, f.char, f.size = true, char, size
+		return true
+	}
+	return false
 }
 
 func firstBody(sections []*section) string {

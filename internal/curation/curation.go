@@ -27,9 +27,10 @@ import (
 
 // Item kinds.
 const (
-	KindProposal = "proposal"
-	KindLink     = "link"
-	KindCode     = "code"
+	KindProposal       = "proposal"
+	KindLink           = "link"
+	KindCode           = "code"
+	KindIdentityReview = "identity-review"
 )
 
 // Proposal states. A proposal that a record in the repository now answers is
@@ -75,11 +76,12 @@ type Item struct {
 	OrgID string `json:"org_id,omitempty"`
 	// CreatedBy is the user ID (accounts mode) and Client the MCP client or
 	// "web", so a person can tell an agent's work from a colleague's.
-	CreatedBy string      `json:"created_by,omitempty"`
-	Client    string      `json:"client,omitempty"`
-	Proposal  *Proposal   `json:"proposal,omitempty"`
-	Link      *Link       `json:"link,omitempty"`
-	Code      *CodeRecord `json:"code,omitempty"`
+	CreatedBy      string          `json:"created_by,omitempty"`
+	Client         string          `json:"client,omitempty"`
+	Proposal       *Proposal       `json:"proposal,omitempty"`
+	Link           *Link           `json:"link,omitempty"`
+	Code           *CodeRecord     `json:"code,omitempty"`
+	IdentityReview *IdentityReview `json:"identity_review,omitempty"`
 }
 
 // Proposal is a draft record. Its status is always the draft word of its type

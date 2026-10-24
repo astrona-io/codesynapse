@@ -29,7 +29,8 @@ const filesByRule = computed(() => {
   return m
 })
 const langMatch = (a?: string, b?: string) => {
-  const n = (l?: string) => (['javascript', 'typescript', 'vue', 'js', 'ts'].includes(l ?? '') ? 'typescript' : l === 'yml' ? 'yaml' : l)
+  // Languages that share examples: the JS family, and Kotlin with Java.
+  const n = (l?: string) => (['javascript', 'typescript', 'vue', 'js', 'ts'].includes(l ?? '') ? 'typescript' : l === 'yml' ? 'yaml' : l === 'kotlin' ? 'java' : l)
   return n(a) === n(b)
 }
 function examplesFor(f: SecFinding) {
@@ -43,7 +44,8 @@ const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info']
 const sevFilter = ref<string>('all')
 const reachFilter = ref<string>('all')
 const exposedOnly = ref(false)
-const q = ref('')
+// ?q= comes from the top bar's search, which opens a finding here.
+const q = ref(typeof route.query.q === 'string' ? route.query.q : '')
 
 const findings = computed(() =>
   (rep.value?.findings ?? []).filter((f) =>
@@ -60,7 +62,7 @@ const vulns = computed(() =>
   ),
 )
 const total = (m: Record<string, number> | undefined) => Object.values(m ?? {}).reduce((a, b) => a + b, 0)
-const gradeColor = computed(() => ({ A: 'var(--green)', B: 'var(--cyan)', C: 'var(--amber)', D: 'var(--orange)', F: 'var(--pink)', 'N/A': 'var(--muted)' }[rep.value?.grade ?? 'A']))
+const gradeColor = computed(() => ({ A: 'var(--success)', B: 'var(--info)', C: 'var(--warning)', D: 'var(--accent)', F: 'var(--danger)', 'N/A': 'var(--muted)' }[rep.value?.grade ?? 'A']))
 const explore = (id: string) => ({ path: `/repos/${encodeURIComponent(repo.value)}/explore`, query: { id } })
 const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--amber', required: '' }[r] ?? '')
 </script>
@@ -79,7 +81,7 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
     <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="rep">
       <div class="grid grid--stats">
-        <div class="panel stat-card grade" :style="{ borderLeftColor: gradeColor }">
+        <div class="panel stat-card grade">
           <p class="eyebrow">Security grade</p>
           <p class="stat__value" :style="{ color: gradeColor }">{{ rep.grade }} <span v-if="rep.grade !== 'N/A'" class="score">{{ rep.score }}/100</span></p>
           <p class="stat__hint">{{ rep.grade === 'N/A' ? 'Nothing here is covered by the rules yet' : 'Weighted by severity, exposure and reachability' }}</p>
@@ -114,7 +116,7 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
         </article>
       </section>
 
-      <div class="panel panel--glass filters">
+      <div class="panel filters">
         <div class="row">
           <span class="label">Severity</span>
           <button class="chip" :class="{ active: sevFilter === 'all' }" @click="sevFilter = 'all'">All</button>
@@ -128,7 +130,7 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
         </div>
       </div>
 
-      <section class="panel edge--pink">
+      <section class="panel">
         <div class="panel__header">
           <div><p class="eyebrow">Dependencies</p><h2>Vulnerable modules <span class="muted">· {{ vulns.length }}</span></h2></div>
         </div>
@@ -157,7 +159,7 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
         <div v-else class="empty"><strong>No known vulnerabilities</strong>{{ rep.modules.total ? 'for the current filter.' : 'Ingest with vulnerability scanning enabled (CODESYNAPSE_VULN_SCAN=true).' }}</div>
       </section>
 
-      <section ref="findingsEl" class="panel edge--orange">
+      <section ref="findingsEl" class="panel">
         <div class="panel__header">
           <div><p class="eyebrow">Source code & config</p><h2>Findings <span class="muted">· {{ findings.length }}</span></h2></div>
           <button v-if="ruleFilter" class="chip active" @click="ruleFilter = ''">rule: {{ ruleFilter }} ✕</button>
@@ -241,17 +243,17 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
 .filters { gap: 10px; padding: 16px 20px; }
 .filter-input { max-width: 280px; margin-left: auto; }
 .compact { gap: 6px; }
-.fix { color: var(--green); }
+.fix { color: var(--success); }
 .callsite { margin-top: 4px; font-size: 12px; }
 .detail { max-width: 460px; color: var(--muted); font-size: 13px; }
 .clickable { cursor: pointer; }
-.clickable.selected td { background: var(--tint-orange); }
-.fix-row td { background: var(--panel-faint); }
+.clickable.selected td { background: var(--accent-soft); }
+.fix-row td { background: var(--panel-2); }
 .fix { display: grid; gap: 10px; padding: 6px 4px 10px; max-width: 1100px; }
 .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 12px; }
 .code { margin: 4px 0 0; padding: 10px 12px; border-radius: var(--radius-xs); font: 12.5px/1.5 var(--font-mono); white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--line); }
-.bad-code { border-left: 3px solid var(--pink); }
-.good-code { border-left: 3px solid var(--green); }
-.label.bad { color: var(--pink); }
-.label.good { color: var(--green); }
+.bad-code { border: 2px solid var(--danger); }
+.good-code { border: 2px solid var(--success); }
+.label.bad { color: var(--danger); }
+.label.good { color: var(--success); }
 </style>

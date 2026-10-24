@@ -72,9 +72,9 @@ const neighbours = computed(() => {
 
 function color(n: ViewNode): string {
   if (n.id === props.root) return 'var(--accent)'
-  if (n.is_test) return 'var(--good)'
-  if (n.security_tags?.length) return 'var(--bad)'
-  if (n.kind === 'InterfaceMethod') return 'var(--warn)'
+  if (n.is_test) return 'var(--success)'
+  if (n.security_tags?.length) return 'var(--danger)'
+  if (n.kind === 'InterfaceMethod') return 'var(--warning)'
   return 'var(--muted)'
 }
 function radius(n: ViewNode): number {
@@ -91,13 +91,13 @@ function label(name: string): string {
     <svg :viewBox="`0 0 ${width} ${height}`" role="img" aria-label="Call graph">
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="16" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--border)" />
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--line)" />
         </marker>
       </defs>
       <line
         v-for="(l, i) in lines" :key="i"
         :x1="l.a!.x" :y1="l.a!.y" :x2="l.b!.x" :y2="l.b!.y"
-        :stroke="hovered && (l.e.from === hovered || l.e.to === hovered) ? 'var(--accent)' : 'var(--border)'"
+        :stroke="hovered && (l.e.from === hovered || l.e.to === hovered) ? 'var(--accent)' : 'var(--line)'"
         :stroke-dasharray="l.e.kind === 'DISPATCHES_TO' ? '4 3' : undefined"
         stroke-width="1.4" marker-end="url(#arrow)"
       />
@@ -106,7 +106,7 @@ function label(name: string): string {
         :opacity="hovered && hovered !== p.id && !neighbours.has(p.id) ? 0.25 : 1"
         @mouseenter="hovered = p.id" @mouseleave="hovered = null" @click="emit('select', p.id)"
       >
-        <circle :cx="p.x" :cy="p.y" :r="radius(p.n)" :fill="color(p.n)" stroke="var(--surface)" stroke-width="2" />
+        <circle :cx="p.x" :cy="p.y" :r="radius(p.n)" :fill="color(p.n)" stroke="var(--panel)" stroke-width="2" />
         <text :x="p.x + radius(p.n) + 4" :y="p.y + 4">{{ label(p.n.name) }}</text>
         <title>{{ p.n.name }}{{ p.n.location ? `\n${p.n.location}` : '' }}</title>
       </g>
@@ -114,18 +114,18 @@ function label(name: string): string {
     <div class="legend muted">
       <span><i style="background: var(--accent)" />selected</span>
       <span><i style="background: var(--muted)" />code</span>
-      <span><i style="background: var(--warn)" />interface</span>
-      <span><i style="background: var(--bad)" />security-sensitive</span>
-      <span><i style="background: var(--good)" />test</span>
+      <span><i style="background: var(--warning)" />interface</span>
+      <span><i style="background: var(--danger)" />security-sensitive</span>
+      <span><i style="background: var(--success)" />test</span>
       <span>dashed = interface dispatch</span>
     </div>
   </div>
 </template>
 
 <style scoped>
-.canvas-wrap svg { width: 100%; height: auto; display: block; background: var(--surface-2); border-radius: 8px; }
+.canvas-wrap svg { width: 100%; height: auto; display: block; background: var(--panel-2); border-radius: 8px; }
 .node { cursor: pointer; }
-.node text { font: 11px var(--mono); fill: var(--text); paint-order: stroke; stroke: var(--surface-2); stroke-width: 3px; }
+.node text { font: 11px var(--font-mono); fill: var(--ink); paint-order: stroke; stroke: var(--panel-2); stroke-width: 3px; }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; margin-top: 8px; }
 .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
 </style>

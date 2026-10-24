@@ -101,6 +101,7 @@ func ValidateRemote(ctx context.Context, raw string, opts RemoteOptions) (string
 				return "", fmt.Errorf("%w: %s resolves to an internal address", ErrInvalidRemote, u.Hostname())
 			}
 		}
+		rememberPin(u, addrs)
 	}
 	u.Path = strings.TrimSuffix(u.Path, "/")
 	return u.String(), nil
@@ -112,7 +113,10 @@ func remoteEnv(remote string, auth Auth) []string {
 	kv := [][2]string{
 		{"protocol.allow", "never"},
 		{"protocol.https.allow", "always"},
-		{"http.followRedirects", "initial"},
+		// Only the validated URL is contacted. A redirect would send git (and
+		// its credentials) to an address nobody checked against the private
+		// network policy; a moved repository has to be added by its new URL.
+		{"http.followRedirects", "false"},
 		{"core.symlinks", "false"},
 		{"submodule.recurse", "false"},
 	}
@@ -124,6 +128,11 @@ func remoteEnv(remote string, auth Auth) []string {
 			// remote with a port.
 			kv = append(kv, [2]string{fmt.Sprintf("http.https://%s/.extraHeader", u.Host), "Authorization: Basic " + cred})
 		}
+	}
+	// Connect to the addresses ValidateRemote checked, not to whatever the
+	// name resolves to a moment later (DNS rebinding).
+	if entry := pinFor(remote); entry != "" {
+		kv = append(kv, [2]string{"http.curloptResolve", entry})
 	}
 	env := []string{fmt.Sprintf("GIT_CONFIG_COUNT=%d", len(kv))}
 	for i, p := range kv {
@@ -158,6 +167,9 @@ func runRemote(ctx context.Context, dir, remote string, auth Auth, args ...strin
 		if deniedRe.MatchString(msg) {
 			return nil, fmt.Errorf("git %s: %w: %s", args[0], ErrNoAccess, msg)
 		}
+		if redirectRe.MatchString(msg) {
+			return nil, fmt.Errorf("git %s: %w", args[0], ErrRedirected)
+		}
 		return nil, fmt.Errorf("git %s: %w: %s", args[0], err, msg)
 	}
 	return stdout.Bytes(), nil
@@ -171,6 +183,14 @@ var testEnv []string
 // for private repositories, claims it does not exist). Network failures
 // are not ErrNoAccess.
 var ErrNoAccess = errors.New("no access to the repository")
+
+// ErrRedirected means the remote answered with a redirect, which is not
+// followed: the repository has moved, and must be added by its current URL.
+var ErrRedirected = errors.New("the repository redirects to another address; add it by its current URL")
+
+// redirectRe matches git's messages when http.followRedirects is off and the
+// server redirects anyway.
+var redirectRe = regexp.MustCompile(`(?i)unable to update url base from redirection|redirecting to|request(ed)? (url )?returned error: 30\d|http redirect`)
 
 // deniedRe matches git's messages for refused credentials and for private
 // repositories hosts hide behind "not found".

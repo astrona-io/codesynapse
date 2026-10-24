@@ -76,6 +76,7 @@ func Run(t *testing.T, s store.Store) {
 	require.NoError(t, s.EnsureSchema(ctx))
 	require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
 	t.Run("replacement_failure", func(t *testing.T) { replacementContract(t, s) })
+	t.Run("successive_replacements", func(t *testing.T) { successiveContract(t, s) })
 	t.Run("access_projection", func(t *testing.T) { accessContract(t, s) })
 	t.Run("scoped_graph", func(t *testing.T) { scopedContract(t, s) })
 	t.Run("dependency_graph", func(t *testing.T) { dependencyContract(t, s) })
@@ -84,6 +85,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("identity", func(t *testing.T) { identityContract(t, s) })
 	t.Run("memory_counts", func(t *testing.T) { memoryCountsContract(t, s) })
 	t.Run("session_memory", func(t *testing.T) { sessionMemoryContract(t, s) })
+	t.Run("runtime_facts", func(t *testing.T) { runtimeContract(t, s) })
 
 	t.Run("repos", func(t *testing.T) {
 		repo, ok := findRepo(ctx, t, s)
@@ -560,6 +562,8 @@ func Run(t *testing.T, s store.Store) {
 		require.NoError(t, s.AddUsage(ctx, []usage.Bucket{b}))
 		require.NoError(t, s.AddUsage(ctx, []usage.Bucket{{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 1, ResponseTokens: 100, DurationMs: 50, MaxDurationMs: 50},
 			{Day: "2000-01-02", Repo: Repo, Tool: usage.Session, Client: "codex", Calls: 1}}))
+		// Hook reports add only the range counters to the same bucket.
+		require.NoError(t, s.AddUsage(ctx, []usage.Bucket{{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", RangesReturned: 5, RangesRead: 2}}))
 		got, err := s.Usage(ctx, "2000-01-01")
 		require.NoError(t, err)
 		var mine []usage.Bucket
@@ -569,7 +573,8 @@ func Run(t *testing.T, s store.Store) {
 			}
 		}
 		require.Len(t, mine, 2)
-		assert.Equal(t, mine[0], usage.Bucket{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 3, Errors: 1, ResponseTokens: 400, DurationMs: 90, MaxDurationMs: 50})
+		assert.Equal(t, mine[0], usage.Bucket{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 3, Errors: 1, ResponseTokens: 400, DurationMs: 90, MaxDurationMs: 50,
+			RangesReturned: 5, RangesRead: 2})
 		assert.Equal(t, mine[1].Tool, usage.Session)
 		require.NoError(t, s.PruneUsage(ctx, "2000-01-02"))
 		got, err = s.Usage(ctx, "2000-01-01")

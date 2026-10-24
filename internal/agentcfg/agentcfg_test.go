@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
@@ -67,4 +68,39 @@ func TestDetectAlwaysOffersProject(t *testing.T) {
 	}
 	assert.True(t, ids["project"])
 	assert.False(t, ids["gemini"], "no ~/.gemini in an empty home")
+}
+
+func TestCursorSetupInstallsBridgeAndHooksWithoutSecrets(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".cursor")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	config := filepath.Join(dir, "mcp.json")
+	require.NoError(t, os.WriteFile(config, []byte(`{"mcpServers":{"other":{"command":"keep"}}}`), 0o600))
+	stored := 0
+	server := Server{Command: "/opt/bin/codesynapse", URL: "https://mcp.example.test/mcp", APIURL: "https://api.example.test", Token: "csk_personal_test", StoreToken: func(string) (string, error) { stored++; return "private", nil }}
+	for _, target := range Detect(home, t.TempDir()) {
+		if target.ID != "cursor" {
+			continue
+		}
+		require.NoError(t, target.Install(t.Context(), server))
+		require.NoError(t, target.Install(t.Context(), server))
+	}
+	assert.Equal(t, stored, 2)
+	data, err := os.ReadFile(config)
+	require.NoError(t, err)
+	var configJSON struct {
+		Servers map[string]struct {
+			Type, Command string
+			Args          []string
+		} `json:"mcpServers"`
+	}
+	require.NoError(t, json.Unmarshal(data, &configJSON))
+	assert.Equal(t, configJSON.Servers["other"].Command, "keep")
+	assert.Equal(t, configJSON.Servers[Name].Type, "stdio")
+	assert.Equal(t, configJSON.Servers[Name].Args, []string{"mcp", "bridge", "--client", "cursor", "--url", server.URL, "--api-url", server.APIURL})
+	assert.False(t, strings.Contains(string(data), server.Token))
+	hooks, err := os.ReadFile(filepath.Join(dir, "hooks.json"))
+	require.NoError(t, err)
+	assert.True(t, strings.Contains(string(hooks), "beforeMCPExecution"))
+	assert.False(t, strings.Contains(string(hooks), server.Token))
 }

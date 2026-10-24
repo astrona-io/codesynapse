@@ -50,3 +50,13 @@ export function fmtUnit(v: number | null | undefined, unit: string): string {
   if (Math.abs(v) < 10 && !Number.isInteger(v)) return v.toFixed(1)
   return fmtCompact(v)
 }
+
+// deviceName turns a browser's user agent into "Chrome on macOS".
+export function deviceName(ua: string): string {
+  if (!ua) return 'Unknown browser'
+  const browser = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox'
+    : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : /curl|Go-http-client|python/i.test(ua) ? 'A script' : 'A browser'
+  const os = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mac OS X|Macintosh/.test(ua) ? 'macOS'
+    : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : ''
+  return os ? `${browser} on ${os}` : browser
+}

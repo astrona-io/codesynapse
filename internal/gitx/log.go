@@ -71,9 +71,26 @@ func ParseLog(out []byte) ([]Commit, error) {
 			// Binary files report "-" for both counts.
 			added, _ := strconv.Atoi(parts[0])   //nolint:errcheck // "-" for binary files means 0
 			removed, _ := strconv.Atoi(parts[1]) //nolint:errcheck // same as above
-			c.Files = append(c.Files, FileStat{Path: parts[2], Added: added, Removed: removed})
+			c.Files = append(c.Files, FileStat{Path: unquotePath(parts[2]), Added: added, Removed: removed})
 		}
 		commits = append(commits, c)
 	}
 	return commits, nil
+}
+
+// unquotePath decodes the C-style quoting git applies to a path in numstat
+// output when it holds a control character, a double quote, a backslash or
+// (with the default core.quotePath) a non-ASCII byte. The escapes git writes
+// (\t, \n, \", \\ and three-digit octal bytes) are also Go string escapes,
+// so strconv.Unquote decodes them, as diff.go does for diff headers. An
+// unquoted path is returned as is, and so is a malformed quoted one, which
+// cannot match a file anyway.
+func unquotePath(s string) string {
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+		return s
+	}
+	if u, err := strconv.Unquote(s); err == nil {
+		return u
+	}
+	return s
 }

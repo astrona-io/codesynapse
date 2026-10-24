@@ -110,7 +110,7 @@ implements: [internal/store]
           <StatTile label="Types" :value="String(Object.keys(page.facets.types).length)" />
         </div>
 
-        <section v-if="issuesData?.issues.length" class="panel edge--amber">
+        <section v-if="issuesData?.issues.length" class="panel">
           <p class="eyebrow">Needs a look</p>
           <h2>Possible problems in the records</h2>
           <p class="muted small">These are reported, not decided. A person chooses which record is right.</p>

@@ -131,3 +131,23 @@ func TestPRContextNamesDuplicatedChanges(t *testing.T) {
 	assert.Contains(t, got.DuplicatedChanged[0], "edited copies ~80% alike")
 	assert.Contains(t, got.DuplicatedChanged[0], "app/app.go:")
 }
+
+func TestShortenModule(t *testing.T) {
+	const mod = "github.com/acme/app"
+	for _, tt := range []struct{ local, short string }{
+		{"github.com/acme/app/store.Get", "~/store.Get"},
+		{"(*github.com/acme/app/store.Store).Get", "(*~/store.Store).Get"},
+		{"(github.com/acme/app/store.Store).Get", "(~/store.Store).Get"},
+		{"github.com/acme/app.Main", "~.Main"},
+		{"github.com/acme/app", "~"},
+		{"github.com/acme/app-tools/x.F", "github.com/acme/app-tools/x.F"}, // another module that starts the same
+		{"internal/store/store.go", "internal/store/store.go"},
+	} {
+		t.Run(tt.local, func(t *testing.T) {
+			assert.Equal(t, ShortenModule(tt.local, mod), tt.short)
+			assert.Equal(t, ExpandModule(tt.short, mod), tt.local)
+			assert.Equal(t, ShortenModule(tt.local, ""), tt.local, "no module recorded")
+		})
+	}
+	assert.Equal(t, ExpandModule("docs/~notes.md", mod), "docs/~notes.md", "a tilde elsewhere stays")
+}

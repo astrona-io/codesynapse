@@ -6,15 +6,18 @@ const props = withDefaults(defineProps<{
   color?: string
   limit?: number
   empty?: string
-}>(), { color: 'var(--cyan)', limit: 10, empty: 'Nothing yet.' })
+  // suffix follows each value ("%"); scale fixes the full bar (100 for shares).
+  suffix?: string
+  scale?: number
+}>(), { color: 'var(--info)', limit: 10, empty: 'Nothing yet.', suffix: '', scale: 0 })
 const shown = computed(() => props.rows.slice(0, props.limit))
-const max = computed(() => Math.max(1, ...shown.value.map((r) => r.value)))
+const max = computed(() => props.scale || Math.max(1, ...shown.value.map((r) => r.value)))
 </script>
 
 <template>
   <ul v-if="shown.length" class="bar-list">
     <li v-for="r in shown" :key="r.label">
-      <div class="head"><span class="name mono" :title="r.label">{{ r.label }}</span><span class="val">{{ fmtInt(r.value) }}</span></div>
+      <div class="head"><span class="name mono" :title="r.label">{{ r.label }}</span><span class="val">{{ fmtInt(r.value) }}{{ suffix }}</span></div>
       <div class="track"><span :style="{ width: `${(r.value / max) * 100}%`, background: color }" /></div>
       <div v-if="r.detail" class="muted detail">{{ r.detail }}</div>
     </li>

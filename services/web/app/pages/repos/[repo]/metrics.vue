@@ -24,7 +24,7 @@ const short = (p: string) => p.replace(/^.*?\/internal\//, 'internal/').replace(
 
     <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="m">
-      <section class="panel panel--glass bench edge--green">
+      <section class="panel bench">
         <div class="panel__header">
           <div><p class="eyebrow eyebrow--green">Token benchmark</p><h2>Context reduced by {{ (m.benchmark.median_reduction_pct ?? 0).toFixed(1) }}% per question <span class="muted">· median</span></h2></div>
           <span class="badge badge--green">{{ m.benchmark.samples }} sampled functions</span>
@@ -95,14 +95,14 @@ const short = (p: string) => p.replace(/^.*?\/internal\//, 'internal/').replace(
       </section>
 
       <div class="grid cols-2">
-        <section class="panel edge--amber">
+        <section class="panel">
           <p class="eyebrow">Test gaps</p><h2>Complex code no test reaches</h2>
           <div class="table-wrap"><table><tbody>
             <tr v-for="r in m.tests.untested_complex" :key="r.id"><td><NuxtLink :to="explore(r.id)" class="mono">{{ r.name }}</NuxtLink></td><td class="mono muted">{{ r.location }}</td></tr>
           </tbody></table></div>
           <p v-if="!m.tests.untested_complex.length" class="muted">Every function with complexity ≥ 5 is reached by a test.</p>
         </section>
-        <section class="panel edge--violet">
+        <section class="panel">
           <p class="eyebrow">Cleanup</p><h2>Dead-code candidates</h2>
           <p class="muted small">Unexported, no static callers. Functions only used as values (callbacks, handlers) also show up here.</p>
           <div class="table-wrap"><table><tbody>
@@ -117,7 +117,7 @@ const short = (p: string) => p.replace(/^.*?\/internal\//, 'internal/').replace(
 
 <style scoped>
 .bench { gap: 18px; }
-.saving { color: var(--green); }
+.saving { color: var(--success); }
 .small { font-size: 12.5px; }
 .meter { width: 90px; display: inline-block; vertical-align: middle; margin-right: 8px; }
 </style>

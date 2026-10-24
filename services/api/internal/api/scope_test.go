@@ -75,11 +75,12 @@ func TestTenantIsolation(t *testing.T) {
 	assert.Equal(t, bob.do("GET", "/api/v1/sources", "", nil), 403, "mounted sources are for platform admins")
 	assert.Equal(t, carol.do("PUT", "/api/v1/repos/"+storetest.Repo+"/schedule", `{"interval_minutes":60}`, nil), 403, "viewers cannot change schedules")
 	assert.Equal(t, carol.do("DELETE", "/api/v1/repos/"+storetest.Repo, "", nil), 403)
-	for _, endpoint := range []string{"identities", "code-records"} {
+	for _, endpoint := range []string{"identities", "code-records", "identities/reviews"} {
 		assert.Equal(t, bob.do("GET", "/api/v1/repos/secret/"+endpoint, "", nil), 404)
 		assert.Equal(t, carol.do("GET", "/api/v1/repos/"+storetest.Repo+"/"+endpoint, "", nil), 200)
 	}
 	assert.Equal(t, carol.do("POST", "/api/v1/repos/"+storetest.Repo+"/code-records", `{}`, nil), 403)
+	assert.Equal(t, carol.do("POST", "/api/v1/repos/"+storetest.Repo+"/identities/reviews", `{}`, nil), 403)
 
 	var created struct{ Key string }
 	require.Equal(t, carol.do("POST", "/api/v1/me/keys", `{"org":"`+team.Slug+`","name":"agent"}`, &created), 201)

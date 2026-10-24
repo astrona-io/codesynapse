@@ -1,5 +1,6 @@
 // Package lang indexes non-Go source code: Python, JavaScript and
-// TypeScript (including <script> blocks of Vue single-file components).
+// TypeScript (including <script> blocks of Vue single-file components),
+// Java and Kotlin (brace.go and jvm.go), Rust (rust.go), C# (csharp.go), PHP (php.go) and Ruby (ruby.go).
 //
 // The parsers are structural, not full compilers: they find functions,
 // classes and methods with exact line ranges, imports between files, calls
@@ -14,9 +15,11 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
@@ -43,7 +46,12 @@ var skipDirs = map[string]bool{
 
 // Language returns the language of a file name, or "".
 func Language(name string) string {
+	if filepath.Base(name) == "Rakefile" {
+		return Ruby
+	}
 	switch strings.ToLower(filepath.Ext(name)) {
+	case ".rb", ".rake":
+		return Ruby
 	case ".py":
 		return Python
 	case ".js", ".jsx", ".mjs", ".cjs":
@@ -55,6 +63,19 @@ func Language(name string) string {
 		return TypeScript
 	case ".vue":
 		return Vue
+	case ".java":
+		return Java
+	case ".kt", ".kts":
+		return Kotlin
+	case ".rs":
+		return Rust
+	case ".cs":
+		return CSharp
+	case ".php":
+		if strings.HasSuffix(strings.ToLower(name), ".blade.php") {
+			return "" // a Blade template, not PHP code
+		}
+		return PHP
 	}
 	return ""
 }
@@ -74,6 +95,9 @@ type symbol struct {
 	class      string
 	clone      string // structural fingerprint, see cloneHash
 	cloneSig   string
+	// guards are checks the declaration itself carries (@login_required,
+	// an auth mixin): a route it handles inherits them.
+	guards []string
 }
 
 type call struct {
@@ -87,7 +111,14 @@ type fileResult struct {
 	imports  []importRef
 	topCalls []call // module-level calls, attributed to the file
 	findings []finding
-	isTest   bool
+	routes   []route // entry points registered here (routes.go)
+	// includes are Django include() entries: URL prefix -> urls module.
+	includes []routeInclude
+	// rbClasses holds Ruby controller callbacks (ruby.go), for the guards
+	// of the routes their actions handle.
+	rbClasses map[string]*rbClass
+	pkg       string // declared package (Java, Kotlin), "" otherwise
+	isTest    bool
 	// partial is set when the source ended with open brackets or an open
 	// string: declarations after the problem may be missing or misplaced.
 	partial bool
@@ -190,7 +221,7 @@ func Extract(ctx context.Context, repo, root string) (*Result, error) {
 }
 
 func isNestedRepo(dir string) bool {
-	_, err := os.Lstat(filepath.Join(dir, ".git"))
+	_, err := os.Lstat(filepath.Join(dir, ".git")) //nolint:gosec // a directory of the walk, inside root
 	return err == nil
 }
 
@@ -206,6 +237,8 @@ type indexer struct {
 	g     *model.Graph
 	files map[string]*parsedFile // rel -> file
 	res   *Result
+	// rustMods holds the module names of each Rust crate (rust.go).
+	rustMods map[string]map[string]bool
 }
 
 func (ix *indexer) id(kind model.NodeKind, local string) string {
@@ -213,12 +246,20 @@ func (ix *indexer) id(kind model.NodeKind, local string) string {
 }
 
 func (ix *indexer) parse(rel, lang string, src []byte) {
+	// A byte order mark (common in C# files) would hide the first line's
+	// namespace or using from the line-anchored patterns.
+	src = bytes.TrimPrefix(src, []byte("\xef\xbb\xbf"))
 	var fr *fileResult
+	var fr0pkg string
 	offset := 0
 	code := src // the text the parser saw: symbol lines index into it
 	switch lang {
 	case Python:
 		fr = parsePython(src)
+		if path.Base(rel) == "urls.py" {
+			routes, includes := djangoRoutes(string(src))
+			fr.routes, fr.includes = append(fr.routes, routes...), includes
+		}
 	case JavaScript, TypeScript:
 		fr = parseJS(src, lang == TypeScript)
 	case Vue:
@@ -231,7 +272,20 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 			code = script
 		}
 		fr.findings = append(fr.findings, vueRules(src)...)
+	case Java:
+		fr, fr0pkg = parseBrace(src, javaLang)
+	case Kotlin:
+		fr, fr0pkg = parseBrace(src, kotlinLang)
+	case Rust:
+		fr, _ = parseBrace(src, rustLang)
+	case CSharp:
+		fr, fr0pkg = parseBrace(src, csharpLang)
+	case PHP:
+		fr, fr0pkg = parseBrace(src, phpLang)
+	case Ruby:
+		fr = parseRuby(src, rel)
 	}
+	fr.pkg = fr0pkg
 	fr.fingerprint(lang, code)
 	if offset > 0 {
 		fr.shift(offset)
@@ -249,6 +303,9 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 	ix.res.Languages[lang]++
 
 	module := moduleName(rel, lang)
+	if fr.pkg != "" {
+		module = fr.pkg // a JVM package or C#/PHP namespace spans files and folders
+	}
 	lines := strings.Count(string(src), "\n") + 1
 	fileID := ix.id(model.KindFile, rel)
 	analysis := model.Analysis{Level: model.LevelSyntactic, Status: model.StatusComplete}
@@ -336,42 +393,102 @@ func (fr *fileResult) shift(offset int) {
 	for i := range fr.findings {
 		fr.findings[i].line += offset
 	}
+	for i := range fr.routes {
+		fr.routes[i].line += offset
+	}
 }
 
 // link resolves imports and calls once every file is parsed, and emits findings.
 func (ix *indexer) link() {
 	byModule := map[string]*parsedFile{}
+	byPkg := map[string][]*parsedFile{} // JVM package or C# namespace -> its files
 	// Name indexes for calls the import graph cannot resolve: methods on
 	// values of unknown type (obj.save()) and auto-imported functions (Nuxt
 	// composables). Only names that are unique in the repository are used,
 	// so ambiguity never produces a wrong edge.
 	methodsByName := map[string][]string{}
 	funcsByName := map[string][]string{}
-	ctorOf := map[string]string{} // class node id -> constructor id
+	ctorOf := map[string]string{}      // class node id -> constructor id
+	symOf := map[string]*symbol{}      // node id -> declaration, for handler guards
+	fileOf := map[string]*parsedFile{} // node id -> its file
 	for _, pf := range ix.files {
+		for _, s := range pf.fr.symbols {
+			symOf[pf.symIDs[s.name]] = s
+			fileOf[pf.symIDs[s.name]] = pf
+		}
 		byModule[pf.lang+":"+pf.module] = pf
+		if pf.fr.pkg != "" {
+			byPkg[pf.fr.pkg] = append(byPkg[pf.fr.pkg], pf)
+		}
 		for _, s := range pf.fr.symbols {
 			sid := pf.symIDs[s.name]
 			short := lastPart(s.name)
 			switch s.kind {
 			case model.KindMethod:
-				if !pf.fr.isTest && short != "__init__" && short != "constructor" {
-					methodsByName[pf.lang+":"+short] = append(methodsByName[pf.lang+":"+short], sid)
+				if !pf.fr.isTest && short != "__init__" && short != "constructor" && short != "__construct" && short != "initialize" {
+					methodsByName[family(pf.lang)+":"+short] = append(methodsByName[family(pf.lang)+":"+short], sid)
 				}
-				if short == "__init__" || short == "constructor" {
+				if short == "__init__" || short == "constructor" || short == "__construct" || short == "initialize" && pf.lang == Ruby || short == lastPart(s.class) && classBased(pf.lang) {
 					ctorOf[pf.symIDs[s.class]] = sid
 				}
 			case model.KindFunction:
 				if s.exported && !pf.fr.isTest {
-					family := pf.lang
-					if family == Vue || family == TypeScript {
-						family = JavaScript
-					}
-					funcsByName[family+":"+short] = append(funcsByName[family+":"+short], sid)
+					funcsByName[family(pf.lang)+":"+short] = append(funcsByName[family(pf.lang)+":"+short], sid)
 				}
 			}
 		}
 	}
+	// Ruby constants resolve across files by name, as Rails autoloads
+	// them: User and Admin::User name a class wherever it is declared.
+	rubyConst := map[string][]*parsedFile{}
+	for _, pf := range ix.files {
+		if pf.lang != Ruby {
+			continue
+		}
+		for _, s := range pf.fr.symbols {
+			if s.kind == model.KindType {
+				rubyConst[s.name] = append(rubyConst[s.name], pf)
+				if short := lastPart(s.name); short != s.name {
+					rubyConst[short] = append(rubyConst[short], pf)
+				}
+			}
+		}
+	}
+	rubyType := func(recv string) (*parsedFile, string) {
+		name := strings.ReplaceAll(recv, "::", ".")
+		files := rubyConst[name]
+		if len(files) == 0 || recv == "" || recv[0] < 'A' || recv[0] > 'Z' {
+			return nil, ""
+		}
+		var full string
+		for _, s := range files[0].fr.symbols {
+			if s.kind == model.KindType && (s.name == name || lastPart(s.name) == name) {
+				full = s.name
+			}
+		}
+		for _, f := range files[1:] {
+			if f != files[0] { // reopened in several files: ambiguous
+				return nil, ""
+			}
+		}
+		return files[0], full
+	}
+	// Types by short name per language family, for routes that name a
+	// controller class without importing it (Laravel's 'UserController@show',
+	// Rails' to: "users#show"): used only when the name is unique.
+	typesByName := map[string][]string{} // family:Short -> "rel\x00Type"
+	for _, pf := range ix.files {
+		for _, s := range pf.fr.symbols {
+			if s.kind == model.KindType {
+				k := family(pf.lang) + ":" + lastPart(s.name)
+				typesByName[k] = append(typesByName[k], pf.rel+"\x00"+s.name)
+			}
+		}
+	}
+	for _, files := range byPkg {
+		slices.SortFunc(files, func(a, b *parsedFile) int { return strings.Compare(a.rel, b.rel) })
+	}
+	djangoPrefix := ix.djangoPrefixes(byModule)
 	unique := func(m map[string][]string, key string) (string, model.Evidence) {
 		if ids := m[key]; len(ids) == 1 {
 			return ids[0], model.EvidenceInferred
@@ -381,10 +498,41 @@ func (ix *indexer) link() {
 	for _, pf := range ix.files {
 		// local name -> target node id, via imports
 		bound := map[string]string{}
+		boundFile := map[string]*parsedFile{} // imported type -> its file
+		boundName := map[string]string{}      // local name -> declared name (import aliases)
 		moduleAlias := map[string]*parsedFile{}
+		// Namespaces whose types need no qualification: the file's own
+		// package, and for C# its parents and every using directive.
+		scope := []string{pf.fr.pkg}
+		if pf.lang == CSharp {
+			for ns := pf.fr.pkg; strings.Contains(ns, "."); {
+				ns = ns[:strings.LastIndexByte(ns, '.')]
+				scope = append(scope, ns)
+			}
+		}
 		for _, imp := range pf.fr.imports {
-			target := ix.resolveImport(pf, imp.spec, byModule)
+			if pf.lang == CSharp && len(imp.names) == 0 {
+				if csLocalNamespace(byPkg, imp.spec) {
+					scope = append(scope, imp.spec)
+				} else if ext := externalName(imp.spec, pf.lang); ext != "" {
+					ix.res.ExternalImports[ext] = append(ix.res.ExternalImports[ext], pf.id)
+				}
+				continue
+			}
+			target := ix.resolveImport(pf, imp, byModule, byPkg)
+			if pf.lang == Python {
+				// from . import views binds a module of the package, which is
+				// not a symbol of its __init__.
+				for local, member := range imp.names {
+					if f, ok := byModule[Python+":"+strings.Trim(pyModulePath(pf, imp.spec)+"."+member, ".")]; ok && member != "*" {
+						moduleAlias[local] = f
+					}
+				}
+			}
 			if target == nil {
+				if pf.lang == Rust && ix.rustLocal(pf, imp.spec) || pf.lang == CSharp && csLocalNamespace(byPkg, imp.spec) {
+					continue
+				}
 				if ext := externalName(imp.spec, pf.lang); ext != "" {
 					ix.res.ExternalImports[ext] = append(ix.res.ExternalImports[ext], pf.id)
 				}
@@ -396,18 +544,39 @@ func (ix *indexer) link() {
 					moduleAlias[local] = target
 					continue
 				}
+				// use crate::db; binds a module: db::open() calls into it.
+				if pf.lang == Rust {
+					if m := ix.rustResolve(pf, imp.spec+"::"+member, true); m != nil {
+						moduleAlias[local] = m
+						continue
+					}
+				}
 				if sid, ok := target.symIDs[member]; ok {
 					bound[local] = sid
+					boundFile[local] = target
+					boundName[local] = member
 				}
 			}
 		}
-		family := pf.lang
-		if family == Vue || family == TypeScript {
-			family = JavaScript
+		fam := family(pf.lang)
+		// samePackage finds a declaration in another file of a JVM package
+		// or a C# namespace in scope, which needs no import.
+		samePackage := func(name string) string {
+			for _, ns := range scope {
+				for _, f := range byPkg[ns] {
+					if sid, ok := f.symIDs[name]; ok && ns != "" {
+						return sid
+					}
+				}
+			}
+			return ""
 		}
 		// resolve finds a call's target and says how: through declarations
 		// and imports (syntactic) or a repository-unique name (inferred).
 		resolve := func(c call, class string) (string, model.Evidence) {
+			if pf.lang == PHP && (c.recv == "$this" || c.recv == "static") {
+				c.recv = "this"
+			}
 			declared := func(sid string) (string, model.Evidence) {
 				if sid == "" {
 					return "", ""
@@ -422,21 +591,58 @@ func (ix *indexer) link() {
 				if sid, ok := bound[c.name]; ok {
 					return declared(sid)
 				}
+				if classBased(pf.lang) {
+					// Inside a class a plain call is one of its methods.
+					if sid, ok := pf.symIDs[class+"."+c.name]; ok && class != "" {
+						return declared(sid)
+					}
+					if sid := samePackage(c.name); sid != "" {
+						return declared(sid)
+					}
+					// Java and C# have no free functions: a call without a receiver
+					// name is a method of a chained expression (new A().f()).
+					if sid, ev := unique(funcsByName, fam+":"+c.name); sid != "" {
+						return sid, ev
+					}
+					return unique(methodsByName, fam+":"+c.name)
+				}
+				if pf.lang == PHP {
+					if sid := samePackage(c.name); sid != "" { // a function of the namespace
+						return declared(sid)
+					}
+				}
+				if pf.lang == Ruby {
+					return "", "" // a bare word may be a local variable: only declarations count
+				}
 				if pf.lang != Python {
-					return unique(funcsByName, family+":"+c.name)
+					return unique(funcsByName, fam+":"+c.name)
 				}
 			case "self", "this", "cls":
 				if class != "" {
 					return declared(pf.symIDs[class+"."+c.name])
 				}
 			default:
+				if pf.lang == Ruby {
+					if f, typ := rubyType(c.recv); f != nil {
+						if c.name == "new" { // User.new runs initialize (ctorOf)
+							return declared(f.symIDs[typ])
+						}
+						return declared(f.symIDs[typ+"."+c.name])
+					}
+				}
 				if m, ok := moduleAlias[c.recv]; ok {
 					return declared(m.symIDs[c.name])
 				}
 				if sid, ok := pf.symIDs[c.recv+"."+c.name]; ok { // Class.static()
 					return declared(sid)
 				}
-				return unique(methodsByName, pf.lang+":"+c.name)
+				if f, ok := boundFile[c.recv]; ok { // ImportedClass.static(), also through an alias
+					return declared(f.symIDs[boundName[c.recv]+"."+c.name])
+				}
+				if sid := samePackage(c.recv + "." + c.name); sid != "" {
+					return declared(sid)
+				}
+				return unique(methodsByName, fam+":"+c.name)
 			}
 			return "", ""
 		}
@@ -463,6 +669,60 @@ func (ix *indexer) link() {
 		for _, c := range pf.fr.topCalls {
 			link(top, c, "")
 		}
+		// A route's handler as written: a function of the file, then through
+		// the file's imports like a call, then a class the repository
+		// declares once under that name.
+		if !pf.fr.isTest {
+			for _, r := range pf.fr.routes {
+				if p := djangoPrefix[pf]; p != "" {
+					r.name = strings.TrimSuffix(p, "/") + "/" + strings.TrimPrefix(r.name, "/")
+				}
+				to, evidence := "", model.Evidence("")
+				local := r.handler
+				if r.recv != "" {
+					local = r.recv + "." + r.handler
+				}
+				switch {
+				case r.handler == "":
+				case pf.symIDs[local] != "":
+					to, evidence = pf.symIDs[local], model.EvidenceSyntactic
+				default:
+					if f, typ := rubyType(r.recv); pf.lang == Ruby && f != nil {
+						// The action itself, even when it is named new (which
+						// in a call constructs the class).
+						to, evidence = f.symIDs[typ+"."+r.handler], model.EvidenceSyntactic
+					} else if pf.lang != Ruby || r.recv == "" {
+						to, evidence = resolve(call{recv: r.recv, name: r.handler}, "")
+					}
+					if r.recv != "" && evidence == model.EvidenceInferred {
+						to = "" // a method name alone does not say which class the route names
+					}
+					if to == "" && r.recv != "" {
+						cls := r.recv[strings.LastIndexAny(r.recv, `.:\`)+1:]
+						if ts := typesByName[fam+":"+cls]; len(ts) == 1 {
+							rel, typ, _ := strings.Cut(ts[0], "\x00")
+							to, evidence = ix.files[rel].symIDs[typ+"."+r.handler], model.EvidenceInferred
+						}
+					}
+				}
+				// What the handler declares counts only when it reads as an
+				// access check: a controller's before_action list or a view's
+				// decorators also load records and set headers.
+				if s := symOf[to]; s != nil {
+					r.guards = append(slices.Clip(r.guards), AccessGuards(s.guards)...)
+					if c := symOf[fileOf[to].symIDs[s.class]]; c != nil && s.class != "" {
+						r.guards = append(r.guards, AccessGuards(c.guards)...) // a class-based view's mixins
+					}
+					if f, typ := rubyType(s.class); pf.lang == Ruby && f != nil {
+						r.guards = append(r.guards, AccessGuards(rubyActionGuards(f.fr.rbClasses, typ, lastPart(s.name), rubyType))...)
+					}
+				}
+				id := ix.addRoute(pf, r)
+				if to != "" {
+					ix.g.AddEdge(model.Edge{From: id, To: to, Kind: model.EdgeHandledBy, Evidence: evidence})
+				}
+			}
+		}
 		for _, f := range pf.fr.findings {
 			if pf.fr.isTest {
 				continue // fixtures with fake secrets would bury real findings
@@ -479,20 +739,31 @@ func (ix *indexer) link() {
 }
 
 // resolveImport maps an import spec to an in-repo file.
-func (ix *indexer) resolveImport(pf *parsedFile, spec string, byModule map[string]*parsedFile) *parsedFile {
+func (ix *indexer) resolveImport(pf *parsedFile, imp importRef, byModule map[string]*parsedFile, byPkg map[string][]*parsedFile) *parsedFile {
+	spec := imp.spec
 	switch pf.lang {
-	case Python:
-		mod := spec
-		if strings.HasPrefix(spec, ".") { // relative import
-			dots := len(spec) - len(strings.TrimLeft(spec, "."))
-			base := strings.Split(pf.module, ".")
-			if len(base) >= dots {
-				base = base[:len(base)-dots]
+	case Rust:
+		return ix.rustResolve(pf, spec, false)
+	case Ruby:
+		return rubyResolveRequire(ix.files, pf.rel, spec)
+	case Java, Kotlin, CSharp, PHP:
+		// com.acme.Foo is Foo in package com.acme, in Java or Kotlin; a C#
+		// alias or static using names a type the same way.
+		for _, member := range imp.names {
+			first, _, _ := strings.Cut(member, ".")
+			pkg := spec
+			if !strings.Contains(member, ".") {
+				pkg = strings.TrimSuffix(spec, "."+member)
 			}
-			rest := strings.TrimLeft(spec, ".")
-			mod = strings.Join(append(base, strings.Split(rest, ".")...), ".")
-			mod = strings.Trim(mod, ".")
+			for _, f := range byPkg[pkg] {
+				if _, ok := f.symIDs[first]; ok {
+					return f
+				}
+			}
 		}
+		return nil
+	case Python:
+		mod := pyModulePath(pf, spec)
 		for _, candidate := range []string{mod, strings.TrimSuffix(mod, ".__init__")} {
 			if f, ok := byModule[Python+":"+candidate]; ok {
 				return f
@@ -524,6 +795,21 @@ func (ix *indexer) resolveImport(pf *parsedFile, spec string, byModule map[strin
 	return nil
 }
 
+// pyModulePath is the absolute module a Python import names, resolving
+// relative imports (from .x import y) against the importing file.
+func pyModulePath(pf *parsedFile, spec string) string {
+	if !strings.HasPrefix(spec, ".") {
+		return spec
+	}
+	dots := len(spec) - len(strings.TrimLeft(spec, "."))
+	base := strings.Split(pf.module, ".")
+	if len(base) >= dots {
+		base = base[:len(base)-dots]
+	}
+	rest := strings.TrimLeft(spec, ".")
+	return strings.Trim(strings.Join(append(base, strings.Split(rest, ".")...), "."), ".")
+}
+
 // srcRoot guesses the directory "@/" aliases point at (src/ or app/).
 func srcRoot(rel string) string {
 	parts := strings.Split(rel, "/")
@@ -537,6 +823,26 @@ func srcRoot(rel string) string {
 
 // externalName returns the package name of a third-party import.
 func externalName(spec, lang string) string {
+	if lang == Rust {
+		first, _, _ := strings.Cut(spec, "::")
+		switch first {
+		case "crate", "self", "super", "std", "core", "alloc", "proc_macro", "test", "":
+			return ""
+		}
+		return first // a crate: Cargo advisories become "imported"
+	}
+	if lang == Ruby {
+		if strings.HasPrefix(spec, ".") {
+			return ""
+		}
+		return spec // a require path; a gem's name usually starts it (internal/vuln)
+	}
+	if isJVM(lang) || lang == PHP {
+		return "" // Maven and Composer names do not follow package names
+	}
+	if lang == CSharp {
+		return spec // a namespace; NuGet IDs usually prefix it (internal/vuln)
+	}
 	if lang == Python {
 		if strings.HasPrefix(spec, ".") {
 			return ""
@@ -560,6 +866,14 @@ func moduleName(rel, lang string) string {
 		m = strings.TrimSuffix(m, "/__init__")
 		return strings.ReplaceAll(m, "/", ".")
 	}
+	if lang == Rust {
+		root, mod := rustModule(rel)
+		crate := path.Base(root)
+		if root == "." || root == "" {
+			crate = "crate"
+		}
+		return strings.Trim(crate+"::"+mod, ":")
+	}
 	ext := filepath.Ext(rel)
 	return strings.TrimSuffix(rel, ext)
 }
@@ -567,6 +881,26 @@ func moduleName(rel, lang string) string {
 func isTestPath(rel, lang string) bool {
 	base := path.Base(rel)
 	switch lang {
+	case Rust:
+		return strings.Contains("/"+rel, "/tests/") || strings.Contains("/"+rel, "/benches/")
+	case PHP:
+		return strings.Contains("/"+strings.ToLower(rel), "/tests/") || strings.HasSuffix(base, "Test.php")
+	case Ruby:
+		return strings.HasSuffix(base, "_spec.rb") || strings.HasSuffix(base, "_test.rb") ||
+			strings.Contains("/"+rel, "/spec/") || strings.Contains("/"+rel, "/test/")
+	case CSharp:
+		stem := strings.TrimSuffix(base, ".cs")
+		for _, dir := range strings.Split(path.Dir(rel), "/") {
+			if strings.HasSuffix(dir, ".Tests") || strings.HasSuffix(dir, ".Test") || strings.HasSuffix(dir, ".UnitTests") ||
+				strings.HasSuffix(dir, ".IntegrationTests") || dir == "test" || dir == "tests" {
+				return true
+			}
+		}
+		return strings.HasSuffix(stem, "Tests") || strings.HasSuffix(stem, "Test")
+	case Java, Kotlin:
+		stem := strings.TrimSuffix(strings.TrimSuffix(base, path.Ext(base)), ".")
+		return strings.Contains("/"+rel, "/src/test/") || strings.HasSuffix(stem, "Test") || strings.HasSuffix(stem, "Tests") ||
+			strings.HasSuffix(stem, "IT") || strings.HasSuffix(stem, "Spec")
 	case Python:
 		return strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py") || base == "conftest.py" || strings.Contains("/"+rel, "/tests/")
 	default:
@@ -622,3 +956,85 @@ func countWord(s, w string) int {
 func isIdent(r rune) bool {
 	return r == '_' || r == '$' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
+
+// addRoute adds one entry point as a Route node; its guards are those seen
+// at registration and those its handler carries.
+func (ix *indexer) addRoute(pf *parsedFile, r route) string {
+	local := routeLocal(r, pf.module)
+	id := ix.id(model.KindRoute, local)
+	var guards []string
+	for _, g := range r.guards {
+		if !slices.Contains(guards, g) {
+			guards = append(guards, g)
+		}
+	}
+	ix.g.AddNode(model.Node{
+		ID: id, Kind: model.KindRoute, Repo: ix.repo, Name: r.name, QualifiedName: local, Package: pf.module, File: pf.rel,
+		StartLine: r.line, EndLine: r.line, Signature: r.kind, Language: pf.lang,
+		Summary: redact.Summary(strings.Join(guards[:min(len(guards), 4)], "; "), 200),
+	})
+	return id
+}
+
+// pyModuleFile finds a Python module by name, also when the project sits in
+// a folder of the repository (blog.urls stored as site.blog.urls).
+func pyModuleFile(byModule map[string]*parsedFile, mod string) *parsedFile {
+	if f, ok := byModule[Python+":"+mod]; ok {
+		return f
+	}
+	var best *parsedFile
+	for key, f := range byModule {
+		if strings.HasPrefix(key, Python+":") && strings.HasSuffix(key, "."+mod) && (best == nil || len(f.module) < len(best.module) || len(f.module) == len(best.module) && f.rel < best.rel) {
+			best = f
+		}
+	}
+	return best
+}
+
+// routeInclude is a Django include(): the URL prefix and the urls module.
+type routeInclude struct{ prefix, module string }
+
+// djangoPrefixes gives each urls.py file the prefix its include() chain
+// mounts it under (blog/urls.py under "blog/" from the root urls.py).
+func (ix *indexer) djangoPrefixes(byModule map[string]*parsedFile) map[*parsedFile]string {
+	prefix := map[*parsedFile]string{}
+	for range 6 { // include chains are shallow; this bounds cycles
+		changed := false
+		for _, rel := range slices.Sorted(maps.Keys(ix.files)) {
+			pf := ix.files[rel]
+			for _, inc := range pf.fr.includes {
+				target := pyModuleFile(byModule, pyModulePath(pf, inc.module))
+				if target == nil || target == pf {
+					continue
+				}
+				p := strings.TrimSuffix(prefix[pf], "/") + "/" + strings.Trim(inc.prefix, "/")
+				if _, seen := prefix[target]; !seen || len(p) < len(prefix[target]) {
+					prefix[target], changed = p, true
+				}
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	return prefix
+}
+
+func routeLocal(r route, module string) string { return r.kind + " " + r.name + " (" + module + ")" }
+
+// family groups languages whose code calls each other by name.
+func family(lang string) string {
+	switch lang {
+	case Vue, TypeScript:
+		return JavaScript
+	case Kotlin:
+		return Java
+	}
+	return lang
+}
+
+func isJVM(lang string) bool { return lang == Java || lang == Kotlin }
+
+// classBased languages have methods in classes and constructors named
+// after them, and resolve plain calls within the class and its package.
+func classBased(lang string) bool { return isJVM(lang) || lang == CSharp }

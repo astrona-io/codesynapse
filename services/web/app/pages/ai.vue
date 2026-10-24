@@ -64,7 +64,7 @@ const resultOf = (n: string) => tests.value[n]
       </ol>
     </div>
 
-    <section v-if="data?.providers.length" class="panel edge--orange routing">
+    <section v-if="data?.providers.length" class="panel routing">
       <div class="panel__header">
         <div><p class="eyebrow">Routing</p><h2>Which model does what</h2></div>
         <div class="row">
@@ -90,7 +90,7 @@ const resultOf = (n: string) => tests.value[n]
     </section>
 
     <div v-if="data?.providers.length" class="grid cols-2">
-      <section v-for="p in data.providers" :key="p.name" class="panel provider" :class="p.local ? 'edge--green' : 'edge--violet'">
+      <section v-for="p in data.providers" :key="p.name" class="panel provider">
         <div class="panel__header">
           <div>
             <p class="eyebrow">{{ p.kind === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible' }} · {{ p.local ? 'local' : 'cloud' }}</p>
@@ -135,11 +135,11 @@ const resultOf = (n: string) => tests.value[n]
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13.5px; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; }
-.ok { color: var(--green); }
+.ok { color: var(--success); }
 .small { font-size: 12.5px; }
 .facts-list { display: grid; gap: 6px; }
 .routing { gap: 12px; }
 .route { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 360px); gap: 14px; align-items: center; padding: 10px 0; border-top: 1px dashed var(--line); }
-.route--global strong { color: var(--orange-ink); }
+.route--global strong { color: var(--accent-ink); }
 @media (max-width: 700px) { .route { grid-template-columns: 1fr; } }
 </style>
