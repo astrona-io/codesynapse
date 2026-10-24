@@ -17,7 +17,7 @@ var Sets = map[string][]string{
 	Core:       {"minimal_context", "get_symbol_context", "get_call_graph", "get_implementations", "file_outline", "search", "get_pr_context", "repo_status", "verify_plan", "change_checklist", "handoff_context"},
 	"repos":    {"repo_list", "search_all_repos", "repo_overview", "repo_metrics", "repo_trend", "hotspots", "file_history", "ingestion_report"},
 	"docs":     {"get_config_entries", "get_doc_section"},
-	"security": {"security_report", "security_symbols", "rule_guide", "license_report"},
+	"security": {"security_report", "security_symbols", "attack_surface", "rule_guide", "license_report"},
 	"architecture": {"architecture_search", "architecture_get", "architecture_context", "architecture_issues",
 		"architecture_proposals", "architecture_propose", "architecture_link"},
 	"memory":   {"search_graph_nodes", "query_subgraph", "recall_context", "upsert_graph_triples", "offload_turns"},

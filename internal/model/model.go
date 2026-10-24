@@ -47,6 +47,18 @@ const (
 	KindRecord NodeKind = "Record"
 	// KindComponent is a part of the system that records apply to.
 	KindComponent NodeKind = "Component"
+	// KindRoute is an entry point the code registers: an HTTP route, an MCP
+	// tool or a CLI command. Signature holds its kind (http, mcp, cli), Name
+	// what a caller uses ("GET /api/x", the tool or command name), File and
+	// StartLine where it is registered, Summary the guards seen there.
+	KindRoute NodeKind = "Route"
+)
+
+// Route kinds (Signature of a Route node).
+const (
+	RouteHTTP = "http"
+	RouteMCP  = "mcp"
+	RouteCLI  = "cli"
 )
 
 // AllNodeKinds lists every valid node kind. Stores use it as the allowlist
@@ -55,7 +67,7 @@ var AllNodeKinds = []NodeKind{
 	KindRepository, KindPackage, KindFile, KindFunction, KindMethod,
 	KindInterfaceMethod, KindType, KindExternal, KindDocument, KindSection,
 	KindCommit, KindAuthor, KindFinding, KindModule, KindVulnerability,
-	KindConfig, KindConfigEntry, KindTemplate, KindTemplateDef, KindRecord, KindComponent,
+	KindConfig, KindConfigEntry, KindTemplate, KindTemplateDef, KindRecord, KindComponent, KindRoute,
 	KindOrganization, KindUser, KindTeam, KindAccessRepository, KindSessionMemoryEntity,
 }
 
@@ -108,6 +120,8 @@ const (
 	// EdgeReferences links code to a function or method it uses as a value
 	// (a handler, callback or method value) without calling it directly.
 	EdgeReferences EdgeKind = "REFERENCES"
+	// EdgeHandledBy links a Route to the function or method that serves it.
+	EdgeHandledBy EdgeKind = "HANDLED_BY"
 )
 
 // Architecture catalog edges.
@@ -128,7 +142,7 @@ var AllEdgeKinds = []EdgeKind{
 	EdgeSessionFact,
 	EdgeContains, EdgeDefines, EdgeHasMethod, EdgeCalls, EdgeDispatchesTo,
 	EdgeImplements, EdgeImports, EdgeMentions, EdgeModifies, EdgeAuthored,
-	EdgeHasFinding, EdgeDependsOn, EdgeAffects, EdgeIncludes, EdgeUsesValue, EdgeReferences,
+	EdgeHasFinding, EdgeDependsOn, EdgeAffects, EdgeIncludes, EdgeUsesValue, EdgeReferences, EdgeHandledBy,
 	EdgeMemberOf, EdgeBelongsTo, EdgeHasAccess,
 	EdgeSupersedes, EdgeAppliesTo, EdgeImplementsDecision, EdgeRelatesTo,
 }
@@ -412,6 +426,9 @@ func (n Node) ShortName() string {
 	switch n.Kind {
 	case KindFile, KindDocument, KindSection, KindPackage, KindCommit, KindAuthor, KindRepository:
 		return n.DisplayName()
+	case KindRoute:
+		// "http GET /api/x": a route's path is no import path.
+		return n.Signature + " " + n.Name
 	}
 	return importPathPrefix.ReplaceAllString(n.DisplayName(), "")
 }

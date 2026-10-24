@@ -117,11 +117,14 @@ type SymbolContext struct {
 	Tests           []Ref           `json:"tests"`
 	UntestedCallers []Ref           `json:"untested_public_callers,omitempty"`
 	Implementations []Ref           `json:"implementations,omitempty"`
-	Docs            []Ref           `json:"docs,omitempty"`
-	Findings        []Ref           `json:"findings,omitempty"`
-	Churn           *Churn          `json:"churn,omitempty"`
-	Package         *PackageCtx     `json:"package,omitempty"`
-	Analysis        *AnalysisNote   `json:"analysis,omitempty"`
+	// ReachedFrom lists the entry points (HTTP routes, MCP tools, CLI
+	// commands) whose handlers lead here through the call graph.
+	ReachedFrom []Ref         `json:"reached_from,omitempty"`
+	Docs        []Ref         `json:"docs,omitempty"`
+	Findings    []Ref         `json:"findings,omitempty"`
+	Churn       *Churn        `json:"churn,omitempty"`
+	Package     *PackageCtx   `json:"package,omitempty"`
+	Analysis    *AnalysisNote `json:"analysis,omitempty"`
 	// Duplicate is set when the function has exact or edited copies elsewhere.
 	Duplicate *duplicates.Info `json:"duplicate,omitempty"`
 	// Measured is the function's coverage in the last recorded test run.
@@ -135,6 +138,7 @@ type Counts struct {
 	Callees            int `json:"callees"`
 	Tests              int `json:"tests"`
 	Implementations    int `json:"implementations,omitempty"`
+	EntryPoints        int `json:"entry_points,omitempty"`
 	CallerTestsChecked int `json:"caller_tests_checked,omitempty"`
 	CallerTestsOmitted int `json:"caller_tests_omitted,omitempty"`
 }
@@ -200,6 +204,9 @@ func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts Co
 		return out, err
 	}
 	if err := s.labelEvidence(ctx, n.ID, tests, out.Tests, nil, nil); err != nil {
+		return out, err
+	}
+	if out.ReachedFrom, out.Counts.EntryPoints, err = s.reachedFrom(ctx, n.ID, limit); err != nil {
 		return out, err
 	}
 	if f, ok, stale, err := s.runtimeFacts(ctx, repo); err != nil {
