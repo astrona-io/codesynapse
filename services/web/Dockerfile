@@ -21,5 +21,5 @@ COPY LICENSE NOTICE /usr/share/licenses/codesynapse/
 COPY --from=build --chown=node:node /app/.output ./.output
 USER node
 EXPOSE 3000
-HEALTHCHECK --interval=15s --timeout=3s --start-period=10s CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s CMD ["wget", "-qO-", "http://127.0.0.1:3000/api/health"]
 CMD ["node", ".output/server/index.mjs"]

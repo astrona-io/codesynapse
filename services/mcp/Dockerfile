@@ -25,6 +25,6 @@ COPY LICENSE NOTICE /usr/share/licenses/codesynapse/
 COPY --from=build /out/codesynapse-mcp /usr/local/bin/codesynapse-mcp
 USER codesynapse
 EXPOSE 8090
-HEALTHCHECK --interval=15s --timeout=3s --start-period=20s CMD wget -qO- http://127.0.0.1:8090/healthz || exit 1
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s CMD ["wget", "-qO-", "http://127.0.0.1:8090/healthz"]
 ENTRYPOINT ["codesynapse-mcp"]
 CMD ["serve"]
