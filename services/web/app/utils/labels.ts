@@ -2,16 +2,16 @@
 // speaks the same words.
 
 export const FORMAT_LABELS: Record<string, string> = {
-  go: 'Go', python: 'Python', typescript: 'TypeScript', javascript: 'JavaScript', vue: 'Vue',
+  go: 'Go', python: 'Python', typescript: 'TypeScript', javascript: 'JavaScript', vue: 'Vue', java: 'Java', kotlin: 'Kotlin',
   yaml: 'YAML', helm: 'Helm', 'go-template': 'Go templates', markdown: 'Markdown',
   'github-actions': 'GitHub Actions', compose: 'Compose', npm: 'npm lockfiles', pypi: 'Python lockfiles',
 }
 
 // Display order: code first, then config, then docs and dependency manifests.
-export const FORMAT_ORDER = ['go', 'python', 'typescript', 'javascript', 'vue', 'helm', 'yaml', 'github-actions', 'compose', 'go-template', 'markdown', 'npm', 'pypi']
+export const FORMAT_ORDER = ['go', 'python', 'typescript', 'javascript', 'vue', 'java', 'kotlin', 'helm', 'yaml', 'github-actions', 'compose', 'go-template', 'markdown', 'npm', 'pypi']
 
 export const FORMAT_GROUP: Record<string, 'code' | 'config' | 'docs' | 'deps'> = {
-  go: 'code', python: 'code', typescript: 'code', javascript: 'code', vue: 'code',
+  go: 'code', python: 'code', typescript: 'code', javascript: 'code', vue: 'code', java: 'code', kotlin: 'code',
   yaml: 'config', helm: 'config', 'go-template': 'config', 'github-actions': 'config', compose: 'config',
   markdown: 'docs', npm: 'deps', pypi: 'deps',
 }

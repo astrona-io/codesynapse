@@ -4,7 +4,7 @@ title: Unsafe deserialisation
 severity: high
 cwe: [CWE-502]
 category: code
-languages: [python]
+languages: [python, java, kotlin]
 why: Deserialising untrusted pickle or unsafe YAML can execute arbitrary code.
 fix: Use json or yaml.safe_load; never unpickle untrusted data.
 references:
@@ -17,3 +17,6 @@ examples:
     fixed: |-
       data = json.loads(blob)
       cfg = yaml.safe_load(text)
+  - language: java
+    vulnerable: 'Object o = new ObjectInputStream(request.getInputStream()).readObject();'
+    fixed: 'User u = objectMapper.readValue(request.getInputStream(), User.class);'

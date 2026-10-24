@@ -4,7 +4,7 @@ title: Process started from a non-constant program name
 severity: medium
 cwe: [CWE-78]
 category: code
-languages: [go, python, javascript, typescript]
+languages: [go, python, javascript, typescript, java, kotlin]
 why: Starting a program whose name or command line comes from data lets that data choose what runs.
 fix: Allowlist the binary; never take it from user input.
 references:
@@ -23,3 +23,6 @@ examples:
   - language: typescript
     vulnerable: 'spawn(cmd, { shell: true })'
     fixed: spawn('/usr/bin/tar', ['xzf', path])
+  - language: java
+    vulnerable: 'Runtime.getRuntime().exec(command);'
+    fixed: 'new ProcessBuilder(List.of("convert", "--", name, "out.png")).start();'

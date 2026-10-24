@@ -73,3 +73,25 @@ func TestBuild(t *testing.T) {
 	assert.Equal(t, plan.Notes[0], "a.U: no test reaches it in the graph, but the run at abc measured 2 of 4 statements covered (50%)")
 	assert.Contains(t, plan.Notes[1], "TestF: flaky in the last recorded run (1 passed, 1 failed)")
 }
+
+func TestBuildJVM(t *testing.T) {
+	ctx := context.Background()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindRepository, "r"), Kind: model.KindRepository, Repo: "r", Name: "r"})
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindFile, "build.gradle.kts"), Kind: model.KindFile, Repo: "r", Name: "build.gradle.kts", File: "build.gradle.kts"})
+	f := model.NodeID("r", model.KindMethod, "src/main/java/a/Svc.java::Svc.find")
+	g.AddNode(model.Node{ID: f, Kind: model.KindMethod, Repo: "r", Name: "find", QualifiedName: "com.acme.Svc.find", File: "src/main/java/a/Svc.java", StartLine: 1, EndLine: 5})
+	tst := model.NodeID("r", model.KindMethod, "src/test/java/a/SvcTest.java::SvcTest.findsOne")
+	g.AddNode(model.Node{ID: tst, Kind: model.KindMethod, Repo: "r", Name: "findsOne", QualifiedName: "com.acme.SvcTest.findsOne", File: "src/test/java/a/SvcTest.java", StartLine: 1, EndLine: 4, IsTest: true})
+	g.AddEdge(model.Edge{From: tst, To: f, Kind: model.EdgeCalls})
+	mem := memory.New()
+	require.NoError(t, mem.ReplaceRepo(ctx, "r", g))
+	rep, err := review.Analyze(ctx, query.Service{R: mem}, "r", []gitx.FileChange{{Path: "src/main/java/a/Svc.java", Ranges: []gitx.LineRange{{Start: 1, End: 5}}}}, review.Options{Depth: 3})
+	require.NoError(t, err)
+	plan, err := Build(ctx, mem, "r", rep)
+	require.NoError(t, err)
+	require.Len(t, plan.Steps, 2)
+	assert.Equal(t, plan.Steps[0].Command, "./gradlew test --tests 'com.acme.SvcTest.findsOne'")
+	assert.Contains(t, plan.Steps[0].Why, "with maven: mvn -q -Dtest='SvcTest#findsOne' test")
+	assert.Equal(t, plan.Steps[1].Command, "./gradlew classes testClasses")
+}

@@ -4,7 +4,7 @@ title: SQL query built from non-constant strings
 severity: high
 cwe: [CWE-89]
 category: code
-languages: [go, python, javascript, typescript]
+languages: [go, python, javascript, typescript, java, kotlin]
 why: 'Building SQL from strings lets input change the query itself: read other rows, bypass auth, drop tables.'
 fix: Use placeholders ($1, ?) and pass values as arguments.
 references:
@@ -19,3 +19,6 @@ examples:
   - language: typescript
     vulnerable: db.query(`SELECT * FROM users WHERE name = '${name}'`)
     fixed: db.query('SELECT * FROM users WHERE name = $1', [name])
+  - language: java
+    vulnerable: 'stmt.executeQuery("SELECT * FROM users WHERE id = ''" + id + "''");'
+    fixed: 'PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE id = ?"); ps.setString(1, id);'
