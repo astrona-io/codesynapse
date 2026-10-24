@@ -217,7 +217,7 @@ func TestPHP(t *testing.T) {
 		"GET /users/{id}": show.ID,
 		"POST /users":     store,
 		"PUT /users":      store,
-		"GET /dashboard":  "", // the controller is in another file
+		"GET /dashboard":  show.ID, // [UserController::class, 'show'] through the use import
 		"POST /login":     "",
 	})
 	assert.Equal(t, guards["POST /users"], "IsGranted('ROLE_USER')")

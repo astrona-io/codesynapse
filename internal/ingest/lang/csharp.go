@@ -213,7 +213,10 @@ func csMinimalRoutes(raw string, line int) []route {
 	if m == nil {
 		return nil
 	}
-	r := route{kind: model.RouteHTTP, name: strings.ToUpper(m[1]) + " /" + strings.TrimPrefix(m[2], "/"), line: line, handler: lastPart(m[3])}
+	r := route{kind: model.RouteHTTP, name: strings.ToUpper(m[1]) + " /" + strings.TrimPrefix(m[2], "/"), line: line, handler: m[3]}
+	if i := strings.LastIndexByte(m[3], '.'); i > 0 { // Handlers.List
+		r.recv, r.handler = m[3][:i], m[3][i+1:]
+	}
 	for _, g := range []string{"RequireAuthorization", "AllowAnonymous"} {
 		if strings.Contains(raw, "."+g+"(") {
 			r.guards = append(r.guards, g)

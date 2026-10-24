@@ -66,6 +66,10 @@ end
     render json: { name: "#{@user.display_name} }", end: 1 }
   end
 
+  def new
+    @user = User.new(nil)
+  end
+
   def create
     user = User.new(params[:name])
     items.each do |item|
@@ -83,13 +87,20 @@ end
 `,
 	"config/routes.rb": `Rails.application.routes.draw do
   root "home#index"
-  resources :users, only: [:index, :show] do
+  resources :users, only: [:index, :show, :new] do
     resources :posts, except: [:destroy, :edit, :new, :update]
   end
   namespace :admin do
     get "stats", to: "stats#show"
   end
   post "/login" => "sessions#create"
+end
+`,
+	"app/controllers/admin/stats_controller.rb": `module Admin
+  class StatsController < ApplicationController
+    def show
+    end
+  end
 end
 `,
 	"app.rb": `require "sinatra"
@@ -134,7 +145,7 @@ func TestRuby(t *testing.T) {
 	res, err := Extract(context.Background(), "r", dir)
 	require.NoError(t, err)
 	g := res.Graph
-	assert.Equal(t, res.Languages[Ruby], 8)
+	assert.Equal(t, res.Languages[Ruby], 9)
 	id := func(k model.NodeKind, rel, name string) string { return model.NodeID("r", k, rel+"::"+name) }
 	node := func(nid string) model.Node {
 		t.Helper()
@@ -151,8 +162,8 @@ func TestRuby(t *testing.T) {
 	assert.True(t, node(id(model.KindMethod, um, "User.display_name")).Exported)
 	show := node(id(model.KindMethod, uc, "UsersController.show"))
 	assert.Equal(t, show.EndLine, 18, "a heredoc, an if block and a brace in an interpolated string")
-	assert.Equal(t, node(id(model.KindMethod, uc, "UsersController.create")).EndLine, 26, "a do block")
-	assert.Equal(t, node(id(model.KindType, uc, "UsersController")).EndLine, 33)
+	assert.Equal(t, node(id(model.KindMethod, uc, "UsersController.create")).EndLine, 30, "a do block")
+	assert.Equal(t, node(id(model.KindType, uc, "UsersController")).EndLine, 37)
 	slug := node(id(model.KindMethod, "lib/helpers.rb", "Helpers.slug"))
 	assert.Equal(t, slug.EndLine, slug.StartLine, "an endless def")
 	assert.True(t, node(id(model.KindMethod, "test/models/user_test.rb", "UserTest.test_display_name")).IsTest)
@@ -204,16 +215,25 @@ func TestRuby(t *testing.T) {
 		assert.False(t, ok, local+" is a file of the repository")
 	}
 
-	var routes []string
-	for _, n := range g.Nodes() {
-		if n.Kind == model.KindRoute {
-			routes = append(routes, n.Name)
+	handlers := map[string]string{}
+	for _, e := range g.Edges() {
+		if e.Kind == model.EdgeHandledBy {
+			handlers[e.From] = e.To
 		}
 	}
-	slices.Sort(routes)
-	assert.Equal(t, routes, []string{
-		"GET /", "GET /admin/stats", "GET /hello", "GET /users", "GET /users/:id",
-		"GET /users/:user_id/posts", "GET /users/:user_id/posts/:id", "POST /login", "POST /users/:user_id/posts",
+	routes := map[string]string{}
+	for _, n := range g.Nodes() {
+		if n.Kind == model.KindRoute {
+			routes[n.Name] = handlers[n.ID]
+		}
+	}
+	assert.Equal(t, routes, map[string]string{
+		"GET /": "", "GET /hello": "", "POST /login": "", // HomeController and SessionsController are not in the fixture
+		"GET /admin/stats":          id(model.KindMethod, "app/controllers/admin/stats_controller.rb", "Admin.StatsController.show"),
+		"GET /users":                id(model.KindMethod, uc, "UsersController.index"),
+		"GET /users/:id":            show.ID,
+		"GET /users/new":            id(model.KindMethod, uc, "UsersController.new"), // the action, not the constructor
+		"GET /users/:user_id/posts": "", "GET /users/:user_id/posts/:id": "", "POST /users/:user_id/posts": "",
 	})
 }
 

@@ -88,7 +88,7 @@ func TestJSRoutes(t *testing.T) {
 	assert.Equal(t, got["http GET /users"].guards, []string{"requireAuth"})
 	assert.Equal(t, got["http POST /users"].handler, "", "inline handler")
 	assert.Equal(t, got["http DELETE /users/:id"].guards, []string{"requireAdmin"})
-	assert.Equal(t, got["http DELETE /users/:id"].handler, "", "removeUser is not a function of this file")
+	assert.Equal(t, got["http DELETE /users/:id"].handler, "removeUser", "kept for link(), which resolves it through imports")
 	assert.Equal(t, got["mcp search"].line, 11)
 }
 

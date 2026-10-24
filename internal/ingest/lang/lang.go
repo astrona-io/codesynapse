@@ -247,6 +247,9 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 	switch lang {
 	case Python:
 		fr = parsePython(src)
+		if path.Base(rel) == "urls.py" {
+			fr.routes = append(fr.routes, djangoRoutes(string(src))...)
+		}
 	case JavaScript, TypeScript:
 		fr = parseJS(src, lang == TypeScript)
 	case Vue:
@@ -457,6 +460,18 @@ func (ix *indexer) link() {
 		}
 		return files[0], full
 	}
+	// Types by short name per language family, for routes that name a
+	// controller class without importing it (Laravel's 'UserController@show',
+	// Rails' to: "users#show"): used only when the name is unique.
+	typesByName := map[string][]string{} // family:Short -> "rel\x00Type"
+	for _, pf := range ix.files {
+		for _, s := range pf.fr.symbols {
+			if s.kind == model.KindType {
+				k := family(pf.lang) + ":" + lastPart(s.name)
+				typesByName[k] = append(typesByName[k], pf.rel+"\x00"+s.name)
+			}
+		}
+	}
 	for _, files := range byPkg {
 		slices.SortFunc(files, func(a, b *parsedFile) int { return strings.Compare(a.rel, b.rel) })
 	}
@@ -491,6 +506,15 @@ func (ix *indexer) link() {
 				continue
 			}
 			target := ix.resolveImport(pf, imp, byModule, byPkg)
+			if pf.lang == Python {
+				// from . import views binds a module of the package, which is
+				// not a symbol of its __init__.
+				for local, member := range imp.names {
+					if f, ok := byModule[Python+":"+strings.Trim(pyModulePath(pf, imp.spec)+"."+member, ".")]; ok && member != "*" {
+						moduleAlias[local] = f
+					}
+				}
+			}
 			if target == nil {
 				if pf.lang == Rust && ix.rustLocal(pf, imp.spec) || pf.lang == CSharp && csLocalNamespace(byPkg, imp.spec) {
 					continue
@@ -631,6 +655,44 @@ func (ix *indexer) link() {
 		for _, c := range pf.fr.topCalls {
 			link(top, c, "")
 		}
+		// A route's handler as written: a function of the file, then through
+		// the file's imports like a call, then a class the repository
+		// declares once under that name.
+		if !pf.fr.isTest {
+			for _, r := range pf.fr.routes {
+				to, evidence := "", model.Evidence("")
+				local := r.handler
+				if r.recv != "" {
+					local = r.recv + "." + r.handler
+				}
+				switch {
+				case r.handler == "":
+				case pf.symIDs[local] != "":
+					to, evidence = pf.symIDs[local], model.EvidenceSyntactic
+				default:
+					if f, typ := rubyType(r.recv); pf.lang == Ruby && f != nil {
+						// The action itself, even when it is named new (which
+						// in a call constructs the class).
+						to, evidence = f.symIDs[typ+"."+r.handler], model.EvidenceSyntactic
+					} else if pf.lang != Ruby || r.recv == "" {
+						to, evidence = resolve(call{recv: r.recv, name: r.handler}, "")
+					}
+					if r.recv != "" && evidence == model.EvidenceInferred {
+						to = "" // a method name alone does not say which class the route names
+					}
+					if to == "" && r.recv != "" {
+						cls := r.recv[strings.LastIndexAny(r.recv, `.:\`)+1:]
+						if ts := typesByName[fam+":"+cls]; len(ts) == 1 {
+							rel, typ, _ := strings.Cut(ts[0], "\x00")
+							to, evidence = ix.files[rel].symIDs[typ+"."+r.handler], model.EvidenceInferred
+						}
+					}
+				}
+				if to != "" {
+					ix.g.AddEdge(model.Edge{From: ix.id(model.KindRoute, routeLocal(r, pf.module)), To: to, Kind: model.EdgeHandledBy, Evidence: evidence})
+				}
+			}
+		}
 		for _, f := range pf.fr.findings {
 			if pf.fr.isTest {
 				continue // fixtures with fake secrets would bury real findings
@@ -671,17 +733,7 @@ func (ix *indexer) resolveImport(pf *parsedFile, imp importRef, byModule map[str
 		}
 		return nil
 	case Python:
-		mod := spec
-		if strings.HasPrefix(spec, ".") { // relative import
-			dots := len(spec) - len(strings.TrimLeft(spec, "."))
-			base := strings.Split(pf.module, ".")
-			if len(base) >= dots {
-				base = base[:len(base)-dots]
-			}
-			rest := strings.TrimLeft(spec, ".")
-			mod = strings.Join(append(base, strings.Split(rest, ".")...), ".")
-			mod = strings.Trim(mod, ".")
-		}
+		mod := pyModulePath(pf, spec)
 		for _, candidate := range []string{mod, strings.TrimSuffix(mod, ".__init__")} {
 			if f, ok := byModule[Python+":"+candidate]; ok {
 				return f
@@ -711,6 +763,21 @@ func (ix *indexer) resolveImport(pf *parsedFile, imp importRef, byModule map[str
 		}
 	}
 	return nil
+}
+
+// pyModulePath is the absolute module a Python import names, resolving
+// relative imports (from .x import y) against the importing file.
+func pyModulePath(pf *parsedFile, spec string) string {
+	if !strings.HasPrefix(spec, ".") {
+		return spec
+	}
+	dots := len(spec) - len(strings.TrimLeft(spec, "."))
+	base := strings.Split(pf.module, ".")
+	if len(base) >= dots {
+		base = base[:len(base)-dots]
+	}
+	rest := strings.TrimLeft(spec, ".")
+	return strings.Trim(strings.Join(append(base, strings.Split(rest, ".")...), "."), ".")
 }
 
 // srcRoot guesses the directory "@/" aliases point at (src/ or app/).
@@ -860,22 +927,21 @@ func isIdent(r rune) bool {
 	return r == '_' || r == '$' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
 
-// addRoutes adds the file's entry points as Route nodes, each linked to its
-// handler when that is a function of the file.
+// addRoutes adds the file's entry points as Route nodes; link() connects
+// them to their handlers once imports are resolved.
 func (ix *indexer) addRoutes(pf *parsedFile, module string) {
 	for _, r := range pf.fr.routes {
-		local := r.kind + " " + r.name + " (" + module + ")"
+		local := routeLocal(r, module)
 		id := ix.id(model.KindRoute, local)
 		ix.g.AddNode(model.Node{
 			ID: id, Kind: model.KindRoute, Repo: ix.repo, Name: r.name, QualifiedName: local, Package: module, File: pf.rel,
 			StartLine: r.line, EndLine: r.line, Signature: r.kind, Language: pf.lang,
 			Summary: redact.Summary(strings.Join(r.guards[:min(len(r.guards), 4)], "; "), 200),
 		})
-		if sid, ok := pf.symIDs[r.handler]; ok && r.handler != "" {
-			ix.g.AddEdge(model.Edge{From: id, To: sid, Kind: model.EdgeHandledBy, Evidence: model.EvidenceSyntactic})
-		}
 	}
 }
+
+func routeLocal(r route, module string) string { return r.kind + " " + r.name + " (" + module + ")" }
 
 // family groups languages whose code calls each other by name.
 func family(lang string) string {
