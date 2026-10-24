@@ -116,6 +116,7 @@ type Server struct {
 	cfg         Config
 	st          store.Store
 	jobs        *Jobs
+	notify      notifyCache
 	// offload extracts memory triples from conversation turns (local model only).
 	offload *offload.Worker
 	recall  *recall.Service
@@ -295,6 +296,7 @@ func (s *Server) routes() {
 	s.repoPolicyRoutes()
 	s.runtimeRoutes()
 	s.retrievalRoutes()
+	s.notificationRoutes()
 	s.route("GET /api/v1/overview", visibleOnly, s.handleWorkspaceOverview)
 	s.route("GET /api/v1/attention", visibleOnly, s.handleAttention)
 	s.route("GET /api/v1/stats", visibleOnly, s.handleStats)

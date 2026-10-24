@@ -370,6 +370,11 @@ type Store interface {
 	// Attempts at or before since, of any key, may be deleted. Every API
 	// replica shares the count (login limits, docs/SAAS.md 6c).
 	TakeAttempt(ctx context.Context, key string, limit int, since, now time.Time) (bool, error)
+	// NotificationsSeen is when the user last marked the dashboard's
+	// notifications read (zero when never). SetNotificationsSeen only moves
+	// it forward.
+	NotificationsSeen(ctx context.Context, userID string) (time.Time, error)
+	SetNotificationsSeen(ctx context.Context, userID string, at time.Time) error
 	// Durable jobs (jobs.go). AddJob refuses a second active job for the
 	// same repository (ErrJobActive). RenewJobLeases extends every active
 	// job owner holds. FinishJob ends a job owner still holds and clears its

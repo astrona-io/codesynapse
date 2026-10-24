@@ -74,6 +74,10 @@ export interface RepoInfo { name: string; head?: string; ingested_at?: string; r
 export interface SiteSearchHit { kind: string; repo: string; id?: string; name: string; location?: string; file?: string; severity?: string }
 export interface SiteSearch { results: SiteSearchHit[]; searched: number; truncated: boolean }
 
+// The dashboard's notifications (GET /notifications).
+export interface AppNotification { id: string; kind: 'findings' | 'sync_failed' | 'review'; tone: 'bad' | 'warn' | 'info'; repo: string; title: string; body?: string; link: string; at: string }
+export interface AppNotifications { items: AppNotification[]; seen_at?: string; unread: number }
+
 export interface RepoSections {
   packages: number; symbols: number; documents: number; config_files: number; k8s_resources: number; helm_charts: number
   records: number; proposals: number; dependencies: number; licences: boolean; findings: number
