@@ -169,6 +169,11 @@
         "stateless": {
           "description": "No transport session between requests, so any replica answers any request without sticky sessions.",
           "type": "boolean"
+        },
+        "toolsets": {
+          "description": "Toolsets for connections that name none: all, or core plus a comma list (repos, docs, security, architecture, memory, cleanup, reviews, identity). Clients choose their own with /mcp?toolsets=...",
+          "type": "string",
+          "pattern": "^(all|[a-z]+(,[a-z]+)*)$"
         }
       }
     },

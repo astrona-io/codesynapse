@@ -65,6 +65,7 @@ nav:
       - Security model: operations/security-model.md
       - Running the stack: operations/running.md
       - Claude Code bridge: operations/claude-code-bridge.md
+      - Claude Code plugin: operations/claude-code-plugin.md
       - Releasing: operations/releasing.md
       - Upgrading: operations/upgrading.md
   - Reference:

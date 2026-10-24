@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["memory", "recall", "--hook"], "timeout": 30 }] }
+    ],
+    "PreCompact": [
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["memory", "offload", "--hook"], "timeout": 60 }] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Read", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "read"], "timeout": 10 }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "stop"], "timeout": 30 }] }
+    ]
+  }
+}

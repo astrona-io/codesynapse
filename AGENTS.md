@@ -121,6 +121,7 @@ just chart-failover-postgres   # after chart-e2e: CloudNativePG with three insta
 just chart-failover-milvus     # after chart-e2e: Milvus cluster (SeaweedFS, Woodpecker), kill nodes under writes
 just chart-install-published X.Y.Z   # a released chart and images on the kind cluster (release check)
 just mcp        # register the MCP server with Claude Code, Codex, Gemini, OpenCode, Cursor
+just plugin-check   # Claude Code's validator on plugins/codesynapse (needs the claude CLI; CI runs TestPluginFiles)
 ```
 
 Test the Helm chart only on the throwaway kind cluster of `just chart-e2e` (`kind-codesynapse-dev`), with `--context`/`--kube-context` set explicitly; never on a shared or production cluster. Run `just chart-check` for any chart change.
