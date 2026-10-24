@@ -5,10 +5,10 @@
   "tasks": 58,
   "summary": {
     "minimal_context": {
-      "recall_at_5": 0.12,
-      "recall_at_10": 0.182,
-      "hit_at_10": 0.5,
-      "tokens": 1349,
+      "recall_at_5": 0.123,
+      "recall_at_10": 0.199,
+      "hit_at_10": 0.534,
+      "tokens": 1366,
       "errors": 0
     },
     "search": {
