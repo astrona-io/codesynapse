@@ -14,7 +14,7 @@ import (
 // turns do not carry definitions it never calls. The core set is always
 // served; without a selection a connection gets every tool.
 var Sets = map[string][]string{
-	Core:       {"minimal_context", "get_symbol_context", "get_call_graph", "get_implementations", "file_outline", "search", "get_pr_context", "repo_status", "verify_plan", "change_checklist"},
+	Core:       {"minimal_context", "get_symbol_context", "get_call_graph", "get_implementations", "file_outline", "search", "get_pr_context", "repo_status", "verify_plan", "change_checklist", "handoff_context"},
 	"repos":    {"repo_list", "search_all_repos", "repo_overview", "repo_metrics", "repo_trend", "hotspots", "file_history", "ingestion_report"},
 	"docs":     {"get_config_entries", "get_doc_section"},
 	"security": {"security_report", "security_symbols", "rule_guide", "license_report"},

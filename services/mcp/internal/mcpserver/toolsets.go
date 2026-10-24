@@ -84,6 +84,7 @@ var instructionRules = [][]clause{
 	{{nil, `Test boundaries: before editing a symbol, check its tests (is_test: true callers) to confirm safety and find fixtures.`}},
 	{{nil, `Changes that ripple: before renaming, changing a signature or removing a symbol, call change_checklist and work through every item it lists (callers, implementations and mocks, references, docs) instead of grepping.`}},
 	{{nil, `Read narrowly: file_outline and the "read"/"location" fields give file:start-end ranges; read only those lines.`}},
+	{{nil, `Delegating: before you hand work to a subagent, call handoff_context with its task and paste the brief it returns into the subagent's prompt.`}},
 	{{nil, `Verify before you finish: verify_plan turns your change into the exact test, build and lint commands to run, closest tests first; run them instead of the whole suite or nothing.`}},
 	{
 		{nil, `Freshness and breadth: repo_status says whether the graph is current;`},

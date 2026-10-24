@@ -36,6 +36,7 @@ var toolPolicies = map[string]toolPolicy{
 	"get_pr_context":         {accounts.Viewer, "repository"},
 	"verify_plan":            {accounts.Viewer, "repository"},
 	"change_checklist":       {accounts.Viewer, "repository"},
+	"handoff_context":        {accounts.Viewer, "repository"},
 	"unused_code":            {accounts.Viewer, "repository"},
 	"duplicate_code":         {accounts.Viewer, "repository"},
 	"cleanup_plan":           {accounts.Viewer, "repository"},

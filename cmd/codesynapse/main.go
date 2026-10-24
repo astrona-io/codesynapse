@@ -621,7 +621,7 @@ func (o *mcpInstallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "API the Claude Code bridge registers chat sessions with")
 	f.BoolVarP(&o.yes, "yes", "y", false, "Install into every detected agent without asking")
 	f.StringSliceVar(&o.only, "only", nil, "Limit to these agents (claude, codex, gemini, opencode, cursor, project)")
-	f.StringVar(&o.profile, "profile", toolsets.Core, "Toolsets the agents get: core (the ten everyday tools), all, or core plus a comma list of "+strings.Join(toolsets.Names(), ", "))
+	f.StringVar(&o.profile, "profile", toolsets.Core, "Toolsets the agents get: core (the eleven everyday tools), all, or core plus a comma list of "+strings.Join(toolsets.Names(), ", "))
 	return nil
 }
 func (o *mcpInstallOptions) Complete(context.Context, *app.Env) error { return nil }

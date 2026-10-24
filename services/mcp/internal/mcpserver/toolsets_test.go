@@ -61,7 +61,7 @@ func TestEveryToolInOneToolset(t *testing.T) {
 		assert.True(t, toolsetOf(name) != "", "%s belongs to a toolset", name)
 	}
 	assert.Equal(t, len(seen), len(tools), "the sets list exactly the tools a full server registers")
-	assert.Len(t, Toolsets[ToolsetCore], 10)
+	assert.Len(t, Toolsets[ToolsetCore], 11)
 }
 
 func TestToolsetSelection(t *testing.T) {
@@ -86,7 +86,7 @@ func TestToolsetSelection(t *testing.T) {
 	}
 	assert.True(t, len(text) < len(allText), "instructions shrink with the toolset")
 	assert.Contains(t, text, "Reuse before you write")
-	assert.Contains(t, text, "9. Freshness and breadth: repo_status says whether the graph is current.")
+	assert.Contains(t, text, "10. Freshness and breadth: repo_status says whether the graph is current.")
 
 	some := all
 	some.Toolsets = []string{ToolsetCore, "memory", "reviews"}
@@ -95,7 +95,7 @@ func TestToolsetSelection(t *testing.T) {
 	assert.Contains(t, text, "submit_review")
 	assert.False(t, strings.Contains(text, "security_report"), "reviews without security leave it out")
 	assert.Contains(t, text, "recall_context")
-	assert.Contains(t, text, "\n12. Memory", "memory follows the rules shown: nine core, reviews, reuse")
+	assert.Contains(t, text, "\n13. Memory", "memory follows the rules shown: ten core, reviews, reuse")
 
 	for _, name := range []string{"submit_review", "search_all_repos", "security_report", "architecture_context", "recall_context", "duplicate_code", "get_doc_section"} {
 		assert.Contains(t, allText, name, "every tool's guidance with all sets")

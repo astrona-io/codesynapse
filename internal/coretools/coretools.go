@@ -10,11 +10,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/astrona-io/codesynapse/internal/agentctx"
+	"github.com/astrona-io/codesynapse/internal/catalog"
+	"github.com/astrona-io/codesynapse/internal/handoff"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/review"
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/verifyplan"
 )
@@ -24,7 +28,7 @@ const MaxDiffBytes = 4 << 20
 
 // Local are the tools a graph of one working tree can answer: they read
 // one repository's code graph and nothing stored beside it.
-var Local = []string{"minimal_context", "get_symbol_context", "get_call_graph", "get_implementations", "file_outline", "search", "get_pr_context", "verify_plan", "change_checklist"}
+var Local = []string{"minimal_context", "get_symbol_context", "get_call_graph", "get_implementations", "file_outline", "search", "get_pr_context", "verify_plan", "change_checklist", "handoff_context"}
 
 // RepoArg selects the repository.
 type RepoArg struct {
@@ -249,4 +253,62 @@ type ChecklistIn struct {
 func ChangeChecklist(ctx context.Context, r store.Reader, repo string, in ChecklistIn) (agentctx.Checklist, error) {
 	out, err := agentctx.Service{R: r}.Checklist(ctx, repo, in.Symbol, in.Change, in.Limit, in.MaxTokens)
 	return compact(repo, out, err)
+}
+
+// HandoffIn is handoff_context's input.
+type HandoffIn struct {
+	RepoArg
+	Task      string   `json:"task" jsonschema:"the subagent's task, in plain words"`
+	Files     []string `json:"files,omitempty" jsonschema:"files the subagent will work in; derived from the task when omitted"`
+	Symbols   []string `json:"symbols,omitempty" jsonschema:"symbols the subagent will touch (for the rules that apply to them)"`
+	MaxTokens int      `json:"max_tokens,omitempty" jsonschema:"size of the brief, estimated tokens (bytes/4); default 1200, at most 4000"`
+}
+
+// Handoff answers handoff_context: a paste-ready briefing for a subagent.
+// cat, when set, adds the architecture rules in force; issues are open
+// issues from durable memory (the server has them, the bridge does not).
+func Handoff(ctx context.Context, r store.Reader, cat *catalog.Service, repo string, in HandoffIn, issues []string) (handoff.Briefing, error) {
+	if strings.TrimSpace(in.Task) == "" {
+		return handoff.Briefing{}, errors.New("task is required")
+	}
+	if len(in.Files) > 20 || len(in.Symbols) > 20 {
+		return handoff.Briefing{}, errors.New("at most 20 files and 20 symbols")
+	}
+	mc, err := MinimalContext(ctx, r, repo, MinimalContextIn{Task: in.Task, Files: in.Files})
+	if err != nil {
+		return handoff.Briefing{}, err
+	}
+	scope := in.Files
+	if len(scope) == 0 {
+		for _, it := range mc.Items {
+			if f := fileOf(it.Read); f != "" && !slices.Contains(scope, f) && len(scope) < 5 {
+				scope = append(scope, f)
+			}
+		}
+	}
+	parts := handoff.Parts{Repo: repo, Task: in.Task, Revision: mc.Revision, Start: mc.Items, OpenIssues: issues}
+	if len(scope) > 0 {
+		if parts.Plan, err = VerifyPlan(ctx, r, repo, VerifyPlanIn{Files: scope}); err != nil {
+			return handoff.Briefing{}, err
+		}
+		if parts.Findings, err = review.Findings(ctx, store.ForRepository(r, repo), repo, scope); err != nil {
+			return handoff.Briefing{}, err
+		}
+	}
+	if cat != nil {
+		res, err := cat.Context(ctx, repo, catalog.Task{Query: in.Task, Files: scope, Symbols: in.Symbols, Limit: 5})
+		if err != nil {
+			return handoff.Briefing{}, err
+		}
+		parts.Rules, parts.Conflicts = res.Binding, res.Issues
+	}
+	return handoff.Write(parts, in.MaxTokens), nil
+}
+
+// fileOf drops a location's line range ("a/b.go:10-20" -> "a/b.go").
+func fileOf(loc string) string {
+	if i := strings.LastIndexByte(loc, ':'); i > 0 && strings.Trim(loc[i+1:], "0123456789-") == "" {
+		return loc[:i]
+	}
+	return loc
 }

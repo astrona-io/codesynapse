@@ -90,6 +90,16 @@ func fingerprint(f DeltaFinding) string {
 	return f.Rule + "\x00" + f.Owner + "\x00" + file
 }
 
+// Findings lists the security findings in files with the symbol that owns
+// each, most severe first.
+func Findings(ctx context.Context, r store.Reader, repo string, files []string) ([]DeltaFinding, error) {
+	out, err := findingsIn(ctx, r, repo, files)
+	slices.SortFunc(out, func(a, b DeltaFinding) int {
+		return cmp.Or(cmp.Compare(model.SeverityRank(b.Severity), model.SeverityRank(a.Severity)), cmp.Compare(a.Location, b.Location))
+	})
+	return out, err
+}
+
 // findingsIn lists the findings in files with the symbol that owns each.
 func findingsIn(ctx context.Context, r store.Reader, repo string, files []string) ([]DeltaFinding, error) {
 	var out []DeltaFinding

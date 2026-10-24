@@ -14,7 +14,8 @@ CodeSynapse has indexed this repository's code, docs, YAML, history and dependen
 3. **Interfaces:** `get_implementations`, never grep for interface calls. Deeper tracing: `get_call_graph` (depth 2).
 4. **Files:** `file_outline` first, then read only the line ranges you need. A whole read of a large file is turned back once with its outline; read it again if you really need all of it.
 5. **Changes that ripple:** before a rename, a signature change or a removal, `change_checklist` with `change` set, and work through every item it lists (callers, implementations and mocks, references, docs). Search for the name at the end for what its notes say the graph cannot see.
-6. **Before you finish:**
+6. **Delegating to a subagent:** `handoff_context` with its task and the files it will work in; paste the returned `brief` into the subagent's prompt.
+7. **Before you finish:**
    - `verify_plan` (no arguments: your current change) and run the commands it lists, closest tests first.
    - `get_pr_context` (no arguments) and check `security_delta`: fix anything listed under `introduced`, and anything flagged untested or high risk, or say why not.
 
