@@ -70,6 +70,10 @@ export interface Dashboard {
 }
 export interface RepoInfo { name: string; head?: string; ingested_at?: string; root?: string; branch?: string; remote?: string; managed?: boolean }
 // What a repository has, for its menu (GET /repos/{repo}/sections).
+// One result of the site search (GET /search).
+export interface SiteSearchHit { kind: string; repo: string; id?: string; name: string; location?: string; file?: string; severity?: string }
+export interface SiteSearch { results: SiteSearchHit[]; searched: number; truncated: boolean }
+
 export interface RepoSections {
   packages: number; symbols: number; documents: number; config_files: number; k8s_resources: number; helm_charts: number
   records: number; proposals: number; dependencies: number; licences: boolean; findings: number

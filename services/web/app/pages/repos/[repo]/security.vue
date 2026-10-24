@@ -43,7 +43,8 @@ const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info']
 const sevFilter = ref<string>('all')
 const reachFilter = ref<string>('all')
 const exposedOnly = ref(false)
-const q = ref('')
+// ?q= comes from the top bar's search, which opens a finding here.
+const q = ref(typeof route.query.q === 'string' ? route.query.q : '')
 
 const findings = computed(() =>
   (rep.value?.findings ?? []).filter((f) =>
