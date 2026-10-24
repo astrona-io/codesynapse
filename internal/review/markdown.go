@@ -1,6 +1,7 @@
 package review
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"strconv"
@@ -16,6 +17,19 @@ func WriteMarkdown(w io.Writer, r Report) error {
 	fmt.Fprintf(&b, "# Review context: %s\n\n", r.Repo)
 	fmt.Fprintf(&b, "**Max risk: %s** · %d files · %d symbols changed · %d impacted · %d untested · %d security-sensitive · %d with copies\n\n",
 		s.MaxLevel, s.ChangedFiles, s.ChangedSymbols, s.ImpactedSymbols, s.UntestedChanges, s.SecuritySensitive, s.DuplicatedChanges)
+
+	if d := r.Security; d != nil {
+		fmt.Fprintf(&b, "**Security: this change %s** (compared with %s; %d findings unchanged)\n\n", d.Headline(), cmp.Or(d.Base, "the base"), d.Unchanged)
+		for _, f := range d.New {
+			fmt.Fprintf(&b, "- new %s `%s` in `%s` at %s: %s\n", f.Severity, f.Rule, f.Owner, f.Location, f.Title)
+		}
+		for _, f := range d.Removed {
+			fmt.Fprintf(&b, "- fixed %s `%s` in `%s`: %s\n", f.Severity, f.Rule, f.Owner, f.Title)
+		}
+		if len(d.New)+len(d.Removed) > 0 {
+			b.WriteString("\n")
+		}
+	}
 
 	if len(r.Changes) > 0 {
 		b.WriteString("## Changed symbols (highest risk first)\n\n")

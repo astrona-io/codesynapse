@@ -97,18 +97,8 @@ func (o *evalOptions) Run(ctx context.Context, _ *app.Env) error {
 
 	// The graph is built at base, in a worktree of its own, so no answer
 	// can draw on the change it is asked about.
-	tmp, err := os.MkdirTemp("", "codesynapse-eval-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tmp) //nolint:errcheck // temporary
-	wt := filepath.Join(tmp, "base")
-	if err := gitx.AddWorktree(ctx, o.root, wt, base); err != nil {
-		return err
-	}
-	defer gitx.RemoveWorktree(context.WithoutCancel(ctx), o.root, wt) //nolint:errcheck // best effort
 	repo := cmpOr(o.repo, filepath.Base(o.root))
-	g, err := ingest.Run(ctx, ingest.Options{Repo: repo, Root: wt, AllowNetwork: o.allowNetwork})
+	g, err := ingest.AtCommit(ctx, o.root, base, ingest.Options{Repo: repo, AllowNetwork: o.allowNetwork})
 	if err != nil {
 		return err
 	}

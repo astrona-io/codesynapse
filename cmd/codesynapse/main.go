@@ -195,6 +195,7 @@ type reviewOptions struct {
 	diffFile             string
 	depth                int
 	offline              bool
+	findingsDelta        bool
 	root                 string
 }
 
@@ -208,6 +209,7 @@ func (o *reviewOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.diffFile, "diff", "", "Read a unified diff from this file ('-' for stdin) instead of running git")
 	f.IntVar(&o.depth, "depth", 3, "Caller traversal depth")
 	f.BoolVar(&o.offline, "offline", false, "Build the graph in memory from the working tree instead of querying HugeGraph")
+	f.BoolVar(&o.findingsDelta, "findings-delta", true, "With --offline and a git diff, also index the base and report which security findings the change introduces and fixes")
 	return nil
 }
 
@@ -270,12 +272,50 @@ func (o *reviewOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return err
 	}
+	if o.offline && o.findingsDelta && o.diffFile == "" {
+		if rep.Security, err = o.securityDelta(ctx, r, changes); err != nil {
+			return err
+		}
+	}
 	if o.EC.Output == app.OutputJSON {
 		enc := json.NewEncoder(o.EC.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(rep)
 	}
 	return review.WriteMarkdown(o.EC.Stdout, rep)
+}
+
+// securityDelta indexes where the change left the base branch and compares
+// the findings of the changed files with the working tree's.
+func (o *reviewOptions) securityDelta(ctx context.Context, head store.Reader, changes []gitx.FileChange) (*review.SecurityDelta, error) {
+	for _, rev := range []string{o.base, o.head} {
+		if err := gitx.ValidateRev(rev); err != nil {
+			return nil, err
+		}
+	}
+	out, err := gitx.Run(ctx, o.root, "merge-base", "--end-of-options", o.base, o.head)
+	if err != nil {
+		return nil, fmt.Errorf("finding where the change left %s: %w", o.base, err)
+	}
+	commit := strings.TrimSpace(string(out))
+	g, err := ingest.AtCommit(ctx, o.root, commit, ingest.Options{ApprovedPolicyDigest: o.approvedPolicyDigest, Repo: o.repo})
+	if err != nil {
+		return nil, fmt.Errorf("indexing the base %s: %w", short(commit), err)
+	}
+	base := memory.New()
+	if err := base.ReplaceRepo(ctx, o.repo, g); err != nil {
+		return nil, err
+	}
+	files := make([]string, 0, len(changes))
+	for _, c := range changes {
+		files = append(files, c.Path)
+	}
+	d, err := review.CompareFindings(ctx, base, head, o.repo, files)
+	if err != nil {
+		return nil, err
+	}
+	d.Base = o.base + " (" + short(commit) + ")"
+	return &d, nil
 }
 
 func (o *reviewOptions) readDiff(ctx context.Context) ([]byte, error) {

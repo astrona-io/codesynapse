@@ -172,6 +172,13 @@ func finishPR(out PRContext, maxTokens int) (PRContext, error) {
 		if n := trimTail(&out.Impacted); n > 0 {
 			return n
 		}
+		// The counts of new and fixed findings always stay; their lists go,
+		// fixed ones first.
+		if d := out.Security; d != nil {
+			if n := trimTail(&d.Removed); n > 0 {
+				return n
+			}
+		}
 		for _, names := range []*[]string{&out.DuplicatedChanged, &out.ExportedChanged, &out.ExportedUntested, &out.SensitiveTouched, &out.Checklist} {
 			if n := trimTail(names); n > 0 {
 				return n
@@ -179,6 +186,11 @@ func finishPR(out PRContext, maxTokens int) (PRContext, error) {
 		}
 		if n := trimTail(&out.Files); n > 0 {
 			return n
+		}
+		if d := out.Security; d != nil {
+			if n := trimTail(&d.New); n > 0 {
+				return n
+			}
 		}
 		// Changes are already ranked by risk. Keep the highest risk subjects
 		// while shedding verbose detail before dropping whole changed symbols.

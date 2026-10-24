@@ -102,6 +102,9 @@ type Report struct {
 	Files     []FileSummary   `json:"files"`
 	Docs      []query.Ref     `json:"docs,omitempty"`
 	Checklist []string        `json:"checklist,omitempty"`
+	// Security is what the change does to the findings of the files it
+	// touches, when a graph of the base was available to compare with.
+	Security *SecurityDelta `json:"security_delta,omitempty"`
 }
 
 // Analyze builds a Report for changes against the graph of repo. The graph
