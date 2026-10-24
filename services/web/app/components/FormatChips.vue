@@ -22,8 +22,8 @@ const entries = computed(() => formatEntries(props.formats).map((e) => {
 .fmt { display: inline-flex; gap: 6px; align-items: baseline; padding: 4px 10px; border-radius: var(--pill); font-size: 12.5px; border: 1px solid var(--line); background: var(--hover); }
 .fmt strong { font-weight: 600; }
 .fmt span { color: var(--muted); font-family: var(--font-mono); font-size: 11.5px; }
-.fmt--code strong { color: var(--cyan); }
-.fmt--config strong { color: var(--orange-ink); }
-.fmt--docs strong { color: var(--violet); }
-.fmt--deps strong { color: var(--green); }
+.fmt--code strong { color: var(--info); }
+.fmt--config strong { color: var(--accent-ink); }
+.fmt--docs strong { color: var(--muted); }
+.fmt--deps strong { color: var(--success); }
 </style>

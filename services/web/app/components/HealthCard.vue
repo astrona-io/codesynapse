@@ -13,13 +13,13 @@ defineProps<{ label: string; value: string | number; verdict: string; tone?: 'go
 </template>
 
 <style scoped>
-.health { gap: 4px; padding: 18px 20px; border-left: 3px solid var(--line-strong); color: var(--ink); transition: transform 0.15s, border-color 0.15s; }
-a.health:hover { transform: translateY(-2px); color: var(--ink); }
-.value { font-size: 30px; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.health { gap: 4px; padding: 20px 22px; background: var(--panel-2); border-color: transparent; color: var(--ink); transition: transform 0.15s, border-color 0.15s; }
+a.health:hover { transform: translateY(-2px); border-color: var(--line-strong); color: var(--ink); text-decoration: none; }
+.value { font: 800 36px/1.1 var(--font-display); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 .verdict { font-size: 13.5px; color: var(--muted); }
 .action { margin-top: 6px; font: 600 13px var(--font-sans); color: var(--accent-ink); }
-.tone--good { border-left-color: var(--green); } .tone--good .value { color: var(--green); }
-.tone--warn { border-left-color: var(--amber); } .tone--warn .value { color: var(--amber); }
-.tone--bad { border-left-color: var(--pink); } .tone--bad .value { color: var(--pink); }
-.tone--neutral .value { color: var(--cyan); }
+.tone--good .value { color: var(--success); }
+.tone--warn .value { color: var(--warning); }
+.tone--bad .value { color: var(--danger); }
+.tone--neutral .value { color: var(--info); }
 </style>

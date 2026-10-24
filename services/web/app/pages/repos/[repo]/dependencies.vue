@@ -81,7 +81,7 @@ const shownCount = computed(() => groups.value.reduce((n, g) => n + g.rows.lengt
       <StatTile label="Update automation" :value="missing ? 'Missing' : automation.length ? 'Needs care' : 'In place'" :hint="missing ? 'no Renovate or Dependabot config' : automation.length ? `${automation.length} configuration issue(s)` : 'Renovate or Dependabot is configured'" />
     </div>
 
-    <section v-if="automation.length" class="panel edge--amber">
+    <section v-if="automation.length" class="panel">
       <h2>Keeping dependencies up to date</h2>
       <p class="muted small">Security fixes in dependencies only help once they are installed. Renovate or Dependabot opens the update pull requests for you.</p>
       <ul class="plain">

@@ -56,7 +56,7 @@ const scopeHint: Record<string, string> = {
       </div>
       <p v-if="rep.truncated" class="notice">Only the largest groups are listed.</p>
 
-      <section class="panel edge--orange">
+      <section class="panel">
         <div class="panel__header">
           <div><p class="eyebrow">Code</p><h2>Copies <span class="muted">· {{ groups.length }}</span></h2></div>
         </div>
@@ -114,10 +114,10 @@ const scopeHint: Record<string, string> = {
 </template>
 
 <style scoped>
-.group { border-top: 1px solid var(--border); padding-top: 12px; display: grid; gap: 8px; }
+.group { border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 8px; }
 .members { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .members li { display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
-.plan { background: var(--surface-2, transparent); border-left: 3px solid var(--accent); padding: 8px 14px; display: grid; gap: 8px; }
+.plan { background: var(--panel-2); border-radius: var(--radius-sm); padding: 12px 16px; display: grid; gap: 8px; }
 .plan p, .plan ul, .plan ol { margin: 0; }
 .steps { padding-left: 20px; display: grid; gap: 2px; }
 .small { font-size: 12.5px; }

@@ -46,13 +46,13 @@ const when = (iso?: string) => (iso ? new Date(iso).toLocaleString([], { month: 
       </div>
       <template v-else>
         <div class="grid cols-2">
-          <section class="panel edge--pink">
+          <section class="panel">
             <p class="eyebrow">Got worse</p>
             <h2>Since {{ when(trend.since) }}</h2>
             <ul v-if="trend.regressions.length" class="plain"><li v-for="c in trend.regressions" :key="c.key">{{ c.detail }}</li></ul>
             <p v-else class="muted">Nothing got worse by more than the noise.</p>
           </section>
-          <section class="panel edge--green">
+          <section class="panel">
             <p class="eyebrow eyebrow--green">Got better</p>
             <h2>Since {{ when(trend.since) }}</h2>
             <ul v-if="trend.improvements.length" class="plain"><li v-for="c in trend.improvements" :key="c.key">{{ c.detail }}</li></ul>

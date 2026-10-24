@@ -46,7 +46,7 @@ const factText = (f: MemoryFact) => `${label(f.subject)} ${f.predicate} ${label(
       </form>
       <p v-if="failed" class="error">{{ failed }}</p>
 
-      <section v-if="g.facts.length" class="panel edge--violet">
+      <section v-if="g.facts.length" class="panel">
         <p class="eyebrow">Facts <span class="muted">· {{ g.facts.length }}</span></p>
         <div class="table-wrap">
           <table>
@@ -92,9 +92,9 @@ const factText = (f: MemoryFact) => `${label(f.subject)} ${f.predicate} ${label(
 
 <style scoped>
 .small { font-size: 12.5px; }
-.pred { color: var(--cyan); white-space: nowrap; }
+.pred { color: var(--info); white-space: nowrap; }
 .entities { list-style: none; margin: 0; padding: 0; display: grid; }
 .entities li { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
 .entities li button { margin-left: auto; }
-.danger { color: var(--pink); }
+.danger { color: var(--danger); }
 </style>

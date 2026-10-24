@@ -140,7 +140,7 @@ onMounted(load)
       <NuxtLink to="/">Repositories</NuxtLink><span class="sep">/</span>
       <NuxtLink :to="`/repos/${encodeURIComponent(repo)}`">{{ repo }}</NuxtLink><span class="sep">/</span><span class="current">Graph</span>
     </nav>
-    <div class="panel panel--glass toolbar">
+    <div class="panel toolbar">
       <div class="search">
         <input v-model="q" type="search" placeholder="Add a symbol, file or doc section…" aria-label="Add node">
         <div v-if="results.length" class="dropdown">
@@ -234,7 +234,7 @@ onMounted(load)
 .toolbar { flex-direction: row; }
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 12px; }
 .search { position: relative; flex: 1 1 260px; }
-.dropdown { position: absolute; z-index: 10; top: 100%; left: 0; right: 0; margin-top: 4px; display: grid; gap: 2px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 4px; max-height: 320px; overflow-y: auto; }
+.dropdown { position: absolute; z-index: 10; top: 100%; left: 0; right: 0; margin-top: 4px; display: grid; gap: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px; max-height: 320px; overflow-y: auto; }
 .dropdown button { text-align: left; }
 .compact { gap: 6px; white-space: nowrap; }
 .compact select { width: auto; }
@@ -245,7 +245,7 @@ onMounted(load)
 .hint { font-size: 12px; margin: 6px 4px 0; }
 .side { display: grid; gap: 12px; align-content: start; max-height: calc(100vh - 170px); overflow-y: auto; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.chip { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: 3px 9px; font-size: 12px; border-radius: 999px; }
+.chip { background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); padding: 3px 9px; font-size: 12px; border-radius: 999px; }
 .chip.off { opacity: .4; }
 .chip i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
 .small { font-size: 12px; margin-top: 10px; }
