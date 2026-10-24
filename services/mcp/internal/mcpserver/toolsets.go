@@ -82,6 +82,7 @@ var instructionRules = [][]clause{
 	{{nil, `Use composite context: prefer get_symbol_context, get_pr_context and minimal_context over many sequential calls.`}},
 	{{nil, `Exact matches: when a lookup returns suggestions, retry with the exact qualified_id it lists (e.g. store.(*Store).Get).`}},
 	{{nil, `Test boundaries: before editing a symbol, check its tests (is_test: true callers) to confirm safety and find fixtures.`}},
+	{{nil, `Changes that ripple: before renaming, changing a signature or removing a symbol, call change_checklist and work through every item it lists (callers, implementations and mocks, references, docs) instead of grepping.`}},
 	{{nil, `Read narrowly: file_outline and the "read"/"location" fields give file:start-end ranges; read only those lines.`}},
 	{{nil, `Verify before you finish: verify_plan turns your change into the exact test, build and lint commands to run, closest tests first; run them instead of the whole suite or nothing.`}},
 	{

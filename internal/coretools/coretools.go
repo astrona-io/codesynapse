@@ -24,7 +24,7 @@ const MaxDiffBytes = 4 << 20
 
 // Local are the tools a graph of one working tree can answer: they read
 // one repository's code graph and nothing stored beside it.
-var Local = []string{"minimal_context", "get_symbol_context", "get_call_graph", "get_implementations", "file_outline", "search", "get_pr_context", "verify_plan"}
+var Local = []string{"minimal_context", "get_symbol_context", "get_call_graph", "get_implementations", "file_outline", "search", "get_pr_context", "verify_plan", "change_checklist"}
 
 // RepoArg selects the repository.
 type RepoArg struct {
@@ -234,4 +234,19 @@ func FileOutline(ctx context.Context, r store.Reader, repo string, in FileIn) (O
 		return OutlineOut{}, err
 	}
 	return compact(repo, OutlineOut{File: in.File, Analysis: analysis, Entries: entries}, nil)
+}
+
+// ChecklistIn is change_checklist's input.
+type ChecklistIn struct {
+	RepoArg
+	Symbol    string `json:"symbol" jsonschema:"the symbol you are about to change: qualified_id (e.g. store.(*Store).Get), node id, name, or package path"`
+	Change    string `json:"change,omitempty" jsonschema:"rename (default), signature or remove"`
+	Limit     int    `json:"limit,omitempty" jsonschema:"max items per group, default 50"`
+	MaxTokens int    `json:"max_tokens,omitempty" jsonschema:"estimated JSON token budget, bytes/4; 256-20000, default 20000"`
+}
+
+// ChangeChecklist answers change_checklist.
+func ChangeChecklist(ctx context.Context, r store.Reader, repo string, in ChecklistIn) (agentctx.Checklist, error) {
+	out, err := agentctx.Service{R: r}.Checklist(ctx, repo, in.Symbol, in.Change, in.Limit, in.MaxTokens)
+	return compact(repo, out, err)
 }
