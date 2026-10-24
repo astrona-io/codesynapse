@@ -2,6 +2,6 @@ module example.com/routes
 
 go 1.22
 
-require github.com/spf13/cobra v0.0.0
+require github.com/spf13/cobra v0.0.7
 
 replace github.com/spf13/cobra => ./fakecobra
