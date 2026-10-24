@@ -103,7 +103,7 @@ type SurfaceOptions struct {
 }
 
 var surfaceNotes = []string{
-	"Guards are what the registration shows (the other arguments, the functions wrapped around the handler), the route groups and router middleware around it (Laravel groups, an Express router's use(auth), NestJS @UseGuards) and what the handler itself declares (Rails before_action through its superclasses, Django decorators and auth mixins). Go middleware applied to a whole router (r.Use(auth)) or a wrapping http.Handler is not seen, and MCP servers usually authenticate the whole connection, so check how the server is built before calling an entry point unprotected.",
+	"Guards are what the registration shows (the other arguments, the functions wrapped around the handler), the route groups and router middleware around it (Laravel groups, an Express router's use(auth), NestJS @UseGuards, Go r.Use(auth), groups and a handler wrapped around the mux, within the function that builds the router) and what the handler itself declares (Rails before_action through its superclasses, Django decorators and auth mixins). A Go router filled in another function than the one that adds its middleware is not followed, and MCP servers usually authenticate the whole connection, so check how the server is built before calling an entry point unprotected.",
 	"Reach follows the static call graph from the handler, through interface dispatch, up to 4 calls deep; calls through function values the type checker cannot follow are not included.",
 }
 

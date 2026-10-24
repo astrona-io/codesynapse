@@ -709,12 +709,12 @@ func (ix *indexer) link() {
 				// access check: a controller's before_action list or a view's
 				// decorators also load records and set headers.
 				if s := symOf[to]; s != nil {
-					r.guards = append(slices.Clip(r.guards), accessGuards(s.guards)...)
+					r.guards = append(slices.Clip(r.guards), AccessGuards(s.guards)...)
 					if c := symOf[fileOf[to].symIDs[s.class]]; c != nil && s.class != "" {
-						r.guards = append(r.guards, accessGuards(c.guards)...) // a class-based view's mixins
+						r.guards = append(r.guards, AccessGuards(c.guards)...) // a class-based view's mixins
 					}
 					if f, typ := rubyType(s.class); pf.lang == Ruby && f != nil {
-						r.guards = append(r.guards, accessGuards(rubyActionGuards(f.fr.rbClasses, typ, lastPart(s.name), rubyType))...)
+						r.guards = append(r.guards, AccessGuards(rubyActionGuards(f.fr.rbClasses, typ, lastPart(s.name), rubyType))...)
 					}
 				}
 				id := ix.addRoute(pf, r)

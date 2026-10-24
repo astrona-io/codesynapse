@@ -24,8 +24,8 @@ import (
 // method (HandleFunc, Get, POST, …) or to a function of the repository
 // itself (s.route("GET /x", policy, h)); an AddTool call; a cobra.Command
 // literal with Run or RunE. The other arguments of the registration and the
-// functions wrapped around the handler are kept as its guards. Middleware
-// applied to a whole router (r.Use(auth)) is not seen.
+// functions wrapped around the handler are kept as its guards, and so is
+// middleware applied to the router it is registered on (routers.go).
 
 var routePatternRe = regexp.MustCompile(`^(?:(GET|HEAD|POST|PUT|PATCH|DELETE|CONNECT|OPTIONS|TRACE)\s+)?([A-Za-z0-9.-]*)(/\S*)$`)
 
@@ -55,10 +55,11 @@ const (
 // routes records the entry points registered inside node (a function body
 // or a package-level declaration) of file rel.
 func (x *extractor) routes(p *packages.Package, node ast.Node, rel string) {
+	rs := x.routerScopes(p, node)
 	ast.Inspect(node, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.CallExpr:
-			x.routeCall(p, n, rel)
+			x.routeCall(p, rs, n, rel)
 		case *ast.CompositeLit:
 			x.cobraCommand(p, n, rel)
 		}
@@ -66,7 +67,7 @@ func (x *extractor) routes(p *packages.Package, node ast.Node, rel string) {
 	})
 }
 
-func (x *extractor) routeCall(p *packages.Package, call *ast.CallExpr, rel string) {
+func (x *extractor) routeCall(p *packages.Package, rs routerScopes, call *ast.CallExpr, rel string) {
 	fn := calleeFunc(p.TypesInfo, call.Fun)
 	if fn == nil || fn.Pkg() == nil || len(call.Args) < 2 {
 		return
@@ -110,11 +111,17 @@ func (x *extractor) routeCall(p *packages.Package, call *ast.CallExpr, rel strin
 			guards = append(guards, exprText(a))
 		}
 	}
+	path := m[3]
+	if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok {
+		prefix, routerGuards := x.routeContext(p, rs, sel.X, call.Pos())
+		path = joinPath(prefix, path)
+		guards = append(guards, routerGuards...)
+	}
 	method := m[1]
 	if method == "" {
 		method = verb
 	}
-	name := strings.TrimSpace(method + " " + m[2] + m[3])
+	name := strings.TrimSpace(method + " " + m[2] + path)
 	x.addRoute(p, model.RouteHTTP, name, call, handler, append(guards, wrappers...), rel)
 }
 
