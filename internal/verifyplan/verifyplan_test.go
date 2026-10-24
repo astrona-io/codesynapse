@@ -9,6 +9,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
 	"github.com/astrona-io/codesynapse/internal/review"
+	"github.com/astrona-io/codesynapse/internal/runtimefacts"
 	"github.com/astrona-io/codesynapse/internal/store/memory"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
@@ -57,4 +58,18 @@ func TestBuild(t *testing.T) {
 	assert.Equal(t, plan.Steps[0].Reach, 1)
 	assert.Equal(t, plan.Steps[2].Reach, 2)
 	assert.Equal(t, plan.Untested, []string{"a.U"})
+	assert.Equal(t, plan.Notes, []string(nil))
+
+	// A recorded test run adds what it measured: U is covered although no
+	// test reaches it in the graph, and TestF failed once on a retry.
+	require.NoError(t, mem.SetRuntimeFacts(ctx, "r", runtimefacts.Facts{
+		Commit: "abc", Unit: "statements",
+		Coverage: map[string]runtimefacts.Coverage{model.NodeID("r", model.KindFunction, "example.com/a.U"): {Covered: 2, Total: 4}},
+		Tests:    map[string]runtimefacts.TestRun{model.NodeID("r", model.KindFunction, "example.com/a.TestF"): {Passed: 1, Failed: 1}},
+	}))
+	plan, err = Build(ctx, mem, "r", rep)
+	require.NoError(t, err)
+	require.Len(t, plan.Notes, 2)
+	assert.Equal(t, plan.Notes[0], "a.U: no test reaches it in the graph, but the run at abc measured 2 of 4 statements covered (50%)")
+	assert.Contains(t, plan.Notes[1], "TestF: flaky in the last recorded run (1 passed, 1 failed)")
 }

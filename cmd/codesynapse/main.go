@@ -33,6 +33,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
 	"github.com/astrona-io/codesynapse/internal/review"
+	"github.com/astrona-io/codesynapse/internal/runtimefacts"
 	"github.com/astrona-io/codesynapse/internal/sbom"
 	"github.com/astrona-io/codesynapse/internal/security"
 	"github.com/astrona-io/codesynapse/internal/snapshot"
@@ -200,6 +201,8 @@ type reviewOptions struct {
 	depth                int
 	offline              bool
 	findingsDelta        bool
+	coverage             []string
+	junit                []string
 	root                 string
 }
 
@@ -214,6 +217,8 @@ func (o *reviewOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.IntVar(&o.depth, "depth", 3, "Caller traversal depth")
 	f.BoolVar(&o.offline, "offline", false, "Build the graph in memory from the working tree instead of querying HugeGraph")
 	f.BoolVar(&o.findingsDelta, "findings-delta", true, "With --offline and a git diff, also index the base and report which security findings the change introduces and fixes")
+	f.StringSliceVar(&o.coverage, "coverage", nil, "With --offline, a Go coverage profile or LCOV file of the last test run (default: cover.out, lcov.info and the like at the root)")
+	f.StringSliceVar(&o.junit, "junit", nil, "With --offline, a JUnit XML report of the last test run (default: junit.xml, report.xml and the like at the root)")
 	return nil
 }
 
@@ -234,6 +239,9 @@ func (o *reviewOptions) Complete(_ context.Context, _ *app.Env) error {
 }
 
 func (o *reviewOptions) Validate(_ context.Context, _ *app.Env) error {
+	if (len(o.coverage) > 0 || len(o.junit) > 0) && !o.offline {
+		return errors.New("--coverage and --junit need --offline: they are read with the working tree")
+	}
 	switch o.EC.Output {
 	case app.OutputPlain, app.OutputMarkdown, app.OutputJSON:
 		return nil
@@ -262,6 +270,9 @@ func (o *reviewOptions) Run(ctx context.Context, _ *app.Env) error {
 		if err := mem.ReplaceRepo(ctx, o.repo, g); err != nil {
 			return err
 		}
+		if err := o.loadRuntimeFacts(ctx, mem, g); err != nil {
+			return err
+		}
 		r = mem
 	} else {
 		st, err := o.graph.Open(ctx)
@@ -281,12 +292,34 @@ func (o *reviewOptions) Run(ctx context.Context, _ *app.Env) error {
 			return err
 		}
 	}
+	if f, ok, err := store.RuntimeFactsOf(ctx, r, o.repo); err != nil {
+		return err
+	} else if ok {
+		rep.Measured = review.MeasuredOf(f, false, rep)
+	}
 	if o.EC.Output == app.OutputJSON {
 		enc := json.NewEncoder(o.EC.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(rep)
 	}
 	return review.WriteMarkdown(o.EC.Stdout, rep)
+}
+
+// loadRuntimeFacts reads the coverage and JUnit reports named by flags, or
+// found at the root, and keeps what they measured next to the graph.
+func (o *reviewOptions) loadRuntimeFacts(ctx context.Context, mem *memory.Store, g *model.Graph) error {
+	files := runtimefacts.Files{Coverage: o.coverage, JUnit: o.junit}
+	if files.Empty() {
+		files = runtimefacts.Discover(o.root)
+	}
+	if files.Empty() {
+		return nil
+	}
+	f, err := runtimefacts.Load(ctx, runtimefacts.NodeSource(g.Nodes()), files)
+	if err != nil {
+		return fmt.Errorf("reading test reports: %w", err)
+	}
+	return mem.SetRuntimeFacts(ctx, o.repo, f)
 }
 
 // securityDelta indexes where the change left the base branch and compares

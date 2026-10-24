@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -29,6 +30,18 @@ func WriteMarkdown(w io.Writer, r Report) error {
 		if len(d.New)+len(d.Removed) > 0 {
 			b.WriteString("\n")
 		}
+	}
+
+	if m := r.Measured; m != nil {
+		stale := ""
+		if m.Stale {
+			stale = ", another commit than the graph"
+		}
+		fmt.Fprintf(&b, "**Last recorded test run** (%s%s)\n\n", m.At, stale)
+		for _, l := range append(slices.Clone(m.Coverage), m.Tests...) {
+			fmt.Fprintf(&b, "- %s\n", l)
+		}
+		b.WriteString("\n")
 	}
 
 	if len(r.Changes) > 0 {

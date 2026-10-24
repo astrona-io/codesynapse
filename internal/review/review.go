@@ -105,6 +105,9 @@ type Report struct {
 	// Security is what the change does to the findings of the files it
 	// touches, when a graph of the base was available to compare with.
 	Security *SecurityDelta `json:"security_delta,omitempty"`
+	// Measured is what the last recorded test run says about the change,
+	// when coverage or test results were recorded.
+	Measured *Measured `json:"measured,omitempty"`
 }
 
 // Analyze builds a Report for changes against the graph of repo. The graph

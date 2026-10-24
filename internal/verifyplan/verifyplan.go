@@ -36,7 +36,9 @@ type Plan struct {
 	// Untested names changed functions no test reaches: check them by hand
 	// or add a test.
 	Untested []string `json:"untested,omitempty"`
-	Notes    []string `json:"notes,omitempty"`
+	// Notes include what the last recorded test run measured: coverage of
+	// untested functions and tests that were flaky or failing.
+	Notes []string `json:"notes,omitempty"`
 }
 
 // Limits keep commands readable and answers small.
@@ -118,6 +120,11 @@ func Build(ctx context.Context, r store.Reader, repo string, rep review.Report) 
 	if len(ordered) == 0 {
 		plan.Notes = append(plan.Notes, "no indexed test reaches the change")
 	}
+	notes, err := measuredNotes(ctx, r, repo, rep)
+	if err != nil {
+		return Plan{}, err
+	}
+	plan.Notes = append(plan.Notes, notes...)
 	return plan, nil
 }
 
@@ -229,4 +236,31 @@ func hasFile(ctx context.Context, r store.Reader, repo, prefix string) (bool, er
 		}
 	}
 	return false, nil
+}
+
+// measuredNotes adds what the last recorded test run (internal/runtimefacts)
+// says: a function the graph sees no test reach may still be covered, and
+// a test reaching it that was flaky or failing before should not be blamed
+// on the change.
+func measuredNotes(ctx context.Context, r store.Reader, repo string, rep review.Report) ([]string, error) {
+	f, ok, err := store.RuntimeFactsOf(ctx, r, repo)
+	if err != nil || !ok {
+		return nil, err
+	}
+	var notes []string
+	seen := map[string]bool{}
+	for _, c := range rep.Changes {
+		if len(c.Tests) == 0 {
+			if note, ok := f.CoverageNote(c.ID); ok {
+				notes = append(notes, fmt.Sprintf("%s: no test reaches it in the graph, but the run at %s measured %s", c.Name, f.At(), note))
+			}
+		}
+		for _, t := range c.Tests {
+			if note, ok := f.RunNote(t.ID); ok && !seen[t.ID] {
+				seen[t.ID] = true
+				notes = append(notes, t.Name+": "+note)
+			}
+		}
+	}
+	return notes, nil
 }

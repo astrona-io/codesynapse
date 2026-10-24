@@ -14,6 +14,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/history"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/reviews"
+	"github.com/astrona-io/codesynapse/internal/runtimefacts"
 	"github.com/astrona-io/codesynapse/internal/sessionmemory"
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/usage"
@@ -35,6 +36,8 @@ type Store struct {
 	mem            map[string]*memRepo
 	usage          map[string]usage.Bucket
 	vecs           map[string]embedding // memory entity ID -> vector
+	// runtime holds measured facts per repository; a re-index keeps them.
+	runtime map[string]runtimefacts.Facts
 }
 
 type repoGraph struct {
@@ -150,6 +153,7 @@ func (s *Store) ReplaceRepo(ctx context.Context, repo string, g *model.Graph) er
 func (s *Store) DeleteRepo(_ context.Context, repo string) error {
 	s.mu.Lock()
 	delete(s.repos, repo)
+	delete(s.runtime, repo)
 	s.mu.Unlock()
 	return nil
 }

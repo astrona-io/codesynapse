@@ -198,3 +198,30 @@ func TestBridgePRContextSaysWhatTheChangeIntroduces(t *testing.T) {
 	assert.Equal(t, out.Security.Removed[0].Owner, "demo.Old")
 	assert.True(t, out.Security.Base != "", "names the base commit")
 }
+
+// TestWorktreeReadsLocalTestReports: a coverage profile the last local test
+// run left at the root reaches get_symbol_context, and a new run makes the
+// bridge rebuild even when git ignores the report.
+func TestWorktreeReadsLocalTestReports(t *testing.T) {
+	dir := gitRepo(t)
+	ctx := context.Background()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("cover.out\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "cover.out"), []byte("mode: set\nexample.com/demo/demo.go:4.21,4.31 1 1\n"), 0o600))
+	wt := newWorktree(ctx, dir, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	require.True(t, wt != nil)
+
+	key, _, err := wt.changes(ctx)
+	require.NoError(t, err)
+	var c toolCall
+	c.Params.Name, c.Params.Arguments = "get_symbol_context", json.RawMessage(`{"symbol":"demo.Synced"}`)
+	out, err := wt.answer(ctx, c)
+	require.NoError(t, err)
+	raw, err := json.Marshal(out["structuredContent"])
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), `"coverage":"1 of 1 statements covered (100%)"`)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "cover.out"), []byte("mode: set\nexample.com/demo/demo.go:4.21,4.31 1 0\n\n"), 0o600))
+	again, _, err := wt.changes(ctx)
+	require.NoError(t, err)
+	assert.NotEqual(t, again, key, "a new report is a new state of the tree")
+}

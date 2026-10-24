@@ -267,6 +267,11 @@ func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRCon
 			out.SensitiveTouched = append(out.SensitiveTouched, c.Name+" ["+strings.Join(c.Tags, ",")+"]")
 		}
 	}
+	if f, ok, stale, err := s.runtimeFacts(ctx, repo); err != nil {
+		return PRContext{}, err
+	} else if ok {
+		out.Measured = review.MeasuredOf(f, stale, out.Report)
+	}
 	return finishPR(out, o.MaxTokens)
 }
 
