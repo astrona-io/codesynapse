@@ -215,7 +215,7 @@ func TestJVMRules(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.line, func(t *testing.T) {
 			var got []string
-			for _, f := range jvmRules(tt.line, maskBrace(tt.line, true), 1, "") {
+			for _, f := range jvmRules(tt.line, maskBrace(tt.line, true, false), 1, "") {
 				got = append(got, f.rule)
 			}
 			assert.Equal(t, got, tt.want)

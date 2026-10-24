@@ -4,7 +4,7 @@ title: SQL query built from non-constant strings
 severity: high
 cwe: [CWE-89]
 category: code
-languages: [go, python, javascript, typescript, java, kotlin, rust]
+languages: [go, python, javascript, typescript, java, kotlin, rust, csharp]
 why: 'Building SQL from strings lets input change the query itself: read other rows, bypass auth, drop tables.'
 fix: Use placeholders ($1, ?) and pass values as arguments.
 references:
@@ -25,3 +25,6 @@ examples:
   - language: rust
     vulnerable: 'sqlx::query(&format!("SELECT * FROM users WHERE name = ''{}''", name)).fetch_all(&pool).await?;'
     fixed: 'sqlx::query("SELECT * FROM users WHERE name = $1").bind(name).fetch_all(&pool).await?;'
+  - language: csharp
+    vulnerable: 'conn.Query<User>($"SELECT * FROM users WHERE name = ''{name}''");'
+    fixed: 'conn.Query<User>("SELECT * FROM users WHERE name = @name", new { name });'

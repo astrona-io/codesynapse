@@ -162,3 +162,27 @@ func TestManifestModules(t *testing.T) {
 	_, evil := got["npm:evil"]
 	assert.False(t, evil, "node_modules is never scanned")
 }
+
+func TestApplyImportedByName(t *testing.T) {
+	for _, tt := range []struct {
+		eco, module, imported string
+		want                  string
+	}{
+		{EcosystemNuGet, "Newtonsoft.Json", "Newtonsoft.Json.Linq", Imported},
+		{EcosystemNuGet, "Newtonsoft.Json", "Newtonsoft.Json", Imported},
+		{EcosystemNuGet, "Newtonsoft.Json", "Newtonsoft.JsonX", Required},
+		{EcosystemCargo, "serde-json", "serde_json", Imported},
+		{EcosystemNPM, "lodash", "lodash/fp", Imported},
+		{EcosystemNPM, "lodash", "lodash.merge", Required},
+	} {
+		t.Run(tt.eco+" "+tt.imported, func(t *testing.T) {
+			g := model.NewGraph()
+			v := Vulnerability{ID: "GHSA-x", Module: tt.module, Ecosystem: tt.eco, Version: "1.0.0"}
+			Apply("r", g, []Module{{Path: tt.module, Version: "1.0.0", Ecosystem: tt.eco}}, []Vulnerability{v}, nil,
+				map[string][]string{tt.imported: {"r|File|a"}})
+			n, ok := g.Node(model.NodeID("r", model.KindVulnerability, Module{Path: tt.module, Ecosystem: tt.eco}.Key()+"@GHSA-x"))
+			require.True(t, ok)
+			assert.Equal(t, n.Reachability, tt.want)
+		})
+	}
+}

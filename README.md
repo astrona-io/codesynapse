@@ -8,7 +8,7 @@ CodeSynapse indexes a repository into a graph and answers small, precise questio
 
 Ask for `ReplaceRepo` and you get its signature, location, 3 callers, the 2 tests that reach it and the doc section that describes it, in a few hundred tokens. On this repository that cuts the context an agent needs per question by a median 92% (`codesynapse stats`).
 
-- **Indexes** Go (type-checked, exact calls and interface dispatch), Python, JavaScript, TypeScript, Vue, Java, Kotlin, Rust, Markdown, YAML, Helm charts, git history and dependencies with their CVEs.
+- **Indexes** Go (type-checked, exact calls and interface dispatch), Python, JavaScript, TypeScript, Vue, Java, Kotlin, Rust, C#, Markdown, YAML, Helm charts, git history and dependencies with their CVEs.
 - **Serves** agents over MCP, people through a web dashboard, and CI through a CLI.
 - **Reviews** security (graded A–F, with reachability), licences, unused code, duplicates and the impact of a diff.
 - **Runs** on Apache HugeGraph and Milvus, all Apache-2.0, on your own machine or cluster.

@@ -1,6 +1,6 @@
 // Package lang indexes non-Go source code: Python, JavaScript and
 // TypeScript (including <script> blocks of Vue single-file components),
-// Java and Kotlin (brace.go and jvm.go), and Rust (rust.go).
+// Java and Kotlin (brace.go and jvm.go), Rust (rust.go) and C# (csharp.go).
 //
 // The parsers are structural, not full compilers: they find functions,
 // classes and methods with exact line ranges, imports between files, calls
@@ -18,6 +18,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
@@ -62,6 +63,8 @@ func Language(name string) string {
 		return Kotlin
 	case ".rs":
 		return Rust
+	case ".cs":
+		return CSharp
 	}
 	return ""
 }
@@ -224,6 +227,9 @@ func (ix *indexer) id(kind model.NodeKind, local string) string {
 }
 
 func (ix *indexer) parse(rel, lang string, src []byte) {
+	// A byte order mark (common in C# files) would hide the first line's
+	// namespace or using from the line-anchored patterns.
+	src = bytes.TrimPrefix(src, []byte("\xef\xbb\xbf"))
 	var fr *fileResult
 	var fr0pkg string
 	offset := 0
@@ -249,6 +255,8 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 		fr, fr0pkg = parseBrace(src, kotlinLang)
 	case Rust:
 		fr, _ = parseBrace(src, rustLang)
+	case CSharp:
+		fr, fr0pkg = parseBrace(src, csharpLang)
 	}
 	fr.pkg = fr0pkg
 	fr.fingerprint(lang, code)
@@ -269,7 +277,7 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 
 	module := moduleName(rel, lang)
 	if fr.pkg != "" {
-		module = fr.pkg // a JVM package spans files and folders
+		module = fr.pkg // a JVM package or C# namespace spans files and folders
 	}
 	lines := strings.Count(string(src), "\n") + 1
 	fileID := ix.id(model.KindFile, rel)
@@ -369,7 +377,7 @@ func (fr *fileResult) shift(offset int) {
 // link resolves imports and calls once every file is parsed, and emits findings.
 func (ix *indexer) link() {
 	byModule := map[string]*parsedFile{}
-	byPkg := map[string][]*parsedFile{} // JVM package -> its files
+	byPkg := map[string][]*parsedFile{} // JVM package or C# namespace -> its files
 	// Name indexes for calls the import graph cannot resolve: methods on
 	// values of unknown type (obj.save()) and auto-imported functions (Nuxt
 	// composables). Only names that are unique in the repository are used,
@@ -390,7 +398,7 @@ func (ix *indexer) link() {
 				if !pf.fr.isTest && short != "__init__" && short != "constructor" {
 					methodsByName[family(pf.lang)+":"+short] = append(methodsByName[family(pf.lang)+":"+short], sid)
 				}
-				if short == "__init__" || short == "constructor" || short == lastPart(s.class) && isJVM(pf.lang) {
+				if short == "__init__" || short == "constructor" || short == lastPart(s.class) && classBased(pf.lang) {
 					ctorOf[pf.symIDs[s.class]] = sid
 				}
 			case model.KindFunction:
@@ -399,6 +407,9 @@ func (ix *indexer) link() {
 				}
 			}
 		}
+	}
+	for _, files := range byPkg {
+		slices.SortFunc(files, func(a, b *parsedFile) int { return strings.Compare(a.rel, b.rel) })
 	}
 	unique := func(m map[string][]string, key string) (string, model.Evidence) {
 		if ids := m[key]; len(ids) == 1 {
@@ -411,10 +422,27 @@ func (ix *indexer) link() {
 		bound := map[string]string{}
 		boundFile := map[string]*parsedFile{} // imported JVM type -> its file
 		moduleAlias := map[string]*parsedFile{}
+		// Namespaces whose types need no qualification: the file's own
+		// package, and for C# its parents and every using directive.
+		scope := []string{pf.fr.pkg}
+		if pf.lang == CSharp {
+			for ns := pf.fr.pkg; strings.Contains(ns, "."); {
+				ns = ns[:strings.LastIndexByte(ns, '.')]
+				scope = append(scope, ns)
+			}
+		}
 		for _, imp := range pf.fr.imports {
+			if pf.lang == CSharp && len(imp.names) == 0 {
+				if csLocalNamespace(byPkg, imp.spec) {
+					scope = append(scope, imp.spec)
+				} else if ext := externalName(imp.spec, pf.lang); ext != "" {
+					ix.res.ExternalImports[ext] = append(ix.res.ExternalImports[ext], pf.id)
+				}
+				continue
+			}
 			target := ix.resolveImport(pf, imp, byModule, byPkg)
 			if target == nil {
-				if pf.lang == Rust && ix.rustLocal(pf, imp.spec) {
+				if pf.lang == Rust && ix.rustLocal(pf, imp.spec) || pf.lang == CSharp && csLocalNamespace(byPkg, imp.spec) {
 					continue
 				}
 				if ext := externalName(imp.spec, pf.lang); ext != "" {
@@ -442,12 +470,14 @@ func (ix *indexer) link() {
 			}
 		}
 		fam := family(pf.lang)
-		// samePackage finds a declaration in another file of a JVM package,
-		// which needs no import.
+		// samePackage finds a declaration in another file of a JVM package
+		// or a C# namespace in scope, which needs no import.
 		samePackage := func(name string) string {
-			for _, f := range byPkg[pf.fr.pkg] {
-				if sid, ok := f.symIDs[name]; ok && pf.fr.pkg != "" {
-					return sid
+			for _, ns := range scope {
+				for _, f := range byPkg[ns] {
+					if sid, ok := f.symIDs[name]; ok && ns != "" {
+						return sid
+					}
 				}
 			}
 			return ""
@@ -469,7 +499,7 @@ func (ix *indexer) link() {
 				if sid, ok := bound[c.name]; ok {
 					return declared(sid)
 				}
-				if isJVM(pf.lang) {
+				if classBased(pf.lang) {
 					// Inside a class a plain call is one of its methods.
 					if sid, ok := pf.symIDs[class+"."+c.name]; ok && class != "" {
 						return declared(sid)
@@ -477,7 +507,7 @@ func (ix *indexer) link() {
 					if sid := samePackage(c.name); sid != "" {
 						return declared(sid)
 					}
-					// Java has no free functions: a call without a receiver
+					// Java and C# have no free functions: a call without a receiver
 					// name is a method of a chained expression (new A().f()).
 					if sid, ev := unique(funcsByName, fam+":"+c.name); sid != "" {
 						return sid, ev
@@ -552,8 +582,9 @@ func (ix *indexer) resolveImport(pf *parsedFile, imp importRef, byModule map[str
 	switch pf.lang {
 	case Rust:
 		return ix.rustResolve(pf, spec, false)
-	case Java, Kotlin:
-		// com.acme.Foo is Foo in package com.acme, in Java or Kotlin.
+	case Java, Kotlin, CSharp:
+		// com.acme.Foo is Foo in package com.acme, in Java or Kotlin; a C#
+		// alias or static using names a type the same way.
 		for _, member := range imp.names {
 			first, _, _ := strings.Cut(member, ".")
 			pkg := spec
@@ -634,6 +665,9 @@ func externalName(spec, lang string) string {
 	if isJVM(lang) {
 		return "" // Maven coordinates do not follow package names
 	}
+	if lang == CSharp {
+		return spec // a namespace; NuGet IDs usually prefix it (internal/vuln)
+	}
 	if lang == Python {
 		if strings.HasPrefix(spec, ".") {
 			return ""
@@ -674,6 +708,15 @@ func isTestPath(rel, lang string) bool {
 	switch lang {
 	case Rust:
 		return strings.Contains("/"+rel, "/tests/") || strings.Contains("/"+rel, "/benches/")
+	case CSharp:
+		stem := strings.TrimSuffix(base, ".cs")
+		for _, dir := range strings.Split(path.Dir(rel), "/") {
+			if strings.HasSuffix(dir, ".Tests") || strings.HasSuffix(dir, ".Test") || strings.HasSuffix(dir, ".UnitTests") ||
+				strings.HasSuffix(dir, ".IntegrationTests") || dir == "test" || dir == "tests" {
+				return true
+			}
+		}
+		return strings.HasSuffix(stem, "Tests") || strings.HasSuffix(stem, "Test")
 	case Java, Kotlin:
 		stem := strings.TrimSuffix(strings.TrimSuffix(base, path.Ext(base)), ".")
 		return strings.Contains("/"+rel, "/src/test/") || strings.HasSuffix(stem, "Test") || strings.HasSuffix(stem, "Tests") ||
@@ -763,3 +806,7 @@ func family(lang string) string {
 }
 
 func isJVM(lang string) bool { return lang == Java || lang == Kotlin }
+
+// classBased languages have methods in classes and constructors named
+// after them, and resolve plain calls within the class and its package.
+func classBased(lang string) bool { return isJVM(lang) || lang == CSharp }
