@@ -21,8 +21,10 @@ const (
 // Apply adds Module and Vulnerability nodes to g. externalCalls and
 // externalImports come from the Go extractor (golang.Result): full names of
 // called out-of-repo functions mapped to caller IDs, and out-of-repo import
-// paths mapped to importing package IDs.
-func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability, externalCalls, externalImports map[string][]string) {
+// paths mapped to importing package IDs. built is every package compiled
+// into the repository's packages and tests (nil when not loaded): an
+// advisory whose packages are all missing from it is marked CodeAbsent.
+func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability, externalCalls, externalImports map[string][]string, built map[string]bool) {
 	repoID := model.NodeID(repo, model.KindRepository, repo)
 	modules = installedVersions(modules)
 	eco := map[string]string{} // module key -> ecosystem
@@ -139,6 +141,16 @@ func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability,
 				g.AddEdge(model.Edge{From: vid, To: extID, Kind: model.EdgeAffects})
 				for _, caller := range callers {
 					g.AddEdge(model.Edge{From: caller, To: extID, Kind: model.EdgeCalls})
+				}
+			}
+		}
+		// With the build's packages known (nil: not loaded), an advisory
+		// whose packages none of them is compiled in cannot run here.
+		if built != nil && len(v.Symbols) > 0 && n.Reachability != Called {
+			n.CodeAbsent = true
+			for pkg := range v.Symbols {
+				if built[pkg] {
+					n.CodeAbsent = false
 				}
 			}
 		}

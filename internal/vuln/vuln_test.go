@@ -104,7 +104,7 @@ func TestScanAndApply(t *testing.T) {
 	g.AddNode(model.Node{ID: caller, Kind: model.KindFunction, Repo: "r", Name: "serve"})
 	Apply("r", g, mods, vulns,
 		map[string][]string{"(*golang.org/x/net/http2.Server).ServeConn": {caller}},
-		map[string][]string{"golang.org/x/net/http2": {"r|Package|app"}})
+		map[string][]string{"golang.org/x/net/http2": {"r|Package|app"}}, nil)
 
 	vn, ok := g.Node(model.NodeID("r", model.KindVulnerability, "golang.org/x/net@GO-2024-0001"))
 	require.True(t, ok)
@@ -182,7 +182,7 @@ func TestApplyImportedByName(t *testing.T) {
 			g := model.NewGraph()
 			v := Vulnerability{ID: "GHSA-x", Module: tt.module, Ecosystem: tt.eco, Version: "1.0.0"}
 			Apply("r", g, []Module{{Path: tt.module, Version: "1.0.0", Ecosystem: tt.eco}}, []Vulnerability{v}, nil,
-				map[string][]string{tt.imported: {"r|File|a"}})
+				map[string][]string{tt.imported: {"r|File|a"}}, nil)
 			n, ok := g.Node(model.NodeID("r", model.KindVulnerability, Module{Path: tt.module, Ecosystem: tt.eco}.Key()+"@GHSA-x"))
 			require.True(t, ok)
 			assert.Equal(t, n.Reachability, tt.want)
@@ -287,7 +287,7 @@ func TestScanAsksAboutTheBuiltModule(t *testing.T) {
 	Apply("r", g, []Module{
 		{Path: "example.com/forked", Version: "v1.1.1", Replacement: &Replacement{Path: "github.com/fork/forked"}},
 		{Path: "example.com/local", Replacement: &Replacement{Path: "../local", Local: true}},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 	forked, ok := g.Node(model.NodeID("r", model.KindModule, "example.com/forked"))
 	require.True(t, ok)
 	assert.Contains(t, forked.Summary, "github.com/fork/forked")
@@ -309,7 +309,7 @@ func TestApplyKeepsAdvisoriesOfEachInstalledVersion(t *testing.T) {
 		{ID: "GHSA-x", Module: "shared", Ecosystem: EcosystemNPM, Version: "1.0.0", Severity: "high"},
 		{ID: "GHSA-x", Module: "shared", Ecosystem: EcosystemNPM, Version: "2.0.0", Severity: "high"},
 	}
-	Apply("r", g, mods, vulns, nil, nil)
+	Apply("r", g, mods, vulns, nil, nil, nil)
 
 	plain := model.NodeID("r", model.KindModule, "npm:shared")
 	second := model.NodeID("r", model.KindModule, "npm:shared@2.0.0")
@@ -339,4 +339,28 @@ func TestApplyKeepsAdvisoriesOfEachInstalledVersion(t *testing.T) {
 		}
 	}
 	assert.Equal(t, strings.Join(requires, ","), second, "top uses the copy the lockfile resolved")
+}
+
+func TestApplyMarksCodeAbsentFromTheBuild(t *testing.T) {
+	const mod, pkg = "example.com/lib", "example.com/lib/p"
+	for _, tt := range []struct {
+		name    string
+		symbols map[string][]string
+		built   map[string]bool
+		absent  bool
+	}{
+		{"package not compiled in", map[string][]string{pkg: {"Parse"}}, map[string]bool{"example.com/lib/other": true}, true},
+		{"compiled in through a dependency", map[string][]string{pkg: {"Parse"}}, map[string]bool{pkg: true}, false},
+		{"build not loaded", map[string][]string{pkg: {"Parse"}}, nil, false},
+		{"advisory names no packages", nil, map[string]bool{}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			g := model.NewGraph()
+			v := Vulnerability{ID: "GO-1", Module: mod, Ecosystem: EcosystemGo, Version: "v1.0.0", Symbols: tt.symbols}
+			Apply("r", g, []Module{{Path: mod, Version: "v1.0.0"}}, []Vulnerability{v}, nil, nil, tt.built)
+			n, ok := g.Node(model.NodeID("r", model.KindVulnerability, mod+"@GO-1"))
+			require.True(t, ok)
+			assert.Equal(t, n.CodeAbsent, tt.absent)
+		})
+	}
 }

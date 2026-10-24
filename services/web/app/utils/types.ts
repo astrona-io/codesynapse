@@ -29,6 +29,7 @@ export interface GraphNodeData {
   dev?: boolean
   via?: string
   roots?: number
+  code_absent?: boolean
 }
 export interface NodeRef { id: string; kind: string; name: string; location?: string; summary?: string; depth?: number }
 

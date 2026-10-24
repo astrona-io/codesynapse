@@ -16,7 +16,7 @@ var (
 		// Written by the store itself for incremental publication (delta.go).
 		"content_hash", "edges_hash"}
 	nodeLongs = []string{"bytes", "start_line", "end_line", "complexity", "loc", "level", "churn", "roots"}
-	nodeBools = []string{"exported", "is_test", "indirect", "dev"}
+	nodeBools = []string{"exported", "is_test", "indirect", "dev", "code_absent"}
 	nodeLists = []string{"cwe", "aliases", "security_tags"}
 )
 

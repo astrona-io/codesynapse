@@ -228,6 +228,10 @@ type Node struct {
 	FixedVersion string `json:"fixed_version,omitempty"`
 	// Reachability is how a Vulnerability is reached: called, imported or required.
 	Reachability string `json:"reachability,omitempty"`
+	// CodeAbsent marks a Go Vulnerability whose advisory names the affected
+	// packages when none of them is compiled into any package of the
+	// repository, tests included: the vulnerable code is not in the build.
+	CodeAbsent bool `json:"code_absent,omitempty"`
 	// URL links to the advisory.
 	URL string `json:"url,omitempty"`
 	// Indirect marks Modules required only indirectly.
