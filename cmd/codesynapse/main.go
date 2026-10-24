@@ -25,6 +25,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/cleanup"
 	"github.com/astrona-io/codesynapse/internal/duplicates"
+	"github.com/astrona-io/codesynapse/internal/forge"
 	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/ingest"
 	"github.com/astrona-io/codesynapse/internal/ingestreport"
@@ -62,6 +63,7 @@ type ingestOptions struct {
 	EC                   *app.Env
 	graph                app.GraphFlags
 	repo                 string
+	nameFromOrigin       bool
 	commitLimit          int
 	allowNetwork         bool
 	vulns                bool
@@ -79,6 +81,7 @@ func (o *ingestOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.reportFile, "ingest-report", "", "Write the per-file JSON report to a new file (existing files are refused)")
 	o.graph.AddFlags(f)
 	f.StringVar(&o.repo, "repo", "", "Repository name in the graph (default: directory name)")
+	f.BoolVar(&o.nameFromOrigin, "name-from-origin", false, "Name the repository after the checkout's origin remote the way the dashboard names one added by URL (owner/name), so adding that URL there links this index instead of cloning it")
 	f.IntVar(&o.commitLimit, "commits", 500, "Number of recent commits to index (0 disables history)")
 	f.BoolVar(&o.allowNetwork, "allow-network", false, "Allow `go list` to download modules (off by default for untrusted repos)")
 	f.BoolVar(&o.vulns, "vulns", false, "Check dependencies against osv.dev (sends module paths and versions)")
@@ -89,7 +92,7 @@ func (o *ingestOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	return nil
 }
 
-func (o *ingestOptions) Complete(_ context.Context, _ *app.Env) error {
+func (o *ingestOptions) Complete(ctx context.Context, _ *app.Env) error {
 	o.root = "."
 	if len(o.EC.Args) > 0 {
 		o.root = o.EC.Args[0]
@@ -99,6 +102,13 @@ func (o *ingestOptions) Complete(_ context.Context, _ *app.Env) error {
 		return err
 	}
 	o.root = abs
+	if o.nameFromOrigin && o.repo == "" {
+		name := forge.NameFromRemote(gitx.SanitizeURL(gitx.HTTPSRemote(gitx.OriginURL(ctx, abs))))
+		if name == "" {
+			return errors.New("--name-from-origin needs an origin remote with an https or ssh address of the form host/owner/name; name the repository with --repo instead")
+		}
+		o.repo = name
+	}
 	if o.repo == "" {
 		o.repo = filepath.Base(abs)
 	}

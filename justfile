@@ -118,21 +118,37 @@ admin-reset mode="": _runtime
 logs service="":
     {{compose}} logs -f {{service}}
 
-# Copy a local checkout into ./sources and ingest it through the API container
+# Index a local checkout through the worker (it has the Go toolchain; the API image has none). Named after the checkout's origin remote the way the dashboard names a repository added by URL, so adding that URL there links this index
 ingest dir name="":
     #!/usr/bin/env sh
     set -eu
     src="$(cd "{{dir}}" && pwd)"
-    name="{{name}}"; [ -n "$name" ] || name="$(basename "$src")"
+    base="$(basename "$src")"
     mkdir -p sources
-    if [ "$src" != "$(pwd)/sources/$name" ]; then
-        rsync -a --delete --exclude /sources --exclude /bin --exclude node_modules --exclude .nuxt --exclude .output "$src/" "sources/$name/"
+    if [ "$src" != "$(pwd)/sources/$base" ]; then
+        rsync -a --delete --exclude /sources --exclude /bin --exclude node_modules --exclude .nuxt --exclude .output "$src/" "sources/$base/"
     fi
-    {{compose}} exec api codesynapse ingest "/sources/$name" --repo "$name" --vulns="${CODESYNAPSE_VULN_SCAN:-true}"
+    origin="$(git -C "$src" remote get-url origin 2>/dev/null || true)"
+    if [ -n "{{name}}" ]; then
+        naming="--repo {{name}}"
+    elif [ -n "$origin" ]; then
+        naming="--name-from-origin"
+    else
+        naming="--repo $base"
+        echo "note: $src has no origin remote, so it is indexed as '$base' and cannot be linked to an organisation by URL" >&2
+    fi
+    # shellcheck disable=SC2086
+    {{compose}} exec worker codesynapse ingest "/sources/$base" $naming --vulns="${CODESYNAPSE_VULN_SCAN:-true}" --allow-network="${CODESYNAPSE_ALLOW_NETWORK:-false}"
+    if [ "${CODESYNAPSE_ALLOW_NETWORK:-false}" != true ]; then
+        echo "note: module downloads are off, so Go packages whose dependencies are not in the worker's module cache are not type-checked (reported as package_load_failed); set CODESYNAPSE_ALLOW_NETWORK=true for a checkout you trust" >&2
+    fi
+    if [ -n "$origin" ]; then
+        echo "Indexed. To see it in your organisation: sign in as an owner, open Repositories, choose Add and paste $origin (public repositories need no token; a private one uses your organisation's Git token). The dashboard links this index instead of cloning."
+    fi
 
-# Ingest this repository itself (dogfooding)
+# Index this repository itself (dogfooding)
 ingest-self:
-    just ingest . codesynapse
+    just ingest .
 
 # Print a review context pack for the current branch against a base ref
 review base="origin/main":
@@ -277,12 +293,10 @@ kind-down:
     kind delete cluster --name "{{kind_cluster}}"
 
 # --- local development --------------------------------------------------------
-# HugeGraph runs Gremlin and is never published to the host, so the API runs
-# in compose (`just up`); these recipes work alongside it or without it.
-
-# Run the MCP server on stdio with an in-memory graph of a directory (no database)
-dev-mcp dir=".":
-    go run ./services/mcp/cmd/codesynapse-mcp serve --offline {{dir}}
+# There is no database-free MCP server: every tool call needs accounts and a
+# registered runtime session. Develop against `just up` and register an agent
+# with `just mcp` (or `codesynapse mcp install`); `go run ./services/mcp/cmd/codesynapse-mcp
+# serve` against the stack's accounts database is the same server unpacked.
 
 # Run the Nuxt dev server against the API of `just up`
 dev-web:

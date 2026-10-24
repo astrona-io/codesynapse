@@ -6,10 +6,18 @@ Requires [just](https://github.com/casey/just) and Docker or Podman (`podman mac
 
 ```sh
 just up                       # writes .env with random secrets, builds and starts everything
+open http://localhost:3000    # sign in as admin (password in .env), replace it, create your organisation
 just ingest ~/src/my-service  # copies the checkout into ./sources and indexes it
 just mcp                      # register the MCP server with your agents
-open http://localhost:3000
 ```
+
+### Getting a local checkout into your organisation
+
+`just ingest <dir>` runs the CLI inside the **worker** (the API image has no Go toolchain) and writes the graph, named after the checkout's `origin` remote the way the dashboard names a repository added by URL (`owner/name` on github.com, `host/owner/name` elsewhere; `just ingest <dir> <name>` names it yourself, and a checkout without an origin is indexed under its directory name and cannot be linked). The index belongs to no organisation yet, so nobody sees it. Module downloads follow `CODESYNAPSE_ALLOW_NETWORK` (off by default): with it off, Go packages whose dependencies the worker has not cached are reported as `package_load_failed`; set it to `true` for a checkout you trust.
+
+To make it visible, sign in as an **owner** of your organisation, open **Repositories**, choose **Add** and paste the origin's address. The dashboard recognises the existing index of the same remote and links it instead of cloning, records the first admin grant and applies the usual access checks; a private repository needs your organisation's Git token to prove access first. The same address added without `just ingest` is cloned and indexed by the worker.
+
+There is no database-free MCP server: every tool call needs accounts and a registered runtime session (see [session context](../SESSION_CONTEXT_PLAN.md#runtime-integration)). Develop against `just up` and register an agent with `just mcp`.
 
 | URL | What |
 |---|---|
@@ -62,7 +70,6 @@ The compose API container reaches model servers on the host through `host.docker
 | `just lint` | golangci-lint, must report 0 issues |
 | `just web-check` | Nuxt typecheck and build |
 | `just ci` | All of the above |
-| `just dev-mcp` | MCP on stdio with an in-memory graph of the checkout (no database) |
 | `just dev-web` | Nuxt dev server against the API of `just up` |
 | `just test-integration` | `test-hugegraph` and `test-postgres` together |
 | `just test-postgres` | Accounts contract on a throwaway PostgreSQL |
