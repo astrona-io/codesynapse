@@ -68,9 +68,18 @@ func Detect(home, cwd string) []Target {
 		})
 	}
 	if _, err := exec.LookPath("codex"); err == nil {
+		p := filepath.Join(home, ".codex", "hooks.json")
 		out = append(out, Target{
-			ID: "codex", Description: "Codex CLI (~/.codex/config.toml)",
-			install: installCodex,
+			ID: "codex", Description: "Codex (MCP connection and all lifecycle hooks; review with /hooks)",
+			install: func(ctx context.Context, s Server) error {
+				if err := prepareLifecycle(s); err != nil {
+					return err
+				}
+				if err := installCodex(ctx, s); err != nil {
+					return err
+				}
+				return InstallLifecycleHooks(p, "codex", s.Command, s.APIURL)
+			},
 		})
 	}
 	if dirExists(filepath.Join(home, ".gemini")) {
@@ -100,12 +109,18 @@ func Detect(home, cwd string) []Target {
 	if dirExists(filepath.Join(home, ".cursor")) {
 		p := filepath.Join(home, ".cursor", "mcp.json")
 		out = append(out, Target{
-			ID: "cursor", Description: "Cursor (~/.cursor/mcp.json)", Path: p,
+			ID: "cursor", Description: "Cursor (MCP connection and all lifecycle hooks)", Path: p,
 			install: func(_ context.Context, s Server) error {
-				return mergeJSON(p, []string{"mcpServers", Name}, map[string]any{
+				if err := prepareLifecycle(s); err != nil {
+					return err
+				}
+				if err := mergeJSON(p, []string{"mcpServers", Name}, map[string]any{
 					"url":     s.URL,
 					"headers": runtimeHeaders("Bearer ${env:"+TokenEnv+"}", "${env:"+SessionEnv+"}", "${env:"+ParentSessionEnv+"}"),
-				})
+				}); err != nil {
+					return err
+				}
+				return InstallLifecycleHooks(filepath.Join(home, ".cursor", "hooks.json"), "cursor", s.Command, s.APIURL)
 			},
 		})
 	}
@@ -127,6 +142,14 @@ func Detect(home, cwd string) []Target {
 		},
 	})
 	return out
+}
+
+func prepareLifecycle(s Server) error {
+	if !strings.HasPrefix(s.Token, personalKeyPrefix) || s.StoreToken == nil || s.Command == "" {
+		return errors.New("lifecycle hooks need an installed binary and a personal API key (csk_…) in " + TokenEnv)
+	}
+	_, err := s.StoreToken(s.Token)
+	return err
 }
 
 func runtimeHeaders(authorization, primary, parent string) map[string]any {
@@ -184,6 +207,7 @@ func installCodex(ctx context.Context, s Server) error {
 // mergeJSON sets value at path inside the JSON object stored in file,
 // keeping every other key. The original is copied to file+".bak" first.
 // Files with comments (JSONC) are refused rather than rewritten lossily.
+// An empty path writes the complete, already-merged root object.
 func mergeJSON(file string, path []string, value any) error {
 	root := map[string]any{}
 	data, err := os.ReadFile(file) //nolint:gosec // path chosen by Detect
@@ -203,15 +227,19 @@ func mergeJSON(file string, path []string, value any) error {
 		}
 	}
 	node := root
-	for _, key := range path[:len(path)-1] {
-		child, ok := node[key].(map[string]any)
-		if !ok {
-			child = map[string]any{}
-			node[key] = child
+	if len(path) == 0 {
+		root = value.(map[string]any)
+	} else {
+		for _, key := range path[:len(path)-1] {
+			child, ok := node[key].(map[string]any)
+			if !ok {
+				child = map[string]any{}
+				node[key] = child
+			}
+			node = child
 		}
-		node = child
+		node[path[len(path)-1]] = value
 	}
-	node[path[len(path)-1]] = value
 	out, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
 		return err

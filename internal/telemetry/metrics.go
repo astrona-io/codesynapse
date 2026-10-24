@@ -5,6 +5,14 @@ import "sync"
 // Default holds the metrics every service records; Push sends it.
 var Default = NewRegistry()
 
+// Client-reported lifecycle observations, recorded after durable acceptance.
+// These are distinct from server-measured MCP/LLM execution instruments.
+var (
+	AgentHookEvents   = Default.ScopedCounter("agent_hook_events_total", "Accepted assistant lifecycle observations.", "client", "event", "category", "outcome")
+	AgentHookDuration = Default.ScopedHistogram("agent_hook_duration_seconds", "Assistant-reported operation duration when available.", []float64{0.01, 0.1, 1, 10, 60, 300, 3600}, "client", "event")
+	AgentHookBytes    = Default.ScopedCounter("agent_hook_bytes_total", "Bytes observed in native hook fields, without retaining content.", "client", "event", "kind")
+)
+
 var (
 	latency = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300}
 	ttft    = []float64{0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64}

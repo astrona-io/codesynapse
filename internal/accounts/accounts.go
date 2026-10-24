@@ -216,13 +216,16 @@ type Event struct {
 	Outcome    string    `json:"outcome"` // success or failure
 	Status     int       `json:"status,omitempty"`
 	Detail     string    `json:"detail,omitempty"`
-	// MCP describes an MCP request (docs/SAAS.md, 5c); nil for everything else.
+	// MCP describes an MCP request or the runtime context of an agent.hook
+	// observation (Method agent/hook); nil for other audit actions.
 	MCP      *MCPRequest `json:"mcp,omitempty"`
 	PrevHash string      `json:"prev_hash"`
 	Hash     string      `json:"hash"`
 }
 
-// MCPRequest is what the audit log keeps about one MCP request: enough to
+// MCPRequest holds runtime context for an MCP request or an agent.hook
+// observation (Method agent/hook, measurements in Event.Detail). For requests,
+// it keeps enough to
 // trace it back to a person, key, chat and client, never the results. Args
 // holds identifying values and redacted, capped free text; bulk inputs (a
 // diff, code, conversation turns) appear only as "sha256:<hex> (<n> bytes)".
@@ -254,8 +257,8 @@ type EventFilter struct {
 	// event); Actor matches the actor's email or user ID; Outcome is
 	// success, failure or empty for both.
 	Action, Actor, Outcome string
-	// Session, Tool and Repo match MCP requests by runtime session, tool or
-	// prompt name and repository.
+	// Session, Tool and Repo match runtime context by session, tool/prompt (or
+	// hook event) name and repository.
 	Session, Tool, Repo string
 	// Ascending orders oldest first (export, verification).
 	Ascending bool

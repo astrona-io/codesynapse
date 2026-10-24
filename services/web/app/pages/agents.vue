@@ -88,6 +88,8 @@ url = ${JSON.stringify(mcpUrl.value)}
 bearer_token_env_var = "CODESYNAPSE_MCP_TOKEN"
 env_http_headers = { "X-CodeSynapse-Session" = "CODESYNAPSE_SESSION_ID", "X-CodeSynapse-Parent-Session" = "CODESYNAPSE_PARENT_SESSION_ID" }`)
 const agentRules = 'Use the CodeSynapse MCP tools before reading files: minimal_context with the task first, get_symbol_context before editing a symbol, and get_pr_context on your diff before finishing.'
+const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
+const hookSetup = (client: 'codex' | 'cursor') => `CODESYNAPSE_API_TOKEN=${shellQuote(token.value)} codesynapse mcp hooks . --client ${client} --api-url ${shellQuote(apiUrl.value)}`
 const showPluginStatus = computed(() => viaBridge.value && selected.value.includes('claude'))
 const setupAgents = computed(() => selectedAgents.value.filter(a => a.id === 'codex' || a.id === 'cursor' || (a.id === 'claude' && viaBridge.value)))
 const stepPlugin = (agent: AgentID) => (viaBridge.value ? 4 : 3) + setupAgents.value.findIndex(a => a.id === agent)
@@ -195,7 +197,10 @@ onBeforeUnmount(() => clearInterval(poll))
       <div class="stack--tight">
         <h2>Use CodeSynapse automatically in Codex</h2>
         <p class="muted">Codex supports plugins that bundle skills, MCP connections and lifecycle hooks. Connecting MCP makes tools available; a hook can run on every prompt to supply context or steer the agent toward CodeSynapse.</p>
-        <p class="notice notice--warn" role="status">CodeSynapse currently ships a Claude Code plugin. A Codex bridge and hook adapter is not available yet; the connection command above does not install one.</p>
+        <p class="muted">Install all 12 Codex lifecycle events for this project. The combined CodeSynapse installer above also installs user-wide hooks; choose one location to avoid duplicate observations.</p>
+        <CopyField :value="hookSetup('codex')" label="Shell — run in your project" />
+        <p class="muted small">Restart Codex, open <code>/hooks</code>, then review and trust the definitions. Hooks load rules on every prompt and save session metadata. View accepted observations in <NuxtLink to="/stats/activity">Statistics → Live activity</NuxtLink>.</p>
+        <p class="notice notice--warn" role="status">Hook setup registers the chat identity for activity reporting. MCP still needs a runtime-aware transport that supplies both session headers per chat.</p>
         <template v-if="viaBridge">
           <h3>Supply the chat identity</h3>
           <p class="muted">Merge this into the existing CodeSynapse entry in <code>~/.codex/config.toml</code>. A runtime integration must first register Codex’s actual thread ID with <code>POST /api/v1/execution/sessions</code>, then supply it as both session environment variables before MCP connects. Keep it across reconnects and compaction; each new chat needs its own runtime ID.</p>
@@ -208,7 +213,7 @@ onBeforeUnmount(() => clearInterval(poll))
         <details>
           <summary class="muted small">Plugins and hooks for every prompt</summary>
           <div class="stack--tight small">
-            <p>A Codex adapter can use <code>SessionStart</code> to load the rules, <code>UserPromptSubmit</code> to run on every prompt, <code>PreToolUse</code> to check tool calls and <code>PostToolUse</code> to report usage. This requires Codex-specific integration with the registered chat identity; installing Claude hooks does not configure Codex.</p>
+            <p>The native adapter loads rules at session start, on prompts and after compaction; observes tool use, permission requests, subagents, interruptions and session completion; and reports retrieval counts. It stores event types, timings and sizes, without prompts, source, commands or response text.</p>
             <p>Plugins containing hooks require manual installation in Codex desktop. Review and trust the hook definitions before they can run; plugins with lifecycle hooks are not eligible for the public plugin directory.</p>
             <p>See OpenAI’s <a href="https://developers.openai.com/plugins/build/plugins" target="_blank" rel="noopener noreferrer">plugin packaging guide</a> and <a href="https://learn.chatgpt.com/docs/hooks" target="_blank" rel="noopener noreferrer">hook documentation</a>.</p>
           </div>
@@ -221,7 +226,10 @@ onBeforeUnmount(() => clearInterval(poll))
       <div class="stack--tight">
         <h2>Use CodeSynapse automatically in Cursor</h2>
         <p class="muted">Cursor supports plugins that bundle rules, skills, MCP connections and hooks. A <code>beforeSubmitPrompt</code> hook can run on every prompt; connecting MCP alone makes the tools available without guaranteeing their use.</p>
-        <p class="notice notice--warn" role="status">CodeSynapse currently ships a Claude Code plugin. A Cursor bridge and hook adapter is not available yet; the connection command above does not install one.</p>
+        <p class="muted">Install Cursor lifecycle hooks for this project. The combined CodeSynapse installer above also installs user-wide hooks; choose one location to avoid duplicate observations.</p>
+        <CopyField :value="hookSetup('cursor')" label="Shell — run in your project" />
+        <p class="muted small">Restart Cursor and inspect Customize → Hooks. Session hooks load rules and save metadata, including compaction context usage when reported. View accepted observations in <NuxtLink to="/stats/activity">Statistics → Live activity</NuxtLink>.</p>
+        <p class="notice notice--warn" role="status">Hook setup registers the chat identity for activity reporting. MCP still needs a runtime-aware transport that supplies both session headers per chat.</p>
         <template v-if="viaBridge">
           <h3>Supply the chat identity</h3>
           <p class="muted">A runtime integration must register Cursor’s actual chat ID with <code>POST /api/v1/execution/sessions</code> and send it as both <code>X-CodeSynapse-Session</code> and <code>X-CodeSynapse-Parent-Session</code> on every MCP request. The installer adds header templates to <code>~/.cursor/mcp.json</code>, but a launcher must supply both session environment variables before Cursor connects.</p>
@@ -233,8 +241,8 @@ onBeforeUnmount(() => clearInterval(poll))
         <details>
           <summary class="muted small">Plugins and hooks for every prompt</summary>
           <div class="stack--tight small">
-            <p>A Cursor adapter can use <code>sessionStart</code> to load the rules, <code>beforeSubmitPrompt</code> to run on each prompt, <code>beforeMCPExecution</code> to check MCP calls and <code>afterMCPExecution</code> to report usage. Hook scripts can be configured in <code>.cursor/hooks.json</code> for a project or <code>~/.cursor/hooks.json</code> for your user, or bundled in a Cursor plugin.</p>
-            <p>See Cursor’s <a href="https://cursor.com/docs/reference/plugins" target="_blank" rel="noopener noreferrer">plugin reference</a> and <a href="https://cursor.com/docs/hooks" target="_blank" rel="noopener noreferrer">hook documentation</a>. CodeSynapse’s Claude setup has not been validated as a Cursor integration.</p>
+            <p>The native adapter observes all 21 Cursor event types. Events need a runtime chat identity to be saved; workspace startup and Tab events without one remain outside session activity. Generic and specialized hooks may observe the same operation.</p>
+            <p>See Cursor’s <a href="https://cursor.com/docs/hooks" target="_blank" rel="noopener noreferrer">hook documentation</a>. Hooks leave permission decisions with Cursor and never auto-approve requests.</p>
           </div>
         </details>
       </div>

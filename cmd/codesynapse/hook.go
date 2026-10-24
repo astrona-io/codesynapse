@@ -56,6 +56,7 @@ const readGuardLines = 400
 const maxOutline = 60
 
 type toolHookInput struct {
+	Client         string `json:"-"`
 	SessionID      string `json:"session_id"`
 	Cwd            string `json:"cwd"`
 	StopHookActive bool   `json:"stop_hook_active"`
@@ -319,7 +320,9 @@ func stopGuard(ctx context.Context, in toolHookInput, logger *slog.Logger) map[s
 }
 
 func hookCmd(ec *app.Env) *cobra.Command {
-	parent := &cobra.Command{Use: "hook", Short: "Claude Code hooks of the CodeSynapse plugin", GroupID: app.GroupBase}
+	parent := &cobra.Command{Use: "hook", Short: "Assistant lifecycle hooks for CodeSynapse", GroupID: app.GroupBase}
+	parent.AddCommand(app.NewSubCommand("lifecycle", &lifecycleOptions{EC: ec}, ec).
+		WithShortDesc("Codex and Cursor lifecycle adapter: rules, guards and metadata-only activity").WithNoArgs().Build())
 	parent.AddCommand(app.NewSubCommand("read", &hookOptions{EC: ec, event: "read"}, ec).
 		WithShortDesc("PreToolUse hook for Read: turn back the first whole read of a large file with its outline").
 		WithNoArgs().Build())
