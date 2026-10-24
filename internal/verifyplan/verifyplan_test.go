@@ -3,6 +3,7 @@ package verifyplan
 import (
 	"context"
 	"math"
+	"slices"
 	"testing"
 
 	"github.com/astrona-io/codesynapse/internal/gitx"
@@ -156,4 +157,30 @@ func TestBuildCSharp(t *testing.T) {
 	require.Len(t, plan.Steps, 2)
 	assert.Equal(t, plan.Steps[0].Command, `dotnet test --filter "FullyQualifiedName~Acme.Tests.SvcTests.FindsNone|FullyQualifiedName~Acme.Tests.SvcTests.FindsOne"`)
 	assert.Equal(t, plan.Steps[1].Command, "dotnet build")
+}
+
+func TestBuildPHP(t *testing.T) {
+	ctx := context.Background()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindRepository, "r"), Kind: model.KindRepository, Repo: "r", Name: "r"})
+	f := model.NodeID("r", model.KindMethod, "app/Svc.php::Svc.find")
+	g.AddNode(model.Node{ID: f, Kind: model.KindMethod, Repo: "r", Name: "find", File: "app/Svc.php", StartLine: 1, EndLine: 5})
+	unit := model.NodeID("r", model.KindMethod, "tests/SvcTest.php::SvcTest.test_finds")
+	g.AddNode(model.Node{ID: unit, Kind: model.KindMethod, Repo: "r", Name: "test_finds", File: "tests/SvcTest.php", StartLine: 1, EndLine: 4, IsTest: true})
+	pest := model.NodeID("r", model.KindFunction, "tests/Pest/SvcTest.php::<tests>")
+	g.AddNode(model.Node{ID: pest, Kind: model.KindFunction, Repo: "r", Name: "<tests>", File: "tests/Pest/SvcTest.php", StartLine: 1, EndLine: 9, IsTest: true})
+	g.AddEdge(model.Edge{From: unit, To: f, Kind: model.EdgeCalls})
+	g.AddEdge(model.Edge{From: pest, To: f, Kind: model.EdgeCalls})
+	mem := memory.New()
+	require.NoError(t, mem.ReplaceRepo(ctx, "r", g))
+	rep, err := review.Analyze(ctx, query.Service{R: mem}, "r", []gitx.FileChange{{Path: "app/Svc.php", Ranges: []gitx.LineRange{{Start: 1, End: 5}}}}, review.Options{Depth: 3})
+	require.NoError(t, err)
+	plan, err := Build(ctx, mem, "r", rep)
+	require.NoError(t, err)
+	var cmds []string
+	for _, s := range plan.Steps {
+		cmds = append(cmds, s.Command)
+	}
+	slices.Sort(cmds)
+	assert.Equal(t, cmds, []string{"php -l app/Svc.php", "vendor/bin/pest tests/Pest/SvcTest.php", "vendor/bin/phpunit --filter 'test_finds' tests/SvcTest.php"})
 }

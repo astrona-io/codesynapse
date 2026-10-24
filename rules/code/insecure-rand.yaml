@@ -4,7 +4,7 @@ title: math/rand used where crypto/rand may be needed
 severity: low
 cwe: [CWE-338]
 category: code
-languages: [go, python, javascript, typescript, java, kotlin, csharp]
+languages: [go, python, javascript, typescript, java, kotlin, csharp, php]
 why: math/rand and Math.random are predictable; tokens or IDs generated with them can be guessed.
 fix: Use crypto/rand for tokens, keys, nonces and IDs that must be unguessable.
 references:
@@ -30,3 +30,6 @@ examples:
   - language: csharp
     vulnerable: 'var token = new Random().Next().ToString("x");'
     fixed: 'var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));'
+  - language: php
+    vulnerable: '$token = md5(mt_rand());'
+    fixed: '$token = bin2hex(random_bytes(32));'

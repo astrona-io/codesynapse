@@ -4,7 +4,7 @@ title: Shell invoked with a non-constant command string
 severity: critical
 cwe: [CWE-78]
 category: code
-languages: [go, python, javascript, typescript, java, kotlin, rust, csharp]
+languages: [go, python, javascript, typescript, java, kotlin, rust, csharp, php]
 why: A shell parses the whole string, so any input containing ; | $( ) or backticks runs extra commands with the service's privileges.
 fix: Avoid sh -c; pass an explicit argv and validate every argument.
 references:
@@ -28,3 +28,6 @@ examples:
   - language: csharp
     vulnerable: 'Process.Start("cmd.exe", "/c convert " + name + " out.png");'
     fixed: 'Process.Start(new ProcessStartInfo("convert") { ArgumentList = { "--", name, "out.png" } });'
+  - language: php
+    vulnerable: 'shell_exec("convert " . $name . " out.png");'
+    fixed: '$p = new Process([''convert'', ''--'', $name, ''out.png'']); $p->run();'

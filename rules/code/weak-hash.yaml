@@ -4,7 +4,7 @@ title: MD5 or SHA-1 used
 severity: medium
 cwe: [CWE-328]
 category: code
-languages: [go, python, javascript, typescript, java, kotlin, rust, csharp]
+languages: [go, python, javascript, typescript, java, kotlin, rust, csharp, php]
 why: MD5 and SHA-1 collisions are practical; they must not protect passwords, signatures or integrity checks.
 fix: Use SHA-256 or better; MD5/SHA-1 only for non-security checksums.
 references:
@@ -28,3 +28,6 @@ examples:
   - language: csharp
     vulnerable: 'using var md5 = MD5.Create();'
     fixed: 'var digest = SHA256.HashData(data); // and PBKDF2/Argon2 for passwords'
+  - language: php
+    vulnerable: '$stored = md5($password);'
+    fixed: '$stored = password_hash($password, PASSWORD_ARGON2ID);'
