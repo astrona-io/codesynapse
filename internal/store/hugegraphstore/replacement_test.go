@@ -48,7 +48,8 @@ func TestContractAtomicReplacement(t *testing.T) {
 	run, err := newRunID()
 	require.NoError(t, err)
 	b := map[string]any{"repo": storetest.Repo, "headID": vid("ih", storetest.Repo), "run": run, "now": time.Now().UnixMilli(), "expires": time.Now().Add(time.Hour).UnixMilli(), "maxChunks": maxStageChunks}
-	require.NoError(t, s.stageWrite(ctx, acquireStage, b))
+	_, err = s.acquire(ctx, b)
+	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.stageWrite(ctx, abandonStage, b) })
 	b["idx"] = 0
 	b["chunkID"] = vid("is", run+"|0")

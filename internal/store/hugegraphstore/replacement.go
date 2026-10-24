@@ -19,10 +19,11 @@ const stageChunkBytes = 24 << 10
 const maxStageChunks = (store.MaxReplacementBytes + stageChunkBytes - 1) / stageChunkBytes
 
 const stageSchema = `def s=graph.schema()
-['stage_data','stage_run'].each{s.propertyKey(it).asText().ifNotExist().create()}
+['stage_data','stage_run','pub_gen'].each{s.propertyKey(it).asText().ifNotExist().create()}
 ['stage_index','stage_expires'].each{s.propertyKey(it).asLong().ifNotExist().create()}
 s.vertexLabel('ingest_stage').useCustomizeStringId().properties('repo','stage_run','stage_index','stage_data','stage_expires').ifNotExist().create()
-s.vertexLabel('ingest_head').useCustomizeStringId().properties('repo','stage_run','stage_expires').ifNotExist().create()
+s.vertexLabel('ingest_head').useCustomizeStringId().properties('repo','stage_run','stage_expires','pub_gen').nullableKeys('pub_gen').ifNotExist().create()
+if(!s.getVertexLabel('ingest_head').properties().collect{graph.propertyKey(it).name()}.contains('pub_gen')){s.vertexLabel('ingest_head').properties('pub_gen').nullableKeys('pub_gen').append()}
 s.indexLabel('ingestStageByRepo').onV('ingest_stage').by('repo').secondary().ifNotExist().create()
 s.indexLabel('ingestStageByExpiry').onV('ingest_stage').by('stage_expires').range().ifNotExist().create()
 1`
@@ -31,15 +32,24 @@ const pruneStages = `def stale=g.V().hasLabel('ingest_stage').has('stage_expires
 stale.each{it.remove()}
 stale.size()`
 
+// acquireStage takes the lease and answers the publication generation:
+// the run that last committed this repository's graph ("" when unknown).
 const acquireStage = `synchronized(graph){
 def head=g.V(headID).tryNext()
 if(head.isPresent()&&head.get().value('stage_run')!=''&&head.get().value('stage_expires')>now)return ['busy']
+def gen=head.isPresent()&&head.get().property('pub_gen').isPresent()?head.get().value('pub_gen'):''
 def old=g.V().hasLabel('ingest_stage').has('repo',repo).limit(maxChunks+1).toList()
 if(old.size()>maxChunks)return ['limit']
 old.each{it.remove()}
-graph.addVertex(T.label,'ingest_head',T.id,headID,'repo',repo,'stage_run',run,'stage_expires',expires)
-graph.tx().commit();return ['ok']
+graph.addVertex(T.label,'ingest_head',T.id,headID,'repo',repo,'stage_run',run,'stage_expires',expires,'pub_gen',gen)
+graph.tx().commit();return ['ok',gen]
 }`
+
+// clearGeneration forgets the publication generation before a repository's
+// nodes are deleted, so no cached hashes are trusted afterwards.
+const clearGeneration = `def head=g.V(headID).tryNext()
+if(head.isPresent()){head.get().property('pub_gen','');graph.tx().commit()}
+1`
 
 const uploadStage = `synchronized(graph){
 def head=g.V(headID).tryNext()
@@ -91,7 +101,7 @@ doc.nodes.each{r->
 }
 doc.edges.each{r->def kv=['count',r.c as Long,'run',run];if(r.e){kv<<'evidence';kv<<r.e};vertices[r.a].addEdge(r.l,vertices[r.b],kv as Object[])}
 chunks.each{it.remove()}
-head.get().property('stage_run','');head.get().property('stage_expires',0L)
+head.get().property('stage_run','');head.get().property('stage_expires',0L);head.get().property('pub_gen',run)
 graph.tx().commit()
 }catch(Throwable t){
 // Never leave a half-applied replacement for the next request on this thread to commit.
@@ -129,20 +139,30 @@ func (s *Store) replaceAtomic(ctx context.Context, repo string, nodes []model.No
 	}
 	// Under the stage lease nobody else publishes this repository, so the
 	// hashes read here describe what the delta is applied to.
-	return s.underStage(ctx, repo, func(bindings map[string]any) (bool, error) {
-		stored, err := s.storedHashes(ctx, repo)
-		if err != nil {
-			return false, fmt.Errorf("read stored hashes: %w", err)
+	published := hashesOf(nodeRows)
+	err = s.underStage(ctx, repo, func(bindings map[string]any) (bool, error) {
+		// The hashes this process published last are still what is stored
+		// when nobody committed since (same generation): no need to read
+		// every node's hashes back.
+		gen := bindings["gen"].(string)
+		stored, cached := s.published.get(repo, gen)
+		if !cached {
+			var err error
+			if stored, err = s.storedHashes(ctx, repo); err != nil {
+				return false, fmt.Errorf("read stored hashes: %w", err)
+			}
 		}
 		d := planDelta(stored, nodeRows, bySource)
 		if d == nil {
 			s.lastPublish.Store("full")
 			err := s.stageAndCommit(ctx, bindings, payload, commitStage)
 			if err == nil {
+				s.published.put(repo, bindings["run"].(string), published)
 				logx.FromContext(ctx).Info("graph published", "mode", "full", "nodes", len(nodeRows), "edges", len(edgeRows))
 			}
 			return true, err
 		}
+		d.Gen = gen
 		small, err := json.Marshal(d)
 		if err != nil {
 			return false, err
@@ -153,14 +173,25 @@ func (s *Store) replaceAtomic(ctx context.Context, repo string, nodes []model.No
 		}
 		s.lastPublish.Store("delta")
 		if err == nil {
-			logx.FromContext(ctx).Info("graph published", "mode", "delta", "nodes", len(d.Nodes), "gone", len(d.Gone), "edges", len(d.Edges), "unchanged", len(nodeRows)-len(d.Nodes))
+			s.published.put(repo, bindings["run"].(string), published)
+			logx.FromContext(ctx).Info("graph published", "mode", "delta", "nodes", len(d.Nodes), "gone", len(d.Gone), "edges", len(d.Edges), "unchanged", len(nodeRows)-len(d.Nodes), "hashes_cached", cached)
 		}
 		return true, err
 	}, func(bindings map[string]any) error {
 		s.lastPublish.Store("full")
 		logx.FromContext(ctx).Warn("stored graph changed while publishing; writing it in full")
-		return s.stageAndCommit(ctx, bindings, payload, commitStage)
+		err := s.stageAndCommit(ctx, bindings, payload, commitStage)
+		if err == nil {
+			s.published.put(repo, bindings["run"].(string), published)
+		}
+		return err
 	})
+	if err != nil {
+		// An attempt may have committed before failing to report it: the
+		// cache holds only what a commit confirmed.
+		s.published.forget(repo)
+	}
+	return err
 }
 
 // underStage runs try under a fresh stage lease. When try reports it did not
@@ -174,9 +205,11 @@ func (s *Store) underStage(ctx context.Context, repo string, try func(map[string
 		}
 		now := time.Now()
 		bindings := map[string]any{"repo": repo, "headID": vid("ih", repo), "run": run, "now": now.UnixMilli(), "expires": now.Add(2 * time.Hour).UnixMilli(), "maxChunks": maxStageChunks}
-		if err := s.stageWrite(ctx, acquireStage, bindings); err != nil {
+		gen, err := s.acquire(ctx, bindings)
+		if err != nil {
 			return false, fmt.Errorf("reserve ingest stage: %w", err)
 		}
+		bindings["gen"] = gen
 		done, err := f(bindings)
 		if !done || err != nil {
 			// Cleanup keeps the original identity but survives request cancellation.
@@ -230,6 +263,18 @@ func (s *Store) stageAndCommit(ctx context.Context, bindings map[string]any, pay
 		return fmt.Errorf("commit ingest stage: %w", err)
 	}
 	return nil
+}
+
+// acquire takes the stage lease and returns the publication generation.
+func (s *Store) acquire(ctx context.Context, bindings map[string]any) (string, error) {
+	var result []string
+	if err := s.write(ctx, acquireStage, bindings, &result); err != nil {
+		return "", err
+	}
+	if len(result) != 2 || result[0] != "ok" {
+		return "", errors.New("ingest stage rejected; retry after the active replacement completes")
+	}
+	return result[1], nil
 }
 
 // ErrTxCapacity reports a replacement too large for one HugeGraph

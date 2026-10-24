@@ -108,7 +108,9 @@ func TestGitHook(t *testing.T) {
 	cmd.Dir = dir
 	require.NoError(t, cmd.Run())
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		if b, err := os.ReadFile(out); err == nil { //nolint:gosec // test file
+		// The hook runs in the background: wait for the whole line, not
+		// only the file.
+		if b, err := os.ReadFile(out); err == nil && strings.HasSuffix(string(b), "\n") { //nolint:gosec // test file
 			assert.Equal(t, strings.TrimSpace(string(b)), "ingest "+dir+" --repo acme/demo")
 			break
 		}

@@ -94,6 +94,10 @@ type Store struct {
 	// lastPublish is "delta" or "full": how the last replacement was
 	// written (tests and logs).
 	lastPublish atomic.Value
+	// published caches the hashes of the last commit per repository, so a
+	// republish skips reading them back (delta.go).
+	published publishedHashes
+	hashReads atomic.Int64 // reads of every node's hashes (tests)
 }
 
 var _ store.Store = (*Store)(nil)

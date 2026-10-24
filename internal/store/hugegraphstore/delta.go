@@ -8,6 +8,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 )
 
 // Incremental publication (docs/PLAN.md, roadmap item 1). Publishing a
@@ -82,6 +83,9 @@ type delta struct {
 	Gone   []string          `json:"gone"`
 	Expect map[string]string `json:"expect"` // vertex -> "content|edges" read before
 	Total  int               `json:"total"`
+	// Gen is the publication generation the hashes belong to; when known,
+	// the commit checks it instead of counting the repository's nodes.
+	Gen string `json:"gen"`
 }
 
 func planDelta(stored []storedHash, nodeRows []map[string]any, bySource map[string][]map[string]any) *delta {
@@ -128,6 +132,7 @@ func planDelta(stored []storedHash, nodeRows []map[string]any, bySource map[stri
 }
 
 func (s *Store) storedHashes(ctx context.Context, repo string) ([]storedHash, error) {
+	s.hashReads.Add(1)
 	var out []storedHash
 	err := s.read(ctx, readHashes, map[string]any{"repo": repo}, &out)
 	return out, err
@@ -149,7 +154,8 @@ for(int i=0;i<chunks.size();i++){
  buffer.write(bytes)
 }
 def doc=new groovy.json.JsonSlurperClassic().parseText(buffer.toString('UTF-8'))
-if(g.V().hasLabel('node').has('repo',repo).count().next()!=doc.total)return ['stale']
+def gen=head.get().property('pub_gen').isPresent()?head.get().value('pub_gen'):''
+if(doc.gen!=''){if(gen!=doc.gen)return ['stale']}else if(g.V().hasLabel('node').has('repo',repo).count().next()!=doc.total)return ['stale']
 def changedIDs=doc.nodes.findAll{!it.n}.collect{it.v}
 def byId=[:]
 if(changedIDs){g.V(changedIDs as Object[]).toList().each{byId[it.id().asString()]=it}}
@@ -192,10 +198,69 @@ doc.nodes.each{r->
 }
 doc.edges.each{r->def kv=['count',r.c as Long,'run',run];if(r.e){kv<<'evidence';kv<<r.e};vertices[r.a].addEdge(r.l,vertices[r.b]?:targets[r.b],kv as Object[])}
 chunks.each{it.remove()}
-head.get().property('stage_run','');head.get().property('stage_expires',0L)
+head.get().property('stage_run','');head.get().property('stage_expires',0L);head.get().property('pub_gen',run)
 graph.tx().commit()
 }catch(Throwable t){
 graph.tx().rollback();throw t
 }
 return ['ok',doc.nodes.size().toString(),doc.gone.size().toString()]
 }`
+
+// hashesOf is what a publication of nodeRows stores, as storedHashes would
+// read it back.
+func hashesOf(nodeRows []map[string]any) []storedHash {
+	out := make([]storedHash, 0, len(nodeRows))
+	for _, r := range nodeRows {
+		p := r["p"].(map[string]any)
+		out = append(out, storedHash{V: r["v"].(string), H: p["content_hash"].(string), E: p["edges_hash"].(string)})
+	}
+	return out
+}
+
+// maxPublishedRepos bounds the hash cache; about 100 bytes per node.
+const maxPublishedRepos = 32
+
+// publishedHashes remembers, per repository, the hashes this process last
+// committed and the generation (run) that committed them. Another process
+// publishing, a deletion or any failed attempt changes or clears the
+// generation, and the cached hashes are then not used.
+type publishedHashes struct {
+	mu sync.Mutex
+	m  map[string]publishedEntry
+}
+
+type publishedEntry struct {
+	gen    string
+	hashes []storedHash
+}
+
+func (c *publishedHashes) get(repo, gen string) ([]storedHash, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.m[repo]
+	if !ok || gen == "" || e.gen != gen {
+		return nil, false
+	}
+	return e.hashes, true
+}
+
+func (c *publishedHashes) put(repo, gen string, hashes []storedHash) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = map[string]publishedEntry{}
+	}
+	if _, ok := c.m[repo]; !ok && len(c.m) >= maxPublishedRepos {
+		for k := range c.m { // any one: a miss only costs a read
+			delete(c.m, k)
+			break
+		}
+	}
+	c.m[repo] = publishedEntry{gen: gen, hashes: hashes}
+}
+
+func (c *publishedHashes) forget(repo string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.m, repo)
+}
