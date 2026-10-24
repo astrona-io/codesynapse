@@ -109,3 +109,18 @@ func TestUnapprovedSuppressionsLeaveFindingsActive(t *testing.T) {
 	}
 	assert.True(t, found)
 }
+
+func TestRootModulePath(t *testing.T) {
+	dir := t.TempDir()
+	assert.Equal(t, rootModulePath(dir), "", "no go.mod")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/app\n\ngo 1.22\n"), 0o600))
+	assert.Equal(t, rootModulePath(dir), "example.com/app")
+	n := model.Node{Kind: model.KindRepository, Meta: `{"repository_policy":{},"go_module":"example.com/app"}`}
+	assert.Equal(t, model.GoModuleOf(n), "example.com/app")
+
+	outside := filepath.Join(t.TempDir(), "go.mod")
+	require.NoError(t, os.WriteFile(outside, []byte("module elsewhere.com/x\n"), 0o600))
+	linked := t.TempDir()
+	require.NoError(t, os.Symlink(outside, filepath.Join(linked, "go.mod")))
+	assert.Equal(t, rootModulePath(linked), "", "a symlinked go.mod is not read")
+}

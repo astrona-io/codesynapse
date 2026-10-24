@@ -17,7 +17,7 @@ func TestCompactIDs(t *testing.T) {
 		{ID: "acme/app|Function|example.com/app.Run", Kind: model.KindFunction, Name: "Run", Summary: "acme/app|not an id"},
 		{ID: "other/repo|Function|example.com/x.Y", Kind: model.KindFunction, Depth: 2},
 	}}
-	got, err := compact("acme/app", in, nil)
+	got, err := compact(context.Background(), memory.New(), "acme/app", in, nil)
 	require.NoError(t, err)
 	assert.Equal(t, got.Results[0].ID, "Function|example.com/app.Run", "this repository's prefix goes")
 	assert.Equal(t, got.Results[0].Summary, "acme/app|not an id", "text that is not an ID stays")
@@ -39,6 +39,25 @@ func TestCompactIDsResolve(t *testing.T) {
 	require.Len(t, found.Results, 1)
 	assert.Equal(t, found.Results[0].ID, "Function|example.com/app.Run")
 	n, err := agentctx.Service{R: mem}.Resolve(ctx, "acme/app", found.Results[0].ID)
+	require.NoError(t, err)
+	assert.Equal(t, n.ID, id)
+}
+
+// The root Go module is written as "~" in compact IDs, and such an ID
+// resolves in the next call.
+func TestModuleRelativeIDs(t *testing.T) {
+	ctx := context.Background()
+	g := model.NewGraph()
+	id := model.NodeID("acme/app", model.KindMethod, "(*example.com/app/store.Store).Get")
+	g.AddNode(model.Node{ID: model.NodeID("acme/app", model.KindRepository, "acme/app"), Kind: model.KindRepository, Repo: "acme/app", Name: "acme/app", Meta: `{"go_module":"example.com/app"}`})
+	g.AddNode(model.Node{ID: id, Kind: model.KindMethod, Repo: "acme/app", Name: "Get", QualifiedName: "(*store.Store).Get", File: "store/store.go", StartLine: 1, EndLine: 3})
+	mem := memory.New()
+	require.NoError(t, mem.ReplaceRepo(ctx, "acme/app", g))
+	out, err := FileOutline(ctx, mem, "acme/app", FileIn{File: "store/store.go"})
+	require.NoError(t, err)
+	require.Len(t, out.Entries, 1)
+	assert.Equal(t, out.Entries[0].ID, "Method|(*~/store.Store).Get")
+	n, err := agentctx.Service{R: mem}.Resolve(ctx, "acme/app", out.Entries[0].ID)
 	require.NoError(t, err)
 	assert.Equal(t, n.ID, id)
 }

@@ -4,6 +4,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -501,4 +502,19 @@ func IsK8sResource(n Node) bool {
 // ContainsFold reports whether s contains substr, ignoring case.
 func ContainsFold(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
+
+// GoModuleOf is the Go module path at the root of a repository, recorded in
+// its Repository node's Meta at ingest, or "".
+func GoModuleOf(repo Node) string {
+	if repo.Kind != KindRepository || repo.Meta == "" {
+		return ""
+	}
+	var meta struct {
+		GoModule string `json:"go_module"`
+	}
+	if json.Unmarshal([]byte(repo.Meta), &meta) != nil {
+		return ""
+	}
+	return meta.GoModule
 }
