@@ -67,6 +67,7 @@ type toolHookInput struct {
 		Repo     string `json:"repo"`
 	} `json:"tool_input"`
 	ToolResponse json.RawMessage `json:"tool_response"`
+	Prompt       string          `json:"prompt"` // UserPromptSubmit
 }
 
 // hookState is what the hooks remember per chat session.
@@ -87,6 +88,9 @@ type hookState struct {
 	Reported workflowSent `json:"reported,omitempty"`
 	// Base is the checkout as the session began (edits.go).
 	Base *treeBase `json:"base,omitempty"`
+	// Task is the session's first prompt, kept only with eval capture on
+	// (cases.go).
+	Task string `json:"task,omitempty"`
 }
 
 // workflowSent is what the server already knows of a session's workflow.
@@ -170,7 +174,10 @@ func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 		out = readGuard(in)
 	case "stop":
 		reportRetrieval(ctx, in, o.EC.Logger)
+		captureCase(ctx, in, o.EC.Logger)
 		out = stopGuard(ctx, in, o.EC.Logger)
+	case "prompt":
+		notePrompt(in)
 	case "lookup":
 		noteLookup(in)
 	case "session":
@@ -339,6 +346,9 @@ func hookCmd(ec *app.Env) *cobra.Command {
 		WithNoArgs().Build())
 	parent.AddCommand(app.NewSubCommand("answer", &hookOptions{EC: ec, event: "answer"}, ec).
 		WithShortDesc("PostToolUse hook for the CodeSynapse tools: note the line ranges an answer gave").
+		WithNoArgs().Build())
+	parent.AddCommand(app.NewSubCommand("prompt", &hookOptions{EC: ec, event: "prompt"}, ec).
+		WithShortDesc("UserPromptSubmit hook: with CODESYNAPSE_EVAL_CAPTURE=true, keep the session's first prompt for an eval case").
 		WithNoArgs().Build())
 	parent.AddCommand(app.NewSubCommand("read-done", &hookOptions{EC: ec, event: "read-done"}, ec).
 		WithShortDesc("PostToolUse hook for Read: count the answered line ranges the agent read").
