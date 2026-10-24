@@ -66,7 +66,7 @@ const maxScanDirs = 5000
 func (r Resolver) Resolve(ctx context.Context, deps []Dep) map[string]Found {
 	out := map[string]Found{}
 	nodeDirs, sitePkgs := r.scan()
-	py := pythonLicenses(sitePkgs, r.allowed)
+	py := pythonLicenses(sitePkgs, r.pythonReadable)
 	var missing []Dep
 	for _, d := range deps {
 		var f Found
@@ -76,7 +76,7 @@ func (r Resolver) Resolve(ctx context.Context, deps []Dep) map[string]Found {
 		case NPM:
 			f = r.npmLicense(nodeDirs, d)
 		case PyPI:
-			f = py[normalizePy(d.Name)]
+			f = pythonFor(py[normalizePy(d.Name)], d.Version)
 		}
 		if f.License != "" {
 			out[d.Key()] = f
@@ -212,9 +212,17 @@ func NPMField(raw []byte) string {
 
 var classifier = regexp.MustCompile(`^Classifier: License :: (?:OSI Approved :: )?(.+)$`)
 
-// pythonLicenses reads installed packages' METADATA in site-packages.
-func pythonLicenses(sitePkgs []string, allowed ...func(string) bool) map[string]Found {
-	out := map[string]Found{}
+// installedPython is one installed distribution's licence evidence.
+type installedPython struct {
+	version string
+	found   Found
+}
+
+// pythonLicenses reads installed packages' METADATA in site-packages. Every
+// installed version is kept: several can be present, and a licence is
+// evidence only for the version it was read from.
+func pythonLicenses(sitePkgs []string, readable ...func(string) bool) map[string][]installedPython {
+	out := map[string][]installedPython{}
 	for _, sp := range sitePkgs {
 		entries, err := os.ReadDir(sp)
 		if err != nil {
@@ -225,29 +233,70 @@ func pythonLicenses(sitePkgs []string, allowed ...func(string) bool) map[string]
 				continue
 			}
 			p := filepath.Join(sp, e.Name(), "METADATA")
-			if len(allowed) > 0 && !allowed[0](p) {
+			if len(readable) > 0 && !readable[0](p) {
 				continue
 			}
 			b, err := readSmall(p)
 			if err != nil {
 				continue
 			}
-			name, id := parseMetadata(b)
+			name, version, id := parseMetadata(b)
 			if name == "" || id == "" {
 				continue
 			}
-			if _, ok := out[normalizePy(name)]; !ok {
-				out[normalizePy(name)] = Found{License: id, Source: "installed package metadata (" + e.Name() + ")"}
-			}
+			key := normalizePy(name)
+			out[key] = append(out[key], installedPython{version: version,
+				found: Found{License: id, Source: "installed package metadata (" + e.Name() + ")"}})
 		}
 	}
 	return out
 }
 
+// pythonFor picks the evidence for the requested version. A mismatch stays
+// unknown (the online lookup, when configured, answers per version); with no
+// requested version only a single installed version is unambiguous.
+func pythonFor(installed []installedPython, version string) Found {
+	if version == "" {
+		if len(installed) == 1 {
+			return installed[0].found
+		}
+		return Found{}
+	}
+	for _, in := range installed {
+		if in.version != "" && samePyVersion(in.version, version) {
+			return in.found
+		}
+	}
+	return Found{}
+}
+
+// samePyVersion compares two versions the way PEP 440 treats the common
+// spellings: case, a leading "v" or "==", and trailing ".0" release segments
+// do not matter ("1.0" and "1.0.0" are one version).
+func samePyVersion(a, b string) bool { return canonicalPyVersion(a) == canonicalPyVersion(b) }
+
+func canonicalPyVersion(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	v = strings.TrimPrefix(strings.TrimPrefix(v, "=="), "v")
+	end := 0
+	for end < len(v) && (v[end] == '.' || (v[end] >= '0' && v[end] <= '9')) {
+		end++
+	}
+	release, rest := v[:end], v[end:]
+	sep := ""
+	if strings.HasSuffix(release, ".") { // "1.0.post1": the dot belongs to the suffix
+		release, sep = strings.TrimSuffix(release, "."), "."
+	}
+	for strings.HasSuffix(release, ".0") {
+		release = strings.TrimSuffix(release, ".0")
+	}
+	return release + sep + rest
+}
+
 // parseMetadata returns the package name and licence from a core-metadata
 // file: License-Expression first, then a short License field, then the
 // trove classifiers.
-func parseMetadata(b []byte) (name, id string) {
+func parseMetadata(b []byte) (name, version, id string) {
 	var expr, field string
 	var trove []string
 	sc := bufio.NewScanner(bytes.NewReader(b))
@@ -260,6 +309,8 @@ func parseMetadata(b []byte) (name, id string) {
 		switch {
 		case strings.HasPrefix(line, "Name: "):
 			name = strings.TrimSpace(line[len("Name: "):])
+		case strings.HasPrefix(line, "Version: "):
+			version = strings.TrimSpace(line[len("Version: "):])
 		case strings.HasPrefix(line, "License-Expression: "):
 			expr = strings.TrimSpace(line[len("License-Expression: "):])
 		case strings.HasPrefix(line, "License: "):
@@ -272,13 +323,13 @@ func parseMetadata(b []byte) (name, id string) {
 	}
 	switch {
 	case expr != "":
-		return name, expr
+		return name, version, expr
 	case field != "" && len(field) < 60 && Of(field) != Unknown:
-		return name, Normalize(field)
+		return name, version, Normalize(field)
 	case len(trove) > 0:
-		return name, strings.Join(trove, " OR ")
+		return name, version, strings.Join(trove, " OR ")
 	}
-	return name, ""
+	return name, version, ""
 }
 
 var pySeparators = regexp.MustCompile(`[-_.]+`)
@@ -311,6 +362,13 @@ func inside(root, p string) bool {
 	}
 	rel, err := filepath.Rel(rr, rp)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// pythonReadable says whether a METADATA file may be read: allowed by the
+// policy and resolving to a path inside the repository, so a symlink in a
+// virtualenv cannot pull in a file from outside the checkout.
+func (r Resolver) pythonReadable(path string) bool {
+	return r.allowed(path) && inside(r.Root, path)
 }
 
 func (r Resolver) allowed(path string) bool {
