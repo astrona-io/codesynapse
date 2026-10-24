@@ -1,0 +1,27 @@
+# `codesynapse install --local`: a laptop cluster (kind, k3d, Docker
+# Desktop, minikube). Small requests, plain HTTP through port-forward.
+cookieSecure: false
+environment: local
+api:
+  resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 1Gi}}
+worker:
+  resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 3Gi}}
+mcp:
+  resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 512Mi}}
+web:
+  resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 512Mi}}
+postgresql:
+  size: 1Gi
+  resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 512Mi}}
+hugegraph:
+  size: 2Gi
+  resources: {requests: {cpu: 100m, memory: 1Gi}, limits: {memory: 3Gi}}
+milvus:
+  size: 2Gi
+  resources: {requests: {cpu: 100m, memory: 512Mi}, limits: {memory: 3Gi}}
+victoriametrics:
+  size: 1Gi
+victoriatraces:
+  size: 1Gi
+workspace:
+  size: 2Gi

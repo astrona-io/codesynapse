@@ -117,6 +117,8 @@ With accounts, organisations use their own tokens instead; see [Organisation Git
 
 ## Kubernetes
 
+To try it on a cluster, `codesynapse install --local` installs the chart with random credentials and waits for every service; `codesynapse status` checks it and `codesynapse uninstall` removes it. See [the chart README](../../deploy/helm/codesynapse/README.md#install-with-the-cli).
+
 Releases publish signed multi-arch images, `ghcr.io/astrona-io/codesynapse-{api,worker,mcp,web}`, and the Helm chart at the same version:
 
 ```sh
