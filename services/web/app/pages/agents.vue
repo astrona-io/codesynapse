@@ -78,8 +78,14 @@ const where = computed(() => viaBridge.value
 // a call and, from the plugin's hooks, that the plugin runs.
 const pluginInstall = 'claude plugin marketplace add astrona-io/codesynapse\nclaude plugin install codesynapse@codesynapse'
 const pluginCleanup = 'claude mcp remove codesynapse -s user'
-const stepPlugin = 4
-const stepCheck = computed(() => (viaBridge.value ? 5 : 3))
+const codexConfig = computed(() => `[mcp_servers.codesynapse]
+url = ${JSON.stringify(mcpUrl.value)}
+bearer_token_env_var = "CODESYNAPSE_MCP_TOKEN"
+env_http_headers = { "X-CodeSynapse-Session" = "CODESYNAPSE_SESSION_ID", "X-CodeSynapse-Parent-Session" = "CODESYNAPSE_PARENT_SESSION_ID" }`)
+const agentRules = 'Use the CodeSynapse MCP tools before reading files: minimal_context with the task first, get_symbol_context before editing a symbol, and get_pr_context on your diff before finishing.'
+const stepPlugin = computed(() => viaBridge.value ? 4 : 3)
+const showPluginStatus = computed(() => viaBridge.value && agent.value === 'claude')
+const stepCheck = computed(() => (viaBridge.value ? 4 : 3) + (agent.value === 'codex' || agent.value === 'cursor' || showPluginStatus.value ? 1 : 0))
 const { data: keys, refresh: refreshKeys } = useApiGet<{ keys: ApiKey[] }>('me/keys', { immediate: session.accounts.value })
 const { data: status, refresh: refreshStatus } = useApiGet<AgentStatus>('agents/status')
 // What was already there when the page opened: only newer activity counts.
@@ -90,16 +96,16 @@ const firstCall = computed(() => !!status.value && !!base.value && status.value.
 const pluginSeen = computed(() => !!status.value && !!base.value && status.value.workflow > base.value.workflow)
 const checks = computed(() => [
   { id: 'key', label: 'Key created', done: !!keyId.value || !session.accounts.value, hint: 'Step 1.' },
-  { id: 'connected', label: 'Agent connected', done: !!connected.value || firstCall.value, hint: connected.value ? `The key was first used ${relTime(connected.value)}.` : 'Start a new chat in your agent; the bridge connects when it starts.' },
+  { id: 'connected', label: 'Agent connected', done: !!connected.value || firstCall.value, hint: connected.value ? `The key was first used ${relTime(connected.value)}.` : 'Start a new chat after completing your agent’s connection and session setup.' },
   { id: 'call', label: 'First tool call', done: firstCall.value, hint: firstCall.value ? 'A CodeSynapse tool answered a call.' : 'Ask something about a repository. Calls are counted within a minute.' },
-  ...(viaBridge.value ? [{ id: 'plugin', label: 'Plugin running', done: pluginSeen.value, hint: pluginSeen.value ? 'Its hooks reported how a session began.' : 'Optional. Appears after a new chat with the plugin installed, once it has looked at code.' }] : []),
+  ...(showPluginStatus.value ? [{ id: 'plugin', label: 'Plugin running', done: pluginSeen.value, hint: pluginSeen.value ? 'Its hooks reported how a session began.' : 'Optional. Appears after a new chat with the plugin installed, once it has looked at code.' }] : []),
 ])
 let poll: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
   poll = setInterval(() => {
     if (document.visibilityState !== 'visible') return
     if (keyId.value && !connected.value) refreshKeys()
-    if (!firstCall.value || (viaBridge.value && !pluginSeen.value)) refreshStatus()
+    if (!firstCall.value || (showPluginStatus.value && !pluginSeen.value)) refreshStatus()
   }, 5000)
 })
 onBeforeUnmount(() => clearInterval(poll))
@@ -133,7 +139,7 @@ onBeforeUnmount(() => clearInterval(poll))
       <p class="step__n">2</p>
       <div class="stack--tight">
         <h2>Install the CodeSynapse bridge</h2>
-        <p class="muted">The bridge is a small program on your machine that sits between your agent and CodeSynapse. It is what makes <strong>every request go through your system</strong>: it signs each call with your key, registers each chat as its own session, and forwards the call to your server, where it is checked against your permissions and written to the audit log. Pointing an agent straight at the MCP address is not enough: Claude Code cannot send the session identity itself, so the server refuses it.</p>
+        <p class="muted">The bridge is a small program on your machine that sits between Claude Code and CodeSynapse. It signs each MCP call with your key, registers each chat as its own session, and forwards the call to your server, where it is checked against your permissions and written to the audit log. Codex and Cursor currently connect over HTTP and need their own runtime session integration, described below.</p>
         <CopyField :value="install" label="Homebrew (macOS and Linux)" />
         <p class="muted small">No Homebrew? Download a release binary or use <code>go install</code>: see the Claude Code bridge guide in the documentation. Every machine that runs Claude Code needs the <code>codesynapse</code> binary.</p>
       </div>
@@ -142,7 +148,7 @@ onBeforeUnmount(() => clearInterval(poll))
     <section class="panel step">
       <p class="step__n">{{ viaBridge ? 3 : 2 }}</p>
       <div class="stack--tight">
-        <h2>{{ viaBridge ? 'Register the bridge with your agent' : 'Add CodeSynapse to your agent' }}</h2>
+        <h2>{{ viaBridge && agent === 'claude' ? 'Register the bridge with your agent' : 'Add CodeSynapse to your agent' }}</h2>
         <div class="row" role="tablist">
           <button v-for="a in agents" :key="a.id" class="chip" :class="{ active: agent === a.id }" role="tab" :aria-selected="agent === a.id" @click="agent = a.id">{{ a.label }}</button>
         </div>
@@ -150,7 +156,7 @@ onBeforeUnmount(() => clearInterval(poll))
         <p class="muted small">{{ where }}</p>
         <p class="muted small">MCP address: <code>{{ mcpUrl }}</code><template v-if="viaBridge"> · API address: <code>{{ apiUrl }}</code></template>. Several agents on one machine? Leave out <code>--only</code> and it offers every agent it finds.</p>
         <p v-if="viaBridge && apiUrl.includes('<')" class="notice notice--warn" role="status">This installation does not know its public API address. Replace <code>{{ apiUrl }}</code> with the address your API is reached at, or ask the operator to set <code>CODESYNAPSE_PUBLIC_API_URL</code>.</p>
-        <details v-if="viaBridge">
+        <details v-if="viaBridge && agent === 'claude'">
           <summary class="muted small">Every call reaches the server (and an opt-in for fresh answers)</summary>
           <div class="stack--tight small">
             <p>By default the bridge sends every call to your system: it is signed with your key, checked against your permissions, written to the audit log and counted here. The server's graph reflects the last sync, so it does not know edits you made since. If you prefer fast answers that include uncommitted edits, you can opt in to answering ten core tools from your working tree on your machine; those answers never reach the server, so they are not audited or counted. Set this where Claude Code starts, for example in your shell profile:</p>
@@ -173,6 +179,56 @@ onBeforeUnmount(() => clearInterval(poll))
       </div>
     </section>
 
+    <section v-if="agent === 'codex'" class="panel step">
+      <p class="step__n">{{ stepPlugin }}</p>
+      <div class="stack--tight">
+        <h2>Use CodeSynapse automatically in Codex</h2>
+        <p class="muted">Codex supports plugins that bundle skills, MCP connections and lifecycle hooks. Connecting MCP makes tools available; a hook can run on every prompt to supply context or steer the agent toward CodeSynapse.</p>
+        <p class="notice notice--warn" role="status">CodeSynapse currently ships a Claude Code plugin. A Codex bridge and hook adapter is not available yet; the connection command above does not install one.</p>
+        <template v-if="viaBridge">
+          <h3>Supply the chat identity</h3>
+          <p class="muted">Merge this into the existing CodeSynapse entry in <code>~/.codex/config.toml</code>. A runtime integration must first register Codex’s actual thread ID with <code>POST /api/v1/execution/sessions</code>, then supply it as both session environment variables before MCP connects. Keep it across reconnects and compaction; each new chat needs its own runtime ID.</p>
+          <CopyField :value="codexConfig" multiline label="~/.codex/config.toml" />
+          <p class="muted small">These headers are required on every MCP request. Hooks cannot update the environment of an MCP process that is already running. A shared, static session ID cannot distinguish several chats.</p>
+        </template>
+        <h3>Add the graph-first rules</h3>
+        <p class="muted">Add this to your repository’s <code>AGENTS.md</code>, or <code>~/.codex/AGENTS.md</code> for all projects. The rules guide Codex once its MCP connection and runtime identity are working; they do not install hooks.</p>
+        <CopyField :value="agentRules" multiline label="AGENTS.md" />
+        <details>
+          <summary class="muted small">Plugins and hooks for every prompt</summary>
+          <div class="stack--tight small">
+            <p>A Codex adapter can use <code>SessionStart</code> to load the rules, <code>UserPromptSubmit</code> to run on every prompt, <code>PreToolUse</code> to check tool calls and <code>PostToolUse</code> to report usage. This requires Codex-specific integration with the registered chat identity; installing Claude hooks does not configure Codex.</p>
+            <p>Plugins containing hooks require manual installation in Codex desktop. Review and trust the hook definitions before they can run; plugins with lifecycle hooks are not eligible for the public plugin directory.</p>
+            <p>See OpenAI’s <a href="https://developers.openai.com/plugins/build/plugins" target="_blank" rel="noopener noreferrer">plugin packaging guide</a> and <a href="https://learn.chatgpt.com/docs/hooks" target="_blank" rel="noopener noreferrer">hook documentation</a>.</p>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section v-if="agent === 'cursor'" class="panel step">
+      <p class="step__n">{{ stepPlugin }}</p>
+      <div class="stack--tight">
+        <h2>Use CodeSynapse automatically in Cursor</h2>
+        <p class="muted">Cursor supports plugins that bundle rules, skills, MCP connections and hooks. A <code>beforeSubmitPrompt</code> hook can run on every prompt; connecting MCP alone makes the tools available without guaranteeing their use.</p>
+        <p class="notice notice--warn" role="status">CodeSynapse currently ships a Claude Code plugin. A Cursor bridge and hook adapter is not available yet; the connection command above does not install one.</p>
+        <template v-if="viaBridge">
+          <h3>Supply the chat identity</h3>
+          <p class="muted">A runtime integration must register Cursor’s actual chat ID with <code>POST /api/v1/execution/sessions</code> and send it as both <code>X-CodeSynapse-Session</code> and <code>X-CodeSynapse-Parent-Session</code> on every MCP request. The installer adds header templates to <code>~/.cursor/mcp.json</code>, but a launcher must supply both session environment variables before Cursor connects.</p>
+          <p class="muted small">Keep the same identity across reconnects and compaction. Each new chat needs its own runtime ID; a shared, static session ID cannot distinguish several chats. A hook cannot update the environment of an MCP process that is already running.</p>
+        </template>
+        <h3>Add the graph-first rules</h3>
+        <p class="muted">Add this to your repository’s <code>AGENTS.md</code> or an always-applied Cursor rule. It guides Cursor once its MCP connection and runtime identity are working; it does not install hooks.</p>
+        <CopyField :value="agentRules" multiline label="AGENTS.md or Cursor rule" />
+        <details>
+          <summary class="muted small">Plugins and hooks for every prompt</summary>
+          <div class="stack--tight small">
+            <p>A Cursor adapter can use <code>sessionStart</code> to load the rules, <code>beforeSubmitPrompt</code> to run on each prompt, <code>beforeMCPExecution</code> to check MCP calls and <code>afterMCPExecution</code> to report usage. Hook scripts can be configured in <code>.cursor/hooks.json</code> for a project or <code>~/.cursor/hooks.json</code> for your user, or bundled in a Cursor plugin.</p>
+            <p>See Cursor’s <a href="https://cursor.com/docs/reference/plugins" target="_blank" rel="noopener noreferrer">plugin reference</a> and <a href="https://cursor.com/docs/hooks" target="_blank" rel="noopener noreferrer">hook documentation</a>. CodeSynapse’s Claude setup has not been validated as a Cursor integration.</p>
+          </div>
+        </details>
+      </div>
+    </section>
+
     <section class="panel step">
       <p class="step__n">{{ stepCheck }}</p>
       <div class="stack--tight">
@@ -184,11 +240,11 @@ onBeforeUnmount(() => clearInterval(poll))
             <span><strong>{{ c.label }}</strong> <span class="muted small">{{ c.hint }}</span></span>
           </li>
         </ul>
-        <details>
+        <details v-if="agent !== 'codex' && agent !== 'cursor'">
           <summary class="muted small">Make agents use it automatically</summary>
           <div class="stack--tight small">
             <p>CodeSynapse sends its own instructions to agents when they connect. The Claude Code plugin goes further: it puts a short ruleset in every session and reports on Statistics whether agents then start with CodeSynapse. Without the plugin, add this to the repository's <code>AGENTS.md</code> or <code>CLAUDE.md</code>, or to <code>~/.claude/CLAUDE.md</code> for every project:</p>
-            <CopyField multiline value="Use the CodeSynapse MCP tools before reading files: minimal_context with the task first, get_symbol_context before editing a symbol, and get_pr_context on your diff before finishing." />
+            <CopyField :value="agentRules" multiline />
             <p class="muted">Claude Code can also recall and offload memory automatically: <code>codesynapse mcp hooks</code> installs the hooks. See <NuxtLink to="/help#memory">agent memory</NuxtLink>.</p>
           </div>
         </details>
