@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net"
 	"net/http"
@@ -125,7 +126,7 @@ func (o *mcpBridgeOptions) Run(ctx context.Context, _ *app.Env) error {
 	if _, err := c.executionContext(ctx, session, session); err != nil {
 		return err
 	}
-	b := &bridge{url: o.url, token: c.token, session: session, out: o.EC.Stdout,
+	b := &bridge{url: o.url, token: c.token, session: session, out: o.EC.Stdout, report: c, logger: o.EC.Logger,
 		http: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	if o.worktree {
 		if cwd, err := os.Getwd(); err == nil {
@@ -150,6 +151,13 @@ type bridge struct {
 
 	// worktree answers core tools from the working tree; nil forwards all.
 	worktree *worktree
+
+	// The git tools are answered here (gitbridge.go). report tells the API
+	// about each call; gitDir is the checkout, found on first use.
+	report apiClient
+	logger *slog.Logger
+	gitMu  sync.Mutex
+	gitDir string
 }
 
 type rpcMessage struct {
@@ -203,7 +211,7 @@ func (b *bridge) run(ctx context.Context, in io.Reader) error {
 			case <-ctx.Done():
 				return
 			}
-			if m.Method == "tools/call" && b.answerLocally(ctx, msg, m) {
+			if m.Method == "tools/call" && (b.answerGit(ctx, msg, m) || b.answerLocally(ctx, msg, m)) {
 				return
 			}
 			if b.routes != nil && m.Method == "tools/call" {

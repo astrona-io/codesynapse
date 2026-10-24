@@ -116,7 +116,7 @@ type DayStat struct {
 // ToolStat is one tool (or "prompt:<name>") over the window.
 type ToolStat struct {
 	Tool           string  `json:"tool"`
-	Kind           string  `json:"kind"` // navigation, memory, review, prompt, other
+	Kind           string  `json:"kind"` // navigation, git, memory, review, prompt, other
 	Calls          int     `json:"calls"`
 	Errors         int     `json:"errors"`
 	ResponseTokens int     `json:"response_tokens"`
@@ -467,6 +467,8 @@ func toolKind(tool string) string {
 		return "navigation"
 	case recallTools[tool] || tool == "upsert_graph_triples":
 		return "memory"
+	case strings.HasPrefix(tool, "git_"):
+		return "git"
 	case strings.Contains(tool, "review"):
 		return "review"
 	}
