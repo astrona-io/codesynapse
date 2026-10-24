@@ -203,30 +203,11 @@ func (s *Server) buildStats(ctx context.Context, days int, now time.Time) (Stats
 	}
 	st := Stats{GeneratedAt: now.UTC().Format(time.RFC3339), Days: days, Workspace: ov.Totals, Jobs: ov.Jobs, Repos: ov.Repos, AI: []AIStat{}}
 
-	// Tokens a file-reading agent needs per graph token, per repository,
-	// from the benchmark measured at ingest.
-	ratio := map[string]float64{}
-	var g, b int
-	for _, rs := range ov.Repos {
-		if rs.GraphTokens > 0 {
-			ratio[rs.Name] = float64(rs.BaseTokens) / float64(rs.GraphTokens)
-			g, b = g+rs.GraphTokens, b+rs.BaseTokens
-		}
-	}
-	workspaceRatio := 1.0
-	if g > 0 {
-		workspaceRatio = float64(b) / float64(g)
-	}
-	buckets, err := s.st.Usage(ctx, usage.Day(now.AddDate(0, 0, -(days-1))))
+	buckets, err := s.usageBuckets(ctx, days, now)
 	if err != nil {
 		return st, err
 	}
-	if sc := scopeFrom(ctx); !sc.all {
-		// An organisation sees its own agents' usage only, even on a
-		// repository it shares with others.
-		buckets = slices.DeleteFunc(buckets, func(b usage.Bucket) bool { return !seesReview(sc, b.Repo, b.Org) })
-	}
-	st.Agents = agentStats(buckets, days, now, ratio, workspaceRatio)
+	st.Agents = agentUsage(buckets, ov.Repos, days, now)
 
 	if st.Memory, err = s.memoryStats(ctx, buckets, st.Agents.Sessions); err != nil {
 		return st, err
@@ -246,6 +227,41 @@ func (s *Server) buildStats(ctx context.Context, days int, now time.Time) (Stats
 		}
 	}
 	return st, nil
+}
+
+// usageBuckets reads the MCP usage of the last days days that the caller's
+// organisations may see.
+func (s *Server) usageBuckets(ctx context.Context, days int, now time.Time) ([]usage.Bucket, error) {
+	buckets, err := s.st.Usage(ctx, usage.Day(now.AddDate(0, 0, -(days-1))))
+	if err != nil {
+		return nil, err
+	}
+	if sc := scopeFrom(ctx); !sc.all {
+		// An organisation sees its own agents' usage only, even on a
+		// repository it shares with others.
+		buckets = slices.DeleteFunc(buckets, func(b usage.Bucket) bool { return !seesReview(sc, b.Repo, b.Org) })
+	}
+	return buckets, nil
+}
+
+// agentUsage compares what agents' calls returned with what reading the
+// files would have cost, using each repository's benchmark ratio.
+func agentUsage(buckets []usage.Bucket, repos []RepoSummary, days int, now time.Time) AgentStats {
+	// Tokens a file-reading agent needs per graph token, per repository,
+	// from the benchmark measured at ingest.
+	ratio := map[string]float64{}
+	var g, b int
+	for _, rs := range repos {
+		if rs.GraphTokens > 0 {
+			ratio[rs.Name] = float64(rs.BaseTokens) / float64(rs.GraphTokens)
+			g, b = g+rs.GraphTokens, b+rs.BaseTokens
+		}
+	}
+	workspaceRatio := 1.0
+	if g > 0 {
+		workspaceRatio = float64(b) / float64(g)
+	}
+	return agentStats(buckets, days, now, ratio, workspaceRatio)
 }
 
 func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[string]float64, workspaceRatio float64) AgentStats {

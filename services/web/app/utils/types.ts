@@ -367,6 +367,11 @@ export interface Attention {
   repos: number
   clean: string[]
   tokens_saved: number
+  // From agents' calls over the last agent_days days (estimates).
+  agent_days: number
+  agent_calls: number
+  tokens_returned: number
+  tokens_avoided: number
   findings: number
   vulns: number
   grades: Record<string, number>
