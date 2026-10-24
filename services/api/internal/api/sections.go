@@ -28,9 +28,11 @@ type Sections struct {
 	Dependencies int  `json:"dependencies"`
 	Licences     bool `json:"licences"`
 	Findings     int  `json:"findings"`
-	Snapshots    int  `json:"snapshots"`
-	Reviews      int  `json:"reviews"`
-	MemoryFacts  int  `json:"memory_facts"`
+	// Routes counts entry points: HTTP routes, MCP tools, CLI commands.
+	Routes      int `json:"routes"`
+	Snapshots   int `json:"snapshots"`
+	Reviews     int `json:"reviews"`
+	MemoryFacts int `json:"memory_facts"`
 	// Admin says the caller administers the repository (always true in
 	// single-tenant mode).
 	Admin bool `json:"admin"`
@@ -63,6 +65,7 @@ func (s *Server) handleSections(w http.ResponseWriter, r *http.Request) {
 		Dependencies: n[model.KindModule],
 		Licences:     repoNode.Licenses != "",
 		Findings:     n[model.KindFinding],
+		Routes:       n[model.KindRoute],
 	}
 	props, err := s.catalogOf(ctx, repo).Proposals(ctx, repo)
 	if err != nil && !errors.Is(err, catalog.ErrDisabled) {

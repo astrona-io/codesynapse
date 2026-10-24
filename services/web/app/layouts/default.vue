@@ -78,6 +78,7 @@ const repoMenu = computed(() => {
     { label: 'Quality and security', links: [
       { to: `${base}/security`, label: 'Security' },
       { to: `${base}/metrics`, label: 'Code health', also: [`${base}/cleanup`] },
+      { to: `${base}/entry-points`, label: 'Entry points', missing: need(s => s.routes > 0, 'no HTTP routes, MCP tools or CLI commands found') },
     ] },
     { label: 'Dependencies', links: [
       { to: `${base}/dependencies`, label: 'Dependencies', missing: need(s => s.dependencies > 0, 'no dependency manifests indexed') },

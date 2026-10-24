@@ -306,6 +306,7 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/repos/{repo}/overview", repoRole(accounts.Viewer), s.handleOverview)
 	s.route("GET /api/v1/repos/{repo}/dashboard", repoRole(accounts.Viewer), s.handleDashboard)
 	s.route("GET /api/v1/repos/{repo}/sections", repoRole(accounts.Viewer), s.handleSections)
+	s.route("GET /api/v1/repos/{repo}/entry-points", repoRole(accounts.Viewer), s.handleEntryPoints)
 	s.route("GET /api/v1/repos/{repo}/metrics", repoRole(accounts.Viewer), s.handleMetrics)
 	s.route("GET /api/v1/repos/{repo}/security", repoRole(accounts.Viewer), s.handleSecurity)
 	s.route("GET /api/v1/repos/{repo}/cleanup", repoRole(accounts.Viewer), s.handleCleanup)
