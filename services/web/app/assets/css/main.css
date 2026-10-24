@@ -72,7 +72,6 @@
   --font-display: 'Bricolage Grotesque', 'DM Sans', system-ui, sans-serif;
   --font-sans: 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
-  --shell-max: 1320px;
   --gutter: 28px;
   --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 }
