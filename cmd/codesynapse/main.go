@@ -592,7 +592,11 @@ func (o *auditOptions) Validate(context.Context, *app.Env) error {
 			return fmt.Errorf("unknown severity %q", s)
 		}
 	}
-	return nil
+	switch o.EC.Output {
+	case app.OutputPlain, app.OutputMarkdown, app.OutputJSON, app.OutputSARIF:
+		return nil
+	}
+	return fmt.Errorf("unsupported output format %q (plain, markdown, json, sarif)", o.EC.Output)
 }
 
 func (o *auditOptions) Run(ctx context.Context, _ *app.Env) error {
@@ -610,11 +614,14 @@ func (o *auditOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return err
 	}
-	if o.EC.Output == app.OutputJSON {
+	switch o.EC.Output {
+	case app.OutputJSON:
 		enc := json.NewEncoder(o.EC.Stdout)
 		enc.SetIndent("", "  ")
 		err = enc.Encode(rep)
-	} else {
+	case app.OutputSARIF:
+		err = security.WriteSARIF(o.EC.Stdout, rep, security.SARIFOptions{Version: version, Manifest: rootManifest(o.root)})
+	default:
 		err = security.WriteMarkdown(o.EC.Stdout, rep)
 	}
 	if err != nil {
@@ -626,12 +633,37 @@ func (o *auditOptions) Run(ctx context.Context, _ *app.Env) error {
 	return nil
 }
 
+// manifestNames are the files a vulnerability of an ecosystem is reported
+// at in SARIF, in order of preference: the lockfiles the scan reads first.
+var manifestNames = map[string][]string{
+	"Go":        {"go.mod"},
+	"npm":       {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "package.json"},
+	"PyPI":      {"poetry.lock", "uv.lock", "Pipfile.lock", "pyproject.toml", "requirements.txt"},
+	"crates.io": {"Cargo.lock", "Cargo.toml"},
+	"Packagist": {"composer.lock", "composer.json"},
+	"RubyGems":  {"Gemfile.lock", "Gemfile"},
+	"NuGet":     {"packages.lock.json"},
+	"Maven":     {"gradle.lockfile", "build.gradle", "build.gradle.kts"},
+}
+
+// rootManifest finds an ecosystem's manifest at the repository root.
+func rootManifest(root string) func(string) string {
+	return func(ecosystem string) string {
+		for _, name := range manifestNames[ecosystem] {
+			if st, err := os.Lstat(filepath.Join(root, name)); err == nil && st.Mode().IsRegular() {
+				return name
+			}
+		}
+		return ""
+	}
+}
+
 func auditCmd(ec *app.Env) *cobra.Command {
 	o := &auditOptions{EC: ec}
 	return app.NewSubCommand("audit [path]", o, ec).
 		WithShortDesc("Security review: code findings and vulnerable dependencies (offline graph)").
 		WithLongDesc("Runs the security rules over the type-checked code and checks go.mod dependencies and the Go standard library against osv.dev. Findings are ranked by severity, exposure from entry points and test reachability; vulnerabilities by severity and whether the vulnerable symbol is called.").
-		WithExample("  codesynapse audit .\n  codesynapse audit . --fail-on high      # CI gate\n  codesynapse audit . --vulns=false -o json").
+		WithExample("  codesynapse audit .\n  codesynapse audit . --fail-on high      # CI gate\n  codesynapse audit . --vulns=false -o json\n  codesynapse audit . -o sarif > codesynapse.sarif   # GitHub code scanning").
 		WithGroupID(app.GroupBase).
 		WithMaxArgs(1).
 		Build()

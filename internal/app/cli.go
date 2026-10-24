@@ -19,6 +19,8 @@ const (
 	OutputPlain    = "plain"
 	OutputMarkdown = "markdown"
 	OutputJSON     = "json"
+	// OutputSARIF is SARIF 2.1.0, for commands that report findings.
+	OutputSARIF = "sarif"
 )
 
 // Command groups for help output.
@@ -143,7 +145,7 @@ func Main(name, short, version string, build func(env *Env) []*cobra.Command) in
 	pf := root.PersistentFlags()
 	pf.StringVar(&env.logLevel, "log-level", Getenv("CODESYNAPSE_LOG_LEVEL", "info"), "Log level (debug, info, warn, error)")
 	pf.StringVar(&env.logFormat, "log-format", Getenv("CODESYNAPSE_LOG_FORMAT", "text"), "Log format (text, json)")
-	pf.StringVarP(&env.Output, "output", "o", OutputPlain, "Output format (plain, markdown, json)")
+	pf.StringVarP(&env.Output, "output", "o", OutputPlain, "Output format (plain, markdown, json; sarif for audit)")
 	root.AddGroup(&cobra.Group{ID: GroupBase, Title: "Commands:"}, &cobra.Group{ID: GroupOther, Title: "Other commands:"})
 	root.SetHelpCommandGroupID(GroupOther)
 	root.SetCompletionCommandGroupID(GroupOther)
