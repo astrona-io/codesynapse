@@ -6,16 +6,16 @@
   "summary": {
     "minimal_context": {
       "recall_at_5": 0.12,
-      "recall_at_10": 0.189,
-      "hit_at_10": 0.466,
-      "tokens": 1376,
+      "recall_at_10": 0.182,
+      "hit_at_10": 0.5,
+      "tokens": 1349,
       "errors": 0
     },
     "search": {
       "recall_at_5": 0.112,
       "recall_at_10": 0.171,
       "hit_at_10": 0.517,
-      "tokens": 799,
+      "tokens": 753,
       "errors": 0
     }
   }

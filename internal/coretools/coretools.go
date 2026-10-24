@@ -47,7 +47,8 @@ func SymbolContext(ctx context.Context, r store.Reader, repo string, in SymbolCo
 	default:
 		return agentctx.SymbolContext{}, fmt.Errorf("verbosity must be outline or full, not %q", in.Verbosity)
 	}
-	return agentctx.Service{R: r}.SymbolContext(ctx, repo, in.Symbol, agentctx.ContextOptions{Verbosity: in.Verbosity, Depth: in.Depth, Limit: in.Limit, MaxTokens: in.MaxTokens})
+	out, err := agentctx.Service{R: r}.SymbolContext(ctx, repo, in.Symbol, agentctx.ContextOptions{Verbosity: in.Verbosity, Depth: in.Depth, Limit: in.Limit, MaxTokens: in.MaxTokens})
+	return compact(repo, out, err)
 }
 
 // CallGraphIn is get_call_graph's input.
@@ -67,7 +68,8 @@ func CallGraph(ctx context.Context, r store.Reader, repo string, in CallGraphIn)
 	default:
 		return agentctx.CallGraph{}, errors.New("direction must be callers, callees or both")
 	}
-	return agentctx.Service{R: r}.CallGraph(ctx, repo, in.Symbol, in.Direction, in.Depth, in.Limit, in.MaxTokens)
+	out, err := agentctx.Service{R: r}.CallGraph(ctx, repo, in.Symbol, in.Direction, in.Depth, in.Limit, in.MaxTokens)
+	return compact(repo, out, err)
 }
 
 // ImplementationsIn is get_implementations' input.
@@ -79,7 +81,8 @@ type ImplementationsIn struct {
 
 // Implementations answers get_implementations.
 func Implementations(ctx context.Context, r store.Reader, repo string, in ImplementationsIn) (agentctx.RefList, error) {
-	return agentctx.Service{R: r}.Implementations(ctx, repo, in.Symbol, in.Limit)
+	out, err := agentctx.Service{R: r}.Implementations(ctx, repo, in.Symbol, in.Limit)
+	return compact(repo, out, err)
 }
 
 // PRContextIn is get_pr_context's input.
@@ -113,7 +116,8 @@ func PRContext(ctx context.Context, r store.Reader, repo string, in PRContextIn)
 		}
 		opts.Root = n.Root
 	}
-	return agentctx.Service{R: r}.PRContext(ctx, repo, opts)
+	out, err := agentctx.Service{R: r}.PRContext(ctx, repo, opts)
+	return compact(repo, out, err)
 }
 
 // MinimalContextIn is minimal_context's input.
@@ -129,7 +133,8 @@ func MinimalContext(ctx context.Context, r store.Reader, repo string, in Minimal
 	if strings.TrimSpace(in.Task) == "" {
 		return agentctx.MinimalContext{}, errors.New("task is required")
 	}
-	return agentctx.Service{R: r}.MinimalContext(ctx, repo, in.Task, in.Files, in.MaxTokens)
+	out, err := agentctx.Service{R: r}.MinimalContext(ctx, repo, in.Task, in.Files, in.MaxTokens)
+	return compact(repo, out, err)
 }
 
 // SearchIn is search's input.
@@ -166,7 +171,7 @@ func Search(ctx context.Context, r store.Reader, repo string, in SearchIn) (Refs
 	for _, n := range ns {
 		out.Results = append(out.Results, query.RefOf(n))
 	}
-	return out, nil
+	return compact(repo, out, nil)
 }
 
 // FileIn names a file.
@@ -196,5 +201,5 @@ func FileOutline(ctx context.Context, r store.Reader, repo string, in FileIn) (O
 	if err != nil {
 		return OutlineOut{}, err
 	}
-	return OutlineOut{File: in.File, Analysis: analysis, Entries: entries}, nil
+	return compact(repo, OutlineOut{File: in.File, Analysis: analysis, Entries: entries}, nil)
 }

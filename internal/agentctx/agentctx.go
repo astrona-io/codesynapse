@@ -106,20 +106,20 @@ type Churn struct {
 
 // SymbolContext answers get_symbol_context for a code symbol.
 type SymbolContext struct {
-	Budget          ResponseBudget `json:"budget"`
-	Symbol          Symbol         `json:"symbol"`
-	Risk            *Risk          `json:"risk,omitempty"`
-	Counts          Counts         `json:"counts"`
-	Callers         []Ref          `json:"callers"`
-	Callees         []Ref          `json:"callees"`
-	Tests           []Ref          `json:"tests"`
-	UntestedCallers []Ref          `json:"untested_public_callers,omitempty"`
-	Implementations []Ref          `json:"implementations,omitempty"`
-	Docs            []Ref          `json:"docs,omitempty"`
-	Findings        []Ref          `json:"findings,omitempty"`
-	Churn           *Churn         `json:"churn,omitempty"`
-	Package         *PackageCtx    `json:"package,omitempty"`
-	Analysis        *AnalysisNote  `json:"analysis,omitempty"`
+	Budget          *ResponseBudget `json:"budget,omitempty"`
+	Symbol          Symbol          `json:"symbol"`
+	Risk            *Risk           `json:"risk,omitempty"`
+	Counts          Counts          `json:"counts"`
+	Callers         []Ref           `json:"callers"`
+	Callees         []Ref           `json:"callees"`
+	Tests           []Ref           `json:"tests"`
+	UntestedCallers []Ref           `json:"untested_public_callers,omitempty"`
+	Implementations []Ref           `json:"implementations,omitempty"`
+	Docs            []Ref           `json:"docs,omitempty"`
+	Findings        []Ref           `json:"findings,omitempty"`
+	Churn           *Churn          `json:"churn,omitempty"`
+	Package         *PackageCtx     `json:"package,omitempty"`
+	Analysis        *AnalysisNote   `json:"analysis,omitempty"`
 	// Duplicate is set when the function has exact or edited copies elsewhere.
 	Duplicate *duplicates.Info `json:"duplicate,omitempty"`
 	Hint      string           `json:"hint,omitempty"`
@@ -307,7 +307,7 @@ func (s Service) churn(ctx context.Context, repo, file string) (*Churn, error) {
 }
 
 // Resolve finds one node for a qualified ID ("store.(*Store).Get"), a full
-// node ID, a plain name, or a package path. Ambiguous or unknown names
+// or compact ("Kind|local") node ID, a plain name, or a package path. Ambiguous or unknown names
 // return a SuggestionError listing qualified IDs to retry with.
 func (s Service) Resolve(ctx context.Context, repo, symbol string) (model.Node, error) {
 	if len(symbol) > 4096 || len(repo) > 4096 {
@@ -326,6 +326,11 @@ func (s Service) Resolve(ctx context.Context, repo, symbol string) (model.Node, 
 	}
 	if strings.Count(symbol, "|") >= 2 {
 		return s.R.Node(ctx, symbol)
+	}
+	// A compact ID ("Function|pkg/path.Name") leaves out the repository the
+	// answer it came from was about.
+	if kind, local, ok := strings.Cut(symbol, "|"); ok && model.NodeKind(kind).Valid() && local != "" {
+		return s.R.Node(ctx, model.NodeID(repo, model.NodeKind(kind), local))
 	}
 	kinds := []model.NodeKind{model.KindFunction, model.KindMethod, model.KindInterfaceMethod, model.KindType, model.KindPackage}
 	// Qualified node IDs are indexed by every store. Resolve them before a

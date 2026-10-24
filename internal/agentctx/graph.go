@@ -61,12 +61,12 @@ func (s Service) Implementations(ctx context.Context, repo, symbol string, limit
 
 // CallGraph is a bounded call neighbourhood with its edges.
 type CallGraph struct {
-	Budget  ResponseBudget `json:"budget"`
-	Root    Symbol         `json:"root"`
-	Nodes   []Ref          `json:"nodes"`
-	Edges   []model.Edge   `json:"edges"`
-	Total   int            `json:"total"`
-	Entries []string       `json:"entry_points,omitempty"`
+	Budget  *ResponseBudget `json:"budget,omitempty"`
+	Root    Symbol          `json:"root"`
+	Nodes   []Ref           `json:"nodes"`
+	Edges   []model.Edge    `json:"edges"`
+	Total   int             `json:"total"`
+	Entries []string        `json:"entry_points,omitempty"`
 }
 
 // CallGraph returns callers ("callers"), callees ("callees") or both up to
@@ -142,10 +142,10 @@ func (s Service) CallGraph(ctx context.Context, repo, symbol, direction string, 
 // guide asks about a change, answered directly.
 type PRContext struct {
 	review.Report
-	Budget           ResponseBudget `json:"budget"`
-	ExportedChanged  []string       `json:"exported_changed"`
-	ExportedUntested []string       `json:"exported_untested"`
-	SensitiveTouched []string       `json:"sensitive_touched"`
+	Budget           *ResponseBudget `json:"budget,omitempty"`
+	ExportedChanged  []string        `json:"exported_changed"`
+	ExportedUntested []string        `json:"exported_untested"`
+	SensitiveTouched []string        `json:"sensitive_touched"`
 	// DuplicatedChanged names changed functions that have copies, with where
 	// the copies are: the same change probably belongs there too.
 	DuplicatedChanged []string `json:"duplicated_changed"`
@@ -275,15 +275,18 @@ type MinimalItem struct {
 // MinimalContext is the token-budgeted answer to "what should I look at
 // for this task".
 type MinimalContext struct {
-	Task       string        `json:"task"`
-	Budget     int           `json:"max_tokens"`
-	UsedTokens int           `json:"used_tokens"`
-	Keywords   []string      `json:"keywords"`
-	Items      []MinimalItem `json:"items"`
-	Omitted    int           `json:"omitted"`
-	Next       string        `json:"next"`
-	Estimator  string        `json:"estimator"`
-	Source     string        `json:"source"`
+	Task       string   `json:"task"`
+	Budget     int      `json:"max_tokens"`
+	UsedTokens int      `json:"used_tokens"`
+	Keywords   []string `json:"keywords"`
+	// Revision is the commit every item was indexed at, unless an item
+	// names its own.
+	Revision  string        `json:"revision,omitempty"`
+	Items     []MinimalItem `json:"items"`
+	Omitted   int           `json:"omitted"`
+	Next      string        `json:"next"`
+	Estimator string        `json:"estimator"`
+	Source    string        `json:"source"`
 }
 
 var (
@@ -474,6 +477,12 @@ func (s Service) MinimalContext(ctx context.Context, repo, task string, files []
 		}
 		if sc.exact {
 			item.Retrieval = "exact"
+		}
+		if mc.Revision == "" {
+			mc.Revision = item.Revision
+		}
+		if item.Revision == mc.Revision {
+			item.Revision = "" // said once at the top
 		}
 		mc.Items = append(mc.Items, item)
 		mc.Omitted--

@@ -17,7 +17,9 @@ const (
 var ErrResponseBudget = errors.New("context does not fit the response budget; increase max_tokens or narrow the request")
 
 // ResponseBudget describes the complete structured JSON, including this field.
-// Transport framing and tool definitions are outside this estimate.
+// Transport framing and tool definitions are outside this estimate. Answers
+// carry it only when something was omitted: without it, an answer is
+// complete and within max_tokens.
 type ResponseBudget struct {
 	MaxTokens  int    `json:"max_tokens"`
 	UsedTokens int    `json:"used_tokens"`
@@ -51,14 +53,19 @@ func measuredTokens(value any, used *int) (int, error) {
 	}
 }
 
-func fitResponse(value any, budget *ResponseBudget, requested int, trim func() int) error {
-	*budget = ResponseBudget{MaxTokens: contextBudget(requested, MaxContextTokens), Estimator: JSONEstimator, Source: "indexed_graph"}
+func fitResponse(value any, out **ResponseBudget, requested int, trim func() int) error {
+	// Measured with the block in place, so dropping it only shrinks the answer.
+	budget := &ResponseBudget{MaxTokens: contextBudget(requested, MaxContextTokens), Estimator: JSONEstimator, Source: "indexed_graph"}
+	*out = budget
 	for {
 		n, err := measuredTokens(value, &budget.UsedTokens)
 		if err != nil {
 			return err
 		}
 		if n <= budget.MaxTokens {
+			if budget.Omitted == 0 {
+				*out = nil
+			}
 			return nil
 		}
 		removed := trim()
