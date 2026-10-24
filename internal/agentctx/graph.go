@@ -407,7 +407,9 @@ func (s Service) MinimalContext(ctx context.Context, repo, task string, files []
 		exactTerms[word] = true
 		exactTerms[strings.TrimRight(word, ":-")] = true
 	}
-	kinds := []model.NodeKind{model.KindFunction, model.KindMethod, model.KindInterfaceMethod, model.KindType, model.KindSection, model.KindConfigEntry, model.KindTemplateDef}
+	// Files too: a task often names a file or area (Dockerfile, a chart, a
+	// page) before any symbol in it, and the task eval finds more with them.
+	kinds := []model.NodeKind{model.KindFunction, model.KindMethod, model.KindInterfaceMethod, model.KindType, model.KindSection, model.KindConfigEntry, model.KindTemplateDef, model.KindFile}
 	for i, kw := range mc.Keywords {
 		if err := ctx.Err(); err != nil {
 			return MinimalContext{}, err
