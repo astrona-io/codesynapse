@@ -97,6 +97,21 @@ historical record. These are attributed claims, not independently verified
 outcomes. Mixed-source-repository records and identity reassignment remain
 future work. See [the agent contracts](AGENT_GUIDE.md#permanent-code-identities-and-reuse-evidence).
 
+The identity baseline also keeps a hash and completeness count for each code
+symbol's call neighbourhood. Unique fingerprint/signature matches may use a
+complete neighbourhood with an unchanged caller to corroborate a rename and
+move. At most 64 neighbours are retained for hashing; incomplete evidence does
+not establish identity.
+
+Human identity reviews are append-only `Curated` items, scoped to the selected
+organisation and repository. Admin sessions can classify pairs as same-symbol,
+copy or distinct against the current indexed revision; API keys and MCP cannot
+write them. Same-symbol assertions provide scoped aliases from retired IDs to
+current compatible symbols without rewriting shared graph IDs. Original
+snapshots and superseded reviews remain historical. Conflicting heads, missing
+targets and overlong chains fail closed. Current ingestion policy filters both
+symbols and saved snapshot paths. Writes audit before persistence.
+
 ### Risk scoring
 
 `review.Score` is a transparent, additive 0-100 score: direct callers (×3, max 25), transitive impact (max 20), exported (+10), complexity (+5/10/15), security tags (+15 high-risk / +8 other, max 30), and +15 when no test reaches the symbol. Levels: low < 20 ≤ medium < 40 ≤ high < 60 ≤ critical. Every point added comes with a reason string, so reviewers and agents can see why something scored high.

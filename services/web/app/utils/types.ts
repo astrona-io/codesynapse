@@ -32,7 +32,7 @@ export interface GraphNodeData {
 }
 export interface NodeRef { id: string; kind: string; name: string; location?: string; summary?: string; depth?: number }
 
-export interface SymbolLocation { node_id: string; name: string; file?: string; signature?: string; revision?: string; fingerprint?: string; start_line?: number; end_line?: number }
+export interface SymbolLocation { neighbour_count?: number; neighbours_omitted?: number; neighbourhood?: string; node_id: string; name: string; file?: string; signature?: string; revision?: string; fingerprint?: string; start_line?: number; end_line?: number }
 export interface SymbolIdentity { id: string; kind: string; language?: string; active: boolean; current: SymbolLocation; history: SymbolLocation[]; history_omitted: number; match: string; candidates: string[] | null; candidates_omitted: number }
 export interface IdentityPage { repo: string; revision?: string; indexed_at?: string; available: boolean; symbols: SymbolIdentity[]; total: number; offset: number; omitted: number; truncated: boolean }
 export interface CodeRecordInput { method: string; origin_repo?: string; origins: string[]; destinations: string[]; purpose: string; labels: string[]; reason: string; modifications: string; compatibility: string; license: string; attribution: string; validation: string }
@@ -94,7 +94,7 @@ export interface RepoSections {
 export interface Source { name: string; is_git: boolean; is_go: boolean; content?: Record<string, number>; truncated?: boolean }
 export interface Job { id: string; repo: string; kind?: string; branch?: string; task?: string; result?: string; state: 'running' | 'succeeded' | 'failed'; started_at: string; finished_at?: string; nodes?: number; edges?: number; error?: string }
 export interface DuplicateInfo { kind: 'exact' | 'near'; similarity: number; scope: string; copies: number; others: DuplicateMember[] }
-export interface SymbolCard { duplicate?: DuplicateInfo; symbol: GraphNodeData; callers: NodeRef[]; callees: NodeRef[]; tests: NodeRef[]; implementations?: NodeRef[]; docs?: NodeRef[] }
+export interface SymbolCard { resolved_from?: string; duplicate?: DuplicateInfo; symbol: GraphNodeData; callers: NodeRef[]; callees: NodeRef[]; tests: NodeRef[]; implementations?: NodeRef[]; docs?: NodeRef[] }
 export interface ViewNode extends NodeRef { complexity?: number; security_tags?: string[]; is_test?: boolean }
 // evidence: typed, dataflow, syntactic or inferred for CALLS/REFERENCES/IMPLEMENTS/DISPATCHES_TO; absent means unknown (indexed before it was recorded).
 export interface ViewEdge { from: string; to: string; kind: string; count?: number; evidence?: 'typed' | 'dataflow' | 'syntactic' | 'inferred' }
@@ -507,3 +507,5 @@ export interface IdentityProvider {
   enabled: boolean; created_by: string; updated_at: string
 }
 export interface ExternalIdentity { id: string; org_id: string; issuer: string; user_id: string; email: string; linked_at: string; last_login_at?: string }
+
+export interface IdentityReviewPage { reviews: { item: { id: string; created_at: string; identity_review: { from: string; to: string; relation: string; reason: string; revision: string; supersedes: string[] } }; state: string }[]; total: number; offset: number; omitted: number; truncated: boolean }

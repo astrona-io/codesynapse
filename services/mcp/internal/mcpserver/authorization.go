@@ -28,6 +28,7 @@ var toolPolicies = map[string]toolPolicy{
 	"search":                 {accounts.Viewer, "repository"},
 	"get_symbol_context":     {accounts.Viewer, "repository"},
 	"code_identities":        {accounts.Viewer, "repository"},
+	"code_identity_reviews":  {accounts.Viewer, "repository"},
 	"code_records":           {accounts.Viewer, "repository"},
 	"code_annotate":          {accounts.Member, "repository"},
 	"code_record_reuse":      {accounts.Member, "reuse"},

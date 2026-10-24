@@ -8,6 +8,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/agentctx"
 	"github.com/astrona-io/codesynapse/internal/catalog"
+	"github.com/astrona-io/codesynapse/internal/curation"
 	"github.com/astrona-io/codesynapse/internal/identity"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
@@ -54,6 +55,59 @@ func TestIdentityToolsAndSharedCatalog(t *testing.T) {
 	assert.Equal(t, records, shared, "MCP and API use the same catalogue result")
 	assert.True(t, call(t, cs, "code_identities", map[string]any{"repo": "foreign"}, nil).IsError)
 	assert.True(t, call(t, cs, "code_annotate", map[string]any{"symbol": "sym-00000000000000000000000000000000", "purpose": "invalid target"}, nil).IsError)
+}
+
+func TestMCPReadsHumanReviewedIdentity(t *testing.T) {
+	ctx := context.Background()
+	db := memory.New()
+	original := storetest.Fixture()
+	first, err := identity.Reconcile(original, storetest.Repo, identity.Report{Repo: storetest.Repo, Version: 1})
+	require.NoError(t, err)
+	from, to := first.Symbols[0].ID, first.Symbols[1].ID
+	next := model.NewGraph()
+	for _, n := range original.Nodes() {
+		if n.SymbolID == from {
+			continue
+		}
+		if n.Kind == model.KindRepository {
+			n.Head = "next"
+		}
+		next.AddNode(n)
+	}
+	for _, e := range original.Edges() {
+		if _, ok := next.Node(e.From); ok {
+			if _, ok := next.Node(e.To); ok {
+				next.AddEdge(e)
+			}
+		}
+	}
+	report, err := identity.Reconcile(next, storetest.Repo, first)
+	require.NoError(t, err)
+	rn, _ := next.Node(storetest.ID(model.KindRepository, storetest.Repo))
+	rn.Identities, err = identity.Encode(report)
+	require.NoError(t, err)
+	require.NoError(t, db.ReplaceRepo(ctx, storetest.Repo, next))
+	_, err = (catalog.Service{R: db, Items: db}).ReviewIdentity(ctx, storetest.Repo, catalog.Actor{User: "human"}, curation.IdentityReviewInput{From: from, To: to, Relation: "same-symbol", Reason: "Reviewed source", Revision: report.Revision, IndexedAt: report.IndexedAt})
+	require.NoError(t, err)
+	ct, st := mcp.NewInMemoryTransports()
+	_, err = newTestServer(t, db, "test", Options{Curated: db}).Connect(ctx, st, nil)
+	require.NoError(t, err)
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "identity-reader"}, nil).Connect(ctx, ct, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cs.Close() })
+	var reviews catalog.IdentityReviewPage
+	require.False(t, call(t, cs, "code_identity_reviews", map[string]any{}, &reviews).IsError)
+	assert.Equal(t, reviews.Total, 1)
+	var result agentctx.SymbolContext
+	require.False(t, call(t, cs, "get_symbol_context", map[string]any{"symbol": from}, &result).IsError)
+	assert.Equal(t, result.Symbol.SymbolID, to)
+	listed, err := cs.ListTools(ctx, nil)
+	require.NoError(t, err)
+	for _, tool := range listed.Tools {
+		if tool.Name == "code_identity_reviews" {
+			assert.True(t, tool.Annotations.ReadOnlyHint)
+		}
+	}
 }
 
 func TestCrossRepositoryReuseRechecksLiveSession(t *testing.T) {

@@ -55,6 +55,7 @@ func refsOf(hits []model.Hit) []Ref {
 
 // SymbolCard is everything an assistant usually needs about one symbol.
 type SymbolCard struct {
+	ResolvedFrom    string     `json:"resolved_from,omitempty"`
 	Symbol          model.Node `json:"symbol"`
 	Callers         []Ref      `json:"callers"`
 	Callees         []Ref      `json:"callees"`
