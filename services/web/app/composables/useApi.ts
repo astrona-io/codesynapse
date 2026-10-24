@@ -22,6 +22,10 @@ export function apiPut<T>(path: string, body: unknown): Promise<T> {
   return $fetch(apiPath(path), { method: 'PUT', body: body as Record<string, unknown> }) as Promise<T>
 }
 
+export function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  return $fetch(apiPath(path), { method: 'PATCH', body: body as Record<string, unknown> }) as Promise<T>
+}
+
 export function apiDelete(path: string): Promise<unknown> {
   return $fetch(apiPath(path), { method: 'DELETE' })
 }

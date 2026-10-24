@@ -93,6 +93,9 @@ type Session struct {
 	UserID    string
 	CreatedAt time.Time
 	ExpiresAt time.Time
+	// UserAgent is the browser that signed in, so a person can tell their
+	// sessions apart (clipped; no address is kept).
+	UserAgent string
 }
 
 // APIKey is a personal key bound to one org. The secret is shown once;
@@ -350,6 +353,13 @@ type Store interface {
 	SessionByHash(ctx context.Context, hash string) (Session, error)
 	DeleteSession(ctx context.Context, hash string) error
 	DeleteUserSessions(ctx context.Context, userID string) error
+	// UserSessions lists a user's unexpired sessions, newest first, at most 100.
+	UserSessions(ctx context.Context, userID string) ([]Session, error)
+	// DeleteOtherSessions ends every session of the user except keepHash.
+	DeleteOtherSessions(ctx context.Context, userID, keepHash string) error
+	SetUserName(ctx context.Context, userID, name string) error
+	// SetUserEmail fails with ErrExists when another account has the email.
+	SetUserEmail(ctx context.Context, userID, email string) error
 
 	// Execution sessions retain closed rows permanently to reject replay.
 	// Schedules (schedules.go). EnsureSchedule adds one only when the

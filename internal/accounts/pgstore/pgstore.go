@@ -412,16 +412,16 @@ func (s *Store) CreateSession(ctx context.Context, sess accounts.Session) error 
 	if _, err := s.db.Exec(ctx, "DELETE FROM sessions WHERE user_id = $1 AND expires_at <= now()", sess.UserID); err != nil {
 		return err
 	}
-	_, err := s.db.Exec(ctx, "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES ($1, $2, $3, $4)",
-		sess.TokenHash, sess.UserID, sess.CreatedAt, sess.ExpiresAt)
+	_, err := s.db.Exec(ctx, "INSERT INTO sessions (token_hash, user_id, created_at, expires_at, user_agent) VALUES ($1, $2, $3, $4, $5)",
+		sess.TokenHash, sess.UserID, sess.CreatedAt, sess.ExpiresAt, sess.UserAgent)
 	return mapErr(err, "session")
 }
 
 // SessionByHash implements accounts.Store.
 func (s *Store) SessionByHash(ctx context.Context, hash string) (accounts.Session, error) {
 	var sess accounts.Session
-	err := s.db.QueryRow(ctx, "SELECT token_hash, user_id, created_at, expires_at FROM sessions WHERE token_hash = $1", hash).
-		Scan(&sess.TokenHash, &sess.UserID, &sess.CreatedAt, &sess.ExpiresAt)
+	err := s.db.QueryRow(ctx, "SELECT token_hash, user_id, created_at, expires_at, user_agent FROM sessions WHERE token_hash = $1", hash).
+		Scan(&sess.TokenHash, &sess.UserID, &sess.CreatedAt, &sess.ExpiresAt, &sess.UserAgent)
 	sess.CreatedAt, sess.ExpiresAt = sess.CreatedAt.UTC(), sess.ExpiresAt.UTC()
 	return sess, mapErr(err, "session")
 }

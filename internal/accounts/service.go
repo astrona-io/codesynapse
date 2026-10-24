@@ -188,7 +188,8 @@ func (s *Service) startSession(ctx context.Context, u User) (string, error) {
 		return "", err
 	}
 	now := s.now()
-	return tok, s.St.CreateSession(ctx, Session{TokenHash: HashToken(tok), UserID: u.ID, CreatedAt: now, ExpiresAt: now.Add(SessionTTL)})
+	return tok, s.St.CreateSession(ctx, Session{TokenHash: HashToken(tok), UserID: u.ID, CreatedAt: now, ExpiresAt: now.Add(SessionTTL),
+		UserAgent: clipText(RequestInfoFrom(ctx).UserAgent, 200)})
 }
 
 // Logout ends a session.

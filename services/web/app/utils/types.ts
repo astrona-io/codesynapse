@@ -78,6 +78,9 @@ export interface SiteSearch { results: SiteSearchHit[]; searched: number; trunca
 export interface AppNotification { id: string; kind: 'findings' | 'sync_failed' | 'review'; tone: 'bad' | 'warn' | 'info'; repo: string; title: string; body?: string; link: string; at: string }
 export interface AppNotifications { items: AppNotification[]; seen_at?: string; unread: number }
 
+// One of your own sign-in sessions (GET /me/sessions).
+export interface SessionView { id: string; device: string; created_at: string; expires_at: string; current: boolean }
+
 export interface RepoSections {
   packages: number; symbols: number; documents: number; config_files: number; k8s_resources: number; helm_charts: number
   records: number; proposals: number; dependencies: number; licences: boolean; findings: number

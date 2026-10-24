@@ -166,6 +166,7 @@ func (s *Server) accountRoutes() {
 	s.account("DELETE /api/v1/accounts/orgs/{org}/sso", businessRoute, s.handleDeleteSSO)
 	s.account("GET /api/v1/me", governanceRoute, s.handleMe)
 	s.account("POST /api/v1/me/password", governanceRoute, s.handlePassword)
+	s.profileRoutes()
 	s.account("GET /api/v1/me/keys", businessRoute, s.handleListKeys)
 	s.account("POST /api/v1/me/keys", businessRoute, s.handleCreateKey)
 	s.account("DELETE /api/v1/me/keys/{id}", businessRoute, s.handleRevokeKey)
