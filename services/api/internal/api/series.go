@@ -72,6 +72,12 @@ var seriesPanels = map[string]seriesPanel{
 	"sessions": {Title: "Agent sessions", Unit: "sessions", Kind: "count",
 		Help:    "MCP sessions started per step.",
 		queries: []seriesQuery{{name: "sessions", expr: `sum(increase(mcp_sessions_total[$w]))`}}},
+	"agent_hook_events": {Title: "Assistant hook activity", Unit: "events", Kind: "count",
+		Help:    "Accepted client-reported lifecycle observations by event; separate from MCP calls.",
+		queries: []seriesQuery{{expr: `sum by (event) (increase(agent_hook_events_total[$w]))`, by: "event"}}},
+	"agent_hook_bytes": {Title: "Assistant observed bytes", Unit: "bytes", Kind: "count",
+		Help:    "Bytes seen in hook fields by kind. Content is never stored; repeated observations may count the same content again.",
+		queries: []seriesQuery{{expr: `sum by (kind) (increase(agent_hook_bytes_total[$w]))`, by: "kind"}}},
 	"tool_latency": {Title: "Tool latency", Unit: "seconds", Kind: "gauge",
 		Help: "Median and 95th percentile time to answer a tool call.",
 		queries: []seriesQuery{

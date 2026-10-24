@@ -187,7 +187,11 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 	}
 	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
 	c.http.Timeout = 5 * time.Second
-	body := map[string]any{"client": retrievalClient, "tools": delta}
+	client := in.Client
+	if client == "" {
+		client = retrievalClient
+	}
+	body := map[string]any{"client": client, "tools": delta}
 	if wf != nil {
 		body["workflow"] = wf
 	}
