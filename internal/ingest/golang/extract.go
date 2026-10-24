@@ -66,6 +66,32 @@ type Result struct {
 	ExternalImports map[string][]string
 }
 
+// GoEnv is the environment every go command on a repository runs with: the
+// local toolchain, no cgo, no workspace and, unless allowNetwork, no module
+// proxy.
+func GoEnv(ctx context.Context, allowNetwork bool) ([]string, error) {
+	env := append(os.Environ(),
+		"CGO_ENABLED=0",
+		"GOTOOLCHAIN=local",
+		"GOFLAGS=", // default -mod: vendor when present, else readonly (sources may be mounted read-only)
+		"GOWORK=off",
+	)
+	if !allowNetwork {
+		env = append(env, "GOPROXY=off", "GONOSUMDB=*")
+	}
+	return execution.Environment(ctx, env)
+}
+
+// Load loads every package under root, tests included, as Extract does.
+func Load(ctx context.Context, root string, mode packages.LoadMode) ([]*packages.Package, error) {
+	env, err := GoEnv(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	cfg := &packages.Config{Context: ctx, Dir: root, Env: env, Tests: true, Mode: mode}
+	return loadPackages(ctx, cfg, []string{"./..."}, repoconfig.FromContext(ctx))
+}
+
 // Extract loads every package under opts.Root and returns its code graph.
 //
 // Loading runs `go list`, which reads go.mod. To keep that safe on untrusted
@@ -83,16 +109,7 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 		return nil, fmt.Errorf("resolving root: %w", err)
 	}
 	opts.Root = root
-	env := append(os.Environ(),
-		"CGO_ENABLED=0",
-		"GOTOOLCHAIN=local",
-		"GOFLAGS=", // default -mod: vendor when present, else readonly (sources may be mounted read-only)
-		"GOWORK=off",
-	)
-	if !opts.AllowNetwork {
-		env = append(env, "GOPROXY=off", "GONOSUMDB=*")
-	}
-	env, err = execution.Environment(ctx, env)
+	env, err := GoEnv(ctx, opts.AllowNetwork)
 	if err != nil {
 		return nil, err
 	}

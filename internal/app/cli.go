@@ -88,6 +88,12 @@ func (b *SubCommand) WithNoArgs() *SubCommand { b.cmd.Args = cobra.NoArgs; retur
 // WithMaxArgs accepts at most n positional arguments.
 func (b *SubCommand) WithMaxArgs(n int) *SubCommand { b.cmd.Args = cobra.MaximumNArgs(n); return b }
 
+// WithArgs sets the Args validator to accept between minN and maxN arguments.
+func (b *SubCommand) WithArgs(minN, maxN int) *SubCommand {
+	b.cmd.Args = cobra.RangeArgs(minN, maxN)
+	return b
+}
+
 // Build finalises the command. Flag setup errors are programmer errors.
 func (b *SubCommand) Build() *cobra.Command {
 	b.env.Command = b.cmd
