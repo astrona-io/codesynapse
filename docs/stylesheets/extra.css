@@ -119,3 +119,20 @@
 .md-top:hover { background: #ff7ab3; color: var(--cs-ink); }
 
 .md-footer-meta { background: var(--md-footer-bg-color); }
+
+/* Top tabs: ink bar, accent underline on the active tab. */
+.md-tabs { background: var(--md-primary-fg-color); }
+.md-tabs__link { opacity: 0.8; font-weight: 500; }
+.md-tabs__item--active .md-tabs__link { opacity: 1; font-weight: 700; }
+.md-tabs__item--active { box-shadow: inset 0 -3px 0 var(--cs-accent); }
+
+/* Landing-page cards: lilac surface, 2px ink border, large radius. */
+.md-typeset .grid.cards > ul > li {
+  border: 2px solid var(--cs-ink);
+  border-radius: var(--cs-radius);
+  background: var(--cs-raised);
+  box-shadow: none;
+  padding: 0.4rem 0.8rem;
+}
+.md-typeset .grid.cards > ul > li:hover { border-color: var(--cs-accent); box-shadow: none; }
+[data-md-color-scheme='slate'] .md-typeset .grid.cards > ul > li { background: #1b1530; border-color: #8e84b5; }
