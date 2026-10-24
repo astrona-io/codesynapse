@@ -161,18 +161,20 @@ func (o *runtimeOptions) body() ([]byte, error) {
 
 // runtimeSummary is the API's answer (api.RuntimeSummary).
 type runtimeSummary struct {
-	Commit         string    `json:"commit"`
-	MeasuredAt     time.Time `json:"measured_at"`
-	Sources        []string  `json:"sources"`
-	Unit           string    `json:"unit"`
-	Functions      int       `json:"functions"`
-	Uncovered      int       `json:"uncovered"`
-	Tests          int       `json:"tests"`
-	Failed         int       `json:"failed"`
-	Flaky          []string  `json:"flaky"`
-	UnmatchedFiles int       `json:"unmatched_files"`
-	UnmatchedTests int       `json:"unmatched_tests"`
-	Stale          bool      `json:"stale"`
+	Commit          string    `json:"commit"`
+	MeasuredAt      time.Time `json:"measured_at"`
+	Sources         []string  `json:"sources"`
+	Unit            string    `json:"unit"`
+	Functions       int       `json:"functions"`
+	Uncovered       int       `json:"uncovered"`
+	Tests           int       `json:"tests"`
+	Failed          int       `json:"failed"`
+	Flaky           []string  `json:"flaky"`
+	Runs            int       `json:"runs"`
+	FlakyAcrossRuns []string  `json:"flaky_across_runs"`
+	UnmatchedFiles  int       `json:"unmatched_files"`
+	UnmatchedTests  int       `json:"unmatched_tests"`
+	Stale           bool      `json:"stale"`
 }
 
 func (o *runtimeOptions) print(repo string, s runtimeSummary) error {
@@ -185,6 +187,12 @@ func (o *runtimeOptions) print(repo string, s runtimeSummary) error {
 	fmt.Fprintf(&b, "  %d tests, %d failed, %d flaky\n", s.Tests, s.Failed, len(s.Flaky))
 	for _, f := range s.Flaky {
 		fmt.Fprintf(&b, "    flaky: %s\n", f)
+	}
+	if s.Runs > 1 {
+		fmt.Fprintf(&b, "  over the last %d uploads, %d more tests are flaky across runs\n", s.Runs, len(s.FlakyAcrossRuns))
+		for _, f := range s.FlakyAcrossRuns {
+			fmt.Fprintf(&b, "    flaky across runs: %s\n", f)
+		}
 	}
 	if s.UnmatchedFiles+s.UnmatchedTests > 0 {
 		fmt.Fprintf(&b, "  not in the graph: %d files, %d tests (vendored, generated or another module)\n", s.UnmatchedFiles, s.UnmatchedTests)

@@ -69,19 +69,23 @@ type RuntimeSummary struct {
 	Unit       string    `json:"unit,omitempty"`
 	Functions  int       `json:"functions"`
 	// Uncovered counts measured functions no test executed.
-	Uncovered      int      `json:"uncovered"`
-	Tests          int      `json:"tests"`
-	Failed         int      `json:"failed"`
-	Flaky          []string `json:"flaky"`
-	UnmatchedFiles int      `json:"unmatched_files"`
-	UnmatchedTests int      `json:"unmatched_tests"`
+	Uncovered int      `json:"uncovered"`
+	Tests     int      `json:"tests"`
+	Failed    int      `json:"failed"`
+	Flaky     []string `json:"flaky"`
+	// Runs is how many uploads the history covers; FlakyAcrossRuns are the
+	// tests that passed and failed at one commit or kept switching.
+	Runs            int      `json:"runs"`
+	FlakyAcrossRuns []string `json:"flaky_across_runs"`
+	UnmatchedFiles  int      `json:"unmatched_files"`
+	UnmatchedTests  int      `json:"unmatched_tests"`
 	// Stale is set when the facts measured another commit than the graph.
 	Stale bool `json:"stale"`
 }
 
 func summarise(f runtimefacts.Facts, head, repo string) RuntimeSummary {
 	out := RuntimeSummary{Commit: f.Commit, MeasuredAt: f.MeasuredAt, Origin: f.Origin, Sources: f.Sources, Unit: f.Unit,
-		Functions: len(f.Coverage), Tests: len(f.Tests), Flaky: []string{}, UnmatchedFiles: f.UnmatchedFiles,
+		Functions: len(f.Coverage), Tests: len(f.Tests), Flaky: []string{}, Runs: len(f.Runs), FlakyAcrossRuns: []string{}, UnmatchedFiles: f.UnmatchedFiles,
 		UnmatchedTests: f.UnmatchedTests, Stale: f.StaleFor(head)}
 	for _, c := range f.Coverage {
 		if c.Covered == 0 {
@@ -94,10 +98,14 @@ func summarise(f runtimefacts.Facts, head, repo string) RuntimeSummary {
 		}
 		if t.Flaky() {
 			out.Flaky = append(out.Flaky, shortID(id, repo))
+		} else if tr, ok := f.TrendOf(id); ok && tr.Flaky() {
+			out.FlakyAcrossRuns = append(out.FlakyAcrossRuns, shortID(id, repo))
 		}
 	}
 	slices.Sort(out.Flaky)
+	slices.Sort(out.FlakyAcrossRuns)
 	out.Flaky = out.Flaky[:min(len(out.Flaky), 50)]
+	out.FlakyAcrossRuns = out.FlakyAcrossRuns[:min(len(out.FlakyAcrossRuns), 50)]
 	return out
 }
 
@@ -197,6 +205,18 @@ func (s *Server) handleUploadRuntime(w http.ResponseWriter, r *http.Request) {
 	ns, err := s.memNamespace(r, repo)
 	if err != nil {
 		s.accountError(w, err)
+		return
+	}
+	// Carry the history of earlier uploads forward, for flakiness across
+	// runs. Two uploads at once may each miss the other's run there; the
+	// facts themselves stay last-write-wins.
+	switch prev, err := rs.RuntimeFacts(ctx, ns); {
+	case err == nil:
+		f = f.WithHistory(prev)
+	case errors.Is(err, store.ErrNotFound):
+		f = f.WithHistory(runtimefacts.Facts{})
+	default:
+		s.problem(w, 500, err)
 		return
 	}
 	if err := rs.SetRuntimeFacts(ctx, ns, f); err != nil {

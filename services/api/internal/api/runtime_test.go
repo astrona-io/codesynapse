@@ -152,3 +152,40 @@ func TestRuntimeUploadIsPerOrganisation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, f.Commit, "abc1234", "kept in the uploading organisation's namespace")
 }
+
+// TestRuntimeHistory: a test that failed and then passed at the same
+// commit (a CI rerun) is flaky across runs, though neither upload saw it
+// pass and fail.
+func TestRuntimeHistory(t *testing.T) {
+	ts, _ := newTestServer(t)
+	base := "/api/v1/repos/" + storetest.Repo + "/runtime"
+	upload := func(commit string, failed bool) RuntimeSummary {
+		t.Helper()
+		tc := `<testcase classname="example.com/app/app" name="TestHandler"/>`
+		if failed {
+			tc = `<testcase classname="example.com/app/app" name="TestHandler"><failure/></testcase>`
+		}
+		b, err := json.Marshal(runtimeUpload{Commit: commit, Reports: []runtimeReport{{Kind: "junit", Name: "junit.xml", Content: "<testsuite>" + tc + "</testsuite>"}}})
+		require.NoError(t, err)
+		req, err := http.NewRequest(http.MethodPut, ts.URL+base, bytes.NewReader(b)) //nolint:noctx // test
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer res.Body.Close() //nolint:errcheck // test
+		require.Equal(t, res.StatusCode, 200)
+		var sum RuntimeSummary
+		require.NoError(t, json.NewDecoder(res.Body).Decode(&sum))
+		return sum
+	}
+	sum := upload("aaa1111", true)
+	assert.Equal(t, sum.Runs, 1)
+	assert.Equal(t, sum.Failed, 1)
+	assert.Equal(t, sum.FlakyAcrossRuns, []string{})
+	sum = upload("aaa1111", false)
+	assert.Equal(t, sum.Runs, 2)
+	assert.Equal(t, sum.Flaky, []string{}, "each run alone was clean")
+	assert.Equal(t, sum.FlakyAcrossRuns, []string{"app.TestHandler"})
+	sum = upload("bbb2222", false)
+	assert.Equal(t, sum.FlakyAcrossRuns, []string{"app.TestHandler"}, "still within the recorded runs")
+}

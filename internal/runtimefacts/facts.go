@@ -38,6 +38,10 @@ type Facts struct {
 	// matched (vendored code, generated files, other modules).
 	UnmatchedFiles int `json:"unmatched_files,omitempty"`
 	UnmatchedTests int `json:"unmatched_tests,omitempty"`
+	// Runs and History are the uploads before this one and each test's
+	// outcome in them (history.go), for flakiness across runs.
+	Runs    []Run             `json:"runs,omitempty"`
+	History map[string]string `json:"history,omitempty"`
 }
 
 // Coverage is how much of one function a run executed.
@@ -377,17 +381,21 @@ func (f Facts) CoverageNote(id string) (string, bool) {
 	return fmt.Sprintf("%d of %d %s covered (%d%%)", c.Covered, c.Total, cmp.Or(f.Unit, "statements"), c.Percent()), true
 }
 
-// RunNote says how test id ended when that matters to an agent: flaky or
-// failed. Passing and skipped tests get no note.
+// RunNote says how test id ended when that matters to an agent: flaky in
+// the last run, flaky across the recorded runs (also when it passed last),
+// or failed. Tests that pass steadily, and skipped ones, get no note.
 func (f Facts) RunNote(id string) (string, bool) {
 	t, ok := f.Tests[id]
 	if !ok {
 		return "", false
 	}
-	switch {
-	case t.Flaky():
+	if t.Flaky() {
 		return fmt.Sprintf("flaky in the last recorded run (%d passed, %d failed): a failure may not be yours", t.Passed, t.Failed), true
-	case t.Failed > 0:
+	}
+	if note := f.trendNote(id); note != "" {
+		return note + ": a failure may not be yours", true
+	}
+	if t.Failed > 0 {
 		return "failed in the last recorded run", true
 	}
 	return "", false
