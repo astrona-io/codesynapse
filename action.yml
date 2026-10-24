@@ -1,0 +1,69 @@
+name: CodeSynapse review
+description: Review a pull request with CodeSynapse - changed symbols and their impact, the tests to run, and the security findings the change introduces and fixes - as one pull request comment.
+author: astrona-io
+branding:
+  icon: git-pull-request
+  color: purple
+
+inputs:
+  fail-on-new:
+    description: Fail when the change introduces a security finding at or above this severity (info, low, medium, high, critical). Findings already on the base branch never fail it. Empty to only report.
+    default: ''
+  coverage:
+    description: Comma-separated Go coverage profiles or LCOV files of this run's tests, to show measured coverage of the changed code.
+    default: ''
+  junit:
+    description: Comma-separated JUnit XML reports of this run's tests, to flag flaky and failing tests that reach the change.
+    default: ''
+  comment:
+    description: Post the report as a pull request comment, updated on every push (needs pull-requests write permission).
+    default: 'true'
+  working-directory:
+    description: The checkout to review.
+    default: '.'
+  github-token:
+    description: Token for the comment.
+    default: ${{ github.token }}
+
+outputs:
+  report:
+    description: Path of the Markdown report.
+    value: ${{ steps.review.outputs.report }}
+  introduced:
+    description: '"true" when the change introduces a finding at or above fail-on-new.'
+    value: ${{ steps.review.outputs.introduced }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: ${{ github.action_path }}/go.mod
+        cache-dependency-path: ${{ github.action_path }}/go.sum
+
+    - name: Build CodeSynapse
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: go build -trimpath -o "$RUNNER_TEMP/codesynapse" ./cmd/codesynapse
+
+    - name: Review the change
+      id: review
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CODESYNAPSE_BIN: ${{ runner.temp }}/codesynapse
+        BASE_REF: ${{ github.base_ref }}
+        FAIL_ON_NEW: ${{ inputs.fail-on-new }}
+        COVERAGE: ${{ inputs.coverage }}
+        JUNIT: ${{ inputs.junit }}
+      run: '"$GITHUB_ACTION_PATH/action/review.sh"'
+
+    - name: Comment on the pull request
+      if: ${{ always() && inputs.comment == 'true' && github.event.pull_request.number }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        REPORT: ${{ steps.review.outputs.report }}
+      run: '"$GITHUB_ACTION_PATH/action/comment.sh"'
