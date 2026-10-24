@@ -85,12 +85,17 @@ type hookState struct {
 	First    string       `json:"first,omitempty"`
 	Turned   int          `json:"turned,omitempty"`
 	Reported workflowSent `json:"reported,omitempty"`
+	// Base is the checkout as the session began (edits.go).
+	Base *treeBase `json:"base,omitempty"`
 }
 
 // workflowSent is what the server already knows of a session's workflow.
 type workflowSent struct {
 	First  bool `json:"first,omitempty"`
 	Turned int  `json:"turned,omitempty"`
+	// Edited and Found are the edit counts already reported (edits.go).
+	Edited int `json:"edited,omitempty"`
+	Found  int `json:"found,omitempty"`
 }
 
 // answerRange is one file:start-end an answer gave.

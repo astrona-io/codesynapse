@@ -21,11 +21,20 @@ const (
 	FirstCodeSynapse = "(first:codesynapse)"
 	FirstNative      = "(first:native)"
 	ReadTurnedBack   = "(guard:read-turned-back)"
+	// FilesEdited counts the files sessions changed (that CodeSynapse
+	// indexes), FilesEditedFound those of them a CodeSynapse answer of the
+	// same session had pointed to: recall measured on real edits.
+	FilesEdited      = "(edits:files)"
+	FilesEditedFound = "(edits:found)"
 )
 
 // IsWorkflow reports whether tool is one of the workflow pseudo tools.
 func IsWorkflow(tool string) bool {
-	return tool == FirstCodeSynapse || tool == FirstNative || tool == ReadTurnedBack
+	switch tool {
+	case FirstCodeSynapse, FirstNative, ReadTurnedBack, FilesEdited, FilesEditedFound:
+		return true
+	}
+	return false
 }
 
 // Retention is how long daily buckets are kept.

@@ -89,7 +89,10 @@ func noteBaseline(ctx context.Context, in toolHookInput, logger *slog.Logger) {
 		return
 	}
 	s := loadState(state)
-	s.Stop = key // "" for a clean tree: any later change differs from it
+	s.Stop = key       // "" for a clean tree: any later change differs from it
+	if s.Base == nil { // a resumed session keeps where it began
+		s.Base = baseOf(ctx, w.root)
+	}
 	saveState(state, s)
 }
 
@@ -139,5 +142,5 @@ func (s hookState) workflowReport() map[string]int {
 }
 
 func (s *hookState) markReported() {
-	s.Reported = workflowSent{First: s.First != "", Turned: s.Turned}
+	s.Reported.First, s.Reported.Turned = s.First != "", s.Turned
 }

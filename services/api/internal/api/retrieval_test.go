@@ -38,6 +38,7 @@ func TestRetrievalReport(t *testing.T) {
 		`{"client":"claude-code","tools":{}}`,
 		`{"client":"claude-code","workflow":{"first_native":-1}}`,
 		`{"client":"claude-code","workflow":{"reads_turned_back":10001}}`,
+		`{"client":"claude-code","workflow":{"files_edited":-2}}`,
 		`{"client":"claude-code","workflow":{"first_native":1,"path":"a.go"}}`,
 		`{"client":"claude-code","tools":{"rm_rf":{"returned":1,"read":0}}}`,
 		`{"client":"claude-code","tools":{"search":{"returned":0,"read":10001}}}`,
@@ -56,6 +57,9 @@ func TestWorkflowReportShowsInStats(t *testing.T) {
 	// A session that never used a CodeSynapse tool reports the workflow alone.
 	require.Equal(t, post(t, ts, path, `{"client":"claude-code","workflow":{"first_native":1,"reads_turned_back":2}}`), 204)
 	require.Equal(t, post(t, ts, path, `{"client":"claude-code","workflow":{"first_codesynapse":3}}`), 204)
+	// Edits of sessions: four files changed, three of them pointed to.
+	require.Equal(t, post(t, ts, path, `{"client":"claude-code","workflow":{"files_edited":3,"files_edited_found":2}}`), 204)
+	require.Equal(t, post(t, ts, path, `{"client":"claude-code","workflow":{"files_edited":1,"files_edited_found":1}}`), 204)
 	require.Equal(t, post(t, ts, path, `{"client":"claude-code","workflow":{}}`), 204, "an empty report is accepted and stores nothing")
 
 	var st Stats
@@ -64,6 +68,9 @@ func TestWorkflowReportShowsInStats(t *testing.T) {
 	assert.Equal(t, st.Agents.Workflow.FirstNative, 1)
 	assert.Equal(t, st.Agents.Workflow.ReadsTurnedBack, 2)
 	assert.Equal(t, st.Agents.Workflow.FirstSharePct, 75)
+	assert.Equal(t, st.Agents.Workflow.FilesEdited, 4)
+	assert.Equal(t, st.Agents.Workflow.FilesEditedFound, 3)
+	assert.Equal(t, st.Agents.Workflow.EditRecallPct, 75)
 	assert.Equal(t, st.Agents.Calls, 0, "workflow counts are not tool calls")
 	assert.Equal(t, len(st.Agents.Tools), 0, "and not tools")
 	assert.Equal(t, len(st.Agents.Clients), 0)
