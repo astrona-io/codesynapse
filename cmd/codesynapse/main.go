@@ -560,6 +560,7 @@ type auditOptions struct {
 	vulns                bool
 	minSeverity          string
 	failOn               string
+	changed              bool
 	root                 string
 }
 
@@ -573,6 +574,7 @@ func (o *auditOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.BoolVar(&o.vulns, "vulns", true, "Check dependencies against osv.dev (sends module paths and versions)")
 	f.StringVar(&o.minSeverity, "min-severity", "low", "Hide findings below this severity (info, low, medium, high, critical)")
 	f.StringVar(&o.failOn, "fail-on", "", "Exit 1 if a finding or reachable vulnerability is at or above this severity")
+	f.BoolVar(&o.changed, "changed", false, "Only findings in staged files, for a pre-commit hook; skips the osv.dev lookup unless --vulns is given")
 	return nil
 }
 
@@ -602,7 +604,25 @@ func (o *auditOptions) Validate(context.Context, *app.Env) error {
 func (o *auditOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
 	repo := filepath.Base(o.root)
-	g, err := ingest.Run(ctx, ingest.Options{ApprovedPolicyDigest: o.approvedPolicyDigest, Repo: repo, Root: o.root, VulnScan: o.vulns})
+	vulns := o.vulns
+	var staged []string
+	if o.changed {
+		var partly []string
+		var err error
+		if staged, partly, err = stagedFiles(ctx, o.root); err != nil {
+			return err
+		}
+		if len(staged) == 0 {
+			_, err := fmt.Fprintln(o.EC.Stdout, "No staged files to check.")
+			return err
+		}
+		for _, f := range partly {
+			_, _ = fmt.Fprintf(o.EC.Stderr, "note: %s also has unstaged changes; the working tree is what was checked\n", f)
+		}
+		// A hook runs on every commit: the network lookup only on request.
+		vulns = vulns && o.EC.Command.Flags().Changed("vulns")
+	}
+	g, err := ingest.Run(ctx, ingest.Options{ApprovedPolicyDigest: o.approvedPolicyDigest, Repo: repo, Root: o.root, VulnScan: vulns})
 	if err != nil {
 		return err
 	}
@@ -613,6 +633,13 @@ func (o *auditOptions) Run(ctx context.Context, _ *app.Env) error {
 	rep, err := security.Build(ctx, mem, repo, security.Options{MinSeverity: o.minSeverity})
 	if err != nil {
 		return err
+	}
+	if o.changed {
+		scope := fmt.Sprintf("%d staged files", len(staged))
+		if len(staged) == 1 {
+			scope = "1 staged file"
+		}
+		rep = rep.OnlyFiles(staged, scope)
 	}
 	switch o.EC.Output {
 	case app.OutputJSON:
@@ -658,12 +685,37 @@ func rootManifest(root string) func(string) string {
 	}
 }
 
+// stagedFiles are the files added, copied, modified or renamed in the
+// index, relative to root, and those of them with further unstaged changes.
+func stagedFiles(ctx context.Context, root string) (staged, partly []string, err error) {
+	names := func(args ...string) ([]string, error) {
+		out, err := gitx.Run(ctx, root, append([]string{"diff", "--name-only", "--relative", "-z", "--diff-filter=ACMR"}, args...)...)
+		if err != nil {
+			return nil, fmt.Errorf("listing changes (is %s a git checkout?): %w", root, err)
+		}
+		return strings.FieldsFunc(string(out), func(r rune) bool { return r == 0 }), nil
+	}
+	if staged, err = names("--cached"); err != nil {
+		return nil, nil, err
+	}
+	unstaged, err := names()
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, f := range staged {
+		if slices.Contains(unstaged, f) {
+			partly = append(partly, f)
+		}
+	}
+	return staged, partly, nil
+}
+
 func auditCmd(ec *app.Env) *cobra.Command {
 	o := &auditOptions{EC: ec}
 	return app.NewSubCommand("audit [path]", o, ec).
 		WithShortDesc("Security review: code findings and vulnerable dependencies (offline graph)").
 		WithLongDesc("Runs the security rules over the type-checked code and checks go.mod dependencies and the Go standard library against osv.dev. Findings are ranked by severity, exposure from entry points and test reachability; vulnerabilities by severity and whether the vulnerable symbol is called.").
-		WithExample("  codesynapse audit .\n  codesynapse audit . --fail-on high      # CI gate\n  codesynapse audit . --vulns=false -o json\n  codesynapse audit . -o sarif > codesynapse.sarif   # GitHub code scanning").
+		WithExample("  codesynapse audit .\n  codesynapse audit . --fail-on high      # CI gate\n  codesynapse audit . --vulns=false -o json\n  codesynapse audit . -o sarif > codesynapse.sarif   # GitHub code scanning\n  codesynapse audit . --changed --fail-on high      # pre-commit (see git-hook install --pre-commit)").
 		WithGroupID(app.GroupBase).
 		WithMaxArgs(1).
 		Build()

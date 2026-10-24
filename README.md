@@ -43,6 +43,7 @@ brew install astrona-io/tap/codesynapse
 
 codesynapse audit .                                  # security review
 codesynapse audit . --fail-on high                   # CI gate
+codesynapse audit . --changed --fail-on high         # pre-commit: staged files only
 codesynapse licenses .                               # dependency licences
 codesynapse cleanup .                                # unused code, files, modules
 codesynapse upgrade-impact golang.org/x/net@v0.40.0  # what a Go module upgrade changes for you

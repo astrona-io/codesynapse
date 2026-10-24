@@ -97,6 +97,18 @@ codesynapse audit . -o sarif > codesynapse.sarif   # GitHub code scanning, IDEs
 
 `--vulns=false` (or `CODESYNAPSE_VULN_SCAN=false`) keeps the scan offline.
 
+### Pre-commit gate
+
+```sh
+codesynapse audit . --changed --fail-on high             # findings in staged files only
+codesynapse git-hook install . --pre-commit --fail-on high
+codesynapse git-hook uninstall . --pre-commit
+```
+
+`--changed` indexes the checkout as `audit` always does, then keeps only the findings in files staged for commit (added, modified, copied or renamed) and fails on `--fail-on` as usual. The grade is left out, since it describes the whole repository. It reads the working tree, not the index: a staged file that also has unstaged changes is named on standard error. The osv.dev lookup is skipped unless `--vulns` is given explicitly, so the hook works offline. Expect a few seconds (about 5 s on this repository, most of it type-checking Go).
+
+`git-hook install --pre-commit` writes `.git/hooks/pre-commit` (or into `core.hooksPath`) to run that check on every commit; `git commit --no-verify` skips it once. Without the `codesynapse` binary the commit goes ahead. A pre-commit hook that is not CodeSynapse's is left alone, and the error shows the line to add to it. To refuse only findings a branch introduces, rather than any finding in a touched file, use `codesynapse review --offline --fail-on-new` in CI.
+
 ### SARIF and GitHub code scanning
 
 `-o sarif` writes SARIF 2.1.0, which GitHub code scanning, the VS Code SARIF viewer and most IDEs read. Each result says where it comes from: the rule's `source` property is "CodeSynapse built-in rule" (with the rule's title, why, fix and a link to its rule file at the release that ran) or "osv.dev advisory" (with the advisory's link). Severities map to SARIF levels (critical and high are errors, medium warnings, low and info notes) and to GitHub's `security-severity`, CWE IDs to `external/cwe/…` tags. Findings suppressed by repository policy are included with their reason as a suppression, so code scanning shows them as dismissed instead of dropping them.
