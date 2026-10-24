@@ -56,6 +56,9 @@ type braceLang struct {
 	routes func(typeAnns, fnAnns []string, handler string, line int) []route
 	// lineRoutes finds routes registered by a statement (Ktor's get("/x") { }).
 	lineRoutes func(raw string, line int) []route
+	// routeScopes finds blocks that prefix and guard the routes registered
+	// inside them (Laravel's Route::prefix('x')->middleware('auth')->group()).
+	routeScopes func(raw, masked []string) []routeScope
 }
 
 // braceCall finds calls: plain f(…), and recv.f(…), recv::f(…), recv->f(…).
@@ -204,6 +207,9 @@ func parseBrace(src []byte, l *braceLang) (*fileResult, string) {
 		if l.lineRoutes != nil && strings.TrimSpace(line) != "" { // not in a comment
 			fr.routes = append(fr.routes, l.lineRoutes(raw[i], n)...)
 		}
+	}
+	if l.routeScopes != nil {
+		fr.routes = applyScopes(fr.routes, l.routeScopes(raw, lines))
 	}
 	for _, s := range fr.symbols {
 		if s.kind == model.KindType {

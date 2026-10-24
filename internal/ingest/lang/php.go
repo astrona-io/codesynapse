@@ -41,7 +41,7 @@ var phpLang = &braceLang{
 	exported: func(decl string) bool {
 		return !strings.Contains(decl, "private ") && !strings.Contains(decl, "protected ")
 	},
-	testAnnotated: phpTestAttr, rules: phpRules, routes: phpAttrRoutes, lineRoutes: phpLineRoutes,
+	testAnnotated: phpTestAttr, rules: phpRules, routes: phpAttrRoutes, lineRoutes: phpLineRoutes, routeScopes: phpRouteGroups,
 }
 
 // phpUseRef reads "App\Models\User", "App\Models\User as U" and the group
@@ -109,7 +109,13 @@ var (
 	laravelRoute  = regexp.MustCompile(`\bRoute::(get|post|put|patch|delete|options|any)\s*\(\s*['"]([^'"]*)['"]`)
 	slimRoute     = regexp.MustCompile(`\$(?:app|group|router|r|route)\s*->\s*(get|post|put|patch|delete|options|any)\s*\(\s*['"]([^'"]*)['"]`)
 	phpHandler    = regexp.MustCompile(`\[\s*\\?([\w\\]+)::class\s*,\s*['"](\w+)['"]\s*\]|['"]\\?([\w\\]+)@(\w+)['"]|,\s*\\?([\w\\]+)::class\s*\)`)
-	phpMiddleware = regexp.MustCompile(`->\s*middleware\s*\(\s*\[?\s*['"]([^'"]+)['"]`)
+	phpBareAction = regexp.MustCompile(`^\s*,\s*['"](\w+)['"]\s*\)`)
+	phpResource   = regexp.MustCompile(`\bRoute::(resource|apiResource)\s*\(\s*['"]([\w./-]+)['"]\s*,\s*\\?([\w\\]+)::class`)
+	phpOnlyExcept = regexp.MustCompile(`->\s*(only|except)\s*\(\s*\[?([^\])]*)`)
+	phpGroupOpen  = regexp.MustCompile(`->\s*group\s*\(\s*(?:static\s+)?function|\bRoute::group\s*\(`)
+	phpPrefixCall = regexp.MustCompile(`prefix\s*\(\s*['"]([^'"]*)['"]|['"]prefix['"]\s*=>\s*['"]([^'"]*)['"]`)
+	phpMWCall     = regexp.MustCompile(`middleware\s*\(\s*\[?([^\])]*)|['"]middleware['"]\s*=>\s*\[?([^\]]*?)\]?\s*(?:,\s*['"]|\]\s*,|\],\s*function)`)
+	phpCtrlCall   = regexp.MustCompile(`controller\s*\(\s*\\?([\w\\]+)::class`)
 )
 
 // phpAttrRoutes reads Symfony's #[Route('/x', methods: ['GET'])] (with the
@@ -167,8 +173,12 @@ func phpAttrRoutes(typeAnns, fnAnns []string, handler string, line int) []route 
 }
 
 // phpLineRoutes reads Laravel's Route::get('/x', …) and Slim's
-// $app->get('/x', …), with ->middleware('auth') on the line as a guard.
+// $app->get('/x', …), with ->middleware('auth') on the line as a guard,
+// and Route::resource('photos', PhotoController::class) as its actions.
 func phpLineRoutes(raw string, line int) []route {
+	if rs := laravelResource(raw, line); rs != nil {
+		return rs
+	}
 	m := laravelRoute.FindStringSubmatch(raw)
 	if m == nil {
 		m = slimRoute.FindStringSubmatch(raw)
@@ -189,9 +199,11 @@ func phpLineRoutes(raw string, line int) []route {
 			method = "__invoke"
 		}
 		r.recv, r.handler = cls[strings.LastIndexByte(cls, '\\')+1:], method
+	} else if b := phpBareAction.FindStringSubmatch(raw[strings.Index(raw, m[0])+len(m[0]):]); b != nil {
+		r.handler, r.bare = b[1], true // Route::get('/x', 'index') inside Route::controller(X::class)
 	}
-	if g := phpMiddleware.FindStringSubmatch(raw); g != nil {
-		r.guards = []string{"middleware(" + g[1] + ")"}
+	if g := phpMWCall.FindStringSubmatch(raw); g != nil {
+		r.guards = laravelMiddleware(g[1] + g[2])
 	}
 	return []route{r}
 }
@@ -372,4 +384,90 @@ func maskPHP(src string) string {
 		}
 	}
 	return string(out)
+}
+
+// laravelResource expands Route::resource('photos', PhotoController::class)
+// into its actions (apiResource leaves out create and edit), honouring
+// ->only([...]) and ->except([...]).
+func laravelResource(raw string, line int) []route {
+	m := phpResource.FindStringSubmatch(raw)
+	if m == nil {
+		return nil
+	}
+	segs := strings.Split(strings.Trim(m[2], "/"), ".") // photos.comments is nested
+	base := ""
+	for i, s := range segs {
+		base += "/" + s
+		if i < len(segs)-1 {
+			base += "/{" + rbSingular(s) + "}"
+		}
+	}
+	last := segs[len(segs)-1]
+	id := base + "/{" + rbSingular(last[strings.LastIndexByte(last, '/')+1:]) + "}"
+	actions := []struct{ action, verb, path string }{
+		{"index", "GET", base}, {"create", "GET", base + "/create"}, {"store", "POST", base},
+		{"show", "GET", id}, {"edit", "GET", id + "/edit"}, {"update", "PUT", id}, {"update", "PATCH", id}, {"destroy", "DELETE", id},
+	}
+	keep := func(string) bool { return true }
+	if o := phpOnlyExcept.FindStringSubmatch(raw); o != nil {
+		named := func(a string) bool { return strings.Contains(o[2], "'"+a+"'") || strings.Contains(o[2], `"`+a+`"`) }
+		keep = func(a string) bool { return named(a) == (o[1] == "only") }
+	}
+	cls := m[3][strings.LastIndexByte(m[3], '\\')+1:]
+	var out []route
+	for _, a := range actions {
+		if m[1] == "apiResource" && (a.action == "create" || a.action == "edit") || !keep(a.action) {
+			continue
+		}
+		r := route{kind: model.RouteHTTP, name: a.verb + " " + a.path, line: line, recv: cls, handler: a.action}
+		if g := phpMWCall.FindStringSubmatch(raw); g != nil {
+			r.guards = laravelMiddleware(g[1] + g[2])
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// phpRouteGroups finds Laravel route groups: the chain before ->group(
+// function () { … }) or Route::group([...], function () { … }), with its
+// prefix, middleware and controller.
+func phpRouteGroups(raw, masked []string) []routeScope {
+	var out []routeScope
+	for i, l := range masked {
+		if !phpGroupOpen.MatchString(l) {
+			continue
+		}
+		// The chain may start a few lines up: Route::prefix('x')\n->group(…
+		chain := raw[i]
+		for j := i - 1; j >= 0 && j >= i-4 && !strings.Contains(chain, "Route::"); j-- {
+			chain = raw[j] + " " + chain
+		}
+		if !strings.Contains(chain, "Route::") {
+			continue
+		}
+		s := routeScope{start: i + 1, end: blockEnd(masked, i+1)}
+		if m := phpPrefixCall.FindStringSubmatch(chain); m != nil {
+			s.prefix = m[1] + m[2]
+		}
+		if m := phpMWCall.FindStringSubmatch(chain); m != nil {
+			s.guards = laravelMiddleware(m[1] + m[2])
+		}
+		if m := phpCtrlCall.FindStringSubmatch(chain); m != nil {
+			s.recv = m[1][strings.LastIndexByte(m[1], '\\')+1:]
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// laravelMiddleware reads the quoted names of a middleware list
+// ('auth:sanctum', 'throttle:10,1') as guards. Parameters after the colon
+// are shown after a space: "auth:x" would read as a credential to the
+// summary redaction.
+func laravelMiddleware(list string) []string {
+	var out []string
+	for _, m := range phpString.FindAllStringSubmatch(list, -1) {
+		out = append(out, "middleware("+strings.Replace(m[1], ":", " ", 1)+")")
+	}
+	return out
 }
