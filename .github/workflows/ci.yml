@@ -53,6 +53,25 @@ jobs:
         # The base commit may need module versions the cache lacks.
         run: just eval --allow-network
 
+  review:
+    # docs/PLAN.md, roadmap item 7: this repository reviews its own pull
+    # requests with the action at its root (action.yml), and a change may
+    # not introduce a high or critical finding.
+    name: CodeSynapse review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./
+        with:
+          fail-on-new: high
+
   web:
     name: Web build and licences
     runs-on: ubuntu-latest

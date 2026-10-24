@@ -203,6 +203,7 @@ type reviewOptions struct {
 	findingsDelta        bool
 	coverage             []string
 	junit                []string
+	failOnNew            string
 	root                 string
 }
 
@@ -218,6 +219,7 @@ func (o *reviewOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.BoolVar(&o.offline, "offline", false, "Build the graph in memory from the working tree instead of querying HugeGraph")
 	f.BoolVar(&o.findingsDelta, "findings-delta", true, "With --offline and a git diff, also index the base and report which security findings the change introduces and fixes")
 	f.StringSliceVar(&o.coverage, "coverage", nil, "With --offline, a Go coverage profile or LCOV file of the last test run (default: cover.out, lcov.info and the like at the root)")
+	f.StringVar(&o.failOnNew, "fail-on-new", "", "With --offline and a git diff, exit 1 when the change introduces a security finding at or above this severity (pre-existing findings do not count)")
 	f.StringSliceVar(&o.junit, "junit", nil, "With --offline, a JUnit XML report of the last test run (default: junit.xml, report.xml and the like at the root)")
 	return nil
 }
@@ -241,6 +243,14 @@ func (o *reviewOptions) Complete(_ context.Context, _ *app.Env) error {
 func (o *reviewOptions) Validate(_ context.Context, _ *app.Env) error {
 	if (len(o.coverage) > 0 || len(o.junit) > 0) && !o.offline {
 		return errors.New("--coverage and --junit need --offline: they are read with the working tree")
+	}
+	if o.failOnNew != "" {
+		if model.SeverityRank(o.failOnNew) < 0 {
+			return fmt.Errorf("--fail-on-new must be one of %s", strings.Join(model.Severities, ", "))
+		}
+		if !o.offline || !o.findingsDelta || o.diffFile != "" {
+			return errors.New("--fail-on-new needs --offline with a git base (not --diff): the base is indexed to tell new findings from old")
+		}
 	}
 	switch o.EC.Output {
 	case app.OutputPlain, app.OutputMarkdown, app.OutputJSON:
@@ -300,10 +310,21 @@ func (o *reviewOptions) Run(ctx context.Context, _ *app.Env) error {
 	if o.EC.Output == app.OutputJSON {
 		enc := json.NewEncoder(o.EC.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(rep)
+		if err := enc.Encode(rep); err != nil {
+			return err
+		}
+	} else if err := review.WriteMarkdown(o.EC.Stdout, rep); err != nil {
+		return err
 	}
-	return review.WriteMarkdown(o.EC.Stdout, rep)
+	if o.failOnNew != "" && rep.Security != nil && rep.Security.IntroducesAtLeast(o.failOnNew) {
+		return errNewFindings
+	}
+	return nil
 }
+
+// errNewFindings makes `review --fail-on-new` exit non-zero for CI without
+// printing an error banner on top of the report.
+var errNewFindings = errors.New("the change introduces security findings at or above the --fail-on-new threshold")
 
 // loadRuntimeFacts reads the coverage and JUnit reports named by flags, or
 // found at the root, and keeps what they measured next to the graph.

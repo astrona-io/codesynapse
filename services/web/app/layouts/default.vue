@@ -78,6 +78,7 @@ const repoMenu = computed(() => {
     { label: 'Quality and security', links: [
       { to: `${base}/security`, label: 'Security' },
       { to: `${base}/metrics`, label: 'Code health', also: [`${base}/cleanup`] },
+      { to: `${base}/entry-points`, label: 'Entry points', missing: need(s => s.routes > 0, 'no HTTP routes, MCP tools or CLI commands found') },
     ] },
     { label: 'Dependencies', links: [
       { to: `${base}/dependencies`, label: 'Dependencies', missing: need(s => s.dependencies > 0, 'no dependency manifests indexed') },
@@ -153,7 +154,9 @@ const orgValue = computed({
         </span>
         <NotificationBell v-if="!session.restricted.value" />
         <UserMenu />
-        <button type="button" class="secondary menu-toggle" :aria-expanded="menuOpen" aria-controls="sidebar" @click="menuOpen = !menuOpen">Menu</button>
+        <button type="button" class="secondary menu-toggle" :aria-expanded="menuOpen" aria-controls="sidebar" :aria-label="menuOpen ? 'Close navigation' : 'Open navigation'" @click="menuOpen = !menuOpen">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path v-if="menuOpen" d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /><path v-else d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /></svg>
+        </button>
       </div>
     </header>
 
@@ -256,12 +259,18 @@ const orgValue = computed({
 .connect__title { font: 800 16px/1.2 var(--font-display); letter-spacing: -0.02em; }
 .connect__text { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
 .main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 22px; padding: 30px var(--gutter) 48px; max-width: var(--shell-max); }
-.menu-toggle { display: none; }
+.menu-toggle { display: none; width: 48px; min-height: 48px; padding: 0; }
 
 @media (max-width: 960px) {
   .sidebar { flex: 1 1 100%; position: static; max-height: none; }
   .sidebar:not(.open) { display: none; }
   .menu-toggle { display: inline-flex; }
+  /* Brand and buttons share the first row; search gets the second. */
+  .bar :deep(.qs) { order: 3; flex: 1 1 100%; max-width: none; }
   .oss, .status { display: none; }
+}
+@media (max-width: 480px) {
+  /* The mark alone leaves the first row to the buttons; the link keeps its label. */
+  .brand__name { display: none; }
 }
 </style>

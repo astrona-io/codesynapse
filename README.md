@@ -44,7 +44,33 @@ codesynapse audit . --fail-on high                   # CI gate
 codesynapse licenses .                               # dependency licences
 codesynapse cleanup .                                # unused code, files, modules
 codesynapse review . --base origin/main --offline    # impact of the current branch
+codesynapse review . --offline --fail-on-new high    # CI gate on what the branch adds
 ```
+
+## GitHub Action
+
+Review every pull request: changed symbols and their impact, the tests to run, and the security findings the change introduces and fixes, posted as one comment that updates on each push.
+
+```yaml
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  codesynapse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astrona-io/codesynapse@vX.Y.Z   # a release tag, or its commit SHA
+        with:
+          fail-on-new: high               # fail on new high or critical findings only
+          # coverage: cover.out           # measured coverage of the changed code
+          # junit: report.xml             # flaky and failing tests that reach it
+```
+
+The action builds the CLI from its own source and never runs the code it reviews. Pull requests from forks get the report in the job summary; their token cannot comment.
 
 ## Kubernetes
 

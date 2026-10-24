@@ -81,9 +81,14 @@ export interface AppNotifications { items: AppNotification[]; seen_at?: string; 
 // One of your own sign-in sessions (GET /me/sessions).
 export interface SessionView { id: string; device: string; created_at: string; expires_at: string; current: boolean }
 
+// The attack surface of a repository (GET /repos/{repo}/entry-points).
+export interface Sink { tag: string; via: string; depth: number }
+export interface EntryPoint { kind: 'http' | 'mcp' | 'cli'; name: string; registered: string; handler?: string; inline_handler?: boolean; guards?: string[]; checks_auth?: boolean; reaches?: Sink[] }
+export interface AttackSurface { total: number; by_kind: Record<string, number>; unguarded: number; entry_points: EntryPoint[]; notes: string[] }
+
 export interface RepoSections {
   packages: number; symbols: number; documents: number; config_files: number; k8s_resources: number; helm_charts: number
-  records: number; proposals: number; dependencies: number; licences: boolean; findings: number
+  records: number; proposals: number; dependencies: number; licences: boolean; findings: number; routes: number
   snapshots: number; reviews: number; memory_facts: number; admin: boolean
 }
 export interface Source { name: string; is_git: boolean; is_go: boolean; content?: Record<string, number>; truncated?: boolean }

@@ -53,3 +53,11 @@ func TestCompareFindings(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, same.Headline(), "introduces and fixes no security findings")
 }
+
+func TestIntroducesAtLeast(t *testing.T) {
+	d := SecurityDelta{Introduced: map[string]int{"medium": 1, "low": 0}, Fixed: map[string]int{"critical": 2}}
+	assert.True(t, d.IntroducesAtLeast("medium"))
+	assert.True(t, d.IntroducesAtLeast("low"))
+	assert.False(t, d.IntroducesAtLeast("high"), "fixed findings never fail a change")
+	assert.False(t, SecurityDelta{}.IntroducesAtLeast("info"))
+}
