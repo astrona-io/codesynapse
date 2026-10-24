@@ -27,6 +27,7 @@ const query = computed(() => {
   return p.toString()
 })
 const { data, error, pending } = useApiGet<{ events: AuditEvent[] }>(() => `${props.base}?${query.value}`)
+const events = computed(() => data.value?.events ?? [])
 const { data: verify, refresh: reverify } = useApiGet<{ ok: boolean; checked: number; reason?: string; broken_at?: number }>('admin/audit/verify', { immediate: !!props.verifyChain })
 const exportUrl = (format: string) => apiPath(`${props.base}?${query.value.replace('limit=200', 'limit=10000')}&format=${format}`)
 // Clicking a chat or tool in the details narrows the log to it.
@@ -63,11 +64,11 @@ const open = ref<number | null>(null)
     </section>
     <p v-if="error" class="notice notice--danger">{{ apiErrorMessage(error) }}</p>
     <section class="panel" :class="{ refreshing: pending }">
-      <div v-if="data?.events.length" class="table-wrap">
+      <div v-if="events.length" class="table-wrap">
         <table>
           <thead><tr><th>When</th><th>Who</th><th>What</th><th>Target</th><th>Outcome</th></tr></thead>
           <tbody>
-            <template v-for="e in data.events" :key="e.id">
+            <template v-for="e in events" :key="e.id">
               <tr class="ev" @click="open = open === e.id ? null : e.id">
                 <td class="nowrap" :title="e.at">{{ new Date(e.at).toLocaleString() }}</td>
                 <td>{{ e.actor_email || e.via }}<div v-if="e.actor_email" class="muted small">{{ e.via }}</div></td>
@@ -100,7 +101,7 @@ const open = ref<number | null>(null)
             </template>
           </tbody>
         </table>
-        <p v-if="data.events.length === 200" class="muted small">Showing the newest 200; export to get everything in the period.</p>
+        <p v-if="events.length === 200" class="muted small">Showing the newest 200; export to get everything in the period.</p>
       </div>
       <p v-else class="empty"><strong>No entries</strong>Nothing matches these filters in this period.</p>
     </section>

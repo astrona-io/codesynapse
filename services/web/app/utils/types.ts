@@ -228,6 +228,9 @@ export interface UsageTool { tool: string; kind: string; calls: number; errors: 
 export interface WorkspaceStats {
   generated_at: string; days: number
   agents: {
+    edits: { edits: number; writes: number; failed: number; patch_bytes: number; write_bytes: number; baseline_bytes: number; avoided_bytes: number; estimated_output_saved: number; avoided_pct: number }
+    tokens: { input: number; output: number; cached_input: number; turns: number; total: number; input_pct: number; output_pct: number }
+    context_total_tokens: number; context_saved_pct: number
     sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; avoided_method: string
     // How sessions began, reported by the Claude Code plugin's hooks.
     workflow: { first_codesynapse: number; first_native: number; reads_turned_back: number; first_share_pct: number; files_edited: number; files_edited_found: number; edit_recall_pct: number }

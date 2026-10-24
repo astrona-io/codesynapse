@@ -14,6 +14,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/toolsets"
+	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
 // Retrieval usefulness (docs/PLAN.md, agent workflow roadmap step 13): did
@@ -155,6 +156,8 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 		return
 	}
 	s := loadState(state)
+	total, tokens := hookTokenDelta(in.TranscriptPath, s.TokenSent)
+	hasEdits := s.Edits.Edits+s.Edits.Writes > 0
 	w := newWorktree(ctx, in.Cwd, "", logger)
 	if w == nil {
 		return
@@ -171,7 +174,7 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 			wf[key] = d
 		}
 	}
-	if len(s.Counts) == 0 && wf == nil {
+	if len(s.Counts) == 0 && wf == nil && tokens == nil && !hasEdits {
 		return
 	}
 	// Counts of other repositories' ranges are left out of the report.
@@ -193,7 +196,7 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 			delta[tool] = rangeCounts{Returned: max(d.Returned, 0), Read: max(d.Read, 0)}
 		}
 	}
-	if len(delta) == 0 && wf == nil {
+	if len(delta) == 0 && wf == nil && tokens == nil && !hasEdits {
 		return
 	}
 	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
@@ -203,6 +206,12 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 		client = retrievalClient
 	}
 	body := map[string]any{"client": client, "tools": delta}
+	if hasEdits {
+		body["edits"] = s.Edits
+	}
+	if tokens != nil {
+		body["tokens"] = tokens
+	}
 	if wf != nil {
 		body["workflow"] = wf
 	}
@@ -217,5 +226,11 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 	}
 	s.markReported()
 	s.Reported.Edited, s.Reported.Found = max(s.Reported.Edited, nEdited), max(s.Reported.Found, nFound)
+	if hasEdits {
+		s.Edits = usage.EditCounts{}
+	}
+	if tokens != nil {
+		s.TokenSent = total
+	}
 	saveState(state, s)
 }

@@ -20,6 +20,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
 // Claude Code hooks of the CodeSynapse plugin (docs/PLAN.md, agent workflow
@@ -56,16 +57,21 @@ const readGuardLines = 400
 const maxOutline = 60
 
 type toolHookInput struct {
+	TranscriptPath string `json:"transcript_path"`
 	Client         string `json:"-"`
 	SessionID      string `json:"session_id"`
 	Cwd            string `json:"cwd"`
 	StopHookActive bool   `json:"stop_hook_active"`
 	ToolName       string `json:"tool_name"`
 	ToolInput      struct {
-		FilePath string `json:"file_path"`
-		Offset   int    `json:"offset"`
-		Limit    int    `json:"limit"`
-		Repo     string `json:"repo"`
+		OldString string `json:"old_string"`
+		NewString string `json:"new_string"`
+		Content   string `json:"content"`
+		Patch     string `json:"patch"`
+		FilePath  string `json:"file_path"`
+		Offset    int    `json:"offset"`
+		Limit     int    `json:"limit"`
+		Repo      string `json:"repo"`
 	} `json:"tool_input"`
 	ToolResponse json.RawMessage `json:"tool_response"`
 	Prompt       string          `json:"prompt"` // UserPromptSubmit
@@ -73,8 +79,10 @@ type toolHookInput struct {
 
 // hookState is what the hooks remember per chat session.
 type hookState struct {
-	Read []string `json:"read,omitempty"` // files already turned back once
-	Stop string   `json:"stop,omitempty"` // the tree the last stop check saw
+	Edits     usage.EditCounts  `json:"edits,omitempty"`
+	TokenSent usage.TokenCounts `json:"token_sent,omitempty"`
+	Read      []string          `json:"read,omitempty"` // files already turned back once
+	Stop      string            `json:"stop,omitempty"` // the tree the last stop check saw
 	// Ranges are the line ranges answers gave, oldest first.
 	Ranges []answerRange `json:"ranges,omitempty"`
 	// Counts are the per-tool totals so far, Sent what Stop has reported.
@@ -187,6 +195,8 @@ func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 		noteAnswer(in)
 	case "read-done":
 		noteRead(in)
+	case "edit", "edit-failed":
+		noteEdit(in, o.event == "edit-failed")
 	}
 	if out != nil {
 		return json.NewEncoder(o.EC.Stdout).Encode(out)
@@ -333,6 +343,10 @@ func stopGuard(ctx context.Context, in toolHookInput, logger *slog.Logger) map[s
 
 func hookCmd(ec *app.Env) *cobra.Command {
 	parent := &cobra.Command{Use: "hook", Short: "Assistant lifecycle hooks for CodeSynapse", GroupID: app.GroupBase}
+	for _, event := range []string{"edit", "edit-failed"} {
+		parent.AddCommand(app.NewSubCommand(event, &hookOptions{EC: ec, event: event}, ec).
+			WithShortDesc("Observe edit/write payload sizes without storing source or blocking edits").WithNoArgs().Build())
+	}
 	parent.AddCommand(app.NewSubCommand("lifecycle", &lifecycleOptions{EC: ec}, ec).
 		WithShortDesc("Codex and Cursor lifecycle adapter: rules, guards and metadata-only activity").WithNoArgs().Build())
 	parent.AddCommand(app.NewSubCommand("read", &hookOptions{EC: ec, event: "read"}, ec).

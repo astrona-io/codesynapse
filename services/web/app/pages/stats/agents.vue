@@ -3,6 +3,10 @@ import { useStatistics } from '~/composables/useStatistics'
 const { days, s, error, pending } = useStatistics()
 
 const a = computed(() => s.value?.agents)
+const tokens = computed(() => a.value?.tokens ?? { input: 0, output: 0, cached_input: 0, turns: 0, total: 0, input_pct: 0, output_pct: 0 })
+const edits = computed(() => a.value?.edits ?? { edits: 0, writes: 0, failed: 0, baseline_bytes: 0, estimated_output_saved: 0, avoided_pct: 0 })
+const contextTotal = computed(() => a.value?.context_total_tokens ?? ((a.value?.response_tokens ?? 0) + (a.value?.avoided_tokens ?? 0)))
+const contextSavedPct = computed(() => a.value?.context_saved_pct ?? (contextTotal.value ? Math.round(100 * (a.value?.avoided_tokens ?? 0) / contextTotal.value) : 0))
 const errorRate = computed(() => (a.value?.calls ? `${((a.value.errors / a.value.calls) * 100).toFixed(1)}%` : '–'))
 const callsPerDay = computed(() => (a.value?.daily ?? []).map((d) => ({ label: d.day, value: d.calls, detail: `${d.sessions} session(s), ${d.errors} error(s)` })))
 const avoidedPerDay = computed(() => (a.value?.daily ?? []).map((d) => ({ label: d.day, value: d.avoided_tokens, detail: `${fmtInt(d.response_tokens)} served` })))
@@ -27,6 +31,41 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
         <StatTile label="Tool calls" :value="fmtCompact(a.calls)" :hint="`${errorRate} errors · ${a.avg_latency_ms} ms avg`" />
         <StatTile label="Tokens served" :value="fmtCompact(a.response_tokens)" :hint="a.calls ? `${fmtInt(Math.round(a.response_tokens / a.calls))} per call` : 'no calls yet'" />
         <StatTile label="Tokens avoided (est.)" :value="fmtCompact(a.avoided_tokens)" hint="vs reading the files instead" />
+      </div>
+      <div class="token-usage">
+        <p class="label">Model tokens reported by hooks</p>
+        <template v-if="tokens.total > 0 || tokens.turns > 0">
+          <div class="grid kpis">
+            <StatTile label="Input tokens" :value="fmtCompact(tokens.input)" :hint="`${tokens.input_pct}% of reported tokens · includes cached input`" />
+            <StatTile label="Output tokens" :value="fmtCompact(tokens.output)" :hint="`${tokens.output_pct}% of reported tokens`" />
+            <StatTile label="Total model tokens" :value="fmtCompact(tokens.total)" hint="reported input + output" />
+            <StatTile label="Cached input tokens" :value="fmtCompact(tokens.cached_input)" hint="included in input; separate from context savings" />
+          </div>
+          <div class="token-split" role="img" :aria-label="`Input ${tokens.input_pct}%, output ${tokens.output_pct}%`">
+            <span :style="{ width: `${tokens.input_pct}%` }" />
+            <span :style="{ width: `${tokens.output_pct}%` }" />
+          </div>
+          <p class="muted small">Input {{ tokens.input_pct }}% · Output {{ tokens.output_pct }}%. Covers usage supplied by agent hooks; other clients and unreported turns are not included.</p>
+        </template>
+        <div v-else class="empty"><strong>Model usage unavailable</strong>The updated Claude Code Stop hook reports input and output usage from the local transcript. MCP tool responses alone cannot measure an agent’s model usage.</div>
+        <p class="label">Context savings estimate</p>
+        <div class="grid kpis">
+          <StatTile label="Tokens saved (est.)" :value="fmtCompact(a.avoided_tokens)" hint="file-reading context avoided" />
+          <StatTile label="Context total (est.)" :value="fmtCompact(contextTotal)" hint="MCP tokens served + estimated saved" />
+          <StatTile label="Context saved" :value="contextTotal ? `${contextSavedPct}%` : '–'" hint="saved ÷ estimated context total" />
+        </div>
+        <p class="muted small">Savings compare graph answers with reading repository files. They estimate reduced context, not measured model output or billing savings.</p>
+      </div>
+      <div class="edit-usage">
+        <p class="label">Small edits and output</p>
+        <div v-if="edits.edits + edits.writes" class="grid kpis">
+          <StatTile label="Targeted edits" :value="fmtCompact(edits.edits)" hint="Edit and patch attempts" />
+          <StatTile label="Full file writes" :value="fmtCompact(edits.writes)" hint="new files and full replacements" />
+          <StatTile label="Failed attempts" :value="fmtCompact(edits.failed)" hint="earn no estimated savings" />
+          <StatTile label="Output avoided (est.)" :value="edits.baseline_bytes ? fmtCompact(edits.estimated_output_saved) : '–'" :hint="edits.baseline_bytes ? `${edits.avoided_pct}% versus eligible full-file rewrites` : 'no comparable file size reported'" />
+        </div>
+        <div v-else class="empty">The updated edit hooks report patch and full-write sizes without storing code.</div>
+        <p class="muted small">For successful edits with a known file size, compare old + new text bytes with rewriting the file; divide avoided bytes by 4 to estimate tokens. Failed edits and patches without a comparable file earn no savings. This hypothetical estimate is separate from measured output and context savings.</p>
       </div>
       <div v-if="a && (a.calls || a.sessions)" class="grid cols-2">
         <div><p class="label">Tool calls per day</p><ColumnChart :points="callsPerDay" title="Tool calls per day" unit="calls" /></div>
@@ -81,4 +120,7 @@ h3 { margin: 18px 0 4px; font-size: 15px; }
 .workflow { margin-top: 16px; }
 .read-share { margin-top: 16px; max-width: 560px; }
 .method summary { cursor: pointer; color: var(--muted); font-size: 12.5px; margin-top: 12px; }
+.token-split { display: flex; height: 12px; border-radius: 999px; overflow: hidden; background: var(--panel-2); }
+.token-split span:first-child { background: var(--s-1); }
+.token-split span:last-child { background: var(--s-2); }
 </style>

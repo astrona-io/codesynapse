@@ -13,7 +13,11 @@
     ],
     "PostToolUse": [
       { "matcher": "mcp__.*codesynapse.*", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "answer"], "timeout": 10 }] },
-      { "matcher": "Read", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "read-done"], "timeout": 10 }] }
+      { "matcher": "Read", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "read-done"], "timeout": 10 }] },
+      { "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "edit"], "timeout": 10 }] }
+    ],
+    "PostToolUseFailure": [
+      { "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "edit-failed"], "timeout": 10 }] }
     ],
     "UserPromptSubmit": [
       { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "prompt"], "timeout": 5 }] }

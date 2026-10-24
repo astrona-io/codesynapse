@@ -16,7 +16,7 @@ watch(q, (val) => {
   debounce = setTimeout(async () => {
     try {
       const res = await $fetch<{ results: NodeRef[] }>(apiPath(repoPath(repo.value, 'search')), { query: { q: val, limit: 30 } })
-      results.value = res.results
+      results.value = res.results ?? []
       searchError.value = ''
     } catch (e) {
       searchError.value = apiErrorMessage(e)
@@ -27,21 +27,33 @@ watch(q, (val) => {
 const card = ref<SymbolCard | null>(null)
 const graph = ref<GraphView | null>(null)
 const loadError = ref('')
+const graphError = ref('')
+const loading = ref(false)
+let loadVersion = 0
 async function load(id: string) {
-  if (!id) { card.value = null; graph.value = null; return }
+  const version = ++loadVersion
+  card.value = null
+  graph.value = null
   loadError.value = ''
+  graphError.value = ''
+  loading.value = !!id
+  if (!id) return
   try {
-    const [c, g] = await Promise.all([
-      $fetch<SymbolCard>(apiPath(repoPath(repo.value, 'symbol')), { query: { id } }),
-      $fetch<GraphView>(apiPath(repoPath(repo.value, 'graph')), { query: { id, depth: 2 } }),
+    await Promise.all([
+      apiGet<SymbolCard>(`${repoPath(repo.value, 'symbol')}?${new URLSearchParams({ id })}`).then(
+        (c) => { if (version === loadVersion) card.value = c },
+        (e) => { if (version === loadVersion) loadError.value = apiErrorMessage(e) },
+      ),
+      apiGet<GraphView>(`${repoPath(repo.value, 'graph')}?${new URLSearchParams({ id, depth: '2' })}`).then(
+        (g) => { if (version === loadVersion) graph.value = g },
+        (e) => { if (version === loadVersion) graphError.value = apiErrorMessage(e) },
+      ),
     ])
-    card.value = c
-    graph.value = g
-  } catch (e) {
-    loadError.value = apiErrorMessage(e)
+  } finally {
+    if (version === loadVersion) loading.value = false
   }
 }
-watch(selected, load, { immediate: true })
+watch([repo, selected], ([, id]) => load(id), { immediate: true })
 
 function pick(id: string) {
   router.push({ query: { id } })
@@ -65,6 +77,8 @@ const isCode = (r: NodeRef) => ['Function', 'Method', 'InterfaceMethod', 'Type']
     </div>
 
     <p v-if="loadError" class="panel error">{{ loadError }}</p>
+    <p v-if="graphError && card" class="panel error">Call neighbourhood unavailable: {{ graphError }}</p>
+    <p v-if="loading && !card" class="panel muted" role="status">Loading symbol details…</p>
 
     <template v-if="card">
       <div class="panel">
@@ -111,9 +125,9 @@ const isCode = (r: NodeRef) => ['Function', 'Method', 'InterfaceMethod', 'Type']
 
       <div class="grid cols-2">
         <div v-for="section in [
-          { title: 'Callers', items: card.callers },
-          { title: 'Callees', items: card.callees },
-          { title: 'Tests that reach it', items: card.tests },
+          { title: 'Callers', items: card.callers ?? [] },
+          { title: 'Callees', items: card.callees ?? [] },
+          { title: 'Tests that reach it', items: card.tests ?? [] },
           { title: 'Implementations', items: card.implementations ?? [] },
           { title: 'Docs that mention it', items: card.docs ?? [] },
         ].filter((s) => s.items.length || s.title === 'Tests that reach it')" :key="section.title" class="panel">

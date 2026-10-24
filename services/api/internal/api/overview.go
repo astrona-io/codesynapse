@@ -13,7 +13,6 @@ import (
 	"github.com/astrona-io/codesynapse/internal/duplicates"
 	"github.com/astrona-io/codesynapse/internal/metrics"
 	"github.com/astrona-io/codesynapse/internal/model"
-	"github.com/astrona-io/codesynapse/internal/security"
 )
 
 // staleAfter marks repositories whose index is older than this.
@@ -136,14 +135,11 @@ func (s *Server) overviewOf(ctx context.Context, only string) (Overview, error) 
 	var graphTok, baseTok int
 	for _, repoNode := range repos {
 		name := repoNode.Name
-		st, err := s.st.Stats(ctx, name)
+		data, err := s.overviewMetrics(ctx, repoNode)
 		if err != nil {
 			return Overview{}, err
 		}
-		sec, err := security.Build(ctx, s.st, name, security.Options{})
-		if err != nil {
-			return Overview{}, err
-		}
+		st, sec := data.stats, data.security
 		rs := RepoSummary{
 			Name: name, Branch: repoNode.Branch, Head: repoNode.Head, Remote: repoNode.URL,
 			Managed: s.inWorkspace(repoNode.Root), IngestedAt: repoNode.Time,
@@ -165,11 +161,7 @@ func (s *Server) overviewOf(ctx context.Context, only string) (Overview, error) 
 		for t, c := range st.SecurityTags {
 			ov.Totals.SecurityTags[t] += c
 		}
-		for _, v := range sec.Vulnerabilities {
-			if v.Reachability == "called" {
-				rs.VulnsCalled++
-			}
-		}
+		rs.VulnsCalled = data.called
 		if t, err := time.Parse(time.RFC3339, repoNode.Time); err == nil {
 			age := now.Sub(t)
 			rs.AgeHours = math.Round(age.Hours()*10) / 10

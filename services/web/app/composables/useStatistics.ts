@@ -1,10 +1,22 @@
 import type { WorkspaceStats } from '~/utils/types'
+import type { InjectionKey } from 'vue'
+import { inject, provide, watch } from 'vue'
 
 // The Statistics pages share one window (the last 7, 30 or 90 days, kept in
 // the URL as ?days=) and one fetch of the workspace figures.
 export const STAT_WINDOWS = [7, 30, 90]
 
+const statisticsKey: InjectionKey<ReturnType<typeof createStatistics>> = Symbol('statistics')
+
 export const useStatistics = () => {
+  const shared = inject(statisticsKey, null)
+  if (shared) return shared
+  const statistics = createStatistics()
+  provide(statisticsKey, statistics)
+  return statistics
+}
+
+function createStatistics() {
   const route = useRoute()
   const router = useRouter()
   const q = Number(route.query.days)
