@@ -1,6 +1,6 @@
 // Package lang indexes non-Go source code: Python, JavaScript and
 // TypeScript (including <script> blocks of Vue single-file components),
-// Java and Kotlin (brace.go and jvm.go), Rust (rust.go) and C# (csharp.go).
+// Java and Kotlin (brace.go and jvm.go), Rust (rust.go), C# (csharp.go) and PHP (php.go).
 //
 // The parsers are structural, not full compilers: they find functions,
 // classes and methods with exact line ranges, imports between files, calls
@@ -65,6 +65,11 @@ func Language(name string) string {
 		return Rust
 	case ".cs":
 		return CSharp
+	case ".php":
+		if strings.HasSuffix(strings.ToLower(name), ".blade.php") {
+			return "" // a Blade template, not PHP code
+		}
+		return PHP
 	}
 	return ""
 }
@@ -257,6 +262,8 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 		fr, _ = parseBrace(src, rustLang)
 	case CSharp:
 		fr, fr0pkg = parseBrace(src, csharpLang)
+	case PHP:
+		fr, fr0pkg = parseBrace(src, phpLang)
 	}
 	fr.pkg = fr0pkg
 	fr.fingerprint(lang, code)
@@ -277,7 +284,7 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 
 	module := moduleName(rel, lang)
 	if fr.pkg != "" {
-		module = fr.pkg // a JVM package or C# namespace spans files and folders
+		module = fr.pkg // a JVM package or C#/PHP namespace spans files and folders
 	}
 	lines := strings.Count(string(src), "\n") + 1
 	fileID := ix.id(model.KindFile, rel)
@@ -395,10 +402,10 @@ func (ix *indexer) link() {
 			short := lastPart(s.name)
 			switch s.kind {
 			case model.KindMethod:
-				if !pf.fr.isTest && short != "__init__" && short != "constructor" {
+				if !pf.fr.isTest && short != "__init__" && short != "constructor" && short != "__construct" {
 					methodsByName[family(pf.lang)+":"+short] = append(methodsByName[family(pf.lang)+":"+short], sid)
 				}
-				if short == "__init__" || short == "constructor" || short == lastPart(s.class) && classBased(pf.lang) {
+				if short == "__init__" || short == "constructor" || short == "__construct" || short == lastPart(s.class) && classBased(pf.lang) {
 					ctorOf[pf.symIDs[s.class]] = sid
 				}
 			case model.KindFunction:
@@ -420,7 +427,8 @@ func (ix *indexer) link() {
 	for _, pf := range ix.files {
 		// local name -> target node id, via imports
 		bound := map[string]string{}
-		boundFile := map[string]*parsedFile{} // imported JVM type -> its file
+		boundFile := map[string]*parsedFile{} // imported type -> its file
+		boundName := map[string]string{}      // local name -> declared name (import aliases)
 		moduleAlias := map[string]*parsedFile{}
 		// Namespaces whose types need no qualification: the file's own
 		// package, and for C# its parents and every using directive.
@@ -466,6 +474,7 @@ func (ix *indexer) link() {
 				if sid, ok := target.symIDs[member]; ok {
 					bound[local] = sid
 					boundFile[local] = target
+					boundName[local] = member
 				}
 			}
 		}
@@ -485,6 +494,9 @@ func (ix *indexer) link() {
 		// resolve finds a call's target and says how: through declarations
 		// and imports (syntactic) or a repository-unique name (inferred).
 		resolve := func(c call, class string) (string, model.Evidence) {
+			if pf.lang == PHP && (c.recv == "$this" || c.recv == "static") {
+				c.recv = "this"
+			}
 			declared := func(sid string) (string, model.Evidence) {
 				if sid == "" {
 					return "", ""
@@ -514,6 +526,11 @@ func (ix *indexer) link() {
 					}
 					return unique(methodsByName, fam+":"+c.name)
 				}
+				if pf.lang == PHP {
+					if sid := samePackage(c.name); sid != "" { // a function of the namespace
+						return declared(sid)
+					}
+				}
 				if pf.lang != Python {
 					return unique(funcsByName, fam+":"+c.name)
 				}
@@ -528,8 +545,8 @@ func (ix *indexer) link() {
 				if sid, ok := pf.symIDs[c.recv+"."+c.name]; ok { // Class.static()
 					return declared(sid)
 				}
-				if f, ok := boundFile[c.recv]; ok { // ImportedClass.static()
-					return declared(f.symIDs[c.recv+"."+c.name])
+				if f, ok := boundFile[c.recv]; ok { // ImportedClass.static(), also through an alias
+					return declared(f.symIDs[boundName[c.recv]+"."+c.name])
 				}
 				if sid := samePackage(c.recv + "." + c.name); sid != "" {
 					return declared(sid)
@@ -582,7 +599,7 @@ func (ix *indexer) resolveImport(pf *parsedFile, imp importRef, byModule map[str
 	switch pf.lang {
 	case Rust:
 		return ix.rustResolve(pf, spec, false)
-	case Java, Kotlin, CSharp:
+	case Java, Kotlin, CSharp, PHP:
 		// com.acme.Foo is Foo in package com.acme, in Java or Kotlin; a C#
 		// alias or static using names a type the same way.
 		for _, member := range imp.names {
@@ -662,8 +679,8 @@ func externalName(spec, lang string) string {
 		}
 		return first // a crate: Cargo advisories become "imported"
 	}
-	if isJVM(lang) {
-		return "" // Maven coordinates do not follow package names
+	if isJVM(lang) || lang == PHP {
+		return "" // Maven and Composer names do not follow package names
 	}
 	if lang == CSharp {
 		return spec // a namespace; NuGet IDs usually prefix it (internal/vuln)
@@ -708,6 +725,8 @@ func isTestPath(rel, lang string) bool {
 	switch lang {
 	case Rust:
 		return strings.Contains("/"+rel, "/tests/") || strings.Contains("/"+rel, "/benches/")
+	case PHP:
+		return strings.Contains("/"+strings.ToLower(rel), "/tests/") || strings.HasSuffix(base, "Test.php")
 	case CSharp:
 		stem := strings.TrimSuffix(base, ".cs")
 		for _, dir := range strings.Split(path.Dir(rel), "/") {

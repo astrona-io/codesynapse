@@ -158,6 +158,9 @@ func testTarget(n model.Node) (lang, key, name string) {
 			return "", "", ""
 		}
 		return "jvm", class, method
+	case ext == ".php":
+		// One command per test file; Pest files are their <tests> body.
+		return "php", n.File, n.Name
 	case ext == ".cs":
 		class, method, ok := cutLast(n.QualifiedName, ".")
 		if !ok {
@@ -239,6 +242,12 @@ func testStep(g *group) Step {
 		s.Command = jvmTestCommand(g.build, g.key, tests)
 	case "rust":
 		s.Command = cargo(g.key, "test -- "+strings.Join(tests, " "))
+	case "php":
+		if slices.Contains(tests, "<tests>") {
+			s.Command = "vendor/bin/pest " + g.key
+		} else {
+			s.Command = "vendor/bin/phpunit --filter '" + strings.Join(tests, "|") + "' " + g.key
+		}
 	case "dotnet":
 		filters := make([]string, 0, len(tests))
 		for _, t := range tests {
@@ -268,7 +277,7 @@ func testStep(g *group) Step {
 // buildAndLint lists the build and lint commands for the languages of the
 // changed files.
 func buildAndLint(ctx context.Context, r store.Reader, repo string, files []review.FileSummary) ([]Step, error) {
-	var goDirs, pyFiles []string
+	var goDirs, pyFiles, phpFiles []string
 	jvm, dotnet := false, false
 	var crates []string
 	for _, f := range files {
@@ -286,6 +295,8 @@ func buildAndLint(ctx context.Context, r store.Reader, repo string, files []revi
 			jvm = true
 		case ".cs":
 			dotnet = true
+		case ".php":
+			phpFiles = append(phpFiles, f.Path)
 		case ".rs":
 			if root, _ := rustCrate(f.Path); !slices.Contains(crates, root) {
 				crates = append(crates, root)
@@ -321,6 +332,13 @@ func buildAndLint(ctx context.Context, r store.Reader, repo string, files []revi
 		steps = append(steps,
 			Step{Kind: "build", Command: cargo(c, "check --all-targets"), Why: "the changed Rust code and its tests compile"},
 			Step{Kind: "lint", Command: cargo(c, "clippy --all-targets"), Why: "clippy on the changed crate"})
+	}
+	if len(phpFiles) > 0 {
+		lint := make([]string, 0, len(phpFiles))
+		for _, f := range phpFiles {
+			lint = append(lint, "php -l "+f)
+		}
+		steps = append(steps, Step{Kind: "build", Command: strings.Join(lint, " && "), Why: "the changed PHP files parse"})
 	}
 	if len(pyFiles) > 0 {
 		steps = append(steps, Step{Kind: "build", Command: "python -m py_compile " + strings.Join(pyFiles, " "), Why: "the changed Python files parse"})

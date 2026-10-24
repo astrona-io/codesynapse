@@ -4,7 +4,7 @@ title: DES or RC4 used
 severity: high
 cwe: [CWE-327]
 category: code
-languages: [go, java, kotlin, csharp]
+languages: [go, java, kotlin, csharp, php]
 why: DES and RC4 are broken; encrypted data can be recovered.
 fix: Use AES-GCM or ChaCha20-Poly1305.
 references:
@@ -21,3 +21,6 @@ examples:
   - language: csharp
     vulnerable: 'aes.Mode = CipherMode.ECB;'
     fixed: 'using var aes = new AesGcm(key, tagSizeInBytes: 16);'
+  - language: php
+    vulnerable: 'openssl_encrypt($data, ''aes-128-ecb'', $key);'
+    fixed: 'openssl_encrypt($data, ''aes-256-gcm'', $key, 0, $iv, $tag);'

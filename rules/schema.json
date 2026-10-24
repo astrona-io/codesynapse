@@ -10,7 +10,7 @@
     "severity": { "enum": ["info", "low", "medium", "high", "critical"] },
     "cwe": { "type": "array", "items": { "type": "string", "pattern": "^CWE-[0-9]+$" } },
     "category": { "enum": ["code", "config"], "description": "Must equal the directory" },
-    "languages": { "type": "array", "items": { "enum": ["go", "python", "javascript", "typescript", "vue", "java", "kotlin", "rust", "csharp", "yaml", "json", "github-actions"] } },
+    "languages": { "type": "array", "items": { "enum": ["go", "python", "javascript", "typescript", "vue", "java", "kotlin", "rust", "csharp", "php", "yaml", "json", "github-actions"] } },
     "why": { "type": "string", "description": "Why it matters: the attack, in one or two sentences" },
     "fix": { "type": "string", "description": "What to do instead, in one sentence" },
     "references": { "type": "array", "items": { "type": "string", "format": "uri" } },

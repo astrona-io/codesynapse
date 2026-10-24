@@ -9,7 +9,7 @@ On this repository the context an agent needs per question drops by a median 92%
 | Source | What is extracted |
 |---|---|
 | Go | Packages, files, functions, methods, types, exact calls and interface dispatch (`go/types`) |
-| Python, JS/TS, Vue, Java, Kotlin, Rust, C# | Structural symbols, imports, name-based call edges, tests |
+| Python, JS/TS, Vue, Java, Kotlin, Rust, C#, PHP | Structural symbols, imports, name-based call edges, tests |
 | Markdown | Sections with line ranges; `MENTIONS` edges to exported symbols |
 | YAML, Helm, Go templates | Kubernetes resources, key paths, `{{define}}` blocks, `.Values` links |
 | Git history | Commits, authors (e-mail hashed), per-file churn |

@@ -307,6 +307,8 @@ func tagsFor(calls []call, lang string) []string {
 			rustTags(c.recv, n, set)
 		case lang == CSharp:
 			csTags(c.recv, n, set)
+		case lang == PHP:
+			phpTags(c.recv, n, set)
 		}
 	}
 	var out []string

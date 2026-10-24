@@ -4,7 +4,7 @@ title: Unsafe deserialisation
 severity: high
 cwe: [CWE-502]
 category: code
-languages: [python, java, kotlin, csharp]
+languages: [python, java, kotlin, csharp, php]
 why: Deserialising untrusted pickle or unsafe YAML can execute arbitrary code.
 fix: Use json or yaml.safe_load; never unpickle untrusted data.
 references:
@@ -23,3 +23,6 @@ examples:
   - language: csharp
     vulnerable: 'var obj = new BinaryFormatter().Deserialize(stream);'
     fixed: 'var user = JsonSerializer.Deserialize<User>(stream);'
+  - language: php
+    vulnerable: '$cart = unserialize($_COOKIE[''cart'']);'
+    fixed: '$cart = json_decode($_COOKIE[''cart''], true, 8, JSON_THROW_ON_ERROR);'

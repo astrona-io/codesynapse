@@ -8,7 +8,7 @@ import (
 )
 
 // A structural parser for languages whose blocks are braces (Java, Kotlin,
-// Rust, C#;
+// Rust, C#, PHP;
 // docs/PLAN.md, agent workflow roadmap step 14). Each language is a
 // braceLang: how a type and a function are declared, which words are not
 // calls, how imports and annotations look, and its rules and routes. The
@@ -45,6 +45,7 @@ type braceLang struct {
 	// rust: 'a is a lifetime unless it closes as a character literal, and
 	// r"…" / r#"…"# are raw strings.
 	rust bool
+	php  bool // # comments, heredocs, and text outside <?php ?> (maskPHP)
 	// scope matches a block that gives its methods a type without declaring
 	// one (Rust's impl Type, impl Trait for Type); its last non-empty group
 	// is the type.
@@ -279,6 +280,9 @@ var docTag = regexp.MustCompile(`</?(?:summary|remarks|returns|value|para|p|c|co
 func maskBraceLang(src string, l *braceLang) string {
 	if l.rust {
 		return maskRust(src)
+	}
+	if l.php {
+		return maskPHP(src)
 	}
 	return maskBrace(src, l.textBlocks, l.verbatim)
 }
