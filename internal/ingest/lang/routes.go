@@ -279,8 +279,8 @@ func splitArgs(s string) []string {
 // as opposed to ones that load data or set headers (set_post, never_cache).
 var accessCheck = regexp.MustCompile(`(?i)auth|login|logged_?in|signed_?in|permission|admin|staff|superuser|role|access|authoriz|verif|token|csrf_?protect|protect|guard|acl|jwt|passport|session|require_?(?:user|login|admin|role|permission|functional|account|owner|member)|ensure_?(?:user|admin|owner|member|logged)|doorkeeper|can[_: ]`)
 
-// accessGuards keeps the names that look like access checks.
-func accessGuards(names []string) []string {
+// AccessGuards keeps the names that look like access checks.
+func AccessGuards(names []string) []string {
 	var out []string
 	for _, n := range names {
 		if accessCheck.MatchString(n) {
@@ -313,7 +313,7 @@ func applyScopes(routes []route, scopes []routeScope) []route {
 		for _, s := range scopes {
 			if r.line >= s.start && r.line <= s.end {
 				prefix = strings.TrimSuffix(prefix, "/") + "/" + strings.Trim(s.prefix, "/")
-				guards = append(guards, accessGuards(s.guards)...) // a group's web/throttle middleware is not a check
+				guards = append(guards, AccessGuards(s.guards)...) // a group's web/throttle middleware is not a check
 				if r.bare && s.recv != "" {
 					r.recv = s.recv
 				}
