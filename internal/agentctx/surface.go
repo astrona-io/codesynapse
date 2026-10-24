@@ -3,6 +3,7 @@ package agentctx
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -19,14 +20,16 @@ import (
 // call graph.
 
 // sinkWeight ranks the security tags worth naming when a handler reaches
-// them: running commands or queries and decoding input first, then files,
-// network and environment, then weak randomness and TLS settings. "http"
+// them: running commands, queries and templates first, then decoding
+// input (nearly every handler decodes JSON; unsafe formats show up as
+// findings), files, network and environment, then weak randomness and TLS
+// settings. "http"
 // (every handler uses net/http), "crypto" and "reflect" (hashing IDs and
 // encoding are everywhere) say nothing about exposure; "auth" is reported
 // as a check, not a risk.
 var sinkWeight = map[string]int{
-	"exec": 3, "sql": 3, "cypher": 3, "deserialize": 3, "template": 3, "unsafe": 3, "syscall": 3,
-	"filesystem": 2, "network": 2, "env": 2,
+	"exec": 3, "sql": 3, "cypher": 3, "template": 3, "unsafe": 3, "syscall": 3,
+	"deserialize": 2, "filesystem": 2, "network": 2, "env": 2,
 	"weak-crypto": 1, "insecure-rand": 1, "tls": 1,
 }
 
@@ -39,6 +42,9 @@ var sinkTags = func() []string {
 	slices.Sort(tags)
 	return tags
 }()
+
+// ErrSurfaceFilter reports an unknown kind or tag filter.
+var ErrSurfaceFilter = errors.New("invalid filter")
 
 const (
 	authTag = "auth"
@@ -108,10 +114,10 @@ func (s Service) AttackSurface(ctx context.Context, repo string, o SurfaceOption
 	switch o.Kind {
 	case "", model.RouteHTTP, model.RouteMCP, model.RouteCLI:
 	default:
-		return AttackSurface{}, fmt.Errorf("kind must be http, mcp or cli, not %q", o.Kind)
+		return AttackSurface{}, fmt.Errorf("%w: kind must be http, mcp or cli, not %q", ErrSurfaceFilter, o.Kind)
 	}
 	if _, ok := sinkWeight[o.Reaching]; o.Reaching != "" && o.Reaching != authTag && !ok {
-		return AttackSurface{}, fmt.Errorf("reaching must be one of %s", strings.Join(sinkTags, ", "))
+		return AttackSurface{}, fmt.Errorf("%w: reaching must be one of %s", ErrSurfaceFilter, strings.Join(sinkTags, ", "))
 	}
 	s.R = store.ForRepository(s.R, repo)
 	routes, err := s.R.List(ctx, repo, store.Filter{Kinds: []model.NodeKind{model.KindRoute}}, store.ByName, store.MaxLimit)

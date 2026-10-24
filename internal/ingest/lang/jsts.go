@@ -306,6 +306,13 @@ func parseJS(src []byte, _ bool) *fileResult {
 		body := strings.Join(lines[max(0, s.start-1):min(len(lines), s.end)], "\n")
 		s.complexity = countBranches(body, jsBranches) + strings.Count(body, "?.")*0 + strings.Count(body, " ? ")
 	}
+	fns := map[string]bool{}
+	for _, sym := range fr.symbols {
+		if sym.kind == model.KindFunction {
+			fns[sym.name] = true
+		}
+	}
+	fr.routes = jsRoutes(string(src), fns)
 	return fr
 }
 

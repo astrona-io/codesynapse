@@ -100,7 +100,7 @@ func parsePython(src []byte) *fileResult {
 	fr := &fileResult{partial: open != "" || unbalanced(m, '(', ')') || unbalanced(m, '[', ']') || unbalanced(m, '{', '}')}
 
 	var stack []openSym
-	var pendingDecorators []string
+	var pendingDecorators, pendingRaw []string
 	closeTo := func(indent, line int) {
 		for len(stack) > 0 && stack[len(stack)-1].indent >= indent {
 			stack[len(stack)-1].sym.end = line
@@ -117,6 +117,7 @@ func parsePython(src []byte) *fileResult {
 		lastCode = n
 		if m := pyDecorator.FindStringSubmatch(l.text); m != nil {
 			pendingDecorators = append(pendingDecorators, m[1])
+			pendingRaw = append(pendingRaw, raw[i])
 			continue
 		}
 		if m := pyClass.FindStringSubmatch(l.text); m != nil {
@@ -128,7 +129,7 @@ func parsePython(src []byte) *fileResult {
 			s.doc = pyDocstring(raw, i+1)
 			fr.symbols = append(fr.symbols, s)
 			stack = append(stack, openSym{s, l.indent})
-			pendingDecorators = nil
+			pendingDecorators, pendingRaw = nil, nil
 			continue
 		}
 		if m := pyDef.FindStringSubmatch(l.text); m != nil {
@@ -148,18 +149,19 @@ func parsePython(src []byte) *fileResult {
 				}
 			}
 			if s == nil { // nested def: its body is part of the parent
-				pendingDecorators = nil
+				pendingDecorators, pendingRaw = nil, nil
 				continue
 			}
 			s.isTest = strings.HasPrefix(name, "test_") || name == "test"
 			s.root = len(pendingDecorators) > 0 && !onlyBuiltinDecorators(pendingDecorators)
 			s.doc = pyDocstring(raw, i+1)
+			fr.routes = append(fr.routes, pyRoutesFor(pendingRaw, pendingDecorators, s.start, s.name)...)
 			fr.symbols = append(fr.symbols, s)
 			stack = append(stack, openSym{s, l.indent})
-			pendingDecorators = nil
+			pendingDecorators, pendingRaw = nil, nil
 			continue
 		}
-		pendingDecorators = nil
+		pendingDecorators, pendingRaw = nil, nil
 		if strings.Contains(l.text, `__name__`) && strings.Contains(l.text, `__main__`) {
 			continue
 		}

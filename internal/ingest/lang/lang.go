@@ -87,6 +87,7 @@ type fileResult struct {
 	imports  []importRef
 	topCalls []call // module-level calls, attributed to the file
 	findings []finding
+	routes   []route // entry points registered here (routes.go)
 	isTest   bool
 	// partial is set when the source ended with open brackets or an open
 	// string: declarations after the problem may be missing or misplaced.
@@ -296,6 +297,9 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 			ix.g.AddEdge(model.Edge{From: fileID, To: sid, Kind: model.EdgeReferences, Evidence: model.EvidenceSyntactic})
 		}
 	}
+	if !fr.isTest {
+		ix.addRoutes(pf, module)
+	}
 	// A test file's module-level code (describe/it blocks) is test code:
 	// give it a synthetic test function so test reachability works.
 	if fr.isTest && len(fr.topCalls) > 0 {
@@ -335,6 +339,9 @@ func (fr *fileResult) shift(offset int) {
 	}
 	for i := range fr.findings {
 		fr.findings[i].line += offset
+	}
+	for i := range fr.routes {
+		fr.routes[i].line += offset
 	}
 }
 
@@ -621,4 +628,21 @@ func countWord(s, w string) int {
 
 func isIdent(r rune) bool {
 	return r == '_' || r == '$' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
+// addRoutes adds the file's entry points as Route nodes, each linked to its
+// handler when that is a function of the file.
+func (ix *indexer) addRoutes(pf *parsedFile, module string) {
+	for _, r := range pf.fr.routes {
+		local := r.kind + " " + r.name + " (" + module + ")"
+		id := ix.id(model.KindRoute, local)
+		ix.g.AddNode(model.Node{
+			ID: id, Kind: model.KindRoute, Repo: ix.repo, Name: r.name, QualifiedName: local, Package: module, File: pf.rel,
+			StartLine: r.line, EndLine: r.line, Signature: r.kind, Language: pf.lang,
+			Summary: redact.Summary(strings.Join(r.guards[:min(len(r.guards), 4)], "; "), 200),
+		})
+		if sid, ok := pf.symIDs[r.handler]; ok && r.handler != "" {
+			ix.g.AddEdge(model.Edge{From: id, To: sid, Kind: model.EdgeHandledBy, Evidence: model.EvidenceSyntactic})
+		}
+	}
 }
