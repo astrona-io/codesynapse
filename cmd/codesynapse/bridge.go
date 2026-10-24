@@ -51,7 +51,7 @@ func (o *mcpBridgeOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f := o.EC.Command.Flags()
 	f.StringVar(&o.url, "url", app.Getenv("CODESYNAPSE_MCP_URL", "http://localhost:8090/mcp"), "MCP endpoint to forward to")
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "CodeSynapse API that registers the chat session")
-	f.BoolVar(&o.worktree, "worktree", app.Getenv("CODESYNAPSE_BRIDGE_WORKTREE", "true") == "true", "While this checkout has changes the server has not indexed, answer the core repository tools from a graph of the working tree built on this machine")
+	f.BoolVar(&o.worktree, "worktree", app.Getenv("CODESYNAPSE_BRIDGE_WORKTREE", "false") == "true", "Opt in: while this checkout has changes the server has not indexed, answer the core repository tools from a graph of the working tree built on this machine (those answers never reach the server, so they are not audited or counted)")
 	f.StringVar(&o.repo, "repo", "", "The name the server knows this checkout by (default: from the origin remote)")
 	return nil
 }
