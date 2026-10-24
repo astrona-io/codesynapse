@@ -124,6 +124,18 @@ func (h *handlers) prContext(ctx context.Context, _ *mcp.CallToolRequest, in prC
 	if err != nil {
 		return nil, agentctx.PRContext{}, err
 	}
+	// Callers of a changed library in other repositories, only those this
+	// caller may see.
+	visible, err := h.visibleRepos(ctx)
+	if err != nil {
+		return nil, agentctx.PRContext{}, err
+	}
+	in.Consumers = nil
+	for _, r := range visible {
+		if r.Name != repo {
+			in.Consumers = append(in.Consumers, r.Name)
+		}
+	}
 	out, err := coretools.PRContext(h.runtimeScope(ctx, repo), h.svc.R, repo, in)
 	return nil, out, err
 }

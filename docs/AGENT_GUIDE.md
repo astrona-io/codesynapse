@@ -267,7 +267,9 @@ Each prompt is also served natively as an MCP prompt (see section 4), so clients
 > 1. Call `get_pr_context` to compute blast radius and risk for every modified symbol.
 > 2. Check whether any modified symbol touches security-tagged APIs (`sensitive_touched`, `External` nodes) or carries findings; call `security_report` with min_severity "medium" for context.
 > 3. Verify that new or modified public functions have unit tests (`exported_untested`).
-> 4. Summarize high-risk changes, missing test coverage and potential architectural side effects, citing file:line."
+> 4. Check `duplicated_changed` and say whether the same change belongs in each copy.
+> 5. Check `used_elsewhere`: changed exported functions other repositories call, with their callers there; say which need a change.
+> 6. Summarize high-risk changes, missing test coverage and potential architectural side effects, citing file:line."
 
 ### C. Package architecture & onboarding — prompt `package-onboarding`
 > "I want to understand how package `<PACKAGE>` fits into this codebase. Use CodeSynapse to:
@@ -364,7 +366,7 @@ Check budget omissions and the suggested next step before treating an answer as 
 | Start a new task | `minimal_context` | `max_tokens: 1500` | Describe the task; read only the returned line ranges. |
 | Quick lookup | `get_symbol_context` | `verbosity: "outline"` | Signature, doc, risk, direct callers/callees, tests, and `duplicate` (exact or edited copies elsewhere, with their locations) when the function has any. |
 | Before editing | `get_symbol_context` | `verbosity: "full"` | Adds transitive callers, untested public callers, docs, churn. |
-| Change analysis | `get_pr_context` | default | Diff, file list or base/head; risk, tests, findings in one call, and `duplicated_changed`: changed functions that have copies elsewhere (the change probably belongs there too, or they should be merged). Only functions in the last ingest are checked; `codesynapse review --offline` indexes the working tree first, so new code is covered. |
+| Change analysis | `get_pr_context` | default | Diff, file list or base/head; risk, tests, findings in one call, and `duplicated_changed`: changed functions that have copies elsewhere (the change probably belongs there too, or they should be merged), and `used_elsewhere`: changed exported Go functions that other repositories you can see call, with the version they require and up to ten callers each. Ingest keeps calls into modules with the same owner as the repository's own module (`github.com/acme/…` for `github.com/acme/app`, the whole host for vanity paths), so a library's callers are found only in repositories of that owner. Only functions in the last ingest are checked; `codesynapse review --offline` indexes the working tree first, so new code is covered. |
 | Interface navigation | `get_implementations` | default | Resolve `DISPATCHES_TO` / `IMPLEMENTS` without guessing types. |
 | Deep dive | `get_call_graph` | `depth: 2` | Raise depth only when 2 is not enough (max 4). Each edge has `evidence`; check `inferred` edges in the code. |
 | Before reading a file | `file_outline` | — | Symbols, doc sections or YAML entries with line ranges, and the file's `analysis` (level, status). |

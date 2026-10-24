@@ -62,6 +62,8 @@ type Result struct {
 	// (types.Func.FullName, e.g. "(*net/http.Client).Do") to caller node IDs.
 	// It is not persisted; vulnerability analysis uses it for reachability.
 	ExternalCalls map[string][]string
+	// ExternalPackages maps the same full names to their import paths.
+	ExternalPackages map[string]string
 	// ExternalImports maps out-of-repo import paths to importing package IDs.
 	ExternalImports map[string][]string
 }
@@ -149,7 +151,7 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 		g:        model.NewGraph(),
 		modules:  map[string]bool{},
 		srcs:     map[string][]byte{},
-		res:      &Result{ExternalCalls: map[string][]string{}, ExternalImports: map[string][]string{}},
+		res:      &Result{ExternalCalls: map[string][]string{}, ExternalPackages: map[string]string{}, ExternalImports: map[string][]string{}},
 		analysis: map[string]*packageAnalysis{},
 	}
 	x.g.AddNode(model.Node{ID: x.repoID(), Kind: model.KindRepository, Repo: opts.Repo, Name: opts.Repo})
@@ -659,6 +661,7 @@ func (x *extractor) calls(p *packages.Package, body ast.Node, callerID string) (
 			x.g.AddEdge(model.Edge{From: callerID, To: x.funcID(fn), Kind: model.EdgeCalls, Evidence: model.EvidenceTyped})
 		default:
 			x.res.ExternalCalls[fn.FullName()] = append(x.res.ExternalCalls[fn.FullName()], callerID)
+			x.res.ExternalPackages[fn.FullName()] = calleePkg
 			if tag == "" {
 				break
 			}

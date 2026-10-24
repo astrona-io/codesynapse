@@ -149,6 +149,9 @@ type PRContext struct {
 	// DuplicatedChanged names changed functions that have copies, with where
 	// the copies are: the same change probably belongs there too.
 	DuplicatedChanged []string `json:"duplicated_changed"`
+	// UsedElsewhere are the changed exported functions other repositories
+	// the caller may see call, with their callers there.
+	UsedElsewhere []ExternalUse `json:"used_elsewhere,omitempty"`
 }
 
 // PROptions select the change to analyse: a unified diff, a list of files
@@ -166,6 +169,9 @@ type PROptions struct {
 	// the base, e.g. a commit).
 	BaseGraph store.Reader
 	BaseLabel string
+	// Consumers are the other repositories the caller may see; where they
+	// call a changed exported function, the answer lists the callers.
+	Consumers []string
 }
 
 // PRContext analyses a change.
@@ -180,6 +186,7 @@ func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRCon
 			return PRContext{}, errors.New("file path exceeds 4096 bytes")
 		}
 	}
+	all := s.R
 	s.R = store.ForRepository(s.R, repo)
 	var changes []gitx.FileChange
 	switch {
@@ -238,6 +245,7 @@ func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRCon
 	}
 	out := PRContext{Report: rep, ExportedChanged: []string{}, ExportedUntested: []string{}, SensitiveTouched: []string{}, DuplicatedChanged: []string{}}
 	out.Summary.DuplicatedChanges = 0
+	var exported []model.Node
 	for i := range out.Changes {
 		c := &out.Changes[i]
 		c.Duplicate = s.scopedDuplicate(ctx, c.Duplicate)
@@ -259,6 +267,9 @@ func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRCon
 		}
 		if n.Exported {
 			out.ExportedChanged = append(out.ExportedChanged, c.Name)
+			if n.Kind.IsCallable() {
+				exported = append(exported, n)
+			}
 			if len(c.Tests) == 0 && n.Kind.IsCallable() {
 				out.ExportedUntested = append(out.ExportedUntested, c.Name)
 			}
@@ -266,6 +277,9 @@ func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRCon
 		if len(c.Tags) > 0 || len(c.Findings) > 0 {
 			out.SensitiveTouched = append(out.SensitiveTouched, c.Name+" ["+strings.Join(c.Tags, ",")+"]")
 		}
+	}
+	if out.UsedElsewhere, err = s.crossRepo(ctx, all, repo, o.Consumers, exported); err != nil {
+		return PRContext{}, fmt.Errorf("callers in other repositories: %w", err)
 	}
 	if f, ok, stale, err := s.runtimeFacts(ctx, repo); err != nil {
 		return PRContext{}, err

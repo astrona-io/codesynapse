@@ -172,6 +172,15 @@ func finishPR(out PRContext, maxTokens int) (PRContext, error) {
 		if n := trimTail(&out.Impacted); n > 0 {
 			return n
 		}
+		for i := range out.UsedElsewhere {
+			if n := trimTail(&out.UsedElsewhere[i].Callers); n > 0 {
+				out.UsedElsewhere[i].More = true
+				return n
+			}
+		}
+		if n := trimTail(&out.UsedElsewhere); n > 0 {
+			return n
+		}
 		// The counts of new and fixed findings always stay; their lists go,
 		// fixed ones first.
 		if d := out.Security; d != nil {
