@@ -64,11 +64,14 @@ The compose API container reaches model servers on the host through `host.docker
 | `just ci` | All of the above |
 | `just dev-mcp` | MCP on stdio with an in-memory graph of the checkout (no database) |
 | `just dev-web` | Nuxt dev server against the API of `just up` |
-| `just test-integration` | `test-hugegraph` and `test-postgres` together |
+| `just test-integration` | `test-hugegraph`, `test-postgres` and `test-metrics` together |
 | `just test-postgres` | Accounts contract on a throwaway PostgreSQL |
 | `just test-hugegraph` | HugeGraph/Milvus contract and parity |
-| `just test-metrics` | Telemetry on a throwaway VictoriaMetrics |
+| `just test-metrics` | Telemetry and series queries on a throwaway VictoriaMetrics |
+| `just check-test-images` | The integration recipes, `docker-compose.yml` and the Helm chart use the same store images |
 | `just review` | Offline review pack for the current branch |
+
+The integration recipes run the store images that `docker-compose.yml` ships (PostgreSQL, HugeGraph, Milvus, VictoriaMetrics), read from it by `.github/scripts/compose-image.sh`, so a version bump there, which Renovate makes in one place, changes what the contracts test. CI runs all three suites on store, accounts, telemetry, series, dependency and recipe changes, nightly and on demand, with a 30 minute job limit and bounded container start-up waits.
 
 Run `just test` and `just lint` before calling a Go change done, and `just web-check` for anything under `services/web/`.
 
