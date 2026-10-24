@@ -48,13 +48,15 @@ type Finding struct {
 
 // Vulnerability is a known vulnerability in a dependency.
 type Vulnerability struct {
-	ID           string      `json:"id"`
-	CVE          []string    `json:"cve,omitempty"`
-	Aliases      []string    `json:"aliases,omitempty"`
-	Summary      string      `json:"summary"`
-	Severity     string      `json:"severity"`
-	CWE          []string    `json:"cwe,omitempty"`
-	Module       string      `json:"module"`
+	ID       string   `json:"id"`
+	CVE      []string `json:"cve,omitempty"`
+	Aliases  []string `json:"aliases,omitempty"`
+	Summary  string   `json:"summary"`
+	Severity string   `json:"severity"`
+	CWE      []string `json:"cwe,omitempty"`
+	Module   string   `json:"module"`
+	// Ecosystem is OSV's name for the package's ecosystem ("Go", "npm", …).
+	Ecosystem    string      `json:"ecosystem,omitempty"`
 	Version      string      `json:"version"`
 	Fixed        string      `json:"fixed,omitempty"`
 	Reachability string      `json:"reachability"`
@@ -219,7 +221,7 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 		vulnerableMods[n.Package] = true
 		vv := Vulnerability{
 			ID: n.Name, Aliases: n.Aliases, Summary: n.Summary, Severity: n.Severity, CWE: n.CWE,
-			Module: n.Package, Version: n.Version, Fixed: n.FixedVersion, Reachability: n.Reachability, URL: n.URL,
+			Module: n.Package, Ecosystem: n.Ecosystem, Version: n.Version, Fixed: n.FixedVersion, Reachability: n.Reachability, URL: n.URL,
 		}
 		key := n.Package
 		if n.Ecosystem != "" && n.Ecosystem != "Go" {

@@ -86,9 +86,32 @@ A repository where nothing is scannable gets **N/A**, not a grade. The report al
 codesynapse audit .                  # Markdown
 codesynapse audit . --fail-on high   # exit 1 on high/critical (reachable vulns only)
 codesynapse audit . -o json
+codesynapse audit . -o sarif > codesynapse.sarif   # GitHub code scanning, IDEs
 ```
 
 `--vulns=false` (or `CODESYNAPSE_VULN_SCAN=false`) keeps the scan offline.
+
+### SARIF and GitHub code scanning
+
+`-o sarif` writes SARIF 2.1.0, which GitHub code scanning, the VS Code SARIF viewer and most IDEs read. Each result says where it comes from: the rule's `source` property is "CodeSynapse built-in rule" (with the rule's title, why, fix and a link to its rule file at the release that ran) or "osv.dev advisory" (with the advisory's link). Severities map to SARIF levels (critical and high are errors, medium warnings, low and info notes) and to GitHub's `security-severity`, CWE IDs to `external/cwe/…` tags. Findings suppressed by repository policy are included with their reason as a suppression, so code scanning shows them as dismissed instead of dropping them.
+
+Code scanning needs a place for every result: a vulnerability goes to the first call of the vulnerable symbol, otherwise to its ecosystem's manifest at the repository root (`go.mod`, `package-lock.json`, `Cargo.lock`, …). One with neither is left out and counted in the run's `vulnerabilities_without_location` property. Results carry a `partialFingerprints` value from rule, owning function and file, like the new-versus-fixed comparison of `review`, so an alert keeps its identity when code above it moves.
+
+```yaml
+permissions:
+  security-events: write
+steps:
+  - uses: actions/checkout@v7
+  - uses: actions/setup-go@v7
+    with:
+      go-version: stable
+  - run: go install github.com/astrona-io/codesynapse/cmd/codesynapse@latest
+  - run: codesynapse audit . -o sarif > codesynapse.sarif
+  - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+    with:
+      sarif_file: codesynapse.sarif
+      category: codesynapse
+```
 
 ## Languages
 
