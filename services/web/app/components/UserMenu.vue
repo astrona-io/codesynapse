@@ -25,6 +25,7 @@ const role = computed(() => {
 const links = computed(() => session.accounts.value
   ? [
       { to: '/settings/profile', label: 'Your account' },
+      { to: '/settings/profile?tab=organisations', label: 'Your organisations' },
       { to: '/settings', label: 'Settings & API keys' },
       { to: '/stats', label: 'Statistics' },
       { to: '/help', label: 'Help' },
