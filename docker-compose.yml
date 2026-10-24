@@ -149,6 +149,10 @@ services:
       # Allow identity providers on a private network (self-hosted Keycloak).
       CODESYNAPSE_SSO_ALLOW_PRIVATE: ${CODESYNAPSE_SSO_ALLOW_PRIVATE:-false}
       CODESYNAPSE_SIGNUP_OPEN: ${CODESYNAPSE_SIGNUP_OPEN:-false}
+      # First start creates the administrator "admin" with this password
+      # (random, made by `just init`). Sign in, then replace the account.
+      CODESYNAPSE_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      CODESYNAPSE_AUTO_ADMIN: ${CODESYNAPSE_AUTO_ADMIN:-true}
       # The local stack is served over plain HTTP on 127.0.0.1; set true behind TLS.
       CODESYNAPSE_COOKIE_SECURE: ${CODESYNAPSE_COOKIE_SECURE:-false}
       CODESYNAPSE_AUDIT_RETENTION_DAYS: ${CODESYNAPSE_AUDIT_RETENTION_DAYS:-400}

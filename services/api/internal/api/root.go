@@ -131,3 +131,27 @@ func (s *Server) handleRecoverOwner(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// ReplaceAdminDone is shown once the first-start administrator is replaced.
+const ReplaceAdminDone = "Your account replaces the administrator made at first start. Sign in with it."
+
+// handleReplaceAdmin creates the caller's own root account in place of the
+// auto-created one and ends the old session.
+func (s *Server) handleReplaceAdmin(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.caller(w, r)
+	if !ok {
+		return
+	}
+	var c credentials
+	if err := decodeJSON(w, r, &c); err != nil {
+		s.problem(w, http.StatusBadRequest, err)
+		return
+	}
+	u, err := s.cfg.Accounts.ReplaceRoot(r.Context(), p, accounts.SignUpInput{Email: c.Email, Username: c.Username, Name: c.Name, Password: c.Password})
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	s.clearSession(w)
+	writeJSON(w, http.StatusOK, map[string]any{"message": ReplaceAdminDone, "user": u})
+}

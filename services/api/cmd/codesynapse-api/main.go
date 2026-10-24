@@ -32,7 +32,7 @@ const EnvToken = "CODESYNAPSE_API_TOKEN" //nolint:gosec // env var name
 func main() {
 	os.Exit(app.Main("codesynapse-api", "HTTP API for the codesynapse dashboard", version,
 		func(ec *app.Env) []*cobra.Command {
-			return []*cobra.Command{serveCmd(ec), workerCmd(ec), designateRootCmd(ec)}
+			return []*cobra.Command{serveCmd(ec), workerCmd(ec), designateRootCmd(ec), resetAdminCmd(ec)}
 		}))
 }
 
@@ -146,6 +146,11 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		return err
 	}
 	defer closeAccounts()
+	if acc != nil && !o.worker {
+		if err := ensureInitialAdmin(ctx, acc, o.EC.Logger); err != nil {
+			return err
+		}
+	}
 	ingestMetrics, err := app.NewIngestMetrics(ctx)
 	if err != nil {
 		return err
@@ -265,6 +270,95 @@ func openAccounts(ctx context.Context, logger *slog.Logger) (*accounts.Service, 
 	}
 	logger.Info("accounts enabled", "signup_open", svc.SignupOpen, "setup", setup.State)
 	return svc, st.Close, nil
+}
+
+// EnvAdminPassword is the password of the administrator made at first start
+// (docs/operations/first-run.md). docker compose and the Helm chart provide
+// a random one; unset, a random one is logged once.
+const EnvAdminPassword = "CODESYNAPSE_ADMIN_PASSWORD" //nolint:gosec // env var name
+
+// EnvAutoAdmin turns the first-start administrator off ("false"): the first
+// sign-up then becomes root, as before.
+const EnvAutoAdmin = "CODESYNAPSE_AUTO_ADMIN"
+
+// ensureInitialAdmin makes the first-start administrator of an empty
+// installation. A generated password is logged once, here and nowhere else;
+// a supplied one never is.
+func ensureInitialAdmin(ctx context.Context, svc *accounts.Service, logger *slog.Logger) error {
+	if app.Getenv(EnvAutoAdmin, "true") == "false" {
+		return nil
+	}
+	password := os.Getenv(EnvAdminPassword)
+	if strings.HasPrefix(password, "change-me") {
+		// The placeholder of .env.example is public: never a real password.
+		logger.Warn(EnvAdminPassword + " is still the placeholder from .env.example: generating a random password instead")
+		password = ""
+	}
+	u, generated, err := svc.EnsureInitialAdmin(ctx, password)
+	if err != nil {
+		return fmt.Errorf("creating the initial administrator: %w", err)
+	}
+	switch {
+	case generated != "":
+		logger.Warn("initial administrator created: sign in, then replace it with your own account", "username", u.Username, "password", generated)
+	case u.ID != "":
+		logger.Warn("initial administrator created with the password from "+EnvAdminPassword+": sign in, then replace it with your own account", "username", u.Username)
+	}
+	return nil
+}
+
+type resetAdminOptions struct {
+	EC       *app.Env
+	generate bool
+}
+
+func (o *resetAdminOptions) SetupFlags(_ context.Context, _ *app.Env) error {
+	o.EC.Command.Flags().BoolVar(&o.generate, "generate", false, "Ignore "+EnvAdminPassword+" and print a new random password")
+	return nil
+}
+
+func (o *resetAdminOptions) Complete(context.Context, *app.Env) error { return nil }
+
+func (o *resetAdminOptions) Validate(context.Context, *app.Env) error {
+	if os.Getenv(EnvDatabaseURL) == "" {
+		return fmt.Errorf("%s is required", EnvDatabaseURL)
+	}
+	return nil
+}
+
+// Run resets the root account's password (or creates the initial
+// administrator on an empty installation). The new password is printed once
+// when it was generated; otherwise it is the one in CODESYNAPSE_ADMIN_PASSWORD.
+func (o *resetAdminOptions) Run(ctx context.Context, _ *app.Env) error {
+	svc, closeDB, err := openAccounts(ctx, o.EC.Logger)
+	if err != nil {
+		return err
+	}
+	defer closeDB()
+	password := os.Getenv(EnvAdminPassword)
+	if o.generate {
+		password = ""
+	}
+	u, generated, err := svc.ResetRoot(ctx, password)
+	if err != nil {
+		return err
+	}
+	o.EC.Logger.Info("root account reset", "username", u.Username, "email", u.Email)
+	if generated != "" {
+		_, err = fmt.Fprintf(os.Stdout, "username: %s\npassword: %s\n", u.Username, generated)
+	} else {
+		_, err = fmt.Fprintf(os.Stdout, "username: %s\npassword: the value of %s\n", u.Username, EnvAdminPassword)
+	}
+	return err
+}
+
+func resetAdminCmd(ec *app.Env) *cobra.Command {
+	o := &resetAdminOptions{EC: ec}
+	return app.NewSubCommand("reset-admin", o, ec).
+		WithShortDesc("Reset the root (admin) account's password and sessions").
+		WithGroupID(app.GroupBase).
+		WithNoArgs().
+		Build()
 }
 
 type designateRootOptions struct {

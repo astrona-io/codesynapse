@@ -56,8 +56,12 @@ type User struct {
 	// fixed when the account is created or designated and never cleared:
 	// unlike PlatformAdmin it cannot be granted or revoked. Root may do
 	// governance only (see bootstrap.go).
-	BootstrapRoot bool      `json:"bootstrap_root,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	BootstrapRoot bool `json:"bootstrap_root,omitempty"`
+	// AutoCreated marks the administrator made at first start with a
+	// generated password (initialadmin.go). The dashboard tells its user to
+	// replace it, and only such a root can be replaced.
+	AutoCreated bool      `json:"auto_created,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 	// DisabledAt is set while the account is suspended: no sign-in, and
 	// its sessions and API keys stop working.
 	DisabledAt *time.Time `json:"disabled_at,omitempty"`
@@ -308,6 +312,11 @@ type Store interface {
 	// root (migration and explicit designation). ErrExists when another
 	// account already is; the classification is never removed.
 	MarkBootstrapRoot(ctx context.Context, userID string) error
+	// ReplaceRoot creates u (not yet root) and makes it the root in place of
+	// oldID, which is deleted with its sessions and keys. The old account's
+	// email and username are free for u. One transaction in the policy
+	// transaction store.
+	ReplaceRoot(ctx context.Context, oldID string, u User) error
 	// Setup returns the installation's setup record; State is empty before
 	// the first account exists.
 	Setup(ctx context.Context) (Setup, error)
