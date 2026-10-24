@@ -221,6 +221,9 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 		goCalls = goRes.ExternalCalls
 	}
 	repoMeta.Conventions = conventions.Analyze(conventions.Input{Graph: g, GoCalls: goCalls, Imports: extImports, Module: repoMeta.GoModule})
+	// After the reports and identities above, which describe the
+	// repository's own code: these nodes only point at other repositories.
+	golang.LinkFirstParty(opts.Repo, g, goRes, repoMeta.GoModule)
 	if meta, err = json.Marshal(repoMeta); err != nil {
 		return nil, fmt.Errorf("encode repository metadata: %w", err)
 	}

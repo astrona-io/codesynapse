@@ -99,6 +99,9 @@ type PRContextIn struct {
 	Head      string   `json:"head,omitempty" jsonschema:"head git ref, default HEAD"`
 	Depth     int      `json:"depth,omitempty" jsonschema:"caller depth for blast radius, default 3"`
 	MaxTokens int      `json:"max_tokens,omitempty" jsonschema:"estimated JSON token budget, bytes/4; 256-20000, default 20000"`
+	// Consumers are the other repositories the caller may see, set by the
+	// server from its scope, never by the client.
+	Consumers []string `json:"-"`
 }
 
 // PRContext answers get_pr_context. Base and head refs need the checkout
@@ -120,7 +123,7 @@ func prContext(ctx context.Context, r, base store.Reader, baseLabel, repo string
 	if len(in.Diff) > MaxDiffBytes {
 		return agentctx.PRContext{}, fmt.Errorf("diff exceeds %d bytes", MaxDiffBytes)
 	}
-	opts := agentctx.PROptions{Diff: []byte(in.Diff), Files: in.Files, Base: in.Base, Head: in.Head, Depth: in.Depth, MaxTokens: in.MaxTokens, BaseGraph: base, BaseLabel: baseLabel}
+	opts := agentctx.PROptions{Diff: []byte(in.Diff), Files: in.Files, Base: in.Base, Head: in.Head, Depth: in.Depth, MaxTokens: in.MaxTokens, BaseGraph: base, BaseLabel: baseLabel, Consumers: in.Consumers}
 	if len(opts.Diff) == 0 && len(opts.Files) == 0 && in.Base != "" {
 		n, err := r.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
 		if err != nil {
