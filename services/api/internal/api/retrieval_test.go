@@ -1,12 +1,19 @@
 package api
 
 import (
+	"context"
+	"io"
+	"log/slog"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/astrona-io/codesynapse/internal/agentrules"
+	"github.com/astrona-io/codesynapse/internal/store/memory"
 	"github.com/astrona-io/codesynapse/internal/store/storetest"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
 func TestRetrievalReport(t *testing.T) {
@@ -73,4 +80,28 @@ func TestAgentRulesEndpoint(t *testing.T) {
 	assert.True(t, !rules.Custom)
 	assert.Equal(t, rules.Version, agentrules.Version)
 	assert.Equal(t, rules.Text, agentrules.Default)
+}
+
+func TestAgentStatusCountsTodaysActivity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+	ts := httptest.NewServer(New(ctx, Config{}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	t.Cleanup(ts.Close)
+	var before AgentStatus
+	require.Equal(t, get(t, ts, "/api/v1/agents/status", &before), 200)
+	assert.Equal(t, before, AgentStatus{})
+
+	today := usage.Day(time.Now())
+	require.NoError(t, st.AddUsage(ctx, []usage.Bucket{
+		{Day: today, Tool: usage.Session, Client: "claude-code", Calls: 2},
+		{Day: today, Repo: storetest.Repo, Tool: "search", Client: "claude-code", Calls: 3},
+		{Day: today, Repo: storetest.Repo, Tool: usage.FirstCodeSynapse, Client: "claude-code", Calls: 1},
+		{Day: today, Repo: storetest.Repo, Tool: usage.ReadTurnedBack, Client: "claude-code", Calls: 4},
+		{Day: usage.Day(time.Now().AddDate(0, 0, -2)), Repo: storetest.Repo, Tool: "search", Client: "claude-code", Calls: 9}, // not today
+	}))
+	var got AgentStatus
+	require.Equal(t, get(t, ts, "/api/v1/agents/status", &got), 200)
+	assert.Equal(t, got, AgentStatus{Sessions: 2, Calls: 3, Workflow: 1})
 }

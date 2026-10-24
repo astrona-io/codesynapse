@@ -362,6 +362,8 @@ export interface AttentionItem {
   action: string
   link: string
 }
+// GET /api/v1/agents/status: what agents did today.
+export interface AgentStatus { sessions: number; calls: number; workflow: number }
 export interface Attention {
   generated_at: string
   items: AttentionItem[]
