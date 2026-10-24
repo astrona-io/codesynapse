@@ -1,4 +1,5 @@
 site_name: CodeSynapse
+site_url: https://astrona-io.github.io/codesynapse/
 site_description: Code graph for security reviews, code quality and AI coding assistants
 repo_url: https://github.com/astrona-io/codesynapse
 docs_dir: docs

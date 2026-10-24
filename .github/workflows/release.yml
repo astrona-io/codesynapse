@@ -89,6 +89,18 @@ jobs:
           # and images installed and passed their tests (docs/SAAS.md, 6b).
           make_latest: false
 
+  # Call directly: a release created with GITHUB_TOKEN does not trigger
+  # another workflow's release event.
+  publish-documentation:
+    name: Publish documentation
+    needs: create-release
+    if: ${{ !contains(github.ref_name, '-') && !github.event.repository.private }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/docs.yml
+
   # Needs secret HOMEBREW_TAP_TOKEN: a fine-grained PAT with Contents
   # read/write on astrona-io/homebrew-tap only. Skipped for pre-release tags
   # (the script only accepts vX.Y.Z) and while this repository is private,
