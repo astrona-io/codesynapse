@@ -52,7 +52,7 @@ func main() {
 // commands are the CLI's subcommands (the plugin test checks the hooks
 // call ones that exist).
 func commands(ec *app.Env) []*cobra.Command {
-	return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), statsCmd(ec), evalCmd(ec), hookCmd(ec), installCmd(ec), statusCmd(ec), uninstallCmd(ec), mcpCmd(ec), memoryCmd(ec), runtimeCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
+	return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), statsCmd(ec), evalCmd(ec), hookCmd(ec), gitHookCmd(ec), installCmd(ec), statusCmd(ec), uninstallCmd(ec), mcpCmd(ec), memoryCmd(ec), runtimeCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
 }
 
 // ingestOptions configures `codesynapse ingest`.
@@ -68,6 +68,9 @@ type ingestOptions struct {
 	licenses             bool
 	dataflow             bool
 	root                 string
+	watch                bool
+	interval             time.Duration
+	st                   store.Store // opened by the first run, kept by --watch
 }
 
 func (o *ingestOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -81,6 +84,8 @@ func (o *ingestOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.BoolVar(&o.vulns, "vulns", false, "Check dependencies against osv.dev (sends module paths and versions)")
 	f.BoolVar(&o.licenses, "license-lookup", false, "Look up dependency licences not found on disk on deps.dev (sends package names and versions)")
 	f.BoolVar(&o.dataflow, "dataflow", false, "Resolve Go calls through function values with SSA and VTA (slower; edges marked dataflow)")
+	f.BoolVar(&o.watch, "watch", false, "Keep running and re-index when the git working tree changes (edits, commits, checkouts)")
+	f.DurationVar(&o.interval, "watch-interval", 2*time.Second, "How often --watch looks at the working tree; a change is indexed once it held for one interval")
 	return nil
 }
 
@@ -104,11 +109,47 @@ func (o *ingestOptions) Validate(_ context.Context, _ *app.Env) error {
 	if o.commitLimit < 0 {
 		return errors.New("--commits must be >= 0")
 	}
+	if o.watch && o.reportFile != "" {
+		return errors.New("--ingest-report writes one run's report; leave it out with --watch")
+	}
+	if o.watch && o.interval < 500*time.Millisecond {
+		return errors.New("--watch-interval must be at least 500ms")
+	}
 	return nil
 }
 
-func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) (result error) {
+func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
+	defer func() {
+		if o.st != nil {
+			o.st.Close(ctx) //nolint:errcheck,gosec // best-effort close
+		}
+	}()
+	if !o.watch {
+		return o.once(ctx)
+	}
+	return o.watchLoop(ctx)
+}
+
+// openStore connects on first use and keeps the store for later runs.
+func (o *ingestOptions) openStore(ctx context.Context) (store.Store, error) {
+	if o.st != nil {
+		return o.st, nil
+	}
+	st, err := o.graph.Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := st.EnsureSchema(ctx); err != nil {
+		st.Close(ctx) //nolint:errcheck,gosec // the schema error is the one to report
+		return nil, err
+	}
+	o.st = st
+	return st, nil
+}
+
+// once indexes the repository and publishes it, with its accounting.
+func (o *ingestOptions) once(ctx context.Context) (result error) {
 	var runID [16]byte
 	if _, err := rand.Read(runID[:]); err != nil {
 		return err
@@ -152,12 +193,8 @@ func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) (result error) {
 		}
 	}()
 	ctx = ingestreport.WithLedger(ctx, ledger)
-	st, err := o.graph.Open(ctx)
+	st, err := o.openStore(ctx)
 	if err != nil {
-		return err
-	}
-	defer st.Close(ctx) //nolint:errcheck // best-effort close
-	if err := st.EnsureSchema(ctx); err != nil {
 		return err
 	}
 	previous, err := ingest.IdentityBaseline(ctx, st, o.repo)
@@ -183,7 +220,8 @@ func ingestCmd(ec *app.Env) *cobra.Command {
 	o := &ingestOptions{EC: ec}
 	return app.NewSubCommand("ingest [path]", o, ec).
 		WithShortDesc("Index a repository into HugeGraph").
-		WithExample("  CODESYNAPSE_HUGEGRAPH_PASSWORD=... codesynapse ingest . --repo my-service").
+		WithLongDesc("Indexes the repository at path and publishes its graph; publication writes only what changed since the last run. With --watch it keeps running and re-indexes whenever the git working tree changes, so the graph follows your edits; `codesynapse git-hook install` re-indexes after each commit instead.").
+		WithExample("  CODESYNAPSE_HUGEGRAPH_PASSWORD=... codesynapse ingest . --repo my-service\n  codesynapse ingest . --repo my-service --watch").
 		WithGroupID(app.GroupBase).
 		WithMaxArgs(1).
 		Build()
