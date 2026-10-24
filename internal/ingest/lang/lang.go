@@ -1,6 +1,6 @@
 // Package lang indexes non-Go source code: Python, JavaScript and
 // TypeScript (including <script> blocks of Vue single-file components),
-// Java and Kotlin (brace.go and jvm.go), Rust (rust.go), C# (csharp.go) and PHP (php.go).
+// Java and Kotlin (brace.go and jvm.go), Rust (rust.go), C# (csharp.go), PHP (php.go) and Ruby (ruby.go).
 //
 // The parsers are structural, not full compilers: they find functions,
 // classes and methods with exact line ranges, imports between files, calls
@@ -45,7 +45,12 @@ var skipDirs = map[string]bool{
 
 // Language returns the language of a file name, or "".
 func Language(name string) string {
+	if filepath.Base(name) == "Rakefile" {
+		return Ruby
+	}
 	switch strings.ToLower(filepath.Ext(name)) {
+	case ".rb", ".rake":
+		return Ruby
 	case ".py":
 		return Python
 	case ".js", ".jsx", ".mjs", ".cjs":
@@ -264,6 +269,8 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 		fr, fr0pkg = parseBrace(src, csharpLang)
 	case PHP:
 		fr, fr0pkg = parseBrace(src, phpLang)
+	case Ruby:
+		fr = parseRuby(src, rel)
 	}
 	fr.pkg = fr0pkg
 	fr.fingerprint(lang, code)
@@ -402,10 +409,10 @@ func (ix *indexer) link() {
 			short := lastPart(s.name)
 			switch s.kind {
 			case model.KindMethod:
-				if !pf.fr.isTest && short != "__init__" && short != "constructor" && short != "__construct" {
+				if !pf.fr.isTest && short != "__init__" && short != "constructor" && short != "__construct" && short != "initialize" {
 					methodsByName[family(pf.lang)+":"+short] = append(methodsByName[family(pf.lang)+":"+short], sid)
 				}
-				if short == "__init__" || short == "constructor" || short == "__construct" || short == lastPart(s.class) && classBased(pf.lang) {
+				if short == "__init__" || short == "constructor" || short == "__construct" || short == "initialize" && pf.lang == Ruby || short == lastPart(s.class) && classBased(pf.lang) {
 					ctorOf[pf.symIDs[s.class]] = sid
 				}
 			case model.KindFunction:
@@ -414,6 +421,41 @@ func (ix *indexer) link() {
 				}
 			}
 		}
+	}
+	// Ruby constants resolve across files by name, as Rails autoloads
+	// them: User and Admin::User name a class wherever it is declared.
+	rubyConst := map[string][]*parsedFile{}
+	for _, pf := range ix.files {
+		if pf.lang != Ruby {
+			continue
+		}
+		for _, s := range pf.fr.symbols {
+			if s.kind == model.KindType {
+				rubyConst[s.name] = append(rubyConst[s.name], pf)
+				if short := lastPart(s.name); short != s.name {
+					rubyConst[short] = append(rubyConst[short], pf)
+				}
+			}
+		}
+	}
+	rubyType := func(recv string) (*parsedFile, string) {
+		name := strings.ReplaceAll(recv, "::", ".")
+		files := rubyConst[name]
+		if len(files) == 0 || recv == "" || recv[0] < 'A' || recv[0] > 'Z' {
+			return nil, ""
+		}
+		var full string
+		for _, s := range files[0].fr.symbols {
+			if s.kind == model.KindType && (s.name == name || lastPart(s.name) == name) {
+				full = s.name
+			}
+		}
+		for _, f := range files[1:] {
+			if f != files[0] { // reopened in several files: ambiguous
+				return nil, ""
+			}
+		}
+		return files[0], full
 	}
 	for _, files := range byPkg {
 		slices.SortFunc(files, func(a, b *parsedFile) int { return strings.Compare(a.rel, b.rel) })
@@ -531,6 +573,9 @@ func (ix *indexer) link() {
 						return declared(sid)
 					}
 				}
+				if pf.lang == Ruby {
+					return "", "" // a bare word may be a local variable: only declarations count
+				}
 				if pf.lang != Python {
 					return unique(funcsByName, fam+":"+c.name)
 				}
@@ -539,6 +584,14 @@ func (ix *indexer) link() {
 					return declared(pf.symIDs[class+"."+c.name])
 				}
 			default:
+				if pf.lang == Ruby {
+					if f, typ := rubyType(c.recv); f != nil {
+						if c.name == "new" { // User.new runs initialize (ctorOf)
+							return declared(f.symIDs[typ])
+						}
+						return declared(f.symIDs[typ+"."+c.name])
+					}
+				}
 				if m, ok := moduleAlias[c.recv]; ok {
 					return declared(m.symIDs[c.name])
 				}
@@ -599,6 +652,8 @@ func (ix *indexer) resolveImport(pf *parsedFile, imp importRef, byModule map[str
 	switch pf.lang {
 	case Rust:
 		return ix.rustResolve(pf, spec, false)
+	case Ruby:
+		return rubyResolveRequire(ix.files, pf.rel, spec)
 	case Java, Kotlin, CSharp, PHP:
 		// com.acme.Foo is Foo in package com.acme, in Java or Kotlin; a C#
 		// alias or static using names a type the same way.
@@ -679,6 +734,12 @@ func externalName(spec, lang string) string {
 		}
 		return first // a crate: Cargo advisories become "imported"
 	}
+	if lang == Ruby {
+		if strings.HasPrefix(spec, ".") {
+			return ""
+		}
+		return spec // a require path; a gem's name usually starts it (internal/vuln)
+	}
 	if isJVM(lang) || lang == PHP {
 		return "" // Maven and Composer names do not follow package names
 	}
@@ -727,6 +788,9 @@ func isTestPath(rel, lang string) bool {
 		return strings.Contains("/"+rel, "/tests/") || strings.Contains("/"+rel, "/benches/")
 	case PHP:
 		return strings.Contains("/"+strings.ToLower(rel), "/tests/") || strings.HasSuffix(base, "Test.php")
+	case Ruby:
+		return strings.HasSuffix(base, "_spec.rb") || strings.HasSuffix(base, "_test.rb") ||
+			strings.Contains("/"+rel, "/spec/") || strings.Contains("/"+rel, "/test/")
 	case CSharp:
 		stem := strings.TrimSuffix(base, ".cs")
 		for _, dir := range strings.Split(path.Dir(rel), "/") {

@@ -184,3 +184,33 @@ func TestBuildPHP(t *testing.T) {
 	slices.Sort(cmds)
 	assert.Equal(t, cmds, []string{"php -l app/Svc.php", "vendor/bin/pest tests/Pest/SvcTest.php", "vendor/bin/phpunit --filter 'test_finds' tests/SvcTest.php"})
 }
+
+func TestBuildRuby(t *testing.T) {
+	ctx := context.Background()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindRepository, "r"), Kind: model.KindRepository, Repo: "r", Name: "r"})
+	f := model.NodeID("r", model.KindMethod, "app/models/user.rb::User.search")
+	g.AddNode(model.Node{ID: f, Kind: model.KindMethod, Repo: "r", Name: "search", File: "app/models/user.rb", StartLine: 1, EndLine: 5})
+	spec := model.NodeID("r", model.KindFunction, "spec/models/user_spec.rb::<tests>")
+	g.AddNode(model.Node{ID: spec, Kind: model.KindFunction, Repo: "r", Name: "<tests>", File: "spec/models/user_spec.rb", StartLine: 1, EndLine: 9, IsTest: true})
+	mt := model.NodeID("r", model.KindMethod, "test/models/user_test.rb::UserTest.test_search")
+	g.AddNode(model.Node{ID: mt, Kind: model.KindMethod, Repo: "r", Name: "test_search", File: "test/models/user_test.rb", StartLine: 2, EndLine: 4, IsTest: true})
+	g.AddEdge(model.Edge{From: spec, To: f, Kind: model.EdgeCalls})
+	g.AddEdge(model.Edge{From: mt, To: f, Kind: model.EdgeCalls})
+	mem := memory.New()
+	require.NoError(t, mem.ReplaceRepo(ctx, "r", g))
+	rep, err := review.Analyze(ctx, query.Service{R: mem}, "r", []gitx.FileChange{{Path: "app/models/user.rb", Ranges: []gitx.LineRange{{Start: 1, End: 5}}}}, review.Options{Depth: 3})
+	require.NoError(t, err)
+	plan, err := Build(ctx, mem, "r", rep)
+	require.NoError(t, err)
+	var cmds []string
+	for _, s := range plan.Steps {
+		cmds = append(cmds, s.Command)
+	}
+	slices.Sort(cmds)
+	assert.Equal(t, cmds, []string{
+		"bundle exec rspec spec/models/user_spec.rb",
+		"bundle exec ruby -Itest test/models/user_test.rb -n '/^(test_search)$/'",
+		"ruby -c app/models/user.rb",
+	})
+}

@@ -4,7 +4,7 @@ title: Unsafe deserialisation
 severity: high
 cwe: [CWE-502]
 category: code
-languages: [python, java, kotlin, csharp, php]
+languages: [python, java, kotlin, csharp, php, ruby]
 why: Deserialising untrusted pickle or unsafe YAML can execute arbitrary code.
 fix: Use json or yaml.safe_load; never unpickle untrusted data.
 references:
@@ -26,3 +26,6 @@ examples:
   - language: php
     vulnerable: '$cart = unserialize($_COOKIE[''cart'']);'
     fixed: '$cart = json_decode($_COOKIE[''cart''], true, 8, JSON_THROW_ON_ERROR);'
+  - language: ruby
+    vulnerable: 'cart = Marshal.load(Base64.decode64(cookies[:cart]))'
+    fixed: 'cart = JSON.parse(cookies[:cart])'

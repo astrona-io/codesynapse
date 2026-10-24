@@ -158,6 +158,12 @@ func testTarget(n model.Node) (lang, key, name string) {
 			return "", "", ""
 		}
 		return "jvm", class, method
+	case ext == ".rb":
+		// RSpec runs a spec file; Minitest a file filtered to its methods.
+		if strings.HasSuffix(n.File, "_spec.rb") {
+			return "rspec", n.File, n.Name
+		}
+		return "minitest", n.File, n.Name
 	case ext == ".php":
 		// One command per test file; Pest files are their <tests> body.
 		return "php", n.File, n.Name
@@ -242,6 +248,10 @@ func testStep(g *group) Step {
 		s.Command = jvmTestCommand(g.build, g.key, tests)
 	case "rust":
 		s.Command = cargo(g.key, "test -- "+strings.Join(tests, " "))
+	case "rspec":
+		s.Command = "bundle exec rspec " + g.key
+	case "minitest":
+		s.Command = "bundle exec ruby -Itest " + g.key + " -n '/^(" + strings.Join(tests, "|") + ")$/'"
 	case "php":
 		if slices.Contains(tests, "<tests>") {
 			s.Command = "vendor/bin/pest " + g.key
@@ -277,7 +287,7 @@ func testStep(g *group) Step {
 // buildAndLint lists the build and lint commands for the languages of the
 // changed files.
 func buildAndLint(ctx context.Context, r store.Reader, repo string, files []review.FileSummary) ([]Step, error) {
-	var goDirs, pyFiles, phpFiles []string
+	var goDirs, pyFiles, phpFiles, rbFiles []string
 	jvm, dotnet := false, false
 	var crates []string
 	for _, f := range files {
@@ -297,6 +307,8 @@ func buildAndLint(ctx context.Context, r store.Reader, repo string, files []revi
 			dotnet = true
 		case ".php":
 			phpFiles = append(phpFiles, f.Path)
+		case ".rb":
+			rbFiles = append(rbFiles, f.Path)
 		case ".rs":
 			if root, _ := rustCrate(f.Path); !slices.Contains(crates, root) {
 				crates = append(crates, root)
@@ -332,6 +344,13 @@ func buildAndLint(ctx context.Context, r store.Reader, repo string, files []revi
 		steps = append(steps,
 			Step{Kind: "build", Command: cargo(c, "check --all-targets"), Why: "the changed Rust code and its tests compile"},
 			Step{Kind: "lint", Command: cargo(c, "clippy --all-targets"), Why: "clippy on the changed crate"})
+	}
+	if len(rbFiles) > 0 {
+		check := make([]string, 0, len(rbFiles))
+		for _, f := range rbFiles {
+			check = append(check, "ruby -c "+f)
+		}
+		steps = append(steps, Step{Kind: "build", Command: strings.Join(check, " && "), Why: "the changed Ruby files parse"})
 	}
 	if len(phpFiles) > 0 {
 		lint := make([]string, 0, len(phpFiles))

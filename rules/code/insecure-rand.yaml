@@ -4,7 +4,7 @@ title: math/rand used where crypto/rand may be needed
 severity: low
 cwe: [CWE-338]
 category: code
-languages: [go, python, javascript, typescript, java, kotlin, csharp, php]
+languages: [go, python, javascript, typescript, java, kotlin, csharp, php, ruby]
 why: math/rand and Math.random are predictable; tokens or IDs generated with them can be guessed.
 fix: Use crypto/rand for tokens, keys, nonces and IDs that must be unguessable.
 references:
@@ -33,3 +33,6 @@ examples:
   - language: php
     vulnerable: '$token = md5(mt_rand());'
     fixed: '$token = bin2hex(random_bytes(32));'
+  - language: ruby
+    vulnerable: 'token = rand(36**32).to_s(36)'
+    fixed: 'token = SecureRandom.hex(32)'

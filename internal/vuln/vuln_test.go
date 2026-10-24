@@ -172,6 +172,9 @@ func TestApplyImportedByName(t *testing.T) {
 		{EcosystemNuGet, "Newtonsoft.Json", "Newtonsoft.Json", Imported},
 		{EcosystemNuGet, "Newtonsoft.Json", "Newtonsoft.JsonX", Required},
 		{EcosystemCargo, "serde-json", "serde_json", Imported},
+		{EcosystemRubyGems, "rack", "rack/utils", Imported},
+		{EcosystemRubyGems, "net-http", "net/http", Imported},
+		{EcosystemRubyGems, "rack", "rackup", Required},
 		{EcosystemNPM, "lodash", "lodash/fp", Imported},
 		{EcosystemNPM, "lodash", "lodash.merge", Required},
 	} {

@@ -77,7 +77,8 @@ func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability,
 				// A C# using directive names a namespace, which a NuGet ID
 				// usually prefixes (Newtonsoft.Json.Linq).
 				if strings.EqualFold(imp, name) || strings.HasPrefix(imp, name+"/") ||
-					mod.Ecosystem == EcosystemNuGet && strings.HasPrefix(strings.ToLower(imp), strings.ToLower(name)+".") {
+					mod.Ecosystem == EcosystemNuGet && strings.HasPrefix(strings.ToLower(imp), strings.ToLower(name)+".") ||
+					mod.Ecosystem == EcosystemRubyGems && rubyRequires(imp, name) {
 					n.Reachability = Imported
 					break
 				}
@@ -186,4 +187,15 @@ func compareVersions(a, b string) int {
 		return semver.Compare(va, vb)
 	}
 	return strings.Compare(a, b)
+}
+
+// rubyRequires reports whether require "imp" loads gem name: rack and
+// rack/utils, or net-http as net/http.
+func rubyRequires(imp, name string) bool {
+	for _, n := range []string{name, strings.ReplaceAll(name, "-", "/")} {
+		if strings.EqualFold(imp, n) || strings.HasPrefix(imp, n+"/") {
+			return true
+		}
+	}
+	return false
 }
