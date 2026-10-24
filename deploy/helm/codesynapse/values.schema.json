@@ -72,6 +72,11 @@
       "type": "string",
       "pattern": "^https?://"
     },
+    "publicAPIURL": {
+      "description": "Where the Claude Code bridge reaches the API; shown on the Agents page.",
+      "type": "string",
+      "pattern": "^https?://"
+    },
     "environment": {
       "description": "Environment name on metrics and traces.",
       "type": "string",
