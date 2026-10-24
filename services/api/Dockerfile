@@ -31,7 +31,7 @@ COPY LICENSE NOTICE /usr/share/licenses/codesynapse/
 COPY --from=build /out/ /usr/local/bin/
 USER codesynapse
 EXPOSE 8081
-HEALTHCHECK --interval=15s --timeout=3s --start-period=20s CMD wget -qO- http://127.0.0.1:8081/healthz || exit 1
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s CMD ["wget", "-qO-", "http://127.0.0.1:8081/healthz"]
 ENTRYPOINT ["codesynapse-api"]
 CMD ["worker"]
 
@@ -47,6 +47,6 @@ COPY LICENSE NOTICE /usr/share/licenses/codesynapse/
 COPY --from=build /out/ /usr/local/bin/
 USER codesynapse
 EXPOSE 8080
-HEALTHCHECK --interval=15s --timeout=3s --start-period=20s CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s CMD ["wget", "-qO-", "http://127.0.0.1:8080/healthz"]
 ENTRYPOINT ["codesynapse-api"]
 CMD ["serve"]
