@@ -112,7 +112,7 @@ Read [AGENTS.md](AGENTS.md) before changing code: it has the conventions and the
 | [Security model](docs/operations/security-model.md) | How untrusted repositories are handled |
 | [Upgrading](docs/operations/upgrading.md) · [Releasing](docs/operations/releasing.md) | |
 
-Read the [documentation site](https://astrona-io.github.io/codesynapse/), published with each stable release. The source is in [`docs/`](docs/index.md); `just docs` serves it locally.
+Read the [documentation site](https://codesynapse.astrona.io/), published with each stable release. The source is in [`docs/`](docs/index.md); `just docs` serves it locally.
 
 ## Contributing
 
