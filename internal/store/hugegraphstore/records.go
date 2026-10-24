@@ -79,26 +79,33 @@ func (s *Store) DeleteReview(ctx context.Context, id string) error {
 
 const (
 	// addUsage adds to existing counters by ID lookup (allowed after writes).
-	addUsage = `rows.each { r ->
+	// The MCP recorder and the API (hook reports) both add to buckets, so
+	// the read and write of each happen under the graph's lock.
+	addUsage = `synchronized(graph) { rows.each { r ->
   def calls = r.calls as long, errors = r.errors as long, tokens = r.tokens as long, ms = r.ms as long, maxMs = r.max_ms as long
+  def returned = r.returned as long, read = r.read as long
   def old = g.V(r.v).tryNext()
   if (old.isPresent()) {
     def o = old.get()
     calls += o.property('calls').orElse(0L); errors += o.property('errors').orElse(0L)
     tokens += o.property('response_tokens').orElse(0L); ms += o.property('duration_ms').orElse(0L)
     maxMs = Math.max(maxMs, o.property('max_duration_ms').orElse(0L))
+    returned += o.property('ranges_returned').orElse(0L); read += o.property('ranges_read').orElse(0L)
   }
   graph.addVertex(T.label, 'usage', T.id, r.v, 'ukey', r.key, 'day', r.day, 'daynum', r.daynum as long, 'org', r.org, 'repo', r.repo,
-    'tool', r.tool, 'client', r.client, 'calls', calls, 'errors', errors, 'response_tokens', tokens, 'duration_ms', ms, 'max_duration_ms', maxMs)
+    'tool', r.tool, 'client', r.client, 'calls', calls, 'errors', errors, 'response_tokens', tokens, 'duration_ms', ms, 'max_duration_ms', maxMs,
+    'ranges_returned', returned, 'ranges_read', read)
 }
-rows.size()`
+graph.tx().commit()
+rows.size() }`
 	pruneUsage = `g.V().hasLabel('usage').has('daynum', lt(day as long)).drop().iterate()
 1`
 	readUsage = `g.V().hasLabel('usage').has('daynum', gte(day as long)).toList().collect { v ->
   [day: v.value('day'), org: v.property('org').orElse(''), repo: v.property('repo').orElse(''), tool: v.property('tool').orElse(''),
    client: v.property('client').orElse(''), calls: v.property('calls').orElse(0L), errors: v.property('errors').orElse(0L),
    response_tokens: v.property('response_tokens').orElse(0L), duration_ms: v.property('duration_ms').orElse(0L),
-   max_duration_ms: v.property('max_duration_ms').orElse(0L)] }`
+   max_duration_ms: v.property('max_duration_ms').orElse(0L), ranges_returned: v.property('ranges_returned').orElse(0L),
+   ranges_read: v.property('ranges_read').orElse(0L)] }`
 )
 
 // dayNum turns YYYY-MM-DD into YYYYMMDD for the range index.
@@ -109,9 +116,7 @@ func dayNum(day string) (int64, error) {
 	return strconv.ParseInt(strings.ReplaceAll(day, "-", ""), 10, 64)
 }
 
-// AddUsage implements store.UsageStore. Concurrent writers to one bucket
-// could lose an increment (read, then write); there is one recorder per
-// MCP process and it flushes on a timer.
+// AddUsage implements store.UsageStore.
 func (s *Store) AddUsage(ctx context.Context, buckets []usage.Bucket) error {
 	if len(buckets) == 0 {
 		return nil
@@ -123,7 +128,8 @@ func (s *Store) AddUsage(ctx context.Context, buckets []usage.Bucket) error {
 			return err
 		}
 		rows[i] = map[string]any{"v": vid("u", b.Key()), "key": b.Key(), "day": b.Day, "daynum": n, "org": b.Org, "repo": b.Repo,
-			"tool": b.Tool, "client": b.Client, "calls": b.Calls, "errors": b.Errors, "tokens": b.ResponseTokens, "ms": b.DurationMs, "max_ms": b.MaxDurationMs}
+			"tool": b.Tool, "client": b.Client, "calls": b.Calls, "errors": b.Errors, "tokens": b.ResponseTokens, "ms": b.DurationMs, "max_ms": b.MaxDurationMs,
+			"returned": b.RangesReturned, "read": b.RangesRead}
 	}
 	return s.batched(ctx, addUsage, rows, nil)
 }

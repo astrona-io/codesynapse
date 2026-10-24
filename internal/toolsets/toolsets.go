@@ -29,6 +29,16 @@ var Sets = map[string][]string{
 // Core is always served.
 const Core = "core"
 
+// Known reports whether tool is in a set.
+func Known(tool string) bool {
+	for _, tools := range Sets {
+		if slices.Contains(tools, tool) {
+			return true
+		}
+	}
+	return false
+}
+
 // Names are the selectable sets, sorted.
 func Names() []string {
 	names := make([]string, 0, len(Sets))

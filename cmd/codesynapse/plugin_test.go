@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -70,7 +71,7 @@ func TestPluginFiles(t *testing.T) {
 		} `json:"hooks"`
 	}
 	read("hooks/hooks.json", &hooks)
-	for _, event := range []string{"SessionStart", "PreCompact", "PreToolUse", "Stop"} {
+	for _, event := range []string{"SessionStart", "PreCompact", "PreToolUse", "PostToolUse", "Stop"} {
 		require.True(t, len(hooks.Hooks[event]) > 0, event)
 		for _, g := range hooks.Hooks[event] {
 			for _, h := range g.Hooks {
@@ -78,6 +79,14 @@ func TestPluginFiles(t *testing.T) {
 				assert.Equal(t, h.Command, "codesynapse")
 				exists(h.Args)
 			}
+		}
+	}
+	// The answer hook's matcher catches the tools under either server name.
+	for _, g := range hooks.Hooks["PostToolUse"] {
+		if g.Matcher != "Read" {
+			re := regexp.MustCompile("^(?:" + g.Matcher + ")$")
+			assert.True(t, re.MatchString("mcp__codesynapse__search") && re.MatchString("mcp__plugin_codesynapse_codesynapse__get_symbol_context"), g.Matcher)
+			assert.False(t, re.MatchString("Read"), g.Matcher)
 		}
 	}
 	skill, err := os.ReadFile(filepath.Join(root, "skills", "codesynapse", "SKILL.md"))

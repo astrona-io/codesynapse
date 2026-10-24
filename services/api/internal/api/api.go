@@ -294,6 +294,7 @@ func (s *Server) routes() {
 	s.sessionMemoryRoutes()
 	s.repoPolicyRoutes()
 	s.runtimeRoutes()
+	s.retrievalRoutes()
 	s.route("GET /api/v1/overview", visibleOnly, s.handleWorkspaceOverview)
 	s.route("GET /api/v1/attention", visibleOnly, s.handleAttention)
 	s.route("GET /api/v1/stats", visibleOnly, s.handleStats)

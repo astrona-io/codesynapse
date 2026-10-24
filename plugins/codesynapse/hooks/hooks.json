@@ -9,6 +9,10 @@
     "PreToolUse": [
       { "matcher": "Read", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "read"], "timeout": 10 }] }
     ],
+    "PostToolUse": [
+      { "matcher": "mcp__.*codesynapse.*", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "answer"], "timeout": 10 }] },
+      { "matcher": "Read", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "read-done"], "timeout": 10 }] }
+    ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "stop"], "timeout": 30 }] }
     ]
