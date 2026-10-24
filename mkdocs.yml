@@ -6,6 +6,11 @@ site_dir: site
 
 theme:
   name: material
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  font:
+    text: DM Sans
+    code: JetBrains Mono
   features:
     - navigation.sections
     - navigation.indexes
@@ -15,16 +20,19 @@ theme:
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: indigo
+      primary: custom
       toggle:
         icon: material/weather-night
         name: Dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: indigo
+      primary: custom
       toggle:
         icon: material/weather-sunny
         name: Light mode
+
+extra_css:
+  - stylesheets/extra.css
 
 markdown_extensions:
   - admonition
@@ -61,6 +69,7 @@ nav:
       - Reviews and fix branches: features/reviews-fixes.md
       - Indexing policy and reports: features/indexing-policy.md
   - Operations:
+      - First run and sign-in: operations/first-run.md
       - Accounts and access: operations/accounts-access.md
       - Security model: operations/security-model.md
       - Running the stack: operations/running.md

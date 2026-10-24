@@ -32,7 +32,7 @@ The web app has sign-in, a first-run setup, Settings for your profile, API keys,
 
 ## Root account and sign-up
 
-The first account becomes the installation's root account. It administers the platform (settings, health, people, the audit log) and never does organisation work. Its one organisation task is setup, which creates the first organisation and a separate owner account in one step, then signs root out; the owner signs in for everything else. Set `CODESYNAPSE_SIGNUP_OPEN=true` to let others sign up after setup.
+The first account becomes the installation's root account, chosen by the operator at first sign-up (there is no default password; see [First run and sign-in](first-run.md)). Until an organisation connects single sign-on, everyone signs in with the local user database. It administers the platform (settings, health, people, the audit log) and never does organisation work. Its one organisation task is setup, which creates the first organisation and a separate owner account in one step, then signs root out; the owner signs in for everything else. Set `CODESYNAPSE_SIGNUP_OPEN=true` to let others sign up after setup.
 
 On an installation that predates this, the API identifies the root at start-up from its setup history. If that history is missing (for example, pruned by audit retention), platform administrators stay limited to administration until an operator runs `codesynapse-api designate-root --email <root>`. See [root bootstrap](../ROOT_BOOTSTRAP_PLAN.md).
 

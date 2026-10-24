@@ -1,0 +1,121 @@
+/* "Agent spark" for the docs: the same tokens as the dashboard
+   (services/web/app/assets/css/main.css) mapped onto Material's variables.
+   Keep both files in step when a token changes. */
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&display=swap');
+
+:root {
+  --cs-ink: #1b1530;
+  --cs-lilac: #f1ecff;
+  --cs-raised: #faf8ff;
+  --cs-line: #e7e0fa;
+  --cs-accent: #ff5fa2;
+  --cs-accent-ink: #b5175f;
+  --cs-radius: 24px;
+  --cs-radius-sm: 14px;
+  --md-text-font: 'DM Sans', system-ui, sans-serif;
+  --md-code-font: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+[data-md-color-scheme='default'] {
+  --md-default-bg-color: #ffffff;
+  --md-default-fg-color: var(--cs-ink);
+  --md-default-fg-color--light: #4a4360;
+  --md-primary-fg-color: var(--cs-ink);
+  --md-primary-bg-color: #ffffff;
+  --md-accent-fg-color: var(--cs-accent-ink);
+  --md-typeset-a-color: var(--cs-accent-ink);
+  --md-code-bg-color: var(--cs-lilac);
+  --md-code-fg-color: var(--cs-ink);
+  --md-footer-bg-color: var(--cs-ink);
+}
+
+[data-md-color-scheme='slate'] {
+  --md-hue: 255;
+  --md-default-bg-color: #120e22;
+  --md-default-fg-color: #f5f1ff;
+  --md-default-fg-color--light: #c3bae0;
+  --md-primary-fg-color: #1b1530;
+  --md-primary-bg-color: #f5f1ff;
+  --md-accent-fg-color: #ff8fc0;
+  --md-typeset-a-color: #ff8fc0;
+  --md-code-bg-color: #251d40;
+  --md-code-fg-color: #f5f1ff;
+  --md-footer-bg-color: #1b1530;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-header__title {
+  font-family: 'Bricolage Grotesque', 'DM Sans', system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.md-typeset h1 { color: var(--md-default-fg-color); }
+
+/* Header: ink bar with the logo, like the dashboard shell. */
+.md-header { box-shadow: none; border-bottom: 2px solid var(--cs-ink); }
+[data-md-color-scheme='slate'] .md-header { border-bottom-color: #2f2650; }
+.md-header__button.md-logo img { height: 1.6rem; }
+
+.md-tabs, .md-nav--primary .md-nav__title { box-shadow: none; }
+
+/* Large radii, 2px borders. */
+.md-typeset table:not([class]) {
+  border: 2px solid var(--cs-ink);
+  border-radius: var(--cs-radius-sm);
+  box-shadow: none;
+  overflow: hidden;
+}
+.md-typeset table:not([class]) th {
+  background: var(--cs-lilac);
+  color: var(--cs-ink);
+  font-weight: 700;
+}
+[data-md-color-scheme='slate'] .md-typeset table:not([class]) { border-color: #8e84b5; }
+[data-md-color-scheme='slate'] .md-typeset table:not([class]) th { background: #251d40; color: #f5f1ff; }
+
+.md-typeset pre > code,
+.md-typeset .highlight { border-radius: var(--cs-radius-sm); }
+.md-typeset code { border-radius: 8px; }
+
+/* Admonitions: tint plus a pill title, never a coloured side stripe. */
+.md-typeset .admonition,
+.md-typeset details {
+  border: 2px solid var(--cs-ink);
+  border-left-width: 2px;
+  border-radius: var(--cs-radius-sm);
+  box-shadow: none;
+  background: var(--cs-raised);
+}
+.md-typeset .admonition-title,
+.md-typeset summary {
+  background: var(--cs-lilac);
+  border-radius: var(--cs-radius-sm) var(--cs-radius-sm) 0 0;
+  font-weight: 700;
+}
+.md-typeset .admonition.warning, .md-typeset details.warning { background: rgba(255, 216, 77, 0.18); }
+.md-typeset .admonition.warning > .admonition-title { background: rgba(255, 216, 77, 0.45); }
+.md-typeset .admonition.tip > .admonition-title { background: rgba(61, 220, 151, 0.28); }
+.md-typeset .admonition.danger > .admonition-title { background: rgba(200, 32, 58, 0.14); }
+.md-typeset .admonition > .admonition-title::before,
+.md-typeset summary::before { background-color: var(--cs-ink); }
+[data-md-color-scheme='slate'] .md-typeset .admonition,
+[data-md-color-scheme='slate'] .md-typeset details { background: #1b1530; border-color: #8e84b5; }
+[data-md-color-scheme='slate'] .md-typeset .admonition-title,
+[data-md-color-scheme='slate'] .md-typeset summary { background: #251d40; }
+[data-md-color-scheme='slate'] .md-typeset .admonition > .admonition-title::before,
+[data-md-color-scheme='slate'] .md-typeset summary::before { background-color: #f5f1ff; }
+
+/* Pill search field. */
+.md-search__form { border-radius: 999px; }
+.md-search__input { border-radius: 999px; }
+
+/* Navigation: the active page gets the candy accent as a pill tint. */
+.md-nav__link--active { font-weight: 700; }
+.md-nav--primary .md-nav__link--active { color: var(--md-typeset-a-color); }
+.md-top { border-radius: 999px; background: var(--cs-accent); color: var(--cs-ink); border: 2px solid var(--cs-ink); box-shadow: none; }
+.md-top:hover { background: #ff7ab3; color: var(--cs-ink); }
+
+.md-footer-meta { background: var(--md-footer-bg-color); }
