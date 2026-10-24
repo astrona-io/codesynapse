@@ -344,6 +344,12 @@ func (w *worktree) runCoreTool(ctx context.Context, r store.Reader, name string,
 			}
 		}
 		return coretools.PRContextAgainst(ctx, r, base, short(commit), repo, in)
+	case "change_checklist":
+		var in coretools.ChecklistIn
+		if err := decode(&in); err != nil {
+			return nil, err
+		}
+		return coretools.ChangeChecklist(ctx, r, repo, in)
 	case "verify_plan":
 		var in coretools.VerifyPlanIn
 		if err := decode(&in); err != nil {

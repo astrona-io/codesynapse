@@ -35,6 +35,9 @@ func registerAgentTools(s *mcp.Server, h *handlers, add func(name, desc string) 
 	mcp.AddTool(s, add("verify_plan",
 		"What to run to check a change: pass a diff, files or base/head refs as for get_pr_context. Returns the tests that reach the changed code as exact commands (go test ./pkg -run '^(TestA|TestB)$', pytest file::test, npm test -- file), closest first, then build and lint for each language touched, and the changed functions no test reaches. Run the steps in order before you finish."),
 		h.verifyPlan)
+	mcp.AddTool(s, add("change_checklist",
+		"Before you rename, change the signature of or remove a symbol: every place the change must also reach, grouped, with file:line ranges and why. Callers and tests, the interface a method satisfies with its other implementations (mocks flagged) and callers, functions used as values, package importers, templates, docs that mention it and decisions it carries out. Notes say what the graph cannot see. Work through every item."),
+		h.changeChecklist)
 	mcp.AddTool(s, add("unused_code",
 		"Unused code to remove: unreachable and test-only functions (with confidence and security relevance), files with nothing live, unused go.mod modules (and CVEs removing them eliminates), unused Helm values and template defines."),
 		h.unusedCode)
@@ -113,6 +116,15 @@ func (h *handlers) verifyPlan(ctx context.Context, _ *mcp.CallToolRequest, in co
 		return nil, verifyplan.Plan{}, err
 	}
 	out, err := coretools.VerifyPlan(ctx, h.svc.R, repo, in)
+	return nil, out, err
+}
+
+func (h *handlers) changeChecklist(ctx context.Context, _ *mcp.CallToolRequest, in coretools.ChecklistIn) (*mcp.CallToolResult, agentctx.Checklist, error) {
+	repo, err := h.repo(ctx, in.Repo)
+	if err != nil {
+		return nil, agentctx.Checklist{}, err
+	}
+	out, err := coretools.ChangeChecklist(ctx, h.svc.R, repo, in)
 	return nil, out, err
 }
 
