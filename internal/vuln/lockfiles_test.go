@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/astrona-io/codesynapse/internal/license"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
@@ -193,4 +194,29 @@ func TestSamePackage(t *testing.T) {
 	assert.False(t, samePackage(Module{Path: "monolog/monolog", Ecosystem: EcosystemPackagist}, "Monolog/Monolog"))
 	assert.True(t, samePackage(Module{Path: "my-pkg", Ecosystem: EcosystemPyPI}, "My_Pkg"))
 	assert.True(t, samePackage(Module{Path: "golang.org/x/net"}, "golang.org/x/net"))
+}
+
+// npm marks a package "dev" when only development needs it and
+// "devOptional" when it is both a development dependency and an optional
+// dependency of production code. The second can ship, so it is not
+// development-only: SBOM scope and licence findings follow Module.Dev.
+func TestParseNPMLockDevOptionalCanShip(t *testing.T) {
+	lock := `{"lockfileVersion":3,"packages":{
+		"":{"name":"app","dependencies":{"prod":"1"},"devDependencies":{"tool":"1"}},
+		"node_modules/prod":{"version":"1.0.0","optionalDependencies":{"shared":"1"}},
+		"node_modules/tool":{"version":"1.0.0","dev":true,"dependencies":{"shared":"1","only-dev":"1"}},
+		"node_modules/shared":{"version":"1.0.0","devOptional":true,"license":"GPL-3.0"},
+		"node_modules/only-dev":{"version":"1.0.0","dev":true,"license":"GPL-3.0"},
+		"node_modules/opt":{"version":"1.0.0","optional":true}}}`
+	mods := byPath(parseNPMLock([]byte(lock), t.TempDir()))
+	assert.False(t, mods["shared"].Dev, "devOptional is also reachable through a production optional dependency")
+	assert.True(t, mods["only-dev"].Dev)
+	assert.True(t, mods["tool"].Dev)
+	assert.False(t, mods["prod"].Dev)
+	assert.False(t, mods["opt"].Dev)
+
+	// The licence verdict follows: a copyleft package that can ship is a
+	// conflict with a permissive project, a development-only one a review.
+	assert.Equal(t, license.Check("MIT", "GPL-3.0", mods["shared"].Dev).Level, license.Conflict)
+	assert.Equal(t, license.Check("MIT", "GPL-3.0", mods["only-dev"].Dev).Level, license.Review)
 }
