@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"time"
 
+	"golang.org/x/mod/modfile"
+
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"github.com/astrona-io/codesynapse/internal/license"
 	"github.com/astrona-io/codesynapse/internal/logx"
@@ -117,7 +119,9 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	if repoNode.Branch == "" {
 		repoNode.Branch = gitx.CurrentBranch(ctx, root)
 	}
-	meta, err := json.Marshal(repoMetadata{Policy: metadata})
+	// The Go module at the root: answers write it as "~" in node IDs
+	// (internal/coretools, compact) and the resolver expands it back.
+	meta, err := json.Marshal(repoMetadata{Policy: metadata, GoModule: rootModulePath(root)})
 	if err != nil {
 		return nil, fmt.Errorf("encode repository policy: %w", err)
 	}
@@ -213,6 +217,20 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	logger.Info("ingest complete", "repo", opts.Repo, "nodes", len(g.Nodes()), "edges", len(g.Edges()),
 		"pruned_edges", pruned, "duration", time.Since(start).Round(time.Millisecond).String())
 	return g, nil
+}
+
+// rootModulePath is the module path declared by go.mod at root, or "". The
+// file is untrusted: a symlink or an oversized file is not read.
+func rootModulePath(root string) string {
+	p := filepath.Join(root, "go.mod")
+	if st, err := os.Lstat(p); err != nil || !st.Mode().IsRegular() || st.Size() > 1<<20 {
+		return ""
+	}
+	data, err := os.ReadFile(p) //nolint:gosec // go.mod at the repository root, checked above
+	if err != nil {
+		return ""
+	}
+	return modfile.ModulePath(data)
 }
 
 func hasGoModule(root string, policies ...*repoconfig.Policy) bool {

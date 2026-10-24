@@ -345,8 +345,13 @@ func (s Service) Resolve(ctx context.Context, repo, symbol string) (model.Node, 
 		return s.R.Node(ctx, symbol)
 	}
 	// A compact ID ("Function|pkg/path.Name") leaves out the repository the
-	// answer it came from was about.
+	// answer it came from was about, and may write its root module as "~".
 	if kind, local, ok := strings.Cut(symbol, "|"); ok && model.NodeKind(kind).Valid() && local != "" {
+		if strings.Contains(local, "~") {
+			if root, err := s.R.Node(ctx, model.NodeID(repo, model.KindRepository, repo)); err == nil {
+				local = ExpandModule(local, model.GoModuleOf(root))
+			}
+		}
 		return s.R.Node(ctx, model.NodeID(repo, model.NodeKind(kind), local))
 	}
 	kinds := []model.NodeKind{model.KindFunction, model.KindMethod, model.KindInterfaceMethod, model.KindType, model.KindPackage}
@@ -460,4 +465,38 @@ func suggestions(q string, pool []model.Node, ambiguous bool) error {
 func IsSuggestion(err error) bool {
 	var s *SuggestionError
 	return errors.As(err, &s)
+}
+
+// ShortenModule writes module, the repository's root Go module path, as
+// "~" at the start of a node ID's local part: "github.com/acme/app/x.F" is
+// "~/x.F", a method "(*github.com/acme/app/x.T).M" is "(*~/x.T).M", the
+// root package "github.com/acme/app" is "~". A longer module that only
+// starts the same ("github.com/acme/app-tools") is left alone.
+func ShortenModule(local, module string) string {
+	if module == "" {
+		return local
+	}
+	for _, lead := range []string{"(*", "(", ""} {
+		rest, ok := strings.CutPrefix(local, lead+module)
+		if !ok {
+			continue
+		}
+		if rest == "" || strings.ContainsRune("/.)", rune(rest[0])) {
+			return lead + "~" + rest
+		}
+	}
+	return local
+}
+
+// ExpandModule undoes ShortenModule.
+func ExpandModule(local, module string) string {
+	if module == "" {
+		return local
+	}
+	for _, lead := range []string{"(*", "(", ""} {
+		if rest, ok := strings.CutPrefix(local, lead+"~"); ok && (rest == "" || strings.ContainsRune("/.)", rune(rest[0]))) {
+			return lead + module + rest
+		}
+	}
+	return local
 }
