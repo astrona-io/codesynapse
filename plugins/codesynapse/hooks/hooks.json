@@ -15,6 +15,9 @@
       { "matcher": "mcp__.*codesynapse.*", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "answer"], "timeout": 10 }] },
       { "matcher": "Read", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "read-done"], "timeout": 10 }] }
     ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "prompt"], "timeout": 5 }] }
+    ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "stop"], "timeout": 30 }] }
     ]

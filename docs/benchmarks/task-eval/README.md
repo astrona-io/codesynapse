@@ -41,3 +41,10 @@ go run ./cmd/codesynapse eval ../other-repo --base HEAD~100    # any repository
 CI runs `just eval --allow-network` (the base may need module versions the cache lacks). A regression is a recall or hit rate more than 0.02 below the baseline, more than 2% more tokens, or more errors.
 
 **Moving the baseline** after a deliberate change, or to a newer window: run `just eval --base <sha> --head <sha> --write-baseline` and commit the file with the reason in the commit message. Keep `--repo codesynapse` (the recipe sets it): node IDs carry the repository name, so it changes token counts.
+
+## Cases from your own sessions
+
+Commit subjects are terse; people ask agents in sentences. To score the tools on the questions you actually ask, start Claude Code with `CODESYNAPSE_EVAL_CAPTURE=true` and the plugin installed, and work as usual. For each session that changes files, the hooks keep a case in `codesynapse-eval-cases.jsonl` in the checkout's git directory: the session's first prompt (secrets and personal numbers redacted, at most 500 characters), the commit it began at, and the files it changed that existed there (files it created are only counted). Nothing is sent anywhere, the file is never committed, and it keeps the newest 500 cases.
+
+`codesynapse eval . --sessions` builds the graph at each case's commit and scores `minimal_context` and `search` exactly like the commit tasks; `--results` lists every case with the files each tool named. Cases of commits this checkout lacks (a rebased branch) are skipped. There is no baseline for them: they are yours, and they change as you work.
+
