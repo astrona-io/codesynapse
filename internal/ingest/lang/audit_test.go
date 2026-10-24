@@ -16,7 +16,7 @@ import (
 func TestAuditLanguageCoverage(t *testing.T) {
 	for _, tt := range []struct{ file, want string }{
 		{"api.py", Python}, {"api.ts", TypeScript}, {"api.tsx", TypeScript},
-		{"api.js", JavaScript}, {"Api.vue", Vue}, {"api.rs", ""}, {"Api.java", ""}, {"api.d.ts", ""},
+		{"api.js", JavaScript}, {"Api.vue", Vue}, {"Api.java", Java}, {"Api.kt", Kotlin}, {"build.gradle.kts", Kotlin}, {"api.rs", ""}, {"api.d.ts", ""},
 	} {
 		t.Run(tt.file, func(t *testing.T) { assert.Equal(t, Language(tt.file), tt.want) })
 	}

@@ -29,6 +29,7 @@ var RuleIDs = []string{
 	"debug-enabled",
 	"insecure-temp",
 	"vue-v-html",
+	"weak-cipher",
 }
 
 func (ix *indexer) report(pf *parsedFile, owner string, f finding) {
@@ -297,6 +298,8 @@ func tagsFor(calls []call, lang string) []string {
 			set["sql"] = true
 		case r == "os" && (n == "getenv" || n == "environ"), r == "process" && n == "env":
 			set["env"] = true
+		case isJVM(lang):
+			jvmTags(c.recv, n, set)
 		}
 	}
 	var out []string
@@ -306,4 +309,25 @@ func tagsFor(calls []call, lang string) []string {
 		}
 	}
 	return out
+}
+
+// jvmTags maps Java and Kotlin library calls to security tags.
+func jvmTags(recv, n string, set map[string]bool) {
+	switch {
+	case n == "ProcessBuilder" || recv == "Runtime" || n == "exec" && recv == "":
+		set["exec"] = true
+	case n == "executeQuery" || n == "executeUpdate" || n == "prepareStatement" || n == "createNativeQuery" || n == "createQuery" ||
+		recv == "jdbcTemplate" && strings.HasPrefix(n, "query"):
+		set["sql"] = true
+	case n == "ObjectInputStream" || n == "readObject" || n == "XMLDecoder":
+		set["deserialize"] = true
+	case recv == "HttpClient" || n == "openConnection" || recv == "restTemplate" || recv == "webClient" || recv == "RestTemplate" || recv == "OkHttpClient":
+		set["http"] = true
+	case recv == "Files" || n == "FileInputStream" || n == "FileOutputStream" || n == "FileWriter" || n == "FileReader":
+		set["filesystem"] = true
+	case recv == "MessageDigest" || recv == "Cipher" || recv == "KeyGenerator" || recv == "Mac" || n == "SecureRandom":
+		set["crypto"] = true
+	case recv == "System" && (n == "getenv" || n == "getProperty"):
+		set["env"] = true
+	}
 }

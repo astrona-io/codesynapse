@@ -57,7 +57,7 @@ internal/ingestreport/  Bounded file ledger, commit-confirmed outcomes and metad
 internal/config/        Strict repository .codesynapse.yaml policy, digest and shared path matcher
 internal/model/         Node/Edge kinds, Graph, IDs. The schema lives here.
 internal/ingest/        Pipeline: golang/ (go/packages + go/types; security rules in findings.go),
-                        lang/ (Python, JS/TS, Vue: pure-Go structural parsers + rules),
+                        lang/ (Python, JS/TS, Vue, Java, Kotlin: pure-Go structural parsers + rules; brace.go is the engine for brace languages),
                         docs/ (Markdown), config/ (YAML, Go templates, Helm; YAML security rules), githistory/
 internal/curation/       Proposals and links added to the architecture catalog by people and agents (never decisions); validation and redaction
 internal/arch/           Reads architecture records (ADR, RFC, standard, policy, overview, runbook, diagram) kept as files into Record and Component nodes

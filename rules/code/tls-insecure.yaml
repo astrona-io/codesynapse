@@ -4,7 +4,7 @@ title: TLS certificate verification disabled
 severity: high
 cwe: [CWE-295]
 category: code
-languages: [go, python, javascript, typescript]
+languages: [go, python, javascript, typescript, java, kotlin]
 why: Without certificate verification anyone on the network path can impersonate the server and read or change traffic.
 fix: Remove InsecureSkipVerify; configure RootCAs for private CAs.
 references:
@@ -22,3 +22,6 @@ examples:
   - language: typescript
     vulnerable: 'new https.Agent({ rejectUnauthorized: false })'
     fixed: 'new https.Agent({ ca: fs.readFileSync(''internal-ca.pem'') })'
+  - language: java
+    vulnerable: 'conn.setHostnameVerifier((host, session) -> true);'
+    fixed: '// keep the default HostnameVerifier and trust store'

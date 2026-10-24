@@ -4,7 +4,7 @@ title: math/rand used where crypto/rand may be needed
 severity: low
 cwe: [CWE-338]
 category: code
-languages: [go, python, javascript, typescript]
+languages: [go, python, javascript, typescript, java, kotlin]
 why: math/rand and Math.random are predictable; tokens or IDs generated with them can be guessed.
 fix: Use crypto/rand for tokens, keys, nonces and IDs that must be unguessable.
 references:
@@ -24,3 +24,6 @@ examples:
   - language: typescript
     vulnerable: const token = Math.random().toString(36)
     fixed: const token = crypto.randomBytes(32).toString('base64url')
+  - language: java
+    vulnerable: 'String token = Long.toHexString(new Random().nextLong());'
+    fixed: 'byte[] token = new byte[32]; new SecureRandom().nextBytes(token);'

@@ -49,7 +49,8 @@ const (
 
 // group is the tests one command runs.
 type group struct {
-	kind, key string // language and package directory or file
+	kind, key string // language and package directory, file or test class
+	build     string // gradle or maven, for JVM tests
 	reach     int
 	covers    map[string]bool // changed symbols it reaches
 	tests     []string
@@ -58,6 +59,10 @@ type group struct {
 // Build plans the checks for a change analysed against the head graph r.
 func Build(ctx context.Context, r store.Reader, repo string, rep review.Report) (Plan, error) {
 	groups := map[string]*group{}
+	build, err := jvmBuild(ctx, r, repo)
+	if err != nil {
+		return Plan{}, err
+	}
 	add := func(n model.Node, reach int, changed string) {
 		lang, key, name := testTarget(n)
 		if key == "" {
@@ -65,7 +70,7 @@ func Build(ctx context.Context, r store.Reader, repo string, rep review.Report) 
 		}
 		g := groups[lang+"\x00"+key]
 		if g == nil {
-			g = &group{kind: lang, key: key, reach: reach, covers: map[string]bool{}}
+			g = &group{kind: lang, key: key, reach: reach, covers: map[string]bool{}, build: build}
 			groups[lang+"\x00"+key] = g
 		}
 		g.reach = min(g.reach, reach)
@@ -146,6 +151,13 @@ func testTarget(n model.Node) (lang, key, name string) {
 		return "python", n.File, strings.ReplaceAll(sym, ".", "::")
 	case slices.Contains([]string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue"}, ext):
 		return "javascript", n.File, n.Name
+	case ext == ".java" || ext == ".kt":
+		// One command per test class: com.acme.FooTest, method name.
+		class, method, ok := cutLast(n.QualifiedName, ".")
+		if !ok {
+			return "", "", ""
+		}
+		return "jvm", class, method
 	}
 	return "", "", ""
 }
@@ -175,7 +187,10 @@ func testStep(g *group) Step {
 		// The package's own test script, filtered to the file: jest and
 		// vitest both take file filters.
 		s.Command = "npm test -- " + g.key
+	case "jvm":
+		s.Command = jvmTestCommand(g.build, g.key, tests)
 	}
+
 	switch g.reach {
 	case 0:
 		s.Why = "the change edits these tests"
@@ -184,6 +199,10 @@ func testStep(g *group) Step {
 	default:
 		s.Why = fmt.Sprintf("reach %s through %d calls", named, g.reach)
 	}
+	if g.kind == "jvm" {
+		other := map[string]string{"gradle": "maven", "maven": "gradle"}[g.build]
+		s.Why += "; with " + other + ": " + jvmTestCommand(other, g.key, tests)
+	}
 	return s
 }
 
@@ -191,6 +210,7 @@ func testStep(g *group) Step {
 // changed files.
 func buildAndLint(ctx context.Context, r store.Reader, repo string, files []review.FileSummary) ([]Step, error) {
 	var goDirs, pyFiles []string
+	jvm := false
 	for _, f := range files {
 		if f.Status == "deleted" {
 			continue
@@ -202,6 +222,8 @@ func buildAndLint(ctx context.Context, r store.Reader, repo string, files []revi
 			}
 		case ".py":
 			pyFiles = append(pyFiles, f.Path)
+		case ".java", ".kt":
+			jvm = true
 		}
 	}
 	slices.Sort(goDirs)
@@ -216,6 +238,14 @@ func buildAndLint(ctx context.Context, r store.Reader, repo string, files []revi
 		} else if ok {
 			steps = append(steps, Step{Kind: "lint", Command: "golangci-lint run " + strings.ReplaceAll(pkgs, " ", "/... ") + "/...", Why: "the repository's golangci-lint configuration"})
 		}
+	}
+	if jvm {
+		build, err := jvmBuild(ctx, r, repo)
+		if err != nil {
+			return nil, err
+		}
+		cmd := map[string]string{"gradle": "./gradlew classes testClasses", "maven": "mvn -q test-compile"}[build]
+		steps = append(steps, Step{Kind: "build", Command: cmd, Why: "the changed Java and Kotlin code compiles"})
 	}
 	if len(pyFiles) > 0 {
 		steps = append(steps, Step{Kind: "build", Command: "python -m py_compile " + strings.Join(pyFiles, " "), Why: "the changed Python files parse"})
@@ -263,4 +293,38 @@ func measuredNotes(ctx context.Context, r store.Reader, repo string, rep review.
 		}
 	}
 	return notes, nil
+}
+
+func cutLast(s, sep string) (before, after string, ok bool) {
+	i := strings.LastIndex(s, sep)
+	if i < 0 {
+		return s, "", false
+	}
+	return s[:i], s[i+len(sep):], true
+}
+
+// jvmBuild is the repository's JVM build tool. Only Kotlin build scripts
+// are indexed (pom.xml and Groovy build.gradle are not), so a
+// build.gradle.kts or settings.gradle.kts at the root means Gradle and
+// anything else Maven; test steps also name the other tool's form.
+func jvmBuild(ctx context.Context, r store.Reader, repo string) (string, error) {
+	for _, f := range []string{"build.gradle.kts", "settings.gradle.kts"} {
+		if ok, err := hasFile(ctx, r, repo, f); err != nil || ok {
+			return "gradle", err
+		}
+	}
+	return "maven", nil
+}
+
+func jvmTestCommand(build, class string, methods []string) string {
+	if build == "maven" {
+		short := class[strings.LastIndex(class, ".")+1:]
+		return fmt.Sprintf("mvn -q -Dtest='%s#%s' test", short, strings.Join(methods, "+"))
+	}
+	var b strings.Builder
+	b.WriteString("./gradlew test")
+	for _, m := range methods {
+		fmt.Fprintf(&b, " --tests '%s.%s'", class, m)
+	}
+	return b.String()
 }

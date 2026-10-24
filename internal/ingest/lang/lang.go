@@ -1,5 +1,6 @@
 // Package lang indexes non-Go source code: Python, JavaScript and
-// TypeScript (including <script> blocks of Vue single-file components).
+// TypeScript (including <script> blocks of Vue single-file components),
+// Java and Kotlin (brace.go and jvm.go).
 //
 // The parsers are structural, not full compilers: they find functions,
 // classes and methods with exact line ranges, imports between files, calls
@@ -55,6 +56,10 @@ func Language(name string) string {
 		return TypeScript
 	case ".vue":
 		return Vue
+	case ".java":
+		return Java
+	case ".kt", ".kts":
+		return Kotlin
 	}
 	return ""
 }
@@ -88,6 +93,7 @@ type fileResult struct {
 	topCalls []call // module-level calls, attributed to the file
 	findings []finding
 	routes   []route // entry points registered here (routes.go)
+	pkg      string  // declared package (Java, Kotlin), "" otherwise
 	isTest   bool
 	// partial is set when the source ended with open brackets or an open
 	// string: declarations after the problem may be missing or misplaced.
@@ -215,6 +221,7 @@ func (ix *indexer) id(kind model.NodeKind, local string) string {
 
 func (ix *indexer) parse(rel, lang string, src []byte) {
 	var fr *fileResult
+	var fr0pkg string
 	offset := 0
 	code := src // the text the parser saw: symbol lines index into it
 	switch lang {
@@ -232,7 +239,12 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 			code = script
 		}
 		fr.findings = append(fr.findings, vueRules(src)...)
+	case Java:
+		fr, fr0pkg = parseBrace(src, javaLang)
+	case Kotlin:
+		fr, fr0pkg = parseBrace(src, kotlinLang)
 	}
+	fr.pkg = fr0pkg
 	fr.fingerprint(lang, code)
 	if offset > 0 {
 		fr.shift(offset)
@@ -250,6 +262,9 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 	ix.res.Languages[lang]++
 
 	module := moduleName(rel, lang)
+	if fr.pkg != "" {
+		module = fr.pkg // a JVM package spans files and folders
+	}
 	lines := strings.Count(string(src), "\n") + 1
 	fileID := ix.id(model.KindFile, rel)
 	analysis := model.Analysis{Level: model.LevelSyntactic, Status: model.StatusComplete}
@@ -348,6 +363,7 @@ func (fr *fileResult) shift(offset int) {
 // link resolves imports and calls once every file is parsed, and emits findings.
 func (ix *indexer) link() {
 	byModule := map[string]*parsedFile{}
+	byPkg := map[string][]*parsedFile{} // JVM package -> its files
 	// Name indexes for calls the import graph cannot resolve: methods on
 	// values of unknown type (obj.save()) and auto-imported functions (Nuxt
 	// composables). Only names that are unique in the repository are used,
@@ -357,24 +373,23 @@ func (ix *indexer) link() {
 	ctorOf := map[string]string{} // class node id -> constructor id
 	for _, pf := range ix.files {
 		byModule[pf.lang+":"+pf.module] = pf
+		if pf.fr.pkg != "" {
+			byPkg[pf.fr.pkg] = append(byPkg[pf.fr.pkg], pf)
+		}
 		for _, s := range pf.fr.symbols {
 			sid := pf.symIDs[s.name]
 			short := lastPart(s.name)
 			switch s.kind {
 			case model.KindMethod:
 				if !pf.fr.isTest && short != "__init__" && short != "constructor" {
-					methodsByName[pf.lang+":"+short] = append(methodsByName[pf.lang+":"+short], sid)
+					methodsByName[family(pf.lang)+":"+short] = append(methodsByName[family(pf.lang)+":"+short], sid)
 				}
-				if short == "__init__" || short == "constructor" {
+				if short == "__init__" || short == "constructor" || short == lastPart(s.class) && isJVM(pf.lang) {
 					ctorOf[pf.symIDs[s.class]] = sid
 				}
 			case model.KindFunction:
 				if s.exported && !pf.fr.isTest {
-					family := pf.lang
-					if family == Vue || family == TypeScript {
-						family = JavaScript
-					}
-					funcsByName[family+":"+short] = append(funcsByName[family+":"+short], sid)
+					funcsByName[family(pf.lang)+":"+short] = append(funcsByName[family(pf.lang)+":"+short], sid)
 				}
 			}
 		}
@@ -388,9 +403,10 @@ func (ix *indexer) link() {
 	for _, pf := range ix.files {
 		// local name -> target node id, via imports
 		bound := map[string]string{}
+		boundFile := map[string]*parsedFile{} // imported JVM type -> its file
 		moduleAlias := map[string]*parsedFile{}
 		for _, imp := range pf.fr.imports {
-			target := ix.resolveImport(pf, imp.spec, byModule)
+			target := ix.resolveImport(pf, imp, byModule, byPkg)
 			if target == nil {
 				if ext := externalName(imp.spec, pf.lang); ext != "" {
 					ix.res.ExternalImports[ext] = append(ix.res.ExternalImports[ext], pf.id)
@@ -405,12 +421,20 @@ func (ix *indexer) link() {
 				}
 				if sid, ok := target.symIDs[member]; ok {
 					bound[local] = sid
+					boundFile[local] = target
 				}
 			}
 		}
-		family := pf.lang
-		if family == Vue || family == TypeScript {
-			family = JavaScript
+		fam := family(pf.lang)
+		// samePackage finds a declaration in another file of a JVM package,
+		// which needs no import.
+		samePackage := func(name string) string {
+			for _, f := range byPkg[pf.fr.pkg] {
+				if sid, ok := f.symIDs[name]; ok && pf.fr.pkg != "" {
+					return sid
+				}
+			}
+			return ""
 		}
 		// resolve finds a call's target and says how: through declarations
 		// and imports (syntactic) or a repository-unique name (inferred).
@@ -429,8 +453,23 @@ func (ix *indexer) link() {
 				if sid, ok := bound[c.name]; ok {
 					return declared(sid)
 				}
+				if isJVM(pf.lang) {
+					// Inside a class a plain call is one of its methods.
+					if sid, ok := pf.symIDs[class+"."+c.name]; ok && class != "" {
+						return declared(sid)
+					}
+					if sid := samePackage(c.name); sid != "" {
+						return declared(sid)
+					}
+					// Java has no free functions: a call without a receiver
+					// name is a method of a chained expression (new A().f()).
+					if sid, ev := unique(funcsByName, fam+":"+c.name); sid != "" {
+						return sid, ev
+					}
+					return unique(methodsByName, fam+":"+c.name)
+				}
 				if pf.lang != Python {
-					return unique(funcsByName, family+":"+c.name)
+					return unique(funcsByName, fam+":"+c.name)
 				}
 			case "self", "this", "cls":
 				if class != "" {
@@ -443,7 +482,13 @@ func (ix *indexer) link() {
 				if sid, ok := pf.symIDs[c.recv+"."+c.name]; ok { // Class.static()
 					return declared(sid)
 				}
-				return unique(methodsByName, pf.lang+":"+c.name)
+				if f, ok := boundFile[c.recv]; ok { // ImportedClass.static()
+					return declared(f.symIDs[c.recv+"."+c.name])
+				}
+				if sid := samePackage(c.recv + "." + c.name); sid != "" {
+					return declared(sid)
+				}
+				return unique(methodsByName, fam+":"+c.name)
 			}
 			return "", ""
 		}
@@ -486,8 +531,24 @@ func (ix *indexer) link() {
 }
 
 // resolveImport maps an import spec to an in-repo file.
-func (ix *indexer) resolveImport(pf *parsedFile, spec string, byModule map[string]*parsedFile) *parsedFile {
+func (ix *indexer) resolveImport(pf *parsedFile, imp importRef, byModule map[string]*parsedFile, byPkg map[string][]*parsedFile) *parsedFile {
+	spec := imp.spec
 	switch pf.lang {
+	case Java, Kotlin:
+		// com.acme.Foo is Foo in package com.acme, in Java or Kotlin.
+		for _, member := range imp.names {
+			first, _, _ := strings.Cut(member, ".")
+			pkg := spec
+			if !strings.Contains(member, ".") {
+				pkg = strings.TrimSuffix(spec, "."+member)
+			}
+			for _, f := range byPkg[pkg] {
+				if _, ok := f.symIDs[first]; ok {
+					return f
+				}
+			}
+		}
+		return nil
 	case Python:
 		mod := spec
 		if strings.HasPrefix(spec, ".") { // relative import
@@ -544,6 +605,9 @@ func srcRoot(rel string) string {
 
 // externalName returns the package name of a third-party import.
 func externalName(spec, lang string) string {
+	if isJVM(lang) {
+		return "" // Maven coordinates do not follow package names
+	}
 	if lang == Python {
 		if strings.HasPrefix(spec, ".") {
 			return ""
@@ -574,6 +638,10 @@ func moduleName(rel, lang string) string {
 func isTestPath(rel, lang string) bool {
 	base := path.Base(rel)
 	switch lang {
+	case Java, Kotlin:
+		stem := strings.TrimSuffix(strings.TrimSuffix(base, path.Ext(base)), ".")
+		return strings.Contains("/"+rel, "/src/test/") || strings.HasSuffix(stem, "Test") || strings.HasSuffix(stem, "Tests") ||
+			strings.HasSuffix(stem, "IT") || strings.HasSuffix(stem, "Spec")
 	case Python:
 		return strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py") || base == "conftest.py" || strings.Contains("/"+rel, "/tests/")
 	default:
@@ -646,3 +714,16 @@ func (ix *indexer) addRoutes(pf *parsedFile, module string) {
 		}
 	}
 }
+
+// family groups languages whose code calls each other by name.
+func family(lang string) string {
+	switch lang {
+	case Vue, TypeScript:
+		return JavaScript
+	case Kotlin:
+		return Java
+	}
+	return lang
+}
+
+func isJVM(lang string) bool { return lang == Java || lang == Kotlin }

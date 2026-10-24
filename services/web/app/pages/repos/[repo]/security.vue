@@ -29,7 +29,8 @@ const filesByRule = computed(() => {
   return m
 })
 const langMatch = (a?: string, b?: string) => {
-  const n = (l?: string) => (['javascript', 'typescript', 'vue', 'js', 'ts'].includes(l ?? '') ? 'typescript' : l === 'yml' ? 'yaml' : l)
+  // Languages that share examples: the JS family, and Kotlin with Java.
+  const n = (l?: string) => (['javascript', 'typescript', 'vue', 'js', 'ts'].includes(l ?? '') ? 'typescript' : l === 'yml' ? 'yaml' : l === 'kotlin' ? 'java' : l)
   return n(a) === n(b)
 }
 function examplesFor(f: SecFinding) {
