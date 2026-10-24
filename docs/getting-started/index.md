@@ -12,7 +12,7 @@ Three steps take you from nothing to an assistant that asks the graph instead of
 
 - **2. Create your accounts**
 
-    Sign in as `admin` (random password in `.env`), replace it with your own account, then create an organisation and its owner.
+    Sign in as `admin` (random password in `.env`), follow the welcome guide (or skip it): replace it with your own account and create an organisation and its owner.
 
     [First run and sign-in](../operations/first-run.md)
 

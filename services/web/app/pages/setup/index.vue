@@ -41,7 +41,7 @@ async function submit() {
 <template>
   <div class="stack--tight">
     <h1>Finish setup</h1>
-    <p class="muted">You are signed in as the root account. It administers the installation (settings, health, the audit log) but never works in an organisation. Create the first organisation and the account that owns it; you then sign in with that account for organisation work.</p>
+    <p class="muted">Step two of the welcome guide. You are signed in as the root account, which administers the installation (settings, health, the audit log) but never works in an organisation. Create the first organisation and the account that owns it; you then sign in with that account for organisation work. You can also leave this page and come back later from the welcome guide.</p>
   </div>
   <form class="stack--tight" @submit.prevent="submit">
     <fieldset v-if="orgs.length" class="stack--tight">
