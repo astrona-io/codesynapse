@@ -58,6 +58,7 @@ var toolPolicies = map[string]toolPolicy{
 	"file_outline":           {accounts.Viewer, "repository"},
 	"hotspots":               {accounts.Viewer, "repository"},
 	"security_symbols":       {accounts.Viewer, "repository"},
+	"attack_surface":         {accounts.Viewer, "repository"},
 	"file_history":           {accounts.Viewer, "repository"},
 	"security_report":        {accounts.Viewer, "repository"},
 	"repo_metrics":           {accounts.Viewer, "repository"},

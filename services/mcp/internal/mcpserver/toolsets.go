@@ -93,7 +93,7 @@ var instructionRules = [][]clause{
 	},
 	{
 		{[]string{"reviews"}, `Reviews: when asked to review code, analyse it with get_pr_context.`},
-		{[]string{"reviews", "security"}, `Add security_report and rule_guide to that analysis.`},
+		{[]string{"reviews", "security"}, `Add security_report and rule_guide to that analysis, and attack_surface when the change adds or alters an HTTP route, MCP tool or CLI command.`},
 		{[]string{"reviews"}, `Record the result with submit_review (comments anchored to file:line, with concrete suggestions). Mark comments you have addressed with update_review_comment.`},
 	},
 	{

@@ -435,6 +435,7 @@ func (x *extractor) file(p *packages.Package, f *ast.File, abs, rel, pkgPath str
 			if d.Tok == token.VAR || d.Tok == token.CONST {
 				if !isTest {
 					x.scan(p.TypesInfo, p.Fset, d, fileID, rel)
+					x.routes(p, d, rel)
 				}
 				// Package-level initialisers (tables of handlers, var x = f())
 				// run at init and keep what they call or reference alive; the
@@ -496,6 +497,7 @@ func (x *extractor) funcDecl(p *packages.Package, d *ast.FuncDecl, abs, rel, fil
 		}
 		if !isTestFile {
 			x.scan(p.TypesInfo, p.Fset, d.Body, n.ID, rel)
+			x.routes(p, d.Body, rel)
 		}
 	}
 	x.g.AddNode(n)
