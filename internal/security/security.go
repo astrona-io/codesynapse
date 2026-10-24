@@ -225,7 +225,13 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 		if n.Ecosystem != "" && n.Ecosystem != "Go" {
 			key = n.Ecosystem + ":" + n.Package
 		}
-		if mod, err := r.Node(ctx, model.NodeID(repo, model.KindModule, key)); err == nil {
+		// A package can be installed in several versions; the advisory hit
+		// one of them, whose chain of dependents is the one to show.
+		mod, err := r.Node(ctx, model.NodeID(repo, model.KindModule, key+"@"+n.Version))
+		if err != nil {
+			mod, err = r.Node(ctx, model.NodeID(repo, model.KindModule, key))
+		}
+		if err == nil {
 			vv.Via, vv.Roots = mod.Via, mod.Roots
 		}
 		for _, a := range n.Aliases {
