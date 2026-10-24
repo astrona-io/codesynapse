@@ -11,6 +11,7 @@ const GROUPS = [
   { title: 'Network and cloud bandwidth', help: 'Application payload bytes. Avoided cloud traffic needs an equivalent configured fallback; local execution alone has no savings baseline.', panels: ['bandwidth', 'cloud_traffic', 'cloud_savings'] },
   { title: 'Database performance', help: 'Measured request latency, volume and returned rows. Graph rows do not measure internal nodes traversed.', panels: ['db_latency', 'db_latency_tail', 'db_requests', 'db_rows', 'db_errors'] },
   { title: 'Agent memory and context offloading', help: 'Durable facts are current stored state. Saved-fact and recall counters measure activity.', panels: ['memory_facts', 'memory', 'sessions', 'tool_calls', 'tool_latency', 'tool_errors'] },
+  { title: 'Assistant lifecycle activity', help: 'Codex and Cursor hooks report lifecycle events and observed byte counts. Prompts, source and responses are not retained. Several hooks can observe one operation.', panels: ['agent_hook_events', 'agent_hook_bytes'] },
 ]
 
 // The window lives in the URL (?range=1h) so a view can be shared.

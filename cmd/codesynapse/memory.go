@@ -463,6 +463,7 @@ func (o *mcpAgentsMdOptions) Run(_ context.Context, _ *app.Env) error {
 
 // mcpHooksOptions configures `codesynapse mcp hooks`.
 type mcpHooksOptions struct {
+	client    string
 	EC        *app.Env
 	dir       string
 	repo      string
@@ -474,6 +475,7 @@ type mcpHooksOptions struct {
 
 func (o *mcpHooksOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f := o.EC.Command.Flags()
+	f.StringVar(&o.client, "client", "claude", "Assistant to configure: claude, codex or cursor")
 	f.StringVar(&o.repo, "repo", "", "Repository name in CodeSynapse (default: matched from the origin remote)")
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "CodeSynapse API the hooks call")
 	f.BoolVar(&o.shared, "shared", false, "Write .claude/settings.json (committed, for the whole team) instead of .claude/settings.local.json")
@@ -491,6 +493,12 @@ func (o *mcpHooksOptions) Complete(context.Context, *app.Env) error {
 	return err
 }
 func (o *mcpHooksOptions) Validate(context.Context, *app.Env) error {
+	if o.client != "claude" && len(agentcfg.HookEvents(o.client)) == 0 {
+		return errors.New("--client must be claude, codex or cursor")
+	}
+	if err := checkBridgeURL(o.apiURL); err != nil {
+		return err
+	}
 	if o.keep < 1 || o.keep > 50 {
 		return errors.New("--keep must be between 1 and 50")
 	}
@@ -503,6 +511,30 @@ func (o *mcpHooksOptions) Validate(context.Context, *app.Env) error {
 func (o *mcpHooksOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
 	c := newAPIClient(o.apiURL)
+	if o.client == "codex" || o.client == "cursor" {
+		if !strings.HasPrefix(c.token, "csk_") {
+			return errors.New("set CODESYNAPSE_API_TOKEN to a personal organisation API key (csk_…)")
+		}
+		if _, err := storeToken(c.token); err != nil {
+			return err
+		}
+		bin, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		if strings.Contains(bin, "go-build") {
+			return errors.New("install the codesynapse binary before configuring hooks; go run paths are temporary")
+		}
+		settings := filepath.Join(o.dir, "."+o.client, "hooks.json")
+		if err := agentcfg.InstallLifecycleHooks(settings, o.client, brewStablePath(bin), o.apiURL); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(o.EC.Stdout, "Installed all %s hook events in %s. Restart the assistant.\nHooks register the runtime chat ID and save metadata-only activity. For automatic MCP transport setup, run `codesynapse mcp install --only %s` and use one hook source (project or user) to avoid duplicates.\n", o.client, settings, o.client)
+		if o.client == "codex" {
+			_, _ = fmt.Fprintln(o.EC.Stdout, "In Codex, open /hooks and review and trust the installed definitions. Hook installation does not grant trust.")
+		}
+		return err
+	}
 	if c.token == "" {
 		return fmt.Errorf("set %s to the API token (in the CodeSynapse folder: export %s=$(sed -n 's/^%s=//p' .env)) so the hooks can reach the API", apiTokenEnv, apiTokenEnv, apiTokenEnv)
 	}
@@ -522,7 +554,7 @@ func (o *mcpHooksOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return err
 	}
-	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+	q := agentcfg.ShellQuote
 	common := fmt.Sprintf("--hook --repo %s --api-url %s", q(repo), q(o.apiURL))
 	settings := filepath.Join(o.dir, ".claude", "settings.local.json")
 	if o.shared {

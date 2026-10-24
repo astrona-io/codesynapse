@@ -53,7 +53,7 @@ func main() {
 // commands are the CLI's subcommands (the plugin test checks the hooks
 // call ones that exist).
 func commands(ec *app.Env) []*cobra.Command {
-	return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), upgradeCmd(ec), statsCmd(ec), evalCmd(ec), hookCmd(ec), gitHookCmd(ec), installCmd(ec), statusCmd(ec), uninstallCmd(ec), mcpCmd(ec), memoryCmd(ec), runtimeCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
+	return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), upgradeCmd(ec), statsCmd(ec), evalCmd(ec), hookCmd(ec), gitHookCmd(ec), installCmd(ec), statusCmd(ec), uninstallCmd(ec), mcpCmd(ec), cursorCmd(ec), assistantCmd(ec, "codex"), assistantCmd(ec, "claude"), memoryCmd(ec), runtimeCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
 }
 
 // ingestOptions configures `codesynapse ingest`.
@@ -752,7 +752,7 @@ type mcpInstallOptions struct {
 func (o *mcpInstallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f := o.EC.Command.Flags()
 	f.StringVar(&o.url, "url", app.Getenv("CODESYNAPSE_MCP_URL", "http://localhost:8090/mcp"), "MCP endpoint to register")
-	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "API the Claude Code bridge registers chat sessions with")
+	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "API used by the bridge and assistant lifecycle hooks")
 	f.BoolVarP(&o.yes, "yes", "y", false, "Install into every detected agent without asking")
 	f.StringSliceVar(&o.only, "only", nil, "Limit to these agents (claude, codex, gemini, opencode, cursor, project)")
 	f.StringVar(&o.profile, "profile", toolsets.Core, "Toolsets the agents get: core (the eleven everyday tools), all, or core plus a comma list of "+strings.Join(toolsets.Names(), ", "))
@@ -805,9 +805,14 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 		return errors.New("run an installed codesynapse binary (go install ./cmd/codesynapse, or just mcp), not go run")
 	}
 	bin = brewStablePath(bin)
-	server := agentcfg.Server{URL: o.url, Token: os.Getenv(agentcfg.TokenEnv), Command: bin, APIURL: o.apiURL, StoreToken: storeToken}
+	token := os.Getenv(agentcfg.TokenEnv)
+	if token == "" {
+		token = newAPIClient(o.apiURL).token
+	}
+	server := agentcfg.Server{URL: o.url, Token: token, Command: bin, APIURL: o.apiURL, StoreToken: storeToken}
 	in := bufio.NewReader(o.EC.Stdin)
 	installed := 0
+	failed := 0
 	for _, t := range agentcfg.Detect(home, cwd) {
 		if len(o.only) > 0 && !slices.Contains(o.only, t.ID) {
 			continue
@@ -816,6 +821,7 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 			continue
 		}
 		if err := t.Install(ctx, server); err != nil {
+			failed++
 			_, _ = fmt.Fprintf(o.EC.Stderr, "  ✗ %s: %v\n", t.Description, err)
 			continue
 		}
@@ -823,8 +829,13 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 		_, _ = fmt.Fprintf(o.EC.Stderr, "  ✓ %s\n", t.Description)
 	}
 	if installed > 0 {
-		_, _ = fmt.Fprintf(o.EC.Stderr, "\nAgents other than Claude read the token from $%s. Export it in your shell profile, e.g.\n  export %s=$(grep ^%s= %s | cut -d= -f2)\n",
-			agentcfg.TokenEnv, agentcfg.TokenEnv, agentcfg.TokenEnv, filepath.Join(cwd, ".env"))
+		_, _ = fmt.Fprintln(o.EC.Stderr, "\nRestart the selected assistants. Codex: review and trust hooks with /hooks. Cursor: keep the installed MCP hooks enabled.\nThe local bridges register each chat automatically and read the personal key from its private file. Start a new chat and verify a CodeSynapse tool call with /mcp (Codex/Claude) or Customize → MCP (Cursor).")
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d assistant configuration(s) failed; see the errors above", failed)
+	}
+	if installed == 0 && o.yes {
+		return errors.New("no matching assistants detected; install project hooks with `codesynapse mcp hooks . --client codex` or `--client cursor`")
 	}
 	return nil
 }
@@ -866,7 +877,7 @@ func mcpCmd(ec *app.Env) *cobra.Command {
 		Build())
 	parent.AddCommand(app.NewSubCommand("bridge", &mcpBridgeOptions{EC: ec}, ec).
 		WithShortDesc("Stdio MCP server for one chat: registers the chat's session and forwards to the HTTP server").
-		WithLongDesc("Claude Code starts this per chat (`codesynapse mcp install` configures it). It reads the chat ID from CLAUDE_CODE_SESSION_ID (or CODESYNAPSE_SESSION_ID), registers it through the API with the key from CODESYNAPSE_API_TOKEN or the file `mcp install` wrote, and forwards every MCP message with the key and the runtime session headers.").
+		WithLongDesc("The installer configures a local stdio bridge. Claude supplies its per-chat environment; --client codex uses native per-request thread metadata; --client cursor pairs each MCP progress token with its trusted pre-tool hook. Every chat is registered and gets its own upstream transport. Keys stay in the private token file.").
 		WithNoArgs().
 		Build())
 	parent.AddCommand(app.NewSubCommand("agents-md [dir]", &mcpAgentsMdOptions{EC: ec}, ec).
@@ -875,8 +886,8 @@ func mcpCmd(ec *app.Env) *cobra.Command {
 		WithMaxArgs(1).
 		Build())
 	parent.AddCommand(app.NewSubCommand("hooks [dir]", &mcpHooksOptions{EC: ec}, ec).
-		WithShortDesc("Install Claude Code hooks: recall memory at session start, offload older turns before compaction").
-		WithExample("  export CODESYNAPSE_API_TOKEN=...   # from the CodeSynapse .env\n  codesynapse mcp hooks ~/src/api\n  codesynapse mcp hooks . --shared --repo astrona-io/api").
+		WithShortDesc("Install lifecycle hooks for Claude Code, Codex or Cursor").
+		WithExample("  codesynapse mcp hooks . --client codex\n  codesynapse mcp hooks . --client cursor\n  codesynapse mcp hooks . --shared --repo astrona-io/api").
 		WithMaxArgs(1).
 		Build())
 	return parent

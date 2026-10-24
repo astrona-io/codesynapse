@@ -40,6 +40,7 @@ const (
 )
 
 type mcpBridgeOptions struct {
+	client   string
 	EC       *app.Env
 	url      string
 	apiURL   string
@@ -49,6 +50,7 @@ type mcpBridgeOptions struct {
 
 func (o *mcpBridgeOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f := o.EC.Command.Flags()
+	f.StringVar(&o.client, "client", "", "Runtime metadata adapter: codex or cursor (default: per-chat Claude bridge)")
 	f.StringVar(&o.url, "url", app.Getenv("CODESYNAPSE_MCP_URL", "http://localhost:8090/mcp"), "MCP endpoint to forward to")
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "CodeSynapse API that registers the chat session")
 	f.BoolVar(&o.worktree, "worktree", app.Getenv("CODESYNAPSE_BRIDGE_WORKTREE", "false") == "true", "Opt in: while this checkout has changes the server has not indexed, answer the core repository tools from a graph of the working tree built on this machine (those answers never reach the server, so they are not audited or counted)")
@@ -57,6 +59,12 @@ func (o *mcpBridgeOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 }
 func (o *mcpBridgeOptions) Complete(context.Context, *app.Env) error { return nil }
 func (o *mcpBridgeOptions) Validate(context.Context, *app.Env) error {
+	if o.client != "" && o.client != "codex" && o.client != "cursor" {
+		return errors.New("--client must be codex or cursor")
+	}
+	if o.client != "" && o.worktree {
+		return errors.New("runtime adapters require server-side answers; turn off --worktree")
+	}
 	for _, u := range []string{o.url, o.apiURL} {
 		if err := checkBridgeURL(u); err != nil {
 			return err
@@ -81,6 +89,28 @@ func checkBridgeURL(raw string) error {
 }
 
 func (o *mcpBridgeOptions) Run(ctx context.Context, _ *app.Env) error {
+	if o.client != "" {
+		c := newAPIClient(o.apiURL)
+		if c.token == "" {
+			return fmt.Errorf("no API key: run codesynapse mcp install with a personal key")
+		}
+		b := &bridge{url: o.url, token: c.token, out: o.EC.Stdout, http: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+		b.routes = &runtimeRoutes{client: o.client, api: c, owner: b, chats: map[string]*runtimeChat{}}
+		if o.client == "cursor" {
+			b.routes.primary = os.Getenv(cursorCLISessionEnv)
+			if b.routes.primary == "" {
+				var err error
+				b.routes.primary, err = findCursorLaunch(ctx, cursorLaunchDir(), c.token)
+				if err != nil {
+					return err
+				}
+			}
+			if b.routes.primary != "" && execution.Validate(execution.Identity{TenantID: "t", SubjectID: "u", SessionID: b.routes.primary, ParentSessionID: b.routes.primary}) != nil {
+				return execution.ErrInvalid
+			}
+		}
+		return b.run(ctx, o.EC.Stdin)
+	}
 	session := cmp.Or(os.Getenv(agentcfg.SessionEnv), os.Getenv(claudeSessionEnv))
 	if parent := os.Getenv(agentcfg.ParentSessionEnv); parent != "" && parent != session {
 		return execution.ErrConflict
@@ -106,6 +136,7 @@ func (o *mcpBridgeOptions) Run(ctx context.Context, _ *app.Env) error {
 }
 
 type bridge struct {
+	routes              *runtimeRoutes
 	url, token, session string
 	http                *http.Client
 	out                 io.Writer
@@ -143,6 +174,13 @@ func (b *bridge) run(ctx context.Context, in io.Reader) error {
 		var m rpcMessage
 		_ = json.Unmarshal(msg, &m) //nolint:errcheck // the server answers malformed input itself
 		if m.Method == "initialize" {
+			if b.routes != nil {
+				if initSeen {
+					b.write(errorResponse(m.ID, errors.New("bridge already initialized")))
+					continue
+				}
+				b.routes.init = append([]byte(nil), msg...)
+			}
 			// Everything else waits for the session the answer opens.
 			initSeen = true
 			b.forward(ctx, msg, m)
@@ -168,10 +206,24 @@ func (b *bridge) run(ctx context.Context, in io.Reader) error {
 			if m.Method == "tools/call" && b.answerLocally(ctx, msg, m) {
 				return
 			}
+			if b.routes != nil && m.Method == "tools/call" {
+				target, err := b.routes.forCall(ctx, msg)
+				if err != nil {
+					if len(m.ID) > 0 {
+						b.write(errorResponse(m.ID, err))
+					}
+					return
+				}
+				target.forward(ctx, msg, m)
+				return
+			}
 			b.forward(ctx, msg, m)
 		}()
 	}
 	wg.Wait()
+	if b.routes != nil {
+		b.routes.close(ctx)
+	}
 	b.close(ctx)
 	return sc.Err()
 }
@@ -211,8 +263,10 @@ func (b *bridge) forward(ctx context.Context, msg []byte, m rpcMessage) {
 
 func (b *bridge) headers(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+b.token)
-	req.Header.Set(execution.SessionHeader, b.session)
-	req.Header.Set(execution.ParentSessionHeader, b.session)
+	if b.session != "" {
+		req.Header.Set(execution.SessionHeader, b.session)
+		req.Header.Set(execution.ParentSessionHeader, b.session)
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.mcpID != "" {

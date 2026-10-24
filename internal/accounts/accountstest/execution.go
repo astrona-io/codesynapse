@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/agentcfg"
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
@@ -31,6 +32,15 @@ func RunExecutionSessions(t *testing.T, st accounts.Store) {
 	id, err := svc.RegisterExecutionSession(ctx, "exec-owner", "exec-org-a", "exec-chat-a")
 	require.NoError(t, err)
 	assert.Equal(t, id.ParentSessionID, id.SessionID)
+	activity := agentcfg.HookActivity{Client: "codex", Event: "PostToolUse", HookMeasurements: agentcfg.HookMeasurements{Category: "mcp", Outcome: "ok"}}
+	_, err = svc.RecordHookActivity(ctx, accounts.Principal{User: accounts.User{ID: "exec-owner"}, Via: "key", OrgID: "exec-org-a"}, id, activity)
+	require.NoError(t, err)
+	rows, err := st.ListEvents(ctx, accounts.EventFilter{OrgID: "exec-org-a", Actor: "exec-owner", Session: id.SessionID, Action: "agent.hook.", Limit: 100})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "hook metadata survives the same audit store contract in both implementations")
+	assert.Equal(t, rows[0].MCP.Method, "agent/hook")
+	_, err = svc.RecordHookActivity(ctx, accounts.Principal{User: accounts.User{ID: "exec-peer"}, Via: "key", OrgID: "exec-org-a"}, id, activity)
+	require.Error(t, err, "same-tenant members cannot impersonate another session participant")
 	first, err := st.ExecutionSessionByID(ctx, id.SessionID)
 	require.NoError(t, err)
 	assert.Equal(t, first.ExpiresAt, now.Add(accounts.ExecutionSessionTTL))
