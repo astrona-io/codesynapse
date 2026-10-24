@@ -236,12 +236,27 @@ func (s *Server) usageBuckets(ctx context.Context, days int, now time.Time) ([]u
 	if err != nil {
 		return nil, err
 	}
-	if sc := scopeFrom(ctx); !sc.all {
-		// An organisation sees its own agents' usage only, even on a
-		// repository it shares with others.
-		buckets = slices.DeleteFunc(buckets, func(b usage.Bucket) bool { return !seesReview(sc, b.Repo, b.Org) })
+	return visibleUsage(scopeFrom(ctx), buckets), nil
+}
+
+// visibleUsage keeps the usage an organisation may see: its own agents'
+// calls, even on a repository it shares with others. Calls that named no
+// repository (and the sessions that connected) have none to check, so they
+// belong to the organisation that made them.
+func visibleUsage(sc scope, buckets []usage.Bucket) []usage.Bucket {
+	if sc.all {
+		return buckets
 	}
-	return buckets, nil
+	mine := map[string]bool{}
+	for _, m := range sc.orgs {
+		mine[m.Org.ID] = true
+	}
+	return slices.DeleteFunc(buckets, func(b usage.Bucket) bool {
+		if b.Repo == "" {
+			return b.Org == "" || !mine[b.Org]
+		}
+		return !seesReview(sc, b.Repo, b.Org)
+	})
 }
 
 // agentUsage compares what agents' calls returned with what reading the

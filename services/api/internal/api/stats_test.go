@@ -5,9 +5,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/astrona-io/codesynapse/internal/accounts"
 	agentmem "github.com/astrona-io/codesynapse/internal/memory"
 	"github.com/astrona-io/codesynapse/internal/reviews"
 	"github.com/astrona-io/codesynapse/internal/store/memory"
@@ -74,4 +77,27 @@ func TestStatsEndpoint(t *testing.T) {
 	assert.Equal(t, got.Workspace.Repos, 1)
 	require.Equal(t, get(t, ts, "/api/v1/stats?days=999", &got), 200)
 	assert.Equal(t, got.Days, 30, "out-of-range windows fall back to 30 days")
+}
+
+func TestVisibleUsageKeepsCallsWithoutARepository(t *testing.T) {
+	sc := scope{
+		orgs:  []accounts.Membership{{Org: accounts.Org{ID: "o1"}}},
+		reach: map[string]accounts.Reach{"acme/app": {OrgID: "o1"}}, // shared/lib is not reachable
+	}
+	in := []usage.Bucket{
+		{Org: "o1", Repo: "acme/app", Tool: "search", Calls: 1},   // own repository
+		{Org: "o1", Repo: "", Tool: usage.Session, Calls: 1},      // own session
+		{Org: "o1", Repo: "", Tool: "repo_status", Calls: 1},      // own call, no repo argument
+		{Org: "o2", Repo: "", Tool: "repo_status", Calls: 1},      // another organisation's
+		{Org: "o2", Repo: "shared/lib", Tool: "search", Calls: 1}, // another organisation's
+		{Org: "", Repo: "", Tool: "repo_status", Calls: 1},        // installation token: no organisation
+		{Org: "o2", Repo: "acme/app", Tool: "search", Calls: 1},   // another organisation on my repository
+	}
+	got := visibleUsage(sc, slices.Clone(in))
+	var tools []string
+	for _, b := range got {
+		tools = append(tools, b.Org+"|"+b.Repo+"|"+b.Tool)
+	}
+	assert.Equal(t, strings.Join(tools, ","), "o1|acme/app|search,o1||(session),o1||repo_status")
+	assert.Equal(t, len(visibleUsage(scope{all: true}, slices.Clone(in))), len(in), "single-tenant sees everything")
 }
