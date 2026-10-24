@@ -164,3 +164,33 @@ func TestStopGuardIgnoresWhatWasDirtyAtStart(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(clean, "demo.go"), []byte("package demo\n\nfunc Other() {}\n"), 0o600))
 	assert.True(t, stopGuard(ctx, in2, logger) != nil)
 }
+
+// A session in a checkout starts with that repository's house style too.
+func TestSessionRulesAddTheRepositoryConventions(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
+	t.Setenv("CODESYNAPSE_API_TOKEN", "csk_test")
+	dir := gitRepo(t)
+	var asked string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/agent-rules":
+			_, _ = io.WriteString(w, `{"text":"Ask the graph first."}`)
+		case strings.HasSuffix(r.URL.Path, "/conventions"):
+			asked = r.URL.EscapedPath()
+			_, _ = io.WriteString(w, `{"conventions":["tests: assert with the repository's own helpers internal/testutil/assert (12 calls)","errors: fmt.Errorf (3 calls) and errors.New (1)"]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("CODESYNAPSE_API_URL", srv.URL)
+	out := sessionRules(context.Background(), toolHookInput{SessionID: "chat-c", Cwd: dir}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	text := out["hookSpecificOutput"].(map[string]any)["additionalContext"].(string)
+	assert.Equal(t, asked, "/api/v1/repos/acme%2Fdemo/conventions") // the name the server knows it by
+	assert.Contains(t, text, "Ask the graph first.\n\nHouse style of acme/demo")
+	assert.Contains(t, text, "\n- errors: fmt.Errorf (3 calls) and errors.New (1)")
+
+	// Outside a checkout, or when the server has none, the rules stay as they are.
+	out = sessionRules(context.Background(), toolHookInput{SessionID: "chat-d", Cwd: t.TempDir()}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	assert.Equal(t, out["hookSpecificOutput"].(map[string]any)["additionalContext"], "Ask the graph first.")
+}

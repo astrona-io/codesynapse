@@ -31,6 +31,8 @@ type Parts struct {
 	Plan                 verifyplan.Plan
 	Findings             []review.DeltaFinding
 	OpenIssues           []string
+	// Conventions are the repository's house style (internal/conventions).
+	Conventions []string
 }
 
 // Briefing is the answer: the block to paste and what it holds.
@@ -49,6 +51,8 @@ const (
 	maxTests    = 4
 	maxFindings = 5
 	maxIssues   = 5
+	// maxConventions matches conventions.MaxStatements.
+	maxConventions = 8
 	// maxNamedTests is how many test names a brief spells out per command.
 	maxNamedTests = 6
 )
@@ -123,6 +127,12 @@ func Write(p Parts, maxTokens int) Briefing {
 		rules = append(rules, "- Possible conflict: "+oneLine(c.Message, 200)+" Ask the user before choosing between records.")
 	}
 	section("rules", "Rules in force", rules, maxRules+len(p.Conflicts))
+
+	var style []string
+	for _, c := range p.Conventions {
+		style = append(style, "- "+oneLine(c, 200))
+	}
+	section("conventions", "House style", style, maxConventions)
 
 	var tests []string
 	for _, s := range p.Plan.Steps {

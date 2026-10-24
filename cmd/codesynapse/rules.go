@@ -4,11 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/agentrules"
 	"github.com/astrona-io/codesynapse/internal/app"
+	"github.com/astrona-io/codesynapse/internal/conventions"
 )
 
 // sessionRules is the SessionStart hook: the ruleset a session starts with.
@@ -29,10 +31,44 @@ func sessionRules(ctx context.Context, in toolHookInput, logger *slog.Logger) ma
 		} else if t := strings.TrimSpace(res.Text); t != "" && len(t) <= agentrules.MaxBytes {
 			text = t
 		}
+		text += repoConventions(ctx, c, in.Cwd, logger)
 	}
 	return map[string]any{"hookSpecificOutput": map[string]any{
 		"hookEventName": "SessionStart", "additionalContext": text,
 	}}
+}
+
+// repoConventions is the house style of the checkout's repository, as a
+// section to add to the session's rules, or "". Once per session costs less
+// than in every minimal_context answer.
+func repoConventions(ctx context.Context, c apiClient, cwd string, logger *slog.Logger) string {
+	if cwd == "" {
+		return ""
+	}
+	w := newWorktree(ctx, cwd, "", logger)
+	if w == nil {
+		return ""
+	}
+	var res struct {
+		Conventions []string `json:"conventions"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/v1/repos/"+url.PathEscape(w.repo)+"/conventions", nil, &res); err != nil {
+		logger.Debug("conventions not fetched", "repo", w.repo, "error", err)
+		return ""
+	}
+	var b strings.Builder
+	for i, s := range res.Conventions {
+		if i == conventions.MaxStatements {
+			break
+		}
+		if s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " ")); s != "" && len(s) <= 300 {
+			b.WriteString("\n- " + s)
+		}
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return "\n\nHouse style of " + w.repo + ", measured in its code by CodeSynapse; write new code the same way:" + b.String()
 }
 
 // noteBaseline remembers the working tree a session starts with, so the Stop

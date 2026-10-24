@@ -61,3 +61,25 @@ func TestModuleRelativeIDs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, n.ID, id)
 }
+
+// Conventions cost minimal_context's matches part of their budget, so they
+// come only when asked for; a subagent's brief always has them.
+func TestConventionsOnRequest(t *testing.T) {
+	ctx := context.Background()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("acme/app", model.KindRepository, "acme/app"), Kind: model.KindRepository, Repo: "acme/app", Name: "acme/app",
+		Meta: `{"conventions":["errors: fmt.Errorf (3 calls) and errors.New (1)"]}`})
+	g.AddNode(model.Node{ID: model.NodeID("acme/app", model.KindFunction, "example.com/app.Run"), Kind: model.KindFunction, Repo: "acme/app", Name: "Run", QualifiedName: "example.com/app.Run", File: "app.go", StartLine: 1, EndLine: 3})
+	mem := memory.New()
+	require.NoError(t, mem.ReplaceRepo(ctx, "acme/app", g))
+	plain, err := MinimalContext(ctx, mem, "acme/app", MinimalContextIn{Task: "change Run"})
+	require.NoError(t, err)
+	assert.Equal(t, len(plain.Conventions), 0)
+	asked, err := MinimalContext(ctx, mem, "acme/app", MinimalContextIn{Task: "change Run", Conventions: true})
+	require.NoError(t, err)
+	assert.Equal(t, asked.Conventions, []string{"errors: fmt.Errorf (3 calls) and errors.New (1)"})
+	brief, err := Handoff(ctx, mem, nil, "acme/app", HandoffIn{Task: "change Run"}, nil)
+	require.NoError(t, err)
+	assert.Contains(t, brief.Brief, "House style")
+	assert.Contains(t, brief.Brief, "- errors: fmt.Errorf (3 calls) and errors.New (1)")
+}

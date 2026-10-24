@@ -20,6 +20,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/arch"
 	"github.com/astrona-io/codesynapse/internal/cleanup"
+	"github.com/astrona-io/codesynapse/internal/conventions"
 	"github.com/astrona-io/codesynapse/internal/duplicates"
 	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/identity"
@@ -121,7 +122,8 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	}
 	// The Go module at the root: answers write it as "~" in node IDs
 	// (internal/coretools, compact) and the resolver expands it back.
-	meta, err := json.Marshal(repoMetadata{Policy: metadata, GoModule: rootModulePath(root)})
+	repoMeta := repoMetadata{Policy: metadata, GoModule: rootModulePath(root)}
+	meta, err := json.Marshal(repoMeta)
 	if err != nil {
 		return nil, fmt.Errorf("encode repository policy: %w", err)
 	}
@@ -214,6 +216,15 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	if repoNode.Identities, err = identity.Encode(identities); err != nil {
 		return nil, fmt.Errorf("encoding symbol identities: %w", err)
 	}
+	var goCalls map[string][]string
+	if goRes != nil {
+		goCalls = goRes.ExternalCalls
+	}
+	repoMeta.Conventions = conventions.Analyze(conventions.Input{Graph: g, GoCalls: goCalls, Imports: extImports, Module: repoMeta.GoModule})
+	if meta, err = json.Marshal(repoMeta); err != nil {
+		return nil, fmt.Errorf("encode repository metadata: %w", err)
+	}
+	repoNode.Meta = string(meta)
 	logger.Info("ingest complete", "repo", opts.Repo, "nodes", len(g.Nodes()), "edges", len(g.Edges()),
 		"pruned_edges", pruned, "duration", time.Since(start).Round(time.Millisecond).String())
 	return g, nil

@@ -162,6 +162,9 @@ type MinimalContextIn struct {
 	Task      string   `json:"task" jsonschema:"what you are trying to do, in plain words; include symbol names you know"`
 	Files     []string `json:"files,omitempty" jsonschema:"files already known to be relevant (boosted)"`
 	MaxTokens int      `json:"max_tokens,omitempty" jsonschema:"estimated JSON token budget, bytes/4; 256-20000, default 1500"`
+	// Conventions sit outside the budget: measured on the task eval, giving
+	// them part of it cost a tenth of the hits.
+	Conventions bool `json:"conventions,omitempty" jsonschema:"also return the repository's house style (how tests assert, how errors and logs are made, frameworks), about 150 tokens on top of max_tokens; once before writing new code is enough"`
 }
 
 // MinimalContext answers minimal_context.
@@ -170,6 +173,11 @@ func MinimalContext(ctx context.Context, r store.Reader, repo string, in Minimal
 		return agentctx.MinimalContext{}, errors.New("task is required")
 	}
 	out, err := agentctx.Service{R: r}.MinimalContext(ctx, repo, in.Task, in.Files, in.MaxTokens)
+	if err == nil && in.Conventions {
+		if root, rerr := store.ForRepository(r, repo).Node(ctx, model.NodeID(repo, model.KindRepository, repo)); rerr == nil {
+			out.Conventions = model.ConventionsOf(root)
+		}
+	}
 	return compact(ctx, r, repo, out, err)
 }
 
@@ -274,7 +282,7 @@ func Handoff(ctx context.Context, r store.Reader, cat *catalog.Service, repo str
 	if len(in.Files) > 20 || len(in.Symbols) > 20 {
 		return handoff.Briefing{}, errors.New("at most 20 files and 20 symbols")
 	}
-	mc, err := MinimalContext(ctx, r, repo, MinimalContextIn{Task: in.Task, Files: in.Files})
+	mc, err := MinimalContext(ctx, r, repo, MinimalContextIn{Task: in.Task, Files: in.Files, Conventions: true})
 	if err != nil {
 		return handoff.Briefing{}, err
 	}
@@ -286,7 +294,7 @@ func Handoff(ctx context.Context, r store.Reader, cat *catalog.Service, repo str
 			}
 		}
 	}
-	parts := handoff.Parts{Repo: repo, Task: in.Task, Revision: mc.Revision, Start: mc.Items, OpenIssues: issues}
+	parts := handoff.Parts{Repo: repo, Task: in.Task, Revision: mc.Revision, Start: mc.Items, OpenIssues: issues, Conventions: mc.Conventions}
 	if len(scope) > 0 {
 		if parts.Plan, err = VerifyPlan(ctx, r, repo, VerifyPlanIn{Files: scope}); err != nil {
 			return handoff.Briefing{}, err
