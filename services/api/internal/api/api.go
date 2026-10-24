@@ -302,6 +302,7 @@ func (s *Server) routes() {
 	s.repoPolicyRoutes()
 	s.runtimeRoutes()
 	s.retrievalRoutes()
+	s.usageLocalRoutes()
 	s.agentRulesRoutes()
 	s.notificationRoutes()
 	s.route("GET /api/v1/overview", visibleOnly, s.handleWorkspaceOverview)

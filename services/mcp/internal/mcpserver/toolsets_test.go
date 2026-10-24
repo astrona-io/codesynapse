@@ -137,3 +137,41 @@ func TestServersForRequest(t *testing.T) {
 	assert.Len(t, tools, len(Toolsets[ToolsetCore])+len(Toolsets["memory"]))
 	assert.True(t, x.ForRequest(httptest.NewRequest("POST", "/mcp?toolsets=nope", nil)) == nil, "an unknown set is refused")
 }
+
+// The git tools read the developer's checkout; the server lists them so every
+// client sees the same tools, and answers a direct call with where to go
+// instead of pretending.
+func TestGitToolsAreListedButAnsweredByTheBridge(t *testing.T) {
+	s := memory.New()
+	cs := connectGraphOptions(t, s, fullOptions(s))
+	for name, args := range map[string]map[string]any{"git_status": {}, "git_diff_summary": {}, "git_blame": {"file": "a.go", "start": 1}, "git_log": {}} {
+		res := call(t, cs, name, args, nil)
+		assert.True(t, res.IsError, name)
+		text := res.Content[0].(*mcp.TextContent).Text
+		assert.Contains(t, text, "bridge", name)
+	}
+
+	core := fullOptions(s)
+	core.Toolsets = []string{ToolsetCore}
+	tools, _, instructions := listed(t, newTestServer(t, s, "test", core))
+	assert.NotContains(t, strings.Join(tools, ","), "git_status", "not in the core set: agents that do not use it do not pay for its definitions")
+	assert.NotContains(t, instructions, "git_status")
+
+	withGit := fullOptions(s)
+	withGit.Toolsets = []string{ToolsetCore, "git"}
+	tools, _, instructions = listed(t, newTestServer(t, s, "test", withGit))
+	assert.Contains(t, strings.Join(tools, ","), "git_blame")
+	assert.Contains(t, instructions, "git_diff_summary")
+}
+
+func connectGraphOptions(t *testing.T, s *memory.Store, o Options) *mcp.ClientSession {
+	t.Helper()
+	ctx := context.Background()
+	ct, st := mcp.NewInMemoryTransports()
+	_, err := newTestServer(t, s, "test", o).Connect(ctx, st, nil)
+	require.NoError(t, err)
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(ctx, ct, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cs.Close() })
+	return cs
+}

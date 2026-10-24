@@ -105,3 +105,36 @@ func TestAgentStatusCountsTodaysActivity(t *testing.T) {
 	require.Equal(t, get(t, ts, "/api/v1/agents/status", &got), 200)
 	assert.Equal(t, got, AgentStatus{Sessions: 2, Calls: 3, Workflow: 1})
 }
+
+func TestLocalGitCallsAreCounted(t *testing.T) {
+	ts, _ := newTestServer(t)
+	path := "/api/v1/usage/local"
+	require.Equal(t, post(t, ts, path, `{"tool":"git_status","client":"claude-code","duration_ms":42,"response_tokens":180}`), 204)
+	require.Equal(t, post(t, ts, path, `{"tool":"git_status","client":"claude-code","duration_ms":8,"response_tokens":20,"failed":true}`), 204)
+	require.Equal(t, post(t, ts, path, `{"tool":"git_blame","client":"claude-code","duration_ms":15,"response_tokens":90}`), 204)
+
+	var st Stats
+	require.Equal(t, get(t, ts, "/api/v1/stats", &st), 200)
+	by := map[string]ToolStat{}
+	for _, tool := range st.Agents.Tools {
+		by[tool.Tool] = tool
+	}
+	assert.Equal(t, by["git_status"].Calls, 2)
+	assert.Equal(t, by["git_status"].Errors, 1)
+	assert.Equal(t, by["git_status"].ResponseTokens, 200)
+	assert.Equal(t, by["git_status"].Kind, "git")
+	assert.Equal(t, by["git_blame"].Calls, 1)
+	assert.Equal(t, st.Agents.Calls, 3, "they count as tool calls like any other")
+
+	for _, body := range []string{
+		`{"tool":"search","client":"claude-code"}`, // only the local tools are reported this way
+		`{"tool":"rm_rf","client":"claude-code"}`,
+		`{"tool":"git_log","client":"Claude Code"}`,
+		`{"tool":"git_log","client":"claude-code","duration_ms":-1}`,
+		`{"tool":"git_log","client":"claude-code","duration_ms":99999999}`,
+		`{"tool":"git_log","client":"claude-code","response_tokens":-5}`,
+		`{"tool":"git_log","client":"claude-code","path":"/etc/passwd"}`, // nothing about the checkout is accepted
+	} {
+		assert.Equal(t, post(t, ts, path, body), 400, body)
+	}
+}

@@ -107,6 +107,7 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	mcp.AddTool(s, add("repo_overview", "Stats, packages (with summaries) and documents of a repository. Start here."), h.repoOverview)
 	mcp.AddTool(s, add("search", "Find symbols, files or doc sections by name substring. Returns ids for the other tools."), h.search)
 	registerAgentTools(s, h, add)
+	registerGitTools(s, add)
 	registerDiscoveryTools(s, h, add)
 	if len(opts) > 0 {
 		h.curated = opts[0].Curated
