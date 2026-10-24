@@ -3,6 +3,7 @@
 // branch from origin; mounted sources re-index what is on disk. Polls the
 // job and refreshes every page's data when it finishes.
 import type { Job } from '~/utils/types'
+import { createPoller, type PollStatus } from '~/utils/jobPolling'
 
 const props = defineProps<{ repo: string }>()
 const { data: info, refresh: refreshBranches } = useApiGet<{ current: string; branches: string[]; managed: boolean; remote?: string }>(
@@ -13,25 +14,37 @@ watch(info, (i) => { if (i && !branch.value) branch.value = i.current || i.branc
 
 const job = ref<Job | null>(null)
 const error = ref('')
-let timer: ReturnType<typeof setInterval> | undefined
+// Whether we can see the job is separate from the job's own state: a dropped
+// connection must not read as a failed job, nor free the button for a second
+// one while the first still runs.
+const pollStatus = ref<PollStatus>('stopped')
+let poller: ReturnType<typeof createPoller<Job>> | undefined
 
-async function poll(id: string) {
-  try {
-    job.value = await $fetch<Job>(apiPath(`jobs/${id}`))
-    if (job.value.state !== 'running') {
-      clearInterval(timer)
-      timer = undefined
-      if (job.value.state === 'succeeded') {
+const status = (e: unknown) => (e as { statusCode?: number; response?: { status?: number } })?.statusCode ?? (e as { response?: { status?: number } })?.response?.status
+
+function watchJob(id: string) {
+  poller?.stop()
+  poller = createPoller<Job>({
+    fetch: () => $fetch<Job>(apiPath(`jobs/${id}`)),
+    done: (j) => j.state !== 'running',
+    onUpdate: (j) => { job.value = j },
+    onFinish: async (j) => {
+      if (j.state === 'succeeded') {
         await refreshNuxtData()
         await refreshBranches()
       } else {
-        error.value = job.value.error ?? 'sync failed'
+        error.value = j.error ?? 'sync failed'
       }
-    }
-  } catch (e) {
-    error.value = apiErrorMessage(e)
-    clearInterval(timer)
-  }
+    },
+    onStatus: (s) => { pollStatus.value = s },
+    // The job is gone or access was lost: nothing to wait for.
+    fatal: (e) => [401, 403, 404].includes(status(e) ?? 0),
+    onError: (e) => {
+      error.value = apiErrorMessage(e)
+      if (job.value) job.value = { ...job.value, state: 'failed' }
+    },
+  })
+  poller.start()
 }
 
 async function sync() {
@@ -39,12 +52,13 @@ async function sync() {
   try {
     const body = info.value?.managed ? { branch: branch.value } : {}
     job.value = await apiPost<Job>(repoPath(props.repo, 'sync'), body)
-    timer = setInterval(() => poll(job.value!.id), 1500)
+    watchJob(job.value.id)
   } catch (e) {
     error.value = apiErrorMessage(e)
   }
 }
-onBeforeUnmount(() => timer && clearInterval(timer))
+onBeforeUnmount(() => poller?.stop())
+const lost = computed(() => pollStatus.value === 'lost')
 const running = computed(() => job.value?.state === 'running')
 </script>
 
@@ -55,8 +69,12 @@ const running = computed(() => job.value?.state === 'running')
     </select>
     <span v-else-if="info?.current" class="badge badge--violet" title="Mounted source: follows the checkout on disk">{{ info.current }}</span>
     <button :disabled="running" :title="info?.managed ? `Fetch ${branch} from ${info.remote} and re-index` : 'Re-index the mounted checkout'" @click="sync">
-      {{ running ? 'Syncing…' : 'Sync' }}
+      {{ running ? (pollStatus === 'retrying' ? 'Reconnecting…' : 'Syncing…') : 'Sync' }}
     </button>
+    <template v-if="lost">
+      <span class="warn small" role="status">Lost contact with the server. The sync may still be running.</span>
+      <button type="button" class="secondary" @click="poller?.resume()">Check status</button>
+    </template>
     <span v-if="job && job.state === 'succeeded'" class="badge badge--green">synced {{ fmtInt(job.nodes) }} nodes</span>
     <span v-if="error" class="error small" :title="error">{{ error.length > 80 ? `${error.slice(0, 79)}…` : error }}</span>
   </div>
@@ -66,4 +84,5 @@ const running = computed(() => job.value?.state === 'running')
 .sync { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .sync select { width: auto; min-width: 150px; min-height: 38px; }
 .small { font-size: 12.5px; }
+.warn { color: var(--warning); }
 </style>
