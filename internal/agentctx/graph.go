@@ -152,6 +152,9 @@ type PRContext struct {
 	// UsedElsewhere are the changed exported functions other repositories
 	// the caller may see call, with their callers there.
 	UsedElsewhere []ExternalUse `json:"used_elsewhere,omitempty"`
+	// CodeOwners are the CODEOWNERS owners of the changed files, who
+	// review the change, with how many of its files each owns.
+	CodeOwners []string `json:"code_owners,omitempty"`
 }
 
 // PROptions select the change to analyse: a unified diff, a list of files
@@ -278,6 +281,7 @@ func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRCon
 			out.SensitiveTouched = append(out.SensitiveTouched, c.Name+" ["+strings.Join(c.Tags, ",")+"]")
 		}
 	}
+	out.CodeOwners = s.changeOwners(ctx, repo, changes)
 	if out.UsedElsewhere, err = s.crossRepo(ctx, all, repo, o.Consumers, exported); err != nil {
 		return PRContext{}, fmt.Errorf("callers in other repositories: %w", err)
 	}

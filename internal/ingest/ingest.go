@@ -22,6 +22,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/arch"
 	"github.com/astrona-io/codesynapse/internal/cleanup"
+	"github.com/astrona-io/codesynapse/internal/codeowners"
 	"github.com/astrona-io/codesynapse/internal/conventions"
 	"github.com/astrona-io/codesynapse/internal/duplicates"
 	"github.com/astrona-io/codesynapse/internal/gitx"
@@ -125,6 +126,9 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	// The Go module at the root: answers write it as "~" in node IDs
 	// (internal/coretools, compact) and the resolver expands it back.
 	repoMeta := repoMetadata{Policy: metadata, GoModule: rootModulePath(root)}
+	if rules, at := codeowners.Read(root); at != "" && policy.PathAllowed(at) {
+		repoMeta.CodeOwners = rules
+	}
 	meta, err := json.Marshal(repoMeta)
 	if err != nil {
 		return nil, fmt.Errorf("encode repository policy: %w", err)

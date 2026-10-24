@@ -37,6 +37,8 @@ type repoMetadata struct {
 	// Conventions are the house style found in the code (internal/conventions),
 	// read back by model.ConventionsOf.
 	Conventions []string `json:"conventions,omitempty"`
+	// CodeOwners are the CODEOWNERS rules, read back by model.CodeOwnersOf.
+	CodeOwners []model.OwnerRule `json:"code_owners,omitempty"`
 }
 
 // RepositoryPolicy reads the last successfully ingested policy, never the live checkout.

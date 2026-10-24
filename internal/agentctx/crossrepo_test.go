@@ -53,3 +53,16 @@ func TestPRContextListsCallersInOtherRepositories(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, got.UsedElsewhere, 0)
 }
+
+func TestPRContextNamesCodeOwners(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindRepository, "r"), Kind: model.KindRepository, Repo: "r", Name: "r",
+		Meta: `{"code_owners":[{"p":"*","o":["@acme/platform"]},{"p":"/web/","o":["@acme/web"]}]}`})
+	require.NoError(t, s.ReplaceRepo(ctx, "r", g))
+
+	got, err := Service{R: s}.PRContext(ctx, "r", PROptions{Files: []string{"web/a.ts", "web/b.ts", "main.go"}})
+	require.NoError(t, err)
+	assert.Equal(t, got.CodeOwners, []string{"@acme/web (2 files)", "@acme/platform (1 file)"})
+}

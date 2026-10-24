@@ -20,6 +20,12 @@ function showRule(rule: string) {
   sevFilter.value = 'all'
   nextTick(() => findingsEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 }
+function showOwner(owner: string) {
+  const key = owner || NO_OWNER
+  ownerFilter.value = ownerFilter.value === key ? '' : key
+  sevFilter.value = 'all'
+  nextTick(() => findingsEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+}
 const filesByRule = computed(() => {
   const m = new Map<string, Set<string>>()
   for (const f of rep.value?.findings ?? []) {
@@ -44,6 +50,11 @@ const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info']
 const sevFilter = ref<string>('all')
 const reachFilter = ref<string>('all')
 const exposedOnly = ref(false)
+// A CODEOWNERS owner, or NO_OWNER for files no rule owns.
+const NO_OWNER = '-'
+const ownerFilter = ref('')
+const ownsFinding = (f: SecFinding) =>
+  !ownerFilter.value || (ownerFilter.value === NO_OWNER ? !f.code_owners?.length : !!f.code_owners?.includes(ownerFilter.value))
 // ?q= comes from the top bar's search, which opens a finding here.
 const q = ref(typeof route.query.q === 'string' ? route.query.q : '')
 
@@ -52,7 +63,8 @@ const findings = computed(() =>
     (sevFilter.value === 'all' || f.severity === sevFilter.value) &&
     (!ruleFilter.value || f.rule === ruleFilter.value) &&
     (!exposedOnly.value || f.exposed) &&
-    (!q.value || `${f.rule} ${f.location} ${f.owner?.name ?? ''} ${f.detail}`.toLowerCase().includes(q.value.toLowerCase())),
+    ownsFinding(f) &&
+    (!q.value || `${f.rule} ${f.location} ${f.owner?.name ?? ''} ${f.code_owners?.join(' ') ?? ''} ${f.detail}`.toLowerCase().includes(q.value.toLowerCase())),
   ),
 )
 const vulns = computed(() =>
@@ -159,10 +171,30 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
         <div v-else class="empty"><strong>No known vulnerabilities</strong>{{ rep.modules.total ? 'for the current filter.' : 'Ingest with vulnerability scanning enabled (CODESYNAPSE_VULN_SCAN=true).' }}</div>
       </section>
 
+      <section v-if="rep.owners?.length" class="panel">
+        <div class="panel__header">
+          <div><p class="eyebrow">CODEOWNERS</p><h2>Findings by owner</h2></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Owner</th><th>By severity</th><th class="num">Findings</th></tr></thead>
+            <tbody>
+              <tr v-for="o in rep.owners" :key="o.owner" class="clickable" :class="{ selected: ownerFilter === (o.owner || NO_OWNER) }" tabindex="0"
+                  @click="showOwner(o.owner)" @keydown.enter="showOwner(o.owner)">
+                <td><a href="#" class="mono" @click.prevent>{{ o.owner || 'no owner' }}</a></td>
+                <td><span v-for="s in SEVERITIES.filter((s) => o.counts[s])" :key="s" class="owner-sev"><SevBadge :severity="s" /> {{ o.counts[s] }}</span></td>
+                <td class="num">{{ o.findings }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section ref="findingsEl" class="panel">
         <div class="panel__header">
           <div><p class="eyebrow">Source code & config</p><h2>Findings <span class="muted">· {{ findings.length }}</span></h2></div>
           <button v-if="ruleFilter" class="chip active" @click="ruleFilter = ''">rule: {{ ruleFilter }} ✕</button>
+          <button v-if="ownerFilter" class="chip active" @click="ownerFilter = ''">owner: {{ ownerFilter === NO_OWNER ? 'none' : ownerFilter }} ✕</button>
         </div>
         <div v-if="findings.length" class="table-wrap">
           <table>
@@ -175,6 +207,7 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
                 <td>
                   <NuxtLink v-if="f.owner && f.owner.kind !== 'File'" :to="explore(f.owner.id)" class="mono">{{ f.owner.name }}</NuxtLink>
                   <div class="mono muted">{{ f.location }}</div>
+                  <div v-if="f.code_owners?.length" class="mono dim">{{ f.code_owners.join(' ') }}</div>
                 </td>
                 <td><span class="badge" :class="f.exposed ? 'badge--pink' : ''">{{ f.exposed ? 'yes' : 'no' }}</span></td>
                 <td><span class="badge" :class="f.tested ? 'badge--green' : 'badge--amber'">{{ f.tested ? 'yes' : 'no' }}</span></td>
@@ -245,6 +278,7 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
 .compact { gap: 6px; }
 .fix { color: var(--success); }
 .callsite { margin-top: 4px; font-size: 12px; }
+.owner-sev { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; white-space: nowrap; }
 .detail { max-width: 460px; color: var(--muted); font-size: 13px; }
 .clickable { cursor: pointer; }
 .clickable.selected td { background: var(--accent-soft); }

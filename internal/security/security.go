@@ -38,6 +38,8 @@ type Finding struct {
 	Language          string     `json:"language,omitempty"`
 	Detail            string     `json:"detail"`
 	Owner             *query.Ref `json:"owner,omitempty"`
+	// CodeOwners are the CODEOWNERS owners of the finding's file.
+	CodeOwners []string `json:"code_owners,omitempty"`
 	// Exposed means the owner is an entry point or reachable from one
 	// (main, an exported function, or an HTTP/MCP handler) within a few hops.
 	Exposed bool `json:"exposed"`
@@ -84,7 +86,10 @@ type Report struct {
 	Vulnerabilities  []Vulnerability `json:"vulnerabilities"`
 	Modules          ModuleStats     `json:"modules"`
 	Rules            []RuleCount     `json:"rules"`
-	Sensitive        []query.Ref     `json:"sensitive_functions"`
+	// OwnerCounts are the listed findings per CODEOWNERS owner, most
+	// severe work first; empty without a CODEOWNERS file.
+	OwnerCounts []OwnerCount `json:"owners,omitempty"`
+	Sensitive   []query.Ref  `json:"sensitive_functions"`
 	// Head and IndexedAt say which commit the report describes; a checkout
 	// that moved on needs a sync before the report covers it.
 	Head      string `json:"head,omitempty"`
@@ -341,6 +346,7 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 
 	if n, err := r.Node(ctx, model.NodeID(repo, model.KindRepository, repo)); err == nil {
 		rep.Head, rep.IndexedAt = n.Head, n.Time
+		rep.applyOwners(model.CodeOwnersOf(n))
 		var c Coverage
 		if n.Coverage != "" && json.Unmarshal([]byte(n.Coverage), &c) == nil {
 			rep.Coverage = &c
@@ -502,12 +508,22 @@ func WriteMarkdown(w io.Writer, r Report) error {
 		}
 		b.WriteString("\n")
 	}
+	if len(r.OwnerCounts) > 0 {
+		b.WriteString("## Findings by owner (CODEOWNERS)\n\n| Owner | Findings | By severity |\n|---|---|---|\n")
+		for _, o := range r.OwnerCounts {
+			fmt.Fprintf(&b, "| %s | %d | %s |\n", cmp.Or(o.Owner, "no owner"), o.Findings, counts(o.Counts))
+		}
+		b.WriteString("\n")
+	}
 	if len(r.Findings) > 0 {
 		b.WriteString("## Code findings (highest priority first)\n\n| Sev | Rule | Location | In | Exposed | Tested | Detail |\n|---|---|---|---|---|---|---|\n")
 		for _, f := range r.Findings {
 			owner := ""
 			if f.Owner != nil {
 				owner = "`" + f.Owner.Name + "`"
+			}
+			if len(f.CodeOwners) > 0 {
+				owner = strings.TrimSpace(owner + " " + strings.Join(f.CodeOwners, " "))
 			}
 			fmt.Fprintf(&b, "| %s | %s %s | %s | %s | %s | %s | %s |\n",
 				f.Severity, f.Rule, strings.Join(f.CWE, " "), f.Location, owner, yesNo(f.Exposed), yesNo(f.Tested), f.Detail)
