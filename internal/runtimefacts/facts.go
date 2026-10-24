@@ -81,10 +81,13 @@ func (t TestRun) Status() string {
 	return ""
 }
 
-// Source is the graph a report is mapped onto.
+// Source is the graph a report is mapped onto. It is asked by path, so a
+// store needs no listing of every file.
 type Source interface {
-	// Files lists the repository-relative paths of indexed files.
-	Files(ctx context.Context) ([]string, error)
+	// HasFile reports whether file (repository-relative) is indexed.
+	HasFile(ctx context.Context, file string) (bool, error)
+	// FilesIn lists the indexed files directly in dir ("." for the root).
+	FilesIn(ctx context.Context, dir string) ([]string, error)
 	// InFile lists the functions, methods and tests declared in file.
 	InFile(ctx context.Context, file string) ([]model.Node, error)
 }
@@ -98,15 +101,7 @@ type Input struct {
 // Map attributes coverage blocks to the functions that contain them and
 // test cases to test nodes.
 func Map(ctx context.Context, src Source, in Input) (Facts, error) {
-	files, err := src.Files(ctx)
-	if err != nil {
-		return Facts{}, err
-	}
-	m := mapper{src: src, files: map[string]bool{}, dirs: map[string][]string{}, nodes: map[string][]model.Node{}}
-	for _, f := range files {
-		m.files[f] = true
-		m.dirs[path.Dir(f)] = append(m.dirs[path.Dir(f)], f)
-	}
+	m := mapper{src: src, files: map[string]bool{}, dirs: map[string][]string{}, nodes: map[string][]model.Node{}, found: map[string]string{}}
 	out := Facts{Coverage: map[string]Coverage{}, Tests: map[string]TestRun{}, Sources: []string{}}
 
 	unmatched := map[string]bool{}
@@ -116,7 +111,10 @@ func Map(ctx context.Context, src Source, in Input) (Facts, error) {
 		}
 		byFile := map[string][]Block{}
 		for _, b := range p.Blocks {
-			f := m.file(b.File)
+			f, err := m.file(ctx, b.File)
+			if err != nil {
+				return Facts{}, err
+			}
 			if f == "" {
 				unmatched[b.File] = true
 				continue
@@ -175,42 +173,66 @@ func Map(ctx context.Context, src Source, in Input) (Facts, error) {
 
 type mapper struct {
 	src   Source
-	files map[string]bool
-	dirs  map[string][]string
+	files map[string]bool     // path -> indexed
+	dirs  map[string][]string // directory -> indexed files in it
 	nodes map[string][]model.Node
+	found map[string]string // reported path -> indexed file ("" for none)
 }
 
 // file finds the indexed file a reported path names: the path itself, or
 // its longest suffix that is an indexed path. Go profiles name files by
 // import path and LCOV often by absolute path; both end in the
 // repository-relative one.
-func (m mapper) file(reported string) string {
-	for p := reported; p != ""; {
-		if m.files[p] {
-			return p
-		}
-		_, rest, ok := strings.Cut(p, "/")
-		if !ok {
-			return ""
-		}
-		p = rest
+func (m mapper) file(ctx context.Context, reported string) (string, error) {
+	if f, ok := m.found[reported]; ok {
+		return f, nil
 	}
-	return ""
+	f, err := m.longest(reported, func(p string) (bool, error) {
+		if ok, seen := m.files[p]; seen {
+			return ok, nil
+		}
+		ok, err := m.src.HasFile(ctx, p)
+		m.files[p] = ok
+		return ok, err
+	})
+	m.found[reported] = f
+	return f, err
 }
 
 // dir is the same for a directory (a Go package path).
-func (m mapper) dir(reported string) string {
-	for p := reported; p != ""; {
-		if len(m.dirs[p]) > 0 {
-			return p
+func (m mapper) dir(ctx context.Context, reported string) (string, error) {
+	return m.longest(reported, func(p string) (bool, error) {
+		files, err := m.filesIn(ctx, p)
+		return len(files) > 0, err
+	})
+}
+
+func (m mapper) filesIn(ctx context.Context, dir string) ([]string, error) {
+	if files, ok := m.dirs[dir]; ok {
+		return files, nil
+	}
+	files, err := m.src.FilesIn(ctx, dir)
+	m.dirs[dir] = files
+	return files, err
+}
+
+// longest drops leading segments of p until exists says yes.
+func (m mapper) longest(p string, exists func(string) (bool, error)) (string, error) {
+	for p != "" {
+		ok, err := exists(p)
+		if err != nil {
+			return "", err
 		}
-		_, rest, ok := strings.Cut(p, "/")
-		if !ok {
-			return ""
+		if ok {
+			return p, nil
+		}
+		_, rest, cut := strings.Cut(p, "/")
+		if !cut {
+			return "", nil
 		}
 		p = rest
 	}
-	return ""
+	return "", nil
 }
 
 func (m mapper) inFile(ctx context.Context, file string) ([]model.Node, error) {
@@ -234,15 +256,26 @@ func (m mapper) test(ctx context.Context, tc TestCase) (string, error) {
 	name = strings.TrimSpace(name)
 	var candidates []string
 	if tc.File != "" {
-		if f := m.file(tc.File); f != "" {
+		f, err := m.file(ctx, tc.File)
+		if err != nil {
+			return "", err
+		}
+		if f != "" {
 			candidates = append(candidates, f)
 		}
 	}
 	if len(candidates) == 0 && tc.Suite != "" {
 		suite := strings.ReplaceAll(tc.Suite, "\\", "/")
-		d := m.dir(suite)
-		if d == "" && strings.Contains(suite, "/") && len(m.dirs["."]) > 0 {
-			d = "." // the module's root package: its path is the module path
+		d, err := m.dir(ctx, suite)
+		if err != nil {
+			return "", err
+		}
+		if d == "" && strings.Contains(suite, "/") {
+			if root, err := m.filesIn(ctx, "."); err != nil {
+				return "", err
+			} else if len(root) > 0 {
+				d = "." // the module's root package: its path is the module path
+			}
 		}
 		if d != "" && strings.Contains(suite, "/") {
 			for _, f := range m.dirs[d] {
@@ -254,7 +287,11 @@ func (m mapper) test(ctx context.Context, tc TestCase) (string, error) {
 			// pytest: "tests.test_app" or "tests.test_app.TestClass".
 			parts := strings.Split(tc.Suite, ".")
 			for i := len(parts); i > 0 && len(candidates) == 0; i-- {
-				if f := m.file(strings.Join(parts[:i], "/") + ".py"); f != "" {
+				f, err := m.file(ctx, strings.Join(parts[:i], "/")+".py")
+				if err != nil {
+					return "", err
+				}
+				if f != "" {
 					candidates = append(candidates, f)
 				}
 			}
@@ -281,25 +318,32 @@ func (m mapper) test(ctx context.Context, tc TestCase) (string, error) {
 
 // NodeSource is a Source over nodes held in memory (an ingest result).
 func NodeSource(nodes []model.Node) Source {
-	s := nodeSource{byFile: map[string][]model.Node{}}
+	s := nodeSource{files: map[string]bool{}, dirs: map[string][]string{}, byFile: map[string][]model.Node{}}
 	for _, n := range nodes {
 		switch {
 		case n.Kind == model.KindFile:
-			s.files = append(s.files, n.File)
+			s.files[n.File] = true
+			s.dirs[path.Dir(n.File)] = append(s.dirs[path.Dir(n.File)], n.File)
 		case n.Kind.IsCallable() && n.File != "":
 			s.byFile[n.File] = append(s.byFile[n.File], n)
 		}
 	}
-	slices.Sort(s.files)
+	for _, files := range s.dirs {
+		slices.Sort(files)
+	}
 	return s
 }
 
 type nodeSource struct {
-	files  []string
+	files  map[string]bool
+	dirs   map[string][]string
 	byFile map[string][]model.Node
 }
 
-func (s nodeSource) Files(context.Context) ([]string, error) { return s.files, nil }
+func (s nodeSource) HasFile(_ context.Context, f string) (bool, error) { return s.files[f], nil }
+func (s nodeSource) FilesIn(_ context.Context, d string) ([]string, error) {
+	return s.dirs[d], nil
+}
 func (s nodeSource) InFile(_ context.Context, f string) ([]model.Node, error) {
 	return s.byFile[f], nil
 }

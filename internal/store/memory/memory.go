@@ -153,7 +153,7 @@ func (s *Store) ReplaceRepo(ctx context.Context, repo string, g *model.Graph) er
 func (s *Store) DeleteRepo(_ context.Context, repo string) error {
 	s.mu.Lock()
 	delete(s.repos, repo)
-	delete(s.runtime, repo)
+	s.deleteRuntimeOf(repo)
 	s.mu.Unlock()
 	return nil
 }

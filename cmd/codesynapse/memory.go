@@ -70,6 +70,11 @@ func newAPIClient(base string) apiClient {
 	return apiClient{base: strings.TrimRight(base, "/"), token: tok, http: &http.Client{Timeout: 8 * time.Second}}
 }
 
+// send is do with a gzipped JSON body, for uploads too large to send plain.
+func (c apiClient) send(ctx context.Context, method, path string, gzipped []byte, out any) error {
+	return c.request(ctx, method, path, bytes.NewReader(gzipped), "gzip", out)
+}
+
 func (c apiClient) do(ctx context.Context, method, path string, body, out any) error {
 	if strings.Contains(path, "/memory") || strings.Contains(path, "/session-memory") {
 		if _, err := execution.Require(ctx); err != nil {
@@ -84,11 +89,18 @@ func (c apiClient) do(ctx context.Context, method, path string, body, out any) e
 		}
 		rd = bytes.NewReader(b)
 	}
+	return c.request(ctx, method, path, rd, "", out)
+}
+
+func (c apiClient) request(ctx context.Context, method, path string, rd io.Reader, encoding string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if encoding != "" {
+		req.Header.Set("Content-Encoding", encoding)
+	}
 	if id, ok := execution.From(ctx); ok {
 		req.Header.Set(execution.SessionHeader, id.SessionID)
 		req.Header.Set(execution.ParentSessionHeader, id.ParentSessionID)
