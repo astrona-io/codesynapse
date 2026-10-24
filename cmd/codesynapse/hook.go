@@ -169,7 +169,7 @@ func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 	case "lookup":
 		noteLookup(in)
 	case "session":
-		out = sessionRules(ctx, o.EC.Logger)
+		out = sessionRules(ctx, in, o.EC.Logger)
 	case "answer":
 		noteAnswer(in)
 	case "read-done":
@@ -305,7 +305,7 @@ func stopGuard(ctx context.Context, in toolHookInput, logger *slog.Logger) map[s
 	}
 	s := loadState(state)
 	if s.Stop == key {
-		return nil // this tree was checked already
+		return nil // this tree was checked already, or is how the session began
 	}
 	s.Stop = key
 	saveState(state, s)
