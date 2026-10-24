@@ -34,6 +34,11 @@ import (
 //     the agent is asked once to run verify_plan and get_pr_context before
 //     it finishes. The tools do the work (through the bridge's cached
 //     working-tree graph), so the hook itself stays instant.
+//   - hook answer (PostToolUse on the CodeSynapse tools) and hook read-done
+//     (PostToolUse on Read) count, per tool, the file line ranges answers
+//     gave and how many the agent then read (agent workflow roadmap step
+//     13). Stop reports the counts to the API: tool names and numbers only,
+//     never paths, ranges or the session.
 
 // readGuardLines is how many lines make a file large enough to guard;
 // CODESYNAPSE_READ_GUARD_LINES overrides it and 0 turns the guard off.
@@ -46,17 +51,40 @@ type toolHookInput struct {
 	SessionID      string `json:"session_id"`
 	Cwd            string `json:"cwd"`
 	StopHookActive bool   `json:"stop_hook_active"`
+	ToolName       string `json:"tool_name"`
 	ToolInput      struct {
 		FilePath string `json:"file_path"`
 		Offset   int    `json:"offset"`
 		Limit    int    `json:"limit"`
+		Repo     string `json:"repo"`
 	} `json:"tool_input"`
+	ToolResponse json.RawMessage `json:"tool_response"`
 }
 
 // hookState is what the hooks remember per chat session.
 type hookState struct {
 	Read []string `json:"read,omitempty"` // files already turned back once
 	Stop string   `json:"stop,omitempty"` // the tree the last stop check saw
+	// Ranges are the line ranges answers gave, oldest first.
+	Ranges []answerRange `json:"ranges,omitempty"`
+	// Counts are the per-tool totals so far, Sent what Stop has reported.
+	Counts map[string]rangeCounts `json:"counts,omitempty"`
+	Sent   map[string]rangeCounts `json:"sent,omitempty"`
+}
+
+// answerRange is one file:start-end an answer gave.
+type answerRange struct {
+	Tool  string `json:"t"`
+	Repo  string `json:"r,omitempty"` // the repository the call named, if any
+	File  string `json:"f"`
+	Start int    `json:"s"`
+	End   int    `json:"e"`
+	Read  bool   `json:"d,omitempty"`
+}
+
+type rangeCounts struct {
+	Returned int `json:"returned"`
+	Read     int `json:"read"`
 }
 
 // stateFile is per session, in the plugin's data folder (or the user
@@ -88,6 +116,9 @@ func saveState(file string, s hookState) {
 	if len(s.Read) > 200 {
 		s.Read = s.Read[len(s.Read)-200:]
 	}
+	if len(s.Ranges) > maxTrackedRanges {
+		s.Ranges = s.Ranges[len(s.Ranges)-maxTrackedRanges:]
+	}
 	raw, err := json.Marshal(s)
 	if err != nil || os.MkdirAll(filepath.Dir(file), 0o700) != nil {
 		return
@@ -112,7 +143,12 @@ func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 	case "read":
 		out = readGuard(in)
 	case "stop":
+		reportRetrieval(ctx, in, o.EC.Logger)
 		out = stopGuard(ctx, in, o.EC.Logger)
+	case "answer":
+		noteAnswer(in)
+	case "read-done":
+		noteRead(in)
 	}
 	if out != nil {
 		return json.NewEncoder(o.EC.Stdout).Encode(out)
@@ -262,7 +298,13 @@ func hookCmd(ec *app.Env) *cobra.Command {
 		WithShortDesc("PreToolUse hook for Read: turn back the first whole read of a large file with its outline").
 		WithNoArgs().Build())
 	parent.AddCommand(app.NewSubCommand("stop", &hookOptions{EC: ec, event: "stop"}, ec).
-		WithShortDesc("Stop hook: once per change, ask for verify_plan and get_pr_context before finishing").
+		WithShortDesc("Stop hook: report retrieval counts; once per change, ask for verify_plan and get_pr_context before finishing").
+		WithNoArgs().Build())
+	parent.AddCommand(app.NewSubCommand("answer", &hookOptions{EC: ec, event: "answer"}, ec).
+		WithShortDesc("PostToolUse hook for the CodeSynapse tools: note the line ranges an answer gave").
+		WithNoArgs().Build())
+	parent.AddCommand(app.NewSubCommand("read-done", &hookOptions{EC: ec, event: "read-done"}, ec).
+		WithShortDesc("PostToolUse hook for Read: count the answered line ranges the agent read").
 		WithNoArgs().Build())
 	return parent
 }

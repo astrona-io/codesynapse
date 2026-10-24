@@ -562,6 +562,8 @@ func Run(t *testing.T, s store.Store) {
 		require.NoError(t, s.AddUsage(ctx, []usage.Bucket{b}))
 		require.NoError(t, s.AddUsage(ctx, []usage.Bucket{{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 1, ResponseTokens: 100, DurationMs: 50, MaxDurationMs: 50},
 			{Day: "2000-01-02", Repo: Repo, Tool: usage.Session, Client: "codex", Calls: 1}}))
+		// Hook reports add only the range counters to the same bucket.
+		require.NoError(t, s.AddUsage(ctx, []usage.Bucket{{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", RangesReturned: 5, RangesRead: 2}}))
 		got, err := s.Usage(ctx, "2000-01-01")
 		require.NoError(t, err)
 		var mine []usage.Bucket
@@ -571,7 +573,8 @@ func Run(t *testing.T, s store.Store) {
 			}
 		}
 		require.Len(t, mine, 2)
-		assert.Equal(t, mine[0], usage.Bucket{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 3, Errors: 1, ResponseTokens: 400, DurationMs: 90, MaxDurationMs: 50})
+		assert.Equal(t, mine[0], usage.Bucket{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 3, Errors: 1, ResponseTokens: 400, DurationMs: 90, MaxDurationMs: 50,
+			RangesReturned: 5, RangesRead: 2})
 		assert.Equal(t, mine[1].Tool, usage.Session)
 		require.NoError(t, s.PruneUsage(ctx, "2000-01-02"))
 		got, err = s.Usage(ctx, "2000-01-01")

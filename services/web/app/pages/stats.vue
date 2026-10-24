@@ -41,6 +41,11 @@ const m = computed(() => s.value?.memory)
 const errorRate = computed(() => (a.value?.calls ? `${((a.value.errors / a.value.calls) * 100).toFixed(1)}%` : '–'))
 const callsPerDay = computed(() => (a.value?.daily ?? []).map((d) => ({ label: d.day, value: d.calls, detail: `${d.sessions} session(s), ${d.errors} error(s)` })))
 const avoidedPerDay = computed(() => (a.value?.daily ?? []).map((d) => ({ label: d.day, value: d.avoided_tokens, detail: `${fmtInt(d.response_tokens)} served` })))
+// Share of the line ranges each tool's answers gave that the agent then
+// read (Claude Code plugin hooks), most read first.
+const readShare = computed(() => (a.value?.tools ?? []).filter((t) => t.ranges_returned > 0)
+  .map((t) => ({ label: t.tool, value: Math.round((100 * Math.min(t.ranges_read, t.ranges_returned)) / t.ranges_returned), detail: `${fmtInt(t.ranges_read)} of ${fmtInt(t.ranges_returned)} line ranges read` }))
+  .sort((x, y) => y.value - x.value))
 const tools = computed(() => (a.value?.tools ?? []).map((t) => ({ label: t.tool, value: t.calls, detail: `${t.kind} · ${fmtInt(Math.round(t.avg_tokens))} tokens/call · ${t.avg_ms} ms avg${t.errors ? ` · ${t.errors} errors` : ''}` })))
 const clients = computed(() => (a.value?.clients ?? []).map((c) => ({ label: c.client, value: c.calls, detail: `${c.sessions} session(s)` })))
 const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.repo || '(no repo argument)', value: r.calls, detail: `${fmtCompact(r.response_tokens)} served · ~${fmtCompact(r.avoided_tokens)} avoided` })))
@@ -128,6 +133,11 @@ const automationPct = computed(() => {
             <div><p class="label">Most used tools</p><RankList :rows="tools" /></div>
             <div><p class="label">Clients</p><RankList :rows="clients" color="var(--violet)" /></div>
             <div><p class="label">Repositories asked about</p><RankList :rows="repoUse" /></div>
+          </div>
+          <div v-if="a.calls" class="read-share">
+            <p class="label">Answers the agent read</p>
+            <RankList :rows="readShare" suffix="%" :scale="100" color="var(--green)" empty="Install the Claude Code plugin to see which tools point agents to code they then read." />
+            <p v-if="readShare.length" class="muted small">Of the file line ranges a tool's answers gave, the share the agent read afterwards. A low share means the tool answers with places that do not help; reported by the plugin's hooks as counts only.</p>
           </div>
           <details class="method"><summary>How tokens avoided are estimated</summary><p class="muted small">{{ a.avoided_method }}</p></details>
         </section>
@@ -238,6 +248,7 @@ const automationPct = computed(() => {
 .kpis { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin: 12px 0; }
 .label { display: block; margin: 12px 0 8px; }
 h3 { margin: 18px 0 4px; font-size: 15px; }
+.read-share { margin-top: 16px; max-width: 560px; }
 .method summary { cursor: pointer; color: var(--muted); font-size: 12.5px; margin-top: 12px; }
 .refreshing { opacity: 0.6; transition: opacity 150ms; }
 .wrap { white-space: normal; word-break: break-word; }

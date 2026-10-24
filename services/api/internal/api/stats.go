@@ -82,6 +82,10 @@ type ToolStat struct {
 	AvgTokens      float64 `json:"avg_tokens"`
 	AvgMs          float64 `json:"avg_ms"`
 	MaxMs          int     `json:"max_ms"`
+	// RangesReturned and RangesRead say how many of the file line ranges
+	// the tool's answers gave were then read (Claude Code plugin hooks).
+	RangesReturned int `json:"ranges_returned"`
+	RangesRead     int `json:"ranges_read"`
 }
 
 // ClientStat is one MCP client (Claude Code, Codex, Cursor, ...).
@@ -305,6 +309,8 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 		t.ResponseTokens += bk.ResponseTokens
 		t.AvgMs += float64(bk.DurationMs) // summed here, averaged below
 		t.MaxMs = max(t.MaxMs, bk.MaxDurationMs)
+		t.RangesReturned += bk.RangesReturned
+		t.RangesRead += bk.RangesRead
 		ru := repos[bk.Repo]
 		if ru == nil {
 			ru = &RepoUsage{Repo: bk.Repo}

@@ -35,6 +35,11 @@ type Bucket struct {
 	ResponseTokens int `json:"response_tokens"`
 	DurationMs     int `json:"duration_ms"`
 	MaxDurationMs  int `json:"max_duration_ms"`
+	// RangesReturned counts the file line ranges the tool's answers gave the
+	// agent, and RangesRead those the agent then read (reported by the
+	// Claude Code plugin's hooks; docs/PLAN.md, agent workflow step 13).
+	RangesReturned int `json:"ranges_returned,omitempty"`
+	RangesRead     int `json:"ranges_read,omitempty"`
 }
 
 // Key identifies a bucket.
@@ -49,6 +54,8 @@ func (b *Bucket) Add(o Bucket) {
 	b.ResponseTokens += o.ResponseTokens
 	b.DurationMs += o.DurationMs
 	b.MaxDurationMs = max(b.MaxDurationMs, o.MaxDurationMs)
+	b.RangesReturned += o.RangesReturned
+	b.RangesRead += o.RangesRead
 }
 
 // Day formats t as a bucket day.

@@ -207,7 +207,7 @@ export interface MemoryFact {
 export interface MemoryGraph { notice: string; entities: MemoryEntity[]; facts: MemoryFact[] }
 
 export interface UsageDay { day: string; sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number }
-export interface UsageTool { tool: string; kind: string; calls: number; errors: number; response_tokens: number; avg_tokens: number; avg_ms: number; max_ms: number }
+export interface UsageTool { tool: string; kind: string; calls: number; errors: number; response_tokens: number; avg_tokens: number; avg_ms: number; max_ms: number; ranges_returned: number; ranges_read: number }
 export interface WorkspaceStats {
   generated_at: string; days: number
   agents: {

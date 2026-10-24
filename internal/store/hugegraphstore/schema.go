@@ -27,10 +27,10 @@ var (
 	reviewProps   = []string{"rid", "repo", "created_at", "updated_at", "doc"}
 	snapshotProps = []string{"sid", "repo", "at", "doc"}
 	curatedProps  = []string{"cid", "repo", "kind", "created_at", "doc"}
-	usageProps    = []string{"ukey", "day", "daynum", "org", "repo", "tool", "client", "calls", "errors", "response_tokens", "duration_ms", "max_duration_ms"}
+	usageProps    = []string{"ukey", "day", "daynum", "org", "repo", "tool", "client", "calls", "errors", "response_tokens", "duration_ms", "max_duration_ms", "ranges_returned", "ranges_read"}
 	otherTexts    = []string{"evidence", "origin_session_id", "eid", "tenant_id", "ns", "type", "created_at", "updated_at", "emb_model", "fid", "subj", "obj", "predicate", "source",
 		"valid_from", "valid_to", "rid", "doc", "ukey", "day", "org", "tool", "client", "sid", "at", "cid", "kind"}
-	otherLongs = []string{"count", "confirmations", "daynum", "calls", "errors", "response_tokens", "duration_ms", "max_duration_ms"}
+	otherLongs = []string{"count", "confirmations", "daynum", "calls", "errors", "response_tokens", "duration_ms", "max_duration_ms", "ranges_returned", "ranges_read"}
 )
 
 const schemaScript = `
