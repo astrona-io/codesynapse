@@ -4,6 +4,7 @@
 // to select, double-click to expand. Canvas instead of SVG so a few hundred
 // nodes stay smooth.
 import type { ViewEdge, ViewNode } from '~/utils/types'
+import { orderNodes, stepSelection } from '~/utils/graphNav'
 
 const props = defineProps<{
   nodes: ViewNode[]
@@ -291,6 +292,33 @@ function onUp() {
   if (dragging && !dragging.moved) emit('select', dragging.kind === 'node' ? dragging.sim!.id : null)
   dragging = null
 }
+// Keyboard: the canvas takes focus; arrows walk the visible nodes in the
+// order of the node list beside it (hubs first), Enter or E expands the
+// selected one, Escape clears the selection and F fits the view.
+const walk = computed(() => orderNodes(visibleNodes.value, visibleEdges.value))
+function onKey(ev: KeyboardEvent) {
+  if (ev.altKey || ev.ctrlKey || ev.metaKey) return
+  let handled = true
+  switch (ev.key) {
+    case 'ArrowDown': case 'ArrowRight': case 'ArrowUp': case 'ArrowLeft': {
+      const next = stepSelection(walk.value, props.selected, ev.key === 'ArrowDown' || ev.key === 'ArrowRight' ? 1 : -1)
+      if (next) { emit('select', next); centerOn(next) }
+      break
+    }
+    case 'Home': case 'End': {
+      const first = ev.key === 'Home' ? walk.value[0] : walk.value.at(-1)
+      if (first) { emit('select', first.id); centerOn(first.id) }
+      break
+    }
+    case 'Enter': case 'e': case 'E':
+      if (props.selected) emit('expand', props.selected)
+      break
+    case 'Escape': emit('select', null); break
+    case 'f': case 'F': fit(); break
+    default: handled = false
+  }
+  if (handled) ev.preventDefault()
+}
 function onDblClick(ev: MouseEvent) {
   const s = hit(ev)
   if (s) emit('expand', s.id)
@@ -364,6 +392,9 @@ onBeforeUnmount(() => {
   <div ref="wrap" class="explorer-canvas">
     <canvas
       ref="canvas"
+      tabindex="0" role="application"
+      aria-label="Code graph. The same nodes are listed after it. Arrow keys move between nodes, Enter expands the selected node, Escape clears it, F fits the view."
+      @keydown="onKey"
       @pointerdown="onDown" @pointermove="onMove" @pointerup="onUp" @pointercancel="onUp"
       @dblclick="onDblClick" @wheel="onWheel"
     />
@@ -373,4 +404,5 @@ onBeforeUnmount(() => {
 <style scoped>
 .explorer-canvas { position: relative; width: 100%; height: 100%; min-height: 420px; border-radius: 8px; overflow: hidden; }
 canvas { display: block; touch-action: none; cursor: grab; }
+canvas:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
 </style>

@@ -34,6 +34,11 @@ const selectedEdges = computed(() => {
     out: edges.value.filter((e) => e.from === selected.value),
   }
 })
+// The same nodes as a list, so the graph can be read and explored without a
+// pointer: hubs first, kinds you hid left out, the selected one marked.
+const shownNodes = computed(() => orderNodes(nodes.value.filter((n) => !hiddenKinds.value.has(n.kind)), edges.value.filter((e) => !hiddenEdges.value.has(e.kind))))
+const connections = computed(() => (selected.value ? edges.value.filter((e) => e.from === selected.value || e.to === selected.value).length : 0))
+const announcement = computed(() => announce({ busy: busy.value, nodes: nodes.value.length, edges: edges.value.length, selected: selectedNode.value, connections: connections.value }))
 const kindCounts = computed(() => {
   const c: Record<string, number> = {}
   for (const n of nodes.value) c[n.kind] = (c[n.kind] ?? 0) + 1
@@ -172,7 +177,8 @@ onMounted(load)
             @select="(id) => (selected = id)" @expand="expand"
           />
         </ClientOnly>
-        <p class="muted hint">Scroll to zoom · drag background to pan · drag a node to pin it · click to inspect · double-click to expand</p>
+        <p class="sr-only" role="status" aria-live="polite">{{ announcement }}</p>
+        <p class="muted hint">Keyboard: focus the graph, then arrow keys move between nodes · Enter expands · Escape clears · F fits. Pointer: scroll to zoom · drag background to pan · drag a node to pin it · click to inspect · double-click to expand</p>
       </div>
 
       <aside class="side">
@@ -193,6 +199,19 @@ onMounted(load)
             </button>
           </div>
           <p class="muted small">Red ring = calls security-sensitive APIs. Dashed = interface dispatch.</p>
+        </div>
+
+        <div class="panel">
+          <h2 id="node-list-title">Nodes in the graph <span class="muted">{{ shownNodes.length }}</span></h2>
+          <p class="muted small">Select a node to see its connections below; Expand loads its neighbours.</p>
+          <ul class="node-list" aria-labelledby="node-list-title">
+            <li v-for="n in shownNodes" :key="n.id" :class="{ current: n.id === selected }">
+              <button type="button" class="pick" :aria-pressed="n.id === selected" @click="selected = n.id">
+                <span class="tag">{{ n.kind }}</span> <span class="mono">{{ n.name }}</span>
+              </button>
+              <button type="button" class="secondary tiny" :disabled="busy" :aria-label="`Expand ${n.name}`" @click="expand(n.id)">Expand</button>
+            </li>
+          </ul>
         </div>
 
         <div v-if="selectedNode" class="panel">
@@ -249,6 +268,11 @@ onMounted(load)
 .chip.off { opacity: .4; }
 .chip i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
 .small { font-size: 12px; margin-top: 10px; }
+.node-list { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 3px; max-height: 280px; overflow-y: auto; }
+.node-list li { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
+.node-list li.current { background: var(--accent-soft); border-radius: var(--radius-xs); }
+.node-list .pick { flex: 1; min-width: 0; background: none; border: 0; color: var(--ink); text-align: left; padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.node-list .pick:hover:not(:disabled) { background: var(--hover); }
 .edges { list-style: none; padding: 0; margin: 0; display: grid; gap: 3px; }
 .edges li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 900px) {

@@ -383,3 +383,6 @@ hr, .rule { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Text for assistive technology only (live announcements, extra labels). */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
