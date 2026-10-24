@@ -16,6 +16,27 @@ The plugin packages everything CodeSynapse does in Claude Code in one install: t
 
 ## What it adds
 
+The Stop hook also reads model usage from the local `transcript_path`: input,
+output, cached input and reported assistant turns. It counts duplicate assistant
+blocks once and reports only new numeric totals after a successful report.
+Claude input includes uncached input, cache reads and cache writes; cached input
+is shown as part of input, not added again to the total. Statistics shows the
+input/output percentage split and keeps estimated context savings separate.
+Transcripts are read locally with a 64 MiB limit; their text, paths and message
+IDs are never sent. Missing or unsupported usage remains unavailable. The parser
+also accepts Codex cumulative `token_count` events when a hook supplies its
+transcript; installing the Claude plugin does not install Codex hooks. Reports
+are best effort, like existing retrieval counts, and are not a billing ledger.
+
+PostToolUse and PostToolUseFailure hooks for `Edit|Write` record attempt counts,
+failures and payload byte sizes. Stop reports those numbers and clears them only
+after success. For successful edits with a known file size, the dashboard compares
+old + new text bytes with a hypothetical full-file rewrite, estimating avoided
+output at bytes/4. Edits are never blocked. Ruleset version 2 encourages targeted
+edits before the agent emits its changes; the hooks measure, they do not shorten
+an edit already emitted. Native Codex/Cursor lifecycle hooks also observe compatible
+edit metadata and forward a `transcript_path` when supplied by the runtime.
+
 | Part | What it does |
 |---|---|
 | MCP server `codesynapse` | `codesynapse mcp bridge`: the CodeSynapse tools; every call goes to the server (opt in to working-tree answers with `CODESYNAPSE_BRIDGE_WORKTREE=true`). In Claude Code the tools are named `mcp__plugin_codesynapse_codesynapse__<tool>`. |

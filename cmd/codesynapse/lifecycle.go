@@ -45,6 +45,7 @@ func (o *lifecycleOptions) Validate(context.Context, *app.Env) error {
 type lifecycleInput struct {
 	ToolUseID            string          `json:"tool_use_id"`
 	AgentID              string          `json:"agent_id"`
+	TranscriptPath       string          `json:"transcript_path"`
 	SessionID            string          `json:"session_id"`
 	ConversationID       string          `json:"conversation_id"`
 	ParentConversationID string          `json:"parent_conversation_id"`
@@ -114,12 +115,17 @@ func decodeLifecycle(in io.Reader, client, event string) (lifecycleInput, toolHo
 	if raw.Cwd == "" && len(raw.WorkspaceRoots) == 1 {
 		raw.Cwd = raw.WorkspaceRoots[0]
 	}
-	tool := toolHookInput{SessionID: raw.SessionID, Cwd: raw.Cwd, ToolName: raw.ToolName, StopHookActive: raw.StopHookActive || raw.LoopCount > 0, Client: client}
+	tool := toolHookInput{SessionID: raw.SessionID, Cwd: raw.Cwd, ToolName: raw.ToolName, StopHookActive: raw.StopHookActive || raw.LoopCount > 0, Client: client, TranscriptPath: raw.TranscriptPath}
 	input := raw.ToolInput
 	if len(input) > 0 && input[0] == '"' {
 		var s string
 		if json.Unmarshal(input, &s) == nil {
-			input = []byte(s)
+			if raw.ToolName == "apply_patch" {
+				tool.ToolInput.Patch = s
+				input = nil
+			} else {
+				input = []byte(s)
+			}
 		}
 	}
 	if len(input) > 0 && !bytes.Equal(input, []byte("null")) {
@@ -343,10 +349,13 @@ func (o *lifecycleOptions) Run(ctx context.Context, _ *app.Env) error {
 			}
 		}
 	case "PostToolUse", "postToolUse", "afterMCPExecution":
+		noteEdit(tool, false)
 		noteAnswer(tool)
 		if activity.Category == "read" {
 			noteRead(tool)
 		}
+	case "PostToolUseFailure", "postToolUseFailure":
+		noteEdit(tool, true)
 	case "Stop", "stop":
 		reportRetrieval(ctx, tool, o.EC.Logger)
 		if raw.Status != "error" && raw.Status != "aborted" {

@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -29,6 +30,8 @@ func usageMiddleware(rec *usage.Recorder) mcp.Middleware {
 				return res, err
 			case "tools/call", "prompts/get":
 				start := time.Now()
+				resolved := &usageRepository{}
+				ctx = context.WithValue(ctx, usageRepositoryKey{}, resolved)
 				res, err := next(ctx, method, req)
 				name, repo := "", ""
 				switch p := req.GetParams().(type) {
@@ -41,6 +44,11 @@ func usageMiddleware(rec *usage.Recorder) mcp.Middleware {
 					repo = args.Repo
 				case *mcp.GetPromptParams:
 					name, repo = "prompt:"+p.Name, p.Arguments["repo"]
+				}
+				if repo == "" {
+					resolved.mu.Lock()
+					repo = resolved.name
+					resolved.mu.Unlock()
 				}
 				failed := err != nil
 				if r, ok := res.(*mcp.CallToolResult); ok && r != nil && r.IsError {
@@ -60,10 +68,37 @@ func usageMiddleware(rec *usage.Recorder) mcp.Middleware {
 	}
 }
 
+type usageRepositoryKey struct{}
+
+type usageRepository struct {
+	mu        sync.Mutex
+	name      string
+	ambiguous bool
+}
+
+// Record the handler's authorised resolution, without another graph query or
+// guessing that a repository-wide tool belongs to the last repository used.
+func noteUsageRepository(ctx context.Context, repo string) {
+	if r, ok := ctx.Value(usageRepositoryKey{}).(*usageRepository); ok {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.ambiguous {
+			return
+		}
+		if r.name != "" && r.name != repo {
+			r.name, r.ambiguous = "", true
+			return
+		}
+		r.name = repo
+	}
+}
+
 func sessionClient(req mcp.Request) string {
-	if ss, ok := req.GetSession().(*mcp.ServerSession); ok {
-		if p := ss.InitializeParams(); p != nil && p.ClientInfo != nil {
-			return p.ClientInfo.Name
+	// The SDK reads per-request metadata for sessionless clients and falls
+	// back to initialize for clients using the session protocol.
+	if r, ok := req.(interface{ ClientInfo() *mcp.Implementation }); ok {
+		if ci := r.ClientInfo(); ci != nil {
+			return ci.Name
 		}
 	}
 	return ""

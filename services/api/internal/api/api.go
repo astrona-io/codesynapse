@@ -122,6 +122,7 @@ type Server struct {
 	st          store.Store
 	jobs        *Jobs
 	notify      notifyCache
+	overviews   overviewCache
 	// offload extracts memory triples from conversation turns (local model only).
 	offload *offload.Worker
 	recall  *recall.Service

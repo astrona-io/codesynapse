@@ -47,10 +47,14 @@ type Stats struct {
 
 // AgentStats summarises MCP usage in the window.
 type AgentStats struct {
-	Sessions       int `json:"sessions"`
-	Calls          int `json:"calls"`
-	Errors         int `json:"errors"`
-	ResponseTokens int `json:"response_tokens"`
+	Edits              EditStats  `json:"edits"`
+	Tokens             TokenStats `json:"tokens"`
+	ContextTotalTokens int        `json:"context_total_tokens"`
+	ContextSavedPct    float64    `json:"context_saved_pct"`
+	Sessions           int        `json:"sessions"`
+	Calls              int        `json:"calls"`
+	Errors             int        `json:"errors"`
+	ResponseTokens     int        `json:"response_tokens"`
 	// AvoidedTokens estimates tokens an agent would have read from files to
 	// answer the same questions (see AvoidedMethod).
 	AvoidedTokens int        `json:"avoided_tokens"`
@@ -63,6 +67,22 @@ type AgentStats struct {
 	Workflow WorkflowStats `json:"workflow"`
 	Clients  []ClientStat  `json:"clients"`
 	Repos    []RepoUsage   `json:"repos"`
+}
+
+// TokenStats is the usage reported by agent hooks for instrumented turns.
+// It is separate from MCP response-size and avoided-context estimates.
+type TokenStats struct {
+	usage.TokenCounts
+	Total     int     `json:"total"`
+	InputPct  float64 `json:"input_pct"`
+	OutputPct float64 `json:"output_pct"`
+}
+
+// EditStats compares payload sizes with a hypothetical full-file rewrite.
+type EditStats struct {
+	usage.EditCounts
+	EstimatedOutputSaved int     `json:"estimated_output_saved"`
+	AvoidedPct           float64 `json:"avoided_pct"`
 }
 
 // WorkflowStats answer "do agents use CodeSynapse first?": of the sessions
@@ -318,6 +338,12 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 		if day == nil {
 			continue
 		}
+		if a.Tokens.AddCounter(bk.Tool, bk.Calls) {
+			continue
+		}
+		if a.Edits.AddCounter(bk.Tool, bk.Calls) {
+			continue
+		}
 		if usage.IsWorkflow(bk.Tool) {
 			switch bk.Tool {
 			case usage.FirstCodeSynapse:
@@ -386,6 +412,19 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 		ru.Calls += bk.Calls
 		ru.ResponseTokens += bk.ResponseTokens
 		ru.AvoidedTokens += avoided
+	}
+	a.Tokens.Total = a.Tokens.Input + a.Tokens.Output
+	a.Edits.EstimatedOutputSaved = a.Edits.AvoidedBytes / 4
+	if a.Edits.BaselineBytes > 0 {
+		a.Edits.AvoidedPct = round1(100 * float64(a.Edits.AvoidedBytes) / float64(a.Edits.BaselineBytes))
+	}
+	if a.Tokens.Total > 0 {
+		a.Tokens.InputPct = round1(100 * float64(a.Tokens.Input) / float64(a.Tokens.Total))
+		a.Tokens.OutputPct = round1(100 - a.Tokens.InputPct)
+	}
+	a.ContextTotalTokens = a.ResponseTokens + a.AvoidedTokens
+	if a.ContextTotalTokens > 0 {
+		a.ContextSavedPct = round1(100 * float64(a.AvoidedTokens) / float64(a.ContextTotalTokens))
 	}
 	for i := range a.Daily {
 		a.Daily[i] = *daily[a.Daily[i].Day]

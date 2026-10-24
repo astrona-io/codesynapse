@@ -128,6 +128,9 @@ type RuleCount struct {
 
 // Options filter the report.
 type Options struct {
+	// SummaryOnly skips test coverage, call sites, dependency paths and sensitive
+	// symbols. Counts, exposure and grading use the same rules as a full report.
+	SummaryOnly bool
 	// Suppression returns a reason only for an active, authorised tenant approval.
 	// Raw findings and findings beyond the report limit remain unchanged.
 	Suppression func(model.Node) string
@@ -174,11 +177,13 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 					exposure[o.ID] = exp
 				}
 				fv.Exposed = exp
-				tests, err := svc.Tests(ctx, o.ID, 3, 1)
-				if err != nil {
-					return rep, err
+				if !opts.SummaryOnly {
+					tests, err := svc.Tests(ctx, o.ID, 3, 1)
+					if err != nil {
+						return rep, err
+					}
+					fv.Tested = len(tests) > 0
 				}
-				fv.Tested = len(tests) > 0
 			}
 		}
 		fv.Priority = severityBase[n.Severity]
@@ -232,14 +237,16 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 		if n.Ecosystem != "" && n.Ecosystem != "Go" {
 			key = n.Ecosystem + ":" + n.Package
 		}
-		// A package can be installed in several versions; the advisory hit
-		// one of them, whose chain of dependents is the one to show.
-		mod, err := r.Node(ctx, model.NodeID(repo, model.KindModule, key+"@"+n.Version))
-		if err != nil {
-			mod, err = r.Node(ctx, model.NodeID(repo, model.KindModule, key))
-		}
-		if err == nil {
-			vv.Via, vv.Roots = mod.Via, mod.Roots
+		if !opts.SummaryOnly {
+			// A package can be installed in several versions; the advisory hit
+			// one of them, whose chain of dependents is the one to show.
+			mod, err := r.Node(ctx, model.NodeID(repo, model.KindModule, key+"@"+n.Version))
+			if err != nil {
+				mod, err = r.Node(ctx, model.NodeID(repo, model.KindModule, key))
+			}
+			if err == nil {
+				vv.Via, vv.Roots = mod.Via, mod.Roots
+			}
 		}
 		for _, a := range n.Aliases {
 			if strings.HasPrefix(a, "CVE-") {
@@ -251,11 +258,13 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 		switch n.Reachability {
 		case "called":
 			vv.Priority += 10
-			sites, err := callSites(ctx, r, n.ID)
-			if err != nil {
-				return rep, err
+			if !opts.SummaryOnly {
+				sites, err := callSites(ctx, r, n.ID)
+				if err != nil {
+					return rep, err
+				}
+				vv.CallSites = sites
 			}
-			vv.CallSites = sites
 		case "imported":
 			w /= 2
 		default:
@@ -303,15 +312,17 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 		}
 	}
 
-	sensitive, err := r.List(ctx, repo, store.Filter{Kinds: []model.NodeKind{model.KindFunction, model.KindMethod}, ExcludeTests: true}, store.ByFanIn, store.MaxLimit)
-	if err != nil {
-		return rep, err
-	}
-	for _, s := range sensitive {
-		if len(s.Node.SecurityTags) > 0 && len(rep.Sensitive) < 25 {
-			ref := query.RefOf(s.Node)
-			ref.Summary = strings.Join(s.Node.SecurityTags, ", ")
-			rep.Sensitive = append(rep.Sensitive, ref)
+	if !opts.SummaryOnly {
+		sensitive, err := r.List(ctx, repo, store.Filter{Kinds: []model.NodeKind{model.KindFunction, model.KindMethod}, ExcludeTests: true}, store.ByFanIn, store.MaxLimit)
+		if err != nil {
+			return rep, err
+		}
+		for _, s := range sensitive {
+			if len(s.Node.SecurityTags) > 0 && len(rep.Sensitive) < 25 {
+				ref := query.RefOf(s.Node)
+				ref.Summary = strings.Join(s.Node.SecurityTags, ", ")
+				rep.Sensitive = append(rep.Sensitive, ref)
+			}
 		}
 	}
 

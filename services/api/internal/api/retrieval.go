@@ -47,6 +47,8 @@ type workflowCounts struct {
 }
 
 type retrievalReport struct {
+	Edits    *usage.EditCounts          `json:"edits,omitempty"`
+	Tokens   *usage.TokenCounts         `json:"tokens,omitempty"`
 	Client   string                     `json:"client"`
 	Tools    map[string]retrievalCounts `json:"tools"`
 	Workflow *workflowCounts            `json:"workflow,omitempty"`
@@ -78,6 +80,20 @@ func (s *Server) handleRetrievalReport(w http.ResponseWriter, r *http.Request) {
 	}
 	day := usage.Day(time.Now())
 	buckets := make([]usage.Bucket, 0, len(in.Tools))
+	if in.Edits != nil {
+		for tool, n := range in.Edits.Counters() {
+			if n > 0 {
+				buckets = append(buckets, usage.Bucket{Day: day, Org: org, Repo: repo, Tool: tool, Client: in.Client, Calls: n})
+			}
+		}
+	}
+	if in.Tokens != nil {
+		for tool, n := range in.Tokens.Counters() {
+			if n > 0 {
+				buckets = append(buckets, usage.Bucket{Day: day, Org: org, Repo: repo, Tool: tool, Client: in.Client, Calls: n})
+			}
+		}
+	}
 	for tool, c := range in.Tools {
 		if c.Returned == 0 && c.Read == 0 {
 			continue
@@ -107,7 +123,17 @@ func (in retrievalReport) validate() error {
 	if !clientNameRe.MatchString(in.Client) {
 		return errors.New("client must be a short lower-case name, e.g. claude-code")
 	}
-	if len(in.Tools) > maxRetrievalTools || (len(in.Tools) == 0 && in.Workflow == nil) {
+	if in.Tokens != nil {
+		if err := in.Tokens.Validate(); err != nil {
+			return err
+		}
+	}
+	if in.Edits != nil {
+		if err := in.Edits.Validate(); err != nil {
+			return err
+		}
+	}
+	if len(in.Tools) > maxRetrievalTools || (len(in.Tools) == 0 && in.Workflow == nil && in.Tokens == nil && in.Edits == nil) {
 		return fmt.Errorf("report up to %d tools, or the workflow counts", maxRetrievalTools)
 	}
 	if wf := in.Workflow; wf != nil {

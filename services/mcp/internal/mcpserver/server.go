@@ -164,6 +164,7 @@ func (h *handlers) repo(ctx context.Context, repo string) (string, error) {
 		if restricted && !slices.Contains(allowed, repo) {
 			return "", fmt.Errorf("repository %q is not available to your organisation", repo)
 		}
+		noteUsageRepository(ctx, repo)
 		return repo, nil
 	}
 	repos, err := h.visibleRepos(ctx)
@@ -177,6 +178,7 @@ func (h *handlers) repo(ctx context.Context, repo string) (string, error) {
 		}
 		return "", errors.New("no repositories are indexed; run `codesynapse ingest` first")
 	case 1:
+		noteUsageRepository(ctx, repos[0].Name)
 		return repos[0].Name, nil
 	}
 	names := make([]string, 0, len(repos))

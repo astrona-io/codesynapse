@@ -59,13 +59,10 @@ type submitReviewOut struct {
 }
 
 func clientName(req *mcp.CallToolRequest) string {
-	if req == nil || req.Session == nil {
+	if req == nil {
 		return ""
 	}
-	if p := req.Session.InitializeParams(); p != nil && p.ClientInfo != nil {
-		return p.ClientInfo.Name
-	}
-	return ""
+	return sessionClient(req)
 }
 
 func (h *handlers) submitReview(ctx context.Context, req *mcp.CallToolRequest, in submitReviewIn) (*mcp.CallToolResult, submitReviewOut, error) {
