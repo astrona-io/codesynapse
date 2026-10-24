@@ -285,7 +285,7 @@ Ordered by value.
 4. **tree-sitter parsers** for exact Python/JS/TS syntax and more languages (Java, Rust, C#, PHP), via a WASM runtime to stay cgo-free; type inference for TypeScript (tsc) and Python (pyright) as optional enrichers.
 5. **Unused npm/PyPI dependencies**, with tooling-aware exceptions (bundler plugins, CLIs, type packages).
 6. **Semantic search** with Milvus vectors over summaries and signatures (would also improve `minimal_context`), local embeddings by default.
-7. **GitHub Action** running `codesynapse audit --fail-on high` and `review --offline`, posting the result as a PR comment.
+7. **GitHub Action** (done: `action.yml` at the repository root builds the CLI from its own source, runs `review --offline` against the pull request's base and posts the report as one comment updated on each push (job summary for forks); `fail-on-new` fails only on findings the change introduces (`review --fail-on-new`); this repository reviews its own pull requests with it). Running `codesynapse audit --fail-on high` and `review --offline`, posting the result as a PR comment.
 8. **Scheduled sync** of registered repositories and webhooks from the forge.
 9. **Read-only HugeGraph role** for the MCP and API services, separate from the ingest writer.
 11. **One-command install** (done): `codesynapse install` (namespace, random-credential Secret made once, the chart at the CLI's version, `helm test`), `codesynapse status` (release and every component's ready replicas; exit 1 when not ready; `--wait`, `--test`) and `codesynapse uninstall` (data kept unless `--keep-data=false`), driving the local `helm` and `kubectl` like `cilium install`, with a `--local` preset for laptop clusters.

@@ -127,6 +127,17 @@ func findingsIn(ctx context.Context, r store.Reader, repo string, files []string
 	return out, nil
 }
 
+// IntroducesAtLeast reports a new finding at or above severity.
+func (d SecurityDelta) IntroducesAtLeast(severity string) bool {
+	floor := model.SeverityRank(severity)
+	for sev, n := range d.Introduced {
+		if n > 0 && model.SeverityRank(sev) >= floor {
+			return true
+		}
+	}
+	return false
+}
+
 // Headline says the delta in one line, after "this change": "introduces
 // 1 high; fixes 2 medium".
 func (d SecurityDelta) Headline() string {
