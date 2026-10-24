@@ -52,7 +52,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', outside))
         <span class="um__name">{{ user.name || user.email }}</span>
         <span v-if="role" class="um__role">{{ role }}</span>
       </span>
-      <span v-else>Menu</span>
+      <span v-else>Settings</span>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
     </button>
     <div v-if="open" :id="`${id}-menu`" class="um__menu" role="menu" aria-label="Account">
