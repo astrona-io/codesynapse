@@ -151,6 +151,7 @@ const orgValue = computed({
           <span class="dot" :class="healthError ? 'dot--bad' : health ? 'dot--ok' : 'dot--warn'" />
           <span class="sr-only">{{ healthError ? 'API unreachable' : health ? 'Connected' : 'Connecting…' }}</span>
         </span>
+        <NotificationBell v-if="!session.restricted.value" />
         <UserMenu />
         <button type="button" class="secondary menu-toggle" :aria-expanded="menuOpen" aria-controls="sidebar" @click="menuOpen = !menuOpen">Menu</button>
       </div>
