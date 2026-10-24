@@ -302,6 +302,7 @@ func (s *Server) routes() {
 	s.repoPolicyRoutes()
 	s.runtimeRoutes()
 	s.conventionsRoutes()
+	s.agentSessionRoutes()
 	s.retrievalRoutes()
 	s.agentRulesRoutes()
 	s.notificationRoutes()

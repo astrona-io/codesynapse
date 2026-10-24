@@ -392,6 +392,18 @@ export interface AdminHealth {
   jobs: { total: number; running: number; succeeded: number; failed: number }
   unowned: string[]
 }
+// One agent (chat) session, from the MCP audit log.
+export interface AgentSession {
+  id: string; actor: string; client?: string; first: string; last: string
+  calls: number; errors: number; bytes: number; duration_ms: number
+  tools: Record<string, number>; repos: string[]
+}
+export interface AgentSessionList { sessions: AgentSession[]; days: number; truncated: boolean; scope: 'own' | 'organisation' }
+export interface SessionCall {
+  at: string; method: string; name?: string; repo?: string; outcome: string; error?: string
+  duration_ms: number; bytes: number; args?: Record<string, string>
+}
+export interface AgentSessionDetail { id: string; actor: string; calls: SessionCall[]; truncated: boolean; limit: number }
 export interface AuditEvent {
   id: number; at: string; request_id?: string; user_id?: string; actor_email?: string; via?: string; key_id?: string; org_id?: string
   ip?: string; user_agent?: string; action: string; target?: string; outcome: string; status?: number; detail?: string; hash: string
