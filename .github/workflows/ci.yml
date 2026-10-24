@@ -160,15 +160,22 @@ jobs:
               - 'internal/vector/**'
               - 'internal/accounts/**'
               - 'internal/model/**'
+              - 'internal/telemetry/**'
+              - 'services/api/internal/api/series*.go'
+              - 'services/api/internal/api/stats*.go'
+              - 'internal/vuln/**'
               - 'docker-compose.yml'
               - 'go.mod'
               - 'justfile'
+              - '.github/scripts/compose-image.sh'
+              - '.github/scripts/check-test-images.sh'
 
   integration:
-    name: Store and accounts contracts
+    name: Store, accounts and metrics contracts
     needs: changes
     if: needs.changes.outputs.stores == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -181,3 +188,5 @@ jobs:
         run: just test-postgres
       - name: HugeGraph and Milvus store contract
         run: just test-hugegraph
+      - name: VictoriaMetrics telemetry and series contract
+        run: just test-metrics
