@@ -9,6 +9,9 @@ export default defineNuxtConfig({
     // Server-only. Override with NUXT_API_BASE / NUXT_API_TOKEN.
     apiBase: 'http://127.0.0.1:8080',
     apiToken: '',
+    // Largest request body the proxy reads (the API's JSON limit is 4 MiB);
+    // bigger ones are refused with 413 while they stream in. NUXT_MAX_BODY_BYTES.
+    maxBodyBytes: 4 * 1024 * 1024,
   },
   app: {
     head: {

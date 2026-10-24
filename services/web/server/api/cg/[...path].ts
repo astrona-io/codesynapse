@@ -60,7 +60,7 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const { apiBase, apiToken } = useRuntimeConfig(event)
+  const { apiBase, apiToken, maxBodyBytes } = useRuntimeConfig(event)
   const base = apiBase.replace(/\/$/, '')
   const search = getRequestURL(event).search
   const target = `${base}/api/v1/${path}${search}`
@@ -86,7 +86,15 @@ export default defineEventHandler(async (event) => {
   const contentType = getRequestHeader(event, 'content-type')
   if (contentType) headers['content-type'] = contentType
 
-  const body = ['POST', 'PUT', 'PATCH'].includes(method) ? await readRawBody(event, false) : undefined
+  let body: Uint8Array<ArrayBuffer> | undefined
+  if (['POST', 'PUT', 'PATCH'].includes(method)) {
+    try {
+      body = await readBounded(getRequestWebStream(event), Number(maxBodyBytes), getRequestHeader(event, 'content-length'))
+    } catch (e) {
+      if (e instanceof BodyTooLarge) throw createError({ statusCode: 413, statusMessage: 'Request body too large' })
+      throw e
+    }
+  }
   const res = await fetch(target, { method, headers, body, redirect: 'error', signal: AbortSignal.timeout(120_000) })
   setResponseStatus(event, res.status)
   const ct = res.headers.get('content-type')
