@@ -133,6 +133,7 @@ func (b *bridge) run(ctx context.Context, in io.Reader) error {
 	sc.Buffer(make([]byte, 64<<10), maxBridgeMessage)
 	slots := make(chan struct{}, bridgeParallel)
 	var wg sync.WaitGroup
+	initSeen := false
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
@@ -143,18 +144,27 @@ func (b *bridge) run(ctx context.Context, in io.Reader) error {
 		_ = json.Unmarshal(msg, &m) //nolint:errcheck // the server answers malformed input itself
 		if m.Method == "initialize" {
 			// Everything else waits for the session the answer opens.
+			initSeen = true
 			b.forward(ctx, msg, m)
 			continue
 		}
-		select {
-		case <-b.readyCh:
-		case <-ctx.Done():
-			return ctx.Err()
+		if !initSeen && len(m.ID) > 0 && m.Method != "" {
+			// A request ahead of initialize is a client probing for a newer
+			// protocol (Claude Code sends server/discover to stdio servers).
+			// Answer it at once: waiting for initialize here would stop this
+			// loop from ever reading it, and the client from ever connecting.
+			b.write(methodNotFound(m.ID))
+			continue
 		}
 		slots <- struct{}{}
 		wg.Add(1)
 		go func() {
 			defer func() { <-slots; wg.Done() }()
+			select {
+			case <-b.readyCh:
+			case <-ctx.Done():
+				return
+			}
 			if m.Method == "tools/call" && b.answerLocally(ctx, msg, m) {
 				return
 			}
@@ -329,6 +339,16 @@ func readEvents(r io.Reader, fn func([]byte)) error {
 	}
 	flush()
 	return sc.Err()
+}
+
+// methodNotFound is the JSON-RPC answer to a request this server does not
+// handle, which tells a probing client to fall back to initialize.
+func methodNotFound(id json.RawMessage) []byte {
+	out, _ := json.Marshal(map[string]any{ //nolint:errchkjson // fixed shape
+		"jsonrpc": "2.0", "id": id,
+		"error": map[string]any{"code": -32601, "message": "Method not found"},
+	})
+	return out
 }
 
 func errorResponse(id json.RawMessage, err error) []byte {
