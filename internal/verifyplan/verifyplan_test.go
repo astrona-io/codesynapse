@@ -95,3 +95,43 @@ func TestBuildJVM(t *testing.T) {
 	assert.Contains(t, plan.Steps[0].Why, "with maven: mvn -q -Dtest='SvcTest#findsOne' test")
 	assert.Equal(t, plan.Steps[1].Command, "./gradlew classes testClasses")
 }
+
+func TestBuildRust(t *testing.T) {
+	ctx := context.Background()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindRepository, "r"), Kind: model.KindRepository, Repo: "r", Name: "r"})
+	f := model.NodeID("r", model.KindFunction, "app/src/db.rs::open")
+	g.AddNode(model.Node{ID: f, Kind: model.KindFunction, Repo: "r", Name: "open", File: "app/src/db.rs", StartLine: 1, EndLine: 5})
+	unit := model.NodeID("r", model.KindMethod, "app/src/db.rs::tests.opens")
+	g.AddNode(model.Node{ID: unit, Kind: model.KindMethod, Repo: "r", Name: "opens", File: "app/src/db.rs", StartLine: 10, EndLine: 12, IsTest: true})
+	integ := model.NodeID("r", model.KindFunction, "app/tests/api.rs::health_works")
+	g.AddNode(model.Node{ID: integ, Kind: model.KindFunction, Repo: "r", Name: "health_works", File: "app/tests/api.rs", StartLine: 1, EndLine: 4, IsTest: true})
+	g.AddEdge(model.Edge{From: unit, To: f, Kind: model.EdgeCalls})
+	g.AddEdge(model.Edge{From: integ, To: f, Kind: model.EdgeCalls})
+	mem := memory.New()
+	require.NoError(t, mem.ReplaceRepo(ctx, "r", g))
+	rep, err := review.Analyze(ctx, query.Service{R: mem}, "r", []gitx.FileChange{{Path: "app/src/db.rs", Ranges: []gitx.LineRange{{Start: 1, End: 5}}}}, review.Options{Depth: 3})
+	require.NoError(t, err)
+	plan, err := Build(ctx, mem, "r", rep)
+	require.NoError(t, err)
+	require.Len(t, plan.Steps, 3)
+	assert.Equal(t, plan.Steps[0].Command, "cargo test --manifest-path app/Cargo.toml -- db::tests::opens health_works")
+	assert.Equal(t, plan.Steps[1].Command, "cargo check --manifest-path app/Cargo.toml --all-targets")
+	assert.Equal(t, plan.Steps[2].Command, "cargo clippy --manifest-path app/Cargo.toml --all-targets")
+}
+
+func TestRustCrate(t *testing.T) {
+	for _, tc := range []struct{ file, root, module string }{
+		{"src/lib.rs", "", ""},
+		{"src/a/b.rs", "", "a::b"},
+		{"crates/x/src/a/mod.rs", "crates/x", "a"},
+		{"crates/x/tests/it.rs", "crates/x", ""},
+		{"build.rs", ".", ""},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			root, module := rustCrate(tc.file)
+			assert.Equal(t, root, tc.root)
+			assert.Equal(t, module, tc.module)
+		})
+	}
+}

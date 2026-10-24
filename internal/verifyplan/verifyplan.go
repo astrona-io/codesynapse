@@ -158,8 +158,50 @@ func testTarget(n model.Node) (lang, key, name string) {
 			return "", "", ""
 		}
 		return "jvm", class, method
+	case ext == ".rs":
+		// One command per crate; libtest filters match the module path.
+		_, sym, ok := strings.Cut(local, "::")
+		if !ok {
+			return "", "", ""
+		}
+		root, module := rustCrate(n.File)
+		name := strings.ReplaceAll(sym, ".", "::")
+		if module != "" {
+			name = module + "::" + name
+		}
+		return "rust", root, name
 	}
 	return "", "", ""
+}
+
+// rustCrate splits a Rust file into its crate directory (the one holding
+// Cargo.toml, before src/, tests/, benches/ or examples/) and its module
+// path inside src/ (empty for the crate root and for test targets).
+func rustCrate(file string) (root, module string) {
+	for _, dir := range []string{"src", "tests", "benches", "examples"} {
+		i := strings.LastIndex("/"+file, "/"+dir+"/")
+		if i < 0 {
+			continue
+		}
+		root = strings.TrimSuffix(file[:i], "/")
+		if dir == "src" {
+			m := strings.TrimSuffix(strings.TrimSuffix(file[i+len(dir)+1:], ".rs"), "mod")
+			if m = strings.Trim(m, "/"); m != "lib" && m != "main" {
+				module = strings.ReplaceAll(m, "/", "::")
+			}
+		}
+		return root, module
+	}
+	return path.Dir(file), ""
+}
+
+// cargo runs cargo for the crate at root (the repository root when empty).
+func cargo(root, args string) string {
+	if root == "" || root == "." {
+		return "cargo " + args
+	}
+	cmd, rest, _ := strings.Cut(args, " ")
+	return "cargo " + cmd + " --manifest-path " + root + "/Cargo.toml " + rest
 }
 
 func testStep(g *group) Step {
@@ -189,6 +231,8 @@ func testStep(g *group) Step {
 		s.Command = "npm test -- " + g.key
 	case "jvm":
 		s.Command = jvmTestCommand(g.build, g.key, tests)
+	case "rust":
+		s.Command = cargo(g.key, "test -- "+strings.Join(tests, " "))
 	}
 
 	switch g.reach {
@@ -211,6 +255,7 @@ func testStep(g *group) Step {
 func buildAndLint(ctx context.Context, r store.Reader, repo string, files []review.FileSummary) ([]Step, error) {
 	var goDirs, pyFiles []string
 	jvm := false
+	var crates []string
 	for _, f := range files {
 		if f.Status == "deleted" {
 			continue
@@ -224,9 +269,14 @@ func buildAndLint(ctx context.Context, r store.Reader, repo string, files []revi
 			pyFiles = append(pyFiles, f.Path)
 		case ".java", ".kt":
 			jvm = true
+		case ".rs":
+			if root, _ := rustCrate(f.Path); !slices.Contains(crates, root) {
+				crates = append(crates, root)
+			}
 		}
 	}
 	slices.Sort(goDirs)
+	slices.Sort(crates)
 	var steps []Step
 	if len(goDirs) > 0 {
 		pkgs := strings.Join(goDirs, " ")
@@ -246,6 +296,11 @@ func buildAndLint(ctx context.Context, r store.Reader, repo string, files []revi
 		}
 		cmd := map[string]string{"gradle": "./gradlew classes testClasses", "maven": "mvn -q test-compile"}[build]
 		steps = append(steps, Step{Kind: "build", Command: cmd, Why: "the changed Java and Kotlin code compiles"})
+	}
+	for _, c := range crates {
+		steps = append(steps,
+			Step{Kind: "build", Command: cargo(c, "check --all-targets"), Why: "the changed Rust code and its tests compile"},
+			Step{Kind: "lint", Command: cargo(c, "clippy --all-targets"), Why: "clippy on the changed crate"})
 	}
 	if len(pyFiles) > 0 {
 		steps = append(steps, Step{Kind: "build", Command: "python -m py_compile " + strings.Join(pyFiles, " "), Why: "the changed Python files parse"})

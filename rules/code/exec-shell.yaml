@@ -4,7 +4,7 @@ title: Shell invoked with a non-constant command string
 severity: critical
 cwe: [CWE-78]
 category: code
-languages: [go, python, javascript, typescript, java, kotlin]
+languages: [go, python, javascript, typescript, java, kotlin, rust]
 why: A shell parses the whole string, so any input containing ; | $( ) or backticks runs extra commands with the service's privileges.
 fix: Avoid sh -c; pass an explicit argv and validate every argument.
 references:
@@ -22,3 +22,6 @@ examples:
   - language: java
     vulnerable: 'new ProcessBuilder("sh", "-c", "convert " + name + " out.png").start();'
     fixed: 'new ProcessBuilder("convert", "--", name, "out.png").start();'
+  - language: rust
+    vulnerable: 'Command::new("sh").arg("-c").arg(format!("convert {} out.png", name)).status()?;'
+    fixed: 'Command::new("convert").args(["--", name, "out.png"]).status()?;'

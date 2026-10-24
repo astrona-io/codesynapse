@@ -4,7 +4,7 @@ title: MD5 or SHA-1 used
 severity: medium
 cwe: [CWE-328]
 category: code
-languages: [go, python, javascript, typescript, java, kotlin]
+languages: [go, python, javascript, typescript, java, kotlin, rust]
 why: MD5 and SHA-1 collisions are practical; they must not protect passwords, signatures or integrity checks.
 fix: Use SHA-256 or better; MD5/SHA-1 only for non-security checksums.
 references:
@@ -22,3 +22,6 @@ examples:
   - language: java
     vulnerable: 'MessageDigest.getInstance("MD5").digest(password);'
     fixed: 'MessageDigest.getInstance("SHA-256").digest(data); // and Argon2/bcrypt for passwords'
+  - language: rust
+    vulnerable: 'let digest = md5::compute(password);'
+    fixed: 'let digest = Sha256::digest(data); // and argon2 for passwords'

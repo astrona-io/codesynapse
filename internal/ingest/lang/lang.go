@@ -1,6 +1,6 @@
 // Package lang indexes non-Go source code: Python, JavaScript and
 // TypeScript (including <script> blocks of Vue single-file components),
-// Java and Kotlin (brace.go and jvm.go).
+// Java and Kotlin (brace.go and jvm.go), and Rust (rust.go).
 //
 // The parsers are structural, not full compilers: they find functions,
 // classes and methods with exact line ranges, imports between files, calls
@@ -60,6 +60,8 @@ func Language(name string) string {
 		return Java
 	case ".kt", ".kts":
 		return Kotlin
+	case ".rs":
+		return Rust
 	}
 	return ""
 }
@@ -197,7 +199,7 @@ func Extract(ctx context.Context, repo, root string) (*Result, error) {
 }
 
 func isNestedRepo(dir string) bool {
-	_, err := os.Lstat(filepath.Join(dir, ".git"))
+	_, err := os.Lstat(filepath.Join(dir, ".git")) //nolint:gosec // a directory of the walk, inside root
 	return err == nil
 }
 
@@ -213,6 +215,8 @@ type indexer struct {
 	g     *model.Graph
 	files map[string]*parsedFile // rel -> file
 	res   *Result
+	// rustMods holds the module names of each Rust crate (rust.go).
+	rustMods map[string]map[string]bool
 }
 
 func (ix *indexer) id(kind model.NodeKind, local string) string {
@@ -243,6 +247,8 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 		fr, fr0pkg = parseBrace(src, javaLang)
 	case Kotlin:
 		fr, fr0pkg = parseBrace(src, kotlinLang)
+	case Rust:
+		fr, _ = parseBrace(src, rustLang)
 	}
 	fr.pkg = fr0pkg
 	fr.fingerprint(lang, code)
@@ -408,6 +414,9 @@ func (ix *indexer) link() {
 		for _, imp := range pf.fr.imports {
 			target := ix.resolveImport(pf, imp, byModule, byPkg)
 			if target == nil {
+				if pf.lang == Rust && ix.rustLocal(pf, imp.spec) {
+					continue
+				}
 				if ext := externalName(imp.spec, pf.lang); ext != "" {
 					ix.res.ExternalImports[ext] = append(ix.res.ExternalImports[ext], pf.id)
 				}
@@ -418,6 +427,13 @@ func (ix *indexer) link() {
 				if member == "*" {
 					moduleAlias[local] = target
 					continue
+				}
+				// use crate::db; binds a module: db::open() calls into it.
+				if pf.lang == Rust {
+					if m := ix.rustResolve(pf, imp.spec+"::"+member, true); m != nil {
+						moduleAlias[local] = m
+						continue
+					}
 				}
 				if sid, ok := target.symIDs[member]; ok {
 					bound[local] = sid
@@ -534,6 +550,8 @@ func (ix *indexer) link() {
 func (ix *indexer) resolveImport(pf *parsedFile, imp importRef, byModule map[string]*parsedFile, byPkg map[string][]*parsedFile) *parsedFile {
 	spec := imp.spec
 	switch pf.lang {
+	case Rust:
+		return ix.rustResolve(pf, spec, false)
 	case Java, Kotlin:
 		// com.acme.Foo is Foo in package com.acme, in Java or Kotlin.
 		for _, member := range imp.names {
@@ -605,6 +623,14 @@ func srcRoot(rel string) string {
 
 // externalName returns the package name of a third-party import.
 func externalName(spec, lang string) string {
+	if lang == Rust {
+		first, _, _ := strings.Cut(spec, "::")
+		switch first {
+		case "crate", "self", "super", "std", "core", "alloc", "proc_macro", "test", "":
+			return ""
+		}
+		return first // a crate: Cargo advisories become "imported"
+	}
 	if isJVM(lang) {
 		return "" // Maven coordinates do not follow package names
 	}
@@ -631,6 +657,14 @@ func moduleName(rel, lang string) string {
 		m = strings.TrimSuffix(m, "/__init__")
 		return strings.ReplaceAll(m, "/", ".")
 	}
+	if lang == Rust {
+		root, mod := rustModule(rel)
+		crate := path.Base(root)
+		if root == "." || root == "" {
+			crate = "crate"
+		}
+		return strings.Trim(crate+"::"+mod, ":")
+	}
 	ext := filepath.Ext(rel)
 	return strings.TrimSuffix(rel, ext)
 }
@@ -638,6 +672,8 @@ func moduleName(rel, lang string) string {
 func isTestPath(rel, lang string) bool {
 	base := path.Base(rel)
 	switch lang {
+	case Rust:
+		return strings.Contains("/"+rel, "/tests/") || strings.Contains("/"+rel, "/benches/")
 	case Java, Kotlin:
 		stem := strings.TrimSuffix(strings.TrimSuffix(base, path.Ext(base)), ".")
 		return strings.Contains("/"+rel, "/src/test/") || strings.HasSuffix(stem, "Test") || strings.HasSuffix(stem, "Tests") ||
