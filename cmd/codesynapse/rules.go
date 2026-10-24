@@ -15,7 +15,8 @@ import (
 // It asks the server so the wording can be improved for every machine at
 // once, and falls back to the built-in text when the server is unreachable
 // or answers nothing usable. It never fails the session.
-func sessionRules(ctx context.Context, logger *slog.Logger) map[string]any {
+func sessionRules(ctx context.Context, in toolHookInput, logger *slog.Logger) map[string]any {
+	noteBaseline(ctx, in, logger)
 	text := agentrules.Default
 	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
 	c.http.Timeout = 3 * time.Second
@@ -32,6 +33,28 @@ func sessionRules(ctx context.Context, logger *slog.Logger) map[string]any {
 	return map[string]any{"hookSpecificOutput": map[string]any{
 		"hookEventName": "SessionStart", "additionalContext": text,
 	}}
+}
+
+// noteBaseline remembers the working tree a session starts with, so the Stop
+// hook asks for a check only when the session itself changed something: a
+// checkout that was already dirty (an untracked scratch file, last week's
+// edits) is not this session's change.
+func noteBaseline(ctx context.Context, in toolHookInput, logger *slog.Logger) {
+	state := stateFile(in.SessionID)
+	if state == "" || in.Cwd == "" {
+		return
+	}
+	w := newWorktree(ctx, in.Cwd, "", logger)
+	if w == nil {
+		return
+	}
+	key, _, err := w.changes(ctx)
+	if err != nil {
+		return
+	}
+	s := loadState(state)
+	s.Stop = key // "" for a clean tree: any later change differs from it
+	saveState(state, s)
 }
 
 // noteLookup records how the session began: the first of Read, Grep, Glob

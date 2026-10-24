@@ -124,7 +124,7 @@ func TestWorkflowReportOnlyTellsWhatIsNew(t *testing.T) {
 func TestSessionRulesFallBackToTheBuiltInText(t *testing.T) {
 	t.Setenv("CODESYNAPSE_API_TOKEN", "csk_test")
 	t.Setenv("CODESYNAPSE_API_URL", "http://127.0.0.1:1") // nothing listens
-	out := sessionRules(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	out := sessionRules(context.Background(), toolHookInput{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	spec := out["hookSpecificOutput"].(map[string]any)
 	assert.Equal(t, spec["hookEventName"], "SessionStart")
 	assert.Contains(t, spec["additionalContext"].(string), "minimal_context")
@@ -135,6 +135,32 @@ func TestSessionRulesFallBackToTheBuiltInText(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	t.Setenv("CODESYNAPSE_API_URL", srv.URL)
-	out = sessionRules(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	out = sessionRules(context.Background(), toolHookInput{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	assert.Equal(t, out["hookSpecificOutput"].(map[string]any)["additionalContext"], "Our rule: ask the graph first.")
+}
+
+// A checkout that was already dirty when the session began is not the
+// session's change: the Stop hook asks only once the session changes it.
+func TestStopGuardIgnoresWhatWasDirtyAtStart(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
+	ctx := context.Background()
+	dir := gitRepo(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "scratch.json"), []byte("{}"), 0o600))
+	in := toolHookInput{SessionID: "chat-2", Cwd: dir}
+
+	noteBaseline(ctx, in, logger)
+	assert.True(t, stopGuard(ctx, in, logger) == nil, "an untracked file from before the session is not asked about")
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "demo.go"), []byte("package demo\n\nfunc Changed() {}\n"), 0o600))
+	out := stopGuard(ctx, in, logger)
+	require.True(t, out != nil, "a change made during the session is")
+	assert.Equal(t, out["decision"], "block")
+
+	// A session that began on a clean tree behaves as before.
+	clean := gitRepo(t)
+	in2 := toolHookInput{SessionID: "chat-3", Cwd: clean}
+	noteBaseline(ctx, in2, logger)
+	require.NoError(t, os.WriteFile(filepath.Join(clean, "demo.go"), []byte("package demo\n\nfunc Other() {}\n"), 0o600))
+	assert.True(t, stopGuard(ctx, in2, logger) != nil)
 }
