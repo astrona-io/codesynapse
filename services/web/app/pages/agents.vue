@@ -3,8 +3,11 @@ import type { ApiKey } from '~/utils/types'
 
 useHead({ title: 'Agents · CodeSynapse' })
 const session = useSession()
-const { data: settings } = useApiGet<{ mcp_url?: string }>('settings')
+const { data: settings } = useApiGet<{ mcp_url?: string; api_url?: string }>('settings')
 const mcpUrl = computed(() => settings.value?.mcp_url || 'http://localhost:8090/mcp')
+// Where the bridge registers each chat. Unknown on a remote install until the operator sets CODESYNAPSE_PUBLIC_API_URL.
+const apiUrl = computed(() => settings.value?.api_url || (/^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(mcpUrl.value) ? 'http://127.0.0.1:8080' : 'https://<your-api-host>'))
+const viaBridge = computed(() => session.accounts.value)
 
 // Step 1: a key for this agent (accounts mode). Single-tenant installs use
 // the installation's MCP token instead.
@@ -24,7 +27,7 @@ async function createKey() {
 }
 const token = computed(() => key.value || (session.accounts.value ? 'csk_…' : '$CODESYNAPSE_MCP_TOKEN'))
 
-// Step 2: the setup for each agent.
+// Step 2: install the bridge. Step 3: register it with each agent.
 const agent = ref<'claude' | 'codex' | 'cursor' | 'other'>('claude')
 const agents = [
   { id: 'claude', label: 'Claude Code' },
@@ -32,7 +35,21 @@ const agents = [
   { id: 'cursor', label: 'Cursor' },
   { id: 'other', label: 'Other (JSON)' },
 ] as const
+const install = 'brew install astrona-io/tap/codesynapse'
+const urls = computed(() => `--url ${mcpUrl.value} --api-url ${apiUrl.value}`)
 const snippet = computed(() => {
+  if (viaBridge.value) {
+    switch (agent.value) {
+      case 'claude':
+        return `CODESYNAPSE_MCP_TOKEN=${token.value} codesynapse mcp install --only claude ${urls.value}`
+      case 'codex':
+        return `CODESYNAPSE_MCP_TOKEN=${token.value} codesynapse mcp install --only codex ${urls.value}`
+      case 'cursor':
+        return `CODESYNAPSE_MCP_TOKEN=${token.value} codesynapse mcp install --only cursor ${urls.value}`
+      default:
+        return JSON.stringify({ mcpServers: { codesynapse: { url: mcpUrl.value, headers: { Authorization: `Bearer ${token.value}`, 'X-CodeSynapse-Session': '${CODESYNAPSE_SESSION_ID}', 'X-CodeSynapse-Parent-Session': '${CODESYNAPSE_PARENT_SESSION_ID}' } } } }, null, 2)
+    }
+  }
   switch (agent.value) {
     case 'claude':
       return `claude mcp add --transport http codesynapse ${mcpUrl.value} \\\n  --header "Authorization: Bearer ${token.value}"`
@@ -42,12 +59,19 @@ const snippet = computed(() => {
       return JSON.stringify({ mcpServers: { codesynapse: { url: mcpUrl.value, headers: { Authorization: `Bearer ${token.value}` } } } }, null, 2)
   }
 })
-const where = computed(() => ({
-  claude: 'Run it in a terminal. It registers CodeSynapse for your user; add --scope project to share it through the repository’s .mcp.json (without the key: use an environment variable there).',
-  codex: 'Run it in a terminal; Codex reads the key from the environment, so put the export in your shell profile.',
-  cursor: 'Paste it into ~/.cursor/mcp.json (all projects) or .cursor/mcp.json in a repository.',
-  other: 'Most MCP clients accept this shape: a streamable HTTP server with a bearer token header.',
-}[agent.value]))
+const where = computed(() => viaBridge.value
+  ? {
+      claude: 'Run it in a terminal after installing the bridge. It stores the key in a private file (never in Claude Code’s settings) and registers the bridge, which Claude Code starts once per chat. Then open a new chat and run /mcp.',
+      codex: 'Run it in a terminal. Codex connects over HTTP without the bridge, so a launcher must register the chat and supply CODESYNAPSE_SESSION_ID and CODESYNAPSE_PARENT_SESSION_ID before it starts.',
+      cursor: 'Run it in a terminal. Cursor connects over HTTP without the bridge, so a launcher must register the chat and supply the two session variables before it starts.',
+      other: 'Clients other than Claude Code have no bridge yet. They must register each chat (POST /api/v1/execution/sessions) and send both session headers on every request; without them the server refuses the call.',
+    }[agent.value]
+  : {
+      claude: 'Run it in a terminal. It registers CodeSynapse for your user; add --scope project to share it through the repository’s .mcp.json (without the key: use an environment variable there).',
+      codex: 'Run it in a terminal; Codex reads the key from the environment, so put the export in your shell profile.',
+      cursor: 'Paste it into ~/.cursor/mcp.json (all projects) or .cursor/mcp.json in a repository.',
+      other: 'Most MCP clients accept this shape: a streamable HTTP server with a bearer token header.',
+    }[agent.value])
 
 // Step 3: the key's first use shows the agent is connected.
 const { data: keys, refresh: refreshKeys } = useApiGet<{ keys: ApiKey[] }>('me/keys', { immediate: session.accounts.value })
@@ -76,7 +100,7 @@ onBeforeUnmount(() => clearInterval(poll))
           </form>
           <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
           <div v-if="key" class="stack--tight">
-            <p class="notice notice--ok">Created. The key is filled into the setup below; it is shown only on this page, so finish step 2 before you leave.</p>
+            <p class="notice notice--ok">Created. The key is filled into the setup below; it is shown only on this page, so finish the steps below before you leave.</p>
             <CopyField :value="key" secret label="Your key" />
           </div>
         </template>
@@ -84,24 +108,43 @@ onBeforeUnmount(() => clearInterval(poll))
       </div>
     </section>
 
-    <section class="panel step">
+    <section v-if="viaBridge" class="panel step">
       <p class="step__n">2</p>
       <div class="stack--tight">
-        <h2>Add CodeSynapse to your agent</h2>
+        <h2>Install the CodeSynapse bridge</h2>
+        <p class="muted">The bridge is a small program on your machine that sits between your agent and CodeSynapse. It is what makes <strong>every request go through your system</strong>: it signs each call with your key, registers each chat as its own session, and forwards the call to your server, where it is checked against your permissions and written to the audit log. Pointing an agent straight at the MCP address is not enough: Claude Code cannot send the session identity itself, so the server refuses it.</p>
+        <CopyField :value="install" label="Homebrew (macOS and Linux)" />
+        <p class="muted small">No Homebrew? Download a release binary or use <code>go install</code>: see the Claude Code bridge guide in the documentation. Every machine that runs Claude Code needs the <code>codesynapse</code> binary.</p>
+      </div>
+    </section>
+
+    <section class="panel step">
+      <p class="step__n">{{ viaBridge ? 3 : 2 }}</p>
+      <div class="stack--tight">
+        <h2>{{ viaBridge ? 'Register the bridge with your agent' : 'Add CodeSynapse to your agent' }}</h2>
         <div class="row" role="tablist">
           <button v-for="a in agents" :key="a.id" class="chip" :class="{ active: agent === a.id }" role="tab" :aria-selected="agent === a.id" @click="agent = a.id">{{ a.label }}</button>
         </div>
         <CopyField :value="snippet" multiline />
         <p class="muted small">{{ where }}</p>
-        <p class="muted small">MCP address: <code>{{ mcpUrl }}</code>. Several agents on one machine? <code>CODESYNAPSE_MCP_TOKEN=csk_… just mcp</code> in the CodeSynapse checkout registers all of them.</p>
+        <p class="muted small">MCP address: <code>{{ mcpUrl }}</code><template v-if="viaBridge"> · API address: <code>{{ apiUrl }}</code></template>. Several agents on one machine? Leave out <code>--only</code> and it offers every agent it finds.</p>
+        <p v-if="viaBridge && apiUrl.includes('<')" class="notice notice--warn" role="status">This installation does not know its public API address. Replace <code>{{ apiUrl }}</code> with the address your API is reached at, or ask the operator to set <code>CODESYNAPSE_PUBLIC_API_URL</code>.</p>
+        <details v-if="viaBridge">
+          <summary class="muted small">Make every call reach the server</summary>
+          <div class="stack--tight small">
+            <p>While your checkout has changes the server has not indexed yet, the bridge answers ten core tools from a graph of your working tree built on your machine. Those answers are fast and current, but they never reach the server, so they are not in its audit log or statistics. To send every call to your system, set this where Claude Code starts, for example in your shell profile:</p>
+            <CopyField value="export CODESYNAPSE_BRIDGE_WORKTREE=false" />
+            <p class="muted">Remote servers must use <code>https</code>; the bridge refuses plain <code>http</code> to anything but this machine.</p>
+          </div>
+        </details>
       </div>
     </section>
 
     <section class="panel step">
-      <p class="step__n">3</p>
+      <p class="step__n">{{ viaBridge ? 4 : 3 }}</p>
       <div class="stack--tight">
         <h2>Check that it works</h2>
-        <p class="muted">Start a new session in your agent and ask something about one of your repositories, for example “Use CodeSynapse to show the callers of the main handler”.</p>
+        <p class="muted">Start a <strong>new</strong> session in your agent (chats that were already open keep their old setup) and ask something about one of your repositories, for example “Use CodeSynapse to show the callers of the main handler”.</p>
         <p v-if="!session.accounts.value || !keyId" class="muted small">With a key from step 1, this page notices the agent's first call.</p>
         <p v-else-if="connected" class="notice notice--ok" role="status">Connected: the agent first used its key {{ relTime(connected) }}.</p>
         <p v-else class="notice" role="status"><span class="dot dot--warn" /> Waiting for the agent's first call…</p>

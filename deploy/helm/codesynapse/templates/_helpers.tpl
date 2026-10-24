@@ -78,6 +78,7 @@
 - {name: CODESYNAPSE_TRUSTED_PROXIES, value: {{ .Values.trustedProxies | quote }}}
 - {name: CODESYNAPSE_PUBLIC_URL, value: {{ .Values.publicURL | quote }}}
 - {name: CODESYNAPSE_PUBLIC_MCP_URL, value: {{ .Values.publicMCPURL | quote }}}
+- {name: CODESYNAPSE_PUBLIC_API_URL, value: {{ .Values.publicAPIURL | quote }}}
 - {name: CODESYNAPSE_SIGNUP_OPEN, value: {{ .Values.signupOpen | quote }}}
 - {name: CODESYNAPSE_COOKIE_SECURE, value: {{ .Values.cookieSecure | quote }}}
 - {name: CODESYNAPSE_AUDIT_RETENTION_DAYS, value: {{ .Values.auditRetentionDays | quote }}}

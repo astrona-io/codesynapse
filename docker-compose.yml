@@ -144,6 +144,8 @@ services:
       CODESYNAPSE_TRUSTED_PROXIES: ${CODESYNAPSE_TRUSTED_PROXIES:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       # Where agents reach the MCP server, shown on the Agents page.
       CODESYNAPSE_PUBLIC_MCP_URL: ${CODESYNAPSE_PUBLIC_MCP_URL:-http://localhost:8090/mcp}
+      # Where the Claude Code bridge reaches the API (shown on the Agents page).
+      CODESYNAPSE_PUBLIC_API_URL: ${CODESYNAPSE_PUBLIC_API_URL:-http://localhost:8080}
       # The dashboard's address: single sign-on returns to <this>/sso/callback.
       CODESYNAPSE_PUBLIC_URL: ${CODESYNAPSE_PUBLIC_URL:-http://localhost:3000}
       # Allow identity providers on a private network (self-hosted Keycloak).

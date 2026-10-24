@@ -25,6 +25,8 @@ image:
 # Where browsers reach the dashboard and agents reach MCP.
 publicURL: http://localhost:3000
 publicMCPURL: http://localhost:8090/mcp
+# Where the Claude Code bridge reaches the API; shown on the Agents page.
+publicAPIURL: http://localhost:8080
 environment: dev
 # The administrator made at first start (user "admin"). The chart generates
 # its password into a Secret named <release>-admin and keeps it across

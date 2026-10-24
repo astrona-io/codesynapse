@@ -73,6 +73,9 @@ type Config struct {
 	// PublicMCPURL is where agents reach the MCP server, shown in the
 	// connection instructions.
 	PublicMCPURL string
+	// PublicAPIURL is where the Claude Code bridge reaches this API to
+	// register chat sessions, shown on the Agents page; empty when unknown.
+	PublicAPIURL string
 	// PublicURL is the dashboard's address; single sign-on returns to
 	// PublicURL + "/sso/callback".
 	PublicURL string
@@ -280,6 +283,7 @@ func (s *Server) routes() {
 			"git_tokens":           tokens,
 			"clone_enabled":        s.cfg.Workspace != "",
 			"mcp_url":              s.cfg.PublicMCPURL,
+			"api_url":              s.cfg.PublicAPIURL,
 			"allow_private_git":    s.cfg.AllowPrivateGit,
 			"vuln_scan":            s.cfg.VulnScan,
 			"license_lookup":       s.cfg.LicenseLookup,
