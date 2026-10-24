@@ -168,11 +168,11 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return n, err
 }
 
-const userCols = "id, email, name, password_hash, platform_admin, created_at, disabled_at, bootstrap_root, username"
+const userCols = "id, email, name, password_hash, platform_admin, created_at, disabled_at, bootstrap_root, username, auto_created"
 
 func scanUser(row pgx.Row) (accounts.User, error) {
 	var u accounts.User
-	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.PlatformAdmin, &u.CreatedAt, &u.DisabledAt, &u.BootstrapRoot, &u.Username)
+	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.PlatformAdmin, &u.CreatedAt, &u.DisabledAt, &u.BootstrapRoot, &u.Username, &u.AutoCreated)
 	u.CreatedAt = u.CreatedAt.UTC()
 	if u.DisabledAt != nil {
 		t := u.DisabledAt.UTC()
@@ -183,8 +183,8 @@ func scanUser(row pgx.Row) (accounts.User, error) {
 
 // CreateUser implements accounts.Store.
 func (s *Store) CreateUser(ctx context.Context, u accounts.User) error {
-	_, err := s.db.Exec(ctx, "INSERT INTO users ("+userCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-		u.ID, u.Email, u.Name, u.PasswordHash, u.PlatformAdmin, u.CreatedAt, u.DisabledAt, u.BootstrapRoot, u.Username)
+	_, err := s.db.Exec(ctx, "INSERT INTO users ("+userCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+		u.ID, u.Email, u.Name, u.PasswordHash, u.PlatformAdmin, u.CreatedAt, u.DisabledAt, u.BootstrapRoot, u.Username, u.AutoCreated)
 	if isConstraint(err, "users_one_bootstrap_root") {
 		return fmt.Errorf("bootstrap root: %w", accounts.ErrExists)
 	}
@@ -198,6 +198,28 @@ func (s *Store) CreateUser(ctx context.Context, u accounts.User) error {
 func isConstraint(err error, name string) bool {
 	var pg *pgconn.PgError
 	return errors.As(err, &pg) && pg.ConstraintName == name
+}
+
+// ReplaceRoot implements accounts.Store. The old account's email and
+// username are renamed first so the new account can take them, then the
+// setup record and the root classification move to the new account.
+func (s *Store) ReplaceRoot(ctx context.Context, oldID string, u accounts.User) error {
+	tag, err := s.db.Exec(ctx, "UPDATE users SET email = 'replaced:' || id, username = '' WHERE id = $1 AND bootstrap_root", oldID)
+	if err := affected(tag, err, "bootstrap root"); err != nil {
+		return err
+	}
+	u.BootstrapRoot = false
+	if err := s.CreateUser(ctx, u); err != nil {
+		return err
+	}
+	tag, err = s.db.Exec(ctx, "UPDATE installation_setup SET root_user_id = $2 WHERE root_user_id = $1", oldID, u.ID)
+	if err := affected(tag, err, "setup"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(ctx, "DELETE FROM users WHERE id = $1", oldID); err != nil {
+		return mapErr(err, "bootstrap root")
+	}
+	return s.MarkBootstrapRoot(ctx, u.ID)
 }
 
 // MarkBootstrapRoot implements accounts.Store.

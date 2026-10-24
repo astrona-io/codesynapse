@@ -52,7 +52,13 @@ The steps below do the same by hand.
 
    Every release publishes the chart at its version, signed like the images (`cosign verify ghcr.io/astrona-io/charts/codesynapse:<X.Y.Z> ...`). To install from a checkout, use `deploy/helm/codesynapse` in place of the `oci://` reference. Upgrades and backups: [docs/operations/upgrading.md](../../../docs/operations/upgrading.md).
 
-3. Open the dashboard. The first account becomes the installation's root account and hands over to an organisation owner.
+3. Open the dashboard and sign in as `admin`. The chart generated its password into the Secret `<release>-admin` (kept across upgrades; `admin.existingSecret` brings your own, `admin.enabled=false` skips it):
+
+   ```sh
+   kubectl --namespace codesynapse get secret <release>-admin -o jsonpath='{.data.CODESYNAPSE_ADMIN_PASSWORD}' | base64 -d
+   ```
+
+   Replace that account with your own, then create the organisation owner. Locked out: `kubectl exec deploy/<release>-api -- codesynapse-api reset-admin --generate`.
 
 ## Values worth knowing
 

@@ -7,4 +7,10 @@ Dashboard: https://{{ .Values.ingress.host }}   MCP: https://{{ .Values.ingress.
 Dashboard: kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "cs.name" (list . "web") }} 3000:3000
 MCP:       kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "cs.name" (list . "mcp") }} 8090:8090
 {{- end }}
+{{- if .Values.admin.enabled }}
+Sign in as "admin" and replace that account with your own. Its password:
+  kubectl --namespace {{ .Release.Namespace }} get secret {{ .Values.admin.existingSecret | default (include "cs.name" (list . "admin")) }} -o jsonpath='{.data.CODESYNAPSE_ADMIN_PASSWORD}' | base64 -d
+Forgot it or locked out:  kubectl --namespace {{ .Release.Namespace }} exec deploy/{{ include "cs.name" (list . "api") }} -- codesynapse-api reset-admin --generate
+{{- else }}
 The first account to sign up becomes the installation's root account.
+{{- end }}

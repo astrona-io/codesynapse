@@ -12,7 +12,7 @@ Three steps take you from nothing to an assistant that asks the graph instead of
 
 - **2. Create your accounts**
 
-    The first sign-up becomes the root account, then you create an organisation and its owner. There is no default password.
+    Sign in as `admin` (random password in `.env`), replace it with your own account, then create an organisation and its owner.
 
     [First run and sign-in](../operations/first-run.md)
 
@@ -28,7 +28,8 @@ Three steps take you from nothing to an assistant that asks the graph instead of
 
 ```sh
 just up        # start everything in docker compose
-# open http://localhost:3000, create the root account, then the organisation owner
+# open http://localhost:3000, sign in as admin (password: grep ADMIN_PASSWORD .env),
+# replace the admin with your own account, then create the organisation owner
 just mcp       # register the MCP server with your coding agents
 ```
 

@@ -51,6 +51,9 @@ async function submit() {
     <h1>Welcome back</h1>
     <p class="muted">Use the email or username and the password of your CodeSynapse account.</p>
   </div>
+  <p v-if="session.status.value?.initial_admin" class="notice">
+    <span>First start? Sign in as <strong>admin</strong>. With <code>just up</code> the password is <code>ADMIN_PASSWORD</code> in <code>.env</code>; on Kubernetes it is in the <code>&lt;release&gt;-admin</code> Secret. You replace this account right after.</span>
+  </p>
   <form class="stack--tight" @submit.prevent="submit">
     <div class="field"><label for="email">Email or username</label><input id="email" v-model="email" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus></div>
     <div class="field"><label for="password">Password</label><input id="password" v-model="password" type="password" autocomplete="current-password" required></div>

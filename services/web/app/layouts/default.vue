@@ -160,6 +160,8 @@ const orgValue = computed({
       </div>
     </header>
 
+    <InitialAdminBanner />
+
     <div class="app__body">
       <aside id="sidebar" class="sidebar" :class="{ open: menuOpen }">
         <nav class="sidebar__nav" aria-label="Main">

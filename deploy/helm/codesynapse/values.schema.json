@@ -77,6 +77,21 @@
       "type": "string",
       "minLength": 1
     },
+    "admin": {
+      "description": "The administrator made at first start. Its password is generated into the Secret <release>-admin (kept across upgrades) or read from existingSecret. With enabled false the first sign-up becomes the root account instead.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Create the administrator \"admin\" when the installation has no accounts.",
+          "type": "boolean"
+        },
+        "existingSecret": {
+          "description": "Name of a Secret with the key CODESYNAPSE_ADMIN_PASSWORD (at least 12 characters), used instead of a generated password.",
+          "type": "string"
+        }
+      }
+    },
     "signupOpen": {
       "description": "Anyone may create an account.",
       "type": "boolean"

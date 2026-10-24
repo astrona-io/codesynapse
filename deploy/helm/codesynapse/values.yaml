@@ -26,6 +26,15 @@ image:
 publicURL: http://localhost:3000
 publicMCPURL: http://localhost:8090/mcp
 environment: dev
+# The administrator made at first start (user "admin"). The chart generates
+# its password into a Secret named <release>-admin and keeps it across
+# upgrades; sign in with it, then replace the account in the dashboard:
+#   kubectl get secret <release>-admin -o jsonpath='{.data.CODESYNAPSE_ADMIN_PASSWORD}' | base64 -d
+admin:
+  enabled: true
+  # A Secret of your own with the key CODESYNAPSE_ADMIN_PASSWORD (at least
+  # 12 characters) instead of the generated one.
+  existingSecret: ""
 signupOpen: false
 # Session cookies need TLS; set false only for plain-HTTP local tests.
 cookieSecure: true

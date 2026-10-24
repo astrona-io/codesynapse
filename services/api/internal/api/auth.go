@@ -157,6 +157,7 @@ func (s *Server) accountRoutes() {
 	s.account("POST /api/v1/auth/login", publicRoute, s.handleLogin)
 	s.account("POST /api/v1/auth/logout", publicRoute, s.handleLogout)
 	s.account("POST /api/v1/auth/setup", governanceRoute, s.handleSetup)
+	s.account("POST /api/v1/auth/replace-admin", governanceRoute, s.handleReplaceAdmin)
 	s.account("POST /api/v1/auth/sso/{org}/start", publicRoute, s.handleSSOStart(accounts.SSOLogin))
 	s.account("POST /api/v1/auth/sso/callback", publicRoute, s.handleSSOCallback)
 	s.account("POST /api/v1/me/sso/{org}/link", businessRoute, s.handleSSOStart(accounts.SSOLink))
@@ -217,7 +218,14 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"mode": "accounts", "needs_setup": setup, "signup_open": s.cfg.Accounts.SignupOpen || setup})
+	initial, err := s.cfg.Accounts.InitialAdminActive(r.Context())
+	if err != nil {
+		s.problem(w, 500, err)
+		return
+	}
+	// initial_admin only lets the sign-in page say where the first-start
+	// password is; the account name is public in the documentation anyway.
+	writeJSON(w, 200, map[string]any{"mode": "accounts", "needs_setup": setup, "signup_open": s.cfg.Accounts.SignupOpen || setup, "initial_admin": initial})
 }
 
 type credentials struct {

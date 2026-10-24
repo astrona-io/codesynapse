@@ -24,6 +24,9 @@ export default defineNuxtRouteMiddleware(async (to) => {
   if (!s.me.value && !OPEN.has(to.path) && !isHelp) return navigateTo({ path: '/login', query: to.fullPath !== '/' ? { next: to.fullPath } : {} })
   if (s.me.value && OPEN.has(to.path)) return navigateTo(s.restricted.value ? '/admin/overview' : '/')
   if (s.restricted.value) {
+    // The administrator made at first start is replaced before anything else.
+    if (s.autoCreated.value && s.setupPending.value) return to.path === '/replace-admin' || isHelp ? undefined : navigateTo('/replace-admin')
+    if (to.path === '/replace-admin' && s.autoCreated.value) return
     if (s.setupPending.value) return to.path === '/setup' || isHelp ? undefined : navigateTo('/setup')
     if (to.path === '/setup' || !rootMay(to.path)) return navigateTo('/admin/overview')
   } else if (to.path === '/setup') {

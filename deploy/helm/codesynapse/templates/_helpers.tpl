@@ -63,6 +63,15 @@
 {{ include "cs.storeEnv" . }}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_API_TOKEN" "CODESYNAPSE_API_TOKEN") }}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_SECRET_KEY" "SECRET_KEY") }}
+{{- if .Values.admin.enabled }}
+- name: CODESYNAPSE_ADMIN_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.admin.existingSecret | default (include "cs.name" (list . "admin")) }}
+      key: CODESYNAPSE_ADMIN_PASSWORD
+{{- else }}
+- {name: CODESYNAPSE_AUTO_ADMIN, value: "false"}
+{{- end }}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_GIT_TOKENS" "CODESYNAPSE_GIT_TOKENS" true) }}
 {{ include "cs.secretEnv" (list . "ANTHROPIC_API_KEY" "ANTHROPIC_API_KEY" true) }}
 {{ include "cs.secretEnv" (list . "OPENROUTER_API_KEY" "OPENROUTER_API_KEY" true) }}

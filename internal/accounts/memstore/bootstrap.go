@@ -26,6 +26,44 @@ func (s *Store) MarkBootstrapRoot(_ context.Context, userID string) error {
 	return nil
 }
 
+// ReplaceRoot implements accounts.Store.
+func (s *Store) ReplaceRoot(_ context.Context, oldID string, u accounts.User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old, ok := s.users[oldID]
+	if !ok || !old.BootstrapRoot {
+		return fmt.Errorf("bootstrap root: %w", accounts.ErrNotFound)
+	}
+	for id, x := range s.users {
+		if id == oldID {
+			continue
+		}
+		if x.Email == u.Email {
+			return fmt.Errorf("email: %w", accounts.ErrExists)
+		}
+		if u.Username != "" && x.Username == u.Username {
+			return fmt.Errorf("username: %w", accounts.ErrExists)
+		}
+	}
+	delete(s.users, oldID)
+	for h, sess := range s.sessions {
+		if sess.UserID == oldID {
+			delete(s.sessions, h)
+		}
+	}
+	for id, k := range s.keys {
+		if k.UserID == oldID {
+			delete(s.keys, id)
+		}
+	}
+	u.BootstrapRoot = true
+	s.users[u.ID] = u
+	if s.setup.RootUserID == oldID {
+		s.setup.RootUserID = u.ID
+	}
+	return nil
+}
+
 // Setup implements accounts.Store.
 func (s *Store) Setup(context.Context) (accounts.Setup, error) {
 	s.mu.RLock()

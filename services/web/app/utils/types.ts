@@ -276,6 +276,8 @@ export interface AuthStatus {
   mode: 'single' | 'accounts'
   needs_setup?: boolean
   signup_open?: boolean
+  // The administrator made at first start still exists.
+  initial_admin?: boolean
 }
 export interface AccountUser {
   id: string
@@ -285,6 +287,8 @@ export interface AccountUser {
   platform_admin: boolean
   // The account that set up the installation: governance only.
   bootstrap_root?: boolean
+  // The administrator made at first start: replace it with your own account.
+  auto_created?: boolean
   created_at: string
 }
 export type SetupState = 'pending' | 'complete' | 'ambiguous'

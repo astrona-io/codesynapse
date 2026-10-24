@@ -109,6 +109,7 @@ func TestBootstrapContract(t *testing.T) {
 	accountstest.RunSchedules(t, fresh)
 	accountstest.RunProfile(t, fresh)
 	accountstest.RunUsername(t, fresh)
+	accountstest.RunInitialAdmin(t, fresh)
 	accountstest.RunBootstrap(t, func(t *testing.T) accounts.Store {
 		st, err := Open(ctx, url)
 		require.NoError(t, err)

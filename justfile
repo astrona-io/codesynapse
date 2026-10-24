@@ -28,6 +28,10 @@ init:
             printf '\n# Seals organisation Git tokens; keep it (tokens sealed with a lost key must be set again).\nSECRET_KEY=%s\n' "$(openssl rand -base64 32)" >> .env
             echo "added SECRET_KEY to .env"
         fi
+        if ! grep -q '^ADMIN_PASSWORD=' .env; then
+            printf '\n# Password of the administrator ("admin") made at first start; replace the account after signing in.\nADMIN_PASSWORD=%s\n' "$(openssl rand -hex 16)" >> .env
+            echo "added ADMIN_PASSWORD to .env"
+        fi
         if ! grep -q '^METRICS_PASSWORD=' .env; then
             printf '\n# VictoriaMetrics password (statistics by minute and hour).\nMETRICS_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
             echo "added METRICS_PASSWORD to .env"
@@ -43,6 +47,7 @@ init:
         -e "s/change-me-postgres/$(openssl rand -hex 24)/" \
         -e "s/change-me-hugegraph/$(openssl rand -hex 24)/" \
         -e "s/change-me-metrics/$(openssl rand -hex 24)/" \
+        -e "s/change-me-admin/$(openssl rand -hex 16)/" \
         -e "s|change-me-secret-key|$(openssl rand -base64 32)|" .env.example > .env
     mkdir -p sources
     [ -f sources/go.mod ] || printf "module sources\n" > sources/go.mod
@@ -87,6 +92,7 @@ git-token host="github.com": init _runtime
 up: init _runtime
     {{compose}} up -d --build
     @echo "web http://localhost:3000 · api http://localhost:8080 · mcp http://localhost:8090/mcp"
+    @echo "first sign-in: user admin, password: grep ADMIN_PASSWORD .env (replace the account afterwards)"
 
 # Stop the stack (data is kept)
 down:
@@ -103,6 +109,10 @@ reset: init _runtime
     {{compose}} build --no-cache
     {{compose}} up -d --force-recreate
     @echo "web http://localhost:3000 · api http://localhost:8080 · mcp http://localhost:8090/mcp"
+
+# Reset the admin (root) account's password to ADMIN_PASSWORD from .env; "generate" prints a new random one instead
+admin-reset mode="": _runtime
+    {{compose}} exec api codesynapse-api reset-admin {{ if mode == "generate" { "--generate" } else { "" } }}
 
 # Follow logs, optionally for one service: just logs api
 logs service="":
