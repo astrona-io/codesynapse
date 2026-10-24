@@ -108,6 +108,7 @@ var (
 	phpGuardAttr  = map[string]bool{"IsGranted": true, "Security": true, "Middleware": true}
 	laravelRoute  = regexp.MustCompile(`\bRoute::(get|post|put|patch|delete|options|any)\s*\(\s*['"]([^'"]*)['"]`)
 	slimRoute     = regexp.MustCompile(`\$(?:app|group|router|r|route)\s*->\s*(get|post|put|patch|delete|options|any)\s*\(\s*['"]([^'"]*)['"]`)
+	phpHandler    = regexp.MustCompile(`\[\s*\\?([\w\\]+)::class\s*,\s*['"](\w+)['"]\s*\]|['"]\\?([\w\\]+)@(\w+)['"]|,\s*\\?([\w\\]+)::class\s*\)`)
 	phpMiddleware = regexp.MustCompile(`->\s*middleware\s*\(\s*\[?\s*['"]([^'"]+)['"]`)
 )
 
@@ -180,6 +181,15 @@ func phpLineRoutes(raw string, line int) []route {
 		verb = ""
 	}
 	r := route{kind: model.RouteHTTP, name: strings.TrimSpace(verb + " /" + strings.TrimPrefix(m[2], "/")), line: line}
+	// [UserController::class, 'show'], 'UserController@show', or an
+	// invokable UserController::class.
+	if h := phpHandler.FindStringSubmatch(raw); h != nil {
+		cls, method := h[1]+h[3]+h[5], h[2]+h[4]
+		if method == "" {
+			method = "__invoke"
+		}
+		r.recv, r.handler = cls[strings.LastIndexByte(cls, '\\')+1:], method
+	}
 	if g := phpMiddleware.FindStringSubmatch(raw); g != nil {
 		r.guards = []string{"middleware(" + g[1] + ")"}
 	}

@@ -13,14 +13,16 @@ import (
 // routes a web framework serves, CLI commands and MCP tools, found by the
 // shape of their registration in the source.
 
-// route is one registration found in a file. handler names a function of
-// the same file ("" when it is inline or imported: the route is real, its
-// handler is not in the graph).
+// route is one registration found in a file. handler is the function as
+// the registration names it, recv its qualifier when written as one
+// (handlers::list, UserController@show); link() resolves both through the
+// file's imports. Both are "" for inline handlers.
 type route struct {
 	kind    string
 	name    string
 	line    int
 	handler string
+	recv    string
 	guards  []string
 }
 
@@ -142,8 +144,9 @@ func jsRoutes(src string, fns map[string]bool) []route {
 		case jsInlineFunc.MatchString(last) || jsInlineFunc.MatchString(rest) && !jsIdent.MatchString(last):
 			// inline handler: the route is real, its body is not a symbol
 		case jsIdent.MatchString(last):
-			if fns[last] {
-				r.handler = last
+			r.handler = last // a function here, or imported: link() decides
+			if i := strings.LastIndexByte(last, '.'); i > 0 && !fns[last] {
+				r.recv, r.handler = last[:i], last[i+1:] // users.list, controllers.users.list
 			}
 		default:
 			continue // options object or anything else: not a registration
@@ -152,6 +155,32 @@ func jsRoutes(src string, fns map[string]bool) []route {
 			if jsIdent.MatchString(a) || strings.HasSuffix(a, ")") && jsIdent.MatchString(strings.SplitN(a, "(", 2)[0]) {
 				r.guards = append(r.guards, a)
 			}
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// djangoPath is a Django URLconf entry: path("users/<int:id>/", views.detail)
+// or re_path(r"^x/$", View.as_view()); include(...) adds no handler.
+var djangoPath = regexp.MustCompile(`\b(?:re_)?path\(\s*r?['"]([^'"]*)['"]\s*,\s*([A-Za-z_][\w.]*)`)
+
+// djangoRoutes reads the routes of a urls.py file.
+func djangoRoutes(src string) []route {
+	var out []route
+	for i, l := range strings.Split(src, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "#") {
+			continue
+		}
+		m := djangoPath.FindStringSubmatch(l)
+		if m == nil || m[2] == "include" {
+			continue
+		}
+		r := route{kind: model.RouteHTTP, name: "/" + strings.TrimPrefix(strings.TrimPrefix(m[1], "^"), "/"), line: i + 1}
+		ref := strings.TrimSuffix(m[2], ".as_view") // a class-based view: the class handles it
+		r.handler = ref
+		if j := strings.LastIndexByte(ref, '.'); j > 0 {
+			r.recv, r.handler = ref[:j], ref[j+1:]
 		}
 		out = append(out, r)
 	}

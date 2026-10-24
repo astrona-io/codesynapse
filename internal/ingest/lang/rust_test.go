@@ -183,8 +183,8 @@ func TestRust(t *testing.T) {
 		}
 	}
 	assert.Equal(t, routes, map[string]string{
-		"GET /users":  "", // list_users is imported, not declared in main.rs
-		"POST /users": "",
+		"GET /users":  id(model.KindFunction, h, "list_users"), // imported by use crate::handlers::{…}
+		"POST /users": id(model.KindFunction, h, "create"),
 		"GET /legacy": id(model.KindFunction, h, "legacy"),
 	})
 }

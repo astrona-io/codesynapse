@@ -235,11 +235,12 @@ func axumRoutes(raw string, line int) []route {
 	}
 	var out []route
 	for _, h := range axumMethod.FindAllStringSubmatch(m[2], -1) {
-		handler := h[2]
-		if i := strings.LastIndex(handler, "::"); i >= 0 {
-			handler = handler[i+2:]
+		r := route{kind: model.RouteHTTP, name: strings.ToUpper(h[1]) + " " + m[1], line: line, handler: h[2]}
+		if i := strings.LastIndex(h[2], "::"); i >= 0 { // handlers::list: the module is the receiver
+			mod := h[2][:i]
+			r.recv, r.handler = mod[strings.LastIndex(mod, "::")+2:], h[2][i+2:]
 		}
-		out = append(out, route{kind: model.RouteHTTP, name: strings.ToUpper(h[1]) + " " + m[1], line: line, handler: handler})
+		out = append(out, r)
 	}
 	return out
 }

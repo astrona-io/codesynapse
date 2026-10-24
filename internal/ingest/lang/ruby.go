@@ -49,6 +49,7 @@ type rbFrame struct {
 	private bool   // after a bare private in a type body
 	single  bool   // class << self
 	prefix  string // a Rails routes namespace or scope
+	module  string // a Rails routes namespace's controller module (Admin)
 }
 
 // parseRuby parses one Ruby file; rel decides whether it is the Rails
@@ -77,12 +78,16 @@ func parseRuby(src []byte, rel string) *fileResult {
 		}
 		return nil
 	}
-	prefix := func() string {
+	prefix := func() (path, module string) {
 		var b strings.Builder
+		var mods []string
 		for _, f := range stack {
 			b.WriteString(f.prefix)
+			if f.module != "" {
+				mods = append(mods, f.module)
+			}
 		}
-		return b.String()
+		return b.String(), strings.Join(mods, "::")
 	}
 	type token struct {
 		pos  int
@@ -95,7 +100,7 @@ func parseRuby(src []byte, rel string) *fileResult {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		routePrefix := prefix() // before this line's own block opens
+		routePrefix, routeModule := prefix() // before this line's own block opens
 		var toks []token
 		consumed := -1 // the opener keyword already handled on this line
 		cls, tf := typeName()
@@ -208,6 +213,11 @@ func parseRuby(src []byte, rel string) *fileResult {
 				f := &rbFrame{kind: "block"}
 				if routesFile {
 					f.prefix = rbRoutePrefix(raw[i])
+					if m := rbNamespace.FindStringSubmatch(raw[i]); m != nil {
+						f.module = rbCamel(m[1])
+					} else if m := rbRouteModule.FindStringSubmatch(raw[i]); m != nil {
+						f.module = rbCamel(m[1]) // scope module: :x do, resources :y, module: :x do
+					}
 				}
 				toks = append(toks, token{pos: loc[0], open: f})
 				continue
@@ -263,7 +273,7 @@ func parseRuby(src []byte, rel string) *fileResult {
 		}
 		fr.findings = append(fr.findings, rubyRules(raw[i], line, n, ownerName(owner))...)
 		if routesFile || owner == nil {
-			fr.routes = append(fr.routes, rubyRoutes(raw[i], line, n, routePrefix, routesFile)...)
+			fr.routes = append(fr.routes, rubyRoutes(raw[i], line, n, routePrefix, routeModule, routesFile)...)
 		}
 	}
 	if len(stack) > 0 {
@@ -293,7 +303,7 @@ func rbSingular(w string) string {
 	switch {
 	case strings.HasSuffix(w, "ies"):
 		return strings.TrimSuffix(w, "ies") + "y"
-	case strings.HasSuffix(w, "sses"), strings.HasSuffix(w, "shes"), strings.HasSuffix(w, "ches"), strings.HasSuffix(w, "xes"):
+	case strings.HasSuffix(w, "sses"), strings.HasSuffix(w, "shes"), strings.HasSuffix(w, "ches"), strings.HasSuffix(w, "xes"), strings.HasSuffix(w, "uses"):
 		return strings.TrimSuffix(w, "es")
 	}
 	return strings.TrimSuffix(w, "s")
@@ -350,18 +360,29 @@ func rbRoutePrefix(raw string) string {
 
 // rubyRoutes reads Rails routes (config/routes.rb: verbs, root, resources)
 // and Sinatra/Grape verb blocks (get '/x' do) elsewhere.
-func rubyRoutes(raw, masked string, line int, prefix string, routesFile bool) []route {
+func rubyRoutes(raw, masked string, line int, prefix, module string, routesFile bool) []route {
 	join := func(p string) string {
 		return "/" + strings.Trim(strings.TrimSuffix(prefix, "/")+"/"+strings.TrimPrefix(p, "/"), "/")
 	}
+	// to: "users#show" names UsersController#show, inside a namespace
+	// module's controllers (Admin::UsersController).
+	if m := rbRouteModule.FindStringSubmatch(raw); m != nil && !strings.Contains(masked, " do") {
+		module = strings.TrimPrefix(module+"::"+rbCamel(m[1]), "::") // resources :x, module: :y
+	}
+	target := func(r route) route {
+		if m := rbRouteTo.FindStringSubmatch(raw); m != nil {
+			r.recv, r.handler = rbController(module, m[1]), m[2]
+		}
+		return r
+	}
 	if m := rbVerbRoute.FindStringSubmatch(raw); m != nil && (routesFile || strings.Contains(masked, " do")) {
-		return []route{{kind: model.RouteHTTP, name: strings.ToUpper(m[1]) + " " + join(m[2]), line: line}}
+		return []route{target(route{kind: model.RouteHTTP, name: strings.ToUpper(m[1]) + " " + join(m[2]), line: line})}
 	}
 	if !routesFile {
 		return nil
 	}
 	if rbRoot.MatchString(raw) {
-		return []route{{kind: model.RouteHTTP, name: "GET " + join(""), line: line}}
+		return []route{target(route{kind: model.RouteHTTP, name: "GET " + join(""), line: line})}
 	}
 	m := rbResources.FindStringSubmatch(raw)
 	if m == nil {
@@ -382,14 +403,52 @@ func rubyRoutes(raw, masked string, line int, prefix string, routesFile bool) []
 		named := func(a string) bool { return strings.Contains(list, ":"+a) || o[3] == a }
 		keep = func(a string) bool { return named(a) == (o[1] == "only") }
 	}
+	ctrl := m[2]
+	if m[1] == "resource" {
+		ctrl += "s" // resource :profile is served by ProfilesController
+	}
+	if c := rbRouteController.FindStringSubmatch(raw); c != nil {
+		ctrl = c[1]
+	}
 	var out []route
 	for _, a := range actions {
 		if m[1] == "resource" && a.action == "index" || !keep(a.action) {
 			continue
 		}
-		out = append(out, route{kind: model.RouteHTTP, name: a.verb + " " + a.path, line: line})
+		out = append(out, route{kind: model.RouteHTTP, name: a.verb + " " + a.path, line: line, recv: rbController(module, ctrl), handler: a.action})
 	}
 	return out
+}
+
+var (
+	rbRouteTo         = regexp.MustCompile(`(?:\bto:\s*|=>\s*|^\s*root\s*\(?\s*)['"]([\w/]+)#(\w+)['"]`)
+	rbRouteModule     = regexp.MustCompile(`\bmodule:\s*[:'"]?(\w+)`)
+	rbRouteController = regexp.MustCompile(`\bcontroller:\s*[:'"]([\w/]+)`)
+)
+
+// rbController is the controller class a route names: "admin/users" in
+// module "Api" is Api::Admin::UsersController.
+func rbController(module, path string) string {
+	parts := strings.Split(path, "/")
+	for i, p := range parts {
+		parts[i] = rbCamel(p)
+	}
+	name := strings.Join(parts, "::") + "Controller"
+	if module != "" {
+		name = module + "::" + name
+	}
+	return name
+}
+
+// rbCamel is user_sessions -> UserSessions.
+func rbCamel(s string) string {
+	var b strings.Builder
+	for _, w := range strings.Split(s, "_") {
+		if w != "" {
+			b.WriteString(strings.ToUpper(w[:1]) + w[1:])
+		}
+	}
+	return b.String()
 }
 
 var (
