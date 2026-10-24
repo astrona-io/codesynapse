@@ -13,10 +13,14 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// Explicit package roots keep ignored directories out of the initial load.
-// Imports can still be read by the type checker; emitted files are filtered too.
+// Every module under the root is loaded, each from its own directory: "./..."
+// stops at the root module's boundary, so nested modules (a tools/ or api/
+// module with its own go.mod) would be silently left out. The walk is the same
+// with or without a repository policy; a policy only adds exclusions, which
+// also keep ignored directories out of the initial load. Imports can still be
+// read by the type checker; emitted files are filtered too.
 func loadPackages(ctx context.Context, cfg *packages.Config, patterns []string, policy *repoconfig.Policy) ([]*packages.Package, error) {
-	if !policy.Present() || len(patterns) != 1 || patterns[0] != "./..." {
+	if len(patterns) != 1 || patterns[0] != "./..." {
 		return packages.Load(cfg, patterns...)
 	}
 	const maxPackageRoots = 4096
@@ -33,7 +37,7 @@ func loadPackages(ctx context.Context, cfg *packages.Config, patterns []string, 
 		}
 		if d.IsDir() {
 			name := d.Name()
-			if p != cfg.Dir && (name == "vendor" || name == "node_modules" || name == "testdata" || strings.HasPrefix(name, ".")) {
+			if p != cfg.Dir && (name == "vendor" || name == "node_modules" || name == "testdata" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")) {
 				return filepath.SkipDir
 			}
 			if p != cfg.Dir {
