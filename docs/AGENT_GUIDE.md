@@ -301,7 +301,7 @@ With memory enabled, `recall_context` recalls only the current chat session by d
 
 Use `recall_context` with `memory_scope: "repository"`, `search_graph_nodes` or `query_subgraph` to explicitly retrieve durable repository knowledge. Use `upsert_graph_triples` only when the user asks to retain knowledge beyond this chat. Those facts remain shared with authorised repository readers in the organisation and appear on the **Agent memory** page. New writes include `origin_session_id`; older facts remain explicitly repository memory without a fabricated origin.
 
-`codesynapse mcp agents-md <repo>` writes these rules into the repository's AGENTS.md. `codesynapse mcp hooks <repo>` installs Claude hooks for session recall and offloading; see the setup limitations above. The client controls compaction. Hooks cannot shorten its message history themselves.
+`GET /api/v1/agent-rules` serves the short ruleset that the [Claude Code plugin](operations/claude-code-plugin.md)'s SessionStart hook puts in every session (`CODESYNAPSE_AGENT_RULES_FILE` replaces the built-in text), and Statistics shows whether sessions then begin with CodeSynapse tools. `codesynapse mcp agents-md <repo>` writes these rules into the repository's AGENTS.md. `codesynapse mcp hooks <repo>` installs Claude hooks for session recall and offloading; see the setup limitations above. The client controls compaction. Hooks cannot shorten its message history themselves.
 
 ### Session-memory API
 

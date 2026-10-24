@@ -43,6 +43,18 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
         <RankList :rows="readShare" suffix="%" :scale="100" color="var(--success)" empty="Install the Claude Code plugin to see which tools point agents to code they then read." />
         <p v-if="readShare.length" class="muted small">Of the file line ranges a tool's answers gave, the share the agent read afterwards. A low share means the tool answers with places that do not help; reported by the plugin's hooks as counts only.</p>
       </div>
+      <div class="workflow">
+        <p class="label">Do agents use CodeSynapse first?</p>
+        <template v-if="a.workflow.first_codesynapse + a.workflow.first_native">
+          <div class="grid kpis">
+            <StatTile label="Began with CodeSynapse" :value="`${a.workflow.first_share_pct}%`" :hint="`${fmtInt(a.workflow.first_codesynapse)} of ${fmtInt(a.workflow.first_codesynapse + a.workflow.first_native)} sessions that looked at code`" />
+            <StatTile label="Began with Read or Grep" :value="fmtInt(a.workflow.first_native)" hint="sessions whose first lookup skipped CodeSynapse" />
+            <StatTile label="Whole-file reads turned back" :value="fmtInt(a.workflow.reads_turned_back)" hint="large files the agent was sent to the outline of" />
+          </div>
+          <p class="muted small">Counted by the plugin's hooks as numbers only, never paths or prompts. A low first share means the ruleset is not reaching agents or its wording is not working: it is served from the API (<code>/api/v1/agent-rules</code>) and can be changed with <code>CODESYNAPSE_AGENT_RULES_FILE</code>, then watch this figure.</p>
+        </template>
+        <div v-else class="empty"><strong>Nothing reported yet</strong>Install the Claude Code plugin: its hooks put the ruleset in every session and report how sessions begin.</div>
+      </div>
       <details class="method"><summary>How tokens avoided are estimated</summary><p class="muted small">{{ a.avoided_method }}</p></details>
     </section>
 
@@ -56,6 +68,7 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
 .label { display: block; margin: 12px 0 8px; }
 h3 { margin: 18px 0 4px; font-size: 15px; }
 .refreshing { opacity: 0.6; transition: opacity 150ms; }
+.workflow { margin-top: 16px; }
 .read-share { margin-top: 16px; max-width: 560px; }
 .method summary { cursor: pointer; color: var(--muted); font-size: 12.5px; margin-top: 12px; }
 </style>

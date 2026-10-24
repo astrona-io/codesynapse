@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,4 +86,55 @@ func TestHookCommandPrintsJSON(t *testing.T) {
 	assert.Equal(t, out.String(), "", "unreadable input: no opinion")
 	var none any
 	assert.True(t, json.Unmarshal([]byte(`{}`), &none) == nil)
+}
+
+func TestLookupNotesHowTheSessionBegan(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
+	lookup := func(session, tool string) {
+		noteLookup(toolHookInput{SessionID: session, ToolName: tool})
+	}
+	first := func(session string) string { return loadState(stateFile(session)).First }
+
+	lookup("a", "mcp__plugin_codesynapse_codesynapse__minimal_context")
+	lookup("a", "Grep")
+	assert.Equal(t, first("a"), "codesynapse", "the first lookup decides")
+
+	lookup("b", "Grep")
+	lookup("b", "mcp__codesynapse__search")
+	assert.Equal(t, first("b"), "native")
+
+	lookup("c", "Bash")
+	lookup("c", "mcp__other__search")
+	assert.Equal(t, first("c"), "", "other tools are not code lookups")
+}
+
+func TestWorkflowReportOnlyTellsWhatIsNew(t *testing.T) {
+	s := hookState{First: "native", Turned: 2}
+	assert.Equal(t, s.workflowReport()["first_native"], 1)
+	assert.Equal(t, s.workflowReport()["reads_turned_back"], 2)
+	s.markReported()
+	assert.True(t, s.workflowReport() == nil, "nothing new after a report")
+	s.Turned = 5
+	rep := s.workflowReport()
+	assert.Equal(t, rep["reads_turned_back"], 3)
+	assert.Equal(t, rep["first_native"], 0, "the beginning is reported once")
+	assert.True(t, (hookState{}).workflowReport() == nil, "a session with no lookups reports nothing")
+}
+
+func TestSessionRulesFallBackToTheBuiltInText(t *testing.T) {
+	t.Setenv("CODESYNAPSE_API_TOKEN", "csk_test")
+	t.Setenv("CODESYNAPSE_API_URL", "http://127.0.0.1:1") // nothing listens
+	out := sessionRules(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	spec := out["hookSpecificOutput"].(map[string]any)
+	assert.Equal(t, spec["hookEventName"], "SessionStart")
+	assert.Contains(t, spec["additionalContext"].(string), "minimal_context")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, r.Header.Get("Authorization"), "Bearer csk_test")
+		_, _ = io.WriteString(w, `{"version":0,"custom":true,"text":"Our rule: ask the graph first."}`)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("CODESYNAPSE_API_URL", srv.URL)
+	out = sessionRules(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	assert.Equal(t, out["hookSpecificOutput"].(map[string]any)["additionalContext"], "Our rule: ask the graph first.")
 }

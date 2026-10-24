@@ -228,6 +228,8 @@ export interface WorkspaceStats {
   generated_at: string; days: number
   agents: {
     sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; avoided_method: string
+    // How sessions began, reported by the Claude Code plugin's hooks.
+    workflow: { first_codesynapse: number; first_native: number; reads_turned_back: number; first_share_pct: number }
     avg_latency_ms: number; max_latency_ms: number; daily: UsageDay[]; tools: UsageTool[]
     clients: { client: string; sessions: number; calls: number }[]
     repos: { repo: string; calls: number; response_tokens: number; avoided_tokens: number }[]

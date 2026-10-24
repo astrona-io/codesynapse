@@ -76,6 +76,8 @@ type Config struct {
 	// PublicAPIURL is where the Claude Code bridge reaches this API to
 	// register chat sessions, shown on the Agents page; empty when unknown.
 	PublicAPIURL string
+	// AgentRulesFile replaces the built-in ruleset sessions start with.
+	AgentRulesFile string
 	// PublicURL is the dashboard's address; single sign-on returns to
 	// PublicURL + "/sso/callback".
 	PublicURL string
@@ -300,6 +302,7 @@ func (s *Server) routes() {
 	s.repoPolicyRoutes()
 	s.runtimeRoutes()
 	s.retrievalRoutes()
+	s.agentRulesRoutes()
 	s.notificationRoutes()
 	s.route("GET /api/v1/overview", visibleOnly, s.handleWorkspaceOverview)
 	s.route("GET /api/v1/attention", visibleOnly, s.handleAttention)

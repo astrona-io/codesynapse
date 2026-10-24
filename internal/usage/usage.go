@@ -13,6 +13,21 @@ import (
 // Session is the pseudo tool under which new MCP sessions are counted.
 const Session = "(session)"
 
+// The plugin's hooks report how sessions began as counts under these
+// pseudo tools (Calls is the count): the first code lookup of a session was a
+// CodeSynapse tool or a native one (Read, Grep, Glob), and how many whole-file
+// reads the guard turned back. They are workflow figures, not tool calls.
+const (
+	FirstCodeSynapse = "(first:codesynapse)"
+	FirstNative      = "(first:native)"
+	ReadTurnedBack   = "(guard:read-turned-back)"
+)
+
+// IsWorkflow reports whether tool is one of the workflow pseudo tools.
+func IsWorkflow(tool string) bool {
+	return tool == FirstCodeSynapse || tool == FirstNative || tool == ReadTurnedBack
+}
+
 // Retention is how long daily buckets are kept.
 const Retention = 180 * 24 * time.Hour
 
