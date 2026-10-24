@@ -145,7 +145,7 @@ const orgValue = computed({
         </select>
       </label>
       <p v-else-if="session.current.value" class="org"><span class="org__label">Org</span><span class="org__name">{{ session.current.value.org.name }}</span></p>
-      <QuickSearch v-if="!session.restricted.value" :items="searchItems" />
+      <QuickSearch v-if="!session.restricted.value" :items="searchItems" :repo="repo || undefined" />
       <div class="bar__end">
         <span class="status" :title="healthError ? 'API unreachable' : health ? 'Connected' : 'Connecting…'">
           <span class="dot" :class="healthError ? 'dot--bad' : health ? 'dot--ok' : 'dot--warn'" />
