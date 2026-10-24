@@ -161,6 +161,11 @@ type PROptions struct {
 	Root      string
 	Depth     int
 	MaxTokens int
+	// BaseGraph, when set, is a graph of the change's base: the answer then
+	// says which findings the change introduces and fixes (BaseLabel names
+	// the base, e.g. a commit).
+	BaseGraph store.Reader
+	BaseLabel string
 }
 
 // PRContext analyses a change.
@@ -218,6 +223,18 @@ func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRCon
 	rep, err := review.Analyze(ctx, s.q(), repo, changes, review.Options{Depth: min(depth, 4)})
 	if err != nil {
 		return PRContext{}, err
+	}
+	if o.BaseGraph != nil {
+		files := make([]string, 0, len(changes))
+		for _, c := range changes {
+			files = append(files, c.Path)
+		}
+		d, err := review.CompareFindings(ctx, store.ForRepository(o.BaseGraph, repo), s.R, repo, files)
+		if err != nil {
+			return PRContext{}, fmt.Errorf("comparing findings with the base: %w", err)
+		}
+		d.Base = o.BaseLabel
+		rep.Security = &d
 	}
 	out := PRContext{Report: rep, ExportedChanged: []string{}, ExportedUntested: []string{}, SensitiveTouched: []string{}, DuplicatedChanged: []string{}}
 	out.Summary.DuplicatedChanges = 0

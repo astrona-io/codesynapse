@@ -99,10 +99,17 @@ type PRContextIn struct {
 // PRContext answers get_pr_context. Base and head refs need the checkout
 // the graph was built from to be readable here.
 func PRContext(ctx context.Context, r store.Reader, repo string, in PRContextIn) (agentctx.PRContext, error) {
+	return PRContextAgainst(ctx, r, nil, "", repo, in)
+}
+
+// PRContextAgainst also compares the findings of the changed files with
+// base, a graph of the change's base named by baseLabel (nil: no
+// comparison). r must then be a graph of the head.
+func PRContextAgainst(ctx context.Context, r, base store.Reader, baseLabel, repo string, in PRContextIn) (agentctx.PRContext, error) {
 	if len(in.Diff) > MaxDiffBytes {
 		return agentctx.PRContext{}, fmt.Errorf("diff exceeds %d bytes", MaxDiffBytes)
 	}
-	opts := agentctx.PROptions{Diff: []byte(in.Diff), Files: in.Files, Base: in.Base, Head: in.Head, Depth: in.Depth, MaxTokens: in.MaxTokens}
+	opts := agentctx.PROptions{Diff: []byte(in.Diff), Files: in.Files, Base: in.Base, Head: in.Head, Depth: in.Depth, MaxTokens: in.MaxTokens, BaseGraph: base, BaseLabel: baseLabel}
 	if len(opts.Diff) == 0 && len(opts.Files) == 0 && in.Base != "" {
 		n, err := r.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
 		if err != nil {

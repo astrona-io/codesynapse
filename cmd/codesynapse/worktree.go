@@ -46,6 +46,12 @@ type worktree struct {
 	key     string       // fingerprint of the tree the graph was built from
 	graph   store.Reader // nil until the first build
 	pending *worktreeBuild
+
+	// The base a change is judged against (get_pr_context): one graph per
+	// base commit, built once.
+	baseMu     sync.Mutex
+	baseCommit string
+	baseGraph  store.Reader
 }
 
 type worktreeBuild struct {
@@ -190,7 +196,7 @@ func (w *worktree) answer(ctx context.Context, c toolCall) (map[string]any, erro
 	if err != nil {
 		return nil, err
 	}
-	out, err := runCoreTool(ctx, g, w.repo, c.Params.Name, c.Params.Arguments)
+	out, err := w.runCoreTool(ctx, g, c.Params.Name, c.Params.Arguments)
 	if err != nil {
 		// The tool itself failed, as it would on the server: tell the agent.
 		return map[string]any{"isError": true, "content": []map[string]any{{"type": "text", "text": err.Error()}}}, nil
@@ -209,8 +215,75 @@ func (w *worktree) answer(ctx context.Context, c toolCall) (map[string]any, erro
 
 var errNoChanges = errors.New("the working tree has no changes the server lacks")
 
+// base returns the commit the working tree's change is judged against
+// (where it left the upstream branch, else HEAD) and a graph of it, built
+// once per commit in a temporary worktree. A nil graph means no comparison.
+func (w *worktree) base(ctx context.Context) (string, store.Reader) {
+	commit := ""
+	if out, err := gitx.Run(ctx, w.root, "merge-base", "HEAD", "@{upstream}"); err == nil {
+		commit = strings.TrimSpace(string(out))
+	}
+	if commit == "" {
+		commit = gitx.HeadCommit(ctx, w.root)
+	}
+	if commit == "" {
+		return "", nil
+	}
+	w.baseMu.Lock()
+	defer w.baseMu.Unlock()
+	if w.baseCommit == commit {
+		return commit, w.baseGraph
+	}
+	ctx = logx.WithLogger(ctx, w.logger)
+	g, err := ingest.AtCommit(ctx, w.root, commit, ingest.Options{Repo: w.repo})
+	if err != nil {
+		w.logger.Warn("base graph failed; get_pr_context answers without new and fixed findings", "commit", commit, "error", err)
+		return commit, nil
+	}
+	mem := memory.New()
+	if err := mem.ReplaceRepo(ctx, w.repo, g); err != nil {
+		return commit, nil
+	}
+	w.baseCommit, w.baseGraph = commit, mem
+	return commit, mem
+}
+
+// currentChange fills a get_pr_context call that names no change with the
+// working tree's change against base: its diff, or, when there are new
+// untracked files a diff leaves out, the changed and new files.
+func (w *worktree) currentChange(ctx context.Context, base string, in *coretools.PRContextIn) error {
+	untracked, err := gitx.Run(ctx, w.root, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return err
+	}
+	if len(untracked) == 0 {
+		diff, err := gitx.WorkingDiff(ctx, w.root, base)
+		if err != nil {
+			return err
+		}
+		if len(diff) > 0 && len(diff) <= coretools.MaxDiffBytes {
+			in.Diff = string(diff)
+			return nil
+		}
+	}
+	names, err := gitx.ChangedFiles(ctx, w.root, base)
+	if err != nil {
+		return err
+	}
+	for _, list := range [][]byte{names, untracked} {
+		for f := range strings.SplitSeq(string(list), "\x00") {
+			if f != "" && !slices.Contains(in.Files, f) {
+				in.Files = append(in.Files, f)
+			}
+		}
+	}
+	in.Files = in.Files[:min(len(in.Files), 100)]
+	return nil
+}
+
 // runCoreTool decodes a core tool's arguments and answers it from r.
-func runCoreTool(ctx context.Context, r store.Reader, repo, name string, args json.RawMessage) (any, error) {
+func (w *worktree) runCoreTool(ctx context.Context, r store.Reader, name string, args json.RawMessage) (any, error) {
+	repo := w.repo
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
 	}
@@ -262,7 +335,13 @@ func runCoreTool(ctx context.Context, r store.Reader, repo, name string, args js
 		if err := decode(&in); err != nil {
 			return nil, err
 		}
-		return coretools.PRContext(ctx, r, repo, in)
+		commit, base := w.base(ctx)
+		if in.Diff == "" && len(in.Files) == 0 && in.Base == "" && commit != "" {
+			if err := w.currentChange(ctx, commit, &in); err != nil {
+				return nil, err
+			}
+		}
+		return coretools.PRContextAgainst(ctx, r, base, short(commit), repo, in)
 	}
 	return nil, fmt.Errorf("%s is not answered from the working tree", name)
 }

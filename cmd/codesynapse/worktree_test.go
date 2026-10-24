@@ -149,3 +149,52 @@ func TestWorktreeLocalCalls(t *testing.T) {
 	_, ok := none.local([]byte(`{"params":{"name":"search"}}`))
 	assert.False(t, ok, "no working tree: everything is forwarded")
 }
+
+// TestBridgePRContextSaysWhatTheChangeIntroduces: get_pr_context without
+// arguments analyses the working tree's change against its base and says
+// which findings it introduces and fixes.
+func TestBridgePRContextSaysWhatTheChangeIntroduces(t *testing.T) {
+	ctx := context.Background()
+	dir := gitRepo(t)
+	write := func(src string) {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "hash.go"), []byte("package demo\n\nimport (\n\t\"crypto/md5\"\n\t\"crypto/sha256\"\n)\n\n"+src), 0o600))
+	}
+	write("// Old hashes with MD5.\nfunc Old(b []byte) [16]byte { return md5.Sum(b) }\n\n// Strong hashes with SHA-256.\nfunc Strong(b []byte) [32]byte { return sha256.Sum256(b) }\n")
+	for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "hash"}} {
+		_, err := gitx.Run(ctx, dir, args...)
+		require.NoError(t, err)
+	}
+	// Old stops using MD5; a new function starts.
+	write("// Old hashes with SHA-256 now.\nfunc Old(b []byte) [32]byte { return sha256.Sum256(b) }\n\n// Strong hashes with SHA-256.\nfunc Strong(b []byte) [32]byte { return sha256.Sum256(b) }\n\n// Legacy hashes with MD5.\nfunc Legacy(b []byte) [16]byte { return md5.Sum(b) }\n")
+
+	wt := newWorktree(ctx, dir, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	require.True(t, wt != nil)
+	res, err := wt.answer(ctx, toolCall{Params: struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}{Name: "get_pr_context", Arguments: json.RawMessage(`{}`)}})
+	require.NoError(t, err)
+	raw, err := json.Marshal(res["structuredContent"])
+	require.NoError(t, err)
+	var out struct {
+		Security struct {
+			Introduced map[string]int `json:"introduced"`
+			Fixed      map[string]int `json:"fixed"`
+			New        []struct {
+				Rule  string `json:"rule"`
+				Owner string `json:"owner"`
+			} `json:"new"`
+			Removed []struct {
+				Owner string `json:"owner"`
+			} `json:"removed"`
+			Base string `json:"base"`
+		} `json:"security_delta"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &out), string(raw))
+	require.Len(t, out.Security.New, 1, string(raw))
+	assert.Equal(t, out.Security.New[0].Rule, "weak-hash")
+	assert.Equal(t, out.Security.New[0].Owner, "demo.Legacy")
+	require.Len(t, out.Security.Removed, 1)
+	assert.Equal(t, out.Security.Removed[0].Owner, "demo.Old")
+	assert.True(t, out.Security.Base != "", "names the base commit")
+}
