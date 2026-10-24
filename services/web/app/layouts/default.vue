@@ -261,7 +261,7 @@ const orgValue = computed({
 .connect { margin-top: auto; display: flex; flex-direction: column; gap: 6px; padding: 18px; border-radius: 20px; background: var(--bg); }
 .connect__title { font: 800 16px/1.2 var(--font-display); letter-spacing: -0.02em; }
 .connect__text { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-.main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 22px; padding: 30px var(--gutter) 48px; max-width: var(--shell-max); }
+.main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 22px; padding: 30px var(--gutter) 48px; }
 .menu-toggle { display: none; width: 48px; min-height: 48px; padding: 0; }
 
 @media (max-width: 960px) {
