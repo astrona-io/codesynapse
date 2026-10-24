@@ -97,7 +97,42 @@ type Vulnerability struct {
 	Description    string     `json:"description,omitempty"`
 	Recommendation string     `json:"recommendation,omitempty"`
 	Affects        []Affects  `json:"affects"`
+	Analysis       *Analysis  `json:"analysis,omitempty"`
 	Properties     []Property `json:"properties,omitempty"`
+}
+
+// Analysis is the VEX statement: whether the product is affected.
+type Analysis struct {
+	State         string `json:"state"`
+	Justification string `json:"justification,omitempty"`
+	Detail        string `json:"detail,omitempty"`
+}
+
+// VEX states and the one justification CodeSynapse can show (CycloneDX 1.5).
+const (
+	StateNotAffected        = "not_affected"
+	StateInTriage           = "in_triage"
+	JustificationNotPresent = "code_not_present"
+)
+
+// analysisOf states what the analysis proves, and no more. "Not affected"
+// only when none of the packages the advisory names is compiled into the
+// repository's packages or tests (Go). A call graph of the repository's own
+// code cannot prove the rest: dependencies and calls through interfaces can
+// still reach a vulnerable function, so everything else stays in triage
+// with what was found.
+func analysisOf(v model.Node) *Analysis {
+	switch {
+	case v.CodeAbsent:
+		return &Analysis{State: StateNotAffected, Justification: JustificationNotPresent,
+			Detail: "None of the packages the advisory names is compiled into this repository's packages or tests."}
+	case v.Reachability == "called":
+		return &Analysis{State: StateInTriage, Detail: "A function the advisory names is called from this repository's code."}
+	case v.Reachability == "imported":
+		return &Analysis{State: StateInTriage, Detail: "This repository's code imports the affected package. Only direct calls from the repository's own code are analysed, so this is not proof either way."}
+	default:
+		return &Analysis{State: StateInTriage, Detail: "A dependency this repository's code does not import directly; other dependencies, run-time loading or tooling can still use it."}
+	}
 }
 
 // Source is where a vulnerability was reported.
@@ -189,7 +224,7 @@ func Build(repo model.Node, g store.DependencyGraph, opts Options) Document {
 		}
 		vu := Vulnerability{
 			BOMRef: "vuln:" + v.Name + ":" + ref, ID: v.Name, Source: Source{Name: "OSV", URL: v.URL},
-			Description: v.Summary, Affects: []Affects{{Ref: ref}},
+			Description: v.Summary, Affects: []Affects{{Ref: ref}}, Analysis: analysisOf(v),
 			Properties: []Property{{Name: "codesynapse:reachability", Value: v.Reachability}},
 		}
 		if v.Severity != "" {

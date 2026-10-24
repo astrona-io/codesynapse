@@ -10,9 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"time"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/tools/go/packages"
 
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"github.com/astrona-io/codesynapse/internal/license"
@@ -314,8 +316,36 @@ func addDependencies(ctx context.Context, opts Options, root string, g *model.Gr
 		}
 	}
 	resolveLicenses(ctx, opts, root, mods)
-	vuln.Apply(opts.Repo, g, mods, vulns, calls, imports)
+	var built map[string]bool
+	if goRes != nil {
+		built = builtPackages(ctx, root, vulns)
+	}
+	vuln.Apply(opts.Repo, g, mods, vulns, calls, imports, built)
 	return mods, nil
+}
+
+// builtPackages is every package compiled into the repository's packages
+// and their tests, loaded only when a Go advisory names packages: a VEX
+// "not affected" rests on it. Any load error gives nil, which claims
+// nothing, since a missing package would make vulnerable code look absent.
+func builtPackages(ctx context.Context, root string, vulns []vuln.Vulnerability) map[string]bool {
+	if !slices.ContainsFunc(vulns, func(v vuln.Vulnerability) bool { return v.Ecosystem == vuln.EcosystemGo && len(v.Symbols) > 0 }) {
+		return nil
+	}
+	pkgs, err := golang.Load(ctx, root, packages.NeedName|packages.NeedImports|packages.NeedDeps)
+	if err != nil {
+		logx.FromContext(ctx).Warn("listing the build's packages failed", logx.Error(err))
+		return nil
+	}
+	built, broken := map[string]bool{}, false
+	packages.Visit(pkgs, nil, func(p *packages.Package) {
+		broken = broken || len(p.Errors) > 0
+		built[p.PkgPath] = true
+	})
+	if broken {
+		return nil
+	}
+	return built
 }
 
 // resolveLicenses fills in licences the lockfiles did not record.
