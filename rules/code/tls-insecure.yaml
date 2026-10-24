@@ -4,7 +4,7 @@ title: TLS certificate verification disabled
 severity: high
 cwe: [CWE-295]
 category: code
-languages: [go, python, javascript, typescript, java, kotlin, rust, csharp, php]
+languages: [go, python, javascript, typescript, java, kotlin, rust, csharp, php, ruby]
 why: Without certificate verification anyone on the network path can impersonate the server and read or change traffic.
 fix: Remove InsecureSkipVerify; configure RootCAs for private CAs.
 references:
@@ -34,3 +34,6 @@ examples:
   - language: php
     vulnerable: 'curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);'
     fixed: 'curl_setopt($ch, CURLOPT_CAINFO, ''/etc/ssl/internal-ca.pem'');'
+  - language: ruby
+    vulnerable: 'http.verify_mode = OpenSSL::SSL::VERIFY_NONE'
+    fixed: 'http.verify_mode = OpenSSL::SSL::VERIFY_PEER'

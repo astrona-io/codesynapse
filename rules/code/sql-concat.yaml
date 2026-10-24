@@ -4,7 +4,7 @@ title: SQL query built from non-constant strings
 severity: high
 cwe: [CWE-89]
 category: code
-languages: [go, python, javascript, typescript, java, kotlin, rust, csharp, php]
+languages: [go, python, javascript, typescript, java, kotlin, rust, csharp, php, ruby]
 why: 'Building SQL from strings lets input change the query itself: read other rows, bypass auth, drop tables.'
 fix: Use placeholders ($1, ?) and pass values as arguments.
 references:
@@ -31,3 +31,6 @@ examples:
   - language: php
     vulnerable: '$pdo->query("SELECT * FROM users WHERE name = ''$name''");'
     fixed: '$stmt = $pdo->prepare(''SELECT * FROM users WHERE name = ?''); $stmt->execute([$name]);'
+  - language: ruby
+    vulnerable: 'User.where("name = ''#{name}''")'
+    fixed: 'User.where(name: name)'

@@ -107,10 +107,10 @@ func looksSecret(name, value string) bool {
 		return false
 	}
 	lower := strings.ToLower(name)
-	if strings.EqualFold(value, name) {
-		return false // CSRF_TOKEN = "csrf_token" names a field or cookie
+	if strings.EqualFold(value, name) || strings.Contains(value, "%d") || strings.Contains(value, "%s") {
+		return false // CSRF_TOKEN = "csrf_token" names a field or cookie; "user.%d.token" is a key format
 	}
-	for _, ref := range []string{"name", "key_id", "file", "path", "env", "url", "type", "header", "field", "prefix", "_ref"} {
+	for _, ref := range []string{"name", "key_id", "file", "path", "env", "url", "type", "header", "field", "prefix", "_ref", "identifier"} {
 		if strings.HasSuffix(lower, ref) {
 			return false
 		}
@@ -309,6 +309,8 @@ func tagsFor(calls []call, lang string) []string {
 			csTags(c.recv, n, set)
 		case lang == PHP:
 			phpTags(c.recv, n, set)
+		case lang == Ruby:
+			rubyTags(c.recv, n, set)
 		}
 	}
 	var out []string

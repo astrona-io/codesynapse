@@ -4,7 +4,7 @@ title: Process started from a non-constant program name
 severity: medium
 cwe: [CWE-78]
 category: code
-languages: [go, python, javascript, typescript, java, kotlin, rust, csharp]
+languages: [go, python, javascript, typescript, java, kotlin, rust, csharp, ruby]
 why: Starting a program whose name or command line comes from data lets that data choose what runs.
 fix: Allowlist the binary; never take it from user input.
 references:
@@ -32,3 +32,6 @@ examples:
   - language: csharp
     vulnerable: 'Process.Start(program, args);'
     fixed: 'Process.Start(new ProcessStartInfo("/usr/bin/tar") { ArgumentList = { "xzf", path } });'
+  - language: ruby
+    vulnerable: 'system(command)'
+    fixed: 'system("/usr/bin/tar", "xzf", path)'

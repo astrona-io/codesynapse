@@ -4,7 +4,7 @@ title: Filesystem path built from HTTP request input
 severity: high
 cwe: [CWE-22]
 category: code
-languages: [go, python, javascript, typescript, php]
+languages: [go, python, javascript, typescript, php, ruby]
 why: Paths taken from requests can contain ../ and read or overwrite files outside the intended directory.
 fix: Clean the path, reject '..', and confine it to a base directory (os.Root).
 references:
@@ -24,3 +24,6 @@ examples:
   - language: php
     vulnerable: 'return file_get_contents(''/srv/files/'' . $_GET[''name'']);'
     fixed: 'return file_get_contents(''/srv/files/'' . basename($name)); // after checking $name against a list'
+  - language: ruby
+    vulnerable: 'send_file Rails.root.join("files", params[:name])'
+    fixed: 'send_file current_user.documents.find(document_id).stored_path'
