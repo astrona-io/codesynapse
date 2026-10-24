@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiKey } from '~/utils/types'
+import type { AgentStatus, ApiKey } from '~/utils/types'
 
 useHead({ title: 'Agents · CodeSynapse' })
 const session = useSession()
@@ -73,13 +73,34 @@ const where = computed(() => viaBridge.value
       other: 'Most MCP clients accept this shape: a streamable HTTP server with a bearer token header.',
     }[agent.value])
 
-// Step 3: the key's first use shows the agent is connected.
+// The last step: what the page can see happen. The key's first use says an
+// agent connected; the usage counters (flushed every 30 seconds) say it made
+// a call and, from the plugin's hooks, that the plugin runs.
+const pluginInstall = 'claude plugin marketplace add astrona-io/codesynapse\nclaude plugin install codesynapse@codesynapse'
+const pluginCleanup = 'claude mcp remove codesynapse -s user'
+const stepPlugin = 4
+const stepCheck = computed(() => (viaBridge.value ? 5 : 3))
 const { data: keys, refresh: refreshKeys } = useApiGet<{ keys: ApiKey[] }>('me/keys', { immediate: session.accounts.value })
+const { data: status, refresh: refreshStatus } = useApiGet<AgentStatus>('agents/status')
+// What was already there when the page opened: only newer activity counts.
+const base = ref<AgentStatus | null>(null)
+watch(status, (v) => { if (v && !base.value) base.value = { ...v } }, { immediate: true })
 const connected = computed(() => keys.value?.keys.find((k) => k.id === keyId.value)?.last_used_at)
+const firstCall = computed(() => !!status.value && !!base.value && status.value.calls > base.value.calls)
+const pluginSeen = computed(() => !!status.value && !!base.value && status.value.workflow > base.value.workflow)
+const checks = computed(() => [
+  { id: 'key', label: 'Key created', done: !!keyId.value || !session.accounts.value, hint: 'Step 1.' },
+  { id: 'connected', label: 'Agent connected', done: !!connected.value || firstCall.value, hint: connected.value ? `The key was first used ${relTime(connected.value)}.` : 'Start a new chat in your agent; the bridge connects when it starts.' },
+  { id: 'call', label: 'First tool call', done: firstCall.value, hint: firstCall.value ? 'A CodeSynapse tool answered a call.' : 'Ask something about a repository. Calls are counted within a minute.' },
+  ...(viaBridge.value ? [{ id: 'plugin', label: 'Plugin running', done: pluginSeen.value, hint: pluginSeen.value ? 'Its hooks reported how a session began.' : 'Optional. Appears after a new chat with the plugin installed, once it has looked at code.' }] : []),
+])
 let poll: ReturnType<typeof setInterval> | undefined
-watch(keyId, (id) => {
-  clearInterval(poll)
-  if (id) poll = setInterval(() => { if (!connected.value) refreshKeys() }, 5000)
+onMounted(() => {
+  poll = setInterval(() => {
+    if (document.visibilityState !== 'visible') return
+    if (keyId.value && !connected.value) refreshKeys()
+    if (!firstCall.value || (viaBridge.value && !pluginSeen.value)) refreshStatus()
+  }, 5000)
 })
 onBeforeUnmount(() => clearInterval(poll))
 </script>
@@ -140,14 +161,29 @@ onBeforeUnmount(() => clearInterval(poll))
       </div>
     </section>
 
+    <section v-if="viaBridge && agent === 'claude'" class="panel step">
+      <p class="step__n">{{ stepPlugin }}</p>
+      <div class="stack--tight">
+        <h2>Install the Claude Code plugin <span class="muted">(recommended)</span></h2>
+        <p class="muted">The plugin makes agents use CodeSynapse without anyone pasting a prompt: every session starts with a short ruleset (served by this installation), large files are read by range, and a check runs before the agent finishes. It also reports, as counts only, whether sessions begin with CodeSynapse; see <NuxtLink to="/stats/agents">Statistics → Agents</NuxtLink>. Run this once in a terminal:</p>
+        <CopyField :value="pluginInstall" multiline label="Shell" />
+        <p class="muted small">The plugin starts its own bridge, so remove the one you registered in step 3 to avoid two servers and double hooks. Your key stays in its file and is reused.</p>
+        <CopyField :value="pluginCleanup" label="Shell" />
+        <p class="muted small">Update the <code>codesynapse</code> program first (<code>brew upgrade codesynapse</code>): the plugin's hooks call commands older versions do not have.</p>
+      </div>
+    </section>
+
     <section class="panel step">
-      <p class="step__n">{{ viaBridge ? 4 : 3 }}</p>
+      <p class="step__n">{{ stepCheck }}</p>
       <div class="stack--tight">
         <h2>Check that it works</h2>
         <p class="muted">Start a <strong>new</strong> session in your agent (chats that were already open keep their old setup) and ask something about one of your repositories, for example “Use CodeSynapse to show the callers of the main handler”.</p>
-        <p v-if="!session.accounts.value || !keyId" class="muted small">With a key from step 1, this page notices the agent's first call.</p>
-        <p v-else-if="connected" class="notice notice--ok" role="status">Connected: the agent first used its key {{ relTime(connected) }}.</p>
-        <p v-else class="notice" role="status"><span class="dot dot--warn" /> Waiting for the agent's first call…</p>
+        <ul class="checks" aria-live="polite">
+          <li v-for="c in checks" :key="c.id" :class="{ done: c.done }">
+            <span class="checks__mark" aria-hidden="true">{{ c.done ? '✓' : '' }}</span>
+            <span><strong>{{ c.label }}</strong> <span class="muted small">{{ c.hint }}</span></span>
+          </li>
+        </ul>
         <details>
           <summary class="muted small">Make agents use it automatically</summary>
           <div class="stack--tight small">
@@ -167,4 +203,9 @@ onBeforeUnmount(() => clearInterval(poll))
 .step > div { flex: 1; min-width: 0; }
 .grow { flex: 1; min-width: 220px; }
 .align-end { align-self: flex-end; }
+.checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.checks li { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border: 2px solid var(--line); border-radius: var(--radius-sm); }
+.checks li.done { background: var(--success-soft); }
+.checks__mark { flex: none; width: 22px; height: 22px; border-radius: var(--pill); border: 2px solid var(--line-strong); display: grid; place-items: center; font-weight: 800; font-size: 13px; }
+.checks li.done .checks__mark { border-color: var(--success); color: var(--success); }
 </style>
