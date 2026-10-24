@@ -22,7 +22,9 @@ const stageSchema = `def s=graph.schema()
 ['stage_data','stage_run','pub_gen'].each{s.propertyKey(it).asText().ifNotExist().create()}
 ['stage_index','stage_expires'].each{s.propertyKey(it).asLong().ifNotExist().create()}
 s.vertexLabel('ingest_stage').useCustomizeStringId().properties('repo','stage_run','stage_index','stage_data','stage_expires').ifNotExist().create()
-s.vertexLabel('ingest_head').useCustomizeStringId().properties('repo','stage_run','stage_expires','pub_gen').nullableKeys('pub_gen').ifNotExist().create()
+// ifNotExist still rejects a label whose older properties differ. Check the
+// name first so the append below can migrate existing publication heads.
+if(!s.getVertexLabels().any{it.name()=='ingest_head'}){s.vertexLabel('ingest_head').useCustomizeStringId().properties('repo','stage_run','stage_expires','pub_gen').nullableKeys('pub_gen').ifNotExist().create()}
 if(!s.getVertexLabel('ingest_head').properties().collect{graph.propertyKey(it).name()}.contains('pub_gen')){s.vertexLabel('ingest_head').properties('pub_gen').nullableKeys('pub_gen').append()}
 s.indexLabel('ingestStageByRepo').onV('ingest_stage').by('repo').secondary().ifNotExist().create()
 s.indexLabel('ingestStageByExpiry').onV('ingest_stage').by('stage_expires').range().ifNotExist().create()

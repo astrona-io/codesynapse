@@ -86,6 +86,38 @@ func testTxCapacity() int {
 	return capacity
 }
 
+func TestStageSchemaUpgradesLegacyHead(t *testing.T) {
+	url := os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_URL")
+	if url == "" {
+		t.Skip("CODESYNAPSE_TEST_HUGEGRAPH_URL not set")
+	}
+	ctx := t.Context()
+	s, err := New(ctx, Config{URL: url, User: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_USER"), Password: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_PASSWORD")})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close(ctx) })
+	require.NoError(t, s.EnsureSchema(ctx))
+	// Separate fixture labels exercise an older schema without touching the
+	// graph's real publication heads or any indexed repository.
+	const legacy = `def s=graph.schema()
+s.vertexLabel('legacy_head_fixture').useCustomizeStringId().properties('repo','stage_run','stage_expires').ifNotExist().create()
+graph.addVertex(T.id,'legacy-head-fixture',T.label,'legacy_head_fixture','repo','legacy-fixture','stage_run','','stage_expires',0L)
+graph.tx().commit();1`
+	const cleanup = `g.V('legacy-head-fixture').drop().iterate();graph.tx().commit()
+graph.schema().vertexLabel('legacy_head_fixture').remove()
+graph.schema().vertexLabel('legacy_stage_fixture').remove();1`
+	require.NoError(t, s.write(ctx, legacy, nil, nil))
+	t.Cleanup(func() { _ = s.write(context.Background(), cleanup, nil, nil) })
+	upgrade := strings.NewReplacer("'ingest_head'", "'legacy_head_fixture'", "'ingest_stage'", "'legacy_stage_fixture'", "'ingestStageByRepo'", "'legacyStageByRepo'", "'ingestStageByExpiry'", "'legacyStageByExpiry'").Replace(stageSchema)
+	require.NoError(t, s.write(ctx, upgrade, nil, nil))
+	require.NoError(t, s.write(ctx, upgrade, nil, nil), "migration is idempotent")
+	const verify = `def v=g.V('legacy-head-fixture').next()
+v.property('pub_gen','generation-fixture');graph.tx().commit()
+g.V('legacy-head-fixture').values('pub_gen').toList()`
+	var values []string
+	require.NoError(t, s.write(ctx, verify, nil, &values))
+	assert.Equal(t, values, []string{"generation-fixture"}, "an existing head survives and accepts the new property")
+}
+
 func TestReplacementTxCapacity(t *testing.T) {
 	url := os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_URL")
 	if url == "" {
