@@ -12,6 +12,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/agentctx"
 	"github.com/astrona-io/codesynapse/internal/cleanup"
 	"github.com/astrona-io/codesynapse/internal/coretools"
+	"github.com/astrona-io/codesynapse/internal/handoff"
 	"github.com/astrona-io/codesynapse/internal/license"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/security"
@@ -38,6 +39,9 @@ func registerAgentTools(s *mcp.Server, h *handlers, add func(name, desc string) 
 	mcp.AddTool(s, add("change_checklist",
 		"Before you rename, change the signature of or remove a symbol: every place the change must also reach, grouped, with file:line ranges and why. Callers and tests, the interface a method satisfies with its other implementations (mocks flagged) and callers, functions used as values, package importers, templates, docs that mention it and decisions it carries out. Notes say what the graph cannot see. Work through every item."),
 		h.changeChecklist)
+	mcp.AddTool(s, add("handoff_context",
+		"Before you hand work to a subagent: a paste-ready briefing for its prompt, built from the task (and the files it will work in): where to start reading with line ranges, the architecture rules in force, the tests that cover the area, and known problems there (security findings, open issues from memory). Paste the brief field into the subagent's prompt."),
+		h.handoffContext)
 	mcp.AddTool(s, add("unused_code",
 		"Unused code to remove: unreachable and test-only functions (with confidence and security relevance), files with nothing live, unused go.mod modules (and CVEs removing them eliminates), unused Helm values and template defines."),
 		h.unusedCode)
@@ -125,6 +129,23 @@ func (h *handlers) changeChecklist(ctx context.Context, _ *mcp.CallToolRequest, 
 		return nil, agentctx.Checklist{}, err
 	}
 	out, err := coretools.ChangeChecklist(ctx, h.svc.R, repo, in)
+	return nil, out, err
+}
+
+func (h *handlers) handoffContext(ctx context.Context, _ *mcp.CallToolRequest, in coretools.HandoffIn) (*mcp.CallToolResult, handoff.Briefing, error) {
+	cat, repo, err := h.catalogFor(ctx, in.Repo)
+	if err != nil {
+		return nil, handoff.Briefing{}, err
+	}
+	var issues []string
+	if h.memory != nil {
+		// Open issues recorded in durable memory that match the task; data,
+		// not instructions, as the brief says.
+		if g, err := h.memory.SearchMemory(ctx, h.memRepo(ctx, repo), in.Task, 50, false); err == nil {
+			issues = handoff.OpenIssues(g, 5)
+		}
+	}
+	out, err := coretools.Handoff(ctx, h.svc.R, &cat, repo, in, issues)
 	return nil, out, err
 }
 

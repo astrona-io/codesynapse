@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/astrona-io/codesynapse/internal/catalog"
 	"github.com/astrona-io/codesynapse/internal/coretools"
 	"github.com/astrona-io/codesynapse/internal/forge"
 	"github.com/astrona-io/codesynapse/internal/gitx"
@@ -344,6 +345,14 @@ func (w *worktree) runCoreTool(ctx context.Context, r store.Reader, name string,
 			}
 		}
 		return coretools.PRContextAgainst(ctx, r, base, short(commit), repo, in)
+	case "handoff_context":
+		var in coretools.HandoffIn
+		if err := decode(&in); err != nil {
+			return nil, err
+		}
+		// Records come from the working tree; memory lives on the server.
+		cat := catalog.Service{R: store.ForRepository(r, repo)}
+		return coretools.Handoff(ctx, r, &cat, repo, in, nil)
 	case "change_checklist":
 		var in coretools.ChecklistIn
 		if err := decode(&in); err != nil {
