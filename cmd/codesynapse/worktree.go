@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -107,16 +108,25 @@ func (w *worktree) changes(ctx context.Context) (key string, files int, err erro
 			_, _ = fmt.Fprintf(h, "%s\x00%d\x00%d\x00", p, st.Size(), st.ModTime().UnixNano()) //nolint:errcheck // hashes never fail
 		}
 	}
+	files = hashStatus(h, w.root, status)
+	return hex.EncodeToString(h.Sum(nil)), files, nil
+}
+
+// hashStatus adds the changed files of `git status --porcelain=v1 -z` to
+// h with their size and modification time, so editing a file that was
+// already modified changes the hash too. It returns how many there were.
+func hashStatus(h io.Writer, root string, status []byte) (files int) {
 	for entry := range strings.SplitSeq(string(status), "\x00") {
 		if len(entry) < 4 {
 			continue
 		}
 		files++
-		if st, err := os.Stat(filepath.Join(w.root, filepath.FromSlash(entry[3:]))); err == nil {
-			_, _ = fmt.Fprintf(h, "%s\x00%d\x00%d\x00", entry[3:], st.Size(), st.ModTime().UnixNano()) //nolint:errcheck // hashes never fail
+		_, _ = fmt.Fprintf(h, "%s\x00", entry) //nolint:errcheck // hashes never fail
+		if st, err := os.Stat(filepath.Join(root, filepath.FromSlash(entry[3:]))); err == nil {
+			_, _ = fmt.Fprintf(h, "%d\x00%d\x00", st.Size(), st.ModTime().UnixNano()) //nolint:errcheck // hashes never fail
 		}
 	}
-	return hex.EncodeToString(h.Sum(nil)), files, nil
+	return files
 }
 
 // graphFor returns the working-tree graph for key, building it once per
