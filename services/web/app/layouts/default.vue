@@ -24,7 +24,7 @@ onBeforeUnmount(() => {
   clearInterval(repoTimer)
   document.removeEventListener('visibilitychange', refreshIfVisible)
 })
-const { data: health, error: healthError } = useFetch<{ status: string }>('/api/cg/version', { key: 'version' })
+const { data: health, error: healthError } = useFetch<{ status: string; version?: string }>('/api/cg/version', { key: 'version' })
 
 const main = computed(() => session.restricted.value ? [] : [
   { to: '/overview', label: 'Overview', hint: 'What needs attention' },
@@ -138,7 +138,6 @@ const orgValue = computed({
         <BrandMark :size="36" />
         <span class="brand__name">CodeSynapse</span>
       </NuxtLink>
-      <a href="https://github.com/astrona-io/codesynapse" class="oss" rel="noopener">Open source</a>
       <label v-if="session.accounts.value && session.memberships.value.length > 1" class="org" for="org-select">
         <span class="org__label">Org</span>
         <select id="org-select" v-model="orgValue">
@@ -212,6 +211,24 @@ const orgValue = computed({
         <slot />
       </main>
     </div>
+
+    <footer class="foot">
+      <div class="foot__brand">
+        <BrandMark :size="28" />
+        <div>
+          <strong>CodeSynapse</strong>
+          <span class="muted small">Open source code intelligence for your team and your AI agents.</span>
+        </div>
+      </div>
+      <nav class="foot__links" aria-label="Footer">
+        <NuxtLink to="/help">Help</NuxtLink>
+        <NuxtLink to="/agents">Connect an agent</NuxtLink>
+        <NuxtLink to="/stats">Statistics</NuxtLink>
+        <a href="https://github.com/astrona-io/codesynapse" rel="noopener">GitHub</a>
+        <a href="https://github.com/astrona-io/codesynapse/tree/main/docs" rel="noopener">Documentation</a>
+      </nav>
+      <p class="foot__meta muted small">{{ health?.version ? `Version ${health.version}` : '' }}</p>
+    </footer>
   </div>
 </template>
 
@@ -228,8 +245,6 @@ const orgValue = computed({
 .brand { display: flex; align-items: center; gap: 10px; color: var(--ink); }
 .brand:hover { color: var(--ink); text-decoration: none; }
 .brand__name { font: 800 22px/1 var(--font-display); letter-spacing: -0.04em; }
-.oss { padding: 6px 12px; border-radius: var(--pill); background: var(--accent); color: var(--on-accent); font-size: 12.5px; font-weight: 700; }
-.oss:hover { color: var(--on-accent); background: var(--accent-hover); text-decoration: none; }
 .org { display: flex; align-items: center; gap: 8px; margin: 0; min-height: 44px; padding: 0 6px 0 14px; border-radius: var(--pill); background: var(--panel-2); font-size: 14px; font-weight: 600; }
 .org__label { font: 700 11.5px var(--font-mono); color: var(--muted); text-transform: uppercase; }
 .org__name { padding-right: 10px; }
@@ -261,6 +276,13 @@ const orgValue = computed({
 .connect { margin-top: auto; display: flex; flex-direction: column; gap: 6px; padding: 18px; border-radius: 20px; background: var(--bg); }
 .connect__title { font: 800 16px/1.2 var(--font-display); letter-spacing: -0.02em; }
 .connect__text { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.foot { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 32px; justify-content: space-between; padding: 22px var(--gutter); border-top: 2px solid var(--line); background: var(--panel-2); }
+.foot__brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.foot__brand > div { display: flex; flex-direction: column; }
+.foot__links { display: flex; flex-wrap: wrap; gap: 8px 20px; font-weight: 600; font-size: 14px; }
+.foot__links a { color: var(--ink); }
+.foot__links a:hover { color: var(--accent-ink); }
+.foot__meta { margin: 0; }
 .main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 22px; padding: 30px var(--gutter) 48px; }
 .menu-toggle { display: none; width: 48px; min-height: 48px; padding: 0; }
 
@@ -270,7 +292,7 @@ const orgValue = computed({
   .menu-toggle { display: inline-flex; }
   /* Brand and buttons share the first row; search gets the second. */
   .bar :deep(.qs) { order: 3; flex: 1 1 100%; max-width: none; }
-  .oss, .status { display: none; }
+  .status { display: none; }
 }
 @media (max-width: 480px) {
   /* The mark alone leaves the first row to the buttons; the link keeps its label. */
