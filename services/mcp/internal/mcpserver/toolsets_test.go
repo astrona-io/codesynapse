@@ -61,7 +61,7 @@ func TestEveryToolInOneToolset(t *testing.T) {
 		assert.True(t, toolsetOf(name) != "", "%s belongs to a toolset", name)
 	}
 	assert.Equal(t, len(seen), len(tools), "the sets list exactly the tools a full server registers")
-	assert.Len(t, Toolsets[ToolsetCore], 8)
+	assert.Len(t, Toolsets[ToolsetCore], 9)
 }
 
 func TestToolsetSelection(t *testing.T) {
@@ -86,16 +86,16 @@ func TestToolsetSelection(t *testing.T) {
 	}
 	assert.True(t, len(text) < len(allText), "instructions shrink with the toolset")
 	assert.Contains(t, text, "Reuse before you write")
-	assert.Contains(t, text, "7. Freshness and breadth: repo_status says whether the graph is current.")
+	assert.Contains(t, text, "8. Freshness and breadth: repo_status says whether the graph is current.")
 
 	some := all
 	some.Toolsets = []string{ToolsetCore, "memory", "reviews"}
 	tools, _, text = listed(t, newTestServer(t, s, "test", some))
-	assert.Len(t, tools, 8+len(Toolsets["memory"])+len(Toolsets["reviews"]))
+	assert.Len(t, tools, len(Toolsets[ToolsetCore])+len(Toolsets["memory"])+len(Toolsets["reviews"]))
 	assert.Contains(t, text, "submit_review")
 	assert.False(t, strings.Contains(text, "security_report"), "reviews without security leave it out")
 	assert.Contains(t, text, "recall_context")
-	assert.Contains(t, text, "\n10. Memory", "memory follows the rules shown: seven core, reviews, reuse")
+	assert.Contains(t, text, "\n11. Memory", "memory follows the rules shown: eight core, reviews, reuse")
 
 	for _, name := range []string{"submit_review", "search_all_repos", "security_report", "architecture_context", "recall_context", "duplicate_code", "get_doc_section"} {
 		assert.Contains(t, allText, name, "every tool's guidance with all sets")
@@ -134,6 +134,6 @@ func TestServersForRequest(t *testing.T) {
 	assert.Len(t, tools, len(toolPolicies))
 	mem := x.ForRequest(httptest.NewRequest("POST", "/mcp?toolsets=memory", nil))
 	tools, _, _ = listed(t, mem)
-	assert.Len(t, tools, 8+len(Toolsets["memory"]))
+	assert.Len(t, tools, len(Toolsets[ToolsetCore])+len(Toolsets["memory"]))
 	assert.True(t, x.ForRequest(httptest.NewRequest("POST", "/mcp?toolsets=nope", nil)) == nil, "an unknown set is refused")
 }

@@ -34,6 +34,7 @@ var toolPolicies = map[string]toolPolicy{
 	"get_call_graph":         {accounts.Viewer, "repository"},
 	"get_implementations":    {accounts.Viewer, "repository"},
 	"get_pr_context":         {accounts.Viewer, "repository"},
+	"verify_plan":            {accounts.Viewer, "repository"},
 	"unused_code":            {accounts.Viewer, "repository"},
 	"duplicate_code":         {accounts.Viewer, "repository"},
 	"cleanup_plan":           {accounts.Viewer, "repository"},

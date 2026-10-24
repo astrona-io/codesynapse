@@ -16,6 +16,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
 	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/verifyplan"
 )
 
 // MaxDiffBytes bounds diffs submitted to get_pr_context.
@@ -23,7 +24,7 @@ const MaxDiffBytes = 4 << 20
 
 // Local are the tools a graph of one working tree can answer: they read
 // one repository's code graph and nothing stored beside it.
-var Local = []string{"minimal_context", "get_symbol_context", "get_call_graph", "get_implementations", "file_outline", "search", "get_pr_context"}
+var Local = []string{"minimal_context", "get_symbol_context", "get_call_graph", "get_implementations", "file_outline", "search", "get_pr_context", "verify_plan"}
 
 // RepoArg selects the repository.
 type RepoArg struct {
@@ -106,6 +107,12 @@ func PRContext(ctx context.Context, r store.Reader, repo string, in PRContextIn)
 // base, a graph of the change's base named by baseLabel (nil: no
 // comparison). r must then be a graph of the head.
 func PRContextAgainst(ctx context.Context, r, base store.Reader, baseLabel, repo string, in PRContextIn) (agentctx.PRContext, error) {
+	out, err := prContext(ctx, r, base, baseLabel, repo, in)
+	return compact(repo, out, err)
+}
+
+// prContext analyses a change with full node IDs.
+func prContext(ctx context.Context, r, base store.Reader, baseLabel, repo string, in PRContextIn) (agentctx.PRContext, error) {
 	if len(in.Diff) > MaxDiffBytes {
 		return agentctx.PRContext{}, fmt.Errorf("diff exceeds %d bytes", MaxDiffBytes)
 	}
@@ -123,8 +130,26 @@ func PRContextAgainst(ctx context.Context, r, base store.Reader, baseLabel, repo
 		}
 		opts.Root = n.Root
 	}
-	out, err := agentctx.Service{R: r}.PRContext(ctx, repo, opts)
-	return compact(repo, out, err)
+	return agentctx.Service{R: r}.PRContext(ctx, repo, opts)
+}
+
+// VerifyPlanIn is verify_plan's input: the change, as for get_pr_context.
+type VerifyPlanIn struct {
+	RepoArg
+	Diff  string   `json:"diff,omitempty" jsonschema:"unified diff text (git diff output)"`
+	Files []string `json:"files,omitempty" jsonschema:"modified file paths; every symbol in them counts as changed"`
+	Base  string   `json:"base,omitempty" jsonschema:"base git ref (with head) when neither diff nor files is given"`
+	Head  string   `json:"head,omitempty" jsonschema:"head git ref, default HEAD"`
+}
+
+// VerifyPlan answers verify_plan: the tests that reach the change, closest
+// first, then build and lint for each language it touches.
+func VerifyPlan(ctx context.Context, r store.Reader, repo string, in VerifyPlanIn) (verifyplan.Plan, error) {
+	pr, err := prContext(ctx, r, nil, "", repo, PRContextIn{RepoArg: in.RepoArg, Diff: in.Diff, Files: in.Files, Base: in.Base, Head: in.Head, MaxTokens: agentctx.MaxContextTokens})
+	if err != nil {
+		return verifyplan.Plan{}, err
+	}
+	return verifyplan.Build(ctx, store.ForRepository(r, repo), repo, pr.Report)
 }
 
 // MinimalContextIn is minimal_context's input.
