@@ -15,14 +15,22 @@ The first start of an empty installation **creates an administrator for you**: u
 
 The password is created only when the installation has no accounts. Restarting or upgrading never creates a second admin and never changes the password.
 
-## 2. Sign in and replace the account
+## 2. Sign in and follow the welcome guide
 
 1. Open the dashboard, `http://localhost:3000`. The sign-in page reminds you where the password is.
 2. Sign in as `admin` (or `admin@codesynapse.local`) with that password.
-3. A notice says you are on the **admin account made at first start**, and you are taken to **Replace the admin account**. Enter your name, email, username and a password of at least 12 characters.
-4. Choose **Create my account and delete the admin**. In one step your account becomes the root account, the auto-created one is deleted with its sessions, and you are signed out.
-5. Sign in with your new account. It lands on **Finish setup**: create the first organisation and its **owner** account (a different person or address than root).
-6. Root is signed out again. Sign in as the owner for all organisation work.
+3. You land on the administration overview. A notice says you are on the **admin account made at first start**, and a **welcome guide** lists what to do next. Nothing is forced: follow the steps in any order, or choose **Skip the guide**. You can reopen it any time from your account menu (**Welcome guide**).
+
+The guide for root has two steps:
+
+| Step | What it does |
+|---|---|
+| **Replace the admin account** | Enter your name, email, username and a password of at least 12 characters. In one step your account becomes the root account, the auto-created one is deleted with its sessions, and you are signed out. Sign in again with the new account. |
+| **Create the first organisation** | Name the organisation and create its **owner** account (a different person or address than root, which only administers the platform). Root is then signed out; sign in as the owner for all organisation work. |
+
+The owner gets their own guide on first sign-in: add a first repository, connect a coding agent, and (for owners and admins) invite the team. Steps that can be detected tick themselves; the others tick when you open them. Skipping is remembered per person in that browser.
+
+Until you replace the auto-created admin, a banner stays at the top of every page. The replacement is audited (`setup.root_replaced`) and can be done once: only the account made at first start can be replaced, never one you made yourself. Until the organisation exists, other sign-ups stay closed even with `CODESYNAPSE_SIGNUP_OPEN=true`.
 
 ```mermaid
 flowchart LR

@@ -161,6 +161,7 @@ const orgValue = computed({
     </header>
 
     <InitialAdminBanner />
+    <WelcomeSteps class="welcome-slot" />
 
     <div class="app__body">
       <aside id="sidebar" class="sidebar" :class="{ open: menuOpen }">

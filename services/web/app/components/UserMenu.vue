@@ -35,6 +35,12 @@ const links = computed(() => session.accounts.value
       { to: '/stats', label: 'Statistics' },
       { to: '/help', label: 'Help' },
     ])
+const welcome = useWelcome()
+async function openGuide() {
+  welcome.reopen()
+  open.value = false
+  await navigateTo(session.restricted.value ? '/admin/overview' : '/')
+}
 const themes: { id: ThemeChoice; label: string }[] = [{ id: 'system', label: 'Auto' }, { id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }]
 
 function outside(e: MouseEvent) {
@@ -61,6 +67,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', outside))
         <span class="um__email">{{ user.email }}</span>
       </div>
       <NuxtLink v-for="l in links" :key="l.to" :to="l.to" role="menuitem" class="um__item">{{ l.label }}</NuxtLink>
+      <button v-if="user" type="button" role="menuitem" class="um__item um__out" @click="openGuide">Welcome guide</button>
       <div class="um__theme" role="radiogroup" aria-label="Theme">
         <button v-for="t in themes" :key="t.id" type="button" class="chip" :class="{ active: theme === t.id }" role="radio" :aria-checked="theme === t.id" @click="theme = t.id">{{ t.label }}</button>
       </div>
