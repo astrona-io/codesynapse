@@ -45,6 +45,7 @@ codesynapse audit .                                  # security review
 codesynapse audit . --fail-on high                   # CI gate
 codesynapse licenses .                               # dependency licences
 codesynapse cleanup .                                # unused code, files, modules
+codesynapse upgrade-impact golang.org/x/net@v0.40.0  # what a Go module upgrade changes for you
 codesynapse review . --base origin/main --offline    # impact of the current branch
 codesynapse review . --offline --fail-on-new high    # CI gate on what the branch adds
 ```

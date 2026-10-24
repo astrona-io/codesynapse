@@ -72,6 +72,20 @@ codesynapse licenses . --license-lookup --fail-on conflict  # CI gate
 
 `--license-lookup` (or `CODESYNAPSE_LICENSE_LOOKUP=true`) is what sends package names and versions to deps.dev; without it, nothing leaves the machine.
 
+## Upgrade impact
+
+Before upgrading a Go module, `codesynapse upgrade-impact` says where the repository uses it and what in that use changes:
+
+```sh
+codesynapse upgrade-impact github.com/spf13/cobra             # every use, with file, line and function
+codesynapse upgrade-impact github.com/spf13/cobra@v1.11.0     # and what changed between versions
+codesynapse upgrade-impact github.com/spf13/cobra@v1.11.0 --json
+```
+
+Uses are calls, types, constants, variables, methods and struct fields, field names in composite literals included, found with the type checker in the repository's own packages and tests. With a version, the exported API of the current version (from the build list) and of the new one are read from the local module cache and compared declaration by declaration. Parameter names don't count, anything else in a signature, field type or constant type does. The report names each removed or changed declaration the repository uses, with the old and new form and where it is used, and counts the rest of the module's changes.
+
+Nothing is downloaded: `go list` runs with `GOPROXY=off` as for an ingest, and a version missing from the cache is reported, with `go mod download` as the way to add it. Internal packages of the module are skipped, since no importer can use them. A new major version is another module path (`…/v2`) and is not compared. Behaviour changes behind an unchanged signature don't show; the release notes still matter.
+
 ## Dependency review page
 
 **Dependency review** (per repository, under Dependencies and Licences) puts the packages that need a decision in one table: known advisories, licences to check and dependencies nothing imports. Each row shows the columns an agent-run review reports: dependency and version, how it was introduced, usage, licence, advisory, a proposed action and a verified-outcome column.
