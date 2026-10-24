@@ -34,6 +34,14 @@ import (
 //     the agent is asked once to run verify_plan and get_pr_context before
 //     it finishes. The tools do the work (through the bridge's cached
 //     working-tree graph), so the hook itself stays instant.
+//   - hook session (SessionStart): the CodeSynapse ruleset goes into the
+//     session's context, from the server (GET /api/v1/agent-rules) so the
+//     wording improves everywhere at once, else the built-in text.
+//   - hook lookup (PreToolUse on Read, Grep, Glob and the CodeSynapse
+//     tools): notes whether the session's first code lookup was a CodeSynapse
+//     tool or a native one. Stop reports it with the number of reads the
+//     guard turned back, so Statistics shows whether agents use CodeSynapse
+//     first. It never blocks.
 //   - hook answer (PostToolUse on the CodeSynapse tools) and hook read-done
 //     (PostToolUse on Read) count, per tool, the file line ranges answers
 //     gave and how many the agent then read (agent workflow roadmap step
@@ -70,6 +78,19 @@ type hookState struct {
 	// Counts are the per-tool totals so far, Sent what Stop has reported.
 	Counts map[string]rangeCounts `json:"counts,omitempty"`
 	Sent   map[string]rangeCounts `json:"sent,omitempty"`
+	// First is how the session began: its first code lookup was a
+	// "codesynapse" tool or a "native" one (Read, Grep, Glob). TurnedBack
+	// counts whole-file reads the guard sent back; Reported is what Stop
+	// has already told the server about both.
+	First    string       `json:"first,omitempty"`
+	Turned   int          `json:"turned,omitempty"`
+	Reported workflowSent `json:"reported,omitempty"`
+}
+
+// workflowSent is what the server already knows of a session's workflow.
+type workflowSent struct {
+	First  bool `json:"first,omitempty"`
+	Turned int  `json:"turned,omitempty"`
 }
 
 // answerRange is one file:start-end an answer gave.
@@ -145,6 +166,10 @@ func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 	case "stop":
 		reportRetrieval(ctx, in, o.EC.Logger)
 		out = stopGuard(ctx, in, o.EC.Logger)
+	case "lookup":
+		noteLookup(in)
+	case "session":
+		out = sessionRules(ctx, o.EC.Logger)
 	case "answer":
 		noteAnswer(in)
 	case "read-done":
@@ -179,6 +204,7 @@ func readGuard(in toolHookInput) map[string]any {
 		return nil // asked to read it again: let it
 	}
 	s.Read = append(s.Read, file)
+	s.Turned++
 	saveState(state, s)
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s has %d+ lines. Read only the ranges you need (Read with offset and limit), or call file_outline for its symbols with signatures and line ranges.", filepath.Base(file), lines)
@@ -299,6 +325,12 @@ func hookCmd(ec *app.Env) *cobra.Command {
 		WithNoArgs().Build())
 	parent.AddCommand(app.NewSubCommand("stop", &hookOptions{EC: ec, event: "stop"}, ec).
 		WithShortDesc("Stop hook: report retrieval counts; once per change, ask for verify_plan and get_pr_context before finishing").
+		WithNoArgs().Build())
+	parent.AddCommand(app.NewSubCommand("session", &hookOptions{EC: ec, event: "session"}, ec).
+		WithShortDesc("SessionStart hook: put the CodeSynapse ruleset (from the server, else built in) in the session's context").
+		WithNoArgs().Build())
+	parent.AddCommand(app.NewSubCommand("lookup", &hookOptions{EC: ec, event: "lookup"}, ec).
+		WithShortDesc("PreToolUse hook for Read, Grep, Glob and the CodeSynapse tools: note how the session began").
 		WithNoArgs().Build())
 	parent.AddCommand(app.NewSubCommand("answer", &hookOptions{EC: ec, event: "answer"}, ec).
 		WithShortDesc("PostToolUse hook for the CodeSynapse tools: note the line ranges an answer gave").

@@ -155,7 +155,8 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 		return
 	}
 	s := loadState(state)
-	if len(s.Counts) == 0 {
+	wf := s.workflowReport()
+	if len(s.Counts) == 0 && wf == nil {
 		return
 	}
 	w := newWorktree(ctx, in.Cwd, "", logger)
@@ -181,12 +182,15 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 			delta[tool] = rangeCounts{Returned: max(d.Returned, 0), Read: max(d.Read, 0)}
 		}
 	}
-	if len(delta) == 0 {
+	if len(delta) == 0 && wf == nil {
 		return
 	}
 	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
 	c.http.Timeout = 5 * time.Second
 	body := map[string]any{"client": retrievalClient, "tools": delta}
+	if wf != nil {
+		body["workflow"] = wf
+	}
 	if err := c.do(ctx, http.MethodPost, "/api/v1/repos/"+url.PathEscape(w.repo)+"/usage/retrieval", body, nil); err != nil {
 		logger.Debug("retrieval counts not reported", "error", err)
 		return
@@ -196,5 +200,6 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 	for tool, c := range s.Counts {
 		s.Sent[tool] = rangeCounts{Returned: c.Returned - foreign[tool].Returned, Read: c.Read - foreign[tool].Read}
 	}
+	s.markReported()
 	saveState(state, s)
 }

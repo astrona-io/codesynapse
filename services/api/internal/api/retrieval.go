@@ -34,9 +34,18 @@ type retrievalCounts struct {
 	Read     int `json:"read"`
 }
 
+// workflowCounts say how sessions began (see usage.FirstCodeSynapse): counts
+// since the last report, nothing about what was read or searched.
+type workflowCounts struct {
+	FirstCodeSynapse int `json:"first_codesynapse"`
+	FirstNative      int `json:"first_native"`
+	ReadsTurnedBack  int `json:"reads_turned_back"`
+}
+
 type retrievalReport struct {
-	Client string                     `json:"client"`
-	Tools  map[string]retrievalCounts `json:"tools"`
+	Client   string                     `json:"client"`
+	Tools    map[string]retrievalCounts `json:"tools"`
+	Workflow *workflowCounts            `json:"workflow,omitempty"`
 }
 
 func (s *Server) retrievalRoutes() {
@@ -71,6 +80,17 @@ func (s *Server) handleRetrievalReport(w http.ResponseWriter, r *http.Request) {
 		}
 		buckets = append(buckets, usage.Bucket{Day: day, Org: org, Repo: repo, Tool: tool, Client: in.Client, RangesReturned: c.Returned, RangesRead: c.Read})
 	}
+	if wf := in.Workflow; wf != nil {
+		for tool, n := range map[string]int{usage.FirstCodeSynapse: wf.FirstCodeSynapse, usage.FirstNative: wf.FirstNative, usage.ReadTurnedBack: wf.ReadsTurnedBack} {
+			if n > 0 {
+				buckets = append(buckets, usage.Bucket{Day: day, Org: org, Repo: repo, Tool: tool, Client: in.Client, Calls: n})
+			}
+		}
+	}
+	if len(buckets) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if err := s.st.AddUsage(r.Context(), buckets); err != nil {
 		s.problem(w, 500, err)
 		return
@@ -82,8 +102,15 @@ func (in retrievalReport) validate() error {
 	if !clientNameRe.MatchString(in.Client) {
 		return errors.New("client must be a short lower-case name, e.g. claude-code")
 	}
-	if len(in.Tools) == 0 || len(in.Tools) > maxRetrievalTools {
-		return fmt.Errorf("report 1 to %d tools", maxRetrievalTools)
+	if len(in.Tools) > maxRetrievalTools || (len(in.Tools) == 0 && in.Workflow == nil) {
+		return fmt.Errorf("report up to %d tools, or the workflow counts", maxRetrievalTools)
+	}
+	if wf := in.Workflow; wf != nil {
+		for _, n := range []int{wf.FirstCodeSynapse, wf.FirstNative, wf.ReadsTurnedBack} {
+			if n < 0 || n > maxRetrievalRanges {
+				return fmt.Errorf("workflow counts must be between 0 and %d", maxRetrievalRanges)
+			}
+		}
 	}
 	for tool, c := range in.Tools {
 		if !toolsets.Known(tool) {

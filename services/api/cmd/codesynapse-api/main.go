@@ -183,8 +183,9 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour,
 		Metrics:        metricsQuerier(), IngestMetrics: ingestMetrics,
 		TrustedProxies: trusted, PublicMCPURL: app.Getenv("CODESYNAPSE_PUBLIC_MCP_URL", "http://localhost:8090/mcp"),
-		PublicAPIURL: app.Getenv("CODESYNAPSE_PUBLIC_API_URL", ""),
-		PublicURL:    app.Getenv("CODESYNAPSE_PUBLIC_URL", "http://localhost:3000"), SSOAllowPrivate: app.Getenv("CODESYNAPSE_SSO_ALLOW_PRIVATE", "") == "true",
+		PublicAPIURL:   app.Getenv("CODESYNAPSE_PUBLIC_API_URL", ""),
+		AgentRulesFile: os.Getenv("CODESYNAPSE_AGENT_RULES_FILE"),
+		PublicURL:      app.Getenv("CODESYNAPSE_PUBLIC_URL", "http://localhost:3000"), SSOAllowPrivate: app.Getenv("CODESYNAPSE_SSO_ALLOW_PRIVATE", "") == "true",
 		GitAuthor: gitx.Author{Name: app.Getenv("CODESYNAPSE_GIT_AUTHOR_NAME", "CodeSynapse"), Email: app.Getenv("CODESYNAPSE_GIT_AUTHOR_EMAIL", "codesynapse@localhost")}}, st, o.EC.Logger)
 	if o.worker {
 		// Jobs only; the health endpoint is for probes.

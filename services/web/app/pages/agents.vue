@@ -151,7 +151,7 @@ onBeforeUnmount(() => clearInterval(poll))
         <details>
           <summary class="muted small">Make agents use it automatically</summary>
           <div class="stack--tight small">
-            <p>CodeSynapse sends its own instructions to agents when they connect. To make them use it first on every task, add this to the repository's <code>AGENTS.md</code> or <code>CLAUDE.md</code>:</p>
+            <p>CodeSynapse sends its own instructions to agents when they connect. The Claude Code plugin goes further: it puts a short ruleset in every session and reports on Statistics whether agents then start with CodeSynapse. Without the plugin, add this to the repository's <code>AGENTS.md</code> or <code>CLAUDE.md</code>, or to <code>~/.claude/CLAUDE.md</code> for every project:</p>
             <CopyField multiline value="Use the CodeSynapse MCP tools before reading files: minimal_context with the task first, get_symbol_context before editing a symbol, and get_pr_context on your diff before finishing." />
             <p class="muted">Claude Code can also recall and offload memory automatically: <code>codesynapse mcp hooks</code> installs the hooks. See <NuxtLink to="/help#memory">agent memory</NuxtLink>.</p>
           </div>

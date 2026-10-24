@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -52,14 +53,28 @@ type AgentStats struct {
 	ResponseTokens int `json:"response_tokens"`
 	// AvoidedTokens estimates tokens an agent would have read from files to
 	// answer the same questions (see AvoidedMethod).
-	AvoidedTokens int          `json:"avoided_tokens"`
-	AvoidedMethod string       `json:"avoided_method"`
-	AvgLatencyMs  float64      `json:"avg_latency_ms"`
-	MaxLatencyMs  int          `json:"max_latency_ms"`
-	Daily         []DayStat    `json:"daily"`
-	Tools         []ToolStat   `json:"tools"`
-	Clients       []ClientStat `json:"clients"`
-	Repos         []RepoUsage  `json:"repos"`
+	AvoidedTokens int        `json:"avoided_tokens"`
+	AvoidedMethod string     `json:"avoided_method"`
+	AvgLatencyMs  float64    `json:"avg_latency_ms"`
+	MaxLatencyMs  int        `json:"max_latency_ms"`
+	Daily         []DayStat  `json:"daily"`
+	Tools         []ToolStat `json:"tools"`
+	// Workflow says how sessions began, as the plugin's hooks reported.
+	Workflow WorkflowStats `json:"workflow"`
+	Clients  []ClientStat  `json:"clients"`
+	Repos    []RepoUsage   `json:"repos"`
+}
+
+// WorkflowStats answer "do agents use CodeSynapse first?": of the sessions
+// that looked at code, how many began with a CodeSynapse tool rather than
+// Read, Grep or Glob, and how many whole-file reads the guard turned back.
+// Only the plugin's hooks report them.
+type WorkflowStats struct {
+	FirstCodeSynapse int `json:"first_codesynapse"`
+	FirstNative      int `json:"first_native"`
+	ReadsTurnedBack  int `json:"reads_turned_back"`
+	// FirstSharePct is FirstCodeSynapse of both, rounded; 0 with no sessions.
+	FirstSharePct int `json:"first_share_pct"`
 }
 
 // DayStat is one day of usage.
@@ -297,6 +312,17 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 		if day == nil {
 			continue
 		}
+		if usage.IsWorkflow(bk.Tool) {
+			switch bk.Tool {
+			case usage.FirstCodeSynapse:
+				a.Workflow.FirstCodeSynapse += bk.Calls
+			case usage.FirstNative:
+				a.Workflow.FirstNative += bk.Calls
+			case usage.ReadTurnedBack:
+				a.Workflow.ReadsTurnedBack += bk.Calls
+			}
+			continue
+		}
 		cl := clients[bk.Client]
 		if cl == nil {
 			cl = &ClientStat{Client: bk.Client}
@@ -353,6 +379,9 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 	}
 	for i := range a.Daily {
 		a.Daily[i] = *daily[a.Daily[i].Day]
+	}
+	if n := a.Workflow.FirstCodeSynapse + a.Workflow.FirstNative; n > 0 {
+		a.Workflow.FirstSharePct = int(math.Round(100 * float64(a.Workflow.FirstCodeSynapse) / float64(n)))
 	}
 	if a.Calls > 0 {
 		a.AvgLatencyMs = round1(float64(totalMs) / float64(a.Calls))
