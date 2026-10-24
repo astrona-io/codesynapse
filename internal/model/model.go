@@ -504,17 +504,24 @@ func ContainsFold(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
+// repoMeta is what answers read from a Repository node's Meta.
+type repoMeta struct {
+	GoModule    string   `json:"go_module"`
+	Conventions []string `json:"conventions"`
+}
+
+func metaOf(repo Node) repoMeta {
+	var meta repoMeta
+	if repo.Kind == KindRepository && repo.Meta != "" {
+		_ = json.Unmarshal([]byte(repo.Meta), &meta) //nolint:errcheck // unreadable metadata reads as none
+	}
+	return meta
+}
+
 // GoModuleOf is the Go module path at the root of a repository, recorded in
 // its Repository node's Meta at ingest, or "".
-func GoModuleOf(repo Node) string {
-	if repo.Kind != KindRepository || repo.Meta == "" {
-		return ""
-	}
-	var meta struct {
-		GoModule string `json:"go_module"`
-	}
-	if json.Unmarshal([]byte(repo.Meta), &meta) != nil {
-		return ""
-	}
-	return meta.GoModule
-}
+func GoModuleOf(repo Node) string { return metaOf(repo).GoModule }
+
+// ConventionsOf is the house style found in a repository's code at ingest
+// (internal/conventions), as short statements with their evidence.
+func ConventionsOf(repo Node) []string { return metaOf(repo).Conventions }

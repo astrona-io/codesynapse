@@ -301,6 +301,7 @@ func (s *Server) routes() {
 	s.sessionMemoryRoutes()
 	s.repoPolicyRoutes()
 	s.runtimeRoutes()
+	s.conventionsRoutes()
 	s.retrievalRoutes()
 	s.agentRulesRoutes()
 	s.notificationRoutes()

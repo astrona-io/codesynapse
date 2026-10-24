@@ -303,12 +303,16 @@ type MinimalContext struct {
 	Keywords   []string `json:"keywords"`
 	// Revision is the commit every item was indexed at, unless an item
 	// names its own.
-	Revision  string        `json:"revision,omitempty"`
-	Items     []MinimalItem `json:"items"`
-	Omitted   int           `json:"omitted"`
-	Next      string        `json:"next"`
-	Estimator string        `json:"estimator"`
-	Source    string        `json:"source"`
+	Revision string `json:"revision,omitempty"`
+	// Conventions are the repository's house style (how tests assert,
+	// errors, logging, frameworks), when asked for: on top of the budget,
+	// which the task's matches keep.
+	Conventions []string      `json:"conventions,omitempty"`
+	Items       []MinimalItem `json:"items"`
+	Omitted     int           `json:"omitted"`
+	Next        string        `json:"next"`
+	Estimator   string        `json:"estimator"`
+	Source      string        `json:"source"`
 }
 
 var (
