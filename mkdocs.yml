@@ -1,4 +1,5 @@
 site_name: CodeSynapse
+site_url: https://codesynapse.astrona.io/
 site_description: Code graph for security reviews, code quality and AI coding assistants
 repo_url: https://github.com/astrona-io/codesynapse
 docs_dir: docs
@@ -6,8 +7,17 @@ site_dir: site
 
 theme:
   name: material
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  font:
+    text: DM Sans
+    code: JetBrains Mono
   features:
+    - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.sections
+    - navigation.expand
+    - navigation.path
     - navigation.indexes
     - navigation.top
     - content.code.copy
@@ -15,19 +25,24 @@ theme:
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: indigo
+      primary: custom
       toggle:
         icon: material/weather-night
         name: Dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: indigo
+      primary: custom
       toggle:
         icon: material/weather-sunny
         name: Light mode
 
+extra_css:
+  - stylesheets/extra.css
+
 markdown_extensions:
   - admonition
+  - attr_list
+  - md_in_html
   - tables
   - toc:
       permalink: true
@@ -42,40 +57,66 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Architecture:
-      - Overview: architecture/overview.md
-      - Ingest pipeline: architecture/ingest.md
-      - Graph schema: architecture/graph-schema.md
-      - Stores and backends: architecture/stores.md
-      - Retrieval and memory: architecture/retrieval-memory.md
+  - Getting started:
+      - getting-started/index.md
+      - Run the stack: operations/running.md
+      - First run and sign-in: operations/first-run.md
+      - Connect Claude Code: operations/claude-code-bridge.md
   - Features:
-      - Overview and dependencies: features/overview.md
-      - Agent context (MCP): features/agent-context.md
-      - Security review: features/security.md
-      - Cleanup and licences: features/cleanup-licenses.md
-      - Duplicate and shared code: features/duplicates.md
-      - Cleanup plan: features/cleanup-plan.md
-      - Trends: features/trends.md
-      - Architecture catalog: features/architecture.md
-      - Agent memory: features/memory.md
-      - Reviews and fix branches: features/reviews-fixes.md
-      - Indexing policy and reports: features/indexing-policy.md
-  - Operations:
-      - Accounts and access: operations/accounts-access.md
-      - Security model: operations/security-model.md
-      - Running the stack: operations/running.md
-      - Claude Code bridge: operations/claude-code-bridge.md
-      - Releasing: operations/releasing.md
-      - Upgrading: operations/upgrading.md
+      - features/index.md
+      - For AI agents:
+          - Agent context (MCP): features/agent-context.md
+          - Agent memory: features/memory.md
+          - Reviews and fix branches: features/reviews-fixes.md
+      - Code quality:
+          - Overview and dependencies: features/overview.md
+          - Cleanup and licences: features/cleanup-licenses.md
+          - Duplicate and shared code: features/duplicates.md
+          - Cleanup plan: features/cleanup-plan.md
+          - Trends: features/trends.md
+      - Security:
+          - Security review: features/security.md
+      - Governance:
+          - Architecture catalog: features/architecture.md
+          - Indexing policy and reports: features/indexing-policy.md
+  - Architecture:
+      - architecture/index.md
+      - Overview: architecture/overview.md
+      - From code to graph:
+          - Ingest pipeline: architecture/ingest.md
+          - Graph schema: architecture/graph-schema.md
+      - Where data lives:
+          - Stores and backends: architecture/stores.md
+          - Retrieval and memory: architecture/retrieval-memory.md
+  - Administration:
+      - operations/index.md
+      - Deploy:
+          - Running the stack: operations/running.md
+          - Releasing: operations/releasing.md
+          - Upgrading: operations/upgrading.md
+      - People and access:
+          - First run and sign-in: operations/first-run.md
+          - Accounts and access: operations/accounts-access.md
+          - Single sign-on: SSO_PLAN.md
+          - Root bootstrap: ROOT_BOOTSTRAP_PLAN.md
+      - Security:
+          - Security model: operations/security-model.md
+      - Coding agents:
+          - Claude Code bridge: operations/claude-code-bridge.md
+          - Claude Code plugin: operations/claude-code-plugin.md
   - Reference:
+      - reference/index.md
       - Agent guide: AGENT_GUIDE.md
-      - Plan and decisions: PLAN.md
-      - Architecture catalog plan: ARCHITECTURE_CATALOG_PLAN.md
-      - Access control plan: ACCESS_CONTROL_PLAN.md
-      - Retrieval plan: RETRIEVAL_PLAN.md
+      - Design:
+          - Plan and decisions: PLAN.md
+          - SaaS: SAAS.md
+          - "ADR 0001: search": adr/0001-search.md
+      - Identity and access:
+          - Access control plan: ACCESS_CONTROL_PLAN.md
+          - Session context plan: SESSION_CONTEXT_PLAN.md
+      - Data and retrieval:
+          - Retrieval plan: RETRIEVAL_PLAN.md
+          - Architecture catalog plan: ARCHITECTURE_CATALOG_PLAN.md
+          - Repo config plan: REPO_CONFIG_PLAN.md
+          - Ingest transparency plan: INGEST_TRANSPARENCY_PLAN.md
       - Telemetry plan: TELEMETRY_PLAN.md
-      - Session context plan: SESSION_CONTEXT_PLAN.md
-      - Repo config plan: REPO_CONFIG_PLAN.md
-      - Ingest transparency plan: INGEST_TRANSPARENCY_PLAN.md
-      - SaaS: SAAS.md
-      - "ADR 0001: search": adr/0001-search.md

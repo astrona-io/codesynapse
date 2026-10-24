@@ -95,7 +95,7 @@ async function toggleFile(file: string) {
         <StatTile label="Config findings" :value="findings.length" :hint="findings.length ? 'misconfigurations to review' : 'no misconfigurations found'" />
       </div>
 
-      <section v-if="findings.length" class="panel edge--pink">
+      <section v-if="findings.length" class="panel">
         <div class="panel__header">
           <div><p class="eyebrow">Risks</p><h2>Misconfigurations</h2></div>
           <NuxtLink :to="`${base}/security`" class="btn btn--ghost">How to fix them</NuxtLink>
@@ -185,6 +185,6 @@ async function toggleFile(file: string) {
 .summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .outline { padding: 4px 6px 14px 24px; display: grid; gap: 4px; }
 .entry { display: flex; gap: 10px; align-items: center; font-size: 13px; }
-.entry.res .mono:first-child { color: var(--green); }
+.entry.res .mono:first-child { color: var(--success); }
 @media (max-width: 800px) { .file { grid-template-columns: auto 1fr; } .summary, .file .dim { display: none; } }
 </style>

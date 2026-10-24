@@ -2,6 +2,8 @@
 
 Claude Code connects to CodeSynapse through `codesynapse mcp bridge`, a small stdio process that runs on the developer's machine. Every machine that uses CodeSynapse from Claude Code needs the `codesynapse` binary installed locally. The server stack can run anywhere.
 
+
+The [Claude Code plugin](claude-code-plugin.md) sets this up in one install, with a workflow skill and hooks; this page describes the bridge it runs.
 ## Why a bridge
 
 The MCP server only runs tools for a registered chat session. Each request must carry a personal key plus `X-CodeSynapse-Session` and `X-CodeSynapse-Parent-Session` with the chat's ID (see [runtime session setup](../AGENT_GUIDE.md#runtime-session-setup)).
@@ -105,7 +107,19 @@ CODESYNAPSE_MCP_TOKEN=csk_... codesynapse mcp install --only claude \
 
 Use whatever hosts your deployment exposes for the MCP endpoint and the API.
 
-`CODESYNAPSE_MCP_URL` and `CODESYNAPSE_API_URL` set the same defaults. The bridge refuses plain `http` to anything except `localhost` or a loopback address, because the key travels with every request.
+`CODESYNAPSE_MCP_URL` and `CODESYNAPSE_API_URL` set the same defaults. The dashboard's **Agents** page prints this command with your installation's addresses filled in; the operator sets them with `CODESYNAPSE_PUBLIC_MCP_URL` and `CODESYNAPSE_PUBLIC_API_URL` (Helm: `publicMCPURL`, `publicAPIURL`). The bridge refuses plain `http` to anything except `localhost` or a loopback address, because the key travels with every request.
+
+## Answers from your working tree (opt in)
+
+By default **every call goes to the server**: it is signed with your key, checked against your permissions, written to the audit log and counted on the Statistics page. The price is that the server's graph reflects the last sync, so in the middle of a task it does not know the files you or the agent just changed.
+
+To trade that for fresh answers, turn the working-tree overlay on with `CODESYNAPSE_BRIDGE_WORKTREE=true` (or `--worktree`). Then, while your checkout has changes the server cannot have (uncommitted or untracked files, or commits not pushed to the upstream branch), the bridge answers ten tools for this repository itself, from a graph of the working tree it builds on your machine: `minimal_context`, `get_symbol_context`, `get_call_graph`, `get_implementations`, `file_outline`, `search`, `get_pr_context`, `verify_plan`, `change_checklist` and `handoff_context` (without open issues from memory, which live on the server).
+
+- **Which repository:** the one the bridge was started in (Claude Code starts it in the project folder), named as the server names it, from the `origin` remote (`owner/name` on github.com, `host/owner/name` elsewhere). Calls that name another repository, and every other tool (memory, reviews, security, `repo_status`, other repositories), go to the server as before. Pass `--repo` when the server knows the checkout by another name.
+- **How it is built:** the same offline indexing as `codesynapse review --offline`, the first time a call needs it and again after the next change (a few seconds for a mid-sized Go module; calls wait for it). Nothing new leaves your machine: the code was already on it, and the answer goes to the agent, not to the server. Because the server is not asked, these answers are not in its audit log or usage statistics; that is why the overlay is off unless you ask for it.
+- **`get_pr_context`:** with no arguments it analyses your current change (the diff against where your branch left its upstream, or HEAD; with new untracked files, the changed and new files), and its answer says which security findings the change introduces and fixes (`security_delta`). The base is indexed once per commit.
+- **How you can tell:** the answer starts with a note ("Answered from your working tree of …") and carries `_meta` `codesynapse/source: worktree` with the number of changed files.
+- **When it does not apply:** a clean tree, a repository policy that needs an approved digest, or a failed build: the call goes to the server. Without the opt-in it never applies.
 
 ## Check it works
 

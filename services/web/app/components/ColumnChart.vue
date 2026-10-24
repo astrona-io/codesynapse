@@ -8,7 +8,7 @@ const props = withDefaults(defineProps<{
   unit?: string
   color?: string
   height?: number
-}>(), { unit: '', color: 'var(--cyan)', height: 160 })
+}>(), { unit: '', color: 'var(--info)', height: 160 })
 
 const W = 640
 const PAD = { top: 12, right: 8, bottom: 22, left: 40 }
@@ -86,7 +86,7 @@ svg { width: 100%; display: block; overflow: visible; }
 path { transition: opacity 120ms; }
 path.dim { opacity: 0.45; }
 .hit { fill: transparent; cursor: default; outline: none; }
-.hit:focus-visible { stroke: var(--line-bright); stroke-width: 1; }
+.hit:focus-visible { stroke: var(--line-strong); stroke-width: 1; }
 .tooltip { position: absolute; top: 0; transform: translate(-50%, -100%); pointer-events: none; padding: 6px 10px; border-radius: var(--radius-xs); background: var(--panel); border: 1px solid var(--line-strong); font-size: 12px; white-space: nowrap; z-index: 2; }
 .tooltip strong { color: var(--ink); font-size: 14px; }
 .table-view summary { cursor: pointer; color: var(--muted); font-size: 12px; }

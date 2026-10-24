@@ -1,9 +1,16 @@
 <script setup lang="ts">
-import type { CodeRecordPage, IdentityPage } from '~/utils/types'
+import type { CodeRecordPage, IdentityPage, IdentityReviewPage } from '~/utils/types'
 
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
 const selected = computed(() => typeof route.query.id === 'string' ? route.query.id : '')
+const identityReview = reactive({ from: '', to: '', relation: 'same-symbol', reason: '' })
+const reviewOffset = ref(0)
+const reviewError = ref('')
+const reviewing = ref(false)
+const reviewSaved = ref(false)
+const { data: reviews, error: reviewsError, refresh: refreshReviews } = useApiGet<IdentityReviewPage>(() => repoPath(repo.value, `identities/reviews?symbol=${encodeURIComponent(selected.value)}&offset=${reviewOffset.value}&limit=20`))
+watch(selected, () => { reviewOffset.value = 0; reviewSaved.value = false })
 const reviewOnly = ref(false)
 const offset = ref(0)
 const limit = 20
@@ -30,6 +37,18 @@ async function save() {
   finally { saving.value = false }
 }
 const base = computed(() => `/repos/${encodeURIComponent(repo.value)}`)
+async function submitIdentityReview() {
+  if (!page.value?.available) return
+  reviewing.value = true
+  reviewError.value = ''
+  reviewSaved.value = false
+  try {
+    await apiPost(repoPath(repo.value, 'identities/reviews'), { ...identityReview, revision: page.value.revision || '', indexed_at: page.value.indexed_at || '' })
+    await refreshReviews()
+    reviewSaved.value = true
+  } catch (e) { reviewError.value = apiErrorMessage(e) }
+  finally { reviewing.value = false }
+}
 useHead({ title: () => `Identity and reuse · ${repo.value}` })
 </script>
 
@@ -57,11 +76,12 @@ useHead({ title: () => `Identity and reuse · ${repo.value}` })
           </div>
           <p class="mono small">{{ symbol.current.file || 'Package' }}<template v-if="symbol.current.start_line">:{{ symbol.current.start_line }}–{{ symbol.current.end_line }}</template></p>
           <p class="small">{{ symbol.match }}</p>
+          <p v-if="symbol.current.neighbour_count" class="small muted">{{ symbol.current.neighbour_count }} call neighbours<template v-if="symbol.current.neighbours_omitted"> · incomplete evidence</template></p>
           <NuxtLink v-if="symbol.active" :to="`${base}/explore?id=${symbol.id}`">Explore current code and callers</NuxtLink>
           <div v-if="symbol.candidates?.length || symbol.candidates_omitted">
             <strong>Review required</strong>
             <p>These are possible prior identities or copies. No identity was transferred and no lineage is verified.</p>
-            <ul><li v-for="id in symbol.candidates" :key="id"><NuxtLink :to="`${base}/identities?id=${id}`" class="mono">{{ id }}</NuxtLink></li></ul>
+            <ul><li v-for="id in symbol.candidates" :key="id"><NuxtLink :to="`${base}/identities?id=${id}`" class="mono">{{ id }}</NuxtLink> <button v-if="symbol.active" class="secondary" @click="identityReview.from = id; identityReview.to = symbol.id">Review this match</button></li></ul>
             <p v-if="symbol.candidates_omitted">Up to {{ symbol.candidates_omitted }} additional candidates were not examined or displayed.</p>
           </div>
           <details v-if="symbol.history?.length">
@@ -77,6 +97,36 @@ useHead({ title: () => `Identity and reuse · ${repo.value}` })
         </nav>
       </template>
     </template>
+
+    <section class="panel stack">
+      <h2>Human identity reviews</h2>
+      <p class="small muted">Reviews belong to the selected organisation. A same-symbol review lets the prior permanent ID resolve to current code here. Copy and distinct reviews keep the identities separate. Earlier reviews remain in history. A copy classification needs a separate reuse record for licence and validation details.</p>
+      <p v-if="reviewsError" class="error" role="alert">{{ apiErrorMessage(reviewsError) }}</p>
+      <p v-else-if="!reviews">Loading reviews…</p>
+      <p v-else-if="!reviews.reviews.length">No identity reviews in this scope.</p>
+      <article v-for="review in reviews?.reviews" :key="review.item.id">
+        <h3>{{ review.item.identity_review.relation }} · {{ review.state }}</h3>
+        <p class="small mono">{{ review.item.identity_review.from }} → {{ review.item.identity_review.to }}</p>
+        <p>{{ review.item.identity_review.reason }}</p>
+        <p class="small muted">{{ review.item.created_at }} · reviewed revision {{ review.item.identity_review.revision || 'unavailable' }}</p>
+      </article>
+      <nav v-if="reviews" class="row" aria-label="Identity review pages">
+        <button class="secondary" :disabled="reviewOffset === 0" @click="reviewOffset = Math.max(0, reviewOffset - 20)">Previous reviews</button>
+        <span>{{ reviews.total }} reviews</span>
+        <button class="secondary" :disabled="reviewOffset + 20 >= reviews.total" @click="reviewOffset += 20">Next reviews</button>
+      </nav>
+    </section>
+    <form v-if="page?.available" class="panel stack" @submit.prevent="submitIdentityReview">
+      <h2>Review an identity match</h2>
+      <p class="small muted">Requires repository administration and, in accounts mode, a signed-in session. Same-symbol links require a retired prior identity and a current target in this repository. Saving replaces earlier effective reviews for either endpoint and preserves their history.</p>
+      <label>Prior permanent ID <input v-model="identityReview.from" required maxlength="36"></label>
+      <label>Current permanent ID <input v-model="identityReview.to" required maxlength="36"></label>
+      <label>Conclusion <select v-model="identityReview.relation"><option value="same-symbol">Same symbol</option><option value="copy">Copied implementation</option><option value="distinct">Different symbols</option></select></label>
+      <label>Evidence and reason <textarea v-model="identityReview.reason" required maxlength="1000" /></label>
+      <p v-if="reviewError" class="error" role="alert">{{ reviewError }}</p>
+      <p v-if="reviewSaved" role="status">Identity review saved.</p>
+      <button :disabled="reviewing">{{ reviewing ? 'Saving…' : 'Save human review' }}</button>
+    </form>
 
     <section class="panel stack">
       <h2>Annotations and recorded reuse</h2>

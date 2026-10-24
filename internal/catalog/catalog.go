@@ -27,6 +27,9 @@ type Service struct {
 	R store.Reader
 	// Items keeps proposals and links; nil leaves them unavailable.
 	Items store.CuratedStore
+	// BeforeIdentityReview records the semantic audit before saving a human
+	// review. Accounts callers supply this hook and refuse audit errors.
+	BeforeIdentityReview func(context.Context, string) error
 	// ReadRepository resolves an additional repository only after checking
 	// current read access in this same organisation. Nil denies cross-repo
 	// provenance even if R happens to be an unrestricted reader.

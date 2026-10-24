@@ -63,7 +63,7 @@ const splitName = (name: string) => {
   const i = name.lastIndexOf('/')
   return i < 0 ? { prefix: '', base: name } : { prefix: name.slice(0, i + 1), base: name.slice(i + 1) }
 }
-const gradeColor: Record<string, string> = { A: 'var(--green)', B: 'var(--cyan)', C: 'var(--amber)', D: 'var(--orange)', F: 'var(--pink)', 'N/A': 'var(--muted)' }
+const gradeColor: Record<string, string> = { A: 'var(--success)', B: 'var(--info)', C: 'var(--warning)', D: 'var(--accent)', F: 'var(--danger)', 'N/A': 'var(--muted)' }
 const syncText = (s?: { state: string; interval_minutes: number }) => {
   if (!s || s.state === 'manual') return 'Manual sync'
   const every = ({ 15: '15 min', 30: '30 min', 60: 'hour', 360: '6 hours', 1440: 'day' } as Record<number, string>)[s.interval_minutes] ?? `${s.interval_minutes} min`
@@ -125,7 +125,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
     <div v-else-if="!ov?.repos.length" class="empty"><strong>No repositories yet</strong>Add one by its Git URL below. It takes about a minute.</div>
 
     <div class="grid cols-2">
-      <section class="panel edge--cyan">
+      <section class="panel">
         <p class="eyebrow">Add a repository</p>
         <h2>Clone from GitHub, GitLab or any HTTPS git host</h2>
         <form class="clone" @submit.prevent="register">
@@ -214,14 +214,14 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
 .repo-owner { color: var(--dim); }
 .repo-link:hover .repo-owner { color: var(--muted); }
 .repo-verdict { font-size: 14px; }
-.repo-verdict.bad { color: var(--pink); }
+.repo-verdict.bad { color: var(--danger); }
 .repo-facts { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
 .branch { overflow-wrap: anywhere; }
 .repo-meta { display: grid; justify-items: end; gap: 10px; flex: none; text-align: right; }
 .repo-status { display: flex; align-items: center; gap: 12px; }
-.grade { display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--radius-xs); border: 1px solid; font: 700 17px var(--font-sans); flex: none; }
-.sync--active { color: var(--green); }
-.sync--paused { color: var(--amber); }
+.grade { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 12px; border: 2px solid; font: 800 17px var(--font-display); flex: none; }
+.sync--active { color: var(--success); }
+.sync--paused { color: var(--warning); }
 .pager { display: flex; justify-content: center; align-items: center; gap: 14px; }
 @media (max-width: 640px) {
   .repo-panel { padding: 4px 16px; }
@@ -232,14 +232,14 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
 .clone { display: grid; gap: 10px; }
 .clone label { display: grid; gap: 4px; }
 .grow { flex: 1 1 180px; }
-.ok { color: var(--green); }
-.token { margin-top: 8px; padding: 14px 16px; border-radius: var(--radius-sm); border: 1px dashed var(--line-strong); background: var(--panel-faint); display: grid; gap: 6px; }
+.ok { color: var(--success); }
+.token { margin-top: 8px; padding: 14px 16px; border-radius: var(--radius-sm); border: 1px dashed var(--line-strong); background: var(--panel-2); display: grid; gap: 6px; }
 .token--ok { border-style: solid; border-color: var(--success); }
-.token--ok strong { color: var(--green); }
-.token--missing strong { color: var(--amber); }
-.tokens { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-family: var(--mono); font-size: 12px; }
-.tokens span { color: var(--violet); text-transform: uppercase; letter-spacing: 0.08em; }
-.cmd { margin: 0; padding: 8px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-xs); font: 13px var(--font-mono); color: var(--orange-ink); }
+.token--ok strong { color: var(--success); }
+.token--missing strong { color: var(--warning); }
+.tokens { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-family: var(--font-mono); font-size: 12px; }
+.tokens span { color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.cmd { margin: 0; padding: 8px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-xs); font: 13px var(--font-mono); color: var(--accent-ink); }
 .sources { list-style: none; margin: 0; padding: 0; display: grid; }
 .source { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px dashed var(--line); }
 .source:last-child { border-bottom: 0; }

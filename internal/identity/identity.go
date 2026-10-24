@@ -25,15 +25,18 @@ const (
 
 // Location is revision-specific evidence, never a permanent identity.
 type Location struct {
-	NodeID      string `json:"node_id"`
-	Name        string `json:"name"`
-	File        string `json:"file,omitempty"`
-	Signature   string `json:"signature,omitempty"`
-	Revision    string `json:"revision,omitempty"`
-	Fingerprint string `json:"fingerprint,omitempty"`
-	CloneHash   string `json:"clone_hash,omitempty"`
-	StartLine   int    `json:"start_line,omitempty"`
-	EndLine     int    `json:"end_line,omitempty"`
+	NodeID            string `json:"node_id"`
+	Name              string `json:"name"`
+	File              string `json:"file,omitempty"`
+	Signature         string `json:"signature,omitempty"`
+	Revision          string `json:"revision,omitempty"`
+	Fingerprint       string `json:"fingerprint,omitempty"`
+	CloneHash         string `json:"clone_hash,omitempty"`
+	StartLine         int    `json:"start_line,omitempty"`
+	EndLine           int    `json:"end_line,omitempty"`
+	Neighbourhood     string `json:"neighbourhood,omitempty"`
+	NeighbourCount    int    `json:"neighbour_count,omitempty"`
+	NeighboursOmitted int    `json:"neighbours_omitted,omitempty"`
 }
 
 // Symbol retains removed symbols too, so a deleted name cannot reclaim its
@@ -112,7 +115,7 @@ func compatible(s Symbol, n model.Node) bool { return s.Kind == n.Kind && s.Lang
 
 // Evidence needs an exact fingerprint or structural fingerprint, plus the
 // same name or file. Structure alone abstracts too much to prove identity.
-func evidence(s Symbol, n model.Node) bool {
+func evidence(s Symbol, n model.Node, near neighbourhood) bool {
 	if !compatible(s, n) {
 		return false
 	}
@@ -120,7 +123,8 @@ func evidence(s Symbol, n model.Node) bool {
 	content := a.Fingerprint != "" && a.Fingerprint == n.BodyHash
 	structure := a.CloneHash != "" && a.CloneHash == n.CloneHash
 	signature := strings.ReplaceAll(a.Signature, a.Name, "<name>") == strings.ReplaceAll(n.Signature, n.Name, "<name>")
-	return (content || structure && signature) && (a.Name == n.Name || a.File != "" && a.File == n.File)
+	neighbourMatch := a.Neighbourhood != "" && a.NeighbourCount >= 2 && a.NeighboursOmitted == 0 && near.hash == a.Neighbourhood && near.count >= 2 && near.omitted == 0 && near.incoming
+	return (content || structure && signature) && (a.Name == n.Name || a.File != "" && a.File == n.File || neighbourMatch)
 }
 
 // Reconcile stamps g and returns the next baseline. Graph IDs remain current
@@ -179,6 +183,11 @@ func Reconcile(g *model.Graph, repo string, previous Report) (Report, error) {
 			used[old] = true
 		}
 	}
+	anchors := map[string]string{}
+	for currentIndex, oldIndex := range assigned {
+		anchors[current[currentIndex].ID] = previous.Symbols[oldIndex].ID
+	}
+	near := neighbours(g, anchors)
 	candidates := map[int][]int{}
 	claims := map[int]int{}
 	unexamined := map[int]int{}
@@ -191,7 +200,7 @@ func Reconcile(g *model.Graph, repo string, previous Report) (Report, error) {
 		unexamined[i] = max(0, fingerprintCounts[n.BodyHash]-len(byFingerprint[n.BodyHash])) + max(0, cloneCounts[n.CloneHash]-len(byClone[n.CloneHash]))
 		slices.Sort(possibles)
 		for _, old := range slices.Compact(possibles) {
-			if evidence(previous.Symbols[old], n) {
+			if evidence(previous.Symbols[old], n, near[n.ID]) {
 				candidates[i] = append(candidates[i], old)
 				if !used[old] {
 					claims[old]++
@@ -199,6 +208,7 @@ func Reconcile(g *model.Graph, repo string, previous Report) (Report, error) {
 			}
 		}
 	}
+	priorLocations := map[string]Location{}
 	for i, n := range current {
 		old, exists := assigned[i]
 		match := "same declaration"
@@ -207,22 +217,15 @@ func Reconcile(g *model.Graph, repo string, previous Report) (Report, error) {
 			if !used[candidate] && claims[candidate] == 1 {
 				old = candidate
 				exists = true
-				match = "rename or move: fingerprint and location/name evidence"
+				match = "rename or move: fingerprint and corroborating name, file or call-neighbourhood evidence"
 			}
 		}
 		var s Symbol
 		if exists {
 			s = r.Symbols[old]
 			s.History = slices.Clone(s.History)
-			next := location(n, r.Revision)
-			if s.Current != next {
-				s.History = append(s.History, s.Current)
-				if len(s.History) > MaxHistory {
-					s.History = s.History[1:]
-					s.HistoryOmitted++
-				}
-			}
-			s.Current = next
+			priorLocations[s.ID] = s.Current
+			s.Current = location(n, r.Revision)
 		} else {
 			if len(r.Symbols) >= MaxSymbols {
 				return Report{}, fmt.Errorf("symbol identity limit of %d exceeded; prior identities retained", MaxSymbols)
@@ -254,6 +257,22 @@ func Reconcile(g *model.Graph, repo string, previous Report) (Report, error) {
 		stored, _ := g.Node(n.ID)
 		stored.SymbolID = s.ID
 		stored.Revision = r.Revision
+		anchors[n.ID] = s.ID
+	}
+	finalNeighbours := neighbours(g, anchors)
+	for i := range r.Symbols {
+		s := &r.Symbols[i]
+		if !s.Active {
+			continue
+		}
+		s.Current.setNeighbours(finalNeighbours[s.Current.NodeID])
+		if old, exists := priorLocations[s.ID]; exists && old != s.Current {
+			s.History = append(s.History, old)
+			if len(s.History) > MaxHistory {
+				s.History = s.History[1:]
+				s.HistoryOmitted++
+			}
+		}
 	}
 	return r, nil
 }

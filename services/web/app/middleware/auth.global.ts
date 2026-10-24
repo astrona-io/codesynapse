@@ -24,8 +24,10 @@ export default defineNuxtRouteMiddleware(async (to) => {
   if (!s.me.value && !OPEN.has(to.path) && !isHelp) return navigateTo({ path: '/login', query: to.fullPath !== '/' ? { next: to.fullPath } : {} })
   if (s.me.value && OPEN.has(to.path)) return navigateTo(s.restricted.value ? '/admin/overview' : '/')
   if (s.restricted.value) {
-    if (s.setupPending.value) return to.path === '/setup' || isHelp ? undefined : navigateTo('/setup')
-    if (to.path === '/setup' || !rootMay(to.path)) return navigateTo('/admin/overview')
+    // Setup steps are offered by the welcome guide, never forced.
+    if (to.path === '/replace-admin') return s.autoCreated.value ? undefined : navigateTo('/admin/overview')
+    if (to.path === '/setup') return s.setupPending.value ? undefined : navigateTo('/admin/overview')
+    if (!rootMay(to.path)) return navigateTo('/admin/overview')
   } else if (to.path === '/setup') {
     return navigateTo('/')
   }

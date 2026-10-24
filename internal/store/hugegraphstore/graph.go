@@ -103,7 +103,14 @@ func (s *Store) drain(ctx context.Context, script string, b map[string]any) erro
 
 // DeleteRepo implements store.Writer.
 func (s *Store) DeleteRepo(ctx context.Context, repo string) error {
-	return s.drain(ctx, dropRepo, map[string]any{"repo": repo, "batch": deleteBatch})
+	s.published.forget(repo)
+	if err := s.write(ctx, clearGeneration, map[string]any{"headID": vid("ih", repo)}, nil); err != nil {
+		return err
+	}
+	if err := s.drain(ctx, dropRepo, map[string]any{"repo": repo, "batch": deleteBatch}); err != nil {
+		return err
+	}
+	return s.deleteRuntimeOf(ctx, repo)
 }
 
 // toNodes decodes P maps.

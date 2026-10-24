@@ -77,6 +77,8 @@ type Ref struct {
 	Summary     string         `json:"summary,omitempty"`
 	// Evidence says how a direct caller's or callee's edge was established.
 	Evidence model.Evidence `json:"evidence,omitempty"`
+	// RunNote flags a test that was flaky or failing in the last recorded run.
+	RunNote string `json:"run_note,omitempty"`
 }
 
 func refOf(n model.Node, depth int, withSummary bool) Ref {
@@ -106,23 +108,28 @@ type Churn struct {
 
 // SymbolContext answers get_symbol_context for a code symbol.
 type SymbolContext struct {
-	Budget          ResponseBudget `json:"budget"`
-	Symbol          Symbol         `json:"symbol"`
-	Risk            *Risk          `json:"risk,omitempty"`
-	Counts          Counts         `json:"counts"`
-	Callers         []Ref          `json:"callers"`
-	Callees         []Ref          `json:"callees"`
-	Tests           []Ref          `json:"tests"`
-	UntestedCallers []Ref          `json:"untested_public_callers,omitempty"`
-	Implementations []Ref          `json:"implementations,omitempty"`
-	Docs            []Ref          `json:"docs,omitempty"`
-	Findings        []Ref          `json:"findings,omitempty"`
-	Churn           *Churn         `json:"churn,omitempty"`
-	Package         *PackageCtx    `json:"package,omitempty"`
-	Analysis        *AnalysisNote  `json:"analysis,omitempty"`
+	Budget          *ResponseBudget `json:"budget,omitempty"`
+	Symbol          Symbol          `json:"symbol"`
+	Risk            *Risk           `json:"risk,omitempty"`
+	Counts          Counts          `json:"counts"`
+	Callers         []Ref           `json:"callers"`
+	Callees         []Ref           `json:"callees"`
+	Tests           []Ref           `json:"tests"`
+	UntestedCallers []Ref           `json:"untested_public_callers,omitempty"`
+	Implementations []Ref           `json:"implementations,omitempty"`
+	// ReachedFrom lists the entry points (HTTP routes, MCP tools, CLI
+	// commands) whose handlers lead here through the call graph.
+	ReachedFrom []Ref         `json:"reached_from,omitempty"`
+	Docs        []Ref         `json:"docs,omitempty"`
+	Findings    []Ref         `json:"findings,omitempty"`
+	Churn       *Churn        `json:"churn,omitempty"`
+	Package     *PackageCtx   `json:"package,omitempty"`
+	Analysis    *AnalysisNote `json:"analysis,omitempty"`
 	// Duplicate is set when the function has exact or edited copies elsewhere.
 	Duplicate *duplicates.Info `json:"duplicate,omitempty"`
-	Hint      string           `json:"hint,omitempty"`
+	// Measured is the function's coverage in the last recorded test run.
+	Measured *Measured `json:"measured,omitempty"`
+	Hint     string    `json:"hint,omitempty"`
 }
 
 // Counts are totals before list truncation.
@@ -131,6 +138,7 @@ type Counts struct {
 	Callees            int `json:"callees"`
 	Tests              int `json:"tests"`
 	Implementations    int `json:"implementations,omitempty"`
+	EntryPoints        int `json:"entry_points,omitempty"`
 	CallerTestsChecked int `json:"caller_tests_checked,omitempty"`
 	CallerTestsOmitted int `json:"caller_tests_omitted,omitempty"`
 }
@@ -197,6 +205,15 @@ func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts Co
 	}
 	if err := s.labelEvidence(ctx, n.ID, tests, out.Tests, nil, nil); err != nil {
 		return out, err
+	}
+	if out.ReachedFrom, out.Counts.EntryPoints, err = s.reachedFrom(ctx, n.ID, limit); err != nil {
+		return out, err
+	}
+	if f, ok, stale, err := s.runtimeFacts(ctx, repo); err != nil {
+		return out, err
+	} else if ok {
+		annotateRuns(f, tests, out.Tests)
+		out.Measured = measuredOf(f, stale, n.ID)
 	}
 	if out.Analysis, err = s.analysisOf(ctx, repo, n); err != nil {
 		return out, err
@@ -307,7 +324,7 @@ func (s Service) churn(ctx context.Context, repo, file string) (*Churn, error) {
 }
 
 // Resolve finds one node for a qualified ID ("store.(*Store).Get"), a full
-// node ID, a plain name, or a package path. Ambiguous or unknown names
+// or compact ("Kind|local") node ID, a plain name, or a package path. Ambiguous or unknown names
 // return a SuggestionError listing qualified IDs to retry with.
 func (s Service) Resolve(ctx context.Context, repo, symbol string) (model.Node, error) {
 	if len(symbol) > 4096 || len(repo) > 4096 {
@@ -326,6 +343,16 @@ func (s Service) Resolve(ctx context.Context, repo, symbol string) (model.Node, 
 	}
 	if strings.Count(symbol, "|") >= 2 {
 		return s.R.Node(ctx, symbol)
+	}
+	// A compact ID ("Function|pkg/path.Name") leaves out the repository the
+	// answer it came from was about, and may write its root module as "~".
+	if kind, local, ok := strings.Cut(symbol, "|"); ok && model.NodeKind(kind).Valid() && local != "" {
+		if strings.Contains(local, "~") {
+			if root, err := s.R.Node(ctx, model.NodeID(repo, model.KindRepository, repo)); err == nil {
+				local = ExpandModule(local, model.GoModuleOf(root))
+			}
+		}
+		return s.R.Node(ctx, model.NodeID(repo, model.NodeKind(kind), local))
 	}
 	kinds := []model.NodeKind{model.KindFunction, model.KindMethod, model.KindInterfaceMethod, model.KindType, model.KindPackage}
 	// Qualified node IDs are indexed by every store. Resolve them before a
@@ -438,4 +465,38 @@ func suggestions(q string, pool []model.Node, ambiguous bool) error {
 func IsSuggestion(err error) bool {
 	var s *SuggestionError
 	return errors.As(err, &s)
+}
+
+// ShortenModule writes module, the repository's root Go module path, as
+// "~" at the start of a node ID's local part: "github.com/acme/app/x.F" is
+// "~/x.F", a method "(*github.com/acme/app/x.T).M" is "(*~/x.T).M", the
+// root package "github.com/acme/app" is "~". A longer module that only
+// starts the same ("github.com/acme/app-tools") is left alone.
+func ShortenModule(local, module string) string {
+	if module == "" {
+		return local
+	}
+	for _, lead := range []string{"(*", "(", ""} {
+		rest, ok := strings.CutPrefix(local, lead+module)
+		if !ok {
+			continue
+		}
+		if rest == "" || strings.ContainsRune("/.)", rune(rest[0])) {
+			return lead + "~" + rest
+		}
+	}
+	return local
+}
+
+// ExpandModule undoes ShortenModule.
+func ExpandModule(local, module string) string {
+	if module == "" {
+		return local
+	}
+	for _, lead := range []string{"(*", "(", ""} {
+		if rest, ok := strings.CutPrefix(local, lead+"~"); ok && (rest == "" || strings.ContainsRune("/.)", rune(rest[0]))) {
+			return lead + module + rest
+		}
+	}
+	return local
 }

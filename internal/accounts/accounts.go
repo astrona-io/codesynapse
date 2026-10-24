@@ -46,16 +46,22 @@ func (r Role) AtLeast(least Role) bool {
 
 // User is a person who can log in.
 type User struct {
-	ID            string `json:"id"`
-	Email         string `json:"email"`
+	ID    string `json:"id"`
+	Email string `json:"email"`
+	// Username is an optional second login name: lower case, no "@", unique.
+	Username      string `json:"username,omitempty"`
 	Name          string `json:"name"`
 	PlatformAdmin bool   `json:"platform_admin"`
 	// BootstrapRoot marks the account that set up the installation. It is
 	// fixed when the account is created or designated and never cleared:
 	// unlike PlatformAdmin it cannot be granted or revoked. Root may do
 	// governance only (see bootstrap.go).
-	BootstrapRoot bool      `json:"bootstrap_root,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	BootstrapRoot bool `json:"bootstrap_root,omitempty"`
+	// AutoCreated marks the administrator made at first start with a
+	// generated password (initialadmin.go). The dashboard tells its user to
+	// replace it, and only such a root can be replaced.
+	AutoCreated bool      `json:"auto_created,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 	// DisabledAt is set while the account is suspended: no sign-in, and
 	// its sessions and API keys stop working.
 	DisabledAt *time.Time `json:"disabled_at,omitempty"`
@@ -93,6 +99,9 @@ type Session struct {
 	UserID    string
 	CreatedAt time.Time
 	ExpiresAt time.Time
+	// UserAgent is the browser that signed in, so a person can tell their
+	// sessions apart (clipped; no address is kept).
+	UserAgent string
 }
 
 // APIKey is a personal key bound to one org. The secret is shown once;
@@ -207,13 +216,16 @@ type Event struct {
 	Outcome    string    `json:"outcome"` // success or failure
 	Status     int       `json:"status,omitempty"`
 	Detail     string    `json:"detail,omitempty"`
-	// MCP describes an MCP request (docs/SAAS.md, 5c); nil for everything else.
+	// MCP describes an MCP request or the runtime context of an agent.hook
+	// observation (Method agent/hook); nil for other audit actions.
 	MCP      *MCPRequest `json:"mcp,omitempty"`
 	PrevHash string      `json:"prev_hash"`
 	Hash     string      `json:"hash"`
 }
 
-// MCPRequest is what the audit log keeps about one MCP request: enough to
+// MCPRequest holds runtime context for an MCP request or an agent.hook
+// observation (Method agent/hook, measurements in Event.Detail). For requests,
+// it keeps enough to
 // trace it back to a person, key, chat and client, never the results. Args
 // holds identifying values and redacted, capped free text; bulk inputs (a
 // diff, code, conversation turns) appear only as "sha256:<hex> (<n> bytes)".
@@ -245,8 +257,8 @@ type EventFilter struct {
 	// event); Actor matches the actor's email or user ID; Outcome is
 	// success, failure or empty for both.
 	Action, Actor, Outcome string
-	// Session, Tool and Repo match MCP requests by runtime session, tool or
-	// prompt name and repository.
+	// Session, Tool and Repo match runtime context by session, tool/prompt (or
+	// hook event) name and repository.
 	Session, Tool, Repo string
 	// Ascending orders oldest first (export, verification).
 	Ascending bool
@@ -303,6 +315,11 @@ type Store interface {
 	// root (migration and explicit designation). ErrExists when another
 	// account already is; the classification is never removed.
 	MarkBootstrapRoot(ctx context.Context, userID string) error
+	// ReplaceRoot creates u (not yet root) and makes it the root in place of
+	// oldID, which is deleted with its sessions and keys. The old account's
+	// email and username are free for u. One transaction in the policy
+	// transaction store.
+	ReplaceRoot(ctx context.Context, oldID string, u User) error
 	// Setup returns the installation's setup record; State is empty before
 	// the first account exists.
 	Setup(ctx context.Context) (Setup, error)
@@ -329,6 +346,10 @@ type Store interface {
 	SetManagedByIDP(ctx context.Context, orgID, userID string, managed bool) error
 	UserByID(ctx context.Context, id string) (User, error)
 	UserByEmail(ctx context.Context, email string) (User, error)
+	// UserByUsername matches the normalised username exactly.
+	UserByUsername(ctx context.Context, username string) (User, error)
+	// SetUsername sets or (with "") clears a username; ErrExists when taken.
+	SetUsername(ctx context.Context, userID, username string) error
 	SetPassword(ctx context.Context, userID, hash string) error
 	ListUsers(ctx context.Context, limit int) ([]User, error)
 	// SetUserDisabled suspends (at != nil) or restores a user.
@@ -350,6 +371,13 @@ type Store interface {
 	SessionByHash(ctx context.Context, hash string) (Session, error)
 	DeleteSession(ctx context.Context, hash string) error
 	DeleteUserSessions(ctx context.Context, userID string) error
+	// UserSessions lists a user's unexpired sessions, newest first, at most 100.
+	UserSessions(ctx context.Context, userID string) ([]Session, error)
+	// DeleteOtherSessions ends every session of the user except keepHash.
+	DeleteOtherSessions(ctx context.Context, userID, keepHash string) error
+	SetUserName(ctx context.Context, userID, name string) error
+	// SetUserEmail fails with ErrExists when another account has the email.
+	SetUserEmail(ctx context.Context, userID, email string) error
 
 	// Execution sessions retain closed rows permanently to reject replay.
 	// Schedules (schedules.go). EnsureSchedule adds one only when the
@@ -370,6 +398,11 @@ type Store interface {
 	// Attempts at or before since, of any key, may be deleted. Every API
 	// replica shares the count (login limits, docs/SAAS.md 6c).
 	TakeAttempt(ctx context.Context, key string, limit int, since, now time.Time) (bool, error)
+	// NotificationsSeen is when the user last marked the dashboard's
+	// notifications read (zero when never). SetNotificationsSeen only moves
+	// it forward.
+	NotificationsSeen(ctx context.Context, userID string) (time.Time, error)
+	SetNotificationsSeen(ctx context.Context, userID string, at time.Time) error
 	// Durable jobs (jobs.go). AddJob refuses a second active job for the
 	// same repository (ErrJobActive). RenewJobLeases extends every active
 	// job owner holds. FinishJob ends a job owner still holds and clears its

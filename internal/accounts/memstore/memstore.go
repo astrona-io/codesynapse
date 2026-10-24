@@ -20,6 +20,7 @@ type Store struct {
 	policy         bool
 	outbox         map[string]int64
 	users          map[string]accounts.User
+	seen           map[string]time.Time // notifications seen, per user
 	orgs           map[string]accounts.Org
 	members        map[string]map[string]member // org -> user -> role
 	sessions       map[string]accounts.Session
@@ -82,6 +83,9 @@ func (s *Store) CreateUser(_ context.Context, u accounts.User) error {
 		if x.Email == u.Email {
 			return fmt.Errorf("email: %w", accounts.ErrExists)
 		}
+		if u.Username != "" && x.Username == u.Username {
+			return fmt.Errorf("username: %w", accounts.ErrExists)
+		}
 		if x.BootstrapRoot && u.BootstrapRoot {
 			return fmt.Errorf("bootstrap root: %w", accounts.ErrExists)
 		}
@@ -110,6 +114,38 @@ func (s *Store) UserByEmail(_ context.Context, email string) (accounts.User, err
 		}
 	}
 	return accounts.User{}, fmt.Errorf("user: %w", accounts.ErrNotFound)
+}
+
+// UserByUsername implements accounts.Store.
+func (s *Store) UserByUsername(_ context.Context, username string) (accounts.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if username != "" {
+		for _, u := range s.users {
+			if u.Username == username {
+				return u, nil
+			}
+		}
+	}
+	return accounts.User{}, fmt.Errorf("user: %w", accounts.ErrNotFound)
+}
+
+// SetUsername implements accounts.Store.
+func (s *Store) SetUsername(_ context.Context, userID, username string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.users[userID]
+	if !ok {
+		return fmt.Errorf("user: %w", accounts.ErrNotFound)
+	}
+	for id, x := range s.users {
+		if id != userID && username != "" && x.Username == username {
+			return fmt.Errorf("username: %w", accounts.ErrExists)
+		}
+	}
+	u.Username = username
+	s.users[userID] = u
+	return nil
 }
 
 // SetPassword implements accounts.Store.

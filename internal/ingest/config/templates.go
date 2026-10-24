@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"text/template/parse"
 
@@ -73,6 +74,7 @@ func (b *builder) templateFile(rel string, content []byte, chart string, refs *t
 		})
 	}
 	if len(defs) > 0 {
+		slices.Sort(defs) // parsed templates come out of a map
 		file.Summary = redact.Summary("defines "+strings.Join(defs, ", "), 240)
 	}
 }

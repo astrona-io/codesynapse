@@ -138,26 +138,26 @@ function move(e: PointerEvent) {
 .inputs input[type='number'] { width: 110px; }
 .small { font-size: 12.5px; margin: 0; }
 .ink { color: var(--ink); }
-.ok { color: var(--green); }
-.warn { color: var(--amber); }
+.ok { color: var(--success); }
+.warn { color: var(--warning); }
 .kpis { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 .chart { margin: 0; display: grid; gap: 8px; }
 .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
 .plot { position: relative; }
 svg { width: 100%; display: block; overflow: visible; }
 .grid-line { stroke: var(--line); stroke-width: 1; }
-.target { stroke: var(--line-bright); stroke-width: 1; }
+.target { stroke: var(--line-strong); stroke-width: 1; }
 .tick, .end { fill: var(--muted); font: 10px var(--font-mono); }
 .series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .series--base { stroke: var(--muted); }
-.series--with { stroke: var(--cyan); }
-.crosshair { stroke: var(--line-bright); stroke-width: 1; }
+.series--with { stroke: var(--info); }
+.crosshair { stroke: var(--line-strong); stroke-width: 1; }
 .dot { stroke: var(--panel); stroke-width: 2; }
 .dot--base { fill: var(--muted); }
-.dot--with { fill: var(--cyan); }
+.dot--with { fill: var(--info); }
 .key { display: inline-block; width: 14px; height: 2px; vertical-align: middle; border-radius: 1px; }
 .key--base { background: var(--muted); }
-.key--with { background: var(--cyan); }
+.key--with { background: var(--info); }
 .tooltip { position: absolute; top: 0; transform: translate(-50%, -105%); pointer-events: none; padding: 6px 10px; border-radius: var(--radius-xs); background: var(--panel); border: 1px solid var(--line-strong); font-size: 12px; white-space: nowrap; z-index: 2; display: grid; gap: 2px; }
 .tooltip strong { color: var(--ink); }
 .assumptions summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }

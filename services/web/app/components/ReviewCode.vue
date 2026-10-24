@@ -47,17 +47,17 @@ const where = computed(() => (props.code?.ref ? `@ ${props.code.ref.slice(0, 10)
 .code { display: grid; gap: 6px; }
 .code header { flex-wrap: wrap; align-items: baseline; }
 .label { margin: 0; }
-.open { margin-left: auto; color: var(--cyan); }
+.open { margin-left: auto; color: var(--info); }
 .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--bg); }
 table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.55; }
 td { padding: 0 8px; white-space: pre; vertical-align: top; border: 0; }
 .n { width: 1%; text-align: right; color: var(--dim); user-select: none; }
 .sign { width: 1%; padding: 0 4px; user-select: none; }
 .t { color: var(--ink); }
-tr.del { background: var(--tint-pink); }
-tr.del .sign { color: var(--pink); }
-tr.add { background: var(--tint-green); }
-tr.add .sign { color: var(--green); }
-tr.mark { background: var(--tint-cyan); }
-tr.mark .n { color: var(--cyan); }
+tr.del { background: var(--danger-soft); }
+tr.del .sign { color: var(--danger); }
+tr.add { background: var(--success-soft); }
+tr.add .sign { color: var(--success); }
+tr.mark { background: var(--info-soft); }
+tr.mark .n { color: var(--info); }
 </style>

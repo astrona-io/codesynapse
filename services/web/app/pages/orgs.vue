@@ -75,7 +75,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 
     <p v-if="data && !data.enabled" class="error">Cloning is off: set CODESYNAPSE_WORKSPACE on the API to watch organisations.</p>
 
-    <section class="panel edge--cyan">
+    <section class="panel">
       <p class="eyebrow">Watch an organisation</p>
       <h2>Index everything in <span class="mono">astrona-io/*</span></h2>
       <form class="add" @submit.prevent="add">
@@ -167,6 +167,6 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 .name { font-weight: 600; }
 .desc { flex: 1 1 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .full { flex-basis: 100%; }
-.bad { color: var(--pink); }
+.bad { color: var(--danger); }
 .small { font-size: 12.5px; }
 </style>

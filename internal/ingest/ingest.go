@@ -10,7 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"time"
+
+	"golang.org/x/mod/modfile"
+	"golang.org/x/tools/go/packages"
 
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"github.com/astrona-io/codesynapse/internal/license"
@@ -18,6 +22,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/arch"
 	"github.com/astrona-io/codesynapse/internal/cleanup"
+	"github.com/astrona-io/codesynapse/internal/conventions"
 	"github.com/astrona-io/codesynapse/internal/duplicates"
 	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/identity"
@@ -117,7 +122,10 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	if repoNode.Branch == "" {
 		repoNode.Branch = gitx.CurrentBranch(ctx, root)
 	}
-	meta, err := json.Marshal(repoMetadata{Policy: metadata})
+	// The Go module at the root: answers write it as "~" in node IDs
+	// (internal/coretools, compact) and the resolver expands it back.
+	repoMeta := repoMetadata{Policy: metadata, GoModule: rootModulePath(root)}
+	meta, err := json.Marshal(repoMeta)
 	if err != nil {
 		return nil, fmt.Errorf("encode repository policy: %w", err)
 	}
@@ -141,12 +149,6 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 		logger.Info("extracted go code", "nodes", len(code.Nodes()), "edges", len(code.Edges()))
 	}
 
-	docGraph, err := docs.Extract(ctx, opts.Repo, root, g)
-	if err != nil {
-		return nil, fmt.Errorf("docs extraction: %w", err)
-	}
-	g.Merge(docGraph)
-
 	langRes, err := lang.Extract(ctx, opts.Repo, root)
 	if err != nil {
 		return nil, fmt.Errorf("python/js/ts extraction: %w", err)
@@ -158,6 +160,13 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	if len(langRes.Languages) > 0 {
 		logger.Info("extracted source code", "files", langRes.Languages)
 	}
+	// Documentation is linked last among the code languages: a mention can
+	// only resolve to a symbol that is already in the graph.
+	docGraph, err := docs.Extract(ctx, opts.Repo, root, g)
+	if err != nil {
+		return nil, fmt.Errorf("docs extraction: %w", err)
+	}
+	g.Merge(docGraph)
 	if err := arch.Extract(ctx, opts.Repo, root, g); err != nil {
 		return nil, fmt.Errorf("architecture records: %w", err)
 	}
@@ -209,9 +218,35 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	if repoNode.Identities, err = identity.Encode(identities); err != nil {
 		return nil, fmt.Errorf("encoding symbol identities: %w", err)
 	}
+	var goCalls map[string][]string
+	if goRes != nil {
+		goCalls = goRes.ExternalCalls
+	}
+	repoMeta.Conventions = conventions.Analyze(conventions.Input{Graph: g, GoCalls: goCalls, Imports: extImports, Module: repoMeta.GoModule})
+	// After the reports and identities above, which describe the
+	// repository's own code: these nodes only point at other repositories.
+	golang.LinkFirstParty(opts.Repo, g, goRes, repoMeta.GoModule)
+	if meta, err = json.Marshal(repoMeta); err != nil {
+		return nil, fmt.Errorf("encode repository metadata: %w", err)
+	}
+	repoNode.Meta = string(meta)
 	logger.Info("ingest complete", "repo", opts.Repo, "nodes", len(g.Nodes()), "edges", len(g.Edges()),
 		"pruned_edges", pruned, "duration", time.Since(start).Round(time.Millisecond).String())
 	return g, nil
+}
+
+// rootModulePath is the module path declared by go.mod at root, or "". The
+// file is untrusted: a symlink or an oversized file is not read.
+func rootModulePath(root string) string {
+	p := filepath.Join(root, "go.mod")
+	if st, err := os.Lstat(p); err != nil || !st.Mode().IsRegular() || st.Size() > 1<<20 {
+		return ""
+	}
+	data, err := os.ReadFile(p) //nolint:gosec // go.mod at the repository root, checked above
+	if err != nil {
+		return ""
+	}
+	return modfile.ModulePath(data)
 }
 
 func hasGoModule(root string, policies ...*repoconfig.Policy) bool {
@@ -281,8 +316,36 @@ func addDependencies(ctx context.Context, opts Options, root string, g *model.Gr
 		}
 	}
 	resolveLicenses(ctx, opts, root, mods)
-	vuln.Apply(opts.Repo, g, mods, vulns, calls, imports)
+	var built map[string]bool
+	if goRes != nil {
+		built = builtPackages(ctx, root, vulns)
+	}
+	vuln.Apply(opts.Repo, g, mods, vulns, calls, imports, built)
 	return mods, nil
+}
+
+// builtPackages is every package compiled into the repository's packages
+// and their tests, loaded only when a Go advisory names packages: a VEX
+// "not affected" rests on it. Any load error gives nil, which claims
+// nothing, since a missing package would make vulnerable code look absent.
+func builtPackages(ctx context.Context, root string, vulns []vuln.Vulnerability) map[string]bool {
+	if !slices.ContainsFunc(vulns, func(v vuln.Vulnerability) bool { return v.Ecosystem == vuln.EcosystemGo && len(v.Symbols) > 0 }) {
+		return nil
+	}
+	pkgs, err := golang.Load(ctx, root, packages.NeedName|packages.NeedImports|packages.NeedDeps)
+	if err != nil {
+		logx.FromContext(ctx).Warn("listing the build's packages failed", logx.Error(err))
+		return nil
+	}
+	built, broken := map[string]bool{}, false
+	packages.Visit(pkgs, nil, func(p *packages.Package) {
+		broken = broken || len(p.Errors) > 0
+		built[p.PkgPath] = true
+	})
+	if broken {
+		return nil
+	}
+	return built
 }
 
 // resolveLicenses fills in licences the lockfiles did not record.
@@ -336,7 +399,7 @@ func Licenses(ctx context.Context, root string, opts Options) (license.Report, e
 func licenseDeps(mods []vuln.Module) []license.Dependency {
 	deps := make([]license.Dependency, len(mods))
 	for i, m := range mods {
-		deps[i] = license.Dependency{Ecosystem: cmp.Or(m.Ecosystem, vuln.EcosystemGo), Name: m.Path, Version: m.Version,
+		deps[i] = license.Dependency{Ecosystem: cmp.Or(m.Ecosystem, vuln.EcosystemGo), Name: m.BuildPath(), Version: m.Version,
 			License: m.License, Source: m.LicenseSource, Indirect: m.Indirect, Dev: m.Dev}
 	}
 	return deps

@@ -4,7 +4,7 @@ title: Shell invoked with a non-constant command string
 severity: critical
 cwe: [CWE-78]
 category: code
-languages: [go, python, javascript, typescript]
+languages: [go, python, javascript, typescript, java, kotlin, rust, csharp, php, ruby]
 why: A shell parses the whole string, so any input containing ; | $( ) or backticks runs extra commands with the service's privileges.
 fix: Avoid sh -c; pass an explicit argv and validate every argument.
 references:
@@ -19,3 +19,18 @@ examples:
   - language: typescript
     vulnerable: exec(`convert ${name} out.png`)
     fixed: execFile('convert', ['--', name, 'out.png'])
+  - language: java
+    vulnerable: 'new ProcessBuilder("sh", "-c", "convert " + name + " out.png").start();'
+    fixed: 'new ProcessBuilder("convert", "--", name, "out.png").start();'
+  - language: rust
+    vulnerable: 'Command::new("sh").arg("-c").arg(format!("convert {} out.png", name)).status()?;'
+    fixed: 'Command::new("convert").args(["--", name, "out.png"]).status()?;'
+  - language: csharp
+    vulnerable: 'Process.Start("cmd.exe", "/c convert " + name + " out.png");'
+    fixed: 'Process.Start(new ProcessStartInfo("convert") { ArgumentList = { "--", name, "out.png" } });'
+  - language: php
+    vulnerable: 'shell_exec("convert " . $name . " out.png");'
+    fixed: '$p = new Process([''convert'', ''--'', $name, ''out.png'']); $p->run();'
+  - language: ruby
+    vulnerable: 'system("convert #{name} out.png")'
+    fixed: 'system("convert", "--", name, "out.png")'

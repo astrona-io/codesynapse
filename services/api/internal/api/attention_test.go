@@ -14,6 +14,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/store/memory"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
 // riskyGraph has two critical and one high finding and a vulnerability the
@@ -137,4 +138,36 @@ func TestAttentionFlagsDuplicateCode(t *testing.T) {
 	for _, it := range a.Items {
 		assert.True(t, it.Kind != "quality" || it.Repo == "org/a", "?repo= limits to one repository and skips the cross-repository advice: %+v", it)
 	}
+}
+
+func TestAttentionCountsWhatAgentsSaved(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, "risky", riskyGraph("risky")))
+	today := usage.Day(time.Now())
+	require.NoError(t, st.AddUsage(ctx, []usage.Bucket{
+		{Day: today, Repo: "risky", Tool: "get_symbol_context", Client: "claude-code", Calls: 10, ResponseTokens: 500},
+		{Day: today, Repo: "risky", Tool: "upsert_graph_triples", Client: "claude-code", Calls: 3, ResponseTokens: 90},
+	}))
+	ts := httptest.NewServer(New(ctx, Config{}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	t.Cleanup(ts.Close)
+
+	var a Attention
+	require.Equal(t, newClient(t, ts).do("GET", "/api/v1/attention", "", &a), 200)
+	assert.Equal(t, a.AgentDays, 30)
+	assert.Equal(t, a.AgentCalls, 10) // navigation calls only, not memory writes
+	assert.Equal(t, a.TokensReturned, 500)
+}
+
+func TestAgentUsageUsesEachRepositorysRatio(t *testing.T) {
+	repos := []RepoSummary{{Name: "r", GraphTokens: 100, BaseTokens: 1000}}
+	now := time.Now()
+	u := agentUsage([]usage.Bucket{
+		{Day: usage.Day(now), Repo: "r", Tool: "get_symbol_context", Calls: 10, ResponseTokens: 500},
+		{Day: usage.Day(now), Repo: "r", Tool: "get_symbol_context", Calls: 10, Errors: 10, ResponseTokens: 500},
+	}, repos, 30, now)
+	// Ratio 10: each returned token stands for 9 more that file reading
+	// would have cost; the failed calls answered nothing.
+	assert.Equal(t, u.AvoidedTokens, 500*9)
 }

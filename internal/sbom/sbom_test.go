@@ -95,6 +95,8 @@ func TestBuild(t *testing.T) {
 
 	require.Len(t, doc.Vulnerabilities, 1)
 	v := doc.Vulnerabilities[0]
+	require.NotNil(t, v.Analysis)
+	assert.Equal(t, v.Analysis.State, StateInTriage, "a module-level advisory proves nothing either way")
 	assert.Equal(t, v.ID, "GO-1")
 	assert.Equal(t, v.Affects[0].Ref, b.BOMRef)
 	assert.Equal(t, v.Ratings[0].Severity, "high")
@@ -118,4 +120,24 @@ func TestBuild(t *testing.T) {
 		found = found || p.Name == "codesynapse:truncated"
 	}
 	assert.True(t, found, "a cut list is said so in the document")
+}
+
+func TestAnalysisOf(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		node          model.Node
+		state, reason string
+	}{
+		{"packages not in the build", model.Node{Reachability: "required", CodeAbsent: true}, StateNotAffected, JustificationNotPresent},
+		{"called", model.Node{Reachability: "called"}, StateInTriage, ""},
+		{"imported, no direct call found", model.Node{Reachability: "imported"}, StateInTriage, ""},
+		{"only required", model.Node{Reachability: "required"}, StateInTriage, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			a := analysisOf(tt.node)
+			assert.Equal(t, a.State, tt.state)
+			assert.Equal(t, a.Justification, tt.reason)
+			assert.NotEmpty(t, a.Detail)
+		})
+	}
 }

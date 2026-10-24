@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,6 +25,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/cleanup"
 	"github.com/astrona-io/codesynapse/internal/duplicates"
+	"github.com/astrona-io/codesynapse/internal/forge"
 	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/ingest"
 	"github.com/astrona-io/codesynapse/internal/ingestreport"
@@ -32,20 +34,26 @@ import (
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
 	"github.com/astrona-io/codesynapse/internal/review"
+	"github.com/astrona-io/codesynapse/internal/runtimefacts"
 	"github.com/astrona-io/codesynapse/internal/sbom"
 	"github.com/astrona-io/codesynapse/internal/security"
 	"github.com/astrona-io/codesynapse/internal/snapshot"
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/store/memory"
+	"github.com/astrona-io/codesynapse/internal/toolsets"
 )
 
 var version = "dev"
 
 func main() {
 	os.Exit(app.Main("codesynapse", "Index code, docs and history into a graph for review and AI assistants", version,
-		func(ec *app.Env) []*cobra.Command {
-			return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), statsCmd(ec), mcpCmd(ec), memoryCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
-		}))
+		commands))
+}
+
+// commands are the CLI's subcommands (the plugin test checks the hooks
+// call ones that exist).
+func commands(ec *app.Env) []*cobra.Command {
+	return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), upgradeCmd(ec), statsCmd(ec), evalCmd(ec), hookCmd(ec), gitHookCmd(ec), installCmd(ec), statusCmd(ec), uninstallCmd(ec), mcpCmd(ec), cursorCmd(ec), assistantCmd(ec, "codex"), assistantCmd(ec, "claude"), memoryCmd(ec), runtimeCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
 }
 
 // ingestOptions configures `codesynapse ingest`.
@@ -55,12 +63,16 @@ type ingestOptions struct {
 	EC                   *app.Env
 	graph                app.GraphFlags
 	repo                 string
+	nameFromOrigin       bool
 	commitLimit          int
 	allowNetwork         bool
 	vulns                bool
 	licenses             bool
 	dataflow             bool
 	root                 string
+	watch                bool
+	interval             time.Duration
+	st                   store.Store // opened by the first run, kept by --watch
 }
 
 func (o *ingestOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -69,15 +81,18 @@ func (o *ingestOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.reportFile, "ingest-report", "", "Write the per-file JSON report to a new file (existing files are refused)")
 	o.graph.AddFlags(f)
 	f.StringVar(&o.repo, "repo", "", "Repository name in the graph (default: directory name)")
+	f.BoolVar(&o.nameFromOrigin, "name-from-origin", false, "Name the repository after the checkout's origin remote the way the dashboard names one added by URL (owner/name), so adding that URL there links this index instead of cloning it")
 	f.IntVar(&o.commitLimit, "commits", 500, "Number of recent commits to index (0 disables history)")
 	f.BoolVar(&o.allowNetwork, "allow-network", false, "Allow `go list` to download modules (off by default for untrusted repos)")
 	f.BoolVar(&o.vulns, "vulns", false, "Check dependencies against osv.dev (sends module paths and versions)")
 	f.BoolVar(&o.licenses, "license-lookup", false, "Look up dependency licences not found on disk on deps.dev (sends package names and versions)")
 	f.BoolVar(&o.dataflow, "dataflow", false, "Resolve Go calls through function values with SSA and VTA (slower; edges marked dataflow)")
+	f.BoolVar(&o.watch, "watch", false, "Keep running and re-index when the git working tree changes (edits, commits, checkouts)")
+	f.DurationVar(&o.interval, "watch-interval", 2*time.Second, "How often --watch looks at the working tree; a change is indexed once it held for one interval")
 	return nil
 }
 
-func (o *ingestOptions) Complete(_ context.Context, _ *app.Env) error {
+func (o *ingestOptions) Complete(ctx context.Context, _ *app.Env) error {
 	o.root = "."
 	if len(o.EC.Args) > 0 {
 		o.root = o.EC.Args[0]
@@ -87,6 +102,13 @@ func (o *ingestOptions) Complete(_ context.Context, _ *app.Env) error {
 		return err
 	}
 	o.root = abs
+	if o.nameFromOrigin && o.repo == "" {
+		name := forge.NameFromRemote(gitx.SanitizeURL(gitx.HTTPSRemote(gitx.OriginURL(ctx, abs))))
+		if name == "" {
+			return errors.New("--name-from-origin needs an origin remote with an https or ssh address of the form host/owner/name; name the repository with --repo instead")
+		}
+		o.repo = name
+	}
 	if o.repo == "" {
 		o.repo = filepath.Base(abs)
 	}
@@ -97,11 +119,47 @@ func (o *ingestOptions) Validate(_ context.Context, _ *app.Env) error {
 	if o.commitLimit < 0 {
 		return errors.New("--commits must be >= 0")
 	}
+	if o.watch && o.reportFile != "" {
+		return errors.New("--ingest-report writes one run's report; leave it out with --watch")
+	}
+	if o.watch && o.interval < 500*time.Millisecond {
+		return errors.New("--watch-interval must be at least 500ms")
+	}
 	return nil
 }
 
-func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) (result error) {
+func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
+	defer func() {
+		if o.st != nil {
+			o.st.Close(ctx) //nolint:errcheck,gosec // best-effort close
+		}
+	}()
+	if !o.watch {
+		return o.once(ctx)
+	}
+	return o.watchLoop(ctx)
+}
+
+// openStore connects on first use and keeps the store for later runs.
+func (o *ingestOptions) openStore(ctx context.Context) (store.Store, error) {
+	if o.st != nil {
+		return o.st, nil
+	}
+	st, err := o.graph.Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := st.EnsureSchema(ctx); err != nil {
+		st.Close(ctx) //nolint:errcheck,gosec // the schema error is the one to report
+		return nil, err
+	}
+	o.st = st
+	return st, nil
+}
+
+// once indexes the repository and publishes it, with its accounting.
+func (o *ingestOptions) once(ctx context.Context) (result error) {
 	var runID [16]byte
 	if _, err := rand.Read(runID[:]); err != nil {
 		return err
@@ -145,12 +203,8 @@ func (o *ingestOptions) Run(ctx context.Context, _ *app.Env) (result error) {
 		}
 	}()
 	ctx = ingestreport.WithLedger(ctx, ledger)
-	st, err := o.graph.Open(ctx)
+	st, err := o.openStore(ctx)
 	if err != nil {
-		return err
-	}
-	defer st.Close(ctx) //nolint:errcheck // best-effort close
-	if err := st.EnsureSchema(ctx); err != nil {
 		return err
 	}
 	previous, err := ingest.IdentityBaseline(ctx, st, o.repo)
@@ -176,7 +230,8 @@ func ingestCmd(ec *app.Env) *cobra.Command {
 	o := &ingestOptions{EC: ec}
 	return app.NewSubCommand("ingest [path]", o, ec).
 		WithShortDesc("Index a repository into HugeGraph").
-		WithExample("  CODESYNAPSE_HUGEGRAPH_PASSWORD=... codesynapse ingest . --repo my-service").
+		WithLongDesc("Indexes the repository at path and publishes its graph; publication writes only what changed since the last run. With --watch it keeps running and re-indexes whenever the git working tree changes, so the graph follows your edits; `codesynapse git-hook install` re-indexes after each commit instead.").
+		WithExample("  CODESYNAPSE_HUGEGRAPH_PASSWORD=... codesynapse ingest . --repo my-service\n  codesynapse ingest . --repo my-service --watch").
 		WithGroupID(app.GroupBase).
 		WithMaxArgs(1).
 		Build()
@@ -193,6 +248,10 @@ type reviewOptions struct {
 	diffFile             string
 	depth                int
 	offline              bool
+	findingsDelta        bool
+	coverage             []string
+	junit                []string
+	failOnNew            string
 	root                 string
 }
 
@@ -206,6 +265,10 @@ func (o *reviewOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.diffFile, "diff", "", "Read a unified diff from this file ('-' for stdin) instead of running git")
 	f.IntVar(&o.depth, "depth", 3, "Caller traversal depth")
 	f.BoolVar(&o.offline, "offline", false, "Build the graph in memory from the working tree instead of querying HugeGraph")
+	f.BoolVar(&o.findingsDelta, "findings-delta", true, "With --offline and a git diff, also index the base and report which security findings the change introduces and fixes")
+	f.StringSliceVar(&o.coverage, "coverage", nil, "With --offline, a Go coverage profile or LCOV file of the last test run (default: cover.out, lcov.info and the like at the root)")
+	f.StringVar(&o.failOnNew, "fail-on-new", "", "With --offline and a git diff, exit 1 when the change introduces a security finding at or above this severity (pre-existing findings do not count)")
+	f.StringSliceVar(&o.junit, "junit", nil, "With --offline, a JUnit XML report of the last test run (default: junit.xml, report.xml and the like at the root)")
 	return nil
 }
 
@@ -226,6 +289,17 @@ func (o *reviewOptions) Complete(_ context.Context, _ *app.Env) error {
 }
 
 func (o *reviewOptions) Validate(_ context.Context, _ *app.Env) error {
+	if (len(o.coverage) > 0 || len(o.junit) > 0) && !o.offline {
+		return errors.New("--coverage and --junit need --offline: they are read with the working tree")
+	}
+	if o.failOnNew != "" {
+		if model.SeverityRank(o.failOnNew) < 0 {
+			return fmt.Errorf("--fail-on-new must be one of %s", strings.Join(model.Severities, ", "))
+		}
+		if !o.offline || !o.findingsDelta || o.diffFile != "" {
+			return errors.New("--fail-on-new needs --offline with a git base (not --diff): the base is indexed to tell new findings from old")
+		}
+	}
 	switch o.EC.Output {
 	case app.OutputPlain, app.OutputMarkdown, app.OutputJSON:
 		return nil
@@ -254,6 +328,9 @@ func (o *reviewOptions) Run(ctx context.Context, _ *app.Env) error {
 		if err := mem.ReplaceRepo(ctx, o.repo, g); err != nil {
 			return err
 		}
+		if err := o.loadRuntimeFacts(ctx, mem, g); err != nil {
+			return err
+		}
 		r = mem
 	} else {
 		st, err := o.graph.Open(ctx)
@@ -268,12 +345,83 @@ func (o *reviewOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return err
 	}
+	if o.offline && o.findingsDelta && o.diffFile == "" {
+		if rep.Security, err = o.securityDelta(ctx, r, changes); err != nil {
+			return err
+		}
+	}
+	if f, ok, err := store.RuntimeFactsOf(ctx, r, o.repo); err != nil {
+		return err
+	} else if ok {
+		rep.Measured = review.MeasuredOf(f, false, rep)
+	}
 	if o.EC.Output == app.OutputJSON {
 		enc := json.NewEncoder(o.EC.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(rep)
+		if err := enc.Encode(rep); err != nil {
+			return err
+		}
+	} else if err := review.WriteMarkdown(o.EC.Stdout, rep); err != nil {
+		return err
 	}
-	return review.WriteMarkdown(o.EC.Stdout, rep)
+	if o.failOnNew != "" && rep.Security != nil && rep.Security.IntroducesAtLeast(o.failOnNew) {
+		return errNewFindings
+	}
+	return nil
+}
+
+// errNewFindings makes `review --fail-on-new` exit non-zero for CI without
+// printing an error banner on top of the report.
+var errNewFindings = errors.New("the change introduces security findings at or above the --fail-on-new threshold")
+
+// loadRuntimeFacts reads the coverage and JUnit reports named by flags, or
+// found at the root, and keeps what they measured next to the graph.
+func (o *reviewOptions) loadRuntimeFacts(ctx context.Context, mem *memory.Store, g *model.Graph) error {
+	files := runtimefacts.Files{Coverage: o.coverage, JUnit: o.junit}
+	if files.Empty() {
+		files = runtimefacts.Discover(o.root)
+	}
+	if files.Empty() {
+		return nil
+	}
+	f, err := runtimefacts.Load(ctx, runtimefacts.NodeSource(g.Nodes()), files)
+	if err != nil {
+		return fmt.Errorf("reading test reports: %w", err)
+	}
+	return mem.SetRuntimeFacts(ctx, o.repo, f)
+}
+
+// securityDelta indexes where the change left the base branch and compares
+// the findings of the changed files with the working tree's.
+func (o *reviewOptions) securityDelta(ctx context.Context, head store.Reader, changes []gitx.FileChange) (*review.SecurityDelta, error) {
+	for _, rev := range []string{o.base, o.head} {
+		if err := gitx.ValidateRev(rev); err != nil {
+			return nil, err
+		}
+	}
+	out, err := gitx.Run(ctx, o.root, "merge-base", "--end-of-options", o.base, o.head)
+	if err != nil {
+		return nil, fmt.Errorf("finding where the change left %s: %w", o.base, err)
+	}
+	commit := strings.TrimSpace(string(out))
+	g, err := ingest.AtCommit(ctx, o.root, commit, ingest.Options{ApprovedPolicyDigest: o.approvedPolicyDigest, Repo: o.repo})
+	if err != nil {
+		return nil, fmt.Errorf("indexing the base %s: %w", short(commit), err)
+	}
+	base := memory.New()
+	if err := base.ReplaceRepo(ctx, o.repo, g); err != nil {
+		return nil, err
+	}
+	files := make([]string, 0, len(changes))
+	for _, c := range changes {
+		files = append(files, c.Path)
+	}
+	d, err := review.CompareFindings(ctx, base, head, o.repo, files)
+	if err != nil {
+		return nil, err
+	}
+	d.Base = o.base + " (" + short(commit) + ")"
+	return &d, nil
 }
 
 func (o *reviewOptions) readDiff(ctx context.Context) ([]byte, error) {
@@ -444,7 +592,11 @@ func (o *auditOptions) Validate(context.Context, *app.Env) error {
 			return fmt.Errorf("unknown severity %q", s)
 		}
 	}
-	return nil
+	switch o.EC.Output {
+	case app.OutputPlain, app.OutputMarkdown, app.OutputJSON, app.OutputSARIF:
+		return nil
+	}
+	return fmt.Errorf("unsupported output format %q (plain, markdown, json, sarif)", o.EC.Output)
 }
 
 func (o *auditOptions) Run(ctx context.Context, _ *app.Env) error {
@@ -462,11 +614,14 @@ func (o *auditOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return err
 	}
-	if o.EC.Output == app.OutputJSON {
+	switch o.EC.Output {
+	case app.OutputJSON:
 		enc := json.NewEncoder(o.EC.Stdout)
 		enc.SetIndent("", "  ")
 		err = enc.Encode(rep)
-	} else {
+	case app.OutputSARIF:
+		err = security.WriteSARIF(o.EC.Stdout, rep, security.SARIFOptions{Version: version, Manifest: rootManifest(o.root)})
+	default:
 		err = security.WriteMarkdown(o.EC.Stdout, rep)
 	}
 	if err != nil {
@@ -478,12 +633,37 @@ func (o *auditOptions) Run(ctx context.Context, _ *app.Env) error {
 	return nil
 }
 
+// manifestNames are the files a vulnerability of an ecosystem is reported
+// at in SARIF, in order of preference: the lockfiles the scan reads first.
+var manifestNames = map[string][]string{
+	"Go":        {"go.mod"},
+	"npm":       {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "package.json"},
+	"PyPI":      {"poetry.lock", "uv.lock", "Pipfile.lock", "pyproject.toml", "requirements.txt"},
+	"crates.io": {"Cargo.lock", "Cargo.toml"},
+	"Packagist": {"composer.lock", "composer.json"},
+	"RubyGems":  {"Gemfile.lock", "Gemfile"},
+	"NuGet":     {"packages.lock.json"},
+	"Maven":     {"gradle.lockfile", "build.gradle", "build.gradle.kts"},
+}
+
+// rootManifest finds an ecosystem's manifest at the repository root.
+func rootManifest(root string) func(string) string {
+	return func(ecosystem string) string {
+		for _, name := range manifestNames[ecosystem] {
+			if st, err := os.Lstat(filepath.Join(root, name)); err == nil && st.Mode().IsRegular() {
+				return name
+			}
+		}
+		return ""
+	}
+}
+
 func auditCmd(ec *app.Env) *cobra.Command {
 	o := &auditOptions{EC: ec}
 	return app.NewSubCommand("audit [path]", o, ec).
 		WithShortDesc("Security review: code findings and vulnerable dependencies (offline graph)").
 		WithLongDesc("Runs the security rules over the type-checked code and checks go.mod dependencies and the Go standard library against osv.dev. Findings are ranked by severity, exposure from entry points and test reachability; vulnerabilities by severity and whether the vulnerable symbol is called.").
-		WithExample("  codesynapse audit .\n  codesynapse audit . --fail-on high      # CI gate\n  codesynapse audit . --vulns=false -o json").
+		WithExample("  codesynapse audit .\n  codesynapse audit . --fail-on high      # CI gate\n  codesynapse audit . --vulns=false -o json\n  codesynapse audit . -o sarif > codesynapse.sarif   # GitHub code scanning").
 		WithGroupID(app.GroupBase).
 		WithMaxArgs(1).
 		Build()
@@ -561,19 +741,21 @@ func licensesCmd(ec *app.Env) *cobra.Command {
 
 // mcpInstallOptions configures `codesynapse mcp install`.
 type mcpInstallOptions struct {
-	EC     *app.Env
-	url    string
-	apiURL string
-	yes    bool
-	only   []string
+	profile string
+	EC      *app.Env
+	url     string
+	apiURL  string
+	yes     bool
+	only    []string
 }
 
 func (o *mcpInstallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f := o.EC.Command.Flags()
 	f.StringVar(&o.url, "url", app.Getenv("CODESYNAPSE_MCP_URL", "http://localhost:8090/mcp"), "MCP endpoint to register")
-	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "API the Claude Code bridge registers chat sessions with")
+	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "API used by the bridge and assistant lifecycle hooks")
 	f.BoolVarP(&o.yes, "yes", "y", false, "Install into every detected agent without asking")
 	f.StringSliceVar(&o.only, "only", nil, "Limit to these agents (claude, codex, gemini, opencode, cursor, project)")
+	f.StringVar(&o.profile, "profile", toolsets.Core, "Toolsets the agents get: core (the eleven everyday tools), all, or core plus a comma list of "+strings.Join(toolsets.Names(), ", "))
 	return nil
 }
 func (o *mcpInstallOptions) Complete(context.Context, *app.Env) error { return nil }
@@ -581,7 +763,28 @@ func (o *mcpInstallOptions) Validate(context.Context, *app.Env) error {
 	if !o.yes && !o.EC.IsTerminal {
 		return errors.New("not a terminal: pass --yes (and --only) to install without prompts")
 	}
-	return nil
+	sel, err := toolsets.Parse(o.profile)
+	if err != nil {
+		return fmt.Errorf("--profile: %w", err)
+	}
+	o.url, err = withToolsets(o.url, sel)
+	return err
+}
+
+// withToolsets adds the selection to the MCP URL (?toolsets=core,memory);
+// nil (all) leaves it as is, so the server's default applies.
+func withToolsets(raw string, sel []string) (string, error) {
+	if sel == nil {
+		return raw, nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("--url: %w", err)
+	}
+	q := u.Query()
+	q.Set("toolsets", strings.Join(sel, ","))
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
@@ -602,9 +805,14 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 		return errors.New("run an installed codesynapse binary (go install ./cmd/codesynapse, or just mcp), not go run")
 	}
 	bin = brewStablePath(bin)
-	server := agentcfg.Server{URL: o.url, Token: os.Getenv(agentcfg.TokenEnv), Command: bin, APIURL: o.apiURL, StoreToken: storeToken}
+	token := os.Getenv(agentcfg.TokenEnv)
+	if token == "" {
+		token = newAPIClient(o.apiURL).token
+	}
+	server := agentcfg.Server{URL: o.url, Token: token, Command: bin, APIURL: o.apiURL, StoreToken: storeToken}
 	in := bufio.NewReader(o.EC.Stdin)
 	installed := 0
+	failed := 0
 	for _, t := range agentcfg.Detect(home, cwd) {
 		if len(o.only) > 0 && !slices.Contains(o.only, t.ID) {
 			continue
@@ -613,6 +821,7 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 			continue
 		}
 		if err := t.Install(ctx, server); err != nil {
+			failed++
 			_, _ = fmt.Fprintf(o.EC.Stderr, "  ✗ %s: %v\n", t.Description, err)
 			continue
 		}
@@ -620,8 +829,13 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 		_, _ = fmt.Fprintf(o.EC.Stderr, "  ✓ %s\n", t.Description)
 	}
 	if installed > 0 {
-		_, _ = fmt.Fprintf(o.EC.Stderr, "\nAgents other than Claude read the token from $%s. Export it in your shell profile, e.g.\n  export %s=$(grep ^%s= %s | cut -d= -f2)\n",
-			agentcfg.TokenEnv, agentcfg.TokenEnv, agentcfg.TokenEnv, filepath.Join(cwd, ".env"))
+		_, _ = fmt.Fprintln(o.EC.Stderr, "\nRestart the selected assistants. Codex: review and trust hooks with /hooks. Cursor: keep the installed MCP hooks enabled.\nThe local bridges register each chat automatically and read the personal key from its private file. Start a new chat and verify a CodeSynapse tool call with /mcp (Codex/Claude) or Customize → MCP (Cursor).")
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d assistant configuration(s) failed; see the errors above", failed)
+	}
+	if installed == 0 && o.yes {
+		return errors.New("no matching assistants detected; install project hooks with `codesynapse mcp hooks . --client codex` or `--client cursor`")
 	}
 	return nil
 }
@@ -663,7 +877,7 @@ func mcpCmd(ec *app.Env) *cobra.Command {
 		Build())
 	parent.AddCommand(app.NewSubCommand("bridge", &mcpBridgeOptions{EC: ec}, ec).
 		WithShortDesc("Stdio MCP server for one chat: registers the chat's session and forwards to the HTTP server").
-		WithLongDesc("Claude Code starts this per chat (`codesynapse mcp install` configures it). It reads the chat ID from CLAUDE_CODE_SESSION_ID (or CODESYNAPSE_SESSION_ID), registers it through the API with the key from CODESYNAPSE_API_TOKEN or the file `mcp install` wrote, and forwards every MCP message with the key and the runtime session headers.").
+		WithLongDesc("The installer configures a local stdio bridge. Claude supplies its per-chat environment; --client codex uses native per-request thread metadata; --client cursor pairs each MCP progress token with its trusted pre-tool hook. Every chat is registered and gets its own upstream transport. Keys stay in the private token file.").
 		WithNoArgs().
 		Build())
 	parent.AddCommand(app.NewSubCommand("agents-md [dir]", &mcpAgentsMdOptions{EC: ec}, ec).
@@ -672,8 +886,8 @@ func mcpCmd(ec *app.Env) *cobra.Command {
 		WithMaxArgs(1).
 		Build())
 	parent.AddCommand(app.NewSubCommand("hooks [dir]", &mcpHooksOptions{EC: ec}, ec).
-		WithShortDesc("Install Claude Code hooks: recall memory at session start, offload older turns before compaction").
-		WithExample("  export CODESYNAPSE_API_TOKEN=...   # from the CodeSynapse .env\n  codesynapse mcp hooks ~/src/api\n  codesynapse mcp hooks . --shared --repo astrona-io/api").
+		WithShortDesc("Install lifecycle hooks for Claude Code, Codex or Cursor").
+		WithExample("  codesynapse mcp hooks . --client codex\n  codesynapse mcp hooks . --client cursor\n  codesynapse mcp hooks . --shared --repo astrona-io/api").
 		WithMaxArgs(1).
 		Build())
 	return parent

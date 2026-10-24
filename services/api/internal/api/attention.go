@@ -13,6 +13,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/history"
 	"github.com/astrona-io/codesynapse/internal/security"
+	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
 // What needs attention, worst first, in words a team lead understands:
@@ -41,10 +42,19 @@ type Attention struct {
 	Repos int      `json:"repos"`
 	Clean []string `json:"clean"`
 	// Headline figures for the page.
-	TokensSaved int            `json:"tokens_saved"`
-	Findings    int            `json:"findings"`
-	Vulns       int            `json:"vulns"`
-	Grades      map[string]int `json:"grades"`
+	TokensSaved int `json:"tokens_saved"`
+	// What agents' calls did over the last AgentDays days (estimates):
+	// AgentCalls navigation-tool calls returned TokensReturned tokens,
+	// where reading the files instead would have taken about
+	// TokensReturned+TokensAvoided. Zero calls: nothing measured yet, and
+	// TokensSaved (the ingest benchmark) is all there is.
+	AgentDays      int            `json:"agent_days"`
+	AgentCalls     int            `json:"agent_calls"`
+	TokensReturned int            `json:"tokens_returned"`
+	TokensAvoided  int            `json:"tokens_avoided"`
+	Findings       int            `json:"findings"`
+	Vulns          int            `json:"vulns"`
+	Grades         map[string]int `json:"grades"`
 }
 
 // A repository is flagged for duplicate code from this share of its function
@@ -92,6 +102,9 @@ func (s *Server) buildAttention(ctx context.Context, only string, now time.Time)
 	a := Attention{GeneratedAt: now.UTC().Format(time.RFC3339), Items: []AttentionItem{}, Levels: map[string]int{}, Clean: []string{},
 		Repos: len(ov.Repos), TokensSaved: ov.Totals.TokensSaved, Grades: ov.Totals.Grades}
 	add := func(it AttentionItem) { a.Items = append(a.Items, it) }
+	if err := s.agentSavings(ctx, &a, only, ov.Repos, now); err != nil {
+		return Attention{}, err
+	}
 
 	for _, rs := range ov.Repos {
 		for _, n := range rs.Findings {
@@ -303,4 +316,26 @@ func (s *Server) regressionItem(ctx context.Context, repo string, add func(Atten
 		Title:  "Got worse since the previous sync: " + strings.Join(details[:min(len(details), 3)], "; "),
 		Detail: strings.Join(details, ". ") + ". Compared with the sync before the last one; the history page shows the trend.",
 		Action: "See the trend", Link: repoLink(repo, "history")})
+}
+
+// agentSavings fills in what agents' calls saved, from the usage counters
+// (the last 30 days), for every visible repository or only the named one.
+func (s *Server) agentSavings(ctx context.Context, a *Attention, only string, repos []RepoSummary, now time.Time) error {
+	const days = 30
+	buckets, err := s.usageBuckets(ctx, days, now)
+	if err != nil {
+		return err
+	}
+	if only != "" {
+		buckets = slices.DeleteFunc(buckets, func(b usage.Bucket) bool { return b.Repo != only })
+	}
+	u := agentUsage(buckets, repos, days, now)
+	a.AgentDays, a.TokensAvoided = days, u.AvoidedTokens
+	for _, t := range u.Tools {
+		if t.Kind == "navigation" {
+			a.AgentCalls += t.Calls
+			a.TokensReturned += t.ResponseTokens
+		}
+	}
+	return nil
 }

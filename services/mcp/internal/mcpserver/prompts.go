@@ -40,7 +40,8 @@ var taskPrompts = []taskPrompt{
 2. Check whether any modified symbol touches security-tagged APIs (sensitive_touched, External nodes) or carries findings; call security_report with min_severity: "medium" for context.
 3. Verify that new or modified public functions have unit tests (exported_untested lists the gaps).
 4. Check duplicated_changed: changed functions that have exact or edited copies elsewhere. Say whether the same change belongs in each copy, or whether the copies should be merged. The graph reflects the last ingest, so a function added in this change is not listed unless the repository was synced after it.
-5. Summarize high-risk changes, missing test coverage, and potential architectural side effects, citing file:line.`, files, quoteList(files))
+5. Check used_elsewhere: changed exported functions that other repositories call, with their callers there. A changed signature or behaviour breaks them; say which need a change.
+6. Summarize high-risk changes, missing test coverage, and potential architectural side effects, citing file:line.`, files, quoteList(files))
 		},
 	},
 	{

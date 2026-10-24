@@ -48,7 +48,8 @@ func TestContractAtomicReplacement(t *testing.T) {
 	run, err := newRunID()
 	require.NoError(t, err)
 	b := map[string]any{"repo": storetest.Repo, "headID": vid("ih", storetest.Repo), "run": run, "now": time.Now().UnixMilli(), "expires": time.Now().Add(time.Hour).UnixMilli(), "maxChunks": maxStageChunks}
-	require.NoError(t, s.stageWrite(ctx, acquireStage, b))
+	_, err = s.acquire(ctx, b)
+	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.stageWrite(ctx, abandonStage, b) })
 	b["idx"] = 0
 	b["chunkID"] = vid("is", run+"|0")
@@ -85,6 +86,38 @@ func testTxCapacity() int {
 	return capacity
 }
 
+func TestStageSchemaUpgradesLegacyHead(t *testing.T) {
+	url := os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_URL")
+	if url == "" {
+		t.Skip("CODESYNAPSE_TEST_HUGEGRAPH_URL not set")
+	}
+	ctx := t.Context()
+	s, err := New(ctx, Config{URL: url, User: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_USER"), Password: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_PASSWORD")})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close(ctx) })
+	require.NoError(t, s.EnsureSchema(ctx))
+	// Separate fixture labels exercise an older schema without touching the
+	// graph's real publication heads or any indexed repository.
+	const legacy = `def s=graph.schema()
+s.vertexLabel('legacy_head_fixture').useCustomizeStringId().properties('repo','stage_run','stage_expires').ifNotExist().create()
+graph.addVertex(T.id,'legacy-head-fixture',T.label,'legacy_head_fixture','repo','legacy-fixture','stage_run','','stage_expires',0L)
+graph.tx().commit();1`
+	const cleanup = `g.V('legacy-head-fixture').drop().iterate();graph.tx().commit()
+graph.schema().vertexLabel('legacy_head_fixture').remove()
+graph.schema().vertexLabel('legacy_stage_fixture').remove();1`
+	require.NoError(t, s.write(ctx, legacy, nil, nil))
+	t.Cleanup(func() { _ = s.write(context.Background(), cleanup, nil, nil) })
+	upgrade := strings.NewReplacer("'ingest_head'", "'legacy_head_fixture'", "'ingest_stage'", "'legacy_stage_fixture'", "'ingestStageByRepo'", "'legacyStageByRepo'", "'ingestStageByExpiry'", "'legacyStageByExpiry'").Replace(stageSchema)
+	require.NoError(t, s.write(ctx, upgrade, nil, nil))
+	require.NoError(t, s.write(ctx, upgrade, nil, nil), "migration is idempotent")
+	const verify = `def v=g.V('legacy-head-fixture').next()
+v.property('pub_gen','generation-fixture');graph.tx().commit()
+g.V('legacy-head-fixture').values('pub_gen').toList()`
+	var values []string
+	require.NoError(t, s.write(ctx, verify, nil, &values))
+	assert.Equal(t, values, []string{"generation-fixture"}, "an existing head survives and accepts the new property")
+}
+
 func TestReplacementTxCapacity(t *testing.T) {
 	url := os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_URL")
 	if url == "" {
@@ -100,8 +133,13 @@ func TestReplacementTxCapacity(t *testing.T) {
 	small, err := New(ctx, Config{URL: url, User: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_USER"), Password: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_PASSWORD"), TxCapacity: 5})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = small.Close(ctx) })
+	// Ten new nodes do not fit five operations, even written as a delta.
 	grown := storetest.Fixture()
 	grown.AddNode(model.Node{ID: storetest.ID(model.KindFunction, "app.extra"), Repo: storetest.Repo, Kind: model.KindFunction, Name: "extra"})
+	for i := range 9 {
+		name := "extra" + string(rune('a'+i))
+		grown.AddNode(model.Node{ID: storetest.ID(model.KindFunction, "app."+name), Repo: storetest.Repo, Kind: model.KindFunction, Name: name})
+	}
 	err = small.ReplaceRepo(ctx, storetest.Repo, grown)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTxCapacity), err.Error())
@@ -114,6 +152,17 @@ func TestReplacementTxCapacity(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, main.Name, "main")
 	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, grown))
+
+	// One changed node is written as a delta, which fits where rewriting the
+	// whole repository would not.
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+	one := storetest.Fixture()
+	m, _ := one.Node(storetest.ID(model.KindFunction, "app.main"))
+	m.Summary = "changed"
+	one.AddNode(*m)
+	require.NoError(t, small.ReplaceRepo(ctx, storetest.Repo, one))
+	assert.Equal(t, small.lastPublish.Load(), "delta")
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
 }
 
 func TestTxCapacityAboveServerMaximum(t *testing.T) {

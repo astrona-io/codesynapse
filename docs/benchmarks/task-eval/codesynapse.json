@@ -1,0 +1,22 @@
+{
+  "repo": "codesynapse",
+  "base": "409c57717b60f56ee79b1564d03273713ea5be4c",
+  "head": "9f63cae40218fea7a8c7b82fa88c128cc80139a2",
+  "tasks": 58,
+  "summary": {
+    "minimal_context": {
+      "recall_at_5": 0.123,
+      "recall_at_10": 0.199,
+      "hit_at_10": 0.534,
+      "tokens": 1366,
+      "errors": 0
+    },
+    "search": {
+      "recall_at_5": 0.112,
+      "recall_at_10": 0.171,
+      "hit_at_10": 0.517,
+      "tokens": 753,
+      "errors": 0
+    }
+  }
+}

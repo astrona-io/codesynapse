@@ -28,6 +28,10 @@ init:
             printf '\n# Seals organisation Git tokens; keep it (tokens sealed with a lost key must be set again).\nSECRET_KEY=%s\n' "$(openssl rand -base64 32)" >> .env
             echo "added SECRET_KEY to .env"
         fi
+        if ! grep -q '^ADMIN_PASSWORD=' .env; then
+            printf '\n# Password of the administrator ("admin") made at first start; replace the account after signing in.\nADMIN_PASSWORD=%s\n' "$(openssl rand -hex 16)" >> .env
+            echo "added ADMIN_PASSWORD to .env"
+        fi
         if ! grep -q '^METRICS_PASSWORD=' .env; then
             printf '\n# VictoriaMetrics password (statistics by minute and hour).\nMETRICS_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
             echo "added METRICS_PASSWORD to .env"
@@ -43,6 +47,7 @@ init:
         -e "s/change-me-postgres/$(openssl rand -hex 24)/" \
         -e "s/change-me-hugegraph/$(openssl rand -hex 24)/" \
         -e "s/change-me-metrics/$(openssl rand -hex 24)/" \
+        -e "s/change-me-admin/$(openssl rand -hex 16)/" \
         -e "s|change-me-secret-key|$(openssl rand -base64 32)|" .env.example > .env
     mkdir -p sources
     [ -f sources/go.mod ] || printf "module sources\n" > sources/go.mod
@@ -87,6 +92,7 @@ git-token host="github.com": init _runtime
 up: init _runtime
     {{compose}} up -d --build
     @echo "web http://localhost:3000 · api http://localhost:8080 · mcp http://localhost:8090/mcp"
+    @echo "first sign-in: user admin, password: grep ADMIN_PASSWORD .env (replace the account afterwards)"
 
 # Stop the stack (data is kept)
 down:
@@ -104,29 +110,60 @@ reset: init _runtime
     {{compose}} up -d --force-recreate
     @echo "web http://localhost:3000 · api http://localhost:8080 · mcp http://localhost:8090/mcp"
 
+# Reset the admin (root) account's password to ADMIN_PASSWORD from .env; "generate" prints a new random one instead
+admin-reset mode="": _runtime
+    {{compose}} exec api codesynapse-api reset-admin {{ if mode == "generate" { "--generate" } else { "" } }}
+
 # Follow logs, optionally for one service: just logs api
 logs service="":
     {{compose}} logs -f {{service}}
 
-# Copy a local checkout into ./sources and ingest it through the API container
+# Index a local checkout through the worker (it has the Go toolchain; the API image has none). Named after the checkout's origin remote the way the dashboard names a repository added by URL, so adding that URL there links this index
 ingest dir name="":
     #!/usr/bin/env sh
     set -eu
     src="$(cd "{{dir}}" && pwd)"
-    name="{{name}}"; [ -n "$name" ] || name="$(basename "$src")"
+    base="$(basename "$src")"
     mkdir -p sources
-    if [ "$src" != "$(pwd)/sources/$name" ]; then
-        rsync -a --delete --exclude /sources --exclude /bin --exclude node_modules --exclude .nuxt --exclude .output "$src/" "sources/$name/"
+    if [ "$src" != "$(pwd)/sources/$base" ]; then
+        rsync -a --delete --exclude /sources --exclude /bin --exclude node_modules --exclude .nuxt --exclude .output "$src/" "sources/$base/"
     fi
-    {{compose}} exec api codesynapse ingest "/sources/$name" --repo "$name" --vulns="${CODESYNAPSE_VULN_SCAN:-true}"
+    origin="$(git -C "$src" remote get-url origin 2>/dev/null || true)"
+    if [ -n "{{name}}" ]; then
+        naming="--repo {{name}}"
+    elif [ -n "$origin" ]; then
+        naming="--name-from-origin"
+    else
+        naming="--repo $base"
+        echo "note: $src has no origin remote, so it is indexed as '$base' and cannot be linked to an organisation by URL" >&2
+    fi
+    # shellcheck disable=SC2086
+    {{compose}} exec worker codesynapse ingest "/sources/$base" $naming --vulns="${CODESYNAPSE_VULN_SCAN:-true}" --allow-network="${CODESYNAPSE_ALLOW_NETWORK:-false}"
+    if [ "${CODESYNAPSE_ALLOW_NETWORK:-false}" != true ]; then
+        echo "note: module downloads are off, so Go packages whose dependencies are not in the worker's module cache are not type-checked (reported as package_load_failed); set CODESYNAPSE_ALLOW_NETWORK=true for a checkout you trust" >&2
+    fi
+    if [ -n "$origin" ]; then
+        echo "Indexed. To see it in your organisation: sign in as an owner, open Repositories, choose Add and paste $origin (public repositories need no token; a private one uses your organisation's Git token). The dashboard links this index instead of cloning."
+    fi
 
-# Ingest this repository itself (dogfooding)
+# Index this repository itself (dogfooding)
 ingest-self:
-    just ingest . codesynapse
+    just ingest .
 
 # Print a review context pack for the current branch against a base ref
 review base="origin/main":
     go run ./cmd/codesynapse review . --offline --base {{base}}
+
+# Validate the Claude Code plugin and marketplace with Claude Code's own validator (needs the claude CLI)
+# Not --strict: the plugin has no version on purpose (installs follow the
+# repository's commits) and no icon (no listing in the plugin directory).
+plugin-check:
+    claude plugin validate ./plugins/codesynapse
+    claude plugin validate .
+
+# Score minimal_context and search on past commits against the committed baseline (needs full history)
+eval *args:
+    go run ./cmd/codesynapse eval . --repo codesynapse --baseline docs/benchmarks/task-eval/codesynapse.json {{args}}
 
 # Register the MCP server with your AI agents (asks per agent: Claude Code, Codex, Gemini, OpenCode, Cursor, project)
 mcp:
@@ -140,6 +177,13 @@ mcp:
 registry := env("REGISTRY", "ghcr.io/astrona-io")
 platform := env("PLATFORM", "")
 engine := env("CONTAINER_ENGINE", `if command -v docker >/dev/null 2>&1; then echo docker; elif command -v podman >/dev/null 2>&1; then echo podman; else echo missing-container-runtime; fi`)
+
+# The store images the integration contracts run against: the ones docker-compose.yml ships.
+# .github/scripts/check-test-images.sh (part of `just checks`) keeps recipes, Compose and the chart in step.
+pg_image := `sh .github/scripts/compose-image.sh postgres`
+milvus_image := `sh .github/scripts/compose-image.sh milvus`
+hugegraph_image := `sh .github/scripts/compose-image.sh hugegraph`
+victoriametrics_image := `sh .github/scripts/compose-image.sh victoria-metrics`
 
 # Build the api, worker, mcp and web images, tagged codesynapse-<svc>:<tag> and <registry>/codesynapse-<svc>:<tag>. PLATFORM=linux/amd64 for a cluster of another architecture.
 image-build tag="dev":
@@ -236,6 +280,14 @@ chart-install-published version pull_secret="": _kind-secret
 chart-test:
     helm test codesynapse --kube-context "{{kind_context}}" --namespace "{{kind_ns}}" --logs
 
+# Point the kind install at a three-instance CloudNativePG cluster and kill its primary (after chart-install)
+chart-failover-postgres:
+    sh .github/scripts/postgres-failover.sh "{{kind_context}}" "{{kind_ns}}"
+
+# Point the kind install at a Milvus cluster (SeaweedFS for S3, no MinIO or Pulsar) and kill nodes under load (after chart-install)
+chart-failover-milvus:
+    sh .github/scripts/milvus-failover.sh "{{kind_context}}" "{{kind_ns}}"
+
 # Build, load, install and test on a throwaway kind cluster (just kind-down removes it)
 chart-e2e: chart-check kind-up chart-images chart-install chart-test
     @echo "the chart works on {{kind_context}}; reach the dashboard with:"
@@ -248,12 +300,10 @@ kind-down:
     kind delete cluster --name "{{kind_cluster}}"
 
 # --- local development --------------------------------------------------------
-# HugeGraph runs Gremlin and is never published to the host, so the API runs
-# in compose (`just up`); these recipes work alongside it or without it.
-
-# Run the MCP server on stdio with an in-memory graph of a directory (no database)
-dev-mcp dir=".":
-    go run ./services/mcp/cmd/codesynapse-mcp serve --offline {{dir}}
+# There is no database-free MCP server: every tool call needs accounts and a
+# registered runtime session. Develop against `just up` and register an agent
+# with `just mcp` (or `codesynapse mcp install`); `go run ./services/mcp/cmd/codesynapse-mcp
+# serve` against the stack's accounts database is the same server unpacked.
 
 # Run the Nuxt dev server against the API of `just up`
 dev-web:
@@ -283,9 +333,10 @@ test-postgres: _runtime
     set -eu
     pw=$(openssl rand -hex 16)
     name="codesynapse-pg-test-$$"
-    {{engine}} run --rm -d --name "$name" -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=cs docker.io/library/postgres:17-alpine >/dev/null
+    {{engine}} run --rm -d --name "$name" -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=cs {{pg_image}} >/dev/null
     trap '{{engine}} stop "$name" >/dev/null 2>&1' EXIT
-    until {{engine}} exec "$name" pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+    # A container that never comes up fails the run instead of hanging it.
+    n=0; until {{engine}} exec "$name" pg_isready -U postgres >/dev/null 2>&1; do n=$((n+1)); [ "$n" -lt 90 ] || { echo "PostgreSQL did not start" >&2; exit 1; }; sleep 1; done
     sleep 1
     CODESYNAPSE_TEST_DATABASE_URL="postgres://postgres:$pw@127.0.0.1:55432/cs?sslmode=disable" go test -race -count=1 ./internal/accounts/...
 
@@ -294,16 +345,16 @@ test-hugegraph: _runtime
     #!/usr/bin/env sh
     set -eu
     hg="codesynapse-hg-test-$$"; mv="codesynapse-milvus-test-$$"
-    # Same images and transaction capacity as docker-compose.yml, so a version bump there is tested here.
-    {{engine}} run --rm -d --name "$hg" -p 127.0.0.1:58080:8080 --entrypoint sh docker.io/hugegraph/hugegraph:1.7.0 \
+    # The images (see pg_image above) and the transaction capacity are the ones docker-compose.yml ships.
+    {{engine}} run --rm -d --name "$hg" -p 127.0.0.1:58080:8080 --entrypoint sh {{hugegraph_image}} \
         -c "printf '\nvertex.tx_capacity=1000000\nedge.tx_capacity=1000000\n' >> conf/graphs/hugegraph.properties && exec ./docker-entrypoint.sh" >/dev/null
     {{engine}} run --rm -d --name "$mv" -p 127.0.0.1:59530:19530 -e ETCD_USE_EMBED=true -e ETCD_DATA_DIR=/var/lib/milvus/etcd \
-        -e COMMON_STORAGETYPE=local -e DEPLOY_MODE=STANDALONE docker.io/milvusdb/milvus:v3.0.3 milvus run standalone >/dev/null
+        -e COMMON_STORAGETYPE=local -e DEPLOY_MODE=STANDALONE {{milvus_image}} milvus run standalone >/dev/null
     trap '{{engine}} stop "$hg" "$mv" >/dev/null 2>&1' EXIT
     # REST and Gremlin answer before the graph is bound (1.7 binds DEFAULT-hugegraph): wait for a graph query.
-    until curl -sf --compressed -X POST http://127.0.0.1:58080/gremlin -H 'Content-Type: application/json' \
-        -d '{"gremlin":"g.V().limit(0).count()","aliases":{"graph":"DEFAULT-hugegraph","g":"__g_DEFAULT-hugegraph"}}' >/dev/null 2>&1; do sleep 2; done
-    until {{engine}} exec "$mv" curl -sf http://127.0.0.1:9091/healthz >/dev/null 2>&1; do sleep 2; done
+    n=0; until curl -sf --compressed -X POST http://127.0.0.1:58080/gremlin -H 'Content-Type: application/json' \
+        -d '{"gremlin":"g.V().limit(0).count()","aliases":{"graph":"DEFAULT-hugegraph","g":"__g_DEFAULT-hugegraph"}}' >/dev/null 2>&1; do n=$((n+1)); [ "$n" -lt 90 ] || { echo "HugeGraph did not start" >&2; exit 1; }; sleep 2; done
+    n=0; until {{engine}} exec "$mv" curl -sf http://127.0.0.1:9091/healthz >/dev/null 2>&1; do n=$((n+1)); [ "$n" -lt 90 ] || { echo "Milvus did not start" >&2; exit 1; }; sleep 2; done
     export CODESYNAPSE_TEST_HUGEGRAPH_URL=http://127.0.0.1:58080 CODESYNAPSE_TEST_MILVUS_URL=http://127.0.0.1:59530 CODESYNAPSE_TEST_HUGEGRAPH_TX_CAPACITY=1000000
     go test -race -count=1 ./internal/store/hugegraphstore/... ./internal/vector/...
     # The parity check indexes this repository; go/packages races under -race.
@@ -314,15 +365,19 @@ test-metrics: _runtime
     #!/usr/bin/env sh
     set -eu
     name="codesynapse-vm-test-$$"; pw=$(openssl rand -hex 16)
-    {{engine}} run --rm -d --name "$name" -p 127.0.0.1:58428:8428 quay.io/victoriametrics/victoria-metrics:v1.110.0 \
+    {{engine}} run --rm -d --name "$name" -p 127.0.0.1:58428:8428 {{victoriametrics_image}} \
         -search.latencyOffset=1s -httpAuth.username=cs -httpAuth.password="$pw" >/dev/null
     trap '{{engine}} stop "$name" >/dev/null 2>&1' EXIT
-    until curl -sf http://127.0.0.1:58428/health >/dev/null; do sleep 1; done
+    n=0; until curl -sf http://127.0.0.1:58428/health >/dev/null; do n=$((n+1)); [ "$n" -lt 60 ] || { echo "VictoriaMetrics did not start" >&2; exit 1; }; sleep 1; done
     CODESYNAPSE_TEST_METRICS_URL=http://127.0.0.1:58428 CODESYNAPSE_TEST_METRICS_USER=cs CODESYNAPSE_TEST_METRICS_PASSWORD="$pw" \
         go test -race -count=1 -run TestVictoriaMetrics ./internal/telemetry/ ./services/api/internal/api/
 
-# Store and accounts contracts against throwaway HugeGraph, Milvus and PostgreSQL containers
-test-integration: test-hugegraph test-postgres
+# Store, accounts and metrics contracts against throwaway HugeGraph, Milvus, PostgreSQL and VictoriaMetrics containers
+test-integration: test-hugegraph test-postgres test-metrics
+
+# Tests and the shipped stack must use the same store images (see pg_image)
+check-test-images:
+    sh .github/scripts/check-test-images.sh
 
 # Coverage report
 cover:
@@ -344,7 +399,7 @@ vuln:
 
 # Type-check and build the web app
 web-check:
-    cd services/web && npm ci --no-fund --no-audit && npm run typecheck && npm run build
+    cd services/web && npm ci --no-fund --no-audit && npm run typecheck && npm test && npm run build
 
 # --- project checks (CI runs the same recipes) ------------------------------
 # Tools run at pinned versions through `go run`, ghcr.io images or uvx, so
@@ -381,10 +436,10 @@ licenses-check:
     sh .github/scripts/check-licenses.sh
 
 # Every project check besides tests, Go lint and the web build
-checks: lint-actions lint-docker lint-shell lint-yaml secrets scan vuln
+checks: lint-actions lint-docker lint-shell lint-yaml check-test-images secrets scan vuln
 
 # Everything CI runs on a pull request (the integration contracts run separately)
-ci: lint test web-check licenses-check checks
+ci: lint test web-check licenses-check checks eval
 
 # --- docs (mkdocs) ------------------------------------------------------------
 

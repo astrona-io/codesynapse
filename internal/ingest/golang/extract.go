@@ -62,8 +62,36 @@ type Result struct {
 	// (types.Func.FullName, e.g. "(*net/http.Client).Do") to caller node IDs.
 	// It is not persisted; vulnerability analysis uses it for reachability.
 	ExternalCalls map[string][]string
+	// ExternalPackages maps the same full names to their import paths.
+	ExternalPackages map[string]string
 	// ExternalImports maps out-of-repo import paths to importing package IDs.
 	ExternalImports map[string][]string
+}
+
+// GoEnv is the environment every go command on a repository runs with: the
+// local toolchain, no cgo, no workspace and, unless allowNetwork, no module
+// proxy.
+func GoEnv(ctx context.Context, allowNetwork bool) ([]string, error) {
+	env := append(os.Environ(),
+		"CGO_ENABLED=0",
+		"GOTOOLCHAIN=local",
+		"GOFLAGS=", // default -mod: vendor when present, else readonly (sources may be mounted read-only)
+		"GOWORK=off",
+	)
+	if !allowNetwork {
+		env = append(env, "GOPROXY=off", "GONOSUMDB=*")
+	}
+	return execution.Environment(ctx, env)
+}
+
+// Load loads every package under root, tests included, as Extract does.
+func Load(ctx context.Context, root string, mode packages.LoadMode) ([]*packages.Package, error) {
+	env, err := GoEnv(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	cfg := &packages.Config{Context: ctx, Dir: root, Env: env, Tests: true, Mode: mode}
+	return loadPackages(ctx, cfg, []string{"./..."}, repoconfig.FromContext(ctx))
 }
 
 // Extract loads every package under opts.Root and returns its code graph.
@@ -83,16 +111,7 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 		return nil, fmt.Errorf("resolving root: %w", err)
 	}
 	opts.Root = root
-	env := append(os.Environ(),
-		"CGO_ENABLED=0",
-		"GOTOOLCHAIN=local",
-		"GOFLAGS=", // default -mod: vendor when present, else readonly (sources may be mounted read-only)
-		"GOWORK=off",
-	)
-	if !opts.AllowNetwork {
-		env = append(env, "GOPROXY=off", "GONOSUMDB=*")
-	}
-	env, err = execution.Environment(ctx, env)
+	env, err := GoEnv(ctx, opts.AllowNetwork)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +151,7 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 		g:        model.NewGraph(),
 		modules:  map[string]bool{},
 		srcs:     map[string][]byte{},
-		res:      &Result{ExternalCalls: map[string][]string{}, ExternalImports: map[string][]string{}},
+		res:      &Result{ExternalCalls: map[string][]string{}, ExternalPackages: map[string]string{}, ExternalImports: map[string][]string{}},
 		analysis: map[string]*packageAnalysis{},
 	}
 	x.g.AddNode(model.Node{ID: x.repoID(), Kind: model.KindRepository, Repo: opts.Repo, Name: opts.Repo})
@@ -435,6 +454,7 @@ func (x *extractor) file(p *packages.Package, f *ast.File, abs, rel, pkgPath str
 			if d.Tok == token.VAR || d.Tok == token.CONST {
 				if !isTest {
 					x.scan(p.TypesInfo, p.Fset, d, fileID, rel)
+					x.routes(p, d, rel)
 				}
 				// Package-level initialisers (tables of handlers, var x = f())
 				// run at init and keep what they call or reference alive; the
@@ -469,7 +489,7 @@ func (x *extractor) funcDecl(p *packages.Package, d *ast.FuncDecl, abs, rel, fil
 		ID: x.id(kind, fullName), Kind: kind, Repo: x.opts.Repo,
 		Name: obj.Name(), QualifiedName: fullName, Package: pkgPath, File: rel,
 		StartLine: start.Line, EndLine: end.Line, LOC: end.Line - start.Line + 1,
-		Signature: types.ObjectString(obj, types.RelativeTo(p.Types)),
+		Signature: types.ObjectString(obj, pkgNames(p.Types)),
 		Exported:  obj.Exported(),
 		IsTest:    isTestFile && isTestFunc(obj.Name(), sig),
 	}
@@ -496,6 +516,7 @@ func (x *extractor) funcDecl(p *packages.Package, d *ast.FuncDecl, abs, rel, fil
 		}
 		if !isTestFile {
 			x.scan(p.TypesInfo, p.Fset, d.Body, n.ID, rel)
+			x.routes(p, d.Body, rel)
 		}
 	}
 	x.g.AddNode(n)
@@ -569,7 +590,7 @@ func (x *extractor) typeSpec(p *packages.Package, gd *ast.GenDecl, ts *ast.TypeS
 			ID: x.id(model.KindInterfaceMethod, m.FullName()), Kind: model.KindInterfaceMethod,
 			Repo: x.opts.Repo, Name: m.Name(), QualifiedName: m.FullName(), Package: pkgPath,
 			File: rel, StartLine: pos.Line, EndLine: pos.Line,
-			Signature: types.ObjectString(m, types.RelativeTo(p.Types)), Exported: m.Exported(),
+			Signature: types.ObjectString(m, pkgNames(p.Types)), Exported: m.Exported(),
 		}
 		x.g.AddNode(mn)
 		x.g.AddEdge(model.Edge{From: n.ID, To: mn.ID, Kind: model.EdgeHasMethod})
@@ -640,6 +661,7 @@ func (x *extractor) calls(p *packages.Package, body ast.Node, callerID string) (
 			x.g.AddEdge(model.Edge{From: callerID, To: x.funcID(fn), Kind: model.EdgeCalls, Evidence: model.EvidenceTyped})
 		default:
 			x.res.ExternalCalls[fn.FullName()] = append(x.res.ExternalCalls[fn.FullName()], callerID)
+			x.res.ExternalPackages[fn.FullName()] = calleePkg
 			if tag == "" {
 				break
 			}
@@ -810,5 +832,17 @@ func (x *extractor) implementations(pkgs []*packages.Package) {
 				})
 			}
 		}
+	}
+}
+
+// pkgNames writes other packages by name, as source code does
+// ("store.Reader", not the import path), and this package's types bare:
+// signatures read like the code and cost far fewer tokens in answers.
+func pkgNames(self *types.Package) types.Qualifier {
+	return func(p *types.Package) string {
+		if p == self {
+			return ""
+		}
+		return p.Name()
 	}
 }

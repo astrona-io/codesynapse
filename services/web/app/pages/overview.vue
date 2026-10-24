@@ -20,6 +20,18 @@ const filters: { id: Filter; label: string }[] = [
 const items = computed(() => (data.value?.items ?? []).filter((it) => filter.value === 'all' || groups[filter.value].includes(it.kind)))
 const urgent = computed(() => (data.value?.levels.critical ?? 0) + (data.value?.levels.high ?? 0))
 const affected = computed(() => (data.value ? data.value.repos - data.value.clean.length : 0))
+// Savings from what agents actually called; the ingest benchmark only until there are calls.
+const saved = computed(() => {
+  const d = data.value
+  if (!d) return { value: '0', hint: '' }
+  if (!d.agent_calls) return { value: fmtCompact(d.tokens_saved), hint: 'No agent calls yet. Estimate from the token benchmark at ingest: graph answers vs reading the files.' }
+  const without = d.tokens_returned + d.tokens_avoided
+  const pct = without > 0 ? Math.round((d.tokens_avoided / without) * 100) : 0
+  return {
+    value: fmtCompact(d.tokens_avoided),
+    hint: `${fmtCompact(d.agent_calls)} calls in ${d.agent_days} days returned ${fmtCompact(d.tokens_returned)} tokens; reading the files would take about ${fmtCompact(without)} (${pct}% fewer). Estimate.`,
+  }
+})
 const where = computed(() => session.current.value?.org.name ?? 'your repositories')
 </script>
 
@@ -40,7 +52,7 @@ const where = computed(() => session.current.value?.org.name ?? 'your repositori
           <StatTile label="Urgent" :value="String(urgent)" :hint="urgent ? 'critical and high items below' : 'nothing urgent'" />
           <StatTile label="Repositories affected" :value="`${affected} of ${data.repos}`" :hint="`${data.clean.length} with nothing to report`" />
           <StatTile label="Security findings" :value="fmtCompact(data.findings)" :hint="`${fmtCompact(data.vulns)} known vulnerabilities in dependencies`" />
-          <StatTile label="Tokens saved by agents" :value="fmtCompact(data.tokens_saved)" hint="vs reading the files instead (estimate)" />
+          <StatTile label="Tokens saved by agents" :value="saved.value" :hint="saved.hint" />
         </div>
 
         <section class="panel">

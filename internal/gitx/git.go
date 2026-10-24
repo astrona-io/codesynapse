@@ -111,6 +111,24 @@ func Diff(ctx context.Context, dir, base, head string) ([]byte, error) {
 		"--unified=0", base+"..."+head, "--")
 }
 
+// WorkingDiff returns the unified diff from base to the working tree,
+// uncommitted changes included (untracked files are not in a diff).
+func WorkingDiff(ctx context.Context, dir, base string) ([]byte, error) {
+	if err := ValidateRev(base); err != nil {
+		return nil, err
+	}
+	return Run(ctx, dir, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--unified=0", base, "--")
+}
+
+// ChangedFiles lists the files that differ between base and the working
+// tree, NUL-separated.
+func ChangedFiles(ctx context.Context, dir, base string) ([]byte, error) {
+	if err := ValidateRev(base); err != nil {
+		return nil, err
+	}
+	return Run(ctx, dir, "diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", base, "--")
+}
+
 // HeadCommit returns the full hash of HEAD, or "" when dir is not a repository.
 func HeadCommit(ctx context.Context, dir string) string {
 	out, err := Run(ctx, dir, "rev-parse", "--verify", "HEAD")

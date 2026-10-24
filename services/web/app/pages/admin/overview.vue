@@ -49,7 +49,7 @@ async function assign(graph: string) {
         <StatTile label="Indexed repositories" :value="String(h.counts.graphs)" :hint="`${h.unowned.length} not assigned to an organisation`" />
         <StatTile label="Audit entries verified" :value="fmtCompact(h.counts.audit_events_checked)" :hint="h.audit.ok ? 'hash chain intact' : 'chain broken: see the audit log'" />
       </div>
-      <section v-if="h.unowned.length" class="panel edge--amber">
+      <section v-if="h.unowned.length" class="panel">
         <h2>Repositories without an organisation <span class="muted">{{ h.unowned.length }}</span></h2>
         <p class="muted small">Indexed before accounts existed, or by the installation's own token. Only platform admins see them until you assign each to an organisation.</p>
         <p v-if="msg" class="notice" role="status">{{ msg }}</p>

@@ -5,6 +5,8 @@ const setup = computed(() => !!session.status.value?.needs_setup)
 useHead({ title: () => (setup.value ? 'Set up CodeSynapse' : 'Create an account · CodeSynapse') })
 const name = ref('')
 const email = ref('')
+// The root account is usually called "admin"; the field stays editable.
+const username = ref(setup.value ? 'admin' : '')
 const password = ref('')
 const error = ref('')
 const busy = ref(false)
@@ -12,7 +14,7 @@ async function submit() {
   busy.value = true
   error.value = ''
   try {
-    await $fetch('/api/cg/auth/signup', { method: 'POST', body: { name: name.value, email: email.value, password: password.value } })
+    await $fetch('/api/cg/auth/signup', { method: 'POST', body: { name: name.value, email: email.value, username: username.value.trim(), password: password.value } })
     await session.load()
     await navigateTo(setup.value ? '/setup' : '/overview')
   } catch (e) {
@@ -33,6 +35,11 @@ async function submit() {
     <form class="stack--tight" @submit.prevent="submit">
       <div class="field"><label for="name">Name</label><input id="name" v-model="name" autocomplete="name" required autofocus></div>
       <div class="field"><label for="email">Email</label><input id="email" v-model="email" type="email" autocomplete="username" required></div>
+      <div class="field">
+        <label for="username">Username <span class="muted">(optional)</span></label>
+        <input id="username" v-model="username" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{2,31}" maxlength="32">
+        <span class="hint">{{ setup ? 'Sign in with this or your email.' : 'A second way to sign in.' }} 3 to 32 letters, digits, dots, dashes or underscores.</span>
+      </div>
       <div class="field">
         <label for="password">Password</label>
         <input id="password" v-model="password" type="password" autocomplete="new-password" minlength="12" required>

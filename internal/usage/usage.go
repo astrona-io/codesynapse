@@ -13,6 +13,30 @@ import (
 // Session is the pseudo tool under which new MCP sessions are counted.
 const Session = "(session)"
 
+// The plugin's hooks report how sessions began as counts under these
+// pseudo tools (Calls is the count): the first code lookup of a session was a
+// CodeSynapse tool or a native one (Read, Grep, Glob), and how many whole-file
+// reads the guard turned back. They are workflow figures, not tool calls.
+const (
+	FirstCodeSynapse = "(first:codesynapse)"
+	FirstNative      = "(first:native)"
+	ReadTurnedBack   = "(guard:read-turned-back)"
+	// FilesEdited counts the files sessions changed (that CodeSynapse
+	// indexes), FilesEditedFound those of them a CodeSynapse answer of the
+	// same session had pointed to: recall measured on real edits.
+	FilesEdited      = "(edits:files)"
+	FilesEditedFound = "(edits:found)"
+)
+
+// IsWorkflow reports whether tool is one of the workflow pseudo tools.
+func IsWorkflow(tool string) bool {
+	switch tool {
+	case FirstCodeSynapse, FirstNative, ReadTurnedBack, FilesEdited, FilesEditedFound:
+		return true
+	}
+	return false
+}
+
 // Retention is how long daily buckets are kept.
 const Retention = 180 * 24 * time.Hour
 
@@ -35,6 +59,11 @@ type Bucket struct {
 	ResponseTokens int `json:"response_tokens"`
 	DurationMs     int `json:"duration_ms"`
 	MaxDurationMs  int `json:"max_duration_ms"`
+	// RangesReturned counts the file line ranges the tool's answers gave the
+	// agent, and RangesRead those the agent then read (reported by the
+	// Claude Code plugin's hooks; docs/PLAN.md, agent workflow step 13).
+	RangesReturned int `json:"ranges_returned,omitempty"`
+	RangesRead     int `json:"ranges_read,omitempty"`
 }
 
 // Key identifies a bucket.
@@ -49,6 +78,8 @@ func (b *Bucket) Add(o Bucket) {
 	b.ResponseTokens += o.ResponseTokens
 	b.DurationMs += o.DurationMs
 	b.MaxDurationMs = max(b.MaxDurationMs, o.MaxDurationMs)
+	b.RangesReturned += o.RangesReturned
+	b.RangesRead += o.RangesRead
 }
 
 // Day formats t as a bucket day.

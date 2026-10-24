@@ -9,6 +9,7 @@ import (
 
 var (
 	pyDef        = regexp.MustCompile(`^(\s*)(async\s+)?def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)?`)
+	pyAuthBase   = regexp.MustCompile(`(?i)(?:login|permission|auth|staff|superuser)\w*(?:required|mixin)|UserPassesTest|IsAuthenticated`)
 	pyClass      = regexp.MustCompile(`^(\s*)class\s+([A-Za-z_]\w*)\s*(\([^)]*\))?\s*:`)
 	pyImport     = regexp.MustCompile(`^\s*import\s+(.+)$`)
 	pyFromImport = regexp.MustCompile(`^\s*from\s+(\.*[\w.]*)\s+import\s+(.+)$`)
@@ -100,7 +101,7 @@ func parsePython(src []byte) *fileResult {
 	fr := &fileResult{partial: open != "" || unbalanced(m, '(', ')') || unbalanced(m, '[', ']') || unbalanced(m, '{', '}')}
 
 	var stack []openSym
-	var pendingDecorators []string
+	var pendingDecorators, pendingRaw []string
 	closeTo := func(indent, line int) {
 		for len(stack) > 0 && stack[len(stack)-1].indent >= indent {
 			stack[len(stack)-1].sym.end = line
@@ -117,6 +118,7 @@ func parsePython(src []byte) *fileResult {
 		lastCode = n
 		if m := pyDecorator.FindStringSubmatch(l.text); m != nil {
 			pendingDecorators = append(pendingDecorators, m[1])
+			pendingRaw = append(pendingRaw, raw[i])
 			continue
 		}
 		if m := pyClass.FindStringSubmatch(l.text); m != nil {
@@ -125,10 +127,15 @@ func parsePython(src []byte) *fileResult {
 				s.name = stack[len(stack)-1].sym.name + "." + m[2]
 			}
 			s.isTest = strings.HasPrefix(m[2], "Test")
+			for _, base := range strings.Split(strings.Trim(m[3], "()"), ",") {
+				if base = strings.TrimSpace(base); pyAuthBase.MatchString(base) {
+					s.guards = append(s.guards, base) // LoginRequiredMixin: a class-based view's check
+				}
+			}
 			s.doc = pyDocstring(raw, i+1)
 			fr.symbols = append(fr.symbols, s)
 			stack = append(stack, openSym{s, l.indent})
-			pendingDecorators = nil
+			pendingDecorators, pendingRaw = nil, nil
 			continue
 		}
 		if m := pyDef.FindStringSubmatch(l.text); m != nil {
@@ -148,18 +155,24 @@ func parsePython(src []byte) *fileResult {
 				}
 			}
 			if s == nil { // nested def: its body is part of the parent
-				pendingDecorators = nil
+				pendingDecorators, pendingRaw = nil, nil
 				continue
 			}
 			s.isTest = strings.HasPrefix(name, "test_") || name == "test"
 			s.root = len(pendingDecorators) > 0 && !onlyBuiltinDecorators(pendingDecorators)
+			for j, d := range pendingDecorators {
+				if !onlyBuiltinDecorators([]string{d}) && !pyRouteDec.MatchString(pendingRaw[j]) && !pyCommandDec.MatchString(pendingRaw[j]) && !pyToolDec.MatchString(pendingRaw[j]) {
+					s.guards = append(s.guards, d) // @login_required: the routes it handles are guarded
+				}
+			}
 			s.doc = pyDocstring(raw, i+1)
+			fr.routes = append(fr.routes, pyRoutesFor(pendingRaw, pendingDecorators, s.start, s.name)...)
 			fr.symbols = append(fr.symbols, s)
 			stack = append(stack, openSym{s, l.indent})
-			pendingDecorators = nil
+			pendingDecorators, pendingRaw = nil, nil
 			continue
 		}
-		pendingDecorators = nil
+		pendingDecorators, pendingRaw = nil, nil
 		if strings.Contains(l.text, `__name__`) && strings.Contains(l.text, `__main__`) {
 			continue
 		}

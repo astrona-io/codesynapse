@@ -26,6 +26,27 @@ type codeRecordsIn struct {
 	Limit  int    `json:"limit,omitempty" jsonschema:"page size, default 20, max 100"`
 }
 
+func (h *handlers) codeIdentityReviews(ctx context.Context, _ *mcp.CallToolRequest, in codeRecordsIn) (*mcp.CallToolResult, catalog.IdentityReviewPage, error) {
+	svc, repo, err := h.catalogFor(ctx, in.Repo)
+	if err != nil {
+		return nil, catalog.IdentityReviewPage{}, err
+	}
+	page, err := svc.IdentityReviews(ctx, repo, in.Symbol, in.Offset, in.Limit)
+	return nil, page, err
+}
+
+func (h *handlers) reviewedSymbol(ctx context.Context, repo, symbol string) (string, error) {
+	if !query.IsSymbolID(symbol) {
+		return symbol, nil
+	}
+	svc, _, err := h.catalogFor(ctx, repo)
+	if err != nil {
+		return "", err
+	}
+	n, err := svc.ResolveSymbol(ctx, repo, symbol)
+	return n.ID, err
+}
+
 func (h *handlers) codeRecords(ctx context.Context, _ *mcp.CallToolRequest, in codeRecordsIn) (*mcp.CallToolResult, catalog.CodePage, error) {
 	svc, repo, err := h.catalogFor(ctx, in.Repo)
 	if err != nil {

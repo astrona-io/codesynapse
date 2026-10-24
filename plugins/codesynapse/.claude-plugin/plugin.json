@@ -1,0 +1,9 @@
+{
+  "name": "codesynapse",
+  "description": "Ask the CodeSynapse code graph before reading files: the MCP bridge (answers from your working tree while it has unsynced changes), a skill with the tool workflow, and hooks that recall memory, steer large-file reads to outlines and check a change before finishing.",
+  "author": { "name": "Astrona" },
+  "homepage": "https://github.com/astrona-io/codesynapse/blob/main/docs/operations/claude-code-plugin.md",
+  "repository": "https://github.com/astrona-io/codesynapse",
+  "license": "Apache-2.0",
+  "keywords": ["code-graph", "mcp", "code-review", "security", "context"]
+}

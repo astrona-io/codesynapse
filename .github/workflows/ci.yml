@@ -35,6 +35,43 @@ jobs:
       - name: Tests (race detector)
         run: go test -race ./...
 
+  eval:
+    # docs/PLAN.md, agent workflow roadmap step 1: minimal_context and
+    # search must keep finding the files past commits touched.
+    name: Task eval
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: Score against the baseline
+        # The base commit may need module versions the cache lacks.
+        run: just eval --allow-network
+
+  review:
+    # docs/PLAN.md, roadmap item 7: this repository reviews its own pull
+    # requests with the action at its root (action.yml), and a change may
+    # not introduce a high or critical finding.
+    name: CodeSynapse review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./
+        with:
+          fail-on-new: high
+
   web:
     name: Web build and licences
     runs-on: ubuntu-latest
@@ -97,7 +134,7 @@ jobs:
           go-version-file: go.mod
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v3.22.1
+          version: v4.3.1
       - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
       - name: Chart checks
         run: just chart-check
@@ -123,15 +160,22 @@ jobs:
               - 'internal/vector/**'
               - 'internal/accounts/**'
               - 'internal/model/**'
+              - 'internal/telemetry/**'
+              - 'services/api/internal/api/series*.go'
+              - 'services/api/internal/api/stats*.go'
+              - 'internal/vuln/**'
               - 'docker-compose.yml'
               - 'go.mod'
               - 'justfile'
+              - '.github/scripts/compose-image.sh'
+              - '.github/scripts/check-test-images.sh'
 
   integration:
-    name: Store and accounts contracts
+    name: Store, accounts and metrics contracts
     needs: changes
     if: needs.changes.outputs.stores == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -144,3 +188,5 @@ jobs:
         run: just test-postgres
       - name: HugeGraph and Milvus store contract
         run: just test-hugegraph
+      - name: VictoriaMetrics telemetry and series contract
+        run: just test-metrics

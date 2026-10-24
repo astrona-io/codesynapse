@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
-	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -23,6 +22,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/forge"
 	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/memory"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
 	"github.com/astrona-io/codesynapse/internal/review"
@@ -73,6 +73,11 @@ type Config struct {
 	// PublicMCPURL is where agents reach the MCP server, shown in the
 	// connection instructions.
 	PublicMCPURL string
+	// PublicAPIURL is where the Claude Code bridge reaches this API to
+	// register chat sessions, shown on the Agents page; empty when unknown.
+	PublicAPIURL string
+	// AgentRulesFile replaces the built-in ruleset sessions start with.
+	AgentRulesFile string
 	// PublicURL is the dashboard's address; single sign-on returns to
 	// PublicURL + "/sso/callback".
 	PublicURL string
@@ -116,6 +121,7 @@ type Server struct {
 	cfg         Config
 	st          store.Store
 	jobs        *Jobs
+	notify      notifyCache
 	// offload extracts memory triples from conversation turns (local model only).
 	offload *offload.Worker
 	recall  *recall.Service
@@ -279,6 +285,7 @@ func (s *Server) routes() {
 			"git_tokens":           tokens,
 			"clone_enabled":        s.cfg.Workspace != "",
 			"mcp_url":              s.cfg.PublicMCPURL,
+			"api_url":              s.cfg.PublicAPIURL,
 			"allow_private_git":    s.cfg.AllowPrivateGit,
 			"vuln_scan":            s.cfg.VulnScan,
 			"license_lookup":       s.cfg.LicenseLookup,
@@ -293,19 +300,30 @@ func (s *Server) routes() {
 	s.importRoutes()
 	s.sessionMemoryRoutes()
 	s.repoPolicyRoutes()
+	s.runtimeRoutes()
+	s.conventionsRoutes()
+	s.agentSessionRoutes()
+	s.retrievalRoutes()
+	s.agentRulesRoutes()
+	s.notificationRoutes()
 	s.route("GET /api/v1/overview", visibleOnly, s.handleWorkspaceOverview)
 	s.route("GET /api/v1/attention", visibleOnly, s.handleAttention)
 	s.route("GET /api/v1/stats", visibleOnly, s.handleStats)
+	s.route("GET /api/v1/agents/status", visibleOnly, s.handleAgentStatus)
+	s.route("GET /api/v1/search", visibleOnly, s.handleSiteSearch)
 	s.route("GET /api/v1/stats/series", governance(anyone), s.handleSeries)
 	s.route("DELETE /api/v1/repos/{repo}", repoRole(accounts.Admin), s.handleDeleteRepo)
 	s.route("GET /api/v1/repos/{repo}/overview", repoRole(accounts.Viewer), s.handleOverview)
 	s.route("GET /api/v1/repos/{repo}/dashboard", repoRole(accounts.Viewer), s.handleDashboard)
+	s.route("GET /api/v1/repos/{repo}/sections", repoRole(accounts.Viewer), s.handleSections)
+	s.route("GET /api/v1/repos/{repo}/entry-points", repoRole(accounts.Viewer), s.handleEntryPoints)
 	s.route("GET /api/v1/repos/{repo}/metrics", repoRole(accounts.Viewer), s.handleMetrics)
 	s.route("GET /api/v1/repos/{repo}/security", repoRole(accounts.Viewer), s.handleSecurity)
 	s.route("GET /api/v1/repos/{repo}/cleanup", repoRole(accounts.Viewer), s.handleCleanup)
 	s.route("GET /api/v1/repos/{repo}/duplicates", repoRole(accounts.Viewer), s.handleDuplicates)
 	s.route("GET /api/v1/shared-code", visibleOnly, s.handleSharedCode)
 	s.route("GET /api/v1/repos/{repo}/sbom", repoRole(accounts.Viewer), s.handleSBOM)
+	s.route("GET /api/v1/repos/{repo}/dependencies", repoRole(accounts.Viewer), s.handleDependencies)
 	s.route("GET /api/v1/repos/{repo}/duplicates/refactor", repoRole(accounts.Viewer), s.handleRefactorPlan)
 	s.route("GET /api/v1/repos/{repo}/architecture", repoRole(accounts.Viewer), s.handleArchitecture)
 	s.route("GET /api/v1/repos/{repo}/architecture/record", repoRole(accounts.Viewer), s.handleArchitectureRecord)
@@ -332,6 +350,8 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/repos/{repo}/search", repoRole(accounts.Viewer), s.handleSearch)
 	s.route("GET /api/v1/repos/{repo}/symbol", repoRole(accounts.Viewer), s.handleSymbol)
 	s.route("GET /api/v1/repos/{repo}/identities", repoRole(accounts.Viewer), s.handleIdentities)
+	s.route("GET /api/v1/repos/{repo}/identities/reviews", repoRole(accounts.Viewer), s.handleIdentityReviews)
+	s.route("POST /api/v1/repos/{repo}/identities/reviews", repoRole(accounts.Admin), s.handleReviewIdentity)
 	s.route("GET /api/v1/repos/{repo}/code-records", repoRole(accounts.Viewer), s.handleCodeRecords)
 	s.route("POST /api/v1/repos/{repo}/code-records", repoRole(accounts.Member), s.handleRecordCode)
 	s.route("GET /api/v1/repos/{repo}/outline", repoRole(accounts.Viewer), s.handleOutline)
@@ -490,6 +510,12 @@ func (s *Server) unlinkRepo(r *http.Request, graph string) (int, error) {
 		if err := s.cfg.Accounts.DropRepoGrants(ctx, l.OrgID, graph); err != nil {
 			return 0, err
 		}
+		// The organisation's uploaded test runs leave with its link.
+		if rs, ok := s.st.(store.RuntimeStore); ok {
+			if err := rs.DeleteRuntimeFacts(ctx, memory.Namespace(l.OrgID, graph)); err != nil {
+				return 0, err
+			}
+		}
 	}
 	return left, nil
 }
@@ -593,7 +619,15 @@ func (s *Server) handleSymbol(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, errors.New("id is required"))
 		return
 	}
-	card, err := s.repoQuery(r.PathValue("repo")).Card(r.Context(), r.PathValue("repo"), id, intParam(r, "limit", 20))
+	resolved, err := s.catalogOf(r.Context(), r.PathValue("repo")).ResolveSymbol(r.Context(), r.PathValue("repo"), id)
+	if err != nil {
+		s.catalogError(w, err)
+		return
+	}
+	card, err := s.repoQuery(r.PathValue("repo")).Card(r.Context(), r.PathValue("repo"), resolved.ID, intParam(r, "limit", 20))
+	if query.IsSymbolID(id) && id != card.Symbol.SymbolID {
+		card.ResolvedFrom = id
+	}
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -682,7 +716,7 @@ func graphNode(n model.Node, depth int) GraphNode {
 // callees up to depth, with the edges between them.
 func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	root, err := s.repoQuery(r.PathValue("repo")).Resolve(ctx, r.PathValue("repo"), r.URL.Query().Get("id"))
+	root, err := s.catalogOf(ctx, r.PathValue("repo")).ResolveSymbol(ctx, r.PathValue("repo"), r.URL.Query().Get("id"))
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -960,30 +994,11 @@ func repoDir(workspace, name string) string {
 	return filepath.Join(workspace, filepath.FromSlash(name))
 }
 
-// repoNameFromRemote names a repository after its remote, so the same
-// owner and name on two providers never collide: "owner/name" on github.com,
-// "host/owner/name" anywhere else (lower-case owner and host), or just "name"
-// when the URL has no owner. It returns "" when the result is not a valid
-// repository name, for instance a GitLab subgroup path the name cannot hold.
+// repoNameFromRemote names a repository after its remote (forge.NameFromRemote),
+// or "" when the result is not a valid repository name here, for instance a
+// GitLab subgroup path the name cannot hold.
 func repoNameFromRemote(remote string) string {
-	u, err := url.Parse(remote)
-	if err != nil {
-		return ""
-	}
-	host := strings.ToLower(u.Hostname())
-	if u.Port() != "" {
-		return "" // a host name alone would not tell two servers apart; name it explicitly
-	}
-	parts := strings.Split(strings.Trim(strings.TrimSuffix(strings.TrimSuffix(u.Path, "/"), ".git"), "/"), "/")
-	var name string
-	switch {
-	case len(parts) == 2 && host == forge.DefaultHost:
-		name = forge.RepoName(host, parts[0], parts[1])
-	case len(parts) == 2 && forge.ValidHost(host):
-		name = forge.RepoName(host, parts[0], parts[1])
-	case len(parts) == 1:
-		name = parts[0]
-	}
+	name := forge.NameFromRemote(remote)
 	if !validRepoName(name) {
 		return ""
 	}

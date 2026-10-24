@@ -3,6 +3,8 @@
 Status: implemented in SaaS phase 4e, after access isolation (4d). The existing Compose stack supplies VictoriaMetrics for development; this phase adds instrumentation and dashboard coverage. Kubernetes wiring waits for the final deployment phase (6a). The request for OTel supersedes the earlier decision to defer it. The approved OTel v1.47.0 SDK/exporter is the default export path; validation and limits are recorded below.
 Session-scoped tool execution and chat memory must also follow [phase 4g](SESSION_CONTEXT_PLAN.md): immutable runtime identity, inherited parent context and tenant/session/namespace filtering. This requirement does not turn session IDs into metric labels.
 
+Codex and Cursor lifecycle observations also use the existing bounded registry and audit store. The [assistant hook collection contract](operations/assistant-hooks.md#collection-contract) documents every field, native event, identity check, retention rule, delivery limit and exported `agent_hook_*` instrument. Client-reported hook activity stays separate from server-measured MCP and LLM execution.
+
 ## Attribution and export
 
 Carry a typed telemetry context through accepted MCP tools, database operations, model calls and queued tasks. Every tenant operation in these dashboards has the following attributes:

@@ -17,7 +17,9 @@ const (
 var ErrResponseBudget = errors.New("context does not fit the response budget; increase max_tokens or narrow the request")
 
 // ResponseBudget describes the complete structured JSON, including this field.
-// Transport framing and tool definitions are outside this estimate.
+// Transport framing and tool definitions are outside this estimate. Answers
+// carry it only when something was omitted: without it, an answer is
+// complete and within max_tokens.
 type ResponseBudget struct {
 	MaxTokens  int    `json:"max_tokens"`
 	UsedTokens int    `json:"used_tokens"`
@@ -51,14 +53,19 @@ func measuredTokens(value any, used *int) (int, error) {
 	}
 }
 
-func fitResponse(value any, budget *ResponseBudget, requested int, trim func() int) error {
-	*budget = ResponseBudget{MaxTokens: contextBudget(requested, MaxContextTokens), Estimator: JSONEstimator, Source: "indexed_graph"}
+func fitResponse(value any, out **ResponseBudget, requested int, trim func() int) error {
+	// Measured with the block in place, so dropping it only shrinks the answer.
+	budget := &ResponseBudget{MaxTokens: contextBudget(requested, MaxContextTokens), Estimator: JSONEstimator, Source: "indexed_graph"}
+	*out = budget
 	for {
 		n, err := measuredTokens(value, &budget.UsedTokens)
 		if err != nil {
 			return err
 		}
 		if n <= budget.MaxTokens {
+			if budget.Omitted == 0 {
+				*out = nil
+			}
 			return nil
 		}
 		removed := trim()
@@ -165,6 +172,22 @@ func finishPR(out PRContext, maxTokens int) (PRContext, error) {
 		if n := trimTail(&out.Impacted); n > 0 {
 			return n
 		}
+		for i := range out.UsedElsewhere {
+			if n := trimTail(&out.UsedElsewhere[i].Callers); n > 0 {
+				out.UsedElsewhere[i].More = true
+				return n
+			}
+		}
+		if n := trimTail(&out.UsedElsewhere); n > 0 {
+			return n
+		}
+		// The counts of new and fixed findings always stay; their lists go,
+		// fixed ones first.
+		if d := out.Security; d != nil {
+			if n := trimTail(&d.Removed); n > 0 {
+				return n
+			}
+		}
 		for _, names := range []*[]string{&out.DuplicatedChanged, &out.ExportedChanged, &out.ExportedUntested, &out.SensitiveTouched, &out.Checklist} {
 			if n := trimTail(names); n > 0 {
 				return n
@@ -172,6 +195,11 @@ func finishPR(out PRContext, maxTokens int) (PRContext, error) {
 		}
 		if n := trimTail(&out.Files); n > 0 {
 			return n
+		}
+		if d := out.Security; d != nil {
+			if n := trimTail(&d.New); n > 0 {
+				return n
+			}
 		}
 		// Changes are already ranked by risk. Keep the highest risk subjects
 		// while shedding verbose detail before dropping whole changed symbols.

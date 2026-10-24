@@ -28,3 +28,16 @@ func TestStdioAccountsRequirePersonalCredential(t *testing.T) {
 		})
 	}
 }
+
+// --offline swaps the graph store, not the identity checks: without accounts
+// every tool call would be refused, so the server says so at start-up.
+func TestOfflineNeedsAccounts(t *testing.T) {
+	t.Setenv(EnvDatabaseURL, "")
+	err := (&serveOptions{transport: "stdio", offline: "."}).Validate(context.Background(), nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "just up")
+
+	t.Setenv(EnvDatabaseURL, "postgres://accounts")
+	t.Setenv("CODESYNAPSE_API_TOKEN", "csk_personal")
+	assert.NoError(t, (&serveOptions{transport: "stdio", offline: "."}).Validate(context.Background(), nil))
+}

@@ -197,12 +197,20 @@ func parseJS(src []byte, _ bool) *fileResult {
 		name  string
 		depth int
 		end   int
+		decs  []string // decorators of the class (@Controller('users'))
 	}
 	var classes []classCtx
+	var decorators []string // decorator lines above the next class or method
 	for i, l := range lines {
 		n := i + 1
 		for len(classes) > 0 && n > classes[len(classes)-1].end {
 			classes = classes[:len(classes)-1]
+		}
+		if t := strings.TrimSpace(l); strings.HasPrefix(t, "@") {
+			decorators = append(decorators, annotationText(raw, i))
+			continue
+		} else if t != "" && !jsClass.MatchString(l) && !jsMethod.MatchString(l) {
+			decorators = nil
 		}
 		// Imports (top level only).
 		if depth[i] == 0 {
@@ -232,7 +240,8 @@ func parseJS(src []byte, _ bool) *fileResult {
 					name: m[4], kind: model.KindType, start: n, end: end, signature: strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(raw[i]), "{")),
 					exported: m[1] != "", doc: jsDoc(raw, i),
 				})
-				classes = append(classes, classCtx{name: m[4], depth: depth[i] + 1, end: end})
+				classes = append(classes, classCtx{name: m[4], depth: depth[i] + 1, end: end, decs: decorators})
+				decorators = nil
 				continue
 			}
 			if m := jsFunc.FindStringSubmatch(l); m != nil {
@@ -255,10 +264,14 @@ func parseJS(src []byte, _ bool) *fileResult {
 				if !jsKeyword[m[2]] {
 					cls := classes[len(classes)-1].name
 					name := strings.TrimPrefix(m[2], "#")
-					fr.symbols = append(fr.symbols, &symbol{
+					s := &symbol{
 						name: cls + "." + name, kind: model.KindMethod, class: cls, start: n, end: blockEnd(lines, n),
 						signature: jsSignature(raw, i), exported: !strings.HasPrefix(m[2], "#") && !strings.Contains(l, "private "), doc: jsDoc(raw, i),
-					})
+						root: len(decorators) > 0,
+					}
+					fr.symbols = append(fr.symbols, s)
+					fr.routes = append(fr.routes, nestRoutes(classes[len(classes)-1].decs, decorators, s.name, n)...)
+					decorators = nil
 				}
 			}
 		}
@@ -306,6 +319,17 @@ func parseJS(src []byte, _ bool) *fileResult {
 		body := strings.Join(lines[max(0, s.start-1):min(len(lines), s.end)], "\n")
 		s.complexity = countBranches(body, jsBranches) + strings.Count(body, "?.")*0 + strings.Count(body, " ? ")
 	}
+	fns := map[string]bool{}
+	for _, sym := range fr.symbols {
+		if sym.kind == model.KindFunction {
+			fns[sym.name] = true
+		}
+	}
+	commander := false
+	for _, imp := range fr.imports {
+		commander = commander || imp.spec == "commander"
+	}
+	fr.routes = append(fr.routes, jsRoutes(string(src), fns, commander)...)
 	return fr
 }
 

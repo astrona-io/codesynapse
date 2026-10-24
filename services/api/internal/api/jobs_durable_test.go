@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -169,4 +170,61 @@ func TestWorkersRunWhatTheAPIRecords(t *testing.T) {
 	var view Job
 	require.Equal(t, browser.do("GET", "/api/v1/jobs/"+queued.ID, "", &view, OrgHeader, org.Slug), 200)
 	assert.Equal(t, view.State, JobSucceeded, "the API shows the worker's outcome")
+}
+
+// TestJobsLeftBehind: a durable job that stops because its process stops,
+// or because the process could not renew its leases, keeps its record
+// active for another process to resume; any other failure is recorded.
+func TestJobsLeftBehind(t *testing.T) {
+	id := execution.Identity{TenantID: "org", SubjectID: "user", SessionID: "chat", ParentSessionID: "chat"}
+	start := func(t *testing.T, root string) (*Jobs, *acctmem.Store, context.CancelFunc, Job, chan error) {
+		t.Helper()
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+		acc := acctmem.New()
+		j := NewJobs(ctx, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)), 0, false, false)
+		j.UseStore(acc, []string{"sync"})
+		// Hold the only slot, so the job waits holding its lease.
+		j.sem <- struct{}{}
+		done := make(chan error, 1)
+		job, err := j.Start("proj", root, JobOptions{Identity: id, OrgID: "org", Kind: "sync",
+			Durable: &durableJob{Kind: "sync", Role: accounts.Admin, ActorID: "user", Via: "session", Params: json.RawMessage(`{}`)},
+			Done:    func(err error) { done <- err }})
+		require.NoError(t, err)
+		return j, acc, cancel, job, done
+	}
+	state := func(t *testing.T, acc *acctmem.Store, id string) string {
+		t.Helper()
+		rec, err := acc.JobByID(context.Background(), id)
+		require.NoError(t, err)
+		return rec.State
+	}
+
+	t.Run("process stops", func(t *testing.T) {
+		_, acc, stop, job, done := start(t, t.TempDir())
+		stop()
+		require.Error(t, <-done)
+		assert.Equal(t, state(t, acc, job.ID), accounts.JobQueued, "left for another process")
+	})
+	t.Run("leases lost", func(t *testing.T) {
+		j, acc, _, job, done := start(t, t.TempDir())
+		j.dropLeases()
+		require.Error(t, <-done)
+		assert.Equal(t, state(t, acc, job.ID), accounts.JobQueued, "left for another process")
+		j.mu.Lock()
+		assert.NoError(t, j.held.Err(), "jobs queued afterwards get fresh leases")
+		j.mu.Unlock()
+	})
+	t.Run("other failures are recorded", func(t *testing.T) {
+		j, acc, _, job, done := start(t, filepath.Join(t.TempDir(), "missing"))
+		assert.False(t, j.leftBehind(t.Context(), errors.New("boom")))
+		assert.False(t, j.leftBehind(t.Context(), nil))
+		// The hour limit or any other cancellation is a real failure.
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		assert.False(t, j.leftBehind(ctx, ctx.Err()))
+		<-j.sem
+		require.Error(t, <-done, "a missing directory does not ingest")
+		assert.Equal(t, state(t, acc, job.ID), accounts.JobFailed)
+	})
 }

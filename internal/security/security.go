@@ -48,13 +48,15 @@ type Finding struct {
 
 // Vulnerability is a known vulnerability in a dependency.
 type Vulnerability struct {
-	ID           string      `json:"id"`
-	CVE          []string    `json:"cve,omitempty"`
-	Aliases      []string    `json:"aliases,omitempty"`
-	Summary      string      `json:"summary"`
-	Severity     string      `json:"severity"`
-	CWE          []string    `json:"cwe,omitempty"`
-	Module       string      `json:"module"`
+	ID       string   `json:"id"`
+	CVE      []string `json:"cve,omitempty"`
+	Aliases  []string `json:"aliases,omitempty"`
+	Summary  string   `json:"summary"`
+	Severity string   `json:"severity"`
+	CWE      []string `json:"cwe,omitempty"`
+	Module   string   `json:"module"`
+	// Ecosystem is OSV's name for the package's ecosystem ("Go", "npm", …).
+	Ecosystem    string      `json:"ecosystem,omitempty"`
 	Version      string      `json:"version"`
 	Fixed        string      `json:"fixed,omitempty"`
 	Reachability string      `json:"reachability"`
@@ -219,13 +221,19 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 		vulnerableMods[n.Package] = true
 		vv := Vulnerability{
 			ID: n.Name, Aliases: n.Aliases, Summary: n.Summary, Severity: n.Severity, CWE: n.CWE,
-			Module: n.Package, Version: n.Version, Fixed: n.FixedVersion, Reachability: n.Reachability, URL: n.URL,
+			Module: n.Package, Ecosystem: n.Ecosystem, Version: n.Version, Fixed: n.FixedVersion, Reachability: n.Reachability, URL: n.URL,
 		}
 		key := n.Package
 		if n.Ecosystem != "" && n.Ecosystem != "Go" {
 			key = n.Ecosystem + ":" + n.Package
 		}
-		if mod, err := r.Node(ctx, model.NodeID(repo, model.KindModule, key)); err == nil {
+		// A package can be installed in several versions; the advisory hit
+		// one of them, whose chain of dependents is the one to show.
+		mod, err := r.Node(ctx, model.NodeID(repo, model.KindModule, key+"@"+n.Version))
+		if err != nil {
+			mod, err = r.Node(ctx, model.NodeID(repo, model.KindModule, key))
+		}
+		if err == nil {
 			vv.Via, vv.Roots = mod.Via, mod.Roots
 		}
 		for _, a := range n.Aliases {

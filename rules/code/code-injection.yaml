@@ -4,7 +4,7 @@ title: Dynamic code evaluation
 severity: high
 cwe: [CWE-95]
 category: code
-languages: [python, javascript, typescript]
+languages: [python, javascript, typescript, php, ruby]
 why: eval and friends execute whatever string they receive; an attacker who controls part of it controls the process.
 fix: Remove eval/exec/new Function; parse data with a real parser.
 references:
@@ -20,3 +20,9 @@ examples:
     fixed: |-
       const ops = { double: (x: number) => x * 2 }
       const fn = ops[name as keyof typeof ops]
+  - language: php
+    vulnerable: 'eval(''return '' . $expr . '';'');'
+    fixed: '$result = $parser->evaluate($expr); // a real expression parser, no eval'
+  - language: ruby
+    vulnerable: 'params[:type].constantize.new'
+    fixed: '{ "csv" => CsvExport, "pdf" => PdfExport }.fetch(params[:type]).new'

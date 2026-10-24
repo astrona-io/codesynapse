@@ -7,7 +7,9 @@ global:
   # Required. Keys: CODESYNAPSE_API_TOKEN, CODESYNAPSE_MCP_TOKEN,
   # HUGEGRAPH_PASSWORD, METRICS_PASSWORD, SECRET_KEY, and POSTGRES_PASSWORD
   # (in-chart PostgreSQL) or CODESYNAPSE_DATABASE_URL (external). Optional:
-  # CODESYNAPSE_GIT_TOKENS, ANTHROPIC_API_KEY, OPENROUTER_API_KEY.
+  # CODESYNAPSE_GIT_TOKENS, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, and
+  # MILVUS_TOKEN ("user:password" or an API key) for an external Milvus
+  # with authentication.
   existingSecret: ""
   # Secrets for a private registry or mirror, e.g. [{name: ghcr}].
   imagePullSecrets: []
@@ -23,7 +25,18 @@ image:
 # Where browsers reach the dashboard and agents reach MCP.
 publicURL: http://localhost:3000
 publicMCPURL: http://localhost:8090/mcp
+# Where the Claude Code bridge reaches the API; shown on the Agents page.
+publicAPIURL: http://localhost:8080
 environment: dev
+# The administrator made at first start (user "admin"). The chart generates
+# its password into a Secret named <release>-admin and keeps it across
+# upgrades; sign in with it, then replace the account in the dashboard:
+#   kubectl get secret <release>-admin -o jsonpath='{.data.CODESYNAPSE_ADMIN_PASSWORD}' | base64 -d
+admin:
+  enabled: true
+  # A Secret of your own with the key CODESYNAPSE_ADMIN_PASSWORD (at least
+  # 12 characters) instead of the generated one.
+  existingSecret: ""
 signupOpen: false
 # Session cookies need TLS; set false only for plain-HTTP local tests.
 cookieSecure: true
@@ -73,6 +86,10 @@ mcp:
   # No transport session between requests, so any replica answers any
   # request without sticky sessions.
   stateless: true
+  # Toolsets for connections that name none: all, or core plus a comma list
+  # (repos, docs, security, architecture, memory, cleanup, reviews,
+  # identity). Clients choose their own with /mcp?toolsets=...
+  toolsets: all
   # CPU autoscaling; replicas is then ignored. Needs metrics-server.
   autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 6, targetCPU: 70}
   resources:
@@ -119,7 +136,8 @@ hugegraph:
   txCapacity: 1000000
 milvus:
   enabled: true
-  # When disabled: the Milvus REST URL; empty turns memory vectors off.
+  # When disabled: the Milvus proxy URL (http(s)://host:19530); empty turns
+  # memory vectors off. With authentication, MILVUS_TOKEN in the Secret.
   externalURL: ""
 victoriametrics:
   enabled: true

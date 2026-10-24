@@ -32,6 +32,11 @@ type PolicyMetadata struct {
 
 type repoMetadata struct {
 	Policy PolicyMetadata `json:"repository_policy"`
+	// GoModule is read back by model.GoModuleOf.
+	GoModule string `json:"go_module,omitempty"`
+	// Conventions are the house style found in the code (internal/conventions),
+	// read back by model.ConventionsOf.
+	Conventions []string `json:"conventions,omitempty"`
 }
 
 // RepositoryPolicy reads the last successfully ingested policy, never the live checkout.

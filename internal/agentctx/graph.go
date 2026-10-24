@@ -61,12 +61,12 @@ func (s Service) Implementations(ctx context.Context, repo, symbol string, limit
 
 // CallGraph is a bounded call neighbourhood with its edges.
 type CallGraph struct {
-	Budget  ResponseBudget `json:"budget"`
-	Root    Symbol         `json:"root"`
-	Nodes   []Ref          `json:"nodes"`
-	Edges   []model.Edge   `json:"edges"`
-	Total   int            `json:"total"`
-	Entries []string       `json:"entry_points,omitempty"`
+	Budget  *ResponseBudget `json:"budget,omitempty"`
+	Root    Symbol          `json:"root"`
+	Nodes   []Ref           `json:"nodes"`
+	Edges   []model.Edge    `json:"edges"`
+	Total   int             `json:"total"`
+	Entries []string        `json:"entry_points,omitempty"`
 }
 
 // CallGraph returns callers ("callers"), callees ("callees") or both up to
@@ -142,13 +142,16 @@ func (s Service) CallGraph(ctx context.Context, repo, symbol, direction string, 
 // guide asks about a change, answered directly.
 type PRContext struct {
 	review.Report
-	Budget           ResponseBudget `json:"budget"`
-	ExportedChanged  []string       `json:"exported_changed"`
-	ExportedUntested []string       `json:"exported_untested"`
-	SensitiveTouched []string       `json:"sensitive_touched"`
+	Budget           *ResponseBudget `json:"budget,omitempty"`
+	ExportedChanged  []string        `json:"exported_changed"`
+	ExportedUntested []string        `json:"exported_untested"`
+	SensitiveTouched []string        `json:"sensitive_touched"`
 	// DuplicatedChanged names changed functions that have copies, with where
 	// the copies are: the same change probably belongs there too.
 	DuplicatedChanged []string `json:"duplicated_changed"`
+	// UsedElsewhere are the changed exported functions other repositories
+	// the caller may see call, with their callers there.
+	UsedElsewhere []ExternalUse `json:"used_elsewhere,omitempty"`
 }
 
 // PROptions select the change to analyse: a unified diff, a list of files
@@ -161,6 +164,14 @@ type PROptions struct {
 	Root      string
 	Depth     int
 	MaxTokens int
+	// BaseGraph, when set, is a graph of the change's base: the answer then
+	// says which findings the change introduces and fixes (BaseLabel names
+	// the base, e.g. a commit).
+	BaseGraph store.Reader
+	BaseLabel string
+	// Consumers are the other repositories the caller may see; where they
+	// call a changed exported function, the answer lists the callers.
+	Consumers []string
 }
 
 // PRContext analyses a change.
@@ -175,6 +186,7 @@ func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRCon
 			return PRContext{}, errors.New("file path exceeds 4096 bytes")
 		}
 	}
+	all := s.R
 	s.R = store.ForRepository(s.R, repo)
 	var changes []gitx.FileChange
 	switch {
@@ -219,8 +231,21 @@ func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRCon
 	if err != nil {
 		return PRContext{}, err
 	}
+	if o.BaseGraph != nil {
+		files := make([]string, 0, len(changes))
+		for _, c := range changes {
+			files = append(files, c.Path)
+		}
+		d, err := review.CompareFindings(ctx, store.ForRepository(o.BaseGraph, repo), s.R, repo, files)
+		if err != nil {
+			return PRContext{}, fmt.Errorf("comparing findings with the base: %w", err)
+		}
+		d.Base = o.BaseLabel
+		rep.Security = &d
+	}
 	out := PRContext{Report: rep, ExportedChanged: []string{}, ExportedUntested: []string{}, SensitiveTouched: []string{}, DuplicatedChanged: []string{}}
 	out.Summary.DuplicatedChanges = 0
+	var exported []model.Node
 	for i := range out.Changes {
 		c := &out.Changes[i]
 		c.Duplicate = s.scopedDuplicate(ctx, c.Duplicate)
@@ -242,6 +267,9 @@ func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRCon
 		}
 		if n.Exported {
 			out.ExportedChanged = append(out.ExportedChanged, c.Name)
+			if n.Kind.IsCallable() {
+				exported = append(exported, n)
+			}
 			if len(c.Tests) == 0 && n.Kind.IsCallable() {
 				out.ExportedUntested = append(out.ExportedUntested, c.Name)
 			}
@@ -249,6 +277,14 @@ func (s Service) PRContext(ctx context.Context, repo string, o PROptions) (PRCon
 		if len(c.Tags) > 0 || len(c.Findings) > 0 {
 			out.SensitiveTouched = append(out.SensitiveTouched, c.Name+" ["+strings.Join(c.Tags, ",")+"]")
 		}
+	}
+	if out.UsedElsewhere, err = s.crossRepo(ctx, all, repo, o.Consumers, exported); err != nil {
+		return PRContext{}, fmt.Errorf("callers in other repositories: %w", err)
+	}
+	if f, ok, stale, err := s.runtimeFacts(ctx, repo); err != nil {
+		return PRContext{}, err
+	} else if ok {
+		out.Measured = review.MeasuredOf(f, stale, out.Report)
 	}
 	return finishPR(out, o.MaxTokens)
 }
@@ -275,15 +311,22 @@ type MinimalItem struct {
 // MinimalContext is the token-budgeted answer to "what should I look at
 // for this task".
 type MinimalContext struct {
-	Task       string        `json:"task"`
-	Budget     int           `json:"max_tokens"`
-	UsedTokens int           `json:"used_tokens"`
-	Keywords   []string      `json:"keywords"`
-	Items      []MinimalItem `json:"items"`
-	Omitted    int           `json:"omitted"`
-	Next       string        `json:"next"`
-	Estimator  string        `json:"estimator"`
-	Source     string        `json:"source"`
+	Task       string   `json:"task"`
+	Budget     int      `json:"max_tokens"`
+	UsedTokens int      `json:"used_tokens"`
+	Keywords   []string `json:"keywords"`
+	// Revision is the commit every item was indexed at, unless an item
+	// names its own.
+	Revision string `json:"revision,omitempty"`
+	// Conventions are the repository's house style (how tests assert,
+	// errors, logging, frameworks), when asked for: on top of the budget,
+	// which the task's matches keep.
+	Conventions []string      `json:"conventions,omitempty"`
+	Items       []MinimalItem `json:"items"`
+	Omitted     int           `json:"omitted"`
+	Next        string        `json:"next"`
+	Estimator   string        `json:"estimator"`
+	Source      string        `json:"source"`
 }
 
 var (
@@ -387,7 +430,9 @@ func (s Service) MinimalContext(ctx context.Context, repo, task string, files []
 		exactTerms[word] = true
 		exactTerms[strings.TrimRight(word, ":-")] = true
 	}
-	kinds := []model.NodeKind{model.KindFunction, model.KindMethod, model.KindInterfaceMethod, model.KindType, model.KindSection, model.KindConfigEntry, model.KindTemplateDef}
+	// Files too: a task often names a file or area (Dockerfile, a chart, a
+	// page) before any symbol in it, and the task eval finds more with them.
+	kinds := []model.NodeKind{model.KindFunction, model.KindMethod, model.KindInterfaceMethod, model.KindType, model.KindSection, model.KindConfigEntry, model.KindTemplateDef, model.KindFile}
 	for i, kw := range mc.Keywords {
 		if err := ctx.Err(); err != nil {
 			return MinimalContext{}, err
@@ -474,6 +519,12 @@ func (s Service) MinimalContext(ctx context.Context, repo, task string, files []
 		}
 		if sc.exact {
 			item.Retrieval = "exact"
+		}
+		if mc.Revision == "" {
+			mc.Revision = item.Revision
+		}
+		if item.Revision == mc.Revision {
+			item.Revision = "" // said once at the top
 		}
 		mc.Items = append(mc.Items, item)
 		mc.Omitted--

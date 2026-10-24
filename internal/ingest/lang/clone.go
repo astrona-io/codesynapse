@@ -44,7 +44,7 @@ func cloneHash(lang string, text []byte) (hash, sig string) {
 	if generatedMarker(text) {
 		return "", ""
 	}
-	py := lang == Python
+	py := lang == Python || lang == Ruby // # comments, blocks by indentation
 	toks := cloneTokens(text, py)
 	lines := 0
 	for _, t := range toks {

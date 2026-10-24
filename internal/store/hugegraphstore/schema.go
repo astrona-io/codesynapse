@@ -12,9 +12,11 @@ import (
 var (
 	nodeTexts = []string{"nid", "kind", "repo", "name", "qualified_name", "package", "file", "signature", "summary", "body_hash", "clone_hash", "clone_sig", "via", "doc_type", "status", "meta", "duplicates",
 		"time", "head", "root", "branch", "metrics", "severity", "rule", "version", "fixed_version", "reachability", "url",
-		"liveness", "cleanup", "licenses", "coverage", "language", "ecosystem", "license", "license_source", "run", "symbol_id", "revision", "identities", "analysis"}
+		"liveness", "cleanup", "licenses", "coverage", "language", "ecosystem", "license", "license_source", "run", "symbol_id", "revision", "identities", "analysis",
+		// Written by the store itself for incremental publication (delta.go).
+		"content_hash", "edges_hash"}
 	nodeLongs = []string{"bytes", "start_line", "end_line", "complexity", "loc", "level", "churn", "roots"}
-	nodeBools = []string{"exported", "is_test", "indirect", "dev"}
+	nodeBools = []string{"exported", "is_test", "indirect", "dev", "code_absent"}
 	nodeLists = []string{"cwe", "aliases", "security_tags"}
 )
 
@@ -25,10 +27,10 @@ var (
 	reviewProps   = []string{"rid", "repo", "created_at", "updated_at", "doc"}
 	snapshotProps = []string{"sid", "repo", "at", "doc"}
 	curatedProps  = []string{"cid", "repo", "kind", "created_at", "doc"}
-	usageProps    = []string{"ukey", "day", "daynum", "org", "repo", "tool", "client", "calls", "errors", "response_tokens", "duration_ms", "max_duration_ms"}
+	usageProps    = []string{"ukey", "day", "daynum", "org", "repo", "tool", "client", "calls", "errors", "response_tokens", "duration_ms", "max_duration_ms", "ranges_returned", "ranges_read"}
 	otherTexts    = []string{"evidence", "origin_session_id", "eid", "tenant_id", "ns", "type", "created_at", "updated_at", "emb_model", "fid", "subj", "obj", "predicate", "source",
 		"valid_from", "valid_to", "rid", "doc", "ukey", "day", "org", "tool", "client", "sid", "at", "cid", "kind"}
-	otherLongs = []string{"count", "confirmations", "daynum", "calls", "errors", "response_tokens", "duration_ms", "max_duration_ms"}
+	otherLongs = []string{"count", "confirmations", "daynum", "calls", "errors", "response_tokens", "duration_ms", "max_duration_ms", "ranges_returned", "ranges_read"}
 )
 
 const schemaScript = `
@@ -103,6 +105,9 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		return err
 	}
 	if err = s.write(ctx, sessionSchema, nil, nil); err != nil {
+		return err
+	}
+	if err = s.write(ctx, runtimeSchema, nil, nil); err != nil {
 		return err
 	}
 	return s.write(ctx, stageSchema, nil, nil)

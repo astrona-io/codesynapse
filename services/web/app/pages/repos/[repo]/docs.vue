@@ -88,9 +88,10 @@ const tokens = (bytes?: number) => Math.round((bytes ?? 0) / 4)
 .docs-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 20px; align-items: start; }
 .doc-list { position: sticky; top: 24px; max-height: calc(100vh - 48px); overflow-y: auto; }
 .doc-list nav { display: flex; flex-direction: column; gap: 2px; }
-.doc-link { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-left: 2px solid transparent; border-radius: var(--radius-xs); }
+.doc-link { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: var(--radius-sm); }
 .doc-link:hover { background: var(--hover); }
-.doc-link.is-active { background: var(--tint-orange); border-left-color: var(--orange); }
+.doc-link.is-active { background: var(--primary); color: var(--on-primary); }
+.doc-link.is-active :is(.muted, .dim, .small) { color: inherit; }
 .doc-title { font-size: 14px; font-weight: 500; color: var(--ink); }
 .outline { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; }
 .outline li { padding: 12px 0; border-bottom: 1px dashed var(--line); }
@@ -98,6 +99,6 @@ const tokens = (bytes?: number) => Math.round((bytes ?? 0) / 4)
 .between { justify-content: space-between; }
 .summary { font-size: 13.5px; margin-top: 4px; }
 .mentions { margin-top: 8px; gap: 4px; }
-.mentions .tag { color: var(--cyan); background: var(--tint-cyan); }
+.mentions .tag { color: var(--info); background: var(--info-soft); }
 @media (max-width: 1000px) { .docs-layout { grid-template-columns: 1fr; } .doc-list { position: static; max-height: none; } }
 </style>

@@ -22,7 +22,7 @@ const maxValue = computed(() => Math.max(1, ...props.items.map((i) => i.value)))
 <style scoped>
 .bars { display: grid; gap: 6px; }
 .bar-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(60px, 1fr) 56px; gap: 10px; align-items: center; }
-.bar-track { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.bar-track { height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
 .bar-fill { height: 100%; background: var(--accent); border-radius: 4px; }
 .bar-value { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12.5px; }
 </style>

@@ -1,0 +1,409 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CodeSynapse Helm chart values",
+  "description": "Values of the codesynapse chart. Each store section is checked again by its subchart's own values.schema.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "global": {
+      "description": "Shared with the store subcharts. Left open for an umbrella chart's own globals.",
+      "type": "object",
+      "properties": {
+        "existingSecret": {
+          "description": "Required at install. The Secret with CODESYNAPSE_API_TOKEN, CODESYNAPSE_MCP_TOKEN, HUGEGRAPH_PASSWORD, METRICS_PASSWORD, SECRET_KEY and POSTGRES_PASSWORD (in-chart PostgreSQL) or CODESYNAPSE_DATABASE_URL (external). Optional: CODESYNAPSE_GIT_TOKENS, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, MILVUS_TOKEN.",
+          "type": "string"
+        },
+        "imagePullSecrets": {
+          "description": "Secrets for a private registry or mirror, e.g. [{name: ghcr}].",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "networkPolicies": {
+          "description": "Each component and store accepts only the pods that need it.",
+          "type": "boolean"
+        }
+      }
+    },
+    "common": {
+      "description": "The library chart of shared helpers; Helm adds its section. Nothing to set.",
+      "type": "object"
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "registry": {
+          "description": "Registry and owner of the api, worker, mcp and web images.",
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "description": "Defaults to the chart's appVersion (the release tag).",
+          "type": "string"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
+      }
+    },
+    "publicURL": {
+      "description": "Where browsers reach the dashboard.",
+      "type": "string",
+      "pattern": "^https?://"
+    },
+    "publicMCPURL": {
+      "description": "Where agents reach MCP.",
+      "type": "string",
+      "pattern": "^https?://"
+    },
+    "publicAPIURL": {
+      "description": "Where the Claude Code bridge reaches the API; shown on the Agents page.",
+      "type": "string",
+      "pattern": "^https?://"
+    },
+    "environment": {
+      "description": "Environment name on metrics and traces.",
+      "type": "string",
+      "minLength": 1
+    },
+    "admin": {
+      "description": "The administrator made at first start. Its password is generated into the Secret <release>-admin (kept across upgrades) or read from existingSecret. With enabled false the first sign-up becomes the root account instead.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Create the administrator \"admin\" when the installation has no accounts.",
+          "type": "boolean"
+        },
+        "existingSecret": {
+          "description": "Name of a Secret with the key CODESYNAPSE_ADMIN_PASSWORD (at least 12 characters), used instead of a generated password.",
+          "type": "string"
+        }
+      }
+    },
+    "signupOpen": {
+      "description": "Anyone may create an account.",
+      "type": "boolean"
+    },
+    "cookieSecure": {
+      "description": "Session cookies need TLS; false only for plain-HTTP local tests.",
+      "type": "boolean"
+    },
+    "trustedProxies": {
+      "description": "Comma-separated CIDRs whose X-Forwarded-For is trusted. The web pods forward each user's address from the pod network.",
+      "type": "string"
+    },
+    "auditRetentionDays": {
+      "description": "Days the audit log is kept.",
+      "type": "integer",
+      "minimum": 30
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "vulnScan": {
+          "description": "Look up dependency vulnerabilities on osv.dev.",
+          "type": "boolean"
+        },
+        "licenseLookup": {
+          "description": "Look up licences not found on disk on deps.dev.",
+          "type": "boolean"
+        },
+        "allowNetwork": {
+          "description": "Module downloads during ingest: trusted repositories only.",
+          "type": "boolean"
+        },
+        "dataflow": {
+          "type": "boolean"
+        },
+        "allowPush": {
+          "description": "Fix branches for accepted review comments (needs Git tokens with write access).",
+          "type": "boolean"
+        },
+        "allowPrivateGit": {
+          "description": "Allow Git remotes on private and loopback addresses.",
+          "type": "boolean"
+        },
+        "allowMemory": {
+          "description": "Agent-memory MCP tools.",
+          "type": "boolean"
+        },
+        "mcpUsage": {
+          "description": "Daily MCP usage counters for the Statistics page.",
+          "type": "boolean"
+        }
+      }
+    },
+    "llmConfig": {
+      "description": "The content of config/llm.yaml (see config/llm.example.yaml). Empty: no AI tasks. API keys go in the Secret, referenced by api_key_env.",
+      "type": "string"
+    },
+    "traces": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sample": {
+          "description": "Share of traces kept, 0 to 1.",
+          "type": [
+            "string",
+            "number"
+          ]
+        }
+      }
+    },
+    "api": {
+      "$ref": "#/definitions/scaledComponent"
+    },
+    "mcp": {
+      "description": "Keeps no state between requests: run two or more for availability. With replicas > 1 it gets a disruption budget and pods spread over nodes and zones.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "autoscaling": {
+          "$ref": "#/definitions/autoscaling"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "stateless": {
+          "description": "No transport session between requests, so any replica answers any request without sticky sessions.",
+          "type": "boolean"
+        },
+        "toolsets": {
+          "description": "Toolsets for connections that name none: all, or core plus a comma list (repos, docs, security, architecture, memory, cleanup, reviews, identity). Clients choose their own with /mcp?toolsets=...",
+          "type": "string",
+          "pattern": "^(all|[a-z]+(,[a-z]+)*)$"
+        }
+      }
+    },
+    "web": {
+      "$ref": "#/definitions/scaledComponent"
+    },
+    "worker": {
+      "description": "Scales by hand: a worker stopped by a scale-down leaves its job to another one only after the job's lease ran out.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "roles": {
+          "description": "Comma-separated job roles: ingest (clone, sync, index), ai, fix (pushes fix branches).",
+          "type": "string",
+          "pattern": "^(ingest|ai|fix)(,(ingest|ai|fix))*$"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        }
+      }
+    },
+    "workspace": {
+      "description": "Clones of repositories added by URL. api, worker and mcp mount it: on a multi-node cluster use a ReadWriteMany storage class.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size": {
+          "$ref": "#/definitions/quantity"
+        },
+        "accessModes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "ReadWriteOnce",
+              "ReadWriteMany",
+              "ReadWriteOncePod",
+              "ReadOnlyMany"
+            ]
+          }
+        },
+        "storageClass": {
+          "type": "string"
+        }
+      }
+    },
+    "ingress": {
+      "description": "Path /mcp goes to the MCP service, everything else to the dashboard.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "className": {
+          "type": "string"
+        },
+        "host": {
+          "description": "Required when enabled.",
+          "type": "string"
+        },
+        "tlsSecretName": {
+          "type": "string"
+        }
+      }
+    },
+    "postgresql": {
+      "description": "In-chart PostgreSQL. When disabled, put the database URL in the Secret as CODESYNAPSE_DATABASE_URL.",
+      "$ref": "#/definitions/store"
+    },
+    "hugegraph": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/store"
+        }
+      ],
+      "properties": {
+        "externalURL": {
+          "description": "When disabled: the HugeGraph REST URL (http(s)://host:8080). The password stays HUGEGRAPH_PASSWORD in the Secret."
+        },
+        "txCapacity": {
+          "description": "Both the server and the services use it.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "milvus": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/store"
+        }
+      ],
+      "properties": {
+        "externalURL": {
+          "description": "When disabled: the Milvus proxy URL (http(s)://host:19530); empty turns memory vectors off. With authentication, MILVUS_TOKEN in the Secret."
+        }
+      }
+    },
+    "victoriametrics": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/store"
+        }
+      ],
+      "properties": {
+        "externalURL": {
+          "description": "When disabled: the base URL; empty turns metrics export off."
+        }
+      }
+    },
+    "victoriatraces": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/store"
+        }
+      ],
+      "properties": {
+        "externalURL": {
+          "description": "When disabled: the full OTLP/HTTP traces endpoint; empty turns export off."
+        }
+      }
+    }
+  },
+  "definitions": {
+    "quantity": {
+      "description": "A Kubernetes quantity, e.g. 250m, 1Gi or 2.",
+      "type": [
+        "string",
+        "number"
+      ],
+      "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+    },
+    "resources": {
+      "description": "Container resources (requests and limits).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requests": {
+          "$ref": "#/definitions/resourceList"
+        },
+        "limits": {
+          "$ref": "#/definitions/resourceList"
+        }
+      }
+    },
+    "resourceList": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/quantity"
+      }
+    },
+    "autoscaling": {
+      "description": "CPU autoscaling; replicas is then ignored. Needs metrics-server.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "minReplicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxReplicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "targetCPU": {
+          "description": "Average CPU utilisation in percent.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "scaledComponent": {
+      "description": "Keeps no state between requests: run two or more for availability. With replicas > 1 it gets a disruption budget and pods spread over nodes and zones.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "autoscaling": {
+          "$ref": "#/definitions/autoscaling"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        }
+      }
+    },
+    "store": {
+      "description": "A store subchart, on by default. For production, prefer stores you run and back up yourself: set enabled=false and set externalURL. The subchart's values.schema.json lists what else can be set (image, size, storageClass, resources, retention).",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "externalURL": {
+          "type": "string",
+          "pattern": "^(https?://.*)?$"
+        }
+      }
+    }
+  }
+}

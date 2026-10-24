@@ -4,6 +4,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -47,6 +48,18 @@ const (
 	KindRecord NodeKind = "Record"
 	// KindComponent is a part of the system that records apply to.
 	KindComponent NodeKind = "Component"
+	// KindRoute is an entry point the code registers: an HTTP route, an MCP
+	// tool or a CLI command. Signature holds its kind (http, mcp, cli), Name
+	// what a caller uses ("GET /api/x", the tool or command name), File and
+	// StartLine where it is registered, Summary the guards seen there.
+	KindRoute NodeKind = "Route"
+)
+
+// Route kinds (Signature of a Route node).
+const (
+	RouteHTTP = "http"
+	RouteMCP  = "mcp"
+	RouteCLI  = "cli"
 )
 
 // AllNodeKinds lists every valid node kind. Stores use it as the allowlist
@@ -55,7 +68,7 @@ var AllNodeKinds = []NodeKind{
 	KindRepository, KindPackage, KindFile, KindFunction, KindMethod,
 	KindInterfaceMethod, KindType, KindExternal, KindDocument, KindSection,
 	KindCommit, KindAuthor, KindFinding, KindModule, KindVulnerability,
-	KindConfig, KindConfigEntry, KindTemplate, KindTemplateDef, KindRecord, KindComponent,
+	KindConfig, KindConfigEntry, KindTemplate, KindTemplateDef, KindRecord, KindComponent, KindRoute,
 	KindOrganization, KindUser, KindTeam, KindAccessRepository, KindSessionMemoryEntity,
 }
 
@@ -108,6 +121,8 @@ const (
 	// EdgeReferences links code to a function or method it uses as a value
 	// (a handler, callback or method value) without calling it directly.
 	EdgeReferences EdgeKind = "REFERENCES"
+	// EdgeHandledBy links a Route to the function or method that serves it.
+	EdgeHandledBy EdgeKind = "HANDLED_BY"
 )
 
 // Architecture catalog edges.
@@ -128,7 +143,7 @@ var AllEdgeKinds = []EdgeKind{
 	EdgeSessionFact,
 	EdgeContains, EdgeDefines, EdgeHasMethod, EdgeCalls, EdgeDispatchesTo,
 	EdgeImplements, EdgeImports, EdgeMentions, EdgeModifies, EdgeAuthored,
-	EdgeHasFinding, EdgeDependsOn, EdgeAffects, EdgeIncludes, EdgeUsesValue, EdgeReferences,
+	EdgeHasFinding, EdgeDependsOn, EdgeAffects, EdgeIncludes, EdgeUsesValue, EdgeReferences, EdgeHandledBy,
 	EdgeMemberOf, EdgeBelongsTo, EdgeHasAccess,
 	EdgeSupersedes, EdgeAppliesTo, EdgeImplementsDecision, EdgeRelatesTo,
 }
@@ -213,6 +228,10 @@ type Node struct {
 	FixedVersion string `json:"fixed_version,omitempty"`
 	// Reachability is how a Vulnerability is reached: called, imported or required.
 	Reachability string `json:"reachability,omitempty"`
+	// CodeAbsent marks a Go Vulnerability whose advisory names the affected
+	// packages when none of them is compiled into any package of the
+	// repository, tests included: the vulnerable code is not in the build.
+	CodeAbsent bool `json:"code_absent,omitempty"`
 	// URL links to the advisory.
 	URL string `json:"url,omitempty"`
 	// Indirect marks Modules required only indirectly.
@@ -412,6 +431,9 @@ func (n Node) ShortName() string {
 	switch n.Kind {
 	case KindFile, KindDocument, KindSection, KindPackage, KindCommit, KindAuthor, KindRepository:
 		return n.DisplayName()
+	case KindRoute:
+		// "http GET /api/x": a route's path is no import path.
+		return n.Signature + " " + n.Name
 	}
 	return importPathPrefix.ReplaceAllString(n.DisplayName(), "")
 }
@@ -485,3 +507,25 @@ func IsK8sResource(n Node) bool {
 func ContainsFold(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
+
+// repoMeta is what answers read from a Repository node's Meta.
+type repoMeta struct {
+	GoModule    string   `json:"go_module"`
+	Conventions []string `json:"conventions"`
+}
+
+func metaOf(repo Node) repoMeta {
+	var meta repoMeta
+	if repo.Kind == KindRepository && repo.Meta != "" {
+		_ = json.Unmarshal([]byte(repo.Meta), &meta) //nolint:errcheck // unreadable metadata reads as none
+	}
+	return meta
+}
+
+// GoModuleOf is the Go module path at the root of a repository, recorded in
+// its Repository node's Meta at ingest, or "".
+func GoModuleOf(repo Node) string { return metaOf(repo).GoModule }
+
+// ConventionsOf is the house style found in a repository's code at ingest
+// (internal/conventions), as short statements with their evidence.
+func ConventionsOf(repo Node) []string { return metaOf(repo).Conventions }
