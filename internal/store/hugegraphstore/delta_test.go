@@ -122,6 +122,45 @@ func TestDeltaPublication(t *testing.T) {
 	assert.Equal(t, got.Name, "faa")
 }
 
+// TestPublicationCache: a process that published a repository last reuses
+// the hashes it committed instead of reading them back; another process
+// publishing in between, or a deletion, makes it read them again, and the
+// result is always the graph published last.
+func TestPublicationCache(t *testing.T) {
+	s, other := liveStore(t), liveStore(t)
+	ctx := context.Background()
+	const repo = "cache-test"
+	t.Cleanup(func() { _ = s.DeleteRepo(ctx, repo) })
+	_ = s.DeleteRepo(ctx, repo)
+	publish := func(st *Store, label string) {
+		t.Helper()
+		g := smallGraph(repo, 40, "base")
+		n, _ := g.Node(model.NodeID(repo, model.KindFunction, "faa"))
+		n.Summary = label
+		g.AddNode(*n)
+		require.NoError(t, st.ReplaceRepo(ctx, repo, g))
+		got, err := s.Node(ctx, n.ID)
+		require.NoError(t, err)
+		assert.Equal(t, got.Summary, label)
+	}
+	publish(s, "one")
+	assert.Equal(t, s.hashReads.Load(), int64(1), "the first publication reads (nothing stored)")
+	publish(s, "two")
+	assert.Equal(t, s.lastPublish.Load(), "delta")
+	assert.Equal(t, s.hashReads.Load(), int64(1), "a republish by the same process reads nothing back")
+
+	publish(other, "three")
+	assert.Equal(t, other.hashReads.Load(), int64(1), "another process has no cache")
+	publish(s, "four")
+	assert.Equal(t, s.hashReads.Load(), int64(2), "someone else published in between: read again")
+	assert.Equal(t, s.lastPublish.Load(), "delta")
+
+	require.NoError(t, other.DeleteRepo(ctx, repo))
+	publish(s, "five")
+	assert.Equal(t, s.lastPublish.Load(), "full", "deleted in between: the cached hashes are not trusted")
+	assert.Equal(t, s.hashReads.Load(), int64(3))
+}
+
 // TestDeltaTiming publishes this repository, then again with one file's
 // worth of change, and logs both (CODESYNAPSE_TEST_DELTA_TIMING=1).
 func TestDeltaTiming(t *testing.T) {
@@ -140,8 +179,8 @@ func TestDeltaTiming(t *testing.T) {
 	edited := 0
 	for _, n := range g.Nodes() {
 		if n.File == "internal/store/hugegraphstore/delta.go" {
-			n.Summary += " (edited)"
-			g.AddNode(n)
+			stored, _ := g.Node(n.ID) // AddNode keeps an existing node: edit it in place
+			stored.Summary += " (edited)"
 			edited++
 		}
 	}
@@ -149,6 +188,15 @@ func TestDeltaTiming(t *testing.T) {
 	require.NoError(t, s.ReplaceRepo(ctx, "timing", g))
 	again := time.Since(t1)
 	t.Logf("nodes=%d edges=%d first=%s (%v) oneFile=%s (%v, %d nodes edited)", len(g.Nodes()), len(g.Edges()), first.Round(time.Millisecond), "full", again.Round(time.Millisecond), s.lastPublish.Load(), edited)
+	// The fixed cost: an unchanged republish with the hashes this process
+	// committed, and with them read back from the server.
+	t2 := time.Now()
+	require.NoError(t, s.ReplaceRepo(ctx, "timing", g))
+	cached := time.Since(t2)
+	s.published.forget("timing")
+	t3 := time.Now()
+	require.NoError(t, s.ReplaceRepo(ctx, "timing", g))
+	t.Logf("unchanged republish: %s with cached hashes, %s reading them back", cached.Round(time.Millisecond), time.Since(t3).Round(time.Millisecond))
 	nodes, _, err := store.Replacement(ctx, "timing", g)
 	require.NoError(t, err)
 	for _, n := range nodes[:50] {
