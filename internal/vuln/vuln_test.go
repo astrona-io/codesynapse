@@ -189,3 +189,108 @@ func TestApplyImportedByName(t *testing.T) {
 		})
 	}
 }
+
+// A replace directive changes what is built: the version (or the module) the
+// code actually uses is what inventory, advisories and licences describe.
+func TestGoReplacementsDecideTheBuiltVersion(t *testing.T) {
+	root := t.TempDir()
+	write := func(p, s string) {
+		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(root, p)), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(root, p), []byte(s), 0o600))
+	}
+	write("go.mod", `module example.com/app
+
+go 1.22
+
+require (
+	example.com/library v1.2.0
+	example.com/pinned v1.5.0
+	example.com/forked v1.1.0
+	example.com/only v1.2.0
+	example.com/local v1.0.0
+	example.com/plain v1.0.0
+)
+
+replace example.com/library => example.com/library v1.0.0
+
+replace example.com/pinned v1.5.0 => example.com/pinned v1.4.0
+
+replace example.com/only v1.9.9 => example.com/only v1.0.0
+
+replace example.com/forked => github.com/fork/forked v1.1.1
+
+replace example.com/local => ../local
+`)
+	// A nested module's replaces apply to its own requirements, not the root's.
+	write("tools/go.mod", "module example.com/app/tools\n\ngo 1.22\n\nrequire example.com/plain v1.0.0\n\nreplace example.com/plain => example.com/plain v0.9.0\n")
+
+	mods, err := Modules(root, "go1.23.1")
+	require.NoError(t, err)
+	got := map[string]Module{}
+	for _, m := range mods {
+		got[m.Path] = m
+	}
+	assert.Equal(t, got["example.com/library"].Version, "v1.0.0", "same module at the replacement version")
+	assert.True(t, got["example.com/library"].Replacement == nil, "nothing to report beyond the version")
+	assert.Equal(t, got["example.com/pinned"].Version, "v1.4.0", "a version-specific replace")
+	assert.Equal(t, got["example.com/only"].Version, "v1.2.0", "a replace for another version does not apply")
+
+	fork := got["example.com/forked"]
+	assert.Equal(t, fork.Version, "v1.1.1")
+	require.True(t, fork.Replacement != nil)
+	assert.Equal(t, fork.Replacement.Path, "github.com/fork/forked")
+	assert.Equal(t, fork.Path, "example.com/forked", "the import path stays the identity")
+	assert.Equal(t, fork.BuildPath(), "github.com/fork/forked")
+	assert.False(t, fork.Local())
+
+	local := got["example.com/local"]
+	require.True(t, local.Replacement != nil)
+	assert.True(t, local.Local())
+	assert.Equal(t, local.Version, "", "a local directory has no published version")
+	assert.Equal(t, local.Replacement.Path, "../local")
+
+	assert.Equal(t, got["example.com/plain"].Version, "v1.0.0", "the root requirement wins; the nested module's replace is its own")
+}
+
+func TestScanAsksAboutTheBuiltModule(t *testing.T) {
+	var asked []map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Queries []struct {
+				Package struct{ Name string } `json:"package"`
+				Version string                `json:"version"`
+			} `json:"queries"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		results := make([]any, len(body.Queries))
+		for i, q := range body.Queries {
+			asked = append(asked, map[string]string{"name": q.Package.Name, "version": q.Version})
+			results[i] = map[string]any{}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
+	}))
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL}
+	_, err := c.Scan(context.Background(), []Module{
+		{Path: "example.com/library", Version: "v1.0.0"},
+		{Path: "example.com/forked", Version: "v1.1.1", Replacement: &Replacement{Path: "github.com/fork/forked"}},
+		{Path: "example.com/local", Replacement: &Replacement{Path: "../local", Local: true}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, len(asked), 2, "the local replacement is not looked up")
+	assert.Equal(t, asked[0]["name"]+"@"+asked[0]["version"], "example.com/library@v1.0.0")
+	assert.Equal(t, asked[1]["name"]+"@"+asked[1]["version"], "github.com/fork/forked@v1.1.1", "advisories of the fork, not of the original")
+
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindRepository, "r"), Kind: model.KindRepository, Repo: "r", Name: "r"})
+	Apply("r", g, []Module{
+		{Path: "example.com/forked", Version: "v1.1.1", Replacement: &Replacement{Path: "github.com/fork/forked"}},
+		{Path: "example.com/local", Replacement: &Replacement{Path: "../local", Local: true}},
+	}, nil, nil, nil)
+	forked, ok := g.Node(model.NodeID("r", model.KindModule, "example.com/forked"))
+	require.True(t, ok)
+	assert.Contains(t, forked.Summary, "github.com/fork/forked")
+	localNode, _ := g.Node(model.NodeID("r", model.KindModule, "example.com/local"))
+	assert.Contains(t, localNode.Summary, "local directory ../local")
+}
