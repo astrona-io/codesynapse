@@ -529,7 +529,7 @@ func (o *mcpHooksOptions) Run(ctx context.Context, _ *app.Env) error {
 		if err := agentcfg.InstallLifecycleHooks(settings, o.client, brewStablePath(bin), o.apiURL); err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(o.EC.Stdout, "Installed all %s hook events in %s. Restart the assistant.\nHooks register the runtime chat ID and save metadata-only activity to CodeSynapse.\nMCP still requires a runtime-aware transport supplying both session headers per chat.\n", o.client, settings)
+		_, err = fmt.Fprintf(o.EC.Stdout, "Installed all %s hook events in %s. Restart the assistant.\nHooks register the runtime chat ID and save metadata-only activity. For automatic MCP transport setup, run `codesynapse mcp install --only %s` and use one hook source (project or user) to avoid duplicates.\n", o.client, settings, o.client)
 		if o.client == "codex" {
 			_, _ = fmt.Fprintln(o.EC.Stdout, "In Codex, open /hooks and review and trust the installed definitions. Hook installation does not grant trust.")
 		}

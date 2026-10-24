@@ -53,7 +53,7 @@ func main() {
 // commands are the CLI's subcommands (the plugin test checks the hooks
 // call ones that exist).
 func commands(ec *app.Env) []*cobra.Command {
-	return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), upgradeCmd(ec), statsCmd(ec), evalCmd(ec), hookCmd(ec), gitHookCmd(ec), installCmd(ec), statusCmd(ec), uninstallCmd(ec), mcpCmd(ec), memoryCmd(ec), runtimeCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
+	return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), upgradeCmd(ec), statsCmd(ec), evalCmd(ec), hookCmd(ec), gitHookCmd(ec), installCmd(ec), statusCmd(ec), uninstallCmd(ec), mcpCmd(ec), cursorCmd(ec), assistantCmd(ec, "codex"), assistantCmd(ec, "claude"), memoryCmd(ec), runtimeCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
 }
 
 // ingestOptions configures `codesynapse ingest`.
@@ -797,8 +797,7 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 		_, _ = fmt.Fprintf(o.EC.Stderr, "  ✓ %s\n", t.Description)
 	}
 	if installed > 0 {
-		_, _ = fmt.Fprintln(o.EC.Stderr, "\nCodex: review and trust installed hooks with /hooks. Cursor: restart to load hooks.\nHooks save session activity; Codex/Cursor MCP calls still need a runtime-aware integration supplying per-chat session headers. A configured connection alone does not prove tool access.")
-		_, _ = fmt.Fprintf(o.EC.Stderr, "\nHTTP clients read the bearer key from $%s. Supply your personal organisation key in the assistant's environment before starting it; installation tokens cannot register chats.\n", agentcfg.TokenEnv)
+		_, _ = fmt.Fprintln(o.EC.Stderr, "\nRestart the selected assistants. Codex: review and trust hooks with /hooks. Cursor: keep the installed MCP hooks enabled.\nThe local bridges register each chat automatically and read the personal key from its private file. Start a new chat and verify a CodeSynapse tool call with /mcp (Codex/Claude) or Customize → MCP (Cursor).")
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d assistant configuration(s) failed; see the errors above", failed)
@@ -846,7 +845,7 @@ func mcpCmd(ec *app.Env) *cobra.Command {
 		Build())
 	parent.AddCommand(app.NewSubCommand("bridge", &mcpBridgeOptions{EC: ec}, ec).
 		WithShortDesc("Stdio MCP server for one chat: registers the chat's session and forwards to the HTTP server").
-		WithLongDesc("Claude Code starts this per chat (`codesynapse mcp install` configures it). It reads the chat ID from CLAUDE_CODE_SESSION_ID (or CODESYNAPSE_SESSION_ID), registers it through the API with the key from CODESYNAPSE_API_TOKEN or the file `mcp install` wrote, and forwards every MCP message with the key and the runtime session headers.").
+		WithLongDesc("The installer configures a local stdio bridge. Claude supplies its per-chat environment; --client codex uses native per-request thread metadata; --client cursor pairs each MCP progress token with its trusted pre-tool hook. Every chat is registered and gets its own upstream transport. Keys stay in the private token file.").
 		WithNoArgs().
 		Build())
 	parent.AddCommand(app.NewSubCommand("agents-md [dir]", &mcpAgentsMdOptions{EC: ec}, ec).

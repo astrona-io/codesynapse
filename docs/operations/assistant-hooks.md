@@ -29,7 +29,37 @@ Hook-enabled plugins require manual installation in Codex desktop and are not el
 
 Codex supplies `session_id`; Cursor supplies `conversation_id` (also `session_id` at session boundaries). If both Cursor fields are supplied, they must agree. Each invocation registers that existing ID idempotently with `POST /api/v1/execution/sessions`, then sends both execution headers when recording activity or recalling memory. Missing, mismatched, expired or closed identities cannot store activity. A subagent keeps the primary runtime identity; a conflicting parent is refused. No substitute session ID is generated.
 
-Hooks and MCP transport are separate integrations. These adapters can record activity with the runtime identity supplied to hooks. **They do not inject per-chat identity into the assistant's independently managed MCP connection.** The current Codex/Cursor MCP installers still need a runtime-aware transport supplying both execution headers on every request. Static environment variables shared by several chats are insufficient. The configuration entry alone does not prove MCP tools work; verify an actual call in two independent chats. See [runtime session setup](../AGENT_GUIDE.md#runtime-session-setup).
+The installer configures local stdio bridges and the Codex/Cursor lifecycle hooks. Claude Code uses its existing plugin or project hooks for lifecycle behavior. Use one setup command for Claude Code, Codex and Cursor:
+
+```sh
+CODESYNAPSE_MCP_TOKEN='<personal organisation key>' codesynapse mcp install --yes --only claude,codex,cursor
+```
+
+After the one-time setup, launch the CLI you want:
+
+```sh
+codesynapse codex
+codesynapse claude
+codesynapse cursor
+```
+
+`codesynapse codex` and `codesynapse claude` forward native arguments directly, including their normal resume options. For example, `codesynapse codex --model <model>` and `codesynapse claude --continue`. They use the already-installed bridge and hooks; they do not install clients or replace their login. Desktop apps use their normal launchers and the same configuration.
+
+The personal key is stored in the private user configuration file, never in assistant settings or command arguments. Restart clients after installation. Codex CLI and desktop share `~/.codex/config.toml`; Cursor CLI and desktop share `~/.cursor/mcp.json`. Install the official CLIs before setup. Codex still requires hook review/trust; Cursor hooks must stay enabled. This code requires a release after v0.0.4.
+
+| Client | Automatic runtime identity |
+|---|---|
+| Codex CLI and desktop | Native MCP `_meta.threadId` or `x-codex-turn-metadata.thread_id`; conflicting IDs are refused. Subagent lineage comes from the trusted `SubagentStart` hook. Ephemeral execution `session_id` is never a substitute. |
+| Cursor desktop | Native MCP string `_meta.progressToken` matched to the `tool_use_id` and `conversation_id` in its pre-MCP hook. Requires an editor version exposing matching IDs. |
+| Cursor CLI | Launch with `codesynapse cursor`. It runs official `cursor-agent create-chat`, then `cursor-agent --resume` with that runtime-created ID. The child process receives the binding; a private live launcher socket also supplies it when Cursor filters the MCP environment. Resume an existing chat with `codesynapse cursor --resume <existing-chat-id>`; pass other native arguments after `--`. |
+
+Cursor CLI currently drops per-call MCP IDs, so launching plain `cursor-agent` cannot provide this integration. Keep one chat per launcher process; relaunch to change chats. If hooks observe a different chat, subsequent MCP calls from that launcher are refused. Separate launcher processes remain independent. Desktop remains independent of the CLI process environment. MCP child processes find the live launcher through their OS parent chain, at most 32 ancestors; the socket requires the installed personal key's fingerprint. The socket contains no chat ID on disk, stops with the launcher, and cannot be selected through tool arguments. This launcher supports macOS and Linux with `/bin/ps`.
+
+The bridge registers the actual runtime ID and attaches both execution headers to every upstream tool call. Each chat has its own upstream MCP transport, including when the client shares a single native MCP process across chats. Discovery can list capabilities without a chat identity; it cannot execute tools. There is no model-selected identity or global “current chat” file. Each bridge permits at most 128 chats before requiring a restart.
+
+Local correlation receipts contain only opaque call/thread IDs, their primary chat and expiry. They live in a private cache partitioned by API URL, credential hash and client; files are mode 0600. Call receipts expire after 30 minutes and are consumed once. Thread lineage and CLI switch markers expire after seven days. Each cache partition is bounded to 4096 receipts. They are never OTel attributes or conversation archives.
+
+Concurrency tests exercise two interleaved chats through stateful and stateless transports for both adapters, refusal of model-supplied IDs, and receipt credential isolation. Cursor desktop correlation is covered by wire fixtures; an actual installed desktop client has not been verified here. Verify a real tool call in two independent chats after installation, especially after client upgrades. Missing runtime metadata produces an explicit error instead of guessing an identity. See [runtime session setup](../AGENT_GUIDE.md#runtime-session-setup).
 
 Session-end hooks record an observation without permanently revoking the execution binding: closing an assistant process may be followed by resuming that chat. Explicit session deletion/revocation still closes the binding permanently. Registration does not extend its seven-day lifetime.
 

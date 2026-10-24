@@ -115,8 +115,7 @@ func Detect(home, cwd string) []Target {
 					return err
 				}
 				if err := mergeJSON(p, []string{"mcpServers", Name}, map[string]any{
-					"url":     s.URL,
-					"headers": runtimeHeaders("Bearer ${env:"+TokenEnv+"}", "${env:"+SessionEnv+"}", "${env:"+ParentSessionEnv+"}"),
+					"type": "stdio", "command": s.Command, "args": []string{"mcp", "bridge", "--client", "cursor", "--url", s.URL, "--api-url", s.APIURL},
 				}); err != nil {
 					return err
 				}
@@ -201,7 +200,7 @@ func installClaude(ctx context.Context, s Server) error {
 
 func installCodex(ctx context.Context, s Server) error {
 	_ = run(ctx, "codex", "mcp", "remove", Name) //nolint:errcheck // absent is fine
-	return run(ctx, "codex", "mcp", "add", Name, "--url", s.URL, "--bearer-token-env-var", TokenEnv)
+	return run(ctx, "codex", "mcp", "add", Name, "--", s.Command, "mcp", "bridge", "--client", "codex", "--url", s.URL, "--api-url", s.APIURL)
 }
 
 // mergeJSON sets value at path inside the JSON object stored in file,

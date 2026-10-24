@@ -43,6 +43,8 @@ func (o *lifecycleOptions) Validate(context.Context, *app.Env) error {
 // lifecycleInput is deliberately not a generic payload map. Raw content is
 // measured in memory, never persisted, logged or sent to the API.
 type lifecycleInput struct {
+	ToolUseID            string          `json:"tool_use_id"`
+	AgentID              string          `json:"agent_id"`
 	SessionID            string          `json:"session_id"`
 	ConversationID       string          `json:"conversation_id"`
 	ParentConversationID string          `json:"parent_conversation_id"`
@@ -262,6 +264,31 @@ func (o *lifecycleOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	c := newAPIClient(o.apiURL)
+	primary := os.Getenv(cursorCLISessionEnv)
+	if o.client == "cursor" && primary == "" {
+		var lookupErr error
+		primary, lookupErr = findCursorLaunch(ctx, cursorLaunchDir(), c.token)
+		if lookupErr != nil {
+			return lookupErr
+		}
+	}
+	if o.client == "cursor" && primary != "" && primary != tool.SessionID {
+		if err := writeRuntimeReceipt(c, "cursor", "thread", "cli-mismatch:"+primary, tool.SessionID); err != nil {
+			o.EC.Logger.Warn("Cursor chat switch could not be recorded; restart the CLI")
+		}
+		return json.NewEncoder(o.EC.Stdout).Encode(map[string]any{"permission": "deny", "user_message": "Restart with codesynapse cursor for this chat."})
+	}
+
+	if o.client == "cursor" && (o.event == "beforeMCPExecution" || o.event == "preToolUse" && (activity.Category == "mcp" || raw.ToolName == "MCP" || strings.HasPrefix(raw.ToolName, "MCP:"))) {
+		if receiptErr := writeRuntimeReceipt(c, "cursor", "call", raw.ToolUseID, tool.SessionID); receiptErr != nil {
+			o.EC.Logger.Warn("Cursor call identity receipt unavailable; MCP invocation will be refused")
+		}
+	}
+	if o.client == "codex" && o.event == "SubagentStart" {
+		if receiptErr := writeRuntimeReceipt(c, "codex", "thread", raw.AgentID, tool.SessionID); receiptErr != nil {
+			o.EC.Logger.Warn("Codex subagent identity receipt unavailable; delegated MCP invocation will be refused")
+		}
+	}
 	registered, registerErr := c.executionContext(ctx, tool.SessionID, tool.SessionID)
 	err = registerErr
 	if err == nil {

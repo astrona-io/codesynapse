@@ -35,18 +35,19 @@ Never ask the model to choose an ID, put identity in tool arguments, or derive a
 
 The installer emits header templates for its JSON client configurations. Environment expansion syntax and the ability to update headers per chat depend on the client; these templates have not been validated end-to-end with every listed client. Do not reuse a process-wide static ID across several chats. Confirm the integration with a real tool call and a separate new chat.
 
-**Codex limitation.** The installed `codex mcp add --help` exposes a URL and `--bearer-token-env-var` for HTTP, but no HTTP header setter. CodeSynapse's Codex installer sets only those supported options. For manual configuration, the [official OpenAI configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference) documents `env_http_headers`. Merge these fields into the existing server entry in `~/.codex/config.toml`:
+**Automatic Codex and Cursor setup (CLI and desktop).** Install a build containing the runtime adapters, then run:
 
-```toml
-[mcp_servers.codesynapse]
-url = "http://localhost:8090/mcp"
-bearer_token_env_var = "CODESYNAPSE_MCP_TOKEN"
-env_http_headers = { "X-CodeSynapse-Session" = "CODESYNAPSE_SESSION_ID", "X-CodeSynapse-Parent-Session" = "CODESYNAPSE_PARENT_SESSION_ID" }
+```sh
+CODESYNAPSE_MCP_TOKEN='<personal organisation key>' codesynapse mcp install --yes --only claude,codex,cursor
 ```
 
-This is a documented header configuration, not an end-to-end tested Codex launcher. A runtime integration must still register the actual thread ID and supply the environment before connection; a single static process environment cannot distinguish multiple chats. Installing Claude hooks does not configure Codex.
+After setup, use `codesynapse codex`, `codesynapse claude`, or `codesynapse cursor` for CLI chats. Codex and Claude forward native arguments, including resume options. Desktop apps launch normally.
 
-**Native Codex and Cursor hooks.** `codesynapse mcp hooks . --client codex` or `--client cursor` installs every native lifecycle event for that assistant; `mcp install --yes --only codex,cursor` includes user-wide hooks for detected clients. They register the hook runtime identity, load rules and save metadata-only activity. Codex requires review and trust through `/hooks`. Hook installation does not supply per-chat identity to a separately managed MCP connection. See [setup, event coverage, collected fields, persistence and OTel](operations/assistant-hooks.md).
+The installer stores the key privately, registers local stdio bridges, and installs native lifecycle hooks for detected clients. Restart the clients; review and trust Codex hooks through `/hooks`, and keep Cursor hooks enabled. Codex CLI and desktop use the shared Codex configuration; Cursor CLI and desktop use the shared Cursor configuration. Both CLIs must be installed for their setup commands to be available.
+
+Codex uses immutable thread metadata on each MCP call. Cursor desktop correlates its MCP progress token with the runtime tool-call ID supplied to the hook. Missing metadata refuses execution. For Cursor CLI, start each chat with `codesynapse cursor` (or `codesynapse cursor --resume <existing-chat-id>`). The launcher asks Cursor to create its real chat ID, then resumes that chat; no manual environment or session registration is needed. Relaunch to switch chats inside the CLI. These adapters are not included in v0.0.4.
+
+Hooks record metadata, load rules and report retrieval counts; they do not auto-approve permissions. See [setup, compatibility, event coverage, collected fields, persistence and OTel](operations/assistant-hooks.md).
 
 **Stdio.** Run one MCP server process per chat with `CODESYNAPSE_DATABASE_URL`, the personal key in `CODESYNAPSE_API_TOKEN`, and the already-registered primary/parent IDs in the two session environment variables above. The server revalidates that binding on every call. Missing accounts or metadata refuses tools; there is no anonymous stdio fallback. Offline CLI ingest remains available independently.
 

@@ -41,7 +41,11 @@ function toggleAgent(id: AgentID) {
   selected.value = selected.value.includes(id) ? selected.value.filter(a => a !== id) : [...selected.value, id]
 }
 const install = 'brew install astrona-io/tap/codesynapse'
-const urls = computed(() => `--url ${mcpUrl.value} --api-url ${apiUrl.value}`)
+const urls = computed(() => `--url ${shellQuote(mcpUrl.value)} --api-url ${shellQuote(apiUrl.value)}`)
+const combinedSetup = computed(() => {
+  const ids = selectedAgents.value.filter(a => a.id !== 'other').map(a => a.id)
+  return ids.length ? `CODESYNAPSE_MCP_TOKEN=${shellQuote(token.value)} codesynapse mcp install --yes --only ${ids.join(',')} ${urls.value}` : ''
+})
 function snippet(agent: AgentID) {
   if (viaBridge.value) {
     switch (agent) {
@@ -67,8 +71,8 @@ function snippet(agent: AgentID) {
 const where = (agent: AgentID) => viaBridge.value
   ? {
       claude: 'Run it in a terminal after installing the bridge. It stores the key in a private file (never in Claude Code’s settings) and registers the bridge, which Claude Code starts once per chat. Then open a new chat and run /mcp.',
-      codex: 'Run it in a terminal. Codex connects over HTTP without the bridge, so a launcher must register the chat and supply CODESYNAPSE_SESSION_ID and CODESYNAPSE_PARENT_SESSION_ID before it starts.',
-      cursor: 'Run it in a terminal. Cursor connects over HTTP without the bridge, so a launcher must register the chat and supply the two session variables before it starts.',
+      codex: 'The installer registers the local bridge and all lifecycle hooks. Restart Codex, open /hooks and trust the definitions. Each chat is registered automatically.',
+      cursor: 'The installer registers the local bridge and all lifecycle hooks. Restart Cursor desktop and keep the MCP hooks enabled in Customize → Hooks. Start Cursor CLI chats with codesynapse cursor.',
       other: 'Clients other than Claude Code have no bridge yet. They must register each chat (POST /api/v1/execution/sessions) and send both session headers on every request; without them the server refuses the call.',
     }[agent]
   : {
@@ -83,13 +87,8 @@ const where = (agent: AgentID) => viaBridge.value
 // a call and, from the plugin's hooks, that the plugin runs.
 const pluginInstall = 'claude plugin marketplace add astrona-io/codesynapse\nclaude plugin install codesynapse@codesynapse'
 const pluginCleanup = 'claude mcp remove codesynapse -s user'
-const codexConfig = computed(() => `[mcp_servers.codesynapse]
-url = ${JSON.stringify(mcpUrl.value)}
-bearer_token_env_var = "CODESYNAPSE_MCP_TOKEN"
-env_http_headers = { "X-CodeSynapse-Session" = "CODESYNAPSE_SESSION_ID", "X-CodeSynapse-Parent-Session" = "CODESYNAPSE_PARENT_SESSION_ID" }`)
 const agentRules = 'Use the CodeSynapse MCP tools before reading files: minimal_context with the task first, get_symbol_context before editing a symbol, and get_pr_context on your diff before finishing.'
 const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
-const hookSetup = (client: 'codex' | 'cursor') => `CODESYNAPSE_API_TOKEN=${shellQuote(token.value)} codesynapse mcp hooks . --client ${client} --api-url ${shellQuote(apiUrl.value)}`
 const showPluginStatus = computed(() => viaBridge.value && selected.value.includes('claude'))
 const setupAgents = computed(() => selectedAgents.value.filter(a => a.id === 'codex' || a.id === 'cursor' || (a.id === 'claude' && viaBridge.value)))
 const stepPlugin = (agent: AgentID) => (viaBridge.value ? 4 : 3) + setupAgents.value.findIndex(a => a.id === agent)
@@ -147,9 +146,9 @@ onBeforeUnmount(() => clearInterval(poll))
       <p class="step__n">2</p>
       <div class="stack--tight">
         <h2>Install the CodeSynapse bridge</h2>
-        <p class="muted">The bridge is a small program on your machine that sits between Claude Code and CodeSynapse. It signs each MCP call with your key, registers each chat as its own session, and forwards the call to your server, where it is checked against your permissions and written to the audit log. Codex and Cursor currently connect over HTTP and need their own runtime session integration, described below.</p>
+        <p class="muted">The bridge connects Claude Code, Codex and Cursor to CodeSynapse. It registers each chat automatically, signs its tool calls with your key and sends them to your server for permission checks and audit logging.</p>
         <CopyField :value="install" label="Homebrew (macOS and Linux)" />
-        <p class="muted small">No Homebrew? Download a release binary or use <code>go install</code>: see the Claude Code bridge guide in the documentation. Every machine that runs Claude Code needs the <code>codesynapse</code> binary.</p>
+        <p class="muted small">No Homebrew? Download a release binary or use <code>go install</code>. Install the <code>codesynapse</code> binary on every machine where you use these assistants.</p>
       </div>
     </section>
 
@@ -162,6 +161,11 @@ onBeforeUnmount(() => clearInterval(poll))
           <button v-for="a in agents" :key="a.id" type="button" class="chip" :class="{ active: selected.includes(a.id) }" :aria-pressed="selected.includes(a.id)" @click="toggleAgent(a.id)">{{ a.label }}</button>
         </div>
         <p v-if="!selectedAgents.length" class="muted" role="status">Choose at least one agent to see its setup instructions.</p>
+        <template v-if="viaBridge && combinedSetup">
+          <h3>Set up the selected agents together</h3>
+          <CopyField :value="combinedSetup" multiline label="Shell — run once" />
+          <p class="muted small">This installs connection settings and Codex/Cursor hooks, and stores the key in your private configuration. Restart each assistant, then review Codex hooks through <code>/hooks</code>.</p>
+        </template>
         <div v-for="a in selectedAgents" :key="a.id" class="stack--tight agent-setup">
           <h3>{{ a.label }}</h3>
           <CopyField :value="snippet(a.id)" multiline :label="`${a.label} connection`" />
@@ -197,16 +201,9 @@ onBeforeUnmount(() => clearInterval(poll))
       <div class="stack--tight">
         <h2>Use CodeSynapse automatically in Codex</h2>
         <p class="muted">Codex supports plugins that bundle skills, MCP connections and lifecycle hooks. Connecting MCP makes tools available; a hook can run on every prompt to supply context or steer the agent toward CodeSynapse.</p>
-        <p class="muted">Install all 12 Codex lifecycle events for this project. The combined CodeSynapse installer above also installs user-wide hooks; choose one location to avoid duplicate observations.</p>
-        <CopyField :value="hookSetup('codex')" label="Shell — run in your project" />
+        <p class="muted">The setup command above installs the Codex bridge and all 12 lifecycle events for your user. Each chat gets its own identity automatically.</p>
         <p class="muted small">Restart Codex, open <code>/hooks</code>, then review and trust the definitions. Hooks load rules on every prompt and save session metadata. View accepted observations in <NuxtLink to="/stats/activity">Statistics → Live activity</NuxtLink>.</p>
-        <p class="notice notice--warn" role="status">Hook setup registers the chat identity for activity reporting. MCP still needs a runtime-aware transport that supplies both session headers per chat.</p>
-        <template v-if="viaBridge">
-          <h3>Supply the chat identity</h3>
-          <p class="muted">Merge this into the existing CodeSynapse entry in <code>~/.codex/config.toml</code>. A runtime integration must first register Codex’s actual thread ID with <code>POST /api/v1/execution/sessions</code>, then supply it as both session environment variables before MCP connects. Keep it across reconnects and compaction; each new chat needs its own runtime ID.</p>
-          <CopyField :value="codexConfig" multiline label="~/.codex/config.toml" />
-          <p class="muted small">These headers are required on every MCP request. Hooks cannot update the environment of an MCP process that is already running. A shared, static session ID cannot distinguish several chats.</p>
-        </template>
+        <p class="muted small">Use a current Codex release that supplies thread metadata on MCP calls. If it is missing, the bridge explains that Codex needs updating.</p>
         <h3>Add the graph-first rules</h3>
         <p class="muted">Add this to your repository’s <code>AGENTS.md</code>, or <code>~/.codex/AGENTS.md</code> for all projects. The rules guide Codex once its MCP connection and runtime identity are working; they do not install hooks.</p>
         <CopyField :value="agentRules" multiline label="AGENTS.md" />
@@ -226,15 +223,10 @@ onBeforeUnmount(() => clearInterval(poll))
       <div class="stack--tight">
         <h2>Use CodeSynapse automatically in Cursor</h2>
         <p class="muted">Cursor supports plugins that bundle rules, skills, MCP connections and hooks. A <code>beforeSubmitPrompt</code> hook can run on every prompt; connecting MCP alone makes the tools available without guaranteeing their use.</p>
-        <p class="muted">Install Cursor lifecycle hooks for this project. The combined CodeSynapse installer above also installs user-wide hooks; choose one location to avoid duplicate observations.</p>
-        <CopyField :value="hookSetup('cursor')" label="Shell — run in your project" />
+        <p class="muted">The setup command above installs the Cursor bridge and lifecycle hooks for your user. Each MCP invocation is associated with its chat automatically.</p>
         <p class="muted small">Restart Cursor and inspect Customize → Hooks. Session hooks load rules and save metadata, including compaction context usage when reported. View accepted observations in <NuxtLink to="/stats/activity">Statistics → Live activity</NuxtLink>.</p>
-        <p class="notice notice--warn" role="status">Hook setup registers the chat identity for activity reporting. MCP still needs a runtime-aware transport that supplies both session headers per chat.</p>
-        <template v-if="viaBridge">
-          <h3>Supply the chat identity</h3>
-          <p class="muted">A runtime integration must register Cursor’s actual chat ID with <code>POST /api/v1/execution/sessions</code> and send it as both <code>X-CodeSynapse-Session</code> and <code>X-CodeSynapse-Parent-Session</code> on every MCP request. The installer adds header templates to <code>~/.cursor/mcp.json</code>, but a launcher must supply both session environment variables before Cursor connects.</p>
-          <p class="muted small">Keep the same identity across reconnects and compaction. Each new chat needs its own runtime ID; a shared, static session ID cannot distinguish several chats. A hook cannot update the environment of an MCP process that is already running.</p>
-        </template>
+        <p class="muted small">Use a current local Cursor release with MCP call IDs in its hooks, and keep the installed hooks enabled. If the required correlation is unavailable, the bridge refuses the call and explains how to update the setup.</p>
+        <p class="muted">For Cursor CLI, start each chat with <code>codesynapse cursor</code>, or resume with <code>codesynapse cursor --resume &lt;existing-chat-id&gt;</code>. Desktop uses its normal chat interface. Relaunch the CLI to switch chats.</p>
         <h3>Add the graph-first rules</h3>
         <p class="muted">Add this to your repository’s <code>AGENTS.md</code> or an always-applied Cursor rule. It guides Cursor once its MCP connection and runtime identity are working; it does not install hooks.</p>
         <CopyField :value="agentRules" multiline label="AGENTS.md or Cursor rule" />
@@ -252,6 +244,7 @@ onBeforeUnmount(() => clearInterval(poll))
       <p class="step__n">{{ stepCheck }}</p>
       <div class="stack--tight">
         <h2>Check that it works</h2>
+        <p class="muted">After setup, launch CLI chats with <code>codesynapse claude</code>, <code>codesynapse codex</code>, or <code>codesynapse cursor</code>. Open desktop apps normally.</p>
         <p class="muted">Start a <strong>new</strong> session in each selected agent (chats that were already open keep their old setup) and ask something about one of your repositories, for example “Use CodeSynapse to show the callers of the main handler”. These checks show activity across your agents; they do not verify each connection separately.</p>
         <ul class="checks" aria-live="polite">
           <li v-for="c in checks" :key="c.id" :class="{ done: c.done }">
