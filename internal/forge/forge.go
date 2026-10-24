@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -100,6 +101,29 @@ func RepoName(host, owner, name string) string {
 		return owner + "/" + name
 	}
 	return strings.ToLower(host) + "/" + owner + "/" + name
+}
+
+// NameFromRemote names a repository after its https remote, as the API
+// does when it clones one: "owner/name" on github.com, "host/owner/name"
+// anywhere else (lower-case owner and host), "name" when the URL has no
+// owner, and "" when it has a port or a deeper path.
+func NameFromRemote(remote string) string {
+	u, err := url.Parse(remote)
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if u.Port() != "" {
+		return "" // a host name alone would not tell two servers apart; name it explicitly
+	}
+	parts := strings.Split(strings.Trim(strings.TrimSuffix(strings.TrimSuffix(u.Path, "/"), ".git"), "/"), "/")
+	switch {
+	case len(parts) == 2 && (host == DefaultHost || ValidHost(host)):
+		return RepoName(host, parts[0], parts[1])
+	case len(parts) == 1:
+		return parts[0]
+	}
+	return ""
 }
 
 // Repo is one repository of an organisation.

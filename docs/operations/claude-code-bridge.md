@@ -107,6 +107,15 @@ Use whatever hosts your deployment exposes for the MCP endpoint and the API.
 
 `CODESYNAPSE_MCP_URL` and `CODESYNAPSE_API_URL` set the same defaults. The bridge refuses plain `http` to anything except `localhost` or a loopback address, because the key travels with every request.
 
+## Answers from your working tree
+
+The server's graph reflects the last sync, so in the middle of a task it does not know the files you or the agent just changed. While your checkout has changes the server cannot have (uncommitted or untracked files, or commits not pushed to the upstream branch), the bridge answers seven tools for this repository itself, from a graph of the working tree it builds on your machine: `minimal_context`, `get_symbol_context`, `get_call_graph`, `get_implementations`, `file_outline`, `search` and `get_pr_context`.
+
+- **Which repository:** the one the bridge was started in (Claude Code starts it in the project folder), named as the server names it, from the `origin` remote (`owner/name` on github.com, `host/owner/name` elsewhere). Calls that name another repository, and every other tool (memory, reviews, security, `repo_status`, other repositories), go to the server as before. Pass `--repo` when the server knows the checkout by another name.
+- **How it is built:** the same offline indexing as `codesynapse review --offline`, the first time a call needs it and again after the next change (a few seconds for a mid-sized Go module; calls wait for it). Nothing new leaves your machine: the code was already on it, and the answer goes to the agent, not to the server. Because the server is not asked, these answers are not in its audit log or usage statistics.
+- **How you can tell:** the answer starts with a note ("Answered from your working tree of …") and carries `_meta` `codesynapse/source: worktree` with the number of changed files.
+- **When it does not apply:** a clean tree, a repository policy that needs an approved digest, or a failed build: the call goes to the server. `--worktree=false` (or `CODESYNAPSE_BRIDGE_WORKTREE=false`) turns it off.
+
 ## Check it works
 
 Send one `initialize` message through the bridge with a throwaway ID:

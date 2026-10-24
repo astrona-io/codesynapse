@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
-	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -961,30 +960,11 @@ func repoDir(workspace, name string) string {
 	return filepath.Join(workspace, filepath.FromSlash(name))
 }
 
-// repoNameFromRemote names a repository after its remote, so the same
-// owner and name on two providers never collide: "owner/name" on github.com,
-// "host/owner/name" anywhere else (lower-case owner and host), or just "name"
-// when the URL has no owner. It returns "" when the result is not a valid
-// repository name, for instance a GitLab subgroup path the name cannot hold.
+// repoNameFromRemote names a repository after its remote (forge.NameFromRemote),
+// or "" when the result is not a valid repository name here, for instance a
+// GitLab subgroup path the name cannot hold.
 func repoNameFromRemote(remote string) string {
-	u, err := url.Parse(remote)
-	if err != nil {
-		return ""
-	}
-	host := strings.ToLower(u.Hostname())
-	if u.Port() != "" {
-		return "" // a host name alone would not tell two servers apart; name it explicitly
-	}
-	parts := strings.Split(strings.Trim(strings.TrimSuffix(strings.TrimSuffix(u.Path, "/"), ".git"), "/"), "/")
-	var name string
-	switch {
-	case len(parts) == 2 && host == forge.DefaultHost:
-		name = forge.RepoName(host, parts[0], parts[1])
-	case len(parts) == 2 && forge.ValidHost(host):
-		name = forge.RepoName(host, parts[0], parts[1])
-	case len(parts) == 1:
-		name = parts[0]
-	}
+	name := forge.NameFromRemote(remote)
 	if !validRepoName(name) {
 		return ""
 	}

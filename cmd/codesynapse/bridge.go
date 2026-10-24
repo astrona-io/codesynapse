@@ -6,6 +6,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -39,15 +40,19 @@ const (
 )
 
 type mcpBridgeOptions struct {
-	EC     *app.Env
-	url    string
-	apiURL string
+	EC       *app.Env
+	url      string
+	apiURL   string
+	worktree bool
+	repo     string
 }
 
 func (o *mcpBridgeOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f := o.EC.Command.Flags()
 	f.StringVar(&o.url, "url", app.Getenv("CODESYNAPSE_MCP_URL", "http://localhost:8090/mcp"), "MCP endpoint to forward to")
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "CodeSynapse API that registers the chat session")
+	f.BoolVar(&o.worktree, "worktree", app.Getenv("CODESYNAPSE_BRIDGE_WORKTREE", "true") == "true", "While this checkout has changes the server has not indexed, answer the core repository tools from a graph of the working tree built on this machine")
+	f.StringVar(&o.repo, "repo", "", "The name the server knows this checkout by (default: from the origin remote)")
 	return nil
 }
 func (o *mcpBridgeOptions) Complete(context.Context, *app.Env) error { return nil }
@@ -92,6 +97,11 @@ func (o *mcpBridgeOptions) Run(ctx context.Context, _ *app.Env) error {
 	}
 	b := &bridge{url: o.url, token: c.token, session: session, out: o.EC.Stdout,
 		http: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	if o.worktree {
+		if cwd, err := os.Getwd(); err == nil {
+			b.worktree = newWorktree(ctx, cwd, o.repo, o.EC.Logger)
+		}
+	}
 	return b.run(ctx, o.EC.Stdin)
 }
 
@@ -107,6 +117,8 @@ type bridge struct {
 	readyOnce sync.Once
 	readyCh   chan struct{} // closed once initialize was answered
 
+	// worktree answers core tools from the working tree; nil forwards all.
+	worktree *worktree
 }
 
 type rpcMessage struct {
@@ -143,12 +155,37 @@ func (b *bridge) run(ctx context.Context, in io.Reader) error {
 		wg.Add(1)
 		go func() {
 			defer func() { <-slots; wg.Done() }()
+			if m.Method == "tools/call" && b.answerLocally(ctx, msg, m) {
+				return
+			}
 			b.forward(ctx, msg, m)
 		}()
 	}
 	wg.Wait()
 	b.close(ctx)
 	return sc.Err()
+}
+
+// answerLocally answers a core tool call from the working tree when it
+// applies, and reports whether it did.
+func (b *bridge) answerLocally(ctx context.Context, msg []byte, m rpcMessage) bool {
+	c, ok := b.worktree.local(msg)
+	if !ok || len(m.ID) == 0 {
+		return false
+	}
+	result, err := b.worktree.answer(ctx, c)
+	if err != nil {
+		if !errors.Is(err, errNoChanges) {
+			b.worktree.logger.Warn("answering from the server instead of the working tree", "tool", c.Params.Name, "error", err)
+		}
+		return false
+	}
+	out, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": result})
+	if err != nil {
+		return false
+	}
+	b.write(out)
+	return true
 }
 
 // forward posts one message and writes whatever the server answers. A failed
