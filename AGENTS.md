@@ -106,7 +106,6 @@ just web-check  # nuxt typecheck + build
 just checks     # actionlint, hadolint, shellcheck, yamllint, gitleaks, Trivy, govulncheck
 just ci         # all of the above plus the licence check: what CI runs on a pull request
 just up         # full stack in docker compose (creates .env with random secrets)
-just dev-mcp    # MCP on stdio with an in-memory graph of the checkout (no database)
 just dev-web    # Nuxt dev server against the API of `just up`
 just test-integration   # test-hugegraph + test-postgres on throwaway containers
 just test-postgres      # accounts contract against a throwaway PostgreSQL container

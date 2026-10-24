@@ -19,9 +19,11 @@ You need [just](https://github.com/casey/just) and Docker or Podman.
 
 ```sh
 just up                       # writes .env with random secrets, builds and starts everything
-just ingest ~/src/my-service  # indexes a checkout
-open http://localhost:3000    # dashboard
+open http://localhost:3000    # dashboard: sign in as admin (password in .env), replace it, create your organisation
+just ingest ~/src/my-service  # indexes a checkout (needs a git origin remote)
 ```
+
+`just ingest` indexes the checkout through the worker, named after its `origin` remote. To see it in your organisation, sign in as an owner, open Repositories, choose Add and paste the origin's address: the dashboard links the index instead of cloning (a private repository needs your organisation's Git token). Repositories you add by URL are cloned and indexed by the worker without `just ingest`.
 
 Then connect your agent. For Claude Code: sign in, create a key under Settings → API keys, and run
 
@@ -85,7 +87,6 @@ Images and chart are signed with cosign. See the [chart README](deploy/helm/code
 ```sh
 just            # list recipes
 just ci         # what CI runs: lint, race tests, web build, licences, checks
-just dev-mcp    # MCP on stdio with an in-memory graph of the checkout, no database
 just dev-web    # Nuxt dev server against the API of `just up`
 ```
 
