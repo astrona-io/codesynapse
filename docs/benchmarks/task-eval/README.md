@@ -28,6 +28,8 @@ Neither tool names a single touched file in its top ten for about half of the ta
 
 These are the numbers later roadmap steps have to move.
 
+**2026-10-24, leaner answers (step 5):** the baseline moved to `minimal_context` 0.120 / 0.182 / 0.500 / 1,349 tokens and `search` 0.112 / 0.171 / 0.517 / 753 tokens. Search answers are 6% smaller with the same results (compact IDs). `minimal_context` still fills its budget, now with more items, so one more task in ten finds a right file (hit@10 0.466 → 0.500); recall@10 moved by −0.007 because a larger, better-ranked item can now fit where two smaller ones used to. The eval now scores the answers through `internal/coretools`, the same functions the MCP server and the bridge use.
+
 ## Running it
 
 ```sh

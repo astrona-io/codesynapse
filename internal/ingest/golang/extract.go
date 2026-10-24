@@ -469,7 +469,7 @@ func (x *extractor) funcDecl(p *packages.Package, d *ast.FuncDecl, abs, rel, fil
 		ID: x.id(kind, fullName), Kind: kind, Repo: x.opts.Repo,
 		Name: obj.Name(), QualifiedName: fullName, Package: pkgPath, File: rel,
 		StartLine: start.Line, EndLine: end.Line, LOC: end.Line - start.Line + 1,
-		Signature: types.ObjectString(obj, types.RelativeTo(p.Types)),
+		Signature: types.ObjectString(obj, pkgNames(p.Types)),
 		Exported:  obj.Exported(),
 		IsTest:    isTestFile && isTestFunc(obj.Name(), sig),
 	}
@@ -569,7 +569,7 @@ func (x *extractor) typeSpec(p *packages.Package, gd *ast.GenDecl, ts *ast.TypeS
 			ID: x.id(model.KindInterfaceMethod, m.FullName()), Kind: model.KindInterfaceMethod,
 			Repo: x.opts.Repo, Name: m.Name(), QualifiedName: m.FullName(), Package: pkgPath,
 			File: rel, StartLine: pos.Line, EndLine: pos.Line,
-			Signature: types.ObjectString(m, types.RelativeTo(p.Types)), Exported: m.Exported(),
+			Signature: types.ObjectString(m, pkgNames(p.Types)), Exported: m.Exported(),
 		}
 		x.g.AddNode(mn)
 		x.g.AddEdge(model.Edge{From: n.ID, To: mn.ID, Kind: model.EdgeHasMethod})
@@ -810,5 +810,17 @@ func (x *extractor) implementations(pkgs []*packages.Package) {
 				})
 			}
 		}
+	}
+}
+
+// pkgNames writes other packages by name, as source code does
+// ("store.Reader", not the import path), and this package's types bare:
+// signatures read like the code and cost far fewer tokens in answers.
+func pkgNames(self *types.Package) types.Qualifier {
+	return func(p *types.Package) string {
+		if p == self {
+			return ""
+		}
+		return p.Name()
 	}
 }

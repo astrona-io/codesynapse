@@ -18,7 +18,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/astrona-io/codesynapse/internal/agentctx"
+	"github.com/astrona-io/codesynapse/internal/coretools"
 	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
@@ -178,11 +178,11 @@ const MinimalContextBudget = 1500
 
 // Run asks both tools every task against the graph in r.
 func Run(ctx context.Context, r store.Reader, repo string, tasks []Task) Report {
-	svc := agentctx.Service{R: r}
 	rep := Report{Repo: repo, Tasks: len(tasks), Summary: map[string]Summary{}}
 	for _, t := range tasks {
 		res := Result{Task: t, Scores: map[string]Score{}}
-		mc, err := svc.MinimalContext(ctx, repo, t.Subject, nil, MinimalContextBudget)
+		// The answers an agent receives: the MCP server and the bridge use coretools.
+		mc, err := coretools.MinimalContext(ctx, r, repo, coretools.MinimalContextIn{Task: t.Subject, MaxTokens: MinimalContextBudget})
 		res.Scores[ToolMinimalContext] = score(t.Truth, mc, err, func() []string {
 			files := make([]string, 0, len(mc.Items))
 			for _, it := range mc.Items {
@@ -212,15 +212,11 @@ func searchKeywords(ctx context.Context, r store.Reader, repo string, truth, key
 	}
 	var answers [][]query.Ref
 	for _, kw := range keywords[:min(SearchKeywords, len(keywords))] {
-		nodes, err := r.Search(ctx, repo, kw, nil, 10)
+		out, err := coretools.Search(ctx, r, repo, coretools.SearchIn{Query: kw, Limit: 10})
 		if err != nil {
 			return Score{Error: err.Error()}
 		}
-		refs := make([]query.Ref, 0, len(nodes))
-		for _, n := range nodes {
-			refs = append(refs, query.RefOf(n))
-		}
-		answers = append(answers, refs)
+		answers = append(answers, out.Results)
 	}
 	return score(truth, answers, nil, func() []string {
 		var files []string
