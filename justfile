@@ -373,7 +373,7 @@ vuln:
 
 # Type-check and build the web app
 web-check:
-    cd services/web && npm ci --no-fund --no-audit && npm run typecheck && npm run build
+    cd services/web && npm ci --no-fund --no-audit && npm run typecheck && npm test && npm run build
 
 # --- project checks (CI runs the same recipes) ------------------------------
 # Tools run at pinned versions through `go run`, ghcr.io images or uvx, so
