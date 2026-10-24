@@ -151,10 +151,10 @@ onBeforeUnmount(() => clearInterval(poll))
         <p class="muted small">MCP address: <code>{{ mcpUrl }}</code><template v-if="viaBridge"> · API address: <code>{{ apiUrl }}</code></template>. Several agents on one machine? Leave out <code>--only</code> and it offers every agent it finds.</p>
         <p v-if="viaBridge && apiUrl.includes('<')" class="notice notice--warn" role="status">This installation does not know its public API address. Replace <code>{{ apiUrl }}</code> with the address your API is reached at, or ask the operator to set <code>CODESYNAPSE_PUBLIC_API_URL</code>.</p>
         <details v-if="viaBridge">
-          <summary class="muted small">Make every call reach the server</summary>
+          <summary class="muted small">Every call reaches the server (and an opt-in for fresh answers)</summary>
           <div class="stack--tight small">
-            <p>While your checkout has changes the server has not indexed yet, the bridge answers ten core tools from a graph of your working tree built on your machine. Those answers are fast and current, but they never reach the server, so they are not in its audit log or statistics. To send every call to your system, set this where Claude Code starts, for example in your shell profile:</p>
-            <CopyField value="export CODESYNAPSE_BRIDGE_WORKTREE=false" />
+            <p>By default the bridge sends every call to your system: it is signed with your key, checked against your permissions, written to the audit log and counted here. The server's graph reflects the last sync, so it does not know edits you made since. If you prefer fast answers that include uncommitted edits, you can opt in to answering ten core tools from your working tree on your machine; those answers never reach the server, so they are not audited or counted. Set this where Claude Code starts, for example in your shell profile:</p>
+            <CopyField value="export CODESYNAPSE_BRIDGE_WORKTREE=true" />
             <p class="muted">Remote servers must use <code>https</code>; the bridge refuses plain <code>http</code> to anything but this machine.</p>
           </div>
         </details>

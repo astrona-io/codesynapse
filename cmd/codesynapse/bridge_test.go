@@ -13,6 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
+	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
@@ -186,4 +189,20 @@ func TestBridgeAnswersAProbeBeforeInitialize(t *testing.T) {
 	}
 	assert.Equal(t, got["0"], "error -32601", "a probe is told the method is unknown")
 	assert.Equal(t, got["1"], "result", "initialize is still answered")
+}
+
+// Every call goes to the server unless the user opts in to local answers:
+// they would not be audited or counted there.
+func TestBridgeWorktreeAnswersAreOptIn(t *testing.T) {
+	t.Setenv("CODESYNAPSE_BRIDGE_WORKTREE", "")
+	ec := &app.Env{Command: &cobra.Command{Use: "bridge"}}
+	o := &mcpBridgeOptions{EC: ec}
+	require.NoError(t, o.SetupFlags(context.Background(), ec))
+	assert.False(t, o.worktree, "off by default")
+
+	t.Setenv("CODESYNAPSE_BRIDGE_WORKTREE", "true")
+	ec = &app.Env{Command: &cobra.Command{Use: "bridge"}}
+	o = &mcpBridgeOptions{EC: ec}
+	require.NoError(t, o.SetupFlags(context.Background(), ec))
+	assert.True(t, o.worktree, "on when asked for")
 }
