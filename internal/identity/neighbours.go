@@ -2,6 +2,7 @@ package identity
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"slices"
 	"strings"
@@ -73,7 +74,14 @@ func neighbours(g *model.Graph, anchors map[string]string) map[string]neighbourh
 				}
 			}
 			slices.Sort(features)
-			hash := sha256.Sum256([]byte(strings.Join(features, "\n")))
+			// Length prefixes keep untrusted names containing separators from
+			// making two different neighbourhoods share the same encoding.
+			var encoded []byte
+			for _, feature := range features {
+				encoded = binary.BigEndian.AppendUint64(encoded, uint64(len(feature)))
+				encoded = append(encoded, feature...)
+			}
+			hash := sha256.Sum256(encoded)
 			n.hash = hex.EncodeToString(hash[:])
 		}
 		out[id] = n

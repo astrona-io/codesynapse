@@ -74,3 +74,20 @@ func TestNeighbourhoodDoesNotCollapseCopies(t *testing.T) {
 	assert.Equal(t, original.SymbolID, base.Symbols[0].ID)
 	assert.True(t, copied.SymbolID != original.SymbolID)
 }
+
+func TestNeighbourhoodEncodingSeparatesUntrustedNames(t *testing.T) {
+	prefix := "out:CALLS:external:r|External|"
+	fingerprint := func(names []string) string {
+		fn := declaration("F", "f.go")
+		g := graph("one", fn)
+		for _, name := range names {
+			id := model.NodeID("r", model.KindExternal, name)
+			g.AddNode(model.Node{ID: id, Repo: "r", Kind: model.KindExternal})
+			g.AddEdge(model.Edge{From: fn.ID, To: id, Kind: model.EdgeCalls})
+		}
+		return neighbours(g, nil)[fn.ID].hash
+	}
+	one := fingerprint([]string{"a", "b\n" + prefix + "c"})
+	two := fingerprint([]string{"a\n" + prefix + "b", "c"})
+	assert.True(t, one != "" && two != "" && one != two)
+}
