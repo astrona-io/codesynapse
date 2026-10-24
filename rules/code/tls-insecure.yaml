@@ -4,7 +4,7 @@ title: TLS certificate verification disabled
 severity: high
 cwe: [CWE-295]
 category: code
-languages: [go, python, javascript, typescript, java, kotlin]
+languages: [go, python, javascript, typescript, java, kotlin, rust]
 why: Without certificate verification anyone on the network path can impersonate the server and read or change traffic.
 fix: Remove InsecureSkipVerify; configure RootCAs for private CAs.
 references:
@@ -25,3 +25,6 @@ examples:
   - language: java
     vulnerable: 'conn.setHostnameVerifier((host, session) -> true);'
     fixed: '// keep the default HostnameVerifier and trust store'
+  - language: rust
+    vulnerable: 'reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;'
+    fixed: 'reqwest::Client::builder().add_root_certificate(internal_ca).build()?;'

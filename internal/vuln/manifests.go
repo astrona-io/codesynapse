@@ -431,6 +431,8 @@ func ImportName(m Module) string {
 			return a
 		}
 		return strings.ReplaceAll(m.Path, "-", "_")
+	case EcosystemCargo:
+		return strings.ReplaceAll(m.Path, "-", "_") // serde-json is serde_json in use paths
 	default:
 		return m.Path
 	}

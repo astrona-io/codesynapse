@@ -107,6 +107,9 @@ func looksSecret(name, value string) bool {
 		return false
 	}
 	lower := strings.ToLower(name)
+	if strings.EqualFold(value, name) {
+		return false // CSRF_TOKEN = "csrf_token" names a field or cookie
+	}
 	for _, ref := range []string{"name", "key_id", "file", "path", "env", "url", "type", "header", "field", "prefix", "_ref"} {
 		if strings.HasSuffix(lower, ref) {
 			return false
@@ -300,6 +303,8 @@ func tagsFor(calls []call, lang string) []string {
 			set["env"] = true
 		case isJVM(lang):
 			jvmTags(c.recv, n, set)
+		case lang == Rust:
+			rustTags(c.recv, n, set)
 		}
 	}
 	var out []string

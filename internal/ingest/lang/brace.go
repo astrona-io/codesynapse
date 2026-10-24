@@ -36,7 +36,14 @@ type braceLang struct {
 	// testAnnotated reports a test function from its annotations.
 	testAnnotated func(annotations []string) bool
 	textBlocks    bool // """ … """ strings (Java text blocks, Kotlin raw strings)
-	rules         func(raw, masked string, line int, owner string) []finding
+	// rust: 'a is a lifetime unless it closes as a character literal, and
+	// r"…" / r#"…"# are raw strings.
+	rust bool
+	// scope matches a block that gives its methods a type without declaring
+	// one (Rust's impl Type, impl Trait for Type); its last non-empty group
+	// is the type.
+	scope *regexp.Regexp
+	rules func(raw, masked string, line int, owner string) []finding
 	// routes reads the entry points of a function from its annotations and
 	// those of the enclosing type.
 	routes func(typeAnns, fnAnns []string, handler string, line int) []route
@@ -57,7 +64,7 @@ type braceType struct {
 // parseBrace parses one file of language l.
 func parseBrace(src []byte, l *braceLang) (*fileResult, string) {
 	raw := strings.Split(string(src), "\n")
-	masked := maskBrace(string(src), l.textBlocks)
+	masked := maskBraceLang(string(src), l)
 	lines := strings.Split(masked, "\n")
 	depth := depths(masked)
 	fr := &fileResult{partial: unbalanced(masked, '{', '}')}
@@ -94,6 +101,13 @@ func parseBrace(src []byte, l *braceLang) (*fileResult, string) {
 		}
 		atMember := len(types) > 0 && depth[i] == types[len(types)-1].depth
 		atTop := depth[i] == 0
+		if l.scope != nil && (atTop || atMember) {
+			if m := l.scope.FindStringSubmatch(line); m != nil {
+				types = append(types, braceType{name: lastGroup(m), depth: depth[i] + 1, end: braceEnd(lines, n), anns: pending})
+				pending = nil
+				continue
+			}
+		}
 		if (atTop || atMember) && l.typeDecl.MatchString(line) {
 			name := lastGroup(l.typeDecl.FindStringSubmatch(line))
 			if name == "" {
@@ -168,7 +182,7 @@ func parseBrace(src []byte, l *braceLang) (*fileResult, string) {
 		if l.rules != nil {
 			fr.findings = append(fr.findings, l.rules(raw[i], line, n, ownerName(o))...)
 		}
-		if l.lineRoutes != nil {
+		if l.lineRoutes != nil && strings.TrimSpace(line) != "" { // not in a comment
 			fr.routes = append(fr.routes, l.lineRoutes(raw[i], n)...)
 		}
 	}
@@ -221,12 +235,29 @@ func braceSignature(raw []string, i int) string {
 	return jsSignature(raw, i)
 }
 
-// braceDoc reads the comment above a declaration (Javadoc, KDoc, //).
+// braceDoc reads the comment block right above line i: /** */, ///, //!,
+// // and * lines, without markers and @tags.
 func braceDoc(raw []string, i int) string {
-	if i <= 0 {
-		return ""
+	var parts []string
+	for j := i - 1; j >= 0 && j >= i-20; j-- {
+		t := strings.TrimSpace(raw[j])
+		if !strings.HasPrefix(t, "//") && !strings.HasPrefix(t, "*") && !strings.HasPrefix(t, "/*") {
+			break
+		}
+		t = strings.TrimSpace(strings.TrimLeft(strings.TrimSuffix(t, "*/"), "/*!"))
+		if t == "" || strings.HasPrefix(t, "@") {
+			continue
+		}
+		parts = append([]string{t}, parts...)
 	}
-	return jsDoc(raw, i)
+	return strings.Join(parts, " ")
+}
+
+func maskBraceLang(src string, l *braceLang) string {
+	if l.rust {
+		return maskRust(src)
+	}
+	return maskBrace(src, l.textBlocks)
 }
 
 // maskBrace blanks string and character literal contents and comments,
@@ -279,6 +310,82 @@ func maskBrace(src string, textBlocks bool) string {
 				j++
 			}
 			i = j
+		}
+	}
+	return string(out)
+}
+
+// maskRust is maskBrace for Rust: raw strings r"…" and r#"…"#, and 'a
+// lifetimes, which are not character literals.
+func maskRust(src string) string {
+	b := []byte(src)
+	out := make([]byte, len(b))
+	copy(out, b)
+	blank := func(i int) {
+		if out[i] != '\n' {
+			out[i] = ' '
+		}
+	}
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		switch {
+		case c == '/' && i+1 < len(b) && b[i+1] == '/':
+			for i < len(b) && b[i] != '\n' {
+				blank(i)
+				i++
+			}
+			i--
+		case c == '/' && i+1 < len(b) && b[i+1] == '*':
+			for i < len(b) && (b[i] != '*' || i+1 >= len(b) || b[i+1] != '/') {
+				blank(i)
+				i++
+			}
+			if i+1 < len(b) {
+				blank(i)
+				blank(i + 1)
+				i++
+			}
+		case c == 'r' && i+1 < len(b) && (b[i+1] == '"' || b[i+1] == '#') && (i == 0 || !isIdent(rune(b[i-1]))):
+			j := i + 1
+			hashes := 0
+			for j < len(b) && b[j] == '#' {
+				hashes++
+				j++
+			}
+			if j >= len(b) || b[j] != '"' {
+				continue
+			}
+			end := "\"" + strings.Repeat("#", hashes)
+			k := strings.Index(src[j+1:], end)
+			if k < 0 {
+				k = len(src) - j - 1
+			}
+			for m := j + 1; m < j+1+k; m++ {
+				blank(m)
+			}
+			i = j + k + len(end)
+		case c == '"':
+			j := i + 1
+			for j < len(b) && b[j] != '"' {
+				if b[j] == '\\' {
+					blank(j)
+					j++
+				}
+				if j < len(b) {
+					blank(j)
+				}
+				j++
+			}
+			i = j
+		case c == '\'':
+			// A character literal closes within a few bytes ('a', '\n',
+			// '\u{1F600}'); otherwise this is a lifetime ('a, 'static).
+			if j := strings.IndexByte(src[i+1:min(len(src), i+12)], '\''); j >= 0 && (j == 1 || b[i+1] == '\\' || j <= 4 && b[i+1] >= 0x80) {
+				for m := i + 1; m < i+1+j; m++ {
+					blank(m)
+				}
+				i += j + 1
+			}
 		}
 	}
 	return string(out)
