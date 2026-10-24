@@ -22,6 +22,8 @@ import (
 	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/ingest"
 	"github.com/astrona-io/codesynapse/internal/logx"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/runtimefacts"
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/store/memory"
 )
@@ -98,6 +100,13 @@ func (w *worktree) changes(ctx context.Context) (key string, files int, err erro
 	h := sha256.New()
 	_, _ = fmt.Fprintf(h, "%s\x00%d\x00", gitx.HeadCommit(ctx, w.root), ahead) //nolint:errcheck // hashes never fail
 	h.Write(status)                                                            //nolint:errcheck // hashes never fail
+	// A new test run (often ignored by git) changes the measured facts.
+	reports := runtimefacts.Discover(w.root)
+	for _, p := range append(reports.Coverage, reports.JUnit...) {
+		if st, err := os.Stat(p); err == nil {
+			_, _ = fmt.Fprintf(h, "%s\x00%d\x00%d\x00", p, st.Size(), st.ModTime().UnixNano()) //nolint:errcheck // hashes never fail
+		}
+	}
 	for entry := range strings.SplitSeq(string(status), "\x00") {
 		if len(entry) < 4 {
 			continue
@@ -145,6 +154,7 @@ func (w *worktree) build(ctx context.Context, b *worktreeBuild) {
 	if err == nil {
 		mem := memory.New()
 		if err = mem.ReplaceRepo(ctx, w.repo, g); err == nil {
+			w.loadRuntimeFacts(ctx, mem, g)
 			b.graph = mem
 		}
 	}
@@ -212,6 +222,24 @@ func (w *worktree) answer(ctx context.Context, c toolCall) (map[string]any, erro
 		"structuredContent": json.RawMessage(raw),
 		"_meta":             map[string]any{"codesynapse/source": "worktree", "codesynapse/changed_files": files},
 	}, nil
+}
+
+// loadRuntimeFacts adds what the last local test run measured (coverage
+// profiles and JUnit reports at the usual places) to the working-tree
+// graph. A report that cannot be read is logged and skipped: the graph's
+// answers do not depend on it.
+func (w *worktree) loadRuntimeFacts(ctx context.Context, mem *memory.Store, g *model.Graph) {
+	files := runtimefacts.Discover(w.root)
+	if files.Empty() {
+		return
+	}
+	f, err := runtimefacts.Load(ctx, runtimefacts.NodeSource(g.Nodes()), files)
+	if err == nil {
+		err = mem.SetRuntimeFacts(ctx, w.repo, f)
+	}
+	if err != nil {
+		w.logger.Warn("test reports skipped", "error", err)
+	}
 }
 
 var errNoChanges = errors.New("the working tree has no changes the server lacks")

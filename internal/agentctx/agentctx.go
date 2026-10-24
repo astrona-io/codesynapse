@@ -77,6 +77,8 @@ type Ref struct {
 	Summary     string         `json:"summary,omitempty"`
 	// Evidence says how a direct caller's or callee's edge was established.
 	Evidence model.Evidence `json:"evidence,omitempty"`
+	// RunNote flags a test that was flaky or failing in the last recorded run.
+	RunNote string `json:"run_note,omitempty"`
 }
 
 func refOf(n model.Node, depth int, withSummary bool) Ref {
@@ -122,7 +124,9 @@ type SymbolContext struct {
 	Analysis        *AnalysisNote   `json:"analysis,omitempty"`
 	// Duplicate is set when the function has exact or edited copies elsewhere.
 	Duplicate *duplicates.Info `json:"duplicate,omitempty"`
-	Hint      string           `json:"hint,omitempty"`
+	// Measured is the function's coverage in the last recorded test run.
+	Measured *Measured `json:"measured,omitempty"`
+	Hint     string    `json:"hint,omitempty"`
 }
 
 // Counts are totals before list truncation.
@@ -197,6 +201,12 @@ func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts Co
 	}
 	if err := s.labelEvidence(ctx, n.ID, tests, out.Tests, nil, nil); err != nil {
 		return out, err
+	}
+	if f, ok, stale, err := s.runtimeFacts(ctx, repo); err != nil {
+		return out, err
+	} else if ok {
+		annotateRuns(f, tests, out.Tests)
+		out.Measured = measuredOf(f, stale, n.ID)
 	}
 	if out.Analysis, err = s.analysisOf(ctx, repo, n); err != nil {
 		return out, err
