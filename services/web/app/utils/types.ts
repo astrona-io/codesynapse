@@ -140,6 +140,10 @@ export interface SecurityReport {
   head?: string; indexed_at?: string; checked?: string[]; not_checked?: string[]; unanalysed_findings?: number
   coverage?: { excluded_files?: number; kubernetes_excluded_files?: number; kubernetes_disabled?: boolean; inventory_incomplete?: boolean }
 }
+export interface ImageScan {
+  uploaded_at: string; images: string[]; counts: Record<string, number>; total: number; truncated: boolean
+  findings: { image: string; package: string; version: string; id: string; severity: string; fixed?: string; title?: string }[]
+}
 export interface Distribution { count: number; min: number; max: number; mean: number; p50: number; p90: number; p99: number; buckets: { label: string; count: number }[] }
 export interface MetricsReport {
   generated_at: string

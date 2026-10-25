@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import type { RuleGuide, SecFinding, SecurityReport } from '~/utils/types'
+import type { ImageScan, RuleGuide, SecFinding, SecurityReport } from '~/utils/types'
 
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
 const { data: rep, error } = useApiGet<SecurityReport>(() => repoPath(repo.value, 'security'))
+// 404 until CI uploads a scan (codesynapse images upload): the panel stays hidden.
+const { data: images } = useApiGet<ImageScan>(() => repoPath(repo.value, 'images'))
 const { data: catalog } = useApiGet<{ rules: RuleGuide[] }>('rules')
 const guides = computed(() => new Map((catalog.value?.rules ?? []).map((g) => [g.rule, g])))
 const ruleFilter = ref('')
@@ -169,6 +171,29 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
           </table>
         </div>
         <div v-else class="empty"><strong>No known vulnerabilities</strong>{{ rep.modules.total ? 'for the current filter.' : 'Ingest with vulnerability scanning enabled (CODESYNAPSE_VULN_SCAN=true).' }}</div>
+      </section>
+
+      <section v-if="images" class="panel">
+        <div class="panel__header">
+          <div><p class="eyebrow">Container images</p><h2>Base-image vulnerabilities <span class="muted">· {{ images.total }}</span></h2></div>
+          <p class="muted">{{ images.images.join(', ') }} · scanned {{ new Date(images.uploaded_at).toLocaleDateString() }}</p>
+        </div>
+        <div v-if="images.findings.length" class="table-wrap">
+          <table>
+            <thead><tr><th>Severity</th><th>Advisory</th><th>Package</th><th>Version → fix</th><th>Image</th></tr></thead>
+            <tbody>
+              <tr v-for="f in images.findings" :key="`${f.image}${f.package}${f.version}${f.id}`">
+                <td><SevBadge :severity="f.severity" /></td>
+                <td class="mono">{{ f.id }}</td>
+                <td class="mono">{{ f.package }}</td>
+                <td class="mono"><span class="muted">{{ f.version }}</span> → <span :class="f.fixed ? 'fix' : 'error'">{{ f.fixed || 'no fix' }}</span></td>
+                <td class="mono">{{ f.image }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-if="images.truncated" class="muted">Showing the worst {{ images.findings.length }} of {{ images.total }}.</p>
+        </div>
+        <div v-else class="empty"><strong>No known vulnerabilities in the scanned images</strong></div>
       </section>
 
       <section v-if="rep.owners?.length" class="panel">
