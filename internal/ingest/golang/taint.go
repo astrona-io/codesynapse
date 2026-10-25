@@ -14,11 +14,10 @@ import (
 // the standard library functions that only transform their input. A value
 // parsed into a number, a base name or an escaped string is clean.
 
-// requestTypes are the types whose values are request input.
-var requestTypes = map[string]bool{
-	"net/http.Request": true, "*net/http.Request": true, "net/url.Values": true, "*net/url.URL": true,
-	"net/http.Header": true, "*net/http.Cookie": true,
-}
+// requestTypes are the incoming request. A URL, header or cookie is input
+// only when it was read from one (r.URL, r.Header): a url.URL parsed from
+// configuration is not.
+var requestTypes = map[string]bool{"net/http.Request": true, "*net/http.Request": true}
 
 // requestReads are the methods and fields of request types that return
 // input the client chose.
@@ -63,6 +62,12 @@ var binders = map[string]bool{
 var propagators = map[string]bool{
 	"fmt": true, "strings": true, "bytes": true, "path": true, "path/filepath": true, "net/url": true,
 	"io": true, "bufio": true, "encoding/json": true, "encoding/base64": true,
+}
+
+// propagatingMethods hand back what their receiver holds, outside the
+// propagator packages.
+var propagatingMethods = map[string]bool{
+	"net/http.Header.Get": true, "net/http.Header.Values": true, "net/http.Cookie.String": true,
 }
 
 // sanitizers return values an attacker cannot steer into the sinks here:
@@ -150,7 +155,13 @@ func (s *scanner) taintOf(e ast.Expr) string {
 			return s.taintOf(v.Args[0]) // string(b), []byte(s)
 		}
 		fn := calleeFunc(s.p.info, v.Fun)
-		if fn == nil || fn.Pkg() == nil || sanitizers[fn.FullName()] || !propagators[fn.Pkg().Path()] {
+		if fn == nil || fn.Pkg() == nil {
+			return ""
+		}
+		if sum := s.sums[fn.Origin()]; sum != nil {
+			return s.returnsTaint(v, sum)
+		}
+		if sanitizers[fn.FullName()] || !propagators[fn.Pkg().Path()] && !propagatingMethods[methodName(fn.Origin())] {
 			return ""
 		}
 		for _, a := range v.Args {
@@ -217,6 +228,14 @@ func (s *scanner) track(n ast.Node) {
 		for i, name := range v.Names {
 			if i < len(v.Values) {
 				set(name, s.taintOf(v.Values[i]))
+			}
+		}
+	case *ast.ReturnStmt:
+		if s.sum != nil {
+			for _, r := range v.Results {
+				if i := paramOf(s.taintOf(r)); i >= 0 && i < s.sum.params {
+					s.sum.returns[i] = true
+				}
 			}
 		}
 	case *ast.RangeStmt:

@@ -58,6 +58,12 @@ type scanner struct {
 	seen         map[string]bool
 	// taint maps variables holding request input to where it came from.
 	taint map[types.Object]string
+	// quiet scans only to learn a summary (sum); sums are the summaries of
+	// the repository's functions known so far (interprocedural.go).
+	quiet bool
+	sum   *summary
+	sums  map[*types.Func]*summary
+	name  string // the function scanned, for findings reached through calls
 }
 
 // pkgInfo is the slice of packages.Package the scanner needs.
@@ -67,7 +73,16 @@ type pkgInfo struct {
 }
 
 func (x *extractor) scan(info *types.Info, fset *token.FileSet, node ast.Node, ownerID, rel string) {
-	s := &scanner{x: x, p: &pkgInfo{info: info, fset: fset}, ownerID: ownerID, rel: rel, seen: map[string]bool{}, taint: map[types.Object]string{}}
+	x.newScanner(info, fset, ownerID, rel).walk(node)
+}
+
+func (x *extractor) newScanner(info *types.Info, fset *token.FileSet, ownerID, rel string) *scanner {
+	return &scanner{x: x, p: &pkgInfo{info: info, fset: fset}, ownerID: ownerID, rel: rel, seen: map[string]bool{}, taint: map[types.Object]string{}}
+}
+
+// walk runs the rules over node, a function body or declaration.
+func (s *scanner) walk(node ast.Node) {
+	info := s.p.info
 	ast.Inspect(node, func(n ast.Node) bool {
 		if call, ok := n.(*ast.CallExpr); ok {
 			if fn := calleeFunc(info, call.Fun); fn != nil && fn.Pkg() != nil {
@@ -112,20 +127,32 @@ func (x *extractor) scan(info *types.Info, fset *token.FileSet, node ast.Node, o
 }
 
 func (s *scanner) report(ruleID string, pos token.Pos, detail string) {
-	rule := rules.MustGet(ruleID)
+	if s.quiet {
+		return
+	}
 	line := s.p.fset.Position(pos).Line
 	key := fmt.Sprintf("%s:%d:%s", s.rel, line, ruleID)
 	if s.seen[key] {
 		return
 	}
 	s.seen[key] = true
-	id := s.x.id(model.KindFinding, key)
-	s.x.g.AddNode(model.Node{
-		ID: id, Kind: model.KindFinding, Repo: s.x.opts.Repo, Name: rule.Title, Rule: rule.ID,
-		Severity: rule.Severity, CWE: rule.CWE, File: s.rel, StartLine: line, EndLine: line,
+	s.x.addFinding(s.rel, line, s.ownerID, ruleID, detail)
+}
+
+// addFinding adds a finding owned by ownerID. The ID is the place and the
+// rule, so the same finding reached twice is one node.
+func (x *extractor) addFinding(rel string, line int, ownerID, ruleID, detail string) {
+	rule := rules.MustGet(ruleID)
+	id := x.id(model.KindFinding, fmt.Sprintf("%s:%d:%s", rel, line, ruleID))
+	if _, ok := x.g.Node(id); ok {
+		return
+	}
+	x.g.AddNode(model.Node{
+		ID: id, Kind: model.KindFinding, Repo: x.opts.Repo, Name: rule.Title, Rule: rule.ID,
+		Severity: rule.Severity, CWE: rule.CWE, File: rel, StartLine: line, EndLine: line,
 		Summary: redact.Summary(detail+". "+rule.Fix, 300),
 	})
-	s.x.g.AddEdge(model.Edge{From: s.ownerID, To: id, Kind: model.EdgeHasFinding})
+	x.g.AddEdge(model.Edge{From: ownerID, To: id, Kind: model.EdgeHasFinding})
 }
 
 func (s *scanner) isConst(e ast.Expr) bool {
@@ -177,6 +204,9 @@ func (s *scanner) call(call *ast.CallExpr) {
 	fn = fn.Origin()
 	full, pkg := fn.FullName(), fn.Pkg().Path()
 	args := call.Args
+	if sum := s.sums[fn]; sum != nil {
+		s.through(call, fn, sum)
+	}
 
 	switch full {
 	case "os/exec.Command", "os/exec.CommandContext":
@@ -193,7 +223,7 @@ func (s *scanner) call(call *ast.CallExpr) {
 				if i > 0 {
 					what = fmt.Sprintf("argument %d", i)
 				}
-				s.report("exec-from-request", call.Pos(), withTaint(what+" comes from the incoming request", from))
+				s.sink("exec-from-request", call.Pos(), what+" comes from the incoming request", from)
 				return
 			}
 		}
@@ -215,19 +245,19 @@ func (s *scanner) call(call *ast.CallExpr) {
 		s.report("http-client-default", call.Pos(), full)
 		if len(args) > 0 {
 			if from := s.taintOf(args[0]); from != "" {
-				s.report("ssrf-from-request", call.Pos(), withTaint("URL comes from the incoming request", from))
+				s.sink("ssrf-from-request", call.Pos(), "URL comes from the incoming request", from)
 			}
 		}
 	case "(*net/http.Client).Get", "(*net/http.Client).Post", "(*net/http.Client).Head", "(*net/http.Client).PostForm":
 		if len(args) > 0 {
 			if from := s.taintOf(args[0]); from != "" {
-				s.report("ssrf-from-request", call.Pos(), withTaint("URL comes from the incoming request", from))
+				s.sink("ssrf-from-request", call.Pos(), "URL comes from the incoming request", from)
 			}
 		}
 	case "net/http.NewRequest", "net/http.NewRequestWithContext":
 		if i := len(args) - 2; i >= 0 {
 			if from := s.taintOf(args[i]); from != "" {
-				s.report("ssrf-from-request", call.Pos(), withTaint("URL comes from the incoming request", from))
+				s.sink("ssrf-from-request", call.Pos(), "URL comes from the incoming request", from)
 			}
 		}
 	case "os.WriteFile", "os.Chmod", "os.MkdirAll", "os.Mkdir", "os.OpenFile":
@@ -236,7 +266,7 @@ func (s *scanner) call(call *ast.CallExpr) {
 				s.report("file-world-writable", call.Pos(), fmt.Sprintf("%s with mode %#o", full, mode))
 			}
 			if from := s.taintOf(args[0]); from != "" {
-				s.report("path-from-request", call.Pos(), withTaint(full+" path comes from the request", from))
+				s.sink("path-from-request", call.Pos(), full+" path comes from the request", from)
 			}
 		}
 	case "os.Open", "os.ReadFile", "os.Create", "os.Remove", "os.RemoveAll", "os.ReadDir", "os.Stat", "net/http.ServeFile":
@@ -247,7 +277,7 @@ func (s *scanner) call(call *ast.CallExpr) {
 		}
 		for _, x := range a {
 			if from := s.taintOf(x); from != "" {
-				s.report("path-from-request", call.Pos(), withTaint(full+" path comes from the request", from))
+				s.sink("path-from-request", call.Pos(), full+" path comes from the request", from)
 				break
 			}
 		}
@@ -275,7 +305,7 @@ func (s *scanner) call(call *ast.CallExpr) {
 		case "Query", "QueryContext", "QueryRow", "QueryRowContext", "Exec", "ExecContext", "Prepare", "PrepareContext", "Raw", "Select", "Get":
 			if q := queryArg(fn, args); q != nil {
 				if from := s.taintOf(q); from != "" {
-					s.report("sql-from-request", call.Pos(), withTaint(full+" runs SQL text taken from the request", from))
+					s.sink("sql-from-request", call.Pos(), full+" runs SQL text taken from the request", from)
 				} else if s.builtDynamically(q) {
 					s.report("sql-concat", call.Pos(), full+" with a dynamically built query")
 				}
