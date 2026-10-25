@@ -123,6 +123,7 @@ type Server struct {
 	jobs        *Jobs
 	notify      notifyCache
 	overviews   overviewCache
+	aiProbe     aiStatusCache
 	// offload extracts memory triples from conversation turns (local model only).
 	offload *offload.Worker
 	recall  *recall.Service
@@ -389,6 +390,7 @@ func (s *Server) routes() {
 	s.route("POST /api/v1/reviews/{id}/fix", reviewRole(accounts.Member), s.withExecution(s.handleFixReview))
 	s.route("POST /api/v1/repos/{repo}/remote", repoRole(accounts.Admin), s.withExecution(s.handleSwitchToRemote))
 	s.route("GET /api/v1/ai/providers", governance(anyone), s.handleAIProviders)
+	s.route("GET /api/v1/ai/status", governance(anyone), s.handleAIStatus)
 	s.route("PUT /api/v1/ai/routing", governance(platformOnly), s.handlePutRouting)
 	s.route("POST /api/v1/ai/providers/{name}/test", governance(platformOnly), s.withExecution(s.handleAITest))
 	s.route("POST /api/v1/repos/{repo}/ai/{task}", repoRole(accounts.Member), s.withExecution(s.handleAITask))
