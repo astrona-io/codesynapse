@@ -49,7 +49,7 @@ Option A. Search stays inside the stores that hold the data, and every leg of a 
 
 How each kind of data is searched:
 
-- **Code symbols:** exact identifier lookup first (`store.Search` ranks exact names before substrings; `qualified_id` resolves ambiguity), then structure through the graph (`get_call_graph`, `get_implementations`). No dense leg, because source is not embedded.
+- **Code symbols:** exact identifier lookup first (`store.Search` ranks exact names before substrings; `qualified_id` resolves ambiguity), then structure through the graph (`get_call_graph`, `get_implementations`). No dense leg, because source is not embedded. (ADR 0002 later added one over descriptions only: name, signature and first doc sentence, local model.)
 - **Agent memory:** hybrid. A lexical leg ranks the namespace's entities with BM25 over names, aliases and types (`memory.RankBM25`, behind `store.MemoryStore.MemoryLexical`); a dense leg asks the vector index (`MemoryNearest`, Milvus or Neo4j). Recall fuses the two with RRF (`memory.FuseRRF`, k = 60), deduplicates by entity, keeps 3 to 8 entries and expands them 1 to 2 hops. Ranks are fused, never raw scores, so BM25 values and cosine similarities need no common scale.
 - **Doc sections, reviews, commits:** lexical through the graph as today, until a trigger below fires.
 

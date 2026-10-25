@@ -144,7 +144,7 @@ func NewOllama(baseURL, model string) (*Ollama, error) {
 	}
 	host := u.Hostname()
 	ip := net.ParseIP(host)
-	if host != "localhost" && (ip == nil || !(ip.IsLoopback() || ip.IsPrivate())) {
+	if host != "localhost" && (ip == nil || (!ip.IsLoopback() && !ip.IsPrivate())) {
 		return nil, fmt.Errorf("semantic: %s is not a local address; embeddings run locally only", host)
 	}
 	return &Ollama{URL: strings.TrimRight(baseURL, "/"), Model: model, HTTP: &http.Client{Timeout: 2 * time.Minute}}, nil
