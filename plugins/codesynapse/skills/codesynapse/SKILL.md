@@ -19,6 +19,10 @@ CodeSynapse has indexed this repository's code, docs, YAML, history and dependen
    - `verify_plan` (no arguments: your current change) and run the commands it lists, closest tests first.
    - `get_pr_context` (no arguments) and check `security_delta`: fix anything listed under `introduced`, and anything flagged untested or high risk, or say why not.
 
+## Git
+
+With the `git` toolset, ask these instead of running `git status`, `git diff`, `git blame` or `git log` and then opening files: `git_status` (where the checkout stands), `git_diff_summary` (what changed, as line ranges to read), `git_blame` (who last changed lines a..b), `git_log` (recent commits for a path). Then `get_pr_context` for symbols, risk and tests.
+
 ## Rules
 
 - Ambiguous names return `qualified_id` suggestions: retry with one of them. Compact IDs (`Function|pkg.Name`) from one answer work in the next call.
