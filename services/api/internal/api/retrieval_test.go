@@ -106,6 +106,11 @@ func TestAgentStatusCountsTodaysActivity(t *testing.T) {
 		{Day: today, Repo: storetest.Repo, Tool: "search", Client: "claude-code", Calls: 3},
 		{Day: today, Repo: storetest.Repo, Tool: usage.FirstCodeSynapse, Client: "claude-code", Calls: 1},
 		{Day: today, Repo: storetest.Repo, Tool: usage.ReadTurnedBack, Client: "claude-code", Calls: 4},
+		// Counters that share the buckets are not tool calls.
+		{Day: today, Repo: storetest.Repo, Tool: usage.TokenInput, Client: "claude-code", Calls: 15_000_000},
+		{Day: today, Repo: storetest.Repo, Tool: usage.TokenTurns, Client: "claude-code", Calls: 12},
+		{Day: today, Repo: storetest.Repo, Tool: "(edit:patch-bytes)", Client: "claude-code", Calls: 40_000},
+		{Day: today, Repo: storetest.Repo, Tool: usage.FilesEdited, Client: "claude-code", Calls: 2},
 		{Day: usage.Day(time.Now().AddDate(0, 0, -2)), Repo: storetest.Repo, Tool: "search", Client: "claude-code", Calls: 9}, // not today
 	}))
 	var got AgentStatus

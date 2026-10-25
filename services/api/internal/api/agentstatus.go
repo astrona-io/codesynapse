@@ -26,8 +26,12 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var st AgentStatus
+	var tokens usage.TokenCounts
+	var edits usage.EditCounts
 	for _, b := range buckets {
 		switch {
+		// Token and edit counters share the buckets; their Calls is a size.
+		case tokens.AddCounter(b.Tool, b.Calls), edits.AddCounter(b.Tool, b.Calls):
 		case b.Tool == usage.Session:
 			st.Sessions += b.Calls
 		case b.Tool == usage.FirstCodeSynapse || b.Tool == usage.FirstNative:
