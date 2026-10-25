@@ -179,7 +179,7 @@ func (s *Server) reverifyOrgHost(ctx context.Context, orgID, host string) []stri
 // with its own token. Single-tenant installs use the installation token.
 func (s *Server) pushAuth(r *http.Request, graph, remote string) (gitx.Auth, error) {
 	if s.cfg.Accounts == nil {
-		return s.authFor(remote), nil
+		return s.installPushAuth(remote), nil
 	}
 	org, err := s.repoOrg(r, graph)
 	if err != nil {
@@ -196,7 +196,7 @@ func (s *Server) pushAuth(r *http.Request, graph, remote string) (gitx.Auth, err
 // organisation comes from the one repository in scope.
 func (s *Server) pushAuthFor(ctx context.Context, graph, remote string) (gitx.Auth, error) {
 	if s.cfg.Accounts == nil {
-		return s.authFor(remote), nil
+		return s.installPushAuth(remote), nil
 	}
 	reach, ok := scopeFrom(ctx).reach[graph]
 	if !ok || reach.Ambiguous || reach.OrgID == "" {

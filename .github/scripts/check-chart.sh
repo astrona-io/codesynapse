@@ -52,6 +52,7 @@ for d in docs:
     push = re.search(r"name: CODESYNAPSE_ALLOW_PUSH, value: \"(\w+)\"", d)
     want = "true" if name.group(1).endswith("fix-worker") else "false"
     assert push and push.group(1) == want, f"{name.group(1)}: CODESYNAPSE_ALLOW_PUSH should be {want}"
+    assert ("CODESYNAPSE_GIT_PUSH_TOKENS" in d) == (want == "true"), f"{name.group(1)}: push tokens belong to the fix worker only"
 assert len(seen) == 2, f"expected a worker and a fix worker, found {sorted(seen)}"
 print("workers: no service token or admin password; only the fix worker may push")
 PY

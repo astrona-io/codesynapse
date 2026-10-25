@@ -83,6 +83,9 @@ ingest and ai workers parse untrusted repositories and never hold it.
 - {name: CODESYNAPSE_LICENSE_LOOKUP, value: {{ $root.Values.features.licenseLookup | quote }}}
 - {name: CODESYNAPSE_INGEST_DATAFLOW, value: {{ $root.Values.features.dataflow | quote }}}
 - {name: CODESYNAPSE_ALLOW_PUSH, value: {{ index . 1 | quote }}}
+{{- if eq (toString (index . 1)) "true" }}
+{{ include "cs.secretEnv" (list $root "CODESYNAPSE_GIT_PUSH_TOKENS" "CODESYNAPSE_GIT_PUSH_TOKENS" true) }}
+{{- end }}
 - {name: CODESYNAPSE_ALLOW_PRIVATE_GIT, value: {{ $root.Values.features.allowPrivateGit | quote }}}
 - {name: CODESYNAPSE_WORKSPACE, value: /workspace}
 - {name: CODESYNAPSE_LLM_CONFIG, value: /config/llm.yaml}

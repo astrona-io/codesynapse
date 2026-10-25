@@ -169,6 +169,10 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return fmt.Errorf("CODESYNAPSE_GIT_TOKENS: %w", err)
 	}
+	pushAuths, err := gitx.ParseAuths(os.Getenv("CODESYNAPSE_GIT_PUSH_TOKENS"))
+	if err != nil {
+		return fmt.Errorf("CODESYNAPSE_GIT_PUSH_TOKENS: %w", err)
+	}
 	var roles []string // all: this process runs every job
 	switch {
 	case o.worker:
@@ -176,7 +180,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	case !o.runJobs:
 		roles = []string{} // none: workers run them
 	}
-	srv := api.New(ctx, api.Config{JobRoles: roles, Worker: o.worker, GitAuths: gitAuths, LLM: registry, SourcesRoot: o.sources, CommitLimit: o.commitLimit, AllowNetwork: o.network, VulnScan: o.vulnScan, LicenseLookup: o.licenses, Dataflow: o.dataflow, Version: version,
+	srv := api.New(ctx, api.Config{JobRoles: roles, Worker: o.worker, GitAuths: gitAuths, PushAuths: pushAuths, LLM: registry, SourcesRoot: o.sources, CommitLimit: o.commitLimit, AllowNetwork: o.network, VulnScan: o.vulnScan, LicenseLookup: o.licenses, Dataflow: o.dataflow, Version: version,
 		Workspace: o.workspace, AllowPrivateGit: app.Getenv("CODESYNAPSE_ALLOW_PRIVATE_GIT", "") == "true",
 		GitAuth:   gitx.Auth{Host: app.Getenv("CODESYNAPSE_GIT_TOKEN_HOST", "github.com"), Token: os.Getenv("CODESYNAPSE_GIT_TOKEN")},
 		AllowPush: pushAllowed(app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true", o.worker, roles, o.EC.Logger),

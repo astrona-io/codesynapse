@@ -93,6 +93,10 @@ type Config struct {
 	// GitAuths holds tokens for further hosts (CODESYNAPSE_GIT_TOKENS). A token
 	// is only ever sent to its own host.
 	GitAuths []gitx.Auth
+	// PushAuths holds the tokens that may push (CODESYNAPSE_GIT_PUSH_TOKENS),
+	// given only to the fix worker so the workers that parse untrusted
+	// repositories hold read tokens at most. Empty: pushes use the read tokens.
+	PushAuths []gitx.Auth
 	// AllowPrivateGit permits remotes on private networks.
 	AllowPrivateGit bool
 	// AllowPush lets CodeSynapse push fix branches for accepted review
@@ -925,6 +929,15 @@ type ingestRequest struct {
 // authFor returns the token configured for remote's host, if any.
 func (s *Server) authFor(remote string) gitx.Auth {
 	return gitx.AuthFor(remote, append([]gitx.Auth{s.cfg.GitAuth}, s.cfg.GitAuths...)...)
+}
+
+// installPushAuth is the installation's credential for pushing to remote: the
+// push tokens when any are configured, else the read tokens.
+func (s *Server) installPushAuth(remote string) gitx.Auth {
+	if len(s.cfg.PushAuths) > 0 {
+		return gitx.AuthFor(remote, s.cfg.PushAuths...)
+	}
+	return s.authFor(remote)
 }
 
 // gitToken is what the settings endpoint shows about a configured token.

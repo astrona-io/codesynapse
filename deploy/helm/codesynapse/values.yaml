@@ -7,7 +7,8 @@ global:
   # Required. Keys: CODESYNAPSE_API_TOKEN, CODESYNAPSE_MCP_TOKEN,
   # HUGEGRAPH_PASSWORD, METRICS_PASSWORD, SECRET_KEY, and POSTGRES_PASSWORD
   # (in-chart PostgreSQL) or CODESYNAPSE_DATABASE_URL (external). Optional:
-  # CODESYNAPSE_GIT_TOKENS, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, and
+  # CODESYNAPSE_GIT_TOKENS, CODESYNAPSE_GIT_PUSH_TOKENS (only the fix worker
+  # gets it), ANTHROPIC_API_KEY, OPENROUTER_API_KEY, and
   # MILVUS_TOKEN ("user:password" or an API key) for an external Milvus
   # with authentication.
   existingSecret: ""
