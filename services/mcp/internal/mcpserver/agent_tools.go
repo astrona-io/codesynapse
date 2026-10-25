@@ -180,6 +180,9 @@ func (h *handlers) minimalContext(ctx context.Context, _ *mcp.CallToolRequest, i
 	if err != nil {
 		return nil, agentctx.MinimalContext{}, err
 	}
+	if h.offload != nil {
+		ctx = agentctx.WithSemantic(ctx, semanticRanker{h.offload, repo})
+	}
 	out, err := coretools.MinimalContext(ctx, h.svc.R, repo, in)
 	return nil, out, err
 }

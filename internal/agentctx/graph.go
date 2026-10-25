@@ -499,10 +499,8 @@ func (s Service) MinimalContext(ctx context.Context, repo, task string, files []
 		}
 	}
 	if r, ok := ctx.Value(semanticKey{}).(SemanticRanker); ok {
-		hits, err := r.Rank(ctx, task, semanticK)
-		if err != nil {
-			return MinimalContext{}, err
-		}
+		// Search by meaning is an extra: when it fails the names still answer.
+		hits, _ := r.Rank(ctx, task, semanticK)
 		for rank, h := range hits {
 			sc := byID[h.ID]
 			if sc == nil {
@@ -676,11 +674,12 @@ func (s Service) packageContext(ctx context.Context, repo string, pkg model.Node
 	return pc, nil
 }
 
-// Experiment knobs, tuned on the task eval.
+// Depth and weight of the semantic leg, tuned on the task eval
+// (docs/adr/0002-code-symbol-embeddings.md).
 var (
-	semanticK      = 40
-	semanticWeight = 1.5
+	semanticK      = 10
+	semanticWeight = 2.5
 )
 
-// SetSemanticTuning changes the experiment's depth and weight (tests, eval).
+// SetSemanticTuning changes the depth and weight of the semantic leg (tests, eval).
 func SetSemanticTuning(k int, weight float64) { semanticK, semanticWeight = k, weight }

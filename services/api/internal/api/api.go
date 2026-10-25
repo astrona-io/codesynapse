@@ -160,7 +160,7 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	s.jobs.dataflow = cfg.Dataflow
 	s.jobs.Policy = s.approveIngestPolicy
 	s.jobs.Publish = s.publishRepo
-	s.jobs.Ingested = s.annotateIngest
+	s.jobs.Ingested = s.afterIngest
 	s.jobs.Report = s.saveIngestReport
 	s.annotations = annotation.New(cfg.LLM, s.persistAnnotations)
 	go s.annotations.Run(ctx)
@@ -309,6 +309,7 @@ func (s *Server) routes() {
 	s.repoPolicyRoutes()
 	s.runtimeRoutes()
 	s.imageScanRoutes()
+	s.semanticRoutes()
 	s.conventionsRoutes()
 	s.agentSessionRoutes()
 	s.retrievalRoutes()

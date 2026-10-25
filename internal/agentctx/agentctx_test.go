@@ -2,6 +2,7 @@ package agentctx
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/astrona-io/codesynapse/internal/duplicates"
@@ -150,4 +151,32 @@ func TestShortenModule(t *testing.T) {
 		})
 	}
 	assert.Equal(t, ExpandModule("docs/~notes.md", mod), "docs/~notes.md", "a tilde elsewhere stays")
+}
+
+type fakeRanker struct {
+	hits []SemanticHit
+	err  error
+}
+
+func (f fakeRanker) Rank(context.Context, string, int) ([]SemanticHit, error) { return f.hits, f.err }
+
+func TestMinimalContextSemantic(t *testing.T) {
+	handler := storetest.ID(model.KindFunction, "app.Handler")
+	task := "who answers incoming calls" // shares no word with any symbol
+
+	plain, err := svc(t).MinimalContext(context.Background(), storetest.Repo, task, nil, 0)
+	require.NoError(t, err)
+	for _, it := range plain.Items {
+		assert.NotEqual(t, it.QualifiedID, "app.Handler", "no meaning, no lexical match")
+	}
+
+	ctx := WithSemantic(context.Background(), fakeRanker{hits: []SemanticHit{{ID: handler, Score: 0.9}}})
+	got, err := svc(t).MinimalContext(ctx, storetest.Repo, task, nil, 0)
+	require.NoError(t, err)
+	require.True(t, len(got.Items) > 0)
+	assert.Equal(t, got.Items[0].QualifiedID, "app.Handler", "found by meaning")
+
+	ctx = WithSemantic(context.Background(), fakeRanker{err: errors.New("embedding model is down")})
+	_, err = svc(t).MinimalContext(ctx, storetest.Repo, "Handler", nil, 0)
+	require.NoError(t, err, "a failing ranker leaves the lexical answer")
 }

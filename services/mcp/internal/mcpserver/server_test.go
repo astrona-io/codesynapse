@@ -625,3 +625,46 @@ func TestRecallContext(t *testing.T) {
 	require.False(t, res.IsError)
 	assert.Equal(t, out.Mode, "hybrid")
 }
+
+func TestMinimalContextUsesSemanticHits(t *testing.T) {
+	handler := storetest.ID(model.KindFunction, "app.Handler")
+	enabled, calls := true, 0
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/api/v1/repos/fixture/semantic" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if !enabled {
+			_, _ = w.Write([]byte(`{"enabled":false,"hits":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"enabled":true,"hits":[{"id":"` + handler + `","score":0.9}]}`))
+	}))
+	t.Cleanup(api.Close)
+	ctx := context.Background()
+	s := memory.New()
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
+	ct, st := mcp.NewInMemoryTransports()
+	_, err := newTestServer(t, s, "test", Options{Memory: s, Offload: &APIClient{BaseURL: api.URL}}).Connect(ctx, st, nil)
+	require.NoError(t, err)
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "claude-code"}, nil).Connect(ctx, ct, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cs.Close() })
+
+	var out struct {
+		Items []struct {
+			QualifiedID string `json:"qualified_id"`
+		}
+	}
+	task := map[string]any{"task": "who answers incoming calls"}
+	require.False(t, call(t, cs, "minimal_context", task, &out).IsError)
+	require.True(t, len(out.Items) > 0)
+	assert.Equal(t, out.Items[0].QualifiedID, "app.Handler")
+
+	enabled = false
+	out.Items = nil
+	require.False(t, call(t, cs, "minimal_context", task, &out).IsError, "off is not an error")
+	require.False(t, call(t, cs, "minimal_context", task, &out).IsError)
+	assert.Equal(t, calls, 2, "after an enabled:false answer the API is not asked again for a minute")
+}

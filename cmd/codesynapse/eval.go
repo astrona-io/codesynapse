@@ -64,8 +64,8 @@ func (o *evalOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.cases, "cases", "", "Cases file for --sessions (default: "+casesFileName+" in the checkout's git directory)")
 	f.StringVar(&o.semModel, "semantic-model", "", "Experiment: also rank symbols by meaning with this local Ollama embedding model (nomic-embed-text)")
 	f.StringVar(&o.semURL, "semantic-url", "http://127.0.0.1:11434", "Local Ollama server for --semantic-model")
-	f.IntVar(&o.semK, "semantic-k", 40, "Symbols the semantic ranking adds")
-	f.Float64Var(&o.semWeight, "semantic-weight", 1.5, "Score of the best semantic hit, against about 1 per keyword match")
+	f.IntVar(&o.semK, "semantic-k", 10, "Symbols the semantic ranking adds")
+	f.Float64Var(&o.semWeight, "semantic-weight", 2.5, "Score of the best semantic hit, against about 1 per keyword match")
 	return nil
 }
 

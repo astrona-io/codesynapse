@@ -20,6 +20,14 @@ const Tenant = "code-graph"
 // maxItemID is the longest vector ID the Milvus index accepts.
 const maxItemID = 128
 
+// Indexer is implemented by graph stores that can hold symbol vectors: the
+// HugeGraph store (its Milvus index, or none) and the in-memory store (a flat
+// index). A store that does not implement it, or returns nil, has no
+// semantic leg.
+type Indexer interface {
+	CodeVectors() vector.Index
+}
+
 // Store keeps symbol embeddings in a vector.Index, one namespace per graph.
 // An item's ID is the node ID and a hash of the embedded text, so a symbol
 // whose description changed gets a new vector and an unchanged one is not
