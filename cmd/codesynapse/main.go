@@ -39,6 +39,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/security"
 	"github.com/astrona-io/codesynapse/internal/snapshot"
 	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/store/hugegraphstore"
 	"github.com/astrona-io/codesynapse/internal/store/memory"
 	"github.com/astrona-io/codesynapse/internal/toolsets"
 )
@@ -448,12 +449,18 @@ func reviewCmd(ec *app.Env) *cobra.Command {
 
 // schemaOptions configures `codesynapse schema`.
 type schemaOptions struct {
-	EC    *app.Env
-	graph app.GraphFlags
+	EC      *app.Env
+	graph   app.GraphFlags
+	mcpUser string
 }
+
+// envMCPRolePassword holds the limited MCP user's password; like every
+// secret it comes from the environment, never a flag.
+const envMCPRolePassword = "CODESYNAPSE_HUGEGRAPH_MCP_PASSWORD" //nolint:gosec // the name of the variable, not a credential
 
 func (o *schemaOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	o.graph.AddFlags(o.EC.Command.Flags())
+	o.EC.Command.Flags().StringVar(&o.mcpUser, "mcp-role", "", "Also create this HugeGraph user for the MCP service: it reads the whole graph and writes only agent memory, reviews, curated links and usage counters (password from "+envMCPRolePassword+"; needs the administrator and HugeGraph 1.7)")
 	return nil
 }
 func (o *schemaOptions) Complete(context.Context, *app.Env) error { return nil }
@@ -464,7 +471,17 @@ func (o *schemaOptions) Run(ctx context.Context, _ *app.Env) error {
 		return err
 	}
 	defer st.Close(ctx) //nolint:errcheck // best-effort close
-	return st.EnsureSchema(ctx)
+	if err := st.EnsureSchema(ctx); err != nil {
+		return err
+	}
+	if o.mcpUser == "" {
+		return nil
+	}
+	hg, ok := st.(*hugegraphstore.Store)
+	if !ok {
+		return errors.New("--mcp-role needs the HugeGraph store")
+	}
+	return hg.ProvisionRole(ctx, hugegraphstore.MCPRole(o.mcpUser, os.Getenv(envMCPRolePassword)))
 }
 
 func schemaCmd(ec *app.Env) *cobra.Command {

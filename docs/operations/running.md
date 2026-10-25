@@ -71,9 +71,10 @@ The compose API container reaches model servers on the host through `host.docker
 | `just web-check` | Nuxt typecheck and build |
 | `just ci` | All of the above |
 | `just dev-web` | Nuxt dev server against the API of `just up` |
-| `just test-integration` | `test-hugegraph`, `test-postgres` and `test-metrics` together |
+| `just test-integration` | `test-hugegraph`, `test-hugegraph-auth`, `test-postgres` and `test-metrics` together |
 | `just test-postgres` | Accounts contract on a throwaway PostgreSQL |
 | `just test-hugegraph` | HugeGraph/Milvus contract and parity |
+| `just test-hugegraph-auth` | Limited HugeGraph role (MCP) on a throwaway HugeGraph with authentication |
 | `just test-metrics` | Telemetry and series queries on a throwaway VictoriaMetrics |
 | `just check-test-images` | The integration recipes, `docker-compose.yml` and the Helm chart use the same store images |
 | `just review` | Offline review pack for the current branch |
