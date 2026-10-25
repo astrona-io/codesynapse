@@ -17,7 +17,10 @@ import (
 // same time replaces, old ones are dropped past the cap, repositories do not
 // see each other's, and replacing or deleting the repository's graph leaves
 // them alone (only DeleteSnapshots removes them).
-func historyContract(t *testing.T, db store.Store) {
+func historyContract(t *testing.T, db interface {
+	store.Writer
+	store.HistoryStore
+}) {
 	ctx := context.Background()
 	repo := fmt.Sprintf("hist-fixture-%d", time.Now().UnixNano())
 	other := repo + "-other"

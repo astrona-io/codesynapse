@@ -37,17 +37,27 @@ var (
 	nodeLists = []string{"cwe", "aliases", "security_tags"}
 )
 
-// column is a property of a tag or an edge type.
-type column struct{ name, typ string }
+// column is a property of a tag or an edge type. A column with a default is
+// NOT NULL, which lets UPSERT add to it on a vertex that does not exist yet.
+type column struct{ name, typ, def string }
 
 func texts(names ...string) []column { return typed("string", names) }
 func longs(names ...string) []column { return typed("int64", names) }
 func bools(names ...string) []column { return typed("bool", names) }
 
+// counters are int64 columns that start at 0.
+func counters(names ...string) []column {
+	out := longs(names...)
+	for i := range out {
+		out[i].def = "0"
+	}
+	return out
+}
+
 func typed(typ string, names []string) []column {
 	out := make([]column, len(names))
 	for i, n := range names {
-		out[i] = column{n, typ}
+		out[i] = column{name: n, typ: typ}
 	}
 	return out
 }
@@ -93,6 +103,14 @@ var schemaItems = func() []schemaItem {
 			{"node_by_repo_file", []indexCol{{"repo", 64}, {"file", 128}}},
 		}},
 	}
+	items = append(items,
+		schemaItem{name: "review", cols: texts("rid", "repo", "created_at", "updated_at", "doc"), indexes: []index{{"review_by_repo", []indexCol{{"repo", 64}}}}},
+		schemaItem{name: "snapshot", cols: texts("sid", "repo", "at", "doc"), indexes: []index{{"snapshot_by_repo", []indexCol{{"repo", 64}}}}},
+		schemaItem{name: "curated", cols: texts("cid", "repo", "kind", "created_at", "doc"), indexes: []index{{"curated_by_repo", []indexCol{{"repo", 64}}}}},
+		schemaItem{name: "usage", cols: slices.Concat(texts("ukey", "day", "org", "repo", "tool", "client"), longs("daynum"),
+			counters("calls", "errors", "response_tokens", "duration_ms", "max_duration_ms", "ranges_returned", "ranges_read")),
+			indexes: []index{{"usage_by_daynum", []indexCol{{"daynum", 0}}}}},
+	)
 	// One edge type per model edge kind (schemaEdges) carries these.
 	edge := slices.Concat(longs("count"), texts("run", "evidence"))
 	for _, k := range edgeKinds() {
@@ -105,10 +123,17 @@ var schemaItems = func() []schemaItem {
 // a model name that is also an nGQL keyword (time, level, version) works.
 func quote(name string) string { return "`" + ident(name) + "`" }
 
+func (c column) ddl() string {
+	if c.def != "" {
+		return quote(c.name) + " " + c.typ + " NOT NULL DEFAULT " + c.def
+	}
+	return quote(c.name) + " " + c.typ + " NULL"
+}
+
 func (s schemaItem) create() string {
 	cols := make([]string, len(s.cols))
 	for i, c := range s.cols {
-		cols[i] = quote(c.name) + " " + c.typ + " NULL"
+		cols[i] = c.ddl()
 	}
 	return fmt.Sprintf("CREATE %s IF NOT EXISTS %s (%s)", s.kind(), quote(s.name), strings.Join(cols, ", "))
 }
@@ -116,7 +141,7 @@ func (s schemaItem) create() string {
 func (s schemaItem) alter(missing []column) string {
 	cols := make([]string, len(missing))
 	for i, c := range missing {
-		cols[i] = quote(c.name) + " " + c.typ + " NULL"
+		cols[i] = c.ddl()
 	}
 	return fmt.Sprintf("ALTER %s %s ADD (%s)", s.kind(), quote(s.name), strings.Join(cols, ", "))
 }

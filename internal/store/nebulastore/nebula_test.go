@@ -38,3 +38,8 @@ func TestCodeGraph(t *testing.T) {
 	require.NoError(t, s.DeleteRepo(context.Background(), storetest.Repo))
 	storetest.RunCodeGraph(t, s)
 }
+
+func TestRecords(t *testing.T) {
+	s := newTestStore(t)
+	storetest.RunRecords(t, s)
+}
