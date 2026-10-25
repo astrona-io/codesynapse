@@ -20,6 +20,7 @@ type Store struct {
 	policy         bool
 	outbox         map[string]int64
 	users          map[string]accounts.User
+	menuPrefs      map[string]accounts.MenuPrefs
 	seen           map[string]time.Time // notifications seen, per user
 	orgs           map[string]accounts.Org
 	members        map[string]map[string]member // org -> user -> role

@@ -384,6 +384,10 @@ type Store interface {
 	// DeleteOtherSessions ends every session of the user except keepHash.
 	DeleteOtherSessions(ctx context.Context, userID, keepHash string) error
 	SetUserName(ctx context.Context, userID, name string) error
+	// MenuPrefs reads a person's repository-menu choices (empty when none);
+	// SetMenuPrefs replaces them. The service validates them (menuprefs.go).
+	MenuPrefs(ctx context.Context, userID string) (MenuPrefs, error)
+	SetMenuPrefs(ctx context.Context, userID string, m MenuPrefs) error
 	// SetUserEmail fails with ErrExists when another account has the email.
 	SetUserEmail(ctx context.Context, userID, email string) error
 

@@ -113,6 +113,61 @@ const repoMenu = computed(() => {
   }
 })
 const linkActive = (l: RepoLink) => route.path === l.to || !!l.also?.includes(route.path)
+
+// Menu choices: pages a person pinned to the top or hid. They follow the
+// account to another browser; without accounts they stay in this one.
+type MenuPrefs = { pinned: string[]; hidden: string[] }
+const prefs = ref<MenuPrefs>({ pinned: [], hidden: [] })
+const PREFS_KEY = 'cs_menu_prefs'
+const accountPrefs = () => session.accounts.value && !session.restricted.value
+onMounted(async () => {
+  try {
+    const saved = accountPrefs() ? await apiGet<MenuPrefs>('me/menu') : JSON.parse(localStorage.getItem(PREFS_KEY) ?? 'null')
+    if (saved) prefs.value = { pinned: saved.pinned ?? [], hidden: saved.hidden ?? [] }
+  } catch { /* no saved choices: the full menu */ }
+})
+async function savePrefs() {
+  try {
+    if (accountPrefs()) prefs.value = await apiPut<MenuPrefs>('me/menu', prefs.value)
+    else localStorage.setItem(PREFS_KEY, JSON.stringify(prefs.value))
+  } catch { /* the choice still holds until the page reloads */ }
+}
+// A page is named by the end of its path, the same name the API stores.
+const slugOf = (l: RepoLink) => l.to.split('/').slice(3).join('-') || 'summary'
+const editing = ref(false)
+function togglePin(l: RepoLink) {
+  const s = slugOf(l)
+  prefs.value = prefs.value.pinned.includes(s)
+    ? { ...prefs.value, pinned: prefs.value.pinned.filter(x => x !== s) }
+    : { pinned: [...prefs.value.pinned, s], hidden: prefs.value.hidden.filter(x => x !== s) }
+  savePrefs()
+}
+function toggleHide(l: RepoLink) {
+  const s = slugOf(l)
+  prefs.value = prefs.value.hidden.includes(s)
+    ? { ...prefs.value, hidden: prefs.value.hidden.filter(x => x !== s) }
+    : { pinned: prefs.value.pinned.filter(x => x !== s), hidden: [...prefs.value.hidden, s] }
+  savePrefs()
+}
+// The page being shown stays in the menu even when hidden, so it is never
+// lost from view.
+const menuSections = computed(() => {
+  const all = repoMenu.value.groups.flatMap(g => g.links)
+  const bySlug = new Map(all.map(l => [slugOf(l), l]))
+  const pinned = prefs.value.pinned.map(x => bySlug.get(x)).filter((l): l is RepoLink => !!l)
+  const pinSet = new Set(pinned.map(slugOf))
+  const hideSet = new Set(prefs.value.hidden)
+  const hidden = all.filter(l => hideSet.has(slugOf(l)) && !pinSet.has(slugOf(l)))
+  const keep = (l: RepoLink) => !pinSet.has(slugOf(l)) && (!hideSet.has(slugOf(l)) || linkActive(l))
+  const out: { label: string; links: RepoLink[] }[] = []
+  if (pinned.length) out.push({ label: 'Pinned', links: pinned })
+  for (const g of repoMenu.value.groups) {
+    const links = g.links.filter(keep)
+    if (links.length) out.push({ label: g.label, links })
+  }
+  if (editing.value && hidden.length) out.push({ label: 'Hidden by you', links: hidden })
+  return out
+})
 const moreOpen = ref(false)
 // Open "More" when the page shown is in it, so the active link is visible.
 watch(() => [route.path, repoMenu.value.more.length], () => { if (repoMenu.value.more.some(linkActive)) moreOpen.value = true }, { immediate: true })
@@ -175,10 +230,17 @@ const orgValue = computed({
               <p class="nav-label">Repository</p>
               <p class="nav-repo mono" :title="repo">{{ repo }}</p>
             </div>
-            <div v-for="g in repoMenu.groups" :key="g.label" class="nav-section">
+            <div v-for="g in menuSections" :key="g.label" class="nav-section">
               <p class="nav-label">{{ g.label }}</p>
-              <NuxtLink v-for="l in g.links" :key="l.to" :to="l.to" class="nav-link nav-link--sub" :class="{ 'is-active': linkActive(l) }">{{ l.label }}</NuxtLink>
+              <div v-for="l in g.links" :key="l.to" class="nav-row">
+                <NuxtLink :to="l.to" class="nav-link nav-link--sub" :class="{ 'is-active': linkActive(l) }">{{ l.label }}</NuxtLink>
+                <template v-if="editing">
+                  <button type="button" class="nav-tool" :aria-pressed="prefs.pinned.includes(slugOf(l))" :title="prefs.pinned.includes(slugOf(l)) ? 'Unpin' : 'Pin to the top'" @click="togglePin(l)">{{ prefs.pinned.includes(slugOf(l)) ? 'Unpin' : 'Pin' }}</button>
+                  <button type="button" class="nav-tool" :title="prefs.hidden.includes(slugOf(l)) ? 'Show again' : 'Hide from the menu'" @click="toggleHide(l)">{{ prefs.hidden.includes(slugOf(l)) ? 'Show' : 'Hide' }}</button>
+                </template>
+              </div>
             </div>
+            <button type="button" class="nav-edit" :aria-pressed="editing" @click="editing = !editing">{{ editing ? 'Done' : 'Pin or hide pages' }}</button>
             <details v-if="repoMenu.more.length" class="nav-section nav-more" :open="moreOpen" @toggle="moreOpen = ($event.target as HTMLDetailsElement).open">
               <summary class="nav-label nav-more__toggle">More · {{ repoMenu.more.length }} with nothing yet</summary>
               <NuxtLink v-for="l in repoMenu.more" :key="l.to" :to="l.to" class="nav-link nav-link--sub nav-link--empty" :class="{ 'is-active': linkActive(l) }" :title="l.missing">
@@ -267,6 +329,11 @@ const orgValue = computed({
 .nav-link--sub { min-height: 36px; font-size: 14px; font-weight: 500; }
 .nav-link:hover { background: var(--bg); color: var(--ink); text-decoration: none; }
 .nav-link.is-active, .nav-link.is-active:hover { background: var(--primary); color: var(--on-primary); }
+.nav-row { display: flex; align-items: center; gap: 4px; }
+.nav-row .nav-link { flex: 1; min-width: 0; }
+.nav-tool, .nav-edit { background: none; border: 0; padding: 2px 6px; font-size: 12px; color: var(--muted); cursor: pointer; border-radius: 999px; }
+.nav-tool:hover, .nav-edit:hover { color: var(--ink); background: var(--panel-2); }
+.nav-edit { align-self: flex-start; margin: 4px 0 0 12px; }
 .nav-more__toggle { cursor: pointer; list-style-position: inside; }
 .nav-link--empty { flex-direction: column; align-items: flex-start; gap: 1px; }
 .nav-why { font-size: 12px; color: var(--muted); font-weight: 400; line-height: 1.3; }
