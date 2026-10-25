@@ -45,7 +45,6 @@ func texts(names ...string) []column { return typed("string", names) }
 func longs(names ...string) []column { return typed("int64", names) }
 func bools(names ...string) []column { return typed("bool", names) }
 
-
 // defaulted are columns that are never NULL, so a read needs no nil case.
 func defaulted(typ, def string, names ...string) []column {
 	out := typed(typ, names)
