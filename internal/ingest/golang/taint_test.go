@@ -84,6 +84,8 @@ func TestTaintThroughCalls(t *testing.T) {
 	_, fromRequest := byFunc["ConcatOfParsedID"]["sql-from-request"]
 	assert.False(t, fromRequest, "parseID returns a number")
 	assert.Contains(t, byFunc["ConcatOfParsedID"]["sql-concat"], "dynamically built")
+	assert.Contains(t, byFunc["Fetch"]["path-from-request"], "via r.PathValue in FetchThroughInterface, passed to Fetch")
 	assert.Len(t, byFunc["readStatic"], 0, "only called with constants")
 	assert.Len(t, byFunc["CleanCaller"], 0)
+	assert.Len(t, byFunc["CleanLookupByID"], 0, "a record found by the input is not the input")
 }

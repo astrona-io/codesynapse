@@ -207,8 +207,10 @@ func isTestVariant(p *packages.Package) bool {
 }
 
 type extractor struct {
-	// taintFuncs are the repository's functions for interprocedural.go.
+	// taintFuncs are the repository's functions for interprocedural.go, and
+	// dispatch the concrete methods behind each interface method.
 	taintFuncs []*taintFunc
+	dispatch   map[*types.Func][]*types.Func
 	policy     *repoconfig.Policy
 	opts       Options
 	g          *model.Graph
@@ -834,6 +836,10 @@ func (x *extractor) implementations(pkgs []*packages.Package) {
 					To:   x.id(model.KindMethod, impl.Origin().FullName()),
 					Kind: model.EdgeDispatchesTo, Evidence: model.EvidenceTyped,
 				})
+				if x.dispatch == nil {
+					x.dispatch = map[*types.Func][]*types.Func{}
+				}
+				x.dispatch[m] = append(x.dispatch[m], impl.Origin())
 			}
 		}
 	}
