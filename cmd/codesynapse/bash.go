@@ -10,7 +10,7 @@ import (
 
 // hook bash (PreToolUse on Bash) spots shell commands CodeSynapse answers
 // with less output: git status, diff, log and blame, text search, reading a
-// file with cat/head/tail, and running a whole test suite. It never blocks:
+// file with cat/head/tail or a sed -n range, and running a whole test suite. It never blocks:
 // the first time a session runs a class it adds a hint naming the tool, and
 // every occurrence is counted (usage.BashClasses) so Statistics shows how
 // often agents reach for the shell where the graph or a git tool would do.
@@ -122,6 +122,21 @@ func classOfWords(w []string) string {
 			if !strings.HasPrefix(a, "-") && strings.Contains(path.Base(a), ".") {
 				return usage.BashRead
 			}
+		}
+	case "sed":
+		// A range read (sed -n '10,40p' file) is a file read; sed -i edits and
+		// a sed fed by a pipe has no file, so neither counts.
+		var words []string
+		for _, a := range args {
+			switch {
+			case a == "--in-place" || strings.HasPrefix(a, "-i") || strings.HasPrefix(a, "--in-place="):
+				return ""
+			case !strings.HasPrefix(a, "-"):
+				words = append(words, a)
+			}
+		}
+		if (slices.Contains(args, "-n") || slices.Contains(args, "--quiet") || slices.Contains(args, "--silent")) && len(words) >= 2 && strings.Contains(path.Base(words[len(words)-1]), ".") {
+			return usage.BashRead
 		}
 	case "go":
 		if len(args) > 0 && args[0] == "test" && slices.Contains(args, "./...") {
