@@ -291,7 +291,7 @@ func unusedModules(c *cleanup.Report, link string, add func(Step), covered map[s
 		add(Step{Kind: RemoveDependency, ID: stepID(RemoveDependency, m.Path), Effort: 1, Safety: "high", Advisory: len(m.Vulns), Link: link + "/dependency-review",
 			Title: "Remove the unused dependency " + m.Path, Why: why, Value: capAt(35+len(m.Vulns)*15, 90),
 			Targets: []Target{{Name: m.Path + "@" + m.Version}},
-			Verify:  "Run go mod tidy (or the package manager's remove), build, run the tests, Sync, and check the advisories are gone."})
+			Verify:  "Run go mod tidy (or the package manager's remove), build, run the tests, Sync, and check the advisories are gone. For an npm or PyPI package also search for it in config files (bundler, test and framework settings) first: use without an import is not detected."})
 	}
 	for _, m := range mods[min(len(mods), maxStepsPerKind):] {
 		covered[m.Path] = true

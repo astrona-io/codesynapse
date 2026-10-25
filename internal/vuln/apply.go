@@ -109,16 +109,8 @@ func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability,
 		if mod.ecosystem() != EcosystemGo {
 			// npm/PyPI advisories rarely list symbols: a package imported by
 			// any source file is "imported", otherwise "required".
-			name := ImportName(mod)
-			for imp := range externalImports {
-				// A C# using directive names a namespace, which a NuGet ID
-				// usually prefixes (Newtonsoft.Json.Linq).
-				if strings.EqualFold(imp, name) || strings.HasPrefix(imp, name+"/") ||
-					mod.Ecosystem == EcosystemNuGet && strings.HasPrefix(strings.ToLower(imp), strings.ToLower(name)+".") ||
-					mod.Ecosystem == EcosystemRubyGems && rubyRequires(imp, name) {
-					n.Reachability = Imported
-					break
-				}
+			if ImportedBy(mod, externalImports) {
+				n.Reachability = Imported
 			}
 			g.AddNode(n)
 			g.AddEdge(model.Edge{From: vid, To: modID, Kind: model.EdgeAffects})
@@ -236,6 +228,21 @@ func compareVersions(a, b string) int {
 		return semver.Compare(va, vb)
 	}
 	return strings.Compare(a, b)
+}
+
+// ImportedBy reports whether any source file imports the (non-Go) module.
+func ImportedBy(mod Module, externalImports map[string][]string) bool {
+	name := ImportName(mod)
+	for imp := range externalImports {
+		// A C# using directive names a namespace, which a NuGet ID usually
+		// prefixes (Newtonsoft.Json.Linq).
+		if strings.EqualFold(imp, name) || strings.HasPrefix(imp, name+"/") ||
+			mod.Ecosystem == EcosystemNuGet && strings.HasPrefix(strings.ToLower(imp), strings.ToLower(name)+".") ||
+			mod.Ecosystem == EcosystemRubyGems && rubyRequires(imp, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // rubyRequires reports whether require "imp" loads gem name: rack and

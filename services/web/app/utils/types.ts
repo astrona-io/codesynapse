@@ -180,7 +180,7 @@ export interface CleanupReport {
   summary: { functions: number; live: number; test_only: number; unreachable: number; dead_loc: number; dead_pct: number; security_relevant: number; unused_modules: number; cves_removable: number; dead_files: number; unused_values: number; unused_template_defines: number; test_support_packages: number }
   items: CleanupItem[]
   files: { file: string; symbols: number; loc: number; test_only: boolean }[]
-  modules: { path: string; version: string; vulnerabilities?: string[] }[]
+  modules: { path: string; ecosystem?: string; version: string; vulnerabilities?: string[] }[]
   unused_values: NodeRef[]
   unused_template_defines: NodeRef[]
   test_support_packages: string[]

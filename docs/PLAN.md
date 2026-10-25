@@ -307,7 +307,7 @@ Ordered by value.
 2. **More ecosystems for CVEs:** container base images, Maven, Cargo, Composer. Grype could back this as a second scanner.
 3. **Compact IDs** relative to the module path, to cut repeated prefixes from answers.
 4. **tree-sitter parsers** for exact Python/JS/TS syntax and more languages (Java, Rust, C#, PHP), via a WASM runtime to stay cgo-free; type inference for TypeScript (tsc) and Python (pyright) as optional enrichers.
-5. **Unused npm/PyPI dependencies**, with tooling-aware exceptions (bundler plugins, CLIs, type packages).
+5. **Unused npm/PyPI dependencies** (done): runtime dependencies no source file imports are listed with the unused Go modules; development dependencies, type packages, bundlers, linters, test runners, framework CLIs and companions (`vue-router` under Nuxt) are never judged (`internal/cleanup/deps.go`). Use that a config file alone makes (a plugin named in `nuxt.config`) is not detected, so the cleanup plan tells people to search config files before removing.
 6. **Semantic search** with Milvus vectors over summaries and signatures (would also improve `minimal_context`), local embeddings by default.
 7. **GitHub Action** (done: `action.yml` at the repository root builds the CLI from its own source, runs `review --offline` against the pull request's base and posts the report as one comment updated on each push (job summary for forks); `fail-on-new` fails only on findings the change introduces (`review --fail-on-new`); this repository reviews its own pull requests with it). Running `codesynapse audit --fail-on high` and `review --offline`, posting the result as a PR comment.
 8. **Scheduled sync** of registered repositories and webhooks from the forge.

@@ -29,7 +29,7 @@ The report lists:
 
 - functions with confidence and security relevance (security-relevant dead code first);
 - files where nothing is live;
-- unused direct Go modules, with the CVEs removing them eliminates;
+- unused direct dependencies, with the CVEs removing them eliminates: Go modules no package imports, and npm and PyPI runtime dependencies no source file imports. Tooling is never judged, because it works without an import: development dependencies, `@types/*`, bundlers, linters, test runners, framework CLIs and servers (the lists are in `internal/cleanup/deps.go`). Nothing is judged for npm or PyPI when no import was found at all;
 - unused Helm values and template defines;
 - a safe-removal checklist.
 

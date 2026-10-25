@@ -19,6 +19,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
+	"github.com/astrona-io/codesynapse/internal/vuln"
 )
 
 // Liveness values.
@@ -73,9 +74,11 @@ type FileItem struct {
 
 // ModuleItem is a direct go.mod requirement no package imports.
 type ModuleItem struct {
-	Path    string   `json:"path"`
-	Version string   `json:"version"`
-	Vulns   []string `json:"vulnerabilities,omitempty"`
+	Path string `json:"path"`
+	// Ecosystem is npm or PyPI for those; empty for a Go module.
+	Ecosystem string   `json:"ecosystem,omitempty"`
+	Version   string   `json:"version"`
+	Vulns     []string `json:"vulnerabilities,omitempty"`
 }
 
 // Summary counts the report.
@@ -346,17 +349,30 @@ func securityOf(n model.Node, out, in map[string][]model.Edge, byID map[string]m
 func unusedModules(g *model.Graph, nodes []model.Node, in map[string][]model.Edge, imports map[string][]string) []ModuleItem {
 	var out []ModuleItem
 	for _, n := range nodes {
-		// npm and Python packages are often used by tooling (bundlers,
-		// linters, CLIs) without an import, so only Go modules are judged.
-		if n.Kind != model.KindModule || n.Name == "stdlib" || (n.Ecosystem != "" && n.Ecosystem != "Go") {
+		if n.Kind != model.KindModule || n.Name == "stdlib" {
 			continue
 		}
 		used := false
-		for imp := range imports {
-			if imp == n.Name || strings.HasPrefix(imp, n.Name+"/") {
-				used = true
-				break
+		switch n.Ecosystem {
+		case "", "Go":
+			for imp := range imports {
+				if imp == n.Name || strings.HasPrefix(imp, n.Name+"/") {
+					used = true
+					break
+				}
 			}
+		case vuln.EcosystemNPM, vuln.EcosystemPyPI:
+			// Tooling (bundlers, linters, test runners, type packages, CLIs)
+			// is used without an import, so only a runtime dependency that
+			// is not one of those is judged, and only when some source was
+			// parsed at all (a repository whose files we could not read has
+			// no imports to compare with).
+			if n.Dev || n.Indirect || len(imports) == 0 || toolingDependency(n.Ecosystem, n.Name) {
+				continue
+			}
+			used = vuln.ImportedBy(vuln.Module{Path: n.Name, Ecosystem: n.Ecosystem}, imports)
+		default:
+			continue
 		}
 		state := Used
 		if !used {
@@ -371,6 +387,9 @@ func unusedModules(g *model.Graph, nodes []model.Node, in map[string][]model.Edg
 			continue
 		}
 		m := ModuleItem{Path: n.Name, Version: n.Version}
+		if n.Ecosystem != "" && n.Ecosystem != "Go" {
+			m.Ecosystem = n.Ecosystem
+		}
 		for _, e := range in[n.ID] {
 			if e.Kind == model.EdgeAffects {
 				if v, ok := g.Node(e.From); ok && v.Kind == model.KindVulnerability {
