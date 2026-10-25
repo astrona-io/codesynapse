@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -177,5 +178,41 @@ func TestGraphBinding(t *testing.T) {
 		"2.0.0": "DEFAULT-hugegraph", "": "hugegraph", "garbage": "hugegraph",
 	} {
 		assert.Equal(t, graphBinding(core, "hugegraph"), want, core)
+	}
+}
+
+// A node label created before a property existed must gain it, not be
+// re-created: HugeGraph refuses ifNotExist().create() for a label whose
+// properties differ, which stopped every API start after a release that added
+// a node property.
+func TestNodeSchemaUpgradesAnOlderLabel(t *testing.T) {
+	url := os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_URL")
+	if url == "" {
+		t.Skip("CODESYNAPSE_TEST_HUGEGRAPH_URL not set")
+	}
+	ctx := t.Context()
+	s, err := New(ctx, Config{URL: url, User: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_USER"), Password: os.Getenv("CODESYNAPSE_TEST_HUGEGRAPH_PASSWORD")})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close(ctx) })
+	require.NoError(t, s.EnsureSchema(ctx))
+
+	// A fixture label with only the identifying properties stands for the
+	// node label of an older release.
+	const legacy = `def s=graph.schema()
+s.propertyKey('nid').asText().ifNotExist().create();s.propertyKey('repo').asText().ifNotExist().create();s.propertyKey('kind').asText().ifNotExist().create()
+s.vertexLabel('legacy_node_fixture').useCustomizeStringId().properties('nid','repo','kind').ifNotExist().create();1`
+	const cleanup = `graph.schema().vertexLabel('legacy_node_fixture').remove();1`
+	require.NoError(t, s.write(ctx, legacy, nil, nil))
+	t.Cleanup(func() { _ = s.write(context.Background(), cleanup, nil, nil) })
+
+	upgrade := strings.Replace(schemaScript, "label('node',", "label('legacy_node_fixture',", 1)
+	require.NotEqual(t, upgrade, schemaScript)
+	require.NoError(t, s.write(ctx, upgrade, schemaBindings(), nil), "an older label is upgraded, not re-created")
+	require.NoError(t, s.write(ctx, upgrade, schemaBindings(), nil), "and the upgrade is idempotent")
+
+	var props []string
+	require.NoError(t, s.write(ctx, `graph.schema().getVertexLabel('legacy_node_fixture').properties().collect{graph.propertyKey(it).name()}`, nil, &props))
+	for _, want := range []string{"code_absent", "signature", "security_tags"} {
+		assert.True(t, slices.Contains(props, want), "the fixture label gained %s: %v", want, props)
 	}
 }
