@@ -86,7 +86,10 @@ type Index struct {
 	retries atomic.Int64
 }
 
-var _ vector.Index = (*Index)(nil)
+var (
+	_ vector.Index  = (*Index)(nil)
+	_ vector.Prober = (*Index)(nil)
+)
 
 // New checks the URL and that Milvus answers.
 func New(ctx context.Context, cfg Config) (*Index, error) {
@@ -385,6 +388,51 @@ func (x *Index) Search(ctx context.Context, model, tenant, namespace string, vec
 	hits = vector.Isolate(hits, tenant, namespace, k)
 	telemetry.VectorMatches.AddContext(ctx, float64(len(hits)), telemetry.TenantLabel(orgOf(tenant)), "milvus")
 	return hits, nil
+}
+
+// hasFilter routes a presence check to one tenant, namespace and ID list.
+const hasFilter = "tenant_id == {tenant} && ns == {ns} && id in {ids}"
+
+// Has implements vector.Prober. It asks every collection of the model (one
+// per vector length) in batches, so the answer needs no length.
+func (x *Index) Has(ctx context.Context, model, tenant, namespace string, ids []string) (map[string]bool, error) {
+	if tenant == "" {
+		return nil, vector.ErrNoTenant
+	}
+	out := map[string]bool{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	sum := sha256.Sum256([]byte(model))
+	prefix := x.prefix + hex.EncodeToString(sum[:8]) + "_"
+	names, err := x.names(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range names {
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		for start := 0; start < len(ids); start += upsertBatch {
+			batch := ids[start:min(start+upsertBatch, len(ids))]
+			var rows []struct {
+				ID string `json:"id"`
+			}
+			body := map[string]any{"collectionName": name, "filter": hasFilter, "limit": len(batch), "outputFields": []string{"id"},
+				"exprParams": map[string]any{"tenant": tenant, "ns": namespace, "ids": batch}, "consistencyLevel": "Strong"}
+			if err := x.call(ctx, "entities/query", body, &rows); err != nil {
+				if gone(err) {
+					x.forget(name)
+					continue
+				}
+				return nil, err
+			}
+			for _, r := range rows {
+				out[r.ID] = true
+			}
+		}
+	}
+	return out, nil
 }
 
 // orgOf turns a vector tenant back into an organisation ID ("" for none).

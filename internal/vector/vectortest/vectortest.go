@@ -45,6 +45,20 @@ func Run(t *testing.T, idx vector.Index) {
 		assert.Equal(t, hits[0].ID, "e-tenant-b")
 	})
 
+	t.Run("has", func(t *testing.T) {
+		p, ok := idx.(vector.Prober)
+		require.True(t, ok, "an index tells which IDs it holds")
+		got, err := p.Has(ctx, model, "org-a", "org-a|repo", []string{"e-payments", "e-billing", "e-missing", "e-other-ns", "e-tenant-b"})
+		require.NoError(t, err)
+		assert.True(t, got["e-payments"] && got["e-billing"])
+		assert.False(t, got["e-missing"] || got["e-other-ns"] || got["e-tenant-b"], "only this tenant's namespace")
+		got, err = p.Has(ctx, "other-model", "org-a", "org-a|repo", []string{"e-payments"})
+		require.NoError(t, err)
+		assert.Len(t, got, 0)
+		_, err = p.Has(ctx, model, "", "org-a|repo", []string{"e-payments"})
+		assert.Error(t, err)
+	})
+
 	t.Run("tenant required", func(t *testing.T) {
 		_, err := idx.Search(ctx, model, "", "org-a|repo", []float32{1, 0, 0}, 10)
 		assert.Error(t, err)

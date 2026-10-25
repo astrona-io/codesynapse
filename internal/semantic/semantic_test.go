@@ -11,6 +11,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/vector"
 )
 
 // fake maps a text to a vector by the words it holds.
@@ -86,4 +87,39 @@ func TestOllamaEmbed(t *testing.T) {
 	vecs, err := o.Embed(context.Background(), []string{"a", "b"})
 	require.NoError(t, err)
 	assert.Len(t, vecs, 2)
+}
+
+func TestStoreSyncIsIncrementalAndRanks(t *testing.T) {
+	ctx := context.Background()
+	st := Store{Idx: vector.NewFlat(), Model: "m"}
+	nodes := []model.Node{
+		{ID: "r|Function|pkg.Scale", Kind: model.KindFunction, QualifiedName: "pkg.Scale", Summary: "scale workers"},
+		{ID: "r|Function|pkg.Enqueue", Kind: model.KindFunction, QualifiedName: "pkg.Enqueue", Summary: "queue a job"},
+		{ID: "r|Function|pkg.TestScale", Kind: model.KindFunction, IsTest: true, QualifiedName: "pkg.TestScale", Summary: "scale"},
+		{ID: "r|File|a.go", Kind: model.KindFile, QualifiedName: "a.go"},
+		{ID: "r|Function|" + strings.Repeat("x", 200), Kind: model.KindFunction, QualifiedName: "long"},
+	}
+	s1, err := st.Sync(ctx, fake{}, "r", nodes)
+	require.NoError(t, err)
+	assert.Equal(t, s1, Stats{Symbols: 3, Embedded: 2, Skipped: 1})
+	s2, err := st.Sync(ctx, fake{}, "r", nodes)
+	require.NoError(t, err)
+	assert.Equal(t, s2.Embedded, 0, "unchanged symbols are not embedded again")
+	nodes[0].Summary = "scale workers on queued jobs"
+	s3, err := st.Sync(ctx, fake{}, "r", nodes)
+	require.NoError(t, err)
+	assert.Equal(t, s3.Embedded, 1, "a changed description is")
+
+	hits, err := st.Rank(ctx, fake{}, "r", "scale the workers", 5)
+	require.NoError(t, err)
+	require.True(t, len(hits) >= 2)
+	assert.Equal(t, hits[0].ID, "r|Function|pkg.Scale")
+	seen := map[string]bool{}
+	for _, h := range hits {
+		assert.False(t, seen[h.ID], "one hit per node")
+		seen[h.ID] = true
+	}
+	other, err := st.Rank(ctx, fake{}, "other", "scale", 5)
+	require.NoError(t, err)
+	assert.Len(t, other, 0, "another graph's namespace is not reachable")
 }
