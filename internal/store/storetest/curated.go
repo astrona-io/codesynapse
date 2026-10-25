@@ -16,7 +16,10 @@ import (
 // curatedContract checks CuratedStore: items round trip, list newest first
 // and by kind, repositories do not see each other's, saving again replaces,
 // and the graph's own lifecycle (ReplaceRepo, DeleteRepo) leaves them alone.
-func curatedContract(t *testing.T, db store.Store) {
+func curatedContract(t *testing.T, db interface {
+	store.Writer
+	store.CuratedStore
+}) {
 	ctx := context.Background()
 	repo := fmt.Sprintf("curated-fixture-%d", time.Now().UnixNano())
 	other := repo + "-other"

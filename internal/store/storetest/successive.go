@@ -19,7 +19,7 @@ import (
 // result must always be exactly the last graph: properties replaced and
 // removed, nodes added and removed, edges changed, and edges from unchanged
 // nodes into changed ones kept.
-func successiveContract(t *testing.T, s store.Store) {
+func successiveContract(t *testing.T, s CodeGraph) {
 	ctx := context.Background()
 	base := func() *model.Graph {
 		g := Fixture()
@@ -67,7 +67,7 @@ func successiveContract(t *testing.T, s store.Store) {
 
 // sameGraph checks every node of want reads back unchanged, removed nodes
 // are gone, and the edges between want's nodes are exactly want's.
-func sameGraph(ctx context.Context, t *testing.T, s store.Store, want *model.Graph, round int) {
+func sameGraph(ctx context.Context, t *testing.T, s CodeGraph, want *model.Graph, round int) {
 	t.Helper()
 	nodes, edges, err := store.Replacement(ctx, Repo, want)
 	require.NoError(t, err)

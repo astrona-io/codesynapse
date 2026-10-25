@@ -13,7 +13,10 @@ import (
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
-func accessContract(t *testing.T, db store.Store) {
+func accessContract(t *testing.T, db interface {
+	store.AccessStore
+	store.Reader
+}) {
 	ctx := context.Background()
 	x := model.AccessSnapshot{TenantID: fmt.Sprintf("access-fixture-%d", time.Now().UnixNano()), Revision: 1, Default: "READ_ONLY",
 		Users: []model.AccessUser{{ID: "reader", Active: true, InheritsDefault: true}, {ID: "denied", Active: true, InheritsDefault: true}, {ID: "team", Active: true}, {ID: "guest", Active: true}, {ID: "default", Active: true, InheritsDefault: true}, {ID: "suspended", InheritsDefault: true}},

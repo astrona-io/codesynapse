@@ -18,10 +18,13 @@ import (
 // runtimeContract: measured facts round-trip per namespace, a new upload
 // replaces the old one whole, organisations sharing a graph never see each
 // other's facts, and deleting the graph removes every namespace's.
-func runtimeContract(t *testing.T, s store.Store) {
+func runtimeContract(t *testing.T, s interface {
+	store.Reader
+	store.Writer
+	store.RuntimeStore
+}) {
 	ctx := context.Background()
-	rs, ok := s.(store.RuntimeStore)
-	require.True(t, ok, "every store keeps runtime facts")
+	rs := s
 	const graph = "runtime-graph"
 	acme, globex := "org-acme|"+graph, "org-globex|"+graph
 

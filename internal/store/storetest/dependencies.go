@@ -15,7 +15,7 @@ import (
 // dependencyContract checks DependencyGraph: every module and vulnerability
 // of one repository, the requirement edges between modules, nothing from
 // another repository and no other kind of edge.
-func dependencyContract(t *testing.T, db store.Store) {
+func dependencyContract(t *testing.T, db CodeGraph) {
 	ctx := context.Background()
 	repo := fmt.Sprintf("deps-fixture-%d", time.Now().UnixNano())
 	other := repo + "-other"
