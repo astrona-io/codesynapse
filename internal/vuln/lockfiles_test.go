@@ -220,3 +220,35 @@ func TestParseNPMLockDevOptionalCanShip(t *testing.T) {
 	assert.Equal(t, license.Check("MIT", "GPL-3.0", mods["shared"].Dev).Level, license.Conflict)
 	assert.Equal(t, license.Check("MIT", "GPL-3.0", mods["only-dev"].Dev).Level, license.Review)
 }
+
+func TestParsePom(t *testing.T) {
+	pom := `<project>
+  <version>2.1.0</version>
+  <properties><jackson.version>2.15.2</jackson.version><alias>${jackson.version}</alias></properties>
+  <dependencyManagement><dependencies>
+    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId><version>2.0.9</version></dependency>
+  </dependencies></dependencyManagement>
+  <dependencies>
+    <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId><version>${alias}</version></dependency>
+    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>5.10.1</version><scope>test</scope></dependency>
+    <dependency><groupId>org.example</groupId><artifactId>self</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>org.springframework</groupId><artifactId>spring-core</artifactId></dependency>
+    <dependency><groupId>org.example</groupId><artifactId>ranged</artifactId><version>[1.0,2.0)</version></dependency>
+  </dependencies>
+</project>`
+	mods := byPath(parsePom([]byte(pom), ""))
+	require.Equal(t, len(mods), 4, "spring-core has no version here and ranged is a range")
+	assert.Equal(t, mods["com.fasterxml.jackson.core:jackson-databind"].Version, "2.15.2")
+	assert.Equal(t, mods["org.slf4j:slf4j-api"].Version, "2.0.9")
+	assert.Equal(t, mods["org.example:self"].Version, "2.1.0")
+	assert.True(t, mods["org.junit.jupiter:junit-jupiter"].Dev)
+	assert.False(t, mods["org.slf4j:slf4j-api"].Dev)
+	assert.Equal(t, mods["org.slf4j:slf4j-api"].Ecosystem, "Maven")
+	assert.Len(t, parsePom([]byte("<project><dependencies>"), ""), 0)
+}
+
+func FuzzParsePom(f *testing.F) {
+	f.Add([]byte(`<project><dependencies><dependency><groupId>a</groupId><artifactId>b</artifactId><version>${x}</version></dependency></dependencies></project>`))
+	f.Fuzz(func(_ *testing.T, data []byte) { parsePom(data, "") })
+}

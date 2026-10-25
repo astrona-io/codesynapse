@@ -68,7 +68,7 @@ internal/refactorplan/   How to merge one duplicate group (name, home, callers, 
 internal/cleanupplan/   Ranked cleanup plan from the stored reports (dead code, dependencies, duplicates, hotspots)
 internal/cleanup/       Liveness (reachability from entry points), unused code/modules/config
 internal/sbom/          CycloneDX 1.5 SBOM from the dependency graph (store.DependencyGraph)
-internal/vuln/          go.mod and lockfiles (npm, PyPI, Cargo, Composer, Bundler, NuGet, Gradle) + OSV lookups, called/imported/required reachability
+internal/vuln/          go.mod and lockfiles (npm, PyPI, Cargo, Composer, Bundler, NuGet, Gradle, Maven pom.xml) + OSV lookups, called/imported/required reachability
 internal/security/      Security report: grading, exposure, prioritisation, Markdown; rule guides (guides.go)
 internal/metrics/       Repository metrics and the token benchmark (computed at ingest)
 internal/forge/         Organisation listing for GitHub, Forgejo/Gitea and GitLab (one host per client) for the Organisations feature

@@ -16,7 +16,7 @@ flowchart TB
         yd[config/yaml.go<br/>Kubernetes, compose, Actions, Renovate]
     end
     subgraph deps[Dependencies]
-        lock[go.mod and lockfiles:<br/>npm, PyPI, Cargo, Composer,<br/>Bundler, NuGet, Gradle]
+        lock[go.mod and lockfiles:<br/>npm, PyPI, Cargo, Composer,<br/>Bundler, NuGet, Gradle, Maven]
         osv[osv.dev<br/>names and versions only]
     end
 
