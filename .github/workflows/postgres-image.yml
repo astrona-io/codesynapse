@@ -12,7 +12,7 @@ on:
   pull_request:
     paths:
       - 'deploy/postgres/**'
-      - '.trivyignore'
+      - '.trivyignore.yaml'
       - 'justfile'
       - '.github/workflows/postgres-image.yml'
   push:

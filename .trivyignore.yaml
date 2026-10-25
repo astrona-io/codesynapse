@@ -1,0 +1,15 @@
+# Trivy findings reviewed and accepted (`just scan`, `just scan-image`). Each
+# needs a statement; scope it with paths when it holds for one file only.
+misconfigurations:
+  # KSV-0109 flags CODESYNAPSE_GIT_TOKEN_HOST in the ConfigMap because its name
+  # contains "TOKEN". It is a host name; tokens come from a Secret.
+  - id: AVD-KSV-0109
+    statement: CODESYNAPSE_GIT_TOKEN_HOST holds a host name, not a token.
+  # The official entrypoint starts as root to prepare the data directory and
+  # then drops to postgres through gosu (docker-compose relies on it).
+  - id: AVD-DS-0002
+    paths:
+      - deploy/postgres/Dockerfile
+    statement: >-
+      The chart runs the PostgreSQL pod as uid 70 and never executes as root;
+      only the compose entrypoint starts as root, to chown the data volume.

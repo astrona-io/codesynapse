@@ -19,7 +19,7 @@ on:
       - 'rules/**'
       - 'go.mod'
       - 'go.sum'
-      - '.trivyignore'
+      - '.trivyignore.yaml'
       - 'deploy/helm/codesynapse/charts/**'
       - '.github/scripts/*chart-images.sh'
       - 'justfile'
