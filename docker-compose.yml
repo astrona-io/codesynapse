@@ -213,17 +213,23 @@ services:
       postgres:
         condition: service_healthy
 
-  # Runs clone, sync, index, AI and fix jobs the API records. Scale it with
-  # `docker compose up --scale worker=3`; each claims only its roles.
+  # Runs the clone, sync, index and AI jobs the API records. Scale it with
+  # `docker compose up --scale worker=3`; each claims only its roles. It parses
+  # untrusted repositories, so it never holds the right to push, the API's
+  # service token or the first administrator's password (docs/SAAS.md, 5e).
   worker:
     build:
       context: .
       dockerfile: services/api/Dockerfile
       target: worker
-    environment:
+    environment: &worker-env
       <<: *api-env
-      CODESYNAPSE_WORKER_ROLES: ${CODESYNAPSE_WORKER_ROLES:-ingest,ai,fix}
-    volumes:
+      CODESYNAPSE_WORKER_ROLES: ingest,ai
+      CODESYNAPSE_ALLOW_PUSH: "false"
+      CODESYNAPSE_API_TOKEN: ""
+      CODESYNAPSE_ADMIN_PASSWORD: ""
+      CODESYNAPSE_AUTO_ADMIN: "false"
+    volumes: &worker-volumes
       - ${SOURCES_DIR:-./sources}:/sources:ro
       - workspace:/workspace
       - go-cache:/cache
@@ -234,14 +240,36 @@ services:
     tmpfs: [/tmp]
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
-    healthcheck:
+    healthcheck: &worker-health
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/healthz"]
       interval: 10s
       timeout: 3s
       retries: 30
-    depends_on:
+    depends_on: &worker-depends
       api:
         condition: service_healthy
+
+  # Pushes fix branches for accepted review comments: the only service that
+  # may (CODESYNAPSE_ALLOW_PUSH from .env, off by default). Idle until a fix
+  # job exists.
+  fix-worker:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+      target: worker
+    environment:
+      <<: *worker-env
+      CODESYNAPSE_WORKER_ROLES: fix
+      CODESYNAPSE_ALLOW_PUSH: ${CODESYNAPSE_ALLOW_PUSH:-false}
+    volumes: *worker-volumes
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    healthcheck: *worker-health
+    depends_on: *worker-depends
 
   mcp:
     build:

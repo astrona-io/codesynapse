@@ -2,8 +2,9 @@
 # optional CPU autoscaling for the stateless ones (docs/SAAS.md, 6c). The
 # worker scales by hand: a worker stopped by a scale-down leaves its job to
 # another one only after the job's lease ran out.
-{{- range $c := list "api" "worker" "mcp" "web" }}
-{{- $v := index $.Values $c }}
+{{- range $c, $key := dict "api" "api" "worker" "worker" "mcp" "mcp" "web" "web" "fix-worker" "fixWorker" }}
+{{- $v := index $.Values $key }}
+{{- if or (ne $c "fix-worker") $v.enabled }}
 {{- $auto := and $v.autoscaling $v.autoscaling.enabled }}
 {{- if or $auto (gt (int $v.replicas) 1) }}
 ---
@@ -42,5 +43,6 @@ spec:
       resource:
         name: cpu
         target: {type: Utilization, averageUtilization: {{ $v.autoscaling.targetCPU }}}
+{{- end }}
 {{- end }}
 {{- end }}

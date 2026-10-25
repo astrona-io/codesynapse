@@ -201,7 +201,7 @@
       "$ref": "#/definitions/scaledComponent"
     },
     "worker": {
-      "description": "Scales by hand: a worker stopped by a scale-down leaves its job to another one only after the job's lease ran out.",
+      "description": "Runs clone, sync and index jobs and AI tasks. Scales by hand: a worker stopped by a scale-down leaves its job to another one only after the job's lease ran out. It never pushes: fix branches belong to fixWorker.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -210,9 +210,31 @@
           "minimum": 0
         },
         "roles": {
-          "description": "Comma-separated job roles: ingest (clone, sync, index), ai, fix (pushes fix branches).",
+          "description": "Comma-separated job roles: ingest (clone, sync, index) and ai. The fix role runs in fixWorker.",
           "type": "string",
-          "pattern": "^(ingest|ai|fix)(,(ingest|ai|fix))*$"
+          "pattern": "^(ingest|ai)(,(ingest|ai))*$"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        }
+      }
+    },
+    "fixWorker": {
+      "description": "Pushes fix branches for accepted review comments. The only worker allowed to push (CODESYNAPSE_ALLOW_PUSH); needs features.allowPush=true and a Git token with write access.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "roles": {
+          "description": "Job roles of this worker: fix.",
+          "type": "string",
+          "enum": ["fix"]
         },
         "resources": {
           "$ref": "#/definitions/resources"

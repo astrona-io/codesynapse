@@ -1,41 +1,55 @@
-# Workers run the jobs the API records: clone, sync and index (ingest), AI
-# tasks (ai) and fix branches (fix). They parse untrusted repositories, so
-# they get no ingress at all.
+# Workers run the jobs the API records: clone, sync and index (ingest) and AI
+# tasks (ai) in the `worker` Deployment, fix branches (fix) in the optional
+# `fix-worker` one. They parse untrusted repositories, so they get no ingress
+# at all. Only the fix worker is allowed to push (CODESYNAPSE_ALLOW_PUSH):
+# a worker that reads untrusted code never holds that switch, and none of
+# them holds the API's service token or the first administrator's password
+# (docs/SAAS.md, 5e step 4).
+{{- $pools := list (dict "component" "worker" "values" .Values.worker "push" "false") }}
+{{- if .Values.fixWorker.enabled }}
+{{- if not .Values.features.allowPush }}
+{{- fail "fixWorker.enabled needs features.allowPush=true: the fix worker is the only one that pushes" }}
+{{- end }}
+{{- $pools = append $pools (dict "component" "fix-worker" "values" .Values.fixWorker "push" "true") }}
+{{- end }}
+{{- range $p := $pools }}
+{{- $v := $p.values }}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "cs.name" (list . "worker") }}
+  name: {{ include "cs.name" (list $ $p.component) }}
   labels:
-    {{- include "cs.labels" (list . "worker") | nindent 4 }}
+    {{- include "cs.labels" (list $ $p.component) | nindent 4 }}
 spec:
-  {{- include "cs.replicas" (list . "worker") | nindent 2 }}
+  replicas: {{ $v.replicas }}
   selector:
     matchLabels:
-      {{- include "cs.selector" (list . "worker") | nindent 6 }}
+      {{- include "cs.selector" (list $ $p.component) | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "cs.labels" (list . "worker") | nindent 8 }}
+        {{- include "cs.labels" (list $ $p.component) | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
+      serviceAccountName: {{ include "cs.name" (list $ "codesynapse") }}
       automountServiceAccountToken: false
       enableServiceLinks: false
-      {{- include "cs.pullSecrets" . | nindent 6 }}
-      {{- include "cs.spread" (list . "worker") | nindent 6 }}
+      {{- include "cs.pullSecrets" $ | nindent 6 }}
+      {{- include "cs.spread" (list $ $p.component) | nindent 6 }}
       securityContext:
         {{- include "cs.podSecurity" 10001 | nindent 8 }}
       containers:
         - name: worker
-          image: {{ include "cs.image" (list . "worker") }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          image: {{ include "cs.image" (list $ "worker") }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
           args: [worker]
           ports:
             - {name: health, containerPort: 8081}
           env:
-            {{- include "cs.apiEnv" . | nindent 12 }}
-            - {name: CODESYNAPSE_WORKER_ROLES, value: {{ .Values.worker.roles | quote }}}
+            {{- include "cs.jobEnv" (list $ $p.push) | nindent 12 }}
+            - {name: CODESYNAPSE_WORKER_ROLES, value: {{ $v.roles | quote }}}
             - {name: CODESYNAPSE_WORKER_ADDR, value: "0.0.0.0:8081"}
-            - {name: GOMEMLIMIT, value: {{ include "cs.gomemlimit" .Values.worker.resources | quote }}}
+            - {name: GOMEMLIMIT, value: {{ include "cs.gomemlimit" $v.resources | quote }}}
           startupProbe:
             httpGet: {path: /healthz, port: health}
             periodSeconds: 5
@@ -45,9 +59,9 @@ spec:
             periodSeconds: 20
             failureThreshold: 6
           resources:
-            {{- toYaml .Values.worker.resources | nindent 12 }}
+            {{- toYaml $v.resources | nindent 12 }}
           securityContext:
-            {{- include "cs.containerSecurity" . | nindent 12 }}
+            {{- include "cs.containerSecurity" $ | nindent 12 }}
           volumeMounts:
             - {name: workspace, mountPath: /workspace}
             - {name: llm, mountPath: /config, readOnly: true}
@@ -55,10 +69,11 @@ spec:
             - {name: tmp, mountPath: /tmp}
       volumes:
         - name: workspace
-          persistentVolumeClaim: {claimName: {{ include "cs.name" (list . "workspace") }}}
+          persistentVolumeClaim: {claimName: {{ include "cs.name" (list $ "workspace") }}}
         - name: llm
-          configMap: {name: {{ include "cs.name" (list . "llm") }}}
+          configMap: {name: {{ include "cs.name" (list $ "llm") }}}
         - name: cache
           emptyDir: {sizeLimit: 10Gi}
         - name: tmp
           emptyDir: {sizeLimit: 2Gi}
+{{- end }}

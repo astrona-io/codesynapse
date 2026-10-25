@@ -75,12 +75,23 @@ api:
     limits: {memory: 1Gi}
 worker:
   replicas: 1
-  # ingest (clone, sync, index), ai, fix (pushes fix branches).
-  roles: "ingest,ai,fix"
+  # ingest (clone, sync, index) and ai. The fix role (pushes fix branches)
+  # belongs to fixWorker below: a worker that parses untrusted repositories
+  # never holds the switch that allows pushing.
+  roles: "ingest,ai"
   # Ingest type-checks whole modules: size for your largest repository.
   resources:
     requests: {cpu: 500m, memory: 1Gi}
     limits: {memory: 6Gi}
+# Pushes fix branches for accepted review comments. Off by default; turning
+# it on needs features.allowPush=true and a Git token with write access.
+fixWorker:
+  enabled: false
+  replicas: 1
+  roles: "fix"
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {memory: 2Gi}
 mcp:
   replicas: 1
   # No transport session between requests, so any replica answers any

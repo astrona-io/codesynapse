@@ -194,8 +194,10 @@ The "Agent spark" product UI with light and dark themes: ink on white with lilac
           - The audit entry, the job and the trace share the request ID, so one ID finds everything.
           - Spans never carry prompts, code, arguments or repository names, following the telemetry rules.
           - Needs `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`, from the same Apache-2.0 project as the metrics exporter already in use; approval needed per AGENTS.md. Needs a trace store: VictoriaTraces or Jaeger (both Apache-2.0); Grafana Tempo is AGPL and excluded.
-       4. **Isolation for the ingest role:**
-          - A read-only root filesystem with a writable workspace volume.
+       4. **Isolation for the ingest role (partly done):**
+          - **Done:** workers are split by what they may hold. The `worker` (ingest, ai) runs with `CODESYNAPSE_ALLOW_PUSH=false`, and a worker without the fix role ignores that switch whatever its environment says (`pushAllowed`). Only `fix-worker` (compose; `fixWorker.enabled` in the chart, which needs `features.allowPush`) may push. No worker has the API's service token or the first administrator's password. `just chart-check` asserts all three on the rendered chart. Still shared with the ingest worker: the installation Git tokens (`CODESYNAPSE_GIT_TOKENS`), which clone and push alike; separate read and push tokens are a follow-up.
+          - **Remaining:** the database role and the network policies below.
+          - A read-only root filesystem with a writable workspace volume (done in compose and the chart).
           - No route to PostgreSQL beyond what its checks need: a database role limited to job and permission reads plus ingest reports.
           - Network policies that allow only git hosts, osv.dev and deps.dev.
           - The fix role is the only one with push tokens, and the API never sees them.

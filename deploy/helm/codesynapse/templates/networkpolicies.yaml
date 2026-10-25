@@ -26,16 +26,20 @@ spec:
               {{- include "cs.selector" (list $root $client) | nindent 14 }}
         {{- end }}
       ports: [{port: 8080}]
+{{- range $w := list "worker" "fix-worker" }}
+{{- if or (eq $w "worker") $root.Values.fixWorker.enabled }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "cs.name" (list . "worker") }}
+  name: {{ include "cs.name" (list $root $w) }}
   labels:
-    {{- include "cs.labels" (list . "worker") | nindent 4 }}
+    {{- include "cs.labels" (list $root $w) | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "cs.selector" (list . "worker") | nindent 6 }}
+      {{- include "cs.selector" (list $root $w) | nindent 6 }}
   policyTypes: [Ingress]
+{{- end }}
+{{- end }}
 {{- end }}

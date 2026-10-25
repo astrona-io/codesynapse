@@ -32,6 +32,10 @@ Take a backup. The parts that matter:
 
 Resource names assume the release is called `codesynapse`.
 
+## Fix branches moved to their own worker
+
+Fix branches (`features.allowPush`) are pushed by a separate worker, so the worker that reads untrusted repositories never holds the right to push. `worker.roles` is now `ingest,ai`. If you pushed fix branches before, set `fixWorker.enabled=true` along with `features.allowPush=true`; until then a fix job waits for a worker that can run it. In compose, `fix-worker` is a new service and `worker` no longer takes `CODESYNAPSE_WORKER_ROLES` from `.env`. Neither worker holds the API token or the administrator password any more.
+
 ## Rolling back
 
 `helm rollback codesynapse <revision>` returns the Deployments to the previous images. Migrations are not reversed. For additive migrations that is safe: the older release ignores what it doesn't know. To return to the state before the upgrade instead, restore the PostgreSQL dump and the volume snapshots.
