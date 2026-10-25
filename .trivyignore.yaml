@@ -10,6 +10,9 @@ misconfigurations:
   - id: AVD-DS-0002
     paths:
       - deploy/postgres/Dockerfile
+      - deploy/hugegraph/Dockerfile
     statement: >-
       The chart runs the PostgreSQL pod as uid 70 and never executes as root;
       only the compose entrypoint starts as root, to chown the data volume.
+      The HugeGraph image is the upstream one with its packages upgraded and
+      keeps upstream's user.

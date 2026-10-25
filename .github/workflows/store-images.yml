@@ -1,25 +1,28 @@
-name: PostgreSQL image
+name: Store images
 
-# The PostgreSQL image of the chart and docker-compose (deploy/postgres): the
-# official image with gosu rebuilt on our Go version, so scans (Artifact Hub,
-# Trivy) stop reporting the Go standard library bundled in upstream's gosu.
+# The store images of the chart and docker-compose (deploy/postgres,
+# deploy/hugegraph): the official images with what scans (Artifact Hub, Trivy)
+# keep reporting fixed. PostgreSQL gets gosu rebuilt on our Go version;
+# HugeGraph gets its Ubuntu packages upgraded. Their bundled jars stay upstream's.
 # Pull requests build and scan only. A merge to main and a weekly rebuild
 # publish a floating tag (the official image moves the same way) and sign it,
-# so Alpine fixes reach us within a week without a release.
-#   :18-alpine            moves with each rebuild
-#   :18-alpine-YYYYMMDD   that rebuild
+# so base-image fixes reach us within a week without a release.
+#   :18-alpine / :1.7.0         moves with each rebuild
+#   :<same>-YYYYMMDD            that rebuild
 on:
   pull_request:
     paths:
       - 'deploy/postgres/**'
+      - 'deploy/hugegraph/**'
       - '.trivyignore.yaml'
       - 'justfile'
-      - '.github/workflows/postgres-image.yml'
+      - '.github/workflows/store-images.yml'
   push:
     branches: [main]
     paths:
       - 'deploy/postgres/**'
-      - '.github/workflows/postgres-image.yml'
+      - 'deploy/hugegraph/**'
+      - '.github/workflows/store-images.yml'
   schedule:
     - cron: '17 4 * * 1'
   workflow_dispatch:
@@ -28,13 +31,19 @@ permissions:
   contents: read
 
 concurrency:
-  group: postgres-image-${{ github.event.pull_request.number || github.ref }}
+  group: store-images-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   scan:
-    name: Build and scan
+    name: Build and scan ${{ matrix.image }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {image: postgres, tag: 18-alpine, gate: 'os,library'}
+          - {image: hugegraph, tag: 1.7.0, gate: os}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -44,16 +53,18 @@ jobs:
       - name: Build (amd64)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: deploy/postgres
-          file: deploy/postgres/Dockerfile
+          context: deploy/${{ matrix.image }}
+          file: deploy/${{ matrix.image }}/Dockerfile
           platforms: linux/amd64
           load: true
-          tags: codesynapse-postgres:scan
+          tags: codesynapse-${{ matrix.image }}:scan
       - name: Fixable HIGH and CRITICAL vulnerabilities (Trivy)
-        run: just scan-image codesynapse-postgres:scan
+        # HugeGraph's jars are upstream's: only its OS packages gate, the rest
+        # shows in the scan-stores report (images.yml).
+        run: just scan-image codesynapse-${{ matrix.image }}:scan ${{ matrix.gate }}
 
   publish:
-    name: Publish
+    name: Publish ${{ matrix.image }}
     needs: scan
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -63,6 +74,12 @@ jobs:
       # cosign keyless signing and build attestations.
       id-token: write
       attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {image: postgres, tag: 18-alpine, gate: 'os,library'}
+          - {image: hugegraph, tag: 1.7.0, gate: os}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -77,17 +94,17 @@ jobs:
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: ghcr.io/${{ github.repository_owner }}/codesynapse-postgres
+          images: ghcr.io/${{ github.repository_owner }}/codesynapse-${{ matrix.image }}
           flavor: latest=false
           tags: |
-            type=raw,value=18-alpine
-            type=raw,value=18-alpine-{{date 'YYYYMMDD'}}
+            type=raw,value=${{ matrix.tag }}
+            type=raw,value=${{ matrix.tag }}-{{date 'YYYYMMDD'}}
       - id: build
         name: Build and push (amd64, arm64)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: deploy/postgres
-          file: deploy/postgres/Dockerfile
+          context: deploy/${{ matrix.image }}
+          file: deploy/${{ matrix.image }}/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -97,6 +114,6 @@ jobs:
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Sign (keyless)
         env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/codesynapse-postgres
+          IMAGE: ghcr.io/${{ github.repository_owner }}/codesynapse-${{ matrix.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: cosign sign --yes "$IMAGE@$DIGEST"
