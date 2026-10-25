@@ -4,7 +4,7 @@
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "fake secrets in tests, fixtures and rule examples"
 paths = [
   '''(^|/)testdata/''',
@@ -13,3 +13,12 @@ paths = [
   '''(^|/)[a-z]+test/[^/]+\.go$''',
   '''^rules/(code|config)/[^/]+\.yaml$''',
 ]
+
+# NebulaGraph's graphd flags (--auth_type=password, --enable_authorize=true)
+# read as a generic API key; no credential is in the line.
+[[allowlists]]
+description = "graphd command line in docker-compose.yml"
+condition = "AND"
+paths = ['''^docker-compose\.yml$''']
+regexTarget = "line"
+regexes = ['''--auth_type=password''']
