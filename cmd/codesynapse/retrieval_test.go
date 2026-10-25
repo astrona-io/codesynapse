@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,4 +210,35 @@ func TestEvalSessions(t *testing.T) {
 	err := empty.Run(ctx, nil)
 	require.True(t, err != nil)
 	assert.Contains(t, err.Error(), evalCaptureEnv)
+}
+
+// TestRetrievalRepoRenamed: a remote that names the old owner of a moved
+// repository must not stop the report; the server's own name for the
+// checkout is used instead.
+func TestRetrievalRepoRenamed(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
+	var reported []string
+	dir := gitRepo(t) // origin acme/demo; the server knows the directory name under the new owner
+	name := "newowner/" + filepath.Base(dir)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos":
+			_, _ = io.WriteString(w, `{"repos":[{"name":"`+name+`","remote":"https://github.com/`+name+`.git"}]}`) //nolint:errcheck // test server
+		case r.URL.EscapedPath() == "/api/v1/repos/"+url.PathEscape(name)+"/usage/retrieval":
+			reported = append(reported, r.URL.EscapedPath())
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"detail":"no such repository"}`) //nolint:errcheck // test server
+		}
+	}))
+	t.Cleanup(api.Close)
+	t.Setenv("CODESYNAPSE_API_URL", api.URL)
+	t.Setenv(apiTokenEnv, "csk_test")
+
+	in := toolHookInput{SessionID: "chat-2", Cwd: dir, ToolName: "mcp__codesynapse__search"}
+	noteLookup(in)
+	reportRetrieval(context.Background(), toolHookInput{SessionID: "chat-2", Cwd: dir}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	assert.Equal(t, len(reported), 1, "the report reached the server under its own name")
 }
