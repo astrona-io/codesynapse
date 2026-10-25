@@ -54,7 +54,7 @@ func main() {
 // commands are the CLI's subcommands (the plugin test checks the hooks
 // call ones that exist).
 func commands(ec *app.Env) []*cobra.Command {
-	return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), upgradeCmd(ec), statsCmd(ec), evalCmd(ec), hookCmd(ec), gitHookCmd(ec), installCmd(ec), statusCmd(ec), uninstallCmd(ec), mcpCmd(ec), cursorCmd(ec), assistantCmd(ec, "codex"), assistantCmd(ec, "claude"), memoryCmd(ec), runtimeCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
+	return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), upgradeCmd(ec), statsCmd(ec), evalCmd(ec), hookCmd(ec), gitHookCmd(ec), installCmd(ec), statusCmd(ec), uninstallCmd(ec), mcpCmd(ec), cursorCmd(ec), assistantCmd(ec, "codex"), assistantCmd(ec, "claude"), memoryCmd(ec), runtimeCmd(ec), imagesCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
 }
 
 // ingestOptions configures `codesynapse ingest`.
