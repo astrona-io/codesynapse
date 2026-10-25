@@ -6,6 +6,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/astrona-io/codesynapse/internal/ghtools"
 	"github.com/astrona-io/codesynapse/internal/gittools"
 )
 
@@ -38,6 +39,19 @@ func registerGitTools(s *mcp.Server, add func(name, desc string) *mcp.Tool) {
 	mcp.AddTool(s, add(gittools.ToolLog,
 		"Recent commits for the repository or a path, one compact entry each: commit, date, author, subject, files and lines changed, the files touched most. Use instead of git log."),
 		func(ctx context.Context, r *mcp.CallToolRequest, _ gittools.LogIn) (*mcp.CallToolResult, any, error) {
+			return local(ctx, r, nil)
+		})
+	// The gh tools are read-only and answered on the developer's machine with
+	// their own GitHub sign-in, like the git tools. There is no tool that
+	// creates, merges or closes anything.
+	mcp.AddTool(s, add(ghtools.ToolPRStatus,
+		"Where a pull request stands, in a few lines: state, draft, head and base branch, mergeability, review decision, and its checks counted (pass, fail, pending, skipped, done) with only the failing and waiting ones named. Omit number for the checked-out branch's pull request. Use instead of gh pr view or gh pr checks. Reads only; creating and merging stay with gh."),
+		func(ctx context.Context, r *mcp.CallToolRequest, _ ghtools.PRStatusIn) (*mcp.CallToolResult, any, error) {
+			return local(ctx, r, nil)
+		})
+	mcp.AddTool(s, add(ghtools.ToolPRList,
+		"Pull requests of the checkout's GitHub repository, one line each: number, title, head branch, state, draft. state is open (default), closed, merged or all; at most 30. Use instead of gh pr list."),
+		func(ctx context.Context, r *mcp.CallToolRequest, _ ghtools.PRListIn) (*mcp.CallToolResult, any, error) {
 			return local(ctx, r, nil)
 		})
 }

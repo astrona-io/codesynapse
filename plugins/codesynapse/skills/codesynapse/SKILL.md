@@ -21,7 +21,7 @@ CodeSynapse has indexed this repository's code, docs, YAML, history and dependen
 
 ## Git
 
-With the `git` toolset, ask these instead of running `git status`, `git diff`, `git blame` or `git log` and then opening files: `git_status` (where the checkout stands), `git_diff_summary` (what changed, as line ranges to read), `git_blame` (who last changed lines a..b), `git_log` (recent commits for a path). Then `get_pr_context` for symbols, risk and tests.
+With the `git` toolset, ask these instead of running `git status`, `git diff`, `git blame` or `git log` and then opening files: `git_status` (where the checkout stands), `git_diff_summary` (what changed, as line ranges to read), `git_blame` (who last changed lines a..b), `git_log` (recent commits for a path). Then `get_pr_context` for symbols, risk and tests. For pull requests, `gh_pr_status` (state, mergeability, checks counted with only the failing and waiting ones named) and `gh_pr_list` replace `gh pr view`, `gh pr checks` and `gh pr list`; creating and merging stay with `gh`.
 
 ## Rules
 
