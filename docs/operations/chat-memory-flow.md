@@ -123,7 +123,7 @@ Each step is recorded as a metric with a fixed set of labels, so it can be expor
 | `flow_step_calls_total` | `tenant_id`, `step`, `outcome` (`ok`, `error`) | Runs of a step |
 | `flow_step_tokens_total` | `tenant_id`, `step`, `kind` | Tokens a step moved. `kind` is `context_in`, `context_out`, `model_in` or `model_out` |
 
-`step` is one of `session_start.rules`, `session_start.recall`, `precompact.offload`, `offload.extract`, `recall_context.embed` and `offload.embed_entities`. Model tokens are the provider's reported usage when it gave one, and the size estimate otherwise.
+`step` is one of `session_start.rules`, `session_start.recall`, `hook.recall`, `precompact.offload`, `offload.extract`, `recall_context.embed` and `offload.embed_entities`. Model tokens are the provider's reported usage when it gave one, and the size estimate otherwise.
 
 The metrics that were there before cover the same ground from other sides: `llm_tokens_input_total` and `llm_tokens_output_total` (by `task`: `memory`, `embeddings`), `memory_offload_turns_total`, `memory_offload_tokens_total`, `memory_recall_total`, `mcp_response_tokens_total` (by tool) and `agent_hook_events_total` (by hook event).
 

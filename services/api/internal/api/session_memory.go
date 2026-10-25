@@ -156,6 +156,10 @@ func (s *Server) handleSessionRecall(w http.ResponseWriter, r *http.Request) {
 		s.sessionMemoryError(w, err)
 		return
 	}
+	// Tokens only for what the hook can add to the chat; a skipped or empty
+	// lookup adds nothing.
+	telemetry.RecordStep(r.Context(), telemetry.StepRecallHook, true)
+	telemetry.RecordStepTokens(r.Context(), telemetry.StepRecallHook, telemetry.KindContextIn, telemetry.EstimateTokens(factBytes(result.Graph)))
 	writeJSON(w, http.StatusOK, result)
 }
 
