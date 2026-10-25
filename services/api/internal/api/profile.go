@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+
+	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
 // A person's own account from the profile page: name, email and sessions
@@ -14,6 +16,8 @@ func (s *Server) profileRoutes() {
 	s.account("GET /api/v1/me/sessions", governanceRoute, s.handleMySessions)
 	s.account("DELETE /api/v1/me/sessions/{id}", governanceRoute, s.handleEndSession)
 	s.account("POST /api/v1/me/sessions/end-others", governanceRoute, s.handleEndOtherSessions)
+	s.account("GET /api/v1/me/menu", businessRoute, s.handleMenuPrefs)
+	s.account("PUT /api/v1/me/menu", businessRoute, s.handleSetMenuPrefs)
 }
 
 func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
@@ -114,4 +118,35 @@ func (s *Server) handleEndOtherSessions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleMenuPrefs(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.caller(w, r)
+	if !ok {
+		return
+	}
+	m, err := s.cfg.Accounts.MenuPrefs(r.Context(), p)
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	writeJSON(w, 200, m)
+}
+
+func (s *Server) handleSetMenuPrefs(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.caller(w, r)
+	if !ok {
+		return
+	}
+	var in accounts.MenuPrefs
+	if err := decodeJSON(w, r, &in); err != nil {
+		s.problem(w, 400, err)
+		return
+	}
+	m, err := s.cfg.Accounts.SetMenuPrefs(r.Context(), p, in)
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	writeJSON(w, 200, m)
 }
