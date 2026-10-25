@@ -261,6 +261,9 @@ services:
       <<: *worker-env
       CODESYNAPSE_WORKER_ROLES: fix
       CODESYNAPSE_ALLOW_PUSH: ${CODESYNAPSE_ALLOW_PUSH:-false}
+      # Tokens that may push (CODESYNAPSE_GIT_TOKENS format); only this
+      # service gets them. Unset: it pushes with CODESYNAPSE_GIT_TOKENS.
+      CODESYNAPSE_GIT_PUSH_TOKENS: ${CODESYNAPSE_GIT_PUSH_TOKENS:-}
     volumes: *worker-volumes
     extra_hosts:
       - "host.docker.internal:host-gateway"

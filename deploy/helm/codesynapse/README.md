@@ -37,7 +37,7 @@ The steps below do the same by hand.
      --from-literal=SECRET_KEY="$(openssl rand -base64 32)"
    ```
 
-   Optional keys: `CODESYNAPSE_GIT_TOKENS` (installation Git tokens, `host=token,...`), `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`. With an external database, put its URL in `CODESYNAPSE_DATABASE_URL` and drop `POSTGRES_PASSWORD`. Keep `SECRET_KEY`: organisation Git tokens and identity provider secrets sealed with a lost key have to be entered again.
+   Optional keys: `CODESYNAPSE_GIT_TOKENS` (installation Git tokens, `host=token,...`; keep them read-only), `CODESYNAPSE_GIT_PUSH_TOKENS` (same format, tokens that may push; only the fix worker and an API that runs jobs with push on get them; without it pushes use `CODESYNAPSE_GIT_TOKENS`), `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`. With an external database, put its URL in `CODESYNAPSE_DATABASE_URL` and drop `POSTGRES_PASSWORD`. Keep `SECRET_KEY`: organisation Git tokens and identity provider secrets sealed with a lost key have to be entered again.
 
 2. Install:
 
