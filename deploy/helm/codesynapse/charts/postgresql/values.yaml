@@ -1,6 +1,6 @@
 # Defaults for the in-chart postgresql. Override them under `postgresql:` in the
 # codesynapse chart's values.
-image: docker.io/library/postgres:18-alpine
+image: ghcr.io/astrona-io/codesynapse-postgres:18-alpine
 size: 5Gi
 storageClass: ""
 resources:
