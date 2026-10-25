@@ -155,6 +155,14 @@ var schemaItems = func() []schemaItem {
 			indexes: []index{{"session_by_tenant", []indexCol{{"tenant_id", 64}, {"session_id", 128}}}}},
 		schemaItem{name: "session_revoked", cols: defaulted("string", `""`, "tenant_id", "session_id")},
 	)
+	// Runtime facts (runtime.go): a head per namespace and the chunks of its
+	// gzipped document.
+	items = append(items,
+		schemaItem{name: "runtime_head", cols: slices.Concat(defaulted("string", `""`, "ns", "graph_name", "gen"), counters("chunks")),
+			indexes: []index{{"runtime_head_by_graph", []indexCol{{"graph_name", 128}}}}},
+		schemaItem{name: "runtime_chunk", cols: slices.Concat(defaulted("string", `""`, "ns", "graph_name", "gen", "data"), counters("idx")),
+			indexes: []index{{"runtime_chunk_by_ns", []indexCol{{"ns", 128}, {"gen", 24}}}, {"runtime_chunk_by_graph", []indexCol{{"graph_name", 128}}}}},
+	)
 	// One edge type per model edge kind (schemaEdges) carries these.
 	edge := slices.Concat(longs("count"), texts("run", "evidence"))
 	for _, k := range edgeKinds() {

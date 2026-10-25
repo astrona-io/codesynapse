@@ -44,3 +44,10 @@ func TestRecords(t *testing.T) {
 	s := newTestStore(t)
 	storetest.RunRecords(t, s)
 }
+
+// TestStore is the whole contract, the one every store passes.
+func TestStore(t *testing.T) {
+	s := newTestStore(t)
+	require.NoError(t, s.DeleteRepo(context.Background(), storetest.Repo))
+	storetest.Run(t, s)
+}

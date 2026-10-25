@@ -101,6 +101,7 @@ type Records interface {
 	store.MemoryStore
 	store.AccessStore
 	store.SessionMemoryStore
+	store.RuntimeStore
 }
 
 // RunRecords exercises only those records; Run includes them.
@@ -111,6 +112,7 @@ func RunRecords(t *testing.T, s Records) {
 	require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
 	t.Run("access_projection", func(t *testing.T) { accessContract(t, s) })
 	t.Run("session_memory", func(t *testing.T) { sessionMemoryContract(t, s) })
+	t.Run("runtime_facts", func(t *testing.T) { runtimeContract(t, s) })
 	t.Run("history", func(t *testing.T) { historyContract(t, s) })
 	t.Run("curated", func(t *testing.T) { curatedContract(t, s) })
 	t.Run("reviews survive re-indexing", func(t *testing.T) { reviewContract(ctx, t, s) })
@@ -299,7 +301,15 @@ func Run(t *testing.T, s store.Store) {
 		require.True(t, ok)
 		sessionMemoryContract(t, sm)
 	})
-	t.Run("runtime_facts", func(t *testing.T) { runtimeContract(t, s) })
+	t.Run("runtime_facts", func(t *testing.T) {
+		rs, ok := s.(interface {
+			store.Reader
+			store.Writer
+			store.RuntimeStore
+		})
+		require.True(t, ok, "every store keeps runtime facts")
+		runtimeContract(t, rs)
+	})
 
 	codeGraphContract(t, s)
 

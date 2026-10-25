@@ -295,3 +295,5 @@ func (s *Store) Usage(ctx context.Context, sinceDay string) ([]usage.Bucket, err
 	})
 	return out, nil
 }
+
+var _ store.Store = (*Store)(nil)
