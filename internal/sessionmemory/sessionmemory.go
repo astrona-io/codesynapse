@@ -297,8 +297,9 @@ func Apply(d Document, scope Scope, triples []memory.Triple, source string, expi
 	for _, f := range p.PutFacts {
 		state.Facts[f.ID] = f
 	}
-	if len(state.Entities) > MaxEntities || len(state.Facts) > MaxFacts {
-		return Document{}, ErrLimit
+	fresh := map[string]bool{}
+	for _, f := range p.PutFacts {
+		fresh[f.ID] = true
 	}
 	d.Graph = EmptyGraph()
 	for _, ent := range state.Entities {
@@ -310,14 +311,64 @@ func Apply(d Document, scope Scope, triples []memory.Triple, source string, expi
 	slices.SortFunc(d.Graph.Entities, func(a, b memory.Entity) int { return strings.Compare(a.ID, b.ID) })
 	slices.SortFunc(d.Graph.Facts, func(a, b memory.Fact) int { return strings.Compare(a.ID, b.ID) })
 	d.Revision++
-	encoded, err := json.Marshal(d)
-	if err != nil {
+	if err := fit(&d, fresh); err != nil {
 		return Document{}, err
 	}
-	if len(encoded) > MaxDocumentBytes {
-		return Document{}, ErrLimit
-	}
 	return d, nil
+}
+
+// fit makes room for a write by dropping the facts a chat is least likely to
+// need: replaced ones first, then the oldest. A long chat is offloaded in many
+// jobs and would otherwise fill the document and fail every later job. Facts
+// the write itself brought are kept; if those alone do not fit, the write is
+// refused. Entities left without a fact go with it.
+func fit(d *Document, fresh map[string]bool) error {
+	over := func() (bool, error) {
+		if len(d.Graph.Entities) > MaxEntities || len(d.Graph.Facts) > MaxFacts {
+			return true, nil
+		}
+		b, err := json.Marshal(d)
+		return len(b) > MaxDocumentBytes, err
+	}
+	if full, err := over(); err != nil || !full {
+		return err
+	}
+	var old []memory.Fact
+	for _, f := range d.Graph.Facts {
+		if !fresh[f.ID] {
+			old = append(old, f)
+		}
+	}
+	slices.SortFunc(old, func(a, b memory.Fact) int {
+		if a.Current() != b.Current() {
+			if !a.Current() {
+				return -1
+			}
+			return 1
+		}
+		if c := strings.Compare(a.UpdatedAt, b.UpdatedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	dropped := map[string]bool{}
+	for _, f := range old {
+		dropped[f.ID] = true
+		d.Graph.Facts = slices.DeleteFunc(d.Graph.Facts, func(x memory.Fact) bool { return dropped[x.ID] })
+		used := map[string]bool{}
+		for _, x := range d.Graph.Facts {
+			used[x.Subject], used[x.Object] = true, true
+		}
+		d.Graph.Entities = slices.DeleteFunc(d.Graph.Entities, func(e memory.Entity) bool { return !used[e.ID] })
+		full, err := over()
+		if err != nil {
+			return err
+		}
+		if !full {
+			return nil
+		}
+	}
+	return ErrLimit
 }
 
 // Select ranks scoped names and includes their current fact endpoints.

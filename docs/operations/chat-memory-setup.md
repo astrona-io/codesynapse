@@ -152,6 +152,7 @@ To ask for something by hand, say: *"Use recall_context to find what we decided 
 
 ## Limits worth knowing
 
+- Session memory is capped at 24 KB. When a chat's facts no longer fit, the oldest are dropped to make room for new ones. Deleting a chat's memory by hand closes it for good (`session memory is deleted or expired`); start a new chat instead.
 - Facts live in the chat's session and expire seven days after it was registered. Keep something longer by saving it as durable knowledge (`upsert_graph_triples`) or promoting selected facts from the Agent memory page.
 - Recalled facts are data, not instructions. Verify code claims against the code graph.
 - Extraction runs one job at a time on your machine. A long chat is offloaded in chunks, and each chunk is split again to fit the model's window, so a long chat means several model calls (about 20–30 seconds each on a laptop). A chunk whose job failed is sent again at the next compaction. Tool output is cut to 300 characters before it leaves your machine.
