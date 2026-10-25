@@ -12,6 +12,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/memory"
 	"github.com/astrona-io/codesynapse/internal/sessionmemory"
 	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 	"github.com/astrona-io/codesynapse/services/api/internal/offload"
 	"github.com/astrona-io/codesynapse/services/api/internal/recall"
@@ -65,7 +66,19 @@ func (s *Server) handleSessionMemory(w http.ResponseWriter, r *http.Request) {
 		s.sessionMemoryError(w, err)
 		return
 	}
+	telemetry.RecordStep(r.Context(), telemetry.StepRecallFacts, true)
+	telemetry.RecordStepTokens(r.Context(), telemetry.StepRecallFacts, telemetry.KindContextIn, telemetry.EstimateTokens(factBytes(g)))
 	writeJSON(w, http.StatusOK, g)
+}
+
+// factBytes is the text size of a recalled graph as the hook renders it (one
+// line a fact), for the flow's token estimate.
+func factBytes(g memory.Graph) int {
+	n := 0
+	for _, f := range g.Facts {
+		n += len(f.Subject) + len(f.Predicate) + len(f.Object) + 16
+	}
+	return n
 }
 
 func (s *Server) handleWriteSessionMemory(w http.ResponseWriter, r *http.Request) {

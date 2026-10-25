@@ -200,6 +200,8 @@ func (w *Worker) submit(ctx context.Context, repo, namespace, source string, tur
 		chars += len(t.Text)
 	}
 	telemetry.OffloadTokens.AddContext(ctx, float64(chars/4), tenant)
+	telemetry.RecordStep(ctx, telemetry.StepOffloadQueue, true)
+	telemetry.RecordStepTokens(ctx, telemetry.StepOffloadQueue, telemetry.KindContextOut, telemetry.EstimateTokens(chars))
 	for len(w.order) > keepJobs {
 		if old := w.jobs[w.order[0]]; old != nil && (old.State == Queued || old.State == Running) {
 			break // never forget a job that has not finished
@@ -314,13 +316,16 @@ func (w *Worker) extract(ctx context.Context, repo, source string, turns []extra
 	for _, e := range g.Entities {
 		known = append(known, e.Name)
 	}
-	batches, err := w.pack(ctx, provider, known, turns)
-	if err != nil {
-		return outcome{}, err
-	}
 	started(provider, cfg.Model)
 	var total outcome
-	for _, batch := range batches {
+	for len(turns) > 0 {
+		// Packed against the entities known now: earlier batches add names to
+		// the prompt, so a plan made up front can outgrow the budget.
+		var batch []extract.Turn
+		batch, turns, err = w.nextBatch(ctx, provider, known, turns)
+		if err != nil {
+			return total, err
+		}
 		out, err := w.extractBatch(ctx, provider, cfg.Model, repo, source, known, batch, authorize, session, expiresAt, sessionStore, scope)
 		total.extracted += out.extracted
 		total.saved += out.saved
@@ -338,11 +343,11 @@ func (w *Worker) extract(ctx context.Context, repo, source string, turns []extra
 	return total, nil
 }
 
-// pack splits turns, in order, into batches whose prompt fits the provider's
-// input budget. A model call sees one batch, so a long chat becomes several
-// calls instead of one the provider refuses. A single turn that cannot fit on
-// its own is shortened until it does.
-func (w *Worker) pack(ctx context.Context, provider string, known []string, turns []extract.Turn) ([][]extract.Turn, error) {
+// nextBatch takes turns from the front, in order, while the prompt fits the
+// provider's input budget, and returns them with the rest. A model call sees
+// one batch, so a long chat becomes several calls instead of one the provider
+// refuses. A single turn that cannot fit on its own is shortened until it does.
+func (w *Worker) nextBatch(ctx context.Context, provider string, known []string, turns []extract.Turn) (batch, rest []extract.Turn, err error) {
 	fits := func(batch []extract.Turn) (bool, error) {
 		sys, user, err := extract.Prompt(known, batch)
 		if err != nil {
@@ -354,34 +359,29 @@ func (w *Worker) pack(ctx context.Context, provider string, known []string, turn
 		}
 		return err == nil, err
 	}
-	var batches [][]extract.Turn
-	var cur []extract.Turn
-	for _, t := range turns {
+	for len(turns) > 0 {
+		t := turns[0]
 		for {
-			ok, err := fits(append(cur[:len(cur):len(cur)], t))
+			ok, err := fits(append(batch[:len(batch):len(batch)], t))
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if ok {
-				cur = append(cur, t)
 				break
 			}
-			if len(cur) > 0 {
-				batches = append(batches, cur)
-				cur = nil
-				continue
+			if len(batch) > 0 {
+				return batch, turns, nil
 			}
 			r := []rune(t.Text)
 			if len(r) <= 200 {
-				return nil, fmt.Errorf("prompt exceeds input budget: %w", llm.ErrInputBudget)
+				return nil, nil, fmt.Errorf("prompt exceeds input budget: %w", llm.ErrInputBudget)
 			}
 			t.Text = string(r[:len(r)/2]) + " …"
 		}
+		batch = append(batch, t)
+		turns = turns[1:]
 	}
-	if len(cur) > 0 {
-		batches = append(batches, cur)
-	}
-	return batches, nil
+	return batch, nil, nil
 }
 
 type batchOutcome struct {
@@ -395,9 +395,13 @@ func (w *Worker) extractBatch(ctx context.Context, provider, model, repo, source
 		return batchOutcome{}, err
 	}
 	resp, err := w.llm.Complete(ctx, provider, llm.Request{System: sys, User: user, MaxTokens: maxAnswer})
+	telemetry.RecordStep(ctx, telemetry.StepExtract, err == nil)
 	if err != nil {
 		return batchOutcome{}, fmt.Errorf("model %s: %w", provider, err)
 	}
+	// Reported usage when the provider gave it, else the size estimate.
+	telemetry.RecordStepTokens(ctx, telemetry.StepExtract, telemetry.KindModelIn, cmp.Or(resp.InputTokens, telemetry.EstimateTokens(len(sys)+len(user))))
+	telemetry.RecordStepTokens(ctx, telemetry.StepExtract, telemetry.KindModelOut, cmp.Or(resp.OutputTokens, telemetry.EstimateTokens(len(resp.Text))))
 	res, err := extract.Parse(resp.Text, extract.DefaultMinConfidence)
 	if err != nil {
 		return batchOutcome{outcome: outcome{dropped: res.Dropped}}, err

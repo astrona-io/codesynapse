@@ -69,6 +69,7 @@ nav:
           - Agent context (MCP): features/agent-context.md
           - Agent memory: features/memory.md
           - Keep chats small (local model): operations/chat-memory-setup.md
+          - Chat memory flow and tokens: operations/chat-memory-flow.md
           - Reviews and fix branches: features/reviews-fixes.md
       - Code quality:
           - Overview and dependencies: features/overview.md
