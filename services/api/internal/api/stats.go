@@ -101,6 +101,10 @@ type WorkflowStats struct {
 	FilesEdited      int `json:"files_edited"`
 	FilesEditedFound int `json:"files_edited_found"`
 	EditRecallPct    int `json:"edit_recall_pct"`
+	// Bash counts, per class, shell commands a CodeSynapse tool answers with
+	// less output (usage.BashClasses); BashTotal is their sum.
+	Bash      map[string]int `json:"bash"`
+	BashTotal int            `json:"bash_total"`
 }
 
 // DayStat is one day of usage.
@@ -345,6 +349,14 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 			continue
 		}
 		if usage.IsWorkflow(bk.Tool) {
+			if class, ok := usage.BashClassOf(bk.Tool); ok {
+				if a.Workflow.Bash == nil {
+					a.Workflow.Bash = map[string]int{}
+				}
+				a.Workflow.Bash[class] += bk.Calls
+				a.Workflow.BashTotal += bk.Calls
+				continue
+			}
 			switch bk.Tool {
 			case usage.FirstCodeSynapse:
 				a.Workflow.FirstCodeSynapse += bk.Calls

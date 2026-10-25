@@ -15,6 +15,10 @@ const avoidedPerDay = computed(() => (a.value?.daily ?? []).map((d) => ({ label:
 const readShare = computed(() => (a.value?.tools ?? []).filter((t) => t.ranges_returned > 0)
   .map((t) => ({ label: t.tool, value: Math.round((100 * Math.min(t.ranges_read, t.ranges_returned)) / t.ranges_returned), detail: `${fmtInt(t.ranges_read)} of ${fmtInt(t.ranges_returned)} line ranges read` }))
   .sort((x, y) => y.value - x.value))
+// Shell commands a CodeSynapse tool would have answered, most frequent first.
+const bashRows = computed(() => Object.entries(a.value?.workflow.bash ?? {})
+  .map(([label, value]) => ({ label: label.replace('_', ' '), value, detail: `${fmtInt(value)} command(s)` }))
+  .sort((x, y) => y.value - x.value))
 const tools = computed(() => (a.value?.tools ?? []).map((t) => ({ label: t.tool, value: t.calls, detail: `${t.kind} · ${fmtInt(Math.round(t.avg_tokens))} tokens/call · ${t.avg_ms} ms avg${t.errors ? ` · ${t.errors} errors` : ''}` })))
 const clients = computed(() => (a.value?.clients ?? []).map((c) => ({ label: c.client, value: c.calls, detail: `${c.sessions} session(s)` })))
 const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.repo || '(no repo argument)', value: r.calls, detail: `${fmtCompact(r.response_tokens)} served · ~${fmtCompact(r.avoided_tokens)} avoided` })))
@@ -103,6 +107,14 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
           <p class="muted small">Of the files a session changed (code, Markdown and YAML that CodeSynapse indexes; not those already changed when it began), the share a CodeSynapse answer of the same session had named. The task eval measures this on old commits; this is the same question on your agents' work. Counted by the plugin's hooks as numbers only, never paths.</p>
         </template>
         <div v-else class="empty"><strong>Nothing reported yet</strong>The plugin reports this when a session that used CodeSynapse changes files.</div>
+      </div>
+      <div class="workflow">
+        <p class="label">Shell commands a CodeSynapse tool answers with less output</p>
+        <template v-if="a.workflow.bash_total">
+          <RankList :rows="bashRows" empty="" />
+          <p class="muted small">Commands agents ran in the shell (git status, diff, log, blame, text search, reading a file, a whole test run) where a CodeSynapse tool answers with less output. The plugin's Bash hook hints at the tool once per session and counts every one, classes only, never the commands.</p>
+        </template>
+        <div v-else class="empty"><strong>Nothing reported yet</strong>The plugin's Bash hook reports these when agents reach for the shell.</div>
       </div>
       <details class="method"><summary>How tokens avoided are estimated</summary><p class="muted small">{{ a.avoided_method }}</p></details>
     </section>

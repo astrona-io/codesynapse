@@ -341,6 +341,9 @@ func (o *lifecycleOptions) Run(ctx context.Context, _ *app.Env) error {
 		if activity.Category == "read" {
 			out = readGuard(tool)
 		}
+		if activity.Category == "shell" && o.client == "codex" {
+			out = bashHint(tool)
+		}
 		if o.client == "cursor" && out != nil {
 			spec, _ := out["hookSpecificOutput"].(map[string]any)
 			out = map[string]any{"permission": "deny", "user_message": spec["permissionDecisionReason"]}
