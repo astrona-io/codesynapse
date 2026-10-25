@@ -127,7 +127,7 @@ func TestStatus(t *testing.T) {
 		return `{"items":[
  {"kind":"Deployment","metadata":{"name":"codesynapse-api"},"spec":{"replicas":2},"status":{"readyReplicas":2}},
  {"kind":"Deployment","metadata":{"name":"codesynapse-web"},"spec":{"replicas":1},"status":{"readyReplicas":` + string(rune('0'+webReady)) + `}},
- {"kind":"StatefulSet","metadata":{"name":"codesynapse-hugegraph"},"spec":{"replicas":1},"status":{"readyReplicas":1}}]}`
+ {"kind":"StatefulSet","metadata":{"name":"codesynapse-nebula-graphd"},"spec":{"replicas":1},"status":{"readyReplicas":1}}]}`
 	}
 	for _, tc := range []struct {
 		name     string
@@ -146,7 +146,7 @@ func TestStatus(t *testing.T) {
 			err := o.Run(context.Background(), env)
 			assert.Equal(t, err == nil, tc.ok, out.String())
 			assert.Contains(t, out.String(), "CodeSynapse 1.2.0 (codesynapse-1.2.0), release \"codesynapse\" revision 3: deployed")
-			assert.Contains(t, out.String(), "codesynapse-hugegraph")
+			assert.Contains(t, out.String(), "codesynapse-nebula-graphd")
 			if !tc.ok {
 				assert.Contains(t, out.String(), "✗ codesynapse-web")
 			}

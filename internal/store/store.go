@@ -1,5 +1,5 @@
 // Package store defines the persistence contract for code graphs. The
-// HugeGraph implementation is the production backend; the in-memory
+// NebulaGraph implementation is the production backend; the in-memory
 // implementation backs tests and offline use. Both must pass storetest.Run.
 package store
 
@@ -199,7 +199,7 @@ type MemoryFactCount struct {
 // never touch.
 //
 // Search and subgraph results are ordered deterministically so the memory and
-// HugeGraph stores answer identically: entities by match score (query words found
+// NebulaGraph stores answer identically: entities by match score (query words found
 // in the name, or equal to the type) then most recently updated then name;
 // facts by most recently updated then ID.
 type MemoryStore interface {

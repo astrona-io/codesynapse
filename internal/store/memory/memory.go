@@ -426,7 +426,7 @@ func (s *Store) List(_ context.Context, repo string, f store.Filter, m store.Met
 }
 
 // Matches reports whether n passes f. Exported for reuse by other stores'
-// tests; the HugeGraph store expresses the same rules in Gremlin.
+// tests; the NebulaGraph store expresses the same rules in nGQL.
 func Matches(n model.Node, f store.Filter) bool {
 	if len(f.Kinds) > 0 && !slices.Contains(f.Kinds, n.Kind) {
 		return false

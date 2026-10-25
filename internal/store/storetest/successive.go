@@ -15,7 +15,7 @@ import (
 )
 
 // successiveContract publishes one repository several times with small and
-// large changes. A store may write only what changed (HugeGraph does); the
+// large changes. A store may write only what changed (NebulaGraph does); the
 // result must always be exactly the last graph: properties replaced and
 // removed, nodes added and removed, edges changed, and edges from unchanged
 // nodes into changed ones kept.

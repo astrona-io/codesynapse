@@ -21,7 +21,7 @@ const Tenant = "code-graph"
 const maxItemID = 128
 
 // Indexer is implemented by graph stores that can hold symbol vectors: the
-// HugeGraph store (its Milvus index, or none) and the in-memory store (a flat
+// NebulaGraph store (its Milvus index, or none) and the in-memory store (a flat
 // index). A store that does not implement it, or returns nil, has no
 // semantic leg.
 type Indexer interface {
