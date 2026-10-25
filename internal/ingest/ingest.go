@@ -193,6 +193,8 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 			// History is enrichment; a shallow clone or odd repo should not
 			// block indexing the code.
 			logger.Warn("skipping git history", logx.Error(err))
+		} else if err := githistory.ScanSecrets(ctx, opts.Repo, root, opts.CommitLimit, g); err != nil {
+			logger.Warn("skipping the git history secret scan", logx.Error(err))
 		}
 	}
 

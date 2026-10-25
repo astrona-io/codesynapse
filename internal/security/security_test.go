@@ -12,6 +12,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 
 	"github.com/astrona-io/codesynapse/internal/ingest/config"
+	"github.com/astrona-io/codesynapse/internal/ingest/githistory"
 	"github.com/astrona-io/codesynapse/internal/ingest/golang"
 	"github.com/astrona-io/codesynapse/internal/ingest/lang"
 	"github.com/astrona-io/codesynapse/internal/model"
@@ -120,7 +121,7 @@ func TestCatalogCoversEveryRule(t *testing.T) {
 // TestEveryDetectorHasARule keeps the detectors and rules/*.yaml in sync.
 func TestEveryDetectorHasARule(t *testing.T) {
 	detected := map[string]bool{}
-	for _, ids := range [][]string{golang.RuleIDs, config.RuleIDs, lang.RuleIDs} {
+	for _, ids := range [][]string{golang.RuleIDs, config.RuleIDs, lang.RuleIDs, githistory.RuleIDs} {
 		for _, id := range ids {
 			_, ok := rules.Get(id)
 			assert.True(t, ok, "detector reports %q but rules/*/%s.yaml is missing", id, id)

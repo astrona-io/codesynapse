@@ -35,6 +35,8 @@ type Coverage struct {
 	// rules could read.
 	HelmScanned int `json:"helm_scanned,omitempty"`
 	HelmTotal   int `json:"helm_total,omitempty"`
+	// Commits counts the commits whose patches were checked for credentials.
+	Commits int `json:"commits,omitempty"`
 	// Dependencies counts modules and packages looked up for advisories.
 	Dependencies int `json:"dependencies,omitempty"`
 	// NotCovered counts files of kinds no rule reads yet, by kind.
@@ -86,6 +88,8 @@ func CoverageOf(g *model.Graph, notCovered map[string]int) Coverage {
 			}
 		case model.KindModule:
 			c.Dependencies++
+		case model.KindCommit:
+			c.Commits++
 		}
 	}
 	for _, n := range g.Nodes() {
@@ -139,6 +143,9 @@ func (c Coverage) Lines() (checked, notChecked []string) {
 	}
 	if c.HelmTotal > 0 {
 		checked = append(checked, fmt.Sprintf("%d of %d Helm template(s)", c.HelmScanned, c.HelmTotal))
+	}
+	if c.Commits > 0 {
+		checked = append(checked, fmt.Sprintf("%d commit(s) of history for removed credentials", c.Commits))
 	}
 	if c.Dependencies > 0 {
 		checked = append(checked, fmt.Sprintf("%d dependencies against known advisories", c.Dependencies))
