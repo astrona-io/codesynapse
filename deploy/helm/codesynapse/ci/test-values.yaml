@@ -17,3 +17,9 @@ features:
   allowPush: true
 fixWorker:
   enabled: true
+# Worker egress rules render too.
+worker:
+  restrictEgress: true
+  egressAllow:
+    - {cidr: 10.20.0.0/24, ports: [5432]}
+    - {cidr: 10.30.0.5/32}

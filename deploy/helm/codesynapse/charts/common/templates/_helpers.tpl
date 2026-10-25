@@ -85,7 +85,7 @@ volumeClaimTemplates:
 {{- printf "%s-codesynapse" .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{/* A store accepts only api, worker and mcp of the same release. Args: root, store. */}}
+{{/* A store accepts only api, worker, fix-worker and mcp of the same release. Args: root, store. */}}
 {{- define "cs.storePolicy" -}}
 {{- $root := index . 0 -}}{{- $store := index . 1 -}}
 {{- if $root.Values.global.networkPolicies }}
@@ -102,7 +102,7 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
-        {{- range $client := list "api" "worker" "mcp" }}
+        {{- range $client := list "api" "worker" "fix-worker" "mcp" }}
         - podSelector:
             matchLabels:
               {{- include "cs.selector" (list $root $client) | nindent 14 }}

@@ -160,6 +160,10 @@ The "Agent spark" product UI with light and dark themes: ink on white with lilac
      | `worker` (fix role) | same image, `--roles fix` | one or few | fix branches; the only role given push credentials (`CODESYNAPSE_ALLOW_PUSH`) |
      | `worker` (system role) | same image, `--roles system` | one active (leader lease) | scheduler, access projections, pruning, recovery, metrics export |
 
+     - **Step 4 follow-ups (worker isolation).**
+       - **Egress, done:** `worker.restrictEgress` (off by default) limits workers and the fix worker to DNS, the stores of the release and HTTPS to public addresses; `worker.egressAllow` adds private destinations (external store, self-hosted Git, local model). Needs a network plugin that enforces NetworkPolicy.
+       - **Deferred:** separate read and push Git tokens, and a limited database role for workers. The role needs the `userCols`/`scanUser` queries split first, because workers read user rows through them; a call-graph reachability scan was too imprecise (interface calls over-approximate) to list the tables a worker truly needs.
+
      - **Steps:**
        1. **Durable job queue in PostgreSQL** (no new dependency). **Done, in process:** jobs are rows before they run, and interrupted jobs are resumed after a restart. The separate worker follows in step 2.
           - **Record:** `jobs` (migration 0013) holds the kind, repository, organisation, requester (user, how they authenticated, API key ID), required role, execution identity, the parameters to rebuild the work (cleared at the end; no credentials), state, attempts, lease, timestamps, result and error. There is one queued or running job per repository (a unique index).

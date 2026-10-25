@@ -22,7 +22,8 @@ helm template codesynapse "$chart" -f "$values" \
 # values.schema.json (and each store's) must refuse what the chart would
 # ignore or break on: unknown keys, wrong types, invalid enums.
 for bad in api.replica=2 'worker.roles=ingest\,typo' 'worker.roles=ingest\,fix' fixWorker.roles=ai image.pullPolicy=Sometimes \
-    auditRetentionDays=7 postgresql.sizee=1Gi hugegraph.size=lots; do
+    auditRetentionDays=7 postgresql.sizee=1Gi hugegraph.size=lots \
+    worker.restrictEgress=maybe 'worker.egressAllow[0].cidr=nonsense' 'worker.egressAllow[0].extra=1'; do
     if helm template codesynapse "$chart" -f "$values" --set "$bad" > /dev/null 2>&1; then
         echo "values.schema.json accepted $bad" >&2
         exit 1
@@ -53,6 +54,18 @@ for d in docs:
     assert push and push.group(1) == want, f"{name.group(1)}: CODESYNAPSE_ALLOW_PUSH should be {want}"
 assert len(seen) == 2, f"expected a worker and a fix worker, found {sorted(seen)}"
 print("workers: no service token or admin password; only the fix worker may push")
+PY
+
+# Restricted egress gives both worker kinds an Egress policy that names no
+# private range (except through worker.egressAllow).
+python3 - "$out/rendered.yaml" <<'PY'
+import sys, re
+docs = open(sys.argv[1]).read().split("\n---\n")
+found = [d for d in docs if re.search(r"^kind: NetworkPolicy$", d, re.M) and "policyTypes: [Ingress, Egress]" in d]
+assert len(found) == 2, f"expected egress policies for worker and fix-worker, found {len(found)}"
+for d in found:
+    assert "10.0.0.0/8" in d and "169.254.0.0/16" in d, "egress policy must exclude private ranges"
+print("workers: egress limited to DNS, stores and public HTTPS")
 PY
 
 go run github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0 -strict -summary -kubernetes-version 1.33.0 "$out/rendered.yaml"

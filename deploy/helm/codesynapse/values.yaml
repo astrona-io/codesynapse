@@ -79,6 +79,14 @@ worker:
   # belongs to fixWorker below: a worker that parses untrusted repositories
   # never holds the switch that allows pushing.
   roles: "ingest,ai"
+  # Limit what workers can reach (needs a network plugin that enforces
+  # NetworkPolicy): DNS, the stores of this release, and HTTPS to public
+  # addresses. Anything on a private address, an external store, a
+  # self-hosted Git server or a local model, needs a rule in egressAllow.
+  # Off by default so an upgrade cannot cut off a private endpoint.
+  restrictEgress: false
+  # [{cidr: 10.20.0.0/24, ports: [5432]}]; no ports means every port.
+  egressAllow: []
   # Ingest type-checks whole modules: size for your largest repository.
   resources:
     requests: {cpu: 500m, memory: 1Gi}
