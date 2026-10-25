@@ -29,6 +29,7 @@ import (
 // Limits on every answer and on gh itself.
 const (
 	MaxNumber    = 10_000_000
+	MaxRunID     = 1 << 50 // workflow run IDs passed 4e10 in 2026 and keep growing
 	MaxList      = 30
 	defaultList  = 10
 	MaxNames     = 15 // check names listed per group
