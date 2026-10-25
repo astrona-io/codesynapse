@@ -3,13 +3,15 @@
 # running.md). Artifact Hub scans these too, so this shows the same numbers
 # before a release. We cannot fix upstream images, so nothing fails here.
 # usage: scan-chart-images.sh [trivy|grype]   (CONTAINER_ENGINE defaults to docker)
+# SCAN_EXTRA_IMAGES (space separated) adds images to the chart's store images.
 set -eu
 scanner="${1:-trivy}"
 engine="${CONTAINER_ENGINE:-docker}"
 here="$(dirname "$0")"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-for ref in $("$here/chart-images.sh"); do
+# shellcheck disable=SC2046,SC2086 # image references never contain spaces
+for ref in $("$here/chart-images.sh") ${SCAN_EXTRA_IMAGES:-}; do
 	case "$scanner" in
 	trivy)
 		"$engine" run --rm -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.76.1 \
