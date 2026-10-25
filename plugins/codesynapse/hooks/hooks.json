@@ -5,7 +5,8 @@
       { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["memory", "recall", "--hook"], "timeout": 30 }] }
     ],
     "PreCompact": [
-      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["memory", "offload", "--hook"], "timeout": 60 }] }
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["memory", "offload", "--hook"], "timeout": 60 }] },
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "lifecycle", "--client", "claude", "--event", "PreCompact"], "timeout": 15 }] }
     ],
     "PreToolUse": [
       { "matcher": "Read", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "read"], "timeout": 10 }] },
@@ -22,6 +23,9 @@
     ],
     "UserPromptSubmit": [
       { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "prompt"], "timeout": 5 }] }
+    ],
+    "CwdChanged": [
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "lifecycle", "--client", "claude", "--event", "CwdChanged"], "timeout": 15 }] }
     ],
     "SessionEnd": [
       { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "lifecycle", "--client", "claude", "--event", "SessionEnd"], "timeout": 2 }] }

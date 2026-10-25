@@ -127,3 +127,37 @@ func TestClaudeActivityMeasuresWithoutContent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, a.FailureType, "permission_denied")
 }
+
+func TestPluginHookReportsActivityOnce(t *testing.T) {
+	t.Setenv(apiTokenEnv, "csk_fixture")
+	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
+	var registered, activity int
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/execution/sessions":
+			registered++
+			_ = json.NewEncoder(w).Encode(execution.Identity{TenantID: "tenant", SubjectID: "user", SessionID: "chat-a", ParentSessionID: "chat-a"})
+		case "/api/v1/execution/activity":
+			activity++
+			assert.Equal(t, r.Header.Get(execution.SessionHeader), "chat-a")
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(api.Close)
+	t.Setenv("CODESYNAPSE_API_URL", api.URL)
+	t.Setenv("CODESYNAPSE_HOOK_ACTIVITY", "true")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	payload := `{"session_id":"chat-a","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status"}}`
+	for range 3 {
+		o := &hookOptions{event: "bash", EC: &app.Env{Stdin: strings.NewReader(payload), Stdout: io.Discard, Logger: logger}}
+		require.NoError(t, o.Run(t.Context(), nil))
+	}
+	assert.Equal(t, registered, 1, "the session is registered once")
+	assert.Equal(t, activity, 3)
+	t.Setenv("CODESYNAPSE_HOOK_ACTIVITY", "false")
+	o := &hookOptions{event: "bash", EC: &app.Env{Stdin: strings.NewReader(payload), Stdout: io.Discard, Logger: logger}}
+	require.NoError(t, o.Run(t.Context(), nil))
+	assert.Equal(t, activity, 3, "switched off")
+}

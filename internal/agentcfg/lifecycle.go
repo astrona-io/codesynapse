@@ -13,10 +13,12 @@ import (
 func HookEvents(client string) []string {
 	switch client {
 	case "claude":
-		// The events the plugin's own hooks (hooks.json) do not already
-		// handle; they only record activity, except that SessionEnd and
-		// SubagentStop flush counts and SubagentStart supplies the rules.
-		return []string{"SessionEnd", "SubagentStart", "SubagentStop", "PostCompact", "PostToolBatch", "InstructionsLoaded", "PermissionRequest", "PermissionDenied", "StopFailure"}
+		// Every event the plugin handles. hooks.json runs the lifecycle
+		// adapter for those its own hook commands do not cover; the commands
+		// report the others themselves (cmd/codesynapse/activity.go). Most only
+		// record activity; SessionEnd and SubagentStop flush counts and
+		// SubagentStart supplies the rules.
+		return []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop", "PreCompact", "SessionEnd", "SubagentStart", "SubagentStop", "PostCompact", "PostToolBatch", "InstructionsLoaded", "CwdChanged", "PermissionRequest", "PermissionDenied", "StopFailure"}
 	case "codex":
 		return []string{"SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop", "Stop", "Interrupt"}
 	case "cursor":
