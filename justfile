@@ -199,14 +199,14 @@ image-build tag="dev":
         -t codesynapse-mcp:{{tag}} -t {{registry}}/codesynapse-mcp:{{tag}} .
     {{engine}} build $plat -f services/web/Dockerfile -t codesynapse-web:{{tag}} -t {{registry}}/codesynapse-web:{{tag}} .
 
-# Scan a built image for fixable HIGH/CRITICAL vulnerabilities (.trivyignore). Works the same with Docker and Podman: the image is saved and scanned as a file.
+# Scan a built image for fixable HIGH/CRITICAL vulnerabilities (.trivyignore.yaml). Works the same with Docker and Podman: the image is saved and scanned as a file.
 scan-image image:
     #!/usr/bin/env sh
     set -eu
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
     {{engine}} save -o "$tmp/image.tar" "{{image}}"
-    {{engine}} run --rm -v "$tmp:/scan:ro" -v "$PWD/.trivyignore:/src/.trivyignore:ro" -w /src -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.76.1 \
-        image --quiet --exit-code 1 --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --input /scan/image.tar
+    {{engine}} run --rm -v "$tmp:/scan:ro" -v "$PWD/.trivyignore.yaml:/src/.trivyignore.yaml:ro" -w /src -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.76.1 \
+        image --quiet --exit-code 1 --ignorefile .trivyignore.yaml --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --input /scan/image.tar
 
 # Report-only scan of the store images the chart deploys, as Artifact Hub sees them. scanner: trivy (default) or grype.
 scan-chart-images scanner="trivy":
@@ -415,7 +415,7 @@ lint-actions:
 
 # Lint the service Dockerfiles (.hadolint.yaml)
 lint-docker:
-    {{engine}} run --rm -v "$PWD:/src:ro" -w /src ghcr.io/hadolint/hadolint:v2.15.1 hadolint services/api/Dockerfile services/mcp/Dockerfile services/web/Dockerfile
+    {{engine}} run --rm -v "$PWD:/src:ro" -w /src ghcr.io/hadolint/hadolint:v2.15.1 hadolint services/api/Dockerfile services/mcp/Dockerfile services/web/Dockerfile deploy/postgres/Dockerfile
 
 # Lint shell scripts
 lint-shell:
@@ -429,10 +429,10 @@ lint-yaml:
 secrets:
     go run github.com/zricethezav/gitleaks/v8@v8.30.1 git . --no-banner --redact
 
-# Vulnerabilities with a fix and misconfigurations, HIGH and CRITICAL (.trivyignore)
+# Vulnerabilities with a fix and misconfigurations, HIGH and CRITICAL (.trivyignore.yaml)
 scan:
     {{engine}} run --rm -v "$PWD:/src:ro" -w /src -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.76.1 \
-        fs --quiet --exit-code 1 --scanners vuln,misconfig --severity HIGH,CRITICAL --ignore-unfixed \
+        fs --quiet --exit-code 1 --ignorefile .trivyignore.yaml --scanners vuln,misconfig --severity HIGH,CRITICAL --ignore-unfixed \
         --skip-dirs '**/node_modules' --skip-dirs '**/testdata' --skip-dirs .claude --skip-dirs sources --skip-dirs bin .
 
 # Licences of what we ship are permissive (run after web-check)
