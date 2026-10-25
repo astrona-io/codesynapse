@@ -162,7 +162,7 @@ The "Agent spark" product UI with light and dark themes: ink on white with lilac
 
      - **Step 4 follow-ups (worker isolation).**
        - **Egress, done:** `worker.restrictEgress` (off by default) limits workers and the fix worker to DNS, the stores of the release and HTTPS to public addresses; `worker.egressAllow` adds private destinations (external store, self-hosted Git, local model). Needs a network plugin that enforces NetworkPolicy.
-       - **Deferred:** a limited database role for workers. The role needs the `userCols`/`scanUser` queries split first, because workers read user rows through them; a call-graph reachability scan was too imprecise (interface calls over-approximate) to list the tables a worker truly needs.
+       - **Deferred:** a limited database role for workers. It needs a migration and per-process credentials on top of the query work: workers read `users` through `userCols`/`scanUser` (password hashes included), so password hashes must move behind a separate read (a `PasswordHash(ctx, id)` call for login, password change and the email change) before a column-level grant can hide them. The role also needs the list of tables each role touches, which an empirical run with statement logging on kind gives better than a call-graph scan. A call-graph reachability scan was too imprecise (interface calls over-approximate) to list the tables a worker truly needs.
 
      - **Steps:**
        1. **Durable job queue in PostgreSQL** (no new dependency). **Done, in process:** jobs are rows before they run, and interrupted jobs are resumed after a restart. The separate worker follows in step 2.
@@ -200,11 +200,11 @@ The "Agent spark" product UI with light and dark themes: ink on white with lilac
           - Needs `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`, from the same Apache-2.0 project as the metrics exporter already in use; approval needed per AGENTS.md. Needs a trace store: VictoriaTraces or Jaeger (both Apache-2.0); Grafana Tempo is AGPL and excluded.
        4. **Isolation for the ingest role (partly done):**
           - **Done:** workers are split by what they may hold. The `worker` (ingest, ai) runs with `CODESYNAPSE_ALLOW_PUSH=false`, and a worker without the fix role ignores that switch whatever its environment says (`pushAllowed`). Only `fix-worker` (compose; `fixWorker.enabled` in the chart, which needs `features.allowPush`) may push. No worker has the API's service token or the first administrator's password. `just chart-check` asserts all three on the rendered chart. Git tokens are split too: `CODESYNAPSE_GIT_TOKENS` (read) reaches every job process, `CODESYNAPSE_GIT_PUSH_TOKENS` only the fix worker, which pushes with it in single-tenant mode (accounts mode pushes with the organisation's own token). Without push tokens the fix worker falls back to the read tokens, so an old install keeps working but gets no separation until the operator sets them.
-          - **Remaining:** the database role and the network policies below.
+          - **Remaining:** the database role (below). Network policies are done (`worker.restrictEgress`).
           - A read-only root filesystem with a writable workspace volume (done in compose and the chart).
           - No route to PostgreSQL beyond what its checks need: a database role limited to job and permission reads plus ingest reports.
-          - Network policies that allow only git hosts, osv.dev and deps.dev.
-          - The fix role is the only one with push tokens, and the API never sees them.
+          - Network policies: done, opt in with `worker.restrictEgress` (DNS, the release's stores, HTTPS to public addresses; `worker.egressAllow` for private destinations). It allows HTTPS to any public host, not only git hosts, osv.dev and deps.dev: a name allowlist needs an egress proxy, which NetworkPolicy cannot express.
+          - The fix role is the only one with push tokens (done: `CODESYNAPSE_GIT_PUSH_TOKENS`), and the API never sees them.
        5. **Compose and the chart (6a)** get one Deployment per component and role, each with its own resources, autoscaling on queue depth, and per-component dashboards.
      - **Tests:**
        - the queue contract (claim, lease expiry, requeue, cancel, the identity recheck, no double run) on PostgreSQL;
