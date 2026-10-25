@@ -318,10 +318,11 @@ func Apply(d Document, scope Scope, triples []memory.Triple, source string, expi
 }
 
 // fit makes room for a write by dropping the facts a chat is least likely to
-// need: replaced ones first, then the oldest. A long chat is offloaded in many
-// jobs and would otherwise fill the document and fail every later job. Facts
-// the write itself brought are kept; if those alone do not fit, the write is
-// refused. Entities left without a fact go with it.
+// need: replaced ones first, then the oldest, and only then the least
+// confident of the write's own. A long chat is offloaded in many jobs and
+// would otherwise fill the document and fail every later job. The write's most
+// confident fact always stays; the write is refused only if that one does not
+// fit. Entities left without a fact go with it.
 func fit(d *Document, fresh map[string]bool) error {
 	over := func() (bool, error) {
 		if len(d.Graph.Entities) > MaxEntities || len(d.Graph.Facts) > MaxFacts {
@@ -351,8 +352,31 @@ func fit(d *Document, fresh map[string]bool) error {
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
+	// Oldest first; then, if the write alone is still too big, its least
+	// confident facts. One extraction can return 50 triples, more than the
+	// document holds, and saving the best of them beats failing the job.
+	var drop []memory.Fact
+	drop = append(drop, old...)
+	var mine []memory.Fact
+	for _, f := range d.Graph.Facts {
+		if fresh[f.ID] {
+			mine = append(mine, f)
+		}
+	}
+	slices.SortFunc(mine, func(a, b memory.Fact) int {
+		if a.Confidence != b.Confidence {
+			if a.Confidence < b.Confidence {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(b.ID, a.ID)
+	})
+	if len(mine) > 0 {
+		drop = append(drop, mine[:len(mine)-1]...) // the most confident fact always stays
+	}
 	dropped := map[string]bool{}
-	for _, f := range old {
+	for _, f := range drop {
 		dropped[f.ID] = true
 		d.Graph.Facts = slices.DeleteFunc(d.Graph.Facts, func(x memory.Fact) bool { return dropped[x.ID] })
 		used := map[string]bool{}

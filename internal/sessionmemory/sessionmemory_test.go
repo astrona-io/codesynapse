@@ -105,3 +105,29 @@ func TestFullDocumentDropsOldestFacts(t *testing.T) {
 		assert.True(t, f.Current())
 	}
 }
+
+func TestOversizedWriteKeepsItsBestFacts(t *testing.T) {
+	scope := Scope{TenantID: "org-a", SessionID: "chat-a", Namespace: "org-a|repo"}
+	now := time.Now()
+	triples := make([]memory.Triple, 0, memory.MaxTriplesPerCall)
+	for i := range memory.MaxTriplesPerCall {
+		triples = append(triples, memory.Triple{
+			Subject:    fmt.Sprintf("subsystem number %d of the billing platform", i),
+			Predicate:  "DEPENDS_ON",
+			Object:     fmt.Sprintf("shared component number %d used by the invoicing module", i),
+			Confidence: 0.5 + float64(i)/200,
+		})
+	}
+	d, err := Apply(Document{}, scope, triples, "test", now.Add(time.Hour), now)
+	require.NoError(t, err, "one extraction larger than the document is trimmed, not refused")
+	require.NotEmpty(t, d.Graph.Facts)
+	assert.True(t, len(d.Graph.Facts) < len(triples))
+	best := 0.0
+	for _, f := range d.Graph.Facts {
+		best = max(best, f.Confidence)
+	}
+	assert.True(t, best >= 0.5+float64(len(triples)-1)/200-1e-9, "the most confident fact is kept")
+	b, err := json.Marshal(d)
+	require.NoError(t, err)
+	assert.True(t, len(b) <= MaxDocumentBytes)
+}
