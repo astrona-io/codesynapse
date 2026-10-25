@@ -168,11 +168,14 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return n, err
 }
 
-const userCols = "id, email, name, password_hash, platform_admin, created_at, disabled_at, bootstrap_root, username, auto_created"
+// userCols never names password_hash: a user read carries has_password (a
+// generated column) and the hash comes only from PasswordHash, so a role can
+// be granted the user columns without the hash.
+const userCols = "id, email, name, platform_admin, created_at, disabled_at, bootstrap_root, username, auto_created, has_password"
 
 func scanUser(row pgx.Row) (accounts.User, error) {
 	var u accounts.User
-	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.PlatformAdmin, &u.CreatedAt, &u.DisabledAt, &u.BootstrapRoot, &u.Username, &u.AutoCreated)
+	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PlatformAdmin, &u.CreatedAt, &u.DisabledAt, &u.BootstrapRoot, &u.Username, &u.AutoCreated, &u.HasPassword)
 	u.CreatedAt = u.CreatedAt.UTC()
 	if u.DisabledAt != nil {
 		t := u.DisabledAt.UTC()
@@ -183,7 +186,7 @@ func scanUser(row pgx.Row) (accounts.User, error) {
 
 // CreateUser implements accounts.Store.
 func (s *Store) CreateUser(ctx context.Context, u accounts.User) error {
-	_, err := s.db.Exec(ctx, "INSERT INTO users ("+userCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+	_, err := s.db.Exec(ctx, "INSERT INTO users (id, email, name, password_hash, platform_admin, created_at, disabled_at, bootstrap_root, username, auto_created) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
 		u.ID, u.Email, u.Name, u.PasswordHash, u.PlatformAdmin, u.CreatedAt, u.DisabledAt, u.BootstrapRoot, u.Username, u.AutoCreated)
 	if isConstraint(err, "users_one_bootstrap_root") {
 		return fmt.Errorf("bootstrap root: %w", accounts.ErrExists)
@@ -281,6 +284,13 @@ func (s *Store) UserByID(ctx context.Context, id string) (accounts.User, error) 
 	return u, mapErr(err, "user")
 }
 
+// PasswordHash implements accounts.Store.
+func (s *Store) PasswordHash(ctx context.Context, userID string) (string, error) {
+	var hash string
+	err := s.db.QueryRow(ctx, "SELECT password_hash FROM users WHERE id = $1", userID).Scan(&hash)
+	return hash, mapErr(err, "user")
+}
+
 // UserByEmail implements accounts.Store.
 func (s *Store) UserByEmail(ctx context.Context, email string) (accounts.User, error) {
 	u, err := scanUser(s.db.QueryRow(ctx, "SELECT "+userCols+" FROM users WHERE email = $1", email))
@@ -364,17 +374,16 @@ func (s *Store) ListOrgs(ctx context.Context, limit int) ([]accounts.Org, error)
 }
 
 const membershipQuery = `SELECT o.id, o.slug, o.name, o.created_at, o.default_repo_access, o.policy_revision,
-  u.id, u.email, u.name, u.password_hash, u.platform_admin, u.created_at, u.disabled_at, u.bootstrap_root, m.role, m.added_at
+  u.id, u.email, u.name, u.platform_admin, u.created_at, u.disabled_at, u.bootstrap_root, m.role, m.added_at
 FROM memberships m JOIN orgs o ON o.id = m.org_id JOIN users u ON u.id = m.user_id `
 
 func scanMembership(r pgx.CollectableRow) (accounts.Membership, error) {
 	var m accounts.Membership
 	var role string
 	err := r.Scan(&m.Org.ID, &m.Org.Slug, &m.Org.Name, &m.Org.CreatedAt, &m.Org.DefaultRepoAccess, &m.Org.PolicyRevision,
-		&m.User.ID, &m.User.Email, &m.User.Name, &m.User.PasswordHash, &m.User.PlatformAdmin, &m.User.CreatedAt, &m.User.DisabledAt, &m.User.BootstrapRoot, &role, &m.AddedAt)
+		&m.User.ID, &m.User.Email, &m.User.Name, &m.User.PlatformAdmin, &m.User.CreatedAt, &m.User.DisabledAt, &m.User.BootstrapRoot, &role, &m.AddedAt)
 	m.Role = accounts.Role(role)
 	m.Org.CreatedAt, m.User.CreatedAt, m.AddedAt = m.Org.CreatedAt.UTC(), m.User.CreatedAt.UTC(), m.AddedAt.UTC()
-	m.User.PasswordHash = "" // never leaves the store in a membership
 	return m, err
 }
 

@@ -65,8 +65,12 @@ type User struct {
 	// DisabledAt is set while the account is suspended: no sign-in, and
 	// its sessions and API keys stop working.
 	DisabledAt *time.Time `json:"disabled_at,omitempty"`
-	// PasswordHash is the argon2id PHC string; never serialised.
+	// PasswordHash is the argon2id PHC string; never serialised. Only
+	// CreateUser takes it: reads leave it empty (Store.PasswordHash returns it
+	// where a password is checked), so a hash never travels with a user.
 	PasswordHash string `json:"-"`
+	// HasPassword says the account has a password, as read from the store.
+	HasPassword bool `json:"-"`
 }
 
 // Default repository visibility policies.
@@ -346,6 +350,10 @@ type Store interface {
 	SetManagedByIDP(ctx context.Context, orgID, userID string, managed bool) error
 	UserByID(ctx context.Context, id string) (User, error)
 	UserByEmail(ctx context.Context, email string) (User, error)
+	// PasswordHash returns the stored hash of a user ("" without a
+	// password). It is the only read that returns one; the user lookups
+	// report HasPassword instead.
+	PasswordHash(ctx context.Context, userID string) (string, error)
 	// UserByUsername matches the normalised username exactly.
 	UserByUsername(ctx context.Context, username string) (User, error)
 	// SetUsername sets or (with "") clears a username; ErrExists when taken.

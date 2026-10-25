@@ -102,6 +102,22 @@ func Run(t *testing.T, st accounts.Store) {
 	assert.Equal(t, members[1].User.Email, "carol@example.com")
 	assert.Equal(t, members[1].Role, accounts.Viewer)
 	assert.Equal(t, members[1].User.PasswordHash, "", "memberships carry no hashes")
+	// Reads report a password without carrying the hash; PasswordHash is the
+	// only way to get it.
+	for name, find := range map[string]func() (accounts.User, error){
+		"id":    func() (accounts.User, error) { return st.UserByID(ctx, bob.ID) },
+		"email": func() (accounts.User, error) { return st.UserByEmail(ctx, "bob@example.com") },
+	} {
+		got, err := find()
+		require.NoError(t, err, name)
+		assert.Equal(t, got.PasswordHash, "", "by %s: no hash in a user read", name)
+		assert.True(t, got.HasPassword, "by %s: bob has a password", name)
+	}
+	hash, err := st.PasswordHash(ctx, bob.ID)
+	require.NoError(t, err)
+	assert.True(t, hash != "", "the hash is read apart")
+	_, err = st.PasswordHash(ctx, "nobody")
+	assert.True(t, errors.Is(err, accounts.ErrNotFound), "unknown user")
 	mine, err := st.UserMemberships(ctx, bob.ID)
 	require.NoError(t, err)
 	assert.Equal(t, len(mine), 2, "Bob's own organisation and the team")

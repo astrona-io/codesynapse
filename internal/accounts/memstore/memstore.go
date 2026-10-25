@@ -99,7 +99,7 @@ func (s *Store) UserByID(_ context.Context, id string) (accounts.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if u, ok := s.users[id]; ok {
-		return u, nil
+		return public(u), nil
 	}
 	return accounts.User{}, fmt.Errorf("user: %w", accounts.ErrNotFound)
 }
@@ -110,7 +110,7 @@ func (s *Store) UserByEmail(_ context.Context, email string) (accounts.User, err
 	defer s.mu.RUnlock()
 	for _, u := range s.users {
 		if u.Email == email {
-			return u, nil
+			return public(u), nil
 		}
 	}
 	return accounts.User{}, fmt.Errorf("user: %w", accounts.ErrNotFound)
@@ -123,7 +123,7 @@ func (s *Store) UserByUsername(_ context.Context, username string) (accounts.Use
 	if username != "" {
 		for _, u := range s.users {
 			if u.Username == username {
-				return u, nil
+				return public(u), nil
 			}
 		}
 	}
@@ -167,7 +167,7 @@ func (s *Store) ListUsers(_ context.Context, limit int) ([]accounts.User, error)
 	defer s.mu.RUnlock()
 	out := make([]accounts.User, 0, len(s.users))
 	for _, u := range s.users {
-		out = append(out, u)
+		out = append(out, public(u))
 	}
 	slices.SortFunc(out, func(a, b accounts.User) int { return cmp.Compare(a.Email, b.Email) })
 	return out[:min(len(out), limit)], nil
@@ -678,10 +678,22 @@ func (s *Store) reposWhere(keep func(accounts.Repository) bool) []accounts.Repos
 	return out
 }
 
-// public drops the password hash, which never leaves the store in a membership.
+// public drops the password hash: reads report HasPassword, and
+// PasswordHash is the one way to get the hash.
 func public(u accounts.User) accounts.User {
+	u.HasPassword = u.HasPassword || u.PasswordHash != ""
 	u.PasswordHash = ""
 	return u
+}
+
+// PasswordHash implements accounts.Store.
+func (s *Store) PasswordHash(_ context.Context, userID string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if u, ok := s.users[userID]; ok {
+		return u.PasswordHash, nil
+	}
+	return "", fmt.Errorf("user: %w", accounts.ErrNotFound)
 }
 
 // CreateTeam implements accounts.Store.

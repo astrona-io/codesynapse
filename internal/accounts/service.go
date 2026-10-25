@@ -201,7 +201,11 @@ func (s *Service) Login(ctx context.Context, login, password, client string) (st
 	if err != nil {
 		return "", User{}, err
 	}
-	if u.PasswordHash == "" || !VerifyPassword(password, u.PasswordHash) {
+	hash, err := s.St.PasswordHash(ctx, u.ID)
+	if err != nil {
+		return "", User{}, err
+	}
+	if hash == "" || !VerifyPassword(password, hash) {
 		s.audit(ctx, Event{UserID: u.ID, ActorEmail: u.Email, Via: "anonymous", Action: "user.login", Target: u.Email, Outcome: Failure, Detail: "wrong password"})
 		return "", User{}, ErrUnauthorized
 	}
@@ -556,7 +560,11 @@ func (s *Service) ChangePassword(ctx context.Context, p Principal, current, next
 	if err != nil {
 		return err
 	}
-	if !VerifyPassword(current, u.PasswordHash) {
+	old, err := s.St.PasswordHash(ctx, u.ID)
+	if err != nil {
+		return err
+	}
+	if !VerifyPassword(current, old) {
 		return ErrUnauthorized
 	}
 	if err := CheckPassword(next); err != nil {

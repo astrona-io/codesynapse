@@ -69,10 +69,14 @@ func (s *Service) ChangeEmail(ctx context.Context, p Principal, password, email 
 	if err != nil {
 		return User{}, err
 	}
-	if u.PasswordHash == "" {
+	hash, err := s.St.PasswordHash(ctx, u.ID)
+	if err != nil {
+		return User{}, err
+	}
+	if hash == "" {
 		return User{}, ErrPasswordless
 	}
-	if !VerifyPassword(password, u.PasswordHash) {
+	if !VerifyPassword(password, hash) {
 		s.audit(ctx, Event{UserID: u.ID, ActorEmail: u.Email, Via: p.Via, Action: "user.email", Target: u.Email, Outcome: Failure, Detail: "wrong password"})
 		return User{}, ErrUnauthorized
 	}
