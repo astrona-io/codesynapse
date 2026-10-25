@@ -208,6 +208,10 @@ scan-image image:
     {{engine}} run --rm -v "$tmp:/scan:ro" -v "$PWD/.trivyignore:/src/.trivyignore:ro" -w /src -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.76.1 \
         image --quiet --exit-code 1 --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --input /scan/image.tar
 
+# Report-only scan of the store images the chart deploys, as Artifact Hub sees them. scanner: trivy (default) or grype.
+scan-chart-images scanner="trivy":
+    CONTAINER_ENGINE={{engine}} .github/scripts/scan-chart-images.sh {{scanner}}
+
 # Push the images to REGISTRY (log in first: docker login ghcr.io)
 image-push tag="dev":
     #!/usr/bin/env sh

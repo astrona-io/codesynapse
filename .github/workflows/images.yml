@@ -20,6 +20,8 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '.trivyignore'
+      - 'deploy/helm/codesynapse/charts/**'
+      - '.github/scripts/*chart-images.sh'
       - 'justfile'
       - '.github/workflows/images.yml'
   push:
@@ -67,6 +69,26 @@ jobs:
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
       - name: Fixable HIGH and CRITICAL vulnerabilities (Trivy)
         run: just scan-image codesynapse-${{ matrix.service }}:scan
+
+  # Store images come from upstream, so a finding here is not ours to fix:
+  # report it (also to the job summary) and gate only on our own images.
+  scan-stores:
+    name: Scan store images (${{ matrix.scanner }}, report only)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        scanner: [trivy, grype]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: HIGH and CRITICAL vulnerabilities in the chart's store images
+        env:
+          SCANNER: ${{ matrix.scanner }}
+        run: |
+          .github/scripts/scan-chart-images.sh "$SCANNER" | tee scan.txt
+          { echo "### Store images ($SCANNER)"; echo '```'; cat scan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     name: Publish ${{ matrix.service }}

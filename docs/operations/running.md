@@ -150,6 +150,7 @@ Building and testing locally:
 ```sh
 just image-build v0.1.0     # api, worker, mcp and web images (PLATFORM=linux/amd64, REGISTRY=ghcr.io/you)
 just scan-image ghcr.io/astrona-io/codesynapse-web:v0.1.0   # fixable HIGH/CRITICAL vulnerabilities, as CI checks
+just scan-chart-images      # report-only scan of the chart's store images (`just scan-chart-images grype` for Grype), as Artifact Hub shows them
 just chart-check            # helm lint, kubeconform, kube-linter, kubesec
 just chart-e2e              # the chart on a throwaway kind cluster: build, load, install, helm test
 just kind-down
