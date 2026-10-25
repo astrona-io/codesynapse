@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../schema.json
+id: dockerfile-curl-pipe-shell
+title: Build runs a script piped from the network
+severity: medium
+cwe: [CWE-494]
+category: config
+languages: [dockerfile]
+why: curl ... | sh runs whatever the server sends during the build, unverified; whoever controls that URL controls the image.
+fix: Download the script, check its checksum or signature, then run it; or install the tool from a package manager or a pinned release.
+references:
+  - https://cwe.mitre.org/data/definitions/494.html
+examples:
+  - language: dockerfile
+    vulnerable: RUN curl -fsSL https://example.com/install.sh | sh
+    fixed: |-
+      RUN curl -fsSLo install.sh https://example.com/install.sh \
+       && echo "24454f830cdb571e2c4ad15481119c43b3cafd48dd869a9b2945d1036d1dc68d  install.sh" | sha256sum -c - \
+       && sh install.sh

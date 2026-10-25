@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../schema.json
+id: dockerfile-image-unpinned
+title: Base image has no tag or digest
+severity: low
+cwe: [CWE-1357]
+category: config
+languages: [dockerfile]
+why: FROM without a tag builds on latest, so the same Dockerfile produces a different image whenever the base moves, including one with new vulnerabilities or a compromised release.
+fix: Pin the base image to a version tag, and to a digest for reproducible builds; let Renovate or Dependabot keep it current.
+references:
+  - https://cwe.mitre.org/data/definitions/1357.html
+examples:
+  - language: dockerfile
+    vulnerable: FROM node
+    fixed: FROM node:22.11-alpine@sha256:24454f830cdb571e2c4ad15481119c43b3cafd48dd869a9b2945d1036d1dc68d

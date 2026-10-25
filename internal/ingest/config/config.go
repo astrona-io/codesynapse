@@ -30,7 +30,7 @@ func Extract(ctx context.Context, repo, root string) (*model.Graph, error) {
 
 	charts := map[string]bool{} // chart roots (repo-relative, slash)
 	type file struct{ rel, abs string }
-	var yamls, templates []file
+	var yamls, templates, dockerfiles []file
 	var manifests []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -70,6 +70,8 @@ func Extract(ctx context.Context, repo, root string) (*model.Graph, error) {
 		}
 		ext := strings.ToLower(filepath.Ext(name))
 		switch {
+		case IsDockerfile(name):
+			dockerfiles = append(dockerfiles, file{rel, p})
 		case templateExts[ext]:
 			templates = append(templates, file{rel, p})
 		case ext == ".yaml" || ext == ".yml":
@@ -116,6 +118,12 @@ func Extract(ctx context.Context, repo, root string) (*model.Graph, error) {
 	for _, f := range templates {
 		if content, ok := readObserved(ctx, f.rel, f.abs); ok {
 			b.templateFile(f.rel, content, chartOf(f.rel), refs)
+			observeConfig(ctx, b, f.rel)
+		}
+	}
+	for _, f := range dockerfiles {
+		if content, ok := readObserved(ctx, f.rel, f.abs); ok {
+			b.dockerFile(f.rel, content)
 			observeConfig(ctx, b, f.rel)
 		}
 	}

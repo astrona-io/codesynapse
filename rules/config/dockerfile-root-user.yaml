@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../schema.json
+id: dockerfile-root-user
+title: Container image runs as root
+severity: medium
+cwe: [CWE-250]
+category: config
+languages: [dockerfile]
+why: Without a USER in the final stage the container's process runs as root, so a flaw in it starts with root inside the container and one step from the host.
+fix: Create an unprivileged user and switch to it with USER before the final CMD or ENTRYPOINT, or build from a nonroot base image.
+references:
+  - https://cwe.mitre.org/data/definitions/250.html
+  - https://docs.docker.com/build/building/best-practices/#user
+examples:
+  - language: dockerfile
+    vulnerable: |-
+      FROM alpine:3.20
+      COPY app /usr/local/bin/app
+      ENTRYPOINT ["app"]
+    fixed: |-
+      FROM alpine:3.20
+      RUN adduser -D -u 10001 app
+      COPY app /usr/local/bin/app
+      USER 10001
+      ENTRYPOINT ["app"]
