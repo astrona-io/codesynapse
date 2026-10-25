@@ -157,7 +157,12 @@ func (s *Server) startCloneAuth(remote, name, branch string, auth gitx.Auth, acc
 	}
 	dir := repoDir(s.cfg.Workspace, name)
 	if _, err := os.Stat(dir); err == nil { //nolint:gosec // name passed validRepoName: at most two safe elements, none with a leading dot
-		return Job{}, fmt.Errorf("%w: %q already exists; use sync", errConflict, name)
+		if !s.orphanedClone(name) {
+			return Job{}, fmt.Errorf("%w: %q already exists; use sync", errConflict, name)
+		}
+		// A folder without a graph (a wiped store, a clone that never
+		// indexed) is invisible in the UI and could never be synced.
+		_ = os.RemoveAll(dir) //nolint:errcheck,gosec // best-effort; a leftover folder makes the clone below fail with a clear error
 	}
 	job, err := s.jobs.Start(name, dir, JobOptions{
 		Kind: "clone", Branch: branch, OrgID: opts.OrgID, Identity: opts.Identity, Authorize: opts.Authorize, Durable: opts.Durable,
@@ -173,6 +178,19 @@ func (s *Server) startCloneAuth(remote, name, branch string, auth gitx.Auth, acc
 		return Job{}, fmt.Errorf("%w: %w", errConflict, err)
 	}
 	return job, nil
+}
+
+// orphanedClone reports whether the workspace folder of name has no
+// repository in the graph and no job working on it, so nothing can sync or
+// show it and it is safe to replace.
+func (s *Server) orphanedClone(name string) bool {
+	for _, j := range s.jobs.List(context.Background()) {
+		if j.Repo == name && j.State == JobRunning {
+			return false
+		}
+	}
+	_, err := s.st.Node(context.Background(), model.NodeID(name, model.KindRepository, name))
+	return errors.Is(err, store.ErrNotFound)
 }
 
 type switchRequest struct {

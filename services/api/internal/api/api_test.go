@@ -537,3 +537,17 @@ func TestRecoverFixes(t *testing.T) {
 	assert.Contains(t, got.Comments[0].Fix.Error, "restarted")
 	assert.True(t, got.Comments[1].Fix == nil)
 }
+
+func TestOrphanedCloneFolder(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ws := t.TempDir()
+	st := memory.New()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("a/known", model.KindRepository, "a/known"), Kind: model.KindRepository, Repo: "a/known", Name: "known"})
+	require.NoError(t, st.ReplaceRepo(ctx, "a/known", g))
+	srv := New(ctx, Config{Workspace: ws}, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	assert.True(t, srv.orphanedClone("a/gone"), "no graph, no job: nothing can show or sync the folder")
+	assert.True(t, !srv.orphanedClone("a/known"), "an indexed repository keeps its folder")
+}

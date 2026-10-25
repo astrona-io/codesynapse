@@ -40,22 +40,10 @@ async function ingest(source: string) {
   }
 }
 
-const reg = reactive({ url: '', branch: '', name: '' })
-const regError = ref('')
-const regOk = ref('')
-const urlHost = computed(() => { try { return new URL(reg.url.trim()).hostname.toLowerCase() } catch { return '' } })
-const hostHasToken = computed(() => !!urlHost.value && (settings.value?.git_token_hosts ?? []).includes(urlHost.value))
-async function register() {
-  regError.value = ''
-  regOk.value = ''
-  try {
-    const job = await apiPost<Job>('repos', { url: reg.url.trim(), branch: reg.branch.trim(), name: reg.name.trim() })
-    regOk.value = `Cloning ${job.repo}… it appears below when indexing finishes.`
-    reg.url = ''; reg.branch = ''; reg.name = ''
-    await refreshJobs()
-  } catch (e) {
-    regError.value = apiErrorMessage(e)
-  }
+const addOpen = ref(false)
+async function onAdded() {
+  await refreshJobs()
+  await refreshOverview()
 }
 
 // "host/owner/name" or "owner/name": the prefix is shown dimmed before the name.
@@ -122,27 +110,14 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
       <span class="muted small">Page {{ page }} of {{ pageCount }} · {{ plural(ov?.repos.length ?? 0, 'repository', 'repositories') }}</span>
       <button class="secondary tiny" :disabled="page >= pageCount" @click="page++">Next</button>
     </nav>
-    <div v-else-if="!ov?.repos.length" class="empty"><strong>No repositories yet</strong>Add one by its Git URL below. It takes about a minute.</div>
+    <div v-else-if="!ov?.repos.length" class="empty"><strong>No repositories yet</strong>Use “Add repositories” below. It takes about a minute.</div>
 
     <div class="grid cols-2">
       <section class="panel">
         <p class="eyebrow">Add a repository</p>
-        <h2>Clone from GitHub, GitLab or any HTTPS git host</h2>
-        <form class="clone" @submit.prevent="register">
-          <label>Repository URL
-            <input v-model="reg.url" type="url" required placeholder="https://github.com/org/repo.git" autocomplete="off">
-          </label>
-          <div class="row">
-            <label class="grow">Branch <span class="dim">(optional)</span><input v-model="reg.branch" placeholder="default branch"></label>
-            <label class="grow">Name <span class="dim">(optional)</span><input v-model="reg.name" placeholder="owner/name from the URL"></label>
-          </div>
-          <div class="row">
-            <button type="submit" :disabled="!reg.url || running || settings?.clone_enabled === false">Clone & index</button>
-            <span class="muted small">Shallow clone over HTTPS; nothing is pushed.</span>
-          </div>
-        </form>
-        <p v-if="regOk" class="ok">{{ regOk }}</p>
-        <p v-if="regError" class="error">{{ regError }}</p>
+        <h2>Scan one repository or a whole organisation</h2>
+        <p class="muted small">Clone from GitHub, GitLab or any HTTPS git host. Pick a single URL, or list an organisation and add everything in it.</p>
+        <div class="row"><button type="button" :disabled="settings?.clone_enabled === false" @click="addOpen = true">Add repositories</button></div>
 
         <p v-if="!operator" class="notice">Public repositories work right away. For private ones, an admin of your organisation adds a Git token under <NuxtLink to="/settings/git-tokens">Settings → Git tokens</NuxtLink>.</p>
         <div v-else class="token" :class="settings?.git_token_configured ? 'token--ok' : 'token--missing'">
@@ -161,7 +136,6 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
             <pre class="cmd">just git-token</pre>
             <p class="muted small">It asks for the token without showing it, stores it in <code>.env</code> and restarts the API. For GitLab, Forgejo or another host: <code>just git-token codeberg.org</code>.</p>
           </template>
-          <p v-if="urlHost && !hostHasToken" class="muted small">No token is set for {{ urlHost }}: if this repository is private, cloning will fail. Run <code>just git-token {{ urlHost }}</code>.</p>
         </div>
       </section>
 
@@ -185,6 +159,8 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
         <div v-else class="empty"><strong>No mounted sources</strong>Put repositories in <code>./sources</code> to index them from disk.</div>
       </section>
     </div>
+
+    <AddRepoDialog :open="addOpen" :clone-enabled="settings?.clone_enabled" :host-tokens="settings?.git_token_hosts" :busy="running" @close="addOpen = false" @added="onAdded" />
 
     <section v-if="jobs?.jobs.length" class="panel">
       <p class="eyebrow">Activity</p><h2>Recent indexing</h2>
@@ -229,10 +205,6 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
   .repo-meta { justify-items: start; text-align: left; width: 100%; }
 }
 .small { font-size: 12.5px; }
-.clone { display: grid; gap: 10px; }
-.clone label { display: grid; gap: 4px; }
-.grow { flex: 1 1 180px; }
-.ok { color: var(--success); }
 .token { margin-top: 8px; padding: 14px 16px; border-radius: var(--radius-sm); border: 1px dashed var(--line-strong); background: var(--panel-2); display: grid; gap: 6px; }
 .token--ok { border-style: solid; border-color: var(--success); }
 .token--ok strong { color: var(--success); }
