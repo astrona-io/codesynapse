@@ -79,3 +79,17 @@ func CleanExec(w http.ResponseWriter, r *http.Request) {
 	_ = r.FormValue("ignored")
 	_ = exec.Command("git", "status").Run()
 }
+
+// A URL from configuration is not request input.
+func CleanConfiguredURL(w http.ResponseWriter, r *http.Request) {
+	u, _ := url.Parse("https://example.com/api")
+	_, _ = http.Get(u.Path)
+}
+
+func SSRFFromHeader(w http.ResponseWriter, r *http.Request) {
+	_, _ = http.Get(r.Header.Get("X-Callback"))
+}
+
+func PathFromQuery(w http.ResponseWriter, r *http.Request) {
+	_, _ = os.ReadFile(r.URL.Query().Get("f"))
+}

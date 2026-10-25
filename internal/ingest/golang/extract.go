@@ -181,6 +181,7 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 		x.pkg(p, true)
 	}
 	x.implementations(primary)
+	x.interprocedural()
 	if opts.Dataflow {
 		if err := x.dataflow(ctx, primary); err != nil {
 			return nil, err
@@ -206,12 +207,14 @@ func isTestVariant(p *packages.Package) bool {
 }
 
 type extractor struct {
-	policy  *repoconfig.Policy
-	opts    Options
-	g       *model.Graph
-	modules map[string]bool
-	srcs    map[string][]byte
-	res     *Result
+	// taintFuncs are the repository's functions for interprocedural.go.
+	taintFuncs []*taintFunc
+	policy     *repoconfig.Policy
+	opts       Options
+	g          *model.Graph
+	modules    map[string]bool
+	srcs       map[string][]byte
+	res        *Result
 	// nested holds repo-relative prefixes ("sources/other/") of nested git
 	// repositories, which are separate graphs and must not be merged in.
 	nested []string
@@ -517,6 +520,7 @@ func (x *extractor) funcDecl(p *packages.Package, d *ast.FuncDecl, abs, rel, fil
 		if !isTestFile {
 			x.scan(p.TypesInfo, p.Fset, d.Body, n.ID, rel)
 			x.routes(p, d.Body, rel)
+			x.taintFuncs = append(x.taintFuncs, &taintFunc{fn: obj, decl: d, info: p.TypesInfo, fset: p.Fset, ownerID: n.ID, rel: rel})
 		}
 	}
 	x.g.AddNode(n)
