@@ -120,6 +120,15 @@ Compaction is Claude Code's. By default it waits until the chat is nearly full. 
 
 `codesynapse mcp hooks` writes the same setting for you (`--compact-at 30`). Start with 30; raise it if compaction feels too frequent.
 
+## 6. Check it with a real compaction
+
+Do this once in a chat on an indexed repository:
+
+1. Restart Claude Code so it reads the threshold, then work until a few exchanges exist.
+2. Run `/compact`. The PreCompact hook offloads the older turns first.
+3. Wait about 30 seconds, then list the jobs with the `curl` from step 3 (use the chat's own session ID, or the Agent memory page). `"state":"succeeded"` with `"saved"` above zero means the chat was offloaded.
+4. In the compacted chat, ask: *"Use recall_context to find what we decided earlier."* The answer should name facts from before the compaction.
+
 ## Everyday use
 
 You do not run anything. Agents are told to call `recall_context` at the start of a task and `offload_turns` for older turns. When a chat compacts, the hook offloads first and the new context starts with the recalled facts.
