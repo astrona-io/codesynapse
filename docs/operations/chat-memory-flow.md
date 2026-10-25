@@ -19,7 +19,7 @@ stateDiagram-v2
         [*] --> Rules
         Rules: 1a. hook session
         Rules --> Facts
-        Facts: 1b. memory recall
+        Facts: 1b. memory recall (after a compaction: by meaning)
     }
 
     SessionStart --> Working: ruleset and facts are now in the chat
@@ -27,11 +27,11 @@ stateDiagram-v2
     state Working {
         direction LR
         [*] --> Prompt
-        Prompt: 2a. hook prompt
+        Prompt: 2a. hook prompt and memory recall
         Prompt --> ToolGuards
         ToolGuards: 2b. hooks read, bash, lookup, answer, edit
         ToolGuards --> Recall
-        Recall: 2c. recall_context (optional)
+        Recall: 2c. recall_context (explicit, repository-wide)
         Recall --> Prompt
     }
 
@@ -68,7 +68,8 @@ stateDiagram-v2
 | Step | Runs where | What it does | Model | Chat tokens | Local tokens |
 |---|---|---|---|---|---|
 | 1a `hook session` | plugin CLI → `GET /api/v1/agent-rules` | Adds the agent ruleset to the new chat | no | **+640** built-in text; limit +1000 (4 KiB) | none |
-| 1b `memory recall --hook` | plugin CLI → `GET …/session-memory` | Adds the facts saved for this chat, newest first | no | **+** up to **1500** (limit: 6000 characters) | none |
+| 1b `memory recall --hook` | plugin CLI → `GET …/session-memory`; after a compaction also `POST …/session-memory/recall` | Adds the facts saved for this chat, newest first. After a compaction the facts that match the last question come first, then the newest, each once | embeddings only, after a compaction | **+** up to **1500** (limit: 6000 characters) | the last question ÷ 4 through `nomic-embed-text`, after a compaction |
+| 2a′ `memory recall --hook` on `UserPromptSubmit` | plugin CLI → `POST …/session-memory/recall` | Adds the facts that match the prompt and were not shown before. Prompts under three words, greetings and `CODESYNAPSE_AUTO_RECALL=false` make no call | embeddings only | **+** up to **375** (limit: 1500 characters), nothing when no fact matches | the prompt ÷ 4 through `nomic-embed-text` |
 | 2a `hook prompt` | plugin CLI | Notes how the chat began (graph tool or native search first) for the workflow report | no | measure | none |
 | 2b `hook read`, `bash`, `lookup`, `answer`, `read-done`, `edit` | plugin CLI, local only | Turns back a whole-file read with an outline (limit 60 lines), hints at a graph tool once per class, counts what was read | no | **+** a short hint when it fires; **−** the whole file when a read is turned back | none |
 | 2c `recall_context` | model → bridge → MCP → API | Finds facts about a question | embeddings only | **+** about 600 for the answer | question ÷ 4 through `nomic-embed-text` |
@@ -80,7 +81,7 @@ stateDiagram-v2
 | 4e embed | API worker → Ollama | Embeds the new entity names, 64 a call | **yes** `nomic-embed-text` | none | names ÷ 4 |
 | 5 `PostCompact` | plugin CLI | Reports the compaction | no | **−** the offloaded turns (estimate: characters ÷ 4) | none |
 
-The chat only shrinks at step 5, because Claude Code does the compacting. Steps 4a to 4e prepare what 1b brings back.
+The chat only shrinks at step 5, because Claude Code does the compacting. Steps 4a to 4e prepare what 1b brings back. Nothing depends on the model remembering to ask: the `SessionStart` that follows a compaction recalls by itself, and so does every prompt that names something.
 
 ## Where the tokens go
 

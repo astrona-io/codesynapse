@@ -22,7 +22,8 @@
       { "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "edit-failed"], "timeout": 10 }] }
     ],
     "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "prompt"], "timeout": 5 }] }
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "prompt"], "timeout": 5 }] },
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["memory", "recall", "--hook"], "timeout": 8 }] }
     ],
     "CwdChanged": [
       { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "lifecycle", "--client", "claude", "--event", "CwdChanged"], "timeout": 15 }] }
