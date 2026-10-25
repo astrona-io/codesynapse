@@ -111,6 +111,9 @@ type hookState struct {
 	Hinted   []string       `json:"hinted,omitempty"`
 	// Registered: a hook already registered the session with the server.
 	Registered bool `json:"registered,omitempty"`
+	// Recalled are the memory fact IDs already put in this chat's context
+	// (autorecall.go), so a prompt never repeats one.
+	Recalled []string `json:"recalled,omitempty"`
 	// Task is the session's first prompt, kept only with eval capture on
 	// (cases.go).
 	Task string `json:"task,omitempty"`

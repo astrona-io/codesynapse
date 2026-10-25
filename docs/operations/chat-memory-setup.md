@@ -101,7 +101,7 @@ curl -s -H "Authorization: Bearer $CODESYNAPSE_API_TOKEN" \
 
 ## 4. Turn on the hooks
 
-With the **Claude Code plugin** installed (recommended), the hooks are already there: a SessionStart hook recalls facts into the new chat and a PreCompact hook offloads older turns. Nothing to install.
+With the **Claude Code plugin** installed (recommended), the hooks are already there: a PreCompact hook offloads older turns, a SessionStart hook recalls facts into the new chat (by meaning after a compaction), and a UserPromptSubmit hook adds the facts that match each prompt. Set `CODESYNAPSE_AUTO_RECALL=false` to turn off the per-prompt recall. Nothing to install.
 
 Without the plugin, install them for one repository:
 
@@ -133,7 +133,7 @@ Do this once in a chat on an indexed repository:
 
 ## Everyday use
 
-You do not run anything. Agents are told to call `recall_context` at the start of a task and `offload_turns` for older turns. When a chat compacts, the hook offloads first and the new context starts with the recalled facts.
+You do not run anything. When a chat compacts, the hook offloads first and the new context starts with the facts that match what you were doing; later prompts get matching facts added. `recall_context` stays for questions beyond this chat, with `memory_scope: "repository"`.
 
 To ask for something by hand, say: *"Use recall_context to find what we decided about billing."*
 
