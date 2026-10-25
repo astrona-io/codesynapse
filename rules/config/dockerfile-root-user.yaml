@@ -13,11 +13,11 @@ references:
 examples:
   - language: dockerfile
     vulnerable: |-
-      FROM alpine:3.20
+      FROM alpine:3.24
       COPY app /usr/local/bin/app
       ENTRYPOINT ["app"]
     fixed: |-
-      FROM alpine:3.20
+      FROM alpine:3.24
       RUN adduser -D -u 10001 app
       COPY app /usr/local/bin/app
       USER 10001
