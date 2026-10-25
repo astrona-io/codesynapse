@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/imagescan"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
@@ -81,6 +82,25 @@ func Run(t *testing.T, st accounts.Store) {
 	adaMenu, err := st.MenuPrefs(ctx, ada.ID)
 	require.NoError(t, err)
 	assert.Equal(t, len(adaMenu.Pinned), 0)
+	// Image scans: none at first, replaced as a whole, kept per namespace.
+	_, has, err := st.ImageScan(ctx, "org|graph")
+	require.NoError(t, err)
+	assert.False(t, has)
+	f1 := imagescan.Finding{Image: "i:1", Package: "libssl3", Version: "3.0.1", ID: "CVE-2025-0001", Severity: "high"}
+	require.NoError(t, st.SetImageScan(ctx, "org|graph", accounts.ImageScan{UploadedAt: now, Findings: []imagescan.Finding{f1, f1}}))
+	require.NoError(t, st.SetImageScan(ctx, "org|graph", accounts.ImageScan{UploadedAt: now, Findings: []imagescan.Finding{f1}}))
+	sc, has, err := st.ImageScan(ctx, "org|graph")
+	require.NoError(t, err)
+	assert.True(t, has)
+	assert.Equal(t, len(sc.Findings), 1)
+	assert.Equal(t, sc.Findings[0], f1)
+	_, has, err = st.ImageScan(ctx, "other|graph")
+	require.NoError(t, err)
+	assert.False(t, has)
+	require.NoError(t, st.DeleteImageScan(ctx, "org|graph"))
+	_, has, err = st.ImageScan(ctx, "org|graph")
+	require.NoError(t, err)
+	assert.False(t, has)
 	now = now.Add(accounts.SessionTTL + time.Second)
 	_, err = svc.Authenticate(ctx, tok)
 	assert.True(t, errors.Is(err, accounts.ErrUnauthorized), "sessions expire")

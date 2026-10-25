@@ -307,6 +307,7 @@ func (s *Server) routes() {
 	s.sessionMemoryRoutes()
 	s.repoPolicyRoutes()
 	s.runtimeRoutes()
+	s.imageScanRoutes()
 	s.conventionsRoutes()
 	s.agentSessionRoutes()
 	s.retrievalRoutes()
@@ -1080,5 +1081,14 @@ func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
 		_ = security.WriteMarkdown(w, rep) //nolint:errcheck // client went away
 		return
 	}
-	writeJSON(w, 200, rep)
+	out := securityWithImages{Report: rep}
+	if s.cfg.Accounts != nil {
+		if ns, err := s.memNamespace(r, r.PathValue("repo")); err == nil {
+			if sc, has, err := s.cfg.Accounts.St.ImageScan(r.Context(), ns); err == nil && has {
+				sum := summariseImages(sc, false)
+				out.ContainerImages = &sum
+			}
+		}
+	}
+	writeJSON(w, 200, out)
 }
