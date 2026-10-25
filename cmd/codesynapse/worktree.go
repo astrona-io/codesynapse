@@ -83,6 +83,23 @@ func newWorktree(ctx context.Context, dir, repo string, logger *slog.Logger) *wo
 	return &worktree{root: root, repo: repo, logger: logger}
 }
 
+// call runs a request about this checkout's repository under the name its
+// origin remote gives. The server may know it by another name (an
+// organisation transfer leaves the old owner in the remote), so on "no such
+// repository" it asks the server which indexed repository the checkout is
+// and tries once more under that name.
+func (w *worktree) call(ctx context.Context, c apiClient, do func(repo string) error) error {
+	err := do(w.repo)
+	if err == nil || !strings.Contains(err.Error(), "no such repository") {
+		return err
+	}
+	name, rerr := c.resolveRepo(ctx, w.root)
+	if rerr != nil || name == w.repo {
+		return err
+	}
+	return do(name)
+}
+
 // changes fingerprints what the server cannot have: uncommitted and
 // untracked files (with their size and modification time) and commits
 // ahead of the upstream branch. It returns "" for a clean tree.
