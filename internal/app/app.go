@@ -1,5 +1,5 @@
 // Package app holds wiring shared by the codesynapse binaries: graph store
-// flags (HugeGraph and Milvus), store construction and HTTP hardening helpers.
+// flags (NebulaGraph and Milvus), store construction and HTTP hardening helpers.
 package app
 
 import (
@@ -17,7 +17,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/astrona-io/codesynapse/internal/store"
-	"github.com/astrona-io/codesynapse/internal/store/hugegraphstore"
+	"github.com/astrona-io/codesynapse/internal/store/nebulastore"
 	"github.com/astrona-io/codesynapse/internal/vector"
 	"github.com/astrona-io/codesynapse/internal/vector/milvus"
 )
@@ -25,65 +25,64 @@ import (
 // Environment variables. The password is only read from the environment so
 // it never appears in process listings or shell history.
 const (
-	// EnvGraphBackend once chose between Neo4j and HugeGraph. HugeGraph is
-	// now the only graph database; any other value is refused so an
-	// upgraded installation does not silently start on an empty graph.
-	EnvGraphBackend      = "CODESYNAPSE_GRAPH_BACKEND"
-	EnvHugeGraphURL      = "CODESYNAPSE_HUGEGRAPH_URL"
-	EnvHugeGraphGraph    = "CODESYNAPSE_HUGEGRAPH_GRAPH"
-	EnvHugeGraphUser     = "CODESYNAPSE_HUGEGRAPH_USER"
-	EnvHugeGraphPassword = "CODESYNAPSE_HUGEGRAPH_PASSWORD" //nolint:gosec // env var name, not a credential
-	// EnvHugeGraphMaxRequest is the server's Gremlin maxContentLength in
-	// bytes (default 60000, under HugeGraph's 65536).
-	EnvHugeGraphMaxRequest = "CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES"
-	EnvHugeGraphTxCapacity = "CODESYNAPSE_HUGEGRAPH_TX_CAPACITY"
+	// EnvGraphBackend once chose between Neo4j, HugeGraph and NebulaGraph.
+	// NebulaGraph is now the only graph database; any other value is refused
+	// so an upgraded installation does not silently start on an empty graph.
+	EnvGraphBackend    = "CODESYNAPSE_GRAPH_BACKEND"
+	EnvNebulaAddrs     = "CODESYNAPSE_NEBULA_ADDRS"
+	EnvNebulaSpace     = "CODESYNAPSE_NEBULA_SPACE"
+	EnvNebulaUser      = "CODESYNAPSE_NEBULA_USER"
+	EnvNebulaPassword  = "CODESYNAPSE_NEBULA_PASSWORD" //nolint:gosec // env var name, not a credential
+	EnvNebulaPartition = "CODESYNAPSE_NEBULA_PARTITIONS"
+	EnvNebulaReplicas  = "CODESYNAPSE_NEBULA_REPLICAS"
 	// EnvMilvusURL turns on Milvus for agent-memory vectors.
 	EnvMilvusURL   = "CODESYNAPSE_MILVUS_URL"
 	EnvMilvusToken = "CODESYNAPSE_MILVUS_TOKEN" //nolint:gosec // env var name, not a credential
 )
 
-// GraphFlags are the graph store settings shared by all binaries: HugeGraph,
+// GraphFlags are the graph store settings shared by all binaries: NebulaGraph,
 // with Milvus for agent-memory vectors.
 type GraphFlags struct {
-	Backend        string
-	HugeGraphURL   string
-	HugeGraphGraph string
-	MilvusURL      string
+	Backend     string
+	NebulaAddrs string
+	NebulaSpace string
+	MilvusURL   string
 }
 
 // AddFlags registers the flags on fs with environment-derived defaults.
 func (f *GraphFlags) AddFlags(fs *pflag.FlagSet) {
-	fs.StringVar(&f.Backend, "graph-backend", Getenv(EnvGraphBackend, "hugegraph"), "Graph database; only hugegraph is supported (env "+EnvGraphBackend+")")
-	fs.StringVar(&f.HugeGraphURL, "hugegraph-url", Getenv(EnvHugeGraphURL, "http://localhost:8180"), "HugeGraph server URL (env "+EnvHugeGraphURL+"; user and password from "+EnvHugeGraphUser+"/"+EnvHugeGraphPassword+")")
-	fs.StringVar(&f.HugeGraphGraph, "hugegraph-graph", Getenv(EnvHugeGraphGraph, "hugegraph"), "HugeGraph graph name (env "+EnvHugeGraphGraph+")")
+	fs.StringVar(&f.Backend, "graph-backend", Getenv(EnvGraphBackend, "nebula"), "Graph database; only nebula is supported (env "+EnvGraphBackend+")")
+	fs.StringVar(&f.NebulaAddrs, "nebula-addrs", Getenv(EnvNebulaAddrs, "localhost:9669"), "NebulaGraph graphd addresses, comma separated (env "+EnvNebulaAddrs+"; user and password from "+EnvNebulaUser+"/"+EnvNebulaPassword+")")
+	fs.StringVar(&f.NebulaSpace, "nebula-space", Getenv(EnvNebulaSpace, "codesynapse"), "NebulaGraph space name (env "+EnvNebulaSpace+")")
 	fs.StringVar(&f.MilvusURL, "milvus-url", Getenv(EnvMilvusURL, ""), "Milvus REST URL for agent-memory vectors, e.g. http://milvus:19530 (env "+EnvMilvusURL+"; token from "+EnvMilvusToken+")")
 }
 
-// ErrNeo4jRemoved refuses a configuration that still asks for Neo4j.
-var ErrNeo4jRemoved = errors.New("the Neo4j graph backend was removed: run HugeGraph (README, \"Graph database\"), unset " + EnvGraphBackend + " and re-index")
+// ErrBackendRemoved refuses a configuration that still asks for a graph
+// database CodeSynapse no longer supports.
+var ErrBackendRemoved = errors.New("this graph backend was removed: run NebulaGraph (README, \"Graph database\"), unset " + EnvGraphBackend + " and re-index")
 
-// Open connects to HugeGraph.
+// Open connects to NebulaGraph.
 func (f *GraphFlags) Open(ctx context.Context) (store.Store, error) {
 	switch f.Backend {
-	case "", "hugegraph":
-		return f.openHugeGraph(ctx)
-	case "neo4j":
-		return nil, ErrNeo4jRemoved
+	case "", "nebula":
+		return f.openNebula(ctx)
+	case "neo4j", "hugegraph":
+		return nil, ErrBackendRemoved
 	default:
-		return nil, fmt.Errorf("unknown graph backend %q: only hugegraph is supported (%s)", f.Backend, EnvGraphBackend)
+		return nil, fmt.Errorf("unknown graph backend %q: only nebula is supported (%s)", f.Backend, EnvGraphBackend)
 	}
 }
 
-func (f *GraphFlags) openHugeGraph(ctx context.Context) (store.Store, error) {
+func (f *GraphFlags) openNebula(ctx context.Context) (store.Store, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	maxRequest, err := strconv.Atoi(Getenv(EnvHugeGraphMaxRequest, "0"))
+	partitions, err := strconv.Atoi(Getenv(EnvNebulaPartition, "0"))
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", EnvHugeGraphMaxRequest, err)
+		return nil, fmt.Errorf("%s: %w", EnvNebulaPartition, err)
 	}
-	txCapacity, err := strconv.Atoi(Getenv(EnvHugeGraphTxCapacity, "0"))
+	replicas, err := strconv.Atoi(Getenv(EnvNebulaReplicas, "0"))
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", EnvHugeGraphTxCapacity, err)
+		return nil, fmt.Errorf("%s: %w", EnvNebulaReplicas, err)
 	}
 	var vec vector.Index
 	if f.MilvusURL != "" {
@@ -93,18 +92,21 @@ func (f *GraphFlags) openHugeGraph(ctx context.Context) (store.Store, error) {
 		}
 		vec = mx
 	}
-	s, err := hugegraphstore.New(ctx, hugegraphstore.Config{URL: f.HugeGraphURL, Graph: f.HugeGraphGraph,
-		User: os.Getenv(EnvHugeGraphUser), Password: os.Getenv(EnvHugeGraphPassword), Vectors: vec, MaxRequestBytes: maxRequest, TxCapacity: txCapacity})
-	if err != nil && vec != nil {
-		_ = vec.Close(ctx) //nolint:errcheck // the connection error is the one worth returning
+	s, err := nebulastore.New(ctx, nebulastore.Config{Addrs: strings.Split(f.NebulaAddrs, ","), Space: f.NebulaSpace,
+		User: Getenv(EnvNebulaUser, "root"), Password: os.Getenv(EnvNebulaPassword), Vectors: vec, Partitions: partitions, Replicas: replicas})
+	if err != nil {
+		if vec != nil {
+			_ = vec.Close(ctx) //nolint:errcheck // the connection error is the one worth returning
+		}
+		return nil, err
 	}
-	return s, err
+	return s, nil
 }
 
 // OpenWithRetry retries Open until it succeeds or ctx ends. Services use it
-// so they can start before HugeGraph finishes booting under docker compose.
+// so they can start before NebulaGraph finishes booting under docker compose.
 func (f *GraphFlags) OpenWithRetry(ctx context.Context, onRetry func(error)) (store.Store, error) {
-	if f.Backend != "" && f.Backend != "hugegraph" {
+	if f.Backend != "" && f.Backend != "nebula" {
 		return f.Open(ctx) // a configuration error: retrying cannot help
 	}
 	delay := time.Second

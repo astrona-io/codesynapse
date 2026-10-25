@@ -63,7 +63,7 @@ flowchart TB
         llm[llm.Registry<br/>routes: memory, embeddings]
     end
     subgraph stores[Stores]
-        hg[(HugeGraph)]
+        hg[(NebulaGraph)]
         mv[(Milvus<br/>tenant partition key)]
         flat[vector.Flat<br/>tests, --offline]
     end
@@ -83,7 +83,7 @@ flowchart TB
     hg --- mv
 ```
 
-- **Store interface.** `store.MemoryStore` exposes `MemoryLexical`, `MemoryNearest` and `MemorySubgraph`. HugeGraph pairs with Milvus through `vector.Index` (vector length checked against `memory.MaxDimensions`). The in-memory store uses `vector.Flat`. All three pass the same contract tests.
+- **Store interface.** `store.MemoryStore` exposes `MemoryLexical`, `MemoryNearest` and `MemorySubgraph`. NebulaGraph pairs with Milvus through `vector.Index` (vector length checked against `memory.MaxDimensions`). The in-memory store uses `vector.Flat`. All three pass the same contract tests.
 - **Embedding model is part of the key.** Vectors are stored per model name, so changing `embedding_model` does not mix dimensions; entities without a current embedding are picked up again by the embedder.
 - **Source of vectors.** Only the provider routed to `embeddings` that has an `embedding_model` and is local (`llm.Registry.EmbeddingProvider`). Inputs pass `redact.Free` in the registry.
 
@@ -171,7 +171,7 @@ The agent keeps the last 5 to 10 exchanges verbatim. Anything older is either al
 | Layer | Control |
 |---|---|
 | Authentication | Accounts mode needs a personal API key on every MCP call; the installation token grants no content access. |
-| Namespace | Memory lives under `org\|graph`; every traversal starts at `has('tenant_id', …).has('ns', …)` (Gremlin, values in bindings). |
+| Namespace | Memory lives under `org\|graph`; every statement filters on `tenant_id` and `ns` first (nGQL, values in parameters). |
 | Vector request | Milvus filters use `exprParams` with `tenant_id` as the partition key; values never go in the expression. |
 | Vector result | `vector.Isolate` drops any hit of another tenant or namespace, even if the backend filter was wrong. |
 | Search without tenant | `vector.ErrNoTenant`. |

@@ -1,4 +1,4 @@
-# Local stack: HugeGraph + Milvus + PostgreSQL + VictoriaMetrics + API + MCP + web dashboard.
+# Local stack: NebulaGraph + Milvus + PostgreSQL + VictoriaMetrics + API + MCP + web dashboard.
 #   cp .env.example .env   # set passwords/tokens
 #   just up                # or: docker compose up -d --build
 # Repositories to index live under ${SOURCES_DIR} (default ./sources) and are
@@ -6,32 +6,95 @@
 name: codesynapse
 
 services:
-  # The graph database. Gremlin runs Groovy on the server, so HugeGraph
-  # always has a password and is never published to the host.
-  hugegraph:
-    image: ghcr.io/astrona-io/codesynapse-hugegraph:1.7.0
-    # Without a password the image would start in no-auth mode: refuse instead.
-    # The image enables auth by editing its config files once and records
-    # that on the volume, so a recreated container would come back without
-    # auth: enable it on every start (the script is idempotent).
-    # Requests may carry a whole review: Gremlin's 64 KB limit becomes 16 MB.
-    # A repository replacement is one transaction: its old and new edges must
-    # fit edge.tx_capacity (default 10,000). 1,000,000 is HugeGraph's maximum;
-    # api and mcp get the same CODESYNAPSE_HUGEGRAPH_TX_CAPACITY, so larger
-    # replacements are refused before anything is written.
-    entrypoint: ["sh", "-c", "[ -n \"$$PASSWORD\" ] || { echo 'HUGEGRAPH_PASSWORD is not set; run just init' >&2; exit 1; }; ./bin/enable-auth.sh && grep -q HugeFactoryAuthProxy conf/graphs/hugegraph.properties || { echo 'could not enable authentication' >&2; exit 1; }; sed -i 's/^maxContentLength: .*/maxContentLength: 16777216/' conf/gremlin-server.yaml && sed -i -e '/^vertex.tx_capacity=/d' -e '/^edge.tx_capacity=/d' conf/graphs/hugegraph.properties && printf '\\nvertex.tx_capacity=1000000\\nedge.tx_capacity=1000000\\n' >> conf/graphs/hugegraph.properties && exec ./docker-entrypoint.sh"]
-    environment:
-      PASSWORD: ${HUGEGRAPH_PASSWORD:-}
+  # The graph database: NebulaGraph (metad keeps the cluster, storaged the
+  # data, graphd answers queries). Authentication is on, and only graphd is
+  # reachable from the other services; nothing is published to the host.
+  # Schema changes reach graphd and storaged on their heartbeat: a short
+  # interval keeps `ensure schema` quick.
+  nebula-metad:
+    image: docker.io/vesoft/nebula-metad:v3.8.0
+    command: ["--meta_server_addrs=nebula-metad:9559", "--local_ip=nebula-metad", "--ws_ip=nebula-metad", "--port=9559", "--data_path=/data/meta", "--log_dir=/logs", "--v=0", "--minloglevel=1", "--heartbeat_interval_secs=2"]
     volumes:
-      - hugegraph-data:/hugegraph-server/rocksdb-data
-      - hugegraph-init:/hugegraph-server/docker
+      - nebula-meta:/data/meta
+      - nebula-meta-logs:/logs
+    security_opt: ["no-new-privileges:true"]
     healthcheck:
-      # REST answers before the Gremlin server behind it: probe a real query,
-      # and stay unhealthy if the server answers without the password.
-      test: ["CMD-SHELL", "curl -sf -u admin:\"$$PASSWORD\" -X POST http://127.0.0.1:8080/gremlin -H 'Content-Type: application/json' -d '{\"gremlin\":\"1\"}' >/dev/null && [ \"$$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8080/gremlin -H 'Content-Type: application/json' -d '{\"gremlin\":\"1\"}')\" = 401 ]"]
+      test: ["CMD-SHELL", "curl -sf http://nebula-metad:19559/status"]
       interval: 10s
       timeout: 5s
       retries: 30
+
+  nebula-storaged:
+    image: docker.io/vesoft/nebula-storaged:v3.8.0
+    command: ["--meta_server_addrs=nebula-metad:9559", "--local_ip=nebula-storaged", "--ws_ip=nebula-storaged", "--port=9779", "--data_path=/data/storage", "--log_dir=/logs", "--v=0", "--minloglevel=1", "--heartbeat_interval_secs=2"]
+    volumes:
+      - nebula-storage:/data/storage
+      - nebula-storage-logs:/logs
+    security_opt: ["no-new-privileges:true"]
+    # No health check: storaged serves nothing until nebula-init has
+    # registered it (it answers "Machine not existed" to the cluster).
+    depends_on:
+      nebula-metad:
+        condition: service_healthy
+
+  nebula-graphd:
+    image: docker.io/vesoft/nebula-graphd:v3.8.0
+    command: ["--meta_server_addrs=nebula-metad:9559", "--port=9669", "--local_ip=nebula-graphd", "--ws_ip=nebula-graphd", "--log_dir=/logs", "--v=0", "--minloglevel=1", "--enable_authorize=true", "--auth_type=password", "--heartbeat_interval_secs=2"]
+    volumes:
+      - nebula-graph-logs:/logs
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://nebula-graphd:19669/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    depends_on:
+      nebula-metad:
+        condition: service_healthy
+
+  # Registers the storage host and replaces the well-known first password of
+  # the root user with NEBULA_PASSWORD. Runs once per start; idempotent: a
+  # host that is registered and a password that is changed are left alone.
+  nebula-init:
+    image: docker.io/vesoft/nebula-console:v3.8.0
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        [ -n "$$NEBULA_PASSWORD" ] || { echo 'NEBULA_PASSWORD is not set; run just init' >&2; exit 1; }
+        c() { nebula-console -addr nebula-graphd -port 9669 -u root -p "$$1" -e "$$2"; }
+        n=0
+        until c "$$NEBULA_PASSWORD" 'SHOW HOSTS' >/dev/null 2>&1 || c nebula 'SHOW HOSTS' >/dev/null 2>&1; do
+          n=$$((n+1)); [ "$$n" -lt 60 ] || { echo 'graphd did not answer' >&2; exit 1; }; sleep 2
+        done
+        # The first password is only valid until it is changed.
+        if c nebula 'SHOW HOSTS' >/dev/null 2>&1; then
+          # The console exits 0 on a statement error, so look at its output.
+          # NebulaGraph accepts at most 24 characters.
+          out=$$(c nebula "CHANGE PASSWORD root FROM \"nebula\" TO \"$$NEBULA_PASSWORD\"" 2>&1)
+          case "$$out" in *ERROR*) echo "$$out" >&2; exit 1;; esac
+        fi
+        # graphd learns the new password on its next heartbeat.
+        n=0
+        until c "$$NEBULA_PASSWORD" 'SHOW HOSTS' >/dev/null 2>&1; do
+          n=$$((n+1)); [ "$$n" -lt 60 ] || { echo 'the new password was not accepted' >&2; exit 1; }; sleep 2
+        done
+        c "$$NEBULA_PASSWORD" 'ADD HOSTS "nebula-storaged":9779' >/dev/null
+        n=0
+        until c "$$NEBULA_PASSWORD" 'SHOW HOSTS' | grep -q ONLINE; do
+          n=$$((n+1)); [ "$$n" -lt 60 ] || { echo 'storaged did not come online' >&2; exit 1; }; sleep 2
+        done
+    environment:
+      NEBULA_PASSWORD: ${NEBULA_PASSWORD:?run "just init" to add NEBULA_PASSWORD to .env}
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    depends_on:
+      nebula-graphd:
+        condition: service_healthy
+      nebula-storaged:
+        condition: service_started
 
   # Agent-memory vectors (standalone, embedded etcd, local storage).
   # Internal network only.
@@ -121,11 +184,9 @@ services:
     # The worker below runs the jobs; the API records them (docs/SAAS.md, 5e).
     environment: &api-env
       CODESYNAPSE_RUN_JOBS: "false"
-      CODESYNAPSE_HUGEGRAPH_URL: http://hugegraph:8080
-      CODESYNAPSE_HUGEGRAPH_USER: admin
-      CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_PASSWORD:?run "just init" to add HUGEGRAPH_PASSWORD to .env}
-      CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES: "8388608"
-      CODESYNAPSE_HUGEGRAPH_TX_CAPACITY: "1000000"
+      CODESYNAPSE_NEBULA_ADDRS: nebula-graphd:9669
+      CODESYNAPSE_NEBULA_USER: root
+      CODESYNAPSE_NEBULA_PASSWORD: ${NEBULA_PASSWORD:?run "just init" to add NEBULA_PASSWORD to .env}
       CODESYNAPSE_MILVUS_URL: http://milvus:19530
       CODESYNAPSE_METRICS_URL: http://victoriametrics:8428
       CODESYNAPSE_METRICS_USER: codesynapse
@@ -206,8 +267,8 @@ services:
       timeout: 3s
       retries: 30
     depends_on:
-      hugegraph:
-        condition: service_healthy
+      nebula-init:
+        condition: service_completed_successfully
       milvus:
         condition: service_healthy
       postgres:
@@ -274,41 +335,14 @@ services:
     healthcheck: *worker-health
     depends_on: *worker-depends
 
-  # Creates the limited HugeGraph user the MCP service connects as (schema
-  # --mcp-role): it reads the whole graph and writes only agent memory,
-  # reviews, curated links and usage counters. Runs once per start; idempotent.
-  hugegraph-role:
-    build:
-      context: .
-      dockerfile: services/api/Dockerfile
-      target: api
-    entrypoint: ["codesynapse", "schema", "--mcp-role", "cs_mcp"]
-    environment:
-      CODESYNAPSE_HUGEGRAPH_URL: http://hugegraph:8080
-      CODESYNAPSE_HUGEGRAPH_USER: admin
-      CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_PASSWORD:?run "just init" to add HUGEGRAPH_PASSWORD to .env}
-      CODESYNAPSE_HUGEGRAPH_MCP_PASSWORD: ${HUGEGRAPH_MCP_PASSWORD:?run "just init" to add HUGEGRAPH_MCP_PASSWORD to .env}
-      CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES: "8388608"
-      CODESYNAPSE_HUGEGRAPH_TX_CAPACITY: "1000000"
-    restart: "no"
-    read_only: true
-    tmpfs: [/tmp]
-    security_opt: ["no-new-privileges:true"]
-    cap_drop: [ALL]
-    depends_on:
-      hugegraph:
-        condition: service_healthy
-
   mcp:
     build:
       context: .
       dockerfile: services/mcp/Dockerfile
     environment:
-      CODESYNAPSE_HUGEGRAPH_URL: http://hugegraph:8080
-      CODESYNAPSE_HUGEGRAPH_USER: cs_mcp
-      CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_MCP_PASSWORD:?run "just init" to add HUGEGRAPH_MCP_PASSWORD to .env}
-      CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES: "8388608"
-      CODESYNAPSE_HUGEGRAPH_TX_CAPACITY: "1000000"
+      CODESYNAPSE_NEBULA_ADDRS: nebula-graphd:9669
+      CODESYNAPSE_NEBULA_USER: root
+      CODESYNAPSE_NEBULA_PASSWORD: ${NEBULA_PASSWORD:?run "just init" to add NEBULA_PASSWORD to .env}
       CODESYNAPSE_MILVUS_URL: http://milvus:19530
       CODESYNAPSE_METRICS_URL: http://victoriametrics:8428
       CODESYNAPSE_METRICS_USER: codesynapse
@@ -349,9 +383,7 @@ services:
       timeout: 3s
       retries: 30
     depends_on:
-      hugegraph:
-        condition: service_healthy
-      hugegraph-role:
+      nebula-init:
         condition: service_completed_successfully
       milvus:
         condition: service_healthy
@@ -381,8 +413,11 @@ services:
         condition: service_healthy
 
 volumes:
-  hugegraph-data:
-  hugegraph-init:
+  nebula-meta:
+  nebula-meta-logs:
+  nebula-storage:
+  nebula-storage-logs:
+  nebula-graph-logs:
   milvus-data:
   metrics-data:
   traces-data:

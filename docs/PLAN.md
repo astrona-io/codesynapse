@@ -11,7 +11,7 @@ Inspired by [code-review-graph](https://github.com/tirth8205/code-review-graph).
 | | code-review-graph | CodeSynapse |
 |---|---|---|
 | Call resolution | tree-sitter AST, heuristic + "inferred" edges | go/types: exact static calls, interface dispatch via `DISPATCHES_TO` |
-| Store | single SQLite file | HugeGraph (+ Milvus), multi-repo, shared by services |
+| Store | single SQLite file | NebulaGraph (+ Milvus), multi-repo, shared by services |
 | HTTP auth | Host/Origin checks | bearer tokens, refuses unauthenticated non-loopback binds |
 | Write tools | `apply_refactor` writes files | none; all tools read-only |
 | Secrets | names sanitised | summaries redacted, no source bodies, hashed author e-mails |
@@ -26,7 +26,7 @@ Inspired by [code-review-graph](https://github.com/tirth8205/code-review-graph).
 ```
              ┌──────────────────┐  MCP (stdio/http)  ┌───────────┐
  agents ───▶ │ codesynapse-mcp  │ ─────────────────▶ │           │
-             └──────────────────┘                    │ HugeGraph │
+             └──────────────────┘                    │ NebulaGr. │
  browser ──▶ web (Nuxt 4) ─▶ /api/cg ─▶ codesynapse-api ─▶ │           │
                                                      └───────────┘
  CI / dev ─▶ codesynapse CLI (ingest, audit, stats, review --offline) ─▲
@@ -39,7 +39,7 @@ Every reader goes through `internal/query` (and `internal/agentctx` for the comp
 1. **Go** (`internal/ingest/golang`): `go/packages` loads all packages with tests. Pass 1 handles primary packages; pass 2 adds `_test.go` files from test variants. For each declaration it records the location, signature, doc summary, cyclomatic complexity, a body hash, and calls resolved through `types.Info.Uses`. Calls to sensitive external APIs become `External` nodes with security tags. Interface satisfaction is computed with `types.Implements` across in-repo types.
 2. **Docs** (`internal/ingest/docs`): Markdown files are split into heading sections with line ranges and summaries. Inline code spans that name an exported symbol become `MENTIONS` edges (ambiguous short names are skipped).
 3. **History** (`internal/ingest/githistory`): the last N commits with numstat give `Commit`/`Author` nodes, `MODIFIES` edges and per-file churn.
-4. **Persist**: validate a bounded replacement, then publish nodes, edges and stale removals atomically. HugeGraph stages bounded chunks outside the code labels and publishes them in one transaction. Recheck authorization and the pinned policy before commit; failed publication preserves the previous graph.
+4. **Persist**: validate a bounded replacement, then publish nodes, edges and stale removals atomically. NebulaGraph has no transactions: the store takes a lease, writes in place stamped with a run and deletes the rows of other runs, so readers see the old or the new graph. Recheck authorization and the pinned policy before commit; failed publication preserves the previous graph.
 
 ### Schema
 
@@ -72,7 +72,7 @@ Edges: `CONTAINS`, `DEFINES`, `HAS_METHOD`, `CALLS` (with `count`), `DISPATCHES_
 
 `CALLS`, `REFERENCES`, `IMPLEMENTS` and `DISPATCHES_TO` carry `evidence`: `typed`, `dataflow` (optional Go SSA/VTA analysis), `syntactic` or `inferred`, absent (unknown) on graphs indexed before phase 4j.4. The `analysis` records say how completely each package and file was analysed and what was left out. See [edge evidence](EDGE_EVIDENCE.md).
 
-Access projections are separate from code nodes. `Organization` carries `tenant_id`, `default_repo_access` and `policy_revision`; tenant-local `User` carries `user_id`, `active` and `inherits_default`; `Team` carries `team_id`; `AccessRepository` carries `repo_id`, `graph_id` and `usable`. `MEMBER_OF`, `BELONGS_TO` and `HAS_ACCESS` connect only these access vertices within a tenant. Grants carry `role` and numeric `rank`. HugeGraph maps each source/target pair to a fixed physical edge label. Revision/digest-scoped IDs and completion records make rebuilds retryable; PostgreSQL remains authoritative. See [the access-control implementation](ACCESS_CONTROL_PLAN.md#implementation-and-upgrade).
+Access projections are separate from code nodes. `Organization` carries `tenant_id`, `default_repo_access` and `policy_revision`; tenant-local `User` carries `user_id`, `active` and `inherits_default`; `Team` carries `team_id`; `AccessRepository` carries `repo_id`, `graph_id` and `usable`. `MEMBER_OF`, `BELONGS_TO` and `HAS_ACCESS` connect only these access vertices within a tenant. Grants carry `role` and numeric `rank`. Revision/digest-scoped IDs and completion records make rebuilds retryable; PostgreSQL remains authoritative. See [the access-control implementation](ACCESS_CONTROL_PLAN.md#implementation-and-upgrade).
 
 Code declarations also carry `symbol_id` (a random permanent identity) and
 `revision`; the existing `id` remains the current graph locator. A repository's
@@ -118,7 +118,7 @@ symbols and saved snapshot paths. Writes audit before persistence.
 
 ## Decisions
 
-- **Apache HugeGraph as the graph database** with Milvus for memory vectors, plus an in-memory twin. Neo4j was supported until October 2026 and then removed: HugeGraph and Milvus are Apache-2.0 (Neo4j Community is GPL-3.0), scale out (HugeGraph on distributed storage, Milvus with tenant partitions), and keep tenant isolation in the data itself. Both are spoken over HTTP with the standard library: the Milvus Go SDK pulls in ~470 packages and a cgo CPU probe that crashes `-race` tests on macOS. HugeGraph specifics: hashed vertex IDs (128-byte cap), size-bounded write batches (Gremlin's 64 KB request default), read-before-write scripts (no index lookups after uncommitted writes), and repository replacement as one transaction bounded by `edge.tx_capacity`/`vertex.tx_capacity` (HugeGraph's maximum is 1,000,000; the store checks `CODESYNAPSE_HUGEGRAPH_TX_CAPACITY` before writing and rolls back on failure). Statistics rules live once in `store.StatsBuilder`; HugeGraph aggregates groups server-side and feeds them through it.
+- **NebulaGraph as the graph database** with Milvus for memory vectors, plus an in-memory twin. Neo4j was supported until October 2026 and HugeGraph after it; both were removed (see [ADR 0003](adr/0003-nebulagraph.md)). NebulaGraph and Milvus are Apache-2.0, scale out and keep tenant isolation in the data itself. Statements are constants with values as parameters; vertex IDs are validated hashes, the one documented exception. There are no transactions, so a repository replacement is a lease plus run-stamped writes. Statistics rules live once in `store.StatsBuilder`.
 - **An in-memory twin behind the same interface.** The contract test (`storetest.Run`) keeps HugeGraph and the memory store identical, which lets everything except the Gremlin itself be tested without a database.
 - **No raw Gremlin over MCP.** Scripts execute code on the server. A curated tool set is safer and cheaper for agents anyway.
 - **No LLM calls inside CodeSynapse.** Outputs are deterministic context; the agent using them is the LLM. This keeps keys and code out of third-party APIs.

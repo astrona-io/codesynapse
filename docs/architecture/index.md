@@ -18,7 +18,7 @@ How the pieces fit, from files on disk to an answer in a chat.
 
 - **Where data lives**
 
-    HugeGraph, Milvus and PostgreSQL, and why search stays inside them.
+    NebulaGraph, Milvus and PostgreSQL, and why search stays inside them.
 
     [Stores and backends](stores.md) · [Retrieval and memory](retrieval-memory.md)
 

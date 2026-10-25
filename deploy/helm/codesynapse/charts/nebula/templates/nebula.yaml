@@ -1,0 +1,148 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "cs.name" (list . "nebula") }}
+  labels:
+    {{- include "cs.labels" (list . "nebula") | nindent 4 }}
+spec:
+  serviceName: {{ include "cs.name" (list . "nebula") }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cs.selector" (list . "nebula") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cs.labels" (list . "nebula") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "cs.serviceAccount" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "cs.podSecurity" 10001 | nindent 8 }}
+      containers:
+        # The three services share the pod and talk over loopback; only
+        # graphd's port is published (Service, network policy). Schema
+        # changes reach graphd and storaged on their heartbeat: a short
+        # interval keeps `ensure schema` quick.
+        - name: metad
+          image: {{ .Values.images.metad }}
+          args: [--meta_server_addrs=127.0.0.1:9559, --local_ip=127.0.0.1, --ws_ip=127.0.0.1, --port=9559, --data_path=/data/meta, --log_dir=/logs/metad, --pid_file=/tmp/metad.pid, --v=0, --minloglevel=1, --heartbeat_interval_secs=2]
+          # Status port; it listens on loopback only.
+          ports:
+            - {name: metad-status, containerPort: 19559}
+          startupProbe:
+            httpGet: {host: 127.0.0.1, path: /status, port: metad-status}
+            periodSeconds: 3
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: {host: 127.0.0.1, path: /status, port: metad-status}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          securityContext:
+            {{- include "cs.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /data/meta, subPath: meta}
+            - {name: scratch, mountPath: /logs, subPath: logs}
+            - {name: scratch, mountPath: /tmp, subPath: tmp}
+        - name: storaged
+          image: {{ .Values.images.storaged }}
+          args: [--meta_server_addrs=127.0.0.1:9559, --local_ip=127.0.0.1, --ws_ip=127.0.0.1, --port=9779, --data_path=/data/storage, --log_dir=/logs/storaged, --pid_file=/tmp/storaged.pid, --v=0, --minloglevel=1, --heartbeat_interval_secs=2]
+          # No probe on the service itself: storaged serves nothing until the
+          # init container below has registered it.
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- include "cs.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /data/storage, subPath: storage}
+            - {name: scratch, mountPath: /logs, subPath: logs}
+            - {name: scratch, mountPath: /tmp, subPath: tmp}
+        - name: graphd
+          image: {{ .Values.images.graphd }}
+          args: [--meta_server_addrs=127.0.0.1:9559, --local_ip=127.0.0.1, --ws_ip=127.0.0.1, --port=9669, --log_dir=/logs/graphd, --pid_file=/tmp/graphd.pid, --v=0, --minloglevel=1, --enable_authorize=true, --auth_type=password, --heartbeat_interval_secs=2]
+          ports:
+            - {name: graph, containerPort: 9669}
+            # Status port; it listens on loopback only.
+            - {name: graphd-status, containerPort: 19669}
+          startupProbe:
+            httpGet: {host: 127.0.0.1, path: /status, port: graphd-status}
+            periodSeconds: 3
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: {host: 127.0.0.1, path: /status, port: graphd-status}
+            periodSeconds: 20
+            failureThreshold: 6
+          readinessProbe:
+            tcpSocket: {port: graph}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          securityContext:
+            {{- include "cs.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - {name: scratch, mountPath: /logs, subPath: logs}
+            - {name: scratch, mountPath: /tmp, subPath: tmp}
+        # Registers the storage host and replaces the well-known first
+        # password of root with NEBULA_PASSWORD (at most 24 characters), then
+        # reports ready and sleeps. Idempotent across restarts. The console
+        # exits 0 on a statement error, so its output is checked.
+        - name: init
+          image: {{ .Values.images.console }}
+          command:
+            - sh
+            - -c
+            - |
+              [ -n "$NEBULA_PASSWORD" ] || { echo 'NEBULA_PASSWORD is not set' >&2; exit 1; }
+              c() { nebula-console -addr 127.0.0.1 -port 9669 -u root -p "$1" -e "$2"; }
+              n=0
+              until c "$NEBULA_PASSWORD" 'SHOW HOSTS' >/dev/null 2>&1 || c nebula 'SHOW HOSTS' >/dev/null 2>&1; do
+                n=$((n+1)); [ "$n" -lt 120 ] || { echo 'graphd did not answer' >&2; exit 1; }; sleep 2
+              done
+              if c nebula 'SHOW HOSTS' >/dev/null 2>&1; then
+                out=$(c nebula "CHANGE PASSWORD root FROM \"nebula\" TO \"$NEBULA_PASSWORD\"" 2>&1)
+                case "$out" in *ERROR*) echo "$out" >&2; exit 1;; esac
+              fi
+              n=0
+              until c "$NEBULA_PASSWORD" 'SHOW HOSTS' >/dev/null 2>&1; do
+                n=$((n+1)); [ "$n" -lt 60 ] || { echo 'the new password was not accepted' >&2; exit 1; }; sleep 2
+              done
+              c "$NEBULA_PASSWORD" 'ADD HOSTS "127.0.0.1":9779' >/dev/null
+              n=0
+              until c "$NEBULA_PASSWORD" 'SHOW HOSTS' | grep -q ONLINE; do
+                n=$((n+1)); [ "$n" -lt 60 ] || { echo 'storaged did not come online' >&2; exit 1; }; sleep 2
+              done
+              touch /tmp/ready
+              exec sleep infinity
+          env:
+            {{- include "cs.secretEnv" (list . "NEBULA_PASSWORD" "NEBULA_PASSWORD") | nindent 12 }}
+          readinessProbe:
+            exec: {command: [test, -f, /tmp/ready]}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          securityContext:
+            {{- include "cs.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - {name: scratch, mountPath: /tmp, subPath: init}
+      volumes:
+        - name: scratch
+          emptyDir: {}
+  {{- include "cs.volumeClaim" (list . .Values) | nindent 2 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cs.name" (list . "nebula") }}
+  labels:
+    {{- include "cs.labels" (list . "nebula") | nindent 4 }}
+spec:
+  selector:
+    {{- include "cs.selector" (list . "nebula") | nindent 4 }}
+  ports:
+    - {name: graph, port: 9669, targetPort: graph}

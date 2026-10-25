@@ -18,10 +18,10 @@ import (
 
 // A git post-commit hook that re-indexes the repository after each commit
 // (docs/PLAN.md, roadmap item 1), for people who run the CLI against their
-// own HugeGraph. It runs in the background so committing stays instant;
+// own NebulaGraph. It runs in the background so committing stays instant;
 // commits made while a run is going are picked up by that run's next
 // round. The store settings come from the committing shell's environment
-// (CODESYNAPSE_HUGEGRAPH_*), never from the hook file.
+// (CODESYNAPSE_NEBULA_*), never from the hook file.
 
 // The markers identify hooks this command wrote; others are left alone.
 const (
@@ -222,7 +222,7 @@ func gitHookCmd(ec *app.Env) *cobra.Command {
 	parent := &cobra.Command{Use: "git-hook", Short: "Re-index the repository after each commit", GroupID: app.GroupBase}
 	parent.AddCommand(app.NewSubCommand("install [path]", &gitHookOptions{EC: ec, install: true}, ec).
 		WithShortDesc("Install a git post-commit hook that re-indexes the repository in the background").
-		WithLongDesc("Writes .git/hooks/post-commit (or into core.hooksPath) so every commit runs `codesynapse ingest` in the background; publication writes only what changed. The store settings come from the environment of the shell that commits (CODESYNAPSE_HUGEGRAPH_URL, _USER, _PASSWORD), never from the hook. A hook that is not CodeSynapse's is left alone. Output goes to codesynapse-ingest.log in the git directory. With --pre-commit it writes .git/hooks/pre-commit instead, which runs `codesynapse audit --changed` on the staged files and refuses the commit on a finding at --fail-on or above (offline; `git commit --no-verify` skips it once).").
+		WithLongDesc("Writes .git/hooks/post-commit (or into core.hooksPath) so every commit runs `codesynapse ingest` in the background; publication writes only what changed. The store settings come from the environment of the shell that commits (CODESYNAPSE_NEBULA_ADDRS, _USER, _PASSWORD), never from the hook. A hook that is not CodeSynapse's is left alone. Output goes to codesynapse-ingest.log in the git directory. With --pre-commit it writes .git/hooks/pre-commit instead, which runs `codesynapse audit --changed` on the staged files and refuses the commit on a finding at --fail-on or above (offline; `git commit --no-verify` skips it once).").
 		WithExample("  codesynapse git-hook install . --repo my-service\n  codesynapse git-hook install . --pre-commit --fail-on high\n  codesynapse git-hook uninstall .").
 		WithMaxArgs(1).Build())
 	parent.AddCommand(app.NewSubCommand("uninstall [path]", &gitHookOptions{EC: ec}, ec).

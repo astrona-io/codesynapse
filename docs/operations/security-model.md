@@ -40,7 +40,7 @@ flowchart LR
 | Area | Rule |
 |---|---|
 | Cypher | Values only through parameters. Labels, types, depth and ORDER BY only from `model` allowlists, `store.ClampDepth` or `metricCypher` |
-| Gremlin | Scripts are constants; values, labels and IDs travel in `bindings`. Always password-protected, never published, no raw-Gremlin tool. Tenant data traversals start at `has('tenant_id', ...).has('ns', ...)` |
+| nGQL | Statements are constants; values travel as parameters, tags and columns are quoted from allowlists, and vertex IDs (no parameters in nGQL) are hashes checked by `literal`. Always password-protected, never published, no raw-nGQL tool. Tenant data statements filter on `tenant_id` and `ns` first |
 | Vectors | Filter templates with `exprParams`; every item has a tenant; `vector.Isolate` drops foreign hits |
 | git | Only through `gitx.Run`: no fsmonitor, hooks, external diff or textconv; ignores global config; no shell |
 | go list | `CGO_ENABLED=0`, `GOTOOLCHAIN=local`, `GOPROXY=off` unless opted in |

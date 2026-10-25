@@ -6,8 +6,7 @@ name: Chart image scan
 #    and the five store images, counts per severity in the job summary.
 #    Never fails: upstream images are not ours to fix.
 #  - gate: fails when one of our own images has a fixable HIGH or CRITICAL
-#    finding (HugeGraph's bundled jars are upstream's, so only its OS
-#    packages count). A failed scheduled run notifies the repository admins.
+#    finding. A failed scheduled run notifies the repository admins.
 on:
   schedule:
     - cron: '43 5 * * 1'
@@ -50,7 +49,6 @@ jobs:
           - {image: codesynapse-mcp, tag: latest, types: 'os,library'}
           - {image: codesynapse-web, tag: latest, types: 'os,library'}
           - {image: codesynapse-postgres, tag: 18-alpine, types: 'os,library'}
-          - {image: codesynapse-hugegraph, tag: 1.7.0, types: os}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

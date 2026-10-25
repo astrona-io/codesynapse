@@ -15,14 +15,14 @@ helm template codesynapse "$chart" -f "$values" > "$out/rendered.yaml"
 helm template codesynapse "$chart" -f "$chart/ci/kind-values.yaml" > /dev/null
 # So must every store linked from outside (no subchart schema applies then).
 helm template codesynapse "$chart" -f "$values" \
-    --set postgresql.enabled=false,hugegraph.enabled=false,milvus.enabled=false \
+    --set postgresql.enabled=false,nebula.enabled=false,milvus.enabled=false \
     --set victoriametrics.enabled=false,victoriatraces.enabled=false \
-    --set hugegraph.externalURL=https://hugegraph.example.com:8080 > /dev/null
+    --set nebula.externalAddrs=nebula.example.com:9669 > /dev/null
 
 # values.schema.json (and each store's) must refuse what the chart would
 # ignore or break on: unknown keys, wrong types, invalid enums.
 for bad in api.replica=2 'worker.roles=ingest\,typo' 'worker.roles=ingest\,fix' fixWorker.roles=ai image.pullPolicy=Sometimes \
-    auditRetentionDays=7 postgresql.sizee=1Gi hugegraph.size=lots \
+    auditRetentionDays=7 postgresql.sizee=1Gi nebula.size=lots \
     worker.restrictEgress=maybe 'worker.egressAllow[0].cidr=nonsense' 'worker.egressAllow[0].extra=1'; do
     if helm template codesynapse "$chart" -f "$values" --set "$bad" > /dev/null 2>&1; then
         echo "values.schema.json accepted $bad" >&2

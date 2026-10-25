@@ -39,7 +39,6 @@ import (
 	"github.com/astrona-io/codesynapse/internal/security"
 	"github.com/astrona-io/codesynapse/internal/snapshot"
 	"github.com/astrona-io/codesynapse/internal/store"
-	"github.com/astrona-io/codesynapse/internal/store/hugegraphstore"
 	"github.com/astrona-io/codesynapse/internal/store/memory"
 	"github.com/astrona-io/codesynapse/internal/toolsets"
 )
@@ -230,9 +229,9 @@ func (o *ingestOptions) once(ctx context.Context) (result error) {
 func ingestCmd(ec *app.Env) *cobra.Command {
 	o := &ingestOptions{EC: ec}
 	return app.NewSubCommand("ingest [path]", o, ec).
-		WithShortDesc("Index a repository into HugeGraph").
+		WithShortDesc("Index a repository into NebulaGraph").
 		WithLongDesc("Indexes the repository at path and publishes its graph; publication writes only what changed since the last run. With --watch it keeps running and re-indexes whenever the git working tree changes, so the graph follows your edits; `codesynapse git-hook install` re-indexes after each commit instead.").
-		WithExample("  CODESYNAPSE_HUGEGRAPH_PASSWORD=... codesynapse ingest . --repo my-service\n  codesynapse ingest . --repo my-service --watch").
+		WithExample("  CODESYNAPSE_NEBULA_PASSWORD=... codesynapse ingest . --repo my-service\n  codesynapse ingest . --repo my-service --watch").
 		WithGroupID(app.GroupBase).
 		WithMaxArgs(1).
 		Build()
@@ -265,7 +264,7 @@ func (o *reviewOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.head, "head", "HEAD", "Head ref of the change")
 	f.StringVar(&o.diffFile, "diff", "", "Read a unified diff from this file ('-' for stdin) instead of running git")
 	f.IntVar(&o.depth, "depth", 3, "Caller traversal depth")
-	f.BoolVar(&o.offline, "offline", false, "Build the graph in memory from the working tree instead of querying HugeGraph")
+	f.BoolVar(&o.offline, "offline", false, "Build the graph in memory from the working tree instead of querying NebulaGraph")
 	f.BoolVar(&o.findingsDelta, "findings-delta", true, "With --offline and a git diff, also index the base and report which security findings the change introduces and fixes")
 	f.StringSliceVar(&o.coverage, "coverage", nil, "With --offline, a Go coverage profile or LCOV file of the last test run (default: cover.out, lcov.info and the like at the root)")
 	f.StringVar(&o.failOnNew, "fail-on-new", "", "With --offline and a git diff, exit 1 when the change introduces a security finding at or above this severity (pre-existing findings do not count)")
@@ -449,18 +448,12 @@ func reviewCmd(ec *app.Env) *cobra.Command {
 
 // schemaOptions configures `codesynapse schema`.
 type schemaOptions struct {
-	EC      *app.Env
-	graph   app.GraphFlags
-	mcpUser string
+	EC    *app.Env
+	graph app.GraphFlags
 }
-
-// envMCPRolePassword holds the limited MCP user's password; like every
-// secret it comes from the environment, never a flag.
-const envMCPRolePassword = "CODESYNAPSE_HUGEGRAPH_MCP_PASSWORD" //nolint:gosec // the name of the variable, not a credential
 
 func (o *schemaOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	o.graph.AddFlags(o.EC.Command.Flags())
-	o.EC.Command.Flags().StringVar(&o.mcpUser, "mcp-role", "", "Also create this HugeGraph user for the MCP service: it reads the whole graph and writes only agent memory, reviews, curated links and usage counters (password from "+envMCPRolePassword+"; needs the administrator and HugeGraph 1.7)")
 	return nil
 }
 func (o *schemaOptions) Complete(context.Context, *app.Env) error { return nil }
@@ -471,23 +464,13 @@ func (o *schemaOptions) Run(ctx context.Context, _ *app.Env) error {
 		return err
 	}
 	defer st.Close(ctx) //nolint:errcheck // best-effort close
-	if err := st.EnsureSchema(ctx); err != nil {
-		return err
-	}
-	if o.mcpUser == "" {
-		return nil
-	}
-	hg, ok := st.(*hugegraphstore.Store)
-	if !ok {
-		return errors.New("--mcp-role needs the HugeGraph store")
-	}
-	return hg.ProvisionRole(ctx, hugegraphstore.MCPRole(o.mcpUser, os.Getenv(envMCPRolePassword)))
+	return st.EnsureSchema(ctx)
 }
 
 func schemaCmd(ec *app.Env) *cobra.Command {
 	o := &schemaOptions{EC: ec}
 	return app.NewSubCommand("schema", o, ec).
-		WithShortDesc("Create the HugeGraph schema (property keys, labels, indexes)").
+		WithShortDesc("Create the NebulaGraph space, tags, edge types and indexes").
 		WithGroupID(app.GroupOther).
 		WithNoArgs().
 		Build()

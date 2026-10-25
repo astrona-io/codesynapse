@@ -1,6 +1,6 @@
 # Stores and backends
 
-All persistence goes through the `store.Store` interface in `internal/store`. Two implementations must behave identically: HugeGraph in production and an in-memory twin for tests and offline use.
+All persistence goes through the `store.Store` interface in `internal/store`. Two implementations must behave identically: NebulaGraph in production and an in-memory twin for tests and offline use.
 
 ```mermaid
 flowchart TB
@@ -14,36 +14,39 @@ flowchart TB
     consumers --> iface
 
     iface --> mem[memory/<br/>tests and --offline]
-    iface --> hg[hugegraphstore/<br/>Gremlin over HTTP]
+    iface --> hg[nebulastore/<br/>nGQL over the graphd client]
 
     hg -.-> milvus[(Milvus<br/>memory vectors)]
-    hg --> hgdb[(HugeGraph)]
+    hg --> hgdb[(NebulaGraph)]
 
     contract[storetest.Run<br/>contract + parity tests] -. verifies .-> mem
     contract -. verifies .-> hg
 ```
 
-| | memory | hugegraphstore |
+| | memory | nebulastore |
 |---|---|---|
-| Query language | Go | Gremlin (constant scripts, values in `bindings`) |
+| Query language | Go | nGQL (constant statements, values in parameters) |
 | Use | Unit tests, `--offline` | Every deployment |
 | Vectors | `vector.Flat` in process | Milvus REST v2 |
 | Licence | in repo | Apache-2.0 |
 
-Neo4j was supported until October 2026. It was removed so the whole data path is Apache-2.0 and there is one production backend to keep correct; graphs are not migrated, so an upgraded installation re-indexes.
+Neo4j was supported until October 2026 and HugeGraph until the same month: both were removed so there is one production backend to keep correct. Graphs are not migrated, so an upgraded installation re-indexes. Reviews, curated records and agent memory live in the same graph, so they start empty too (see [Upgrading](../operations/upgrading.md)).
 
 ## Why contract tests matter
 
-`storetest.Run` is the single definition of correct behaviour. `just test-hugegraph` runs it, and `TestParityWithReference`, against throwaway HugeGraph and Milvus containers; the memory store runs it in `just test`. A new `store.Reader` method is not done until both pass.
+`storetest.Run` is the single definition of correct behaviour. `just test-nebula` runs it against throwaway NebulaGraph and Milvus containers; the memory store runs it in `just test`. A new `store.Reader` method is not done until both pass.
 
 ## Backend-specific rules
 
-**HugeGraph**
+**NebulaGraph**
 
-- Vertex IDs are hashed (128-byte cap), write batches are size-bounded (Gremlin's 64 KB request default) and scripts read before they write.
-- Gremlin-groovy executes code on the server, so HugeGraph always runs with a password, is never published to the host, and no raw-Gremlin tool exists.
-- Statistics rules live once in `store.StatsBuilder`; HugeGraph aggregates groups server-side and feeds them through it.
-- Indexing replaces a repository's graph in one transaction, so its old and new edges must fit the server's `edge.tx_capacity` and `vertex.tx_capacity`. HugeGraph's default of 10,000 is too small for most repositories; the compose service sets 1,000,000, the most HugeGraph accepts. If you run your own HugeGraph, set both options on the server and `CODESYNAPSE_HUGEGRAPH_TX_CAPACITY` to the same value for `api` and `mcp`. A replacement that does not fit is refused before anything is written, and the error names the setting. At 1,000,000 that is roughly a repository of 500,000 edges; larger ones cannot be indexed yet.
+- Statements are constants; values travel as parameters and tags, edge types and columns are quoted from allowlists. nGQL has no parameters for vertex IDs, so an ID is written into the text as `literal(vid(prefix, id))`: one lowercase letter plus 32 hex characters of a hash, and a panic on anything else. This is the one documented exception to "values only in parameters".
+- NebulaGraph has no transactions. Replacing a repository takes a lease (`UPSERT ... WHEN`), writes in place stamped with a run, then deletes the rows of other runs; readers filter on the live run, so they see the old or the new graph, never a mix. A crashed run is cleaned up by the next one.
+- A composite index misses rows whose later columns are NULL, so indexed columns are `NOT NULL DEFAULT`.
+- Schema changes reach graphd and storaged on their heartbeat (2 s in the shipped stack); `ensure schema` waits for them.
+- Authentication is always on and the root password is set at first start (`NEBULA_PASSWORD`, at most 24 characters). graphd is never published to the host and no raw-nGQL tool exists.
+- Statistics rules live once in `store.StatsBuilder`; the store feeds it grouped counts.
+- Partitions and replicas of a new space come from `CODESYNAPSE_NEBULA_PARTITIONS` and `CODESYNAPSE_NEBULA_REPLICAS` (a space is created once; changing them later does not reshape it).
 
 **Milvus**
 

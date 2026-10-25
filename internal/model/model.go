@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// NodeKind classifies a node. Each kind is a graph label (Kind property in HugeGraph).
+// NodeKind classifies a node. Each kind is a graph label (the kind property in NebulaGraph).
 type NodeKind string
 
 // Node kinds.
@@ -80,7 +80,7 @@ func (k NodeKind) IsCallable() bool {
 	return k == KindFunction || k == KindMethod || k == KindInterfaceMethod || k == KindExternal
 }
 
-// EdgeKind classifies an edge. Each kind maps 1:1 to a HugeGraph edge label.
+// EdgeKind classifies an edge. Each kind maps 1:1 to a NebulaGraph edge type.
 type EdgeKind string
 
 // Edge kinds.

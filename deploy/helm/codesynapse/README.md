@@ -2,7 +2,7 @@
 
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/codesynapse)](https://artifacthub.io/packages/search?repo=codesynapse)
 
-Installs CodeSynapse on Kubernetes: the dashboard (`web`), the API (`api`), job workers (`worker`) and the MCP server (`mcp`). The stores it needs are subcharts, all on by default, so a plain install runs everything: PostgreSQL, HugeGraph, Milvus, VictoriaMetrics and VictoriaTraces. For production, run them yourself and link them (see [Stores](#stores)). Every image is Apache-2.0, or PostgreSQL-licensed for the database.
+Installs CodeSynapse on Kubernetes: the dashboard (`web`), the API (`api`), job workers (`worker`) and the MCP server (`mcp`). The stores it needs are subcharts, all on by default, so a plain install runs everything: PostgreSQL, NebulaGraph, Milvus, VictoriaMetrics and VictoriaTraces. For production, run them yourself and link them (see [Stores](#stores)). Every image is Apache-2.0, or PostgreSQL-licensed for the database.
 
 ## Install with the CLI
 
@@ -32,7 +32,7 @@ The steps below do the same by hand.
      --from-literal=CODESYNAPSE_API_TOKEN="$(openssl rand -hex 24)" \
      --from-literal=CODESYNAPSE_MCP_TOKEN="$(openssl rand -hex 24)" \
      --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)" \
-     --from-literal=HUGEGRAPH_PASSWORD="$(openssl rand -hex 24)" \
+     --from-literal=NEBULA_PASSWORD="$(openssl rand -hex 12)" \
      --from-literal=METRICS_PASSWORD="$(openssl rand -hex 24)" \
      --from-literal=SECRET_KEY="$(openssl rand -base64 32)"
    ```
@@ -91,19 +91,19 @@ Each store is a subchart in `charts/`, declared in `Chart.yaml` with `condition:
 | Store | Disable | Link instead |
 |---|---|---|
 | PostgreSQL (accounts, jobs, audit log) | `postgresql.enabled=false` | `CODESYNAPSE_DATABASE_URL` in the Secret; drop `POSTGRES_PASSWORD`. A managed database, or CloudNativePG with three instances (the `uri` of its `<cluster>-app` Secret); `just chart-failover-postgres` tests a primary failover |
-| HugeGraph (code graph) | `hugegraph.enabled=false` | `hugegraph.externalURL` (required); `HUGEGRAPH_PASSWORD` stays in the Secret. Authentication must be on |
+| NebulaGraph (code graph) | `nebula.enabled=false` | `nebula.externalAddrs` (required, graphd `host:9669`, comma separated); `NEBULA_PASSWORD` (the `root` password) stays in the Secret. Authentication must be on |
 | Milvus (memory vectors) | `milvus.enabled=false` | `milvus.externalURL` (the proxy, `http(s)://host:19530`), and `MILVUS_TOKEN` in the Secret when authentication is on; empty turns memory vectors off. A Milvus cluster from the zilliztech chart with SeaweedFS for S3 and Woodpecker as the log is tested by `just chart-failover-milvus`; set `mq.type: woodpecker` before its first start |
 | VictoriaMetrics (metrics) | `victoriametrics.enabled=false` | `victoriametrics.externalURL`; empty turns export off |
 | VictoriaTraces (traces) | `victoriatraces.enabled=false` | `victoriatraces.externalURL`, the full OTLP/HTTP traces endpoint; empty turns export off |
 
-Settings of an in-chart store go under its name, for example `--set hugegraph.size=50Gi`. Each subchart's `values.yaml` lists them: image, size, storageClass, resources, and retention for the Victoria stores. The subcharts take the Secret, pull secrets and network policies from `global`, and share the helpers in the `common` library chart.
+Settings of an in-chart store go under its name, for example `--set nebula.size=50Gi`. Each subchart's `values.yaml` lists them: image, size, storageClass, resources, and retention for the Victoria stores. The subcharts take the Secret, pull secrets and network policies from `global`, and share the helpers in the `common` library chart.
 
 ```sh
-# PostgreSQL and HugeGraph run elsewhere; the rest stays in the chart.
+# PostgreSQL and NebulaGraph run elsewhere; the rest stays in the chart.
 helm upgrade --install codesynapse oci://ghcr.io/astrona-io/charts/codesynapse --version <X.Y.Z> \
   --kube-context <ctx> --namespace codesynapse --set global.existingSecret=codesynapse \
   --set postgresql.enabled=false \
-  --set hugegraph.enabled=false --set hugegraph.externalURL=https://hugegraph.internal:8080
+  --set nebula.enabled=false --set nebula.externalAddrs=nebula.internal:9669
 ```
 
 ## Scaling out
@@ -122,14 +122,14 @@ With more than one replica, or with autoscaling, a component gets a PodDisruptio
 
 - `api`, `worker` and `mcp` mount the same workspace volume. Spread over several nodes, it needs a ReadWriteMany storage class.
 - Status lookups for annotation jobs (`/annotations/jobs/{id}`) and memory extraction jobs (`/memory/jobs/{id}`) answer only on the API replica that took the job. The work itself is unaffected, and the dashboard doesn't poll them. A durable annotation queue is a follow-up.
-- PostgreSQL, HugeGraph and Milvus run as single instances. Clustered stores are 6d in [docs/SAAS.md](https://codesynapse.astrona.io/SAAS/).
+- PostgreSQL, NebulaGraph and Milvus run as single instances. Clustered stores are 6d in [docs/SAAS.md](https://codesynapse.astrona.io/SAAS/).
 
 ## Security
 
 - **Pods:**
   - every CodeSynapse pod runs as non-root with a read-only root filesystem, no capabilities, no privilege escalation, the default seccomp profile and no service-account token;
   - PostgreSQL, Milvus and the Victoria stores run as non-root too;
-  - HugeGraph's image rewrites its root-owned configuration at start, so it keeps root with capabilities limited to file ownership. Use an external, hardened HugeGraph in production.
+  - NebulaGraph runs as one pod (metad, storaged, graphd and a registration sidecar) with a read-only root filesystem; the chart's root password is at most 24 characters. For a cluster, run NebulaGraph yourself.
 - **Network policies:**
   - stores accept only `api`, `worker` and `mcp`;
   - the API accepts only `web`, `mcp` and the chart test;

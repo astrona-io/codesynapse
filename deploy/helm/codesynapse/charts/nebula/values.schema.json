@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "In-chart HugeGraph values",
-  "description": "Override these under `hugegraph:` in the codesynapse chart's values.",
+  "title": "In-chart NebulaGraph values",
+  "description": "Override these under `nebula:` in the codesynapse chart's values.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -13,10 +13,16 @@
       "description": "Set in the codesynapse chart (condition).",
       "type": "boolean"
     },
-    "image": {
-      "description": "Image reference with registry and tag.",
-      "type": "string",
-      "minLength": 1
+    "images": {
+      "description": "Image references with registry and tag.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "metad": {"description": "Meta service.", "type": "string", "minLength": 1},
+        "storaged": {"description": "Storage service.", "type": "string", "minLength": 1},
+        "graphd": {"description": "Query service, the only one the other pods reach.", "type": "string", "minLength": 1},
+        "console": {"description": "Registers the storage host and replaces the first root password at start.", "type": "string", "minLength": 1}
+      }
     },
     "size": {
       "description": "Size of the data volume.",
@@ -38,15 +44,10 @@
         }
       }
     },
-    "externalURL": {
-      "description": "Set in the codesynapse chart: the store to use when this one is disabled.",
+    "externalAddrs": {
+      "description": "Set in the codesynapse chart: the graphd addresses to use when this store is disabled.",
       "type": "string",
-      "pattern": "^(https?://.*)?$"
-    },
-    "txCapacity": {
-      "description": "Largest transaction the server accepts.",
-      "type": "integer",
-      "minimum": 1
+      "pattern": "^([^,:\\s]+:[0-9]+(,[^,:\\s]+:[0-9]+)*)?$"
     }
   },
   "definitions": {

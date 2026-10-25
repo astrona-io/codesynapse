@@ -45,7 +45,7 @@ var secretKeys = []struct {
 	base64 bool
 }{
 	{"CODESYNAPSE_API_TOKEN", false}, {"CODESYNAPSE_MCP_TOKEN", false}, {"POSTGRES_PASSWORD", false},
-	{"HUGEGRAPH_PASSWORD", false}, {"METRICS_PASSWORD", false}, {"SECRET_KEY", true},
+	{"NEBULA_PASSWORD", false}, {"METRICS_PASSWORD", false}, {"SECRET_KEY", true},
 }
 
 // k8sName is a DNS-1123 label: what a namespace or release may be called.
