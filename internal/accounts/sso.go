@@ -590,7 +590,7 @@ func (s *Service) UnlinkIdentity(ctx context.Context, p Principal, id string) er
 		if i < 0 {
 			return struct{}{}, ErrNotFound
 		}
-		if u.PasswordHash == "" && len(ids) == 1 {
+		if !u.HasPassword && len(ids) == 1 {
 			return struct{}{}, fmt.Errorf("%w: this is the only way this account signs in", ErrForbidden)
 		}
 		if err := tx.St.DeleteIdentity(ctx, u.ID, id); err != nil {
