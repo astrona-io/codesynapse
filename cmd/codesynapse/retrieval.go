@@ -220,7 +220,19 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 	if bash != nil {
 		body["bash"] = bash
 	}
-	if err := c.do(ctx, http.MethodPost, "/api/v1/repos/"+url.PathEscape(w.repo)+"/usage/retrieval", body, nil); err != nil {
+	post := func(repo string) error {
+		return c.do(ctx, http.MethodPost, "/api/v1/repos/"+url.PathEscape(repo)+"/usage/retrieval", body, nil)
+	}
+	err := post(w.repo)
+	if err != nil && strings.Contains(err.Error(), "no such repository") {
+		// The origin remote can name the repository differently from the
+		// server (an organisation transfer leaves the old owner in the
+		// remote): ask the server which indexed repository this checkout is.
+		if name, rerr := c.resolveRepo(ctx, w.root); rerr == nil && name != w.repo {
+			err = post(name)
+		}
+	}
+	if err != nil {
 		logger.Debug("retrieval counts not reported", "error", err)
 		return
 	}
