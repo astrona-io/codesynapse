@@ -335,27 +335,29 @@ func stopGuard(ctx context.Context, in toolHookInput, logger *slog.Logger) map[s
 	if w == nil {
 		return nil
 	}
-	key, files, err := w.changes(ctx)
-	if err != nil || key == "" {
-		return nil
+	change := stopChanges(ctx, w.root)
+	if change.Key == "" {
+		return nil // nothing CodeSynapse can say anything about
 	}
 	state := stateFile(in.SessionID)
 	if state == "" {
 		return nil
 	}
 	s := loadState(state)
-	if s.Stop == key {
+	if s.Stop == change.Key {
 		return nil // this tree was checked already, or is how the session began
 	}
-	s.Stop = key
+	s.Stop = change.Key
 	saveState(state, s)
-	return map[string]any{
-		"decision": "block",
-		"reason": fmt.Sprintf("Before you finish: %d file(s) in %s changed since CodeSynapse last checked. "+
-			"Call verify_plan (no arguments: your current change) and run the commands it lists; "+
-			"call get_pr_context (no arguments) and fix any finding its security_delta lists as introduced. "+
-			"Then finish. If the CodeSynapse tools are not available, finish now.", files, w.repo),
+	reason := fmt.Sprintf("Before you finish: %d file(s) in %s changed since CodeSynapse last checked. "+
+		"Call verify_plan (no arguments: your current change) and run the commands it lists; "+
+		"call get_pr_context (no arguments) and fix any finding its security_delta lists as introduced. "+
+		"Then finish. If the CodeSynapse tools are not available, finish now.", change.Files, w.repo)
+	if len(change.Problems) > 0 {
+		// Found by parsing and formatting the changed Go files here.
+		reason = "Fix these first:\n- " + strings.Join(change.Problems, "\n- ") + "\n\n" + reason
 	}
+	return map[string]any{"decision": "block", "reason": reason}
 }
 
 func hookCmd(ec *app.Env) *cobra.Command {

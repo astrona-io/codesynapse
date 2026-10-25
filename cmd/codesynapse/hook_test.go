@@ -194,3 +194,31 @@ func TestSessionRulesAddTheRepositoryConventions(t *testing.T) {
 	out = sessionRules(context.Background(), toolHookInput{SessionID: "chat-d", Cwd: t.TempDir()}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	assert.Equal(t, out["hookSpecificOutput"].(map[string]any)["additionalContext"], "Ask the graph first.")
 }
+
+func TestStopGuardIgnoresWhatCodeSynapseDoesNotIndex(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
+	ctx := context.Background()
+	dir := gitRepo(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	in := toolHookInput{SessionID: "chat-1", Cwd: dir}
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	for name, body := range map[string]string{".claude/settings.local.json": "{}", ".mcp.json": "{}", "notes.md": "# notes\n", "go.sum": "x\n"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600))
+	}
+	assert.True(t, stopGuard(ctx, in, logger) == nil, "local settings, JSON and prose are not asked about")
+}
+
+func TestStopGuardReportsGoProblemsItself(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
+	ctx := context.Background()
+	dir := gitRepo(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "broken.go"), []byte("package demo\n\nfunc Broken( {\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "ugly.go"), []byte("package demo\n\nfunc   Ugly()   {}\n"), 0o600))
+	out := stopGuard(ctx, toolHookInput{SessionID: "chat-1", Cwd: dir}, logger)
+	require.True(t, out != nil)
+	reason := out["reason"].(string)
+	assert.Contains(t, reason, "broken.go:3")
+	assert.Contains(t, reason, "ugly.go: not gofmt-formatted")
+	assert.Contains(t, reason, "verify_plan")
+}
