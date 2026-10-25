@@ -29,7 +29,7 @@ Hook-enabled plugins require manual installation in Codex desktop and are not el
 
 Codex supplies `session_id`; Cursor supplies `conversation_id` (also `session_id` at session boundaries). If both Cursor fields are supplied, they must agree. Each invocation registers that existing ID idempotently with `POST /api/v1/execution/sessions`, then sends both execution headers when recording activity or recalling memory. Missing, mismatched, expired or closed identities cannot store activity. A subagent keeps the primary runtime identity; a conflicting parent is refused. No substitute session ID is generated.
 
-The installer configures local stdio bridges and the Codex/Cursor lifecycle hooks. Claude Code uses its existing plugin or project hooks for lifecycle behavior. Use one setup command for Claude Code, Codex and Cursor:
+The installer configures local stdio bridges and the Codex/Cursor lifecycle hooks. Claude Code uses its existing plugin or project hooks for lifecycle behavior; the plugin also runs this adapter (`--client claude`) for the events its other hooks do not cover (see the plugin page). Use one setup command for Claude Code, Codex and Cursor:
 
 ```sh
 CODESYNAPSE_MCP_TOKEN='<personal organisation key>' codesynapse mcp install --yes --only claude,codex,cursor

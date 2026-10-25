@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -63,7 +66,7 @@ func TestCursorNativeCompactionAndMCPFields(t *testing.T) {
 func TestEveryLifecycleEventRecordsWithRegisteredHeaders(t *testing.T) {
 	t.Setenv(apiTokenEnv, "csk_fixture")
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
-	for _, client := range []string{"codex", "cursor"} {
+	for _, client := range []string{"claude", "codex", "cursor"} {
 		for _, event := range agentcfg.HookEvents(client) {
 			t.Run(client+"/"+event, func(t *testing.T) {
 				var activity agentcfg.HookActivity
@@ -105,4 +108,22 @@ func FuzzLifecycleInput(f *testing.F) {
 			require.NoError(t, a.Validate())
 		}
 	})
+}
+
+func TestClaudeActivityMeasuresWithoutContent(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "CLAUDE.md")
+	require.NoError(t, os.WriteFile(file, []byte("secret rules"), 0o600))
+	raw := `{"session_id":"chat-a","file_path":` + strconv.Quote(file) + `,"reason":"logout"}`
+	_, _, a, err := decodeLifecycle(strings.NewReader(raw), "claude", "InstructionsLoaded")
+	require.NoError(t, err)
+	assert.Equal(t, a.ContentBytes, int64(len("secret rules")))
+	encoded, err := json.Marshal(a)
+	require.NoError(t, err)
+	assert.False(t, bytes.Contains(encoded, []byte("CLAUDE.md")), "the path is not reported")
+	_, _, a, err = decodeLifecycle(strings.NewReader(raw), "claude", "SessionEnd")
+	require.NoError(t, err)
+	assert.Equal(t, a.Source, "other", "reasons outside the enum are folded")
+	_, _, a, err = decodeLifecycle(strings.NewReader(`{"session_id":"chat-a"}`), "claude", "PermissionDenied")
+	require.NoError(t, err)
+	assert.Equal(t, a.FailureType, "permission_denied")
 }
