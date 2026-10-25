@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../schema.json
+id: tf-open-ingress
+title: Network rule open to the internet
+severity: high
+cwe: [CWE-284]
+category: config
+languages: [terraform]
+why: An ingress rule from 0.0.0.0/0 (or ::/0, or Azure's "*") exposes the port to every host on the internet, where SSH, database and admin ports are scanned within minutes.
+fix: Allow only the address ranges that need access (a VPN, a load balancer's security group, an office range); keep 0.0.0.0/0 for public web ports 80 and 443 only.
+references:
+  - https://cwe.mitre.org/data/definitions/284.html
+examples:
+  - language: terraform
+    vulnerable: |-
+      ingress {
+        from_port   = 22
+        to_port     = 22
+        protocol    = "tcp"
+        cidr_blocks = ["0.0.0.0/0"]
+      }
+    fixed: |-
+      ingress {
+        from_port   = 22
+        to_port     = 22
+        protocol    = "tcp"
+        cidr_blocks = [var.admin_cidr]
+      }

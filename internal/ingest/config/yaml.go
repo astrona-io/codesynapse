@@ -241,6 +241,11 @@ var RuleIDs = []string{
 	"dockerfile-curl-pipe-shell",
 	"dockerfile-image-unpinned",
 	"dockerfile-secret-in-env",
+	"tf-open-ingress",
+	"tf-public-storage",
+	"tf-public-database",
+	"tf-unencrypted-storage",
+	"tf-secret-literal",
 }
 
 func (b *builder) report(rel, ownerID, ruleID string, line int, detail string) {

@@ -31,6 +31,8 @@ type Coverage struct {
 	Compose    int `json:"compose,omitempty"`
 	// Dockerfiles counts the Dockerfiles and Containerfiles read.
 	Dockerfiles int `json:"dockerfiles,omitempty"`
+	// Terraform counts the .tf files read.
+	Terraform int `json:"terraform,omitempty"`
 	// HelmScanned of HelmTotal chart templates rendered to literal YAML the
 	// rules could read.
 	HelmScanned int `json:"helm_scanned,omitempty"`
@@ -62,6 +64,10 @@ func CoverageOf(g *model.Graph, notCovered map[string]int) Coverage {
 		case model.KindConfig:
 			if n.Language == "dockerfile" {
 				c.Dockerfiles++
+				continue
+			}
+			if n.Language == "terraform" {
+				c.Terraform++
 				continue
 			}
 			if strings.HasPrefix(n.Summary, "unparseable YAML") {
@@ -118,7 +124,7 @@ func (c Coverage) Scannable() bool {
 	for _, n := range c.Code {
 		code += n
 	}
-	return code > 0 || c.YAML > 0 || c.Dockerfiles > 0 || c.HelmScanned > 0 || c.Dependencies > 0
+	return code > 0 || c.YAML > 0 || c.Dockerfiles > 0 || c.Terraform > 0 || c.HelmScanned > 0 || c.Dependencies > 0
 }
 
 // Lines words the coverage as what was checked and what was not.
@@ -140,6 +146,9 @@ func (c Coverage) Lines() (checked, notChecked []string) {
 	}
 	if c.Dockerfiles > 0 {
 		checked = append(checked, fmt.Sprintf("%d Dockerfile(s)", c.Dockerfiles))
+	}
+	if c.Terraform > 0 {
+		checked = append(checked, fmt.Sprintf("%d Terraform file(s)", c.Terraform))
 	}
 	if c.HelmTotal > 0 {
 		checked = append(checked, fmt.Sprintf("%d of %d Helm template(s)", c.HelmScanned, c.HelmTotal))
@@ -195,7 +204,7 @@ func EncodeCoverage(c Coverage) (string, error) {
 // uncovered maps file names and extensions without rules to a display kind.
 var (
 	uncoveredExts = map[string]string{
-		".tf": "Terraform", ".sh": "Shell", ".bash": "Shell", ".c": "C", ".cpp": "C++", ".swift": "Swift",
+		".sh": "Shell", ".bash": "Shell", ".c": "C", ".cpp": "C++", ".swift": "Swift",
 	}
 	skipInventory = map[string]bool{
 		".git": true, "node_modules": true, "vendor": true, ".nuxt": true, ".output": true,
