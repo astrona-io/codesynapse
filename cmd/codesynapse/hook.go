@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -192,7 +193,7 @@ func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 	raw, _ := io.ReadAll(io.LimitReader(o.EC.Stdin, 1<<20)) //nolint:errcheck // no input, no opinion
 	_ = json.Unmarshal(raw, &in)                            //nolint:errcheck // same
 	var out map[string]any
-	defer recordActivity(ctx, o.event, raw, o.EC.Logger)
+	started := time.Now()
 	switch o.event {
 	case "read":
 		out = readGuard(in)
@@ -214,6 +215,14 @@ func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 		noteRead(in)
 	case "edit", "edit-failed":
 		noteEdit(in, o.event == "edit-failed")
+	}
+	note := recordActivity(ctx, o.event, raw, o.EC.Logger)
+	if os.Getenv("CODESYNAPSE_HOOK_TRACE") == "chat" {
+		// systemMessage is shown to the person in the chat, not to the model.
+		if out == nil {
+			out = map[string]any{}
+		}
+		out["systemMessage"] = fmt.Sprintf("CodeSynapse hook %s: %s (%dms)", o.event, note, time.Since(started).Milliseconds())
 	}
 	if out != nil {
 		return json.NewEncoder(o.EC.Stdout).Encode(out)
