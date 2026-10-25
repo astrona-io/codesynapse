@@ -45,6 +45,16 @@ func texts(names ...string) []column { return typed("string", names) }
 func longs(names ...string) []column { return typed("int64", names) }
 func bools(names ...string) []column { return typed("bool", names) }
 
+
+// defaulted are columns that are never NULL, so a read needs no nil case.
+func defaulted(typ, def string, names ...string) []column {
+	out := typed(typ, names)
+	for i := range out {
+		out[i].def = def
+	}
+	return out
+}
+
 // counters are int64 columns that start at 0.
 func counters(names ...string) []column {
 	out := longs(names...)
@@ -110,6 +120,15 @@ var schemaItems = func() []schemaItem {
 		schemaItem{name: "usage", cols: slices.Concat(texts("ukey", "day", "org", "repo", "tool", "client"), longs("daynum"),
 			counters("calls", "errors", "response_tokens", "duration_ms", "max_duration_ms", "ranges_returned", "ranges_read")),
 			indexes: []index{{"usage_by_daynum", []indexCol{{"daynum", 0}}}}},
+	)
+	// Agent memory (memory.go): entities and facts per namespace. Every
+	// column is set on write, so none is NULL.
+	items = append(items,
+		schemaItem{name: "mem_entity", cols: slices.Concat(defaulted("string", `""`, "eid", "tenant_id", "ns", "name", "type", "aliases", "created_at", "updated_at", "emb_model")),
+			indexes: []index{{"mem_entity_by_ns", []indexCol{{"tenant_id", 64}, {"ns", 128}}}, {"mem_entity_all", nil}}},
+		schemaItem{name: "mem_fact", cols: slices.Concat(defaulted("string", `""`, "fid", "tenant_id", "ns", "subj", "obj", "predicate", "source", "origin_session_id", "valid_from", "valid_to", "created_at", "updated_at"),
+			counters("confirmations"), defaulted("double", "1.0", "confidence")),
+			indexes: []index{{"mem_fact_by_ns", []indexCol{{"tenant_id", 64}, {"ns", 128}}}, {"mem_fact_all", nil}}},
 	)
 	// One edge type per model edge kind (schemaEdges) carries these.
 	edge := slices.Concat(longs("count"), texts("run", "evidence"))

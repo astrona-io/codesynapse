@@ -8,6 +8,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/store/storetest"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/vector"
 )
 
 // newTestStore connects to the NebulaGraph of CODESYNAPSE_TEST_NEBULA_ADDR
@@ -23,7 +24,7 @@ func newTestStore(t *testing.T) *Store {
 	if user == "" {
 		user, pass = "root", "nebula"
 	}
-	s, err := New(ctx, Config{Addrs: strings.Split(addr, ","), Space: "cs_test", User: user, Password: pass, Partitions: 3})
+	s, err := New(ctx, Config{Addrs: strings.Split(addr, ","), Space: "cs_test", User: user, Password: pass, Partitions: 3, Vectors: vector.NewFlat()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close(ctx) })
 	require.NoError(t, s.EnsureSchema(ctx))

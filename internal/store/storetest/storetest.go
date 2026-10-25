@@ -98,6 +98,7 @@ type Records interface {
 	store.HistoryStore
 	store.CuratedStore
 	store.UsageStore
+	store.MemoryStore
 }
 
 // RunRecords exercises only those records; Run includes them.
@@ -110,6 +111,8 @@ func RunRecords(t *testing.T, s Records) {
 	t.Run("curated", func(t *testing.T) { curatedContract(t, s) })
 	t.Run("reviews survive re-indexing", func(t *testing.T) { reviewContract(ctx, t, s) })
 	t.Run("usage counters", func(t *testing.T) { usageContract(ctx, t, s) })
+	memoryContract(ctx, t, s)
+	t.Run("memory_counts", func(t *testing.T) { memoryCountsContract(t, s) })
 }
 
 // codeGraphContract reads and replaces the fixture repository.
@@ -291,6 +294,117 @@ func Run(t *testing.T, s store.Store) {
 
 	t.Run("reviews survive re-indexing", func(t *testing.T) { reviewContract(ctx, t, s) })
 
+	memoryContract(ctx, t, s)
+
+	t.Run("usage counters", func(t *testing.T) { usageContract(ctx, t, s) })
+
+	t.Run("finding counts", func(t *testing.T) { findingCountsContract(ctx, t, s) })
+	t.Run("delete", func(t *testing.T) { deleteContract(ctx, t, s) })
+}
+
+func findingCountsContract(ctx context.Context, t *testing.T, s CodeGraph) {
+	require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
+	got, err := s.FindingCounts(ctx, Repo)
+	require.NoError(t, err)
+	want := map[string]int{}
+	for _, n := range Fixture().Nodes() {
+		if n.Kind == model.KindFinding {
+			want[n.Severity]++
+		}
+	}
+	assert.Equal(t, got, want)
+}
+
+func deleteContract(ctx context.Context, t *testing.T, s CodeGraph) {
+	require.NoError(t, s.DeleteRepo(ctx, Repo))
+	_, ok := findRepo(ctx, t, s)
+	assert.False(t, ok)
+}
+
+func findRepo(ctx context.Context, t *testing.T, s store.Reader) (model.Node, bool) {
+	t.Helper()
+	repos, err := s.Repos(ctx)
+	require.NoError(t, err)
+	for _, r := range repos {
+		if r.Name == Repo {
+			return r, true
+		}
+	}
+	return model.Node{}, false
+}
+
+// findEntity reports whether repo's memory has an entity with this exact
+// normalised ID name.
+func findEntity(ctx context.Context, s store.MemoryStore, repo, name string) (memory.Entity, bool) {
+	g, err := s.SearchMemory(ctx, repo, "", store.MaxLimit, true)
+	if err != nil {
+		return memory.Entity{}, false
+	}
+	for _, e := range g.Entities {
+		if e.ID == memory.EntityID(repo, name) {
+			return e, true
+		}
+	}
+	return memory.Entity{}, false
+}
+
+func reviewContract(ctx context.Context, t *testing.T, s interface {
+	store.Writer
+	store.ReviewStore
+}) {
+	r, err := reviews.Prepare(reviews.Review{Repo: Repo, Title: "Review", Comments: []reviews.CommentItem{{File: "app/app.go", Line: 9, Message: "m"}}}, time.Now())
+	require.NoError(t, err)
+	require.NoError(t, s.SaveReview(ctx, r))
+	require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
+	got, err := s.GetReview(ctx, r.ID)
+	require.NoError(t, err)
+	assert.Equal(t, got.Comments[0].Message, "m")
+	list, err := s.ListReviews(ctx, Repo, 10)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	require.NoError(t, reviews.ApplyStatus(&got, got.Comments[0].ID, reviews.Resolved, "done", "test", time.Now()))
+	require.NoError(t, s.SaveReview(ctx, got))
+	again, err := s.GetReview(ctx, r.ID)
+	require.NoError(t, err)
+	assert.Equal(t, again.Comments[0].Status, reviews.Resolved)
+	require.NoError(t, s.DeleteReview(ctx, r.ID))
+	_, err = s.GetReview(ctx, r.ID)
+	assert.True(t, errors.Is(err, store.ErrNotFound))
+}
+
+func usageContract(ctx context.Context, t *testing.T, s store.UsageStore) {
+	// Days in 2000 keep the integration run away from real counters.
+	t.Cleanup(func() { _ = s.PruneUsage(ctx, "2000-01-03") })
+	b := usage.Bucket{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 2, Errors: 1, ResponseTokens: 300, DurationMs: 40, MaxDurationMs: 30}
+	require.NoError(t, s.AddUsage(ctx, []usage.Bucket{b}))
+	require.NoError(t, s.AddUsage(ctx, []usage.Bucket{{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 1, ResponseTokens: 100, DurationMs: 50, MaxDurationMs: 50},
+		{Day: "2000-01-02", Repo: Repo, Tool: usage.Session, Client: "codex", Calls: 1}}))
+	// Hook reports add only the range counters to the same bucket.
+	require.NoError(t, s.AddUsage(ctx, []usage.Bucket{{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", RangesReturned: 5, RangesRead: 2}}))
+	got, err := s.Usage(ctx, "2000-01-01")
+	require.NoError(t, err)
+	var mine []usage.Bucket
+	for _, g := range got {
+		if g.Day < "2000-01-03" {
+			mine = append(mine, g)
+		}
+	}
+	require.Len(t, mine, 2)
+	assert.Equal(t, mine[0], usage.Bucket{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 3, Errors: 1, ResponseTokens: 400, DurationMs: 90, MaxDurationMs: 50,
+		RangesReturned: 5, RangesRead: 2})
+	assert.Equal(t, mine[1].Tool, usage.Session)
+	require.NoError(t, s.PruneUsage(ctx, "2000-01-02"))
+	got, err = s.Usage(ctx, "2000-01-01")
+	require.NoError(t, err)
+	assert.Equal(t, got[0].Day, "2000-01-02", "older days pruned")
+}
+
+// memoryContract is agent memory: triples, aliases, history, vectors,
+// namespaces, lexical ranking and statistics.
+func memoryContract(ctx context.Context, t *testing.T, s interface {
+	store.Writer
+	store.MemoryStore
+}) {
 	t.Run("agent memory", func(t *testing.T) {
 		t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 		// The integration run uses a live database: leave no memory behind.
@@ -586,106 +700,4 @@ func Run(t *testing.T, s store.Store) {
 		assert.Equal(t, got.Sources, map[string]int{"agent-a": 1})
 		assert.Equal(t, got.LastUpdated, "2026-02-01T00:00:00Z")
 	})
-
-	t.Run("usage counters", func(t *testing.T) { usageContract(ctx, t, s) })
-
-	t.Run("finding counts", func(t *testing.T) { findingCountsContract(ctx, t, s) })
-	t.Run("delete", func(t *testing.T) { deleteContract(ctx, t, s) })
-}
-
-func findingCountsContract(ctx context.Context, t *testing.T, s CodeGraph) {
-	require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
-	got, err := s.FindingCounts(ctx, Repo)
-	require.NoError(t, err)
-	want := map[string]int{}
-	for _, n := range Fixture().Nodes() {
-		if n.Kind == model.KindFinding {
-			want[n.Severity]++
-		}
-	}
-	assert.Equal(t, got, want)
-}
-
-func deleteContract(ctx context.Context, t *testing.T, s CodeGraph) {
-	require.NoError(t, s.DeleteRepo(ctx, Repo))
-	_, ok := findRepo(ctx, t, s)
-	assert.False(t, ok)
-}
-
-func findRepo(ctx context.Context, t *testing.T, s store.Reader) (model.Node, bool) {
-	t.Helper()
-	repos, err := s.Repos(ctx)
-	require.NoError(t, err)
-	for _, r := range repos {
-		if r.Name == Repo {
-			return r, true
-		}
-	}
-	return model.Node{}, false
-}
-
-// findEntity reports whether repo's memory has an entity with this exact
-// normalised ID name.
-func findEntity(ctx context.Context, s store.Store, repo, name string) (memory.Entity, bool) {
-	g, err := s.SearchMemory(ctx, repo, "", store.MaxLimit, true)
-	if err != nil {
-		return memory.Entity{}, false
-	}
-	for _, e := range g.Entities {
-		if e.ID == memory.EntityID(repo, name) {
-			return e, true
-		}
-	}
-	return memory.Entity{}, false
-}
-
-func reviewContract(ctx context.Context, t *testing.T, s interface {
-	store.Writer
-	store.ReviewStore
-}) {
-	r, err := reviews.Prepare(reviews.Review{Repo: Repo, Title: "Review", Comments: []reviews.CommentItem{{File: "app/app.go", Line: 9, Message: "m"}}}, time.Now())
-	require.NoError(t, err)
-	require.NoError(t, s.SaveReview(ctx, r))
-	require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
-	got, err := s.GetReview(ctx, r.ID)
-	require.NoError(t, err)
-	assert.Equal(t, got.Comments[0].Message, "m")
-	list, err := s.ListReviews(ctx, Repo, 10)
-	require.NoError(t, err)
-	require.Len(t, list, 1)
-	require.NoError(t, reviews.ApplyStatus(&got, got.Comments[0].ID, reviews.Resolved, "done", "test", time.Now()))
-	require.NoError(t, s.SaveReview(ctx, got))
-	again, err := s.GetReview(ctx, r.ID)
-	require.NoError(t, err)
-	assert.Equal(t, again.Comments[0].Status, reviews.Resolved)
-	require.NoError(t, s.DeleteReview(ctx, r.ID))
-	_, err = s.GetReview(ctx, r.ID)
-	assert.True(t, errors.Is(err, store.ErrNotFound))
-}
-
-func usageContract(ctx context.Context, t *testing.T, s store.UsageStore) {
-	// Days in 2000 keep the integration run away from real counters.
-	t.Cleanup(func() { _ = s.PruneUsage(ctx, "2000-01-03") })
-	b := usage.Bucket{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 2, Errors: 1, ResponseTokens: 300, DurationMs: 40, MaxDurationMs: 30}
-	require.NoError(t, s.AddUsage(ctx, []usage.Bucket{b}))
-	require.NoError(t, s.AddUsage(ctx, []usage.Bucket{{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 1, ResponseTokens: 100, DurationMs: 50, MaxDurationMs: 50},
-		{Day: "2000-01-02", Repo: Repo, Tool: usage.Session, Client: "codex", Calls: 1}}))
-	// Hook reports add only the range counters to the same bucket.
-	require.NoError(t, s.AddUsage(ctx, []usage.Bucket{{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", RangesReturned: 5, RangesRead: 2}}))
-	got, err := s.Usage(ctx, "2000-01-01")
-	require.NoError(t, err)
-	var mine []usage.Bucket
-	for _, g := range got {
-		if g.Day < "2000-01-03" {
-			mine = append(mine, g)
-		}
-	}
-	require.Len(t, mine, 2)
-	assert.Equal(t, mine[0], usage.Bucket{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 3, Errors: 1, ResponseTokens: 400, DurationMs: 90, MaxDurationMs: 50,
-		RangesReturned: 5, RangesRead: 2})
-	assert.Equal(t, mine[1].Tool, usage.Session)
-	require.NoError(t, s.PruneUsage(ctx, "2000-01-02"))
-	got, err = s.Usage(ctx, "2000-01-01")
-	require.NoError(t, err)
-	assert.Equal(t, got[0].Day, "2000-01-02", "older days pruned")
 }

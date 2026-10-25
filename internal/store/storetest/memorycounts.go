@@ -11,7 +11,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
-func memoryCountsContract(t *testing.T, s store.Store) {
+func memoryCountsContract(t *testing.T, s store.MemoryStore) {
 	t.Helper()
 	ctx := context.Background()
 	names := []string{"000000000000000000000001|count-a", "000000000000000000000001|count-b", "000000000000000000000002|count-a", "legacy-count"}
