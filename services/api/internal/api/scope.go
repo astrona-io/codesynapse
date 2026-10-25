@@ -284,27 +284,27 @@ func visibleRepos(ctx context.Context, repos []model.Node) []model.Node {
 }
 
 // linkRepo atomically links the repository and grants its creating member ADMIN.
-func (s *Server) linkRepo(r *http.Request, graph, remote, visibility string) error {
+func (s *Server) linkRepo(ctx context.Context, graph, remote, visibility string) error {
 	if s.cfg.Accounts == nil {
 		return nil
 	}
-	sc := scopeFrom(r.Context())
+	sc := scopeFrom(ctx)
 	m, err := sc.selected()
 	if err != nil {
 		return err
 	}
-	p, _ := principal(r.Context())
-	if p.Via != "session" {
+	p, _ := principal(ctx)
+	if !signedInOrWatching(ctx, p) {
 		return accounts.ErrForbidden
 	}
-	id, err := execution.Require(r.Context())
+	id, err := execution.Require(ctx)
 	if err != nil {
 		return err
 	}
-	if _, err := s.cfg.Accounts.ResolveExecutionSession(r.Context(), p.User.ID, m.Org.ID, id.SessionID); err != nil {
+	if _, err := s.cfg.Accounts.ResolveExecutionSession(ctx, p.User.ID, m.Org.ID, id.SessionID); err != nil {
 		return err
 	}
-	err = s.linkPolicyRepository(r.Context(), accounts.Repository{OrgID: m.Org.ID, Graph: graph, Remote: remote,
+	err = s.linkPolicyRepository(ctx, accounts.Repository{OrgID: m.Org.ID, Graph: graph, Remote: remote,
 		Visibility: visibility, AddedBy: p.User.ID, AddedAt: time.Now().UTC().Truncate(time.Microsecond)}, accounts.Member)
 	if errors.Is(err, accounts.ErrExists) {
 		return nil // already linked: adding it again is fine
@@ -320,7 +320,7 @@ func (s *Server) linkPolicyRepository(ctx context.Context, entry accounts.Reposi
 	if err != nil {
 		return err
 	}
-	if !ok || p.Via != "session" || p.User.ID != entry.AddedBy || id.SubjectID != p.User.ID || id.TenantID != entry.OrgID {
+	if !ok || !signedInOrWatching(ctx, p) || p.User.ID != entry.AddedBy || id.SubjectID != p.User.ID || id.TenantID != entry.OrgID {
 		return accounts.ErrForbidden
 	}
 	return s.cfg.Accounts.St.PolicyTransaction(ctx, entry.OrgID, func(st accounts.Store) error {

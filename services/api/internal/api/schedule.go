@@ -498,6 +498,8 @@ func (s *Server) runScheduler(ctx context.Context, logger *slog.Logger) {
 			}
 			if s.cfg.Accounts == nil {
 				s.scanDue(ctx, now, logger)
+			} else {
+				s.scanWatches(ctx, now, logger)
 			}
 			for _, repo := range s.sched.due(ctx, now) {
 				sc := s.sched.get(ctx, repo)

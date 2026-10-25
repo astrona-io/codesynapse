@@ -42,8 +42,24 @@ async function ingest(source: string) {
 
 const addOpen = ref(false)
 async function onAdded() {
-  await refreshJobs()
-  await refreshOverview()
+  await Promise.all([refreshJobs(), refreshOverview(), refreshWatches()])
+}
+
+// Organisations whose new public repositories are added automatically
+// (accounts only; the dialog creates them).
+interface Watch { key: string; provider: string; host: string; org: string; paused: boolean; last_scan?: string; last_status?: string; last_error?: string; next_scan?: string; added: number; mine: boolean }
+const { data: watchList, refresh: refreshWatches } = useApiGet<{ watches: Watch[] }>('watches')
+const watchError = ref('')
+async function watchCall(method: 'PUT' | 'DELETE', w: Watch, body?: object) {
+  watchError.value = ''
+  try {
+    const path = `watches/${w.host}/${w.org}`
+    if (method === 'PUT') await apiPut(path, body)
+    else await apiDelete(path)
+    await refreshWatches()
+  } catch (e) {
+    watchError.value = apiErrorMessage(e)
+  }
 }
 
 // "host/owner/name" or "owner/name": the prefix is shown dimmed before the name.
@@ -159,6 +175,25 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
         <div v-else class="empty"><strong>No mounted sources</strong>Put repositories in <code>./sources</code> to index them from disk.</div>
       </section>
     </div>
+
+    <section v-if="session.accounts.value && watchList?.watches.length" class="panel">
+      <p class="eyebrow">Auto-add</p><h2>Watched organisations</h2>
+      <p class="muted small">New public repositories of these are added to your organisation automatically, checked every 15 minutes.</p>
+      <ul class="jobs">
+        <li v-for="w in watchList.watches" :key="w.key" class="job">
+          <span class="dot" :class="{ 'dot--ok': !w.paused && (!w.last_status || w.last_status === 'ok' || w.last_status === 'watching'), 'dot--warn': w.paused, 'dot--bad': !w.paused && !!w.last_error }" />
+          <strong class="mono">{{ w.key }}/*</strong>
+          <span class="muted">{{ w.paused ? 'paused' : w.last_status || 'waiting for first check' }} · {{ plural(w.added, 'repository', 'repositories') }} added</span>
+          <span v-if="w.last_scan" class="muted small">checked {{ relTime(w.last_scan) }}</span>
+          <span class="right row tight-actions">
+            <button class="secondary tiny" @click="watchCall('PUT', w, { paused: !w.paused })">{{ w.paused ? 'Resume' : 'Pause' }}</button>
+            <button class="secondary tiny" @click="watchCall('DELETE', w)">Stop watching</button>
+          </span>
+          <p v-if="w.last_error" class="error small job-error">{{ w.last_error }}</p>
+        </li>
+      </ul>
+      <p v-if="watchError" class="error">{{ watchError }}</p>
+    </section>
 
     <AddRepoDialog :open="addOpen" :clone-enabled="settings?.clone_enabled" :host-tokens="settings?.git_token_hosts" :busy="running" @close="addOpen = false" @added="onAdded" />
 
