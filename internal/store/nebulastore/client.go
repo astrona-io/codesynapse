@@ -213,16 +213,21 @@ func (s *Store) admin(ctx context.Context, f func(*nebula.Session) error) error 
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
+	// The goroutine owns the pool: closing it from here, while a call that
+	// timed out is still writing on one of its connections, is a data race in
+	// the driver. The session goes back and the pool closes before done is sent.
 	done := make(chan error, 1)
 	go func() {
 		sess, err := pool.GetSession(s.cfg.User, s.cfg.Password)
 		if err != nil {
+			pool.Close()
 			done <- err
 			return
 		}
-		defer sess.Release()
-		done <- f(sess)
+		err = f(sess)
+		sess.Release()
+		pool.Close()
+		done <- err
 	}()
 	select {
 	case err := <-done:
