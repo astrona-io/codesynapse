@@ -180,6 +180,8 @@ flowchart LR
 
 On the **AI models** page you pick a global model, the fallback for everything, and optionally a different one per area: code review, security analysis and briefings. The choice is saved in `workspace/.codesynapse/llm-routes.json`. Remote providers never receive source code beyond the diff you ask them to review; local providers also get short snippets around findings. Model answers are treated as untrusted text and redacted before they are stored.
 
+Two tasks run **only on a local model**, because they read a private change or the cleanup plan: `pr-summary` (a plain-language summary of a pasted diff: what changed, the riskiest parts, a merge checklist) and `cleanup-briefing` (the ranked cleanup plan as what to do first and what is safe and quick). With no route set they use the first local provider (the global model if it is local); with no local provider they do not appear, and routing them to a cloud provider is refused. Both start from the repository's **AI assistant** page and save a report under Reviews.
+
 You can also skip the provider: with the `security-triage`, `code-review` and `briefing` MCP prompts your own agent does the work and submits it with `submit_review`, so no key is needed.
 
 ## Statistics
