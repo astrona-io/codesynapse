@@ -50,7 +50,7 @@ var branchRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._/-]{0,199}$`)
 
 // Failure answers gh_run_failure.
 func Failure(ctx context.Context, dir string, in RunFailureIn) (RunFailure, error) {
-	if in.Run < 0 || in.Run > MaxNumber*1000 || in.Number < 0 || in.Number > MaxNumber {
+	if in.Run < 0 || in.Run > MaxRunID || in.Number < 0 || in.Number > MaxNumber {
 		return RunFailure{}, fmt.Errorf("%w: run and number must be positive IDs", ErrInvalid)
 	}
 	out := RunFailure{Run: in.Run, Failed: make([]FailedJob, 0, MaxFailedJobs)} // byJob points into it: it must never reallocate
@@ -173,8 +173,9 @@ var ansi = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
 // errorLike matches the lines CI output uses for a failure: Go and other test
 // runners, compilers and linters (file:line:col), panics, npm, and the
-// workflow's own ##[error] annotations.
-var errorLike = regexp.MustCompile(`(?i)^(\s*--- FAIL|FAIL\b|panic:|fatal( error)?:|error[:\[]|##\[error\]|npm ERR!|not ok\b|\s*E\s{2,}|.*\bFAILED\b|.*\.[a-z]{1,4}:\d+(:\d+)?:\s*\S)`)
+// workflow's own ##[error] annotations, and scanner summaries (Trivy's
+// "Failures: 1" and its "DS-0002 (HIGH): ..." finding lines).
+var errorLike = regexp.MustCompile(`(?i)^(\s*--- FAIL|FAIL\b|panic:|fatal( error)?:|error[:\[]|##\[error\]|npm ERR!|not ok\b|\s*E\s{2,}|Failures:\s*[1-9]|[A-Z]+-\d+ \((CRITICAL|HIGH|MEDIUM|LOW)\)|.*\bFAILED\b|.*\.[a-z]{1,4}:\d+(:\d+)?:\s*\S)`)
 
 // errorLines picks the lines that say what went wrong, each once and in
 // order; with none, the last few lines of the log.

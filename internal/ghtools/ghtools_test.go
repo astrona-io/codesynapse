@@ -320,3 +320,22 @@ func TestTimeoutAddsTheWait(t *testing.T) {
 	assert.Equal(t, Timeout(base, ToolPRList, json.RawMessage(`{"wait_seconds":120}`)), base)
 	assert.Equal(t, Timeout(base, ToolPRStatus, nil), base)
 }
+
+func TestErrorLinesNameScannerFindings(t *testing.T) {
+	got := errorLines([]string{
+		"Tests: 20 (SUCCESSES: 19, FAILURES: 1)",
+		"Failures: 1 (HIGH: 1, CRITICAL: 0)",
+		"DS-0002 (HIGH): Specify at least 1 USER command in Dockerfile",
+		"Failures: 0 (HIGH: 0)",
+		"error: recipe `scan` failed on line 436 with exit code 1",
+	})
+	assert.Equal(t, len(got), 3)
+	assert.Equal(t, got[1], "DS-0002 (HIGH): Specify at least 1 USER command in Dockerfile")
+}
+
+func TestFailureAcceptsCurrentRunIDs(t *testing.T) {
+	fakeGHRuns(t, answer{"'run view'*", ""})
+	if _, err := Failure(t.Context(), t.TempDir(), RunFailureIn{Run: 40_186_662_401}); errors.Is(err, ErrInvalid) {
+		t.Fatalf("a 2026 run ID was refused: %v", err)
+	}
+}
