@@ -197,6 +197,10 @@ func (s *Store) coreVersion(ctx context.Context) (string, error) {
 	return v.Versions.Core, nil
 }
 
+// CodeVectors is the index of symbol embeddings (internal/semantic); nil
+// without Milvus.
+func (s *Store) CodeVectors() vector.Index { return s.vec }
+
 // System names the database for metrics.
 func (s *Store) System() string { return "hugegraph" }
 

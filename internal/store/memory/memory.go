@@ -27,6 +27,7 @@ type Store struct {
 	sessions       map[string]sessionmemory.Document
 	sessionRevoked map[string]bool
 	sessionVectors *vector.Flat
+	codeVectors    *vector.Flat
 	access         map[string]model.AccessSnapshot
 	mu             sync.RWMutex
 	repos          map[string]*repoGraph
@@ -104,8 +105,12 @@ func New() *Store {
 	s.sessions = map[string]sessionmemory.Document{}
 	s.sessionRevoked = map[string]bool{}
 	s.sessionVectors = vector.NewFlat()
+	s.codeVectors = vector.NewFlat()
 	return s
 }
+
+// CodeVectors is the index of symbol embeddings (internal/semantic).
+func (s *Store) CodeVectors() vector.Index { return s.codeVectors }
 
 // EnsureSchema is a no-op.
 func (s *Store) EnsureSchema(context.Context) error { return nil }

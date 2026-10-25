@@ -11,10 +11,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/astrona-io/codesynapse/internal/agentctx"
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/memory"
 	"github.com/astrona-io/codesynapse/internal/memory/extract"
@@ -27,6 +29,8 @@ type APIClient struct {
 	BaseURL string // e.g. http://api:8080
 	Token   string // the API's bearer token, from the environment
 	HTTP    *http.Client
+
+	semanticOff atomic.Int64 // unix nanoseconds until which semantic ranking is skipped
 }
 
 // offloadJob is the API's answer (offload.Job), kept to what agents need.
@@ -55,6 +59,40 @@ func (c *APIClient) recall(ctx context.Context, repo string, q recallIn) (recall
 func (c *APIClient) indexRepository(ctx context.Context, repo string) error {
 	var result map[string]any
 	return c.post(ctx, "/api/v1/repos/"+url.PathEscape(repo)+"/memory/index", map[string]any{}, http.StatusOK, &result)
+}
+
+// semanticRanker asks the API to rank a repository's symbols by meaning. The
+// API owns the embedding model; when it has none, or fails, the answer is no
+// hits and minimal_context stays lexical. "Off" is remembered for a minute so
+// an installation without a model pays one round trip, not one per call.
+type semanticRanker struct {
+	c    *APIClient
+	repo string
+}
+
+func (r semanticRanker) Rank(ctx context.Context, task string, k int) ([]agentctx.SemanticHit, error) {
+	if time.Now().UnixNano() < r.c.semanticOff.Load() {
+		return nil, nil
+	}
+	var out struct {
+		Enabled bool `json:"enabled"`
+		Hits    []struct {
+			ID    string  `json:"id"`
+			Score float64 `json:"score"`
+		} `json:"hits"`
+	}
+	if err := r.c.post(ctx, "/api/v1/repos/"+url.PathEscape(r.repo)+"/semantic", map[string]any{"task": task, "k": k}, http.StatusOK, &out); err != nil {
+		return nil, err
+	}
+	if !out.Enabled {
+		r.c.semanticOff.Store(time.Now().Add(time.Minute).UnixNano())
+		return nil, nil
+	}
+	hits := make([]agentctx.SemanticHit, len(out.Hits))
+	for i, h := range out.Hits {
+		hits[i] = agentctx.SemanticHit{ID: h.ID, Score: h.Score}
+	}
+	return hits, nil
 }
 
 // post sends body and decodes the answer, relaying the API's error detail.
