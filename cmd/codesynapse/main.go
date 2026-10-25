@@ -561,6 +561,7 @@ type auditOptions struct {
 	minSeverity          string
 	failOn               string
 	changed              bool
+	history              int
 	root                 string
 }
 
@@ -574,6 +575,7 @@ func (o *auditOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.BoolVar(&o.vulns, "vulns", true, "Check dependencies against osv.dev (sends module paths and versions)")
 	f.StringVar(&o.minSeverity, "min-severity", "low", "Hide findings below this severity (info, low, medium, high, critical)")
 	f.StringVar(&o.failOn, "fail-on", "", "Exit 1 if a finding or reachable vulnerability is at or above this severity")
+	f.IntVar(&o.history, "history", 500, "Commits of git history to check for credentials removed from the code but never rotated (0 skips; --changed skips unless set)")
 	f.BoolVar(&o.changed, "changed", false, "Only findings in staged files, for a pre-commit hook; skips the osv.dev lookup unless --vulns is given")
 	return nil
 }
@@ -621,8 +623,11 @@ func (o *auditOptions) Run(ctx context.Context, _ *app.Env) error {
 		}
 		// A hook runs on every commit: the network lookup only on request.
 		vulns = vulns && o.EC.Command.Flags().Changed("vulns")
+		if !o.EC.Command.Flags().Changed("history") {
+			o.history = 0
+		}
 	}
-	g, err := ingest.Run(ctx, ingest.Options{ApprovedPolicyDigest: o.approvedPolicyDigest, Repo: repo, Root: o.root, VulnScan: vulns})
+	g, err := ingest.Run(ctx, ingest.Options{ApprovedPolicyDigest: o.approvedPolicyDigest, Repo: repo, Root: o.root, VulnScan: vulns, CommitLimit: max(o.history, 0)})
 	if err != nil {
 		return err
 	}

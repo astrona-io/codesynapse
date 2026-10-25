@@ -166,9 +166,10 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 			ref := query.RefOf(o)
 			fv.Owner = &ref
 			switch o.Kind {
-			case model.KindFile, model.KindConfig, model.KindConfigEntry, model.KindTemplate, model.KindRepository:
-				// Package-level declarations, deployed config and
-				// repository-wide settings are always live.
+			case model.KindFile, model.KindConfig, model.KindConfigEntry, model.KindTemplate, model.KindRepository, model.KindCommit:
+				// Package-level declarations, deployed config,
+				// repository-wide settings and history (in every clone)
+				// are always live.
 				fv.Exposed = true
 			default:
 				exp, ok := exposure[o.ID]

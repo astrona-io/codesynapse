@@ -31,6 +31,7 @@ func TestAuditChanged(t *testing.T) {
 		var out, errs bytes.Buffer
 		cmd := &cobra.Command{}
 		cmd.Flags().Bool("vulns", true, "")
+		cmd.Flags().Int("history", 500, "")
 		o := &auditOptions{EC: &app.Env{Args: []string{dir}, Output: app.OutputMarkdown, Stdout: &out, Stderr: &errs, Command: cmd, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))},
 			vulns: true, minSeverity: "low", failOn: failOn, changed: true}
 		require.NoError(t, o.Complete(ctx, nil))

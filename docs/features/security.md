@@ -41,6 +41,7 @@ Each rule is a readable YAML file (title, severity, CWE, why, fix, vulnerable to
 - **Code:** shell and command injection, SQL/Cypher from strings, disabled TLS verification, old TLS, weak hashes and ciphers, hardcoded credentials, `template.HTML` from variables, HTTP servers/clients without timeouts, request-derived paths and URLs, unbounded bodies, world-writable files, unverified JWTs, `unsafe`.
 - **Configuration:** privileged pods, privilege escalation, host namespaces, `hostPath`, root users, dangerous capabilities, unpinned images, literal secrets, GitHub Actions script injection, `pull_request_target` checkouts, unpinned third-party actions, privileged compose services; in Dockerfiles and Containerfiles, a final stage that runs as root (following the stages it builds on, nonroot base images excepted), `ADD` from a URL without `--checksum`, a download piped into a shell, an unpinned base image and a literal secret in `ENV` or `ARG` (the variable is named, its value never stored).
 - **Update automation:** manifests but no Renovate or Dependabot; Renovate configs that are broken, disabled, automerge without `minimumReleaseAge`, or leave actions and images unpinned.
+- **Git history:** provider-shaped credentials (AWS, GitHub, Slack, OpenAI/Anthropic, Google API keys, PEM private keys) added in the last 500 commits and no longer in the checkout. Removing a credential from the code does not revoke it: it is in every clone, so the finding asks for rotation. `git log -G` selects the candidate commits with a pattern, the added lines are checked in memory, and a credential still in the checkout is left to the rules that read the checkout. Nothing of the value is stored: the finding names the kind of credential, the commit that first added it and the file and line, and tells credentials apart by a truncated hash. Documentation examples (`…EXAMPLE`) and filler are skipped; a PEM header counts only on a line of its own followed by key material.
 - **Dependencies:** known CVEs with fixed version and reachability.
 
 ## Vulnerability reachability
@@ -95,7 +96,7 @@ codesynapse audit . -o json
 codesynapse audit . -o sarif > codesynapse.sarif   # GitHub code scanning, IDEs
 ```
 
-`--vulns=false` (or `CODESYNAPSE_VULN_SCAN=false`) keeps the scan offline.
+`--vulns=false` (or `CODESYNAPSE_VULN_SCAN=false`) keeps the scan offline. `--history N` sets how many commits are checked for removed credentials (500 by default, `0` skips it; about 1.5 s for 500 commits of this repository).
 
 ### Pre-commit gate
 

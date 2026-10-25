@@ -94,3 +94,22 @@ func unquotePath(s string) string {
 	}
 	return s
 }
+
+// PatchRecord starts each commit in LogPatches output, followed by the
+// hash, FieldSep and the author time.
+const (
+	PatchRecord = recSep
+	FieldSep    = fieldSep
+)
+
+// LogPatches returns the zero-context patches of up to limit commits
+// reachable from HEAD whose added or removed lines match pickaxe (a POSIX
+// extended regular expression, git log -G), newest first, showing only
+// the files that matched. Output past MaxDiffBytes is an error.
+func LogPatches(ctx context.Context, dir string, limit int, pickaxe string) ([]byte, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	return Run(ctx, dir, "log", "--no-color", "--no-merges", "--no-renames", "--no-ext-diff", "--no-textconv",
+		"-p", "--unified=0", "-G"+pickaxe, "--format="+recSep+"%H"+fieldSep+"%aI", "-n", strconv.Itoa(limit), "HEAD", "--")
+}
