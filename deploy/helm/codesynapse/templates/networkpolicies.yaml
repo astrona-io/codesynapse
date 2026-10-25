@@ -4,8 +4,11 @@
 # policies live in the store subcharts); the API accepts the dashboard, mcp
 # (memory offload) and the chart's test; workers accept nothing (they parse
 # untrusted repositories). web and mcp face users and agents through the
-# ingress. Egress stays open: workers reach git hosts, osv.dev and deps.dev,
-# and model providers.
+# ingress. Egress is open unless worker.restrictEgress is on: then workers
+# reach DNS, the stores of this release, and the internet on 443 (git hosts,
+# osv.dev, deps.dev, model providers) but no private address, so a worker
+# that reads a hostile repository cannot reach the API, the cloud metadata
+# endpoint or anything else inside the cluster network.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -39,7 +42,45 @@ spec:
   podSelector:
     matchLabels:
       {{- include "cs.selector" (list $root $w) | nindent 6 }}
+  {{- if $root.Values.worker.restrictEgress }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    # DNS, wherever the cluster runs it.
+    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    # The stores of this release.
+    - to:
+        {{- range $store := list "postgresql" "hugegraph" "milvus" "victoriametrics" "victoriatraces" }}
+        {{- if index $root.Values $store "enabled" }}
+        - podSelector:
+            matchLabels:
+              {{- include "cs.selector" (list $root $store) | nindent 14 }}
+        {{- end }}
+        {{- end }}
+    # Git hosts, osv.dev, deps.dev and model providers: HTTPS to public addresses.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16]
+        - ipBlock:
+            cidr: ::/0
+            except: [fc00::/7, fe80::/10]
+      ports: [{port: 443, protocol: TCP}]
+    {{- range $rule := $root.Values.worker.egressAllow }}
+    # Added by worker.egressAllow: an external store, a self-hosted Git
+    # server or a model on a private address.
+    - to:
+        - ipBlock:
+            cidr: {{ $rule.cidr | quote }}
+      {{- with $rule.ports }}
+      ports:
+        {{- range $port := . }}
+        - {port: {{ $port }}, protocol: TCP}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+  {{- else }}
   policyTypes: [Ingress]
+  {{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
