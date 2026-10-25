@@ -47,7 +47,7 @@ ARG API_TOKEN="not-a-real-token"
 CMD ["app"]
 `, []string{"dockerfile-add-url:02", "dockerfile-curl-pipe-shell:03", "dockerfile-image-unpinned:01", "dockerfile-root-user:01", "dockerfile-secret-in-env:05", "dockerfile-secret-in-env:06"}},
 		{"done right", "Containerfile", `# syntax=docker/dockerfile:1
-FROM golang:1.23 AS build
+FROM golang:1.27 AS build
 RUN go build -o /app .
 FROM gcr.io/distroless/static:nonroot
 ADD --checksum=sha256:24454f830cdb571e2c4ad15481119c43b3cafd48dd869a9b2945d1036d1dc68d https://example.com/x.tgz /x
