@@ -520,10 +520,13 @@ func (j *Jobs) finish(job *Job, nodes, edges int, err error) {
 	if err != nil {
 		job.State = JobFailed
 		job.Error = err.Error()
-		j.logger.Error("ingest failed", "job", job.ID, "repo", job.Repo, "error", err)
+		j.logger.Error("job failed", "job", job.ID, "kind", job.Kind, "repo", job.Repo, "error", err)
 		return
 	}
 	job.State = JobSucceeded
+	// Every job logs how it began ("job started"); a success has to say how it
+	// ended too, or a worker's log shows work that never seems to finish.
+	j.logger.Info("job finished", "job", job.ID, "kind", job.Kind, "task", job.Task, "repo", job.Repo, "attempt", job.Attempts+1)
 }
 
 // prune drops the oldest finished jobs beyond maxJobHistory. Callers hold mu.
