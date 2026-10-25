@@ -12,9 +12,9 @@ ARG GOSU_VERSION=1.20
 ARG GOSU_COMMIT=29b939aa5bd4dc588af765b8248f6e39150d2565
 RUN apk add --no-cache git \
     && git clone --quiet https://github.com/tianon/gosu /src \
-    && git -C /src checkout --quiet "$GOSU_COMMIT" \
-    && cd /src \
-    && CGO_ENABLED=0 go build -trimpath -ldflags "-d -s -w" -o /gosu . \
+    && git -C /src checkout --quiet "$GOSU_COMMIT"
+WORKDIR /src
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-d -s -w" -o /gosu . \
     && /gosu --version
 
 FROM ${PG_IMAGE}
