@@ -52,12 +52,13 @@ watch(selected, () => { open.value = null })
         <p v-if="listError" class="notice notice--danger">{{ apiErrorMessage(listError) }}</p>
         <div v-if="list?.sessions.length" class="table-wrap">
           <table>
-            <thead><tr><th>Last call</th><th v-if="list.scope === 'organisation'">Who</th><th>Client</th><th class="num">Calls</th><th class="num">Returned</th><th>Most used</th><th>Repositories</th></tr></thead>
+            <thead><tr><th>Last call</th><th v-if="list.scope === 'organisation'">Who</th><th>Client</th><th>API key</th><th class="num">Calls</th><th class="num">Returned</th><th>Most used</th><th>Repositories</th></tr></thead>
             <tbody>
               <tr v-for="s in list.sessions" :key="s.id" class="row-link" :class="{ active: s.id === selected }" tabindex="0" @click="pick(s.id)" @keydown.enter="pick(s.id)">
                 <td class="nowrap" :title="new Date(s.last).toLocaleString()">{{ relTime(s.last) }}</td>
                 <td v-if="list.scope === 'organisation'">{{ s.actor }}</td>
                 <td class="small">{{ s.client || '–' }}</td>
+                <td class="small mono">{{ s.key || '–' }}</td>
                 <td class="num">{{ fmtInt(s.calls) }}<span v-if="s.errors" class="badge badge--pink small">{{ s.errors }} failed</span></td>
                 <td class="num" :title="`${fmtInt(s.bytes)} bytes`">~{{ tokens(s.bytes) }} tokens</td>
                 <td><span v-for="[t, n] in topTools(s.tools)" :key="t" class="chip mono">{{ t }} ×{{ n }}</span></td>
@@ -75,7 +76,7 @@ watch(selected, () => { open.value = null })
           <h2>Timeline</h2>
           <button class="secondary tiny" @click="pick(selected)">Close</button>
         </div>
-        <p class="muted small mono">{{ selected }}<template v-if="detail"> · {{ detail.actor }}</template></p>
+        <p class="muted small mono">{{ selected }}<template v-if="detail"> · {{ detail.actor }}<template v-if="detail.key"> · key {{ detail.key }}</template></template></p>
         <p v-if="detailError" class="notice notice--danger">{{ apiErrorMessage(detailError) }}</p>
         <ol v-if="detail" class="timeline">
           <li v-for="(c, i) in detail.calls" :key="i" :class="{ failed: c.outcome === 'failure' }">

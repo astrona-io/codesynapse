@@ -60,6 +60,11 @@ func TestEveryMCPRequestIsAudited(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, res.IsError, "a repository outside the caller's reach is refused")
 
+	// No repo argument: the only repository the caller may use is picked, and
+	// the entry names it, so the sessions page shows where the chat ran.
+	_, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: "repo_overview", Arguments: map[string]any{}})
+	require.NoError(t, err)
+
 	events, err := acc.St.ListEvents(ctx, accounts.EventFilter{Action: "mcp.", Limit: 100, Ascending: true})
 	require.NoError(t, err)
 	byName := map[string][]accounts.Event{}
@@ -89,6 +94,8 @@ func TestEveryMCPRequestIsAudited(t *testing.T) {
 	assert.True(t, strings.HasPrefix(pr.MCP.Args["diff"], "sha256:"), pr.MCP.Args["diff"])
 	assert.True(t, strings.HasPrefix(pr.MCP.ArgsDigest, "sha256:"))
 	assert.True(t, pr.MCP.Bytes > 0)
+	require.Len(t, byName["tools/call repo_overview"], 1)
+	assert.Equal(t, byName["tools/call repo_overview"][0].MCP.Repo, storetest.Repo, "the resolved repository, not only the argument")
 	searches := byName["tools/call search"]
 	require.Len(t, searches, 2)
 	assert.Equal(t, searches[0].MCP.Args["limit"], "5")

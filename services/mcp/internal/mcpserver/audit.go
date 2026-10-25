@@ -109,8 +109,17 @@ func (h *handlers) auditMiddleware() mcp.Middleware {
 				return next(ctx, method, req)
 			}
 			start := time.Now()
+			resolved := repositoryHolder(ctx)
+			ctx = context.WithValue(ctx, usageRepositoryKey{}, resolved)
 			res, err := next(ctx, method, req)
 			m := describeRequest(method, req)
+			if m.Repo == "" {
+				// The tool omitted repo and the handler picked the only one the
+				// caller may use: the entry names it, so sessions show where they ran.
+				resolved.mu.Lock()
+				m.Repo = resolved.name
+				resolved.mu.Unlock()
+			}
 			m.DurationMS = time.Since(start).Milliseconds()
 			if id, ok := execution.From(ctx); ok {
 				m.SessionID = id.SessionID
