@@ -401,6 +401,25 @@ func splitIdent(w string) []string {
 	return parts
 }
 
+// SemanticHit is a symbol a SemanticRanker found close in meaning to a task.
+type SemanticHit struct {
+	ID    string
+	Score float64
+}
+
+// SemanticRanker ranks symbols by meaning (internal/semantic). It is optional
+// and travels in the context, so the answers of a plain Service never change.
+type SemanticRanker interface {
+	Rank(ctx context.Context, task string, k int) ([]SemanticHit, error)
+}
+
+type semanticKey struct{}
+
+// WithSemantic makes MinimalContext add symbols close in meaning to the task.
+func WithSemantic(ctx context.Context, r SemanticRanker) context.Context {
+	return context.WithValue(ctx, semanticKey{}, r)
+}
+
 // MinimalContext ranks symbols, doc sections and config entries for a task
 // and packs the best ones until maxTokens (estimated at bytes/4) is spent.
 func (s Service) MinimalContext(ctx context.Context, repo, task string, files []string, maxTokens int) (MinimalContext, error) {
@@ -477,6 +496,25 @@ func (s Service) MinimalContext(ctx context.Context, repo, task string, files []
 				sc.score += weight
 			}
 			sc.why = append(sc.why, kw)
+		}
+	}
+	if r, ok := ctx.Value(semanticKey{}).(SemanticRanker); ok {
+		hits, err := r.Rank(ctx, task, semanticK)
+		if err != nil {
+			return MinimalContext{}, err
+		}
+		for rank, h := range hits {
+			sc := byID[h.ID]
+			if sc == nil {
+				n, err := s.R.Node(ctx, h.ID)
+				if err != nil {
+					continue
+				}
+				sc = &scored{n: n}
+				byID[h.ID] = sc
+			}
+			sc.score += semanticWeight / (1 + float64(rank)*0.1)
+			sc.why = append(sc.why, "meaning")
 		}
 	}
 	for _, sc := range byID {
@@ -637,3 +675,12 @@ func (s Service) packageContext(ctx context.Context, repo string, pkg model.Node
 	}
 	return pc, nil
 }
+
+// Experiment knobs, tuned on the task eval.
+var (
+	semanticK      = 40
+	semanticWeight = 1.5
+)
+
+// SetSemanticTuning changes the experiment's depth and weight (tests, eval).
+func SetSemanticTuning(k int, weight float64) { semanticK, semanticWeight = k, weight }
