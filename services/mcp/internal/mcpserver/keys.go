@@ -48,6 +48,11 @@ func (a AccountsAccess) ResolveExecutionSession(ctx context.Context, userID, org
 	return a.Acc.ResolveExecutionSession(ctx, userID, orgID, sessionID)
 }
 
+// ImageScan reads the last image scan uploaded for a repository namespace.
+func (a AccountsAccess) ImageScan(ctx context.Context, ns string) (accounts.ImageScan, bool, error) {
+	return a.Acc.St.ImageScan(ctx, ns)
+}
+
 // Reach implements Access.
 func (a AccountsAccess) Reach(ctx context.Context, userID, orgID string) (map[string]accounts.Reach, error) {
 	access, err := a.Acc.AccessOf(ctx, userID)

@@ -14,7 +14,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/coretools"
+	"github.com/astrona-io/codesynapse/internal/imagescan"
 	"github.com/astrona-io/codesynapse/internal/metrics"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
@@ -406,6 +408,15 @@ func (h *handlers) securityReport(ctx context.Context, _ *mcp.CallToolRequest, i
 		return nil, rep, err
 	}
 	rep.Sensitive = nil // keep the answer small; security_symbols has these
+	if scans, ok := h.access.(interface {
+		ImageScan(context.Context, string) (accounts.ImageScan, bool, error)
+	}); ok {
+		// An unreadable scan leaves the field out, like one never uploaded.
+		if sc, has, err := scans.ImageScan(ctx, h.memRepo(ctx, repo)); err == nil && has {
+			o := imagescan.Summarise(sc.UploadedAt, sc.Findings)
+			rep.ContainerImages = &o
+		}
+	}
 	filterFindingsByPath(&rep, in.Path)
 	if in.Limit > 0 {
 		rep.Findings = rep.Findings[:min(len(rep.Findings), in.Limit)]

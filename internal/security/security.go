@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/astrona-io/codesynapse/internal/imagescan"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
 	"github.com/astrona-io/codesynapse/internal/redact"
@@ -108,6 +109,10 @@ type Report struct {
 	// towards the grade at full weight but are not listed or analysed for
 	// exposure.
 	Unanalysed int `json:"unanalysed_findings,omitempty"`
+	// ContainerImages counts the findings of the last image scan uploaded
+	// from CI (internal/imagescan). Build leaves it nil: the scan lives in
+	// the accounts database, so the API and MCP fill it for their caller.
+	ContainerImages *imagescan.Overview `json:"container_images,omitempty"`
 }
 
 // NotApplicable is the grade when no rule had anything to read.

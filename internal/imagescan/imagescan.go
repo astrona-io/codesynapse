@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Limits on what one report may hold.
@@ -203,4 +204,28 @@ func clip(s string) string {
 		return s
 	}
 	return strings.ToValidUTF8(s[:maxFieldLen], "")
+}
+
+// Overview is what a security report says about an uploaded scan: when, which
+// images and how many findings per severity, never the findings themselves.
+type Overview struct {
+	UploadedAt time.Time      `json:"uploaded_at"`
+	Images     []string       `json:"images"`
+	Counts     map[string]int `json:"counts"`
+	Total      int            `json:"total"`
+}
+
+// Summarise counts findings per severity and lists the images, sorted.
+func Summarise(at time.Time, findings []Finding) Overview {
+	o := Overview{UploadedAt: at, Images: []string{}, Counts: map[string]int{}, Total: len(findings)}
+	seen := map[string]bool{}
+	for _, f := range findings {
+		o.Counts[f.Severity]++
+		if !seen[f.Image] {
+			seen[f.Image] = true
+			o.Images = append(o.Images, f.Image)
+		}
+	}
+	sort.Strings(o.Images)
+	return o
 }
