@@ -1,0 +1,65 @@
+name: Chart image scan
+
+# Every Monday, and on demand: scan the images the chart deploys the way
+# Artifact Hub does, so new CVEs show up here before they show up there.
+#  - report: Trivy and Grype over our four service images (latest release)
+#    and the five store images, counts per severity in the job summary.
+#    Never fails: upstream images are not ours to fix.
+#  - gate: fails when one of our own images has a fixable HIGH or CRITICAL
+#    finding (HugeGraph's bundled jars are upstream's, so only its OS
+#    packages count). A failed scheduled run notifies the repository admins.
+on:
+  schedule:
+    - cron: '43 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    name: Report (${{ matrix.scanner }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        scanner: [trivy, grype]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Scan the chart's images
+        env:
+          SCANNER: ${{ matrix.scanner }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          images=""
+          for svc in api worker mcp web; do images="$images ghcr.io/$OWNER/codesynapse-$svc:latest"; done
+          SCAN_EXTRA_IMAGES="$images" .github/scripts/scan-chart-images.sh "$SCANNER" | tee scan.txt
+          { echo "### Chart images ($SCANNER)"; echo '```'; cat scan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  gate:
+    name: Gate ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {image: codesynapse-api, tag: latest, types: 'os,library'}
+          - {image: codesynapse-worker, tag: latest, types: 'os,library'}
+          - {image: codesynapse-mcp, tag: latest, types: 'os,library'}
+          - {image: codesynapse-web, tag: latest, types: 'os,library'}
+          - {image: codesynapse-postgres, tag: 18-alpine, types: 'os,library'}
+          - {image: codesynapse-hugegraph, tag: 1.7.0, types: os}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: Fixable HIGH and CRITICAL vulnerabilities (Trivy)
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ matrix.tag }}
+          TYPES: ${{ matrix.types }}
+        run: |
+          docker pull "$IMAGE"
+          just scan-image "$IMAGE" "$TYPES"
