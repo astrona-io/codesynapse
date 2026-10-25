@@ -12,7 +12,11 @@ const TASKS = [
   { id: 'security-triage', title: 'Triage security findings', body: 'The model judges each medium-or-higher finding — likely exploitable, needs review or false positive — and proposes a fix. You accept or reject each one.' },
   { id: 'review', title: 'Review the riskiest code', body: 'Reviews hotspots and untested complex functions, or a diff you paste below, and leaves comments on exact lines with suggested fixes.' },
   { id: 'briefing', title: 'Write a briefing', body: 'A short architecture and risk overview for someone new to the repository, written from graph summaries only — no source is sent.' },
+  { id: 'pr-summary', local: true, title: 'Summarise a change', body: 'Paste a git diff below. A local model writes what changed, the riskiest parts and a merge checklist from the graph (callers, tests, findings). Needs a local model.' },
+  { id: 'cleanup-briefing', local: true, title: 'Brief the cleanup plan', body: 'Turns the ranked cleanup plan (dead code, duplicates, hotspots, vulnerable packages) into what to do first and what is safe and quick. Needs a local model.' },
 ]
+const LOCAL_ONLY = new Set(['pr-summary', 'cleanup-briefing'])
+const tasks = computed(() => TASKS.filter((t) => !LOCAL_ONLY.has(t.id) || providers.value?.providers.some((p) => p.tasks.includes(t.id))))
 const routed = (task: string) => providers.value?.providers.find((p) => p.tasks.includes(task))?.name ?? providers.value?.providers[0]?.name ?? ''
 const choice = reactive<Record<string, string>>({})
 const diff = ref('')
@@ -24,7 +28,7 @@ async function run(task: string) {
   errors[task] = ''
   try {
     const body: Record<string, string> = { provider: choice[task] || '' }
-    if (task === 'review' && diff.value.trim()) body.diff = diff.value
+    if ((task === 'review' || task === 'pr-summary') && diff.value.trim()) body.diff = diff.value
     jobs[task] = await apiPost<Job>(repoPath(repo.value, `ai/${task}`), body)
     timers[task] = setInterval(async () => {
       const j = await $fetch<Job>(apiPath(`jobs/${jobs[task]!.id}`))
@@ -54,10 +58,10 @@ const elapsed = (j: Job) => Math.round((Date.now() - Date.parse(j.started_at)) /
     <div v-if="providers && !providers.providers.length" class="empty"><strong>No AI model configured</strong>Set one up on the <NuxtLink to="/ai">AI models</NuxtLink> page — a local MLX or Ollama server is enough.</div>
 
     <div v-else class="grid cols-3">
-      <section v-for="t in TASKS" :key="t.id" class="panel task">
+      <section v-for="t in tasks" :key="t.id" class="panel task">
         <h2>{{ t.title }}</h2>
         <p class="muted">{{ t.body }}</p>
-        <textarea v-if="t.id === 'review'" v-model="diff" placeholder="Optional: paste a git diff to review a change instead" class="diff" />
+        <textarea v-if="t.id === 'review' || t.id === 'pr-summary'" v-model="diff" :placeholder="t.id === 'review' ? 'Optional: paste a git diff to review a change instead' : 'Paste a git diff to summarise'" class="diff" />
         <label class="row tight">Model
           <select v-model="choice[t.id]" :aria-label="`Model for ${t.title}`">
             <option value="">{{ routed(t.id) }} (default)</option>

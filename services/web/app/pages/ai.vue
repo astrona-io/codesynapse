@@ -20,6 +20,8 @@ const AREAS = [
   { task: 'review', label: 'Code review', hint: 'Reviews of changes and risky code' },
   { task: 'security-triage', label: 'Security analysis', hint: 'Triage of findings and fixes' },
   { task: 'briefing', label: 'Briefings', hint: 'Architecture and risk overviews' },
+  { task: 'pr-summary', label: 'Change summaries', hint: 'Plain-language summary of a diff (local models only)', local: true },
+  { task: 'cleanup-briefing', label: 'Cleanup briefings', hint: 'What to clean up first, from the cleanup plan (local models only)', local: true },
   { task: 'fix', label: 'Fixes', hint: 'Writes fix branches for accepted review comments (needs source: use a local model)' },
 ]
 const routing = reactive<{ default: string; tasks: Record<string, string> }>({ default: '', tasks: {} })
@@ -45,7 +47,7 @@ async function saveRouting() {
     saving.value = false
   }
 }
-const TASK_LABEL: Record<string, string> = { 'security-triage': 'Security triage', review: 'Code review', briefing: 'Briefing', fix: 'Fixes' }
+const TASK_LABEL: Record<string, string> = { 'security-triage': 'Security triage', review: 'Code review', briefing: 'Briefing', fix: 'Fixes', 'pr-summary': 'Change summary', 'cleanup-briefing': 'Cleanup briefing' }
 interface TestResult { ok: boolean; error?: string; reply?: string; models?: string[]; seconds?: number; model?: string }
 const tests = ref<Record<string, TestResult | 'running'>>({})
 async function test(name: string) {
@@ -97,8 +99,8 @@ const resultOf = (n: string) => tests.value[n]
       <div v-for="a in AREAS" :key="a.task" class="route">
         <div><strong>{{ a.label }}</strong><p class="muted small">{{ a.hint }}</p></div>
         <select v-model="routing.tasks[a.task]" :aria-label="`Model for ${a.label}`">
-          <option value="">Use global ({{ routing.default }})</option>
-          <option v-for="p in data.providers" :key="p.name" :value="p.name">{{ p.name }} · {{ p.local ? 'local' : 'cloud' }}</option>
+          <option value="">{{ a.local ? 'First local model' : `Use global (${routing.default})` }}</option>
+          <option v-for="p in data.providers.filter(x => !a.local || x.local)" :key="p.name" :value="p.name">{{ p.name }} · {{ p.local ? 'local' : 'cloud' }}</option>
         </select>
       </div>
       <p v-if="routeError" class="error small">{{ routeError }}</p>

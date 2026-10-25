@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/agentctx"
+	"github.com/astrona-io/codesynapse/internal/cleanupplan"
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/model"
@@ -93,6 +94,10 @@ func (r Runner) Run(ctx context.Context, task string, in Input) (string, error) 
 		rv, err = r.codeReview(ctx, provider, in, src, lim)
 	case "briefing":
 		rv, err = r.briefing(ctx, provider, in, lim)
+	case "pr-summary":
+		rv, err = r.prSummary(ctx, provider, in, lim)
+	case "cleanup-briefing":
+		rv, err = r.cleanupBriefing(ctx, provider, in, lim)
 	default:
 		return "", fmt.Errorf("unknown task %q", task)
 	}
@@ -450,6 +455,91 @@ func (r Runner) briefing(ctx context.Context, provider string, in Input, lim lim
 		return reviews.Review{}, err
 	}
 	return reviews.Review{Kind: reviews.KindReport, Title: "AI briefing: " + in.Repo, Summary: resp.Text, Verdict: reviews.Comment, Author: author(provider, resp)}, nil
+}
+
+// --- local-only summaries -------------------------------------------------
+
+const prSummarySystem = `You summarise a code change for a reviewer. Use only the facts given: changed symbols with their risk, who calls them, which tests reach them, and security findings. Write Markdown with the sections "What changed" (two to four sentences), "Risk" (the riskiest changes and why) and "Before merging" (a short checklist). Do not invent symbols or behaviour. At most 300 words.`
+
+func (r Runner) prSummary(ctx context.Context, provider string, in Input, lim limits) (reviews.Review, error) {
+	if len(in.Diff) == 0 {
+		return reviews.Review{}, ErrNothingToDo
+	}
+	changes, err := gitx.ParseDiff(in.Diff)
+	if err != nil {
+		return reviews.Review{}, err
+	}
+	rep, err := review.Analyze(ctx, query.Service{R: r.St}, in.Repo, changes, review.Options{})
+	if err != nil {
+		return reviews.Review{}, err
+	}
+	if len(rep.Files) == 0 {
+		return reviews.Review{}, ErrNothingToDo
+	}
+	var b strings.Builder
+	s := rep.Summary
+	fmt.Fprintf(&b, "Repository %s. %d files and %d symbols changed; %d symbols impacted; %d changes without tests; %d security-sensitive; highest risk %s.\n", in.Repo, s.ChangedFiles, s.ChangedSymbols, s.ImpactedSymbols, s.UntestedChanges, s.SecuritySensitive, s.MaxLevel)
+	for i, f := range rep.Files[:min(len(rep.Files), lim.briefItems)] {
+		part := fmt.Sprintf("- file %s (%s), %d symbols\n", f.Path, f.Status, f.Symbols)
+		if i == 0 {
+			part = "\nFiles:\n" + part
+		}
+		if err := r.appendPrompt(ctx, provider, prSummarySystem, &b, part, lim); err != nil {
+			if errors.Is(err, llm.ErrInputBudget) {
+				break
+			}
+			return reviews.Review{}, err
+		}
+	}
+	for i, c := range rep.Changes[:min(len(rep.Changes), lim.symbols)] {
+		part := fmt.Sprintf("- %s risk %d (%s): %s; callers %d, tests %d, findings %d\n", c.Name+" "+c.Location, c.Risk, c.Level, strings.Join(c.Reasons, "; "), c.FanIn, len(c.Tests), len(c.Findings))
+		if i == 0 {
+			part = "\nChanged symbols:\n" + part
+		}
+		if err := r.appendPrompt(ctx, provider, prSummarySystem, &b, part, lim); err != nil {
+			if errors.Is(err, llm.ErrInputBudget) {
+				break
+			}
+			return reviews.Review{}, err
+		}
+	}
+	resp, err := r.ask(ctx, provider, prSummarySystem, b.String())
+	if err != nil {
+		return reviews.Review{}, err
+	}
+	return reviews.Review{Kind: reviews.KindReport, Title: "Change summary: " + in.Repo, Summary: llm.CleanText(resp.Text), Verdict: reviews.Comment, Author: author(provider, resp)}, nil
+}
+
+const cleanupBriefingSystem = `You turn a ranked cleanup plan into a short plain-language briefing for the team. Use only the steps given; they are already ordered by priority. Write Markdown with "Do first" (up to three steps with the reason), "Safe and quick" (steps marked safety high and effort 1) and "Leave for later". Name the targets exactly as given. Do not add steps. At most 350 words.`
+
+func (r Runner) cleanupBriefing(ctx context.Context, provider string, in Input, lim limits) (reviews.Review, error) {
+	plan, err := cleanupplan.Assemble(ctx, r.St, in.Repo)
+	if err != nil {
+		return reviews.Review{}, err
+	}
+	if len(plan.Steps) == 0 {
+		return reviews.Review{}, ErrNothingToDo
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Repository %s. %d cleanup steps, up to %d lines, %d advisories.\n", in.Repo, plan.Summary.Steps, plan.Summary.LinesUpTo, plan.Summary.Advisories)
+	for i, st := range plan.Steps[:min(len(plan.Steps), lim.briefItems*2)] {
+		names := make([]string, 0, 3)
+		for _, t := range st.Targets[:min(len(st.Targets), 3)] {
+			names = append(names, t.Name)
+		}
+		part := fmt.Sprintf("%d. [%s] %s. %s (value %d, effort %d, safety %s) targets: %s\n", i+1, st.Kind, st.Title, st.Why, st.Value, st.Effort, st.Safety, strings.Join(names, ", "))
+		if err := r.appendPrompt(ctx, provider, cleanupBriefingSystem, &b, part, lim); err != nil {
+			if errors.Is(err, llm.ErrInputBudget) && i > 0 {
+				break
+			}
+			return reviews.Review{}, err
+		}
+	}
+	resp, err := r.ask(ctx, provider, cleanupBriefingSystem, b.String())
+	if err != nil {
+		return reviews.Review{}, err
+	}
+	return reviews.Review{Kind: reviews.KindReport, Title: "Cleanup briefing: " + in.Repo, Summary: llm.CleanText(resp.Text), Verdict: reviews.Comment, Author: author(provider, resp)}, nil
 }
 
 // --- helpers --------------------------------------------------------------

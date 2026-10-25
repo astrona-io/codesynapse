@@ -42,7 +42,15 @@ const (
 )
 
 // Tasks a provider can be routed to.
-var Tasks = []string{"security-triage", "review", "briefing", "fix", "memory", "embeddings", "code-annotation"}
+var Tasks = []string{"security-triage", "review", "briefing", "fix", "memory", "embeddings", "code-annotation", "pr-summary", "cleanup-briefing"}
+
+// LocalTasks run only on a local model: they read a diff or the cleanup plan,
+// which name paths and symbols of a private change. Without a routed local
+// provider they pick the first local one; with none, the task is unavailable.
+var LocalTasks = []string{"pr-summary", "cleanup-briefing"}
+
+// ErrNoLocalModel means a local-only task has no local provider to run on.
+var ErrNoLocalModel = errors.New("this task runs only on a local model and none is configured")
 
 // Request is one completion request.
 type Request struct {
@@ -400,6 +408,9 @@ func (r *Registry) SetRoutes(rt Routes) error {
 		if _, ok := r.impl[name]; !ok {
 			return fmt.Errorf("task %q routes to unknown provider %q", task, name)
 		}
+		if cfg, _ := r.Config(name); slices.Contains(LocalTasks, task) && !cfg.Local() {
+			return fmt.Errorf("task %q runs only on a local model; %q is not local", task, name)
+		}
 		tasks[task] = name
 	}
 	r.mu.Lock()
@@ -408,12 +419,23 @@ func (r *Registry) SetRoutes(rt Routes) error {
 	return nil
 }
 
-// ProviderFor returns the provider routed to task, or override when set.
+// ProviderFor returns the provider routed to task, or override when set. A
+// local-only task never resolves to a cloud provider.
 func (r *Registry) ProviderFor(task, override string) (string, error) {
 	name := override
+	explicit := name != ""
 	r.mu.Lock()
 	if name == "" {
 		name = r.cfg.Tasks[task]
+		explicit = name != ""
+	}
+	local := slices.Contains(LocalTasks, task)
+	if name == "" && local {
+		name = r.firstLocalLocked()
+		if name == "" {
+			r.mu.Unlock()
+			return "", ErrNoLocalModel
+		}
 	}
 	if name == "" {
 		name = r.cfg.Default
@@ -425,7 +447,28 @@ func (r *Registry) ProviderFor(task, override string) (string, error) {
 	if _, ok := r.impl[name]; !ok {
 		return "", fmt.Errorf("unknown AI provider %q", name)
 	}
+	if local && explicit {
+		if cfg, ok := r.Config(name); !ok || !cfg.Local() {
+			return "", fmt.Errorf("task %q runs only on a local model; %q is not local", task, name)
+		}
+	}
 	return name, nil
+}
+
+// firstLocalLocked prefers the default provider when it is local, then the
+// first local one in configuration order. The caller holds r.mu.
+func (r *Registry) firstLocalLocked() string {
+	for _, p := range r.cfg.Providers {
+		if p.Name == r.cfg.Default && p.Local() {
+			return p.Name
+		}
+	}
+	for _, p := range r.cfg.Providers {
+		if p.Local() {
+			return p.Name
+		}
+	}
+	return ""
 }
 
 // TaskRoutes returns the provider used for each task.

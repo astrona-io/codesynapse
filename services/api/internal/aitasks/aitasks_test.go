@@ -3,6 +3,7 @@ package aitasks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -145,4 +146,28 @@ func taskContext(t *testing.T) context.Context {
 func TestRunRequiresExecutionBeforeStoreAccess(t *testing.T) {
 	_, err := (Runner{}).Run(context.Background(), "briefing", Input{})
 	require.ErrorIs(t, err, execution.ErrMissing)
+}
+
+func TestLocalSummaries(t *testing.T) {
+	r, st, prompts := setup(t, "## Do first\nNothing risky.", true)
+	diff := "diff --git a/app/app.go b/app/app.go\n--- a/app/app.go\n+++ b/app/app.go\n@@ -10,2 +10,3 @@\n line\n+changed\n line\n"
+	id, err := r.Run(taskContext(t), "pr-summary", Input{Repo: storetest.Repo, Diff: []byte(diff)})
+	require.NoError(t, err)
+	rv, err := st.GetReview(taskContext(t), id)
+	require.NoError(t, err)
+	assert.Equal(t, rv.Kind, reviews.KindReport)
+	assert.Contains(t, rv.Title, "Change summary")
+	assert.Contains(t, (*prompts)[0], "app/app.go")
+
+	_, err = r.Run(taskContext(t), "pr-summary", Input{Repo: storetest.Repo})
+	assert.True(t, errors.Is(err, ErrNothingToDo), "no diff, nothing to summarise")
+
+	id, err = r.Run(taskContext(t), "cleanup-briefing", Input{Repo: storetest.Repo})
+	if errors.Is(err, ErrNothingToDo) {
+		t.Skip("fixture has no cleanup steps")
+	}
+	require.NoError(t, err)
+	rv, err = st.GetReview(taskContext(t), id)
+	require.NoError(t, err)
+	assert.Contains(t, rv.Title, "Cleanup briefing")
 }

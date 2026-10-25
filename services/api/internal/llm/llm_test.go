@@ -173,3 +173,25 @@ func TestEmbeddings(t *testing.T) {
 		assert.True(t, errors.Is(err, ErrNoEmbeddings), route+": cloud or no embedding model is refused")
 	}
 }
+
+func TestLocalOnlyTasksNeverUseCloud(t *testing.T) {
+	cloud := ProviderConfig{Name: "cloud", Kind: KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "m", MaxOutputTokens: 100, MaxInputTokens: 1000}
+	local := ProviderConfig{Name: "local", Kind: KindOpenAI, BaseURL: "http://127.0.0.1:11434/v1", Model: "m", MaxOutputTokens: 100, MaxInputTokens: 1000}
+
+	onlyCloud := NewRegistry(Config{Providers: []ProviderConfig{cloud}, Default: "cloud"})
+	_, err := onlyCloud.ProviderFor("pr-summary", "")
+	assert.True(t, errors.Is(err, ErrNoLocalModel))
+	_, err = onlyCloud.ProviderFor("pr-summary", "cloud")
+	assert.Error(t, err, "an explicit cloud choice is refused")
+	_, ok := onlyCloud.TaskRoutes()["pr-summary"]
+	assert.False(t, ok, "no local model, no route")
+
+	both := NewRegistry(Config{Providers: []ProviderConfig{cloud, local}, Default: "cloud"})
+	name, err := both.ProviderFor("cleanup-briefing", "")
+	require.NoError(t, err)
+	assert.Equal(t, name, "local", "the first local provider is used though the default is cloud")
+	name, err = both.ProviderFor("review", "")
+	require.NoError(t, err)
+	assert.Equal(t, name, "cloud", "other tasks keep the default")
+	assert.Error(t, both.SetRoutes(Routes{Default: "cloud", Tasks: map[string]string{"pr-summary": "cloud"}}))
+}
