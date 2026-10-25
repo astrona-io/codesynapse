@@ -45,7 +45,7 @@ func registerGitTools(s *mcp.Server, add func(name, desc string) *mcp.Tool) {
 	// their own GitHub sign-in, like the git tools. There is no tool that
 	// creates, merges or closes anything.
 	mcp.AddTool(s, add(ghtools.ToolPRStatus,
-		"Where a pull request stands, in a few lines: state, draft, head and base branch, mergeability, review decision, and its checks counted (pass, fail, pending, skipped, done) with only the failing and waiting ones named. Omit number for the checked-out branch's pull request. Use instead of gh pr view or gh pr checks. Reads only; creating and merging stay with gh."),
+		"Where a pull request stands, in a few lines: state, draft, head and base branch, mergeability, review decision, and its checks counted (pass, fail, pending, skipped, done) with only the failing and waiting ones named. Omit number for the checked-out branch's pull request. Set wait_seconds (at most 300) to block until the checks finish or one fails, instead of polling: the answer then says waited_seconds and timed_out. Use instead of gh pr view, gh pr checks or gh pr checks --watch. Reads only; creating and merging stay with gh."),
 		func(ctx context.Context, r *mcp.CallToolRequest, _ ghtools.PRStatusIn) (*mcp.CallToolResult, any, error) {
 			return local(ctx, r, nil)
 		})

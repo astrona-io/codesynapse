@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"time"
 )
 
 // The tool names. They read the developer's GitHub sign-in, which only the
@@ -24,6 +25,9 @@ var Tools = []string{ToolPRStatus, ToolPRList, ToolRunFail}
 type PRStatusIn struct {
 	// Number is the pull request; 0 is the one for the checked-out branch.
 	Number int `json:"number,omitempty" jsonschema:"pull request number; omit for the checked-out branch's pull request"`
+	// WaitSeconds blocks until the checks are done or one fails, at most this
+	// long (0 answers now).
+	WaitSeconds int `json:"wait_seconds,omitempty" jsonschema:"wait up to this many seconds (at most 300) for the checks to finish or one to fail, then answer; omit to answer now"`
 }
 
 // PRListIn is gh_pr_list's input.
@@ -56,6 +60,10 @@ type PRStatus struct {
 	MergeState     string `json:"merge_state,omitempty"`     // CLEAN, BLOCKED, BEHIND, DIRTY, …
 	ReviewDecision string `json:"review_decision,omitempty"` // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
 	Checks         Checks `json:"checks"`
+	// WaitedSeconds and TimedOut describe a wait_seconds request: how long it
+	// waited, and whether the checks were still running when it gave up.
+	WaitedSeconds int  `json:"waited_seconds,omitempty"`
+	TimedOut      bool `json:"timed_out,omitempty"`
 }
 
 // PRSummary is one line of a pull request list.
@@ -110,11 +118,60 @@ func Run(ctx context.Context, dir, tool string, args json.RawMessage) (any, erro
 	return nil, fmt.Errorf("%w: unknown tool %q", ErrInvalid, tool)
 }
 
-// Status answers gh_pr_status.
-func Status(ctx context.Context, dir string, in PRStatusIn) (PRStatus, error) {
-	if in.Number < 0 || in.Number > MaxNumber {
-		return PRStatus{}, fmt.Errorf("%w: number must be a pull request number", ErrInvalid)
+// MaxWaitSeconds is the longest gh_pr_status may wait for checks.
+const MaxWaitSeconds = 300
+
+// The poll interval and the grace are variables so tests do not sleep.
+var (
+	pollInterval = 15 * time.Second
+	// noChecksGrace is how long a wait lets checks appear: right after a push
+	// none exist yet, and a repository without CI never gets any.
+	noChecksGrace = 45 * time.Second
+)
+
+// Timeout is how long the bridge should let a call run: the usual bound plus
+// the wait a gh_pr_status call asked for.
+func Timeout(base time.Duration, tool string, args json.RawMessage) time.Duration {
+	var in PRStatusIn
+	if tool != ToolPRStatus || json.Unmarshal(args, &in) != nil {
+		return base
 	}
+	return base + time.Duration(min(max(in.WaitSeconds, 0), MaxWaitSeconds))*time.Second
+}
+
+// Status answers gh_pr_status. With WaitSeconds it polls until the checks are
+// done or one fails (so a fix can start while the rest still run), or the
+// time is up.
+func Status(ctx context.Context, dir string, in PRStatusIn) (PRStatus, error) {
+	if in.Number < 0 || in.Number > MaxNumber || in.WaitSeconds < 0 || in.WaitSeconds > MaxWaitSeconds {
+		return PRStatus{}, fmt.Errorf("%w: number must be a pull request number and wait_seconds between 0 and %d", ErrInvalid, MaxWaitSeconds)
+	}
+	start := time.Now()
+	deadline := start.Add(time.Duration(in.WaitSeconds) * time.Second)
+	for {
+		st, err := status(ctx, dir, in.Number)
+		if err != nil || in.WaitSeconds == 0 {
+			return st, err
+		}
+		c := st.Checks
+		total := c.Pass + c.Fail + c.Pending + c.Skipped
+		finished := st.State != "OPEN" || c.Fail > 0 || (c.Done && total > 0) ||
+			(total == 0 && time.Since(start) >= noChecksGrace)
+		if finished || !time.Now().Before(deadline) {
+			st.WaitedSeconds = int(time.Since(start).Round(time.Second) / time.Second)
+			st.TimedOut = !finished
+			return st, nil
+		}
+		select {
+		case <-ctx.Done():
+			return st, ctx.Err()
+		case <-time.After(min(pollInterval, time.Until(deadline))):
+		}
+	}
+}
+
+func status(ctx context.Context, dir string, number int) (PRStatus, error) {
+	in := PRStatusIn{Number: number}
 	args := []string{"pr", "view"}
 	if in.Number > 0 {
 		args = append(args, strconv.Itoa(in.Number))

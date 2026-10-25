@@ -22,7 +22,7 @@ var bashHints = map[string]string{
 	usage.BashGitDiff:   "git_diff_summary lists changed files with line ranges and no patch; read only those ranges. get_pr_context adds symbols, risk and covering tests.",
 	usage.BashGitLog:    "git_log lists commits compactly; file_history covers indexed history of a file.",
 	usage.BashGitBlame:  "git_blame groups a line range by commit instead of printing every line.",
-	usage.BashGh:        "gh_pr_status gives a pull request's state, mergeability, review decision and counted checks (only the failing and waiting ones named); gh_pr_list lists pull requests compactly; gh_run_failure gives the failed jobs and error lines of a CI run instead of its log. Merging and creating stay with gh.",
+	usage.BashGh:        "gh_pr_status (wait_seconds blocks until the checks finish or one fails, so do not poll) gives a pull request's state, mergeability, review decision and counted checks (only the failing and waiting ones named); gh_pr_list lists pull requests compactly; gh_run_failure gives the failed jobs and error lines of a CI run instead of its log. Merging and creating stay with gh.",
 	usage.BashSearch:    "search finds symbols and files by name; minimal_context finds code by meaning; get_symbol_context lists callers without grepping.",
 	usage.BashRead:      "file_outline lists a file's symbols with line ranges; Read with offset and limit takes only the lines you need.",
 	usage.BashTest:      "verify_plan lists the closest tests for your change; run those instead of the whole suite.",

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
@@ -213,4 +214,109 @@ func TestFailureNoFailedJob(t *testing.T) {
 	fakeGHRuns(t, answer{"'run view'*", `{"workflowName":"CI","jobs":[{"name":"a","conclusion":"success"}]}`})
 	_, err := Failure(t.Context(), t.TempDir(), RunFailureIn{Run: 1})
 	assert.True(t, errors.Is(err, ErrUnavailable))
+}
+
+// fakeGHSeq puts a gh on PATH that prints the nth of outs on its nth call
+// (the last one from then on) and counts the calls.
+func fakeGHSeq(t *testing.T, outs ...string) (calls func() int) {
+	t.Helper()
+	dir := t.TempDir()
+	counter := filepath.Join(dir, "n")
+	script := "#!/bin/sh\necho x >> '" + counter + "'\nn=$(wc -l < '" + counter + "' | tr -d ' ')\n"
+	for i, o := range outs {
+		f := filepath.Join(dir, "o"+string(rune('0'+i)))
+		require.NoError(t, os.WriteFile(f, []byte(o), 0o600))
+		script += "if [ \"$n\" -le " + string(rune('1'+i)) + " ]; then cat '" + f + "'; exit 0; fi\n"
+	}
+	script += "cat '" + filepath.Join(dir, "o"+string(rune('0'+len(outs)-1))) + "'\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700)) //nolint:gosec // a test double must be executable
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func() int {
+		b, _ := os.ReadFile(counter) //nolint:gosec,errcheck // the test's own file
+		return strings.Count(string(b), "x")
+	}
+}
+
+func fastPolling(t *testing.T) {
+	t.Helper()
+	oldPoll, oldGrace := pollInterval, noChecksGrace
+	pollInterval, noChecksGrace = 5*time.Millisecond, 600*time.Millisecond
+	t.Cleanup(func() { pollInterval, noChecksGrace = oldPoll, oldGrace })
+}
+
+func prJSON(state string, runs ...string) string {
+	return `{"number":1,"title":"t","state":"` + state + `","headRefName":"b","baseRefName":"main","mergeable":"MERGEABLE","statusCheckRollup":[` + strings.Join(runs, ",") + `]}`
+}
+
+const (
+	runPass    = `{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"}`
+	runPending = `{"__typename":"CheckRun","name":"b","status":"IN_PROGRESS","conclusion":""}`
+	runFail    = `{"__typename":"CheckRun","name":"c","status":"COMPLETED","conclusion":"FAILURE"}`
+)
+
+func TestStatusWaitsForChecks(t *testing.T) {
+	fastPolling(t)
+	calls := fakeGHSeq(t, prJSON("OPEN", runPass, runPending), prJSON("OPEN", runPass, runPending), prJSON("OPEN", runPass, runPass))
+	got, err := Status(t.Context(), t.TempDir(), PRStatusIn{WaitSeconds: 5})
+	require.NoError(t, err)
+	assert.True(t, got.Checks.Done)
+	assert.False(t, got.TimedOut)
+	assert.Equal(t, calls(), 3, "it polled until the checks finished")
+}
+
+func TestStatusWaitStopsAtFirstFailure(t *testing.T) {
+	fastPolling(t)
+	calls := fakeGHSeq(t, prJSON("OPEN", runPending), prJSON("OPEN", runFail, runPending))
+	got, err := Status(t.Context(), t.TempDir(), PRStatusIn{WaitSeconds: 5})
+	require.NoError(t, err)
+	assert.Equal(t, got.Checks.Fail, 1)
+	assert.Equal(t, got.Checks.Pending, 1, "the others may still run")
+	assert.False(t, got.TimedOut)
+	assert.Equal(t, calls(), 2)
+}
+
+func TestStatusWaitTimesOut(t *testing.T) {
+	fastPolling(t)
+	fakeGHSeq(t, prJSON("OPEN", runPending))
+	start := time.Now()
+	got, err := Status(t.Context(), t.TempDir(), PRStatusIn{WaitSeconds: 1})
+	require.NoError(t, err)
+	assert.True(t, got.TimedOut)
+	assert.False(t, got.Checks.Done)
+	assert.True(t, time.Since(start) < 3*time.Second)
+}
+
+func TestStatusWaitGivesChecksTimeToAppear(t *testing.T) {
+	fastPolling(t)
+	calls := fakeGHSeq(t, prJSON("OPEN"), prJSON("OPEN", runPass))
+	got, err := Status(t.Context(), t.TempDir(), PRStatusIn{WaitSeconds: 5})
+	require.NoError(t, err)
+	assert.Equal(t, got.Checks.Pass, 1, "no checks yet is not done")
+	assert.Equal(t, calls(), 2)
+
+	// A repository without CI stops waiting after the grace.
+	fakeGHSeq(t, prJSON("OPEN"))
+	got, err = Status(t.Context(), t.TempDir(), PRStatusIn{WaitSeconds: 5})
+	require.NoError(t, err)
+	assert.False(t, got.TimedOut)
+}
+
+func TestStatusWaitRefusesBadValuesAndMergedEndsIt(t *testing.T) {
+	fastPolling(t)
+	for _, n := range []int{-1, MaxWaitSeconds + 1} {
+		_, err := Status(t.Context(), t.TempDir(), PRStatusIn{WaitSeconds: n})
+		assert.True(t, errors.Is(err, ErrInvalid))
+	}
+	calls := fakeGHSeq(t, prJSON("MERGED", runPending))
+	_, err := Status(t.Context(), t.TempDir(), PRStatusIn{WaitSeconds: 5})
+	require.NoError(t, err)
+	assert.Equal(t, calls(), 1, "a merged pull request has nothing to wait for")
+}
+
+func TestTimeoutAddsTheWait(t *testing.T) {
+	base := 30 * time.Second
+	assert.Equal(t, Timeout(base, ToolPRStatus, json.RawMessage(`{"wait_seconds":120}`)), 150*time.Second)
+	assert.Equal(t, Timeout(base, ToolPRStatus, json.RawMessage(`{"wait_seconds":99999}`)), base+MaxWaitSeconds*time.Second)
+	assert.Equal(t, Timeout(base, ToolPRList, json.RawMessage(`{"wait_seconds":120}`)), base)
+	assert.Equal(t, Timeout(base, ToolPRStatus, nil), base)
 }

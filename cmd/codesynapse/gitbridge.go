@@ -39,7 +39,7 @@ func (b *bridge) answerGit(ctx context.Context, msg []byte, m rpcMessage) bool {
 		return false
 	}
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(ctx, localGitTimeout)
+	ctx, cancel := context.WithTimeout(ctx, ghtools.Timeout(localGitTimeout, c.Params.Name, c.Params.Arguments))
 	defer cancel()
 
 	result, failed := b.runGit(ctx, c)
