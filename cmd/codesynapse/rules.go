@@ -52,7 +52,10 @@ func repoConventions(ctx context.Context, c apiClient, cwd string, logger *slog.
 	var res struct {
 		Conventions []string `json:"conventions"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/api/v1/repos/"+url.PathEscape(w.repo)+"/conventions", nil, &res); err != nil {
+	err := w.call(ctx, c, func(repo string) error {
+		return c.do(ctx, http.MethodGet, "/api/v1/repos/"+url.PathEscape(repo)+"/conventions", nil, &res)
+	})
+	if err != nil {
 		logger.Debug("conventions not fetched", "repo", w.repo, "error", err)
 		return ""
 	}
