@@ -182,7 +182,7 @@ engine := env("CONTAINER_ENGINE", `if command -v docker >/dev/null 2>&1; then ec
 # .github/scripts/check-test-images.sh (part of `just checks`) keeps recipes, Compose and the chart in step.
 pg_image := `sh .github/scripts/compose-image.sh codesynapse-postgres`
 milvus_image := `sh .github/scripts/compose-image.sh milvus`
-hugegraph_image := `sh .github/scripts/compose-image.sh hugegraph`
+hugegraph_image := `sh .github/scripts/compose-image.sh codesynapse-hugegraph`
 victoriametrics_image := `sh .github/scripts/compose-image.sh victoria-metrics`
 
 # Build the api, worker, mcp and web images, tagged codesynapse-<svc>:<tag> and <registry>/codesynapse-<svc>:<tag>. PLATFORM=linux/amd64 for a cluster of another architecture.

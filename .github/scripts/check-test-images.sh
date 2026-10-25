@@ -22,7 +22,7 @@ check() { # name chart-values-file
     fi
 }
 check codesynapse-postgres deploy/helm/codesynapse/charts/postgresql/values.yaml
-check hugegraph deploy/helm/codesynapse/charts/hugegraph/values.yaml
+check codesynapse-hugegraph deploy/helm/codesynapse/charts/hugegraph/values.yaml
 check milvus deploy/helm/codesynapse/charts/milvus/values.yaml
 check victoria-metrics deploy/helm/codesynapse/charts/victoriametrics/values.yaml
 check victoria-traces deploy/helm/codesynapse/charts/victoriatraces/values.yaml
