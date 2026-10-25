@@ -68,25 +68,31 @@ func Fixture() *model.Graph {
 	return g
 }
 
-// Run exercises s against the contract. s may hold other repositories;
-// only the fixture repo is written and checked.
-func Run(t *testing.T, s store.Store) {
+// CodeGraph is the part of a store that holds repositories' code graphs.
+type CodeGraph interface {
+	store.Reader
+	store.Writer
+}
+
+// RunCodeGraph exercises only the code graph, for a store that is built in
+// parts; Run includes it.
+func RunCodeGraph(t *testing.T, s CodeGraph) {
 	t.Helper()
 	ctx := context.Background()
 	require.NoError(t, s.EnsureSchema(ctx))
 	require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
 	t.Run("replacement_failure", func(t *testing.T) { replacementContract(t, s) })
 	t.Run("successive_replacements", func(t *testing.T) { successiveContract(t, s) })
-	t.Run("access_projection", func(t *testing.T) { accessContract(t, s) })
 	t.Run("scoped_graph", func(t *testing.T) { scopedContract(t, s) })
 	t.Run("dependency_graph", func(t *testing.T) { dependencyContract(t, s) })
-	t.Run("history", func(t *testing.T) { historyContract(t, s) })
-	t.Run("curated", func(t *testing.T) { curatedContract(t, s) })
-	t.Run("identity", func(t *testing.T) { identityContract(t, s) })
-	t.Run("memory_counts", func(t *testing.T) { memoryCountsContract(t, s) })
-	t.Run("session_memory", func(t *testing.T) { sessionMemoryContract(t, s) })
-	t.Run("runtime_facts", func(t *testing.T) { runtimeContract(t, s) })
+	codeGraphContract(t, s)
+	t.Run("finding counts", func(t *testing.T) { findingCountsContract(ctx, t, s) })
+	t.Run("delete", func(t *testing.T) { deleteContract(ctx, t, s) })
+}
 
+// codeGraphContract reads and replaces the fixture repository.
+func codeGraphContract(t *testing.T, s CodeGraph) {
+	ctx := context.Background()
 	t.Run("repos", func(t *testing.T) {
 		repo, ok := findRepo(ctx, t, s)
 		require.True(t, ok)
@@ -237,6 +243,29 @@ func Run(t *testing.T, s store.Store) {
 		require.NoError(t, err)
 		assert.Len(t, res, 0)
 	})
+
+}
+
+// Run exercises s against the contract. s may hold other repositories;
+// only the fixture repo is written and checked.
+func Run(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, s.EnsureSchema(ctx))
+	require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
+	t.Run("replacement_failure", func(t *testing.T) { replacementContract(t, s) })
+	t.Run("successive_replacements", func(t *testing.T) { successiveContract(t, s) })
+	t.Run("access_projection", func(t *testing.T) { accessContract(t, s) })
+	t.Run("scoped_graph", func(t *testing.T) { scopedContract(t, s) })
+	t.Run("dependency_graph", func(t *testing.T) { dependencyContract(t, s) })
+	t.Run("history", func(t *testing.T) { historyContract(t, s) })
+	t.Run("curated", func(t *testing.T) { curatedContract(t, s) })
+	t.Run("identity", func(t *testing.T) { identityContract(t, s) })
+	t.Run("memory_counts", func(t *testing.T) { memoryCountsContract(t, s) })
+	t.Run("session_memory", func(t *testing.T) { sessionMemoryContract(t, s) })
+	t.Run("runtime_facts", func(t *testing.T) { runtimeContract(t, s) })
+
+	codeGraphContract(t, s)
 
 	t.Run("reviews survive re-indexing", func(t *testing.T) {
 		r, err := reviews.Prepare(reviews.Review{Repo: Repo, Title: "Review", Comments: []reviews.CommentItem{{File: "app/app.go", Line: 9, Message: "m"}}}, time.Now())
@@ -582,27 +611,30 @@ func Run(t *testing.T, s store.Store) {
 		assert.Equal(t, got[0].Day, "2000-01-02", "older days pruned")
 	})
 
-	t.Run("finding counts", func(t *testing.T) {
-		require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
-		got, err := s.FindingCounts(ctx, Repo)
-		require.NoError(t, err)
-		want := map[string]int{}
-		for _, n := range Fixture().Nodes() {
-			if n.Kind == model.KindFinding {
-				want[n.Severity]++
-			}
-		}
-		assert.Equal(t, got, want)
-	})
-
-	t.Run("delete", func(t *testing.T) {
-		require.NoError(t, s.DeleteRepo(ctx, Repo))
-		_, ok := findRepo(ctx, t, s)
-		assert.False(t, ok)
-	})
+	t.Run("finding counts", func(t *testing.T) { findingCountsContract(ctx, t, s) })
+	t.Run("delete", func(t *testing.T) { deleteContract(ctx, t, s) })
 }
 
-func findRepo(ctx context.Context, t *testing.T, s store.Store) (model.Node, bool) {
+func findingCountsContract(ctx context.Context, t *testing.T, s CodeGraph) {
+	require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
+	got, err := s.FindingCounts(ctx, Repo)
+	require.NoError(t, err)
+	want := map[string]int{}
+	for _, n := range Fixture().Nodes() {
+		if n.Kind == model.KindFinding {
+			want[n.Severity]++
+		}
+	}
+	assert.Equal(t, got, want)
+}
+
+func deleteContract(ctx context.Context, t *testing.T, s CodeGraph) {
+	require.NoError(t, s.DeleteRepo(ctx, Repo))
+	_, ok := findRepo(ctx, t, s)
+	assert.False(t, ok)
+}
+
+func findRepo(ctx context.Context, t *testing.T, s store.Reader) (model.Node, bool) {
 	t.Helper()
 	repos, err := s.Repos(ctx)
 	require.NoError(t, err)

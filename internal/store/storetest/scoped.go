@@ -13,7 +13,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
-func scopedContract(t *testing.T, db store.Store) {
+func scopedContract(t *testing.T, db CodeGraph) {
 	ctx := context.Background()
 	repo := fmt.Sprintf("scope-fixture-%d", time.Now().UnixNano())
 	foreign := repo + "-foreign"

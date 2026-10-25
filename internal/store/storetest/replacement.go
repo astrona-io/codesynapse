@@ -11,7 +11,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
-func replacementContract(t *testing.T, s store.Store) {
+func replacementContract(t *testing.T, s CodeGraph) {
 	ctx := context.Background()
 	original, err := s.Node(ctx, ID(model.KindRepository, Repo))
 	require.NoError(t, err)
