@@ -1,0 +1,43 @@
+package mcpserver
+
+import (
+	"context"
+	"errors"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/astrona-io/codesynapse/internal/gittools"
+)
+
+// The git tools read the developer's checkout, which only the machine it is
+// on can see. The server registers them so every client lists the same tools,
+// and the Claude Code bridge answers them locally and tells the server (tool,
+// size, time; nothing else) so they are counted and audited. A client that
+// calls the server directly gets this error instead of a guess.
+var errGitLocal = errors.New("the git tools read the checkout on your machine: connect through the CodeSynapse bridge (`codesynapse mcp install`, or the Claude Code plugin); the server cannot see your working tree")
+
+func registerGitTools(s *mcp.Server, add func(name, desc string) *mcp.Tool) {
+	local := func(context.Context, *mcp.CallToolRequest, any) (*mcp.CallToolResult, any, error) {
+		return nil, nil, errGitLocal
+	}
+	mcp.AddTool(s, add(gittools.ToolStatus,
+		"git status and git diff --stat in one small answer: branch, head, ahead/behind its upstream, and every changed path (staged, unstaged, untracked) with added/removed lines. Use instead of running git status or git diff --stat."),
+		func(ctx context.Context, r *mcp.CallToolRequest, _ gittools.StatusIn) (*mcp.CallToolResult, any, error) {
+			return local(ctx, r, nil)
+		})
+	mcp.AddTool(s, add(gittools.ToolDiffSummary,
+		"What changed and where, without the patch: per changed file its status, added/removed lines and hunk line ranges with the declaration git names for each (untracked files included). Default is everything uncommitted since HEAD; base compares with the point where the branch left it. Read only those ranges, or pass them on to get_pr_context for symbols, risk and tests. Use instead of git diff."),
+		func(ctx context.Context, r *mcp.CallToolRequest, _ gittools.DiffIn) (*mcp.CallToolResult, any, error) {
+			return local(ctx, r, nil)
+		})
+	mcp.AddTool(s, add(gittools.ToolBlame,
+		"Who last changed lines start..end of a file: one entry per run of lines from the same commit (commit, author, date, subject), uncommitted lines marked. At most 400 lines. Use instead of git blame."),
+		func(ctx context.Context, r *mcp.CallToolRequest, _ gittools.BlameIn) (*mcp.CallToolResult, any, error) {
+			return local(ctx, r, nil)
+		})
+	mcp.AddTool(s, add(gittools.ToolLog,
+		"Recent commits for the repository or a path, one compact entry each: commit, date, author, subject, files and lines changed, the files touched most. Use instead of git log."),
+		func(ctx context.Context, r *mcp.CallToolRequest, _ gittools.LogIn) (*mcp.CallToolResult, any, error) {
+			return local(ctx, r, nil)
+		})
+}
