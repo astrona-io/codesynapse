@@ -5,7 +5,8 @@ type: application
 # The chart version follows the release tag (docs/SAAS.md, 6b).
 version: 0.1.0
 appVersion: "dev"
-home: https://github.com/astrona-io/codesynapse
+home: https://codesynapse.astrona.io/
+icon: https://codesynapse.astrona.io/assets/logo.svg
 sources:
   - https://github.com/astrona-io/codesynapse
 keywords: [code-intelligence, mcp, graph, security]
@@ -16,9 +17,31 @@ annotations:
   artifacthub.io/category: ai-machine-learning
   artifacthub.io/links: |
     - name: Documentation
-      url: https://github.com/astrona-io/codesynapse/tree/main/docs
+      url: https://codesynapse.astrona.io/
+    - name: Getting started
+      url: https://codesynapse.astrona.io/getting-started/
+    - name: Run the stack
+      url: https://codesynapse.astrona.io/operations/running/
+    - name: First run and sign-in
+      url: https://codesynapse.astrona.io/operations/first-run/
+    - name: Accounts and access
+      url: https://codesynapse.astrona.io/operations/accounts-access/
+    - name: Single sign-on
+      url: https://codesynapse.astrona.io/SSO_PLAN/
+    - name: Security model
+      url: https://codesynapse.astrona.io/operations/security-model/
+    - name: Connect Claude Code
+      url: https://codesynapse.astrona.io/operations/claude-code-bridge/
+    - name: Agent guide (MCP tools)
+      url: https://codesynapse.astrona.io/AGENT_GUIDE/
+    - name: Architecture
+      url: https://codesynapse.astrona.io/architecture/
     - name: Upgrading
-      url: https://github.com/astrona-io/codesynapse/blob/main/docs/operations/upgrading.md
+      url: https://codesynapse.astrona.io/operations/upgrading/
+    - name: Release notes
+      url: https://github.com/astrona-io/codesynapse/releases
+    - name: Report an issue
+      url: https://github.com/astrona-io/codesynapse/issues
 dependencies:
   # Helpers for this chart and the stores below.
   - name: common

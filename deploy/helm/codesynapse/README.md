@@ -50,7 +50,7 @@ The steps below do the same by hand.
    helm test codesynapse --kube-context <ctx> --namespace codesynapse
    ```
 
-   Every release publishes the chart at its version, signed like the images (`cosign verify ghcr.io/astrona-io/charts/codesynapse:<X.Y.Z> ...`). To install from a checkout, use `deploy/helm/codesynapse` in place of the `oci://` reference. Upgrades and backups: [docs/operations/upgrading.md](../../../docs/operations/upgrading.md).
+   Every release publishes the chart at its version, signed like the images (`cosign verify ghcr.io/astrona-io/charts/codesynapse:<X.Y.Z> ...`). To install from a checkout, use `deploy/helm/codesynapse` in place of the `oci://` reference. Upgrades and backups: [docs/operations/upgrading.md](https://codesynapse.astrona.io/operations/upgrading/).
 
 3. Open the dashboard and sign in as `admin`. The chart generated its password into the Secret `<release>-admin` (kept across upgrades; `admin.existingSecret` brings your own, `admin.enabled=false` skips it):
 
@@ -120,7 +120,7 @@ With more than one replica, or with autoscaling, a component gets a PodDisruptio
 
 - `api`, `worker` and `mcp` mount the same workspace volume. Spread over several nodes, it needs a ReadWriteMany storage class.
 - Status lookups for annotation jobs (`/annotations/jobs/{id}`) and memory extraction jobs (`/memory/jobs/{id}`) answer only on the API replica that took the job. The work itself is unaffected, and the dashboard doesn't poll them. A durable annotation queue is a follow-up.
-- PostgreSQL, HugeGraph and Milvus run as single instances. Clustered stores are 6d in [docs/SAAS.md](../../../docs/SAAS.md).
+- PostgreSQL, HugeGraph and Milvus run as single instances. Clustered stores are 6d in [docs/SAAS.md](https://codesynapse.astrona.io/SAAS/).
 
 ## Security
 
