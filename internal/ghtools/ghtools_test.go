@@ -128,3 +128,89 @@ func TestCountChecksCapsNames(t *testing.T) {
 	assert.Equal(t, c.Fail, 40)
 	assert.Equal(t, len(c.Failing), MaxNames)
 }
+
+// answer is one canned reply of fakeGHRuns: the text it prints when the
+// arguments match the shell pattern.
+type answer struct{ pattern, text string }
+
+// fakeGHRuns puts a gh on PATH that replies with the first answer whose
+// pattern matches its arguments, and fails on any other call.
+func fakeGHRuns(t *testing.T, answers ...answer) (argsFile string) {
+	t.Helper()
+	dir := t.TempDir()
+	argsFile = filepath.Join(dir, "args")
+	script := "#!/bin/sh\necho \"$@\" >> '" + argsFile + "'\ncase \"$*\" in\n"
+	for i, a := range answers {
+		f := filepath.Join(dir, "a"+string(rune('0'+i)))
+		require.NoError(t, os.WriteFile(f, []byte(a.text), 0o600))
+		script += a.pattern + ") cat '" + f + "';;\n"
+	}
+	script += "*) echo \"unexpected: $*\" >&2; exit 1;;\nesac\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700)) //nolint:gosec // a test double must be executable
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return argsFile
+}
+
+const failedLog = "Go tests and lint\tRun tests\t2026-10-25T10:00:00.1234567Z === RUN   TestX\n" +
+	"Go tests and lint\tRun tests\t2026-10-25T10:00:01.0000000Z --- FAIL: TestX (0.00s)\n" +
+	"Go tests and lint\tRun tests\t2026-10-25T10:00:01.0000000Z     x_test.go:12: got 1, want 2\n" +
+	"Go tests and lint\tRun tests\t2026-10-25T10:00:01.0000000Z --- FAIL: TestX (0.00s)\n" + // repeated
+	"Go tests and lint\tRun tests\t2026-10-25T10:00:02.0000000Z FAIL\tgithub.com/x/y\t0.01s\n" +
+	"Go tests and lint\tRun tests\t2026-10-25T10:00:02.0000000Z \x1b[31mpanic:\x1b[0m boom token=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n" +
+	"Helm chart\tLint\t2026-10-25T10:00:03.0000000Z linting chart\n" +
+	"Helm chart\tLint\t2026-10-25T10:00:04.0000000Z all good here\n" +
+	"Helm chart\tLint\t2026-10-25T10:00:05.0000000Z exit status 2\n" +
+	"Other job\tstep\t2026-10-25T10:00:05.0000000Z error: not for a failed job\n"
+
+const runJSON = `{"workflowName":"CI","jobs":[
+ {"name":"Go tests and lint","conclusion":"failure","steps":[{"name":"Checkout","conclusion":"success"},{"name":"Run tests","conclusion":"failure"}]},
+ {"name":"Helm chart","conclusion":"failure","steps":[{"name":"Lint","conclusion":"failure"}]},
+ {"name":"Other job","conclusion":"success","steps":[]}]}`
+
+func TestFailureByRun(t *testing.T) {
+	args := fakeGHRuns(t, answer{"*--log-failed*", failedLog}, answer{"'run view'*", runJSON})
+	got, err := Failure(t.Context(), t.TempDir(), RunFailureIn{Run: 4242})
+	require.NoError(t, err)
+	assert.Equal(t, got.Run, 4242)
+	assert.Equal(t, got.Workflow, "CI")
+	require.Equal(t, len(got.Failed), 2, "only failed jobs")
+	first := got.Failed[0]
+	assert.Equal(t, first.Job, "Go tests and lint")
+	assert.Equal(t, strings.Join(first.Steps, ","), "Run tests")
+	assert.Equal(t, len(first.Lines), 4, "the error lines, each once, without timestamps")
+	assert.Equal(t, first.Lines[0], "--- FAIL: TestX (0.00s)")
+	assert.False(t, strings.Contains(strings.Join(first.Lines, "\n"), "ghp_abcdefghijklmnopqrstuvwxyz"), "secrets are redacted")
+	assert.False(t, strings.Contains(strings.Join(first.Lines, "\n"), "\x1b"), "colour codes are gone")
+	assert.Equal(t, got.Failed[1].Lines, []string{"linting chart", "all good here", "exit status 2"}, "no error-looking line: the last lines")
+	for _, l := range append(first.Lines, got.Failed[1].Lines...) {
+		assert.False(t, strings.Contains(l, "not for a failed job"))
+	}
+	assert.True(t, strings.Contains(recorded(t, args), "run view 4242 --log-failed"))
+}
+
+func TestFailureLatestRunOfBranch(t *testing.T) {
+	args := fakeGHRuns(t,
+		answer{"'pr view'*", `{"headRefName":"feat/x"}`},
+		answer{"'run list'*", `[{"databaseId":9,"workflowName":"CI","conclusion":"success"},{"databaseId":8,"workflowName":"CI","conclusion":"failure"}]`},
+		answer{"*--log-failed*", failedLog}, answer{"'run view'*", runJSON})
+	got, err := Failure(t.Context(), t.TempDir(), RunFailureIn{})
+	require.NoError(t, err)
+	assert.Equal(t, got.Run, 8, "the newest failed run, not the newest run")
+	assert.True(t, strings.Contains(recorded(t, args), "run list --branch feat/x --limit 10"))
+}
+
+func TestFailureRefusals(t *testing.T) {
+	fakeGHRuns(t, answer{"'pr view'*", `{"headRefName":"--web"}`})
+	_, err := Failure(t.Context(), t.TempDir(), RunFailureIn{})
+	assert.True(t, errors.Is(err, ErrUnavailable), "a branch that reads as an option is not used")
+	for _, in := range []RunFailureIn{{Run: -1}, {Number: -1}, {Number: MaxNumber + 1}} {
+		_, err := Failure(t.Context(), t.TempDir(), in)
+		assert.True(t, errors.Is(err, ErrInvalid), "%+v", in)
+	}
+}
+
+func TestFailureNoFailedJob(t *testing.T) {
+	fakeGHRuns(t, answer{"'run view'*", `{"workflowName":"CI","jobs":[{"name":"a","conclusion":"success"}]}`})
+	_, err := Failure(t.Context(), t.TempDir(), RunFailureIn{Run: 1})
+	assert.True(t, errors.Is(err, ErrUnavailable))
+}

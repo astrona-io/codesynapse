@@ -33,6 +33,7 @@ const (
 	defaultList  = 10
 	MaxNames     = 15 // check names listed per group
 	maxGHOutput  = 4 << 20
+	maxLogBytes  = 8 << 20 // job log read from gh; the answer is far smaller
 	titleLimit   = 120
 	nameLimit    = 80
 	messageLimit = 200
@@ -57,27 +58,41 @@ func safeText(s string, n int) string { return redact.Summary(clip(strings.TrimS
 // gh runs the GitHub CLI in dir. It is a variable so tests can stand in for
 // the binary without touching the network.
 var gh = func(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	out, over, err := runGH(ctx, dir, maxGHOutput, args)
+	if err == nil && over {
+		return nil, fmt.Errorf("%w: answer larger than %d bytes", ErrUnavailable, maxGHOutput)
+	}
+	return out, err
+}
+
+// ghLog is gh for a job log, which can be huge: it keeps the first
+// maxLogBytes and says when it cut the rest.
+func ghLog(ctx context.Context, dir string, args ...string) (out []byte, truncated bool, err error) {
+	return runGH(ctx, dir, maxLogBytes, args)
+}
+
+func runGH(ctx context.Context, dir string, limit int, args []string) ([]byte, bool, error) {
 	bin, err := exec.LookPath("gh")
 	if err != nil {
-		return nil, fmt.Errorf("%w: the GitHub CLI (gh) is not installed", ErrUnavailable)
+		return nil, false, fmt.Errorf("%w: the GitHub CLI (gh) is not installed", ErrUnavailable)
 	}
 	cmd := exec.CommandContext(ctx, bin, args...) //nolint:gosec // a looked-up binary with a fixed argument list
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GH_PROMPT_DISABLED=1", "NO_COLOR=1", "GH_PAGER=cat", "GH_NO_UPDATE_NOTIFIER=1", "GH_SPINNER_DISABLED=1", "GH_FORCE_TTY=")
 	var out, errb limitedBuffer
-	out.max, errb.max = maxGHOutput, 4096
+	out.max, errb.max = limit, 4096
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, false, ctx.Err()
 		}
-		msg, _, _ := strings.Cut(strings.TrimSpace(errb.String()), "\n")
-		return nil, fmt.Errorf("%w: %s", ErrUnavailable, safeText(msg, messageLimit))
+		// Reading stops once the cap is hit, so a killed pipe is not a failure.
+		if !out.over {
+			msg, _, _ := strings.Cut(strings.TrimSpace(errb.String()), "\n")
+			return nil, false, fmt.Errorf("%w: %s", ErrUnavailable, safeText(msg, messageLimit))
+		}
 	}
-	if out.over {
-		return nil, fmt.Errorf("%w: answer larger than %d bytes", ErrUnavailable, maxGHOutput)
-	}
-	return out.Bytes(), nil
+	return out.Bytes(), out.over, nil
 }
 
 // limitedBuffer keeps at most max bytes and notes when more arrived.

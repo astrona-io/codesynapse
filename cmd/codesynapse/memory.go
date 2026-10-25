@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -151,6 +153,9 @@ func (c apiClient) executionContext(ctx context.Context, primary, parent string)
 	return execution.With(ctx, id)
 }
 
+// errNoRepo means the directory's repository is not indexed in CodeSynapse.
+var errNoRepo = errors.New("no indexed repository matches")
+
 // resolveRepo finds the CodeSynapse repository name of dir: the indexed
 // repository with the same origin remote, else one named like the directory.
 func (c apiClient) resolveRepo(ctx context.Context, dir string) (string, error) {
@@ -175,7 +180,7 @@ func (c apiClient) resolveRepo(ctx context.Context, dir string) (string, error) 
 			return r.Name, nil
 		}
 	}
-	return "", fmt.Errorf("no indexed repository matches %s; index it first or pass --repo", dir)
+	return "", fmt.Errorf("%w %s; index it first or pass --repo", errNoRepo, dir)
 }
 
 func memoryCmd(ec *app.Env) *cobra.Command {
@@ -219,6 +224,11 @@ type recallOptions struct {
 	hook   bool
 	// event is the hook event being answered, set by recall.
 	event string
+	// source is why the session started (startup, resume, compact).
+	source string
+	// skipped is set when recall chose not to look anything up (a prompt
+	// with nothing worth recalling), so the hook says nothing.
+	skipped bool
 }
 
 func (o *recallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -239,20 +249,101 @@ func (o *recallOptions) Run(ctx context.Context, _ *app.Env) error {
 		// A hook must never break the session: report on stderr, exit 0.
 		if err != nil {
 			logx.FromContext(ctx).Warn("memory recall skipped", logx.Error(err))
-			return nil
 		}
-		if text == "" {
-			return nil
-		}
-		return json.NewEncoder(o.EC.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]any{
-			"hookEventName": cmp.Or(o.event, "SessionStart"), "additionalContext": text,
-		}})
+		note, modelNote := recallNote(o.event, o.source, o.skipped, text, err, o.apiURL)
+		return hookReply(o.EC.Stdout, cmp.Or(o.event, "SessionStart"), note, cmp.Or(text, modelNote))
 	}
 	if err != nil {
 		return err
 	}
 	_, err = io.WriteString(o.EC.Stdout, cmp.Or(text, "No facts saved yet.\n"))
 	return err
+}
+
+// recallNote says what a recall did: the first for the person in the chat,
+// the second, only when memory is off, for the model so it does not rely on
+// recall_context. Prompt recalls stay quiet unless they added facts, so a
+// busy chat is not flooded.
+func recallNote(event, source string, skipped bool, text string, err error, apiURL string) (note, modelNote string) {
+	if skipped {
+		return "", ""
+	}
+	n := countFacts(text)
+	switch {
+	case err != nil:
+		if event == eventPrompt {
+			return "", ""
+		}
+		note = "CodeSynapse memory is off: " + failureReason(err, apiURL)
+		if errors.Is(err, errNoRepo) {
+			return note, "CodeSynapse memory is off for this repository (not indexed); recall_context and offload_turns have nothing to use."
+		}
+		return note, ""
+	case event == eventPrompt:
+		if n == 0 {
+			return "", ""
+		}
+		return fmt.Sprintf("CodeSynapse memory: %s added for this prompt", plural(n, "fact")), ""
+	case n == 0:
+		return "CodeSynapse memory: nothing saved yet for this chat", ""
+	case source == "compact":
+		return fmt.Sprintf("CodeSynapse memory: %s restored after the compaction", plural(n, "fact")), ""
+	}
+	return fmt.Sprintf("CodeSynapse memory: %s recalled", plural(n, "fact")), ""
+}
+
+// failureReason is one short line about why a memory hook did nothing.
+func failureReason(err error, apiURL string) string {
+	var netErr net.Error
+	switch {
+	case errors.Is(err, errNoRepo):
+		return "this repository is not indexed in CodeSynapse. Add it in the dashboard (Import) to turn memory on."
+	case errors.Is(err, execution.ErrMissing), errors.Is(err, execution.ErrConflict):
+		return "Claude Code gave no usable session id."
+	case errors.As(err, &netErr), errors.Is(err, syscall.ECONNREFUSED):
+		return "the CodeSynapse API is not reachable at " + apiURL + "."
+	}
+	msg := err.Error()
+	if len(msg) > 140 {
+		msg = msg[:140] + "…"
+	}
+	return msg
+}
+
+// countFacts counts the fact lines of a rendered recall.
+func countFacts(text string) int {
+	n := 0
+	for _, l := range strings.Split(text, "\n") {
+		if strings.HasPrefix(l, "- ") && !strings.HasPrefix(l, "- …") {
+			n++
+		}
+	}
+	return n
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return "1 " + word
+	}
+	return fmt.Sprintf("%d %ss", n, word)
+}
+
+// hookReply writes a hook's answer. note is shown to the person in the chat
+// (systemMessage, no model tokens); context goes to the model. Either may be
+// empty; with both empty nothing is printed. CODESYNAPSE_HOOK_QUIET=true
+// drops the note.
+func hookReply(w io.Writer, event, note, context string) error {
+	out := map[string]any{}
+	if note != "" && os.Getenv("CODESYNAPSE_HOOK_QUIET") != "true" {
+		out["systemMessage"] = note
+	}
+	if context != "" {
+		out["hookSpecificOutput"] = map[string]any{"hookEventName": event, "additionalContext": context}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return json.NewEncoder(w).Encode(out)
 }
 
 func (o *recallOptions) recall(ctx context.Context) (string, error) {
@@ -263,7 +354,7 @@ func (o *recallOptions) recall(ctx context.Context) (string, error) {
 	if o.hook {
 		in = readHook(o.EC.Stdin)
 		primary, parent = in.SessionID, in.SessionID
-		o.event = in.EventName
+		o.event, o.source = in.EventName, in.Source
 		if in.Cwd != "" {
 			dir = in.Cwd
 		}
@@ -271,6 +362,7 @@ func (o *recallOptions) recall(ctx context.Context) (string, error) {
 	prompt := o.event == eventPrompt
 	if prompt && (!autoRecall() || !worthRecalling(in.Prompt)) {
 		// Nothing to look up: no API call, no context.
+		o.skipped = true
 		return "", nil
 	}
 	if prompt {
@@ -343,6 +435,8 @@ type offloadOptions struct {
 	transcript string
 	keep       int
 	hook       bool
+	// note is what the hook tells the person in the chat about this run.
+	note string
 }
 
 func (o *offloadOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -369,10 +463,18 @@ func (o *offloadOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
 	n, err := o.offload(ctx)
 	if o.hook {
+		note := o.note
 		if err != nil {
 			logx.FromContext(ctx).Warn("memory offload skipped", logx.Error(err))
+			note = "CodeSynapse memory: offload before the compaction failed: " + failureReason(err, o.apiURL)
+			if errors.Is(err, errNoRepo) {
+				note = "CodeSynapse memory is off, so nothing was offloaded: " + failureReason(err, o.apiURL)
+			}
+			if n > 0 {
+				note = fmt.Sprintf("CodeSynapse memory: %s offloaded, then the offload failed: %s", plural(n, "older turn"), failureReason(err, o.apiURL))
+			}
 		}
-		return nil
+		return hookReply(o.EC.Stdout, "PreCompact", note, "")
 	}
 	if err != nil {
 		return err
@@ -407,6 +509,10 @@ func (o *offloadOptions) offload(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	older := agentcfg.OlderThanWindow(turns, o.keep)
+	if len(older) == 0 {
+		o.note = fmt.Sprintf("CodeSynapse memory: nothing to offload yet, the chat is within the last %d exchanges that stay in context", o.keep)
+		return 0, nil
+	}
 	// Only turns not sent before: a session is compacted more than once.
 	// Jobs run in the background, so first learn how earlier ones ended; a
 	// failed job rewinds to its first turn and those turns are sent again.
@@ -417,6 +523,7 @@ func (o *offloadOptions) offload(ctx context.Context) (int, error) {
 	st.settle(func(id string) string { return c.jobState(ctx, id) })
 	if st.sent() >= len(older) {
 		st.save()
+		o.note = fmt.Sprintf("CodeSynapse memory: the %d older turns were already offloaded", len(older))
 		return 0, nil
 	}
 	repo := o.repo
@@ -425,7 +532,7 @@ func (o *offloadOptions) offload(ctx context.Context) (int, error) {
 			return 0, err
 		}
 	}
-	sent := 0
+	sent, jobs := 0, 0
 	for _, chunk := range offloadChunks(older[st.sent():]) {
 		var job struct {
 			ID string `json:"id"`
@@ -437,8 +544,10 @@ func (o *offloadOptions) offload(ctx context.Context) (int, error) {
 		}
 		st.add(job.ID, len(chunk))
 		sent += len(chunk)
+		jobs++
 	}
 	st.save()
+	o.note = fmt.Sprintf("CodeSynapse memory: %s offloaded in %s for %s; a local model extracts the facts in the background", plural(sent, "older turn"), plural(jobs, "job"), repo)
 	return sent, nil
 }
 

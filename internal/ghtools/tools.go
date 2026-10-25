@@ -14,10 +14,11 @@ import (
 const (
 	ToolPRStatus = "gh_pr_status"
 	ToolPRList   = "gh_pr_list"
+	ToolRunFail  = "gh_run_failure"
 )
 
 // Tools lists them.
-var Tools = []string{ToolPRStatus, ToolPRList}
+var Tools = []string{ToolPRStatus, ToolPRList, ToolRunFail}
 
 // PRStatusIn is gh_pr_status's input.
 type PRStatusIn struct {
@@ -99,6 +100,12 @@ func Run(ctx context.Context, dir, tool string, args json.RawMessage) (any, erro
 			return nil, err
 		}
 		return List(ctx, dir, in)
+	case ToolRunFail:
+		var in RunFailureIn
+		if err := decode(&in); err != nil {
+			return nil, err
+		}
+		return Failure(ctx, dir, in)
 	}
 	return nil, fmt.Errorf("%w: unknown tool %q", ErrInvalid, tool)
 }

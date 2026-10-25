@@ -92,7 +92,7 @@ var instructionRules = [][]clause{
 		{[]string{"docs"}, `get_config_entries and get_doc_section read YAML and Markdown structure without opening the files;`},
 	},
 	{
-		{[]string{"git"}, `Git: instead of running git status, git diff, git blame or git log, and then opening files to understand them, call git_status for where the checkout stands, git_diff_summary for what changed and in which line ranges, git_blame for who last changed some lines and git_log for recent commits. Instead of gh pr view, gh pr checks or gh pr list, call gh_pr_status (state, mergeability, review decision, checks counted with only the failing and waiting ones named) and gh_pr_list. They answer in a few lines and are served by the Claude Code bridge on your machine.`},
+		{[]string{"git"}, `Git: instead of running git status, git diff, git blame or git log, and then opening files to understand them, call git_status for where the checkout stands, git_diff_summary for what changed and in which line ranges, git_blame for who last changed some lines and git_log for recent commits. Instead of gh pr view, gh pr checks or gh pr list, call gh_pr_status (state, mergeability, review decision, checks counted with only the failing and waiting ones named) and gh_pr_list, and gh_run_failure for why a CI run failed (the failed jobs, steps and error lines) instead of reading gh run view --log-failed. They answer in a few lines and are served by the Claude Code bridge on your machine.`},
 	},
 	{
 		{[]string{"reviews"}, `Reviews: when asked to review code, analyse it with get_pr_context.`},

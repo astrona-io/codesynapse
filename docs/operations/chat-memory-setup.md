@@ -131,6 +131,24 @@ Do this once in a chat on an indexed repository:
 3. Wait about 30 seconds, then list the jobs with the `curl` from step 3 (use the chat's own session ID, or the Agent memory page). `"state":"succeeded"` with `"saved"` above zero means the chat was offloaded.
 4. In the compacted chat, ask: *"Use recall_context to find what we decided earlier."* The answer should name facts from before the compaction.
 
+## What the hooks tell you
+
+The memory hooks say what they did in one line in the chat, so a silent failure cannot hide. These lines are for you: they cost the model no tokens.
+
+| Line | Meaning |
+|---|---|
+| `CodeSynapse memory: 12 facts recalled` | A new chat got the facts saved for it |
+| `… 12 facts restored after the compaction` | The chat was compacted and its facts came back |
+| `… 2 facts added for this prompt` | Facts that matched your prompt were added (no line when none matched) |
+| `… nothing saved yet for this chat` | The memory is empty, which is normal early in a chat |
+| `… 120 older turns offloaded in 2 jobs for <repo>` | The compaction handed turns to the local model; the facts appear within minutes |
+| `… nothing to offload yet, the chat is within the last 10 exchanges` | The chat is too short to have turns older than the window |
+| `… the 120 older turns were already offloaded` | An earlier compaction sent them |
+| `CodeSynapse memory is off: this repository is not indexed …` | Add the repository in the dashboard (Import). The model is told too, so it does not call `recall_context` |
+| `CodeSynapse memory is off: the CodeSynapse API is not reachable at …` | The stack is not running or the URL is wrong |
+
+Set `CODESYNAPSE_HOOK_QUIET=true` to hide the lines. Older CLI versions say nothing: upgrade `codesynapse` to get them. `CODESYNAPSE_HOOK_TRACE=chat` additionally shows one line for every other hook.
+
 ## Everyday use
 
 You do not run anything. When a chat compacts, the hook offloads first and the new context starts with the facts that match what you were doing; later prompts get matching facts added. `recall_context` stays for questions beyond this chat, with `memory_scope: "repository"`.
