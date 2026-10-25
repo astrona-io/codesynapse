@@ -2,7 +2,9 @@ package sessionmemory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -69,5 +71,37 @@ func TestRetainedQuota(t *testing.T) {
 			}
 			assert.True(t, errors.Is(CheckQuota(rows, next, now), ErrLimit))
 		})
+	}
+}
+
+func TestFullDocumentDropsOldestFacts(t *testing.T) {
+	scope := Scope{TenantID: "org-a", SessionID: "chat-a", Namespace: "org-a|repo"}
+	now := time.Now()
+	d := Document{}
+	var err error
+	for batch := range 40 {
+		triples := make([]memory.Triple, 0, 10)
+		for i := range 10 {
+			triples = append(triples, memory.Triple{
+				Subject:   fmt.Sprintf("module number %d of batch %d", i, batch),
+				Predicate: "DEPENDS_ON",
+				Object:    fmt.Sprintf("component %d of batch %d with a longer name", i, batch),
+			})
+		}
+		d, err = Apply(d, scope, triples, "test", now.Add(time.Hour), now.Add(time.Duration(batch)*time.Second))
+		require.NoError(t, err, "batch %d", batch)
+		b, err := json.Marshal(d)
+		require.NoError(t, err)
+		assert.True(t, len(b) <= MaxDocumentBytes, "document stays within its cap")
+		require.NoError(t, CheckDocument(d, scope, now))
+	}
+	names := map[string]bool{}
+	for _, e := range d.Graph.Entities {
+		names[e.Name] = true
+	}
+	assert.True(t, names["module number 0 of batch 39"], "newest facts are kept")
+	assert.False(t, names["module number 0 of batch 0"], "oldest facts were dropped")
+	for _, f := range d.Graph.Facts {
+		assert.True(t, f.Current())
 	}
 }
