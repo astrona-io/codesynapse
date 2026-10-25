@@ -8,6 +8,7 @@ import "context"
 const (
 	StepRules        = "session_start.rules"    // ruleset added to a new chat
 	StepRecallFacts  = "session_start.recall"   // facts added to a new chat
+	StepRecallHook   = "hook.recall"            // facts a hook looked up by meaning (after a compaction, on a prompt)
 	StepOffloadQueue = "precompact.offload"     // older turns leaving the chat
 	StepExtract      = "offload.extract"        // one local-model call over a batch of turns
 	StepEmbedQuery   = "recall_context.embed"   // one local embedding of a question
@@ -24,7 +25,7 @@ const (
 )
 
 var flowSteps = map[string]bool{
-	StepRules: true, StepRecallFacts: true, StepOffloadQueue: true,
+	StepRules: true, StepRecallFacts: true, StepRecallHook: true, StepOffloadQueue: true,
 	StepExtract: true, StepEmbedQuery: true, StepEmbedIndex: true,
 }
 
