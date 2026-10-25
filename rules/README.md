@@ -1,6 +1,6 @@
 # Security rules
 
-One YAML file per rule. `code/` holds rules for source code (Go, Python, JavaScript, TypeScript, Vue); `config/` holds rules for Kubernetes manifests, compose files, GitHub Actions and dependency update automation.
+One YAML file per rule. `code/` holds rules for source code (Go, Python, JavaScript, TypeScript, Vue); `config/` holds rules for Kubernetes manifests, compose files, GitHub Actions, Dockerfiles and dependency update automation.
 
 These files are the single source of truth for everything a person reads about a rule: the title and severity in reports, the "why it matters" and "how to fix" text, and the vulnerable → fixed examples on the Security page, in `codesynapse audit`, and in the `rule_guide` MCP tool. They are embedded into the binaries at build time.
 
@@ -11,6 +11,7 @@ The detection logic lives in Go next to the parser for each language:
 | Go | `internal/ingest/golang/findings.go` |
 | Python, JavaScript, TypeScript, Vue | `internal/ingest/lang/rules.go` |
 | YAML (Kubernetes, compose, GitHub Actions) | `internal/ingest/config/yaml.go` |
+| Dockerfile, Containerfile | `internal/ingest/config/dockerfile.go` (ids listed in `yaml.go`) |
 | Dependency update automation (Renovate, Dependabot) | `internal/ingest/config/renovate.go` (ids listed in `yaml.go`) |
 
 ## Fields

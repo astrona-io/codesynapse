@@ -162,12 +162,13 @@ func TestYAMLRepositoryIsGradedWithCoverage(t *testing.T) {
 	assert.Equal(t, rep.Coverage.HelmScanned, 1)
 	joined := strings.Join(append(rep.Checked, rep.NotChecked...), "\n")
 	assert.True(t, strings.Contains(joined, "1 of 1 Helm template(s)"), joined)
-	assert.True(t, strings.Contains(joined, "1 Dockerfile file(s): no rules yet"), joined)
+	assert.True(t, strings.Contains(joined, "1 Dockerfile(s)"), joined)
+	assert.False(t, strings.Contains(joined, "no rules yet"), joined)
 
 	var md strings.Builder
 	require.NoError(t, WriteMarkdown(&md, rep))
 	assert.True(t, strings.Contains(md.String(), "Indexed at commit `a82019c0ff`"))
-	assert.True(t, strings.Contains(md.String(), "**Not checked (review by hand):**"))
+	assert.True(t, strings.Contains(md.String(), "**What was checked:**"))
 }
 
 func TestNothingScannableIsNotApplicable(t *testing.T) {

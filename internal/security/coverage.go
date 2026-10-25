@@ -29,6 +29,8 @@ type Coverage struct {
 	Kubernetes int `json:"kubernetes,omitempty"`
 	Workflows  int `json:"workflows,omitempty"`
 	Compose    int `json:"compose,omitempty"`
+	// Dockerfiles counts the Dockerfiles and Containerfiles read.
+	Dockerfiles int `json:"dockerfiles,omitempty"`
 	// HelmScanned of HelmTotal chart templates rendered to literal YAML the
 	// rules could read.
 	HelmScanned int `json:"helm_scanned,omitempty"`
@@ -56,6 +58,10 @@ func CoverageOf(g *model.Graph, notCovered map[string]int) Coverage {
 			}
 			c.Code[lang]++
 		case model.KindConfig:
+			if n.Language == "dockerfile" {
+				c.Dockerfiles++
+				continue
+			}
 			if strings.HasPrefix(n.Summary, "unparseable YAML") {
 				c.YAMLUnparseable++
 			} else {
@@ -108,7 +114,7 @@ func (c Coverage) Scannable() bool {
 	for _, n := range c.Code {
 		code += n
 	}
-	return code > 0 || c.YAML > 0 || c.HelmScanned > 0 || c.Dependencies > 0
+	return code > 0 || c.YAML > 0 || c.Dockerfiles > 0 || c.HelmScanned > 0 || c.Dependencies > 0
 }
 
 // Lines words the coverage as what was checked and what was not.
@@ -127,6 +133,9 @@ func (c Coverage) Lines() (checked, notChecked []string) {
 	}
 	if c.Compose > 0 {
 		checked = append(checked, fmt.Sprintf("%d Compose file(s)", c.Compose))
+	}
+	if c.Dockerfiles > 0 {
+		checked = append(checked, fmt.Sprintf("%d Dockerfile(s)", c.Dockerfiles))
 	}
 	if c.HelmTotal > 0 {
 		checked = append(checked, fmt.Sprintf("%d of %d Helm template(s)", c.HelmScanned, c.HelmTotal))
@@ -178,11 +187,8 @@ func EncodeCoverage(c Coverage) (string, error) {
 
 // uncovered maps file names and extensions without rules to a display kind.
 var (
-	uncoveredNames = map[string]string{"Dockerfile": "Dockerfile", "Containerfile": "Dockerfile"}
-	uncoveredExts  = map[string]string{
-		".tf": "Terraform", ".sh": "Shell", ".bash": "Shell", ".java": "Java", ".kt": "Kotlin",
-		".cs": "C#", ".rb": "Ruby", ".php": "PHP", ".rs": "Rust", ".c": "C", ".cpp": "C++",
-		".swift": "Swift",
+	uncoveredExts = map[string]string{
+		".tf": "Terraform", ".sh": "Shell", ".bash": "Shell", ".c": "C", ".cpp": "C++", ".swift": "Swift",
 	}
 	skipInventory = map[string]bool{
 		".git": true, "node_modules": true, "vendor": true, ".nuxt": true, ".output": true,
@@ -215,13 +221,6 @@ func Inventory(root string, policies ...*repoconfig.Policy) map[string]int {
 			return nil
 		}
 		name := d.Name()
-		if kind, ok := uncoveredNames[name]; ok || strings.HasPrefix(name, "Dockerfile.") {
-			if !ok {
-				kind = "Dockerfile"
-			}
-			out[kind]++
-			return nil
-		}
 		if kind, ok := uncoveredExts[strings.ToLower(filepath.Ext(name))]; ok {
 			out[kind]++
 		}

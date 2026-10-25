@@ -39,7 +39,7 @@ Each rule is a readable YAML file (title, severity, CWE, why, fix, vulnerable to
 ## Finding categories
 
 - **Code:** shell and command injection, SQL/Cypher from strings, disabled TLS verification, old TLS, weak hashes and ciphers, hardcoded credentials, `template.HTML` from variables, HTTP servers/clients without timeouts, request-derived paths and URLs, unbounded bodies, world-writable files, unverified JWTs, `unsafe`.
-- **Configuration:** privileged pods, privilege escalation, host namespaces, `hostPath`, root users, dangerous capabilities, unpinned images, literal secrets, GitHub Actions script injection, `pull_request_target` checkouts, unpinned third-party actions, privileged compose services.
+- **Configuration:** privileged pods, privilege escalation, host namespaces, `hostPath`, root users, dangerous capabilities, unpinned images, literal secrets, GitHub Actions script injection, `pull_request_target` checkouts, unpinned third-party actions, privileged compose services; in Dockerfiles and Containerfiles, a final stage that runs as root (following the stages it builds on, nonroot base images excepted), `ADD` from a URL without `--checksum`, a download piped into a shell, an unpinned base image and a literal secret in `ENV` or `ARG` (the variable is named, its value never stored).
 - **Update automation:** manifests but no Renovate or Dependabot; Renovate configs that are broken, disabled, automerge without `minimumReleaseAge`, or leave actions and images unpinned.
 - **Dependencies:** known CVEs with fixed version and reachability.
 
@@ -139,6 +139,7 @@ steps:
 | Python | structural parser, imports, `self.` calls | pytest files/functions | shell, eval, pickle/yaml, SQL, TLS, JWT, secrets, debug | requirements*.txt, poetry.lock, uv.lock, Pipfile.lock |
 | JavaScript / TypeScript / Vue | structural parser, ES imports/require, `this.` calls | `*.test.*`, `*.spec.*`, `__tests__` | child_process, eval, DOM XSS, `v-html`, SQL, TLS, JWT, secrets, redirects | package-lock.json, yarn.lock, pnpm-lock.yaml |
 | YAML, Helm, Go templates | resources, key paths, `include`/`.Values` links | – | Kubernetes, compose, GitHub Actions, Renovate/Dependabot | – |
+| Dockerfile, Containerfile | stages and base images (continuations, `# escape=`, heredocs) | – | root user, `ADD` from URLs, `curl \| sh`, unpinned base, secrets in `ENV`/`ARG` | – |
 
 Non-Go call edges are name-based (imports, enclosing class, names unique in the repo), so they can miss dynamic dispatch; Go keeps exact type-checked edges. Parsers are pure Go: no cgo, static binaries.
 

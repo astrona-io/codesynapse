@@ -236,14 +236,25 @@ var RuleIDs = []string{
 	"renovate-vulnerability-alerts-off",
 	"renovate-automerge-no-release-age",
 	"renovate-no-digest-pinning",
+	"dockerfile-root-user",
+	"dockerfile-add-url",
+	"dockerfile-curl-pipe-shell",
+	"dockerfile-image-unpinned",
+	"dockerfile-secret-in-env",
 }
 
 func (b *builder) report(rel, ownerID, ruleID string, line int, detail string) {
+	b.reportIn(rel, ownerID, ruleID, line, detail, "")
+}
+
+// reportIn reports a finding whose language the file name does not tell
+// (the fix examples to show are chosen by it).
+func (b *builder) reportIn(rel, ownerID, ruleID string, line int, detail, language string) {
 	r := rules.MustGet(ruleID)
 	id := b.id(model.KindFinding, fmt.Sprintf("%s:%d:%s", rel, line, ruleID))
 	b.g.AddNode(model.Node{
 		ID: id, Kind: model.KindFinding, Repo: b.repo, Name: r.Title, Rule: r.ID, Severity: r.Severity, CWE: r.CWE,
-		File: rel, StartLine: line, EndLine: line, Summary: redact.Summary(detail+". "+r.Fix, 300),
+		File: rel, StartLine: line, EndLine: line, Language: language, Summary: redact.Summary(detail+". "+r.Fix, 300),
 	})
 	b.g.AddEdge(model.Edge{From: ownerID, To: id, Kind: model.EdgeHasFinding})
 }

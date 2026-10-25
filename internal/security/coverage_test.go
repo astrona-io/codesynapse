@@ -22,16 +22,16 @@ func TestInventory(t *testing.T) {
 	write("scripts/run.SH")
 	write("node_modules/pkg/Dockerfile")
 	write("testdata/x.tf")
+	write("src/Main.java")
 
 	outside := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(outside, "evil.tf"), []byte("x"), 0o600))
 	require.NoError(t, os.Symlink(outside, filepath.Join(root, "link")))
 
 	got := Inventory(root)
-	assert.Equal(t, got["Dockerfile"], 2)
 	assert.Equal(t, got["Terraform"], 1)
 	assert.Equal(t, got["Shell"], 1)
-	assert.Equal(t, len(got), 3)
+	assert.Equal(t, len(got), 2, "Dockerfiles and Java have rules")
 }
 
 func TestCoverageLines(t *testing.T) {

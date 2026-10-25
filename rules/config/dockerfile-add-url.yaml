@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../schema.json
+id: dockerfile-add-url
+title: ADD downloads a URL without a checksum
+severity: medium
+cwe: [CWE-494]
+category: config
+languages: [dockerfile]
+why: ADD with a URL puts whatever that server returns at build time into the image; a compromised or changed download goes in unnoticed.
+fix: Pin the download with ADD --checksum=sha256:<digest>, or fetch and verify it in a RUN step.
+references:
+  - https://cwe.mitre.org/data/definitions/494.html
+  - https://docs.docker.com/reference/dockerfile/#add---checksum
+examples:
+  - language: dockerfile
+    vulnerable: ADD https://example.com/tool.tar.gz /opt/
+    fixed: ADD --checksum=sha256:24454f830cdb571e2c4ad15481119c43b3cafd48dd869a9b2945d1036d1dc68d https://example.com/tool.tar.gz /opt/
