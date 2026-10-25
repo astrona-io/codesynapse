@@ -3,6 +3,7 @@ package recall
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/memory"
@@ -84,9 +85,11 @@ func (s *Service) sessionNearest(ctx context.Context, st store.SessionMemoryStor
 	ctx, cancel := context.WithTimeout(ctx, vectorTimeout)
 	defer cancel()
 	vecs, err := s.LLM.Embed(ctx, name, []string{query})
+	telemetry.RecordStep(ctx, telemetry.StepEmbedQuery, err == nil)
 	if err != nil {
 		return nil, err
 	}
+	telemetry.RecordStepTokens(ctx, telemetry.StepEmbedQuery, telemetry.KindModelIn, telemetry.EstimateTokens(len(query)))
 	if len(vecs) != 1 {
 		return nil, errors.New("embedding response has the wrong vector count")
 	}
@@ -141,9 +144,11 @@ func (s *Service) IndexSession(ctx context.Context, scope sessionmemory.Scope, a
 			names[i] = e.Name
 		}
 		vecs, err := s.LLM.Embed(ctx, name, names)
+		telemetry.RecordStep(ctx, telemetry.StepEmbedIndex, err == nil)
 		if err != nil {
 			return err
 		}
+		telemetry.RecordStepTokens(ctx, telemetry.StepEmbedIndex, telemetry.KindModelIn, telemetry.EstimateTokens(len(strings.Join(names, " "))))
 		if len(vecs) != len(batch) {
 			return errors.New("embedding response has the wrong vector count")
 		}
