@@ -98,7 +98,7 @@ These came out of real compactions and are the first things to improve.
 | The input budget counts request bytes as tokens, so 13 312 "tokens" is about 13 KB, or roughly 3 300 real tokens | A batch holds about a quarter of what the model could read, so there are about four times too many calls | Count bytes ÷ 4, or use the provider's tokenizer, for the local route only |
 | The entity list in every prompt grows after each batch (limit 200 names) | A later batch could overflow the budget (fixed: batches are now sized against the current list) | Send only names that occur in the batch |
 | One session and repository keep one 24 KB document | Long chats filled it and every later job failed with `session memory capacity exceeded` (fixed: a full document now drops replaced and then the oldest facts to make room) | Merge facts about the same entity before saving |
-| `model answer has an unterminated JSON object` | The model's answer was cut or malformed; nothing from that batch is saved | Retry once with a smaller batch |
+| `model answer has an unterminated JSON object` | The model's answer was cut off. Fixed: the triples finished before the cut are kept; the job fails only when none were finished | Retry once with a smaller batch when nothing could be kept |
 | The older v0.0.7 hook sends all turns every time | Duplicate jobs for the same turns | Upgrade the CLI (the new client remembers what succeeded) |
 
 ## What is measured

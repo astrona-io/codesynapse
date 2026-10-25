@@ -118,23 +118,36 @@ type Result struct {
 	Triples []memory.Triple
 	// Dropped counts triples rejected by validation or the threshold.
 	Dropped int
+	// Truncated is set when the answer was cut off and only its finished
+	// triples were kept.
+	Truncated bool
 }
 
 // Parse reads the model's answer. It finds the outermost JSON object (models
 // wrap answers in prose or code fences), keeps triples that validate and
 // reach minConfidence, and caps the result at memory.MaxTriplesPerCall.
 func Parse(answer string, minConfidence float64) (Result, error) {
-	raw, err := outerObject(answer)
-	if err != nil {
-		return Result{}, err
-	}
 	var out struct {
 		Triples []json.RawMessage `json:"triples"`
 	}
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return Result{}, fmt.Errorf("model answer is not the expected JSON: %w", err)
-	}
 	var res Result
+	raw, err := outerObject(answer)
+	switch {
+	case err == nil:
+		if err := json.Unmarshal([]byte(raw), &out); err != nil {
+			return Result{}, fmt.Errorf("model answer is not the expected JSON: %w", err)
+		}
+	case errors.Is(err, errUnterminated):
+		// A cut-off answer still holds the triples written before the cut;
+		// keep those instead of losing the whole batch.
+		out.Triples = completeTriples(answer)
+		if len(out.Triples) == 0 {
+			return Result{}, err
+		}
+		res.Truncated = true
+	default:
+		return Result{}, err
+	}
 	for _, item := range out.Triples {
 		var t memory.Triple
 		if json.Unmarshal(item, &t) != nil || len(res.Triples) == memory.MaxTriplesPerCall {
@@ -181,7 +194,51 @@ func outerObject(s string) (string, error) {
 			}
 		}
 	}
-	return "", errors.New("model answer has an unterminated JSON object")
+	return "", errUnterminated
+}
+
+var errUnterminated = errors.New("model answer has an unterminated JSON object")
+
+// completeTriples returns the finished {...} items of the "triples" array in an
+// answer that was cut off before its closing brackets.
+func completeTriples(s string) []json.RawMessage {
+	i := strings.Index(s, `"triples"`)
+	if i < 0 {
+		return nil
+	}
+	open := strings.IndexByte(s[i:], '[')
+	if open < 0 {
+		return nil
+	}
+	i += open
+	var items []json.RawMessage
+	depth, start, inStr, esc := 0, -1, false, false
+	for j := i + 1; j < len(s); j++ {
+		c := s[j]
+		switch {
+		case esc:
+			esc = false
+		case inStr && c == '\\':
+			esc = true
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+		case c == '{':
+			if depth == 0 {
+				start = j
+			}
+			depth++
+		case c == '}':
+			depth--
+			if depth == 0 && start >= 0 {
+				items = append(items, json.RawMessage(s[start:j+1]))
+				start = -1
+			}
+		case c == ']' && depth == 0:
+			return items
+		}
+	}
+	return items
 }
 
 // zeroTime is only used to validate triples; timestamps are set on save.
