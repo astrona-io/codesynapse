@@ -9,6 +9,7 @@ on:
       - 'deploy/helm/**'
       - '.github/workflows/chart-e2e.yml'
       - '.github/scripts/check-chart.sh'
+      - '.github/scripts/keda-scale.sh'
       - '.github/scripts/postgres-failover.sh'
       - '.github/scripts/milvus-failover.sh'
       - 'internal/vector/milvus/**'
@@ -44,6 +45,8 @@ jobs:
           cluster_name: codesynapse-dev
       - name: Build, load, install and test
         run: just chart-e2e
+      - name: KEDA scales the workers
+        run: just chart-scale-keda
       - name: PostgreSQL failover
         run: just chart-failover-postgres
       - name: Milvus failover
