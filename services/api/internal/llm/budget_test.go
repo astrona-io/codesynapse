@@ -221,3 +221,18 @@ func FuzzPromptPreflight(f *testing.F) {
 		}
 	})
 }
+
+func TestBytesPerTokenScalesTheEstimate(t *testing.T) {
+	cfg := ProviderConfig{Name: "p", Kind: KindOpenAI, Model: "m", MaxOutputTokens: 100, MaxInputTokens: 100000}
+	req := Request{System: "s", User: strings.Repeat("word ", 400)}
+	base, err := requestByteCounter{}.Count(t.Context(), cfg, req)
+	require.NoError(t, err)
+	assert.Equal(t, base.Tokens, base.Bytes, "default counts one byte as one token")
+	cfg.BytesPerToken = 3
+	three, err := requestByteCounter{}.Count(t.Context(), cfg, req)
+	require.NoError(t, err)
+	assert.Equal(t, three.Bytes, base.Bytes)
+	assert.Equal(t, three.Tokens, (base.Bytes+2)/3)
+	cfg.BytesPerToken = 9
+	assert.Error(t, validateBudgetConfig(cfg))
+}

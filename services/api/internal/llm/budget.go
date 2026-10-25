@@ -86,7 +86,7 @@ func (requestByteCounter) Count(ctx context.Context, cfg ProviderConfig, req Req
 	if err := ctx.Err(); err != nil {
 		return InputCount{}, err
 	}
-	count := InputCount{Tokens: len(encoded), Bytes: len(encoded), Model: cfg.Model, Encoding: "utf8-bytes", Version: "request-json-v1", Exact: false}
+	count := InputCount{Tokens: (len(encoded) + max(cfg.BytesPerToken, 1) - 1) / max(cfg.BytesPerToken, 1), Bytes: len(encoded), Model: cfg.Model, Encoding: "utf8-bytes", Version: "request-json-v1", Exact: false}
 	if len(encoded) > maxPromptEnvelopeBytes {
 		return count, &BudgetError{Unit: "request bytes", Count: len(encoded), Limit: maxPromptEnvelopeBytes}
 	}
@@ -102,6 +102,9 @@ func validateBudgetConfig(p ProviderConfig) error {
 	}
 	if p.MaxInputTokens < 0 || p.MaxOutputTokens < 0 || p.ContextWindow < 0 || p.TimeoutSeconds < 0 || p.TimeoutSeconds > 86400 {
 		return errors.New("model budgets must be nonnegative and timeout_seconds must not exceed 86400")
+	}
+	if p.BytesPerToken < 0 || p.BytesPerToken > 8 {
+		return errors.New("bytes_per_token must be between 1 and 8")
 	}
 	if p.InputBudgetPolicy != "" && p.InputBudgetPolicy != "estimate" && p.InputBudgetPolicy != "require_exact" {
 		return errors.New("input_budget_policy must be estimate or require_exact")

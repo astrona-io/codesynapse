@@ -148,6 +148,11 @@ type ProviderConfig struct {
 	MaxInputTokens int `yaml:"max_input_tokens" json:"max_input_tokens"`
 	// InputBudgetPolicy allows labelled estimates or requires a verified exact count.
 	InputBudgetPolicy string `yaml:"input_budget_policy" json:"input_budget_policy,omitempty"`
+	// BytesPerToken is how many request bytes the estimate counts as one
+	// input token. The default 1 never undercounts; a local model whose
+	// tokenizer reads about three or four bytes a token can set 3 and get
+	// about three times more into each request, with fewer calls.
+	BytesPerToken int `yaml:"bytes_per_token" json:"bytes_per_token,omitempty"`
 	// ContextWindow is the model's total context (prompt + answer). Input
 	// and output budgets are kept inside it.
 	ContextWindow  int `yaml:"context_window" json:"context_window"`
