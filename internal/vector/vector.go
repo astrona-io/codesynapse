@@ -54,6 +54,13 @@ type Index interface {
 	Close(ctx context.Context) error
 }
 
+// Prober tells which of the given IDs an Index already holds for a tenant's
+// namespace and model, so a caller embeds only what is missing. Flat and the
+// Milvus index implement it.
+type Prober interface {
+	Has(ctx context.Context, model, tenant, namespace string, ids []string) (map[string]bool, error)
+}
+
 // A search returns MinK to MaxK hits (DefaultK when unset): recall should
 // add a few strong entities, not a long tail that floods the context. Fewer
 // than three gives the graph expansion too little to work from.
@@ -124,7 +131,10 @@ type flatItem struct {
 	model string
 }
 
-var _ Index = (*Flat)(nil)
+var (
+	_ Index  = (*Flat)(nil)
+	_ Prober = (*Flat)(nil)
+)
 
 // NewFlat returns an empty index.
 func NewFlat() *Flat { return &Flat{items: map[string]flatItem{}} }
@@ -162,6 +172,22 @@ func (f *Flat) Search(_ context.Context, model, tenant, namespace string, vec []
 		}
 	}
 	return Isolate(hits, tenant, namespace, ClampK(k)), nil
+}
+
+// Has implements Prober.
+func (f *Flat) Has(_ context.Context, model, tenant, namespace string, ids []string) (map[string]bool, error) {
+	if tenant == "" {
+		return nil, ErrNoTenant
+	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	out := map[string]bool{}
+	for _, id := range ids {
+		if it, ok := f.items[id]; ok && it.SessionID == "" && it.model == model && it.Tenant == tenant && it.Namespace == namespace {
+			out[id] = true
+		}
+	}
+	return out, nil
 }
 
 // Delete implements Index.
