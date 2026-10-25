@@ -123,7 +123,7 @@
           "type": "boolean"
         },
         "licenseLookup": {
-          "description": "Look up licences not found on disk on deps.dev.",
+          "description": "Ask deps.dev for licences not found on disk and for deprecated or outdated dependencies (sends package names and versions).",
           "type": "boolean"
         },
         "allowNetwork": {

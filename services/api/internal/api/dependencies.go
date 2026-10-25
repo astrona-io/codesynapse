@@ -21,6 +21,10 @@ type Package struct {
 	Dev     bool   `json:"dev,omitempty"`
 	Via     string `json:"via,omitempty"`
 	Roots   int    `json:"roots,omitempty"`
+	// Latest, Deprecated and Behind come from deps.dev when lookups are on.
+	Latest     string `json:"latest,omitempty"`
+	Deprecated string `json:"deprecated,omitempty"`
+	Behind     int    `json:"behind,omitempty"`
 }
 
 // EcosystemCount is how many packages one ecosystem contributes.
@@ -58,7 +62,7 @@ func dependenciesOf(g store.DependencyGraph) Dependencies {
 			continue // ships with every Go program; the licence report leaves it out too
 		}
 		out.Packages = append(out.Packages, Package{Ecosystem: eco, Name: n.Name, Version: n.Version, License: cmp.Or(n.License, "unknown"),
-			Direct: !n.Indirect, Dev: n.Dev, Via: n.Via, Roots: n.Roots})
+			Direct: !n.Indirect, Dev: n.Dev, Via: n.Via, Roots: n.Roots, Latest: n.Latest, Deprecated: n.Deprecated, Behind: n.Behind})
 		counts[eco]++
 	}
 	slices.SortFunc(out.Packages, func(a, b Package) int {

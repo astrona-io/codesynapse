@@ -2,9 +2,11 @@ package security
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store/memory"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
@@ -47,4 +49,28 @@ func TestApplyOwners(t *testing.T) {
 	none.applyOwners(nil)
 	assert.Len(t, none.OwnerCounts, 0)
 	assert.Len(t, none.Findings[0].CodeOwners, 0)
+}
+
+func TestDeprecatedDependencies(t *testing.T) {
+	ctx := context.Background()
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindRepository, "r"), Kind: model.KindRepository, Repo: "r", Name: "r"})
+	mod := func(name string, indirect bool, deprecated string, behind int) {
+		g.AddNode(model.Node{ID: model.NodeID("r", model.KindModule, name), Kind: model.KindModule, Repo: "r", Name: name, Version: "1.0.0",
+			Indirect: indirect, Deprecated: deprecated, Latest: "2.0.0", Behind: behind})
+	}
+	mod("zz-direct", false, "moved to zz2", 3)
+	mod("aa-indirect", true, "unmaintained", 1)
+	mod("fine", false, "", 0)
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, "r", g))
+	rep, err := Build(ctx, st, "r", Options{})
+	require.NoError(t, err)
+	assert.Equal(t, rep.Modules.Deprecated, 2)
+	assert.Equal(t, rep.Modules.Behind, 2)
+	require.Len(t, rep.Deprecated, 2)
+	assert.Equal(t, rep.Deprecated[0].Module, "zz-direct", "direct dependencies first")
+	var md bytes.Buffer
+	require.NoError(t, WriteMarkdown(&md, rep))
+	assert.Contains(t, md.String(), "| `zz-direct` | 1.0.0 | 2.0.0 | yes | moved to zz2 |")
 }

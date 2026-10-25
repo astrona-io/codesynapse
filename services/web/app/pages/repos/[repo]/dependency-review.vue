@@ -13,7 +13,7 @@ const { data: clean } = useApiGet<CleanupReport>(() => repoPath(repo.value, 'cle
 type Verdict = { level: string; reason: string }
 type Row = {
   key: string; name: string; version: string; ecosystem: string; direct: boolean; dev: boolean; license: string
-  vulns: SecVuln[]; verdict?: Verdict; unused: boolean; via: string; roots: number
+  vulns: SecVuln[]; verdict?: Verdict; unused: boolean; via: string; roots: number; deprecated?: string; latest?: string
 }
 
 // What the review table covers: packages with an advisory, a licence to
@@ -29,11 +29,11 @@ const rows = computed<Row[]>(() => {
   }
   const known = new Map<string, Row>()
   for (const { node: n } of mods.value?.results ?? []) {
-    known.set(n.name, { key: '', name: n.name, version: n.version ?? '', ecosystem: eco(n.ecosystem), direct: !n.indirect, dev: !!n.dev, license: n.license ?? '', vulns: [], unused: false, via: n.via ?? '', roots: n.roots ?? 0 })
+    known.set(n.name, { key: '', name: n.name, version: n.version ?? '', ecosystem: eco(n.ecosystem), direct: !n.indirect, dev: !!n.dev, license: n.license ?? '', vulns: [], unused: false, via: n.via ?? '', roots: n.roots ?? 0, deprecated: n.deprecated, latest: n.latest })
   }
   const fill = (r: Row) => {
     const k = known.get(r.name)
-    if (k) Object.assign(r, { version: r.version || k.version, direct: k.direct, dev: k.dev, license: r.license || k.license, ecosystem: r.ecosystem || k.ecosystem, via: k.via, roots: k.roots })
+    if (k) Object.assign(r, { version: r.version || k.version, direct: k.direct, dev: k.dev, license: r.license || k.license, ecosystem: r.ecosystem || k.ecosystem, via: k.via, roots: k.roots, deprecated: k.deprecated, latest: k.latest })
     return r
   }
   for (const v of sec.value?.vulnerabilities ?? []) {
@@ -47,6 +47,9 @@ const rows = computed<Row[]>(() => {
     const k = known.get(i.name)
     Object.assign(r, { version: i.version, direct: i.direct, dev: !!i.dev, license: i.license ?? '', verdict: i.verdict, via: k?.via ?? '', roots: k?.roots ?? 0 })
   }
+  for (const k of known.values()) {
+    if (k.deprecated) fill(row(k.name, k.ecosystem))
+  }
   for (const m of clean.value?.modules ?? []) {
     const r = fill(row(m.path, known.get(m.path)?.ecosystem))
     r.version = r.version || m.version
@@ -56,7 +59,7 @@ const rows = computed<Row[]>(() => {
 })
 function score(r: Row) {
   const calls = r.vulns.some((v) => v.reachability === 'called') ? 100 : 0
-  return calls + r.vulns.length * 10 + (r.verdict?.level === 'conflict' ? 20 : r.verdict ? 5 : 0) + (r.unused ? 1 : 0)
+  return calls + r.vulns.length * 10 + (r.verdict?.level === 'conflict' ? 20 : r.verdict ? 5 : 0) + (r.deprecated ? 8 : 0) + (r.unused ? 1 : 0)
 }
 
 const REACH: Record<string, string> = {
@@ -76,6 +79,7 @@ function actions(r: Row): string[] {
   const fixes = [...new Set(r.vulns.map((v) => v.fixed).filter(Boolean))]
   if (r.vulns.length && fixes.length) out.push(`${r.vulns.some((v) => v.reachability === 'called') ? 'Urgent: u' : 'U'}pgrade to ${fixes.join(' / ')} or later, if compatible.`)
   else if (r.vulns.length) out.push('No fixed version listed: remove, replace or mitigate it, and check whether the flaw is reachable.')
+  if (r.deprecated) out.push(`Deprecated by its publisher: ${r.deprecated} Move to the replacement it names${r.latest && r.latest !== r.version ? `, or check whether ${r.latest} is still deprecated` : ''}.`)
   if (r.verdict?.level === 'conflict') out.push('Licence conflicts with yours: ask whoever owns licensing, then replace or comply. This is a flag, not a legal finding.')
   else if (r.verdict) out.push('Read the licence terms before relying on it.')
   return out
