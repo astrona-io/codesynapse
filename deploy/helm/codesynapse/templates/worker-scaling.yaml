@@ -34,9 +34,9 @@ spec:
           averageValue: {{ $q.jobsPerWorker | quote }}
   behavior:
     scaleDown:
-      stabilizationWindowSeconds: 900
+      stabilizationWindowSeconds: {{ $q.cooldownSeconds }}
       policies:
-        - {type: Pods, value: 1, periodSeconds: 300}
+        - {type: Pods, value: 1, periodSeconds: {{ div (int $q.cooldownSeconds) 3 }}}
 {{- else }}
 {{- $kinds := list }}
 {{- range $r := splitList "," .Values.worker.roles }}
@@ -71,21 +71,22 @@ spec:
     name: {{ $name }}
   minReplicaCount: {{ $q.minReplicas }}
   maxReplicaCount: {{ $q.maxReplicas }}
-  cooldownPeriod: 900
+  cooldownPeriod: {{ $q.cooldownSeconds }}
   advanced:
     horizontalPodAutoscalerConfig:
       behavior:
         scaleDown:
-          stabilizationWindowSeconds: 900
+          stabilizationWindowSeconds: {{ $q.cooldownSeconds }}
           policies:
-            - {type: Pods, value: 1, periodSeconds: 300}
+            - {type: Pods, value: 1, periodSeconds: {{ div (int $q.cooldownSeconds) 3 }}}
   triggers:
     - type: postgresql
       authenticationRef:
         name: {{ $name }}
       metadata:
         {{- if .Values.postgresql.enabled }}
-        host: {{ include "cs.name" (list . "postgresql") | quote }}
+        # KEDA runs in its own namespace: the name must carry this one.
+        host: {{ printf "%s.%s.svc" (include "cs.name" (list . "postgresql")) .Release.Namespace | quote }}
         port: "5432"
         userName: codesynapse
         dbName: codesynapse

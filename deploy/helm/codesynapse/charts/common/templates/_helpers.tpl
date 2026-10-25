@@ -107,5 +107,16 @@ spec:
             matchLabels:
               {{- include "cs.selector" (list $root $client) | nindent 14 }}
         {{- end }}
+        {{- if and (eq $store "postgresql") $root.Values.global.kedaNamespace }}
+        {{- /* The operator's pod label differs between KEDA's release manifest (app) and its Helm chart (app.kubernetes.io/name). */}}
+        {{- range $label := list "app" "app.kubernetes.io/name" }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $root.Values.global.kedaNamespace | quote }}
+          podSelector:
+            matchLabels:
+              {{ $label }}: keda-operator
+        {{- end }}
+        {{- end }}
 {{- end }}
 {{- end -}}
