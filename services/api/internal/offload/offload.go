@@ -314,24 +314,99 @@ func (w *Worker) extract(ctx context.Context, repo, source string, turns []extra
 	for _, e := range g.Entities {
 		known = append(known, e.Name)
 	}
-	sys, user, err := extract.Prompt(known, turns)
+	batches, err := w.pack(ctx, provider, known, turns)
 	if err != nil {
 		return outcome{}, err
 	}
 	started(provider, cfg.Model)
+	var total outcome
+	for _, batch := range batches {
+		out, err := w.extractBatch(ctx, provider, cfg.Model, repo, source, known, batch, authorize, session, expiresAt, sessionStore, scope)
+		total.extracted += out.extracted
+		total.saved += out.saved
+		total.dropped += out.dropped
+		if err != nil {
+			return total, err
+		}
+		for _, t := range out.names {
+			if len(known) >= extract.MaxKnown {
+				break
+			}
+			known = append(known, t)
+		}
+	}
+	return total, nil
+}
+
+// pack splits turns, in order, into batches whose prompt fits the provider's
+// input budget. A model call sees one batch, so a long chat becomes several
+// calls instead of one the provider refuses. A single turn that cannot fit on
+// its own is shortened until it does.
+func (w *Worker) pack(ctx context.Context, provider string, known []string, turns []extract.Turn) ([][]extract.Turn, error) {
+	fits := func(batch []extract.Turn) (bool, error) {
+		sys, user, err := extract.Prompt(known, batch)
+		if err != nil {
+			return false, err
+		}
+		_, err = w.llm.Preflight(ctx, provider, llm.Request{System: sys, User: user, MaxTokens: maxAnswer})
+		if errors.Is(err, llm.ErrInputBudget) {
+			return false, nil
+		}
+		return err == nil, err
+	}
+	var batches [][]extract.Turn
+	var cur []extract.Turn
+	for _, t := range turns {
+		for {
+			ok, err := fits(append(cur[:len(cur):len(cur)], t))
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				cur = append(cur, t)
+				break
+			}
+			if len(cur) > 0 {
+				batches = append(batches, cur)
+				cur = nil
+				continue
+			}
+			r := []rune(t.Text)
+			if len(r) <= 200 {
+				return nil, fmt.Errorf("prompt exceeds input budget: %w", llm.ErrInputBudget)
+			}
+			t.Text = string(r[:len(r)/2]) + " …"
+		}
+	}
+	if len(cur) > 0 {
+		batches = append(batches, cur)
+	}
+	return batches, nil
+}
+
+type batchOutcome struct {
+	outcome
+	names []string // entity names the batch saved, for the next batch to reuse
+}
+
+func (w *Worker) extractBatch(ctx context.Context, provider, model, repo, source string, known []string, turns []extract.Turn, authorize func(context.Context) error, session bool, expiresAt time.Time, sessionStore store.SessionMemoryStore, scope sessionmemory.Scope) (batchOutcome, error) {
+	sys, user, err := extract.Prompt(known, turns)
+	if err != nil {
+		return batchOutcome{}, err
+	}
 	resp, err := w.llm.Complete(ctx, provider, llm.Request{System: sys, User: user, MaxTokens: maxAnswer})
 	if err != nil {
-		return outcome{}, fmt.Errorf("model %s: %w", provider, err)
+		return batchOutcome{}, fmt.Errorf("model %s: %w", provider, err)
 	}
 	res, err := extract.Parse(resp.Text, extract.DefaultMinConfidence)
 	if err != nil {
-		return outcome{dropped: res.Dropped}, err
+		return batchOutcome{outcome: outcome{dropped: res.Dropped}}, err
 	}
-	out := outcome{extracted: len(res.Triples) + res.Dropped, dropped: res.Dropped}
+	out := batchOutcome{outcome: outcome{extracted: len(res.Triples) + res.Dropped, dropped: res.Dropped}}
 	if len(res.Triples) == 0 {
 		return out, nil
 	}
-	label := fmt.Sprintf("%s (extracted by %s)", source, cmp.Or(resp.Model, cfg.Model, provider))
+	label := fmt.Sprintf("%s (extracted by %s)", source, cmp.Or(resp.Model, model, provider))
 	b, err := memory.Prepare(repo, res.Triples, label, w.now())
 	if err != nil {
 		return out, fmt.Errorf("preparing triples: %w", err)
@@ -350,6 +425,9 @@ func (w *Worker) extract(ctx context.Context, repo, source string, turns []extra
 		return out, fmt.Errorf("saving triples: %w", err)
 	}
 	out.saved = len(b.Facts) + len(b.Aliases)
+	for _, t := range res.Triples {
+		out.names = append(out.names, t.Subject, t.Object)
+	}
 	return out, nil
 }
 

@@ -168,7 +168,7 @@ func isOurs(group any) bool {
 // Transcript limits: a hook must stay fast and a session can be huge.
 const (
 	maxTranscript = 64 << 20
-	maxToolText   = 2000
+	maxToolText   = 300
 )
 
 // ReadTranscript reads a Claude Code session transcript (JSON lines) and

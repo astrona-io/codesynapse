@@ -373,12 +373,15 @@ func (o *offloadOptions) offload(ctx context.Context) (int, error) {
 	}
 	older := agentcfg.OlderThanWindow(turns, o.keep)
 	// Only turns not sent before: a session is compacted more than once.
-	state, done := offloadState(in.SessionID)
-	if done > len(older) {
-		done = 0 // a new or rewritten transcript
+	// Jobs run in the background, so first learn how earlier ones ended; a
+	// failed job rewinds to its first turn and those turns are sent again.
+	st := loadOffloadState(in.SessionID)
+	if st.done > len(older) {
+		st = offloadProgress{path: st.path} // a new or rewritten transcript
 	}
-	todo := older[done:]
-	if len(todo) == 0 {
+	st.settle(func(id string) string { return c.jobState(ctx, id) })
+	if st.sent() >= len(older) {
+		st.save()
 		return 0, nil
 	}
 	repo := o.repo
@@ -388,45 +391,58 @@ func (o *offloadOptions) offload(ctx context.Context) (int, error) {
 		}
 	}
 	sent := 0
-	for start := 0; start < len(todo); start += extract.MaxTurns {
-		chunk := todo[start:min(start+extract.MaxTurns, len(todo))]
+	for _, chunk := range offloadChunks(older[st.sent():]) {
+		var job struct {
+			ID string `json:"id"`
+		}
 		if err := c.do(ctx, http.MethodPost, "/api/v1/repos/"+url.PathEscape(repo)+"/session-memory/offload",
-			map[string]any{"turns": chunk, "source": "claude-code (hook)"}, nil); err != nil {
-			saveOffloadState(state, done+sent)
+			map[string]any{"turns": chunk, "source": "claude-code (hook)"}, &job); err != nil {
+			st.save()
 			return sent, err
 		}
+		st.add(job.ID, len(chunk))
 		sent += len(chunk)
 	}
-	saveOffloadState(state, done+sent)
+	st.save()
 	return sent, nil
 }
 
-// offloadState returns the state file of a session and how many turns were
-// offloaded already. Without a session ID nothing is remembered.
-func offloadState(session string) (string, int) {
-	if session == "" || strings.ContainsAny(session, `/\`) || len(session) > 128 {
-		return "", 0
+// maxChunkChars keeps one request under the API's cap (4 x extract.MaxInputChars).
+const maxChunkChars = 3 * extract.MaxInputChars
+
+// offloadChunks splits turns, in order, into requests of at most
+// extract.MaxTurns turns and maxChunkChars characters.
+func offloadChunks(turns []extract.Turn) [][]extract.Turn {
+	var out [][]extract.Turn
+	start, size := 0, 0
+	for i, t := range turns {
+		n := len(t.Text)
+		if i > start && (i-start == extract.MaxTurns || size+n > maxChunkChars) {
+			out = append(out, turns[start:i])
+			start, size = i, 0
+		}
+		size += n
 	}
-	dir, err := os.UserCacheDir()
-	if err != nil {
-		return "", 0
+	if start < len(turns) {
+		out = append(out, turns[start:])
 	}
-	p := filepath.Join(dir, "codesynapse", "offload", session)
-	b, err := os.ReadFile(p) //nolint:gosec // our own cache file, session ID checked above
-	if err != nil {
-		return p, 0
-	}
-	var n int
-	_, _ = fmt.Sscanf(strings.TrimSpace(string(b)), "%d", &n) //nolint:errcheck // a broken file starts over
-	return p, n
+	return out
 }
 
-func saveOffloadState(p string, n int) {
-	if p == "" {
-		return
+// jobState asks the API how a job ended: its state, or "failed" when the API
+// no longer knows it (restarted) and "running" when it cannot be reached.
+func (c apiClient) jobState(ctx context.Context, id string) string {
+	var j struct {
+		State string `json:"state"`
 	}
-	_ = os.MkdirAll(filepath.Dir(p), 0o700)                    //nolint:errcheck // best effort
-	_ = os.WriteFile(p, []byte(fmt.Sprintf("%d\n", n)), 0o600) //nolint:errcheck // best effort
+	err := c.do(ctx, http.MethodGet, "/api/v1/memory/jobs/"+url.PathEscape(id), nil, &j)
+	switch {
+	case err == nil:
+		return j.State
+	case strings.Contains(err.Error(), "no such memory extraction job"):
+		return "failed"
+	}
+	return "running"
 }
 
 // mcpAgentsMdOptions configures `codesynapse mcp agents-md`.
