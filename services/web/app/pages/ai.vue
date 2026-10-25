@@ -1,8 +1,17 @@
 <script setup lang="ts">
-import type { AIProvider } from '~/utils/types'
+import type { AIProvider, SeriesPanel } from '~/utils/types'
 
 const { data, refresh } = useApiGet<{ providers: AIProvider[]; tasks: string[]; routing: { default: string; tasks: Record<string, string> } }>('ai/providers')
 interface ProviderStatus { name: string; checked: boolean; online: boolean; model_available: boolean; latency_ms?: number; error?: string }
+// Jobs run in the worker, so the API process's own counters (p.usage) miss
+// them. The metrics series count every process; they are the day's totals.
+const usagePanels = ['llm_provider_requests', 'llm_provider_failures', 'llm_provider_input', 'llm_provider_output'] as const
+const usageSeries = Object.fromEntries(usagePanels.map(panel => [panel, useApiGet<SeriesPanel>(`stats/series?panel=${panel}&range=24h`).data]))
+function dayUsage(name: string): { requests: number; failures: number; input: number; output: number } | null {
+  const get = (panel: string) => usageSeries[panel]?.value?.series.find(s => s.name === name)?.total ?? 0
+  if (!usagePanels.every(panel => usageSeries[panel]?.value)) return null
+  return { requests: get('llm_provider_requests'), failures: get('llm_provider_failures'), input: get('llm_provider_input'), output: get('llm_provider_output') }
+}
 const { data: status, refresh: refreshStatus } = useApiGet<{ providers: ProviderStatus[] }>('ai/status')
 let statusTimer: ReturnType<typeof setInterval> | undefined
 onMounted(() => { statusTimer = setInterval(() => refreshStatus(), 15000) })
@@ -125,8 +134,9 @@ const resultOf = (n: string) => tests.value[n]
           <dt>Budget per request<InfoTip text="The final redacted request is checked before sending. Input counts are conservative estimates and may differ from the model tokenizer. Exact-only policy refuses calls without a verified counter. Lower max_input_tokens in config/llm.yaml to limit context." /></dt><dd>{{ fmtInt(p.max_input_tokens) }} estimated in · {{ fmtInt(p.max_output_tokens) }} tokens out</dd>
           <dt>Input policy</dt><dd>{{ p.input_budget_policy === 'require_exact' ? 'Exact count required; unavailable' : 'Estimated count allowed' }}</dd>
           <dt>Used for</dt><dd><span v-for="t in p.tasks" :key="t" class="tag">{{ TASK_LABEL[t] ?? t }}</span><span v-if="!p.tasks.length" class="muted">no tasks (only by explicit choice)</span></dd>
-          <dt>Usage</dt>
-          <dd>{{ plural(p.usage.requests, 'request') }} · {{ fmtInt(p.usage.input_tokens) }} in / {{ fmtInt(p.usage.output_tokens) }} out<span v-if="p.usage.requests"> · avg {{ p.usage.avg_seconds.toFixed(1) }} s</span><span v-if="p.usage.failures" class="error"> · {{ p.usage.failures }} failed</span></dd>
+          <dt>Usage<InfoTip text="Last 24 hours from the metrics store, counting every process (the worker runs the AI jobs). Without metrics it shows what the API process itself has done since it started." /></dt>
+          <dd v-if="dayUsage(p.name)">{{ plural(dayUsage(p.name)!.requests, 'request') }} · {{ fmtInt(dayUsage(p.name)!.input) }} in / {{ fmtInt(dayUsage(p.name)!.output) }} out<span v-if="dayUsage(p.name)!.failures" class="error"> · {{ dayUsage(p.name)!.failures }} failed</span><span class="muted small"> · last 24 h</span></dd>
+          <dd v-else>{{ plural(p.usage.requests, 'request') }} · {{ fmtInt(p.usage.input_tokens) }} in / {{ fmtInt(p.usage.output_tokens) }} out<span v-if="p.usage.requests"> · avg {{ p.usage.avg_seconds.toFixed(1) }} s</span><span v-if="p.usage.failures" class="error"> · {{ p.usage.failures }} failed</span><span class="muted small"> · this API process only</span></dd>
         </dl>
         <template v-if="resultOf(p.name) && resultOf(p.name) !== 'running'">
           <p v-if="(resultOf(p.name) as TestResult).ok" class="ok">Connected in {{ (resultOf(p.name) as TestResult).seconds }} s · replied “{{ (resultOf(p.name) as TestResult).reply }}”</p>
