@@ -203,7 +203,7 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 		// run jobs (docs/SAAS.md, 5e).
 		loops := []func(context.Context){s.recoverFixes, func(ctx context.Context) { s.runScheduler(ctx, logger) }}
 		if cfg.Accounts != nil {
-			loops = append(loops, s.pruneAudit, s.projectAccess, s.pruneExecutionMemory, s.recoverIngestReports)
+			loops = append(loops, s.pruneAudit, s.projectAccess, s.pruneExecutionMemory, s.recoverIngestReports, s.reportJobQueue)
 		}
 		s.singleton(ctx, loops...)
 	}

@@ -93,16 +93,20 @@ func ToolLabel(name string) string {
 
 // Coverage and savings are observations, not assumptions about missing usage.
 var (
-	LLMCostSaved                = Default.ScopedCounter("llm_cost_saved_estimated_dollars_total", "Estimated cached-input cost savings at the configured prices.", "tenant_id", "llm_provider", "llm_model")
-	LLMUsageUnknown             = Default.ScopedCounter("llm_usage_unknown_total", "Model calls without complete reported token usage.", "tenant_id", "llm_provider", "llm_model")
-	LLMPriceMissing             = Default.ScopedCounter("llm_pricing_missing_total", "Model calls without sufficient configured prices.", "tenant_id", "llm_provider", "llm_model")
-	NetBytesReceived            = Default.ScopedCounter("net_bytes_received_total", "MCP application payload bytes read, excluding HTTP headers and transport overhead.", "tenant_id", "mcp_tool")
-	NetBytesSent                = Default.ScopedCounter("net_bytes_sent_total", "MCP application payload bytes successfully written, including stream framing.", "tenant_id", "mcp_tool")
-	CloudBytesSent              = Default.ScopedCounter("cloud_bytes_sent_total", "Cloud model request body bytes consumed by HTTP transports, including retries.", "tenant_id", "llm_provider", "llm_model")
-	CloudBytesSaved             = Default.ScopedCounter("cloud_bytes_saved_total", "Estimated avoided cloud request bytes with a measured equivalent fallback baseline.", "tenant_id", "llm_provider", "llm_model")
-	GraphRowsReturned           = Default.ScopedCounter("db_graph_rows_returned_total", "Graph result rows returned; not internally visited nodes.", "tenant_id", "db_system")
-	DBTimeouts                  = Default.ScopedCounter("db_query_timeouts_total", "Database requests that timed out.", "tenant_id", "db_system", "operation")
-	AgentMemoryRecalls          = Default.ScopedCounter("agent_memory_recalls_total", "Logical memory recall requests, counted once before retrieval.", "tenant_id")
+	LLMCostSaved       = Default.ScopedCounter("llm_cost_saved_estimated_dollars_total", "Estimated cached-input cost savings at the configured prices.", "tenant_id", "llm_provider", "llm_model")
+	LLMUsageUnknown    = Default.ScopedCounter("llm_usage_unknown_total", "Model calls without complete reported token usage.", "tenant_id", "llm_provider", "llm_model")
+	LLMPriceMissing    = Default.ScopedCounter("llm_pricing_missing_total", "Model calls without sufficient configured prices.", "tenant_id", "llm_provider", "llm_model")
+	NetBytesReceived   = Default.ScopedCounter("net_bytes_received_total", "MCP application payload bytes read, excluding HTTP headers and transport overhead.", "tenant_id", "mcp_tool")
+	NetBytesSent       = Default.ScopedCounter("net_bytes_sent_total", "MCP application payload bytes successfully written, including stream framing.", "tenant_id", "mcp_tool")
+	CloudBytesSent     = Default.ScopedCounter("cloud_bytes_sent_total", "Cloud model request body bytes consumed by HTTP transports, including retries.", "tenant_id", "llm_provider", "llm_model")
+	CloudBytesSaved    = Default.ScopedCounter("cloud_bytes_saved_total", "Estimated avoided cloud request bytes with a measured equivalent fallback baseline.", "tenant_id", "llm_provider", "llm_model")
+	GraphRowsReturned  = Default.ScopedCounter("db_graph_rows_returned_total", "Graph result rows returned; not internally visited nodes.", "tenant_id", "db_system")
+	DBTimeouts         = Default.ScopedCounter("db_query_timeouts_total", "Database requests that timed out.", "tenant_id", "db_system", "operation")
+	AgentMemoryRecalls = Default.ScopedCounter("agent_memory_recalls_total", "Logical memory recall requests, counted once before retrieval.", "tenant_id")
+	// JobsWaiting is the work a worker could claim now, per job kind (a
+	// fixed set). Set by the one API process that holds the loops lease, so
+	// replicas never double it; it has no tenant, so it exports as platform_.
+	JobsWaiting                 = Default.ScopedGauge("codesynapse_jobs_waiting", "Jobs queued or interrupted that a worker could claim now, per kind.", "kind")
 	MemoryFactsCurrent          = Default.ScopedGauge("agent_memory_facts_count", "Current unique active durable memory facts per tenant.", "tenant_id")
 	MemoryFactsObservedAt       = Default.ScopedGauge("agent_memory_facts_observed_at_seconds", "Time of the last complete durable memory count snapshot.", "tenant_id")
 	MemoryFactsCollectionErrors = Default.Counter("platform_memory_facts_collection_errors_total", "Failed or incomplete durable memory count collections.")

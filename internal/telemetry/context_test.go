@@ -52,6 +52,16 @@ func TestGaugeDeletionAndUntrustedIdentity(t *testing.T) {
 	assert.False(t, strings.Contains(out, "tenant_id="))
 }
 
+func TestJobsWaitingIsAPlatformSeries(t *testing.T) {
+	r := NewRegistry()
+	g := r.ScopedGauge("codesynapse_jobs_waiting", "Jobs.", "kind")
+	g.SetContext(context.Background(), 3, "sync")
+	out := text(t, r)
+	assert.Contains(t, out, `platform_codesynapse_jobs_waiting{`)
+	assert.Contains(t, out, `kind="sync",mcp_tool="none",llm_provider="none",llm_model="none"} 3`)
+	assert.False(t, strings.Contains(out, "tenant_id="))
+}
+
 func BenchmarkRecord(b *testing.B) {
 	ctx := WithTenant(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaa")
 	for _, scoped := range []bool{false, true} {

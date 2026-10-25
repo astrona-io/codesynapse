@@ -106,6 +106,25 @@ ORDER BY created_at DESC OFFSET $1)`, accounts.JobHistory)
 	return err
 }
 
+// WaitingJobs implements accounts.Store.
+func (s *Store) WaitingJobs(ctx context.Context, now time.Time) (map[string]int, error) {
+	rows, err := s.db.Query(ctx, "SELECT kind, count(*) FROM jobs WHERE state IN ('queued', 'running') AND lease_until < $1 GROUP BY kind", now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var kind string
+		var n int
+		if err := rows.Scan(&kind, &n); err != nil {
+			return nil, err
+		}
+		out[kind] = n
+	}
+	return out, rows.Err()
+}
+
 // ClaimOrphanedJob implements accounts.Store. SKIP LOCKED lets several
 // processes look at once without claiming the same job.
 func (s *Store) ClaimOrphanedJob(ctx context.Context, owner string, kinds []string, leaseUntil, now time.Time) (accounts.JobRecord, bool, error) {
