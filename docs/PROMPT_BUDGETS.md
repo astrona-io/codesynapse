@@ -26,6 +26,13 @@ shape. OpenAI-compatible options and Anthropic system cache controls, message
 blocks, fallback/effort settings and the SDK's stream flag are included. Shared
 request builders keep counting and dispatch aligned.
 
+`bytes_per_token` (1 to 8, default 1) changes that ratio for one provider. A local
+model reads about three to four request bytes per token, so `bytes_per_token: 3`
+fits about three times more into each request and needs about a third of the
+calls (for example when offloading a long chat), while staying below the real
+count for ordinary text and code. Leave it at 1 for text that tokenizes badly
+(base64, hex, minified code) and for any provider where an overflow is costly.
+
 This is an estimate, not a tokenizer. Server-side templates, model revisions,
 special tokens and Anthropic fallback models remain unverified. An accepted
 estimate cannot guarantee that an arbitrary model's context window will fit.
