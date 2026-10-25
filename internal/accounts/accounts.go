@@ -388,6 +388,12 @@ type Store interface {
 	// SetMenuPrefs replaces them. The service validates them (menuprefs.go).
 	MenuPrefs(ctx context.Context, userID string) (MenuPrefs, error)
 	SetMenuPrefs(ctx context.Context, userID string, m MenuPrefs) error
+	// ImageScan reads the image findings of a repository namespace; ok is
+	// false when none were uploaded. SetImageScan replaces them and
+	// DeleteImageScan removes them.
+	ImageScan(ctx context.Context, ns string) (scan ImageScan, ok bool, err error)
+	SetImageScan(ctx context.Context, ns string, scan ImageScan) error
+	DeleteImageScan(ctx context.Context, ns string) error
 	// SetUserEmail fails with ErrExists when another account has the email.
 	SetUserEmail(ctx context.Context, userID, email string) error
 
