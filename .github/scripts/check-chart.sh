@@ -21,13 +21,39 @@ helm template codesynapse "$chart" -f "$values" \
 
 # values.schema.json (and each store's) must refuse what the chart would
 # ignore or break on: unknown keys, wrong types, invalid enums.
-for bad in api.replica=2 'worker.roles=ingest\,typo' image.pullPolicy=Sometimes \
+for bad in api.replica=2 'worker.roles=ingest\,typo' 'worker.roles=ingest\,fix' fixWorker.roles=ai image.pullPolicy=Sometimes \
     auditRetentionDays=7 postgresql.sizee=1Gi hugegraph.size=lots; do
     if helm template codesynapse "$chart" -f "$values" --set "$bad" > /dev/null 2>&1; then
         echo "values.schema.json accepted $bad" >&2
         exit 1
     fi
 done
+
+# The fix worker pushes: it cannot be on without the switch that allows it.
+if helm template codesynapse "$chart" -f "$values" --set features.allowPush=false > /dev/null 2>&1; then
+    echo "chart rendered a fix worker without features.allowPush" >&2
+    exit 1
+fi
+# No worker holds the API's service token or the first administrator's
+# password, and only the fix worker may push.
+python3 - "$out/rendered.yaml" <<'PY'
+import sys, re
+docs = open(sys.argv[1]).read().split("\n---\n")
+seen = set()
+for d in docs:
+    m = re.search(r"^kind: Deployment$", d, re.M)
+    name = re.search(r"^  name: (\S+)$", d, re.M)
+    if not m or not name or "worker" not in name.group(1):
+        continue
+    seen.add(name.group(1))
+    for secret in ("CODESYNAPSE_API_TOKEN", "CODESYNAPSE_ADMIN_PASSWORD"):
+        assert secret not in d, f"{name.group(1)} holds {secret}"
+    push = re.search(r"name: CODESYNAPSE_ALLOW_PUSH, value: \"(\w+)\"", d)
+    want = "true" if name.group(1).endswith("fix-worker") else "false"
+    assert push and push.group(1) == want, f"{name.group(1)}: CODESYNAPSE_ALLOW_PUSH should be {want}"
+assert len(seen) == 2, f"expected a worker and a fix worker, found {sorted(seen)}"
+print("workers: no service token or admin password; only the fix worker may push")
+PY
 
 go run github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0 -strict -summary -kubernetes-version 1.33.0 "$out/rendered.yaml"
 go run golang.stackrox.io/kube-linter/cmd/kube-linter@v0.8.3 lint "$out/rendered.yaml"

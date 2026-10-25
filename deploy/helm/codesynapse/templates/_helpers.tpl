@@ -58,11 +58,44 @@
 {{- end -}}
 {{- end -}}
 
-{{/* Environment of the API process, served (api) or running jobs (worker). */}}
+{{/*
+Environment of a process that runs jobs: the API (it still runs them when no
+worker does) and the workers. Args: root, push ("true" or "false": whether
+this process may push fix branches). Only the fix workers get "true"; the
+ingest and ai workers parse untrusted repositories and never hold it.
+*/}}
+{{- define "cs.jobEnv" -}}
+{{- $root := index . 0 -}}
+{{ include "cs.storeEnv" $root }}
+{{ include "cs.secretEnv" (list $root "CODESYNAPSE_SECRET_KEY" "SECRET_KEY") }}
+{{ include "cs.secretEnv" (list $root "CODESYNAPSE_GIT_TOKENS" "CODESYNAPSE_GIT_TOKENS" true) }}
+{{ include "cs.secretEnv" (list $root "ANTHROPIC_API_KEY" "ANTHROPIC_API_KEY" true) }}
+{{ include "cs.secretEnv" (list $root "OPENROUTER_API_KEY" "OPENROUTER_API_KEY" true) }}
+- {name: CODESYNAPSE_TRUSTED_PROXIES, value: {{ $root.Values.trustedProxies | quote }}}
+- {name: CODESYNAPSE_PUBLIC_URL, value: {{ $root.Values.publicURL | quote }}}
+- {name: CODESYNAPSE_PUBLIC_MCP_URL, value: {{ $root.Values.publicMCPURL | quote }}}
+- {name: CODESYNAPSE_PUBLIC_API_URL, value: {{ $root.Values.publicAPIURL | quote }}}
+- {name: CODESYNAPSE_SIGNUP_OPEN, value: {{ $root.Values.signupOpen | quote }}}
+- {name: CODESYNAPSE_COOKIE_SECURE, value: {{ $root.Values.cookieSecure | quote }}}
+- {name: CODESYNAPSE_AUDIT_RETENTION_DAYS, value: {{ $root.Values.auditRetentionDays | quote }}}
+- {name: CODESYNAPSE_ALLOW_NETWORK, value: {{ $root.Values.features.allowNetwork | quote }}}
+- {name: CODESYNAPSE_VULN_SCAN, value: {{ $root.Values.features.vulnScan | quote }}}
+- {name: CODESYNAPSE_LICENSE_LOOKUP, value: {{ $root.Values.features.licenseLookup | quote }}}
+- {name: CODESYNAPSE_INGEST_DATAFLOW, value: {{ $root.Values.features.dataflow | quote }}}
+- {name: CODESYNAPSE_ALLOW_PUSH, value: {{ index . 1 | quote }}}
+- {name: CODESYNAPSE_ALLOW_PRIVATE_GIT, value: {{ $root.Values.features.allowPrivateGit | quote }}}
+- {name: CODESYNAPSE_WORKSPACE, value: /workspace}
+- {name: CODESYNAPSE_LLM_CONFIG, value: /config/llm.yaml}
+{{- end -}}
+
+{{/*
+Environment of the API process. On top of the job environment it holds what
+only the API uses: the service token (workers serve no HTTP) and the first
+administrator's password. Workers never get either.
+*/}}
 {{- define "cs.apiEnv" -}}
-{{ include "cs.storeEnv" . }}
+{{ include "cs.jobEnv" (list . .Values.features.allowPush) }}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_API_TOKEN" "CODESYNAPSE_API_TOKEN") }}
-{{ include "cs.secretEnv" (list . "CODESYNAPSE_SECRET_KEY" "SECRET_KEY") }}
 {{- if .Values.admin.enabled }}
 - name: CODESYNAPSE_ADMIN_PASSWORD
   valueFrom:
@@ -72,24 +105,6 @@
 {{- else }}
 - {name: CODESYNAPSE_AUTO_ADMIN, value: "false"}
 {{- end }}
-{{ include "cs.secretEnv" (list . "CODESYNAPSE_GIT_TOKENS" "CODESYNAPSE_GIT_TOKENS" true) }}
-{{ include "cs.secretEnv" (list . "ANTHROPIC_API_KEY" "ANTHROPIC_API_KEY" true) }}
-{{ include "cs.secretEnv" (list . "OPENROUTER_API_KEY" "OPENROUTER_API_KEY" true) }}
-- {name: CODESYNAPSE_TRUSTED_PROXIES, value: {{ .Values.trustedProxies | quote }}}
-- {name: CODESYNAPSE_PUBLIC_URL, value: {{ .Values.publicURL | quote }}}
-- {name: CODESYNAPSE_PUBLIC_MCP_URL, value: {{ .Values.publicMCPURL | quote }}}
-- {name: CODESYNAPSE_PUBLIC_API_URL, value: {{ .Values.publicAPIURL | quote }}}
-- {name: CODESYNAPSE_SIGNUP_OPEN, value: {{ .Values.signupOpen | quote }}}
-- {name: CODESYNAPSE_COOKIE_SECURE, value: {{ .Values.cookieSecure | quote }}}
-- {name: CODESYNAPSE_AUDIT_RETENTION_DAYS, value: {{ .Values.auditRetentionDays | quote }}}
-- {name: CODESYNAPSE_ALLOW_NETWORK, value: {{ .Values.features.allowNetwork | quote }}}
-- {name: CODESYNAPSE_VULN_SCAN, value: {{ .Values.features.vulnScan | quote }}}
-- {name: CODESYNAPSE_LICENSE_LOOKUP, value: {{ .Values.features.licenseLookup | quote }}}
-- {name: CODESYNAPSE_INGEST_DATAFLOW, value: {{ .Values.features.dataflow | quote }}}
-- {name: CODESYNAPSE_ALLOW_PUSH, value: {{ .Values.features.allowPush | quote }}}
-- {name: CODESYNAPSE_ALLOW_PRIVATE_GIT, value: {{ .Values.features.allowPrivateGit | quote }}}
-- {name: CODESYNAPSE_WORKSPACE, value: /workspace}
-- {name: CODESYNAPSE_LLM_CONFIG, value: /config/llm.yaml}
 {{- end -}}
 
 

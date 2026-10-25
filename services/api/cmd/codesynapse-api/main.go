@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -178,7 +179,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	srv := api.New(ctx, api.Config{JobRoles: roles, Worker: o.worker, GitAuths: gitAuths, LLM: registry, SourcesRoot: o.sources, CommitLimit: o.commitLimit, AllowNetwork: o.network, VulnScan: o.vulnScan, LicenseLookup: o.licenses, Dataflow: o.dataflow, Version: version,
 		Workspace: o.workspace, AllowPrivateGit: app.Getenv("CODESYNAPSE_ALLOW_PRIVATE_GIT", "") == "true",
 		GitAuth:   gitx.Auth{Host: app.Getenv("CODESYNAPSE_GIT_TOKEN_HOST", "github.com"), Token: os.Getenv("CODESYNAPSE_GIT_TOKEN")},
-		AllowPush: app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true",
+		AllowPush: pushAllowed(app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true", o.worker, roles, o.EC.Logger),
 		Accounts:  acc, ServiceToken: os.Getenv(EnvToken), SecureCookies: app.Getenv("CODESYNAPSE_COOKIE_SECURE", "true") == "true",
 		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour,
 		Metrics:        metricsQuerier(), IngestMetrics: ingestMetrics,
@@ -427,4 +428,16 @@ func retentionDays() int {
 		return 400 // NIS2 evidence needs history; below a month is a typo
 	}
 	return n
+}
+
+// pushAllowed is whether this process may push fix branches. The API needs
+// the switch to accept a fix request; a worker needs it only when it has the
+// fix role. A worker without that role parses untrusted repositories and
+// never holds the switch, whatever its environment says.
+func pushAllowed(wanted, worker bool, roles []string, logger *slog.Logger) bool {
+	if !wanted || !worker || slices.Contains(roles, "fix") {
+		return wanted
+	}
+	logger.Warn("CODESYNAPSE_ALLOW_PUSH ignored: this worker has no fix role", "roles", roles)
+	return false
 }

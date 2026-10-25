@@ -70,7 +70,8 @@ Every value is described and type-checked in `values.schema.json` (each store's 
 | `image.tag` | chart appVersion | Image tag on `ghcr.io/astrona-io/codesynapse-{api,worker,mcp,web}` |
 | `global.imagePullSecrets` | `[]` | Pull secrets for a private registry or mirror, e.g. `[{name: ghcr}]`; the stores use them too |
 | `global.networkPolicies` | `true` | Each component and store accepts only the pods that need it |
-| `worker.replicas`, `worker.roles` | `1`, `ingest,ai,fix` | Job workers. Split roles across Deployments to scale them apart |
+| `worker.replicas`, `worker.roles` | `1`, `ingest,ai` | Clone, sync, index and AI jobs. It parses untrusted repositories, so it never holds the right to push, the API's service token or the first administrator's password |
+| `fixWorker.enabled`, `fixWorker.replicas` | `false`, `1` | The only worker that pushes fix branches (`CODESYNAPSE_ALLOW_PUSH=true`). Needs `features.allowPush=true` and a Git token with write access |
 | `worker.resources.limits.memory` | `6Gi` | Ingest type-checks whole modules; size it for your largest repository. `GOMEMLIMIT` is set to 90% |
 | `workspace.accessModes` | `[ReadWriteOnce]` | `api`, `worker` and `mcp` share clones. Use a ReadWriteMany class on more than one node |
 | `api.replicas`, `mcp.replicas`, `web.replicas` | `1` | Raise to 2 or more for availability; see [Scaling out](#scaling-out) |
