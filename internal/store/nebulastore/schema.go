@@ -148,6 +148,13 @@ var schemaItems = func() []schemaItem {
 	for _, k := range accessEdges {
 		items = append(items, schemaItem{name: k, edge: true, cols: slices.Concat(texts("tenant_id", "role"), longs("rank"))})
 	}
+	// Transient chat memory (session.go): one document per tenant, session
+	// and namespace, and a tombstone per revoked execution.
+	items = append(items,
+		schemaItem{name: "session_scope", cols: slices.Concat(defaulted("string", `""`, "tenant_id", "session_id", "ns", "doc"), counters("revision", "expires", "facts"), defaulted("bool", "false", "deleted")),
+			indexes: []index{{"session_by_tenant", []indexCol{{"tenant_id", 64}, {"session_id", 128}}}}},
+		schemaItem{name: "session_revoked", cols: defaulted("string", `""`, "tenant_id", "session_id")},
+	)
 	// One edge type per model edge kind (schemaEdges) carries these.
 	edge := slices.Concat(longs("count"), texts("run", "evidence"))
 	for _, k := range edgeKinds() {

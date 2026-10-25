@@ -15,9 +15,11 @@ import (
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
-func sessionMemoryContract(t *testing.T, s store.Store) {
-	st, ok := s.(store.SessionMemoryStore)
-	require.True(t, ok)
+func sessionMemoryContract(t *testing.T, s interface {
+	store.SessionMemoryStore
+	store.MemoryStore
+}) {
+	st := s
 	sid := fmt.Sprintf("chat-%d", time.Now().UnixNano())
 	a := sessionmemory.Scope{TenantID: "org-session-a", SessionID: sid, Namespace: "org-session-a|fixture"}
 	b := a

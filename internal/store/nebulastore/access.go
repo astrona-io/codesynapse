@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/store"
@@ -32,6 +33,14 @@ func (s *Store) ReplaceAccess(ctx context.Context, snapshot model.AccessSnapshot
 	if err := snapshot.Validate(); err != nil {
 		return err
 	}
+	// Publishers of one tenant take turns: concurrent writes of the same
+	// vertices are refused by the storage service.
+	return s.locked(ctx, vid("l", "access|"+snapshot.TenantID), snapshot.TenantID, accessLockTTL, func() error { return s.publishAccess(ctx, snapshot) })
+}
+
+const accessLockTTL = time.Minute
+
+func (s *Store) publishAccess(ctx context.Context, snapshot model.AccessSnapshot) error {
 	digest := snapshot.Digest()
 	current, published, err := s.accessHead(ctx, snapshot.TenantID)
 	if err != nil {

@@ -45,6 +45,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/astrona-io/codesynapse/internal/sessionmemory"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/internal/vector"
 )
@@ -72,6 +73,8 @@ type Config struct {
 
 // Store is a NebulaGraph-backed store.Store.
 type Store struct {
+	sessionmemory.Engine // transient chat memory over the session document backend
+
 	cfg     Config
 	timeout time.Duration
 	vec     vector.Index
@@ -108,6 +111,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 		timeout = 30 * time.Second
 	}
 	s := &Store{cfg: cfg, timeout: timeout, vec: cfg.Vectors}
+	s.Engine = sessionmemory.Engine{Backend: s}
 	if _, err := hosts(cfg.Addrs); err != nil {
 		return nil, err
 	}

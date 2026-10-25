@@ -53,7 +53,7 @@ func (s *Store) ReplaceRepo(ctx context.Context, repo string, g *model.Graph) er
 		return fmt.Errorf("generate ingest run: %w", err)
 	}
 	head := vid("h", repo)
-	if err := s.lease(ctx, head, repo, run); err != nil {
+	if err := s.lease(ctx, head, repo, run, leaseTTL); err != nil {
 		return err
 	}
 	// The lease is released even when the request was cancelled.
@@ -89,10 +89,10 @@ const (
 // lease takes the repository's publication lease. UPSERT with WHEN is one
 // atomic statement on the vertex's partition, so two publishers cannot both
 // pass. A WHEN that is false answers "filter out", which means busy.
-func (s *Store) lease(ctx context.Context, head, repo, run string) error {
+func (s *Store) lease(ctx context.Context, head, repo, run string, ttl time.Duration) error {
 	now := time.Now()
 	_, err := s.write(ctx, fmt.Sprintf(acquireLease, literal(head)), map[string]any{
-		"repo": repo, "run": run, "expires": now.Add(leaseTTL).UnixMilli(), "now": now.UnixMilli(),
+		"repo": repo, "run": run, "expires": now.Add(ttl).UnixMilli(), "now": now.UnixMilli(),
 	})
 	if err != nil {
 		var ne *Error
