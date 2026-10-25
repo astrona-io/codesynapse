@@ -364,6 +364,19 @@ test-hugegraph: _runtime
     # The parity check indexes this repository; go/packages races under -race.
     go test -count=1 -run TestParityWithReference ./internal/store/hugegraphstore/
 
+# Limited HugeGraph role (read everything, write the MCP labels) against a throwaway HugeGraph with authentication on
+test-hugegraph-auth: _runtime
+    #!/usr/bin/env sh
+    set -eu
+    hg="codesynapse-hga-test-$$"; pw=$(openssl rand -hex 16)
+    {{engine}} run --rm -d --name "$hg" -p 127.0.0.1:58081:8080 -e PASSWORD="$pw" --entrypoint sh {{hugegraph_image}} \
+        -c "./bin/enable-auth.sh && printf '\nvertex.tx_capacity=1000000\nedge.tx_capacity=1000000\n' >> conf/graphs/hugegraph.properties && exec ./docker-entrypoint.sh" >/dev/null
+    trap '{{engine}} stop "$hg" >/dev/null 2>&1' EXIT
+    n=0; until curl -sf --compressed -u "admin:$pw" -X POST http://127.0.0.1:58081/gremlin -H 'Content-Type: application/json' \
+        -d '{"gremlin":"g.V().limit(0).count()","aliases":{"graph":"DEFAULT-hugegraph","g":"__g_DEFAULT-hugegraph"}}' >/dev/null 2>&1; do n=$((n+1)); [ "$n" -lt 90 ] || { echo "HugeGraph did not start" >&2; exit 1; }; sleep 2; done
+    CODESYNAPSE_TEST_HUGEGRAPH_URL=http://127.0.0.1:58081 CODESYNAPSE_TEST_HUGEGRAPH_PASSWORD="$pw" CODESYNAPSE_TEST_HUGEGRAPH_TX_CAPACITY=1000000 \
+        go test -count=1 -run 'TestLimitedRole|TestProvisionRole' -v ./internal/store/hugegraphstore/
+
 # Push and tenant-filtered queries against a throwaway VictoriaMetrics
 test-metrics: _runtime
     #!/usr/bin/env sh
@@ -377,7 +390,7 @@ test-metrics: _runtime
         go test -race -count=1 -run TestVictoriaMetrics ./internal/telemetry/ ./services/api/internal/api/
 
 # Store, accounts and metrics contracts against throwaway HugeGraph, Milvus, PostgreSQL and VictoriaMetrics containers
-test-integration: test-hugegraph test-postgres test-metrics
+test-integration: test-hugegraph test-hugegraph-auth test-postgres test-metrics
 
 # Tests and the shipped stack must use the same store images (see pg_image)
 check-test-images:
