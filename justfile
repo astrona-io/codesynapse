@@ -21,7 +21,7 @@ init:
     if [ -f .env ]; then
         # Upgrades: add keys newer versions need, never touch existing ones.
         if ! grep -q '^POSTGRES_PASSWORD=' .env; then
-            printf '\n# PostgreSQL for users, organisations, API keys and the audit log.\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
+            printf '\n# PostgreSQL for users, organisations, API keys and the audit log.\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 12)" >> .env
             echo "added POSTGRES_PASSWORD to .env"
         fi
         if ! grep -q '^SECRET_KEY=' .env; then
@@ -33,24 +33,19 @@ init:
             echo "added ADMIN_PASSWORD to .env"
         fi
         if ! grep -q '^METRICS_PASSWORD=' .env; then
-            printf '\n# VictoriaMetrics password (statistics by minute and hour).\nMETRICS_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
+            printf '\n# VictoriaMetrics password (statistics by minute and hour).\nMETRICS_PASSWORD=%s\n' "$(openssl rand -hex 12)" >> .env
             echo "added METRICS_PASSWORD to .env"
         fi
-        if ! grep -q '^HUGEGRAPH_PASSWORD=' .env; then
-            printf '\n# HugeGraph admin password (the graph database).\nHUGEGRAPH_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
-            echo "added HUGEGRAPH_PASSWORD to .env"
-        fi
-        if ! grep -q '^HUGEGRAPH_MCP_PASSWORD=' .env; then
-            printf '\n# Password of the limited HugeGraph user the MCP service connects as.\nHUGEGRAPH_MCP_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
-            echo "added HUGEGRAPH_MCP_PASSWORD to .env"
+        if ! grep -q '^NEBULA_PASSWORD=' .env; then
+            printf '\n# NebulaGraph root password (the graph database; at most 24 characters).\nNEBULA_PASSWORD=%s\n' "$(openssl rand -hex 12)" >> .env
+            echo "added NEBULA_PASSWORD to .env"
         fi
         exit 0
     fi
     sed -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-postgres/$(openssl rand -hex 24)/" \
-        -e "s/change-me-hugegraph/$(openssl rand -hex 24)/" \
-        -e "s/change-me-graph-role/$(openssl rand -hex 24)/" \
+        -e "s/change-me-nebula/$(openssl rand -hex 12)/" \
         -e "s/change-me-metrics/$(openssl rand -hex 24)/" \
         -e "s/change-me-admin/$(openssl rand -hex 16)/" \
         -e "s|change-me-secret-key|$(openssl rand -base64 32)|" .env.example > .env
@@ -93,7 +88,7 @@ git-token host="github.com": init _runtime
     echo "token stored in .env for $host; the API was restarted. Run again with another host (just git-token codeberg.org) to add more."
     echo "read-only token: Contents read. For fix branches and PRs (CODESYNAPSE_ALLOW_PUSH=true): Contents and Pull requests read and write."
 
-# Build and start HugeGraph, Milvus, PostgreSQL, API, MCP and web
+# Build and start NebulaGraph, Milvus, PostgreSQL, API, MCP and web
 up: init _runtime
     {{compose}} up -d --build
     @echo "web http://localhost:3000 · api http://localhost:8080 · mcp http://localhost:8090/mcp"
@@ -187,7 +182,10 @@ engine := env("CONTAINER_ENGINE", `if command -v docker >/dev/null 2>&1; then ec
 # .github/scripts/check-test-images.sh (part of `just checks`) keeps recipes, Compose and the chart in step.
 pg_image := `sh .github/scripts/compose-image.sh codesynapse-postgres`
 milvus_image := `sh .github/scripts/compose-image.sh milvus`
-hugegraph_image := `sh .github/scripts/compose-image.sh codesynapse-hugegraph`
+nebula_metad_image := `sh .github/scripts/compose-image.sh nebula-metad`
+nebula_storaged_image := `sh .github/scripts/compose-image.sh nebula-storaged`
+nebula_graphd_image := `sh .github/scripts/compose-image.sh nebula-graphd`
+nebula_console_image := `sh .github/scripts/compose-image.sh nebula-console`
 victoriametrics_image := `sh .github/scripts/compose-image.sh victoria-metrics`
 
 # Build the api, worker, mcp and web images, tagged codesynapse-<svc>:<tag> and <registry>/codesynapse-<svc>:<tag>. PLATFORM=linux/amd64 for a cluster of another architecture.
@@ -266,7 +264,7 @@ _kind-secret:
             --from-literal=CODESYNAPSE_API_TOKEN="$(openssl rand -hex 24)" \
             --from-literal=CODESYNAPSE_MCP_TOKEN="$(openssl rand -hex 24)" \
             --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)" \
-            --from-literal=HUGEGRAPH_PASSWORD="$(openssl rand -hex 24)" \
+            --from-literal=NEBULA_PASSWORD="$(openssl rand -hex 12)" \
             --from-literal=METRICS_PASSWORD="$(openssl rand -hex 24)" \
             --from-literal=SECRET_KEY="$(openssl rand -base64 32)"
     fi
@@ -353,38 +351,26 @@ test-postgres: _runtime
     sleep 1
     CODESYNAPSE_TEST_DATABASE_URL="postgres://postgres:$pw@127.0.0.1:55432/cs?sslmode=disable" go test -race -count=1 ./internal/accounts/...
 
-# Store contract and parity checks against throwaway HugeGraph and Milvus containers
-test-hugegraph: _runtime
+# Store contract against a throwaway NebulaGraph cluster (the images docker-compose.yml ships) and Milvus
+test-nebula: _runtime
     #!/usr/bin/env sh
     set -eu
-    hg="codesynapse-hg-test-$$"; mv="codesynapse-milvus-test-$$"
-    # The images (see pg_image above) and the transaction capacity are the ones docker-compose.yml ships.
-    {{engine}} run --rm -d --name "$hg" -p 127.0.0.1:58080:8080 --entrypoint sh {{hugegraph_image}} \
-        -c "printf '\nvertex.tx_capacity=1000000\nedge.tx_capacity=1000000\n' >> conf/graphs/hugegraph.properties && exec ./docker-entrypoint.sh" >/dev/null
+    id="$$"; net="codesynapse-neb-test-$id"; mv="codesynapse-milvus-test-$id"
+    flags="--log_dir=/logs --v=0 --minloglevel=1 --heartbeat_interval_secs=1"
+    {{engine}} network create "$net" >/dev/null
+    {{engine}} run --rm -d --network "$net" --name "$net-metad" {{nebula_metad_image}} --meta_server_addrs="$net-metad:9559" --local_ip="$net-metad" --ws_ip="$net-metad" --port=9559 --data_path=/data/meta $flags >/dev/null
+    {{engine}} run --rm -d --network "$net" --name "$net-storaged" {{nebula_storaged_image}} --meta_server_addrs="$net-metad:9559" --local_ip="$net-storaged" --ws_ip="$net-storaged" --port=9779 --data_path=/data/storage $flags >/dev/null
+    {{engine}} run --rm -d --network "$net" --name "$net-graphd" -p 127.0.0.1:59669:9669 {{nebula_graphd_image}} --meta_server_addrs="$net-metad:9559" --local_ip="$net-graphd" --ws_ip="$net-graphd" --port=9669 --enable_authorize=true $flags >/dev/null
     {{engine}} run --rm -d --name "$mv" -p 127.0.0.1:59530:19530 -e ETCD_USE_EMBED=true -e ETCD_DATA_DIR=/var/lib/milvus/etcd \
         -e COMMON_STORAGETYPE=local -e DEPLOY_MODE=STANDALONE {{milvus_image}} milvus run standalone >/dev/null
-    trap '{{engine}} stop "$hg" "$mv" >/dev/null 2>&1' EXIT
-    # REST and Gremlin answer before the graph is bound (1.7 binds DEFAULT-hugegraph): wait for a graph query.
-    n=0; until curl -sf --compressed -X POST http://127.0.0.1:58080/gremlin -H 'Content-Type: application/json' \
-        -d '{"gremlin":"g.V().limit(0).count()","aliases":{"graph":"DEFAULT-hugegraph","g":"__g_DEFAULT-hugegraph"}}' >/dev/null 2>&1; do n=$((n+1)); [ "$n" -lt 90 ] || { echo "HugeGraph did not start" >&2; exit 1; }; sleep 2; done
+    trap '{{engine}} stop "$net-metad" "$net-storaged" "$net-graphd" "$mv" >/dev/null 2>&1; {{engine}} network rm "$net" >/dev/null 2>&1' EXIT
+    console() { {{engine}} run --rm --network "$net" --entrypoint nebula-console {{nebula_console_image}} -addr "$net-graphd" -port 9669 -u root -p nebula -e "$1"; }
+    n=0; until console 'SHOW HOSTS' >/dev/null 2>&1; do n=$((n+1)); [ "$n" -lt 60 ] || { echo "NebulaGraph did not start" >&2; exit 1; }; sleep 2; done
+    console "ADD HOSTS \"$net-storaged\":9779" >/dev/null
+    n=0; until console 'SHOW HOSTS' | grep -q ONLINE; do n=$((n+1)); [ "$n" -lt 60 ] || { echo "the storage host did not come online" >&2; exit 1; }; sleep 2; done
     n=0; until {{engine}} exec "$mv" curl -sf http://127.0.0.1:9091/healthz >/dev/null 2>&1; do n=$((n+1)); [ "$n" -lt 90 ] || { echo "Milvus did not start" >&2; exit 1; }; sleep 2; done
-    export CODESYNAPSE_TEST_HUGEGRAPH_URL=http://127.0.0.1:58080 CODESYNAPSE_TEST_MILVUS_URL=http://127.0.0.1:59530 CODESYNAPSE_TEST_HUGEGRAPH_TX_CAPACITY=1000000
-    go test -race -count=1 ./internal/store/hugegraphstore/... ./internal/vector/...
-    # The parity check indexes this repository; go/packages races under -race.
-    go test -count=1 -run TestParityWithReference ./internal/store/hugegraphstore/
-
-# Limited HugeGraph role (read everything, write the MCP labels) against a throwaway HugeGraph with authentication on
-test-hugegraph-auth: _runtime
-    #!/usr/bin/env sh
-    set -eu
-    hg="codesynapse-hga-test-$$"; pw=$(openssl rand -hex 16)
-    {{engine}} run --rm -d --name "$hg" -p 127.0.0.1:58081:8080 -e PASSWORD="$pw" --entrypoint sh {{hugegraph_image}} \
-        -c "./bin/enable-auth.sh && printf '\nvertex.tx_capacity=1000000\nedge.tx_capacity=1000000\n' >> conf/graphs/hugegraph.properties && exec ./docker-entrypoint.sh" >/dev/null
-    trap '{{engine}} stop "$hg" >/dev/null 2>&1' EXIT
-    n=0; until curl -sf --compressed -u "admin:$pw" -X POST http://127.0.0.1:58081/gremlin -H 'Content-Type: application/json' \
-        -d '{"gremlin":"g.V().limit(0).count()","aliases":{"graph":"DEFAULT-hugegraph","g":"__g_DEFAULT-hugegraph"}}' >/dev/null 2>&1; do n=$((n+1)); [ "$n" -lt 90 ] || { echo "HugeGraph did not start" >&2; exit 1; }; sleep 2; done
-    CODESYNAPSE_TEST_HUGEGRAPH_URL=http://127.0.0.1:58081 CODESYNAPSE_TEST_HUGEGRAPH_PASSWORD="$pw" CODESYNAPSE_TEST_HUGEGRAPH_TX_CAPACITY=1000000 \
-        go test -count=1 -run 'TestLimitedRole|TestProvisionRole' -v ./internal/store/hugegraphstore/
+    export CODESYNAPSE_TEST_NEBULA_ADDR=127.0.0.1:59669 CODESYNAPSE_TEST_MILVUS_URL=http://127.0.0.1:59530
+    go test -race -count=1 ./internal/store/nebulastore/... ./internal/vector/...
 
 # Push and tenant-filtered queries against a throwaway VictoriaMetrics
 test-metrics: _runtime
@@ -398,8 +384,8 @@ test-metrics: _runtime
     CODESYNAPSE_TEST_METRICS_URL=http://127.0.0.1:58428 CODESYNAPSE_TEST_METRICS_USER=cs CODESYNAPSE_TEST_METRICS_PASSWORD="$pw" \
         go test -race -count=1 -run TestVictoriaMetrics ./internal/telemetry/ ./services/api/internal/api/
 
-# Store, accounts and metrics contracts against throwaway HugeGraph, Milvus, PostgreSQL and VictoriaMetrics containers
-test-integration: test-hugegraph test-hugegraph-auth test-postgres test-metrics
+# Store, accounts and metrics contracts against throwaway NebulaGraph, Milvus, PostgreSQL and VictoriaMetrics containers
+test-integration: test-nebula test-postgres test-metrics
 
 # Tests and the shipped stack must use the same store images (see pg_image)
 check-test-images:
@@ -437,7 +423,7 @@ lint-actions:
 
 # Lint the service Dockerfiles (.hadolint.yaml)
 lint-docker:
-    {{engine}} run --rm -v "$PWD:/src:ro" -w /src ghcr.io/hadolint/hadolint:v2.15.1 hadolint services/api/Dockerfile services/mcp/Dockerfile services/web/Dockerfile deploy/postgres/Dockerfile deploy/hugegraph/Dockerfile
+    {{engine}} run --rm -v "$PWD:/src:ro" -w /src ghcr.io/hadolint/hadolint:v2.15.1 hadolint services/api/Dockerfile services/mcp/Dockerfile services/web/Dockerfile deploy/postgres/Dockerfile
 
 # Lint shell scripts
 lint-shell:

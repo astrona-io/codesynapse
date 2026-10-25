@@ -186,7 +186,7 @@ jobs:
       - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
       - name: PostgreSQL accounts contract
         run: just test-postgres
-      - name: HugeGraph and Milvus store contract
-        run: just test-hugegraph
+      - name: NebulaGraph and Milvus store contract
+        run: just test-nebula
       - name: VictoriaMetrics telemetry and series contract
         run: just test-metrics

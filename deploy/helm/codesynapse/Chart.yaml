@@ -50,9 +50,9 @@ dependencies:
   - name: postgresql
     version: 0.1.0
     condition: postgresql.enabled
-  - name: hugegraph
+  - name: nebula
     version: 0.1.0
-    condition: hugegraph.enabled
+    condition: nebula.enabled
   - name: milvus
     version: 0.1.0
     condition: milvus.enabled

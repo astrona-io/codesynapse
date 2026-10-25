@@ -11,7 +11,7 @@ Ask for `ReplaceRepo` and you get its signature, location, 3 callers, the 2 test
 - **Indexes** Go (type-checked, exact calls and interface dispatch), Python, JavaScript, TypeScript, Vue, Java, Kotlin, Rust, C#, PHP, Ruby, Markdown, YAML, Helm charts, git history and dependencies with their CVEs.
 - **Serves** agents over MCP, people through a web dashboard, and CI through a CLI.
 - **Reviews** security (graded A–F, with reachability), licences, unused code, duplicates and the impact of a diff.
-- **Runs** on Apache HugeGraph and Milvus, all Apache-2.0, on your own machine or cluster.
+- **Runs** on NebulaGraph and Milvus, all Apache-2.0, on your own machine or cluster.
 
 ## Quick start
 
@@ -122,4 +122,4 @@ Issues and pull requests are welcome. Run `just ci` before you open a PR, use [c
 
 ## License
 
-Copyright 2026 Astrona.io. Licensed under the [Apache License, Version 2.0](LICENSE); see [NOTICE](NOTICE) for attributions. All Go and production npm dependencies use permissive licences, and HugeGraph and Milvus run as separate Apache-2.0 images.
+Copyright 2026 Astrona.io. Licensed under the [Apache License, Version 2.0](LICENSE); see [NOTICE](NOTICE) for attributions. All Go and production npm dependencies use permissive licences, and NebulaGraph and Milvus run as separate Apache-2.0 images.

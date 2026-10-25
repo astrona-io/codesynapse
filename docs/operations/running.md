@@ -41,7 +41,7 @@ flowchart TB
         mcp[mcp :8090]
         pg[(postgres)]
         vm[(victoriametrics)]
-        hg[(hugegraph)]
+        hg[(nebula-graphd)]
         mv[(milvus)]
     end
     user[Browser] --> web
@@ -71,15 +71,14 @@ The compose API container reaches model servers on the host through `host.docker
 | `just web-check` | Nuxt typecheck and build |
 | `just ci` | All of the above |
 | `just dev-web` | Nuxt dev server against the API of `just up` |
-| `just test-integration` | `test-hugegraph`, `test-hugegraph-auth`, `test-postgres` and `test-metrics` together |
+| `just test-integration` | `test-nebula`, `test-postgres` and `test-metrics` together |
 | `just test-postgres` | Accounts contract on a throwaway PostgreSQL |
-| `just test-hugegraph` | HugeGraph/Milvus contract and parity |
-| `just test-hugegraph-auth` | Limited HugeGraph role (MCP) on a throwaway HugeGraph with authentication |
+| `just test-nebula` | NebulaGraph/Milvus store contract |
 | `just test-metrics` | Telemetry and series queries on a throwaway VictoriaMetrics |
 | `just check-test-images` | The integration recipes, `docker-compose.yml` and the Helm chart use the same store images |
 | `just review` | Offline review pack for the current branch |
 
-The integration recipes run the store images that `docker-compose.yml` ships (PostgreSQL, HugeGraph, Milvus, VictoriaMetrics), read from it by `.github/scripts/compose-image.sh`, so a version bump there, which Renovate makes in one place, changes what the contracts test. CI runs all three suites on store, accounts, telemetry, series, dependency and recipe changes, nightly and on demand, with a 30 minute job limit and bounded container start-up waits.
+The integration recipes run the store images that `docker-compose.yml` ships (PostgreSQL, NebulaGraph, Milvus, VictoriaMetrics), read from it by `.github/scripts/compose-image.sh`, so a version bump there, which Renovate makes in one place, changes what the contracts test. CI runs all three suites on store, accounts, telemetry, series, dependency and recipe changes, nightly and on demand, with a 30 minute job limit and bounded container start-up waits.
 
 Run `just test` and `just lint` before calling a Go change done, and `just web-check` for anything under `services/web/`.
 
@@ -136,7 +135,7 @@ Releases publish signed multi-arch images, `ghcr.io/astrona-io/codesynapse-{api,
 helm install codesynapse oci://ghcr.io/astrona-io/charts/codesynapse --version X.Y.Z
 ```
 
-The chart runs the four services and, unless you point it at your own, PostgreSQL, HugeGraph, Milvus, VictoriaMetrics and VictoriaTraces as subcharts. It uses one Secret for every credential, network policies, non-root pods and a `helm test`. See the [chart README](https://github.com/astrona-io/codesynapse/blob/main/deploy/helm/codesynapse/README.md), [Releasing](releasing.md) and [Upgrading](upgrading.md).
+The chart runs the four services and, unless you point it at your own, PostgreSQL, NebulaGraph, Milvus, VictoriaMetrics and VictoriaTraces as subcharts. It uses one Secret for every credential, network policies, non-root pods and a `helm test`. See the [chart README](https://github.com/astrona-io/codesynapse/blob/main/deploy/helm/codesynapse/README.md), [Releasing](releasing.md) and [Upgrading](upgrading.md).
 
 Verify an image:
 

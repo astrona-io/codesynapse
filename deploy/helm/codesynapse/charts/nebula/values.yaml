@@ -1,0 +1,16 @@
+# Defaults for the in-chart NebulaGraph. Override them under `nebula:` in the
+# codesynapse chart's values.
+# One pod runs metad, storaged and graphd together (a single instance, like
+# the other in-chart stores); for a cluster run NebulaGraph yourself and set
+# nebula.externalAddrs.
+images:
+  metad: docker.io/vesoft/nebula-metad:v3.8.0
+  storaged: docker.io/vesoft/nebula-storaged:v3.8.0
+  graphd: docker.io/vesoft/nebula-graphd:v3.8.0
+  # Registers the storage host and replaces the first root password.
+  console: docker.io/vesoft/nebula-console:v3.8.0
+size: 20Gi
+storageClass: ""
+resources:
+  requests: {cpu: 500m, memory: 2Gi}
+  limits: {memory: 4Gi}

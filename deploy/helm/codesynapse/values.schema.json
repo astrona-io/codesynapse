@@ -10,7 +10,7 @@
       "type": "object",
       "properties": {
         "existingSecret": {
-          "description": "Required at install. The Secret with CODESYNAPSE_API_TOKEN, CODESYNAPSE_MCP_TOKEN, HUGEGRAPH_PASSWORD, METRICS_PASSWORD, SECRET_KEY and POSTGRES_PASSWORD (in-chart PostgreSQL) or CODESYNAPSE_DATABASE_URL (external). Optional: CODESYNAPSE_GIT_TOKENS, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, MILVUS_TOKEN.",
+          "description": "Required at install. The Secret with CODESYNAPSE_API_TOKEN, CODESYNAPSE_MCP_TOKEN, NEBULA_PASSWORD, METRICS_PASSWORD, SECRET_KEY and POSTGRES_PASSWORD (in-chart PostgreSQL) or CODESYNAPSE_DATABASE_URL (external). Optional: CODESYNAPSE_GIT_TOKENS, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, MILVUS_TOKEN.",
           "type": "string"
         },
         "imagePullSecrets": {
@@ -334,20 +334,15 @@
       "description": "In-chart PostgreSQL. When disabled, put the database URL in the Secret as CODESYNAPSE_DATABASE_URL.",
       "$ref": "#/definitions/store"
     },
-    "hugegraph": {
+    "nebula": {
       "allOf": [
         {
           "$ref": "#/definitions/store"
         }
       ],
       "properties": {
-        "externalURL": {
-          "description": "When disabled: the HugeGraph REST URL (http(s)://host:8080). The password stays HUGEGRAPH_PASSWORD in the Secret."
-        },
-        "txCapacity": {
-          "description": "Both the server and the services use it.",
-          "type": "integer",
-          "minimum": 1
+        "externalAddrs": {
+          "description": "When disabled: the graphd addresses (host:9669, comma separated). The root password stays NEBULA_PASSWORD in the Secret; in the chart it is at most 24 characters (NebulaGraph's limit)."
         }
       }
     },

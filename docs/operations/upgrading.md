@@ -26,7 +26,7 @@ Take a backup. The parts that matter:
 | What | How |
 |---|---|
 | PostgreSQL (accounts, organisations, audit log, jobs, schedules, sealed tokens) | `kubectl --context <ctx> -n codesynapse exec codesynapse-postgresql-0 -- pg_dump -U codesynapse -Fc codesynapse > codesynapse.dump`, or your managed database's snapshots |
-| HugeGraph and Milvus volumes (graphs, reviews, memory, vectors) | Volume snapshots of the `codesynapse-hugegraph` and `codesynapse-milvus` StatefulSet volumes. Graphs can be rebuilt by re-indexing; reviews and agent memory can't |
+| NebulaGraph and Milvus volumes (graphs, reviews, memory, vectors) | Volume snapshots of the `codesynapse-nebula` and `codesynapse-milvus` StatefulSet volumes. Graphs can be rebuilt by re-indexing; reviews and agent memory can't |
 | The Secret `codesynapse` | Keep `SECRET_KEY` safe. Organisation Git tokens and identity provider secrets sealed with a lost key have to be entered again |
 | The audit log, for retention outside the cluster | `GET /api/v1/admin/audit?format=jsonl` as a platform admin; `GET /api/v1/admin/audit/verify` checks the hash chain |
 
@@ -42,10 +42,11 @@ Fix branches (`features.allowPush`) are pushed by a separate worker, so the work
 
 ## Docker compose installs
 
-Run `just init` (it adds missing keys such as `POSTGRES_PASSWORD`, `SECRET_KEY`, `HUGEGRAPH_PASSWORD` and `METRICS_PASSWORD` to `.env`), then `just up`.
+Run `just init` (it adds missing keys such as `POSTGRES_PASSWORD`, `SECRET_KEY`, `NEBULA_PASSWORD` and `METRICS_PASSWORD` to `.env`), then `just up`.
 
 - **PostgreSQL 17 to 18.** The compose stack runs PostgreSQL 18, which cannot open a data volume written by PostgreSQL 17. If your install predates the upgrade, dump the accounts database with the old image first (`docker compose exec postgres pg_dumpall -U codesynapse > accounts.sql`), remove the `postgres-data` volume, run `just up`, and restore (`docker compose exec -T postgres psql -U codesynapse -d codesynapse < accounts.sql`).
-- **From Neo4j.** Neo4j support was removed and graphs are not migrated: after `just up`, sync your repositories again to rebuild them in HugeGraph. The old data stays in the `neo4j-data` volume until you delete it (`docker volume rm codesynapse_neo4j-data`). `CODESYNAPSE_GRAPH_BACKEND`, `COMPOSE_PROFILES=hugegraph` and `NEO4J_*` lines in `.env` are no longer used; a CLI or service still configured with `CODESYNAPSE_GRAPH_BACKEND=neo4j` stops with an error that says so.
+- **From HugeGraph.** HugeGraph was replaced by NebulaGraph and graphs are not migrated. Run `just init` to add `NEBULA_PASSWORD` (at most 24 characters), `just up`, and sync your repositories again. Reviews, curated records and agent memory were stored in the same graph, so they start empty; export what you need first. Recreate the Milvus volume if the collection was built for an older release (`docker volume rm codesynapse_milvus-data`). The old `hugegraph-data` volume stays until you delete it. In Kubernetes, put `NEBULA_PASSWORD` in the Secret, replace `hugegraph.*` values with `nebula.*` (`nebula.externalAddrs` for your own cluster) and delete the old `*-hugegraph` StatefulSet volume.
+- **From Neo4j.** Neo4j support was removed and graphs are not migrated: after `just up`, sync your repositories again to rebuild them in NebulaGraph. The old data stays in the `neo4j-data` volume until you delete it (`docker volume rm codesynapse_neo4j-data`). `CODESYNAPSE_GRAPH_BACKEND`, `COMPOSE_PROFILES=hugegraph` and `NEO4J_*` lines in `.env` are no longer used; a CLI or service still configured with `CODESYNAPSE_GRAPH_BACKEND=neo4j` stops with an error that says so.
 - **Module path.** The repository and Go module are `github.com/astrona-io/codesynapse`, and images are under `ghcr.io/astrona-io`. Update existing clones with `git remote set-url origin git@github.com:astrona-io/codesynapse.git`; consumers of the Go module must update their imports.
 
 ## Release candidates

@@ -114,6 +114,7 @@ nav:
           - Plan and decisions: PLAN.md
           - SaaS: SAAS.md
           - "ADR 0001: search": adr/0001-search.md
+          - "ADR 0003: NebulaGraph": adr/0003-nebulagraph.md
       - Identity and access:
           - Access control plan: ACCESS_CONTROL_PLAN.md
           - Session context plan: SESSION_CONTEXT_PLAN.md

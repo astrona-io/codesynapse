@@ -5,7 +5,7 @@
 # Shared with the store subcharts.
 global:
   # Required. Keys: CODESYNAPSE_API_TOKEN, CODESYNAPSE_MCP_TOKEN,
-  # HUGEGRAPH_PASSWORD, METRICS_PASSWORD, SECRET_KEY, and POSTGRES_PASSWORD
+  # NEBULA_PASSWORD, METRICS_PASSWORD, SECRET_KEY, and POSTGRES_PASSWORD
   # (in-chart PostgreSQL) or CODESYNAPSE_DATABASE_URL (external). Optional:
   # CODESYNAPSE_GIT_TOKENS, CODESYNAPSE_GIT_PUSH_TOKENS (only the fix worker
   # gets it), ANTHROPIC_API_KEY, OPENROUTER_API_KEY, and
@@ -169,13 +169,12 @@ postgresql:
   enabled: true
   # When disabled, put the database URL in the Secret as
   # CODESYNAPSE_DATABASE_URL.
-hugegraph:
+nebula:
   enabled: true
-  # When disabled: the HugeGraph REST URL (http(s)://host:8080). The
-  # password stays HUGEGRAPH_PASSWORD in the Secret.
-  externalURL: ""
-  # Both the server and the services use it.
-  txCapacity: 1000000
+  # When disabled: the graphd addresses (host:9669, comma separated). The
+  # root password stays NEBULA_PASSWORD in the Secret; in the chart it is
+  # at most 24 characters (NebulaGraph's limit).
+  externalAddrs: ""
 milvus:
   enabled: true
   # When disabled: the Milvus proxy URL (http(s)://host:19530); empty turns

@@ -9,8 +9,8 @@
 
 
 {{/* Store addresses: in-chart service or the external value. */}}
-{{- define "cs.hugegraphURL" -}}
-{{- if .Values.hugegraph.enabled }}http://{{ include "cs.name" (list . "hugegraph") }}:8080{{ else }}{{ required "hugegraph.externalURL is required when hugegraph.enabled is false" .Values.hugegraph.externalURL }}{{ end -}}
+{{- define "cs.nebulaAddrs" -}}
+{{- if .Values.nebula.enabled }}{{ include "cs.name" (list . "nebula") }}:9669{{ else }}{{ required "nebula.externalAddrs is required when nebula.enabled is false" .Values.nebula.externalAddrs }}{{ end -}}
 {{- end -}}
 {{- define "cs.milvusURL" -}}
 {{- if .Values.milvus.enabled }}http://{{ include "cs.name" (list . "milvus") }}:19530{{ else }}{{ .Values.milvus.externalURL }}{{ end -}}
@@ -24,11 +24,9 @@
 
 {{/* Environment shared by api, worker and mcp: stores and telemetry. */}}
 {{- define "cs.storeEnv" -}}
-- {name: CODESYNAPSE_HUGEGRAPH_URL, value: {{ include "cs.hugegraphURL" . | quote }}}
-- {name: CODESYNAPSE_HUGEGRAPH_USER, value: admin}
-{{ include "cs.secretEnv" (list . "CODESYNAPSE_HUGEGRAPH_PASSWORD" "HUGEGRAPH_PASSWORD") }}
-- {name: CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES, value: "8388608"}
-- {name: CODESYNAPSE_HUGEGRAPH_TX_CAPACITY, value: {{ int64 .Values.hugegraph.txCapacity | quote }}}
+- {name: CODESYNAPSE_NEBULA_ADDRS, value: {{ include "cs.nebulaAddrs" . | quote }}}
+- {name: CODESYNAPSE_NEBULA_USER, value: root}
+{{ include "cs.secretEnv" (list . "CODESYNAPSE_NEBULA_PASSWORD" "NEBULA_PASSWORD") }}
 - {name: CODESYNAPSE_MILVUS_URL, value: {{ include "cs.milvusURL" . | quote }}}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_MILVUS_TOKEN" "MILVUS_TOKEN" true) }}
 - {name: CODESYNAPSE_METRICS_URL, value: {{ include "cs.metricsURL" . | quote }}}
