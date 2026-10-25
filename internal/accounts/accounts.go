@@ -429,6 +429,9 @@ type Store interface {
 	FinishJob(ctx context.Context, id, owner string, out JobOutcome) error
 	// kinds limits the claim to those job kinds; nil claims any.
 	ClaimOrphanedJob(ctx context.Context, owner string, kinds []string, leaseUntil, now time.Time) (JobRecord, bool, error)
+	// WaitingJobs counts, per kind, the jobs a worker could claim now: queued
+	// or running with an expired lease. It is the work waiting for a process.
+	WaitingJobs(ctx context.Context, now time.Time) (map[string]int, error)
 	RegisterExecutionSession(ctx context.Context, session ExecutionSession) (ExecutionSession, bool, error)
 	ExecutionSessionByID(ctx context.Context, id string) (ExecutionSession, error)
 	RevokeExecutionSession(ctx context.Context, id, orgID, userID string, at time.Time) error

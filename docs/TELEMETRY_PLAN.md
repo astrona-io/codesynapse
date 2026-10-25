@@ -66,6 +66,10 @@ Local/cloud classification comes from provider configuration and `ProviderConfig
 
 Add a correctly named `db_graph_rows_returned_total` and migrate panels while documenting the legacy series. Actual Gremlin traversal counts require verified backend profiling support and a defined counting method; expose them separately only when measured, never substitute returned rows or run expensive profiling on every production query. Add error/timeout rates, p50/p95/p99 latency and request volume; configured SLA targets are not measured benefits.
 
+## Worker queue depth
+
+`platform_codesynapse_jobs_waiting{kind}` is a gauge of the jobs a worker could claim now (queued, or running with an expired lease), per job kind. It has no tenant, so it exports as a platform series. The API process that holds the `api-loops` lease sets it every 15 seconds (`reportJobQueue`), so replicas never report it twice; a kind that drained reports 0. It is the signal an autoscaler adds workers on; a kind that never had a waiting job has no series, which an autoscaler reads as 0.
+
 ## Dashboard 4: memory and offloading
 
 | Metric | Instrument and meaning |

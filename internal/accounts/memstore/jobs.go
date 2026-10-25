@@ -155,6 +155,20 @@ func (s *Store) ClaimOrphanedJob(_ context.Context, owner string, kinds []string
 	}
 }
 
+// WaitingJobs implements accounts.Store.
+func (s *Store) WaitingJobs(_ context.Context, now time.Time) (map[string]int, error) {
+	t := s.jobTable()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := map[string]int{}
+	for _, j := range t.jobs {
+		if j.Active() && j.LeaseUntil.Before(now) {
+			out[j.Kind]++
+		}
+	}
+	return out, nil
+}
+
 // prune keeps the newest accounts.JobHistory finished jobs. Callers hold mu.
 func (t *jobTable) prune() {
 	var done []accounts.JobRecord
