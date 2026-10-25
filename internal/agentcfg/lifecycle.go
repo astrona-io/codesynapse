@@ -12,6 +12,11 @@ import (
 // which CodeSynapse only records activity and never makes a permission decision.
 func HookEvents(client string) []string {
 	switch client {
+	case "claude":
+		// The events the plugin's own hooks (hooks.json) do not already
+		// handle; they only record activity, except that SessionEnd and
+		// SubagentStop flush counts and SubagentStart supplies the rules.
+		return []string{"SessionEnd", "SubagentStart", "SubagentStop", "PostCompact", "PostToolBatch", "InstructionsLoaded", "PermissionRequest", "PermissionDenied", "StopFailure"}
 	case "codex":
 		return []string{"SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop", "Stop", "Interrupt"}
 	case "cursor":

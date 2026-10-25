@@ -23,6 +23,33 @@
     "UserPromptSubmit": [
       { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "prompt"], "timeout": 5 }] }
     ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "lifecycle", "--client", "claude", "--event", "SessionEnd"], "timeout": 2 }] }
+    ],
+    "SubagentStart": [
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "lifecycle", "--client", "claude", "--event", "SubagentStart"], "timeout": 15 }] }
+    ],
+    "SubagentStop": [
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "lifecycle", "--client", "claude", "--event", "SubagentStop"], "timeout": 15 }] }
+    ],
+    "PostCompact": [
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "lifecycle", "--client", "claude", "--event", "PostCompact"], "timeout": 15 }] }
+    ],
+    "PostToolBatch": [
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "lifecycle", "--client", "claude", "--event", "PostToolBatch"], "timeout": 15 }] }
+    ],
+    "InstructionsLoaded": [
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "lifecycle", "--client", "claude", "--event", "InstructionsLoaded"], "timeout": 15 }] }
+    ],
+    "PermissionRequest": [
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "lifecycle", "--client", "claude", "--event", "PermissionRequest"], "timeout": 15 }] }
+    ],
+    "PermissionDenied": [
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "lifecycle", "--client", "claude", "--event", "PermissionDenied"], "timeout": 15 }] }
+    ],
+    "StopFailure": [
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "lifecycle", "--client", "claude", "--event", "StopFailure"], "timeout": 15 }] }
+    ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "stop"], "timeout": 30 }] }
     ]

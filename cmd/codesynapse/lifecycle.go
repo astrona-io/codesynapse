@@ -27,7 +27,7 @@ type lifecycleOptions struct {
 
 func (o *lifecycleOptions) SetupFlags(context.Context, *app.Env) error {
 	f := o.EC.Command.Flags()
-	f.StringVar(&o.client, "client", "", "Assistant runtime: codex or cursor")
+	f.StringVar(&o.client, "client", "", "Assistant runtime: claude, codex or cursor")
 	f.StringVar(&o.event, "event", "", "Native lifecycle event name")
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "API for runtime registration and activity")
 	return nil
@@ -84,6 +84,7 @@ type lifecycleInput struct {
 	ContextLimit         *int64          `json:"context_window_size"`
 	LoopCount            int64           `json:"loop_count"`
 	StopHookActive       bool            `json:"stop_hook_active"`
+	Reason               string          `json:"reason"` // Claude Code SessionEnd
 }
 
 func decodeLifecycle(in io.Reader, client, event string) (lifecycleInput, toolHookInput, agentcfg.HookActivity, error) {
@@ -220,6 +221,9 @@ func decodeLifecycle(in io.Reader, client, event string) (lifecycleInput, toolHo
 	if event == "postToolUse" {
 		a.Outcome = "ok"
 	}
+	if client == "claude" {
+		claudeActivity(raw, &a)
+	}
 	if raw.IsInterrupt {
 		a.Outcome = "aborted"
 	}
@@ -266,6 +270,9 @@ func (o *lifecycleOptions) Run(ctx context.Context, _ *app.Env) error {
 	budget := 10 * time.Second
 	if o.event == "SessionEnd" || o.event == "Interrupt" {
 		budget = 2500 * time.Millisecond
+		if o.client == "claude" {
+			budget = 1200 * time.Millisecond // Claude Code gives all SessionEnd hooks 1.5 s together
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
@@ -307,6 +314,9 @@ func (o *lifecycleOptions) Run(ctx context.Context, _ *app.Env) error {
 		o.EC.Logger.Warn("assistant activity not saved; check API key, endpoint and runtime registration")
 	}
 	out := map[string]any{}
+	if o.client == "claude" && o.event == "PostCompact" {
+		return json.NewEncoder(o.EC.Stdout).Encode(out) // Claude Code ignores its output; SessionStart (compact) restores the rules
+	}
 	switch o.event {
 	case "SessionStart", "sessionStart", "SubagentStart", "UserPromptSubmit", "PostCompact":
 		if o.event == "SessionStart" || o.event == "sessionStart" {
@@ -386,4 +396,25 @@ func lifecycleDefault(client, event string) map[string]any {
 		}
 	}
 	return map[string]any{}
+}
+
+// claudeActivity adds what only Claude Code's events carry, as fixed enums
+// and sizes: the SessionEnd reason, what a denied permission or failed turn
+// means, and how large an instructions file is (never its path or text).
+func claudeActivity(raw lifecycleInput, a *agentcfg.HookActivity) {
+	switch a.Event {
+	case "SessionEnd":
+		a.Source = "other"
+		if slices.Contains([]string{"clear", "resume"}, raw.Reason) {
+			a.Source = raw.Reason
+		}
+	case "PermissionDenied":
+		a.FailureType, a.Outcome = "permission_denied", "error"
+	case "StopFailure":
+		a.Outcome = "error"
+	case "InstructionsLoaded":
+		if fi, err := os.Stat(raw.FilePath); err == nil && fi.Mode().IsRegular() {
+			a.ContentBytes = fi.Size()
+		}
+	}
 }
