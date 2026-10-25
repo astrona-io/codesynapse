@@ -43,6 +43,10 @@ import (
 //     tool or a native one. Stop reports it with the number of reads the
 //     guard turned back, so Statistics shows whether agents use CodeSynapse
 //     first. It never blocks.
+//   - hook bash (PreToolUse on Bash): hints, once per class and session, at the
+//     CodeSynapse tool that answers git status/diff/log/blame, a text search,
+//     a file read or a whole test run with less output, and counts each one
+//     (bash.go). It never blocks.
 //   - hook answer (PostToolUse on the CodeSynapse tools) and hook read-done
 //     (PostToolUse on Read) count, per tool, the file line ranges answers
 //     gave and how many the agent then read (agent workflow roadmap step
@@ -69,6 +73,7 @@ type toolHookInput struct {
 		Content   string `json:"content"`
 		Patch     string `json:"patch"`
 		FilePath  string `json:"file_path"`
+		Command   string `json:"command"`
 		Offset    int    `json:"offset"`
 		Limit     int    `json:"limit"`
 		Repo      string `json:"repo"`
@@ -97,6 +102,12 @@ type hookState struct {
 	Reported workflowSent `json:"reported,omitempty"`
 	// Base is the checkout as the session began (edits.go).
 	Base *treeBase `json:"base,omitempty"`
+	// Bash counts the shell commands CodeSynapse answers with less output, per
+	// usage class; Hinted are the classes already hinted, BashSent what Stop
+	// has reported (bash.go).
+	Bash     map[string]int `json:"bash,omitempty"`
+	BashSent map[string]int `json:"bash_sent,omitempty"`
+	Hinted   []string       `json:"hinted,omitempty"`
 	// Task is the session's first prompt, kept only with eval capture on
 	// (cases.go).
 	Task string `json:"task,omitempty"`
@@ -189,6 +200,8 @@ func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 		notePrompt(in)
 	case "lookup":
 		noteLookup(in)
+	case "bash":
+		out = bashHint(in)
 	case "session":
 		out = sessionRules(ctx, in, o.EC.Logger)
 	case "answer":
@@ -360,6 +373,9 @@ func hookCmd(ec *app.Env) *cobra.Command {
 		WithNoArgs().Build())
 	parent.AddCommand(app.NewSubCommand("lookup", &hookOptions{EC: ec, event: "lookup"}, ec).
 		WithShortDesc("PreToolUse hook for Read, Grep, Glob and the CodeSynapse tools: note how the session began").
+		WithNoArgs().Build())
+	parent.AddCommand(app.NewSubCommand("bash", &hookOptions{EC: ec, event: "bash"}, ec).
+		WithShortDesc("PreToolUse hook for Bash: hint at the CodeSynapse tool that answers git, search, file reads and test runs with less output").
 		WithNoArgs().Build())
 	parent.AddCommand(app.NewSubCommand("answer", &hookOptions{EC: ec, event: "answer"}, ec).
 		WithShortDesc("PostToolUse hook for the CodeSynapse tools: note the line ranges an answer gave").

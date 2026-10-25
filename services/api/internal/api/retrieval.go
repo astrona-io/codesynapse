@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
@@ -52,6 +53,9 @@ type retrievalReport struct {
 	Client   string                     `json:"client"`
 	Tools    map[string]retrievalCounts `json:"tools"`
 	Workflow *workflowCounts            `json:"workflow,omitempty"`
+	// Bash counts shell commands per usage.BashClasses class that a
+	// CodeSynapse tool answers with less output; never the commands.
+	Bash map[string]int `json:"bash,omitempty"`
 }
 
 func (s *Server) retrievalRoutes() {
@@ -108,6 +112,11 @@ func (s *Server) handleRetrievalReport(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	for class, n := range in.Bash {
+		if n > 0 {
+			buckets = append(buckets, usage.Bucket{Day: day, Org: org, Repo: repo, Tool: usage.BashTool(class), Client: in.Client, Calls: n})
+		}
+	}
 	if len(buckets) == 0 {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -133,7 +142,7 @@ func (in retrievalReport) validate() error {
 			return err
 		}
 	}
-	if len(in.Tools) > maxRetrievalTools || (len(in.Tools) == 0 && in.Workflow == nil && in.Tokens == nil && in.Edits == nil) {
+	if len(in.Tools) > maxRetrievalTools || (len(in.Tools) == 0 && in.Workflow == nil && in.Tokens == nil && in.Edits == nil && len(in.Bash) == 0) {
 		return fmt.Errorf("report up to %d tools, or the workflow counts", maxRetrievalTools)
 	}
 	if wf := in.Workflow; wf != nil {
@@ -141,6 +150,11 @@ func (in retrievalReport) validate() error {
 			if n < 0 || n > maxRetrievalRanges {
 				return fmt.Errorf("workflow counts must be between 0 and %d", maxRetrievalRanges)
 			}
+		}
+	}
+	for class, n := range in.Bash {
+		if !slices.Contains(usage.BashClasses, class) || n < 0 || n > maxRetrievalRanges {
+			return fmt.Errorf("bash: unknown class %q or count out of range", class)
 		}
 	}
 	for tool, c := range in.Tools {

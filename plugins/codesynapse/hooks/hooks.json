@@ -9,6 +9,7 @@
     ],
     "PreToolUse": [
       { "matcher": "Read", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "read"], "timeout": 10 }] },
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "bash"], "timeout": 10 }] },
       { "matcher": "Read|Grep|Glob|mcp__.*codesynapse.*", "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "lookup"], "timeout": 10 }] }
     ],
     "PostToolUse": [

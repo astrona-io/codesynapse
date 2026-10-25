@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -174,7 +175,8 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 			wf[key] = d
 		}
 	}
-	if len(s.Counts) == 0 && wf == nil && tokens == nil && !hasEdits {
+	bash := s.bashReport()
+	if len(s.Counts) == 0 && wf == nil && tokens == nil && !hasEdits && bash == nil {
 		return
 	}
 	// Counts of other repositories' ranges are left out of the report.
@@ -196,7 +198,7 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 			delta[tool] = rangeCounts{Returned: max(d.Returned, 0), Read: max(d.Read, 0)}
 		}
 	}
-	if len(delta) == 0 && wf == nil && tokens == nil && !hasEdits {
+	if len(delta) == 0 && wf == nil && tokens == nil && !hasEdits && bash == nil {
 		return
 	}
 	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
@@ -215,6 +217,9 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 	if wf != nil {
 		body["workflow"] = wf
 	}
+	if bash != nil {
+		body["bash"] = bash
+	}
 	if err := c.do(ctx, http.MethodPost, "/api/v1/repos/"+url.PathEscape(w.repo)+"/usage/retrieval", body, nil); err != nil {
 		logger.Debug("retrieval counts not reported", "error", err)
 		return
@@ -225,6 +230,7 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 		s.Sent[tool] = rangeCounts{Returned: c.Returned - foreign[tool].Returned, Read: c.Read - foreign[tool].Read}
 	}
 	s.markReported()
+	s.BashSent = maps.Clone(s.Bash)
 	s.Reported.Edited, s.Reported.Found = max(s.Reported.Edited, nEdited), max(s.Reported.Found, nFound)
 	if hasEdits {
 		s.Edits = usage.EditCounts{}

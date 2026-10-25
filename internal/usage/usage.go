@@ -5,6 +5,7 @@ package usage
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -28,8 +29,37 @@ const (
 	FilesEditedFound = "(edits:found)"
 )
 
+// Shell commands a session ran where a CodeSynapse tool answers with less
+// output (hook bash). A class is counted under the pseudo tool BashTool(class);
+// the command itself is never reported.
+const (
+	BashGitStatus = "git_status"
+	BashGitDiff   = "git_diff"
+	BashGitLog    = "git_log"
+	BashGitBlame  = "git_blame"
+	BashSearch    = "search"
+	BashRead      = "read"
+	BashTest      = "test"
+)
+
+// BashClasses are the classes the API accepts.
+var BashClasses = []string{BashGitStatus, BashGitDiff, BashGitLog, BashGitBlame, BashSearch, BashRead, BashTest}
+
+// BashTool is the pseudo tool a class is counted under.
+func BashTool(class string) string { return "(bash:" + class + ")" }
+
+// BashClassOf returns the class of a BashTool pseudo tool.
+func BashClassOf(tool string) (string, bool) {
+	c, ok := strings.CutPrefix(tool, "(bash:")
+	c, ok2 := strings.CutSuffix(c, ")")
+	return c, ok && ok2 && slices.Contains(BashClasses, c)
+}
+
 // IsWorkflow reports whether tool is one of the workflow pseudo tools.
 func IsWorkflow(tool string) bool {
+	if _, ok := BashClassOf(tool); ok {
+		return true
+	}
 	switch tool {
 	case FirstCodeSynapse, FirstNative, ReadTurnedBack, FilesEdited, FilesEditedFound:
 		return true
