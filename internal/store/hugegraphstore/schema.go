@@ -43,8 +43,12 @@ s.propertyKey('confidence').asDouble().ifNotExist().create()
 
 def label = { name, idKeys, props ->
   def nullable = props - idKeys
-  s.vertexLabel(name).useCustomizeStringId().properties(props as String[]).nullableKeys(nullable as String[]).ifNotExist().create()
-  // Labels created by an older version get new properties appended.
+  // ifNotExist() does not make create() idempotent for a label whose
+  // properties differ (HugeGraph 1.7 throws ExistedException), so a label an
+  // older version created is never re-created: it gets what it lacks appended.
+  if (!s.getVertexLabels().any { it.name() == name }) {
+    s.vertexLabel(name).useCustomizeStringId().properties(props as String[]).nullableKeys(nullable as String[]).ifNotExist().create()
+  }
   def have = s.getVertexLabel(name).properties().collect { graph.propertyKey(it).name() }
   def missing = props - have
   if (missing) { s.vertexLabel(name).properties(missing as String[]).nullableKeys(missing as String[]).append() }
@@ -85,19 +89,7 @@ s.indexLabel('usageByDay').onV('usage').by('daynum').range().ifNotExist().create
 // EnsureSchema implements store.Writer. Property keys, labels and indexes
 // are created when missing; nothing is dropped.
 func (s *Store) EnsureSchema(ctx context.Context) error {
-	edges := []string{}
-	for _, k := range model.AllEdgeKinds {
-		if k != model.EdgeSessionFact {
-			edges = append(edges, string(k))
-		}
-	}
-	nodeProps := append(append(append(append([]string{}, nodeTexts...), nodeLongs...), nodeBools...), nodeLists...)
-	err := s.write(ctx, schemaScript, map[string]any{
-		"texts": append(append([]string{}, nodeTexts...), otherTexts...), "longs": append(append([]string{}, nodeLongs...), otherLongs...),
-		"bools": nodeBools, "lists": nodeLists,
-		"nodeProps": nodeProps, "entityProps": entityProps, "factProps": factProps, "reviewProps": reviewProps, "snapshotProps": snapshotProps, "curatedProps": curatedProps, "usageProps": usageProps,
-		"edgeKinds": edges,
-	}, nil)
+	err := s.write(ctx, schemaScript, schemaBindings(), nil)
 	if err != nil {
 		return fmt.Errorf("hugegraph schema: %w", err)
 	}
@@ -111,4 +103,21 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		return err
 	}
 	return s.write(ctx, stageSchema, nil, nil)
+}
+
+// schemaBindings are the values of schemaScript.
+func schemaBindings() map[string]any {
+	edges := []string{}
+	for _, k := range model.AllEdgeKinds {
+		if k != model.EdgeSessionFact {
+			edges = append(edges, string(k))
+		}
+	}
+	nodeProps := append(append(append(append([]string{}, nodeTexts...), nodeLongs...), nodeBools...), nodeLists...)
+	return map[string]any{
+		"texts": append(append([]string{}, nodeTexts...), otherTexts...), "longs": append(append([]string{}, nodeLongs...), otherLongs...),
+		"bools": nodeBools, "lists": nodeLists,
+		"nodeProps": nodeProps, "entityProps": entityProps, "factProps": factProps, "reviewProps": reviewProps, "snapshotProps": snapshotProps, "curatedProps": curatedProps, "usageProps": usageProps,
+		"edgeKinds": edges,
+	}
 }
