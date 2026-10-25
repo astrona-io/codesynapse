@@ -64,11 +64,16 @@ const chosen = computed(() => (listing.value?.repos ?? []).filter((r) => picked[
 const allPicked = computed(() => openRepos.value.length > 0 && openRepos.value.every((r) => picked[r.repo]))
 const pickAll = (on: boolean) => { for (const r of openRepos.value) picked[r.repo] = on }
 
+// Watching the organisation adds the repositories created from now on; the
+// ones listed today are the baseline, so unpicked ones stay out.
+const autoAdd = ref(true)
+const watchNote = ref('')
 const adding = ref(false)
 // One at a time: the API queues clones, and each answer says whether the
 // repository was cloned or linked to an existing graph.
 async function addChosen() {
   adding.value = true
+  watchNote.value = ''
   try {
     for (const r of chosen.value) {
       try {
@@ -77,6 +82,14 @@ async function addChosen() {
         picked[r.repo] = false
       } catch (e) {
         outcome[r.repo] = { ok: false, text: apiErrorMessage(e) }
+      }
+    }
+    if (autoAdd.value && listing.value) {
+      try {
+        await apiPost('watches', { provider: listing.value.provider, host: listing.value.host, org: listing.value.org, include_archived: form.include_archived, include_forks: form.include_forks })
+        watchNote.value = `Watching ${listing.value.org}: new public repositories are added automatically.`
+      } catch (e) {
+        watchNote.value = `Could not watch ${listing.value.org}: ${apiErrorMessage(e)}`
       }
     }
   } finally {
@@ -150,8 +163,10 @@ async function addChosen() {
           <section v-if="listing" class="found">
             <div class="found-head">
               <p class="muted small"><strong class="mono">{{ listing.org }}/*</strong> · {{ plural(listing.repos.length, 'repository', 'repositories') }} · {{ listing.repos.filter((r) => r.added).length }} already added<template v-if="listing.truncated"> · only the first {{ listing.repos.length }} are shown</template></p>
-              <button type="button" :disabled="!chosen.length || adding" @click="addChosen">{{ adding ? 'Adding…' : chosen.length ? `Add ${chosen.length} selected` : 'Add selected' }}</button>
+              <button type="button" :disabled="(!chosen.length && !autoAdd) || adding" @click="addChosen">{{ adding ? 'Adding…' : chosen.length ? `Add ${chosen.length} selected` : autoAdd ? 'Watch for new repositories' : 'Add selected' }}</button>
             </div>
+            <label class="check"><input v-model="autoAdd" type="checkbox"> Automatically add new repositories {{ listing.org }} creates later</label>
+            <p v-if="watchNote" class="muted small">{{ watchNote }}</p>
             <div class="row opts">
               <input v-model="filter" class="find" placeholder="Filter repositories" aria-label="Filter repositories">
               <label class="check"><input type="checkbox" :checked="allPicked" :disabled="!openRepos.length" @change="pickAll(($event.target as HTMLInputElement).checked)"> Select all shown</label>

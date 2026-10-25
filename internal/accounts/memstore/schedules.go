@@ -16,6 +16,7 @@ type scheduleTable struct {
 	all      map[string]accounts.Schedule
 	leases   map[string]lease
 	attempts map[string][]time.Time
+	watches  map[string]accounts.OrgWatch // orgID|key
 }
 
 type lease struct {
@@ -26,7 +27,7 @@ type lease struct {
 func (s *Store) scheduleTable() *scheduleTable {
 	s.schedOnce.Do(func() {
 		if s.sched == nil {
-			s.sched = &scheduleTable{all: map[string]accounts.Schedule{}, leases: map[string]lease{}, attempts: map[string][]time.Time{}}
+			s.sched = &scheduleTable{all: map[string]accounts.Schedule{}, leases: map[string]lease{}, attempts: map[string][]time.Time{}, watches: map[string]accounts.OrgWatch{}}
 		}
 	})
 	return s.sched

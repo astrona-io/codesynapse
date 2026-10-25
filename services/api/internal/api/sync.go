@@ -105,7 +105,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 				s.problem(w, http.StatusConflict, errors.New("the name "+req.Name+" is already used for another source; choose another name"))
 				return
 			}
-			if err := s.linkRepo(r, req.Name, remote, vis); err != nil {
+			if err := s.linkRepo(r.Context(), req.Name, remote, vis); err != nil {
 				s.problem(w, 400, err)
 				return
 			}
@@ -116,7 +116,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]any{"repo": req.Name, "shared": true, "visibility": vis, "note": "already indexed: linked to your organisation"})
 			return
 		}
-		if err := s.linkRepo(r, req.Name, remote, vis); err != nil {
+		if err := s.linkRepo(r.Context(), req.Name, remote, vis); err != nil {
 			s.problem(w, 400, err)
 			return
 		}

@@ -47,6 +47,25 @@ type ImportCandidate struct {
 	Added bool `json:"added"`
 }
 
+// publicForgeClient is the anonymous client for a login on host. Hosts other
+// than github.com come from the user, so they pass the same SSRF check as
+// clone URLs.
+func (s *Server) publicForgeClient(ctx context.Context, kind forge.Kind, host, login string) (forge.Client, error) {
+	c := forge.Client{Kind: kind, Host: host, BaseURL: s.cfg.ForgeAPI}
+	if s.cfg.ForgeAPI == "" && host != forge.DefaultHost {
+		if _, err := gitx.ValidateRemote(ctx, c.CloneURL(login, "x"), gitx.RemoteOptions{AllowPrivate: s.cfg.AllowPrivateGit}); err != nil {
+			return c, err
+		}
+	}
+	return c, nil
+}
+
+// keepListed says whether a listed repository can be imported under the
+// archived and fork filters: public, with a name that is safe to clone.
+func keepListed(x forge.Repo, archived, forks bool) bool {
+	return validRepoSegment(x.Name) && !x.Private && (archived || !x.Archived) && (forks || !x.Fork)
+}
+
 func (s *Server) importRoutes() {
 	s.route("POST /api/v1/imports/list", orgRole(accounts.Member), s.handleImportList)
 }
@@ -76,12 +95,10 @@ func (s *Server) handleImportList(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
-	c := forge.Client{Kind: kind, Host: host, BaseURL: s.cfg.ForgeAPI}
-	if s.cfg.ForgeAPI == "" && host != forge.DefaultHost {
-		if _, err := gitx.ValidateRemote(r.Context(), c.CloneURL(login, "x"), gitx.RemoteOptions{AllowPrivate: s.cfg.AllowPrivateGit}); err != nil {
-			s.problem(w, http.StatusBadRequest, err)
-			return
-		}
+	c, err := s.publicForgeClient(r.Context(), kind, host, login)
+	if err != nil {
+		s.problem(w, http.StatusBadRequest, err)
+		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
@@ -108,7 +125,7 @@ func (s *Server) handleImportList(w http.ResponseWriter, r *http.Request) {
 		if len(out) == maxImportListed {
 			break
 		}
-		if !validRepoSegment(x.Name) || x.Private || (x.Archived && !req.IncludeArchived) || (x.Fork && !req.IncludeForks) {
+		if !keepListed(x, req.IncludeArchived, req.IncludeForks) {
 			continue
 		}
 		name := forge.RepoName(host, login, x.Name)

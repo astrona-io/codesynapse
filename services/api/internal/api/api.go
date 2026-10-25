@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
@@ -122,6 +123,7 @@ type Config struct {
 
 // Server is the API handler.
 type Server struct {
+	watching    atomic.Bool // an organisation watch scan is running
 	annotations *annotation.Worker
 	cfg         Config
 	st          store.Store
@@ -305,6 +307,7 @@ func (s *Server) routes() {
 	s.accountRoutes()
 	s.executionRoutes()
 	s.importRoutes()
+	s.watchRoutes()
 	s.sessionMemoryRoutes()
 	s.repoPolicyRoutes()
 	s.runtimeRoutes()

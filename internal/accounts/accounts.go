@@ -409,6 +409,13 @@ type Store interface {
 	DeleteSchedule(ctx context.Context, repo string) error
 	DueSchedules(ctx context.Context, now time.Time) ([]string, error)
 	RecordScheduleRun(ctx context.Context, repo string, run ScheduleRun) error
+	// Organisation watches (watches.go). PutOrgWatch keeps the scan state
+	// of an existing watch; RecordWatchScan changes only that state.
+	OrgWatches(ctx context.Context, orgID string) ([]OrgWatch, error)
+	PutOrgWatch(ctx context.Context, w OrgWatch) error
+	DeleteOrgWatch(ctx context.Context, orgID, key string) error
+	DueOrgWatches(ctx context.Context, now time.Time) ([]OrgWatch, error)
+	RecordWatchScan(ctx context.Context, orgID, key string, scan WatchScan) error
 	AddScheduleMissing(ctx context.Context, repo string, gone bool) (int, error)
 	TakeLease(ctx context.Context, name, owner string, until, now time.Time) (bool, error)
 	// TakeAttempt records an attempt for key at now unless key already has
