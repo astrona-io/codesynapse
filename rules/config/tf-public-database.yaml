@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../schema.json
+id: tf-public-database
+title: Database reachable from the internet
+severity: high
+cwe: [CWE-284]
+category: config
+languages: [terraform]
+why: A database with a public endpoint, or one that authorizes 0.0.0.0/0, is one leaked or guessed password away from a breach, and its login is exposed to brute force.
+fix: Keep databases in private subnets (publicly_accessible = false), reach them through the application or a bastion, and authorize only private ranges.
+references:
+  - https://cwe.mitre.org/data/definitions/284.html
+examples:
+  - language: terraform
+    vulnerable: |-
+      resource "aws_db_instance" "main" {
+        publicly_accessible = true
+      }
+    fixed: |-
+      resource "aws_db_instance" "main" {
+        publicly_accessible    = false
+        db_subnet_group_name   = aws_db_subnet_group.private.name
+      }

@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../schema.json
+id: tf-public-storage
+title: Storage bucket or container open to the public
+severity: high
+cwe: [CWE-732]
+category: config
+languages: [terraform]
+why: A public ACL, a public access block turned off, an allUsers grant or anonymous container access lets anyone on the internet list or read the data, and with write access, replace it.
+fix: Keep buckets private (block public access, no public ACLs or allUsers grants) and serve public files through a CDN or signed URLs.
+references:
+  - https://cwe.mitre.org/data/definitions/732.html
+examples:
+  - language: terraform
+    vulnerable: |-
+      resource "aws_s3_bucket_acl" "assets" {
+        bucket = aws_s3_bucket.assets.id
+        acl    = "public-read"
+      }
+    fixed: |-
+      resource "aws_s3_bucket_public_access_block" "assets" {
+        bucket                  = aws_s3_bucket.assets.id
+        block_public_acls       = true
+        block_public_policy     = true
+        ignore_public_acls      = true
+        restrict_public_buckets = true
+      }

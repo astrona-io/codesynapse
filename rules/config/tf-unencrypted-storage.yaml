@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../schema.json
+id: tf-unencrypted-storage
+title: Storage without encryption at rest
+severity: medium
+cwe: [CWE-311]
+category: config
+languages: [terraform]
+why: RDS instances and EBS volumes are unencrypted unless asked for; their snapshots and disks can then be read by anyone who gets a copy, and many compliance regimes require encryption.
+fix: Set storage_encrypted = true (RDS) or encrypted = true (EBS), preferably with your own KMS key; or turn on EBS encryption by default for the account.
+references:
+  - https://cwe.mitre.org/data/definitions/311.html
+examples:
+  - language: terraform
+    vulnerable: |-
+      resource "aws_ebs_volume" "data" {
+        availability_zone = "eu-west-1a"
+        size              = 100
+      }
+    fixed: |-
+      resource "aws_ebs_volume" "data" {
+        availability_zone = "eu-west-1a"
+        size              = 100
+        encrypted         = true
+        kms_key_id        = aws_kms_key.data.arn
+      }
