@@ -65,6 +65,8 @@ var toolPolicies = map[string]toolPolicy{
 	"git_diff_summary":       {accounts.Viewer, "list"},
 	"git_blame":              {accounts.Viewer, "list"},
 	"git_log":                {accounts.Viewer, "list"},
+	"gh_pr_status":           {accounts.Viewer, "list"},
+	"gh_pr_list":             {accounts.Viewer, "list"},
 	"security_report":        {accounts.Viewer, "repository"},
 	"repo_metrics":           {accounts.Viewer, "repository"},
 	"list_reviews":           {accounts.Viewer, "repository"},

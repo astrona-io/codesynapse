@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/astrona-io/codesynapse/internal/ghtools"
 	"github.com/astrona-io/codesynapse/internal/gittools"
 	"github.com/astrona-io/codesynapse/internal/usage"
 )
@@ -68,7 +69,7 @@ func (s *Server) handleLocalUsage(w http.ResponseWriter, r *http.Request) {
 
 func (in localUsageReport) validate() error {
 	switch {
-	case !slices.Contains(gittools.Tools, in.Tool):
+	case !slices.Contains(gittools.Tools, in.Tool) && !slices.Contains(ghtools.Tools, in.Tool):
 		return fmt.Errorf("unknown local tool %q", in.Tool)
 	case !clientNameRe.MatchString(in.Client):
 		return errors.New("client must be a short lower-case name, e.g. claude-code")

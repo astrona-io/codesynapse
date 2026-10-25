@@ -37,13 +37,14 @@ const (
 	BashGitDiff   = "git_diff"
 	BashGitLog    = "git_log"
 	BashGitBlame  = "git_blame"
+	BashGh        = "gh_pr"
 	BashSearch    = "search"
 	BashRead      = "read"
 	BashTest      = "test"
 )
 
 // BashClasses are the classes the API accepts.
-var BashClasses = []string{BashGitStatus, BashGitDiff, BashGitLog, BashGitBlame, BashSearch, BashRead, BashTest}
+var BashClasses = []string{BashGitStatus, BashGitDiff, BashGitLog, BashGitBlame, BashGh, BashSearch, BashRead, BashTest}
 
 // BashTool is the pseudo tool a class is counted under.
 func BashTool(class string) string { return "(bash:" + class + ")" }

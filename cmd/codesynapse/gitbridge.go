@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/astrona-io/codesynapse/internal/ghtools"
 	"github.com/astrona-io/codesynapse/internal/gittools"
 	"github.com/astrona-io/codesynapse/internal/gitx"
 )
@@ -21,6 +22,12 @@ import (
 // on Statistics and recorded in the audit log like any other. Nothing else
 // about the checkout leaves the machine.
 
+// isLocalTool reports whether the bridge answers tool itself: the git tools
+// and the read-only gh tools (internal/ghtools, the developer's own sign-in).
+func isLocalTool(tool string) bool {
+	return slices.Contains(gittools.Tools, tool) || slices.Contains(ghtools.Tools, tool)
+}
+
 // localGitTimeout bounds one answer.
 const localGitTimeout = 30 * time.Second
 
@@ -28,7 +35,7 @@ const localGitTimeout = 30 * time.Second
 // whether it did.
 func (b *bridge) answerGit(ctx context.Context, msg []byte, m rpcMessage) bool {
 	var c toolCall
-	if json.Unmarshal(msg, &c) != nil || !slices.Contains(gittools.Tools, c.Params.Name) || len(m.ID) == 0 {
+	if json.Unmarshal(msg, &c) != nil || !isLocalTool(c.Params.Name) || len(m.ID) == 0 {
 		return false
 	}
 	start := time.Now()
@@ -56,7 +63,12 @@ func (b *bridge) runGit(ctx context.Context, c toolCall) (map[string]any, bool) 
 	if err != nil {
 		return fail(err)
 	}
-	ans, err := gittools.Run(ctx, dir, c.Params.Name, c.Params.Arguments)
+	var ans any
+	if slices.Contains(ghtools.Tools, c.Params.Name) {
+		ans, err = ghtools.Run(ctx, dir, c.Params.Name, c.Params.Arguments)
+	} else {
+		ans, err = gittools.Run(ctx, dir, c.Params.Name, c.Params.Arguments)
+	}
 	if err != nil {
 		return fail(err)
 	}
