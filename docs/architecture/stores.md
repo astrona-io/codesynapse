@@ -53,7 +53,7 @@ flowchart LR
     emb --> search[Search with tenant_id partition key<br/>+ exprParams template]
     search --> iso[vector.Isolate<br/>drop any hit of another tenant or namespace]
     iso --> out[Hits]
-    notenant[No tenant] -. vector.ErrNoTenant .-> search
+    notenant[No tenant] -.->|vector.ErrNoTenant| search
 ```
 
 Only entity names are embedded, and only by a local model.

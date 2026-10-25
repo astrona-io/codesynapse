@@ -85,7 +85,7 @@ flowchart TD
     gate -- skip --> none[Empty result]
     gate -- pass --> par
     subgraph par[Two legs]
-        v[Vector search<br/>local embeddings, cosine kept from 0.7, 3-10 hits]
+        v[Vector search<br/>local embeddings, cosine 0.4 and up, 3-10 hits]
         b[BM25 over entity names, aliases, types<br/>camelCase and -/_ split, prefixes from 3 letters]
     end
     par --> rrf[FuseRRF k=60, dedupe, max 8 entry entities]

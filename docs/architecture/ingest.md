@@ -13,14 +13,14 @@ flowchart TD
 
     subgraph extract[Extraction - in parallel per language]
         go[golang<br/>go/packages + go/types]
-        lang[lang<br/>Python, JS, TS, Vue]
+        lang[lang<br/>Python, JS/TS, Vue, Java, Kotlin,<br/>Rust, C#, PHP, Ruby]
         docs[docs<br/>Markdown sections]
         cfg[config<br/>YAML, templates, Helm]
         hist[githistory<br/>commits, churn]
     end
 
-    extract --> graph[model.Graph<br/>nodes + edges in memory]
-    graph --> post
+    extract --> memgraph[model.Graph<br/>nodes + edges in memory]
+    memgraph --> post
 
     subgraph post[Post-processing on the complete graph]
         vuln[vuln: go.mod and lockfiles<br/>OSV lookup, reachability]
