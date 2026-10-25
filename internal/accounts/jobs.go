@@ -72,6 +72,14 @@ type JobRecord struct {
 	Edges      int        `json:"edges,omitempty"`
 }
 
+// JobQueue counts jobs per kind. Waiting are those a worker could claim now
+// (queued, or running with an expired lease); Active also includes the ones a
+// process is running, which is how many workers the work needs.
+type JobQueue struct {
+	Waiting map[string]int
+	Active  map[string]int
+}
+
 // Active reports whether the job is queued or running.
 func (j JobRecord) Active() bool { return j.State == JobQueued || j.State == JobRunning }
 

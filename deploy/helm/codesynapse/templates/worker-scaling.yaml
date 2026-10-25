@@ -1,0 +1,97 @@
+{{- /*
+Scales the worker Deployment on the jobs queued or running, with the tool the
+cluster has (worker.queueScaling.mode). The chart installs neither. The fix
+worker is never scaled: a fix job is not resumed, so it must not be stopped.
+*/ -}}
+{{- $q := .Values.worker.queueScaling }}
+{{- if ne (toString $q.mode) "none" }}
+{{- if lt (int $q.maxReplicas) (int $q.minReplicas) }}
+{{- fail "worker.queueScaling.maxReplicas must not be below minReplicas" }}
+{{- end }}
+{{- $name := include "cs.name" (list . "worker") }}
+{{- if eq $q.mode "hpa" }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "cs.labels" (list . "worker") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $name }}
+  minReplicas: {{ $q.minReplicas }}
+  maxReplicas: {{ $q.maxReplicas }}
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: {{ $q.metricName | quote }}
+        target:
+          type: AverageValue
+          averageValue: {{ $q.jobsPerWorker | quote }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 900
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 300}
+{{- else }}
+{{- $kinds := list }}
+{{- range $r := splitList "," .Values.worker.roles }}
+{{- if eq $r "ingest" }}{{ $kinds = concat $kinds (list "sync" "clone" "switch") }}{{ end }}
+{{- if eq $r "ai" }}{{ $kinds = concat $kinds (list "ai" "ai-auto") }}{{ end }}
+{{- end }}
+{{- $quoted := list }}
+{{- range $kinds }}{{ $quoted = append $quoted (printf "'%s'" .) }}{{ end }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "cs.labels" (list . "worker") | nindent 4 }}
+spec:
+  secretTargetRef:
+    {{- if .Values.postgresql.enabled }}
+    - {parameter: password, name: {{ include "cs.secret" . }}, key: POSTGRES_PASSWORD}
+    {{- else }}
+    - {parameter: connection, name: {{ include "cs.secret" . }}, key: CODESYNAPSE_DATABASE_URL}
+    {{- end }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "cs.labels" (list . "worker") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ $name }}
+  minReplicaCount: {{ $q.minReplicas }}
+  maxReplicaCount: {{ $q.maxReplicas }}
+  cooldownPeriod: 900
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 900
+          policies:
+            - {type: Pods, value: 1, periodSeconds: 300}
+  triggers:
+    - type: postgresql
+      authenticationRef:
+        name: {{ $name }}
+      metadata:
+        {{- if .Values.postgresql.enabled }}
+        host: {{ include "cs.name" (list . "postgresql") | quote }}
+        port: "5432"
+        userName: codesynapse
+        dbName: codesynapse
+        sslmode: disable
+        {{- end }}
+        query: {{ printf "SELECT count(*) FROM jobs WHERE state IN ('queued', 'running') AND kind IN (%s)" (join ", " $quoted) | quote }}
+        targetQueryValue: {{ $q.jobsPerWorker | quote }}
+{{- end }}
+{{- end }}

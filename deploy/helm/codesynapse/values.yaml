@@ -88,6 +88,22 @@ worker:
   restrictEgress: false
   # [{cidr: 10.20.0.0/24, ports: [5432]}]; no ports means every port.
   egressAllow: []
+  # Scale workers on the jobs queued or running (platform_codesynapse_jobs_active,
+  # or the jobs table itself). Which tool does it depends on what the cluster
+  # has; the chart installs neither:
+  #   none  workers stay at `replicas`.
+  #   hpa   a HorizontalPodAutoscaler on an external metric. Needs an adapter
+  #         that serves `metricName` (the sum of codesynapse_jobs_active over
+  #         the kinds sync, clone, switch, ai, ai-auto) as an external metric.
+  #   keda  a KEDA ScaledObject that counts those jobs in PostgreSQL. Needs KEDA.
+  # `replicas` is ignored when a mode is on. Scale-downs are slow (15 minutes)
+  # because a worker removed mid-job leaves it to another only after its lease.
+  queueScaling:
+    mode: none
+    minReplicas: 1
+    maxReplicas: 4
+    jobsPerWorker: 1
+    metricName: codesynapse_jobs_active
   # Ingest type-checks whole modules: size for your largest repository.
   resources:
     requests: {cpu: 500m, memory: 1Gi}

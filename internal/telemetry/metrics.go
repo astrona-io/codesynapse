@@ -106,7 +106,9 @@ var (
 	// JobsWaiting is the work a worker could claim now, per job kind (a
 	// fixed set). Set by the one API process that holds the loops lease, so
 	// replicas never double it; it has no tenant, so it exports as platform_.
-	JobsWaiting                 = Default.ScopedGauge("codesynapse_jobs_waiting", "Jobs queued or interrupted that a worker could claim now, per kind.", "kind")
+	JobsWaiting = Default.ScopedGauge("codesynapse_jobs_waiting", "Jobs queued or interrupted that a worker could claim now, per kind.", "kind")
+	// JobsActive adds the jobs a process is running: the workers the work needs.
+	JobsActive                  = Default.ScopedGauge("codesynapse_jobs_active", "Jobs queued or running, per kind.", "kind")
 	MemoryFactsCurrent          = Default.ScopedGauge("agent_memory_facts_count", "Current unique active durable memory facts per tenant.", "tenant_id")
 	MemoryFactsObservedAt       = Default.ScopedGauge("agent_memory_facts_observed_at_seconds", "Time of the last complete durable memory count snapshot.", "tenant_id")
 	MemoryFactsCollectionErrors = Default.Counter("platform_memory_facts_collection_errors_total", "Failed or incomplete durable memory count collections.")

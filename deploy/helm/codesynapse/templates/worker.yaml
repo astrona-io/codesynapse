@@ -22,7 +22,9 @@ metadata:
   labels:
     {{- include "cs.labels" (list $ $p.component) | nindent 4 }}
 spec:
+  {{- if not (and (eq $p.component "worker") (ne (toString $v.queueScaling.mode) "none")) }}
   replicas: {{ $v.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "cs.selector" (list $ $p.component) | nindent 6 }}

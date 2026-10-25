@@ -201,7 +201,7 @@
       "$ref": "#/definitions/scaledComponent"
     },
     "worker": {
-      "description": "Runs clone, sync and index jobs and AI tasks. Scales by hand: a worker stopped by a scale-down leaves its job to another one only after the job's lease ran out. It never pushes: fix branches belong to fixWorker.",
+      "description": "Runs clone, sync and index jobs and AI tasks. Scales by hand, or on queued jobs with queueScaling: a worker stopped by a scale-down leaves its job to another one only after the job's lease ran out. It never pushes: fix branches belong to fixWorker.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -213,6 +213,18 @@
           "description": "Comma-separated job roles: ingest (clone, sync, index) and ai. The fix role runs in fixWorker.",
           "type": "string",
           "pattern": "^(ingest|ai)(,(ingest|ai))*$"
+        },
+        "queueScaling": {
+          "description": "Scale workers on the jobs queued or running. The chart installs neither tool: hpa needs an external-metrics adapter serving metricName, keda needs KEDA. replicas is ignored when a mode is on.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {"description": "none keeps replicas; hpa adds a HorizontalPodAutoscaler on an external metric; keda adds a KEDA ScaledObject that counts jobs in PostgreSQL.", "enum": ["none", "hpa", "keda"]},
+            "minReplicas": {"type": "integer", "minimum": 1},
+            "maxReplicas": {"type": "integer", "minimum": 1},
+            "jobsPerWorker": {"description": "Jobs one worker takes before another is added.", "type": "integer", "minimum": 1},
+            "metricName": {"description": "hpa only: the external metric the adapter serves, the sum of codesynapse_jobs_active over the worker job kinds.", "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_.:/-]{0,252}$"}
+          }
         },
         "restrictEgress": {
           "description": "Limit what workers (and the fix worker) can reach to DNS, the stores of this release and HTTPS to public addresses. Needs a network plugin that enforces NetworkPolicy. Private addresses (an external store, a self-hosted Git server, a local model) need a rule in egressAllow.",

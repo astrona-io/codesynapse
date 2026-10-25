@@ -115,7 +115,7 @@ helm upgrade --install codesynapse oci://ghcr.io/astrona-io/charts/codesynapse -
 
 With more than one replica, or with autoscaling, a component gets a PodDisruptionBudget (`maxUnavailable: 1`). Its pods prefer different nodes and spread over zones where the cluster has them.
 
-**Workers** scale by `worker.replicas`, not by autoscaling: a worker removed mid-job leaves the job to another worker once its two-minute lease runs out. Split roles over separate releases or Deployments to size ingest apart from AI work.
+**Workers** scale by `worker.replicas`, or on queued jobs with `worker.queueScaling` (`mode: none|hpa|keda`, `minReplicas`, `maxReplicas`, `jobsPerWorker`). The chart installs neither tool, so pick what your cluster has: `hpa` makes a HorizontalPodAutoscaler on the external metric `metricName`, which an adapter must serve as the sum of `codesynapse_jobs_active` over the kinds `sync`, `clone`, `switch`, `ai` and `ai-auto` (see docs/TELEMETRY_PLAN.md); `keda` makes a KEDA ScaledObject that counts those jobs in PostgreSQL, so KEDA's operator must be allowed to reach the database (the store network policy admits only this release's pods). `replicas` is ignored when a mode is on, scale-downs take 15 minutes, and the fix worker is never scaled. Without a mode, workers scale by `worker.replicas`: a worker removed mid-job leaves the job to another worker once its two-minute lease runs out. Split roles over separate releases or Deployments to size ingest apart from AI work.
 
 **Limits that remain:**
 
