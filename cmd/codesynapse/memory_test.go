@@ -16,6 +16,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/memory/extract"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
@@ -30,6 +31,7 @@ func TestOffloadHook(t *testing.T) {
 	var mu sync.Mutex
 	var batches [][]map[string]string
 	var auth string
+	jobState := "succeeded"
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/execution/sessions" {
 			var body struct {
@@ -38,6 +40,10 @@ func TestOffloadHook(t *testing.T) {
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			assert.Equal(t, body.SessionID, "abc")
 			_ = json.NewEncoder(w).Encode(execution.Identity{TenantID: "org-fixture", SubjectID: "user-fixture", SessionID: body.SessionID, ParentSessionID: body.SessionID})
+			return
+		}
+		if r.URL.Path == "/api/v1/memory/jobs/j" {
+			_, _ = w.Write([]byte(`{"state":"` + jobState + `"}`))
 			return
 		}
 		mu.Lock()
@@ -82,6 +88,52 @@ func TestOffloadHook(t *testing.T) {
 	mu.Lock()
 	assert.Equal(t, len(batches), 3, "turns are offloaded once per session")
 	mu.Unlock()
+
+	// A job that failed in the background is not forgotten: its turns, and
+	// those of every job after it, go out again.
+	cacheDir, err := os.UserCacheDir()
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(filepath.Join(cacheDir, "codesynapse", "offload", "abc")))
+	jobState = "failed"
+	run()
+	run()
+	mu.Lock()
+	assert.Equal(t, len(batches), 9, "three chunks resent after each run, as the earlier ones failed")
+	mu.Unlock()
+}
+
+func TestOffloadChunks(t *testing.T) {
+	big := strings.Repeat("x", 8000)
+	var turns []extract.Turn
+	for range 40 {
+		turns = append(turns, extract.Turn{Role: "user", Text: big})
+	}
+	chunks := offloadChunks(turns)
+	total := 0
+	for _, c := range chunks {
+		size := 0
+		for _, t := range c {
+			size += len(t.Text)
+		}
+		assert.True(t, len(c) <= extract.MaxTurns && size <= maxChunkChars, "chunk within the API limits")
+		total += len(c)
+	}
+	assert.Equal(t, total, 40, "no turn is lost")
+	assert.True(t, len(chunks) > 1, "large turns are split by size")
+}
+
+func TestOffloadProgress(t *testing.T) {
+	st := offloadProgress{done: 5, pending: []offloadJob{{"a", 10}, {"b", 10}, {"c", 10}}}
+	states := map[string]string{"a": "succeeded", "b": "failed", "c": "succeeded"}
+	st.settle(func(id string) string { return states[id] })
+	assert.Equal(t, st.done, 15)
+	assert.Equal(t, st.sent(), 15, "the failed job and the one after it are sent again")
+
+	st = offloadProgress{pending: []offloadJob{{"a", 10}, {"b", 10}}}
+	states = map[string]string{"a": "running", "b": "succeeded"}
+	st.settle(func(id string) string { return states[id] })
+	assert.Equal(t, st.done, 0, "nothing settles behind a running job")
+	assert.Equal(t, st.sent(), 20, "running jobs are not sent twice")
 }
 
 func TestHookRequiresRuntimeSession(t *testing.T) {

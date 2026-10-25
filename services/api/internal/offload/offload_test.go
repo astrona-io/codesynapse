@@ -211,3 +211,35 @@ func TestShutdownDropsQueuedConversation(t *testing.T) {
 	assert.Len(t, w.jobs[job.ID].turns, 0)
 	assert.True(t, w.jobs[job.ID].authorize == nil)
 }
+
+// A long conversation must reach a model with a small input budget in several
+// calls, none of them over the budget, instead of one the provider refuses.
+func TestWorkerSplitsTurnsToTheInputBudget(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	var calls, longest int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		calls++
+		longest = max(longest, len(body))
+		_, _ = w.Write([]byte(`{"model":"qwen-local","choices":[{"message":{"content":"{\"triples\":[{\"subject\":\"Payments\",\"predicate\":\"OWNED_BY\",\"object\":\"Team Blue\",\"confidence\":0.9}]}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
+	}))
+	t.Cleanup(srv.Close)
+	reg := llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{
+		{Name: "local", Kind: llm.KindOpenAI, BaseURL: srv.URL + "/v1", Model: "qwen", MaxOutputTokens: 1000, MaxInputTokens: 6000, TimeoutSeconds: 5},
+	}, Default: "local"})
+	w := New(memory.New(), reg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	go w.Run(ctx)
+
+	var turns []extract.Turn
+	for i := range 8 {
+		turns = append(turns, extract.Turn{Role: "user", Text: fmt.Sprintf("turn %d: %s", i, strings.Repeat("word ", 600))})
+	}
+	j, err := submit(t, w, "repo", "", "claude-code", turns)
+	require.NoError(t, err)
+	done := waitDone(t, w, j.ID)
+	assert.Equal(t, done.State, Succeeded, done.Error)
+	assert.True(t, calls > 1, "the conversation is split into several model calls")
+	assert.True(t, longest <= 6000+500, "each call stays near the budget")
+	assert.True(t, done.Saved > 0)
+}

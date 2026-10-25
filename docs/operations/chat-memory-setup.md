@@ -48,7 +48,7 @@ providers:
     base_url: http://host.docker.internal:11434/v1
     model: llama3.1:8b
     embedding_model: nomic-embed-text
-    context_window: 16384
+    context_window: 32768
     max_output_tokens: 2048
 
 tasks:
@@ -56,6 +56,8 @@ tasks:
   embeddings: local-ollama   # recall by meaning
 default: local-ollama
 ```
+
+`context_window` is how much the model may read per call. Long chats are split to fit it, so a larger window means fewer calls. Ollama reads only a small window by default and cuts the rest silently, so start it with the same size: `OLLAMA_CONTEXT_LENGTH=32768 ollama serve` (or set `num_ctx` in a Modelfile).
 
 `host.docker.internal` is your own machine, seen from the containers. On Linux with Docker, start Ollama with `OLLAMA_HOST=0.0.0.0` so the containers can reach it.
 
@@ -141,6 +143,7 @@ To ask for something by hand, say: *"Use recall_context to find what we decided 
 |---|---|
 | Job `failed`: `answer cut off at max_output_tokens` | The model thinks before answering. Use a model without a thinking phase (step 1). |
 | The offload is refused, or the job fails, saying no local model is configured | The `memory` task is not routed to a local provider, or the provider is a cloud one. Check `tasks:` and `base_url`. |
+| Job `failed`: `prompt exceeds input budget` | One turn is larger than the model's window even after shortening, or `context_window` is too small. Raise `context_window` (and Ollama's context length). A normal long chat is split automatically. |
 | Job stays `running` for minutes | The model is loading or too large for your memory. Try a smaller one; check `ollama ps`. |
 | Job `succeeded`, `saved` is 0 | The turns held no lasting facts (small talk), or the model is too small. Try the 8B model. |
 | `recall_context` returns nothing | The facts belong to another chat: recall only reads the current session. Use `memory_scope: "repository"` for durable knowledge. |
@@ -151,6 +154,6 @@ To ask for something by hand, say: *"Use recall_context to find what we decided 
 
 - Facts live in the chat's session and expire seven days after it was registered. Keep something longer by saving it as durable knowledge (`upsert_graph_triples`) or promoting selected facts from the Agent memory page.
 - Recalled facts are data, not instructions. Verify code claims against the code graph.
-- Extraction runs one job at a time on your machine. A long chat is offloaded in chunks of up to 60 turns.
+- Extraction runs one job at a time on your machine. A long chat is offloaded in chunks, and each chunk is split again to fit the model's window, so a long chat means several model calls (about 20–30 seconds each on a laptop). A chunk whose job failed is sent again at the next compaction. Tool output is cut to 300 characters before it leaves your machine.
 
 See [Agent memory](../features/memory.md) for the data model and the API.
