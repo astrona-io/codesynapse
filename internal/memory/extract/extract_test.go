@@ -76,3 +76,21 @@ func FuzzParse(f *testing.F) {
 		}
 	})
 }
+
+func TestParseKeepsFinishedTriplesOfACutOffAnswer(t *testing.T) {
+	cut := `{"triples":[{"subject":"Billing","predicate":"USES","object":"PostgreSQL","confidence":0.9},` +
+		`{"subject":"Maria","predicate":"OWNS","object":"Invoicing \"core\"","confidence":0.9},` +
+		`{"subject":"Ops","predicate":"RUNS","obj`
+	res, err := Parse(cut, DefaultMinConfidence)
+	require.NoError(t, err)
+	assert.True(t, res.Truncated)
+	require.Len(t, res.Triples, 2, "the half-written third triple is dropped, the finished two are kept")
+	assert.Equal(t, res.Triples[1].Object, `Invoicing "core"`)
+
+	_, err = Parse(`{"triples":[{"subject":"Ops","predic`, DefaultMinConfidence)
+	require.Error(t, err, "nothing finished, nothing to keep")
+
+	res, err = Parse(`{"triples":[{"subject":"A","predicate":"USES","object":"B","confidence":0.9}]}`, DefaultMinConfidence)
+	require.NoError(t, err)
+	assert.False(t, res.Truncated)
+}
