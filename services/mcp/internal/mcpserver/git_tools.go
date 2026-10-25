@@ -54,4 +54,9 @@ func registerGitTools(s *mcp.Server, add func(name, desc string) *mcp.Tool) {
 		func(ctx context.Context, r *mcp.CallToolRequest, _ ghtools.PRListIn) (*mcp.CallToolResult, any, error) {
 			return local(ctx, r, nil)
 		})
+	mcp.AddTool(s, add(ghtools.ToolRunFail,
+		"Why a CI run failed, in a few lines: the failed jobs, their failed steps and the error lines of their logs (test failures, panics, compiler and linter messages), without timestamps or the rest of the log. Pass run for a workflow run ID, or omit it for the latest failed run of the pull request's branch (number, or the checked-out branch). Use instead of gh run view --log-failed. Reads only."),
+		func(ctx context.Context, r *mcp.CallToolRequest, _ ghtools.RunFailureIn) (*mcp.CallToolResult, any, error) {
+			return local(ctx, r, nil)
+		})
 }
