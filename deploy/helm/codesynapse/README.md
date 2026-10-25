@@ -75,6 +75,7 @@ Every value is described and type-checked in `values.schema.json` (each store's 
 | `worker.resources.limits.memory` | `6Gi` | Ingest type-checks whole modules; size it for your largest repository. `GOMEMLIMIT` is set to 90% |
 | `workspace.accessModes` | `[ReadWriteOnce]` | `api`, `worker` and `mcp` share clones. Use a ReadWriteMany class on more than one node |
 | `api.replicas`, `mcp.replicas`, `web.replicas` | `1` | Raise to 2 or more for availability; see [Scaling out](#scaling-out) |
+| `global.kedaNamespace` | empty | With `worker.queueScaling.mode=keda`: the namespace of KEDA's operator, admitted by the PostgreSQL network policy |
 | `<api,mcp,web>.autoscaling` | off | CPU autoscaling (`minReplicas`, `maxReplicas`, `targetCPU`); needs metrics-server |
 | `mcp.stateless` | `true` | No MCP transport session between requests, so no sticky sessions are needed |
 | `ingress.*` | off | One host: `/mcp` to MCP, the rest to the dashboard. The API is never exposed |
@@ -115,7 +116,7 @@ helm upgrade --install codesynapse oci://ghcr.io/astrona-io/charts/codesynapse -
 
 With more than one replica, or with autoscaling, a component gets a PodDisruptionBudget (`maxUnavailable: 1`). Its pods prefer different nodes and spread over zones where the cluster has them.
 
-**Workers** scale by `worker.replicas`, or on queued jobs with `worker.queueScaling` (`mode: none|hpa|keda`, `minReplicas`, `maxReplicas`, `jobsPerWorker`). The chart installs neither tool, so pick what your cluster has: `hpa` makes a HorizontalPodAutoscaler on the external metric `metricName`, which an adapter must serve as the sum of `codesynapse_jobs_active` over the kinds `sync`, `clone`, `switch`, `ai` and `ai-auto` (see docs/TELEMETRY_PLAN.md); `keda` makes a KEDA ScaledObject that counts those jobs in PostgreSQL, so KEDA's operator must be allowed to reach the database (the store network policy admits only this release's pods). `replicas` is ignored when a mode is on, scale-downs take 15 minutes, and the fix worker is never scaled. Without a mode, workers scale by `worker.replicas`: a worker removed mid-job leaves the job to another worker once its two-minute lease runs out. Split roles over separate releases or Deployments to size ingest apart from AI work.
+**Workers** scale by `worker.replicas`, or on queued jobs with `worker.queueScaling` (`mode: none|hpa|keda`, `minReplicas`, `maxReplicas`, `jobsPerWorker`). The chart installs neither tool, so pick what your cluster has: `hpa` makes a HorizontalPodAutoscaler on the external metric `metricName`, which an adapter must serve as the sum of `codesynapse_jobs_active` over the kinds `sync`, `clone`, `switch`, `ai` and `ai-auto` (see docs/TELEMETRY_PLAN.md); `keda` makes a KEDA ScaledObject that counts those jobs in PostgreSQL, so set `global.kedaNamespace` to the namespace of KEDA's operator, which the PostgreSQL network policy then admits (`just chart-scale-keda` checks this on kind). `replicas` is ignored when a mode is on, scale-downs take 15 minutes, and the fix worker is never scaled. Without a mode, workers scale by `worker.replicas`: a worker removed mid-job leaves the job to another worker once its two-minute lease runs out. Split roles over separate releases or Deployments to size ingest apart from AI work.
 
 **Limits that remain:**
 

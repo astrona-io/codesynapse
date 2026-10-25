@@ -16,6 +16,10 @@ global:
   imagePullSecrets: []
   # Each component and store accepts only the pods that need it.
   networkPolicies: true
+  # worker.queueScaling.mode=keda: the namespace of KEDA's operator, which
+  # reads the jobs table. PostgreSQL then accepts the pods of keda-operator
+  # there. Empty keeps PostgreSQL to this release's pods.
+  kedaNamespace: ""
 
 image:
   registry: ghcr.io/astrona-io
@@ -104,6 +108,8 @@ worker:
     maxReplicas: 4
     jobsPerWorker: 1
     metricName: codesynapse_jobs_active
+    # Seconds of low load before a scale-down; one worker goes per third of it.
+    cooldownSeconds: 900
   # Ingest type-checks whole modules: size for your largest repository.
   resources:
     requests: {cpu: 500m, memory: 1Gi}

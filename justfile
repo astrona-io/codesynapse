@@ -292,6 +292,10 @@ chart-failover-postgres:
 chart-failover-milvus:
     sh .github/scripts/milvus-failover.sh "{{kind_context}}" "{{kind_ns}}"
 
+# Install KEDA and check that it scales the workers on queued jobs and back (after chart-install)
+chart-scale-keda:
+    sh .github/scripts/keda-scale.sh "{{kind_context}}" "{{kind_ns}}"
+
 # Build, load, install and test on a throwaway kind cluster (just kind-down removes it)
 chart-e2e: chart-check kind-up chart-images chart-install chart-test
     @echo "the chart works on {{kind_context}}; reach the dashboard with:"
