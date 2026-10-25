@@ -109,6 +109,10 @@ Use whatever hosts your deployment exposes for the MCP endpoint and the API.
 
 `CODESYNAPSE_MCP_URL` and `CODESYNAPSE_API_URL` set the same defaults. The dashboard's **Agents** page prints this command with your installation's addresses filled in; the operator sets them with `CODESYNAPSE_PUBLIC_MCP_URL` and `CODESYNAPSE_PUBLIC_API_URL` (Helm: `publicMCPURL`, `publicAPIURL`). The bridge refuses plain `http` to anything except `localhost` or a loopback address, because the key travels with every request.
 
+## Which repository a call means
+
+A call without a `repo` argument only works on the server when one repository is visible. The bridge runs next to your checkout, so it fills the argument in for tools that declare one: the indexed repository with the same origin remote, else the one named like the directory, else the name the remote gives. An explicit `repo` is never replaced, and outside a checkout (or when the checkout is not an indexed repository) the call goes unchanged and the server answers as before. The name only selects what you may already read; the server checks access on every call.
+
 ## Answers from your working tree (opt in)
 
 By default **every call goes to the server**: it is signed with your key, checked against your permissions, written to the audit log and counted on the Statistics page. The price is that the server's graph reflects the last sync, so in the middle of a task it does not know the files you or the agent just changed.
