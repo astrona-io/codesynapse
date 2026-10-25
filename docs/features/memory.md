@@ -33,6 +33,8 @@ Durable repository knowledge is shared with authorised readers of that repositor
 
 ## Setup
 
+Short version with a worked example, model choice and troubleshooting: [Keep chats small with a local model](../operations/chat-memory-setup.md).
+
 1. Configure the runtime session binding ([Connecting an agent](agent-context.md#connecting-an-agent)). Connected agents receive instructions to recall the current chat and offload older turns; those instructions do not supply authentication or runtime metadata.
 2. Run `codesynapse mcp agents-md ~/src/your-repo` to add the same memory rules to AGENTS.md and, where applicable, CLAUDE.md. Re-running updates the marked block.
 3. Supply a personal key in `CODESYNAPSE_API_TOKEN`, then run `codesynapse mcp hooks ~/src/your-repo` to install Claude Code hooks (below). The SessionStart and PreCompact hook payloads must contain the runtime's `session_id`. Hooks register that ID and send both identity headers when recalling or offloading through the API. They report an error and skip work if the identity is missing or closed.

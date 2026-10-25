@@ -29,8 +29,11 @@ providers:
   # - name: local-ollama
   #   kind: openai
   #   base_url: http://host.docker.internal:11434/v1
-  #   model: qwen3:8b                      # extracts triples from conversation turns
+  #   model: llama3.1:8b                   # extracts triples from conversation turns
   #   embedding_model: nomic-embed-text    # `ollama pull nomic-embed-text`; enables vector recall
+  #   # Use a model that does not think before answering. Qwen3/DeepSeek-R1 on Ollama
+  #   # spend max_output_tokens on thinking and the job fails (disable_thinking only
+  #   # works on MLX/vLLM). Setup guide: docs/operations/chat-memory-setup.md
 
   # Example cloud provider (uncomment, set ANTHROPIC_API_KEY in .env).
   # Cloud providers receive no source code unless you set send_source: true.

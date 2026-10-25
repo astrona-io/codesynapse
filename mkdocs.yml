@@ -62,11 +62,13 @@ nav:
       - Run the stack: operations/running.md
       - First run and sign-in: operations/first-run.md
       - Connect Claude Code: operations/claude-code-bridge.md
+      - Keep chats small (local model): operations/chat-memory-setup.md
   - Features:
       - features/index.md
       - For AI agents:
           - Agent context (MCP): features/agent-context.md
           - Agent memory: features/memory.md
+          - Keep chats small (local model): operations/chat-memory-setup.md
           - Reviews and fix branches: features/reviews-fixes.md
       - Code quality:
           - Overview and dependencies: features/overview.md
