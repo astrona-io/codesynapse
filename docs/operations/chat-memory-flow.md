@@ -95,11 +95,23 @@ These came out of real compactions and are the first things to improve.
 
 | Finding | Effect | Idea |
 |---|---|---|
-| The input budget counts request bytes as tokens, so 13 312 "tokens" is about 13 KB, or roughly 3 300 real tokens | A batch holds about a quarter of what the model could read, so there are about four times too many calls | Count bytes ÷ 4, or use the provider's tokenizer, for the local route only |
+| The input budget counts request bytes as tokens, so 13 312 "tokens" is about 13 KB, or roughly 3 300 real tokens | A batch held about a quarter of what the model could read, so there were about four times too many calls (fixed for a provider that sets `bytes_per_token`, see [prompt budgets](../PROMPT_BUDGETS.md); `3` suits local models) | Use the provider's tokenizer when it has one |
 | The entity list in every prompt grows after each batch (limit 200 names) | A later batch could overflow the budget (fixed: batches are now sized against the current list) | Send only names that occur in the batch |
 | One session and repository keep one 24 KB document | Long chats filled it and every later job failed with `session memory capacity exceeded` (fixed: a full document now drops replaced and then the oldest facts to make room) | Merge facts about the same entity before saving |
 | `model answer has an unterminated JSON object` | The model's answer was cut off. Fixed: the triples finished before the cut are kept; the job fails only when none were finished | Retry once with a smaller batch when nothing could be kept |
 | The older v0.0.7 hook sends all turns every time | Duplicate jobs for the same turns | Upgrade the CLI (the new client remembers what succeeded) |
+
+## A measured run
+
+239 turns of a real chat (this project's own), offloaded with `qwen3.8:27b`, `bytes_per_token: 3` and `context_window: 16384`:
+
+| Step | Runs | Tokens |
+|---|---|---|
+| `precompact.offload` | 4 chunks | 32 863 out of the chat (estimate) |
+| `offload.extract` | 4 model calls | 36 965 in, 6 668 out |
+| `offload.embed_entities` | 4 | 1 362 in |
+
+The four jobs took about nine minutes on a laptop with the 27B model, and extracted 75 facts. The session keeps the newest 19: one extraction returns up to 50 triples (about 60 KB as stored facts) and the session document holds 24 KB, so a write drops older facts first and then its own least confident ones. This is the rolling window the memory works as.
 
 ## What is measured
 
