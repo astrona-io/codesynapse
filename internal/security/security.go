@@ -87,8 +87,10 @@ type Report struct {
 	VulnCounts      map[string]int  `json:"vuln_counts"`
 	Findings        []Finding       `json:"findings"`
 	Vulnerabilities []Vulnerability `json:"vulnerabilities"`
-	Modules         ModuleStats     `json:"modules"`
-	Rules           []RuleCount     `json:"rules"`
+	// Deprecated lists deprecated dependencies, direct ones first.
+	Deprecated []DeprecatedModule `json:"deprecated,omitempty"`
+	Modules    ModuleStats        `json:"modules"`
+	Rules      []RuleCount        `json:"rules"`
 	// OwnerCounts are the listed findings per CODEOWNERS owner, most
 	// severe work first; empty without a CODEOWNERS file.
 	OwnerCounts []OwnerCount `json:"owners,omitempty"`
@@ -119,6 +121,20 @@ type ModuleStats struct {
 	Vulnerable int `json:"vulnerable"`
 	// Stdlib is the Go version checked for standard library vulnerabilities.
 	Stdlib string `json:"stdlib,omitempty"`
+	// Deprecated and Behind count modules deps.dev reports deprecated, or
+	// behind their latest release (only with deps.dev lookups on).
+	Deprecated int `json:"deprecated,omitempty"`
+	Behind     int `json:"behind,omitempty"`
+}
+
+// DeprecatedModule is a dependency whose version its publisher deprecated.
+type DeprecatedModule struct {
+	Module    string `json:"module"`
+	Ecosystem string `json:"ecosystem,omitempty"`
+	Version   string `json:"version"`
+	Latest    string `json:"latest,omitempty"`
+	Reason    string `json:"reason"`
+	Direct    bool   `json:"direct"`
 }
 
 // RuleCount is how often a rule fired.
@@ -297,7 +313,21 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 		} else {
 			rep.Modules.Direct++
 		}
+		if m.Node.Behind > 0 {
+			rep.Modules.Behind++
+		}
+		if m.Node.Deprecated != "" {
+			rep.Modules.Deprecated++
+			rep.Deprecated = append(rep.Deprecated, DeprecatedModule{Module: m.Node.Name, Ecosystem: m.Node.Ecosystem, Version: m.Node.Version,
+				Latest: m.Node.Latest, Reason: m.Node.Deprecated, Direct: !m.Node.Indirect})
+		}
 	}
+	slices.SortStableFunc(rep.Deprecated, func(a, b DeprecatedModule) int {
+		if a.Direct != b.Direct {
+			return map[bool]int{true: -1, false: 1}[a.Direct]
+		}
+		return cmp.Compare(a.Module, b.Module)
+	})
 	rep.Modules.Vulnerable = len(vulnerableMods)
 	// The list stops at MaxLimit; the node count does not. Modules beyond the
 	// list are counted as indirect, which large lockfiles mostly are.
@@ -498,6 +528,14 @@ func WriteMarkdown(w io.Writer, r Report) error {
 			}
 			fmt.Fprintf(&b, "| %s | [%s](%s) | %s | `%s` | %s → %s | %s | %s |\n",
 				v.Severity, v.ID, v.URL, strings.Join(v.CVE, " "), v.Module, v.Version, fixed, v.Reachability, v.Summary)
+		}
+		b.WriteString("\n")
+	}
+	if len(r.Deprecated) > 0 {
+		b.WriteString("## Deprecated dependencies\n\n| Module | Version | Latest | Direct | Reason |\n|---|---|---|---|---|\n")
+		escape := strings.NewReplacer("|", "\\|", "\n", " ")
+		for _, d := range r.Deprecated {
+			fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %s |\n", d.Module, d.Version, cmp.Or(d.Latest, "?"), yesNo(d.Direct), escape.Replace(d.Reason))
 		}
 		b.WriteString("\n")
 	}

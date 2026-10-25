@@ -70,7 +70,11 @@ codesynapse licenses .                                      # Markdown
 codesynapse licenses . --license-lookup --fail-on conflict  # CI gate
 ```
 
-`--license-lookup` (or `CODESYNAPSE_LICENSE_LOOKUP=true`) is what sends package names and versions to deps.dev; without it, nothing leaves the machine.
+`--license-lookup` (or `CODESYNAPSE_LICENSE_LOOKUP=true`, `features.licenseLookup` in the Helm chart) is what sends package names and versions to deps.dev; without it, nothing leaves the machine.
+
+## Deprecated and outdated dependencies
+
+With the same switch on, an ingest also asks deps.dev, once per package (at most 2,000 per ingest), which versions exist. Each dependency then records the latest release, how many stable releases are newer than the one in use (pre-releases and Go pseudo-versions not counted) and, when its publisher deprecated that version, the reason they gave: npm deprecations, Go module deprecations (`// Deprecated:` in go.mod), PyPI, Cargo, NuGet and Maven as deps.dev reports them; Composer and RubyGems are not on deps.dev. The **Dependencies** page marks deprecated packages and shows the latest release next to outdated ones, the **Dependency review** page lists deprecated packages with what to do, and `codesynapse audit` and `security_report` list them in a "Deprecated dependencies" table, direct ones first. An outdated dependency is not a finding by itself: the vulnerability report already says which old versions matter.
 
 ## Upgrade impact
 

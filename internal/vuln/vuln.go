@@ -67,6 +67,11 @@ type Module struct {
 	// and stay empty for direct dependencies and unknown paths.
 	Via   string `json:"via,omitempty"`
 	Roots int    `json:"roots,omitempty"`
+	// Latest, Deprecated and Behind come from deps.dev (package hygiene)
+	// during ingest; see model.Node.
+	Latest     string `json:"latest,omitempty"`
+	Deprecated string `json:"deprecated,omitempty"`
+	Behind     int    `json:"behind,omitempty"`
 }
 
 // Replacement is the target of a go.mod replace directive.

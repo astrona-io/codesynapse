@@ -26,6 +26,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/conventions"
 	"github.com/astrona-io/codesynapse/internal/duplicates"
 	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/hygiene"
 	"github.com/astrona-io/codesynapse/internal/identity"
 	"github.com/astrona-io/codesynapse/internal/ingest/config"
 	"github.com/astrona-io/codesynapse/internal/ingest/docs"
@@ -374,6 +375,35 @@ func resolveLicenses(ctx context.Context, opts Options, root string, mods []vuln
 		}
 	}
 	logx.FromContext(ctx).Info("licences resolved", "dependencies", len(mods), "found", len(found), "online", opts.LicenseLookup)
+	if opts.LicenseLookup {
+		checkHygiene(ctx, cmp.Or(opts.DepsDev, &license.DepsDev{}), mods)
+	}
+}
+
+// checkHygiene fills in which dependencies are deprecated or behind their
+// latest release, from deps.dev (switched on with the licence lookup).
+func checkHygiene(ctx context.Context, c *license.DepsDev, mods []vuln.Module) {
+	deps := make([]license.Dep, 0, len(mods))
+	for _, m := range mods {
+		if m.Version != "" && m.Path != vuln.StdlibPath {
+			deps = append(deps, license.Dep{Ecosystem: cmp.Or(m.Ecosystem, vuln.EcosystemGo), Name: m.BuildPath(), Version: m.Version})
+		}
+	}
+	found := hygiene.Check(ctx, c, deps)
+	deprecated, behind := 0, 0
+	for i, m := range mods {
+		d := license.Dep{Ecosystem: cmp.Or(m.Ecosystem, vuln.EcosystemGo), Name: m.BuildPath(), Version: m.Version}
+		if s, ok := found[d.Key()]; ok {
+			mods[i].Latest, mods[i].Deprecated, mods[i].Behind = s.Latest, s.Deprecated, s.Behind
+			if s.Deprecated != "" {
+				deprecated++
+			}
+			if s.Behind > 0 {
+				behind++
+			}
+		}
+	}
+	logx.FromContext(ctx).Info("dependency hygiene checked", "dependencies", len(deps), "found", len(found), "deprecated", deprecated, "behind", behind)
 }
 
 // Licenses checks the dependency licences of the repository at root without

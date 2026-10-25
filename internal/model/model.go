@@ -236,6 +236,12 @@ type Node struct {
 	URL string `json:"url,omitempty"`
 	// Indirect marks Modules required only indirectly.
 	Indirect bool `json:"indirect,omitempty"`
+	// Latest, Deprecated and Behind describe a Module's release state from
+	// deps.dev (package hygiene): the latest release, the publisher's
+	// deprecation reason, and how many stable releases are newer.
+	Latest     string `json:"latest,omitempty"`
+	Deprecated string `json:"deprecated,omitempty"`
+	Behind     int    `json:"behind,omitempty"`
 	// Liveness is live, test-only or unreachable for functions and methods,
 	// and used or unused for Modules (see package cleanup).
 	Liveness string `json:"liveness,omitempty"`

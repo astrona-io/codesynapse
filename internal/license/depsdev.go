@@ -69,19 +69,15 @@ func escape(s string) string {
 	return strings.ReplaceAll(url.PathEscape(s), "@", "%40")
 }
 
-func (c *DepsDev) one(ctx context.Context, d Dep) (string, error) {
-	sys, ok := systems[d.Ecosystem]
-	if !ok || d.Name == "" || d.Version == "" {
-		return "", nil
-	}
+// get fetches one deps.dev API path into v.
+func (c *DepsDev) get(ctx context.Context, path string, v any) error {
 	base := depsDevURL
 	if c.BaseURL != "" {
 		base = strings.TrimRight(c.BaseURL, "/")
 	}
-	u := fmt.Sprintf("%s/v3/systems/%s/packages/%s/versions/%s", base, sys, escape(d.Name), escape(d.Version))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
 	if err != nil {
-		return "", err
+		return err
 	}
 	req.Header.Set("User-Agent", "codesynapse")
 	hc := c.HTTP
@@ -90,16 +86,61 @@ func (c *DepsDev) one(ctx context.Context, d Dep) (string, error) {
 	}
 	res, err := hc.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("deps.dev: %w", err)
+		return fmt.Errorf("deps.dev: %w", err)
 	}
 	defer res.Body.Close() //nolint:errcheck // read-only response
 	if res.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("deps.dev: status %d", res.StatusCode)
+		return fmt.Errorf("deps.dev: status %d", res.StatusCode)
+	}
+	return json.NewDecoder(io.LimitReader(res.Body, maxResponse)).Decode(v)
+}
+
+// Version is one published version of a package on deps.dev.
+type Version struct {
+	Version    string
+	Default    bool // what the registry installs by default: the latest release
+	Deprecated bool
+	Reason     string // why it is deprecated, as the publisher wrote it
+	Published  time.Time
+}
+
+// Versions lists the published versions of a package. The request carries
+// only the ecosystem and the package name.
+func (c *DepsDev) Versions(ctx context.Context, ecosystem, name string) ([]Version, error) {
+	sys, ok := systems[ecosystem]
+	if !ok || name == "" {
+		return nil, nil
+	}
+	var v struct {
+		Versions []struct {
+			VersionKey struct {
+				Version string `json:"version"`
+			} `json:"versionKey"`
+			PublishedAt      time.Time `json:"publishedAt"`
+			IsDefault        bool      `json:"isDefault"`
+			IsDeprecated     bool      `json:"isDeprecated"`
+			DeprecatedReason string    `json:"deprecatedReason"`
+		} `json:"versions"`
+	}
+	if err := c.get(ctx, fmt.Sprintf("/v3/systems/%s/packages/%s", sys, escape(name)), &v); err != nil {
+		return nil, err
+	}
+	out := make([]Version, 0, len(v.Versions))
+	for _, x := range v.Versions {
+		out = append(out, Version{Version: x.VersionKey.Version, Default: x.IsDefault, Deprecated: x.IsDeprecated, Reason: x.DeprecatedReason, Published: x.PublishedAt})
+	}
+	return out, nil
+}
+
+func (c *DepsDev) one(ctx context.Context, d Dep) (string, error) {
+	sys, ok := systems[d.Ecosystem]
+	if !ok || d.Name == "" || d.Version == "" {
+		return "", nil
 	}
 	var v struct {
 		Licenses []string `json:"licenses"`
 	}
-	if err := json.NewDecoder(io.LimitReader(res.Body, maxResponse)).Decode(&v); err != nil {
+	if err := c.get(ctx, fmt.Sprintf("/v3/systems/%s/packages/%s/versions/%s", sys, escape(d.Name), escape(d.Version)), &v); err != nil {
 		return "", err
 	}
 	// Several entries are several licence files; all of them apply.
