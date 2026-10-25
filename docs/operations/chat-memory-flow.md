@@ -103,7 +103,7 @@ These came out of real compactions and are the first things to improve.
 
 ## A measured run
 
-239 turns of a real chat (this project's own), offloaded with `llama`-class settings replaced by `qwen3.8:27b`, `bytes_per_token: 3` and `context_window: 16384`:
+239 turns of a real chat (this project's own), offloaded with `qwen3.8:27b`, `bytes_per_token: 3` and `context_window: 16384`:
 
 | Step | Runs | Tokens |
 |---|---|---|
