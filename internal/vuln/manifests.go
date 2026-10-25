@@ -51,6 +51,7 @@ var lockfiles = map[string]func([]byte, string, ...manifestScope) []Module{
 	"Gemfile.lock":       parseGemfileLock,
 	"packages.lock.json": parseNuGetLock,
 	"gradle.lockfile":    parseGradleLock,
+	"pom.xml":            parsePom,
 }
 
 // ManifestModules reads npm, Python, Rust, PHP, Ruby, .NET and Gradle lockfiles under root. dir is the

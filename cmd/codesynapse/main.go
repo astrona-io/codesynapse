@@ -675,7 +675,7 @@ var manifestNames = map[string][]string{
 	"Packagist": {"composer.lock", "composer.json"},
 	"RubyGems":  {"Gemfile.lock", "Gemfile"},
 	"NuGet":     {"packages.lock.json"},
-	"Maven":     {"gradle.lockfile", "build.gradle", "build.gradle.kts"},
+	"Maven":     {"gradle.lockfile", "pom.xml", "build.gradle", "build.gradle.kts"},
 }
 
 // rootManifest finds an ecosystem's manifest at the repository root.

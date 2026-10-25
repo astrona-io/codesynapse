@@ -100,7 +100,7 @@ Nothing is downloaded: `go list` runs with `GOPROXY=off` as for an ingest, and a
 - **Verified outcome** always starts as "Not verified": run the tests, build and scans after a change and Sync again.
 - Below the table the page lists the package-manager commands for the ecosystems the repository uses, and the text to give an agent to run the full `dependency-review` prompt (any language, with smaller-alternative checks).
 
-CodeSynapse reads go.mod and the lockfiles of npm, PyPI, Cargo, Composer, Bundler, NuGet and Gradle only (see below); a clean page is not proof that a project is free of vulnerabilities or compliant with a licence policy.
+CodeSynapse reads go.mod and the lockfiles of npm, PyPI, Cargo, Composer, Bundler, NuGet and Gradle, plus the direct dependencies of Maven `pom.xml` files (see below); a clean page is not proof that a project is free of vulnerabilities or compliant with a licence policy.
 
 ### Dependency paths
 
@@ -126,6 +126,7 @@ Not covered yet: yarn and pnpm lockfiles, `requirements.txt`, Pipfile.lock and l
 | Ruby | `Gemfile.lock` | the `DEPENDENCIES` section | yes |
 | .NET | `packages.lock.json` | `type: Direct` | yes |
 | Java and Kotlin | `gradle.lockfile` | coordinates named in `build.gradle(.kts)` next to it | no |
+| Java (Maven) | `pom.xml` | every `<dependency>` whose version is written out, comes from this file's `<properties>` or `<dependencyManagement>`; a version from a parent POM, an imported BOM or a range is left out, because OSV needs an exact one (run `mvn dependency:tree` for those) | no |
 
 Advisories come from osv.dev for all of them. Not read: Maven `pom.xml` (it holds ranges and properties, not the resolved graph), Gradle without dependency locking, NuGet without `packages.lock.json`, Swift, Dart, Elixir, C/C++. For those the agent prompt gives the commands to run. Versions that are not semver (four-part Ruby or NuGet versions) are matched against advisories but the suggested "fixed in" version is the first one OSV lists, which may belong to another release branch: check it.
 
