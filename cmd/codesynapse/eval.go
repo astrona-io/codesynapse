@@ -11,9 +11,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/astrona-io/codesynapse/internal/agentctx"
 	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/ingest"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/semantic"
 	"github.com/astrona-io/codesynapse/internal/store/memory"
 	"github.com/astrona-io/codesynapse/internal/taskeval"
 )
@@ -32,6 +35,10 @@ type evalOptions struct {
 	allowNetwork  bool
 	sessions      bool
 	cases         string
+	semModel      string
+	semURL        string
+	semK          int
+	semWeight     float64
 }
 
 // evalHistory is how many commits before base the graph indexes, as an
@@ -55,6 +62,10 @@ func (o *evalOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.BoolVar(&o.allowNetwork, "allow-network", false, "Let go list download the modules base needs (CI; otherwise only the module cache is used)")
 	f.BoolVar(&o.sessions, "sessions", false, "Score the cases captured from your agent sessions ("+evalCaptureEnv+"=true) instead of commits")
 	f.StringVar(&o.cases, "cases", "", "Cases file for --sessions (default: "+casesFileName+" in the checkout's git directory)")
+	f.StringVar(&o.semModel, "semantic-model", "", "Experiment: also rank symbols by meaning with this local Ollama embedding model (nomic-embed-text)")
+	f.StringVar(&o.semURL, "semantic-url", "http://127.0.0.1:11434", "Local Ollama server for --semantic-model")
+	f.IntVar(&o.semK, "semantic-k", 40, "Symbols the semantic ranking adds")
+	f.Float64Var(&o.semWeight, "semantic-weight", 1.5, "Score of the best semantic hit, against about 1 per keyword match")
 	return nil
 }
 
@@ -134,6 +145,20 @@ func (o *evalOptions) Run(ctx context.Context, _ *app.Env) error {
 	tasks := taskeval.Tasks(commits, taskeval.IndexedFiles(g), taskeval.Options{MaxFiles: o.maxFiles})
 	if len(tasks) == 0 {
 		return fmt.Errorf("no tasks in %s..%s", short(base), short(head))
+	}
+	if o.semModel != "" {
+		emb, err := semantic.NewOllama(o.semURL, o.semModel)
+		if err != nil {
+			return err
+		}
+		nodes := semanticNodes(g)
+		ix, err := semantic.Build(ctx, emb, nodes)
+		if err != nil {
+			return err
+		}
+		o.EC.Logger.Info("semantic index built", "symbols", ix.Len())
+		agentctx.SetSemanticTuning(o.semK, o.semWeight)
+		ctx = agentctx.WithSemantic(ctx, semanticAdapter{ix})
 	}
 	rep := taskeval.Run(ctx, mem, repo, tasks)
 	rep.Base, rep.Head = base, head
@@ -282,4 +307,31 @@ func evalCmd(ec *app.Env) *cobra.Command {
 		WithGroupID(app.GroupBase).
 		WithMaxArgs(1).
 		Build()
+}
+
+// semanticAdapter lets the index answer agentctx.SemanticRanker.
+type semanticAdapter struct{ ix *semantic.Index }
+
+func (a semanticAdapter) Rank(ctx context.Context, task string, k int) ([]agentctx.SemanticHit, error) {
+	hits, err := a.ix.Rank(ctx, task, k)
+	out := make([]agentctx.SemanticHit, len(hits))
+	for i, h := range hits {
+		out[i] = agentctx.SemanticHit{ID: h.ID, Score: h.Score}
+	}
+	return out, err
+}
+
+// semanticNodes are the symbols worth embedding: functions, methods, types
+// and doc sections.
+func semanticNodes(g *model.Graph) []model.Node {
+	var out []model.Node
+	for _, n := range g.Nodes() {
+		switch n.Kind {
+		case model.KindFunction, model.KindMethod, model.KindInterfaceMethod, model.KindType, model.KindSection:
+			if !n.IsTest {
+				out = append(out, n)
+			}
+		}
+	}
+	return out
 }
