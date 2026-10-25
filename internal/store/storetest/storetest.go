@@ -99,6 +99,7 @@ type Records interface {
 	store.CuratedStore
 	store.UsageStore
 	store.MemoryStore
+	store.AccessStore
 }
 
 // RunRecords exercises only those records; Run includes them.
@@ -107,6 +108,7 @@ func RunRecords(t *testing.T, s Records) {
 	ctx := context.Background()
 	require.NoError(t, s.EnsureSchema(ctx))
 	require.NoError(t, s.ReplaceRepo(ctx, Repo, Fixture()))
+	t.Run("access_projection", func(t *testing.T) { accessContract(t, s) })
 	t.Run("history", func(t *testing.T) { historyContract(t, s) })
 	t.Run("curated", func(t *testing.T) { curatedContract(t, s) })
 	t.Run("reviews survive re-indexing", func(t *testing.T) { reviewContract(ctx, t, s) })

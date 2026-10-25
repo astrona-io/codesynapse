@@ -37,6 +37,9 @@ var (
 	nodeLists = []string{"cwe", "aliases", "security_tags"}
 )
 
+// indexedNodeColumns are the node columns the indexes below are made of.
+var indexedNodeColumns = []string{"repo", "kind", "file"}
+
 // column is a property of a tag or an edge type. A column with a default is
 // NOT NULL, which lets UPSERT add to it on a vertex that does not exist yet.
 type column struct{ name, typ, def string }
@@ -102,6 +105,14 @@ func (s schemaItem) kind() string {
 // version created gets the columns it lacks appended.
 var schemaItems = func() []schemaItem {
 	node := slices.Concat(texts(nodeTexts...), longs(nodeLongs...), bools(nodeBools...), texts(nodeLists...))
+	// A composite index misses rows whose later columns are NULL, and a
+	// lookup by one column may be served by any index that starts with it, so
+	// every indexed column is never NULL.
+	for i := range node {
+		if slices.Contains(indexedNodeColumns, node[i].name) {
+			node[i].def = `""`
+		}
+	}
 	items := []schemaItem{
 		// The lease a publisher holds on a repository (replace.go).
 		{name: "ingest_head", cols: slices.Concat(texts("repo", "stage_run"), longs("stage_expires"))},
@@ -129,6 +140,14 @@ var schemaItems = func() []schemaItem {
 			counters("confirmations"), defaulted("double", "1.0", "confidence")),
 			indexes: []index{{"mem_fact_by_ns", []indexCol{{"tenant_id", 64}, {"ns", 128}}}, {"mem_fact_all", nil}}},
 	)
+	// Access projections (access.go): one tag for every kind, and their own
+	// edge types, apart from the code graph.
+	items = append(items, schemaItem{name: "access_vertex", cols: slices.Concat(texts("aid", "kind", "tenant_id", "user_id", "team_id", "repo_id", "graph_id", "default_repo_access", "digest"),
+		longs("policy_revision"), bools("active", "inherits_default", "usable")),
+		indexes: []index{{"access_by_tenant_revision", []indexCol{{"tenant_id", 64}, {"policy_revision", 0}}}, {"access_by_tenant_kind", []indexCol{{"tenant_id", 64}, {"kind", 24}}}}})
+	for _, k := range accessEdges {
+		items = append(items, schemaItem{name: k, edge: true, cols: slices.Concat(texts("tenant_id", "role"), longs("rank"))})
+	}
 	// One edge type per model edge kind (schemaEdges) carries these.
 	edge := slices.Concat(longs("count"), texts("run", "evidence"))
 	for _, k := range edgeKinds() {
@@ -231,6 +250,16 @@ func (s *Store) ensureItem(ctx context.Context, item schemaItem, deadline time.T
 		}); err != nil {
 			return err
 		}
+	}
+	// DESCRIBE is answered by the Graph service; a write needs the Storage
+	// service to know the schema too, which it learns on its own heartbeat.
+	probeVID := literal(vid("p", "schema-probe"))
+	fetch := "FETCH PROP ON " + quote(item.name) + " " + probeVID + " YIELD vertex AS v"
+	if item.edge {
+		fetch = "FETCH PROP ON " + quote(item.name) + " " + probeVID + "->" + probeVID + "@0 YIELD edge AS e"
+	}
+	if err := s.until(ctx, deadline, item.name, func() error { _, err := s.read(ctx, fetch, nil); return err }); err != nil {
+		return err
 	}
 	if len(item.indexes) == 0 {
 		return nil
