@@ -160,6 +160,12 @@ type bridge struct {
 	logger *slog.Logger
 	gitMu  sync.Mutex
 	gitDir string
+
+	// repoTools are the tools that take a repo argument (learned from
+	// tools/list); repoName is the checkout's repository (bridgerepo.go).
+	repoTools map[string]bool
+	repoOnce  sync.Once
+	repoName  string
 }
 
 type rpcMessage struct {
@@ -217,6 +223,7 @@ func (b *bridge) run(ctx context.Context, in io.Reader) error {
 			if m.Method == "tools/call" && (b.answerGit(ctx, msg, m) || b.answerLocally(ctx, msg, m)) {
 				return
 			}
+			msg := b.withRepo(ctx, msg, m)
 			if b.routes != nil && m.Method == "tools/call" {
 				target, err := b.routes.forCall(ctx, msg)
 				if err != nil {
@@ -366,6 +373,9 @@ func (b *bridge) post(ctx context.Context, msg []byte, m rpcMessage) error {
 // deliver writes one server message and notes the protocol version the
 // initialize answer settles on.
 func (b *bridge) deliver(data []byte, sent rpcMessage) {
+	if sent.Method == "tools/list" {
+		b.learnRepoTools(data)
+	}
 	if sent.Method == "initialize" {
 		var r struct {
 			Result struct {
