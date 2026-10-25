@@ -28,8 +28,9 @@ func TestPluginFiles(t *testing.T) {
 		cmd, rest, err := cli.Find(args)
 		require.NoError(t, err, strings.Join(args, " "))
 		assert.True(t, cmd != cli && cmd.Runnable(), "codesynapse "+strings.Join(args, " ")+" is a command")
-		for _, a := range rest {
-			assert.True(t, strings.HasPrefix(a, "-"), "only flags after the command: "+a)
+		for i, a := range rest {
+			// A flag's value follows the flag ("--client claude").
+			assert.True(t, strings.HasPrefix(a, "-") || i > 0 && strings.HasPrefix(rest[i-1], "-"), "only flags after the command: "+a)
 		}
 	}
 	read := func(name string, v any) {
@@ -71,7 +72,7 @@ func TestPluginFiles(t *testing.T) {
 		} `json:"hooks"`
 	}
 	read("hooks/hooks.json", &hooks)
-	for _, event := range []string{"SessionStart", "PreCompact", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"} {
+	for _, event := range []string{"SessionStart", "PreCompact", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop", "CwdChanged", "SessionEnd", "SubagentStart", "SubagentStop", "PostCompact", "PostToolBatch", "InstructionsLoaded", "PermissionRequest", "PermissionDenied", "StopFailure"} {
 		require.True(t, len(hooks.Hooks[event]) > 0, event)
 		for _, g := range hooks.Hooks[event] {
 			for _, h := range g.Hooks {

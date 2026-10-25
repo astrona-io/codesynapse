@@ -108,6 +108,8 @@ type hookState struct {
 	Bash     map[string]int `json:"bash,omitempty"`
 	BashSent map[string]int `json:"bash_sent,omitempty"`
 	Hinted   []string       `json:"hinted,omitempty"`
+	// Registered: a hook already registered the session with the server.
+	Registered bool `json:"registered,omitempty"`
 	// Task is the session's first prompt, kept only with eval capture on
 	// (cases.go).
 	Task string `json:"task,omitempty"`
@@ -187,8 +189,10 @@ func (o *hookOptions) Validate(context.Context, *app.Env) error   { return nil }
 
 func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 	var in toolHookInput
-	_ = json.NewDecoder(io.LimitReader(o.EC.Stdin, 1<<20)).Decode(&in) //nolint:errcheck // no input, no opinion
+	raw, _ := io.ReadAll(io.LimitReader(o.EC.Stdin, 1<<20)) //nolint:errcheck // no input, no opinion
+	_ = json.Unmarshal(raw, &in)                            //nolint:errcheck // same
 	var out map[string]any
+	defer recordActivity(ctx, o.event, raw, o.EC.Logger)
 	switch o.event {
 	case "read":
 		out = readGuard(in)
