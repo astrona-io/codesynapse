@@ -206,3 +206,13 @@ func TestBridgeWorktreeAnswersAreOptIn(t *testing.T) {
 	require.NoError(t, o.SetupFlags(context.Background(), ec))
 	assert.True(t, o.worktree, "on when asked for")
 }
+
+func TestBridgeNoteClient(t *testing.T) {
+	b := &bridge{}
+	b.noteClient([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Claude Code (CLI)!","version":"2"}}}`))
+	assert.Equal(t, b.client, "claude-code-cli")
+	req, err := http.NewRequest(http.MethodPost, "http://x", nil)
+	require.NoError(t, err)
+	b.headers(req)
+	assert.Equal(t, req.Header.Get(clientHeader), "claude-code-cli")
+}

@@ -93,13 +93,22 @@ func noteUsageRepository(ctx context.Context, repo string) {
 	}
 }
 
+// clientNameHeader is set by the CodeSynapse bridge from the client's
+// initialize message (cmd/codesynapse/bridge.go).
+const clientNameHeader = "X-CodeSynapse-Client"
+
 func sessionClient(req mcp.Request) string {
 	// The SDK reads per-request metadata for sessionless clients and falls
 	// back to initialize for clients using the session protocol.
 	if r, ok := req.(interface{ ClientInfo() *mcp.Implementation }); ok {
-		if ci := r.ClientInfo(); ci != nil {
+		if ci := r.ClientInfo(); ci != nil && ci.Name != "" {
 			return ci.Name
 		}
+	}
+	// A bridge that carries the name itself; usage cleans and caps it like
+	// any client name, so it cannot mint series.
+	if extra := req.GetExtra(); extra != nil && extra.Header != nil {
+		return extra.Header.Get(clientNameHeader)
 	}
 	return ""
 }

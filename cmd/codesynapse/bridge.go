@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -144,6 +145,7 @@ type bridge struct {
 	outMu               sync.Mutex
 
 	mu        sync.Mutex
+	client    string // the client's own name from initialize, for usage counts
 	mcpID     string // Mcp-Session-Id from the server
 	protocol  string // negotiated protocol version
 	readyOnce sync.Once
@@ -182,6 +184,7 @@ func (b *bridge) run(ctx context.Context, in io.Reader) error {
 		var m rpcMessage
 		_ = json.Unmarshal(msg, &m) //nolint:errcheck // the server answers malformed input itself
 		if m.Method == "initialize" {
+			b.noteClient(msg)
 			if b.routes != nil {
 				if initSeen {
 					b.write(errorResponse(m.ID, errors.New("bridge already initialized")))
@@ -269,6 +272,36 @@ func (b *bridge) forward(ctx context.Context, msg []byte, m rpcMessage) {
 	}
 }
 
+// clientHeader carries the MCP client's name from initialize on every
+// forwarded request: the server counts usage per client, and requests that
+// arrive without the session's initialize (every call after the first
+// through the streamable transport) would otherwise count as "unknown".
+const clientHeader = "X-CodeSynapse-Client"
+
+var clientNameRe = regexp.MustCompile(`[^a-z0-9._-]+`)
+
+// noteClient keeps the clientInfo name of an initialize message, lower-cased
+// and reduced to the characters usage client names allow.
+func (b *bridge) noteClient(msg []byte) {
+	var init struct {
+		Params struct {
+			ClientInfo struct {
+				Name string `json:"name"`
+			} `json:"clientInfo"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(msg, &init) != nil {
+		return
+	}
+	name := clientNameRe.ReplaceAllString(strings.ToLower(init.Params.ClientInfo.Name), "-")
+	if len(name) > 64 {
+		name = name[:64]
+	}
+	b.mu.Lock()
+	b.client = strings.Trim(name, "-")
+	b.mu.Unlock()
+}
+
 func (b *bridge) headers(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+b.token)
 	if b.session != "" {
@@ -279,6 +312,9 @@ func (b *bridge) headers(req *http.Request) {
 	defer b.mu.Unlock()
 	if b.mcpID != "" {
 		req.Header.Set("Mcp-Session-Id", b.mcpID)
+	}
+	if b.client != "" {
+		req.Header.Set(clientHeader, b.client)
 	}
 	if b.protocol != "" {
 		req.Header.Set("Mcp-Protocol-Version", b.protocol)
