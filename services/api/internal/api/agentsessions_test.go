@@ -29,9 +29,17 @@ func TestAgentSessions(t *testing.T) {
 	require.Equal(t, ada.do("POST", "/api/v1/accounts/orgs", `{"name":"Sessions"}`, &org), 201)
 	require.Equal(t, ada.do("PUT", "/api/v1/accounts/orgs/"+org.Slug+"/members", `{"email":"bob@example.com","role":"member"}`, nil), 200)
 
+	var made struct {
+		Key    string
+		APIKey accounts.APIKey `json:"api_key"`
+	}
+	require.Equal(t, ada.do("POST", "/api/v1/me/keys", `{"org":"`+org.Slug+`","name":"laptop-agent"}`, &made), 201)
+	keyID := made.APIKey.ID
+	require.True(t, keyID != "", "the key has an ID")
+
 	call := func(u accounts.User, orgID, session, tool string, failed bool) {
 		t.Helper()
-		e := accounts.Event{UserID: u.ID, ActorEmail: u.Email, OrgID: orgID, Via: "key", Action: "mcp.tools.call", Target: tool, Outcome: accounts.Success,
+		e := accounts.Event{UserID: u.ID, ActorEmail: u.Email, OrgID: orgID, Via: "key", KeyID: map[bool]string{true: keyID}[u.ID == adaUser.ID], Action: "mcp.tools.call", Target: tool, Outcome: accounts.Success,
 			MCP: &accounts.MCPRequest{Method: "tools/call", Name: tool, Repo: "acme/api", SessionID: session, Client: "claude-code 2.1", Bytes: 1000, DurationMS: 12, Args: map[string]string{"task": "add a field"}}}
 		if failed {
 			e.Outcome, e.MCP.Error = accounts.Failure, "no exact match"
@@ -66,6 +74,8 @@ func TestAgentSessions(t *testing.T) {
 	assert.Equal(t, a.Repos, []string{"acme/api"})
 	assert.Equal(t, a.Client, "claude-code 2.1")
 	assert.Equal(t, a.Actor, "ada@example.com")
+	assert.Equal(t, a.Key, "laptop-agent", "the list names the API key the chat used")
+	assert.Equal(t, byID["chat-b"].Key, "", "an entry without a key names none")
 
 	var own list
 	require.Equal(t, bob.do("GET", base, "", &own), 200)

@@ -30,7 +30,7 @@ func usageMiddleware(rec *usage.Recorder) mcp.Middleware {
 				return res, err
 			case "tools/call", "prompts/get":
 				start := time.Now()
-				resolved := &usageRepository{}
+				resolved := repositoryHolder(ctx)
 				ctx = context.WithValue(ctx, usageRepositoryKey{}, resolved)
 				res, err := next(ctx, method, req)
 				name, repo := "", ""
@@ -69,6 +69,15 @@ func usageMiddleware(rec *usage.Recorder) mcp.Middleware {
 }
 
 type usageRepositoryKey struct{}
+
+// repositoryHolder returns the holder an outer middleware already put in ctx,
+// so usage and audit see the same resolution whichever runs outside.
+func repositoryHolder(ctx context.Context) *usageRepository {
+	if r, ok := ctx.Value(usageRepositoryKey{}).(*usageRepository); ok {
+		return r
+	}
+	return &usageRepository{}
+}
 
 type usageRepository struct {
 	mu        sync.Mutex

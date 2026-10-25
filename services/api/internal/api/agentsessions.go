@@ -29,9 +29,12 @@ func (s *Server) agentSessionRoutes() {
 
 // AgentSession summarises one runtime (chat) session.
 type AgentSession struct {
-	ID         string         `json:"id"`
-	Actor      string         `json:"actor"`
-	Client     string         `json:"client,omitempty"`
+	ID     string `json:"id"`
+	Actor  string `json:"actor"`
+	Client string `json:"client,omitempty"`
+	// Key is the name of the API key the chat used; empty when it was
+	// deleted since, or the entry carries none.
+	Key        string         `json:"key,omitempty"`
 	First      time.Time      `json:"first"`
 	Last       time.Time      `json:"last"`
 	Calls      int            `json:"calls"`
@@ -81,6 +84,7 @@ func (s *Server) handleAgentSessions(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusInternalServerError, err)
 		return
 	}
+	keys := s.keyNames(r, events)
 	byID := map[string]*AgentSession{}
 	for _, e := range events {
 		if e.MCP == nil || e.MCP.SessionID == "" {
@@ -93,6 +97,7 @@ func (s *Server) handleAgentSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		a.First, a.Last = minTime(a.First, e.At), maxTime(a.Last, e.At)
 		a.Client = cmp.Or(a.Client, e.MCP.Client)
+		a.Key = cmp.Or(a.Key, keys[e.KeyID])
 		a.Calls++
 		a.Bytes += e.MCP.Bytes
 		a.DurationMS += e.MCP.DurationMS
@@ -151,7 +156,7 @@ func (s *Server) handleAgentSession(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, c)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id": id, "actor": events[0].ActorEmail, "calls": calls,
+		"id": id, "actor": events[0].ActorEmail, "key": s.keyNames(r, events[:1])[events[0].KeyID], "calls": calls,
 		"truncated": len(events) > maxSessionCalls, "limit": maxSessionCalls,
 	})
 }
@@ -168,4 +173,26 @@ func maxTime(a, b time.Time) time.Time {
 		return b
 	}
 	return a
+}
+
+// keyNames maps the API key IDs of events to their names. Keys belong to the
+// events' users, so it reads those users' keys only; a failed read leaves the
+// names out rather than failing the list.
+func (s *Server) keyNames(r *http.Request, events []accounts.Event) map[string]string {
+	names := map[string]string{}
+	seen := map[string]bool{}
+	for _, e := range events {
+		if e.KeyID == "" || e.UserID == "" || seen[e.UserID] {
+			continue
+		}
+		seen[e.UserID] = true
+		keys, err := s.cfg.Accounts.St.ListAPIKeys(r.Context(), e.UserID)
+		if err != nil {
+			continue
+		}
+		for _, k := range keys {
+			names[k.ID] = k.Name
+		}
+	}
+	return names
 }
