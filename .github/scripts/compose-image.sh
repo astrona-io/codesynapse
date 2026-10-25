@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Prints the image docker-compose.yml ships for a store, e.g.
-#   compose-image.sh postgres   ->  docker.io/library/postgres:18-alpine
+#   compose-image.sh codesynapse-postgres   ->  ghcr.io/astrona-io/codesynapse-postgres:18-alpine
 # The integration recipes in the justfile test exactly these, so a version bump in
 # docker-compose.yml changes what the contracts run against (docs: "Integration
 # images"). The argument is matched against the repository name of the image.

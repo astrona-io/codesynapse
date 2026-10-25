@@ -21,7 +21,7 @@ check() { # name chart-values-file
         fail=1
     fi
 }
-check postgres deploy/helm/codesynapse/charts/postgresql/values.yaml
+check codesynapse-postgres deploy/helm/codesynapse/charts/postgresql/values.yaml
 check hugegraph deploy/helm/codesynapse/charts/hugegraph/values.yaml
 check milvus deploy/helm/codesynapse/charts/milvus/values.yaml
 check victoria-metrics deploy/helm/codesynapse/charts/victoriametrics/values.yaml

@@ -180,7 +180,7 @@ engine := env("CONTAINER_ENGINE", `if command -v docker >/dev/null 2>&1; then ec
 
 # The store images the integration contracts run against: the ones docker-compose.yml ships.
 # .github/scripts/check-test-images.sh (part of `just checks`) keeps recipes, Compose and the chart in step.
-pg_image := `sh .github/scripts/compose-image.sh postgres`
+pg_image := `sh .github/scripts/compose-image.sh codesynapse-postgres`
 milvus_image := `sh .github/scripts/compose-image.sh milvus`
 hugegraph_image := `sh .github/scripts/compose-image.sh hugegraph`
 victoriametrics_image := `sh .github/scripts/compose-image.sh victoria-metrics`
