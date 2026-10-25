@@ -19,8 +19,9 @@ import (
 // that sink, naming the caller and the call it went through; a result
 // computed from request input is tainted at the call site.
 //
-// Only static calls to the repository's functions are followed; calls
-// through interfaces and function values are not (yet).
+// Static calls to the repository's functions are followed, and calls
+// through the repository's interfaces apply the summaries of every
+// implementation in the repository; calls through function values are not.
 
 const (
 	maxTaintRounds    = 8
@@ -134,6 +135,21 @@ func (s *scanner) through(call *ast.CallExpr, fn *types.Func, sum *summary) {
 			}
 		}
 	}
+}
+
+// summariesOf are the summaries a call to fn applies: fn's own, or for an
+// interface method those of its implementations.
+func (s *scanner) summariesOf(fn *types.Func) []*summary {
+	if sum := s.sums[fn]; sum != nil {
+		return []*summary{sum}
+	}
+	var out []*summary
+	for _, impl := range s.x.dispatch[fn] {
+		if sum := s.sums[impl]; sum != nil {
+			out = append(out, sum)
+		}
+	}
+	return out
 }
 
 // returnsTaint is the taint of a call's result under the callee's summary.

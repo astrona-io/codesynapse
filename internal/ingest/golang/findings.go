@@ -204,7 +204,7 @@ func (s *scanner) call(call *ast.CallExpr) {
 	fn = fn.Origin()
 	full, pkg := fn.FullName(), fn.Pkg().Path()
 	args := call.Args
-	if sum := s.sums[fn]; sum != nil {
+	for _, sum := range s.summariesOf(fn) {
 		s.through(call, fn, sum)
 	}
 

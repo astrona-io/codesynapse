@@ -158,8 +158,13 @@ func (s *scanner) taintOf(e ast.Expr) string {
 		if fn == nil || fn.Pkg() == nil {
 			return ""
 		}
-		if sum := s.sums[fn.Origin()]; sum != nil {
-			return s.returnsTaint(v, sum)
+		if sums := s.summariesOf(fn.Origin()); len(sums) > 0 {
+			for _, sum := range sums {
+				if d := s.returnsTaint(v, sum); d != "" {
+					return d
+				}
+			}
+			return ""
 		}
 		if sanitizers[fn.FullName()] || !propagators[fn.Pkg().Path()] && !propagatingMethods[methodName(fn.Origin())] {
 			return ""
@@ -176,6 +181,28 @@ func (s *scanner) taintOf(e ast.Expr) string {
 		}
 	}
 	return ""
+}
+
+// carriesText reports the result types through which a function hands its
+// input back: strings, byte and string slices, URLs. A struct returned by a
+// lookup holds stored data, not the key it was found by, and an error that
+// names its input goes nowhere a sink reads.
+func carriesText(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	if t.String() == "*net/url.URL" || t.String() == "net/url.Values" {
+		return true
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Basic:
+		return u.Info()&types.IsString != 0
+	case *types.Slice:
+		if b, ok := u.Elem().Underlying().(*types.Basic); ok {
+			return b.Kind() == types.Byte || b.Info()&types.IsString != 0
+		}
+	}
+	return false
 }
 
 func identOf(e ast.Expr) *ast.Ident {
@@ -233,6 +260,9 @@ func (s *scanner) track(n ast.Node) {
 	case *ast.ReturnStmt:
 		if s.sum != nil {
 			for _, r := range v.Results {
+				if !carriesText(s.p.info.TypeOf(r)) {
+					continue // a record looked up by the input, or an error naming it
+				}
 				if i := paramOf(s.taintOf(r)); i >= 0 && i < s.sum.params {
 					s.sum.returns[i] = true
 				}

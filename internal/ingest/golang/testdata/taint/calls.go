@@ -64,3 +64,22 @@ func walkTree(p string, depth int) {
 func RecursiveHelper(w http.ResponseWriter, r *http.Request) {
 	walkTree(r.PathValue("dir"), 3)
 }
+
+type record struct{ ID, Path string }
+
+// findRecord looks a record up by its ID: the record is stored data, even
+// though the error names the ID.
+func findRecord(id string) (record, error) {
+	if id == "" {
+		return record{}, fmt.Errorf("record %q not found", id)
+	}
+	return record{ID: id, Path: "/data/" + "fixed"}, nil
+}
+
+func CleanLookupByID(w http.ResponseWriter, r *http.Request) {
+	rec, err := findRecord(r.PathValue("id"))
+	if err != nil {
+		return
+	}
+	_, _ = os.ReadFile(rec.Path)
+}
