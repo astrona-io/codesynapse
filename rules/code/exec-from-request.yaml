@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../schema.json
+id: exec-from-request
+title: Process started with request input
+severity: critical
+cwe: [CWE-78, CWE-88]
+category: code
+languages: [go]
+why: When request input chooses the program or its arguments, the client can run other programs or pass options that change what the program does (git's --upload-pack, curl's -o), often up to running its own code.
+fix: Never take the program from the request; map request values to fixed arguments, put "--" before any value that must stay an operand, and validate it against an allowlist.
+references:
+  - https://cwe.mitre.org/data/definitions/78.html
+  - https://cwe.mitre.org/data/definitions/88.html
+examples:
+  - language: go
+    vulnerable: |-
+      ref := r.URL.Query().Get("ref")
+      out, err := exec.Command("git", "log", ref).Output()
+    fixed: |-
+      ref := r.URL.Query().Get("ref")
+      if !validRef.MatchString(ref) {
+          http.Error(w, "bad ref", http.StatusBadRequest)
+          return
+      }
+      out, err := exec.Command("git", "log", "--end-of-options", ref).Output()

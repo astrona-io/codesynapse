@@ -33,6 +33,8 @@ var RuleIDs = []string{
 	"file-world-writable",
 	"path-from-request",
 	"ssrf-from-request",
+	"sql-from-request",
+	"exec-from-request",
 	"unbounded-body",
 	"unsafe-pointer",
 	"jwt-unverified",
@@ -54,6 +56,8 @@ type scanner struct {
 	readsLimited bool
 	usesCrypto   bool
 	seen         map[string]bool
+	// taint maps variables holding request input to where it came from.
+	taint map[types.Object]string
 }
 
 // pkgInfo is the slice of packages.Package the scanner needs.
@@ -63,7 +67,7 @@ type pkgInfo struct {
 }
 
 func (x *extractor) scan(info *types.Info, fset *token.FileSet, node ast.Node, ownerID, rel string) {
-	s := &scanner{x: x, p: &pkgInfo{info: info, fset: fset}, ownerID: ownerID, rel: rel, seen: map[string]bool{}}
+	s := &scanner{x: x, p: &pkgInfo{info: info, fset: fset}, ownerID: ownerID, rel: rel, seen: map[string]bool{}, taint: map[types.Object]string{}}
 	ast.Inspect(node, func(n ast.Node) bool {
 		if call, ok := n.(*ast.CallExpr); ok {
 			if fn := calleeFunc(info, call.Fun); fn != nil && fn.Pkg() != nil {
@@ -78,6 +82,7 @@ func (x *extractor) scan(info *types.Info, fset *token.FileSet, node ast.Node, o
 		return true
 	})
 	ast.Inspect(node, func(n ast.Node) bool {
+		s.track(n)
 		switch n := n.(type) {
 		case *ast.CallExpr:
 			s.call(n)
@@ -160,34 +165,6 @@ func (s *scanner) builtDynamically(e ast.Expr) bool {
 	return false
 }
 
-// fromRequest reports whether e reads HTTP request input directly:
-// r.FormValue, r.PathValue, r.URL.Query().Get, r.Header.Get and friends.
-func (s *scanner) fromRequest(e ast.Expr) bool {
-	found := false
-	ast.Inspect(e, func(n ast.Node) bool {
-		if found {
-			return false
-		}
-		sel, ok := n.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		tv, ok := s.p.info.Types[sel.X]
-		if !ok {
-			return true
-		}
-		t := tv.Type.String()
-		if strings.HasSuffix(t, "net/http.Request") || t == "net/url.Values" || t == "*net/url.URL" || t == "net/http.Header" {
-			switch sel.Sel.Name {
-			case "FormValue", "PostFormValue", "PathValue", "Query", "Get", "URL", "Path", "RawQuery", "Form":
-				found = true
-			}
-		}
-		return true
-	})
-	return found
-}
-
 func (s *scanner) call(call *ast.CallExpr) {
 	fn := calleeFunc(s.p.info, call.Fun)
 	if fn == nil {
@@ -210,6 +187,16 @@ func (s *scanner) call(call *ast.CallExpr) {
 		if len(args) <= off {
 			return
 		}
+		for i, a := range args[off:] {
+			if from := s.taintOf(a); from != "" {
+				what := "the program name"
+				if i > 0 {
+					what = fmt.Sprintf("argument %d", i)
+				}
+				s.report("exec-from-request", call.Pos(), withTaint(what+" comes from the incoming request", from))
+				return
+			}
+		}
 		prog, isConst := s.constString(args[off])
 		if !isConst {
 			s.report("exec-variable", call.Pos(), "program name is not a constant")
@@ -226,26 +213,41 @@ func (s *scanner) call(call *ast.CallExpr) {
 		s.report("http-no-timeout", call.Pos(), full+" has no timeouts")
 	case "net/http.Get", "net/http.Post", "net/http.PostForm", "net/http.Head":
 		s.report("http-client-default", call.Pos(), full)
-		if len(args) > 0 && s.fromRequest(args[0]) {
-			s.report("ssrf-from-request", call.Pos(), "URL comes from the incoming request")
+		if len(args) > 0 {
+			if from := s.taintOf(args[0]); from != "" {
+				s.report("ssrf-from-request", call.Pos(), withTaint("URL comes from the incoming request", from))
+			}
+		}
+	case "(*net/http.Client).Get", "(*net/http.Client).Post", "(*net/http.Client).Head", "(*net/http.Client).PostForm":
+		if len(args) > 0 {
+			if from := s.taintOf(args[0]); from != "" {
+				s.report("ssrf-from-request", call.Pos(), withTaint("URL comes from the incoming request", from))
+			}
 		}
 	case "net/http.NewRequest", "net/http.NewRequestWithContext":
-		if i := len(args) - 2; i >= 0 && s.fromRequest(args[i]) {
-			s.report("ssrf-from-request", call.Pos(), "URL comes from the incoming request")
+		if i := len(args) - 2; i >= 0 {
+			if from := s.taintOf(args[i]); from != "" {
+				s.report("ssrf-from-request", call.Pos(), withTaint("URL comes from the incoming request", from))
+			}
 		}
 	case "os.WriteFile", "os.Chmod", "os.MkdirAll", "os.Mkdir", "os.OpenFile":
 		if len(args) > 0 {
 			if mode, ok := s.constInt(args[len(args)-1]); ok && mode&0o002 != 0 {
 				s.report("file-world-writable", call.Pos(), fmt.Sprintf("%s with mode %#o", full, mode))
 			}
-			if s.fromRequest(args[0]) {
-				s.report("path-from-request", call.Pos(), full+" path comes from the request")
+			if from := s.taintOf(args[0]); from != "" {
+				s.report("path-from-request", call.Pos(), withTaint(full+" path comes from the request", from))
 			}
 		}
-	case "os.Open", "os.ReadFile", "os.Create", "os.Remove", "os.RemoveAll", "path/filepath.Join", "path.Join", "net/http.ServeFile":
-		for _, a := range args {
-			if s.fromRequest(a) {
-				s.report("path-from-request", call.Pos(), full+" path comes from the request")
+	case "os.Open", "os.ReadFile", "os.Create", "os.Remove", "os.RemoveAll", "os.ReadDir", "os.Stat", "net/http.ServeFile":
+		// The path is the last argument of ServeFile, the first elsewhere.
+		a := args[0:min(1, len(args))]
+		if full == "net/http.ServeFile" && len(args) == 3 {
+			a = args[2:]
+		}
+		for _, x := range a {
+			if from := s.taintOf(x); from != "" {
+				s.report("path-from-request", call.Pos(), withTaint(full+" path comes from the request", from))
 				break
 			}
 		}
@@ -271,8 +273,12 @@ func (s *scanner) call(call *ast.CallExpr) {
 	case pkg == "database/sql" || pkg == "gorm.io/gorm" || strings.HasPrefix(pkg, "github.com/jackc/pgx") || pkg == "github.com/jmoiron/sqlx":
 		switch fn.Name() {
 		case "Query", "QueryContext", "QueryRow", "QueryRowContext", "Exec", "ExecContext", "Prepare", "PrepareContext", "Raw", "Select", "Get":
-			if q := queryArg(fn, args); q != nil && s.builtDynamically(q) {
-				s.report("sql-concat", call.Pos(), full+" with a dynamically built query")
+			if q := queryArg(fn, args); q != nil {
+				if from := s.taintOf(q); from != "" {
+					s.report("sql-from-request", call.Pos(), withTaint(full+" runs SQL text taken from the request", from))
+				} else if s.builtDynamically(q) {
+					s.report("sql-concat", call.Pos(), full+" with a dynamically built query")
+				}
 			}
 		}
 	case strings.HasPrefix(pkg, "github.com/neo4j/neo4j-go-driver"):
