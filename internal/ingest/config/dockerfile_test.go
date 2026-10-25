@@ -64,7 +64,7 @@ CMD ["app"]
 `, nil},
 		{"root again in the final stage", "api.Dockerfile", `FROM alpine:3.20
 USER app
-FROM alpine:3.20
+FROM alpine:3.24
 USER root
 CMD ["app"]
 `, []string{"dockerfile-root-user:03"}},
