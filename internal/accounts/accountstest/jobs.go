@@ -30,19 +30,20 @@ func RunJobs(t *testing.T, newStore func(*testing.T) accounts.Store) {
 			LeaseOwner: "proc-a", LeaseUntil: now.Add(time.Minute), CreatedAt: now}
 	}
 
-	t.Run("waiting", func(t *testing.T) {
+	t.Run("queue", func(t *testing.T) {
 		st := newStore(t)
 		require.NoError(t, st.AddJob(ctx, job("w1", "acme/api")))
-		got, err := st.WaitingJobs(ctx, now)
+		got, err := st.JobQueue(ctx, now)
 		require.NoError(t, err)
-		assert.Equal(t, len(got), 0, "a job with a live lease is not waiting")
-		got, err = st.WaitingJobs(ctx, now.Add(2*time.Minute))
+		assert.Equal(t, len(got.Waiting), 0, "a job with a live lease is not waiting")
+		assert.Equal(t, got.Active["sync"], 1, "but it is active")
+		got, err = st.JobQueue(ctx, now.Add(2*time.Minute))
 		require.NoError(t, err)
-		assert.Equal(t, got["sync"], 1, "an expired lease leaves the job for a worker")
+		assert.Equal(t, got.Waiting["sync"], 1, "an expired lease leaves the job for a worker")
 		require.NoError(t, st.FinishJob(ctx, "w1", "proc-a", accounts.JobOutcome{State: accounts.JobSucceeded, At: now}))
-		got, err = st.WaitingJobs(ctx, now.Add(2*time.Minute))
+		got, err = st.JobQueue(ctx, now.Add(2*time.Minute))
 		require.NoError(t, err)
-		assert.Equal(t, len(got), 0, "a finished job is not waiting")
+		assert.Equal(t, len(got.Waiting)+len(got.Active), 0, "a finished job is neither")
 	})
 
 	t.Run("lifecycle", func(t *testing.T) {

@@ -106,23 +106,27 @@ ORDER BY created_at DESC OFFSET $1)`, accounts.JobHistory)
 	return err
 }
 
-// WaitingJobs implements accounts.Store.
-func (s *Store) WaitingJobs(ctx context.Context, now time.Time) (map[string]int, error) {
-	rows, err := s.db.Query(ctx, "SELECT kind, count(*) FROM jobs WHERE state IN ('queued', 'running') AND lease_until < $1 GROUP BY kind", now)
+// JobQueue implements accounts.Store.
+func (s *Store) JobQueue(ctx context.Context, now time.Time) (accounts.JobQueue, error) {
+	q := accounts.JobQueue{Waiting: map[string]int{}, Active: map[string]int{}}
+	rows, err := s.db.Query(ctx, `SELECT kind, count(*), count(*) FILTER (WHERE lease_until < $1) FROM jobs
+WHERE state IN ('queued', 'running') GROUP BY kind`, now)
 	if err != nil {
-		return nil, err
+		return q, err
 	}
 	defer rows.Close()
-	out := map[string]int{}
 	for rows.Next() {
 		var kind string
-		var n int
-		if err := rows.Scan(&kind, &n); err != nil {
-			return nil, err
+		var active, waiting int
+		if err := rows.Scan(&kind, &active, &waiting); err != nil {
+			return q, err
 		}
-		out[kind] = n
+		q.Active[kind] = active
+		if waiting > 0 {
+			q.Waiting[kind] = waiting
+		}
 	}
-	return out, rows.Err()
+	return q, rows.Err()
 }
 
 // ClaimOrphanedJob implements accounts.Store. SKIP LOCKED lets several

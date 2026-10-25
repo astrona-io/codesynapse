@@ -155,18 +155,22 @@ func (s *Store) ClaimOrphanedJob(_ context.Context, owner string, kinds []string
 	}
 }
 
-// WaitingJobs implements accounts.Store.
-func (s *Store) WaitingJobs(_ context.Context, now time.Time) (map[string]int, error) {
+// JobQueue implements accounts.Store.
+func (s *Store) JobQueue(_ context.Context, now time.Time) (accounts.JobQueue, error) {
 	t := s.jobTable()
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	out := map[string]int{}
+	q := accounts.JobQueue{Waiting: map[string]int{}, Active: map[string]int{}}
 	for _, j := range t.jobs {
-		if j.Active() && j.LeaseUntil.Before(now) {
-			out[j.Kind]++
+		if !j.Active() {
+			continue
+		}
+		q.Active[j.Kind]++
+		if j.LeaseUntil.Before(now) {
+			q.Waiting[j.Kind]++
 		}
 	}
-	return out, nil
+	return q, nil
 }
 
 // prune keeps the newest accounts.JobHistory finished jobs. Callers hold mu.

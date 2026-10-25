@@ -30,6 +30,26 @@ for bad in api.replica=2 'worker.roles=ingest\,typo' 'worker.roles=ingest\,fix' 
     fi
 done
 
+# Queue scaling renders the object of the tool the cluster has, and only that
+# one; the fix worker is never scaled. The CRD of KEDA is not installed here,
+# so these are not run through kubeconform.
+for mode in hpa keda; do
+    helm template codesynapse "$chart" -f "$values" --set "worker.queueScaling.mode=$mode" > "$out/scaling-$mode.yaml"
+done
+grep -q 'kind: HorizontalPodAutoscaler' "$out/scaling-hpa.yaml" && grep -q 'name: "codesynapse_jobs_active"' "$out/scaling-hpa.yaml"
+grep -q 'kind: ScaledObject' "$out/scaling-keda.yaml" && ! grep -q 'name: "codesynapse_jobs_active"' "$out/scaling-keda.yaml"
+if grep -q 'kind: ScaledObject' "$out/rendered.yaml"; then echo "KEDA objects rendered with queueScaling off" >&2; exit 1; fi
+for bad in worker.queueScaling.mode=argo worker.queueScaling.jobsPerWorker=0 worker.queueScaling.extra=1; do
+    if helm template codesynapse "$chart" -f "$values" --set "$bad" > /dev/null 2>&1; then
+        echo "values.schema.json accepted $bad" >&2
+        exit 1
+    fi
+done
+if helm template codesynapse "$chart" -f "$values" --set worker.queueScaling.mode=hpa,worker.queueScaling.minReplicas=5 > /dev/null 2>&1; then
+    echo "chart rendered queueScaling with maxReplicas below minReplicas" >&2
+    exit 1
+fi
+
 # The fix worker pushes: it cannot be on without the switch that allows it.
 if helm template codesynapse "$chart" -f "$values" --set features.allowPush=false > /dev/null 2>&1; then
     echo "chart rendered a fix worker without features.allowPush" >&2

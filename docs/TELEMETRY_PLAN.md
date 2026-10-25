@@ -68,7 +68,7 @@ Add a correctly named `db_graph_rows_returned_total` and migrate panels while do
 
 ## Worker queue depth
 
-`platform_codesynapse_jobs_waiting{kind}` is a gauge of the jobs a worker could claim now (queued, or running with an expired lease), per job kind. It has no tenant, so it exports as a platform series. The API process that holds the `api-loops` lease sets it every 15 seconds (`reportJobQueue`), so replicas never report it twice; a kind that drained reports 0. It is the signal an autoscaler adds workers on; a kind that never had a waiting job has no series, which an autoscaler reads as 0.
+`platform_codesynapse_jobs_waiting{kind}` is a gauge of the jobs a worker could claim now (queued, or running with an expired lease), per job kind. It has no tenant, so it exports as a platform series. The API process that holds the `api-loops` lease sets it every 15 seconds (`reportJobQueue`), so replicas never report it twice; a kind that drained reports 0. It is the signal an autoscaler adds workers on; `platform_codesynapse_jobs_active{kind}` also counts the jobs a process is running. Scale workers on active, not waiting: waiting is 0 while every worker is busy, and scaling down then stops a running job. A kind that never had a job has no series, which an autoscaler reads as 0.
 
 ## Dashboard 4: memory and offloading
 
