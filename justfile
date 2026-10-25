@@ -415,7 +415,7 @@ lint-actions:
 
 # Lint the service Dockerfiles (.hadolint.yaml)
 lint-docker:
-    {{engine}} run --rm -v "$PWD:/src:ro" -w /src ghcr.io/hadolint/hadolint:v2.15.1 hadolint services/api/Dockerfile services/mcp/Dockerfile services/web/Dockerfile
+    {{engine}} run --rm -v "$PWD:/src:ro" -w /src ghcr.io/hadolint/hadolint:v2.15.1 hadolint services/api/Dockerfile services/mcp/Dockerfile services/web/Dockerfile deploy/postgres/Dockerfile
 
 # Lint shell scripts
 lint-shell:
