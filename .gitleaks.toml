@@ -4,7 +4,7 @@
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "fake secrets in tests, fixtures and rule examples"
 paths = [
   '''(^|/)testdata/''',
