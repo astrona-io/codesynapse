@@ -12,7 +12,7 @@ flowchart TB
     end
     subgraph detectors
         gd[golang/findings.go<br/>type-aware]
-        ld[lang/rules.go<br/>Python, JS, TS, Vue]
+        ld[lang/rules.go<br/>Python, JS/TS, Vue, Java, Kotlin,<br/>Rust, C#, PHP, Ruby]
         yd[config/yaml.go<br/>Kubernetes, compose, Actions, Renovate]
     end
     subgraph deps[Dependencies]
@@ -52,8 +52,8 @@ flowchart LR
     req -- yes --> required[required]
     required --> imp{Package of M imported?}
     imp -- yes --> imported[imported]
-    imported --> call{Vulnerable symbol called<br/>over CALLS edges?}
-    call -- yes --> called[called<br/>with call sites]
+    imported --> calls{Vulnerable symbol called<br/>over CALLS edges?}
+    calls -- yes --> called[called<br/>with call sites]
 ```
 
 Symbol-level reachability exists for Go. For the other ecosystems, advisories rarely list symbols, so the levels are imported (npm, PyPI, Cargo, NuGet and RubyGems, when a source file imports the package; for NuGet, a using directive whose namespace the package ID prefixes; for RubyGems, a require of the gem) or required (everything else: PHP and Java imports are not matched to Composer or Maven names). `--fail-on` gates CI on reachable vulnerabilities only.

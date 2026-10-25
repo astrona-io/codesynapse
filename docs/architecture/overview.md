@@ -126,6 +126,7 @@ flowchart LR
     cleanup[internal/cleanup]
     vuln[internal/vuln]
     license[internal/license]
+    config[internal/config]
     metrics[internal/metrics]
     security[internal/security]
     redact[internal/redact]
@@ -143,16 +144,16 @@ flowchart LR
     ingest --> gitx
     cleanup --> model
     vuln --> model
-    license --> model
+    license --> config
     metrics --> model
     security --> model
     store --> model
     query --> store
     agentctx --> query
     review --> query
-    reviews --> store
-    memory --> store
-    accounts -. authz .-> store
+    store --> reviews
+    store --> memory
+    query -. authz .-> accounts
 ```
 
 See the [AGENTS.md layout section](https://github.com/astrona-io/codesynapse/blob/main/AGENTS.md) for the full directory list.

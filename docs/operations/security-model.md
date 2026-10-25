@@ -22,17 +22,17 @@ flowchart LR
         auth[Auth, tenant scope, limits]
     end
     subgraph trusted[Core]
-        graph[(Graph store)]
+        store[(Graph store)]
         llm[llm registry<br/>local vs cloud]
     end
 
-    remote --> gitx --> graph
-    repo --> fs --> redact --> graph
+    remote --> gitx --> store
+    repo --> fs --> redact --> store
     agentText --> redact
-    agentText --> params --> graph
+    agentText --> params --> store
     modelOut --> parse --> redact
     reqs --> auth --> params
-    graph --> llm
+    store --> llm
 ```
 
 ## Rules by area

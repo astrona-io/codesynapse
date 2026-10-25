@@ -57,7 +57,7 @@ sequenceDiagram
     A->>W: Commit to new codesynapse/fix-... branch
     A->>R: gitx.PushBranch (new branch, never forced)
     A->>R: Open draft pull request (github.com only)
-    A-->>U: PR link; CI runs on it
+    A-->>U: PR link, CI runs on it
 ```
 
 ### Rails
