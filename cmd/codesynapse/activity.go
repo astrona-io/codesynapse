@@ -37,19 +37,25 @@ const activityBudget = 1500 * time.Millisecond
 // every Claude Code hook reaches CodeSynapse. It never fails the hook:
 // without an API key, a session ID or a reachable API it does nothing.
 // CODESYNAPSE_HOOK_ACTIVITY=false turns it off.
-func recordActivity(ctx context.Context, command string, raw []byte, logger *slog.Logger) {
+func recordActivity(ctx context.Context, command string, raw []byte, logger *slog.Logger) string {
 	event, ok := claudeEvents[command]
-	if !ok || os.Getenv("CODESYNAPSE_HOOK_ACTIVITY") == "false" {
-		return
+	if !ok {
+		return "not reported: no activity event for this hook"
+	}
+	if os.Getenv("CODESYNAPSE_HOOK_ACTIVITY") == "false" {
+		return "not reported: CODESYNAPSE_HOOK_ACTIVITY=false"
 	}
 	_, tool, a, err := decodeLifecycle(bytes.NewReader(raw), "claude", event)
 	if err != nil {
-		return
+		return "not reported: hook input not understood"
 	}
 	state := stateFile(tool.SessionID)
 	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
-	if state == "" || c.token == "" {
-		return
+	if state == "" {
+		return "not reported: no valid session ID"
+	}
+	if c.token == "" {
+		return "not reported: no API token (CODESYNAPSE_API_TOKEN or the user config api-token file)"
 	}
 	ctx, cancel := context.WithTimeout(ctx, activityBudget)
 	defer cancel()
@@ -71,5 +77,7 @@ func recordActivity(ctx context.Context, command string, raw []byte, logger *slo
 	}
 	if err != nil {
 		logger.Debug("hook activity not saved", "event", event, "error", err)
+		return "not reported: " + err.Error()
 	}
+	return "reported to " + c.base
 }
