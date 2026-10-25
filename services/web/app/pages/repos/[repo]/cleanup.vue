@@ -50,8 +50,8 @@ const steps = [
       <section v-if="rep.modules.length" class="panel">
         <p class="eyebrow">Supply chain</p><h2>Dependencies nothing imports</h2>
         <div class="table-wrap"><table><tbody>
-          <tr v-for="m in rep.modules" :key="m.path">
-            <td class="mono">{{ m.path }}</td><td class="mono muted">{{ m.version }}</td>
+          <tr v-for="m in rep.modules" :key="`${m.ecosystem ?? 'Go'}:${m.path}`">
+            <td class="mono">{{ m.path }}<span v-if="m.ecosystem" class="muted"> ({{ m.ecosystem }})</span></td><td class="mono muted">{{ m.version }}</td>
             <td><span v-for="v in m.vulnerabilities ?? []" :key="v" class="sev sev--high">{{ v }}</span><span v-if="!m.vulnerabilities?.length" class="muted">no known CVEs</span></td>
           </tr>
         </tbody></table></div>

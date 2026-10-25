@@ -113,3 +113,37 @@ func TestTestSupportPackage(t *testing.T) {
 	n, _ := g.Node(assertEq)
 	assert.Equal(t, n.Liveness, TestSupport)
 }
+
+func TestUnusedJSAndPythonDependencies(t *testing.T) {
+	g := model.NewGraph()
+	for _, m := range []model.Node{
+		{Name: "left-pad", Ecosystem: "npm"},                     // never imported
+		{Name: "vue", Ecosystem: "npm"},                          // imported
+		{Name: "@scope/lib", Ecosystem: "npm"},                   // imported through a subpath
+		{Name: "@types/node", Ecosystem: "npm"},                  // tooling
+		{Name: "esbuild", Ecosystem: "npm"},                      // tooling
+		{Name: "jest", Ecosystem: "npm", Dev: true},              // dev
+		{Name: "shared", Ecosystem: "npm", Indirect: true},       // not the repository's choice
+		{Name: "requests", Ecosystem: "PyPI"},                    // imported
+		{Name: "python-dateutil", Ecosystem: "PyPI"},             // imported as dateutil
+		{Name: "leftover", Ecosystem: "PyPI"},                    // never imported
+		{Name: "gunicorn", Ecosystem: "PyPI"},                    // server, not imported
+		{Name: "pytest-cov", Ecosystem: "PyPI"},                  // tooling
+		{Name: "golang.org/x/net", Version: "v1", Ecosystem: ""}, // Go is judged as before
+	} {
+		m.ID, m.Kind, m.Repo = model.NodeID("r", model.KindModule, m.Ecosystem+":"+m.Name), model.KindModule, "r"
+		g.AddNode(m)
+	}
+	imports := map[string][]string{"vue": {"a"}, "@scope/lib/sub": {"a"}, "requests": {"b"}, "dateutil": {"b"}, "golang.org/x/net/http2": {"c"}}
+	rep := Analyze(g, imports)
+	var got []string
+	for _, m := range rep.Modules {
+		got = append(got, m.Ecosystem+":"+m.Path)
+	}
+	assert.Equal(t, got, []string{"npm:left-pad", "PyPI:leftover"})
+
+	// No imports at all (nothing parsed): npm and PyPI are not judged.
+	for _, m := range Analyze(g, nil).Modules {
+		assert.Equal(t, m.Ecosystem, "", "%s judged without any import", m.Path)
+	}
+}
