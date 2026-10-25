@@ -22,6 +22,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/forge"
 	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/imagescan"
 	"github.com/astrona-io/codesynapse/internal/memory"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
@@ -1081,14 +1082,13 @@ func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
 		_ = security.WriteMarkdown(w, rep) //nolint:errcheck // client went away
 		return
 	}
-	out := securityWithImages{Report: rep}
 	if s.cfg.Accounts != nil {
 		if ns, err := s.memNamespace(r, r.PathValue("repo")); err == nil {
 			if sc, has, err := s.cfg.Accounts.St.ImageScan(r.Context(), ns); err == nil && has {
-				sum := summariseImages(sc, false)
-				out.ContainerImages = &sum
+				o := imagescan.Summarise(sc.UploadedAt, sc.Findings)
+				rep.ContainerImages = &o
 			}
 		}
 	}
-	writeJSON(w, 200, out)
+	writeJSON(w, 200, rep)
 }

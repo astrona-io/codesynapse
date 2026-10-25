@@ -12,7 +12,6 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/imagescan"
 	"github.com/astrona-io/codesynapse/internal/model"
-	"github.com/astrona-io/codesynapse/internal/security"
 )
 
 // Container image scans uploaded from CI: the JSON report of Trivy or Grype
@@ -31,27 +30,15 @@ func (s *Server) imageScanRoutes() {
 // ImageScanSummary is what the API says about the uploaded scan: counts for
 // the security report, findings (worst first, capped) for the images page.
 type ImageScanSummary struct {
-	UploadedAt time.Time           `json:"uploaded_at"`
-	Images     []string            `json:"images"`
-	Counts     map[string]int      `json:"counts"`
-	Total      int                 `json:"total"`
-	Truncated  bool                `json:"truncated"`
-	Findings   []imagescan.Finding `json:"findings"`
+	imagescan.Overview
+	Truncated bool                `json:"truncated"`
+	Findings  []imagescan.Finding `json:"findings"`
 }
 
 const maxImageFindingsShown = 500
 
 func summariseImages(sc accounts.ImageScan, withFindings bool) ImageScanSummary {
-	out := ImageScanSummary{UploadedAt: sc.UploadedAt, Images: []string{}, Counts: map[string]int{}, Total: len(sc.Findings), Findings: []imagescan.Finding{}}
-	seen := map[string]bool{}
-	for _, f := range sc.Findings {
-		out.Counts[f.Severity]++
-		if !seen[f.Image] {
-			seen[f.Image] = true
-			out.Images = append(out.Images, f.Image)
-		}
-	}
-	sort.Strings(out.Images)
+	out := ImageScanSummary{Overview: imagescan.Summarise(sc.UploadedAt, sc.Findings), Findings: []imagescan.Finding{}}
 	if !withFindings {
 		return out
 	}
@@ -154,10 +141,4 @@ func (s *Server) handleDeleteImageScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// securityWithImages adds the image counts to the security report's JSON.
-type securityWithImages struct {
-	security.Report
-	ContainerImages *ImageScanSummary `json:"container_images,omitempty"`
 }
