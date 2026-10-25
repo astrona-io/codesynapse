@@ -2,6 +2,20 @@
 import type { AIProvider } from '~/utils/types'
 
 const { data, refresh } = useApiGet<{ providers: AIProvider[]; tasks: string[]; routing: { default: string; tasks: Record<string, string> } }>('ai/providers')
+interface ProviderStatus { name: string; checked: boolean; online: boolean; model_available: boolean; latency_ms?: number; error?: string }
+const { data: status, refresh: refreshStatus } = useApiGet<{ providers: ProviderStatus[] }>('ai/status')
+let statusTimer: ReturnType<typeof setInterval> | undefined
+onMounted(() => { statusTimer = setInterval(() => refreshStatus(), 15000) })
+onBeforeUnmount(() => statusTimer && clearInterval(statusTimer))
+const statusOf = (n: string) => status.value?.providers.find(p => p.name === n)
+function health(n: string): { label: string; tone: string; note: string } {
+  const st = statusOf(n)
+  if (!st) return { label: 'Checking…', tone: 'badge--violet', note: '' }
+  if (!st.checked) return { label: 'Not checked', tone: 'badge--violet', note: 'Cloud endpoints are not probed.' }
+  if (!st.online) return { label: 'Offline', tone: 'badge--pink', note: 'The endpoint does not answer. Is the model server running?' }
+  if (!st.model_available) return { label: 'Online, model missing', tone: 'badge--amber', note: 'The server answers but does not list the configured model.' }
+  return { label: 'Online', tone: 'badge--green', note: st.latency_ms !== undefined ? `Answered in ${st.latency_ms} ms.` : '' }
+}
 const AREAS = [
   { task: 'review', label: 'Code review', hint: 'Reviews of changes and risky code' },
   { task: 'security-triage', label: 'Security analysis', hint: 'Triage of findings and fixes' },
@@ -43,6 +57,7 @@ async function test(name: string) {
     tests.value = { ...tests.value, [name]: { ok: false, error: apiErrorMessage(e) } }
   } finally {
     refresh()
+    refreshStatus()
   }
 }
 const resultOf = (n: string) => tests.value[n]
@@ -95,6 +110,7 @@ const resultOf = (n: string) => tests.value[n]
           <div>
             <p class="eyebrow">{{ p.kind === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible' }} · {{ p.local ? 'local' : 'cloud' }}</p>
             <h2 class="mono">{{ p.name }}</h2>
+            <p class="status-line"><span class="badge" :class="health(p.name).tone">{{ health(p.name).label }}</span><span class="muted small">{{ health(p.name).note }}</span></p>
           </div>
           <button class="secondary" :disabled="resultOf(p.name) === 'running'" @click="test(p.name)">{{ resultOf(p.name) === 'running' ? 'Testing…' : 'Test connection' }}</button>
         </div>
@@ -136,6 +152,7 @@ const resultOf = (n: string) => tests.value[n]
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; }
 .ok { color: var(--success); }
+.status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 0; }
 .small { font-size: 12.5px; }
 .facts-list { display: grid; gap: 6px; }
 .routing { gap: 12px; }
