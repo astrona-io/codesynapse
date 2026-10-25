@@ -274,14 +274,39 @@ services:
     healthcheck: *worker-health
     depends_on: *worker-depends
 
+  # Creates the limited HugeGraph user the MCP service connects as (schema
+  # --mcp-role): it reads the whole graph and writes only agent memory,
+  # reviews, curated links and usage counters. Runs once per start; idempotent.
+  hugegraph-role:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+      target: api
+    entrypoint: ["codesynapse", "schema", "--mcp-role", "cs_mcp"]
+    environment:
+      CODESYNAPSE_HUGEGRAPH_URL: http://hugegraph:8080
+      CODESYNAPSE_HUGEGRAPH_USER: admin
+      CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_PASSWORD:?run "just init" to add HUGEGRAPH_PASSWORD to .env}
+      CODESYNAPSE_HUGEGRAPH_MCP_PASSWORD: ${HUGEGRAPH_MCP_PASSWORD:?run "just init" to add HUGEGRAPH_MCP_PASSWORD to .env}
+      CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES: "8388608"
+      CODESYNAPSE_HUGEGRAPH_TX_CAPACITY: "1000000"
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    depends_on:
+      hugegraph:
+        condition: service_healthy
+
   mcp:
     build:
       context: .
       dockerfile: services/mcp/Dockerfile
     environment:
       CODESYNAPSE_HUGEGRAPH_URL: http://hugegraph:8080
-      CODESYNAPSE_HUGEGRAPH_USER: admin
-      CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_PASSWORD:?run "just init" to add HUGEGRAPH_PASSWORD to .env}
+      CODESYNAPSE_HUGEGRAPH_USER: cs_mcp
+      CODESYNAPSE_HUGEGRAPH_PASSWORD: ${HUGEGRAPH_MCP_PASSWORD:?run "just init" to add HUGEGRAPH_MCP_PASSWORD to .env}
       CODESYNAPSE_HUGEGRAPH_MAX_REQUEST_BYTES: "8388608"
       CODESYNAPSE_HUGEGRAPH_TX_CAPACITY: "1000000"
       CODESYNAPSE_MILVUS_URL: http://milvus:19530
@@ -326,6 +351,8 @@ services:
     depends_on:
       hugegraph:
         condition: service_healthy
+      hugegraph-role:
+        condition: service_completed_successfully
       milvus:
         condition: service_healthy
       postgres:

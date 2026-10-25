@@ -40,12 +40,17 @@ init:
             printf '\n# HugeGraph admin password (the graph database).\nHUGEGRAPH_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
             echo "added HUGEGRAPH_PASSWORD to .env"
         fi
+        if ! grep -q '^HUGEGRAPH_MCP_PASSWORD=' .env; then
+            printf '\n# Password of the limited HugeGraph user the MCP service connects as.\nHUGEGRAPH_MCP_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
+            echo "added HUGEGRAPH_MCP_PASSWORD to .env"
+        fi
         exit 0
     fi
     sed -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-postgres/$(openssl rand -hex 24)/" \
         -e "s/change-me-hugegraph/$(openssl rand -hex 24)/" \
+        -e "s/change-me-graph-role/$(openssl rand -hex 24)/" \
         -e "s/change-me-metrics/$(openssl rand -hex 24)/" \
         -e "s/change-me-admin/$(openssl rand -hex 16)/" \
         -e "s|change-me-secret-key|$(openssl rand -base64 32)|" .env.example > .env
