@@ -25,8 +25,11 @@ import (
 const (
 	jobLease     = 2 * time.Minute
 	jobHeartbeat = 30 * time.Second
-	// jobPoll is how often an idle process looks for work.
-	jobPoll = 2 * time.Second
+	// jobPoll is how often an idle process looks for work when its store
+	// cannot wake it (accounts.JobWaker); jobPollFallback when it can, for
+	// the jobs no wake announces: those whose lease ran out.
+	jobPoll         = 2 * time.Second
+	jobPollFallback = 30 * time.Second
 )
 
 // errLeaseLost stops this process's durable jobs when it could not renew
@@ -206,7 +209,12 @@ func fromRecord(r accounts.JobRecord) Job {
 // trusted from the record). An interrupted fix is never restarted: a
 // second run could push a second branch.
 func (s *Server) runQueue(ctx context.Context) {
-	t := time.NewTicker(jobPoll)
+	every := jobPoll
+	var wake <-chan struct{}
+	if w, ok := s.jobs.store.(accounts.JobWaker); ok {
+		every, wake = jobPollFallback, w.JobWake(ctx)
+	}
+	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
 		for ctx.Err() == nil && s.jobs.idle() {
@@ -238,6 +246,7 @@ func (s *Server) runQueue(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case <-wake:
 		}
 	}
 }

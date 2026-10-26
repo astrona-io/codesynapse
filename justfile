@@ -259,15 +259,16 @@ _kind-secret:
     set -eu
     k="kubectl --context {{kind_context}} --namespace {{kind_ns}}"
     kubectl --context "{{kind_context}}" get namespace "{{kind_ns}}" >/dev/null 2>&1 || kubectl --context "{{kind_context}}" create namespace "{{kind_ns}}"
-    if ! $k get secret codesynapse >/dev/null 2>&1; then
-        $k create secret generic codesynapse \
-            --from-literal=CODESYNAPSE_API_TOKEN="$(openssl rand -hex 24)" \
-            --from-literal=CODESYNAPSE_MCP_TOKEN="$(openssl rand -hex 24)" \
-            --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)" \
-            --from-literal=NEBULA_PASSWORD="$(openssl rand -hex 12)" \
-            --from-literal=METRICS_PASSWORD="$(openssl rand -hex 24)" \
-            --from-literal=SECRET_KEY="$(openssl rand -base64 32)"
-    fi
+    $k get secret codesynapse >/dev/null 2>&1 || $k create secret generic codesynapse
+    # Add any key the Secret lacks, so a cluster set up by an older chart
+    # (before NebulaGraph, say) gets the new ones and keeps the rest.
+    for kv in CODESYNAPSE_API_TOKEN:hex24 CODESYNAPSE_MCP_TOKEN:hex24 POSTGRES_PASSWORD:hex24 NEBULA_PASSWORD:hex12 METRICS_PASSWORD:hex24 SECRET_KEY:b64; do
+        key=${kv%%:*}
+        if [ -z "$($k get secret codesynapse -o "jsonpath={.data.$key}")" ]; then
+            case ${kv#*:} in hex24) v=$(openssl rand -hex 24) ;; hex12) v=$(openssl rand -hex 12) ;; b64) v=$(openssl rand -base64 32) ;; esac
+            $k patch secret codesynapse --type merge -p "{\"stringData\":{\"$key\":\"$v\"}}" >/dev/null
+        fi
+    done
 
 # Install the chart from the working tree into the kind cluster (random secrets, created once)
 chart-install: _kind-secret

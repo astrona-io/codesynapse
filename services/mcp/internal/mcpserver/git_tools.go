@@ -59,4 +59,9 @@ func registerGitTools(s *mcp.Server, add func(name, desc string) *mcp.Tool) {
 		func(ctx context.Context, r *mcp.CallToolRequest, _ ghtools.RunFailureIn) (*mcp.CallToolResult, any, error) {
 			return local(ctx, r, nil)
 		})
+	mcp.AddTool(s, add(ghtools.ToolRunList,
+		"Recent CI workflow runs of the checkout's GitHub repository, newest first, one line each: run id, workflow, branch, commit, event, status, conclusion and start time. Filter by workflow name, branch or conclusion (success, failure, cancelled, skipped); at most 30, from the last 200 runs. Use it to find when a check started failing, then gh_run_failure with the run id for why. Use instead of gh run list. Reads only."),
+		func(ctx context.Context, r *mcp.CallToolRequest, _ ghtools.RunListIn) (*mcp.CallToolResult, any, error) {
+			return local(ctx, r, nil)
+		})
 }

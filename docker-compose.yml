@@ -119,7 +119,7 @@ services:
   # that api and mcp push every 15s; the Statistics page charts them by
   # minute and hour. Internal network only, password protected.
   victoriametrics:
-    image: quay.io/victoriametrics/victoria-metrics:v1.154.1
+    image: quay.io/victoriametrics/victoria-metrics:v1.155.0
     command:
       - -retentionPeriod=${METRICS_RETENTION:-90d}
       - -search.latencyOffset=5s
@@ -152,11 +152,8 @@ services:
     read_only: true
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:10428/health"]
-      interval: 10s
-      timeout: 3s
-      retries: 20
+    # No healthcheck: the image is distroless (no shell, wget or curl), so a
+    # check could never pass, and nothing waits on traces being up.
 
   # Users, organisations, API keys and the audit log.
   postgres:

@@ -13,6 +13,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/sessionmemory"
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/internal/usage"
 	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 	"github.com/astrona-io/codesynapse/services/api/internal/offload"
 	"github.com/astrona-io/codesynapse/services/api/internal/recall"
@@ -159,7 +160,9 @@ func (s *Server) handleSessionRecall(w http.ResponseWriter, r *http.Request) {
 	// Tokens only for what the hook can add to the chat; a skipped or empty
 	// lookup adds nothing.
 	telemetry.RecordStep(r.Context(), telemetry.StepRecallHook, true)
-	telemetry.RecordStepTokens(r.Context(), telemetry.StepRecallHook, telemetry.KindContextIn, telemetry.EstimateTokens(factBytes(result.Graph)))
+	tokens := telemetry.EstimateTokens(factBytes(result.Graph))
+	telemetry.RecordStepTokens(r.Context(), telemetry.StepRecallHook, telemetry.KindContextIn, tokens)
+	s.countMemory(r, scope.TenantID, map[string]int{usage.MemoryAutoRecalls: 1, usage.MemoryAutoRecallContext: tokens})
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -192,7 +195,29 @@ func (s *Server) handleSessionOffload(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, status, err)
 		return
 	}
+	s.countMemory(r, scope.TenantID, map[string]int{usage.MemoryOffloads: 1, usage.MemoryOffloadTurns: len(in.Turns)})
 	writeJSON(w, http.StatusAccepted, job)
+}
+
+// memoryClient is the client the memory counters are kept under: the hooks
+// and tools that call these endpoints.
+const memoryClient = "codesynapse"
+
+// countMemory adds to the day's memory counters for the request's
+// repository. Best effort: the answer does not wait on it.
+func (s *Server) countMemory(r *http.Request, org string, counts map[string]int) {
+	var buckets []usage.Bucket
+	day, repo := usage.Day(time.Now()), r.PathValue("repo")
+	for tool, n := range counts {
+		if n > 0 {
+			buckets = append(buckets, usage.Bucket{Day: day, Org: org, Repo: repo, Tool: tool, Client: memoryClient, Calls: n})
+		}
+	}
+	if len(buckets) > 0 {
+		if err := s.st.AddUsage(r.Context(), buckets); err != nil {
+			s.logger.Warn("memory counters not saved", "error", err)
+		}
+	}
 }
 
 func (s *Server) handlePromoteSessionMemory(w http.ResponseWriter, r *http.Request) {

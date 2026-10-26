@@ -7,4 +7,6 @@ package usage
 const (
 	LocalRead    = "(local:read)"    //nolint:gosec // daily counter identifier, not a credential
 	LocalAvoided = "(local:avoided)" //nolint:gosec // daily counter identifier, not a credential
+	// LocalBriefs counts prompts a local model briefed the agent on.
+	LocalBriefs = "(local:briefs)" //nolint:gosec // daily counter identifier, not a credential
 )

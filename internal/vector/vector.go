@@ -73,6 +73,10 @@ const (
 // ErrNoTenant rejects searches and writes without a tenant.
 var ErrNoTenant = errors.New("vector: tenant is required")
 
+// MaxID is the longest item ID every index accepts (Milvus stores it in a
+// VarChar of this length). Longer IDs are left out of the index by callers.
+const MaxID = 128
+
 // Check validates items for Upsert.
 func Check(items []Item) error {
 	vecs := make(map[string][]float32, len(items))

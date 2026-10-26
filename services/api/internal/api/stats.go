@@ -65,11 +65,13 @@ type AgentStats struct {
 	// the agent did not have to read is in AvoidedTokens.
 	LocalReadTokens int `json:"local_read_tokens"`
 	// LocalAvoidedTokens is the ask_local part of AvoidedTokens.
-	LocalAvoidedTokens int        `json:"local_avoided_tokens"`
-	AvgLatencyMs       float64    `json:"avg_latency_ms"`
-	MaxLatencyMs       int        `json:"max_latency_ms"`
-	Daily              []DayStat  `json:"daily"`
-	Tools              []ToolStat `json:"tools"`
+	LocalAvoidedTokens int `json:"local_avoided_tokens"`
+	// LocalBriefs counts prompts a local model briefed the agent on.
+	LocalBriefs  int        `json:"local_briefs"`
+	AvgLatencyMs float64    `json:"avg_latency_ms"`
+	MaxLatencyMs int        `json:"max_latency_ms"`
+	Daily        []DayStat  `json:"daily"`
+	Tools        []ToolStat `json:"tools"`
 	// Workflow says how sessions began, as the plugin's hooks reported.
 	Workflow WorkflowStats `json:"workflow"`
 	Clients  []ClientStat  `json:"clients"`
@@ -167,7 +169,15 @@ type MemoryStats struct {
 	Saves         int            `json:"saves"`
 	Recalls       int            `json:"recalls"`
 	RecallTokens  int            `json:"recall_tokens"`
-	Model         OffloadInputs  `json:"model"`
+	// What the hooks did on their own: per-prompt recalls and the tokens
+	// they added, conversations offloaded, their turns and the facts the
+	// local model extracted from them.
+	AutoRecalls      int           `json:"auto_recalls"`
+	AutoRecallTokens int           `json:"auto_recall_tokens"`
+	Offloads         int           `json:"offloads"`
+	OffloadedTurns   int           `json:"offloaded_turns"`
+	OffloadFacts     int           `json:"offload_facts"`
+	Model            OffloadInputs `json:"model"`
 }
 
 // OffloadInputs are the measured numbers behind the offloading estimate.
@@ -354,6 +364,10 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 			continue
 		}
 		if a.Edits.AddCounter(bk.Tool, bk.Calls) {
+			continue
+		}
+		if bk.Tool == usage.LocalBriefs {
+			a.LocalBriefs += bk.Calls
 			continue
 		}
 		if bk.Tool == usage.LocalRead {
@@ -551,6 +565,16 @@ func (s *Server) memoryStats(ctx context.Context, buckets []usage.Bucket, sessio
 		case recallTools[b.Tool]:
 			m.Recalls += b.Calls
 			m.RecallTokens += b.ResponseTokens
+		case b.Tool == usage.MemoryAutoRecalls:
+			m.AutoRecalls += b.Calls
+		case b.Tool == usage.MemoryAutoRecallContext:
+			m.AutoRecallTokens += b.Calls
+		case b.Tool == usage.MemoryOffloads:
+			m.Offloads += b.Calls
+		case b.Tool == usage.MemoryOffloadTurns:
+			m.OffloadedTurns += b.Calls
+		case b.Tool == usage.MemoryOffloadFacts:
+			m.OffloadFacts += b.Calls
 		}
 	}
 	in := OffloadInputs{TokensPerFact: 20, RecallsPerSession: defaultRecallsPerSes}

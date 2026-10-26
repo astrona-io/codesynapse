@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/execution"
@@ -211,6 +212,12 @@ func (s *Service) IndexRepository(ctx context.Context, namespace string, authori
 }
 
 func (s *Service) embedEntities(ctx context.Context, provider, model string, entities []memory.Entity, authorize func(context.Context) error) error {
+	// An entity whose ID the vector index cannot hold (a long name) stays
+	// findable by name; it no longer fails the whole batch.
+	entities = slices.DeleteFunc(slices.Clone(entities), func(e memory.Entity) bool { return len(e.ID) > vector.MaxID })
+	if len(entities) == 0 {
+		return nil
+	}
 	texts := make([]string, len(entities))
 	for i, entity := range entities {
 		texts[i] = memory.EmbeddingText(entity)

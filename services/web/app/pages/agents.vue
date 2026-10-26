@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AgentStatus, ApiKey } from '~/utils/types'
+import type { AgentStatus, ApiKey, WorkspaceStats } from '~/utils/types'
 
 useHead({ title: 'Agents · CodeSynapse' })
 const session = useSession()
@@ -109,6 +109,9 @@ const capAgents = computed(() => selected.value.filter(a => a === 'claude' || a 
 const capCommand = computed(() => `codesynapse mcp install --yes --only ${capAgents.value.join(',')} ${urls.value} --context-cap ${capLabel(contextCap.value)}`)
 const { data: keys, refresh: refreshKeys } = useApiGet<{ keys: ApiKey[] }>('me/keys', { immediate: session.accounts.value })
 const { data: status, refresh: refreshStatus } = useApiGet<AgentStatus>('agents/status')
+// The what-if below uses the recall cost measured on this workspace.
+const { data: memStats } = useApiGet<WorkspaceStats>('stats?days=30')
+const memModel = computed(() => memStats.value?.memory.model)
 // What was already there when the page opened: only newer activity counts.
 const base = ref<AgentStatus | null>(null)
 watch(status, (v) => { if (v && !base.value) base.value = { ...v } }, { immediate: true })
@@ -304,12 +307,19 @@ onBeforeUnmount(() => clearInterval(poll))
           </details>
         </template>
         <p v-else class="muted small">Claude Code and Codex have a setting for this. Choose one of them above to see it.</p>
+        <details v-if="memModel" class="what-if">
+          <summary>Why a smaller limit saves tokens: try it</summary>
+          <p class="muted small">A what-if for one long session: every prompt re-sends the whole conversation, so its size over all turns is what you pay for. Change the numbers to match how you work; nothing here is saved or configured. The recall cost is measured on this workspace once agents have recalled facts.</p>
+          <OffloadModel :tokens-per-recall="memModel.tokens_per_recall" :recalls-per-session="memModel.recalls_per_session" :tokens-per-fact="memModel.tokens_per_fact" :measured="memModel.measured" />
+        </details>
       </div>
     </section>
   </div>
 </template>
 
 <style scoped>
+.what-if { margin-top: 16px; }
+.what-if summary { cursor: pointer; font-weight: 600; }
 .step { flex-direction: row; gap: 16px; align-items: flex-start; }
 .step__n { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); font-weight: 650; }
 .step > div { flex: 1; min-width: 0; }

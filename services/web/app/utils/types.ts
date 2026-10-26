@@ -204,7 +204,12 @@ export interface AIProvider {
   name: string; kind: string; model: string; endpoint: string; local: boolean; has_key: boolean; key_env?: string
   sends_source: boolean; max_output_tokens: number; max_input_tokens: number; input_budget_policy?: 'estimate' | 'require_exact'; context_window?: number; tasks: string[]
   usage: { requests: number; failures: number; input_tokens: number; output_tokens: number; avg_seconds: number; last_error?: string }
+  // auto: models picked from what the server serves (model: auto); served is its last answer.
+  auto?: boolean; embedding_model?: string
+  prices?: { input: number; output: number; cached_input?: number; source?: string; checked?: string; feed?: string }
+  served?: { models: ServedModel[]; error?: string; at: string }
 }
+export interface ServedModel { name: string; chat: boolean; embedding: boolean; thinking?: boolean; params_b?: number; context?: number; bytes?: number }
 
 export type LicenseCategory = 'public-domain' | 'permissive' | 'weak-copyleft' | 'strong-copyleft' | 'network-copyleft' | 'restricted' | 'unknown'
 export interface LicenseVerdict { level: 'ok' | 'review' | 'conflict'; reason: string }
@@ -242,7 +247,7 @@ export interface WorkspaceStats {
     context_total_tokens: number; context_saved_pct: number
     sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; avoided_method: string
     // ask_local: tokens local models read, and its part of avoided_tokens.
-    local_read_tokens?: number; local_avoided_tokens?: number
+    local_read_tokens?: number; local_avoided_tokens?: number; local_briefs?: number
     // How sessions began, reported by the Claude Code plugin's hooks.
     workflow: { first_codesynapse: number; first_native: number; reads_turned_back: number; first_share_pct: number; files_edited: number; files_edited_found: number; edit_recall_pct: number; bash: Record<string, number> | null; bash_total: number }
     avg_latency_ms: number; max_latency_ms: number; daily: UsageDay[]; tools: UsageTool[]
@@ -253,6 +258,8 @@ export interface WorkspaceStats {
     entities: number; facts: number; confirmations: number; sources: Record<string, number>
     repos: { repo: string; entities: number; facts: number; confirmations: number; fact_chars: number; sources: Record<string, number>; last_updated?: string }[]
     saves: number; recalls: number; recall_tokens: number
+    // What the hooks did on their own (per-prompt recall, offloading at compaction).
+    auto_recalls?: number; auto_recall_tokens?: number; offloads?: number; offloaded_turns?: number; offload_facts?: number
     model: { tokens_per_fact: number; tokens_per_recall: number; recalls_per_session: number; measured: boolean }
   }
   licenses: {
@@ -562,5 +569,5 @@ export interface ModelStat {
 }
 export interface ModelStats {
   range: string; models: ModelStat[]
-  reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number }
+  reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; source?: string; checked?: string }
 }

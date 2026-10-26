@@ -181,8 +181,21 @@ type ProviderConfig struct {
 	PricingConfigured       bool    `yaml:"pricing_configured" json:"pricing_configured,omitempty"`
 	PriceCacheWritePerMTok  float64 `yaml:"price_cache_write_per_mtok" json:"price_cache_write_per_mtok,omitempty"`
 	PriceOutputPerMTok      float64 `yaml:"price_output_per_mtok" json:"price_output_per_mtok,omitempty"`
+	// PriceSource says where the prices come from (a URL such as the
+	// provider's pricing page) and PriceChecked when (YYYY-MM-DD), so every
+	// cost and savings figure can name them. PriceFeed "openrouter" fetches
+	// the prices from OpenRouter's public model list once a day instead;
+	// PriceModel is the model's id there when it differs.
+	PriceSource  string `yaml:"price_source" json:"price_source,omitempty"`
+	PriceChecked string `yaml:"price_checked" json:"price_checked,omitempty"`
+	PriceFeed    string `yaml:"price_feed" json:"price_feed,omitempty"`
+	PriceModel   string `yaml:"price_model" json:"price_model,omitempty"`
 
 	apiKey string
+	// autoRaw keeps the configuration as written when model or
+	// embedding_model is auto, so budgets are worked out again from the
+	// context window of whichever model is picked.
+	autoRaw *ProviderConfig
 }
 
 // Config is the whole LLM configuration.
@@ -263,12 +276,22 @@ func (c *Config) normalise(getenv func(string) string) error {
 		if p.BaseURL != "" && !strings.HasPrefix(p.BaseURL, "http://") && !strings.HasPrefix(p.BaseURL, "https://") {
 			return fmt.Errorf("provider %q: base_url must be http(s)", p.Name)
 		}
+		if err := validatePriceSource(*p); err != nil {
+			return fmt.Errorf("provider %q: %w", p.Name, err)
+		}
 		for _, price := range []float64{p.PriceInputPerMTok, p.PriceCachedInputPerMTok, p.PriceCacheWritePerMTok, p.PriceOutputPerMTok} {
 			if price < 0 || math.IsNaN(price) || math.IsInf(price, 0) {
 				return fmt.Errorf("provider %q: token prices must be finite and nonnegative", p.Name)
 			}
 		}
 		p.BaseURL = strings.TrimRight(p.BaseURL, "/")
+		if p.Model == Auto || p.EmbeddingModel == Auto {
+			if p.Kind != KindOpenAI || !p.Local() {
+				return fmt.Errorf("provider %q: %s is only for a local OpenAI-compatible server", p.Name, Auto)
+			}
+			raw := *p
+			p.autoRaw = &raw
+		}
 		normalized, err := effectiveBudgets(*p)
 		if err != nil {
 			return fmt.Errorf("provider %q: %w", p.Name, err)
@@ -340,6 +363,8 @@ type Registry struct {
 	mu      sync.Mutex
 	usage   map[string]*Usage
 	counter promptCounter
+	// served is the last discovery per auto provider (auto.go).
+	served map[string]Discovery
 }
 
 // NewRegistry builds providers from cfg.
@@ -356,7 +381,7 @@ func NewRegistry(cfg Config) *Registry {
 		}
 	}
 	cfg.Tasks = maps.Clone(cfg.Tasks)
-	r := &Registry{cfg: cfg, impl: map[string]Provider{}, usage: map[string]*Usage{}, counter: requestByteCounter{}}
+	r := &Registry{cfg: cfg, impl: map[string]Provider{}, usage: map[string]*Usage{}, counter: requestByteCounter{}, served: map[string]Discovery{}}
 	for _, p := range cfg.Providers {
 		telemetry.AllowModels(p.Name, p.Model, p.EmbeddingModel)
 		switch p.Kind {
@@ -371,10 +396,25 @@ func NewRegistry(cfg Config) *Registry {
 }
 
 // Configs returns provider configurations (no secrets).
-func (r *Registry) Configs() []ProviderConfig { return slices.Clone(r.cfg.Providers) }
+func (r *Registry) Configs() []ProviderConfig {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.cfg.Providers)
+}
+
+// provider returns the client of name; auto providers swap theirs when the
+// picked model changes.
+func (r *Registry) provider(name string) (Provider, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, ok := r.impl[name]
+	return p, ok
+}
 
 // Config returns the configuration of name.
 func (r *Registry) Config(name string) (ProviderConfig, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	for _, p := range r.cfg.Providers {
 		if p.Name == name {
 			return p, true
@@ -404,7 +444,7 @@ func (r *Registry) Routes() Routes {
 // entry, or one naming the default, means "use the default": such a task
 // follows the global model when it changes.
 func (r *Registry) SetRoutes(rt Routes) error {
-	if _, ok := r.impl[rt.Default]; !ok {
+	if _, ok := r.provider(rt.Default); !ok {
 		return fmt.Errorf("default provider %q is not configured", rt.Default)
 	}
 	tasks := map[string]string{}
@@ -415,7 +455,7 @@ func (r *Registry) SetRoutes(rt Routes) error {
 		if name == "" {
 			continue
 		}
-		if _, ok := r.impl[name]; !ok {
+		if _, ok := r.provider(name); !ok {
 			return fmt.Errorf("task %q routes to unknown provider %q", task, name)
 		}
 		if cfg, _ := r.Config(name); slices.Contains(LocalTasks, task) && !cfg.Local() {
@@ -457,7 +497,7 @@ func (r *Registry) ProviderFor(task, override string) (string, error) {
 	if name == "" {
 		return "", errors.New("no AI provider configured; add one to config/llm.yaml or set CODESYNAPSE_LLM_BASE_URL")
 	}
-	if _, ok := r.impl[name]; !ok {
+	if _, ok := r.provider(name); !ok {
 		return "", fmt.Errorf("unknown AI provider %q", name)
 	}
 	if local && explicit {
@@ -512,7 +552,7 @@ func (r *Registry) Complete(ctx context.Context, name string, req Request) (Resp
 	if _, err := execution.Require(ctx); err != nil {
 		return Response{}, err
 	}
-	p, ok := r.impl[name]
+	p, ok := r.provider(name)
 	if !ok {
 		return Response{}, fmt.Errorf("unknown AI provider %q", name)
 	}
@@ -650,7 +690,8 @@ func (r *Registry) EmbeddingProvider() (string, ProviderConfig, error) {
 		return "", ProviderConfig{}, ErrNoEmbeddings
 	}
 	cfg, ok := r.Config(name)
-	if _, can := r.impl[name].(embedder); !ok || !can || !cfg.Local() || cfg.EmbeddingModel == "" {
+	impl, _ := r.provider(name)
+	if _, can := impl.(embedder); !ok || !can || !cfg.Local() || cfg.EmbeddingModel == "" || cfg.EmbeddingModel == Auto {
 		return "", ProviderConfig{}, ErrNoEmbeddings
 	}
 	return name, cfg, nil
@@ -662,9 +703,10 @@ func (r *Registry) Embed(ctx context.Context, name string, inputs []string) ([][
 	if _, err := execution.Require(ctx); err != nil {
 		return nil, err
 	}
-	p, ok := r.impl[name].(embedder)
+	impl, _ := r.provider(name)
+	p, ok := impl.(embedder)
 	cfg, _ := r.Config(name)
-	if !ok || cfg.EmbeddingModel == "" {
+	if !ok || cfg.EmbeddingModel == "" || cfg.EmbeddingModel == Auto {
 		return nil, ErrNoEmbeddings
 	}
 	if len(inputs) == 0 || len(inputs) > maxEmbedInputs {
@@ -690,7 +732,7 @@ func (r *Registry) Embed(ctx context.Context, name string, inputs []string) ([][
 
 // Models lists what provider name serves.
 func (r *Registry) Models(ctx context.Context, name string) ([]string, error) {
-	p, ok := r.impl[name]
+	p, ok := r.provider(name)
 	if !ok {
 		return nil, fmt.Errorf("unknown AI provider %q", name)
 	}

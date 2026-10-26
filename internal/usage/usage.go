@@ -58,11 +58,11 @@ func BashClassOf(tool string) (string, bool) {
 
 // IsWorkflow reports whether tool is one of the workflow pseudo tools.
 func IsWorkflow(tool string) bool {
-	if _, ok := BashClassOf(tool); ok {
+	if _, ok := BashClassOf(tool); ok || IsMemoryCounter(tool) {
 		return true
 	}
 	switch tool {
-	case FirstCodeSynapse, FirstNative, ReadTurnedBack, FilesEdited, FilesEditedFound, LocalRead, LocalAvoided:
+	case FirstCodeSynapse, FirstNative, ReadTurnedBack, FilesEdited, FilesEditedFound, LocalRead, LocalAvoided, LocalBriefs:
 		return true
 	}
 	return false

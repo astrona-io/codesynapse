@@ -17,13 +17,19 @@ const memSources = computed(() => Object.entries(m.value?.sources ?? {}).map(([l
         <StatTile label="Recalls" :value="fmtCompact(m.recalls)" :hint="`${m.model.recalls_per_session} per session`" />
         <StatTile label="Tokens per recall" :value="fmtInt(Math.round(m.model.tokens_per_recall))" :hint="`${m.model.tokens_per_fact} tokens per fact`" />
       </div>
+      <h3>Automatic</h3>
+      <p class="muted small">What the Claude Code hooks did on their own, last {{ days }} days: looking up the chat's memory for each prompt, and handing older turns to a local model before a compaction.</p>
+      <div class="grid kpis">
+        <StatTile label="Prompts looked up" :value="fmtCompact(m.auto_recalls ?? 0)" :hint="`${fmtCompact(m.auto_recall_tokens ?? 0)} tokens of facts added`" />
+        <StatTile label="Conversations offloaded" :value="fmtCompact(m.offloads ?? 0)" :hint="`${fmtCompact(m.offloaded_turns ?? 0)} turns`" />
+        <StatTile label="Facts from offloading" :value="fmtCompact(m.offload_facts ?? 0)" hint="extracted by the local model" />
+      </div>
+      <p v-if="!(m.offloads ?? 0) && (m.auto_recalls ?? 0)" class="muted small">No offloading yet: it runs when a chat compacts. With the 150k limit that happens in long sessions.</p>
       <div v-if="m.facts" class="grid cols-2">
         <div><p class="label">Facts per repository</p><RankList :rows="memRepos" color="var(--muted)" /></div>
         <div><p class="label">Saved by</p><RankList :rows="memSources" color="var(--muted)" /></div>
       </div>
-      <h3>What offloading should save — theoretical</h3>
-      <p class="muted small">A what-if calculator, nothing is saved or configured here. Adjust the session to match how you work. The recall cost comes from your agents once they have recalled facts.</p>
-      <OffloadModel :tokens-per-recall="m.model.tokens_per_recall" :recalls-per-session="m.model.recalls_per_session" :tokens-per-fact="m.model.tokens_per_fact" :measured="m.model.measured" />
+      <p class="muted small">What offloading could save in a long session, with these measured costs, is worked through on the <NuxtLink to="/agents">Agents page</NuxtLink> under “Keep each chat small”.</p>
     </section>
 
   </div>

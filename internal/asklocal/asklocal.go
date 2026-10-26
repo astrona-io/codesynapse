@@ -19,6 +19,11 @@ import (
 // Tool is the MCP tool name.
 const Tool = "ask_local"
 
+// ModeBrief asks for a briefing for a coding agent about to work on the
+// question (the developer's prompt) instead of an answer: where the work
+// is, what exists, what to watch. The pre-brief hook uses it.
+const ModeBrief = "brief"
+
 // Limits keep one call bounded on both sides.
 const (
 	MaxQuestion = 2000
@@ -57,6 +62,8 @@ type File struct {
 type Request struct {
 	Question string `json:"question"`
 	Files    []File `json:"files"`
+	// Mode is "" for an answer, or ModeBrief.
+	Mode string `json:"mode,omitempty"`
 }
 
 // Citation is a range the answer cites that was among the lines sent.
@@ -111,6 +118,8 @@ func (r Request) Validate() error {
 		return fmt.Errorf("%w: question is empty", ErrInvalid)
 	case utf8.RuneCountInString(q) > MaxQuestion:
 		return fmt.Errorf("%w: question is longer than %d characters", ErrInvalid, MaxQuestion)
+	case r.Mode != "" && r.Mode != ModeBrief:
+		return fmt.Errorf("%w: mode must be empty or %q", ErrInvalid, ModeBrief)
 	case len(r.Files) == 0:
 		return fmt.Errorf("%w: no files to read", ErrInvalid)
 	case len(r.Files) > MaxFiles:

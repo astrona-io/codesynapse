@@ -25,6 +25,18 @@ providers:
     # timeout_seconds:        # defaults to max(300, max_input_tokens/100) seconds: big prompts take minutes on a Mac
     # send_source: true       # default for local providers: short code snippets allowed
 
+  # Let CodeSynapse pick: with model and embedding_model on auto it asks the
+  # server what it serves (every five minutes), uses the chat model with the
+  # most parameters with that model's own context window, and an embedding
+  # model for recall. Local servers only. With no providers configured at all,
+  # a local Ollama (11434) or LM Studio (1234) found at start-up is used this
+  # way (CODESYNAPSE_LLM_DISCOVER=false turns that off).
+  # - name: local
+  #   kind: openai
+  #   base_url: http://host.docker.internal:11434/v1
+  #   model: auto
+  #   embedding_model: auto
+
   # Local Ollama for agent memory: extraction of facts from conversations and
   # embeddings for recall by meaning. Both run on local providers only.
   # - name: local-ollama
@@ -54,6 +66,16 @@ providers:
   #   price_output_per_mtok: 25
   #   # Set only after specifying every applicable rate; permits deliberate zeros.
   #   pricing_configured: true
+  #   # Where the rates come from and when you read them; shown beside every
+  #   # cost and savings figure.
+  #   price_source: https://platform.claude.com/docs/en/about-claude/pricing
+  #   price_checked: 2026-10-26
+  #   # Or let CodeSynapse read the rates from OpenRouter's public model list
+  #   # once a day (a GET of the whole list; nothing about you is sent). The
+  #   # model's id there is worked out (anthropic/claude-opus-5.5); set
+  #   # price_model when it differs.
+  #   # price_feed: openrouter
+  #   # price_model: anthropic/claude-opus-5.5
 
   # Local providers with all rates unset have zero token billing; hardware and
   # electricity costs are outside these estimates. Usage omitted by a provider

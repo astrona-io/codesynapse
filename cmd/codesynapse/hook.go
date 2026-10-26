@@ -402,6 +402,9 @@ func hookCmd(ec *app.Env) *cobra.Command {
 	parent.AddCommand(app.NewSubCommand("prompt", &hookOptions{EC: ec, event: "prompt"}, ec).
 		WithShortDesc("UserPromptSubmit hook: with CODESYNAPSE_EVAL_CAPTURE=true, keep the session's first prompt for an eval case").
 		WithNoArgs().Build())
+	parent.AddCommand(app.NewSubCommand("brief", &prebriefOptions{EC: ec}, ec).
+		WithShortDesc("UserPromptSubmit hook: a local model briefs the agent on a code prompt before it starts (CODESYNAPSE_PREBRIEF=false turns it off)").
+		WithNoArgs().Build())
 	parent.AddCommand(app.NewSubCommand("read-done", &hookOptions{EC: ec, event: "read-done"}, ec).
 		WithShortDesc("PostToolUse hook for Read: count the answered line ranges the agent read").
 		WithNoArgs().Build())
