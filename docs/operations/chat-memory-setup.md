@@ -114,15 +114,17 @@ Do not do both; the hooks would run twice. Restart Claude Code afterwards.
 
 ## 5. Make Claude Code compact earlier
 
-Compaction is Claude Code's. By default it waits until the chat is nearly full, and on models with a million-token window that is close to a million tokens. Cap the chat in tokens so the offload runs and the chat shrinks while it is still small. Add this to `~/.claude/settings.json` (or the project's `.claude/settings.json`):
+Compaction is Claude Code's. By default it waits until the chat is nearly full, and on models with a million-token window that is close to a million tokens. A cap in tokens makes the offload run and the chat shrink while it is still small.
+
+`codesynapse mcp install` and `codesynapse mcp hooks` set it for you: `autoCompactWindow` 150000 in Claude Code's settings (and `model_auto_compact_token_limit` in `~/.codex/config.toml` for Codex). A cap you set yourself is kept; `--context-cap 200k` replaces it, `--context-cap 0` leaves the settings alone. By hand, add this to `~/.claude/settings.json` (or the project's `.claude/settings.json`):
 
 ```json
 { "autoCompactWindow": 150000 }
 ```
 
-Claude Code accepts 100k to 1M; `/autocompact 150k` sets it for one chat. The Agents page builds the snippet for Claude Code and Codex.
+Claude Code accepts 100k to 1M; `/autocompact 150k` sets it for one chat.
 
-`codesynapse mcp hooks` writes `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` instead (`--compact-at 30`): a percentage of the window, so 30 compacts at about 290k on a million-token model. With `autoCompactWindow` set, the percentage applies to that cap too (30 of 150k is 45k), so keep one of the two, or pass `--compact-at 0`.
+Older versions wrote `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` (`--compact-at 30`), a percentage of the window: about 290k on a million-token model. It also applies on top of a cap (30 of 150k is 45k), so setting the cap removes it. `--compact-at` still works instead of `--context-cap`.
 
 ## 6. Check it with a real compaction
 

@@ -631,6 +631,8 @@ type mcpHooksOptions struct {
 	shared    bool
 	keep      int
 	compactAt int
+	cap       string
+	tokens    int
 }
 
 func (o *mcpHooksOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -640,7 +642,8 @@ func (o *mcpHooksOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "CodeSynapse API the hooks call")
 	f.BoolVar(&o.shared, "shared", false, "Write .claude/settings.json (committed, for the whole team) instead of .claude/settings.local.json")
 	f.IntVar(&o.keep, "keep", 10, "Recent exchanges kept in context; older ones are offloaded before compaction")
-	f.IntVar(&o.compactAt, "compact-at", 30, "Let Claude Code compact the session at this % of its auto-compact window (offloading first), so it stays small; 0 keeps Claude Code's default")
+	f.StringVar(&o.cap, "context-cap", "150k", "Chat size at which Claude Code compacts, offloading first (100k to 1M; 0 leaves it alone). A cap already in the settings file is kept unless you pass this flag")
+	f.IntVar(&o.compactAt, "compact-at", 0, "Compact at this % of Claude Code's auto-compact window instead of --context-cap (on a million-token model 30 is still about 290k tokens)")
 	return nil
 }
 func (o *mcpHooksOptions) Complete(context.Context, *app.Env) error {
@@ -664,6 +667,17 @@ func (o *mcpHooksOptions) Validate(context.Context, *app.Env) error {
 	}
 	if o.compactAt < 0 || o.compactAt > 100 {
 		return errors.New("--compact-at must be 0 (Claude Code's default) or 1 to 100")
+	}
+	var err error
+	if o.tokens, err = agentcfg.ParseContextCap(o.cap); err != nil {
+		return fmt.Errorf("--context-cap: %w", err)
+	}
+	if o.compactAt > 0 {
+		// The percentage applies to the cap, so one of them is enough.
+		if o.EC.Command.Flags().Changed("context-cap") && o.tokens > 0 {
+			return errors.New("use --context-cap or --compact-at, not both")
+		}
+		o.tokens = 0
 	}
 	return nil
 }
@@ -730,6 +744,11 @@ func (o *mcpHooksOptions) Run(ctx context.Context, _ *app.Env) error {
 	shrink := "Claude Code's default compaction threshold is unchanged"
 	if o.compactAt > 0 {
 		shrink = fmt.Sprintf("the session is compacted at %d%% of the auto-compact window (%s), right after the offload, so it stays small", o.compactAt, agentcfg.CompactEnv)
+	}
+	if o.tokens > 0 {
+		if shrink, err = agentcfg.SetClaudeContextCap(settings, o.tokens, o.EC.Command.Flags().Changed("context-cap")); err != nil {
+			return err
+		}
 	}
 	_, err = fmt.Fprintf(o.EC.Stdout, "installed Claude Code hooks for %s in %s\n  SessionStart: recall saved facts into context (also after each compaction)\n  PreCompact:   offload turns older than the last %d exchanges (local model, background)\n  %s\nAPI token stored in %s (0600). Restart Claude Code in that project to apply.\n", repo, settings, o.keep, shrink, p)
 	return err

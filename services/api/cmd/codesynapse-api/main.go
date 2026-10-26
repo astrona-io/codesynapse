@@ -123,6 +123,9 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	if len(llmCfg.Providers) > 0 {
 		registry = llm.NewRegistry(llmCfg)
 		o.EC.Logger.Info("AI providers configured", "providers", len(llmCfg.Providers), "default", llmCfg.Default)
+		if !o.worker {
+			go warnMissingModels(ctx, o.EC.Logger, registry, llmCfg)
+		}
 	}
 	trusted, err := app.ParsePrefixes(os.Getenv("CODESYNAPSE_TRUSTED_PROXIES"))
 	if err != nil {
@@ -204,6 +207,25 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		return app.Serve(ctx, app.NewServer(o.addr, srv)) // the server authenticates every request itself
 	}
 	return app.Serve(ctx, app.NewServer(o.addr, app.RequireBearer(os.Getenv(EnvToken), srv)))
+}
+
+// warnMissingModels names configured models their server does not offer,
+// such as an embedding model nobody pulled, so recall by meaning does not
+// fail quietly later. Servers that cannot be reached are left to the
+// provider test and the jobs.
+func warnMissingModels(ctx context.Context, logger *slog.Logger, r *llm.Registry, cfg llm.Config) {
+	for _, p := range cfg.Providers {
+		if p.Kind != llm.KindOpenAI {
+			continue
+		}
+		served, err := r.Models(ctx, p.Name)
+		if err != nil {
+			continue
+		}
+		for _, m := range llm.MissingModels(p, served) {
+			logger.Warn("AI model not on its server: pull it (Ollama: ollama pull <model>) or fix config/llm.yaml", "provider", p.Name, "model", m)
+		}
+	}
 }
 
 func workerCmd(ec *app.Env) *cobra.Command {
