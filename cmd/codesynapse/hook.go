@@ -30,7 +30,8 @@ import (
 //
 //   - hook read (PreToolUse on Read): the first time in a session the agent
 //     reads all of a large file, it is turned back with the file's outline
-//     and line ranges, so it reads what it needs. Reading it again is
+//     and line ranges, and pointed at ask_local to have a local model read
+//     it, so it reads only what it needs. Reading it again is
 //     allowed: the guard nudges, it does not forbid.
 //   - hook stop (Stop): when the working tree changed since the last check,
 //     the agent is asked once to run verify_plan and get_pr_context before
@@ -259,7 +260,7 @@ func readGuard(in toolHookInput) map[string]any {
 	s.Turned++
 	saveState(state, s)
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s has %d+ lines. Read only the ranges you need (Read with offset and limit), or call file_outline for its symbols with signatures and line ranges.", filepath.Base(file), lines)
+	fmt.Fprintf(&b, "%s has %d+ lines. To learn what it says, call ask_local with your question and this path: a local model reads it and answers with file:line citations, so the file stays out of your context. To change it, read only the ranges you need (Read with offset and limit), or call file_outline for its symbols with signatures and line ranges.", filepath.Base(file), lines)
 	if outline := goOutline(file); len(outline) > 0 {
 		b.WriteString(" Outline:\n" + strings.Join(outline, "\n"))
 	}

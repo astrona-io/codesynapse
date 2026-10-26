@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
@@ -24,6 +25,7 @@ func TestBashClass(t *testing.T) {
 		{"FOO=1 grep -rn Foo .", usage.BashSearch},
 		{"rg Foo | head", usage.BashSearch},
 		{"cat internal/x/y.go", usage.BashRead},
+		{"tail -n 200 build.log", usage.BashRead},
 		{"head -n 20 README.md", usage.BashRead},
 		{"sed -n '10,40p' internal/x/y.go", usage.BashRead},
 		{"sed -n 10,40p README.md", usage.BashRead},
@@ -42,6 +44,12 @@ func TestBashClass(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.cmd, func(t *testing.T) { assert.Equal(t, bashClass(tt.cmd), tt.want) })
 	}
+}
+
+// File reads in the shell are pointed at ask_local first: a log or a long
+// file is exactly what a local model can read in the agent's place.
+func TestBashReadHintNamesAskLocal(t *testing.T) {
+	assert.True(t, strings.HasPrefix(bashHints[usage.BashRead], "ask_local"))
 }
 
 func TestBashHintOncePerClass(t *testing.T) {

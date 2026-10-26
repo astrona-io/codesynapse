@@ -815,7 +815,7 @@ func (o *mcpInstallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.BoolVarP(&o.yes, "yes", "y", false, "Install into every detected agent without asking")
 	f.StringSliceVar(&o.only, "only", nil, "Limit to these agents (claude, codex, gemini, opencode, cursor, project)")
 	f.StringVar(&o.cap, "context-cap", "150k", "Chat size at which Claude Code and Codex compact (100k to 1M; 0 leaves their settings alone). With the memory hooks older turns are offloaded first. A cap you set yourself is kept unless you pass this flag")
-	f.StringVar(&o.profile, "profile", toolsets.Core, "Toolsets the agents get: core (the eleven everyday tools), all, or core plus a comma list of "+strings.Join(toolsets.Names(), ", "))
+	f.StringVar(&o.profile, "profile", toolsets.Core, "Toolsets the agents get: core (the twelve everyday tools), all, or core plus a comma list of "+strings.Join(toolsets.Names(), ", "))
 	return nil
 }
 func (o *mcpInstallOptions) Complete(context.Context, *app.Env) error { return nil }
