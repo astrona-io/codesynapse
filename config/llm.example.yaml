@@ -75,6 +75,7 @@ tasks:
   fix: local-mlx         # writes fixes for accepted review comments (needs source access: use a local model)
   # pr-summary: local-mlx        # summary of a diff (local providers only; defaults to the first local one)
   # cleanup-briefing: local-mlx  # the cleanup plan in plain language (local providers only)
+  # local-answer: local-mlx      # ask_local: reads files for coding agents to save their tokens (local providers only)
   # memory: local-ollama     # agent memory: facts extracted from conversation turns (local providers only)
   # embeddings: local-ollama # agent memory: recall by meaning (local, with embedding_model)
 default: local-mlx

@@ -24,6 +24,7 @@ const AREAS = [
   { task: 'briefing', label: 'Briefings', hint: 'Architecture and risk overviews' },
   { task: 'pr-summary', label: 'Change summaries', hint: 'Plain-language summary of a diff (local models only)', local: true },
   { task: 'cleanup-briefing', label: 'Cleanup briefings', hint: 'What to clean up first, from the cleanup plan (local models only)', local: true },
+  { task: 'local-answer', label: 'Agent questions', hint: 'Reads files for coding agents (ask_local) so they spend fewer cloud tokens (local models only)', local: true },
   { task: 'fix', label: 'Fixes', hint: 'Writes fix branches for accepted review comments (needs source: use a local model)' },
 ]
 const routing = reactive<{ default: string; tasks: Record<string, string> }>({ default: '', tasks: {} })
@@ -51,7 +52,7 @@ async function saveRouting() {
     saving.value = false
   }
 }
-const TASK_LABEL: Record<string, string> = { 'security-triage': 'Security triage', review: 'Code review', briefing: 'Briefing', fix: 'Fixes', 'pr-summary': 'Change summary', 'cleanup-briefing': 'Cleanup briefing' }
+const TASK_LABEL: Record<string, string> = { 'security-triage': 'Security triage', review: 'Code review', briefing: 'Briefing', fix: 'Fixes', 'pr-summary': 'Change summary', 'cleanup-briefing': 'Cleanup briefing', 'local-answer': 'Agent questions' }
 interface TestResult { ok: boolean; error?: string; reply?: string; models?: string[]; missing?: string[]; seconds?: number; model?: string }
 const tests = ref<Record<string, TestResult | 'running'>>({})
 async function test(name: string) {
