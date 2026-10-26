@@ -567,7 +567,7 @@ func (s *Server) memoryStats(ctx context.Context, buckets []usage.Bucket, sessio
 			m.RecallTokens += b.ResponseTokens
 		case b.Tool == usage.MemoryAutoRecalls:
 			m.AutoRecalls += b.Calls
-		case b.Tool == usage.MemoryAutoRecallTokens:
+		case b.Tool == usage.MemoryAutoRecallContext:
 			m.AutoRecallTokens += b.Calls
 		case b.Tool == usage.MemoryOffloads:
 			m.Offloads += b.Calls

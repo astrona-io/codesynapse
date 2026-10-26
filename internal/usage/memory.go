@@ -5,9 +5,9 @@ package usage
 // their own, which the MCP tool counts do not see.
 const (
 	// MemoryAutoRecalls counts the per-prompt lookups of the chat's memory,
-	// MemoryAutoRecallTokens what they added to the chat.
-	MemoryAutoRecalls      = "(memory:auto-recalls)"       //nolint:gosec // daily counter identifier, not a credential
-	MemoryAutoRecallTokens = "(memory:auto-recall-tokens)" //nolint:gosec // daily counter identifier, not a credential
+	// MemoryAutoRecallContext the tokens of context they added.
+	MemoryAutoRecalls       = "(memory:auto-recalls)"        //nolint:gosec // daily counter identifier, not a credential
+	MemoryAutoRecallContext = "(memory:auto-recall-context)" //nolint:gosec // daily counter identifier, not a credential
 	// MemoryOffloads counts conversations handed to offloading (compaction
 	// hook or offload_turns), MemoryOffloadTurns their turns and
 	// MemoryOffloadFacts the facts the local model extracted from them.
@@ -19,7 +19,7 @@ const (
 // IsMemoryCounter reports whether tool is one of these counters.
 func IsMemoryCounter(tool string) bool {
 	switch tool {
-	case MemoryAutoRecalls, MemoryAutoRecallTokens, MemoryOffloads, MemoryOffloadTurns, MemoryOffloadFacts:
+	case MemoryAutoRecalls, MemoryAutoRecallContext, MemoryOffloads, MemoryOffloadTurns, MemoryOffloadFacts:
 		return true
 	}
 	return false

@@ -162,7 +162,7 @@ func (s *Server) handleSessionRecall(w http.ResponseWriter, r *http.Request) {
 	telemetry.RecordStep(r.Context(), telemetry.StepRecallHook, true)
 	tokens := telemetry.EstimateTokens(factBytes(result.Graph))
 	telemetry.RecordStepTokens(r.Context(), telemetry.StepRecallHook, telemetry.KindContextIn, tokens)
-	s.countMemory(r, scope.TenantID, map[string]int{usage.MemoryAutoRecalls: 1, usage.MemoryAutoRecallTokens: tokens})
+	s.countMemory(r, scope.TenantID, map[string]int{usage.MemoryAutoRecalls: 1, usage.MemoryAutoRecallContext: tokens})
 	writeJSON(w, http.StatusOK, result)
 }
 
