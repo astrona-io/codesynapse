@@ -87,7 +87,10 @@ const where = (agent: AgentID) => viaBridge.value
 // a call and, from the plugin's hooks, that the plugin runs.
 const pluginInstall = 'claude plugin marketplace add astrona-io/codesynapse\nclaude plugin install codesynapse@codesynapse'
 const pluginCleanup = 'claude mcp remove codesynapse -s user'
-const agentRules = 'Use the CodeSynapse MCP tools before reading files: minimal_context with the task first, get_symbol_context before editing a symbol, and get_pr_context on your diff before finishing.'
+// The same ruleset hooked sessions start with (internal/agentrules), so a
+// pasted AGENTS.md matches it, including an operator's own wording.
+const { data: rules } = useApiGet<{ text: string }>('agent-rules?for=setup')
+const agentRules = computed(() => rules.value?.text || 'Use the CodeSynapse MCP tools before reading files: minimal_context with the task first, get_symbol_context before editing a symbol, and get_pr_context on your diff before finishing.')
 const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
 const showPluginStatus = computed(() => viaBridge.value && selected.value.includes('claude'))
 const setupAgents = computed(() => selectedAgents.value.filter(a => a.id === 'codex' || a.id === 'cursor' || (a.id === 'claude' && viaBridge.value)))

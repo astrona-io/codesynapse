@@ -83,10 +83,12 @@ func TestAgentRulesEndpoint(t *testing.T) {
 		Custom  bool   `json:"custom"`
 		Text    string `json:"text"`
 	}
-	require.Equal(t, get(t, ts, "/api/v1/agent-rules", &rules), 200)
-	assert.True(t, !rules.Custom)
-	assert.Equal(t, rules.Version, agentrules.Version)
-	assert.Equal(t, rules.Text, agentrules.Default)
+	for _, path := range []string{"/api/v1/agent-rules", "/api/v1/agent-rules?for=setup"} {
+		require.Equal(t, get(t, ts, path, &rules), 200)
+		assert.True(t, !rules.Custom, path)
+		assert.Equal(t, rules.Version, agentrules.Version, path)
+		assert.Equal(t, rules.Text, agentrules.Default, path)
+	}
 }
 
 func TestAgentStatusCountsTodaysActivity(t *testing.T) {
