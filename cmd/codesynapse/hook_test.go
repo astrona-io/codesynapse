@@ -44,6 +44,7 @@ func TestReadGuard(t *testing.T) {
 	assert.Contains(t, reason, "type Store: lines 3-3")
 	assert.Contains(t, reason, "func (*Store).FAa: lines 6-7")
 	assert.Contains(t, reason, "read it again")
+	assert.Contains(t, reason, "call ask_local", "a local model can read it instead")
 	assert.True(t, read(big, 0) == nil, "reading it again is allowed")
 	assert.True(t, read(big, 100) == nil, "a ranged read is never turned back")
 	assert.True(t, read(small, 0) == nil, "small files are read as asked")

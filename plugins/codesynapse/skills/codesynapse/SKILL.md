@@ -13,6 +13,7 @@ CodeSynapse has indexed this repository's code, docs, YAML, history and dependen
 2. **Before editing a symbol:** `get_symbol_context` (verbosity `outline`, then `full`). Note its callers and its tests (`is_test` callers).
 3. **Interfaces:** `get_implementations`, never grep for interface calls. Deeper tracing: `get_call_graph` (depth 2).
 4. **Files:** `file_outline` first, then read only the line ranges you need. A whole read of a large file is turned back once with its outline; read it again if you really need all of it.
+   To learn what files, a directory or a log say without reading them, call `ask_local` with your question and the paths: a local model reads them and answers with `file:line` citations. Read the cited lines before you edit or rely on a detail; if it has no local model or cites nothing, read the files as usual.
 5. **Changes that ripple:** before a rename, a signature change or a removal, `change_checklist` with `change` set, and work through every item it lists (callers, implementations and mocks, references, docs). Search for the name at the end for what its notes say the graph cannot see.
 6. **Delegating to a subagent:** `handoff_context` with its task and the files it will work in; paste the returned `brief` into the subagent's prompt.
 7. **Before you finish:**

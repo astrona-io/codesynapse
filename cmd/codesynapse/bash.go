@@ -24,7 +24,7 @@ var bashHints = map[string]string{
 	usage.BashGitBlame:  "git_blame groups a line range by commit instead of printing every line.",
 	usage.BashGh:        "gh_pr_status (wait_seconds blocks until the checks finish or one fails, so do not poll) gives a pull request's state, mergeability, review decision and counted checks (only the failing and waiting ones named); gh_pr_list lists pull requests compactly; gh_run_failure gives the failed jobs and error lines of a CI run instead of its log. Merging and creating stay with gh.",
 	usage.BashSearch:    "search finds symbols and files by name; minimal_context finds code by meaning; get_symbol_context lists callers without grepping.",
-	usage.BashRead:      "file_outline lists a file's symbols with line ranges; Read with offset and limit takes only the lines you need.",
+	usage.BashRead:      "ask_local has a local model read files or logs and answer your question with file:line citations, so they stay out of your context; file_outline lists a file's symbols with line ranges; Read with offset and limit takes only the lines you need.",
 	usage.BashTest:      "verify_plan lists the closest tests for your change; run those instead of the whole suite.",
 }
 

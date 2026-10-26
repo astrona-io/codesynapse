@@ -14,7 +14,7 @@ import (
 // turns do not carry definitions it never calls. The core set is always
 // served; without a selection a connection gets every tool.
 var Sets = map[string][]string{
-	Core:       {"minimal_context", "get_symbol_context", "get_call_graph", "get_implementations", "file_outline", "search", "get_pr_context", "repo_status", "verify_plan", "change_checklist", "handoff_context"},
+	Core:       {"minimal_context", "get_symbol_context", "get_call_graph", "get_implementations", "file_outline", "search", "get_pr_context", "repo_status", "verify_plan", "change_checklist", "handoff_context", "ask_local"},
 	"repos":    {"repo_list", "search_all_repos", "repo_overview", "repo_metrics", "repo_trend", "hotspots", "file_history", "ingestion_report"},
 	"docs":     {"get_config_entries", "get_doc_section"},
 	"security": {"security_report", "security_symbols", "attack_surface", "rule_guide", "license_report"},
@@ -24,7 +24,6 @@ var Sets = map[string][]string{
 	"cleanup":  {"unused_code", "duplicate_code", "cleanup_plan", "refactor_duplicates", "shared_code"},
 	"reviews":  {"list_reviews", "get_review", "submit_review", "update_review_comment"},
 	"git":      {"git_status", "git_diff_summary", "git_blame", "git_log", "gh_pr_status", "gh_pr_list", "gh_run_failure"},
-	"local":    {"ask_local"},
 	"identity": {"code_identities", "code_identity_reviews", "code_records", "code_annotate", "code_record_reuse"},
 }
 
