@@ -37,7 +37,7 @@ func TestLoad(t *testing.T) {
 }
 
 func TestDefaultNamesRealTools(t *testing.T) {
-	for _, tool := range []string{"minimal_context", "get_symbol_context", "get_implementations", "get_call_graph", "file_outline", "change_checklist", "verify_plan", "get_pr_context"} {
+	for _, tool := range []string{"minimal_context", "get_symbol_context", "get_implementations", "get_call_graph", "file_outline", "change_checklist", "verify_plan", "get_pr_context", "search", "duplicate_code"} {
 		assert.Contains(t, Default, tool)
 	}
 	assert.True(t, len(Default) < MaxBytes, "it is added to every session")
