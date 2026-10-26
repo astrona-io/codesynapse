@@ -196,9 +196,6 @@ async function addChosen() {
 .add-dialog::backdrop { background: rgba(15, 17, 21, 0.45); backdrop-filter: blur(4px); }
 .body { display: grid; gap: 14px; padding: 22px 24px; }
 .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.tabs { display: flex; gap: 8px; }
-.tabs button { background: transparent; color: var(--ink); border: 2px solid var(--line-strong); border-radius: 999px; padding: 6px 16px; }
-.tabs button.on { background: var(--panel-2); border-color: var(--ink); }
 .form { display: grid; gap: 10px; }
 .form label { display: grid; gap: 4px; }
 .grow { flex: 1 1 180px; }
