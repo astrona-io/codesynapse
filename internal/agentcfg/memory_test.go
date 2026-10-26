@@ -47,7 +47,9 @@ func TestInstallHooks(t *testing.T) {
 	p := filepath.Join(t.TempDir(), ".claude", "settings.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o750))
 	require.NoError(t, os.WriteFile(p, []byte(`{"model":"opus","env":{"FOO":"1"},"hooks":{"PreCompact":[{"matcher":"","hooks":[{"type":"command","command":"say compacting"}]}]}}`), 0o600))
-	cmds := HookCommands{SessionStart: "codesynapse memory recall --hook --repo r", PreCompact: "codesynapse memory offload --hook --repo r", CompactAt: 30}
+	// The binary path is shell-quoted, as `mcp hooks` writes it.
+	bin := ShellQuote("/opt/homebrew/opt/codesynapse/bin/codesynapse")
+	cmds := HookCommands{SessionStart: bin + " memory recall --hook --repo r", PreCompact: bin + " memory offload --hook --repo r", CompactAt: 30}
 	require.NoError(t, InstallHooks(p, cmds))
 	require.NoError(t, InstallHooks(p, cmds))
 

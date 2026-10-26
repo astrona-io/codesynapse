@@ -75,23 +75,25 @@ func (t Target) Install(ctx context.Context, s Server) error { return t.install(
 func Detect(home, cwd string) []Target {
 	var out []Target
 	if _, err := exec.LookPath("claude"); err == nil {
-		out = append(out, Target{
+		t := Target{
 			ID: "claude", Description: "Claude Code (user scope, all projects; one bridge per chat)",
 			install: func(ctx context.Context, s Server) error {
 				if err := installClaude(ctx, s); err != nil {
 					return err
 				}
-				if s.ContextCap == 0 {
-					return nil
-				}
-				msg, err := SetClaudeContextCap(filepath.Join(home, ".claude", "settings.json"), s.ContextCap, s.ForceContextCap)
-				if err != nil {
+				return setClaudeCap(home, s)
+			},
+		}
+		if ClaudePluginEnabled(home, cwd) {
+			t.Description = "Claude Code (plugin found: sets the context cap and removes the older setup it replaces)"
+			t.install = func(ctx context.Context, s Server) error {
+				if err := cleanClaudeForPlugin(ctx, home, cwd, s); err != nil {
 					return err
 				}
-				s.note(msg)
-				return nil
-			},
-		})
+				return setClaudeCap(home, s)
+			}
+		}
+		out = append(out, t)
 	}
 	if _, err := exec.LookPath("codex"); err == nil {
 		p := filepath.Join(home, ".codex", "hooks.json")
@@ -229,6 +231,50 @@ func installClaude(ctx context.Context, s Server) error {
 	}
 	_ = run(ctx, "claude", "mcp", "remove", Name, "--scope", "user") //nolint:errcheck // absent is fine
 	return run(ctx, "claude", "mcp", "add-json", Name, string(cfg), "--scope", "user")
+}
+
+func setClaudeCap(home string, s Server) error {
+	if s.ContextCap == 0 {
+		return nil
+	}
+	msg, err := SetClaudeContextCap(filepath.Join(home, ".claude", "settings.json"), s.ContextCap, s.ForceContextCap)
+	if err != nil {
+		return err
+	}
+	s.note(msg)
+	return nil
+}
+
+// cleanClaudeForPlugin removes what an earlier `mcp install` or `mcp hooks`
+// set up and the plugin now brings itself: the user-scope server and the
+// hooks in the user's and this project's private settings. The project's
+// shared settings.json is only reported, since teammates may lack the plugin.
+func cleanClaudeForPlugin(ctx context.Context, home, cwd string, s Server) error {
+	if strings.HasPrefix(s.Token, personalKeyPrefix) && s.StoreToken != nil {
+		// The plugin's bridge reads the key from the same file.
+		if _, err := s.StoreToken(s.Token); err != nil {
+			return err
+		}
+	}
+	if claudeUserServer(home) {
+		if err := run(ctx, "claude", "mcp", "remove", Name, "--scope", "user"); err != nil {
+			return err
+		}
+		s.note("removed the user-scope " + Name + " server; the plugin's bridge replaces it")
+	}
+	for _, f := range []string{filepath.Join(home, ".claude", "settings.json"), filepath.Join(cwd, ".claude", "settings.local.json")} {
+		n, err := RemoveClaudeHooks(f)
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			s.note(fmt.Sprintf("removed %d CodeSynapse hook(s) from %s; the plugin runs them", n, f))
+		}
+	}
+	if hasClaudeHooks(filepath.Join(cwd, ".claude", "settings.json")) {
+		s.note("the project's .claude/settings.json (shared) also has CodeSynapse hooks; remove them there once the team uses the plugin")
+	}
+	return nil
 }
 
 func installCodex(ctx context.Context, s Server) error {

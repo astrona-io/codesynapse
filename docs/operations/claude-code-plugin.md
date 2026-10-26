@@ -12,7 +12,7 @@ The plugin packages everything CodeSynapse does in Claude Code in one install: t
    ```
 
    or, from a shell, `claude plugin marketplace add astrona-io/codesynapse` and `claude plugin install codesynapse@codesynapse`.
-3. If you registered CodeSynapse before with `codesynapse mcp install` or `codesynapse mcp hooks`, remove that registration (`claude mcp remove codesynapse`) and the hooks from your settings, so tools and hooks do not run twice.
+3. Run `codesynapse mcp install --only claude` once. With the plugin enabled it registers nothing for Claude Code. Instead it sets the 150k context cap and removes what an earlier `mcp install` or `mcp hooks` set up, so tools and hooks do not run twice: the user-scope `codesynapse` server and the CodeSynapse hooks in `~/.claude/settings.json` and the project's `.claude/settings.local.json`. It only reports hooks in the project's shared `.claude/settings.json`; remove those once your team uses the plugin. Running it again changes nothing.
 
 ## What it adds
 
