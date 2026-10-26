@@ -105,3 +105,32 @@ test('statistics show local model work from the metrics store', async (t) => {
   assert.match(html, /Tokens processed locally 10000 /, 'input + output tokens')
   assert.match(html, /Share of AI requests 80% /, '40 of 50 requests stayed local')
 })
+
+test('models and savings split the token pool without counting ask_local twice', async (t) => {
+  const models = {
+    range: '30d',
+    reference_price: { provider: 'claude', model: 'claude-opus-5-5', input_per_mtok: 10, output_per_mtok: 20 },
+    models: [
+      { provider: 'local-ollama', model: 'qwen3.8:27b', local: true, configured: true, context_window: 262144, requests: 40, failures: 0, input_tokens: 60000, output_tokens: 5000, avg_prompt_tokens: 1500,
+        read_tokens_per_second: 264, write_tokens_per_second: 32.8, context_p50: 0.02, context_p95: 0.2,
+        tasks: [{ task: 'local-answer', requests: 30, failures: 0, input_tokens: 50000, output_tokens: 3000 }, { task: 'review', requests: 10, failures: 0, input_tokens: 10000, output_tokens: 2000 }] },
+      { provider: 'claude', model: 'claude-opus-5-5', local: false, configured: true, requests: 2, failures: 0, input_tokens: 4000, output_tokens: 1000, avg_prompt_tokens: 2000,
+        read_tokens_per_second: null, write_tokens_per_second: null, context_p50: null, context_p95: null, tasks: [{ task: 'briefing', requests: 2, failures: 0, input_tokens: 4000, output_tokens: 1000 }] },
+    ],
+  }
+  const html = await renderComponent(t, '../pages/stats/models.vue', {
+    useStatistics: () => ({
+      days: ref(30), error: ref(null), pending: ref(false),
+      s: ref({ agents: { tokens: { total: 100000 }, avoided_tokens: 50000, local_avoided_tokens: 20000 } }),
+    }),
+    useApiGet: () => ({ data: ref(models), error: ref(null) }),
+    seriesRangeFor: () => '30d',
+    fmtCompact: (n) => String(n),
+    fmtInt: (n) => String(n),
+    apiErrorMessage: (e) => String(e),
+  }, {})
+  assert.match(html, /Kept off cloud models 48% /, '30k never read + 65k local of a 200k pool')
+  assert.match(html, /Tokens never read 50000 /)
+  assert.match(html, /Handled by local models 65000 60000 read · 5000 written/)
+  assert.match(html, /Cloud cost avoided \$1\.00 at claude-opus-5-5 prices, estimated/, '(60k + 30k) × $10 + 5k × $20 per million')
+})

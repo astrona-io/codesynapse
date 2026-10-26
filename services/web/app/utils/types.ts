@@ -241,6 +241,8 @@ export interface WorkspaceStats {
     tokens: { input: number; output: number; cached_input: number; turns: number; total: number; input_pct: number; output_pct: number }
     context_total_tokens: number; context_saved_pct: number
     sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; avoided_method: string
+    // ask_local: tokens local models read, and its part of avoided_tokens.
+    local_read_tokens?: number; local_avoided_tokens?: number
     // How sessions began, reported by the Claude Code plugin's hooks.
     workflow: { first_codesynapse: number; first_native: number; reads_turned_back: number; first_share_pct: number; files_edited: number; files_edited_found: number; edit_recall_pct: number; bash: Record<string, number> | null; bash_total: number }
     avg_latency_ms: number; max_latency_ms: number; daily: UsageDay[]; tools: UsageTool[]
@@ -548,3 +550,17 @@ export interface IdentityProvider {
 export interface ExternalIdentity { id: string; org_id: string; issuer: string; user_id: string; email: string; linked_at: string; last_login_at?: string }
 
 export interface IdentityReviewPage { reviews: { item: { id: string; created_at: string; identity_review: { from: string; to: string; relation: string; reason: string; revision: string; supersedes: string[] } }; state: string }[]; total: number; offset: number; omitted: number; truncated: boolean }
+
+// GET /api/v1/stats/models: one row per model over a metrics window.
+export interface ModelTaskStat { task: string; requests: number; failures: number; input_tokens: number; output_tokens: number }
+export interface ModelStat {
+  provider: string; model: string; local: boolean; configured: boolean; context_window?: number
+  requests: number; failures: number; input_tokens: number; output_tokens: number; avg_prompt_tokens: number
+  read_tokens_per_second: number | null; write_tokens_per_second: number | null
+  context_p50: number | null; context_p95: number | null
+  tasks: ModelTaskStat[]
+}
+export interface ModelStats {
+  range: string; models: ModelStat[]
+  reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number }
+}
