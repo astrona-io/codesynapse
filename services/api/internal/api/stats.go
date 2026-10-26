@@ -161,8 +161,10 @@ type RepoUsage struct {
 // MemoryStats summarises agent memory and how it is used. Model holds the
 // measured inputs of the offloading estimate the page computes.
 type MemoryStats struct {
-	Entities      int            `json:"entities"`
-	Facts         int            `json:"facts"`
+	Entities int `json:"entities"`
+	Facts    int `json:"facts"`
+	// History counts facts replaced by newer ones.
+	History       int            `json:"history"`
 	Confirmations int            `json:"confirmations"`
 	Sources       map[string]int `json:"sources"`
 	Repos         []memory.Stats `json:"repos"`
@@ -178,6 +180,27 @@ type MemoryStats struct {
 	OffloadedTurns   int           `json:"offloaded_turns"`
 	OffloadFacts     int           `json:"offload_facts"`
 	Model            OffloadInputs `json:"model"`
+	// Daily fills the whole window, empty days included; Clients ranks the
+	// agents that saved and recalled.
+	Daily   []MemoryDay    `json:"daily"`
+	Clients []MemoryClient `json:"clients"`
+}
+
+// MemoryDay is one day of memory activity.
+type MemoryDay struct {
+	Day          string `json:"day"`
+	Saves        int    `json:"saves"`
+	Recalls      int    `json:"recalls"`
+	AutoRecalls  int    `json:"auto_recalls"`
+	Offloads     int    `json:"offloads"`
+	OffloadFacts int    `json:"offload_facts"`
+}
+
+// MemoryClient is one agent's saves and recalls in the window.
+type MemoryClient struct {
+	Client  string `json:"client"`
+	Saves   int    `json:"saves"`
+	Recalls int    `json:"recalls"`
 }
 
 // OffloadInputs are the measured numbers behind the offloading estimate.
@@ -274,7 +297,7 @@ func (s *Server) buildStats(ctx context.Context, days int, now time.Time) (Stats
 				return err
 			}
 			st.Agents = agentUsage(buckets, ov.Repos, days, now)
-			st.Memory, err = s.memoryStats(ctx, buckets, st.Agents.Sessions)
+			st.Memory, err = s.memoryStats(ctx, buckets, st.Agents.Sessions, days, now)
 			return err
 		},
 		func(ctx context.Context) (err error) { st.Hygiene, err = s.hygieneStats(ctx, ov.Repos); return err },
@@ -532,8 +555,8 @@ const (
 	defaultRecallsPerSes = 2
 )
 
-func (s *Server) memoryStats(ctx context.Context, buckets []usage.Bucket, sessions int) (MemoryStats, error) {
-	m := MemoryStats{Sources: map[string]int{}, Repos: []memory.Stats{}}
+func (s *Server) memoryStats(ctx context.Context, buckets []usage.Bucket, sessions, days int, now time.Time) (MemoryStats, error) {
+	m := MemoryStats{Sources: map[string]int{}, Repos: []memory.Stats{}, Daily: []MemoryDay{}, Clients: []MemoryClient{}}
 	repos, err := s.st.MemoryStats(ctx)
 	if err != nil {
 		return m, err
@@ -552,31 +575,65 @@ func (s *Server) memoryStats(ctx context.Context, buckets []usage.Bucket, sessio
 		m.Repos = append(m.Repos, r)
 		m.Entities += r.Entities
 		m.Facts += r.Facts
+		m.History += r.History
 		m.Confirmations += r.Confirmations
 		chars += r.FactChars
 		for src, n := range r.Sources {
 			m.Sources[src] += n
 		}
 	}
+	daily := map[string]*MemoryDay{}
+	for i := days - 1; i >= 0; i-- {
+		m.Daily = append(m.Daily, MemoryDay{Day: usage.Day(now.AddDate(0, 0, -i))})
+	}
+	for i := range m.Daily {
+		daily[m.Daily[i].Day] = &m.Daily[i]
+	}
+	clients := map[string]*MemoryClient{}
+	client := func(name string) *MemoryClient {
+		if clients[name] == nil {
+			clients[name] = &MemoryClient{Client: name}
+		}
+		return clients[name]
+	}
+	day := func(d string) *MemoryDay {
+		if p := daily[d]; p != nil {
+			return p
+		}
+		return &MemoryDay{} // outside the window: counted in the totals only
+	}
 	for _, b := range buckets {
 		switch {
 		case b.Tool == "upsert_graph_triples":
 			m.Saves += b.Calls
+			day(b.Day).Saves += b.Calls
+			client(b.Client).Saves += b.Calls
 		case recallTools[b.Tool]:
 			m.Recalls += b.Calls
 			m.RecallTokens += b.ResponseTokens
+			day(b.Day).Recalls += b.Calls
+			client(b.Client).Recalls += b.Calls
 		case b.Tool == usage.MemoryAutoRecalls:
 			m.AutoRecalls += b.Calls
+			day(b.Day).AutoRecalls += b.Calls
 		case b.Tool == usage.MemoryAutoRecallContext:
 			m.AutoRecallTokens += b.Calls
 		case b.Tool == usage.MemoryOffloads:
 			m.Offloads += b.Calls
+			day(b.Day).Offloads += b.Calls
 		case b.Tool == usage.MemoryOffloadTurns:
 			m.OffloadedTurns += b.Calls
 		case b.Tool == usage.MemoryOffloadFacts:
 			m.OffloadFacts += b.Calls
+			day(b.Day).OffloadFacts += b.Calls
 		}
 	}
+	for _, c := range clients {
+		m.Clients = append(m.Clients, *c)
+	}
+	slices.SortFunc(m.Clients, func(x, y MemoryClient) int {
+		return cmp.Or(cmp.Compare(y.Saves+y.Recalls, x.Saves+x.Recalls), cmp.Compare(x.Client, y.Client))
+	})
 	in := OffloadInputs{TokensPerFact: 20, RecallsPerSession: defaultRecallsPerSes}
 	if m.Facts > 0 {
 		in.TokensPerFact = round1(float64(chars/m.Facts+factJSONChars) / 4)
