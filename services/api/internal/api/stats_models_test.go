@@ -102,6 +102,7 @@ func TestAgentStatsCountsAskLocal(t *testing.T) {
 	assert.Equal(t, a.Calls, 1)
 	assert.Equal(t, a.LocalReadTokens, 11000)
 	assert.Equal(t, a.AvoidedTokens, 9700)
+	assert.Equal(t, a.LocalAvoidedTokens, 9700)
 	assert.Equal(t, a.Daily[len(a.Daily)-1].AvoidedTokens, 9700)
 	assert.Equal(t, a.ContextTotalTokens, 10000)
 }
