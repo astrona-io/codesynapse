@@ -21,7 +21,10 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 # The worker runs jobs: ingest type-checks repositories with `go list`, so it
 # keeps the Go toolchain. docker build --target worker -f services/api/Dockerfile .
 FROM docker.io/library/golang:${GO_VERSION}-alpine AS worker
-RUN apk add --no-cache git ca-certificates && \
+# PACKAGES_DATE (the build day in CI) keys this layer, so the build cache
+# never keeps Alpine packages older than a day after a fix is published.
+ARG PACKAGES_DATE
+RUN apk upgrade --no-cache && apk add --no-cache git ca-certificates && \
     adduser -D -u 10001 codesynapse && \
     mkdir -p /cache/go-build /cache/gomod /workspace && chown -R codesynapse /cache /workspace
 ENV GOCACHE=/cache/go-build GOMODCACHE=/cache/gomod GOTOOLCHAIN=local \
@@ -38,7 +41,10 @@ CMD ["worker"]
 # The API records jobs for workers (CODESYNAPSE_RUN_JOBS=false) and needs no
 # Go toolchain; git stays for access checks and branch lists.
 FROM docker.io/library/alpine:3.24 AS api
-RUN apk add --no-cache git ca-certificates && \
+# PACKAGES_DATE (the build day in CI) keys this layer, so the build cache
+# never keeps Alpine packages older than a day after a fix is published.
+ARG PACKAGES_DATE
+RUN apk upgrade --no-cache && apk add --no-cache git ca-certificates && \
     adduser -D -u 10001 codesynapse && \
     mkdir -p /workspace && chown -R codesynapse /workspace
 ENV CODESYNAPSE_API_ADDR=0.0.0.0:8080 CODESYNAPSE_SOURCES_ROOT=/sources CODESYNAPSE_RUN_JOBS=false
