@@ -23,6 +23,7 @@ helm template codesynapse "$chart" -f "$values" \
 # ignore or break on: unknown keys, wrong types, invalid enums.
 for bad in api.replica=2 'worker.roles=ingest\,typo' 'worker.roles=ingest\,fix' fixWorker.roles=ai image.pullPolicy=Sometimes \
     auditRetentionDays=7 postgresql.sizee=1Gi nebula.size=lots \
+    nebula.space.replicas=2 nebula.space.partitions=0 nebula.space.extra=1 \
     worker.restrictEgress=maybe 'worker.egressAllow[0].cidr=nonsense' 'worker.egressAllow[0].extra=1'; do
     if helm template codesynapse "$chart" -f "$values" --set "$bad" > /dev/null 2>&1; then
         echo "values.schema.json accepted $bad" >&2
@@ -49,6 +50,16 @@ if helm template codesynapse "$chart" -f "$values" --set worker.queueScaling.mod
     echo "chart rendered queueScaling with maxReplicas below minReplicas" >&2
     exit 1
 fi
+
+# A replicated graph space needs a NebulaGraph cluster: the in-chart one has
+# a single storaged host. Linked to a cluster, the layout reaches every pod.
+if helm template codesynapse "$chart" -f "$values" --set nebula.space.replicas=3 > /dev/null 2>&1; then
+    echo "chart rendered nebula.space.replicas=3 with the in-chart NebulaGraph" >&2
+    exit 1
+fi
+helm template codesynapse "$chart" -f "$values" --set nebula.enabled=false,nebula.externalAddrs=nebula.example.com:9669,nebula.space.replicas=3,nebula.space.partitions=30 > "$out/nebula-cluster.yaml"
+grep -q 'name: CODESYNAPSE_NEBULA_REPLICAS, value: "3"' "$out/nebula-cluster.yaml"
+grep -q 'name: CODESYNAPSE_NEBULA_PARTITIONS, value: "30"' "$out/nebula-cluster.yaml"
 
 # The fix worker pushes: it cannot be on without the switch that allows it.
 if helm template codesynapse "$chart" -f "$values" --set features.allowPush=false > /dev/null 2>&1; then

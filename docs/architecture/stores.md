@@ -46,7 +46,7 @@ Neo4j was supported until October 2026 and HugeGraph until the same month: both 
 - Schema changes reach graphd and storaged on their heartbeat (2 s in the shipped stack); `ensure schema` waits for them.
 - Authentication is always on and the root password is set at first start (`NEBULA_PASSWORD`, at most 24 characters). graphd is never published to the host and no raw-nGQL tool exists.
 - Statistics rules live once in `store.StatsBuilder`; the store feeds it grouped counts.
-- Partitions and replicas of a new space come from `CODESYNAPSE_NEBULA_PARTITIONS` and `CODESYNAPSE_NEBULA_REPLICAS` (a space is created once; changing them later does not reshape it).
+- Partitions and replicas of a new space come from `CODESYNAPSE_NEBULA_PARTITIONS` and `CODESYNAPSE_NEBULA_REPLICAS`, set by the chart's `nebula.space` (a space is created once; changing them later does not reshape it).
 
 **Milvus**
 

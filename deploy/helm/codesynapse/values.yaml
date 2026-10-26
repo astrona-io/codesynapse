@@ -175,6 +175,13 @@ nebula:
   # root password stays NEBULA_PASSWORD in the Secret; in the chart it is
   # at most 24 characters (NebulaGraph's limit).
   externalAddrs: ""
+  # The graph space's layout, fixed when CodeSynapse first creates it:
+  # partitions spread the graph over storaged hosts, replicas keeps that
+  # many copies of each partition (odd, at most the storaged hosts). The
+  # in-chart NebulaGraph has one storaged, so 1; a cluster wants 3.
+  space:
+    partitions: 10
+    replicas: 1
 milvus:
   enabled: true
   # When disabled: the Milvus proxy URL (http(s)://host:19530); empty turns
