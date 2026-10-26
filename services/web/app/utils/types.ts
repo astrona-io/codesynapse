@@ -204,7 +204,11 @@ export interface AIProvider {
   name: string; kind: string; model: string; endpoint: string; local: boolean; has_key: boolean; key_env?: string
   sends_source: boolean; max_output_tokens: number; max_input_tokens: number; input_budget_policy?: 'estimate' | 'require_exact'; context_window?: number; tasks: string[]
   usage: { requests: number; failures: number; input_tokens: number; output_tokens: number; avg_seconds: number; last_error?: string }
+  // auto: models picked from what the server serves (model: auto); served is its last answer.
+  auto?: boolean; embedding_model?: string
+  served?: { models: ServedModel[]; error?: string; at: string }
 }
+export interface ServedModel { name: string; chat: boolean; embedding: boolean; thinking?: boolean; params_b?: number; context?: number; bytes?: number }
 
 export type LicenseCategory = 'public-domain' | 'permissive' | 'weak-copyleft' | 'strong-copyleft' | 'network-copyleft' | 'restricted' | 'unknown'
 export interface LicenseVerdict { level: 'ok' | 'review' | 'conflict'; reason: string }

@@ -35,6 +35,11 @@ type ProviderInfo struct {
 	Context           int       `json:"context_window,omitempty"`
 	Tasks             []string  `json:"tasks"`
 	Usage             llm.Usage `json:"usage"`
+	// Auto: the provider picks its models from what its server serves;
+	// Served is that server's last answer.
+	Auto           bool           `json:"auto,omitempty"`
+	EmbeddingModel string         `json:"embedding_model,omitempty"`
+	Served         *llm.Discovery `json:"served,omitempty"`
 }
 
 // endpointHost shows scheme://host only, hiding paths and query strings.
@@ -63,8 +68,11 @@ func (s *Server) handleAIProviders(w http.ResponseWriter, _ *http.Request) {
 				Name: p.Name, Kind: p.Kind, Model: p.Model, Endpoint: endpointHost(p.BaseURL), Local: p.Local(),
 				HasKey: p.HasKey(), KeyEnv: p.APIKeyEnv, SendsSource: p.AllowsSource(),
 				MaxOutput: p.MaxOutputTokens, MaxInput: p.MaxInputTokens, InputBudgetPolicy: p.InputBudgetPolicy, Context: p.ContextWindow, Tasks: append([]string{}, tasks...),
-				Usage: s.cfg.LLM.Usage(p.Name),
+				Usage: s.cfg.LLM.Usage(p.Name), Auto: p.Auto(), EmbeddingModel: p.EmbeddingModel,
 			})
+			if d, ok := s.cfg.LLM.Served(p.Name); ok {
+				out[len(out)-1].Served = &d
+			}
 		}
 	}
 	var routing llm.Routes
@@ -147,7 +155,7 @@ func (s *Server) handleAITest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out["models"] = models
-	if cfg, _ := s.cfg.LLM.Config(name); len(llm.MissingModels(cfg, models)) > 0 {
+	if cfg, _ := s.cfg.LLM.Config(name); !cfg.Auto() && len(llm.MissingModels(cfg, models)) > 0 {
 		out["missing"] = llm.MissingModels(cfg, models)
 	}
 	start := time.Now()

@@ -142,6 +142,9 @@ func (r *Registry) prepare(ctx context.Context, name string, req Request) (Reque
 	if !ok {
 		return req, cfg, empty, fmt.Errorf("unknown AI provider %q", name)
 	}
+	if cfg.Model == Auto {
+		return req, cfg, empty, fmt.Errorf("%s: %w", name, ErrNoServedModel)
+	}
 	cfg, err := effectiveBudgets(cfg)
 	if err != nil {
 		return req, cfg, empty, err

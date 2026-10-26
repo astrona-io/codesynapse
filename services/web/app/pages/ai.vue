@@ -78,6 +78,7 @@ const resultOf = (n: string) => tests.value[n]
     <div v-if="!data?.providers.length" class="panel how">
       <p class="eyebrow eyebrow--green">No model configured</p>
       <h2>Connect a local or cloud model</h2>
+      <p class="muted">With nothing configured, CodeSynapse uses a local model server it finds when the API starts: Ollama on port 11434 or LM Studio on 1234. Start one, pull a model (<code>ollama pull qwen3.8:27b</code>) and restart the API. To choose yourself:</p>
       <ol class="steps">
         <li>Copy <code>config/llm.example.yaml</code> to <code>config/llm.yaml</code> in the project folder.</li>
         <li>Point <code>base_url</code> at your server. For a model server on this Mac use <code>http://host.docker.internal:&lt;port&gt;/v1</code> — for example MLX on 9080 or Ollama on 11434.</li>
@@ -122,7 +123,8 @@ const resultOf = (n: string) => tests.value[n]
           <button class="secondary" :disabled="resultOf(p.name) === 'running'" @click="test(p.name)">{{ resultOf(p.name) === 'running' ? 'Testing…' : 'Test connection' }}</button>
         </div>
         <dl class="facts">
-          <dt>Model</dt><dd class="mono">{{ p.model || '(server default)' }}</dd>
+          <dt>Model<InfoTip v-if="p.auto" text="model: auto in config/llm.yaml. CodeSynapse asks the server what it serves every five minutes and uses the chat model with the most parameters, and an embedding model for recall, so a model you pull is used without a restart." /></dt>
+          <dd class="mono">{{ p.model === 'auto' ? 'none yet' : (p.model || '(server default)') }}<span v-if="p.auto" class="badge badge--green auto">picked automatically</span></dd>
           <dt>Endpoint</dt><dd class="mono">{{ p.endpoint }}</dd>
           <dt>API key</dt><dd>{{ p.has_key ? `set (${p.key_env})` : p.key_env ? `missing — set ${p.key_env}` : 'none needed' }}</dd>
           <dt>Code snippets</dt><dd><span class="badge" :class="p.sends_source ? 'badge--amber' : 'badge--green'">{{ p.sends_source ? 'sent (short excerpts)' : 'never sent' }}</span></dd>
@@ -134,6 +136,23 @@ const resultOf = (n: string) => tests.value[n]
           <dd v-if="dayUsage(p.name)">{{ plural(dayUsage(p.name)!.requests, 'request') }} · {{ fmtInt(dayUsage(p.name)!.input) }} in / {{ fmtInt(dayUsage(p.name)!.output) }} out<span v-if="dayUsage(p.name)!.failures" class="error"> · {{ dayUsage(p.name)!.failures }} failed</span><span class="muted small"> · last 24 h</span></dd>
           <dd v-else>{{ plural(p.usage.requests, 'request') }} · {{ fmtInt(p.usage.input_tokens) }} in / {{ fmtInt(p.usage.output_tokens) }} out<span v-if="p.usage.requests"> · avg {{ p.usage.avg_seconds.toFixed(1) }} s</span><span v-if="p.usage.failures" class="error"> · {{ p.usage.failures }} failed</span><span class="muted small"> · this API process only</span></dd>
         </dl>
+        <details v-if="p.served" class="served" :open="p.model === 'auto'">
+          <summary>What the server offers ({{ p.served.models.length }})<span v-if="p.served.error" class="error"> · last check failed</span></summary>
+          <p v-if="p.served.error" class="error small">{{ p.served.error }}</p>
+          <table v-if="p.served.models.length">
+            <thead><tr><th>Model</th><th>Can</th><th class="num">Size</th><th class="num">Context</th><th>Used for</th></tr></thead>
+            <tbody>
+              <tr v-for="m in p.served.models" :key="m.name">
+                <td class="mono">{{ m.name }}</td>
+                <td>{{ [m.chat && 'chat', m.embedding && 'embeddings', m.thinking && 'thinking'].filter(Boolean).join(', ') }}</td>
+                <td class="num">{{ m.params_b ? `${m.params_b >= 1 ? m.params_b.toFixed(1) + 'B' : Math.round(m.params_b * 1000) + 'M'}` : '–' }}</td>
+                <td class="num">{{ m.context ? fmtCompact(m.context) : '–' }}</td>
+                <td><span v-if="m.name === p.model" class="badge badge--green">answers</span><span v-if="m.name === p.embedding_model" class="badge badge--violet">recall</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else-if="!p.served.error" class="muted small">The server offers no models yet. On Ollama: <code>ollama pull qwen3.8:27b</code>.</p>
+        </details>
         <template v-if="resultOf(p.name) && resultOf(p.name) !== 'running'">
           <p v-if="(resultOf(p.name) as TestResult).ok" class="ok">Connected in {{ (resultOf(p.name) as TestResult).seconds }} s · replied “{{ (resultOf(p.name) as TestResult).reply }}”</p>
           <p v-else class="error">{{ (resultOf(p.name) as TestResult).error }}</p>
@@ -156,6 +175,10 @@ const resultOf = (n: string) => tests.value[n]
 </template>
 
 <style scoped>
+.auto { margin-left: 8px; }
+.served summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.served table { margin-top: 8px; font-size: 13px; }
+.served .badge + .badge { margin-left: 4px; }
 .steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13.5px; }
 .facts dt { color: var(--muted); }
