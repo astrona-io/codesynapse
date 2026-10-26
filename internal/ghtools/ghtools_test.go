@@ -339,3 +339,32 @@ func TestFailureAcceptsCurrentRunIDs(t *testing.T) {
 		t.Fatalf("a 2026 run ID was refused: %v", err)
 	}
 }
+
+// gh_run_list asks gh with a fixed argument list and filters here, so
+// nothing the agent writes reaches gh's arguments.
+func TestRuns(t *testing.T) {
+	runs := `[
+ {"databaseId":3,"workflowName":"Chart end to end","headBranch":"main","headSha":"aad2b4dffff","event":"push","status":"completed","conclusion":"failure","createdAt":"2026-10-26T12:00:00Z"},
+ {"databaseId":2,"workflowName":"CI","headBranch":"main","headSha":"5fee920aaaa","event":"push","status":"completed","conclusion":"success","createdAt":"2026-10-26T11:00:00Z"},
+ {"databaseId":1,"workflowName":"Chart end to end","headBranch":"main","headSha":"3c74c14bbbb","event":"push","status":"completed","conclusion":"success","createdAt":"2026-10-25T21:00:00Z"}]`
+	args := fakeGH(t, runs, 0, "")
+	got, err := Runs(t.Context(), t.TempDir(), RunListIn{Workflow: "chart end to end; rm -rf /", Limit: 5})
+	require.NoError(t, err)
+	assert.Equal(t, recorded(t, args), "run list --limit 200 --json databaseId,workflowName,headBranch,headSha,event,status,conclusion,createdAt")
+	assert.Len(t, got.Runs, 0, "a workflow name that matches nothing finds nothing")
+
+	got, err = Runs(t.Context(), t.TempDir(), RunListIn{Workflow: "chart end to end", Conclusion: "success"})
+	require.NoError(t, err)
+	require.Len(t, got.Runs, 1)
+	assert.Equal(t, got.Runs[0], RunSummary{ID: 1, Workflow: "Chart end to end", Branch: "main", Commit: "3c74c14", Event: "push", Status: "completed", Conclusion: "success", Created: "2026-10-25T21:00:00Z"})
+	assert.Equal(t, got.Scanned, 3)
+
+	got, err = Runs(t.Context(), t.TempDir(), RunListIn{Branch: "main", Limit: 2})
+	require.NoError(t, err)
+	assert.Len(t, got.Runs, 2, "newest first, up to the limit")
+
+	for _, in := range []RunListIn{{Conclusion: "maybe"}, {Limit: -1}} {
+		_, err := Runs(t.Context(), t.TempDir(), in)
+		assert.True(t, errors.Is(err, ErrInvalid), "%+v", in)
+	}
+}

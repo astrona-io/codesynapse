@@ -23,7 +23,7 @@ var Sets = map[string][]string{
 	"memory":   {"search_graph_nodes", "query_subgraph", "recall_context", "upsert_graph_triples", "offload_turns"},
 	"cleanup":  {"unused_code", "duplicate_code", "cleanup_plan", "refactor_duplicates", "shared_code"},
 	"reviews":  {"list_reviews", "get_review", "submit_review", "update_review_comment"},
-	"git":      {"git_status", "git_diff_summary", "git_blame", "git_log", "gh_pr_status", "gh_pr_list", "gh_run_failure"},
+	"git":      {"git_status", "git_diff_summary", "git_blame", "git_log", "gh_pr_status", "gh_pr_list", "gh_run_failure", "gh_run_list"},
 	"identity": {"code_identities", "code_identity_reviews", "code_records", "code_annotate", "code_record_reuse"},
 }
 
