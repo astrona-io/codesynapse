@@ -62,7 +62,7 @@ func IsWorkflow(tool string) bool {
 		return true
 	}
 	switch tool {
-	case FirstCodeSynapse, FirstNative, ReadTurnedBack, FilesEdited, FilesEditedFound, LocalRead, LocalAvoided:
+	case FirstCodeSynapse, FirstNative, ReadTurnedBack, FilesEdited, FilesEditedFound, LocalRead, LocalAvoided, LocalBriefs:
 		return true
 	}
 	return false

@@ -82,6 +82,7 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
         <StatTile label="Kept off cloud models" :value="offCloud === null ? '–' : `${offCloud}%`" hint="never read, or read by a local model" />
         <StatTile label="Tokens never read" :value="fmtCompact(a?.avoided_tokens ?? 0)" :hint="`graph answers and ask_local, estimated`" />
         <StatTile label="Handled by local models" :value="fmtCompact(localIn + localOut)" :hint="`${fmtCompact(localIn)} read · ${fmtCompact(localOut)} written`" />
+        <StatTile label="Prompts pre-briefed" :value="fmtCompact(a?.local_briefs ?? 0)" hint="a local model briefed the agent first" />
         <StatTile
           label="Cloud cost avoided" :value="saved === null ? '–' : money(saved)"
           :hint="price ? `at ${price.model} prices, estimated` : 'add prices to a cloud provider to estimate'"

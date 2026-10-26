@@ -65,11 +65,13 @@ type AgentStats struct {
 	// the agent did not have to read is in AvoidedTokens.
 	LocalReadTokens int `json:"local_read_tokens"`
 	// LocalAvoidedTokens is the ask_local part of AvoidedTokens.
-	LocalAvoidedTokens int        `json:"local_avoided_tokens"`
-	AvgLatencyMs       float64    `json:"avg_latency_ms"`
-	MaxLatencyMs       int        `json:"max_latency_ms"`
-	Daily              []DayStat  `json:"daily"`
-	Tools              []ToolStat `json:"tools"`
+	LocalAvoidedTokens int `json:"local_avoided_tokens"`
+	// LocalBriefs counts prompts a local model briefed the agent on.
+	LocalBriefs  int        `json:"local_briefs"`
+	AvgLatencyMs float64    `json:"avg_latency_ms"`
+	MaxLatencyMs int        `json:"max_latency_ms"`
+	Daily        []DayStat  `json:"daily"`
+	Tools        []ToolStat `json:"tools"`
 	// Workflow says how sessions began, as the plugin's hooks reported.
 	Workflow WorkflowStats `json:"workflow"`
 	Clients  []ClientStat  `json:"clients"`
@@ -354,6 +356,10 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 			continue
 		}
 		if a.Edits.AddCounter(bk.Tool, bk.Calls) {
+			continue
+		}
+		if bk.Tool == usage.LocalBriefs {
+			a.LocalBriefs += bk.Calls
 			continue
 		}
 		if bk.Tool == usage.LocalRead {

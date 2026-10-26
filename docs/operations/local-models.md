@@ -9,6 +9,7 @@ This page covers why you would run one, what the two recommended Qwen models nee
 | Work | Task | Local only? |
 |---|---|---|
 | Agents ask it about files instead of reading them (`ask_local`) | `local-answer` | yes |
+| It briefs the agent on each code prompt before the agent starts (the plugin's pre-brief) | `local-answer` | yes |
 | Older chat turns become memory facts before a compaction | `memory` | yes |
 | Recall by meaning (embeddings) | `embeddings` | yes, with `embedding_model` |
 | Change summaries, cleanup briefings | `pr-summary`, `cleanup-briefing` | yes |
