@@ -13,6 +13,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/store/storetest"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/usage"
 	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
@@ -69,6 +70,14 @@ func TestAskLocalEndpoint(t *testing.T) {
 	assert.Contains(t, ans.Note, "citations were not among the lines")
 	assert.Equal(t, []int{ans.Files, ans.Lines, ans.Batches}, []int{1, 3, 1})
 	assert.Contains(t, sent.Load().(string), "11| b\n", "lines are numbered for citing")
+
+	buckets, err := f.store.Usage(t.Context(), "")
+	require.NoError(t, err)
+	counted := map[string]int{}
+	for _, b := range buckets {
+		counted[b.Tool] += b.Calls
+	}
+	assert.True(t, counted[usage.LocalRead] > 0, "what the local model read is counted")
 }
 
 // Files larger than one request are read in parts and the notes merged.

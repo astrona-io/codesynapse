@@ -233,11 +233,8 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusForbidden, errors.New("platform admins only"))
 		return
 	}
-	if !sc.all && !p.platform {
-		tenants = []string{}
-		for _, m := range sc.orgs {
-			tenants = append(tenants, m.Org.ID)
-		}
+	if !p.platform {
+		tenants = callerTenants(r)
 	}
 	repositoryID := ""
 	if p.repository {
@@ -358,4 +355,18 @@ func foldSeries(lines []SeriesLine, kind string, n int) []SeriesLine {
 		}
 	}
 	return append(keep, other)
+}
+
+// callerTenants are the organisations whose metrics the caller may read, as
+// extra_filters; nil means every tenant (single-tenant installs).
+func callerTenants(r *http.Request) []string {
+	sc := scopeFrom(r.Context())
+	if sc.all {
+		return nil
+	}
+	tenants := []string{}
+	for _, m := range sc.orgs {
+		tenants = append(tenants, m.Org.ID)
+	}
+	return tenants
 }

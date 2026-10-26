@@ -59,12 +59,15 @@ type AgentStats struct {
 	ResponseTokens     int        `json:"response_tokens"`
 	// AvoidedTokens estimates tokens an agent would have read from files to
 	// answer the same questions (see AvoidedMethod).
-	AvoidedTokens int        `json:"avoided_tokens"`
-	AvoidedMethod string     `json:"avoided_method"`
-	AvgLatencyMs  float64    `json:"avg_latency_ms"`
-	MaxLatencyMs  int        `json:"max_latency_ms"`
-	Daily         []DayStat  `json:"daily"`
-	Tools         []ToolStat `json:"tools"`
+	AvoidedTokens int    `json:"avoided_tokens"`
+	AvoidedMethod string `json:"avoided_method"`
+	// LocalReadTokens is what local models read for ask_local; the part
+	// the agent did not have to read is in AvoidedTokens.
+	LocalReadTokens int        `json:"local_read_tokens"`
+	AvgLatencyMs    float64    `json:"avg_latency_ms"`
+	MaxLatencyMs    int        `json:"max_latency_ms"`
+	Daily           []DayStat  `json:"daily"`
+	Tools           []ToolStat `json:"tools"`
 	// Workflow says how sessions began, as the plugin's hooks reported.
 	Workflow WorkflowStats `json:"workflow"`
 	Clients  []ClientStat  `json:"clients"`
@@ -329,7 +332,7 @@ func agentUsage(buckets []usage.Bucket, repos []RepoSummary, days int, now time.
 
 func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[string]float64, workspaceRatio float64) AgentStats {
 	a := AgentStats{Daily: []DayStat{}, Tools: []ToolStat{}, Clients: []ClientStat{}, Repos: []RepoUsage{},
-		AvoidedMethod: "For successful calls of navigation tools (symbol context, call graph, outlines, search, ...), each response is compared with the tokens of the files an agent would read instead, using the ratio measured by that repository's token benchmark at ingest (workspace ratio when the call named no repository). Tokens are bytes/4."}
+		AvoidedMethod: "For successful calls of navigation tools (symbol context, call graph, outlines, search, ...), each response is compared with the tokens of the files an agent would read instead, using the ratio measured by that repository's token benchmark at ingest (workspace ratio when the call named no repository). For ask_local, the files a local model read in the agent's place, minus the answer the agent got. Tokens are bytes/4."}
 	daily := map[string]*DayStat{}
 	for i := days - 1; i >= 0; i-- {
 		d := usage.Day(now.AddDate(0, 0, -i))
@@ -349,6 +352,21 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 			continue
 		}
 		if a.Edits.AddCounter(bk.Tool, bk.Calls) {
+			continue
+		}
+		if bk.Tool == usage.LocalRead {
+			a.LocalReadTokens += bk.Calls
+			continue
+		}
+		if bk.Tool == usage.LocalAvoided {
+			a.AvoidedTokens += bk.Calls
+			day.AvoidedTokens += bk.Calls
+			ru := repos[bk.Repo]
+			if ru == nil {
+				ru = &RepoUsage{Repo: bk.Repo}
+				repos[bk.Repo] = ru
+			}
+			ru.AvoidedTokens += bk.Calls
 			continue
 		}
 		if usage.IsWorkflow(bk.Tool) {
