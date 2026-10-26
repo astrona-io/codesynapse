@@ -52,6 +52,11 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 	if errors.As(err, &pg) && pg.Code == "23505" && pg.ConstraintName == "jobs_active_repo" {
 		return accounts.ErrJobActive
 	}
+	if err == nil {
+		// Wake idle workers; a lost notice only delays the job until their
+		// fallback poll.
+		_, _ = s.db.Exec(ctx, "SELECT pg_notify('"+jobsChannel+"', '')") //nolint:errcheck // best effort
+	}
 	return mapErr(err, "job")
 }
 
@@ -161,4 +166,41 @@ ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`, now, kinds))
 			return claimed, found, err
 		}
 	}
+}
+
+// jobsChannel is the LISTEN/NOTIFY channel AddJob announces jobs on.
+const jobsChannel = "codesynapse_jobs"
+
+// JobWake implements accounts.JobWaker with LISTEN on a connection of its
+// own, outside the pool. After a lost connection it reconnects and wakes
+// once, since a notice may have been missed meanwhile.
+func (s *Store) JobWake(ctx context.Context) <-chan struct{} {
+	ch := make(chan struct{}, 1)
+	wake := func() {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+	go func() {
+		for ctx.Err() == nil {
+			conn, err := pgx.ConnectConfig(ctx, s.pool.Config().ConnConfig.Copy())
+			if err == nil {
+				if _, err = conn.Exec(ctx, "LISTEN "+jobsChannel); err == nil {
+					wake()
+					for err == nil {
+						if _, err = conn.WaitForNotification(ctx); err == nil {
+							wake()
+						}
+					}
+				}
+				_ = conn.Close(context.WithoutCancel(ctx)) //nolint:errcheck // reconnecting anyway
+			}
+			select {
+			case <-ctx.Done():
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}()
+	return ch
 }

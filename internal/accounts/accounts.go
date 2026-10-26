@@ -510,3 +510,11 @@ type Store interface {
 	// PruneEvents deletes entries before t (retention).
 	PruneEvents(ctx context.Context, before time.Time) (int, error)
 }
+
+// JobWaker is implemented by stores that can tell a worker a job was
+// added, so idle workers wait for that instead of asking every few seconds.
+// The channel delivers at most one pending wake; a slow fallback poll still
+// claims jobs whose lease ran out, which no wake announces.
+type JobWaker interface {
+	JobWake(ctx context.Context) <-chan struct{}
+}

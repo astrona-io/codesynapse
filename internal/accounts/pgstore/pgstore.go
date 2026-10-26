@@ -47,6 +47,10 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	}
 	cfg.MaxConns = 10
 	cfg.ConnConfig.Tracer = tracer{}
+	// pgx pings a connection idle for over a second before handing it out,
+	// which doubled the statements of every background poll. A dead
+	// connection still fails its query and is replaced.
+	cfg.ShouldPing = func(_ context.Context, p pgxpool.ShouldPingParams) bool { return p.IdleDuration > time.Minute }
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
