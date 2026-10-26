@@ -13,23 +13,15 @@ const replacedPct = computed(() => (versions.value ? Math.round((100 * (m.value?
 const confirmsPerFact = computed(() => (m.value?.facts ? (m.value.confirmations / m.value.facts).toFixed(1) : '0'))
 const activeRepos = computed(() => (m.value?.repos ?? []).filter((r) => r.facts > 0).length)
 
-// Daily activity, one line per kind; local midnight so the axis reads as dates.
+// Daily activity, one stacked column per day.
 const daily = computed(() => m.value?.daily ?? [])
-const dayTimes = computed(() => daily.value.map((d) => {
-  const [y, mo, da] = d.day.split('-').map(Number)
-  return new Date(y!, mo! - 1, da!).getTime() / 1000
-}))
-type MemoryDay = NonNullable<NonNullable<typeof m.value>['daily']>[number]
-const line = (name: string, pick: (d: MemoryDay) => number) => {
-  const values = daily.value.map(pick)
-  return { name, values, total: values.reduce((t, v) => t + v, 0) }
-}
-const dailySeries = computed(() => [
-  line('saves', (d) => d.saves),
-  line('recalls', (d) => d.recalls),
-  line('prompts looked up', (d) => d.auto_recalls),
-  line('facts from offloading', (d) => d.offload_facts),
-])
+const dailyKeys = [
+  { key: 'saves', label: 'Saves', color: 'var(--s-2)' },
+  { key: 'recalls', label: 'Recalls', color: 'var(--s-1)' },
+  { key: 'auto', label: 'Prompts looked up', color: 'var(--s-3)' },
+  { key: 'offload', label: 'Facts from offloading', color: 'var(--s-4)' },
+]
+const dailyRows = computed(() => daily.value.map((d) => ({ label: d.day, values: { saves: d.saves, recalls: d.recalls, auto: d.auto_recalls, offload: d.offload_facts } })))
 const activeDays = computed(() => daily.value.filter((d) => d.saves + d.recalls + d.auto_recalls + d.offloads > 0).length)
 const busiest = computed(() => {
   let best: { day: string; n: number } | null = null
@@ -39,7 +31,11 @@ const busiest = computed(() => {
   }
   return best
 })
-const hasActivity = computed(() => dailySeries.value.some((l) => l.total > 0))
+// Which tool the recalls came through; recall_context is the one agents start with.
+const recallTools = computed(() => Object.entries(m.value?.recalls_by_tool ?? {})
+  .map(([label, value]) => ({ label, value, detail: `${m.value?.recalls ? Math.round((100 * value) / m.value.recalls) : 0}% of recalls` }))
+  .sort((x, y) => y.value - x.value))
+const hasActivity = computed(() => activeDays.value > 0)
 
 // How memory was reached and how facts arrived: by the agent asking, or by
 // the hooks on their own.
@@ -108,15 +104,18 @@ function unavailable(panel: string, status: number) {
 
     <section class="panel">
       <p class="eyebrow">Over time</p><h2>Memory activity per day</h2>
-      <template v-if="hasActivity">
-        <div class="facts">
-          <span><strong>{{ activeDays }}</strong> of {{ days }} days active</span>
-          <span v-if="busiest"><strong>{{ fmtInt(busiest.n) }}</strong> events on the busiest day, {{ busiest.day }}</span>
-          <span><strong>{{ fmtInt(m.saves + m.recalls + (m.auto_recalls ?? 0)) }}</strong> saves and lookups in all</span>
-        </div>
-        <LineChart :times="dayTimes" :series="dailySeries" title="Memory activity per day" unit="events" :step-seconds="86400" :height="220" />
-      </template>
-      <div v-else class="empty"><strong>No memory activity in the last {{ days }} days</strong>Agents save with <code>upsert_graph_triples</code> and recall with <code>search_graph_nodes</code> or <code>query_subgraph</code>; the Claude Code plugin also looks up memory for each prompt and offloads older turns before a compaction.</div>
+      <div v-if="hasActivity" class="activity">
+        <StackedColumns :rows="dailyRows" :keys="dailyKeys" title="Memory activity per day" unit="events" />
+        <aside class="side">
+          <div class="mini"><span class="label">Active days</span><strong>{{ activeDays }}<small> of {{ days }}</small></strong></div>
+          <div v-if="busiest" class="mini"><span class="label">Busiest day</span><strong>{{ fmtInt(busiest.n) }}<small> on {{ busiest.day.slice(5) }}</small></strong></div>
+          <div>
+            <span class="label">Recalls by tool</span>
+            <RankList :rows="recallTools" color="var(--s-1)" :limit="3" empty="No agent recalls yet." />
+          </div>
+        </aside>
+      </div>
+      <div v-else class="empty"><strong>No memory activity in the last {{ days }} days</strong>Agents save with <code>upsert_graph_triples</code> and recall with <code>recall_context</code>, <code>search_graph_nodes</code> or <code>query_subgraph</code>; the Claude Code plugin also looks up memory for each prompt and offloads older turns before a compaction.</div>
     </section>
 
     <section class="panel">
@@ -186,8 +185,12 @@ function unavailable(panel: string, status: number) {
 .lead { max-width: 72ch; margin: 4px 0 0; }
 .kpis { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin: 16px 0; }
 .label { display: block; margin: 12px 0 8px; }
-.facts { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 8px 0 14px; font-size: 13.5px; color: var(--muted); }
-.facts strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.activity { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 24px; align-items: start; margin-top: 12px; }
+.side { display: grid; gap: 14px; }
+.side .label { margin: 0 0 4px; }
+.mini strong { display: block; font: 600 22px/1.1 var(--font-display); font-variant-numeric: tabular-nums; }
+.mini small { font: 400 12.5px var(--font-sans); color: var(--muted); }
+@media (max-width: 760px) { .activity { grid-template-columns: 1fr; } }
 .meter { margin-top: 4px; padding: 14px 16px; border-radius: var(--radius); background: var(--panel-2); }
 .meter__head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .meter__track { height: 12px; margin: 8px 0; border-radius: 999px; background: var(--line); overflow: hidden; }
