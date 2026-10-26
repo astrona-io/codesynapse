@@ -258,6 +258,8 @@ export interface WorkspaceStats {
     entities: number; facts: number; history?: number; confirmations: number; sources: Record<string, number>
     repos: { repo: string; entities: number; facts: number; history?: number; confirmations: number; fact_chars: number; sources: Record<string, number>; last_updated?: string }[]
     saves: number; recalls: number; recall_tokens: number
+    // Recalls split by the tool that read memory (recall_context, search_graph_nodes, query_subgraph).
+    recalls_by_tool?: Record<string, number>
     // What the hooks did on their own (per-prompt recall, offloading at compaction).
     auto_recalls?: number; auto_recall_tokens?: number; offloads?: number; offloaded_turns?: number; offload_facts?: number
     model: { tokens_per_fact: number; tokens_per_recall: number; recalls_per_session: number; measured: boolean }

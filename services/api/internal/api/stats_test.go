@@ -42,6 +42,8 @@ func TestAgentStats(t *testing.T) {
 	assert.Equal(t, got.Clients[0], ClientStat{Client: "claude-code", Sessions: 2, Calls: 5})
 	assert.Equal(t, toolKind("prompt:code-review"), "prompt")
 	assert.Equal(t, toolKind("query_subgraph"), "memory")
+	assert.Equal(t, toolKind("recall_context"), "memory")
+	assert.Equal(t, toolKind("offload_turns"), "memory")
 }
 
 func TestStatsEndpoint(t *testing.T) {
@@ -52,6 +54,7 @@ func TestStatsEndpoint(t *testing.T) {
 	require.NoError(t, st.AddUsage(ctx, []usage.Bucket{
 		{Day: today, Tool: usage.Session, Client: "claude-code", Calls: 2},
 		{Day: today, Repo: storetest.Repo, Tool: "search_graph_nodes", Client: "claude-code", Calls: 4, ResponseTokens: 800},
+		{Day: today, Repo: storetest.Repo, Tool: "recall_context", Client: "claude-code", Calls: 6, ResponseTokens: 1200},
 		{Day: today, Repo: storetest.Repo, Tool: "upsert_graph_triples", Client: "claude-code", Calls: 1, ResponseTokens: 30},
 	}))
 	b, err := agentmem.Prepare(storetest.Repo, []agentmem.Triple{{Subject: "Team", Predicate: "OWNS", Object: "api"}}, "claude-code", time.Now())
@@ -67,15 +70,16 @@ func TestStatsEndpoint(t *testing.T) {
 	require.Equal(t, get(t, ts, "/api/v1/stats?days=7", &got), 200)
 	assert.Equal(t, got.Days, 7)
 	assert.Equal(t, got.Agents.Sessions, 2)
-	assert.Equal(t, got.Agents.Calls, 5)
+	assert.Equal(t, got.Agents.Calls, 11)
 	assert.Equal(t, got.Memory.Facts, 1)
 	assert.Equal(t, got.Memory.Saves, 1)
-	assert.Equal(t, got.Memory.Recalls, 4)
-	assert.Equal(t, got.Memory.Model, OffloadInputs{TokensPerFact: 17.8, TokensPerRecall: 200, RecallsPerSession: 2, Measured: true})
+	assert.Equal(t, got.Memory.Recalls, 10, "recall_context counts as a recall")
+	assert.Equal(t, got.Memory.RecallsByTool, map[string]int{"recall_context": 6, "search_graph_nodes": 4})
+	assert.Equal(t, got.Memory.Model, OffloadInputs{TokensPerFact: 17.8, TokensPerRecall: 200, RecallsPerSession: 5, Measured: true})
 	require.Equal(t, len(got.Memory.Daily), 7, "the window is filled with empty days")
-	assert.Equal(t, got.Memory.Daily[6], MemoryDay{Day: today, Saves: 1, Recalls: 4})
+	assert.Equal(t, got.Memory.Daily[6], MemoryDay{Day: today, Saves: 1, Recalls: 10})
 	assert.Equal(t, got.Memory.Daily[0].Saves, 0)
-	assert.Equal(t, got.Memory.Clients, []MemoryClient{{Client: "claude-code", Saves: 1, Recalls: 4}})
+	assert.Equal(t, got.Memory.Clients, []MemoryClient{{Client: "claude-code", Saves: 1, Recalls: 10}})
 	assert.Equal(t, got.Memory.History, 0)
 	assert.Equal(t, got.Reviews.Reviews, 1)
 	assert.Equal(t, got.Reviews.ByStatus["open"], 1)

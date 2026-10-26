@@ -30,7 +30,8 @@ var navigationTools = map[string]bool{
 	"get_doc_section": true, "repo_overview": true,
 }
 
-var recallTools = map[string]bool{"search_graph_nodes": true, "query_subgraph": true}
+// recallTools read agent memory; recall_context is the one agents call first.
+var recallTools = map[string]bool{"recall_context": true, "search_graph_nodes": true, "query_subgraph": true}
 
 // Stats is GET /api/v1/stats: everything measured across the workspace.
 type Stats struct {
@@ -171,6 +172,8 @@ type MemoryStats struct {
 	Saves         int            `json:"saves"`
 	Recalls       int            `json:"recalls"`
 	RecallTokens  int            `json:"recall_tokens"`
+	// RecallsByTool splits Recalls by the tool that read memory.
+	RecallsByTool map[string]int `json:"recalls_by_tool"`
 	// What the hooks did on their own: per-prompt recalls and the tokens
 	// they added, conversations offloaded, their turns and the facts the
 	// local model extracted from them.
@@ -538,7 +541,7 @@ func toolKind(tool string) string {
 		return "prompt"
 	case navigationTools[tool]:
 		return "navigation"
-	case recallTools[tool] || tool == "upsert_graph_triples":
+	case recallTools[tool] || tool == "upsert_graph_triples" || tool == "offload_turns":
 		return "memory"
 	case strings.HasPrefix(tool, "git_"):
 		return "git"
@@ -556,7 +559,7 @@ const (
 )
 
 func (s *Server) memoryStats(ctx context.Context, buckets []usage.Bucket, sessions, days int, now time.Time) (MemoryStats, error) {
-	m := MemoryStats{Sources: map[string]int{}, Repos: []memory.Stats{}, Daily: []MemoryDay{}, Clients: []MemoryClient{}}
+	m := MemoryStats{Sources: map[string]int{}, RecallsByTool: map[string]int{}, Repos: []memory.Stats{}, Daily: []MemoryDay{}, Clients: []MemoryClient{}}
 	repos, err := s.st.MemoryStats(ctx)
 	if err != nil {
 		return m, err
@@ -611,6 +614,7 @@ func (s *Server) memoryStats(ctx context.Context, buckets []usage.Bucket, sessio
 		case recallTools[b.Tool]:
 			m.Recalls += b.Calls
 			m.RecallTokens += b.ResponseTokens
+			m.RecallsByTool[b.Tool] += b.Calls
 			day(b.Day).Recalls += b.Calls
 			client(b.Client).Recalls += b.Calls
 		case b.Tool == usage.MemoryAutoRecalls:
