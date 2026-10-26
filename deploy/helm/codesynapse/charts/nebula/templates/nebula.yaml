@@ -31,12 +31,16 @@ spec:
           # Status port; it listens on loopback only.
           ports:
             - {name: metad-status, containerPort: 19559}
+          # The status port listens on the pod's loopback only (--ws_ip), so
+          # the probes run inside the container: an httpGet with host
+          # 127.0.0.1 is sent by the kubelet to the node's loopback instead,
+          # never connects, and had the pod restarted for good.
           startupProbe:
-            httpGet: {host: 127.0.0.1, path: /status, port: metad-status}
+            exec: {command: [curl, -sf, -o, /dev/null, "http://127.0.0.1:19559/status"]}
             periodSeconds: 3
             failureThreshold: 60
           livenessProbe:
-            httpGet: {host: 127.0.0.1, path: /status, port: metad-status}
+            exec: {command: [curl, -sf, -o, /dev/null, "http://127.0.0.1:19559/status"]}
             periodSeconds: 20
             failureThreshold: 6
           resources:
@@ -50,9 +54,12 @@ spec:
             - {name: scratch, mountPath: /tmp, subPath: tmp}
         - name: storaged
           image: {{ .Values.images.storaged }}
-          args: [--meta_server_addrs=127.0.0.1:9559, --local_ip=127.0.0.1, --ws_ip=127.0.0.1, --port=9779, --data_path=/data/storage, --log_dir=/logs/storaged, --pid_file=/tmp/storaged.pid, --v=0, --minloglevel=1, --heartbeat_interval_secs=2]
-          # No probe on the service itself: storaged serves nothing until the
-          # init container below has registered it.
+          args: [--meta_server_addrs=127.0.0.1:9559, --local_ip=127.0.0.1, --ws_ip=127.0.0.1, --port=9779, --data_path=/data/storage, --cluster_id_path=/data/storage/cluster.id, --log_dir=/logs/storaged, --pid_file=/tmp/storaged.pid, --v=0, --minloglevel=1, --heartbeat_interval_secs=2]
+          # The root filesystem is read-only, so cluster.id (written to the
+          # working directory by default) goes to the data volume; without it
+          # storaged never joins metad. No probe on the service itself:
+          # storaged serves nothing until the init container below has
+          # registered it.
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
@@ -69,11 +76,11 @@ spec:
             # Status port; it listens on loopback only.
             - {name: graphd-status, containerPort: 19669}
           startupProbe:
-            httpGet: {host: 127.0.0.1, path: /status, port: graphd-status}
+            exec: {command: [curl, -sf, -o, /dev/null, "http://127.0.0.1:19669/status"]}
             periodSeconds: 3
             failureThreshold: 60
           livenessProbe:
-            httpGet: {host: 127.0.0.1, path: /status, port: graphd-status}
+            exec: {command: [curl, -sf, -o, /dev/null, "http://127.0.0.1:19669/status"]}
             periodSeconds: 20
             failureThreshold: 6
           readinessProbe:
