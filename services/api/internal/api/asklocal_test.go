@@ -154,3 +154,44 @@ func TestAskLocalReportAndTaskGuard(t *testing.T) {
 	f := newRuntimeFixture(t, Config{LLM: reg})
 	assert.Equal(t, f.client.do("POST", "/api/v1/repos/"+storetest.Repo+"/ai/local-answer", "", nil, runtimeHeaders("thread-a")...), 400)
 }
+
+// The pre-brief's plan names line ranges from the graph alone.
+func TestBriefPlan(t *testing.T) {
+	f := newRuntimeFixture(t, Config{})
+	path := "/api/v1/repos/" + storetest.Repo + "/brief-plan"
+	var plan BriefPlan
+	require.Equal(t, f.client.do("POST", path, `{"prompt":"Make Handler validate its input before it runs"}`, &plan, runtimeHeaders("thread-a")...), 200)
+	require.True(t, len(plan.Ranges) > 0)
+	assert.Contains(t, strings.Join(plan.Ranges, ","), "app/app.go:")
+	assert.True(t, len(plan.Ranges) <= maxBriefRanges)
+	assert.Equal(t, f.client.do("POST", path, `{"prompt":"  "}`, nil, runtimeHeaders("thread-a")...), 400)
+}
+
+// In brief mode the local model briefs instead of answering, and the brief
+// is counted.
+func TestAskLocalBriefMode(t *testing.T) {
+	model := chatModel(t, func(system, user string) string {
+		if !strings.Contains(system, "Brief it") || !strings.Contains(user, "The developer's request: add a flag") {
+			return "wrong prompt"
+		}
+		return "**Where** Handler at internal/api/api.go:11."
+	})
+	reg := llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{{Name: "local", Kind: llm.KindOpenAI, BaseURL: model.URL + "/v1", Model: "qwen", MaxOutputTokens: 4000, MaxInputTokens: 30000, TimeoutSeconds: 5}}, Default: "local"})
+	f := newRuntimeFixture(t, Config{LLM: reg})
+	path := "/api/v1/repos/" + storetest.Repo + "/ask-local"
+	body := `{"question":"add a flag","mode":"brief","files":[{"path":"internal/api/api.go","start":10,"end":12,"text":"a\nb\nc\n"}]}`
+	var ans asklocal.Answer
+	require.Equal(t, f.client.do("POST", path, body, &ans, runtimeHeaders("thread-a")...), 200)
+	assert.Equal(t, ans.Answer, "**Where** Handler at internal/api/api.go:11.")
+	assert.True(t, ans.Grounded)
+	buckets, err := f.store.Usage(t.Context(), "")
+	require.NoError(t, err)
+	briefs := 0
+	for _, b := range buckets {
+		if b.Tool == usage.LocalBriefs {
+			briefs += b.Calls
+		}
+	}
+	assert.Equal(t, briefs, 1)
+	assert.Equal(t, f.client.do("POST", path, strings.Replace(body, `"brief"`, `"essay"`, 1), nil, runtimeHeaders("thread-a")...), 400)
+}

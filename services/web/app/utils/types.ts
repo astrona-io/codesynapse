@@ -246,7 +246,7 @@ export interface WorkspaceStats {
     context_total_tokens: number; context_saved_pct: number
     sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; avoided_method: string
     // ask_local: tokens local models read, and its part of avoided_tokens.
-    local_read_tokens?: number; local_avoided_tokens?: number
+    local_read_tokens?: number; local_avoided_tokens?: number; local_briefs?: number
     // How sessions began, reported by the Claude Code plugin's hooks.
     workflow: { first_codesynapse: number; first_native: number; reads_turned_back: number; first_share_pct: number; files_edited: number; files_edited_found: number; edit_recall_pct: number; bash: Record<string, number> | null; bash_total: number }
     avg_latency_ms: number; max_latency_ms: number; daily: UsageDay[]; tools: UsageTool[]
