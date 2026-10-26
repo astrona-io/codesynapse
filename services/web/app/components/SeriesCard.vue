@@ -1,17 +1,31 @@
 <script setup lang="ts">
 import type { SeriesPanel, SeriesRange } from '~/utils/types'
+import type { BatchedPanel } from '~/composables/useSeriesBatch'
 
 // One time-series panel from /stats/series. Emits "unavailable" when the
 // API says metrics are not configured (409) or the panel is not for this
 // user (403), so the page can explain once instead of per chart.
-const props = defineProps<{ panel: string; range: SeriesRange; tick: number; repo?: string }>()
+// A page that loads its panels together (useSeriesBatch) passes batched;
+// a card on its own fetches its panel.
+const props = defineProps<{ panel: string; range: SeriesRange; tick?: number; repo?: string; batched?: BatchedPanel | null; batchPending?: boolean }>()
 const emit = defineEmits<{ unavailable: [status: number] }>()
-const { data, error, pending, refresh } = useApiGet<SeriesPanel>(() => `stats/series?panel=${props.panel}&range=${props.range}${props.repo ? `&repo=${encodeURIComponent(props.repo)}` : ""}`)
-watch(() => props.tick, () => refresh())
-watch(error, (e) => {
-  const status = (e as { statusCode?: number } | null)?.statusCode
-  if (status === 409 || status === 403) emit('unavailable', status)
+const own = props.batched === undefined
+  ? useApiGet<SeriesPanel>(() => `stats/series?panel=${props.panel}&range=${props.range}${props.repo ? `&repo=${encodeURIComponent(props.repo)}` : ""}`)
+  : null
+if (own) watch(() => props.tick, () => own.refresh())
+const data = computed<SeriesPanel | null>(() => (own ? own.data.value ?? null : props.batched?.data ?? null))
+const pending = computed(() => (own ? own.pending.value : !!props.batchPending))
+const error = computed<{ statusCode: number; message: string } | null>(() => {
+  if (own) {
+    const e = own.error.value as { statusCode?: number } | null
+    return e ? { statusCode: e.statusCode ?? 0, message: apiErrorMessage(own.error.value) } : null
+  }
+  const b = props.batched
+  return b && b.status !== 200 ? { statusCode: b.status, message: b.error ?? '' } : null
 })
+watch(error, (e) => {
+  if (e?.statusCode === 409 || e?.statusCode === 403) emit('unavailable', e.statusCode)
+}, { immediate: true })
 const empty = computed(() => !data.value?.series.some((s) => s.values.some((v) => v !== null)))
 const headline = computed(() => {
   const d = data.value
@@ -27,7 +41,7 @@ const headline = computed(() => {
       <p class="label">{{ data?.title ?? panel }}</p>
       <span v-if="headline" class="headline mono">{{ headline }}</span>
     </div>
-    <p v-if="error && (error as any).statusCode !== 409 && (error as any).statusCode !== 403" class="muted small">{{ apiErrorMessage(error) }}</p>
+    <p v-if="error && error.statusCode !== 409 && error.statusCode !== 403" class="muted small">{{ error.message }}</p>
     <template v-else-if="data">
       <LineChart v-if="!empty" :times="data.times" :series="data.series" :title="data.title" :unit="data.unit" :step-seconds="data.step_seconds" />
       <p v-else class="muted small empty-chart">{{ data.empty }}</p>
