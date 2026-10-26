@@ -236,3 +236,20 @@ func TestBytesPerTokenScalesTheEstimate(t *testing.T) {
 	cfg.BytesPerToken = 9
 	assert.Error(t, validateBudgetConfig(cfg))
 }
+
+func TestOpenAIRequestReasoningEffort(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  ProviderConfig
+		want any
+	}{
+		{"unset", ProviderConfig{DisableThinking: true}, nil},
+		{"none", ProviderConfig{Effort: "none"}, "none"},
+		{"high", ProviderConfig{Effort: "high"}, "high"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := openAIRequest(tc.cfg, Request{User: "hi"})
+			assert.Equal(t, body["reasoning_effort"], tc.want)
+		})
+	}
+}
