@@ -343,6 +343,15 @@
       "properties": {
         "externalAddrs": {
           "description": "When disabled: the graphd addresses (host:9669, comma separated). The root password stays NEBULA_PASSWORD in the Secret; in the chart it is at most 24 characters (NebulaGraph's limit)."
+        },
+        "space": {
+          "description": "The graph space's layout, fixed when CodeSynapse first creates it; changing it later does not reshape an existing space.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "partitions": {"description": "Partitions the graph is split into, spread over the storaged hosts.", "type": "integer", "minimum": 1, "maximum": 1024},
+            "replicas": {"description": "Copies of each partition: odd, at most the storaged hosts. The in-chart NebulaGraph needs 1; a cluster wants 3.", "type": "integer", "enum": [1, 3, 5, 7]}
+          }
         }
       }
     },

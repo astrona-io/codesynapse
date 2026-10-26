@@ -26,6 +26,11 @@
 {{- define "cs.storeEnv" -}}
 - {name: CODESYNAPSE_NEBULA_ADDRS, value: {{ include "cs.nebulaAddrs" . | quote }}}
 - {name: CODESYNAPSE_NEBULA_USER, value: root}
+{{- if and .Values.nebula.enabled (gt (int .Values.nebula.space.replicas) 1) }}
+{{- fail "nebula.space.replicas above 1 needs a NebulaGraph cluster: the in-chart one has a single storaged host" }}
+{{- end }}
+- {name: CODESYNAPSE_NEBULA_PARTITIONS, value: {{ .Values.nebula.space.partitions | quote }}}
+- {name: CODESYNAPSE_NEBULA_REPLICAS, value: {{ .Values.nebula.space.replicas | quote }}}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_NEBULA_PASSWORD" "NEBULA_PASSWORD") }}
 - {name: CODESYNAPSE_MILVUS_URL, value: {{ include "cs.milvusURL" . | quote }}}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_MILVUS_TOKEN" "MILVUS_TOKEN" true) }}
