@@ -99,7 +99,7 @@ Search stays inside the stores rather than a separate engine; see [ADR 0001](../
 
 `codesynapse mcp hooks` installs:
 
-- `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` (default 30%, `--compact-at`), so Claude Code compacts earlier;
+- `autoCompactWindow` (default 150k tokens, `--context-cap`; a cap already set is kept), so Claude Code compacts long before a million-token window fills;
 - a **SessionStart** hook (`codesynapse memory recall`) that injects facts as additional context;
 - a **PreCompact** hook (`codesynapse memory offload`) that sends turns before the window shrinks, once per session.
 

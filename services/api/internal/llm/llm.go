@@ -684,6 +684,28 @@ func (r *Registry) Models(ctx context.Context, name string) ([]string, error) {
 	return p.Models(ctx)
 }
 
+// MissingModels lists the configured chat and embedding models that served
+// (a provider's model list) does not contain, so a model nobody pulled is
+// named up front instead of failing a job later. Ollama lists name:tag, and
+// a name without a tag means :latest. An empty list proves nothing: some
+// servers do not list their models.
+func MissingModels(cfg ProviderConfig, served []string) []string {
+	if len(served) == 0 {
+		return nil
+	}
+	has := make(map[string]bool, len(served))
+	for _, m := range served {
+		has[m] = true
+	}
+	var out []string
+	for _, m := range []string{cfg.Model, cfg.EmbeddingModel} {
+		if m != "" && !has[m] && !has[m+":latest"] && !slices.Contains(out, m) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 var thinkBlock = regexp.MustCompile(`(?s)<think>.*?</think>`)
 
 // CleanText strips reasoning blocks some local models put in their answer.

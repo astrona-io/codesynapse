@@ -41,6 +41,19 @@ type Server struct {
 	// StoreToken keeps the key in the user's config folder for the bridge,
 	// so Claude Code's settings never hold it.
 	StoreToken func(token string) (string, error)
+	// ContextCap, in tokens, is where Claude Code and Codex compact (0
+	// leaves their settings alone). An existing setting is kept unless
+	// ForceContextCap: the user asked for this cap.
+	ContextCap      int
+	ForceContextCap bool
+	// Note reports what an installer changed besides the connection.
+	Note func(msg string)
+}
+
+func (s Server) note(msg string) {
+	if s.Note != nil {
+		s.Note(msg)
+	}
 }
 
 // Target is one agent configuration that can be installed.
@@ -64,7 +77,20 @@ func Detect(home, cwd string) []Target {
 	if _, err := exec.LookPath("claude"); err == nil {
 		out = append(out, Target{
 			ID: "claude", Description: "Claude Code (user scope, all projects; one bridge per chat)",
-			install: installClaude,
+			install: func(ctx context.Context, s Server) error {
+				if err := installClaude(ctx, s); err != nil {
+					return err
+				}
+				if s.ContextCap == 0 {
+					return nil
+				}
+				msg, err := SetClaudeContextCap(filepath.Join(home, ".claude", "settings.json"), s.ContextCap, s.ForceContextCap)
+				if err != nil {
+					return err
+				}
+				s.note(msg)
+				return nil
+			},
 		})
 	}
 	if _, err := exec.LookPath("codex"); err == nil {
@@ -77,6 +103,13 @@ func Detect(home, cwd string) []Target {
 				}
 				if err := installCodex(ctx, s); err != nil {
 					return err
+				}
+				if s.ContextCap > 0 {
+					msg, err := SetCodexContextCap(filepath.Join(home, ".codex", "config.toml"), s.ContextCap, s.ForceContextCap)
+					if err != nil {
+						return err
+					}
+					s.note(msg)
 				}
 				return InstallLifecycleHooks(p, "codex", s.Command, s.APIURL)
 			},
