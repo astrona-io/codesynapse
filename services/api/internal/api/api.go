@@ -31,6 +31,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/security"
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/internal/usage"
 	"github.com/astrona-io/codesynapse/services/api/internal/annotation"
 	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 	"github.com/astrona-io/codesynapse/services/api/internal/offload"
@@ -182,6 +183,15 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	s.offload = offload.New(st, cfg.LLM, logger)
 	s.recall = recall.New(st, cfg.LLM, logger)
 	s.offload.OnSessionSaved = s.indexSession
+	s.offload.OnFinished = func(ctx context.Context, org, repo string, saved int) {
+		if saved <= 0 {
+			return
+		}
+		b := usage.Bucket{Day: usage.Day(time.Now()), Org: org, Repo: repo, Tool: usage.MemoryOffloadFacts, Client: memoryClient, Calls: saved}
+		if err := s.st.AddUsage(ctx, []usage.Bucket{b}); err != nil {
+			s.logger.Warn("memory counters not saved", "error", err)
+		}
+	}
 	if !cfg.Worker {
 		go s.offload.Run(ctx)
 		go s.observeMemoryFacts(ctx)

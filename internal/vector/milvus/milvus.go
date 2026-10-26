@@ -37,7 +37,7 @@ const (
 	defaultPrefix = "cs_memory_"
 	// Field lengths: entity IDs are hashes, tenants organisation IDs,
 	// namespaces "org|graph".
-	maxID        = 128
+	maxID        = vector.MaxID
 	maxTenant    = 128
 	maxNamespace = 1024
 	// searchFilter routes a search to one tenant and namespace.

@@ -165,3 +165,20 @@ func recallContext(t *testing.T, tenant ...string) context.Context {
 	return ctx
 }
 func allowRecall(context.Context) error { return nil }
+
+// A name near the length limit makes an entity ID longer than the vector
+// index holds; that entity is left out instead of failing the whole batch.
+func TestIndexSkipsEntitiesTheIndexCannotHold(t *testing.T) {
+	ctx := recallContext(t)
+	s, st := setup(t, true)
+	long := strings.Repeat("a long note saved as a name ", 5)[:memory.MaxNameLen]
+	b, err := memory.Prepare("tenant|r", []memory.Triple{{Subject: "Decision", Predicate: "HAS_NOTE", Object: long}}, "agent", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, st.UpsertMemory(ctx, b))
+	n, err := s.IndexRepository(ctx, "tenant|r", allowRecall)
+	require.NoError(t, err)
+	assert.Equal(t, n, 7, "every entity was considered")
+	res, err := s.Recall(ctx, "tenant|r", Query{Text: "who owns payments", Depth: 1})
+	require.NoError(t, err)
+	assert.Equal(t, res.Mode, "hybrid", "the others were embedded")
+}
