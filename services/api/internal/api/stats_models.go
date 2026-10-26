@@ -56,6 +56,19 @@ type ModelStat struct {
 type ModelStats struct {
 	Range  string      `json:"range"`
 	Models []ModelStat `json:"models"`
+	// Reference prices a cloud model the operator configured, so work done
+	// locally can be valued at what that model would have charged; nil when
+	// no cloud provider has prices, and then no cost is estimated.
+	Reference *PriceReference `json:"reference_price,omitempty"`
+}
+
+// PriceReference is one configured cloud provider's prices, US dollars per
+// million tokens.
+type PriceReference struct {
+	Provider      string  `json:"provider"`
+	Model         string  `json:"model"`
+	InputPerMTok  float64 `json:"input_per_mtok"`
+	OutputPerMTok float64 `json:"output_per_mtok"`
 }
 
 // modelQueries; $r is the window.
@@ -186,6 +199,14 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out := ModelStats{Range: rng, Models: []ModelStat{}}
+	if s.cfg.LLM != nil {
+		for _, p := range s.cfg.LLM.Configs() {
+			if !p.Local() && p.PriceInputPerMTok > 0 && p.PriceOutputPerMTok > 0 {
+				out.Reference = &PriceReference{Provider: p.Name, Model: p.Model, InputPerMTok: p.PriceInputPerMTok, OutputPerMTok: p.PriceOutputPerMTok}
+				break
+			}
+		}
+	}
 	for _, m := range models {
 		if m.Requests == 0 && m.InputTokens == 0 {
 			continue

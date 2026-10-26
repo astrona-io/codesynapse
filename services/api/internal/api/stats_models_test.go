@@ -57,7 +57,7 @@ func TestModelStats(t *testing.T) {
 	vm := modelVM(t, &filters)
 	reg := llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{
 		{Name: "local", Kind: llm.KindOpenAI, BaseURL: "http://127.0.0.1:11434/v1", Model: "qwen", ContextWindow: 262144},
-		{Name: "cloud", Kind: llm.KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "big"},
+		{Name: "cloud", Kind: llm.KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "big", PriceInputPerMTok: 3, PriceOutputPerMTok: 15},
 	}, Default: "local"})
 	s := &Server{cfg: Config{Metrics: &telemetry.Querier{URL: vm.URL}, LLM: reg}, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	ctx := context.WithValue(context.Background(), scopeKey{}, scope{orgs: []accounts.Membership{{Org: accounts.Org{ID: "0123456789abcdef01234567"}}}})
@@ -67,6 +67,8 @@ func TestModelStats(t *testing.T) {
 	var out ModelStats
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
 	require.Len(t, out.Models, 2)
+	require.True(t, out.Reference != nil)
+	assert.Equal(t, *out.Reference, PriceReference{Provider: "cloud", Model: "big", InputPerMTok: 3, OutputPerMTok: 15})
 	q := out.Models[0]
 	assert.Equal(t, []any{q.Provider, q.Model, q.Local, q.Configured, q.ContextWindow}, []any{"local", "qwen", true, true, 262144})
 	assert.Equal(t, []float64{q.Requests, q.Failures, q.InputTokens, q.OutputTokens, q.AvgPromptTokens}, []float64{40, 2, 240000, 12000, 6000})
