@@ -176,7 +176,8 @@ flowchart LR
 - `kind: openai` covers anything with an OpenAI-compatible `/v1/chat/completions`: MLX (`mlx_lm.server`), Ollama, vLLM, LM Studio, llama.cpp, OpenRouter. An API key is optional (`api_key_env` names the environment variable).
 - `kind: anthropic` uses the official SDK; the key comes from `ANTHROPIC_API_KEY`.
 - The compose API container reaches services on your Mac through `host.docker.internal` (for example `http://host.docker.internal:9080/v1`).
-- `disable_thinking: true` turns off reasoning for Qwen-style models, which otherwise spend the whole output budget thinking.
+- `disable_thinking: true` turns off reasoning for Qwen-style models, which otherwise spend the whole output budget thinking. It works on MLX, vLLM and SGLang; Ollama ignores it, so on Ollama set `effort: none` instead.
+- `effort` on a `kind: openai` provider is sent as `reasoning_effort` (`none`, `low`, `medium`, `high`, as the server allows).
 - Set `context_window` to the model's real context (for MLX models it is `max_position_embeddings` in the model's `config.json`). Each request then gets everything up to the window minus `max_output_tokens`, and the work per request grows with it: more findings per triage batch, more changed symbols and longer code excerpts per review. Without `context_window` it stays at a safe 32k in / 8k out. Lower `max_input_tokens` if answers get too slow; the timeout scales with the budget. See [prompt budgets](../PROMPT_BUDGETS.md).
 
 On the **AI models** page you pick a global model, the fallback for everything, and optionally a different one per area: code review, security analysis and briefings. The choice is saved in `workspace/.codesynapse/llm-routes.json`. Remote providers never receive source code beyond the diff you ask them to review; local providers also get short snippets around findings. Model answers are treated as untrusted text and redacted before they are stored.

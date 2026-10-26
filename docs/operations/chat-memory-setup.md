@@ -33,7 +33,7 @@ ollama pull nomic-embed-text     # recall by meaning
 ```
 
 !!! warning "Pick a model that does not think first"
-    Models that reason before answering (Qwen3, DeepSeek-R1) can spend the whole output budget on thinking. The job then fails with `answer cut off at max_output_tokens … raise it for reasoning models`, and nothing is saved. `disable_thinking` only works on servers that understand `chat_template_kwargs` (MLX, vLLM); Ollama ignores it. Use `llama3.1:8b`, `gemma3:12b` or another instruction model without a thinking phase.
+    Models that reason before answering (Qwen3, DeepSeek-R1) can spend the whole output budget on thinking. The job then fails with `answer cut off at max_output_tokens … raise it for reasoning models`, and nothing is saved. `disable_thinking` only works on servers that understand `chat_template_kwargs` (MLX, vLLM); Ollama ignores it. On Ollama set `effort: none`, which is sent as `reasoning_effort` and turns thinking off, or use `llama3.1:8b`, `gemma3:12b` or another instruction model without a thinking phase.
 
 A model of 7–12 billion parameters is enough. Smaller ones (1–3B) miss facts and invent predicates.
 

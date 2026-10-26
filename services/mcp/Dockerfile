@@ -18,7 +18,10 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 
 # git is needed for impact analysis by base/head refs.
 FROM docker.io/library/alpine:3.24
-RUN apk add --no-cache git ca-certificates && adduser -D -u 10001 codesynapse
+# PACKAGES_DATE (the build day in CI) keys this layer, so the build cache
+# never keeps Alpine packages older than a day after a fix is published.
+ARG PACKAGES_DATE
+RUN apk upgrade --no-cache && apk add --no-cache git ca-certificates && adduser -D -u 10001 codesynapse
 ENV CODESYNAPSE_MCP_TRANSPORT=http CODESYNAPSE_MCP_ADDR=0.0.0.0:8090
 LABEL org.opencontainers.image.licenses="Apache-2.0" org.opencontainers.image.vendor="Astrona.io"
 COPY LICENSE NOTICE /usr/share/licenses/codesynapse/
