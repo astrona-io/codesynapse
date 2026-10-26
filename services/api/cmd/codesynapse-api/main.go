@@ -119,9 +119,35 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return fmt.Errorf("AI provider config: %w", err)
 	}
+	if len(llmCfg.Providers) == 0 && os.Getenv("CODESYNAPSE_LLM_DISCOVER") != "false" {
+		// Nothing configured: use a local model server if one answers.
+		urls := llm.DiscoverURLs
+		if v := os.Getenv("CODESYNAPSE_LLM_DISCOVER_URLS"); v != "" {
+			urls = strings.Split(v, ",")
+		}
+		dctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		if p, ok := llm.DiscoverProvider(dctx, urls); ok {
+			if err := llmCfg.Add(p, os.Getenv); err != nil {
+				cancel()
+				return fmt.Errorf("discovered AI provider: %w", err)
+			}
+			o.EC.Logger.Info("found a local model server", "base_url", p.BaseURL)
+		}
+		cancel()
+	}
 	var registry *llm.Registry
 	if len(llmCfg.Providers) > 0 {
 		registry = llm.NewRegistry(llmCfg)
+		if registry.HasAuto() {
+			// First answer before serving, then every five minutes, so a
+			// model pulled or removed later is used without a restart.
+			rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			for _, c := range registry.Resolve(rctx) {
+				o.EC.Logger.Info("AI model picked", "change", c)
+			}
+			cancel()
+			go registry.ResolveEvery(ctx, 5*time.Minute, func(c string) { o.EC.Logger.Info("AI model picked", "change", c) })
+		}
 		o.EC.Logger.Info("AI providers configured", "providers", len(llmCfg.Providers), "default", llmCfg.Default)
 		if !o.worker {
 			go warnMissingModels(ctx, o.EC.Logger, registry, llmCfg)
@@ -215,7 +241,8 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 // provider test and the jobs.
 func warnMissingModels(ctx context.Context, logger *slog.Logger, r *llm.Registry, cfg llm.Config) {
 	for _, p := range cfg.Providers {
-		if p.Kind != llm.KindOpenAI {
+		if p.Kind != llm.KindOpenAI || p.Auto() {
+			// An auto provider uses what its server has.
 			continue
 		}
 		served, err := r.Models(ctx, p.Name)

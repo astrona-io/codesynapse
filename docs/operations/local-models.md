@@ -69,7 +69,22 @@ The CodeSynapse stack itself uses about 1 GB across its containers at rest (meas
 
 2. Raise the context length. The Ollama app has it under Settings (set it to 256k); a server started from the shell reads `OLLAMA_CONTEXT_LENGTH=262144`. CodeSynapse cannot set it through Ollama's OpenAI-compatible API.
 
-3. Add the provider to `config/llm.yaml` (copy `config/llm.example.yaml` first):
+3. Let CodeSynapse pick, or choose yourself.
+
+    **Automatic.** With no provider in `config/llm.yaml`, the API looks for Ollama (port 11434) or LM Studio (1234) when it starts and uses it. Or add one with `model: auto`:
+
+    ```yaml
+    providers:
+      - name: local
+        kind: openai
+        base_url: http://host.docker.internal:11434/v1
+        model: auto            # the chat model with the most parameters
+        embedding_model: auto  # an embedding model, for recall by meaning
+    ```
+
+    CodeSynapse asks the server what it serves at start-up and every five minutes. It picks the chat model with the most parameters, since answer quality matters more than speed, uses that model's own context length as `context_window` and, for a window of 64k or more, leaves 32k tokens for the answer (thinking models reason in it). A model you pull later is used within five minutes, without a restart; if the server stops answering, the last choice stays. The AI models page lists what the server offers and what was picked. `auto` works only for local servers. Set `CODESYNAPSE_LLM_DISCOVER=false` to turn off discovery, or `CODESYNAPSE_LLM_DISCOVER_URLS` to list other addresses.
+
+    **By hand.** Name the model and its settings:
 
     ```yaml
     providers:
