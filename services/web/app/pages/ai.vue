@@ -50,7 +50,7 @@ async function saveRouting() {
   }
 }
 const TASK_LABEL: Record<string, string> = { 'security-triage': 'Security triage', review: 'Code review', briefing: 'Briefing', fix: 'Fixes', 'pr-summary': 'Change summary', 'cleanup-briefing': 'Cleanup briefing' }
-interface TestResult { ok: boolean; error?: string; reply?: string; models?: string[]; seconds?: number; model?: string }
+interface TestResult { ok: boolean; error?: string; reply?: string; models?: string[]; missing?: string[]; seconds?: number; model?: string }
 const tests = ref<Record<string, TestResult | 'running'>>({})
 async function test(name: string) {
   tests.value = { ...tests.value, [name]: 'running' }
@@ -134,6 +134,7 @@ const resultOf = (n: string) => tests.value[n]
         <template v-if="resultOf(p.name) && resultOf(p.name) !== 'running'">
           <p v-if="(resultOf(p.name) as TestResult).ok" class="ok">Connected in {{ (resultOf(p.name) as TestResult).seconds }} s · replied “{{ (resultOf(p.name) as TestResult).reply }}”</p>
           <p v-else class="error">{{ (resultOf(p.name) as TestResult).error }}</p>
+          <p v-if="(resultOf(p.name) as TestResult).missing?.length" class="error">Not on this server: {{ (resultOf(p.name) as TestResult).missing!.join(', ') }}. On Ollama, run <code>ollama pull {{ (resultOf(p.name) as TestResult).missing![0] }}</code>; otherwise fix the name in <code>config/llm.yaml</code>.</p>
           <p v-if="(resultOf(p.name) as TestResult).models?.length" class="muted small">Server offers: {{ (resultOf(p.name) as TestResult).models!.join(', ') }}</p>
         </template>
         <p v-else-if="p.usage.last_error" class="error small">Last error: {{ p.usage.last_error }}</p>

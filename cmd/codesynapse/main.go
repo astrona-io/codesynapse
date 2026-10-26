@@ -804,6 +804,8 @@ type mcpInstallOptions struct {
 	apiURL  string
 	yes     bool
 	only    []string
+	cap     string
+	tokens  int
 }
 
 func (o *mcpInstallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -812,6 +814,7 @@ func (o *mcpInstallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "API used by the bridge and assistant lifecycle hooks")
 	f.BoolVarP(&o.yes, "yes", "y", false, "Install into every detected agent without asking")
 	f.StringSliceVar(&o.only, "only", nil, "Limit to these agents (claude, codex, gemini, opencode, cursor, project)")
+	f.StringVar(&o.cap, "context-cap", "150k", "Chat size at which Claude Code and Codex compact (100k to 1M; 0 leaves their settings alone). With the memory hooks older turns are offloaded first. A cap you set yourself is kept unless you pass this flag")
 	f.StringVar(&o.profile, "profile", toolsets.Core, "Toolsets the agents get: core (the eleven everyday tools), all, or core plus a comma list of "+strings.Join(toolsets.Names(), ", "))
 	return nil
 }
@@ -823,6 +826,9 @@ func (o *mcpInstallOptions) Validate(context.Context, *app.Env) error {
 	sel, err := toolsets.Parse(o.profile)
 	if err != nil {
 		return fmt.Errorf("--profile: %w", err)
+	}
+	if o.tokens, err = agentcfg.ParseContextCap(o.cap); err != nil {
+		return fmt.Errorf("--context-cap: %w", err)
 	}
 	o.url, err = withToolsets(o.url, sel)
 	return err
@@ -866,7 +872,12 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 	if token == "" {
 		token = newAPIClient(o.apiURL).token
 	}
-	server := agentcfg.Server{URL: o.url, Token: token, Command: bin, APIURL: o.apiURL, StoreToken: storeToken}
+	server := agentcfg.Server{
+		URL: o.url, Token: token, Command: bin, APIURL: o.apiURL, StoreToken: storeToken,
+		ContextCap: o.tokens, ForceContextCap: o.EC.Command.Flags().Changed("context-cap"),
+	}
+	var notes []string
+	server.Note = func(msg string) { notes = append(notes, msg) }
 	in := bufio.NewReader(o.EC.Stdin)
 	installed := 0
 	failed := 0
@@ -877,6 +888,7 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 		if !o.yes && !confirm(o.EC.Stderr, in, t) {
 			continue
 		}
+		notes = notes[:0]
 		if err := t.Install(ctx, server); err != nil {
 			failed++
 			_, _ = fmt.Fprintf(o.EC.Stderr, "  ✗ %s: %v\n", t.Description, err)
@@ -884,6 +896,9 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 		}
 		installed++
 		_, _ = fmt.Fprintf(o.EC.Stderr, "  ✓ %s\n", t.Description)
+		for _, n := range notes {
+			_, _ = fmt.Fprintf(o.EC.Stderr, "    %s\n", n)
+		}
 	}
 	if installed > 0 {
 		_, _ = fmt.Fprintln(o.EC.Stderr, "\nRestart the selected assistants. Codex: review and trust hooks with /hooks. Cursor: keep the installed MCP hooks enabled.\nThe local bridges register each chat automatically and read the personal key from its private file. Start a new chat and verify a CodeSynapse tool call with /mcp (Codex/Claude) or Customize → MCP (Cursor).")
