@@ -132,6 +132,12 @@ func (s *Server) overviewOf(ctx context.Context, only string) (Overview, error) 
 			Vulns: map[string]int{}, Grades: map[string]int{}, SecurityTags: map[string]int{},
 		},
 	}
+	// Fill the per-repository cache a few repositories at a time; the loop
+	// below then reads it. An error here comes back from the loop.
+	_ = forEach(ctx, len(repos), func(ctx context.Context, i int) error { //nolint:errcheck // reported by the loop below
+		_, err := s.overviewMetrics(ctx, repos[i])
+		return err
+	})
 	var graphTok, baseTok int
 	for _, repoNode := range repos {
 		name := repoNode.Name

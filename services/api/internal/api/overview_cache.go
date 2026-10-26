@@ -12,8 +12,12 @@ import (
 	"github.com/astrona-io/codesynapse/internal/store/nodeprops"
 )
 
+// The key covers every repository property, and the code graph changes only
+// through ReplaceRepo, which republishes the repository node with a new
+// receipt. The TTL only bounds memory; at 30 seconds it made the overview and
+// statistics recompute about seven seconds of reads on most visits.
 const (
-	overviewCacheTTL = 30 * time.Second
+	overviewCacheTTL = 10 * time.Minute
 	overviewCacheMax = 256
 )
 

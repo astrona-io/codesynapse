@@ -1,17 +1,10 @@
 <script setup lang="ts">
-import type { AIProvider, SeriesPanel } from '~/utils/types'
+import type { AIProvider } from '~/utils/types'
 
 const { data, refresh } = useApiGet<{ providers: AIProvider[]; tasks: string[]; routing: { default: string; tasks: Record<string, string> } }>('ai/providers')
 interface ProviderStatus { name: string; checked: boolean; online: boolean; model_available: boolean; latency_ms?: number; error?: string }
-// Jobs run in the worker, so the API process's own counters (p.usage) miss
-// them. The metrics series count every process; they are the day's totals.
-const usagePanels = ['llm_provider_requests', 'llm_provider_failures', 'llm_provider_input', 'llm_provider_output'] as const
-const usageSeries = Object.fromEntries(usagePanels.map(panel => [panel, useApiGet<SeriesPanel>(`stats/series?panel=${panel}&range=24h`).data]))
-function dayUsage(name: string): { requests: number; failures: number; input: number; output: number } | null {
-  const get = (panel: string) => usageSeries[panel]?.value?.series.find(s => s.name === name)?.total ?? 0
-  if (!usagePanels.every(panel => usageSeries[panel]?.value)) return null
-  return { requests: get('llm_provider_requests'), failures: get('llm_provider_failures'), input: get('llm_provider_input'), output: get('llm_provider_output') }
-}
+// The day's totals from every process (p.usage counts the API process only).
+const { usageOf: dayUsage } = useModelUsage('24h')
 const { data: status, refresh: refreshStatus } = useApiGet<{ providers: ProviderStatus[] }>('ai/status')
 let statusTimer: ReturnType<typeof setInterval> | undefined
 onMounted(() => { statusTimer = setInterval(() => refreshStatus(), 15000) })

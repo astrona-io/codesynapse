@@ -20,6 +20,9 @@ async function renderComponent(t, file, globals, props = {}) {
   let script = compileScript(descriptor, { id: file, inlineTemplate: true }).content
   script = stripTypeScriptTypes(script).replace(/from ["']vue["']/g, `from ${JSON.stringify(import.meta.resolve('vue'))}`)
   script = script.replace(/import \{ useStatistics \} from ['"]~\/composables\/useStatistics['"]/g, 'const useStatistics = globalThis.useStatistics')
+  // A data: URL is imported once per text: keep each render's module, and
+  // the stubs it captured, its own.
+  script += `\n// ${t.fullName}`
   const { default: component } = await import(`data:text/javascript;base64,${Buffer.from(script).toString('base64')}`)
   const setup = component.setup
   component.setup = async (p, ctx) => {
@@ -71,7 +74,34 @@ test('statistics renders missing token and edit fields from an older API', async
       s: ref({ agents: { sessions: 0, calls: 0, errors: 0, response_tokens: 0, avoided_tokens: 0, tools: [], clients: [], repos: [], daily: [], workflow: { first_codesynapse: 0, first_native: 0 } } }),
     }),
     fmtCompact: (n) => String(n),
+    useModelUsage: () => ({ ready: ref(false), usageOf: () => null }),
+    seriesRangeFor: () => '30d',
   })
   assert.match(html, /Model usage unavailable/)
   assert.match(html, /Small edits and output/)
+  assert.doesNotMatch(html, /Local models/, 'no AI providers in an older API, no local-model section')
+})
+
+test('statistics show local model work from the metrics store', async (t) => {
+  const usage = { 'local-ollama': { requests: 40, failures: 1, input: 9000, output: 1000 }, claude: { requests: 10, failures: 0, input: 500, output: 100 } }
+  const html = await renderComponent(t, '../pages/stats/agents.vue', {
+    useStatistics: () => ({
+      days: ref(30), error: ref(null), pending: ref(false),
+      s: ref({
+        agents: { sessions: 0, calls: 0, errors: 0, response_tokens: 0, avoided_tokens: 0, tools: [], clients: [], repos: [], daily: [], workflow: { first_codesynapse: 0, first_native: 0 } },
+        ai: [
+          { provider: 'local-ollama', model: 'qwen3.8:27b', local: true, usage: { requests: 0, failures: 0, input_tokens: 0, output_tokens: 0 } },
+          { provider: 'claude', model: 'claude-opus-5-5', local: false, usage: { requests: 0, failures: 0, input_tokens: 0, output_tokens: 0 } },
+        ],
+      }),
+    }),
+    fmtCompact: (n) => String(n),
+    useModelUsage: () => ({ ready: ref(true), usageOf: (name) => usage[name] }),
+    seriesRangeFor: () => '30d',
+  })
+  assert.match(html, /AI work that stayed on your network/)
+  assert.match(html, /qwen3\.8:27b/)
+  assert.match(html, /Local requests 40 /, 'requests from the metrics store, not the API process')
+  assert.match(html, /Tokens processed locally 10000 /, 'input + output tokens')
+  assert.match(html, /Share of AI requests 80% /, '40 of 50 requests stayed local')
 })

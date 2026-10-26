@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"maps"
 	"math"
 	"net/http"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/license"
 	"github.com/astrona-io/codesynapse/internal/memory"
 	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/reviews"
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/usage"
 	"github.com/astrona-io/codesynapse/services/api/internal/llm"
@@ -248,22 +250,23 @@ func (s *Server) buildStats(ctx context.Context, days int, now time.Time) (Stats
 	}
 	st := Stats{GeneratedAt: now.UTC().Format(time.RFC3339), Days: days, Workspace: ov.Totals, Jobs: ov.Jobs, Repos: ov.Repos, AI: []AIStat{}}
 
-	buckets, err := s.usageBuckets(ctx, days, now)
-	if err != nil {
-		return st, err
+	// The sections read different parts of the graph; each also reads its
+	// repositories a few at a time (forEach).
+	sections := []func(context.Context) error{
+		func(ctx context.Context) error {
+			buckets, err := s.usageBuckets(ctx, days, now)
+			if err != nil {
+				return err
+			}
+			st.Agents = agentUsage(buckets, ov.Repos, days, now)
+			st.Memory, err = s.memoryStats(ctx, buckets, st.Agents.Sessions)
+			return err
+		},
+		func(ctx context.Context) (err error) { st.Hygiene, err = s.hygieneStats(ctx, ov.Repos); return err },
+		func(ctx context.Context) (err error) { st.Reviews, err = s.reviewStats(ctx, ov.Repos); return err },
+		func(ctx context.Context) (err error) { st.Licenses, err = s.licenseStats(ctx, ov.Repos); return err },
 	}
-	st.Agents = agentUsage(buckets, ov.Repos, days, now)
-
-	if st.Memory, err = s.memoryStats(ctx, buckets, st.Agents.Sessions); err != nil {
-		return st, err
-	}
-	if st.Hygiene, err = s.hygieneStats(ctx, ov.Repos); err != nil {
-		return st, err
-	}
-	if st.Reviews, err = s.reviewStats(ctx, ov.Repos); err != nil {
-		return st, err
-	}
-	if st.Licenses, err = s.licenseStats(ctx, ov.Repos); err != nil {
+	if err := forEach(ctx, len(sections), func(ctx context.Context, i int) error { return sections[i](ctx) }); err != nil {
 		return st, err
 	}
 	if s.cfg.LLM != nil {
@@ -549,31 +552,31 @@ func (s *Server) memoryStats(ctx context.Context, buckets []usage.Bucket, sessio
 func (s *Server) hygieneStats(ctx context.Context, repos []RepoSummary) (HygieneStats, error) {
 	h := HygieneStats{NoUpdateAutomation: []string{}, RenovateIssues: []RepoCount{}, TopRules: []RuleCount{}}
 	rules := map[string]*RuleCount{}
-	for _, rs := range repos {
-		findings, err := s.st.List(ctx, rs.Name, store.Filter{Kinds: []model.NodeKind{model.KindFinding}}, store.ByName, store.MaxLimit)
-		if err != nil {
-			return h, err
-		}
-		seen := map[string]bool{}
+	perRepo := make([]ruleHits, len(repos))
+	if err := forEach(ctx, len(repos), func(ctx context.Context, i int) (err error) {
+		perRepo[i], err = s.findingRules(ctx, repos[i])
+		return err
+	}); err != nil {
+		return h, err
+	}
+	for i, rs := range repos {
 		renovate := 0
-		for _, f := range findings {
-			rule := f.Node.Rule
-			if rule == "dependency-updates-missing" && !seen[rule] {
+		names := slices.Sorted(maps.Keys(perRepo[i]))
+		for _, rule := range names {
+			hit := perRepo[i][rule]
+			if rule == "dependency-updates-missing" {
 				h.NoUpdateAutomation = append(h.NoUpdateAutomation, rs.Name)
 			}
 			if strings.HasPrefix(rule, "renovate-") {
-				renovate++
+				renovate += hit.findings
 			}
 			rc := rules[rule]
 			if rc == nil {
-				rc = &RuleCount{Rule: rule, Severity: f.Node.Severity}
+				rc = &RuleCount{Rule: rule, Severity: hit.severity}
 				rules[rule] = rc
 			}
-			rc.Findings++
-			if !seen[rule] {
-				rc.Repos++
-				seen[rule] = true
-			}
+			rc.Findings += hit.findings
+			rc.Repos++
 		}
 		if renovate > 0 {
 			h.RenovateIssues = append(h.RenovateIssues, RepoCount{rs.Name, renovate})
@@ -591,11 +594,14 @@ func (s *Server) hygieneStats(ctx context.Context, repos []RepoSummary) (Hygiene
 
 func (s *Server) reviewStats(ctx context.Context, repos []RepoSummary) (ReviewStats, error) {
 	rv := ReviewStats{ByStatus: map[string]int{}, ByKind: map[string]int{}, BySource: map[string]int{}, Verdicts: map[string]int{}, Fixes: map[string]int{}}
-	for _, rs := range repos {
-		list, err := s.st.ListReviews(ctx, rs.Name, store.MaxLimit)
-		if err != nil {
-			return rv, err
-		}
+	lists := make([][]reviews.Review, len(repos))
+	if err := forEach(ctx, len(repos), func(ctx context.Context, i int) (err error) {
+		lists[i], err = s.st.ListReviews(ctx, repos[i].Name, store.MaxLimit)
+		return err
+	}); err != nil {
+		return rv, err
+	}
+	for _, list := range lists {
 		for _, r := range list {
 			rv.Reviews++
 			rv.ByKind[cmp.Or(r.Kind, "review")]++
