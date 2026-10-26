@@ -127,6 +127,8 @@ With accounts, organisations use their own tokens instead; see [Organisation Git
 
 ## Kubernetes
 
+Sizing, and what a highly available install with failover needs: [Requirements](requirements.md).
+
 To try it on a cluster, `codesynapse install --local` installs the chart with random credentials and waits for every service; `codesynapse status` checks it and `codesynapse uninstall` removes it. See [the chart README](https://github.com/astrona-io/codesynapse/blob/main/deploy/helm/codesynapse/README.md#install-with-the-cli).
 
 Releases publish signed multi-arch images, `ghcr.io/astrona-io/codesynapse-{api,worker,mcp,web}`, and the Helm chart at the same version:
@@ -160,7 +162,7 @@ Test the chart only on the throwaway kind cluster these recipes create, with `--
 
 ## AI models
 
-Providers are configured in `config/llm.yaml` (copy `config/llm.example.yaml`; it is gitignored).
+Providers are configured in `config/llm.yaml` (copy `config/llm.example.yaml`; it is gitignored). To choose and set up a model on your own machine, and for what it needs and saves, see [Local models](local-models.md).
 
 ```mermaid
 flowchart LR

@@ -59,7 +59,9 @@ nav:
   - Home: index.md
   - Getting started:
       - getting-started/index.md
+      - Requirements: operations/requirements.md
       - Run the stack: operations/running.md
+      - Local models: operations/local-models.md
       - First run and sign-in: operations/first-run.md
       - Connect Claude Code: operations/claude-code-bridge.md
       - Keep chats small (local model): operations/chat-memory-setup.md
@@ -94,7 +96,9 @@ nav:
   - Administration:
       - operations/index.md
       - Deploy:
+          - Requirements: operations/requirements.md
           - Running the stack: operations/running.md
+          - Local models: operations/local-models.md
           - Releasing: operations/releasing.md
           - Upgrading: operations/upgrading.md
       - People and access:
