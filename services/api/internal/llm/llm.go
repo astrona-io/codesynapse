@@ -400,7 +400,8 @@ func (r *Registry) Routes() Routes {
 }
 
 // SetRoutes replaces the routing after validating names. An empty task
-// entry means "use the default".
+// entry, or one naming the default, means "use the default": such a task
+// follows the global model when it changes.
 func (r *Registry) SetRoutes(rt Routes) error {
 	if _, ok := r.impl[rt.Default]; !ok {
 		return fmt.Errorf("default provider %q is not configured", rt.Default)
@@ -418,6 +419,9 @@ func (r *Registry) SetRoutes(rt Routes) error {
 		}
 		if cfg, _ := r.Config(name); slices.Contains(LocalTasks, task) && !cfg.Local() {
 			return fmt.Errorf("task %q runs only on a local model; %q is not local", task, name)
+		}
+		if name == rt.Default {
+			continue
 		}
 		tasks[task] = name
 	}
