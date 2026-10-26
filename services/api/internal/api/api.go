@@ -318,6 +318,7 @@ func (s *Server) routes() {
 	s.agentSessionRoutes()
 	s.retrievalRoutes()
 	s.usageLocalRoutes()
+	s.askLocalRoutes()
 	s.agentRulesRoutes()
 	s.notificationRoutes()
 	s.route("GET /api/v1/overview", visibleOnly, s.handleWorkspaceOverview)

@@ -220,7 +220,7 @@ func (b *bridge) run(ctx context.Context, in io.Reader) error {
 			case <-ctx.Done():
 				return
 			}
-			if m.Method == "tools/call" && (b.answerGit(ctx, msg, m) || b.answerLocally(ctx, msg, m)) {
+			if m.Method == "tools/call" && (b.answerGit(ctx, msg, m) || b.answerAskLocal(ctx, msg, m) || b.answerLocally(ctx, msg, m)) {
 				return
 			}
 			msg := b.withRepo(ctx, msg, m)

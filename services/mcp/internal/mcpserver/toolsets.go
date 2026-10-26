@@ -95,6 +95,9 @@ var instructionRules = [][]clause{
 		{[]string{"git"}, `Git: instead of running git status, git diff, git blame or git log, and then opening files to understand them, call git_status for where the checkout stands, git_diff_summary for what changed and in which line ranges, git_blame for who last changed some lines and git_log for recent commits. Instead of gh pr view, gh pr checks or gh pr list, call gh_pr_status (state, mergeability, review decision, checks counted with only the failing and waiting ones named) and gh_pr_list, and gh_run_failure for why a CI run failed (the failed jobs, steps and error lines) instead of reading gh run view --log-failed. They answer in a few lines and are served by the Claude Code bridge on your machine.`},
 	},
 	{
+		{[]string{"local"}, `Save tokens with a local model: to learn what files say (how something works, where something is handled, what a long file or test log contains) without reading them into your context, call ask_local with the question and the files, directories or file:start-end ranges. A local model reads them and answers briefly with file:line citations; read those cited lines yourself before you edit or rely on a detail. When it answers that nothing is in the files, has no local model or cites nothing, read the files as usual. Never use it for the exact text you are about to edit.`},
+	},
+	{
 		{[]string{"reviews"}, `Reviews: when asked to review code, analyse it with get_pr_context.`},
 		{[]string{"reviews", "security"}, `Add security_report and rule_guide to that analysis, and attack_surface when the change adds or alters an HTTP route, MCP tool or CLI command.`},
 		{[]string{"reviews"}, `Record the result with submit_review (comments anchored to file:line, with concrete suggestions). Mark comments you have addressed with update_review_comment.`},
