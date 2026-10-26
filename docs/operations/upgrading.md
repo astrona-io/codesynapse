@@ -28,7 +28,7 @@ Take a backup. The parts that matter:
 | PostgreSQL (accounts, organisations, audit log, jobs, schedules, sealed tokens) | `kubectl --context <ctx> -n codesynapse exec codesynapse-postgresql-0 -- pg_dump -U codesynapse -Fc codesynapse > codesynapse.dump`, or your managed database's snapshots |
 | NebulaGraph and Milvus volumes (graphs, reviews, memory, vectors) | Volume snapshots of the `codesynapse-nebula` and `codesynapse-milvus` StatefulSet volumes. Graphs can be rebuilt by re-indexing; reviews and agent memory can't |
 | The Secret `codesynapse` | Keep `SECRET_KEY` safe. Organisation Git tokens and identity provider secrets sealed with a lost key have to be entered again |
-| The audit log, for retention outside the cluster | `GET /api/v1/admin/audit?format=jsonl` as a platform admin; `GET /api/v1/admin/audit/verify` checks the hash chain |
+| The audit log, for retention outside the cluster | `GET /api/v1/admin/audit?format=jsonl` as a platform admin; `GET /api/v1/admin/audit/verify` checks the hash chain. With an [archive](accounts-access.md#archive), back up its directory or bucket too: older entries are only there (`?deep=true` checks them) |
 
 Resource names assume the release is called `codesynapse`.
 

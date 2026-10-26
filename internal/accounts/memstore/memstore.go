@@ -30,6 +30,9 @@ type Store struct {
 	keys           map[string]accounts.APIKey // by ID
 	events         []accounts.Event
 	lastID         int64
+	segments       []accounts.AuditSegment
+	segmentID      int64
+	tip            string
 	repos          map[string]accounts.Repository // org|graph
 	tokens         map[string]accounts.GitToken   // org|host
 	teams          map[string]accounts.Team
@@ -437,13 +440,11 @@ func (s *Store) TouchAPIKey(_ context.Context, keyID string, at time.Time) error
 func (s *Store) AddEvent(_ context.Context, e accounts.Event) (accounts.Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	prev := ""
-	if n := len(s.events); n > 0 {
-		prev = s.events[n-1].Hash
-	}
-	e = e.Prepare(prev)
+	// The tip outlives pruned and sealed entries, like audit_head.
+	e = e.Prepare(s.tip)
 	s.lastID++
 	e.ID = s.lastID
+	s.tip = e.Hash
 	s.events = append(s.events, e)
 	return e, nil
 }
@@ -494,6 +495,43 @@ func (s *Store) PruneEvents(_ context.Context, before time.Time) (int, error) {
 	}
 	s.events = keep
 	return n, nil
+}
+
+// SealAuditSegment implements accounts.Store.
+func (s *Store) SealAuditSegment(_ context.Context, seg accounts.AuditSegment) (accounts.AuditSegment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if seg.Count <= 0 || seg.Count > len(s.events) {
+		return seg, accounts.ErrAuditConflict
+	}
+	first, last := s.events[0], s.events[seg.Count-1]
+	linked := len(s.segments) == 0 || s.segments[len(s.segments)-1].LastHash == seg.PrevHash
+	if !linked || first.ID != seg.FirstID || last.ID != seg.LastID || first.PrevHash != seg.PrevHash || last.Hash != seg.LastHash {
+		return seg, accounts.ErrAuditConflict
+	}
+	s.segmentID++
+	seg.ID = s.segmentID
+	s.segments = append(s.segments, seg)
+	s.events = slices.Clone(s.events[seg.Count:])
+	return seg, nil
+}
+
+// AuditSegments implements accounts.Store.
+func (s *Store) AuditSegments(context.Context) ([]accounts.AuditSegment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.segments[:min(len(s.segments), accounts.MaxAuditSegments)]), nil
+}
+
+// DropAuditSegment implements accounts.Store.
+func (s *Store) DropAuditSegment(_ context.Context, id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.segments) == 0 || s.segments[0].ID != id {
+		return fmt.Errorf("audit segment: %w", accounts.ErrNotFound)
+	}
+	s.segments = slices.Clone(s.segments[1:])
+	return nil
 }
 
 // AddRepository implements accounts.Store.

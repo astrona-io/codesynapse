@@ -19,6 +19,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/accounts/pgstore"
 	"github.com/astrona-io/codesynapse/internal/app"
+	"github.com/astrona-io/codesynapse/internal/auditarchive"
 	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/services/api/internal/api"
@@ -216,6 +217,12 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return fmt.Errorf("CODESYNAPSE_GIT_PUSH_TOKENS: %w", err)
 	}
+	var auditArchive auditarchive.Archive
+	if acc != nil && !o.worker { // the API's maintenance loop seals; workers never touch it
+		if auditArchive, err = auditarchive.FromEnv(os.Getenv); err != nil {
+			return err
+		}
+	}
 	var roles []string // all: this process runs every job
 	switch {
 	case o.worker:
@@ -228,8 +235,8 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		GitAuth:   gitx.Auth{Host: app.Getenv("CODESYNAPSE_GIT_TOKEN_HOST", "github.com"), Token: os.Getenv("CODESYNAPSE_GIT_TOKEN")},
 		AllowPush: pushAllowed(app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true", o.worker, roles, o.EC.Logger),
 		Accounts:  acc, ServiceToken: os.Getenv(EnvToken), SecureCookies: app.Getenv("CODESYNAPSE_COOKIE_SECURE", "true") == "true",
-		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour,
-		Metrics:        metricsQuerier(), IngestMetrics: ingestMetrics,
+		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour, AuditHot: time.Duration(hotDays()) * 24 * time.Hour, AuditArchive: auditArchive,
+		Metrics: metricsQuerier(), IngestMetrics: ingestMetrics,
 		TrustedProxies: trusted, PublicMCPURL: app.Getenv("CODESYNAPSE_PUBLIC_MCP_URL", "http://localhost:8090/mcp"),
 		PublicAPIURL:   app.Getenv("CODESYNAPSE_PUBLIC_API_URL", ""),
 		AgentRulesFile: os.Getenv("CODESYNAPSE_AGENT_RULES_FILE"),
@@ -493,6 +500,16 @@ func retentionDays() int {
 	n, err := strconv.Atoi(app.Getenv("CODESYNAPSE_AUDIT_RETENTION_DAYS", "400"))
 	if err != nil || n < 30 {
 		return 400 // NIS2 evidence needs history; below a month is a typo
+	}
+	return n
+}
+
+// hotDays reads CODESYNAPSE_AUDIT_HOT_DAYS (default 90): how long entries
+// stay in PostgreSQL when an audit archive is configured.
+func hotDays() int {
+	n, err := strconv.Atoi(app.Getenv("CODESYNAPSE_AUDIT_HOT_DAYS", "90"))
+	if err != nil || n < 7 {
+		return 90
 	}
 	return n
 }

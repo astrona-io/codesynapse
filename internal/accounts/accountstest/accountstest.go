@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -276,6 +277,47 @@ func Run(t *testing.T, st accounts.Store) {
 	v, err = accounts.VerifyAudit(ctx, st)
 	require.NoError(t, err)
 	assert.True(t, v.OK, "the chain still verifies from its first remaining entry")
+
+	// Sealing moves the oldest entries into a segment; the chain then starts
+	// at the segment and later entries still link to it.
+	held, err := st.ListEvents(ctx, accounts.EventFilter{Limit: 1000})
+	require.NoError(t, err)
+	slices.Reverse(held)
+	require.True(t, len(held) >= 3)
+	seg := accounts.AuditSegment{FirstID: held[0].ID, LastID: held[1].ID, FirstAt: held[0].At, LastAt: held[1].At, Count: 2,
+		PrevHash: held[0].PrevHash, LastHash: held[1].Hash, SHA256: strings.Repeat("a", 64), Bytes: 10, Backend: "dir", Key: "k1", SealedAt: now}
+	stale := seg
+	stale.Count = 3
+	_, err = st.SealAuditSegment(ctx, stale)
+	assert.True(t, errors.Is(err, accounts.ErrAuditConflict), "a seal that does not match the entries is refused")
+	sealed, err := st.SealAuditSegment(ctx, seg)
+	require.NoError(t, err)
+	assert.True(t, sealed.ID > 0)
+	_, err = st.SealAuditSegment(ctx, seg)
+	assert.True(t, errors.Is(err, accounts.ErrAuditConflict), "the same entries are sealed once")
+	segs, err := st.AuditSegments(ctx)
+	require.NoError(t, err)
+	require.Len(t, segs, 1)
+	assert.Equal(t, segs[0].LastHash, seg.LastHash)
+	assert.Equal(t, segs[0].LastAt, seg.LastAt.UTC())
+	_, err = svc.Record(ctx, accounts.Event{Action: "after.seal"})
+	require.NoError(t, err)
+	v, err = accounts.VerifyAudit(ctx, st)
+	require.NoError(t, err)
+	assert.True(t, v.OK, v.Reason)
+	assert.Equal(t, v.Segments, 1)
+	assert.Equal(t, v.Sealed, 2)
+	assert.Equal(t, v.Checked, len(held)-1)
+	next := accounts.AuditSegment{FirstID: held[2].ID, LastID: held[2].ID, FirstAt: held[2].At, LastAt: held[2].At, Count: 1,
+		PrevHash: held[2].PrevHash, LastHash: held[2].Hash, SHA256: strings.Repeat("b", 64), Bytes: 10, Backend: "dir", Key: "k2", SealedAt: now}
+	second, err := st.SealAuditSegment(ctx, next)
+	require.NoError(t, err)
+	assert.True(t, errors.Is(st.DropAuditSegment(ctx, second.ID), accounts.ErrNotFound), "only the oldest segment is dropped")
+	require.NoError(t, st.DropAuditSegment(ctx, sealed.ID))
+	v, err = accounts.VerifyAudit(ctx, st)
+	require.NoError(t, err)
+	assert.True(t, v.OK, "the next segment anchors the chain: "+v.Reason)
+	assert.Equal(t, v.FirstID, held[2].ID)
 
 	// Repository registry: one graph, referenced by two organisations.
 	add := func(orgID, graph, vis string) error {

@@ -765,6 +765,67 @@ func (s *Store) PruneEvents(ctx context.Context, before time.Time) (int, error) 
 	return int(tag.RowsAffected()), err
 }
 
+const segmentCols = "id, first_id, last_id, first_at, last_at, count, prev_hash, last_hash, sha256, bytes, backend, key, sealed_at"
+
+// SealAuditSegment implements accounts.Store. The chain tip is locked so no
+// second seal runs at once; the entries up to seg.LastID must be exactly the
+// ones the segment describes, or nothing changes.
+func (s *Store) SealAuditSegment(ctx context.Context, seg accounts.AuditSegment) (accounts.AuditSegment, error) {
+	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT hash FROM audit_head WHERE id = 1 FOR UPDATE"); err != nil {
+			return err
+		}
+		var lastHash string
+		err := tx.QueryRow(ctx, "SELECT last_hash FROM audit_segments ORDER BY first_id DESC LIMIT 1").Scan(&lastHash)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err == nil && lastHash != seg.PrevHash {
+			return accounts.ErrAuditConflict
+		}
+		var n int
+		var firstID, lastID int64
+		var firstPrev, lastHashNow string
+		if err := tx.QueryRow(ctx, `SELECT count(*), coalesce(min(id), 0), coalesce(max(id), 0),
+  coalesce((SELECT prev_hash FROM events ORDER BY id LIMIT 1), ''), coalesce((SELECT hash FROM events WHERE id = $1), '')
+FROM events WHERE id <= $1`, seg.LastID).Scan(&n, &firstID, &lastID, &firstPrev, &lastHashNow); err != nil {
+			return err
+		}
+		if n != seg.Count || firstID != seg.FirstID || lastID != seg.LastID || firstPrev != seg.PrevHash || lastHashNow != seg.LastHash {
+			return accounts.ErrAuditConflict
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO audit_segments (first_id, last_id, first_at, last_at, count, prev_hash, last_hash, sha256, bytes, backend, key, sealed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
+			seg.FirstID, seg.LastID, seg.FirstAt, seg.LastAt, seg.Count, seg.PrevHash, seg.LastHash, seg.SHA256, seg.Bytes, seg.Backend, seg.Key, seg.SealedAt).Scan(&seg.ID); err != nil {
+			return mapErr(err, "audit segment")
+		}
+		_, err = tx.Exec(ctx, "DELETE FROM events WHERE id <= $1", seg.LastID)
+		return err
+	})
+	return seg, err
+}
+
+// AuditSegments implements accounts.Store.
+func (s *Store) AuditSegments(ctx context.Context) ([]accounts.AuditSegment, error) {
+	rows, err := s.db.Query(ctx, "SELECT "+segmentCols+" FROM audit_segments ORDER BY first_id LIMIT $1", accounts.MaxAuditSegments)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (accounts.AuditSegment, error) {
+		var g accounts.AuditSegment
+		err := r.Scan(&g.ID, &g.FirstID, &g.LastID, &g.FirstAt, &g.LastAt, &g.Count, &g.PrevHash, &g.LastHash, &g.SHA256, &g.Bytes,
+			&g.Backend, &g.Key, &g.SealedAt)
+		g.FirstAt, g.LastAt, g.SealedAt = g.FirstAt.UTC(), g.LastAt.UTC(), g.SealedAt.UTC()
+		return g, err
+	})
+}
+
+// DropAuditSegment implements accounts.Store.
+func (s *Store) DropAuditSegment(ctx context.Context, id int64) error {
+	tag, err := s.db.Exec(ctx, "DELETE FROM audit_segments WHERE id = $1 AND first_id = (SELECT min(first_id) FROM audit_segments)", id)
+	return affected(tag, err, "audit segment")
+}
+
 // CreateTeam implements accounts.Store.
 func (s *Store) CreateTeam(ctx context.Context, t accounts.Team) error {
 	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {
