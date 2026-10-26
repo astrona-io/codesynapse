@@ -69,6 +69,10 @@ type PriceReference struct {
 	Model         string  `json:"model"`
 	InputPerMTok  float64 `json:"input_per_mtok"`
 	OutputPerMTok float64 `json:"output_per_mtok"`
+	// Source and Checked say where the prices come from and when they
+	// were read (price_source and price_checked, or the price feed).
+	Source  string `json:"source,omitempty"`
+	Checked string `json:"checked,omitempty"`
 }
 
 // modelQueries; $r is the window.
@@ -202,7 +206,7 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.LLM != nil {
 		for _, p := range s.cfg.LLM.Configs() {
 			if !p.Local() && p.PriceInputPerMTok > 0 && p.PriceOutputPerMTok > 0 {
-				out.Reference = &PriceReference{Provider: p.Name, Model: p.Model, InputPerMTok: p.PriceInputPerMTok, OutputPerMTok: p.PriceOutputPerMTok}
+				out.Reference = &PriceReference{Provider: p.Name, Model: p.Model, InputPerMTok: p.PriceInputPerMTok, OutputPerMTok: p.PriceOutputPerMTok, Source: p.PriceSource, Checked: p.PriceChecked}
 				break
 			}
 		}

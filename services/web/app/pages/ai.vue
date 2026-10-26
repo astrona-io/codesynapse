@@ -127,6 +127,11 @@ const resultOf = (n: string) => tests.value[n]
           <dd class="mono">{{ p.model === 'auto' ? 'none yet' : (p.model || '(server default)') }}<span v-if="p.auto" class="badge badge--green auto">picked automatically</span></dd>
           <dt>Endpoint</dt><dd class="mono">{{ p.endpoint }}</dd>
           <dt>API key</dt><dd>{{ p.has_key ? `set (${p.key_env})` : p.key_env ? `missing — set ${p.key_env}` : 'none needed' }}</dd>
+          <template v-if="p.prices">
+            <dt>Prices<InfoTip text="US dollars per million tokens, for the cost and savings estimates. price_source and price_checked in config/llm.yaml say where they come from; price_feed: openrouter reads them from OpenRouter's public model list once a day." /></dt>
+            <dd>${{ p.prices.input }} in · ${{ p.prices.output }} out<template v-if="p.prices.cached_input"> · ${{ p.prices.cached_input }} cached</template>
+              <span class="muted small"> · <template v-if="p.prices.source"><a :href="p.prices.source" target="_blank" rel="noopener noreferrer">{{ p.prices.feed ? 'OpenRouter feed' : 'source' }}</a><template v-if="p.prices.checked">, {{ p.prices.checked }}</template></template><template v-else>source not given</template></span></dd>
+          </template>
           <dt>Code snippets</dt><dd><span class="badge" :class="p.sends_source ? 'badge--amber' : 'badge--green'">{{ p.sends_source ? 'sent (short excerpts)' : 'never sent' }}</span></dd>
           <dt>Context window<InfoTip text="The most the model can read and write in one request. Set context_window in config/llm.yaml. CodeSynapse reserves answer space and checks the final prompt estimate." /></dt><dd>{{ p.context_window ? `${fmtInt(p.context_window)} tokens` : 'not set; model capacity unverified' }}</dd>
           <dt>Budget per request<InfoTip text="The final redacted request is checked before sending. Input counts are conservative estimates and may differ from the model tokenizer. Exact-only policy refuses calls without a verified counter. Lower max_input_tokens in config/llm.yaml to limit context." /></dt><dd>{{ fmtInt(p.max_input_tokens) }} estimated in · {{ fmtInt(p.max_output_tokens) }} tokens out</dd>

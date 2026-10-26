@@ -206,6 +206,7 @@ export interface AIProvider {
   usage: { requests: number; failures: number; input_tokens: number; output_tokens: number; avg_seconds: number; last_error?: string }
   // auto: models picked from what the server serves (model: auto); served is its last answer.
   auto?: boolean; embedding_model?: string
+  prices?: { input: number; output: number; cached_input?: number; source?: string; checked?: string; feed?: string }
   served?: { models: ServedModel[]; error?: string; at: string }
 }
 export interface ServedModel { name: string; chat: boolean; embedding: boolean; thinking?: boolean; params_b?: number; context?: number; bytes?: number }
@@ -566,5 +567,5 @@ export interface ModelStat {
 }
 export interface ModelStats {
   range: string; models: ModelStat[]
-  reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number }
+  reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; source?: string; checked?: string }
 }
