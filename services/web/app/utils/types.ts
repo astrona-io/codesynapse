@@ -255,12 +255,15 @@ export interface WorkspaceStats {
     repos: { repo: string; calls: number; response_tokens: number; avoided_tokens: number }[]
   }
   memory: {
-    entities: number; facts: number; confirmations: number; sources: Record<string, number>
-    repos: { repo: string; entities: number; facts: number; confirmations: number; fact_chars: number; sources: Record<string, number>; last_updated?: string }[]
+    entities: number; facts: number; history?: number; confirmations: number; sources: Record<string, number>
+    repos: { repo: string; entities: number; facts: number; history?: number; confirmations: number; fact_chars: number; sources: Record<string, number>; last_updated?: string }[]
     saves: number; recalls: number; recall_tokens: number
     // What the hooks did on their own (per-prompt recall, offloading at compaction).
     auto_recalls?: number; auto_recall_tokens?: number; offloads?: number; offloaded_turns?: number; offload_facts?: number
     model: { tokens_per_fact: number; tokens_per_recall: number; recalls_per_session: number; measured: boolean }
+    // The window day by day (empty days included), and the agents that used memory.
+    daily?: { day: string; saves: number; recalls: number; auto_recalls: number; offloads: number; offload_facts: number }[]
+    clients?: { client: string; saves: number; recalls: number }[]
   }
   licenses: {
     dependencies: number; ok: number; review: number; conflict: number; unknown: number
