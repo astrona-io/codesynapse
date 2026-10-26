@@ -16,6 +16,34 @@ import (
 type jobTable struct {
 	mu   sync.Mutex
 	jobs map[string]accounts.JobRecord
+	// wakes are the channels JobWake handed out.
+	wakes []chan struct{}
+}
+
+// JobWake implements accounts.JobWaker.
+func (s *Store) JobWake(ctx context.Context) <-chan struct{} {
+	t := s.jobTable()
+	ch := make(chan struct{}, 1)
+	t.mu.Lock()
+	t.wakes = append(t.wakes, ch)
+	t.mu.Unlock()
+	go func() {
+		<-ctx.Done()
+		t.mu.Lock()
+		t.wakes = slices.DeleteFunc(t.wakes, func(c chan struct{}) bool { return c == ch })
+		t.mu.Unlock()
+	}()
+	return ch
+}
+
+// wakeLocked tells every waiting worker a job was added; t.mu is held.
+func (t *jobTable) wakeLocked() {
+	for _, ch := range t.wakes {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (s *Store) jobTable() *jobTable {
@@ -45,6 +73,7 @@ func (s *Store) AddJob(_ context.Context, j accounts.JobRecord) error {
 	}
 	j.Params = slices.Clone(j.Params)
 	t.jobs[j.ID] = j
+	t.wakeLocked()
 	return nil
 }
 

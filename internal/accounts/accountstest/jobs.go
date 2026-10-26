@@ -46,6 +46,30 @@ func RunJobs(t *testing.T, newStore func(*testing.T) accounts.Store) {
 		assert.Equal(t, len(got.Waiting)+len(got.Active), 0, "a finished job is neither")
 	})
 
+	// A store that can wake workers does so when a job is added, so idle
+	// workers need not poll every few seconds.
+	t.Run("wake", func(t *testing.T) {
+		st := newStore(t)
+		w, ok := st.(accounts.JobWaker)
+		if !ok {
+			t.Skip("store cannot wake workers")
+		}
+		wctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		wake := w.JobWake(wctx)
+		// A listener that just connected may wake once on its own; let it.
+		select {
+		case <-wake:
+		case <-time.After(2 * time.Second):
+		}
+		require.NoError(t, st.AddJob(ctx, job("wk1", "acme/wake")))
+		select {
+		case <-wake:
+		case <-time.After(10 * time.Second):
+			t.Fatal("adding a job did not wake the worker")
+		}
+	})
+
 	t.Run("lifecycle", func(t *testing.T) {
 		st := newStore(t)
 		require.NoError(t, st.AddJob(ctx, job("j1", "acme/api")))
