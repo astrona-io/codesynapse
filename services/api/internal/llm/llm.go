@@ -161,10 +161,13 @@ type ProviderConfig struct {
 	// for local providers and false for remote ones.
 	SendSource *bool `yaml:"send_source" json:"-"`
 	// Effort is the Anthropic output effort (low, medium, high, xhigh, max).
+	// OpenAI-compatible servers get it as reasoning_effort; "none" turns off
+	// thinking on Ollama, which ignores chat_template_kwargs.
 	Effort string `yaml:"effort" json:"effort,omitempty"`
 	// DisableThinking turns off the reasoning phase of local reasoning
 	// models (Qwen3, DeepSeek-R1 style) for faster structured answers. Sent
-	// as chat_template_kwargs.enable_thinking=false (MLX, vLLM, SGLang).
+	// as chat_template_kwargs.enable_thinking=false (MLX, vLLM, SGLang); on
+	// Ollama use Effort "none" instead.
 	DisableThinking bool `yaml:"disable_thinking" json:"disable_thinking,omitempty"`
 	// EmbeddingModel names the model the provider's /embeddings endpoint
 	// uses (e.g. nomic-embed-text on Ollama); empty means no embeddings.

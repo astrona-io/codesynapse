@@ -77,6 +77,11 @@ func openAIRequest(cfg ProviderConfig, req Request) map[string]any {
 	if cfg.DisableThinking {
 		body["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
 	}
+	// Opt-in: vLLM refuses values it does not know, so disable_thinking
+	// cannot send it for every server.
+	if cfg.Effort != "" {
+		body["reasoning_effort"] = cfg.Effort
+	}
 	return body
 }
 
