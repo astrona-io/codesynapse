@@ -33,5 +33,7 @@ victoriametrics:
   size: 1Gi
 victoriatraces:
   size: 1Gi
+victorialogs:
+  size: 1Gi
 workspace:
   size: 2Gi

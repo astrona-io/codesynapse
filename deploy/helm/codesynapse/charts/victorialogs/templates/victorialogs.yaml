@@ -1,0 +1,63 @@
+# Logs: what the services write to stderr, including the audit line (actor
+# email and client address). Password protected with the metrics login; only
+# the services reach it.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "cs.name" (list . "victorialogs") }}
+  labels:
+    {{- include "cs.labels" (list . "victorialogs") | nindent 4 }}
+spec:
+  serviceName: {{ include "cs.name" (list . "victorialogs") }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cs.selector" (list . "victorialogs") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cs.labels" (list . "victorialogs") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "cs.serviceAccount" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "cs.podSecurity" 65534 | nindent 8 }}
+      containers:
+        - name: victorialogs
+          image: {{ .Values.image }}
+          args:
+            - -retentionPeriod={{ .Values.retention }}
+            - -storageDataPath=/victoria-logs-data
+            - -httpAuth.username=codesynapse
+            - -httpAuth.password=$(METRICS_PASSWORD)
+          env:
+            {{- include "cs.secretEnv" (list . "METRICS_PASSWORD" "METRICS_PASSWORD") | nindent 12 }}
+          ports:
+            - {name: http, containerPort: 9428}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- include "cs.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /victoria-logs-data}
+  {{- include "cs.volumeClaim" (list . .Values) | nindent 2 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cs.name" (list . "victorialogs") }}
+  labels:
+    {{- include "cs.labels" (list . "victorialogs") | nindent 4 }}
+spec:
+  selector:
+    {{- include "cs.selector" (list . "victorialogs") | nindent 4 }}
+  ports:
+    - {name: http, port: 9428, targetPort: http}

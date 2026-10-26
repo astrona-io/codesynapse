@@ -62,3 +62,6 @@ dependencies:
   - name: victoriatraces
     version: 0.1.0
     condition: victoriatraces.enabled
+  - name: victorialogs
+    version: 0.1.0
+    condition: victorialogs.enabled

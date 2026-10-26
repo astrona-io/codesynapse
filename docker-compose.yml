@@ -155,6 +155,24 @@ services:
     # No healthcheck: the image is distroless (no shell, wget or curl), so a
     # check could never pass, and nothing waits on traces being up.
 
+  # Logs: every line the services write, shipped as JSON beside stderr. That
+  # includes the audit line (actor email, client address), so keep it
+  # internal. Search at http://localhost:9428/select/vmui (same login as metrics).
+  victorialogs:
+    image: quay.io/victoriametrics/victoria-logs:v1.53.0
+    command:
+      - -retentionPeriod=${LOGS_RETENTION:-30d}
+      - -httpAuth.username=codesynapse
+      - -httpAuth.password=${METRICS_PASSWORD:?run "just init" to add METRICS_PASSWORD to .env}
+    volumes:
+      - logs-data:/victoria-logs-data
+    ports:
+      - "127.0.0.1:${CODESYNAPSE_LOGS_PORT:-9428}:9428"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    # No healthcheck, for the same reason as victoriatraces.
+
   # Users, organisations, API keys and the audit log.
   postgres:
     # Official PostgreSQL with gosu rebuilt on our Go version (deploy/postgres).
@@ -192,6 +210,9 @@ services:
       CODESYNAPSE_TRACES_USER: codesynapse
       CODESYNAPSE_TRACES_PASSWORD: ${METRICS_PASSWORD}
       CODESYNAPSE_TRACES_SAMPLE: ${CODESYNAPSE_TRACES_SAMPLE:-1}
+      CODESYNAPSE_LOGS_URL: http://victorialogs:9428
+      CODESYNAPSE_LOGS_USER: codesynapse
+      CODESYNAPSE_LOGS_PASSWORD: ${METRICS_PASSWORD}
       CODESYNAPSE_API_TOKEN: ${CODESYNAPSE_API_TOKEN:?set CODESYNAPSE_API_TOKEN in .env}
       # Accounts: users, organisations, API keys and the audit log.
       CODESYNAPSE_DATABASE_URL: postgres://codesynapse:${POSTGRES_PASSWORD}@postgres:5432/codesynapse?sslmode=disable
@@ -348,6 +369,9 @@ services:
       CODESYNAPSE_TRACES_USER: codesynapse
       CODESYNAPSE_TRACES_PASSWORD: ${METRICS_PASSWORD}
       CODESYNAPSE_TRACES_SAMPLE: ${CODESYNAPSE_TRACES_SAMPLE:-1}
+      CODESYNAPSE_LOGS_URL: http://victorialogs:9428
+      CODESYNAPSE_LOGS_USER: codesynapse
+      CODESYNAPSE_LOGS_PASSWORD: ${METRICS_PASSWORD}
       CODESYNAPSE_MCP_TOKEN: ${CODESYNAPSE_MCP_TOKEN:?set CODESYNAPSE_MCP_TOKEN in .env}
       # Personal API keys (csk_...) scope every tool to the key's organisation.
       # The API owns and migrates this database.
@@ -418,6 +442,7 @@ volumes:
   milvus-data:
   metrics-data:
   traces-data:
+  logs-data:
   postgres-data:
   workspace:
   go-cache:

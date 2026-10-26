@@ -208,6 +208,8 @@ Metrics use OpenTelemetry cumulative OTLP/HTTP by default. Set `CODESYNAPSE_METR
 
 Traces go to [VictoriaTraces](https://docs.victoriametrics.com/victoriatraces/) (Apache-2.0), also in compose. A dashboard click, its job on the worker, the graph store calls and the model calls form one trace. Its ID is the `X-Request-ID` and the audit entry's request ID, and it appears as `trace_id` in log lines. Search traces at http://localhost:10428/select/vmui, using the metrics login (user `codesynapse`, `METRICS_PASSWORD` from `.env`). Spans carry no content: no paths, repository names, people, prompts or code. See [traces](../TELEMETRY_PLAN.md#traces).
 
+Log lines of every service also go to [VictoriaLogs](https://docs.victoriametrics.com/victorialogs/) (Apache-2.0), still written to stderr as before. Search them at http://localhost:9428/select/vmui with the same login, for example `service:codesynapse-api AND trace_id:<id>` for one request. The structured `audit` lines are there too, with actor emails and client addresses, so treat the store like the audit log: keep it internal and give only operators the password. Lines are kept for `LOGS_RETENTION` (default 30 days); the hash-chained audit log in PostgreSQL stays the record. See [logs](../TELEMETRY_PLAN.md#logs).
+
 ## Building this documentation
 
 ```sh

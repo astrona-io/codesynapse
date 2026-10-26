@@ -106,6 +106,15 @@ func (o *serveOptions) Validate(context.Context, *app.Env) error {
 }
 
 func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
+	service := "api"
+	if o.worker {
+		service = "worker"
+	}
+	ctx, stopLogs, err := app.StartLogs(ctx, o.EC, service, version)
+	if err != nil {
+		return err
+	}
+	defer stopLogs()
 	ctx = app.Ctx(ctx, o.EC)
 	st, err := o.graph.OpenWithRetry(ctx, func(err error) { o.EC.Logger.Warn("waiting for the graph database", "error", err) })
 	if err != nil {
@@ -165,10 +174,6 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	trusted, err := app.ParsePrefixes(os.Getenv("CODESYNAPSE_TRUSTED_PROXIES"))
 	if err != nil {
 		return fmt.Errorf("CODESYNAPSE_TRUSTED_PROXIES: %w", err)
-	}
-	service := "api"
-	if o.worker {
-		service = "worker"
 	}
 	stopMetrics, err := app.StartMetrics(ctx, o.EC.Logger, service, version)
 	if err != nil {

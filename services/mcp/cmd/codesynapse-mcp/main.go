@@ -128,6 +128,11 @@ func (o *serveOptions) open(ctx context.Context) (store.Reader, func(), error) {
 }
 
 func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
+	ctx, stopLogs, err := app.StartLogs(ctx, o.EC, "mcp", version)
+	if err != nil {
+		return err
+	}
+	defer stopLogs()
 	ctx = app.Ctx(ctx, o.EC)
 	r, closeFn, err := o.open(ctx)
 	if err != nil {

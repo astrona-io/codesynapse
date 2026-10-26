@@ -49,7 +49,7 @@ spec:
     - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
     # The stores of this release.
     - to:
-        {{- range $store := list "postgresql" "nebula" "milvus" "victoriametrics" "victoriatraces" }}
+        {{- range $store := list "postgresql" "nebula" "milvus" "victoriametrics" "victoriatraces" "victorialogs" }}
         {{- if index $root.Values $store "enabled" }}
         - podSelector:
             matchLabels:

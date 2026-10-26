@@ -25,6 +25,7 @@ check codesynapse-postgres deploy/helm/codesynapse/charts/postgresql/values.yaml
 check milvus deploy/helm/codesynapse/charts/milvus/values.yaml
 check victoria-metrics deploy/helm/codesynapse/charts/victoriametrics/values.yaml
 check victoria-traces deploy/helm/codesynapse/charts/victoriatraces/values.yaml
+check victoria-logs deploy/helm/codesynapse/charts/victorialogs/values.yaml
 # NebulaGraph is four images in one pod: metad, storaged, graphd and the console.
 for part in metad storaged graphd console; do
     want=$(sh .github/scripts/compose-image.sh "nebula-$part")
