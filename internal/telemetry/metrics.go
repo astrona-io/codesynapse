@@ -16,6 +16,8 @@ var (
 var (
 	latency = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300}
 	ttft    = []float64{0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64}
+	// contextShare buckets the share of a context window a request used.
+	contextShare = []float64{0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 1}
 )
 
 // MCP: sessions, tool calls, latency and the size of what agents receive.
@@ -36,6 +38,15 @@ var (
 	LLMCost     = Default.ScopedCounter("llm_cost_estimated_dollars", "Estimated cost in US dollars from the configured token prices.", "tenant_id", "llm_provider", "llm_model")
 	LLMDuration = Default.ScopedHistogram("llm_request_duration_seconds", "LLM request time.", latency, "tenant_id", "llm_provider", "llm_model")
 	LLMTTFT     = Default.ScopedHistogram("llm_time_to_first_token_seconds", "Time to the first streamed token (streaming providers only).", ttft, "tenant_id", "llm_provider", "llm_model")
+	// Streamed answers split into reading the prompt (until the first token)
+	// and writing the answer, with the tokens of those same answers, so
+	// tokens/seconds is a model's read and write speed.
+	LLMReadSeconds  = Default.ScopedCounter("llm_read_seconds_total", "Seconds streamed answers spent before their first token (reading the prompt).", "tenant_id", "llm_provider", "llm_model")
+	LLMWriteSeconds = Default.ScopedCounter("llm_write_seconds_total", "Seconds streamed answers spent after their first token (writing the answer).", "tenant_id", "llm_provider", "llm_model")
+	LLMReadTokens   = Default.ScopedCounter("llm_read_tokens_total", "Prompt tokens of streamed answers.", "tenant_id", "llm_provider", "llm_model")
+	LLMWriteTokens  = Default.ScopedCounter("llm_write_tokens_total", "Answer tokens of streamed answers.", "tenant_id", "llm_provider", "llm_model")
+	// LLMContextUsed is prompt plus answer over the configured context window.
+	LLMContextUsed = Default.ScopedHistogram("llm_context_used_ratio", "Share of the model's context window one request used.", contextShare, "tenant_id", "llm_provider", "llm_model", "task")
 )
 
 // Databases.

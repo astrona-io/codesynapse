@@ -8,11 +8,13 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/asklocal"
 	"github.com/astrona-io/codesynapse/internal/redact"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/internal/usage"
 	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
@@ -90,9 +92,40 @@ func (s *Server) handleAskLocal(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		s.problem(w, http.StatusBadGateway, err)
 	default:
+		s.countAskLocal(r, org, req, ans)
 		writeJSON(w, http.StatusOK, ans)
 	}
 }
+
+// countAskLocal adds what the local model read, and what the agent did not
+// read because of it, to the day's usage. Best effort: the answer is given.
+func (s *Server) countAskLocal(r *http.Request, org string, req asklocal.Request, ans asklocal.Answer) {
+	files := 0
+	for _, f := range req.Files {
+		files += len(f.Text)
+	}
+	answer, err := json.Marshal(ans)
+	if err != nil {
+		return
+	}
+	day, repo := usage.Day(time.Now()), r.PathValue("repo")
+	var buckets []usage.Bucket
+	if ans.InputTokens > 0 {
+		buckets = append(buckets, usage.Bucket{Day: day, Org: org, Repo: repo, Tool: usage.LocalRead, Client: askClient, Calls: ans.InputTokens})
+	}
+	if avoided := files/4 - len(answer)/4; avoided > 0 {
+		buckets = append(buckets, usage.Bucket{Day: day, Org: org, Repo: repo, Tool: usage.LocalAvoided, Client: askClient, Calls: avoided})
+	}
+	if len(buckets) == 0 {
+		return
+	}
+	if err := s.st.AddUsage(r.Context(), buckets); err != nil {
+		s.logger.Warn("ask_local usage not counted", "error", err)
+	}
+}
+
+// askClient matches what the bridge reports the ask_local call as.
+const askClient = "claude-code"
 
 // askLocal answers req on the local model routed to local-answer. Files that
 // do not fit one request are split into batches, each answered as notes,

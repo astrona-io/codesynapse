@@ -615,6 +615,16 @@ func record(ctx context.Context, name string, cfg ProviderConfig, resp Response,
 	if resp.FirstToken > 0 {
 		telemetry.LLMTTFT.ObserveContext(ctx, resp.FirstToken.Seconds(), tenant, name, cfg.Model)
 	}
+	if err == nil && resp.UsageKnown && resp.FirstToken > 0 && resp.Duration > resp.FirstToken {
+		telemetry.LLMReadSeconds.AddContext(ctx, resp.FirstToken.Seconds(), tenant, name, cfg.Model)
+		telemetry.LLMWriteSeconds.AddContext(ctx, (resp.Duration - resp.FirstToken).Seconds(), tenant, name, cfg.Model)
+		telemetry.LLMReadTokens.AddContext(ctx, float64(resp.InputTokens), tenant, name, cfg.Model)
+		telemetry.LLMWriteTokens.AddContext(ctx, float64(resp.OutputTokens), tenant, name, cfg.Model)
+	}
+	if resp.UsageReported && cfg.ContextWindow > 0 {
+		used := float64(max(resp.InputTokens, 0)+max(resp.OutputTokens, 0)) / float64(cfg.ContextWindow)
+		telemetry.LLMContextUsed.ObserveContext(ctx, min(used, 1), tenant, name, cfg.Model, task)
+	}
 }
 
 // Embedding limits per call: entity names and queries are short.

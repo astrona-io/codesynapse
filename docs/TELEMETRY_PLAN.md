@@ -38,6 +38,12 @@ Select one exporter per metric stream during migration. Do not push the same obs
 | `llm_cost_estimated_dollars` | Counter, estimated USD from the configured input/output/cache-read/cache-write rates at call time |
 | `llm_cost_saved_estimated_dollars_total` | Counter, comparable uncached input cost minus actual cached-input cost, calculated with that call's prices |
 | `llm_usage_unknown_total`, `llm_pricing_missing_total` | Counters of calls whose usage or configured prices are missing; their cost is unknown |
+| `llm_read_seconds_total`, `llm_write_seconds_total`, `llm_read_tokens_total`, `llm_write_tokens_total` | Counters, streamed answers only: seconds before the first token and after it, with the prompt and answer tokens of those same answers. Tokens divided by seconds is a model's read and write speed. Local OpenAI-compatible servers are asked to stream (`stream_options.include_usage`); one that refuses is asked whole from then on and gets no speed. Loading a model into memory happens before its first token, so read speed right after a load is low |
+| `llm_context_used_ratio` | Histogram by task: prompt plus answer tokens over the provider's configured `context_window` |
+
+`GET /api/v1/stats/models?range=1h|6h|24h|7d|30d` returns one row per model for the window: requests and failures, input and output tokens, average prompt, read and write tokens per second, the median and 95th percentile of context use, and the same counts per task, with `local` and `context_window` from the configuration. Its queries are fixed MetricsQL with the caller's organisations as `extra_filters`, like the series panels.
+
+`ask_local` adds two daily counters to the usage buckets: `(local:read)`, the tokens a local model read, and `(local:avoided)`, the files' tokens (bytes/4) minus the answer the agent got instead. The second joins tokens avoided on Statistics.
 
 Cached tokens can still be billed and sent over the network. Label the panel “Input tokens served from cache”; do not present it as tokens never sent. Keep graph-context reduction separate from provider caching. Provider usage omissions are “unknown”, not zero cost. Track missing-price calls separately; do not silently price them at zero. Retry attempts count actual usage when reported. Do not claim visibility into tokens consumed by an external agent's own model.
 

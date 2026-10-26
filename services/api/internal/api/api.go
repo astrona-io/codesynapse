@@ -327,6 +327,7 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/agents/status", visibleOnly, s.handleAgentStatus)
 	s.route("GET /api/v1/search", visibleOnly, s.handleSiteSearch)
 	s.route("GET /api/v1/stats/series", governance(anyone), s.handleSeries)
+	s.route("GET /api/v1/stats/models", governance(anyone), s.handleModelStats)
 	s.route("DELETE /api/v1/repos/{repo}", repoRole(accounts.Admin), s.handleDeleteRepo)
 	s.route("GET /api/v1/repos/{repo}/overview", repoRole(accounts.Viewer), s.handleOverview)
 	s.route("GET /api/v1/repos/{repo}/dashboard", repoRole(accounts.Viewer), s.handleDashboard)
