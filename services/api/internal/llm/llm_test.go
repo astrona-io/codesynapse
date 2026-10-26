@@ -195,3 +195,16 @@ func TestLocalOnlyTasksNeverUseCloud(t *testing.T) {
 	assert.Equal(t, name, "cloud", "other tasks keep the default")
 	assert.Error(t, both.SetRoutes(Routes{Default: "cloud", Tasks: map[string]string{"pr-summary": "cloud"}}))
 }
+
+func TestTasksOnTheGlobalModelFollowIt(t *testing.T) {
+	a := ProviderConfig{Name: "a", Kind: KindOpenAI, BaseURL: "http://127.0.0.1:11434/v1", Model: "m"}
+	b := ProviderConfig{Name: "b", Kind: KindOpenAI, BaseURL: "http://127.0.0.1:9080/v1", Model: "m"}
+	r := NewRegistry(Config{Providers: []ProviderConfig{a, b}, Default: "a"})
+	require.NoError(t, r.SetRoutes(Routes{Default: "a", Tasks: map[string]string{"review": "a", "briefing": "b"}}))
+	assert.Equal(t, r.Routes().Tasks, map[string]string{"briefing": "b"}, "a task on the global model follows it")
+
+	require.NoError(t, r.SetRoutes(Routes{Default: "b", Tasks: r.Routes().Tasks}))
+	name, err := r.ProviderFor("review", "")
+	require.NoError(t, err)
+	assert.Equal(t, name, "b", "changing the global model moves the tasks that follow it")
+}

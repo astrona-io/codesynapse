@@ -34,6 +34,8 @@ const AREAS = [
   { task: 'fix', label: 'Fixes', hint: 'Writes fix branches for accepted review comments (needs source: use a local model)' },
 ]
 const routing = reactive<{ default: string; tasks: Record<string, string> }>({ default: '', tasks: {} })
+// Local-only areas follow the global model when it is local.
+const globalIsLocal = computed(() => !!data.value?.providers.find(p => p.name === routing.default)?.local)
 watch(() => data.value?.routing, (r) => {
   if (!r) return
   routing.default = r.default
@@ -108,7 +110,7 @@ const resultOf = (n: string) => tests.value[n]
       <div v-for="a in AREAS" :key="a.task" class="route">
         <div><strong>{{ a.label }}</strong><p class="muted small">{{ a.hint }}</p></div>
         <select v-model="routing.tasks[a.task]" :aria-label="`Model for ${a.label}`">
-          <option value="">{{ a.local ? 'First local model' : `Use global (${routing.default})` }}</option>
+          <option value="">{{ a.local && !globalIsLocal ? 'First local model' : `Use global (${routing.default})` }}</option>
           <option v-for="p in data.providers.filter(x => !a.local || x.local)" :key="p.name" :value="p.name">{{ p.name }} · {{ p.local ? 'local' : 'cloud' }}</option>
         </select>
       </div>

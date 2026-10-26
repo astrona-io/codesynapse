@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -69,6 +70,9 @@ func (s *Server) handleAIProviders(w http.ResponseWriter, _ *http.Request) {
 	var routing llm.Routes
 	if s.cfg.LLM != nil {
 		routing = s.cfg.LLM.Routes()
+		// A task routed to the global model (say from config/llm.yaml) is
+		// shown as following it, so saving a new global model moves it too.
+		maps.DeleteFunc(routing.Tasks, func(_, name string) bool { return name == routing.Default })
 	}
 	writeJSON(w, 200, map[string]any{"providers": out, "tasks": llm.Tasks, "routing": routing})
 }
