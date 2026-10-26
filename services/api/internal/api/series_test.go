@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -106,6 +107,29 @@ func TestSeriesScopedByTenant(t *testing.T) {
 			assert.True(t, p.Times[len(p.Times)-1] <= time.Now().Unix(), "freshness is never evaluated against a future step")
 		}
 	}
+
+	// The batch answers each panel as a request of its own would: scoped
+	// to the caller, with each panel's status.
+	var batch struct {
+		Panels map[string]SeriesBatchItem
+	}
+	require.Equal(t, bob.do("GET", "/api/v1/stats/series/batch?panels=tool_calls,llm_cost,tool_calls,tenants,nope&range=1h", "", &batch), 200)
+	require.Len(t, batch.Panels, 4, "duplicates count once")
+	assert.Equal(t, batch.Panels["tool_calls"].Status, 200)
+	require.NoError(t, json.Unmarshal(batch.Panels["tool_calls"].Body, &p))
+	assert.Equal(t, p.Series[0].Total, 3.0)
+	assert.Equal(t, len(p.Times), 60, "the range applies to every panel")
+	assert.Equal(t, batch.Panels["llm_cost"].Status, 200)
+	assert.Equal(t, batch.Panels["tenants"].Status, 403, "cross-tenant panels stay refused")
+	assert.Equal(t, batch.Panels["nope"].Status, 400)
+	filter, _ = vm.last()
+	assert.Equal(t, filter, `{tenant_id=~"`+signed.Org.ID+`"}`)
+	assert.Equal(t, bob.do("GET", "/api/v1/stats/series/batch?panels=", "", nil), 400)
+	many := make([]string, maxBatchPanels+1)
+	for i := range many {
+		many[i] = fmt.Sprintf("p%d", i)
+	}
+	assert.Equal(t, bob.do("GET", "/api/v1/stats/series/batch?panels="+strings.Join(many, ","), "", nil), 400)
 
 	plain := httptest.NewServer(New(ctx, Config{}, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil))))
 	defer plain.Close()

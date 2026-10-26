@@ -4,8 +4,10 @@ export function apiPath(path: string): string {
   return `/api/cg/${path.replace(/^\/+/, '')}`
 }
 
+// The key follows the path: a key read once at setup kept a page on its
+// first answer when its window or filter changed.
 export function useApiGet<T>(path: MaybeRefOrGetter<string>, opts: { immediate?: boolean } = {}) {
-  return useFetch<T>(() => apiPath(toValue(path)), { key: toValue(path), immediate: opts.immediate ?? true })
+  return useFetch<T>(() => apiPath(toValue(path)), { key: () => toValue(path), immediate: opts.immediate ?? true })
 }
 
 // apiGet is a one-off GET for code that fetches on its own schedule (a

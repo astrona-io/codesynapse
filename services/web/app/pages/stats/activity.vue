@@ -20,7 +20,12 @@ const router = useRouter()
 const isRange = (v: unknown): v is SeriesRange => RANGES.some((r) => r.id === v)
 const range = ref<SeriesRange>(isRange(route.query.range) ? route.query.range : '24h')
 watch(range, (r) => router.replace({ query: { ...route.query, range: r } }))
+// Every panel of the page in one request; a panel refused for this user
+// is hidden, as before.
+const allPanels = GROUPS.flatMap((g) => g.panels)
+const { panels: batch, pending: batchPending, refresh: refreshBatch } = useSeriesBatch(allPanels, range)
 const tick = ref(0)
+watch(tick, () => refreshBatch())
 const metricsOff = ref(false)
 const hiddenPanels = ref<string[]>([])
 function unavailable(panel: string, status: number) {
@@ -51,7 +56,7 @@ onBeforeUnmount(() => clearInterval(timer))
       <p class="muted small">{{ group.help }}</p>
       <div class="grid cols-2">
         <template v-for="p in group.panels" :key="p">
-          <SeriesCard v-if="!hiddenPanels.includes(p)" :panel="p" :range="range" :tick="tick" @unavailable="(status) => unavailable(p, status)" />
+          <SeriesCard v-if="!hiddenPanels.includes(p)" :panel="p" :range="range" :batched="batch[p] ?? null" :batch-pending="batchPending" @unavailable="(status) => unavailable(p, status)" />
         </template>
       </div>
     </section>
