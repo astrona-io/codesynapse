@@ -358,10 +358,30 @@ label { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .chip:hover:not(:disabled) { background: var(--panel-2); border-color: var(--line-strong); color: var(--ink); }
 .chip.active, .chip.active:hover:not(:disabled) { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
 .chip.off { opacity: 0.45; }
-.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-.tabs a { padding: 8px 16px; border-radius: var(--pill); color: var(--ink); background: var(--panel-2); font-weight: 600; }
-.tabs a:hover { text-decoration: none; box-shadow: inset 0 0 0 2px var(--line-strong); }
-.tabs a.router-link-exact-active { background: var(--primary); color: var(--on-primary); }
+/* Tabs are navigation between views of one thing: text on a hairline, the
+   current one in ink and underlined, so they never read as chips or badges.
+   They wrap when a wide screen runs out of room, and on a phone scroll
+   sideways instead of stacking. */
+.tabs { display: flex; flex-wrap: wrap; gap: 0 4px; border-bottom: 2px solid var(--line); }
+@media (max-width: 640px) {
+  .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+}
+.tabs a, .tabs button {
+  flex: none; display: inline-flex; align-items: center; min-height: 40px; margin-bottom: -2px; padding: 8px 12px;
+  border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: none;
+  color: var(--muted); font: 600 14px var(--font-sans); white-space: nowrap; cursor: pointer;
+}
+.tabs a:hover, .tabs button:hover:not(:disabled) { text-decoration: none; background: none; color: var(--ink); border-bottom-color: var(--line-strong); }
+.tabs a.router-link-exact-active, .tabs [aria-selected="true"], .tabs [aria-current="page"] { color: var(--ink); border-bottom-color: var(--primary); }
+.tabs a:focus-visible, .tabs button:focus-visible { border-radius: var(--radius-xs) var(--radius-xs) 0 0; }
+
+/* A segmented control picks one of a few options (a time window): one joined
+   control with the choice filled, unlike tabs (navigation) or chips (filters). */
+.segmented { display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--pill); background: var(--panel-2); }
+.segmented button { min-height: 30px; padding: 4px 14px; border: 0; border-radius: var(--pill); background: none; color: var(--muted); font: 600 13px var(--font-sans); }
+.segmented button:hover:not(:disabled) { background: var(--panel); color: var(--ink); }
+.segmented button[aria-pressed="true"], .segmented button[aria-pressed="true"]:hover:not(:disabled) { background: var(--panel); color: var(--ink); box-shadow: 0 0 0 2px var(--line-strong); }
 
 /* Notices */
 .welcome-slot { margin: 12px var(--gutter) 0; }

@@ -26,8 +26,10 @@ const showWindow = computed(() => !route.path.endsWith('/activity'))
       <NuxtLink to="/stats/sync">Sync health</NuxtLink>
     </nav>
     <div v-if="showWindow" class="row filters">
-      <span class="label">Window</span>
-      <button v-for="d in STAT_WINDOWS" :key="d" class="chip" :class="{ active: days === d }" @click="days = d">last {{ d }} days</button>
+      <span class="label" id="stat-window">Window</span>
+      <div class="segmented" role="group" aria-labelledby="stat-window">
+        <button v-for="d in STAT_WINDOWS" :key="d" type="button" :aria-pressed="days === d" @click="days = d">last {{ d }} days</button>
+      </div>
       <span v-if="pending" class="muted small">refreshing…</span>
     </div>
     <NuxtPage />
