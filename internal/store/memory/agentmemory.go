@@ -276,6 +276,12 @@ func (s *Store) SetMemoryEmbeddings(_ context.Context, model string, vecs map[st
 	if err := agentmem.CheckVectors(vecs); err != nil {
 		return err
 	}
+	for id := range vecs {
+		// The same limit the Milvus index has, so both stores refuse alike.
+		if len(id) > vector.MaxID {
+			return fmt.Errorf("memory embeddings: entity %q has an over-long ID", id)
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, v := range vecs {

@@ -258,6 +258,8 @@ export interface WorkspaceStats {
     entities: number; facts: number; confirmations: number; sources: Record<string, number>
     repos: { repo: string; entities: number; facts: number; confirmations: number; fact_chars: number; sources: Record<string, number>; last_updated?: string }[]
     saves: number; recalls: number; recall_tokens: number
+    // What the hooks did on their own (per-prompt recall, offloading at compaction).
+    auto_recalls?: number; auto_recall_tokens?: number; offloads?: number; offloaded_turns?: number; offload_facts?: number
     model: { tokens_per_fact: number; tokens_per_recall: number; recalls_per_session: number; measured: boolean }
   }
   licenses: {

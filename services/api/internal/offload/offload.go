@@ -98,6 +98,9 @@ type Worker struct {
 	// OnSaved runs after a job saved facts (to embed new entities soon).
 	OnSaved        func()
 	OnSessionSaved func(context.Context, sessionmemory.Scope, func(context.Context) error)
+	// OnFinished hears about every job that succeeded, with the facts it
+	// saved (for the statistics); it runs on its own goroutine.
+	OnFinished func(ctx context.Context, org, repo string, saved int)
 
 	mu    sync.Mutex
 	jobs  map[string]*Job
@@ -273,6 +276,9 @@ func (w *Worker) run(ctx context.Context, id string) {
 	telemetry.MemoryFacts.AddContext(telemetry.WithModel(ctx, j.Provider, j.Model), float64(j.Saved), telemetry.Tenant(ctx), "offload")
 	if j.Saved > 0 && w.OnSaved != nil {
 		w.OnSaved()
+	}
+	if w.OnFinished != nil {
+		go w.OnFinished(context.WithoutCancel(ctx), j.Execution.TenantID, j.Repo, j.Saved)
 	}
 	w.logger.Info("memory extraction done", "job", j.ID, "repo", j.Repo, "saved", j.Saved, "dropped", j.Dropped)
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/store/storetest"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/internal/usage"
 	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 	"github.com/astrona-io/codesynapse/services/api/internal/offload"
 )
@@ -39,6 +40,21 @@ func TestOffloadEndpoints(t *testing.T) {
 	}
 	assert.Equal(t, job.State, offload.Succeeded, job.Error)
 	assert.Equal(t, job.Saved, 1)
+	// The offload and the facts it saved are counted for Statistics.
+	counted := func() map[string]int {
+		buckets, err := f.store.Usage(t.Context(), "")
+		require.NoError(t, err)
+		out := map[string]int{}
+		for _, b := range buckets {
+			out[b.Tool] += b.Calls
+		}
+		return out
+	}
+	for c := counted(); c[usage.MemoryOffloadFacts] == 0 && time.Now().Before(deadline); c = counted() {
+		time.Sleep(10 * time.Millisecond)
+	}
+	c := counted()
+	assert.Equal(t, []int{c[usage.MemoryOffloads], c[usage.MemoryOffloadTurns], c[usage.MemoryOffloadFacts]}, []int{1, 1, 1})
 	var g agentmem.Graph
 	require.Equal(t, f.client.do("GET", "/api/v1/repos/"+storetest.Repo+"/session-memory", "", &g, runtimeHeaders("thread-a")...), 200)
 	require.Len(t, g.Facts, 1)
@@ -68,6 +84,15 @@ func TestRecallAndStatusEndpoints(t *testing.T) {
 	assert.Len(t, res.Facts, 0, "session recall never falls back to durable knowledge")
 	require.Equal(t, f.client.do("POST", path+"/session-memory/recall", `{"query":"thanks!"}`, &res, runtimeHeaders("thread-a")...), 200)
 	assert.Equal(t, res.Skipped, "small talk")
+	buckets, err := f.store.Usage(t.Context(), "")
+	require.NoError(t, err)
+	recalls := 0
+	for _, b := range buckets {
+		if b.Tool == usage.MemoryAutoRecalls {
+			recalls += b.Calls
+		}
+	}
+	assert.Equal(t, recalls, 2, "each hook lookup is counted")
 	assert.Equal(t, f.client.do("POST", path+"/session-memory/recall", `{"query":"`+strings.Repeat("x", 2001)+`"}`, nil, runtimeHeaders("thread-a")...), 400)
 	assert.Equal(t, f.client.do("POST", path+"/memory/offload", `{"turns":[]}`, nil, runtimeHeaders("thread-a")...), 410)
 	var status map[string]any
