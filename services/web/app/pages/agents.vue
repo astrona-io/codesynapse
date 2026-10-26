@@ -98,12 +98,15 @@ const stepPlugin = (agent: AgentID) => (viaBridge.value ? 4 : 3) + setupAgents.v
 const stepCheck = computed(() => (viaBridge.value ? 4 : 3) + setupAgents.value.length)
 
 // Last step: a cap on each chat's context. The agent compacts at the cap;
-// with the memory hooks the older turns are offloaded first.
+// with the memory hooks the older turns are offloaded first. The setup
+// command sets 150k (agentcfg.DefaultContextCap) unless one is already set.
 const contextCaps = [100_000, 150_000, 200_000]
 const contextCap = ref(150_000)
 const capLabel = (n: number) => `${n / 1000}k`
 const claudeCap = computed(() => JSON.stringify({ autoCompactWindow: contextCap.value }, null, 2))
 const codexCap = computed(() => `model_auto_compact_token_limit = ${contextCap.value}`)
+const capAgents = computed(() => selected.value.filter(a => a === 'claude' || a === 'codex'))
+const capCommand = computed(() => `codesynapse mcp install --yes --only ${capAgents.value.join(',')} ${urls.value} --context-cap ${capLabel(contextCap.value)}`)
 const { data: keys, refresh: refreshKeys } = useApiGet<{ keys: ApiKey[] }>('me/keys', { immediate: session.accounts.value })
 const { data: status, refresh: refreshStatus } = useApiGet<AgentStatus>('agents/status')
 // What was already there when the page opened: only newer activity counts.
@@ -277,23 +280,30 @@ onBeforeUnmount(() => clearInterval(poll))
     <section class="panel step">
       <p class="step__n">{{ stepCheck + 1 }}</p>
       <div class="stack--tight">
-        <h2>Keep each chat small <span class="muted">(optional)</span></h2>
-        <p class="muted">An agent keeps the whole conversation in context until it compacts it, and every prompt pays for all of it again. Models with a million-token window compact only near the end of it. Set a lower limit so the chat compacts sooner. With the Claude Code plugin or <code>codesynapse mcp hooks</code>, the older turns go to <NuxtLink to="/help#memory">agent memory</NuxtLink> first and come back when a prompt needs them, so a small limit loses little.</p>
-        <div class="row" role="group" aria-label="Context limit">
-          <button v-for="n in contextCaps" :key="n" type="button" class="chip" :class="{ active: contextCap === n }" :aria-pressed="contextCap === n" @click="contextCap = n">{{ capLabel(n) }} tokens</button>
-        </div>
-        <template v-if="selected.includes('claude')">
-          <h3>Claude Code</h3>
-          <p class="muted">Add this to <code>~/.claude/settings.json</code> for every project, or to a project's <code>.claude/settings.json</code>. Claude Code accepts 100k to 1M. For one chat only, type <code>/autocompact {{ capLabel(contextCap) }}</code>.</p>
-          <CopyField :value="claudeCap" multiline label="settings.json" />
-          <p class="muted small">If <code>codesynapse mcp hooks</code> set <code>CLAUDE_AUTOCOMPACT_PCT_OVERRIDE</code> in the same file, remove it. It is a percentage of this limit, so 30 would compact at {{ capLabel(contextCap * 0.3) }}.</p>
+        <h2>Keep each chat small</h2>
+        <p class="muted">An agent keeps the whole conversation in context until it compacts it, and every prompt pays for all of it again. Models with a million-token window compact only near the end of it. With the Claude Code plugin or <code>codesynapse mcp hooks</code>, the older turns go to <NuxtLink to="/help#memory">agent memory</NuxtLink> before each compaction and come back when a prompt needs them, so a small limit loses little.</p>
+        <template v-if="capAgents.length">
+          <p class="muted">The setup command above already makes Claude Code and Codex compact at <strong>150k tokens</strong>, and keeps a limit you set yourself. To pick another, choose it and run the command:</p>
+          <div class="row" role="group" aria-label="Context limit">
+            <button v-for="n in contextCaps" :key="n" type="button" class="chip" :class="{ active: contextCap === n }" :aria-pressed="contextCap === n" @click="contextCap = n">{{ capLabel(n) }} tokens</button>
+          </div>
+          <CopyField :value="capCommand" multiline label="Shell" />
+          <p class="muted small"><code>--context-cap 0</code> leaves the agents' own settings alone. Codex summarises older turns itself; its hooks do not offload them to agent memory yet.</p>
+          <details>
+            <summary class="muted small">Set it by hand</summary>
+            <div class="stack--tight small">
+              <template v-if="selected.includes('claude')">
+                <p>Claude Code: add this to <code>~/.claude/settings.json</code>, or to a project's <code>.claude/settings.json</code> (100k to 1M). For one chat only, type <code>/autocompact {{ capLabel(contextCap) }}</code>. Remove <code>CLAUDE_AUTOCOMPACT_PCT_OVERRIDE</code> from the same file: it is a percentage of this limit, so 30 would compact at {{ capLabel(contextCap * 0.3) }}.</p>
+                <CopyField :value="claudeCap" multiline label="settings.json" />
+              </template>
+              <template v-if="selected.includes('codex')">
+                <p>Codex: add this to <code>~/.codex/config.toml</code>, above the first <code>[section]</code>.</p>
+                <CopyField :value="codexCap" label="config.toml" />
+              </template>
+            </div>
+          </details>
         </template>
-        <template v-if="selected.includes('codex')">
-          <h3>Codex</h3>
-          <p class="muted">Add this to <code>~/.codex/config.toml</code>, above the first <code>[section]</code>. Codex summarises older turns itself; its hooks do not offload them to agent memory yet.</p>
-          <CopyField :value="codexCap" label="config.toml" />
-        </template>
-        <p v-if="!selected.includes('claude') && !selected.includes('codex')" class="muted small">Claude Code and Codex have a setting for this. Choose one of them above to see it.</p>
+        <p v-else class="muted small">Claude Code and Codex have a setting for this. Choose one of them above to see it.</p>
       </div>
     </section>
   </div>

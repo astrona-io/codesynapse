@@ -253,3 +253,21 @@ func TestOpenAIRequestReasoningEffort(t *testing.T) {
 		})
 	}
 }
+
+func TestMissingModels(t *testing.T) {
+	cfg := ProviderConfig{Model: "qwen3.8:27b", EmbeddingModel: "nomic-embed-text"}
+	for _, tc := range []struct {
+		name   string
+		served []string
+		want   []string
+	}{
+		{"all there", []string{"qwen3.8:27b", "nomic-embed-text:latest"}, nil},
+		{"embedding not pulled", []string{"qwen3.8:27b", "llama3.2:latest"}, []string{"nomic-embed-text"}},
+		{"tagged name needs that tag", []string{"qwen3.8:14b", "nomic-embed-text"}, []string{"qwen3.8:27b"}},
+		{"server lists nothing", nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, MissingModels(cfg, tc.served), tc.want)
+		})
+	}
+}

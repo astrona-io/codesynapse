@@ -147,6 +147,9 @@ func (s *Server) handleAITest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out["models"] = models
+	if cfg, _ := s.cfg.LLM.Config(name); len(llm.MissingModels(cfg, models)) > 0 {
+		out["missing"] = llm.MissingModels(cfg, models)
+	}
 	start := time.Now()
 	resp, err := s.cfg.LLM.Complete(r.Context(), name, llm.Request{System: "Reply with the single word OK.", User: "Health check.", MaxTokens: 2048})
 	out["seconds"] = time.Since(start).Round(100 * time.Millisecond).Seconds()
