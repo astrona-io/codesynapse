@@ -37,9 +37,21 @@ type ProviderInfo struct {
 	Usage             llm.Usage `json:"usage"`
 	// Auto: the provider picks its models from what its server serves;
 	// Served is that server's last answer.
-	Auto           bool           `json:"auto,omitempty"`
-	EmbeddingModel string         `json:"embedding_model,omitempty"`
-	Served         *llm.Discovery `json:"served,omitempty"`
+	// Prices per million tokens and where they come from.
+	Prices         *ProviderPrices `json:"prices,omitempty"`
+	Auto           bool            `json:"auto,omitempty"`
+	EmbeddingModel string          `json:"embedding_model,omitempty"`
+	Served         *llm.Discovery  `json:"served,omitempty"`
+}
+
+// ProviderPrices are a provider's prices in US dollars per million tokens.
+type ProviderPrices struct {
+	Input       float64 `json:"input"`
+	Output      float64 `json:"output"`
+	CachedInput float64 `json:"cached_input,omitempty"`
+	Source      string  `json:"source,omitempty"`
+	Checked     string  `json:"checked,omitempty"`
+	Feed        string  `json:"feed,omitempty"`
 }
 
 // endpointHost shows scheme://host only, hiding paths and query strings.
@@ -70,6 +82,10 @@ func (s *Server) handleAIProviders(w http.ResponseWriter, _ *http.Request) {
 				MaxOutput: p.MaxOutputTokens, MaxInput: p.MaxInputTokens, InputBudgetPolicy: p.InputBudgetPolicy, Context: p.ContextWindow, Tasks: append([]string{}, tasks...),
 				Usage: s.cfg.LLM.Usage(p.Name), Auto: p.Auto(), EmbeddingModel: p.EmbeddingModel,
 			})
+			if p.PriceInputPerMTok > 0 || p.PriceOutputPerMTok > 0 {
+				out[len(out)-1].Prices = &ProviderPrices{Input: p.PriceInputPerMTok, Output: p.PriceOutputPerMTok, CachedInput: p.PriceCachedInputPerMTok,
+					Source: p.PriceSource, Checked: p.PriceChecked, Feed: p.PriceFeed}
+			}
 			if d, ok := s.cfg.LLM.Served(p.Name); ok {
 				out[len(out)-1].Served = &d
 			}

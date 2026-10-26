@@ -181,6 +181,15 @@ type ProviderConfig struct {
 	PricingConfigured       bool    `yaml:"pricing_configured" json:"pricing_configured,omitempty"`
 	PriceCacheWritePerMTok  float64 `yaml:"price_cache_write_per_mtok" json:"price_cache_write_per_mtok,omitempty"`
 	PriceOutputPerMTok      float64 `yaml:"price_output_per_mtok" json:"price_output_per_mtok,omitempty"`
+	// PriceSource says where the prices come from (a URL such as the
+	// provider's pricing page) and PriceChecked when (YYYY-MM-DD), so every
+	// cost and savings figure can name them. PriceFeed "openrouter" fetches
+	// the prices from OpenRouter's public model list once a day instead;
+	// PriceModel is the model's id there when it differs.
+	PriceSource  string `yaml:"price_source" json:"price_source,omitempty"`
+	PriceChecked string `yaml:"price_checked" json:"price_checked,omitempty"`
+	PriceFeed    string `yaml:"price_feed" json:"price_feed,omitempty"`
+	PriceModel   string `yaml:"price_model" json:"price_model,omitempty"`
 
 	apiKey string
 	// autoRaw keeps the configuration as written when model or
@@ -266,6 +275,9 @@ func (c *Config) normalise(getenv func(string) string) error {
 		}
 		if p.BaseURL != "" && !strings.HasPrefix(p.BaseURL, "http://") && !strings.HasPrefix(p.BaseURL, "https://") {
 			return fmt.Errorf("provider %q: base_url must be http(s)", p.Name)
+		}
+		if err := validatePriceSource(*p); err != nil {
+			return fmt.Errorf("provider %q: %w", p.Name, err)
 		}
 		for _, price := range []float64{p.PriceInputPerMTok, p.PriceCachedInputPerMTok, p.PriceCacheWritePerMTok, p.PriceOutputPerMTok} {
 			if price < 0 || math.IsNaN(price) || math.IsInf(price, 0) {

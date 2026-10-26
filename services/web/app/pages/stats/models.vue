@@ -38,6 +38,8 @@ const saved = computed(() => {
   if (!p) return null
   return ((localIn.value + graphAvoided.value) * p.input_per_mtok + localOut.value * p.output_per_mtok) / 1e6
 })
+// Where a price comes from, shown as its host and path.
+const sourceLabel = (u: string) => { try { const x = new URL(u); return x.host + x.pathname + (x.hash ? ` (${x.hash.slice(1)})` : '') } catch { return u } }
 const money = (v: number) => (v >= 100 ? `$${Math.round(v)}` : `$${v.toFixed(2)}`)
 
 const TASK_LABEL: Record<string, string> = {
@@ -85,7 +87,7 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
         <StatTile label="Prompts pre-briefed" :value="fmtCompact(a?.local_briefs ?? 0)" hint="a local model briefed the agent first" />
         <StatTile
           label="Cloud cost avoided" :value="saved === null ? '–' : money(saved)"
-          :hint="price ? `at ${price.model} prices, estimated` : 'add prices to a cloud provider to estimate'"
+          :hint="price ? `at ${price.model} prices${price.checked ? ` of ${price.checked}` : ''}, estimated` : 'add prices to a cloud provider to estimate'"
         />
       </div>
       <DonutChart
@@ -95,6 +97,11 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
       <p v-else class="muted small">No tokens counted yet in this window.</p>
     </section>
 
+    <p v-if="price" class="muted small source">
+      Cost avoided values local work and unread tokens at {{ price.model }}'s prices: ${{ price.input_per_mtok }} in and ${{ price.output_per_mtok }} out per million tokens.
+      <template v-if="price.source">Source: <a :href="price.source" target="_blank" rel="noopener noreferrer">{{ sourceLabel(price.source) }}</a><template v-if="price.checked">, checked {{ price.checked }}</template>.</template>
+      <template v-else>No source given: add <code>price_source</code> and <code>price_checked</code> to that provider in config/llm.yaml, or <code>price_feed: openrouter</code>.</template>
+    </p>
     <p v-if="modelsError" class="panel muted small">Model statistics need live metrics: {{ apiErrorMessage(modelsError) }}</p>
     <template v-else-if="m">
       <section class="panel">

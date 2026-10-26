@@ -176,6 +176,7 @@ flowchart LR
 ```
 
 - `model: auto` (and `embedding_model: auto`) on a local provider lets CodeSynapse pick from what the server serves, every five minutes: the chat model with the most parameters, with its own context window, and an embedding model. With no provider configured, a local Ollama or LM Studio found at start-up is used that way. See [Local models](local-models.md#set-it-up-with-ollama).
+- Prices (`price_input_per_mtok` and the rest) drive the cost and savings estimates. Say where they come from with `price_source` (for Claude, the [pricing page](https://platform.claude.com/docs/en/about-claude/pricing)) and `price_checked` (the date you read it); both are shown beside every figure that uses them. Or set `price_feed: openrouter` on a cloud provider to read its prices from OpenRouter's public model list once a day: a plain download of the whole list, looked up locally, so nothing about you is sent. The figures then cite that list and the day it was read. Anthropic publishes no price API of its own.
 - `kind: openai` covers anything with an OpenAI-compatible `/v1/chat/completions`: MLX (`mlx_lm.server`), Ollama, vLLM, LM Studio, llama.cpp, OpenRouter. An API key is optional (`api_key_env` names the environment variable).
 - `kind: anthropic` uses the official SDK; the key comes from `ANTHROPIC_API_KEY`.
 - The compose API container reaches services on your Mac through `host.docker.internal` (for example `http://host.docker.internal:9080/v1`).

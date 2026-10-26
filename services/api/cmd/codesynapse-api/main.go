@@ -148,6 +148,15 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 			cancel()
 			go registry.ResolveEvery(ctx, 5*time.Minute, func(c string) { o.EC.Logger.Info("AI model picked", "change", c) })
 		}
+		if registry.HasPriceFeed() {
+			// Opt-in (price_feed): OpenRouter's public list, once a day.
+			pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+			for _, p := range registry.RefreshPrices(pctx) {
+				o.EC.Logger.Warn("AI prices not updated", "problem", p)
+			}
+			cancel()
+			go registry.RefreshPricesEvery(ctx, 24*time.Hour, func(p string) { o.EC.Logger.Warn("AI prices not updated", "problem", p) })
+		}
 		o.EC.Logger.Info("AI providers configured", "providers", len(llmCfg.Providers), "default", llmCfg.Default)
 		if !o.worker {
 			go warnMissingModels(ctx, o.EC.Logger, registry, llmCfg)
