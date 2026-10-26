@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/auditarchive"
 	"github.com/astrona-io/codesynapse/internal/forge"
 	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/imagescan"
@@ -66,6 +67,11 @@ type Config struct {
 	SecureCookies bool
 	// AuditRetention is how long audit entries are kept (default 400 days).
 	AuditRetention time.Duration
+	// AuditHot is how long entries stay in PostgreSQL before AuditArchive
+	// takes them (default 90 days, at most AuditRetention). Without an
+	// archive, entries stay until the retention period ends.
+	AuditHot     time.Duration
+	AuditArchive auditarchive.Archive
 	// Metrics reads time series for the statistics (nil without
 	// VictoriaMetrics).
 	Metrics       *telemetry.Querier
@@ -171,6 +177,9 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	if cfg.Accounts != nil {
 		if cfg.AuditRetention <= 0 {
 			s.cfg.AuditRetention = accounts.DefaultRetention
+		}
+		if cfg.AuditHot <= 0 || cfg.AuditHot > s.cfg.AuditRetention {
+			s.cfg.AuditHot = min(accounts.DefaultHot, s.cfg.AuditRetention)
 		}
 		if cfg.Accounts.Sink == nil {
 			cfg.Accounts.Sink = s.logAudit

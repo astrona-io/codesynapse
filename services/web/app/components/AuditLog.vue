@@ -28,7 +28,19 @@ const query = computed(() => {
 })
 const { data, error, pending } = useApiGet<{ events: AuditEvent[] }>(() => `${props.base}?${query.value}`)
 const events = computed(() => data.value?.events ?? [])
-const { data: verify, refresh: reverify } = useApiGet<{ ok: boolean; checked: number; reason?: string; broken_at?: number }>('admin/audit/verify', { immediate: !!props.verifyChain })
+// deep reads every archived file back as well; it is slower, so it is asked for.
+const deep = ref(false)
+const { data: verify, refresh: reverify } = useApiGet<{ ok: boolean; checked: number; reason?: string; broken_at?: number; segments?: number; sealed?: number; archives?: number }>(
+  () => `admin/audit/verify${deep.value ? '?deep=true' : ''}`, { immediate: !!props.verifyChain })
+const verifyText = computed(() => {
+  const v = verify.value
+  if (!v) return ''
+  if (!v.ok) return `Chain broken at entry ${v.broken_at}: ${v.reason}`
+  let s = `Hash chain intact (${fmtInt(v.checked)} entries`
+  if (v.segments) s += `, ${fmtInt(v.sealed ?? 0)} more in ${fmtInt(v.segments)} archived files`
+  if (v.archives) s += `, ${fmtInt(v.archives)} files read back`
+  return s + ')'
+})
 const exportUrl = (format: string) => apiPath(`${props.base}?${query.value.replace('limit=200', 'limit=10000')}&format=${format}`)
 // Clicking a chat or tool in the details narrows the log to it.
 const narrowers = { session, tool, repo }
@@ -46,8 +58,9 @@ const open = ref<number | null>(null)
       <div class="panel__header">
         <h2>Audit log</h2>
         <div class="row">
-          <span v-if="verifyChain && verify" class="pill"><span class="dot" :class="verify.ok ? 'dot--ok' : 'dot--bad'" />{{ verify.ok ? `Hash chain intact (${fmtInt(verify.checked)} entries)` : `Chain broken at entry ${verify.broken_at}: ${verify.reason}` }}</span>
+          <span v-if="verifyChain && verify" class="pill"><span class="dot" :class="verify.ok ? 'dot--ok' : 'dot--bad'" />{{ verifyText }}</span>
           <button v-if="verifyChain" class="secondary tiny" @click="reverify()">Verify again</button>
+          <button v-if="verifyChain && verify?.segments && !deep" class="secondary tiny" @click="deep = true">Check archive files</button>
         </div>
       </div>
       <p class="muted small">Every change, security event and agent (MCP) request, append-only and hash-chained: altering or removing an entry breaks the chain. Agent requests record the person, API key, chat session, client, tool, repository and arguments; code and conversations appear only as a fingerprint. Keep exports as evidence (NIS2).</p>

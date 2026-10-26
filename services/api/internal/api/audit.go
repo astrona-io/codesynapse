@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/auditarchive"
 )
 
 // requestIDRe accepts client-supplied request IDs that are safe to log.
@@ -138,23 +140,64 @@ func (s *Server) logAudit(e accounts.Event) {
 		"target", e.Target, "ip", e.IP, "user_agent", e.UserAgent, "request_id", e.RequestID, "detail", e.Detail, "hash", e.Hash)
 }
 
-// pruneAudit applies the retention period once a day.
+// pruneAudit applies the retention period once a day. With an archive,
+// entries older than the hot window are sealed into archive files first, and
+// whole files go when their newest entry passes the retention period.
 func (s *Server) pruneAudit(ctx context.Context) {
 	t := time.NewTicker(24 * time.Hour)
 	defer t.Stop()
 	for {
-		before := time.Now().Add(-s.cfg.AuditRetention)
-		if n, err := s.cfg.Accounts.St.PruneEvents(ctx, before); err != nil {
-			s.logger.Warn("pruning the audit log failed", "error", err)
-		} else if n > 0 {
-			s.record(ctx, accounts.Event{Via: "service", Action: "audit.prune", Detail: strconv.Itoa(n) + " entries older than " + before.Format(time.DateOnly)})
-		}
+		s.applyAuditRetention(ctx, time.Now())
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		}
 	}
+}
+
+func (s *Server) applyAuditRetention(ctx context.Context, now time.Time) {
+	st, arch := s.cfg.Accounts.St, s.cfg.AuditArchive
+	expireBefore := now.Add(-s.cfg.AuditRetention)
+	if arch == nil {
+		// Pruning past sealed segments would cut the chain between the last
+		// file and the entries still held, so it waits for the archive.
+		if segs, err := st.AuditSegments(ctx); err != nil || len(segs) > 0 {
+			s.logger.Warn("audit log has archived segments but no archive is configured; not pruning", "error", err)
+			return
+		}
+		if n, err := st.PruneEvents(ctx, expireBefore); err != nil {
+			s.logger.Warn("pruning the audit log failed", "error", err)
+		} else if n > 0 {
+			s.record(ctx, accounts.Event{Via: "service", Action: "audit.prune", Detail: strconv.Itoa(n) + " entries older than " + expireBefore.Format(time.DateOnly)})
+		}
+		return
+	}
+	sealBefore := now.Add(-s.cfg.AuditHot)
+	sealed, err := auditarchive.Seal(ctx, st, arch, sealBefore, s.cfg.AuditRetention, now)
+	if err != nil {
+		s.logger.Warn("archiving the audit log failed", "backend", arch.Backend(), "error", err)
+	}
+	if n := entries(sealed); n > 0 {
+		s.record(ctx, accounts.Event{Via: "service", Action: "audit.seal", Target: arch.Backend(),
+			Detail: fmt.Sprintf("%d entries older than %s in %d files", n, sealBefore.Format(time.DateOnly), len(sealed))})
+	}
+	expired, err := auditarchive.Expire(ctx, st, arch, expireBefore)
+	if err != nil {
+		s.logger.Warn("expiring audit archive files failed", "backend", arch.Backend(), "error", err)
+	}
+	if n := entries(expired); n > 0 {
+		s.record(ctx, accounts.Event{Via: "service", Action: "audit.expire", Target: arch.Backend(),
+			Detail: fmt.Sprintf("%d entries older than %s in %d files", n, expireBefore.Format(time.DateOnly), len(expired))})
+	}
+}
+
+func entries(segs []accounts.AuditSegment) int {
+	n := 0
+	for _, g := range segs {
+		n += g.Count
+	}
+	return n
 }
 
 // handleOrgAudit exports an organisation's audit log (org admins).
@@ -178,7 +221,15 @@ func (s *Server) handleVerifyAudit(w http.ResponseWriter, r *http.Request) {
 	if !s.platformAdmin(w, r) {
 		return
 	}
-	v, err := accounts.VerifyAudit(r.Context(), s.cfg.Accounts.St)
+	// deep=true also reads every archive file back and checks its
+	// checksum and entries; without it only the stored hashes are linked.
+	var v accounts.Verification
+	var err error
+	if r.URL.Query().Get("deep") == "true" && s.cfg.AuditArchive != nil {
+		v, err = auditarchive.DeepVerify(r.Context(), s.cfg.Accounts.St, s.cfg.AuditArchive)
+	} else {
+		v, err = accounts.VerifyAudit(r.Context(), s.cfg.Accounts.St)
+	}
 	if err != nil {
 		s.problem(w, 500, err)
 		return

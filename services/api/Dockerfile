@@ -46,7 +46,7 @@ FROM docker.io/library/alpine:3.24 AS api
 ARG PACKAGES_DATE
 RUN apk upgrade --no-cache && apk add --no-cache git ca-certificates && \
     adduser -D -u 10001 codesynapse && \
-    mkdir -p /workspace && chown -R codesynapse /workspace
+    mkdir -p /workspace /audit-archive && chown -R codesynapse /workspace /audit-archive
 ENV CODESYNAPSE_API_ADDR=0.0.0.0:8080 CODESYNAPSE_SOURCES_ROOT=/sources CODESYNAPSE_RUN_JOBS=false
 LABEL org.opencontainers.image.licenses="Apache-2.0" org.opencontainers.image.vendor="Astrona.io"
 COPY LICENSE NOTICE /usr/share/licenses/codesynapse/

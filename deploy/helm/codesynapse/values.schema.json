@@ -119,6 +119,49 @@
       "type": "integer",
       "minimum": 30
     },
+    "auditArchive": {
+      "description": "Seal audit entries older than hotDays into files in an S3 bucket instead of keeping them in PostgreSQL.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hotDays": {
+          "description": "Days audit entries stay in PostgreSQL before they are archived (at most auditRetentionDays).",
+          "type": "integer",
+          "minimum": 7
+        },
+        "s3": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "endpoint": {
+              "description": "https URL of the S3-compatible service; empty turns the archive off. Keys come from global.existingSecret.",
+              "type": "string",
+              "pattern": "^(https://[^/?#@\\s]+/?)?$"
+            },
+            "bucket": {
+              "description": "Bucket that holds the files.",
+              "type": "string",
+              "pattern": "^([a-z0-9][a-z0-9.-]{1,61}[a-z0-9])?$"
+            },
+            "region": {
+              "description": "Signing region.",
+              "type": "string",
+              "pattern": "^[a-z0-9-]+$"
+            },
+            "prefix": {
+              "description": "Key prefix of the files, ending in /.",
+              "type": "string",
+              "pattern": "^([A-Za-z0-9_-]+/)*$"
+            },
+            "lockMode": {
+              "description": "Object lock retention on each file until it expires.",
+              "type": "string",
+              "enum": ["", "COMPLIANCE", "GOVERNANCE"]
+            }
+          }
+        }
+      }
+    },
     "features": {
       "type": "object",
       "additionalProperties": false,

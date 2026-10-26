@@ -27,6 +27,10 @@ const (
 // DefaultRetention keeps audit entries a little over a year.
 const DefaultRetention = 400 * 24 * time.Hour
 
+// DefaultHot is how long entries stay in the database when an archive takes
+// the older ones.
+const DefaultHot = 90 * 24 * time.Hour
+
 // GenesisHash is the PrevHash of the first entry.
 const GenesisHash = "0000000000000000000000000000000000000000000000000000000000000000"
 
@@ -104,39 +108,96 @@ type Verification struct {
 	BrokenAt int64  `json:"broken_at,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	// FirstID is where verification started: older entries were pruned and
-	// the first remaining entry's PrevHash is trusted as the anchor.
+	// the first remaining entry's (or segment's) PrevHash is trusted as the
+	// anchor.
 	FirstID int64 `json:"first_id,omitempty"`
+	// Segments and Sealed count the archived segments and the entries in
+	// them, linked through the hashes the database keeps; Archives counts the
+	// files that were read and checked entry by entry (a deep check).
+	Segments int `json:"segments,omitempty"`
+	Sealed   int `json:"sealed,omitempty"`
+	Archives int `json:"archives,omitempty"`
 }
 
-// VerifyAudit walks the whole chain oldest first.
+// VerifyAudit walks the whole chain oldest first: the sealed segments by
+// their stored hashes, then every entry still in the database.
 func VerifyAudit(ctx context.Context, st Store) (Verification, error) {
-	var v Verification
+	v, boundary, err := verifyAudit(ctx, st)
+	if err == nil && boundary {
+		// A seal between reading the segments and the entries moves the
+		// boundary; one more pass sees a consistent picture.
+		v, _, err = verifyAudit(ctx, st)
+	}
+	return v, err
+}
+
+func verifyAudit(ctx context.Context, st Store) (v Verification, boundary bool, err error) {
+	segs, err := st.AuditSegments(ctx)
+	if err != nil {
+		return v, false, err
+	}
 	prev := ""
+	for i, sg := range segs {
+		if i == 0 {
+			v.FirstID = sg.FirstID
+		} else if sg.PrevHash != prev {
+			v.BrokenAt, v.Reason = sg.FirstID, "archived segment does not link to the one before it"
+			return v, false, nil
+		}
+		prev = sg.LastHash
+		v.Segments++
+		v.Sealed += sg.Count
+	}
 	var after int64
 	for {
 		page, err := st.ListEvents(ctx, EventFilter{AfterID: after, Limit: 1000, Ascending: true})
 		if err != nil {
-			return v, err
+			return v, false, err
 		}
 		for _, e := range page {
 			if v.FirstID == 0 {
 				v.FirstID = e.ID
 			} else if e.PrevHash != prev {
 				v.BrokenAt, v.Reason = e.ID, "link to the previous entry does not match (an entry was removed or changed)"
-				return v, nil
+				return v, v.Checked == 0 && len(segs) > 0, nil
 			}
 			if e.ChainHash() != e.Hash {
 				v.BrokenAt, v.Reason = e.ID, "entry content does not match its hash (it was changed)"
-				return v, nil
+				return v, false, nil
 			}
 			prev, after = e.Hash, e.ID
 			v.Checked++
 		}
 		if len(page) < 1000 {
 			v.OK = true
-			return v, nil
+			return v, false, nil
 		}
 	}
+}
+
+// CheckSegment checks entries read back from an archive file against the
+// segment that describes them: their count, IDs, hashes and links.
+func CheckSegment(seg AuditSegment, events []Event) error {
+	if len(events) != seg.Count || len(events) == 0 {
+		return fmt.Errorf("segment %d: %d entries, expected %d", seg.ID, len(events), seg.Count)
+	}
+	prev := seg.PrevHash
+	for i, e := range events {
+		if e.PrevHash != prev {
+			return fmt.Errorf("segment %d: entry %d does not link to the one before it", seg.ID, e.ID)
+		}
+		if e.ChainHash() != e.Hash {
+			return fmt.Errorf("segment %d: entry %d does not match its hash", seg.ID, e.ID)
+		}
+		if i > 0 && e.ID <= events[i-1].ID {
+			return fmt.Errorf("segment %d: entry %d is out of order", seg.ID, e.ID)
+		}
+		prev = e.Hash
+	}
+	if events[0].ID != seg.FirstID || events[len(events)-1].ID != seg.LastID || prev != seg.LastHash {
+		return fmt.Errorf("segment %d: entries %d-%d do not match the recorded %d-%d", seg.ID, events[0].ID, events[len(events)-1].ID, seg.FirstID, seg.LastID)
+	}
+	return nil
 }
 
 // RequestInfo describes the HTTP request an action comes from.

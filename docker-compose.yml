@@ -238,6 +238,17 @@ services:
       # The local stack is served over plain HTTP on 127.0.0.1; set true behind TLS.
       CODESYNAPSE_COOKIE_SECURE: ${CODESYNAPSE_COOKIE_SECURE:-false}
       CODESYNAPSE_AUDIT_RETENTION_DAYS: ${CODESYNAPSE_AUDIT_RETENTION_DAYS:-400}
+      # Audit entries older than the hot window are sealed into files and
+      # leave PostgreSQL: /audit-archive (the audit-archive volume) or an S3
+      # bucket. Empty keeps everything in PostgreSQL. Keep it on once set.
+      CODESYNAPSE_AUDIT_HOT_DAYS: ${CODESYNAPSE_AUDIT_HOT_DAYS:-90}
+      CODESYNAPSE_AUDIT_ARCHIVE_DIR: ${CODESYNAPSE_AUDIT_ARCHIVE_DIR:-}
+      CODESYNAPSE_AUDIT_S3_ENDPOINT: ${CODESYNAPSE_AUDIT_S3_ENDPOINT:-}
+      CODESYNAPSE_AUDIT_S3_BUCKET: ${CODESYNAPSE_AUDIT_S3_BUCKET:-}
+      CODESYNAPSE_AUDIT_S3_REGION: ${CODESYNAPSE_AUDIT_S3_REGION:-us-east-1}
+      CODESYNAPSE_AUDIT_S3_LOCK_MODE: ${CODESYNAPSE_AUDIT_S3_LOCK_MODE:-}
+      CODESYNAPSE_AUDIT_S3_ACCESS_KEY_ID: ${CODESYNAPSE_AUDIT_S3_ACCESS_KEY_ID:-}
+      CODESYNAPSE_AUDIT_S3_SECRET_ACCESS_KEY: ${CODESYNAPSE_AUDIT_S3_SECRET_ACCESS_KEY:-}
       # Module downloads during ingest. Keep false for repositories you do not trust.
       CODESYNAPSE_ALLOW_NETWORK: ${CODESYNAPSE_ALLOW_NETWORK:-false}
       # Check go.mod dependencies against osv.dev (sends module paths + versions only).
@@ -265,6 +276,7 @@ services:
     volumes:
       - ${SOURCES_DIR:-./sources}:/sources:ro
       - workspace:/workspace
+      - audit-archive:/audit-archive
       - ./config:/config:ro
     # Reach model servers running on this machine (e.g. MLX on :9080) as
     # host.docker.internal. The default network is a normal NAT'd bridge, so
@@ -308,6 +320,8 @@ services:
       CODESYNAPSE_API_TOKEN: ""
       CODESYNAPSE_ADMIN_PASSWORD: ""
       CODESYNAPSE_AUTO_ADMIN: "false"
+      CODESYNAPSE_AUDIT_S3_ACCESS_KEY_ID: ""
+      CODESYNAPSE_AUDIT_S3_SECRET_ACCESS_KEY: ""
     volumes: &worker-volumes
       - ${SOURCES_DIR:-./sources}:/sources:ro
       - workspace:/workspace
@@ -445,4 +459,5 @@ volumes:
   logs-data:
   postgres-data:
   workspace:
+  audit-archive:
   go-cache:

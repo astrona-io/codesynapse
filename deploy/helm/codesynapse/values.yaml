@@ -10,7 +10,8 @@ global:
   # CODESYNAPSE_GIT_TOKENS, CODESYNAPSE_GIT_PUSH_TOKENS (only the fix worker
   # gets it), ANTHROPIC_API_KEY, OPENROUTER_API_KEY, and
   # MILVUS_TOKEN ("user:password" or an API key) for an external Milvus
-  # with authentication.
+  # with authentication, and CODESYNAPSE_AUDIT_S3_ACCESS_KEY_ID and
+  # CODESYNAPSE_AUDIT_S3_SECRET_ACCESS_KEY for auditArchive.s3.
   existingSecret: ""
   # Secrets for a private registry or mirror, e.g. [{name: ghcr}].
   imagePullSecrets: []
@@ -48,6 +49,21 @@ cookieSecure: true
 # The web pods forward each user's address from the pod network.
 trustedProxies: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 auditRetentionDays: 400
+# Audit entries older than hotDays are sealed into gzip files in an S3 bucket
+# and leave PostgreSQL; the files are deleted at auditRetentionDays. Without
+# an endpoint every entry stays in PostgreSQL until auditRetentionDays. Once
+# on, keep it on: PostgreSQL then no longer holds the start of the chain.
+auditArchive:
+  hotDays: 90
+  s3:
+    # e.g. https://s3.eu-central-1.amazonaws.com or your MinIO; empty is off.
+    endpoint: ""
+    bucket: ""
+    region: us-east-1
+    prefix: audit/
+    # Object lock retention on each file (the bucket needs object lock on):
+    # COMPLIANCE, GOVERNANCE, or empty for none.
+    lockMode: ""
 
 features:
   vulnScan: true

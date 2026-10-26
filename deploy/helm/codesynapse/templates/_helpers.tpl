@@ -108,6 +108,19 @@ administrator's password. Workers never get either.
 {{- define "cs.apiEnv" -}}
 {{ include "cs.jobEnv" (list . .Values.features.allowPush) }}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_API_TOKEN" "CODESYNAPSE_API_TOKEN") }}
+{{- with .Values.auditArchive }}
+- {name: CODESYNAPSE_AUDIT_HOT_DAYS, value: {{ .hotDays | quote }}}
+{{- if .s3.endpoint }}
+{{- if not .s3.bucket }}{{ fail "auditArchive.s3.bucket is required with an endpoint" }}{{ end }}
+- {name: CODESYNAPSE_AUDIT_S3_ENDPOINT, value: {{ .s3.endpoint | quote }}}
+- {name: CODESYNAPSE_AUDIT_S3_BUCKET, value: {{ .s3.bucket | quote }}}
+- {name: CODESYNAPSE_AUDIT_S3_REGION, value: {{ .s3.region | quote }}}
+- {name: CODESYNAPSE_AUDIT_S3_PREFIX, value: {{ .s3.prefix | quote }}}
+- {name: CODESYNAPSE_AUDIT_S3_LOCK_MODE, value: {{ .s3.lockMode | quote }}}
+{{ include "cs.secretEnv" (list $ "CODESYNAPSE_AUDIT_S3_ACCESS_KEY_ID" "CODESYNAPSE_AUDIT_S3_ACCESS_KEY_ID") }}
+{{ include "cs.secretEnv" (list $ "CODESYNAPSE_AUDIT_S3_SECRET_ACCESS_KEY" "CODESYNAPSE_AUDIT_S3_SECRET_ACCESS_KEY") }}
+{{- end }}
+{{- end }}
 {{- if .Values.admin.enabled }}
 - name: CODESYNAPSE_ADMIN_PASSWORD
   valueFrom:

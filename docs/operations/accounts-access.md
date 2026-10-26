@@ -139,6 +139,21 @@ Organisations never use the installation's tokens. A public repository is cloned
 
 Every changing request and security event is appended to a hash-chained table with actor, authentication method, client address, user agent, request ID, target, status and outcome. `GET /api/v1/admin/audit/verify` checks the chain; export is JSON, JSON Lines or CSV (formula-neutralised). Retention is `CODESYNAPSE_AUDIT_RETENTION_DAYS` (default 400, minimum 30). New endpoints are covered by middleware; new security-relevant service actions also call `Service.Record`.
 
+### Archive
+
+PostgreSQL does not have to hold the whole retention period. With an archive set, entries older than `CODESYNAPSE_AUDIT_HOT_DAYS` (default 90, at least 7, at most the retention) are sealed once a day into gzip JSON Lines files of at most 20,000 entries and removed from PostgreSQL. PostgreSQL keeps one row per file: the first and last entry, the hash before and after it, and the file's SHA-256. A file is deleted when its newest entry is past `CODESYNAPSE_AUDIT_RETENTION_DAYS`, so the total retention stays 400 days.
+
+| Archive | Settings | Notes |
+|---|---|---|
+| Directory | `CODESYNAPSE_AUDIT_ARCHIVE_DIR` | Files are written read-only. Compose mounts the `audit-archive` volume at `/audit-archive`. Back the directory up. |
+| S3-compatible bucket | `CODESYNAPSE_AUDIT_S3_ENDPOINT` (https), `_BUCKET`, `_REGION` (default `us-east-1`), `_PREFIX` (default `audit/`), `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`, optional `_SESSION_TOKEN` | Path-style requests signed with SigV4, so AWS S3, MinIO, Ceph and most providers work. `_LOCK_MODE=COMPLIANCE` or `GOVERNANCE` sets object lock retention on each file until it expires; the bucket needs object lock turned on. In a versioned bucket, add a lifecycle rule that removes noncurrent versions. In the chart: `auditArchive.s3` with the two keys in `global.existingSecret`. |
+
+Set one of the two, never both. Only the API process that holds the `api-loops` lease seals and deletes; workers never see the archive or its keys. `audit.seal` and `audit.expire` entries record each run.
+
+Keep the archive on once it is set. PostgreSQL then no longer holds the oldest entries, so the daily pruning without an archive stops and logs a warning instead of deleting anything.
+
+`GET /api/v1/admin/audit/verify` checks the rows in PostgreSQL and the links between the files through the stored hashes; it reports `segments` and `sealed` (entries in files). Add `?deep=true` to read every file back as well: its checksum, every entry's hash and every link. `archives` then counts the files read. A missing or changed file fails the check and names its segment. When older entries were pruned without an archive, `first_id` says where the check started.
+
 ## Platform administration
 
 `/api/v1/admin/*` is for platform admins only. Suspending an account ends its sessions and refuses its logins and keys on the next request. The service keeps at least one active platform admin (`ErrLastAdmin`) and refuses suspending yourself. Suspension and the admin flag need a signed-in session, never an API key.

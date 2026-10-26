@@ -268,6 +268,29 @@ type EventFilter struct {
 	Ascending bool
 }
 
+// AuditSegment is a run of the oldest audit entries sealed into an archive
+// file and removed from the database. The database keeps its hashes, so the
+// chain still verifies across segments without reading the files.
+type AuditSegment struct {
+	ID       int64     `json:"id"`
+	FirstID  int64     `json:"first_id"`
+	LastID   int64     `json:"last_id"`
+	FirstAt  time.Time `json:"first_at"`
+	LastAt   time.Time `json:"last_at"`
+	Count    int       `json:"count"`
+	PrevHash string    `json:"prev_hash"` // the first entry's PrevHash
+	LastHash string    `json:"last_hash"` // the last entry's Hash
+	// SHA256 and Bytes describe the archive file (gzip JSON lines).
+	SHA256   string    `json:"sha256"`
+	Bytes    int64     `json:"bytes"`
+	Backend  string    `json:"backend"` // dir or s3
+	Key      string    `json:"key"`
+	SealedAt time.Time `json:"sealed_at"`
+}
+
+// MaxAuditSegments bounds the segment list (more than ten years of daily seals).
+const MaxAuditSegments = 5000
+
 // Errors.
 var (
 	ErrAccessLimit   = errors.New("access policy exceeds evaluation limit")
@@ -280,6 +303,8 @@ var (
 	ErrRateLimited   = errors.New("too many attempts; wait a minute and try again")
 	ErrLastOwner     = errors.New("an organisation needs at least one owner")
 	ErrInvalidInput  = errors.New("invalid input")
+	// ErrAuditConflict refuses a seal whose entries changed or are not the oldest.
+	ErrAuditConflict = errors.New("the audit entries changed while they were sealed")
 	ErrKeyRevoked    = errors.New("API key revoked or expired")
 	ErrSuspended     = errors.New("this account is suspended; ask an administrator")
 	ErrNoSecretKey   = errors.New("organisation Git tokens need CODESYNAPSE_SECRET_KEY (32 random bytes, base64 or hex) on the API")
@@ -509,6 +534,17 @@ type Store interface {
 	ListEvents(ctx context.Context, f EventFilter) ([]Event, error)
 	// PruneEvents deletes entries before t (retention).
 	PruneEvents(ctx context.Context, before time.Time) (int, error)
+	// SealAuditSegment records seg and deletes the entries it holds, in one
+	// transaction, and only while they are still the oldest entries, unchanged
+	// and linked to the previous segment (ErrAuditConflict otherwise).
+	SealAuditSegment(ctx context.Context, seg AuditSegment) (AuditSegment, error)
+	// AuditSegments lists the sealed segments oldest first (at most MaxAuditSegments).
+	AuditSegments(ctx context.Context) ([]AuditSegment, error)
+	// DropAuditSegment removes the oldest segment once its retention ended;
+	// the next segment's PrevHash becomes the chain's anchor, as the first
+	// remaining entry's does after PruneEvents (ErrNotFound if id is not
+	// the oldest).
+	DropAuditSegment(ctx context.Context, id int64) error
 }
 
 // JobWaker is implemented by stores that can tell a worker a job was

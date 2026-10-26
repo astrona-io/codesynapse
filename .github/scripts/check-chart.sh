@@ -24,12 +24,24 @@ helm template codesynapse "$chart" -f "$values" \
 for bad in api.replica=2 'worker.roles=ingest\,typo' 'worker.roles=ingest\,fix' fixWorker.roles=ai image.pullPolicy=Sometimes \
     auditRetentionDays=7 postgresql.sizee=1Gi nebula.size=lots \
     nebula.space.replicas=2 nebula.space.partitions=0 nebula.space.extra=1 \
-    worker.restrictEgress=maybe 'worker.egressAllow[0].cidr=nonsense' 'worker.egressAllow[0].extra=1'; do
+    worker.restrictEgress=maybe 'worker.egressAllow[0].cidr=nonsense' 'worker.egressAllow[0].extra=1' \
+    auditArchive.hotDays=3 auditArchive.s3.endpoint=http://minio:9000 auditArchive.s3.lockMode=legal \
+    auditArchive.s3.prefix=../audit/ auditArchive.s3.extra=1; do
     if helm template codesynapse "$chart" -f "$values" --set "$bad" > /dev/null 2>&1; then
         echo "values.schema.json accepted $bad" >&2
         exit 1
     fi
 done
+
+# The audit archive reaches the API only, with its keys from the Secret, and
+# needs a bucket.
+helm template codesynapse "$chart" -f "$values" --set auditArchive.s3.endpoint=https://s3.example.com,auditArchive.s3.bucket=audit > "$out/audit.yaml"
+grep -q 'key: CODESYNAPSE_AUDIT_S3_SECRET_ACCESS_KEY' "$out/audit.yaml"
+if grep -q CODESYNAPSE_AUDIT_S3 "$out/rendered.yaml"; then echo "audit archive rendered without an endpoint" >&2; exit 1; fi
+if helm template codesynapse "$chart" -f "$values" --set auditArchive.s3.endpoint=https://s3.example.com > /dev/null 2>&1; then
+    echo "chart rendered the audit archive without a bucket" >&2
+    exit 1
+fi
 
 # Queue scaling renders the object of the tool the cluster has, and only that
 # one; the fix worker is never scaled. The CRD of KEDA is not installed here,
