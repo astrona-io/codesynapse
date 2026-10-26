@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -100,8 +101,9 @@ type HookCommands struct {
 // CompactEnv is Claude Code's variable for an earlier auto-compaction.
 const CompactEnv = "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
 
-// marker identifies hooks this package installed, so re-running replaces them.
-const marker = "codesynapse memory "
+// memoryHook identifies hooks this package installed, so re-running replaces
+// them. The binary path is shell-quoted ('/path/codesynapse' memory recall).
+var memoryHook = regexp.MustCompile(`codesynapse'? memory (recall|offload) `)
 
 // InstallHooks merges the CodeSynapse SessionStart and PreCompact hooks
 // into a Claude Code settings file, keeping every other setting and hook.
@@ -158,7 +160,7 @@ func isOurs(group any) bool {
 	hs, _ := g["hooks"].([]any)
 	for _, h := range hs {
 		m, _ := h.(map[string]any)
-		if c, _ := m["command"].(string); strings.Contains(c, marker) {
+		if c, _ := m["command"].(string); memoryHook.MatchString(c) {
 			return true
 		}
 	}

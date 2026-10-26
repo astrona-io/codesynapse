@@ -709,6 +709,13 @@ func (o *mcpHooksOptions) Run(ctx context.Context, _ *app.Env) error {
 		}
 		return err
 	}
+	settings := filepath.Join(o.dir, ".claude", "settings.local.json")
+	if o.shared {
+		settings = filepath.Join(o.dir, ".claude", "settings.json")
+	}
+	if home, err := os.UserHomeDir(); err == nil && agentcfg.ClaudePluginEnabled(home, o.dir) {
+		return o.pluginOnly(settings)
+	}
 	if c.token == "" {
 		return fmt.Errorf("set %s to the API token (in the CodeSynapse folder: export %s=$(sed -n 's/^%s=//p' .env)) so the hooks can reach the API", apiTokenEnv, apiTokenEnv, apiTokenEnv)
 	}
@@ -730,10 +737,6 @@ func (o *mcpHooksOptions) Run(ctx context.Context, _ *app.Env) error {
 	}
 	q := agentcfg.ShellQuote
 	common := fmt.Sprintf("--hook --repo %s --api-url %s", q(repo), q(o.apiURL))
-	settings := filepath.Join(o.dir, ".claude", "settings.local.json")
-	if o.shared {
-		settings = filepath.Join(o.dir, ".claude", "settings.json")
-	}
 	if err := agentcfg.InstallHooks(settings, agentcfg.HookCommands{
 		SessionStart: fmt.Sprintf("%s memory recall %s", q(bin), common),
 		PreCompact:   fmt.Sprintf("%s memory offload %s --keep %d", q(bin), common, o.keep),
@@ -751,5 +754,28 @@ func (o *mcpHooksOptions) Run(ctx context.Context, _ *app.Env) error {
 		}
 	}
 	_, err = fmt.Fprintf(o.EC.Stdout, "installed Claude Code hooks for %s in %s\n  SessionStart: recall saved facts into context (also after each compaction)\n  PreCompact:   offload turns older than the last %d exchanges (local model, background)\n  %s\nAPI token stored in %s (0600). Restart Claude Code in that project to apply.\n", repo, settings, o.keep, shrink, p)
+	return err
+}
+
+// pluginOnly is `mcp hooks` when the CodeSynapse plugin is enabled: the
+// plugin already runs these hooks, so it removes copies an earlier run wrote
+// and only sets the context cap.
+func (o *mcpHooksOptions) pluginOnly(settings string) error {
+	n, err := agentcfg.RemoveClaudeHooks(settings)
+	if err != nil {
+		return err
+	}
+	msg := "The CodeSynapse plugin is enabled and runs the memory hooks itself, so none were added."
+	if n > 0 {
+		msg += fmt.Sprintf(" Removed %d older CodeSynapse hook(s) from %s.", n, settings)
+	}
+	if o.tokens > 0 {
+		line, err := agentcfg.SetClaudeContextCap(settings, o.tokens, o.EC.Command.Flags().Changed("context-cap"))
+		if err != nil {
+			return err
+		}
+		msg += "\n" + line
+	}
+	_, err = fmt.Fprintln(o.EC.Stdout, msg+"\nRestart Claude Code to apply.")
 	return err
 }

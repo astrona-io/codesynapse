@@ -110,7 +110,7 @@ export CODESYNAPSE_API_TOKEN=csk_...
 codesynapse mcp hooks ~/src/your-repo
 ```
 
-Do not do both; the hooks would run twice. Restart Claude Code afterwards.
+Do not do both; the hooks would run twice. With the plugin enabled, `mcp hooks` adds no hooks: it removes copies an earlier run wrote and only sets the context cap. Running it again replaces its own hooks instead of adding more. Restart Claude Code afterwards.
 
 ## 5. Make Claude Code compact earlier
 
