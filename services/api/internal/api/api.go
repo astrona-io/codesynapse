@@ -130,6 +130,7 @@ type Server struct {
 	jobs        *Jobs
 	notify      notifyCache
 	overviews   overviewCache
+	rules       ruleCache
 	aiProbe     aiStatusCache
 	// offload extracts memory triples from conversation turns (local model only).
 	offload *offload.Worker

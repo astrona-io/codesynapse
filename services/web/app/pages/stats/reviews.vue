@@ -2,6 +2,12 @@
 import { useStatistics } from '~/composables/useStatistics'
 const { days, s, error, pending } = useStatistics()
 const r = computed(() => s.value?.reviews)
+const range = computed(() => seriesRangeFor(days.value))
+const { ready, usageOf } = useModelUsage(range)
+// From the metrics store when it is on (every process, this window), else the
+// API process's own counters since it started.
+const usage = (p: NonNullable<typeof s.value>['ai'][number]) => usageOf(p.provider)
+  ?? { requests: p.usage.requests, failures: p.usage.failures, input: p.usage.input_tokens, output: p.usage.output_tokens }
 const entries = (o?: Record<string, number>) => Object.entries(o ?? {}).map(([label, value]) => ({ label, value })).sort((x, y) => y.value - x.value)
 </script>
 
@@ -17,14 +23,14 @@ const entries = (o?: Record<string, number>) => Object.entries(o ?? {}).map(([la
               </section>
               <section class="panel">
                 <p class="eyebrow">AI providers</p><h2>Model usage</h2>
-                <p class="muted small">Since the API started.</p>
+                <p class="muted small">{{ ready ? `Last ${range === '7d' ? 7 : 30} days, every process${days > 30 ? ' (the metrics store keeps 30 days)' : ''}.` : 'Since the API started; live metrics are off.' }}</p>
                 <table v-if="s.ai.length">
                   <thead><tr><th>Provider</th><th class="num">Requests</th><th class="num">Tokens in / out</th></tr></thead>
                   <tbody>
                     <tr v-for="p in s.ai" :key="p.provider">
                       <td>{{ p.provider }} <div class="muted small mono">{{ p.model }}{{ p.local ? ' · local' : '' }}</div></td>
-                      <td class="num">{{ fmtInt(p.usage.requests) }}<div v-if="p.usage.failures" class="muted small">{{ p.usage.failures }} failed</div></td>
-                      <td class="num">{{ fmtCompact(p.usage.input_tokens) }} / {{ fmtCompact(p.usage.output_tokens) }}</td>
+                      <td class="num">{{ fmtInt(usage(p).requests) }}<div v-if="usage(p).failures" class="muted small">{{ usage(p).failures }} failed</div></td>
+                      <td class="num">{{ fmtCompact(usage(p).input) }} / {{ fmtCompact(usage(p).output) }}</td>
                     </tr>
                   </tbody>
                 </table>

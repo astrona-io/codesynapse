@@ -21,12 +21,36 @@ const bashRows = computed(() => Object.entries(a.value?.workflow.bash ?? {})
   .sort((x, y) => y.value - x.value))
 const tools = computed(() => (a.value?.tools ?? []).map((t) => ({ label: t.tool, value: t.calls, detail: `${t.kind} · ${fmtInt(Math.round(t.avg_tokens))} tokens/call · ${t.avg_ms} ms avg${t.errors ? ` · ${t.errors} errors` : ''}` })))
 const clients = computed(() => (a.value?.clients ?? []).map((c) => ({ label: c.client, value: c.calls, detail: `${c.sessions} session(s)` })))
+// Local models: CodeSynapse's own AI work (reviews, triage, memory extraction)
+// that never left this network.
+const modelRange = computed(() => seriesRangeFor(days.value))
+const { ready: modelsReady, usageOf } = useModelUsage(modelRange)
+const local = computed(() => {
+  const ai = s.value?.ai ?? []
+  if (!ai.some(p => p.local)) return null
+  const sum = (ps: typeof ai) => ps.reduce((t, p) => {
+    const u = usageOf(p.provider) ?? { requests: p.usage.requests, failures: p.usage.failures, input: p.usage.input_tokens, output: p.usage.output_tokens }
+    return { requests: t.requests + u.requests, failures: t.failures + u.failures, tokens: t.tokens + u.input + u.output }
+  }, { requests: 0, failures: 0, tokens: 0 })
+  const mine = sum(ai.filter(p => p.local))
+  const all = sum(ai)
+  return { ...mine, models: ai.filter(p => p.local).map(p => p.model || p.provider), sharePct: all.requests ? Math.round((100 * mine.requests) / all.requests) : null }
+})
 const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.repo || '(no repo argument)', value: r.calls, detail: `${fmtCompact(r.response_tokens)} served · ~${fmtCompact(r.avoided_tokens)} avoided` })))
 </script>
 
 <template>
   <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
   <div v-else-if="s" :class="{ refreshing: pending }" class="stack">
+    <section v-if="local" class="panel">
+      <p class="eyebrow">Local models</p><h2>AI work that stayed on your network</h2>
+      <p class="muted small">Reviews, security triage, briefings and memory extraction CodeSynapse ran on {{ local.models.join(', ') }}. {{ modelsReady ? `Last ${modelRange === '7d' ? 7 : 30} days, every process.` : 'Since the API started; live metrics are off.' }}</p>
+      <div class="grid kpis">
+        <StatTile label="Local requests" :value="fmtCompact(local.requests)" :hint="local.failures ? `${local.failures} failed` : 'no failures'" />
+        <StatTile label="Tokens processed locally" :value="fmtCompact(local.tokens)" hint="input + output, no cloud bill" />
+        <StatTile label="Share of AI requests" :value="local.sharePct === null ? '–' : `${local.sharePct}%`" hint="local ÷ all AI providers" />
+      </div>
+    </section>
     <section v-if="a" class="panel">
       <p class="eyebrow">Agents &amp; context</p><h2>MCP sessions and tool calls</h2>
       <p class="muted small">Counted by the MCP server per day, repository, tool and client. Arguments and results are never stored, only their size.</p>
