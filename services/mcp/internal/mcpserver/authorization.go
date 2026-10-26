@@ -68,6 +68,7 @@ var toolPolicies = map[string]toolPolicy{
 	"gh_pr_status":           {accounts.Viewer, "list"},
 	"gh_pr_list":             {accounts.Viewer, "list"},
 	"gh_run_failure":         {accounts.Viewer, "list"},
+	"gh_run_list":            {accounts.Viewer, "list"},
 	"ask_local":              {accounts.Viewer, "list"},
 	"security_report":        {accounts.Viewer, "repository"},
 	"repo_metrics":           {accounts.Viewer, "repository"},

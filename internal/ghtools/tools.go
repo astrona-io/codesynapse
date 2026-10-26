@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -16,10 +17,11 @@ const (
 	ToolPRStatus = "gh_pr_status"
 	ToolPRList   = "gh_pr_list"
 	ToolRunFail  = "gh_run_failure"
+	ToolRunList  = "gh_run_list"
 )
 
 // Tools lists them.
-var Tools = []string{ToolPRStatus, ToolPRList, ToolRunFail}
+var Tools = []string{ToolPRStatus, ToolPRList, ToolRunFail, ToolRunList}
 
 // PRStatusIn is gh_pr_status's input.
 type PRStatusIn struct {
@@ -34,6 +36,34 @@ type PRStatusIn struct {
 type PRListIn struct {
 	State string `json:"state,omitempty" jsonschema:"open (default), closed, merged or all"`
 	Limit int    `json:"limit,omitempty" jsonschema:"how many to list, default 10, at most 30"`
+}
+
+// RunListIn is gh_run_list's input. The filters are applied here, after gh
+// answers, so no text from the agent reaches gh's arguments.
+type RunListIn struct {
+	Workflow   string `json:"workflow,omitempty" jsonschema:"only runs of this workflow (its name, as shown in the list)"`
+	Branch     string `json:"branch,omitempty" jsonschema:"only runs on this branch"`
+	Conclusion string `json:"conclusion,omitempty" jsonschema:"only runs that ended so: success, failure, cancelled or skipped"`
+	Limit      int    `json:"limit,omitempty" jsonschema:"how many to list, default 10, at most 30"`
+}
+
+// RunSummary is one line of a run list.
+type RunSummary struct {
+	ID         int64  `json:"id"`
+	Workflow   string `json:"workflow"`
+	Branch     string `json:"branch"`
+	Commit     string `json:"commit"`
+	Event      string `json:"event"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion,omitempty"`
+	Created    string `json:"created"`
+}
+
+// RunListOut is gh_run_list's answer.
+type RunListOut struct {
+	Runs []RunSummary `json:"runs"`
+	// Scanned is how many recent runs the filters looked through.
+	Scanned int `json:"scanned"`
 }
 
 // Checks counts a pull request's checks and names the ones to look at.
@@ -114,6 +144,12 @@ func Run(ctx context.Context, dir, tool string, args json.RawMessage) (any, erro
 			return nil, err
 		}
 		return Failure(ctx, dir, in)
+	case ToolRunList:
+		var in RunListIn
+		if err := decode(&in); err != nil {
+			return nil, err
+		}
+		return Runs(ctx, dir, in)
 	}
 	return nil, fmt.Errorf("%w: unknown tool %q", ErrInvalid, tool)
 }
@@ -304,4 +340,68 @@ func List(ctx context.Context, dir string, in PRListIn) (PRListOut, error) {
 		})
 	}
 	return out, nil
+}
+
+// runScan is how many recent runs gh_run_list asks for before filtering.
+const runScan = 200
+
+// Runs answers gh_run_list: recent workflow runs, newest first, one line
+// each, filtered here by workflow, branch and conclusion.
+func Runs(ctx context.Context, dir string, in RunListIn) (RunListOut, error) {
+	if in.Conclusion != "" && !slices.Contains([]string{"success", "failure", "cancelled", "skipped"}, in.Conclusion) {
+		return RunListOut{}, fmt.Errorf("%w: conclusion must be success, failure, cancelled or skipped", ErrInvalid)
+	}
+	limit := in.Limit
+	switch {
+	case limit < 0:
+		return RunListOut{}, fmt.Errorf("%w: limit must be positive", ErrInvalid)
+	case limit == 0:
+		limit = defaultList
+	}
+	limit = min(limit, MaxList)
+	raw, err := gh(ctx, dir, "run", "list", "--limit", strconv.Itoa(runScan), "--json", "databaseId,workflowName,headBranch,headSha,event,status,conclusion,createdAt")
+	if err != nil {
+		return RunListOut{}, err
+	}
+	var v []struct {
+		DatabaseID   int64  `json:"databaseId"`
+		WorkflowName string `json:"workflowName"`
+		HeadBranch   string `json:"headBranch"`
+		HeadSha      string `json:"headSha"`
+		Event        string `json:"event"`
+		Status       string `json:"status"`
+		Conclusion   string `json:"conclusion"`
+		CreatedAt    string `json:"createdAt"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return RunListOut{}, fmt.Errorf("%w: unreadable answer from gh", ErrUnavailable)
+	}
+	out := RunListOut{Runs: []RunSummary{}, Scanned: len(v)}
+	for _, r := range v {
+		if (in.Workflow != "" && !strings.EqualFold(r.WorkflowName, in.Workflow)) || (in.Branch != "" && r.HeadBranch != in.Branch) ||
+			(in.Conclusion != "" && !strings.EqualFold(r.Conclusion, in.Conclusion)) {
+			continue
+		}
+		out.Runs = append(out.Runs, RunSummary{
+			ID: r.DatabaseID, Workflow: safeText(r.WorkflowName, titleLimit), Branch: safeText(r.HeadBranch, nameLimit), Commit: shortSha(r.HeadSha),
+			Event: safeText(r.Event, nameLimit), Status: strings.ToLower(r.Status), Conclusion: strings.ToLower(r.Conclusion), Created: r.CreatedAt,
+		})
+		if len(out.Runs) == limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+// shortSha keeps the first seven hex digits of a commit.
+func shortSha(s string) string {
+	if len(s) < 7 {
+		return ""
+	}
+	for _, c := range s[:7] {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			return ""
+		}
+	}
+	return s[:7]
 }
