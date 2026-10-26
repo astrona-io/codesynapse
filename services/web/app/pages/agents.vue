@@ -96,6 +96,14 @@ const showPluginStatus = computed(() => viaBridge.value && selected.value.includ
 const setupAgents = computed(() => selectedAgents.value.filter(a => a.id === 'codex' || a.id === 'cursor' || (a.id === 'claude' && viaBridge.value)))
 const stepPlugin = (agent: AgentID) => (viaBridge.value ? 4 : 3) + setupAgents.value.findIndex(a => a.id === agent)
 const stepCheck = computed(() => (viaBridge.value ? 4 : 3) + setupAgents.value.length)
+
+// Last step: a cap on each chat's context. The agent compacts at the cap;
+// with the memory hooks the older turns are offloaded first.
+const contextCaps = [100_000, 150_000, 200_000]
+const contextCap = ref(150_000)
+const capLabel = (n: number) => `${n / 1000}k`
+const claudeCap = computed(() => JSON.stringify({ autoCompactWindow: contextCap.value }, null, 2))
+const codexCap = computed(() => `model_auto_compact_token_limit = ${contextCap.value}`)
 const { data: keys, refresh: refreshKeys } = useApiGet<{ keys: ApiKey[] }>('me/keys', { immediate: session.accounts.value })
 const { data: status, refresh: refreshStatus } = useApiGet<AgentStatus>('agents/status')
 // What was already there when the page opened: only newer activity counts.
@@ -263,6 +271,29 @@ onBeforeUnmount(() => clearInterval(poll))
             <p class="muted">Claude Code can also recall and offload memory automatically: <code>codesynapse mcp hooks</code> installs the hooks. See <NuxtLink to="/help#memory">agent memory</NuxtLink>.</p>
           </div>
         </details>
+      </div>
+    </section>
+
+    <section class="panel step">
+      <p class="step__n">{{ stepCheck + 1 }}</p>
+      <div class="stack--tight">
+        <h2>Keep each chat small <span class="muted">(optional)</span></h2>
+        <p class="muted">An agent keeps the whole conversation in context until it compacts it, and every prompt pays for all of it again. Models with a million-token window compact only near the end of it. Set a lower limit so the chat compacts sooner. With the Claude Code plugin or <code>codesynapse mcp hooks</code>, the older turns go to <NuxtLink to="/help#memory">agent memory</NuxtLink> first and come back when a prompt needs them, so a small limit loses little.</p>
+        <div class="row" role="group" aria-label="Context limit">
+          <button v-for="n in contextCaps" :key="n" type="button" class="chip" :class="{ active: contextCap === n }" :aria-pressed="contextCap === n" @click="contextCap = n">{{ capLabel(n) }} tokens</button>
+        </div>
+        <template v-if="selected.includes('claude')">
+          <h3>Claude Code</h3>
+          <p class="muted">Add this to <code>~/.claude/settings.json</code> for every project, or to a project's <code>.claude/settings.json</code>. Claude Code accepts 100k to 1M. For one chat only, type <code>/autocompact {{ capLabel(contextCap) }}</code>.</p>
+          <CopyField :value="claudeCap" multiline label="settings.json" />
+          <p class="muted small">If <code>codesynapse mcp hooks</code> set <code>CLAUDE_AUTOCOMPACT_PCT_OVERRIDE</code> in the same file, remove it. It is a percentage of this limit, so 30 would compact at {{ capLabel(contextCap * 0.3) }}.</p>
+        </template>
+        <template v-if="selected.includes('codex')">
+          <h3>Codex</h3>
+          <p class="muted">Add this to <code>~/.codex/config.toml</code>, above the first <code>[section]</code>. Codex summarises older turns itself; its hooks do not offload them to agent memory yet.</p>
+          <CopyField :value="codexCap" label="config.toml" />
+        </template>
+        <p v-if="!selected.includes('claude') && !selected.includes('codex')" class="muted small">Claude Code and Codex have a setting for this. Choose one of them above to see it.</p>
       </div>
     </section>
   </div>
