@@ -95,6 +95,7 @@ Each store is a subchart in `charts/`, declared in `Chart.yaml` with `condition:
 | Milvus (memory vectors) | `milvus.enabled=false` | `milvus.externalURL` (the proxy, `http(s)://host:19530`), and `MILVUS_TOKEN` in the Secret when authentication is on; empty turns memory vectors off. A Milvus cluster from the zilliztech chart with SeaweedFS for S3 and Woodpecker as the log is tested by `just chart-failover-milvus`; set `mq.type: woodpecker` before its first start |
 | VictoriaMetrics (metrics) | `victoriametrics.enabled=false` | `victoriametrics.externalURL`; empty turns export off |
 | VictoriaTraces (traces) | `victoriatraces.enabled=false` | `victoriatraces.externalURL`, the full OTLP/HTTP traces endpoint; empty turns export off |
+| VictoriaLogs (service logs) | `victorialogs.enabled=false` | `victorialogs.externalURL`, the base URL; empty ships nothing (stderr only). The lines include audit lines with emails and addresses: keep it internal |
 
 Settings of an in-chart store go under its name, for example `--set nebula.size=50Gi`. Each subchart's `values.yaml` lists them: image, size, storageClass, resources, and retention for the Victoria stores. The subcharts take the Secret, pull secrets and network policies from `global`, and share the helpers in the `common` library chart.
 

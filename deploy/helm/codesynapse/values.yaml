@@ -195,3 +195,7 @@ victoriatraces:
   enabled: true
   # When disabled: the full OTLP/HTTP traces endpoint; empty turns export off.
   externalURL: ""
+victorialogs:
+  enabled: true
+  # When disabled: the base URL; empty turns log shipping off (stderr only).
+  externalURL: ""

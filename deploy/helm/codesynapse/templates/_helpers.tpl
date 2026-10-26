@@ -21,6 +21,9 @@
 {{- define "cs.tracesURL" -}}
 {{- if .Values.victoriatraces.enabled }}http://{{ include "cs.name" (list . "victoriatraces") }}:10428/insert/opentelemetry/v1/traces{{ else }}{{ .Values.victoriatraces.externalURL }}{{ end -}}
 {{- end -}}
+{{- define "cs.logsURL" -}}
+{{- if .Values.victorialogs.enabled }}http://{{ include "cs.name" (list . "victorialogs") }}:9428{{ else }}{{ .Values.victorialogs.externalURL }}{{ end -}}
+{{- end -}}
 
 {{/* Environment shared by api, worker and mcp: stores and telemetry. */}}
 {{- define "cs.storeEnv" -}}
@@ -41,6 +44,9 @@
 - {name: CODESYNAPSE_TRACES_USER, value: codesynapse}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_TRACES_PASSWORD" "METRICS_PASSWORD") }}
 - {name: CODESYNAPSE_TRACES_SAMPLE, value: {{ .Values.traces.sample | quote }}}
+- {name: CODESYNAPSE_LOGS_URL, value: {{ include "cs.logsURL" . | quote }}}
+- {name: CODESYNAPSE_LOGS_USER, value: codesynapse}
+{{ include "cs.secretEnv" (list . "CODESYNAPSE_LOGS_PASSWORD" "METRICS_PASSWORD") }}
 - {name: CODESYNAPSE_ENVIRONMENT, value: {{ .Values.environment | quote }}}
 {{- if .Values.postgresql.enabled }}
 {{ include "cs.secretEnv" (list . "POSTGRES_PASSWORD" "POSTGRES_PASSWORD") }}

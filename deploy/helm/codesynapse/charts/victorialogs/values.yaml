@@ -1,0 +1,9 @@
+# Defaults for the in-chart victorialogs. Override them under `victorialogs:` in the
+# codesynapse chart's values.
+image: quay.io/victoriametrics/victoria-logs:v1.53.0
+retention: 30d
+size: 10Gi
+storageClass: ""
+resources:
+  requests: {cpu: 50m, memory: 128Mi}
+  limits: {memory: 1Gi}

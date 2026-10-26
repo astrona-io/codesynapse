@@ -145,6 +145,16 @@ One request is followed through the API, its job, the worker, HugeGraph and mode
 - **Trust:** the API continues an incoming `traceparent` only from `CODESYNAPSE_TRUSTED_PROXIES` (the dashboard). The MCP server never continues one: an outside caller could otherwise force sampling or splice into other traces.
 - **One ID:** with a valid span, the request ID (`X-Request-ID`, the audit entry's `request_id`) is the trace ID. Log lines written with a context carry `trace_id` and `span_id`. An audit entry, a log line and a trace therefore lead to each other.
 
+## Logs
+
+The services ship their log lines to VictoriaLogs (Apache-2.0) as well as writing them to stderr, so lines from every replica can be searched in one place, next to their traces.
+
+- **Export:** JSON lines to `CODESYNAPSE_LOGS_URL`, the base URL (the shipper appends `/insert/jsonline`), with `CODESYNAPSE_LOGS_USER` and `CODESYNAPSE_LOGS_PASSWORD`. Compose runs VictoriaLogs at `http://victorialogs:9428` with the metrics login; its UI is at `http://localhost:9428/select/vmui`. Without a URL, services log to stderr only.
+- **Fields:** each shipped line is JSON whatever `--log-format` says, and adds `service`, `environment`, `instance` (the opaque process ID metrics use) and `version`. The streams are `service`, `environment` and `instance`. Lines written with a context carry `trace_id` and `span_id`, as on stderr.
+- **Bounds:** lines wait in a 4 MiB queue and go out every two seconds in batches of at most 1 MiB. A line over 64 KiB, a full queue or a failed batch drops lines; logging never waits on the network. Drops are counted in `platform_log_lines_dropped_total` (`reason`: `too_long`, `queue_full`, `send_failed`). Shipping failures are reported on stderr only, at most once a minute, so a failing store cannot feed itself. On shutdown what is left is sent within five seconds.
+- **Personal data:** the lines are the ones the services already write. That includes the structured `audit` line, which names the actor's email and client address. VictoriaLogs is therefore an operator store: internal, password protected, never published beyond localhost in compose, reachable only from the services in the chart (network policy), and it keeps lines `LOGS_RETENTION` (compose) or `victorialogs.retention` (chart), 30 days by default.
+- **Not the audit log:** the hash-chained audit table in PostgreSQL stays the record of truth; VictoriaLogs is for searching. A shipped audit line can be dropped like any other.
+
 ## Implementation and checks
 
 The approved dependency set is `go.opentelemetry.io/otel/sdk`, `go.opentelemetry.io/otel/sdk/metric`, and `go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp`, each at `v1.47.0`, with matching OTel API modules and required transitive dependencies. The upstream licence is Apache-2.0 with BSD-3-Clause portions. Matching API and transitive dependencies are recorded in `go.mod` and `go.sum`.

@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "In-chart VictoriaLogs values",
+  "description": "Override these under `victorialogs:` in the codesynapse chart's values.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "global": {
+      "description": "Set in the codesynapse chart.",
+      "type": "object"
+    },
+    "enabled": {
+      "description": "Set in the codesynapse chart (condition).",
+      "type": "boolean"
+    },
+    "image": {
+      "description": "Image reference with registry and tag.",
+      "type": "string",
+      "minLength": 1
+    },
+    "size": {
+      "description": "Size of the data volume.",
+      "$ref": "#/definitions/quantity"
+    },
+    "storageClass": {
+      "description": "Storage class of the data volume; empty uses the cluster default.",
+      "type": "string"
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requests": {
+          "$ref": "#/definitions/resourceList"
+        },
+        "limits": {
+          "$ref": "#/definitions/resourceList"
+        }
+      }
+    },
+    "externalURL": {
+      "description": "Set in the codesynapse chart: the store to use when this one is disabled.",
+      "type": "string",
+      "pattern": "^(https?://.*)?$"
+    },
+    "retention": {
+      "description": "How long data is kept, e.g. 7d, 4w or 1y.",
+      "type": "string",
+      "pattern": "^[0-9]+(h|d|w|y)?$"
+    }
+  },
+  "definitions": {
+    "quantity": {
+      "description": "A Kubernetes quantity, e.g. 250m, 1Gi or 2.",
+      "type": [
+        "string",
+        "number"
+      ],
+      "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+    },
+    "resourceList": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/quantity"
+      }
+    }
+  }
+}

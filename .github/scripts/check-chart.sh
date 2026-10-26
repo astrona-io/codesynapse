@@ -16,7 +16,7 @@ helm template codesynapse "$chart" -f "$chart/ci/kind-values.yaml" > /dev/null
 # So must every store linked from outside (no subchart schema applies then).
 helm template codesynapse "$chart" -f "$values" \
     --set postgresql.enabled=false,nebula.enabled=false,milvus.enabled=false \
-    --set victoriametrics.enabled=false,victoriatraces.enabled=false \
+    --set victoriametrics.enabled=false,victoriatraces.enabled=false,victorialogs.enabled=false \
     --set nebula.externalAddrs=nebula.example.com:9669 > /dev/null
 
 # values.schema.json (and each store's) must refuse what the chart would

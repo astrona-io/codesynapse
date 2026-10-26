@@ -390,6 +390,18 @@
           "description": "When disabled: the full OTLP/HTTP traces endpoint; empty turns export off."
         }
       }
+    },
+    "victorialogs": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/store"
+        }
+      ],
+      "properties": {
+        "externalURL": {
+          "description": "When disabled: the base URL; empty turns log shipping off (stderr only)."
+        }
+      }
     }
   },
   "definitions": {
