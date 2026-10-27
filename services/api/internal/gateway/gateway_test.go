@@ -75,6 +75,41 @@ func TestRedirectIsNotFollowed(t *testing.T) {
 	assert.Equal(t, rec.Code, http.StatusFound)
 }
 
+func TestGatewayKeyIsNeverForwardedAsModelCredential(t *testing.T) {
+	hit := false
+	up := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hit = true }))
+	defer up.Close()
+	g := NewAnthropic()
+	g.Upstream = up.URL
+	for name, set := range map[string]func(*http.Request){
+		"bearer":    func(r *http.Request) { r.Header.Set("Authorization", "Bearer csk_abc") },
+		"x-api-key": func(r *http.Request) { r.Header.Set("X-Api-Key", "csk_abc") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}"))
+			set(r)
+			g.Handler("/v1/messages")(rec, r)
+			assert.Equal(t, rec.Code, http.StatusBadRequest)
+			assert.False(t, hit, "nothing reaches the upstream")
+		})
+	}
+}
+
+func TestLocalRedirectIsNotFollowed(t *testing.T) {
+	var followed bool
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { followed = true }))
+	defer target.Close()
+	loc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer loc.Close()
+	o := &OpenAI{Local: func() *Local { return &Local{BaseURL: loc.URL + "/v1", Model: "m", APIKey: "secret"} }}
+	rec := httptest.NewRecorder()
+	o.ChatHandler()(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"messages":[]}`)))
+	assert.False(t, followed, "the local model's bearer key must not follow a redirect")
+}
+
 func TestBodyIsCapped(t *testing.T) {
 	g := NewAnthropic()
 	rec := httptest.NewRecorder()

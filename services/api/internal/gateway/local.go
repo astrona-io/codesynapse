@@ -40,6 +40,18 @@ type Local struct {
 	Wait time.Duration
 }
 
+// noRedirects is the client of a Local without one: the local model's address
+// is fixed by the operator, so an answer that points elsewhere is not followed
+// (its bearer key would go along).
+var noRedirects = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+func (l *Local) client() *http.Client {
+	if l.Client != nil {
+		return l.Client
+	}
+	return noRedirects
+}
+
 // SmallModel is the default Eligible: Claude's small model class.
 func SmallModel(model string) bool { return strings.Contains(strings.ToLower(model), "haiku") }
 
@@ -176,11 +188,7 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) b
 	if l.APIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+l.APIKey)
 	}
-	client := l.Client
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(httpReq)
+	resp, err := l.client().Do(httpReq)
 	if err != nil {
 		return false
 	}
