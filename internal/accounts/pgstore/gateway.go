@@ -12,7 +12,7 @@ func (s *Store) GatewayEnabled(ctx context.Context, orgID string) (bool, error) 
 	var on bool
 	err := s.db.QueryRow(ctx, "SELECT enabled FROM org_gateway WHERE org_id = $1", orgID).Scan(&on)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return true, nil // never chose: on by default
 	}
 	return on, err
 }

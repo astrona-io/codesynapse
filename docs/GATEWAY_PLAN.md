@@ -17,7 +17,7 @@ Goal: every model request an agent makes goes through CodeSynapse, waits its tur
 `POST /v1/messages` (+ `count_tokens`), streaming, reached with `ANTHROPIC_BASE_URL`.
 
 - The server forwards to Anthropic with the installation's or organisation's API key (`api_key_env`). A Claude subscription sign-in cannot be forwarded this way: it is a personal OAuth token and must not be stored on the server.
-- This sends prompts and code to a cloud provider through the server. AGENTS.md forbids that except a diff the user asked to review, so it needs an explicit, per-provider switch (`gateway: true`, off by default), and an organisation-level opt-in. Decided: allowed as that opt-in only.
+- This sends prompts and code to a cloud provider through the server. AGENTS.md forbids that except a diff the user asked to review, so the cloud leg is a pass-through of the caller's own credential to `api.anthropic.com` only, and local answering needs an explicit per-provider switch (`gateway: true`). Decided (revised): the gateway is on by default and can be disabled for the installation or per organisation, because the project exists to lower cost, cut tokens and keep as much data on the premises as possible when people use tools such as Claude.
 - Briefing: the plugin's `codesynapse hook brief` already adds a graph briefing to every Claude Code prompt; the gateway adds queueing, audit, usage and cost for the traffic itself.
 
 ## Routing: answer here or go to the cloud
@@ -28,7 +28,7 @@ Claude Code (`ANTHROPIC_BASE_URL` pointed at the gateway) sends every request to
 - A local answer needs the request translated from the Anthropic format (messages, system blocks, streaming events) to the OpenAI-compatible one and back. Requests with tools or images are never routed locally in the first version.
 - A request the local model cannot take (busy past a wait limit, error, no local model) falls through to the cloud unless the caller asked for local only.
 - Authorisation for the cloud leg: the caller's own `Authorization` / `x-api-key` header is passed through to Anthropic for that one request and never stored or logged, so a subscription sign-in works. A server-side key (`api_key_env`) is the alternative for shared installs.
-- Opt-in as decided: off unless the provider has `gateway: true` and the organisation allows it.
+- On by default, can be disabled: the installation switch (`CODESYNAPSE_GATEWAY=false`) or the organisation setting turns it off. Local answering still needs a provider with `gateway: true`; without one every request goes to the cloud as a plain pass-through.
 
 ## Identity (decided: option 1)
 
@@ -45,7 +45,7 @@ A provider with `gateway: true` (local only, explicit `model`) answers `/v1/mess
 
 ## Credentials (decided)
 
-The gateway key travels in `X-CodeSynapse-Key` (Claude Code: `ANTHROPIC_CUSTOM_HEADERS`). `Authorization` and `x-api-key` stay the caller's own Anthropic credential, passed to the cloud for that request only. The route is mounted only with `CODESYNAPSE_GATEWAY=true` and accounts. Requests are forwarded to `https://api.anthropic.com` only, without redirects, with a header allowlist and a 32 MiB body cap; the audit records the model, size and status, never text.
+The gateway key travels in `X-CodeSynapse-Key` (Claude Code: `ANTHROPIC_CUSTOM_HEADERS`). `Authorization` and `x-api-key` stay the caller's own Anthropic credential, passed to the cloud for that request only. The route is mounted with accounts unless `CODESYNAPSE_GATEWAY=false`. Requests are forwarded to `https://api.anthropic.com` only, without redirects, with a header allowlist and a 32 MiB body cap; the audit records the model, size and status, never text.
 
 ## Checks before merging any phase
 
@@ -53,8 +53,8 @@ Route classified through `s.route`, limits on body and time, queue slot released
 
 ## OpenAI-compatible endpoints (built)
 
-For local agents: `POST /v1/chat/completions` and `GET /v1/models`, behind `CODESYNAPSE_GATEWAY=true` like the Anthropic route. These paths accept the gateway key as `Authorization: Bearer csk_…` (OpenAI clients send nothing else). They are local-only: no cloud fallback, `model` is replaced by the local model's name, other fields (tools, stream) pass through. A request waits in the local provider's queue for as long as the agent keeps the connection open. With no `gateway: true` local provider they answer 503. Same key-bound, audited runtime session as `/v1/messages`.
+For local agents: `POST /v1/chat/completions` and `GET /v1/models`, behind the same `CODESYNAPSE_GATEWAY` switch (on by default) like the Anthropic route. These paths accept the gateway key as `Authorization: Bearer csk_…` (OpenAI clients send nothing else). They are local-only: no cloud fallback, `model` is replaced by the local model's name, other fields (tools, stream) pass through. A request waits in the local provider's queue for as long as the agent keeps the connection open. With no `gateway: true` local provider they answer 503. Same key-bound, audited runtime session as `/v1/messages`.
 
-## Organisation opt-in (built)
+## Organisation setting (built, on by default)
 
-The server switch (`CODESYNAPSE_GATEWAY`) and a `gateway: true` provider are not enough: each organisation opts in, default off (`org_gateway`, migration 0026). `GET/PUT /api/v1/accounts/orgs/{org}/gateway` reads (any member) and sets (owner or admin, signed-in session only, never an API key) the choice; the change is audited as `org.gateway.set` before it is stored, and a failed audit refuses it. Every `/v1/*` gateway request from a key of an organisation that has not opted in answers 403, before a runtime session is registered. The GET answer also says `available`: whether the operator turned the gateway on for the installation.
+The gateway is on by default: for cost, fewer tokens and keeping data on the premises. The operator can switch it off for the installation (`CODESYNAPSE_GATEWAY=false`), and each organisation can switch it off for itself (`org_gateway`, migration 0026; an organisation with no row counts as on, migration 0027 keeps the column default consistent). `GET/PUT /api/v1/accounts/orgs/{org}/gateway` reads (any member) and sets (owner or admin, signed-in session only, never an API key) the choice; the change is audited as `org.gateway.set` before it is stored, and a failed audit refuses it. Every `/v1/*` gateway request from a key of an organisation that switched it off answers 403, before a runtime session is registered. The GET answer also says `available`: whether the operator left the gateway on for the installation. Every other rail stays: a gateway key is required, each key gets its own audited runtime session, the caller's model credential is passed for one request and never stored, and the cloud leg goes only to `api.anthropic.com`.

@@ -413,8 +413,8 @@ type Store interface {
 	// SetMenuPrefs replaces them. The service validates them (menuprefs.go).
 	MenuPrefs(ctx context.Context, userID string) (MenuPrefs, error)
 	SetMenuPrefs(ctx context.Context, userID string, m MenuPrefs) error
-	// GatewayEnabled says whether an organisation opted in to the agent
-	// gateway (false when it never chose); SetGatewayEnabled records it.
+	// GatewayEnabled says whether the agent gateway is on for an organisation
+	// (true when it never chose); SetGatewayEnabled records the choice.
 	GatewayEnabled(ctx context.Context, orgID string) (bool, error)
 	SetGatewayEnabled(ctx context.Context, orgID string, enabled bool) error
 	// ImageScan reads the image findings of a repository namespace; ok is

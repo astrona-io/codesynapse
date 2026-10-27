@@ -11,9 +11,9 @@ import (
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
-// RunGateway covers the organisation opt-in for the agent gateway: off by
-// default, changed only by an admin in a signed-in session, audited, and kept
-// per organisation.
+// RunGateway covers the organisation setting for the agent gateway: on by
+// default, switched off only by an admin in a signed-in session, audited, and
+// kept per organisation.
 func RunGateway(t *testing.T, st accounts.Store) {
 	ctx := context.Background()
 	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
@@ -35,31 +35,31 @@ func RunGateway(t *testing.T, st accounts.Store) {
 
 	on, err := svc.GatewayEnabled(ctx, "gw-org-a")
 	require.NoError(t, err)
-	assert.False(t, on, "off until an organisation opts in")
+	assert.True(t, on, "on until an organisation switches it off")
 
-	assert.True(t, errors.Is(svc.SetGateway(ctx, member, "gw-org-a", true), accounts.ErrForbidden), "members cannot opt in")
-	assert.True(t, errors.Is(svc.SetGateway(ctx, key, "gw-org-a", true), accounts.ErrForbidden), "API keys cannot opt in")
+	assert.True(t, errors.Is(svc.SetGateway(ctx, member, "gw-org-a", false), accounts.ErrForbidden), "members cannot switch it off")
+	assert.True(t, errors.Is(svc.SetGateway(ctx, key, "gw-org-a", false), accounts.ErrForbidden), "API keys cannot switch it off")
 	on, err = svc.GatewayEnabled(ctx, "gw-org-a")
 	require.NoError(t, err)
-	assert.False(t, on)
+	assert.True(t, on)
 
-	require.NoError(t, svc.SetGateway(ctx, owner, "gw-org-a", true))
+	require.NoError(t, svc.SetGateway(ctx, owner, "gw-org-a", false))
 	on, err = svc.GatewaySetting(ctx, member, "gw-org-a")
 	require.NoError(t, err)
-	assert.True(t, on)
+	assert.False(t, on)
 	on, err = svc.GatewayEnabled(ctx, "gw-org-b")
 	require.NoError(t, err)
-	assert.False(t, on, "the choice is per organisation")
+	assert.True(t, on, "the choice is per organisation")
 	_, err = svc.GatewaySetting(ctx, member, "gw-org-b")
 	assert.True(t, errors.Is(err, accounts.ErrForbidden) || errors.Is(err, accounts.ErrNotFound), "not a member of org b")
 
 	rows, err := st.ListEvents(ctx, accounts.EventFilter{OrgID: "gw-org-a", Action: "org.gateway.set", Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, rows, 1, "the change is audited")
-	assert.Equal(t, rows[0].Detail, "enabled=true")
+	assert.Equal(t, rows[0].Detail, "enabled=false")
 
-	require.NoError(t, svc.SetGateway(ctx, owner, "gw-org-a", false))
+	require.NoError(t, svc.SetGateway(ctx, owner, "gw-org-a", true))
 	on, err = svc.GatewayEnabled(ctx, "gw-org-a")
 	require.NoError(t, err)
-	assert.False(t, on)
+	assert.True(t, on)
 }

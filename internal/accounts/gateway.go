@@ -6,16 +6,18 @@ import (
 )
 
 // The agent gateway sends an organisation's agent model traffic through
-// CodeSynapse. It is off until an owner or admin of the organisation turns it
-// on from a signed-in session; the operator's switch alone is not enough.
+// CodeSynapse, which cuts cost and tokens and keeps what a local model can
+// answer on the premises. It is on unless an owner or admin of the
+// organisation turns it off from a signed-in session.
 
-// GatewayEnabled says whether the organisation opted in. It checks no
-// caller: the gateway asks it for the organisation of a key it authenticated.
+// GatewayEnabled says whether the gateway is on for the organisation (it is
+// unless someone switched it off). It checks no caller: the gateway asks it
+// for the organisation of a key it authenticated.
 func (s *Service) GatewayEnabled(ctx context.Context, orgID string) (bool, error) {
 	return s.St.GatewayEnabled(ctx, orgID)
 }
 
-// GatewaySetting returns the opt-in for a member of the organisation.
+// GatewaySetting returns the setting for a member of the organisation.
 func (s *Service) GatewaySetting(ctx context.Context, p Principal, orgID string) (bool, error) {
 	if err := s.Require(ctx, p, orgID, Member); err != nil {
 		return false, err
