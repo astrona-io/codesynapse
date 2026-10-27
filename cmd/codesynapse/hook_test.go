@@ -85,7 +85,7 @@ func TestStopGuard(t *testing.T) {
 
 func TestStopGuardSkipsUnindexedCheckout(t *testing.T) {
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
-	var repos, reported string
+	var repos, reported, jobs string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/usage/unindexed" {
 			b, _ := io.ReadAll(r.Body) //nolint:errcheck // test server
@@ -99,6 +99,10 @@ func TestStopGuardSkipsUnindexedCheckout(t *testing.T) {
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)                                                                                                                //nolint:errcheck // test server
 			_ = json.NewEncoder(w).Encode(map[string]string{"tenant_id": "t", "subject_id": "s", "session_id": body.SessionID, "parent_session_id": body.SessionID}) //nolint:errcheck // test server
+			return
+		}
+		if r.URL.Path == "/api/v1/jobs" {
+			_, _ = io.WriteString(w, jobs) //nolint:errcheck // test server
 			return
 		}
 		_, _ = io.WriteString(w, repos) //nolint:errcheck // test server
@@ -118,6 +122,16 @@ func TestStopGuardSkipsUnindexedCheckout(t *testing.T) {
 	assert.Contains(t, skipped["systemMessage"].(string), "not in the server's index")
 	assert.Contains(t, reported, `"repo":"acme/demo"`, "the name the checkout's origin gives")
 	assert.Contains(t, reported, `"client":"claude-code"`)
+
+	// A running job for the checkout: said so, and not counted as unindexed.
+	reported = ""
+	jobs = `{"jobs":[{"repo":"acme/demo","state":"running"}]}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "demo.go"), []byte("package demo\n\nfunc Queued() {}\n"), 0o600))
+	queued := stopGuard(ctx, toolHookInput{SessionID: "chat-3", Cwd: dir}, logger)
+	require.True(t, queued != nil)
+	assert.Contains(t, queued["systemMessage"].(string), "queued or being indexed")
+	assert.Equal(t, reported, "")
+	jobs = `{"jobs":[]}`
 
 	// Same server, but the checkout is indexed: the check is asked for.
 	reported = ""
