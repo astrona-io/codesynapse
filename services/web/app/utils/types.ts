@@ -96,7 +96,7 @@ export interface RepoSections {
   snapshots: number; reviews: number; memory_facts: number; admin: boolean
 }
 export interface Source { name: string; is_git: boolean; is_go: boolean; content?: Record<string, number>; truncated?: boolean }
-export interface Job { id: string; repo: string; kind?: string; branch?: string; task?: string; result?: string; state: 'running' | 'succeeded' | 'failed'; started_at: string; finished_at?: string; nodes?: number; edges?: number; error?: string }
+export interface Job { id: string; repo: string; kind?: string; branch?: string; task?: string; result?: string; state: 'running' | 'succeeded' | 'failed'; started_at: string; finished_at?: string; nodes?: number; edges?: number; error?: string; waiting?: boolean; phase?: string; step?: number; steps?: number }
 export interface DuplicateInfo { kind: 'exact' | 'near'; similarity: number; scope: string; copies: number; others: DuplicateMember[] }
 export interface SymbolCard { resolved_from?: string; duplicate?: DuplicateInfo; symbol: GraphNodeData; callers: NodeRef[]; callees: NodeRef[]; tests: NodeRef[]; implementations?: NodeRef[]; docs?: NodeRef[] }
 export interface ViewNode extends NodeRef { complexity?: number; security_tags?: string[]; is_test?: boolean }

@@ -64,6 +64,11 @@ type Job struct {
 	// Waiting is true while the job waits for another job to finish; jobs
 	// run one at a time.
 	Waiting bool `json:"waiting,omitempty"`
+	// Phase names the stage an index job is in; Step of Steps drives the
+	// dashboard's progress bar. Zero Steps means no progress is known.
+	Phase string `json:"phase,omitempty"`
+	Step  int    `json:"step,omitempty"`
+	Steps int    `json:"steps,omitempty"`
 	// Attempts counts starts; above 1 the job was resumed after a restart.
 	Attempts int `json:"attempts,omitempty"`
 	durable  bool
@@ -404,8 +409,16 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 	}
 	ctx = repoconfig.WithPolicy(ctx, policy)
 	endIngest := phase("job.ingest")
-	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Dataflow: j.dataflow, ModuleProxy: j.moduleProxy, Branch: opts.Branch, PreviousIdentities: previous, ApprovedPolicyDigest: approved})
+	progress := func(step int, name string) {
+		j.mu.Lock()
+		job.Phase, job.Step, job.Steps = name, step, ingest.Steps+1
+		j.mu.Unlock()
+	}
+	g, err := ingest.Run(ctx, ingest.Options{Progress: progress, Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Dataflow: j.dataflow, ModuleProxy: j.moduleProxy, Branch: opts.Branch, PreviousIdentities: previous, ApprovedPolicyDigest: approved})
 	endIngest(err)
+	if err == nil {
+		progress(ingest.Steps+1, "Saving the graph")
+	}
 	if err == nil && ledger != nil {
 		report := ledger.Prepare(g)
 		err = checkJob(ctx, opts.Authorize)
