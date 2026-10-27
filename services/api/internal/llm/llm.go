@@ -42,13 +42,13 @@ const (
 )
 
 // Tasks a provider can be routed to.
-var Tasks = []string{"security-triage", "review", "briefing", "fix", "memory", "embeddings", "code-annotation", "pr-summary", "cleanup-briefing", "local-answer"}
+var Tasks = []string{"security-triage", "review", "briefing", "fix", "memory", "embeddings", "code-annotation", "pr-summary", "cleanup-briefing", "local-answer", "compress"}
 
 // LocalTasks run only on a local model: they read a diff, the cleanup plan
 // or files of the developer's checkout (local-answer, the ask_local tool).
 // Without a routed local provider they pick the first local one; with none,
 // the task is unavailable.
-var LocalTasks = []string{"pr-summary", "cleanup-briefing", "local-answer"}
+var LocalTasks = []string{"pr-summary", "cleanup-briefing", "local-answer", "compress"}
 
 // ErrNoLocalModel means a local-only task has no local provider to run on.
 var ErrNoLocalModel = errors.New("this task runs only on a local model and none is configured")
@@ -161,6 +161,10 @@ type ProviderConfig struct {
 	// SendSource allows short source snippets in prompts. Defaults to true
 	// for local providers and false for remote ones.
 	SendSource *bool `yaml:"send_source" json:"-"`
+	// MaxConcurrent is how many requests run on this provider at once; the
+	// rest wait their turn (queue.go). 0 means 1 for a local provider and no
+	// limit for a cloud one. Raise it when the server batches (OLLAMA_NUM_PARALLEL).
+	MaxConcurrent int `yaml:"max_concurrent" json:"max_concurrent,omitempty"`
 	// Effort is the Anthropic output effort (low, medium, high, xhigh, max).
 	// OpenAI-compatible servers get it as reasoning_effort; "none" turns off
 	// thinking on Ollama, which ignores chat_template_kwargs.
@@ -215,6 +219,9 @@ type Config struct {
 	Default string            `yaml:"default"`
 	// KVCacheTTL is the default for providers that do not set their own.
 	KVCacheTTL string `yaml:"kv_cache_ttl"`
+	// CompressPrompts has a local model shorten the prose of prompts bound for
+	// a cloud provider and asks the cloud model for terse answers (compress.go).
+	CompressPrompts bool `yaml:"compress_prompts"`
 }
 
 // Local reports whether the provider runs on this machine or network,
@@ -369,7 +376,13 @@ type Usage struct {
 	CachedTokens int     `json:"cached_tokens"`
 	OutputTokens int     `json:"output_tokens"`
 	AvgSeconds   float64 `json:"avg_seconds"`
-	LastError    string  `json:"last_error,omitempty"`
+	// CompressedBytes is the prompt text a local model removed before the
+	// request went to this provider.
+	CompressedBytes int `json:"compressed_bytes,omitempty"`
+	// Running and Waiting are requests on the provider now and queued behind them.
+	Running   int    `json:"running,omitempty"`
+	Waiting   int    `json:"waiting,omitempty"`
+	LastError string `json:"last_error,omitempty"`
 }
 
 // Registry holds the configured providers.
@@ -379,6 +392,8 @@ type Registry struct {
 	mu      sync.Mutex
 	usage   map[string]*Usage
 	counter promptCounter
+	// slots limit concurrent requests per provider (queue.go).
+	slots map[string]*slots
 	// served is the last discovery per auto provider (auto.go).
 	served map[string]Discovery
 }
@@ -397,7 +412,7 @@ func NewRegistry(cfg Config) *Registry {
 		}
 	}
 	cfg.Tasks = maps.Clone(cfg.Tasks)
-	r := &Registry{cfg: cfg, impl: map[string]Provider{}, usage: map[string]*Usage{}, counter: requestByteCounter{}, served: map[string]Discovery{}}
+	r := &Registry{cfg: cfg, impl: map[string]Provider{}, usage: map[string]*Usage{}, counter: requestByteCounter{}, served: map[string]Discovery{}, slots: map[string]*slots{}}
 	for _, p := range cfg.Providers {
 		telemetry.AllowModels(p.Name, p.Model, p.EmbeddingModel)
 		switch p.Kind {
@@ -407,6 +422,7 @@ func NewRegistry(cfg Config) *Registry {
 			r.impl[p.Name] = newOpenAI(p)
 		}
 		r.usage[p.Name] = &Usage{}
+		r.slots[p.Name] = newSlots(p)
 	}
 	return r
 }
@@ -556,7 +572,9 @@ func (r *Registry) Usage(name string) Usage {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if u, ok := r.usage[name]; ok {
-		return *u
+		out := *u
+		out.Running, out.Waiting = r.slots[name].counts()
+		return out
 	}
 	return Usage{}
 }
@@ -572,10 +590,18 @@ func (r *Registry) Complete(ctx context.Context, name string, req Request) (Resp
 	if !ok {
 		return Response{}, fmt.Errorf("unknown AI provider %q", name)
 	}
+	req, saved := r.compressCloud(ctx, name, req)
 	req, cfg, count, err := r.prepare(ctx, name, req)
 	if err != nil {
 		return Response{Preflight: count}, err
 	}
+	// Wait for a free slot before the request clock starts, so queueing does
+	// not eat the provider timeout. The caller's own deadline still applies.
+	release, err := r.slots[name].acquire(ctx)
+	if err != nil {
+		return Response{Preflight: count}, err
+	}
+	defer release()
 	ctx = telemetry.WithModel(ctx, name, cfg.Model)
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
 	defer cancel()
@@ -599,6 +625,7 @@ func (r *Registry) Complete(ctx context.Context, name string, req Request) (Resp
 	u.InputTokens += max(resp.InputTokens, 0)
 	u.CachedTokens += min(max(resp.CachedInputTokens, 0), max(resp.InputTokens, 0))
 	u.OutputTokens += max(resp.OutputTokens, 0)
+	u.CompressedBytes += saved
 	if err != nil {
 		u.Failures++
 		u.LastError = err.Error()
