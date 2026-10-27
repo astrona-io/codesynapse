@@ -111,6 +111,7 @@ nav:
       - Coding agents:
           - Claude Code bridge: operations/claude-code-bridge.md
           - Claude Code plugin: operations/claude-code-plugin.md
+          - Agent gateway: operations/gateway.md
   - Reference:
       - reference/index.md
       - Agent guide: AGENT_GUIDE.md

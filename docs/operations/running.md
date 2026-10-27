@@ -5,22 +5,44 @@
 
 ## Quick start
 
-Requires [just](https://github.com/casey/just) and Docker or Podman (`podman machine start` plus `docker-compose` on the PATH). The justfile picks whichever is installed; set `COMPOSE="docker compose"` to force one.
+You need two tools first:
 
-```sh
-just up                       # writes .env with random secrets, builds and starts everything
-open http://localhost:3000    # sign in as admin (password in .env), replace it, create your organisation
-just ingest ~/src/my-service  # copies the checkout into ./sources and indexes it
-just mcp                      # register the MCP server with your agents
-```
+- [just](https://github.com/casey/just), a small command runner. Every `just ...` line on this page is a shortcut defined in the project's `justfile`.
+- Docker or Podman, which run the programs in containers. With Podman, run `podman machine start` first and make sure `docker-compose` is on your PATH. The justfile uses whichever one is installed; set `COMPOSE="docker compose"` to force Docker.
+
+Then run these four steps in order:
+
+1. `just up` writes a `.env` file with random secrets, builds the images and starts everything.
+2. Open `http://localhost:3000` and sign in as `admin`. The password is in `.env`. Replace it and create your organisation (see [First run and sign-in](first-run.md)).
+3. `just ingest ~/src/my-service` copies a checkout into `./sources` and indexes it (reads it and stores its structure in the graph).
+4. `just mcp` registers the MCP server (the service your coding assistant talks to) with your agents.
 
 ### Getting a local checkout into your organisation
 
-`just ingest <dir>` runs the CLI inside the **worker** (the API image has no Go toolchain) and writes the graph, named after the checkout's `origin` remote the way the dashboard names a repository added by URL (`owner/name` on github.com, `host/owner/name` elsewhere; `just ingest <dir> <name>` names it yourself, and a checkout without an origin is indexed under its directory name and cannot be linked). The index belongs to no organisation yet, so nobody sees it. Go dependencies the worker has not cached are downloaded from the public proxy.golang.org only (`CODESYNAPSE_GO_MODULE_DOWNLOAD`, on by default; checksum database on, no VCS access, only module paths and versions leave the machine; set it to `false` for offline use, then affected packages are reported as `dependencies_unavailable`). `CODESYNAPSE_ALLOW_NETWORK` (off by default) is the broader switch that also allows private modules and direct fetches; set it to `true` only for a checkout you trust.
+`just ingest <dir>` indexes a folder you already have on your machine. It works in two stages.
 
-To make it visible, sign in as an **owner** of your organisation, open **Repositories**, choose **Add** and paste the origin's address. The dashboard recognises the existing index of the same remote and links it instead of cloning, records the first admin grant and applies the usual access checks; a private repository needs your organisation's Git token to prove access first. The same address added without `just ingest` is cloned and indexed by the worker.
+**Stage 1: indexing.** The command runs inside the **worker**, because the API image has no Go toolchain. The result is stored under a name taken from the checkout's `origin` remote, the same way the dashboard names a repository you add by URL:
 
-There is no database-free MCP server: every tool call needs accounts and a registered runtime session (see [session context](../SESSION_CONTEXT_PLAN.md#runtime-integration)). Develop against `just up` and register an agent with `just mcp`.
+- `owner/name` on github.com.
+- `host/owner/name` on any other host.
+- Your own name, if you run `just ingest <dir> <name>`.
+- The directory name, if the checkout has no origin. Such an index cannot be linked later.
+
+Right after indexing, the index belongs to no organisation, so nobody can see it yet.
+
+**Go dependencies.** The worker downloads Go dependencies it has not cached from the public proxy.golang.org, and from nowhere else. This is `CODESYNAPSE_GO_MODULE_DOWNLOAD`, on by default. The checksum database stays on, no version-control access is allowed, and only module paths and versions leave your machine. Set it to `false` for offline use; affected packages are then reported as `dependencies_unavailable`. A broader switch, `CODESYNAPSE_ALLOW_NETWORK` (off by default), also allows private modules and direct fetches. Set it to `true` only for a checkout you trust.
+
+**Stage 2: making it visible.**
+
+1. Sign in as an **owner** of your organisation.
+2. Open **Repositories** and choose **Add**.
+3. Paste the origin's address.
+
+The dashboard sees that an index of the same remote already exists and links it instead of cloning again. It records the first admin grant and applies the usual access checks. A private repository first needs your organisation's Git token to prove you have access. If you add the same address without running `just ingest`, the worker clones and indexes it for you.
+
+There is no database-free MCP server. Every tool call needs accounts and a registered runtime session (see [session context](../SESSION_CONTEXT_PLAN.md#runtime-integration)), which is how CodeSynapse knows who is asking. So even for development, start the stack with `just up` and register an agent with `just mcp`.
+
+These are the addresses you will use:
 
 | URL | What |
 |---|---|
@@ -28,11 +50,15 @@ There is no database-free MCP server: every tool call needs accounts and a regis
 | http://localhost:8080 | API (bearer `CODESYNAPSE_API_TOKEN`) |
 | http://localhost:8090/mcp | MCP over streamable HTTP (bearer `CODESYNAPSE_MCP_TOKEN`) |
 
-All ports bind to 127.0.0.1.
+All ports bind to 127.0.0.1, so only your own machine can reach them.
 
-The dashboard supports sign-in, governance, repository browsing and execution controls such as cloning, sync and model tasks. A signed-in browser gets its own runtime session binding for those (see [session context](../SESSION_CONTEXT_PLAN.md#runtime-integration)); agents and API clients register theirs.
+In the dashboard you can sign in, manage access, browse repositories and start work such as cloning, syncing and model tasks. A signed-in browser gets its own runtime session for that work (see [session context](../SESSION_CONTEXT_PLAN.md#runtime-integration)). Agents and API clients register theirs.
 
-The API records those jobs, and the `worker` service runs them. Jobs survive restarts, and a job a stopped worker left behind is picked up again with the requester's access checked anew. Add workers with `docker compose up --scale worker=3`, or limit one to some roles with `CODESYNAPSE_WORKER_ROLES=ingest` (`ingest`, `ai`, `fix`). Without a worker, `codesynapse-api serve` runs jobs itself, as in development.
+Slow work runs as **jobs**. The API writes each job down, and the `worker` service carries it out. Jobs survive restarts: if a worker stops halfway, another worker picks the job up again, and the requester's access is checked again first.
+
+- To run more workers: `docker compose up --scale worker=3`.
+- To limit a worker to some kinds of work: `CODESYNAPSE_WORKER_ROLES=ingest`. The roles are `ingest`, `ai` and `fix`.
+- With no worker at all, `codesynapse-api serve` runs jobs itself. That is how development works.
 
 ## Deployment topology
 
@@ -81,7 +107,7 @@ The compose API container reaches model servers on the host through `host.docker
 | `just check-test-images` | The integration recipes, `docker-compose.yml` and the Helm chart use the same store images |
 | `just review` | Offline review pack for the current branch |
 
-The integration recipes run the store images that `docker-compose.yml` ships (PostgreSQL, NebulaGraph, Milvus, VictoriaMetrics), read from it by `.github/scripts/compose-image.sh`, so a version bump there, which Renovate makes in one place, changes what the contracts test. CI runs all three suites on store, accounts, telemetry, series, dependency and recipe changes, nightly and on demand, with a 30 minute job limit and bounded container start-up waits.
+The integration recipes test against the same database images that `docker-compose.yml` ships (PostgreSQL, NebulaGraph, Milvus, VictoriaMetrics). `.github/scripts/compose-image.sh` reads the image names from that file, so when Renovate bumps a version there, the tests use the new version too. CI runs all three suites when stores, accounts, telemetry, series, dependencies or recipes change, plus nightly and on demand. Each job has a 30 minute limit and waits only a bounded time for containers to start.
 
 Run `just test` and `just lint` before calling a Go change done, and `just web-check` for anything under `services/web/`.
 
@@ -101,10 +127,12 @@ stateDiagram-v2
     Failed --> Idle: backoff
 ```
 
-- **Sync** fetches the chosen branch (cloned repositories) or re-indexes the folder (mounted sources). The branch picker lists every branch of the remote (cloned) or of the checkout (mounted; only the checked-out one can be synced).
-- **Auto-sync** runs every 30 minutes by default for every repository. The countdown starts when a sync finishes, and first runs are spread over the interval so repositories do not sync together. Per repository you can switch it off, or pick 5 or 15 minutes, hourly, every 6 hours or daily, with pause/resume. Status ("next in 3 min", "paused") shows on the repository card and summary. Schedules require an explicit delegated identity and current repository admin.
-- **Gone repositories:** when the provider confirms that a cloned repository no longer exists (a clean 404 from its API, three scheduled syncs in a row), its graph, schedule and clone are removed. Network errors, rate limits and refused requests never count, and mounted folders are never removed.
-- **Remove** a repository from its card or summary; a confirmation asks for the name and offers to delete the cloned files too.
+A **sync** brings the index up to date with the code. The diagram above shows the steps.
+
+- **Sync** downloads the chosen branch (for cloned repositories) or re-indexes the folder (for mounted sources). The branch picker lists every branch of the remote (cloned) or of the checkout (mounted; only the checked-out branch can be synced).
+- **Auto-sync** runs every 30 minutes by default, for every repository. The countdown starts when a sync finishes. First runs are spread over the interval, so repositories do not all sync at once. For each repository you can switch it off, or pick 5 or 15 minutes, hourly, every 6 hours or daily, and pause or resume it. The repository card shows the status, for example "next in 3 min" or "paused". Schedules need an explicit delegated identity and a current repository admin.
+- **Gone repositories:** if the provider says a cloned repository no longer exists, CodeSynapse removes its graph, schedule and clone. It does this only after a clean 404 from the provider's API on three scheduled syncs in a row. Network errors, rate limits and refused requests never count. Mounted folders are never removed.
+- **Remove** a repository from its card or summary. A confirmation asks you to type the name and offers to delete the cloned files too.
 
 ## Organisations
 
@@ -118,13 +146,32 @@ flowchart LR
     clone -- failure --> back[Back off one hour]
 ```
 
-On the **Organisations** page enter `astrona-io` (or `https://github.com/astrona-io/*`). GitHub (also Enterprise Server), Forgejo/Gitea/Codeberg and GitLab are supported: pick the provider and host, or paste a URL such as `https://codeberg.org/team/*` (github.com, gitlab.com and codeberg.org are recognised on their own). Archived repositories and forks are skipped unless you tick them. With auto-index off it only lists, and you index repositories one by one. Stopping to watch keeps the repositories already indexed.
+An *organisation* here means a whole account on a git host, such as `astrona-io` on GitHub. Instead of adding repositories one at a time, you can ask CodeSynapse to find them all.
+
+1. Open the **Organisations** page.
+2. Enter `astrona-io` (or `https://github.com/astrona-io/*`). To use another host, pick the provider and host, or paste a URL such as `https://codeberg.org/team/*`. GitHub (also Enterprise Server), Forgejo/Gitea/Codeberg and GitLab are supported, and github.com, gitlab.com and codeberg.org are recognised on their own.
+3. Choose whether to include archived repositories and forks. They are skipped unless you tick them.
+
+With auto-index off, CodeSynapse only lists the repositories and you index them one by one. If you stop watching an organisation, the repositories already indexed stay.
 
 Repository names are `owner/name` on github.com and `host/owner/name` elsewhere, so identical names on two providers never collide.
 
 ### Private repositories
 
-`just git-token <host>` asks for a token (input hidden), stores it in `.env` as `CODESYNAPSE_GIT_TOKENS` (`host=token,host2=token2`) and restarts the API. Run it once per git host (`just git-token`, `just git-token codeberg.org`, ...). Each token is sent to its own host only. Use a read-only token (fine-grained GitHub token with *Contents* read). To let fix branches push, put a second token with write access in `CODESYNAPSE_GIT_PUSH_TOKENS` (same format): only the fix worker receives it, so the workers that read untrusted repositories never hold write access. The single `CODESYNAPSE_GIT_TOKEN` + `CODESYNAPSE_GIT_TOKEN_HOST` pair still works. Hosts on a private network need `CODESYNAPSE_ALLOW_PRIVATE_GIT=true`; hosts with a port are not supported. Pull requests for fix branches are opened on github.com only; other hosts get the pushed branch.
+A private repository needs a **token** (a password-like string from your git host) so CodeSynapse may read it.
+
+1. Run `just git-token <host>`. It asks for the token with the input hidden.
+2. The command stores it in `.env` as `CODESYNAPSE_GIT_TOKENS` (the format is `host=token,host2=token2`) and restarts the API.
+3. Repeat once per git host: `just git-token`, `just git-token codeberg.org`, and so on.
+
+Good to know:
+
+- Each token is sent to its own host only.
+- Use a read-only token. On GitHub that is a fine-grained token with *Contents* read access.
+- To let fix branches push, put a second token with write access in `CODESYNAPSE_GIT_PUSH_TOKENS` (same format). Only the fix worker receives it, so the workers that read untrusted repositories never hold write access.
+- The older single `CODESYNAPSE_GIT_TOKEN` plus `CODESYNAPSE_GIT_TOKEN_HOST` pair still works.
+- Hosts on a private network need `CODESYNAPSE_ALLOW_PRIVATE_GIT=true`. Hosts with a port are not supported.
+- Pull requests for fix branches are opened on github.com only. On other hosts you get the pushed branch.
 
 With accounts, organisations use their own tokens instead; see [Organisation Git tokens](accounts-access.md#organisation-git-tokens).
 
@@ -165,7 +212,9 @@ Test the chart only on the throwaway kind cluster these recipes create, with `--
 
 ## AI models
 
-Providers are configured in `config/llm.yaml` (copy `config/llm.example.yaml`; it is gitignored). To choose and set up a model on your own machine, and for what it needs and saves, see [Local models](local-models.md).
+CodeSynapse can use an AI model for tasks such as code review, security analysis and briefings. A model's connection settings are called a **provider**. Providers are configured in `config/llm.yaml`. Copy `config/llm.example.yaml` to create it; the file is gitignored, so your keys stay out of git. To choose and set up a model on your own machine, and for what it needs and saves, see [Local models](local-models.md).
+
+The diagram shows how a task finds its model. A "local" provider runs on your own machine, so it may receive code snippets. A cloud provider never receives more than the diff you ask it to review.
 
 ```mermaid
 flowchart LR
@@ -178,7 +227,9 @@ flowchart LR
     local -- no --> diff[Only the diff the user asked to review]
 ```
 
-- `model: auto` (and `embedding_model: auto`) on a local provider lets CodeSynapse pick from what the server serves, every five minutes: the chat model with the most parameters, with its own context window, and an embedding model. With no provider configured, a local Ollama or LM Studio found at start-up is used that way. See [Local models](local-models.md#set-it-up-with-ollama).
+Settings you will meet in `config/llm.yaml`:
+
+- `model: auto` (and `embedding_model: auto`) on a local provider lets CodeSynapse choose for you. Every five minutes it looks at what the server offers and picks the chat model with the most parameters, using that model's own context window, plus an embedding model. With no provider configured, a local Ollama or LM Studio found at start-up is used this way. See [Local models](local-models.md#set-it-up-with-ollama).
 - Prices (`price_input_per_mtok` and the rest) drive the cost and savings estimates. Say where they come from with `price_source` (for Claude, the [pricing page](https://platform.claude.com/docs/en/about-claude/pricing)) and `price_checked` (the date you read it); both are shown beside every figure that uses them. Or set `price_feed: openrouter` on a cloud provider to read its prices from OpenRouter's public model list once a day: a plain download of the whole list, looked up locally, so nothing about you is sent. The figures then cite that list and the day it was read. Anthropic publishes no price API of its own.
 - `kind: openai` covers anything with an OpenAI-compatible `/v1/chat/completions`: MLX (`mlx_lm.server`), Ollama, vLLM, LM Studio, llama.cpp, OpenRouter. An API key is optional (`api_key_env` names the environment variable).
 - `kind: anthropic` uses the official SDK; the key comes from `ANTHROPIC_API_KEY`.
@@ -188,7 +239,7 @@ flowchart LR
 - `effort` on a `kind: openai` provider is sent as `reasoning_effort` (`none`, `low`, `medium`, `high`, as the server allows).
 - Set `context_window` to the model's real context (for MLX models it is `max_position_embeddings` in the model's `config.json`). Each request then gets everything up to the window minus `max_output_tokens`, and the work per request grows with it: more findings per triage batch, more changed symbols and longer code excerpts per review. Without `context_window` it stays at a safe 32k in / 8k out. Lower `max_input_tokens` if answers get too slow; the timeout scales with the budget. See [prompt budgets](../PROMPT_BUDGETS.md).
 
-On the **AI models** page you pick a global model, the fallback for everything, and optionally a different one per area: code review, security analysis and briefings. The choice is saved in `workspace/.codesynapse/llm-routes.json`. Remote providers never receive source code beyond the diff you ask them to review; local providers also get short snippets around findings. Model answers are treated as untrusted text and redacted before they are stored.
+On the **AI models** page you pick a global model, which is the fallback for everything. You can also pick a different model for each area: code review, security analysis and briefings. The choice is saved in `workspace/.codesynapse/llm-routes.json`. Remote providers never receive source code beyond the diff you ask them to review. Local providers also get short snippets around findings. Model answers are treated as untrusted text and have secrets removed (redacted) before they are stored.
 
 Three tasks run **only on a local model**, because they read a private change, the cleanup plan or the developer's files: `pr-summary` (a plain-language summary of a pasted diff: what changed, the riskiest parts, a merge checklist), `cleanup-briefing` (the ranked cleanup plan as what to do first and what is safe and quick) and `local-answer` (the `ask_local` tool: a coding agent hands files and a question to the local model and reads a short cited answer instead of the files, which saves its cloud tokens). With no route set they use the first local provider (the global model if it is local); with no local provider they do not appear, and routing them to a cloud provider is refused. The first two start from the repository's **AI assistant** page and save a report under Reviews; `local-answer` runs only for agents through the bridge and stores nothing.
 
@@ -196,7 +247,7 @@ You can also skip the provider: with the `security-triage`, `code-review` and `b
 
 ## Statistics
 
-The compose stack runs [VictoriaMetrics](https://victoriametrics.com/) (Apache-2.0). The API and MCP services push metrics to it every 15 seconds, and the **Statistics** page charts them per minute, 5 or 15 minutes, hour or 6 hours (`/stats?range=1h|6h|24h|7d|30d`):
+The compose stack runs [VictoriaMetrics](https://victoriametrics.com/) (Apache-2.0), a database for numbers over time. The API and MCP services send it their metrics (counts and timings) every 15 seconds. The **Statistics** page charts them per minute, 5 or 15 minutes, hour or 6 hours (`/stats?range=1h|6h|24h|7d|30d`). It shows:
 
 - **Tokens and model cost:** provider-reported input, output and cached tokens, estimated spend and prompt-cache savings, and calls with missing usage or prices.
 - **Network and cloud bandwidth:** MCP request/response payload bytes and cloud model request bytes. Avoided cloud traffic stays "Not measured" until an equivalent fallback provides a comparable baseline.

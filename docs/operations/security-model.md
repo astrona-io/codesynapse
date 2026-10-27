@@ -42,6 +42,8 @@ flowchart LR
 
 ## Rules by area
 
+Read the table one row at a time: the left column names a place where outside input could cause harm, and the right column says what CodeSynapse does about it. A few names you will meet: *nGQL* and *Cypher* are query languages for graph databases. A *tenant* is one organisation's private slice of the data. *Allowlist* means only values on a fixed list are accepted. The names in backticks are the code that enforces the rule, for people who want to check it.
+
 | Area | Rule |
 |---|---|
 | Cypher | Values only through parameters. Labels, types, depth and ORDER BY only from `model` allowlists, `store.ClampDepth` or `metricCypher` |
@@ -63,7 +65,9 @@ flowchart LR
 
 ## Telemetry cardinality
 
-Metrics carry only bounded labels. Prompt text, queries, paths, repository names and user IDs never become labels; they belong in logs.
+Metrics are counts and timings with a few labels attached, such as the organisation or the tool name. "Bounded" means each label can only take a limited set of values, so the metrics database cannot be flooded. Prompt text, queries, paths, repository names and user IDs never become labels; they belong in logs.
+
+The picture shows where each label comes from:
 
 ```mermaid
 flowchart LR
@@ -83,7 +87,7 @@ The database enforces the tenant scope; cross-tenant panels are platform-only.
 
 ## Destructive actions
 
-Delete repository and delete review are confirmed in the UI. The one automatic removal is `reapIfGone`: a cloned repository is removed only after the provider API answers a clean 404 three scheduled syncs in a row. Deleting cloned files is limited to a single directory inside the workspace, and mounted sources are never deleted.
+Deleting a repository or a review always asks you to confirm in the dashboard. CodeSynapse removes only one thing by itself, in a function called `reapIfGone`: a cloned repository that the provider says no longer exists. It is removed only after the provider's API answers a clean 404 ("not found") on three scheduled syncs in a row, so one hiccup never deletes anything. Deleting cloned files is limited to a single directory inside the workspace, and mounted sources are never deleted.
 
 ```mermaid
 stateDiagram-v2

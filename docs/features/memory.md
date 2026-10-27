@@ -7,6 +7,8 @@ Agents lose detail when their context is compacted and start each session from n
 
 ## Hybrid memory model
 
+Think of two notebooks. The assistant keeps the last few exchanges in its head (short term). When its head fills up, older turns are summarised into short facts and written into CodeSynapse (long term). A fact is a small statement such as `repo` `USES` `NebulaGraph`: a thing, a link and another thing.
+
 ```mermaid
 flowchart LR
     subgraph short[Short term - client]

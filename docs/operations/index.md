@@ -31,6 +31,6 @@ For the people who run CodeSynapse for a team.
 
     Claude Code today, other clients through MCP.
 
-    [Claude Code bridge](claude-code-bridge.md) · [Claude Code plugin](claude-code-plugin.md)
+    [Claude Code bridge](claude-code-bridge.md) · [Claude Code plugin](claude-code-plugin.md) · [Agent gateway](gateway.md)
 
 </div>
