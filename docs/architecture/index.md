@@ -1,5 +1,8 @@
 # Architecture
 
+!!! tip "In plain words"
+    How the pieces fit together, from files on disk to an answer in a chat. These pages are for people running or extending CodeSynapse.
+
 How the pieces fit, from files on disk to an answer in a chat.
 
 <div class="grid cards" markdown>

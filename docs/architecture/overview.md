@@ -1,5 +1,8 @@
 # Architecture overview
 
+!!! tip "In plain words"
+    A tour of the running system: which services exist, what each one does and how they talk to each other. All of them are defined in `docker-compose.yml`.
+
 ## Services
 
 Three services plus the graph database, all defined in `docker-compose.yml`.

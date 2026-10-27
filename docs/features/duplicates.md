@@ -1,5 +1,8 @@
 # Duplicate and shared code
 
+!!! tip "In plain words"
+    Code that exists twice has to be fixed twice, and the copies slowly drift apart. This page explains how CodeSynapse finds copies, inside one repository and across several, and how it suggests where a shared library would help.
+
 Code that exists twice has to be read, tested, secured and fixed twice, and the copies drift apart. CodeSynapse finds it inside one repository and across the repositories you can see, and recommends where a shared library or framework would pay off.
 
 ## What counts as a duplicate

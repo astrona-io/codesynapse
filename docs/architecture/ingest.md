@@ -1,5 +1,8 @@
 # Ingest pipeline
 
+!!! tip "In plain words"
+    Ingest is the step that reads a repository and turns it into the graph. The API runs it as a background job (clone, sync or scheduled sync). On your own machine you can run it directly with `codesynapse ingest`. This page walks through the stages in order.
+
 Ingest turns a checkout into graph nodes and edges. The API runs it as a job (clone, sync, scheduled sync); the CLI runs it directly with `codesynapse ingest`.
 
 ```mermaid

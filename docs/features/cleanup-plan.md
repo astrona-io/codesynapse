@@ -1,5 +1,8 @@
 # Cleanup plan
 
+!!! tip "In plain words"
+    One ranked to-do list for tidying a repository: the best payoff for the least risk comes first. It only reads results CodeSynapse already stored and never changes anything.
+
 CodeSynapse already finds a lot: unreachable code, unused and vulnerable dependencies, licence conflicts, duplicate code and complex files nobody tests. The cleanup plan puts them in one list, ranked by what pays off most for the least risk, so the answer to "what should we fix next?" is a page and not a project.
 
 It only reads what the last ingest stored. It changes nothing.

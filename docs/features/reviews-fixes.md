@@ -1,5 +1,8 @@
 # Reviews and fix branches
 
+!!! tip "In plain words"
+    A review is a written check of a change, with comments tied to exact lines of code. An assistant (or a built-in AI task) makes it, and it shows up on the Reviews page. For accepted comments, CodeSynapse can also prepare a *fix branch*: a separate branch with the proposed change, which a person then reviews.
+
 ## Review lifecycle
 
 Ask your agent to review a change ("review my changes with CodeSynapse and submit the review", or the `code-review` MCP prompt). It (or the API's AI tasks) analyses the change with the graph, then records the result with `submit_review`, and the review appears on the **Reviews** page. Reviews live in the review store (`:Review` nodes), never in the code graph. Disable the review tools with `CODESYNAPSE_MCP_REVIEWS=false`.

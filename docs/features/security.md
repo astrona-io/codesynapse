@@ -1,5 +1,8 @@
 # Security review
 
+!!! tip "In plain words"
+    A security review gives a repository a grade from A to F and a list of problems ("findings"). Each finding says what is wrong, why it matters and how to fix it. The grade is only meaningful next to what was checked, so every report also says how much it covered.
+
 `codesynapse audit`, the **Security** page and the `security_report` MCP tool grade a repository A to F and list findings. The grade only means something next to what was checked, so every report also states its coverage.
 
 ## Where findings come from

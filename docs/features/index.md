@@ -1,5 +1,8 @@
 # Features
 
+!!! tip "In plain words"
+    A map of what CodeSynapse can tell you once a repository is indexed. Pick the area you care about. New to the words used here? See the [glossary](../GLOSSARY.md).
+
 What CodeSynapse answers once a repository is indexed. Pick the area you care about.
 
 <div class="grid cards" markdown>

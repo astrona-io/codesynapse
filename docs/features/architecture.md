@@ -1,5 +1,8 @@
 # Architecture catalog
 
+!!! tip "In plain words"
+    Teams write down decisions ("we use PostgreSQL for accounts") in files next to the code. CodeSynapse reads those files so you or an assistant can ask: what did we decide, is it still true, and which code follows it? The answer also says which records are firm rules and which are only proposals.
+
 Decisions, standards and designs usually live in files next to the code. CodeSynapse indexes them on every sync, so people and coding agents can ask "what did we decide, is it still true, and which code carries it out?" and get an answer that says which record is a rule and which is only a proposal.
 
 ## What is a record

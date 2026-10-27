@@ -1,5 +1,8 @@
 # Graph schema
 
+!!! tip "In plain words"
+    This is the reference for what is stored: the kinds of "dots" (nodes, such as a function or a file) and "lines" (edges, such as "calls") in the graph. Read it if you want to build on the data or understand a query result. Everyday users do not need it.
+
 The schema lives in `internal/model/model.go`. Every code node has the label `Node` plus its kind, and the properties `id`, `repo`, `kind` and `name`. IDs are `repo|Kind|local`.
 
 `AllNodeKinds` and `AllEdgeKinds` are the allowlist for tags and edge types in nGQL, because those cannot be passed as parameters.
