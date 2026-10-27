@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/logx"
 )
 
@@ -116,6 +117,12 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			done(r.Context(), Meta{Path: upstreamPath, Route: "rejected"}, http.StatusRequestEntityTooLarge)
 			return
 		}
+		if holdsGatewayKey(r) {
+			// A CodeSynapse key in the model-credential headers would go to
+			// the cloud; refuse before anything is sent.
+			problem(w, http.StatusBadRequest, "that is a CodeSynapse key; send it in the "+KeyHeader+" header and your Anthropic credential in Authorization or x-api-key")
+			return
+		}
 		meta := inspect(upstreamPath, body)
 		if local := g.local(); local != nil && upstreamPath == "/v1/messages" {
 			rec := &statusWriter{ResponseWriter: w}
@@ -150,6 +157,13 @@ func (g *Anthropic) local() *Local {
 		return nil
 	}
 	return g.Local()
+}
+
+// holdsGatewayKey reports whether a CodeSynapse key sits where the caller's
+// own model credential belongs.
+func holdsGatewayKey(r *http.Request) bool {
+	bearer, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return strings.HasPrefix(bearer, accounts.KeyPrefix) || strings.HasPrefix(r.Header.Get("X-Api-Key"), accounts.KeyPrefix)
 }
 
 func hasCredential(r *http.Request) bool {

@@ -3,8 +3,11 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
@@ -12,6 +15,63 @@ import (
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/services/api/internal/gateway"
 )
+
+// maxGatewayInFlight caps the requests one key may have open at once, so a
+// single key cannot fill the local model's queue or the server's goroutines.
+const maxGatewayInFlight = 8
+
+// keyLimit counts the open gateway requests of each key.
+type keyLimit struct {
+	mu sync.Mutex
+	n  map[string]int
+}
+
+// take reserves a slot for the key; ok is false when it already holds its share.
+func (l *keyLimit) take(key string) (release func(), ok bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.n == nil {
+		l.n = map[string]int{}
+	}
+	if l.n[key] >= maxGatewayInFlight {
+		return nil, false
+	}
+	l.n[key]++
+	return func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		if l.n[key]--; l.n[key] <= 0 {
+			delete(l.n, key)
+		}
+	}, true
+}
+
+// modelName keeps the audit trail free of anything but a plain model name.
+var modelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$`)
+
+// auditGateway records what a gateway call was, never what it said: route,
+// model name, sizes and timing.
+func (s *Server) auditGateway(ctx context.Context, m gateway.Meta, status int, took time.Duration) {
+	recordGateway(ctx, m, status, took)
+	model := m.Model
+	if !modelName.MatchString(model) {
+		model = "other"
+	}
+	if status == 0 {
+		status = http.StatusOK
+	}
+	e := accounts.Event{
+		Action: "gateway.request", Target: m.Path, Status: status, Outcome: accounts.Success, Via: "anonymous",
+		Detail: fmt.Sprintf("route=%s model=%s stream=%t tools=%t bytes=%d ms=%d", m.Route, model, m.Stream, m.Tools, m.Bytes, took.Milliseconds()),
+	}
+	if status >= 400 {
+		e.Outcome = accounts.Failure
+	}
+	if p, ok := principal(ctx); ok {
+		e.UserID, e.ActorEmail, e.Via, e.KeyID, e.OrgID = p.User.ID, p.User.Email, p.Via, p.KeyID, p.OrgID
+	}
+	s.record(ctx, e)
+}
 
 // authenticateGateway reads the CodeSynapse key from its own header and
 // leaves Authorization and x-api-key to the caller's model credential, which
@@ -44,7 +104,6 @@ func (s *Server) gatewayRoutes() {
 		return
 	}
 	g := gateway.NewAnthropic()
-	g.Done = recordGateway
 	g.Upstream = s.cfg.GatewayUpstream
 	g.Local = func() *gateway.Local {
 		if s.cfg.LLM == nil {
@@ -56,28 +115,33 @@ func (s *Server) gatewayRoutes() {
 		}
 		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire}
 	}
-	for _, path := range []string{"/v1/messages", "/v1/messages/count_tokens"} {
-		h := g.Handler(path)
-		s.route("POST "+path, orgRole(accounts.Member), func(w http.ResponseWriter, r *http.Request) {
-			r, ok := s.gatewaySession(w, r)
-			if !ok {
-				return
-			}
-			h(w, r)
-		})
-	}
-	o := &gateway.OpenAI{Local: g.Local, Done: recordGateway}
-	bound := func(h http.HandlerFunc) http.HandlerFunc {
+	g.Done = s.auditGateway
+	var open keyLimit
+	// guard binds the request to the key's session and holds one of the key's
+	// slots until the answer is done.
+	guard := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
+			p, _ := principal(r.Context())
 			r, ok := s.gatewaySession(w, r)
 			if !ok {
 				return
 			}
+			release, ok := open.take(p.KeyID)
+			if !ok {
+				w.Header().Set("Retry-After", "5")
+				s.problem(w, http.StatusTooManyRequests, errors.New("this key has too many gateway requests open; wait for one to finish"))
+				return
+			}
+			defer release()
 			h(w, r)
 		}
 	}
-	s.route("POST /v1/chat/completions", orgRole(accounts.Member), bound(o.ChatHandler()))
-	s.route("GET /v1/models", orgRole(accounts.Member), bound(o.ModelsHandler()))
+	for _, path := range []string{"/v1/messages", "/v1/messages/count_tokens"} {
+		s.route("POST "+path, orgRole(accounts.Member), guard(g.Handler(path)))
+	}
+	o := &gateway.OpenAI{Local: g.Local, Done: s.auditGateway}
+	s.route("POST /v1/chat/completions", orgRole(accounts.Member), guard(o.ChatHandler()))
+	s.route("GET /v1/models", orgRole(accounts.Member), guard(o.ModelsHandler()))
 }
 
 // gatewaySession binds the request to the key's own runtime session; headers

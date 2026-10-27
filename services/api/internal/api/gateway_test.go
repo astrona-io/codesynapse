@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
@@ -58,6 +60,60 @@ func TestGatewayForwardsWithKeyAndBindsSession(t *testing.T) {
 		}
 	}
 	assert.Equal(t, gw, 1, "one audited gateway session")
+}
+
+func TestGatewayAuditsCallsWithoutPrompts(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, `{}`) }))
+	defer up.Close()
+	f := newRuntimeFixture(t, Config{Gateway: true, GatewayUpstream: up.URL})
+	req, err := http.NewRequest(http.MethodPost, f.client.ts.URL+"/v1/messages", strings.NewReader(`{"model":"claude-x","messages":[{"role":"user","content":"TOP-SECRET-PROMPT"}]}`)) //nolint:noctx // test
+	require.NoError(t, err)
+	req.Header.Set(gateway.KeyHeader, strings.TrimPrefix(f.client.auth, "Bearer "))
+	req.Header.Set("X-Api-Key", "sk-ant-own")
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	_ = res.Body.Close()
+	require.Equal(t, res.StatusCode, 200)
+
+	rows, err := f.accounts.St.ListEvents(t.Context(), accounts.EventFilter{OrgID: f.org.ID, Action: "gateway.request", Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Contains(t, rows[0].Detail, "route=cloud")
+	assert.Contains(t, rows[0].Detail, "model=claude-x")
+	assert.NotContains(t, rows[0].Detail, "TOP-SECRET")
+	assert.NotContains(t, rows[0].Detail, "sk-ant-own")
+}
+
+func TestGatewayCapsOpenRequestsPerKey(t *testing.T) {
+	release := make(chan struct{})
+	var held atomic.Int32
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		held.Add(1)
+		<-release
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer up.Close()
+	defer close(release)
+	f := newRuntimeFixture(t, Config{Gateway: true, GatewayUpstream: up.URL})
+	post := func() int {
+		req, err := http.NewRequest(http.MethodPost, f.client.ts.URL+"/v1/messages", strings.NewReader(`{}`)) //nolint:noctx // test
+		require.NoError(t, err)
+		req.Header.Set(gateway.KeyHeader, strings.TrimPrefix(f.client.auth, "Bearer "))
+		req.Header.Set("X-Api-Key", "sk-ant-own")
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_ = res.Body.Close()
+		return res.StatusCode
+	}
+	for range maxGatewayInFlight {
+		go post()
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for held.Load() < maxGatewayInFlight && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	require.Equal(t, int(held.Load()), maxGatewayInFlight)
+	assert.Equal(t, post(), http.StatusTooManyRequests)
 }
 
 func TestGatewayOffByDefault(t *testing.T) {

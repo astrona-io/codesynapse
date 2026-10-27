@@ -3,7 +3,12 @@
 !!! info "In plain words"
     This page explains who can sign in and what each person can see. People belong to an **organisation** (a team or company). Inside it they have a **role** and can be given access to single repositories. Programs, such as a coding assistant or a CI job, sign in with an **API key** instead of a password. Every change is written to an **audit log** that cannot be edited afterwards. Terms are in the [glossary](../GLOSSARY.md#people-and-access).
 
-Accounts are optional. Without `CODESYNAPSE_DATABASE_URL` the installation is single-tenant and uses bearer tokens. With it, PostgreSQL holds users, organisations, roles, sessions, API keys, teams, grants and the audit log (`internal/accounts`).
+Accounts are optional.
+
+- **Without** `CODESYNAPSE_DATABASE_URL`, the installation is *single-tenant*: one shared space, protected by bearer tokens (a secret string sent with each request).
+- **With** it, PostgreSQL holds users, organisations, roles, sessions, API keys, teams, grants and the audit log (`internal/accounts`).
+
+The diagram shows how a browser and an agent each prove who they are:
 
 ## Identity
 
@@ -46,7 +51,9 @@ An organisation can connect its own OpenID Connect provider (Entra ID, Okta, Key
 
 ## Repository permission resolution
 
-Memberships and relation tuples in PostgreSQL are authoritative. Every subject must be an active, explicit member of the owning organisation; platform administration gives no code access.
+When someone asks to open a repository, CodeSynapse works out the answer from the memberships and grants stored in PostgreSQL, and nothing else decides. Every person must be an active, named member of the organisation that owns the repository. Being a platform administrator gives no access to code.
+
+Follow the diagram from the top. For example, if Sam is a member and has a direct grant of `viewer` on the repository, the answer is "viewer", even if a team Sam belongs to has a stronger grant.
 
 ```mermaid
 flowchart TD

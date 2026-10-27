@@ -129,11 +129,7 @@ func (o *OpenAI) forward(ctx context.Context, w http.ResponseWriter, l *Local, b
 	if l.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+l.APIKey)
 	}
-	client := l.Client
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
+	resp, err := l.client().Do(req)
 	if err != nil {
 		logx.FromContext(ctx).Warn("gateway local model failed", "error", err)
 		openAIProblem(w, http.StatusBadGateway, "the local model could not be reached")
