@@ -45,6 +45,7 @@ type serveOptions struct {
 	sources     string
 	commitLimit int
 	network     bool
+	moduleProxy bool
 	vulnScan    bool
 	licenses    bool
 	dataflow    bool
@@ -74,6 +75,7 @@ func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.BoolVar(&o.vulnScan, "vulns", app.Getenv("CODESYNAPSE_VULN_SCAN", "") == "true", "Check dependencies against osv.dev on ingest (sends module paths and versions)")
 	f.BoolVar(&o.licenses, "license-lookup", app.Getenv("CODESYNAPSE_LICENSE_LOOKUP", "") == "true", "Ask deps.dev for dependency licences not found on disk, and which dependencies are deprecated or behind their latest release (sends package names and versions)")
 	f.BoolVar(&o.dataflow, "dataflow", app.Getenv("CODESYNAPSE_INGEST_DATAFLOW", "") == "true", "Resolve Go calls through function values with SSA and VTA on ingest (slower; edges marked dataflow)")
+	f.BoolVar(&o.moduleProxy, "go-module-download", app.Getenv("CODESYNAPSE_GO_MODULE_DOWNLOAD", "true") != "false", "Let ingest fetch missing Go modules from the public module proxy only, so dependencies are type-checked")
 	f.BoolVar(&o.network, "allow-network", app.Getenv("CODESYNAPSE_ALLOW_NETWORK", "") == "true", "Let ingest download Go modules (trusted repos only)")
 	return nil
 }
@@ -230,7 +232,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	case !o.runJobs:
 		roles = []string{} // none: workers run them
 	}
-	srv := api.New(ctx, api.Config{JobRoles: roles, Worker: o.worker, GitAuths: gitAuths, PushAuths: pushAuths, LLM: registry, SourcesRoot: o.sources, CommitLimit: o.commitLimit, AllowNetwork: o.network, VulnScan: o.vulnScan, LicenseLookup: o.licenses, Dataflow: o.dataflow, Version: version,
+	srv := api.New(ctx, api.Config{JobRoles: roles, Worker: o.worker, GitAuths: gitAuths, PushAuths: pushAuths, LLM: registry, SourcesRoot: o.sources, CommitLimit: o.commitLimit, AllowNetwork: o.network, ModuleProxy: o.moduleProxy, VulnScan: o.vulnScan, LicenseLookup: o.licenses, Dataflow: o.dataflow, Version: version,
 		Workspace: o.workspace, AllowPrivateGit: app.Getenv("CODESYNAPSE_ALLOW_PRIVATE_GIT", "") == "true",
 		GitAuth:   gitx.Auth{Host: app.Getenv("CODESYNAPSE_GIT_TOKEN_HOST", "github.com"), Token: os.Getenv("CODESYNAPSE_GIT_TOKEN")},
 		AllowPush: pushAllowed(app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true", o.worker, roles, o.EC.Logger),
