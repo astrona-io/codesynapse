@@ -11,6 +11,7 @@ import (
 	"go/token"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -365,7 +366,7 @@ func stopGuard(ctx context.Context, in toolHookInput, logger *slog.Logger) map[s
 	saveState(state, s)
 	repo := w.repo
 	notice := ""
-	if name, known := serverRepo(ctx, in, w.root); !known {
+	if name, known := serverRepo(ctx, in, w.root, w.repo); !known {
 		// verify_plan and get_pr_context answer "not found" for a checkout the
 		// server has not indexed, so asking for them only wastes a turn. Say so
 		// in the chat (systemMessage) rather than finishing without a word.
@@ -395,7 +396,9 @@ func stopGuard(ctx context.Context, in toolHookInput, logger *slog.Logger) map[s
 // serverRepo asks the server which indexed repository root is. known is false
 // only when the server answered and does not list the checkout; with no token
 // or no answer it stays true, since nothing says the tools are unavailable.
-func serverRepo(ctx context.Context, in toolHookInput, root string) (name string, known bool) {
+// checkout is the name the checkout's origin gives; a skipped check is reported
+// under it (usage.Unindexed).
+func serverRepo(ctx context.Context, in toolHookInput, root, checkout string) (name string, known bool) {
 	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
 	if c.token == "" || in.SessionID == "" {
 		return "", true
@@ -408,6 +411,11 @@ func serverRepo(ctx context.Context, in toolHookInput, root string) (name string
 	}
 	name, err = c.resolveRepo(ctx, root)
 	if errors.Is(err, errNoRepo) {
+		// Counted so Statistics can recommend indexing it; best effort, the
+		// person already gets the notice either way.
+		rctx, rcancel := context.WithTimeout(context.WithoutCancel(ctx), activityBudget)
+		defer rcancel()
+		_ = c.do(rctx, http.MethodPost, "/api/v1/usage/unindexed", map[string]string{"repo": checkout, "client": "claude-code"}, nil) //nolint:errcheck // counters are best effort
 		return "", false
 	}
 	return name, true

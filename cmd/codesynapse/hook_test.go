@@ -85,8 +85,14 @@ func TestStopGuard(t *testing.T) {
 
 func TestStopGuardSkipsUnindexedCheckout(t *testing.T) {
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
-	var repos string
+	var repos, reported string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/usage/unindexed" {
+			b, _ := io.ReadAll(r.Body) //nolint:errcheck // test server
+			reported = string(b)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.URL.Path == "/api/v1/execution/sessions" {
 			var body struct {
 				SessionID string `json:"session_id"`
@@ -110,13 +116,17 @@ func TestStopGuardSkipsUnindexedCheckout(t *testing.T) {
 	require.True(t, skipped != nil, "the skip is explained in the chat")
 	assert.True(t, skipped["decision"] == nil, "verify_plan cannot answer for a checkout the server has not indexed, so nothing blocks")
 	assert.Contains(t, skipped["systemMessage"].(string), "not in the server's index")
+	assert.Contains(t, reported, `"repo":"acme/demo"`, "the name the checkout's origin gives")
+	assert.Contains(t, reported, `"client":"claude-code"`)
 
 	// Same server, but the checkout is indexed: the check is asked for.
+	reported = ""
 	repos = `{"repos":[{"name":"` + filepath.Base(dir) + `","remote":""}]}`
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "demo.go"), []byte("package demo\n\nfunc ChangedAgain() {}\n"), 0o600))
 	out := stopGuard(ctx, toolHookInput{SessionID: "chat-2", Cwd: dir}, logger)
 	require.True(t, out != nil)
 	assert.Contains(t, out["reason"].(string), "verify_plan")
+	assert.Equal(t, reported, "", "an indexed checkout is not reported")
 }
 
 func TestHookCommandPrintsJSON(t *testing.T) {
