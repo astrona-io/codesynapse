@@ -14,6 +14,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -84,6 +85,21 @@ func GoEnv(ctx context.Context, allowNetwork bool) ([]string, error) {
 	return execution.Environment(ctx, env)
 }
 
+// missingModuleRe matches what go list and go/types say when a dependency is
+// not in the module cache and the network is off.
+var missingModuleRe = regexp.MustCompile(`(?i)no required module provides package|cannot find module providing|module lookup disabled by GOPROXY=off|missing go\.sum entry|cannot find package|could not import .*\((no required module|cannot find|module lookup)`)
+
+// loadDiagnostic tells a package that failed because its dependencies are not
+// available (the worker is offline by design) from one that is broken.
+func loadDiagnostic(p *packages.Package) string {
+	for _, e := range p.Errors {
+		if missingModuleRe.MatchString(e.Msg) {
+			return "dependencies_unavailable"
+		}
+	}
+	return "package_load_failed"
+}
+
 // Load loads every package under root, tests included, as Extract does.
 func Load(ctx context.Context, root string, mode packages.LoadMode) ([]*packages.Package, error) {
 	env, err := GoEnv(ctx, false)
@@ -133,7 +149,7 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 		if len(p.Errors) > 0 {
 			for _, filename := range p.GoFiles {
 				if rel, err := filepath.Rel(root, filename); err == nil && repoconfig.FromContext(ctx).PathAllowed(filepath.ToSlash(rel)) {
-					ingestreport.Observe(ctx, filepath.ToSlash(rel), ingestreport.Go, ingestreport.StageFailed, "package_load_failed")
+					ingestreport.Observe(ctx, filepath.ToSlash(rel), ingestreport.Go, ingestreport.StageFailed, loadDiagnostic(p))
 				}
 			}
 		}

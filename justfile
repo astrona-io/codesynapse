@@ -140,7 +140,7 @@ ingest dir name="":
     # shellcheck disable=SC2086
     {{compose}} exec worker codesynapse ingest "/sources/$base" $naming --vulns="${CODESYNAPSE_VULN_SCAN:-true}" --allow-network="${CODESYNAPSE_ALLOW_NETWORK:-false}"
     if [ "${CODESYNAPSE_ALLOW_NETWORK:-false}" != true ]; then
-        echo "note: module downloads are off, so Go packages whose dependencies are not in the worker's module cache are not type-checked (reported as package_load_failed); set CODESYNAPSE_ALLOW_NETWORK=true for a checkout you trust" >&2
+        echo "note: module downloads are off, so Go packages whose dependencies are not in the worker's module cache are not type-checked (reported as dependencies_unavailable); set CODESYNAPSE_ALLOW_NETWORK=true for a checkout you trust" >&2
     fi
     if [ -n "$origin" ]; then
         echo "Indexed. To see it in your organisation: sign in as an owner, open Repositories, choose Add and paste $origin (public repositories need no token; a private one uses your organisation's Git token). The dashboard links this index instead of cloning."
