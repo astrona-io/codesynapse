@@ -51,8 +51,33 @@ type Meta struct {
 	Stream bool
 	Bytes  int
 	Tools  bool
-	// Route is where the call was answered: local or cloud.
+	// Route is where the call was answered: local, cloud, or rejected when the
+	// gateway refused it before any model saw it.
 	Route string
+	// Out is the response size in bytes.
+	Out int
+	// InTokens and OutTokens are what the local model reported for a local
+	// answer; Metered says it reported any.
+	InTokens, OutTokens int
+	Metered             bool
+}
+
+// countWriter counts the bytes of the response.
+type countWriter struct {
+	http.ResponseWriter
+	n int
+}
+
+func (c *countWriter) Write(b []byte) (int, error) {
+	n, err := c.ResponseWriter.Write(b)
+	c.n += n
+	return n, err
+}
+
+func (c *countWriter) Flush() {
+	if f, ok := c.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // Anthropic forwards Anthropic-compatible requests.
@@ -77,11 +102,19 @@ func NewAnthropic() *Anthropic {
 
 // Handler serves POST /v1/messages and POST /v1/messages/count_tokens.
 func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return func(rw http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		w := &countWriter{ResponseWriter: rw}
+		done := func(ctx context.Context, m Meta, status int) {
+			if g.Done != nil {
+				m.Out = w.n
+				g.Done(ctx, m, status, time.Since(start))
+			}
+		}
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBody))
 		if err != nil {
 			problem(w, http.StatusRequestEntityTooLarge, "request body too large")
+			done(r.Context(), Meta{Path: upstreamPath, Route: "rejected"}, http.StatusRequestEntityTooLarge)
 			return
 		}
 		if holdsGatewayKey(r) {
@@ -93,17 +126,18 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 		meta := inspect(upstreamPath, body)
 		if local := g.local(); local != nil && upstreamPath == "/v1/messages" {
 			rec := &statusWriter{ResponseWriter: w}
-			if local.serve(r.Context(), rec, body) {
-				if g.Done != nil {
-					meta.Route = "local"
-					g.Done(r.Context(), meta, http.StatusOK, time.Since(start))
-				}
+			if u, ok := local.serve(r.Context(), rec, body); ok {
+				meta.Route = "local"
+				meta.InTokens, meta.OutTokens, meta.Metered = u.In, u.Out, u.In+u.Out > 0
+				done(r.Context(), meta, http.StatusOK)
 				return
 			}
 		}
 		meta.Route = "cloud"
 		if !hasCredential(r) {
 			problem(w, http.StatusUnauthorized, "send your Anthropic credential (Authorization or x-api-key) with the request; the gateway does not store one")
+			meta.Route = "rejected"
+			done(r.Context(), meta, http.StatusUnauthorized)
 			return
 		}
 		status, err := g.forward(r.Context(), w, r, upstreamPath, body)
@@ -114,9 +148,7 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 				status = http.StatusBadGateway
 			}
 		}
-		if g.Done != nil {
-			g.Done(r.Context(), meta, status, time.Since(start))
-		}
+		done(r.Context(), meta, status)
 	}
 }
 

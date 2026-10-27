@@ -50,6 +50,17 @@ var (
 	LLMContextUsed = Default.ScopedHistogram("llm_context_used_ratio", "Share of the model's context window one request used.", contextShare, "tenant_id", "llm_provider", "llm_model", "task")
 )
 
+// Agent gateway: model requests agents send through CodeSynapse. The model
+// the agent asked for is client text, so it is never a label; the route says
+// where the request was answered (local, cloud, or rejected before any model).
+var (
+	GatewayRequests    = Default.ScopedCounter("gateway_requests_total", "Gateway requests by route (local, cloud, rejected) and status class (2xx, 4xx, 5xx, other).", "tenant_id", "route", "class")
+	GatewayBytes       = Default.ScopedCounter("gateway_bytes_total", "Gateway request and response bytes by route and direction (in, out).", "tenant_id", "route", "direction")
+	GatewayLocalTokens = Default.ScopedCounter("gateway_local_tokens_total", "Tokens the local model reported for gateway answers, by kind (input, output).", "tenant_id", "kind")
+	// GatewayLocalUnmetered counts local answers whose server reported no usage.
+	GatewayLocalUnmetered = Default.ScopedCounter("gateway_local_unmetered_total", "Gateway answers from the local model that reported no token usage.", "tenant_id")
+)
+
 // Databases.
 var (
 	DBDuration     = Default.ScopedHistogram("db_query_duration_seconds", "Database round-trip time by system and operation.", latency, "tenant_id", "db_system", "operation")

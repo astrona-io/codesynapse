@@ -24,6 +24,10 @@ const (
 	defaultWait = 20 * time.Second
 )
 
+// Usage is what the local model reported for one answer; zero when it
+// reported nothing.
+type Usage struct{ In, Out int }
+
 // Local answers small, tool-free requests from a local OpenAI-compatible
 // model. Anything else goes to the cloud.
 type Local struct {
@@ -140,7 +144,9 @@ func (l *Local) translate(body []byte) (in anthropicIn, out []byte, ok bool) {
 		}
 		msgs = append(msgs, msg{m.Role, t})
 	}
-	req := map[string]any{"model": l.Model, "messages": msgs, "stream": true}
+	// include_usage makes the server report the tokens it used, so the
+	// gateway can say what a local answer saved.
+	req := map[string]any{"model": l.Model, "messages": msgs, "stream": true, "stream_options": map[string]bool{"include_usage": true}}
 	if in.MaxTokens > 0 {
 		req["max_tokens"] = in.MaxTokens
 	}
@@ -159,10 +165,10 @@ func (l *Local) translate(body []byte) (in anthropicIn, out []byte, ok bool) {
 
 // serve tries to answer from the local model. It returns false, with nothing
 // written, when the cloud should take the request.
-func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) bool {
+func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (Usage, bool) {
 	in, req, ok := l.translate(body)
 	if !ok {
-		return false
+		return Usage{}, false
 	}
 	release := func() {}
 	if l.Acquire != nil {
@@ -175,14 +181,14 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) b
 		release, err = l.Acquire(qctx)
 		cancel()
 		if err != nil {
-			return false
+			return Usage{}, false
 		}
 	}
 	defer release()
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(l.BaseURL, "/")+"/chat/completions", bytes.NewReader(req))
 	if err != nil {
-		return false
+		return Usage{}, false
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if l.APIKey != "" {
@@ -190,11 +196,11 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) b
 	}
 	resp, err := l.client().Do(httpReq)
 	if err != nil {
-		return false
+		return Usage{}, false
 	}
 	defer resp.Body.Close() //nolint:errcheck // read side
 	if resp.StatusCode != http.StatusOK {
-		return false
+		return Usage{}, false
 	}
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
@@ -203,15 +209,16 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) b
 	// fails to start still falls through to the cloud.
 	first, more := next()
 	if !more && sc.Err() != nil {
-		return false
+		return Usage{}, false
 	}
 	w.Header().Set(RouteHeader, "local")
+	var u Usage
 	if in.Stream {
-		streamAnswer(w, in.Model, first, more, next)
+		u = streamAnswer(w, in.Model, first, more, next)
 	} else {
-		jsonAnswer(w, in.Model, first, more, next)
+		u = jsonAnswer(w, in.Model, first, more, next)
 	}
-	return true
+	return u, true
 }
 
 type chunk struct {
@@ -273,7 +280,7 @@ func messageID() string {
 }
 
 // streamAnswer writes the Anthropic event stream for the chunks.
-func streamAnswer(w http.ResponseWriter, model string, first chunk, more bool, next func() (chunk, bool)) {
+func streamAnswer(w http.ResponseWriter, model string, first chunk, more bool, next func() (chunk, bool)) Usage {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
@@ -306,10 +313,11 @@ func streamAnswer(w http.ResponseWriter, model string, first chunk, more bool, n
 	send("content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
 	send("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stopReason(finish), "stop_sequence": nil}, "usage": map[string]int{"input_tokens": inTok, "output_tokens": outTok}})
 	send("message_stop", map[string]string{"type": "message_stop"})
+	return Usage{In: inTok, Out: outTok}
 }
 
 // jsonAnswer writes the single Anthropic message for the chunks.
-func jsonAnswer(w http.ResponseWriter, model string, first chunk, more bool, next func() (chunk, bool)) {
+func jsonAnswer(w http.ResponseWriter, model string, first chunk, more bool, next func() (chunk, bool)) Usage {
 	var b strings.Builder
 	var finish string
 	var inTok, outTok int
@@ -329,4 +337,5 @@ func jsonAnswer(w http.ResponseWriter, model string, first chunk, more bool, nex
 		"stop_reason": stopReason(finish), "stop_sequence": nil,
 		"usage": map[string]int{"input_tokens": inTok, "output_tokens": outTok},
 	})
+	return Usage{In: inTok, Out: outTok}
 }

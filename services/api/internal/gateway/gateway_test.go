@@ -51,7 +51,7 @@ func TestForwardPassesCredentialAndStreams(t *testing.T) {
 	assert.Equal(t, got.Get(KeyHeader), "")
 	assert.Equal(t, got.Get("Cookie"), "")
 	assert.Equal(t, gotBody, `{"model":"m1","stream":true,"tools":[{}]}`)
-	assert.Equal(t, meta, Meta{Path: "/v1/messages", Model: "m1", Stream: true, Bytes: len(gotBody), Tools: true, Route: "cloud"})
+	assert.Equal(t, meta, Meta{Path: "/v1/messages", Model: "m1", Stream: true, Bytes: len(gotBody), Tools: true, Route: "cloud", Out: 13})
 }
 
 func TestNoCredentialIsRefused(t *testing.T) {
@@ -166,6 +166,9 @@ func TestSmallRequestIsAnsweredLocally(t *testing.T) {
 	assert.True(t, !cloudHit)
 	assert.True(t, released)
 	assert.Equal(t, meta.Route, "local")
+	assert.True(t, meta.Metered)
+	assert.Equal(t, []int{meta.InTokens, meta.OutTokens}, []int{7, 2})
+	assert.Equal(t, meta.Out, rec.Body.Len(), "response bytes are counted")
 
 	rec = httptest.NewRecorder()
 	g.Handler("/v1/messages")(rec, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(strings.Replace(body, `"stream":true`, `"stream":false`, 1))))
@@ -203,6 +206,13 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 			assert.Equal(t, rec.Header().Get(RouteHeader), "cloud")
 		})
 	}
+}
+
+func TestReportedUsage(t *testing.T) {
+	in, out := reportedUsage([]byte(`data: {"usage":{"prompt_tokens":12,"completion_tokens":34}}`))
+	assert.Equal(t, []int{in, out}, []int{12, 34})
+	in, out = reportedUsage([]byte("data: [DONE]"))
+	assert.Equal(t, []int{in, out}, []int{0, 0})
 }
 
 func TestOpenAIChatQueuesAndUsesLocalModel(t *testing.T) {

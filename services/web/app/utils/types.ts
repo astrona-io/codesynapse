@@ -581,9 +581,16 @@ export interface ModelStat {
   tasks: ModelTaskStat[]
   cost_dollars?: number | null; compressed_bytes?: number
 }
+// Agent gateway traffic; saved_dollars is null when a local answer reported no usage.
+export interface GatewayStat {
+  requests: number; local: number; cloud: number; rejected: number; failed: number; local_share_pct: number
+  bytes_in: number; bytes_out: number; local_input_tokens: number; local_output_tokens: number
+  local_unmetered: number; saved_dollars: number | null
+}
 export interface ModelStats {
   range: string; models: ModelStat[]
   // Cloud spend and the dollars prompt compression saved; null when a price is missing.
   spent_dollars?: number | null; compression_saved_dollars?: number | null
+  gateway?: GatewayStat
   reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; cached_input_per_mtok?: number; estimate?: boolean; source?: string; checked?: string }
 }

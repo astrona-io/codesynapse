@@ -12,6 +12,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/services/api/internal/gateway"
 )
 
@@ -51,6 +52,7 @@ var modelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$`)
 // auditGateway records what a gateway call was, never what it said: route,
 // model name, sizes and timing.
 func (s *Server) auditGateway(ctx context.Context, m gateway.Meta, status int, took time.Duration) {
+	recordGateway(ctx, m, status, took)
 	model := m.Model
 	if !modelName.MatchString(model) {
 		model = "other"
@@ -208,4 +210,35 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": on, "available": s.cfg.Gateway})
+}
+
+// recordGateway counts one gateway request. Only the route, the status class
+// and sizes become metrics: never the model name, path or text.
+func recordGateway(ctx context.Context, m gateway.Meta, status int, _ time.Duration) {
+	route := m.Route
+	if route != "local" && route != "cloud" {
+		route = "rejected"
+	}
+	class := "other"
+	switch {
+	case status >= 200 && status < 300:
+		class = "2xx"
+	case status >= 400 && status < 500:
+		class = "4xx"
+	case status >= 500:
+		class = "5xx"
+	}
+	tenant := telemetry.Tenant(ctx)
+	telemetry.GatewayRequests.IncContext(ctx, tenant, route, class)
+	telemetry.GatewayBytes.AddContext(ctx, float64(m.Bytes), tenant, route, "in")
+	telemetry.GatewayBytes.AddContext(ctx, float64(m.Out), tenant, route, "out")
+	if route != "local" {
+		return
+	}
+	if !m.Metered {
+		telemetry.GatewayLocalUnmetered.IncContext(ctx, tenant)
+		return
+	}
+	telemetry.GatewayLocalTokens.AddContext(ctx, float64(m.InTokens), tenant, "input")
+	telemetry.GatewayLocalTokens.AddContext(ctx, float64(m.OutTokens), tenant, "output")
 }
