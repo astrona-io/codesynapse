@@ -110,6 +110,7 @@ test('models and savings split the token pool without counting ask_local twice',
   const models = {
     range: '30d',
     reference_price: { provider: 'claude', model: 'claude-opus-5-5', input_per_mtok: 10, output_per_mtok: 20 },
+    spent_dollars: 0.25, compression_saved_dollars: 0.5,
     models: [
       { provider: 'local-ollama', model: 'qwen3.8:27b', local: true, configured: true, context_window: 262144, requests: 40, failures: 0, input_tokens: 60000, output_tokens: 5000, avg_prompt_tokens: 1500,
         read_tokens_per_second: 264, write_tokens_per_second: 32.8, context_p50: 0.02, context_p95: 0.2,
@@ -132,5 +133,7 @@ test('models and savings split the token pool without counting ask_local twice',
   assert.match(html, /Kept off cloud models 48% /, '30k never read + 65k local of a 200k pool')
   assert.match(html, /Tokens never read 50000 /)
   assert.match(html, /Handled by local models 65000 60000 read · 5000 written/)
-  assert.match(html, /Total saved \(est\.\) \$1\.00 at claude-opus-5-5 prices, estimated/, '(60k + 30k) × $10 + 5k × $20 per million')
+  assert.match(html, /Total saved \(est\.\) \$1\.50 at claude-opus-5-5 prices, estimated/, '(60k + 30k) × $10 + 5k × $20 per million, plus $0.50 from shorter prompts')
+  assert.match(html, /Spent on cloud models \(est\.\) \$0\.25 /)
+  assert.match(html, /Saved by shorter prompts \$0\.50 /)
 })

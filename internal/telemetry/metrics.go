@@ -31,13 +31,14 @@ var (
 // LLM calls made by CodeSynapse itself (reviews, triage, briefings,
 // memory extraction).
 var (
-	LLMRequests = Default.ScopedCounter("llm_requests_total", "LLM requests by outcome.", "tenant_id", "llm_provider", "llm_model", "task", "outcome")
-	LLMInput    = Default.ScopedCounter("llm_tokens_input_total", "Prompt tokens consumed.", "tenant_id", "llm_provider", "llm_model", "task")
-	LLMOutput   = Default.ScopedCounter("llm_tokens_output_total", "Completion tokens generated.", "tenant_id", "llm_provider", "llm_model", "task")
-	LLMSaved    = Default.ScopedCounter("llm_tokens_saved_total", "Input tokens served from the provider's prompt cache.", "tenant_id", "llm_provider", "llm_model", "task")
-	LLMCost     = Default.ScopedCounter("llm_cost_estimated_dollars", "Estimated cost in US dollars from the configured token prices.", "tenant_id", "llm_provider", "llm_model")
-	LLMDuration = Default.ScopedHistogram("llm_request_duration_seconds", "LLM request time.", latency, "tenant_id", "llm_provider", "llm_model")
-	LLMTTFT     = Default.ScopedHistogram("llm_time_to_first_token_seconds", "Time to the first streamed token (streaming providers only).", ttft, "tenant_id", "llm_provider", "llm_model")
+	LLMRequests   = Default.ScopedCounter("llm_requests_total", "LLM requests by outcome.", "tenant_id", "llm_provider", "llm_model", "task", "outcome")
+	LLMInput      = Default.ScopedCounter("llm_tokens_input_total", "Prompt tokens consumed.", "tenant_id", "llm_provider", "llm_model", "task")
+	LLMOutput     = Default.ScopedCounter("llm_tokens_output_total", "Completion tokens generated.", "tenant_id", "llm_provider", "llm_model", "task")
+	LLMSaved      = Default.ScopedCounter("llm_tokens_saved_total", "Input tokens served from the provider's prompt cache.", "tenant_id", "llm_provider", "llm_model", "task")
+	LLMCost       = Default.ScopedCounter("llm_cost_estimated_dollars", "Estimated cost in US dollars from the configured token prices.", "tenant_id", "llm_provider", "llm_model")
+	LLMCompressed = Default.ScopedCounter("llm_compressed_bytes_total", "Prompt bytes a local model removed before a request went to a cloud provider.", "tenant_id", "llm_provider", "llm_model")
+	LLMDuration   = Default.ScopedHistogram("llm_request_duration_seconds", "LLM request time.", latency, "tenant_id", "llm_provider", "llm_model")
+	LLMTTFT       = Default.ScopedHistogram("llm_time_to_first_token_seconds", "Time to the first streamed token (streaming providers only).", ttft, "tenant_id", "llm_provider", "llm_model")
 	// Streamed answers split into reading the prompt (until the first token)
 	// and writing the answer, with the tokens of those same answers, so
 	// tokens/seconds is a model's read and write speed.

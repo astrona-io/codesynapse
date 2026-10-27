@@ -52,6 +52,12 @@ type ModelStat struct {
 	ContextP50 *float64    `json:"context_p50"`
 	ContextP95 *float64    `json:"context_p95"`
 	Tasks      []ModelTask `json:"tasks"`
+	// CostDollars is the estimated spend from reported usage and the
+	// configured prices; nil when the model's prices are not configured.
+	CostDollars *float64 `json:"cost_dollars"`
+	// CompressedBytes is the prompt text a local model removed before the
+	// requests went to this model.
+	CompressedBytes float64 `json:"compressed_bytes"`
 }
 
 // ModelStats is the answer of GET /api/v1/stats/models.
@@ -62,7 +68,17 @@ type ModelStats struct {
 	// locally can be valued at what that model would have charged; nil when
 	// no cloud provider has prices, and then no cost is estimated.
 	Reference *PriceReference `json:"reference_price,omitempty"`
+	// Spent is the estimated cloud spend in the window and CompressionSaved
+	// the dollars of input the prompt compression kept off cloud models
+	// (about bytesPerToken bytes a token, at each model's input price).
+	// Each is nil when a model that did the work has no configured price:
+	// unknown, never zero.
+	Spent            *float64 `json:"spent_dollars"`
+	CompressionSaved *float64 `json:"compression_saved_dollars"`
 }
+
+// bytesPerToken turns compressed prompt bytes into a token estimate.
+const bytesPerToken = 4
 
 // PriceReference is one configured cloud provider's prices, US dollars per
 // million tokens.
@@ -92,17 +108,19 @@ var defaultReference = PriceReference{
 }
 
 // modelQueries; $r is the window.
-var modelQueries = struct{ requests, input, output, cached, readS, writeS, readT, writeT, p50, p95 string }{
-	requests: `sum by (llm_provider, llm_model, task, outcome)(increase(llm_requests_total[$r]))`,
-	input:    `sum by (llm_provider, llm_model, task)(increase(llm_tokens_input_total[$r]))`,
-	output:   `sum by (llm_provider, llm_model, task)(increase(llm_tokens_output_total[$r]))`,
-	cached:   `sum by (llm_provider, llm_model)(increase(llm_tokens_saved_total[$r]))`,
-	readS:    `sum by (llm_provider, llm_model)(increase(llm_read_seconds_total[$r]))`,
-	writeS:   `sum by (llm_provider, llm_model)(increase(llm_write_seconds_total[$r]))`,
-	readT:    `sum by (llm_provider, llm_model)(increase(llm_read_tokens_total[$r]))`,
-	writeT:   `sum by (llm_provider, llm_model)(increase(llm_write_tokens_total[$r]))`,
-	p50:      `histogram_quantile(0.5, sum by (le, llm_provider, llm_model)(increase(llm_context_used_ratio_bucket[$r])))`,
-	p95:      `histogram_quantile(0.95, sum by (le, llm_provider, llm_model)(increase(llm_context_used_ratio_bucket[$r])))`,
+var modelQueries = struct{ requests, input, output, cached, readS, writeS, readT, writeT, p50, p95, cost, compressed string }{
+	cost:       `sum by (llm_provider, llm_model)(increase(llm_cost_estimated_dollars[$r]))`,
+	compressed: `sum by (llm_provider, llm_model)(increase(llm_compressed_bytes_total[$r]))`,
+	requests:   `sum by (llm_provider, llm_model, task, outcome)(increase(llm_requests_total[$r]))`,
+	input:      `sum by (llm_provider, llm_model, task)(increase(llm_tokens_input_total[$r]))`,
+	output:     `sum by (llm_provider, llm_model, task)(increase(llm_tokens_output_total[$r]))`,
+	cached:     `sum by (llm_provider, llm_model)(increase(llm_tokens_saved_total[$r]))`,
+	readS:      `sum by (llm_provider, llm_model)(increase(llm_read_seconds_total[$r]))`,
+	writeS:     `sum by (llm_provider, llm_model)(increase(llm_write_seconds_total[$r]))`,
+	readT:      `sum by (llm_provider, llm_model)(increase(llm_read_tokens_total[$r]))`,
+	writeT:     `sum by (llm_provider, llm_model)(increase(llm_write_tokens_total[$r]))`,
+	p50:        `histogram_quantile(0.5, sum by (le, llm_provider, llm_model)(increase(llm_context_used_ratio_bucket[$r])))`,
+	p95:        `histogram_quantile(0.95, sum by (le, llm_provider, llm_model)(increase(llm_context_used_ratio_bucket[$r])))`,
 }
 
 func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
@@ -195,6 +213,11 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 			task(m, l["task"]).OutputTokens += v
 		}},
 		{modelQueries.cached, func(l map[string]string, v float64) { stat(l).CachedTokens += v }},
+		{modelQueries.cost, func(l map[string]string, v float64) {
+			m := stat(l)
+			m.CostDollars = ptr(round4(v) + deref(m.CostDollars))
+		}},
+		{modelQueries.compressed, func(l map[string]string, v float64) { stat(l).CompressedBytes += v }},
 		{modelQueries.readS, func(l map[string]string, v float64) { speedOf(l)[0] += v }},
 		{modelQueries.writeS, func(l map[string]string, v float64) { speedOf(l)[1] += v }},
 		{modelQueries.readT, func(l map[string]string, v float64) { speedOf(l)[2] += v }},
@@ -247,6 +270,7 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		slices.SortFunc(m.Tasks, func(a, b ModelTask) int { return cmp.Compare(b.Requests, a.Requests) })
 		out.Models = append(out.Models, *m)
 	}
+	out.Spent, out.CompressionSaved = s.moneyTotals(out.Models)
 	slices.SortFunc(out.Models, func(a, b ModelStat) int {
 		return cmp.Or(cmp.Compare(b.InputTokens+b.OutputTokens, a.InputTokens+a.OutputTokens), cmp.Compare(a.Provider+a.Model, b.Provider+b.Model))
 	})
@@ -256,3 +280,53 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 func ptr(v float64) *float64 { return &v }
 
 func round3(f float64) float64 { return math.Round(f*1000) / 1000 }
+
+func round4(f float64) float64 { return math.Round(f*10000) / 10000 }
+
+func deref(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+// moneyTotals sums the cloud models' spend and the dollars compression saved
+// on them. A cloud model that did work without a configured price makes the
+// matching total unknown (nil) instead of leaving it out.
+func (s *Server) moneyTotals(models []ModelStat) (spent, compression *float64) {
+	var sp, cs float64
+	spentKnown, compKnown := true, true
+	for _, m := range models {
+		if m.Local {
+			continue
+		}
+		priced := false
+		var inPrice float64
+		if s.cfg.LLM != nil {
+			if cfg, ok := s.cfg.LLM.Config(m.Provider); ok && cfg.PriceInputPerMTok > 0 && cfg.PriceOutputPerMTok > 0 {
+				priced, inPrice = true, cfg.PriceInputPerMTok
+			}
+		}
+		if m.InputTokens+m.OutputTokens > 0 {
+			if m.CostDollars == nil {
+				spentKnown = false
+			} else {
+				sp += *m.CostDollars
+			}
+		}
+		if m.CompressedBytes > 0 {
+			if !priced {
+				compKnown = false
+			} else {
+				cs += m.CompressedBytes / bytesPerToken * inPrice / 1e6
+			}
+		}
+	}
+	if spentKnown {
+		spent = ptr(round4(sp))
+	}
+	if compKnown {
+		compression = ptr(round4(cs))
+	}
+	return spent, compression
+}
