@@ -36,6 +36,7 @@ const local = computed(() => {
   const all = sum(ai)
   return { ...mine, models: ai.filter(p => p.local).map(p => p.model || p.provider), sharePct: all.requests ? Math.round((100 * mine.requests) / all.requests) : null }
 })
+const unindexed = computed(() => (a.value?.unindexed?.repos ?? []).map((r) => ({ label: r.repo, value: r.skipped, detail: 'pre-finish checks skipped' })))
 const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.repo || '(no repo argument)', value: r.calls, detail: `${fmtCompact(r.response_tokens)} served · ~${fmtCompact(r.avoided_tokens)} avoided` })))
 </script>
 
@@ -74,6 +75,16 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
         <RankList :rows="readShare" suffix="%" :scale="100" color="var(--success)" empty="Install the Claude Code plugin to see which tools point agents to code they then read." />
         <p v-if="readShare.length" class="muted small">Of the file line ranges a tool's answers gave, the share the agent read afterwards. A low share means the tool answers with places that do not help; reported by the plugin's hooks as counts only.</p>
       </div>
+    </section>
+
+    <section v-if="a && unindexed.length" class="panel">
+      <p class="eyebrow">Not indexed</p><h2>Checkouts without an index</h2>
+      <RankList :rows="unindexed" color="var(--warning)" />
+      <p class="muted small">
+        Agents worked in these checkouts, but the server has not indexed them, so no graph answers were available and the agent had to read whole files.
+        <template v-if="a.unindexed?.avoided_per_session">On the indexed repositories, graph answers avoided about {{ fmtCompact(a.unindexed.avoided_per_session) }} tokens per session in this period: a reference, not a measurement of these checkouts.</template>
+        Add them under Repositories to get the check and the savings.
+      </p>
     </section>
 
     <div v-if="a" class="grid cols-2">

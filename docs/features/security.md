@@ -141,6 +141,7 @@ steps:
 | JavaScript / TypeScript / Vue | structural parser, ES imports/require, `this.` calls | `*.test.*`, `*.spec.*`, `__tests__` | child_process, eval, DOM XSS, `v-html`, SQL, TLS, JWT, secrets, redirects | package-lock.json, yarn.lock, pnpm-lock.yaml |
 | YAML, Helm, Go templates | resources, key paths, `include`/`.Values` links | – | Kubernetes, compose, GitHub Actions, Renovate/Dependabot | – |
 | Terraform (`.tf`) | blocks, labels and attributes (comments, heredocs, templates) | – | open ingress, public storage, public databases, unencrypted storage, literal secrets | – |
+| Ansible | plays, roles, tasks, handlers, packages, services, vars, inventory groups and hosts (names only, never values) | – | literal secrets, unquoted variables in `shell`, `curl \| sh`, `validate_certs: false`, world-writable modes, `state: latest` | – |
 | Dockerfile, Containerfile | stages and base images (continuations, `# escape=`, heredocs) | – | root user, `ADD` from URLs, `curl \| sh`, unpinned base, secrets in `ENV`/`ARG` | – |
 
 Non-Go call edges are name-based (imports, enclosing class, names unique in the repo), so they can miss dynamic dispatch; Go keeps exact type-checked edges. Parsers are pure Go: no cgo, static binaries.

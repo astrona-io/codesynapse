@@ -12,6 +12,7 @@ The detection logic lives in Go next to the parser for each language:
 | Python, JavaScript, TypeScript, Vue | `internal/ingest/lang/rules.go` |
 | YAML (Kubernetes, compose, GitHub Actions) | `internal/ingest/config/yaml.go` |
 | Dockerfile, Containerfile | `internal/ingest/config/dockerfile.go` (ids listed in `yaml.go`) |
+| Ansible | `internal/ingest/config/ansible.go` (ids listed in `yaml.go`) |
 | Terraform | `internal/ingest/config/terraform.go` on the reader in `hcl.go` (ids listed in `yaml.go`) |
 | Dependency update automation (Renovate, Dependabot) | `internal/ingest/config/renovate.go` (ids listed in `yaml.go`) |
 

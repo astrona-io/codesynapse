@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -362,15 +364,88 @@ func stopGuard(ctx context.Context, in toolHookInput, logger *slog.Logger) map[s
 	}
 	s.Stop = change.Key
 	saveState(state, s)
+	repo := w.repo
+	notice := ""
+	if name, known, indexing := serverRepo(ctx, in, w.root, w.repo); !known {
+		// verify_plan and get_pr_context answer "not found" for a checkout the
+		// server has not indexed, so asking for them only wastes a turn. Say so
+		// in the chat (systemMessage) rather than finishing without a word.
+		notice = fmt.Sprintf("CodeSynapse skipped its pre-finish check: %s is not in the server's index, so verify_plan and get_pr_context cannot answer for it. Add it to get the check.", w.repo)
+		if indexing {
+			notice = fmt.Sprintf("CodeSynapse skipped its pre-finish check: %s is queued or being indexed. verify_plan and get_pr_context answer for it once the ingest finishes.", w.repo)
+		}
+		if len(change.Problems) == 0 {
+			return map[string]any{"systemMessage": notice}
+		}
+		return map[string]any{
+			"decision":      "block",
+			"reason":        "Fix these first:\n- " + strings.Join(change.Problems, "\n- "),
+			"systemMessage": notice,
+		}
+	} else if name != "" {
+		repo = name // the server may know the checkout by another name than its remote
+	}
 	reason := fmt.Sprintf("Before you finish: %d file(s) in %s changed since CodeSynapse last checked. "+
 		"Call verify_plan (no arguments: your current change) and run the commands it lists; "+
 		"call get_pr_context (no arguments) and fix any finding its security_delta lists as introduced. "+
-		"Then finish. If the CodeSynapse tools are not available, finish now.", change.Files, w.repo)
+		"Then finish. If the CodeSynapse tools are not available, finish now.", change.Files, repo)
 	if len(change.Problems) > 0 {
 		// Found by parsing and formatting the changed Go files here.
 		reason = "Fix these first:\n- " + strings.Join(change.Problems, "\n- ") + "\n\n" + reason
 	}
 	return map[string]any{"decision": "block", "reason": reason}
+}
+
+// serverRepo asks the server which indexed repository root is. known is false
+// only when the server answered and does not list the checkout; with no token
+// or no answer it stays true, since nothing says the tools are unavailable.
+// checkout is the name the checkout's origin gives; a skipped check is reported
+// under it (usage.Unindexed).
+func serverRepo(ctx context.Context, in toolHookInput, root, checkout string) (name string, known, indexing bool) {
+	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
+	if c.token == "" || in.SessionID == "" {
+		return "", true, false
+	}
+	ctx, cancel := context.WithTimeout(ctx, activityBudget)
+	defer cancel()
+	ctx, err := c.executionContext(ctx, in.SessionID, in.SessionID)
+	if err != nil {
+		return "", true, false
+	}
+	name, err = c.resolveRepo(ctx, root)
+	if errors.Is(err, errNoRepo) {
+		if c.indexingNow(ctx, checkout) {
+			// Already on its way in: nothing to recommend, so it is not counted.
+			return "", false, true
+		}
+		// Counted so Statistics can recommend indexing it; best effort, the
+		// person already gets the notice either way.
+		rctx, rcancel := context.WithTimeout(context.WithoutCancel(ctx), activityBudget)
+		defer rcancel()
+		_ = c.do(rctx, http.MethodPost, "/api/v1/usage/unindexed", map[string]string{"repo": checkout, "client": "claude-code"}, nil) //nolint:errcheck // counters are best effort
+		return "", false, false
+	}
+	return name, true, false
+}
+
+// indexingNow reports whether a clone or ingest job for repo is queued or
+// running. Any trouble asking says no: the person then gets the plain notice.
+func (c apiClient) indexingNow(ctx context.Context, repo string) bool {
+	var list struct {
+		Jobs []struct {
+			Repo  string `json:"repo"`
+			State string `json:"state"`
+		} `json:"jobs"`
+	}
+	if c.do(ctx, http.MethodGet, "/api/v1/jobs", nil, &list) != nil {
+		return false
+	}
+	for _, j := range list.Jobs {
+		if j.State == "running" && strings.EqualFold(j.Repo, repo) {
+			return true
+		}
+	}
+	return false
 }
 
 func hookCmd(ec *app.Env) *cobra.Command {
