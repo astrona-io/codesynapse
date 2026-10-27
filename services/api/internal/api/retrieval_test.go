@@ -152,3 +152,35 @@ func TestLocalGitCallsAreCounted(t *testing.T) {
 		assert.Equal(t, post(t, ts, path, body), 400, body)
 	}
 }
+
+func TestUnindexedCheckoutsAreCounted(t *testing.T) {
+	ts, _ := newTestServer(t)
+	path := "/api/v1/usage/unindexed"
+	require.Equal(t, post(t, ts, path, `{"repo":"astrona-io/codesynapse","client":"claude-code"}`), 204)
+	require.Equal(t, post(t, ts, path, `{"repo":"astrona-io/codesynapse","client":"claude-code"}`), 204)
+	require.Equal(t, post(t, ts, path, `{"repo":"codeberg.org/team/api","client":"claude-code"}`), 204)
+
+	var st Stats
+	require.Equal(t, get(t, ts, "/api/v1/stats", &st), 200)
+	assert.Equal(t, st.Agents.Unindexed.Skipped, 3)
+	assert.Equal(t, st.Agents.Unindexed.Repos, []UnindexedRepo{{Repo: "astrona-io/codesynapse", Skipped: 2}, {Repo: "codeberg.org/team/api", Skipped: 1}})
+	assert.Equal(t, st.Agents.Calls, 0, "a skipped check is not a tool call")
+
+	for _, body := range []string{
+		`{"repo":"","client":"claude-code"}`,
+		`{"repo":"../etc/passwd","client":"claude-code"}`,
+		`{"repo":"a/b/c/d","client":"claude-code"}`,
+		`{"repo":"owner/na me","client":"claude-code"}`,
+		`{"repo":"owner/name","client":"Claude Code"}`,
+		`{"repo":"owner/name","client":"claude-code","path":"/etc/passwd"}`,
+	} {
+		assert.Equal(t, post(t, ts, path, body), 400, body)
+	}
+}
+
+func TestUnindexedStatsReferenceIsPerSession(t *testing.T) {
+	u := unindexedStats(map[string]int{"b/b": 1, "a/a": 1}, 1000, 4)
+	assert.Equal(t, u.AvoidedPerSession, 250)
+	assert.Equal(t, u.Repos[0].Repo, "a/a", "ties sort by name")
+	assert.Equal(t, unindexedStats(nil, 1000, 0).AvoidedPerSession, 0)
+}

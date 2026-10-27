@@ -77,6 +77,43 @@ type AgentStats struct {
 	Workflow WorkflowStats `json:"workflow"`
 	Clients  []ClientStat  `json:"clients"`
 	Repos    []RepoUsage   `json:"repos"`
+	// Unindexed lists checkouts agents worked in that the server has not
+	// indexed, so they got no graph answers.
+	Unindexed UnindexedStats `json:"unindexed"`
+}
+
+// UnindexedRepo is one checkout whose pre-finish check was skipped.
+type UnindexedRepo struct {
+	Repo    string `json:"repo"`
+	Skipped int    `json:"skipped"`
+}
+
+// UnindexedStats recommends indexing: the checkouts without an index, most
+// skipped first. AvoidedPerSession is what graph answers saved per session on
+// the indexed repositories of the window, a reference and not a measurement
+// of what these checkouts cost (0 when unknown).
+type UnindexedStats struct {
+	Repos             []UnindexedRepo `json:"repos"`
+	Skipped           int             `json:"skipped"`
+	AvoidedPerSession int             `json:"avoided_per_session"`
+}
+
+func unindexedStats(byRepo map[string]int, avoided, sessions int) UnindexedStats {
+	u := UnindexedStats{Repos: []UnindexedRepo{}}
+	for repo, n := range byRepo {
+		u.Repos = append(u.Repos, UnindexedRepo{Repo: repo, Skipped: n})
+		u.Skipped += n
+	}
+	slices.SortFunc(u.Repos, func(a, b UnindexedRepo) int {
+		if c := cmp.Compare(b.Skipped, a.Skipped); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Repo, b.Repo)
+	})
+	if sessions > 0 {
+		u.AvoidedPerSession = avoided / sessions
+	}
+	return u
 }
 
 // TokenStats is the usage reported by agent hooks for instrumented turns.
@@ -341,7 +378,9 @@ func visibleUsage(sc scope, buckets []usage.Bucket) []usage.Bucket {
 		mine[m.Org.ID] = true
 	}
 	return slices.DeleteFunc(buckets, func(b usage.Bucket) bool {
-		if b.Repo == "" {
+		// A checkout the server does not index has no repository to check:
+		// like a call without one, it belongs to the organisation that reported it.
+		if b.Repo == "" || b.Tool == usage.Unindexed {
 			return b.Org == "" || !mine[b.Org]
 		}
 		return !seesReview(sc, b.Repo, b.Org)
@@ -380,6 +419,7 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 	tools := map[string]*ToolStat{}
 	clients := map[string]*ClientStat{}
 	repos := map[string]*RepoUsage{}
+	unindexed := map[string]int{}
 	var totalMs int
 	for _, bk := range buckets {
 		day := daily[bk.Day]
@@ -390,6 +430,10 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 			continue
 		}
 		if a.Edits.AddCounter(bk.Tool, bk.Calls) {
+			continue
+		}
+		if bk.Tool == usage.Unindexed {
+			unindexed[bk.Repo] += bk.Calls
 			continue
 		}
 		if bk.Tool == usage.LocalBriefs {
@@ -489,6 +533,7 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 		ru.ResponseTokens += bk.ResponseTokens
 		ru.AvoidedTokens += avoided
 	}
+	a.Unindexed = unindexedStats(unindexed, a.AvoidedTokens, a.Sessions)
 	a.Tokens.Total = a.Tokens.Input + a.Tokens.Output
 	a.Edits.EstimatedOutputSaved = a.Edits.AvoidedBytes / 4
 	if a.Edits.BaselineBytes > 0 {

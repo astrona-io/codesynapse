@@ -35,6 +35,68 @@ type localUsageReport struct {
 
 func (s *Server) usageLocalRoutes() {
 	s.route("POST /api/v1/usage/local", anyone, s.handleLocalUsage)
+	s.route("POST /api/v1/usage/unindexed", anyone, s.handleUnindexedUsage)
+}
+
+// maxUnindexedPerDay bounds the distinct checkout names one organisation can
+// report in a day: names come from the client, so they must not mint rows
+// without limit.
+const maxUnindexedPerDay = 200
+
+type unindexedReport struct {
+	Repo   string `json:"repo"`
+	Client string `json:"client"`
+}
+
+// handleUnindexedUsage counts a pre-finish check the Stop hook skipped because
+// the server has not indexed the checkout (usage.Unindexed). Only the name
+// the checkout's origin gives arrives, after validRepoName; nothing about the
+// files or the session.
+func (s *Server) handleUnindexedUsage(w http.ResponseWriter, r *http.Request) {
+	var in unindexedReport
+	if err := decodeJSON(w, r, &in); err != nil {
+		s.problem(w, http.StatusBadRequest, err)
+		return
+	}
+	if !validRepoName(in.Repo) {
+		s.problem(w, http.StatusBadRequest, errors.New("repo must be a repository name such as owner/name"))
+		return
+	}
+	if !clientNameRe.MatchString(in.Client) {
+		s.problem(w, http.StatusBadRequest, errors.New("client must be a short lower-case name, e.g. claude-code"))
+		return
+	}
+	org := ""
+	if s.cfg.Accounts != nil {
+		m, err := scopeFrom(r.Context()).selected()
+		if err != nil {
+			s.problem(w, http.StatusBadRequest, err)
+			return
+		}
+		org = m.Org.ID
+	}
+	today := usage.Day(time.Now())
+	existing, err := s.st.Usage(r.Context(), today)
+	if err != nil {
+		s.problem(w, http.StatusInternalServerError, err)
+		return
+	}
+	names := map[string]bool{}
+	for _, b := range existing {
+		if b.Tool == usage.Unindexed && b.Org == org && b.Day == today {
+			names[b.Repo] = true
+		}
+	}
+	if !names[in.Repo] && len(names) >= maxUnindexedPerDay {
+		s.problem(w, http.StatusTooManyRequests, errors.New("too many unindexed repositories reported today"))
+		return
+	}
+	b := usage.Bucket{Day: today, Org: org, Repo: in.Repo, Tool: usage.Unindexed, Client: in.Client, Calls: 1}
+	if err := s.st.AddUsage(r.Context(), []usage.Bucket{b}); err != nil {
+		s.problem(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleLocalUsage(w http.ResponseWriter, r *http.Request) {
