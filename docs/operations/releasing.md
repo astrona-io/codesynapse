@@ -1,10 +1,13 @@
 # Releasing
 
+!!! info "In plain words"
+    This page is for the maintainers who publish a new version. Pushing a tag such as `v0.3.0` makes the build system produce the command-line program, the container images, the Helm chart and the documentation site, install them on a test cluster to check they work, and only then mark the release as the latest. If a step fails, the previous release stays the latest: fix the problem and publish a new tag instead of moving the old one.
+
 A release publishes the `codesynapse` CLI (bare binaries on GitHub and a formula in the Homebrew tap [astrona-io/homebrew-tap](https://github.com/astrona-io/homebrew-tap)) and the server stack (container images and the Helm chart, see [Server release](#server-release)).
 
 ## Cut a release
 
-Tag `main` and push the tag:
+A "tag" is a name pinned to one commit, here the version number. Tag `main` and push the tag:
 
 ```sh
 git switch main && git pull
@@ -69,6 +72,8 @@ Upgrading an installation: [Upgrading](upgrading.md).
 Don't edit `Formula/codesynapse.rb` in the tap by hand. The next release overwrites it.
 
 ## Verifying a download
+
+These commands check that a downloaded file is the one we published and was built by our pipeline.
 
 ```sh
 gh release download v0.3.0 -R astrona-io/codesynapse -p 'codesynapse-darwin-arm64' -p SHA256SUMS

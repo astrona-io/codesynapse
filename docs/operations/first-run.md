@@ -1,5 +1,8 @@
 # First run and sign-in
 
+!!! info "In plain words"
+    The first time CodeSynapse starts, it makes one special account called `admin` with a long random password. Find that password, sign in, then set up your team's **organisation** and its first **owner**. The `admin` account only runs the platform; it never reads anyone's code. The steps below walk through exactly that.
+
 The first start of an empty installation **creates an administrator for you**: user `admin`, with a **random password** that is generated for that installation. You sign in with it, then replace it with your own account. Until an organisation connects single sign-on, everyone signs in with the local user database.
 
 !!! warning "There is no shared default password"

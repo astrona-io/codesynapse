@@ -1,5 +1,8 @@
 # Accounts and access
 
+!!! info "In plain words"
+    This page explains who can sign in and what each person can see. People belong to an **organisation** (a team or company). Inside it they have a **role** and can be given access to single repositories. Programs, such as a coding assistant or a CI job, sign in with an **API key** instead of a password. Every change is written to an **audit log** that cannot be edited afterwards. Terms are in the [glossary](../GLOSSARY.md#people-and-access).
+
 Accounts are optional. Without `CODESYNAPSE_DATABASE_URL` the installation is single-tenant and uses bearer tokens. With it, PostgreSQL holds users, organisations, roles, sessions, API keys, teams, grants and the audit log (`internal/accounts`).
 
 ## Identity

@@ -1,8 +1,13 @@
 # Claude Code plugin
 
+!!! info "In plain words"
+    A **plugin** is an add-on for Claude Code. This one installs everything CodeSynapse needs in one step: the connection to the server, a short guide that teaches Claude how to use CodeSynapse well, and **hooks**. A hook is a small program Claude Code runs by itself at a set moment (when a chat starts, before a file is read, when Claude finishes). The table below lists each hook. None of them can break a session: if something goes wrong they stay quiet.
+
 The plugin packages everything CodeSynapse does in Claude Code in one install: the MCP server (through the [bridge](claude-code-bridge.md)), a skill that teaches the tool workflow, and four hooks. It replaces running `codesynapse mcp install` and `codesynapse mcp hooks` by hand.
 
 ## Install
+
+Three steps. Do them in order.
 
 1. Install the `codesynapse` binary and put a personal API key where the bridge finds it: [Claude Code bridge](claude-code-bridge.md#install-the-binary). If your server is not on this machine, set `CODESYNAPSE_MCP_URL` and `CODESYNAPSE_API_URL` in your shell profile; the bridge reads them.
 2. In Claude Code:
@@ -15,6 +20,8 @@ The plugin packages everything CodeSynapse does in Claude Code in one install: t
 3. Run `codesynapse mcp install --only claude` once. With the plugin enabled it registers nothing for Claude Code. Instead it sets the 150k context cap and removes what an earlier `mcp install` or `mcp hooks` set up, so tools and hooks do not run twice: the user-scope `codesynapse` server and the CodeSynapse hooks in `~/.claude/settings.json` and the project's `.claude/settings.local.json`. It only reports hooks in the project's shared `.claude/settings.json`; remove those once your team uses the plugin. Running it again changes nothing.
 
 ## What it adds
+
+Most of this is for people who want the detail. The short version is in the table further down.
 
 The Stop hook also reads model usage from the local `transcript_path`: input,
 output, cached input and reported assistant turns. It counts duplicate assistant
