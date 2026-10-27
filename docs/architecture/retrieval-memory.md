@@ -1,5 +1,8 @@
 # Retrieval, vectors and agent memory
 
+!!! tip "In plain words"
+    How CodeSynapse finds the right answer for an assistant. Most answers come from the graph by exact lookups, with no guessing. Vectors (numbers that capture meaning, see [embedding](../GLOSSARY.md#ai-assistants)) are used in only a few places, mainly to recall agent memory. This page shows which is which.
+
 CodeSynapse answers agents from a graph, not from embedded source. This page shows where retrieval is deterministic, where vectors are used, and how agent memory is written and recalled. Planned work (Milvus-side hybrid search) is marked as planned; see the [retrieval plan](../RETRIEVAL_PLAN.md).
 
 ## The short version

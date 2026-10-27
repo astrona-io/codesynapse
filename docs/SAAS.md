@@ -1,5 +1,8 @@
 # CodeSynapse as a multi-tenant product
 
+!!! tip "In plain words"
+    This is the plan for running CodeSynapse as a shared service where many organisations ("tenants") use one installation without seeing each other's data. It is built in phases, and each finished phase is its own pull request. Terms like *organisation*, *role* and *API key* are explained in the [glossary](GLOSSARY.md).
+
 This is the target architecture for running CodeSynapse as an open-source, self-hostable SaaS product on Kubernetes. It is built in phases; each completed phase is committed, pushed and opened as its own pull request. Decisions below were agreed on 2026-10-22.
 
 ## Who it is for

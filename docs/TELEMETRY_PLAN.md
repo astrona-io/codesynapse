@@ -1,5 +1,8 @@
 # Tenant telemetry and four dashboard groups
 
+!!! tip "In plain words"
+    Telemetry means numbers about how the system behaves, such as how many requests ran and how long they took. This page explains what CodeSynapse measures, how every measurement is tied to the right organisation, and the rule that no prompts, code, file paths or personal details ever go into a metric.
+
 Status: implemented in SaaS phase 4e, after access isolation (4d). The existing Compose stack supplies VictoriaMetrics for development; this phase adds instrumentation and dashboard coverage. Kubernetes wiring waits for the final deployment phase (6a). The request for OTel supersedes the earlier decision to defer it. The approved OTel v1.47.0 SDK/exporter is the default export path; validation and limits are recorded below.
 Session-scoped tool execution and chat memory must also follow [phase 4g](SESSION_CONTEXT_PLAN.md): immutable runtime identity, inherited parent context and tenant/session/namespace filtering. This requirement does not turn session IDs into metric labels.
 

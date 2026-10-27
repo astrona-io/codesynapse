@@ -87,18 +87,22 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
     <section class="panel">
       <p class="eyebrow">Token pool</p><h2>Where the reading happened</h2>
       <p class="muted small">Every token an agent or CodeSynapse spent, or did not have to spend, in the window. Cloud agents' tokens come from Claude Code and Codex hooks; the rest from CodeSynapse's own counters. Estimates say how they are estimated.</p>
+      <h3 class="row-title">Counts</h3>
       <div class="grid kpis">
         <StatTile label="Kept off cloud models" :value="offCloud === null ? '–' : `${offCloud}%`" hint="never read, or read by a local model" />
         <StatTile label="Tokens never read" :value="fmtCompact(a?.avoided_tokens ?? 0)" :hint="`graph answers and ask_local, estimated`" />
         <StatTile label="Handled by local models" :value="fmtCompact(localIn + localOut)" :hint="`${fmtCompact(localIn)} read · ${fmtCompact(localOut)} written`" />
         <StatTile label="Prompts pre-briefed" :value="fmtCompact(a?.local_briefs ?? 0)" hint="a local model briefed the agent first" />
+      </div>
+      <h3 class="row-title">Money (estimate)</h3>
+      <div class="grid kpis">
         <StatTile
-          label="Cloud cost avoided" :value="saved === null ? '–' : money(saved)"
-          :hint="price ? (price.estimate ? `at ${price.model}, rough estimate` : `at ${price.model} prices${price.checked ? ` of ${price.checked}` : ''}, estimated`) : 'no prices to estimate with'"
+          label="Total saved (est.)" :value="saved === null ? 'unknown' : money(saved)"
+          :hint="price ? (price.estimate ? `at ${price.model}, rough estimate` : `at ${price.model} prices${price.checked ? ` of ${price.checked}` : ''}, estimated`) : 'no prices to estimate with: add them in config/llm.yaml'"
         />
-        <StatTile v-if="savedParts" label="Avoided on input" :value="money(savedParts.input)" :hint="`${fmtCompact(Math.max(0, localIn - localCached) + graphAvoided)} tokens never sent or read`" />
-        <StatTile v-if="savedParts" label="Avoided on cached input" :value="money(savedParts.cached)" :hint="`${fmtCompact(localCached)} tokens from the prompt cache`" />
-        <StatTile v-if="savedParts" label="Avoided on output" :value="money(savedParts.output)" :hint="`${fmtCompact(localOut)} tokens written locally`" />
+        <StatTile v-if="savedParts" label="Saved on input" :value="money(savedParts.input)" :hint="`${fmtCompact(Math.max(0, localIn - localCached) + graphAvoided)} tokens never sent or read`" />
+        <StatTile v-if="savedParts" label="Saved on cached input" :value="money(savedParts.cached)" :hint="`${fmtCompact(localCached)} tokens from the prompt cache`" />
+        <StatTile v-if="savedParts" label="Saved on output" :value="money(savedParts.output)" :hint="`${fmtCompact(localOut)} tokens written locally`" />
       </div>
       <DonutChart
         v-if="poolTotal" :segments="pool" title="Token pool" unit="tokens"
@@ -108,7 +112,7 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
     </section>
 
     <p v-if="price" class="muted small source">
-      Cost avoided values local work and unread tokens at {{ price.model }}'s prices: ${{ price.input_per_mtok }} in<template v-if="price.cached_input_per_mtok">, ${{ price.cached_input_per_mtok }} cached</template> and ${{ price.output_per_mtok }} out per million tokens.
+      The total saved values local work and unread tokens at {{ price.model }}'s prices: ${{ price.input_per_mtok }} in<template v-if="price.cached_input_per_mtok">, ${{ price.cached_input_per_mtok }} cached</template> and ${{ price.output_per_mtok }} out per million tokens.
       <template v-if="price.estimate">This is a built-in estimate; add prices to a cloud provider in config/llm.yaml (or <code>price_feed: openrouter</code>) for your own.</template>
       <template v-else-if="price.source">Source: <a :href="price.source" target="_blank" rel="noopener noreferrer">{{ sourceLabel(price.source) }}</a><template v-if="price.checked">, checked {{ price.checked }}</template>.</template>
       <template v-else>No source given: add <code>price_source</code> and <code>price_checked</code> to that provider in config/llm.yaml, or <code>price_feed: openrouter</code>.</template>
@@ -154,6 +158,7 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
 </template>
 
 <style scoped>
+.row-title { font-size: 13px; margin: 14px 0 8px; color: var(--muted); }
 .kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 16px; }
 .two { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 24px; }
 h3 { font-size: 14px; margin: 0 0 10px; }

@@ -1,5 +1,8 @@
 # Agent memory
 
+!!! tip "In plain words"
+    Coding assistants forget: when their working memory fills up they drop detail, and every new session starts blank. Agent memory lets an assistant save short facts about a repository (for example "we decided to use X") and find them again later. Facts are stored apart from the code, so re-indexing does not erase them. You can switch it off.
+
 Agents lose detail when their context is compacted and start each session from nothing. CodeSynapse stores durable facts per repository as `(:MemoryEntity)-[:FACT]->(:MemoryEntity)`, apart from the code graph, so re-indexing keeps them. On by default; `--allow-memory=false` or `CODESYNAPSE_ALLOW_MEMORY=false` turns it off.
 
 ## Hybrid memory model

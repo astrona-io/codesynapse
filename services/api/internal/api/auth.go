@@ -185,6 +185,8 @@ func (s *Server) accountRoutes() {
 	s.account("GET /api/v1/admin/audit/verify", governanceRoute, s.handleVerifyAudit)
 	s.account("GET /api/v1/accounts/orgs/{org}/repos", businessRoute, s.handleOrgRepos)
 	s.account("GET /api/v1/accounts/orgs/{org}/repo-policy", businessRoute, s.handleRepoPolicy)
+	s.account("GET /api/v1/accounts/orgs/{org}/gateway", businessRoute, s.handleOrgGateway)
+	s.account("PUT /api/v1/accounts/orgs/{org}/gateway", businessRoute, s.handleOrgGateway)
 	s.account("GET /api/v1/accounts/orgs/{org}/access-changes", businessRoute, s.handleAccessChanges)
 	s.account("PUT /api/v1/accounts/orgs/{org}/repo-policy", businessRoute, s.handleRepoPolicy)
 	s.account("POST /api/v1/accounts/orgs/{org}/repos/{repo}/recover-admin", businessRoute, s.handleRecoverRepoAdmin)

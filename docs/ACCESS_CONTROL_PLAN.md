@@ -1,5 +1,8 @@
 # Tenant access and platform administrator isolation
 
+!!! tip "In plain words"
+    Who may see which repository? This page sets the rules. People get access through their organisation and through direct or team grants, and a platform administrator does *not* get to read an organisation's code just because of that role. Below you will find how the rules are ordered and how they are checked.
+
 Status: implemented in SaaS phase 4d, extending phase 2d. The implementation removes platform-admin content bypasses and replaces strongest-path-wins with direct-user, team, then organisation-default precedence. The design examples below explain the contract; store adapters contain the executable queries.
 Session-scoped tool execution and chat memory must also follow [phase 4g](SESSION_CONTEXT_PLAN.md): immutable runtime identity, inherited parent context and tenant/session/namespace filtering. This requirement does not turn session IDs into metric labels.
 

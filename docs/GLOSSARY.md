@@ -161,11 +161,31 @@ Plain-English meanings for the words you will meet in CodeSynapse. Each entry sa
 **Redaction**
 :   Removing secrets (passwords, keys) and personal data from text before it is stored or sent.
 
-**Telemetry**
-:   Numbers a service sends about its own activity, such as request counts. CodeSynapse never puts prompts, code or file names in them.
-
 **Tag (release)**
 :   A name pinned to one commit, such as `v0.3.0`. Pushing a tag starts the release build.
 
 **Cosign**
 :   A tool that signs container images and charts, so you can check they came from the project.
+
+## More terms
+
+**Tenant**
+:   One customer of a shared installation. In CodeSynapse a tenant is an organisation: its repositories, reviews and memory stay private to it.
+
+**OpenID Connect (OIDC)**
+:   The standard sign-in protocol behind single sign-on. Okta, Microsoft Entra ID, Keycloak and Google Workspace all speak it.
+
+**Telemetry**
+:   Numbers about how the system behaves (requests, delays, errors). CodeSynapse never puts prompts, code or file paths into them.
+
+**NebulaGraph**
+:   The database that stores the code graph.
+
+**Milvus**
+:   The database that stores vectors for agent memory.
+
+**PostgreSQL**
+:   The database that stores accounts, organisations, sessions and the audit log.
+
+**Node / edge**
+:   The "dots" and "lines" of the graph. A node is a thing (a function, a file); an edge is a link between two nodes (for example "calls").

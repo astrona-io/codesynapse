@@ -1,5 +1,8 @@
 # Trends
 
+!!! tip "In plain words"
+    The latest numbers do not tell you whether things are getting better or worse. After every sync CodeSynapse keeps a small snapshot of the repository, so the Trends page can show what changed over time.
+
 "Are we getting better or worse?" needs more than the latest numbers. After every sync CodeSynapse keeps a small snapshot of the repository, so the Trends page, the Overview and agents can say what changed.
 
 ## What is kept

@@ -1,5 +1,8 @@
 # Indexing policy and reports
 
+!!! tip "In plain words"
+    A repository can carry a small settings file, `.codesynapse.yaml`, that says things like "skip this folder". Because that file comes from the repository itself, CodeSynapse does not trust it until a person approves it. This page shows how to check the file and how approval works.
+
 ## Repository policy
 
 An optional `.codesynapse.yaml` at a repository root requests path exclusions, Kubernetes scanner controls, security exceptions and local AI annotation. The file comes from the repository, so it is untrusted until someone approves it. Validate it first:
