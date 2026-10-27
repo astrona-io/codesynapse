@@ -323,6 +323,13 @@ export interface AccountUser {
 }
 export type SetupState = 'pending' | 'complete' | 'ambiguous'
 export interface SetupInput { org_name?: string; org_id?: string; email: string; username?: string; name: string; password: string }
+// Whether keys of the organisation may use the agent gateway, and whether the
+// server switch (CODESYNAPSE_GATEWAY) is on at all.
+export interface OrgGateway {
+  enabled: boolean
+  available: boolean
+}
+
 export interface AccountOrg {
   id: string
   slug: string
