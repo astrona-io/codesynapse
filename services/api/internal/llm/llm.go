@@ -362,9 +362,11 @@ func Load(path string, getenv func(string) string) (Config, error) {
 
 // Usage counts what a provider has done since start.
 type Usage struct {
-	Requests     int     `json:"requests"`
-	Failures     int     `json:"failures"`
-	InputTokens  int     `json:"input_tokens"`
+	Requests    int `json:"requests"`
+	Failures    int `json:"failures"`
+	InputTokens int `json:"input_tokens"`
+	// CachedTokens is the part of InputTokens the server took from its prompt cache.
+	CachedTokens int     `json:"cached_tokens"`
 	OutputTokens int     `json:"output_tokens"`
 	AvgSeconds   float64 `json:"avg_seconds"`
 	LastError    string  `json:"last_error,omitempty"`
@@ -595,6 +597,7 @@ func (r *Registry) Complete(ctx context.Context, name string, req Request) (Resp
 	u.AvgSeconds = (u.AvgSeconds*float64(u.Requests) + resp.Duration.Seconds()) / float64(u.Requests+1)
 	u.Requests++
 	u.InputTokens += max(resp.InputTokens, 0)
+	u.CachedTokens += min(max(resp.CachedInputTokens, 0), max(resp.InputTokens, 0))
 	u.OutputTokens += max(resp.OutputTokens, 0)
 	if err != nil {
 		u.Failures++
