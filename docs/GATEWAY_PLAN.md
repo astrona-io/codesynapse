@@ -39,6 +39,10 @@ Every execution needs a registered runtime session (`X-CodeSynapse-Session`, equ
 
 Decision: option 1, as an explicit "gateway key" with its own audit trail.
 
+## Credentials (decided)
+
+The gateway key travels in `X-CodeSynapse-Key` (Claude Code: `ANTHROPIC_CUSTOM_HEADERS`). `Authorization` and `x-api-key` stay the caller's own Anthropic credential, passed to the cloud for that request only. The route is mounted only with `CODESYNAPSE_GATEWAY=true` and accounts. Requests are forwarded to `https://api.anthropic.com` only, without redirects, with a header allowlist and a 32 MiB body cap; the audit records the model, size and status, never text.
+
 ## Checks before merging any phase
 
 Route classified through `s.route`, limits on body and time, queue slot released on client disconnect, no secrets in logs, tests with a fake upstream (no real model), `docs/AGENT_GUIDE.md` updated.

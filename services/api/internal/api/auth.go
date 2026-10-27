@@ -50,6 +50,9 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (*http.Req
 		}
 		return r, true
 	}
+	if strings.HasPrefix(r.URL.Path, "/v1/") {
+		return s.authenticateGateway(w, r)
+	}
 	var p accounts.Principal
 	var err error
 	authz := r.Header.Get("Authorization")

@@ -111,6 +111,11 @@ type Config struct {
 	PushAuths []gitx.Auth
 	// AllowPrivateGit permits remotes on private networks.
 	AllowPrivateGit bool
+	// Gateway turns on the agent gateway (/v1/messages). Off by default: it
+	// forwards agent conversations to a model API, so an operator opts in.
+	Gateway bool
+	// GatewayUpstream replaces the model API address; tests only.
+	GatewayUpstream string
 	// AllowPush lets CodeSynapse push fix branches for accepted review
 	// comments and open pull requests. Off by default.
 	AllowPush bool
@@ -239,6 +244,7 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 		go s.runQueue(ctx)
 	}
 	s.routes()
+	s.gatewayRoutes()
 	return s
 }
 
