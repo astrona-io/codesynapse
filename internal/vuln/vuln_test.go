@@ -364,3 +364,38 @@ func TestApplyMarksCodeAbsentFromTheBuild(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyNamesCalledMembersOfNpmAndPyPI(t *testing.T) {
+	g := model.NewGraph()
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindRepository, "r"), Kind: model.KindRepository, Repo: "r", Name: "r"})
+	caller := model.NodeID("r", model.KindFunction, "app.py::load")
+	mods := []Module{
+		{Path: "pyyaml", Ecosystem: EcosystemPyPI, Version: "5.3.1"},
+		{Path: "lodash", Ecosystem: EcosystemNPM, Version: "4.17.15"},
+	}
+	vulns := []Vulnerability{
+		{ID: "A-1", Module: "pyyaml", Ecosystem: EcosystemPyPI, Summary: "Arbitrary code execution through `load` with the default Loader"},
+		{ID: "B-1", Module: "lodash", Ecosystem: EcosystemNPM, Summary: "Prototype pollution in zipObjectDeep"},
+		{ID: "C-1", Module: "lodash", Ecosystem: EcosystemNPM, Summary: "Command injection in lodash.template"},
+	}
+	Apply("r", g, mods, vulns,
+		map[string][]string{"yaml.load": {caller}, "lodash.merge": {caller}, "lodash.template": {caller}},
+		map[string][]string{"yaml": {"f"}, "lodash": {"f"}}, nil)
+
+	affects := func(vuln, key string) bool {
+		vid := model.NodeID("r", model.KindVulnerability, key)
+		ext := model.NodeID("r", model.KindExternal, vuln)
+		for _, e := range g.Edges() {
+			if e.From == vid && e.To == ext && e.Kind == model.EdgeAffects && e.Evidence == model.EvidenceInferred {
+				return true
+			}
+		}
+		return false
+	}
+	assert.True(t, affects("yaml.load", mods[0].Key()+"@A-1"), "backticked member the code calls")
+	assert.True(t, affects("lodash.template", mods[1].Key()+"@C-1"), "full name in the summary")
+	assert.False(t, affects("lodash.merge", mods[1].Key()+"@B-1"), "a member the advisory does not name")
+	vn, ok := g.Node(model.NodeID("r", model.KindVulnerability, mods[1].Key()+"@C-1"))
+	require.True(t, ok)
+	assert.Equal(t, vn.Reachability, Imported, "prose is evidence, not a symbol list")
+}

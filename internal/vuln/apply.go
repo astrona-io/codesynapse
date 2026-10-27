@@ -114,6 +114,18 @@ func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability,
 			}
 			g.AddNode(n)
 			g.AddEdge(model.Edge{From: vid, To: modID, Kind: model.EdgeAffects})
+			// Evidence, not a verdict: the advisory text names a member the
+			// code calls. The level stays imported, because prose is not a
+			// symbol list.
+			for _, member := range namedMembers(mod, v.Summary, externalCalls) {
+				full := ImportName(mod) + "." + member
+				extID := model.NodeID(repo, model.KindExternal, full)
+				g.AddNode(model.Node{ID: extID, Kind: model.KindExternal, Repo: repo, Name: member, QualifiedName: full, Package: mod.Path})
+				g.AddEdge(model.Edge{From: vid, To: extID, Kind: model.EdgeAffects, Evidence: model.EvidenceInferred})
+				for _, caller := range externalCalls[full] {
+					g.AddEdge(model.Edge{From: caller, To: extID, Kind: model.EdgeCalls, Evidence: model.EvidenceSyntactic})
+				}
+			}
 			continue
 		}
 		for pkg, syms := range v.Symbols {
@@ -254,4 +266,29 @@ func rubyRequires(imp, name string) bool {
 		}
 	}
 	return false
+}
+
+// namedMembers returns the members of a non-Go package that code calls and
+// the advisory summary names: the full name (yaml.load), or the member as
+// code, in backticks or followed by parentheses. A bare word does not
+// count (merge, get and parse are also plain English). Sorted, so the graph
+// is the same on every run.
+func namedMembers(mod Module, summary string, externalCalls map[string][]string) []string {
+	if summary == "" {
+		return nil
+	}
+	prefix := ImportName(mod) + "."
+	var out []string
+	for key := range externalCalls {
+		member, ok := strings.CutPrefix(key, prefix)
+		if !ok || member == "" {
+			continue
+		}
+		last := member[strings.LastIndexByte(member, '.')+1:]
+		if strings.Contains(summary, key) || strings.Contains(summary, "`"+last+"`") || strings.Contains(summary, last+"()") || strings.Contains(summary, "`"+last+"(") {
+			out = append(out, member)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
