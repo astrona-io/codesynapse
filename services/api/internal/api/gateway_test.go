@@ -22,6 +22,7 @@ func TestGatewayForwardsWithKeyAndBindsSession(t *testing.T) {
 	defer up.Close()
 	f := newRuntimeFixture(t, Config{Gateway: true, GatewayUpstream: up.URL})
 	key := strings.TrimPrefix(f.client.auth, "Bearer ")
+	require.NoError(t, f.accounts.St.SetGatewayEnabled(t.Context(), f.org.ID, true))
 
 	call := func(headers map[string]string) (int, string) {
 		req, err := http.NewRequest(http.MethodPost, f.client.ts.URL+"/v1/messages", strings.NewReader(`{"model":"m"}`)) //nolint:noctx // test
@@ -74,6 +75,7 @@ func TestGatewayOffByDefault(t *testing.T) {
 
 func TestGatewayOpenAIBearerKeyAndNoLocalModel(t *testing.T) {
 	f := newRuntimeFixture(t, Config{Gateway: true})
+	require.NoError(t, f.accounts.St.SetGatewayEnabled(t.Context(), f.org.ID, true))
 	do := func(method, path, auth string) int {
 		req, err := http.NewRequest(method, f.client.ts.URL+path, strings.NewReader(`{"model":"x","messages":[]}`)) //nolint:noctx // test
 		require.NoError(t, err)
@@ -89,4 +91,34 @@ func TestGatewayOpenAIBearerKeyAndNoLocalModel(t *testing.T) {
 	assert.Equal(t, do(http.MethodGet, "/v1/models", "Bearer csk_nope"), 401)
 	assert.Equal(t, do(http.MethodGet, "/v1/models", f.client.auth), 503, "valid key, no local model")
 	assert.Equal(t, do(http.MethodPost, "/v1/chat/completions", f.client.auth), 503)
+}
+
+func TestGatewayNeedsOrganisationOptIn(t *testing.T) {
+	f := newRuntimeFixture(t, Config{Gateway: true})
+	status := func() int {
+		req, err := http.NewRequest(http.MethodGet, f.client.ts.URL+"/v1/models", nil) //nolint:noctx // test
+		require.NoError(t, err)
+		req.Header.Set("Authorization", f.client.auth)
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_ = res.Body.Close()
+		return res.StatusCode
+	}
+	assert.Equal(t, status(), 403, "organisation has not opted in")
+
+	path := "/api/v1/accounts/orgs/" + f.org.Slug + "/gateway"
+	var got struct {
+		Enabled   bool `json:"enabled"`
+		Available bool `json:"available"`
+	}
+	require.Equal(t, f.client.do("GET", path, "", &got), 200)
+	assert.False(t, got.Enabled)
+	assert.True(t, got.Available)
+	assert.Equal(t, f.client.do("PUT", path, `{"enabled":true}`, nil), 403, "API keys cannot opt in")
+	assert.Equal(t, status(), 403)
+
+	require.NoError(t, f.accounts.St.SetGatewayEnabled(t.Context(), f.org.ID, true))
+	assert.Equal(t, status(), 503, "opted in, no local model")
+	require.Equal(t, f.client.do("GET", path, "", &got), 200)
+	assert.True(t, got.Enabled)
 }
