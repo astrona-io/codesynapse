@@ -161,13 +161,18 @@ type Result struct {
 	// ExternalImports maps third-party package names (npm or Python
 	// distribution-ish names) to importing file IDs.
 	ExternalImports map[string][]string
+	// ExternalCalls maps the members of third-party packages that code calls
+	// ("lodash.template", "yaml.load", "@scope/pkg.sub.fn") to the IDs of the
+	// symbols or files calling them. Only calls through an import count: a
+	// method on a value the package returned is not seen.
+	ExternalCalls map[string][]string
 	// Languages counts indexed files per language.
 	Languages map[string]int
 }
 
 // Extract indexes every Python, JavaScript, TypeScript and Vue file under root.
 func Extract(ctx context.Context, repo, root string) (*Result, error) {
-	ix := &indexer{repo: repo, g: model.NewGraph(), files: map[string]*parsedFile{}, res: &Result{ExternalImports: map[string][]string{}, Languages: map[string]int{}}}
+	ix := &indexer{repo: repo, g: model.NewGraph(), files: map[string]*parsedFile{}, res: &Result{ExternalImports: map[string][]string{}, ExternalCalls: map[string][]string{}, Languages: map[string]int{}}}
 	ix.g.AddNode(model.Node{ID: model.NodeID(repo, model.KindRepository, repo), Kind: model.KindRepository, Repo: repo, Name: repo})
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -501,6 +506,7 @@ func (ix *indexer) link() {
 		boundFile := map[string]*parsedFile{} // imported type -> its file
 		boundName := map[string]string{}      // local name -> declared name (import aliases)
 		moduleAlias := map[string]*parsedFile{}
+		extBound := extBinds{} // local name -> third-party member it binds
 		// Namespaces whose types need no qualification: the file's own
 		// package, and for C# its parents and every using directive.
 		scope := []string{pf.fr.pkg}
@@ -535,6 +541,11 @@ func (ix *indexer) link() {
 				}
 				if ext := externalName(imp.spec, pf.lang); ext != "" {
 					ix.res.ExternalImports[ext] = append(ix.res.ExternalImports[ext], pf.id)
+					for local, member := range imp.names {
+						if u, ok := externalUse(ext, imp.spec, member, pf.lang); ok {
+							extBound[local] = u
+						}
+					}
 				}
 				continue
 			}
@@ -648,6 +659,11 @@ func (ix *indexer) link() {
 		}
 		link := func(from string, c call, class string) {
 			to, evidence := resolve(c, class)
+			if to == "" && !pf.fr.isTest {
+				if key := extBound.callKey(c); key != "" {
+					ix.res.ExternalCalls[key] = append(ix.res.ExternalCalls[key], from)
+				}
+			}
 			if to == "" || to == from {
 				return
 			}
@@ -1038,3 +1054,60 @@ func isJVM(lang string) bool { return lang == Java || lang == Kotlin }
 // classBased languages have methods in classes and constructors named
 // after them, and resolve plain calls within the class and its package.
 func classBased(lang string) bool { return isJVM(lang) || lang == CSharp }
+
+// extUse is what a local name stands for when an import binds it to a
+// third-party package: the package, the submodule path under it (lodash/fp
+// -> "fp") and the member, "*" for the module itself.
+type extUse struct{ pkg, sub, member string }
+
+// externalUse says what local name an import binds in a package. Only
+// languages whose package names equal their import names (npm, PyPI) take
+// part: for the others a call cannot be tied to a registry package.
+func externalUse(pkg, spec, member, lang string) (extUse, bool) {
+	var sub string
+	switch lang {
+	case Python:
+		sub = strings.TrimPrefix(strings.TrimPrefix(spec, pkg), ".")
+	case JavaScript, TypeScript, Vue:
+		sub = strings.TrimPrefix(strings.TrimPrefix(spec, pkg), "/")
+		sub = strings.ReplaceAll(sub, "/", ".")
+	default:
+		return extUse{}, false
+	}
+	if member == "default" { // import template from "lodash/template" is lodash.template
+		if sub == "" {
+			return extUse{pkg: pkg, member: "*"}, true
+		}
+		return extUse{pkg: pkg, sub: sub, member: "*"}, true
+	}
+	return extUse{pkg: pkg, sub: sub, member: member}, true
+}
+
+// extBinds are the third-party names one file's imports bind.
+type extBinds map[string]extUse
+
+// callKey names the third-party member a call reaches, "" when the call is
+// not through an import: lodash.template(), template() after
+// import {template} from "lodash", or yaml.load() after import yaml.
+func (b extBinds) callKey(c call) string {
+	if c.recv == "" {
+		if u, ok := b[c.name]; ok && u.member != "*" {
+			return u.key(u.member)
+		}
+		return ""
+	}
+	if u, ok := b[c.recv]; ok {
+		if u.member == "*" {
+			return u.key(c.name)
+		}
+		return u.key(u.member + "." + c.name)
+	}
+	return ""
+}
+
+func (u extUse) key(name string) string {
+	if u.sub == "" {
+		return u.pkg + "." + name
+	}
+	return u.pkg + "." + u.sub + "." + name
+}

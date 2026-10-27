@@ -196,7 +196,7 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 		return nil, fmt.Errorf("architecture records: %w", err)
 	}
 	progress(4, "Checking dependencies and licences")
-	mods, err := addDependencies(ctx, opts, root, g, goRes, extImports)
+	mods, err := addDependencies(ctx, opts, root, g, goRes, extImports, langRes.ExternalCalls)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +308,7 @@ func hasGoModule(root string, policies ...*repoconfig.Policy) bool {
 // addDependencies records go.mod and lockfile modules with their licences
 // and, when enabled, their known vulnerabilities. A failed vulnerability lookup is logged, not fatal: the
 // code graph is still useful without it.
-func addDependencies(ctx context.Context, opts Options, root string, g *model.Graph, goRes *golang.Result, imports map[string][]string) ([]vuln.Module, error) {
+func addDependencies(ctx context.Context, opts Options, root string, g *model.Graph, goRes *golang.Result, imports, langCalls map[string][]string) ([]vuln.Module, error) {
 	logger := logx.FromContext(ctx)
 	var mods []vuln.Module
 	if goRes != nil {
@@ -328,9 +328,14 @@ func addDependencies(ctx context.Context, opts Options, root string, g *model.Gr
 		goEdges = vuln.GoGraph(ctx, root, opts.AllowNetwork)
 	}
 	vuln.AssignPaths(mods, goEdges)
-	var calls map[string][]string
+	calls := map[string][]string{}
 	if goRes != nil {
-		calls = goRes.ExternalCalls
+		for k, v := range goRes.ExternalCalls {
+			calls[k] = v
+		}
+	}
+	for k, v := range langCalls { // npm and PyPI members used through imports
+		calls[k] = append(calls[k], v...)
 	}
 	var vulns []vuln.Vulnerability
 	if opts.VulnScan {
