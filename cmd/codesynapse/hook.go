@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -362,15 +363,54 @@ func stopGuard(ctx context.Context, in toolHookInput, logger *slog.Logger) map[s
 	}
 	s.Stop = change.Key
 	saveState(state, s)
+	repo := w.repo
+	notice := ""
+	if name, known := serverRepo(ctx, in, w.root); !known {
+		// verify_plan and get_pr_context answer "not found" for a checkout the
+		// server has not indexed, so asking for them only wastes a turn. Say so
+		// in the chat (systemMessage) rather than finishing without a word.
+		notice = fmt.Sprintf("CodeSynapse skipped its pre-finish check: %s is not in the server's index (not added yet, or its first ingest has not finished), so verify_plan and get_pr_context cannot answer for it. Index it, or wait for the ingest, to get the check.", w.repo)
+		if len(change.Problems) == 0 {
+			return map[string]any{"systemMessage": notice}
+		}
+		return map[string]any{
+			"decision":      "block",
+			"reason":        "Fix these first:\n- " + strings.Join(change.Problems, "\n- "),
+			"systemMessage": notice,
+		}
+	} else if name != "" {
+		repo = name // the server may know the checkout by another name than its remote
+	}
 	reason := fmt.Sprintf("Before you finish: %d file(s) in %s changed since CodeSynapse last checked. "+
 		"Call verify_plan (no arguments: your current change) and run the commands it lists; "+
 		"call get_pr_context (no arguments) and fix any finding its security_delta lists as introduced. "+
-		"Then finish. If the CodeSynapse tools are not available, finish now.", change.Files, w.repo)
+		"Then finish. If the CodeSynapse tools are not available, finish now.", change.Files, repo)
 	if len(change.Problems) > 0 {
 		// Found by parsing and formatting the changed Go files here.
 		reason = "Fix these first:\n- " + strings.Join(change.Problems, "\n- ") + "\n\n" + reason
 	}
 	return map[string]any{"decision": "block", "reason": reason}
+}
+
+// serverRepo asks the server which indexed repository root is. known is false
+// only when the server answered and does not list the checkout; with no token
+// or no answer it stays true, since nothing says the tools are unavailable.
+func serverRepo(ctx context.Context, in toolHookInput, root string) (name string, known bool) {
+	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
+	if c.token == "" || in.SessionID == "" {
+		return "", true
+	}
+	ctx, cancel := context.WithTimeout(ctx, activityBudget)
+	defer cancel()
+	ctx, err := c.executionContext(ctx, in.SessionID, in.SessionID)
+	if err != nil {
+		return "", true
+	}
+	name, err = c.resolveRepo(ctx, root)
+	if errors.Is(err, errNoRepo) {
+		return "", false
+	}
+	return name, true
 }
 
 func hookCmd(ec *app.Env) *cobra.Command {

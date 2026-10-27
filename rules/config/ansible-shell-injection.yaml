@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../schema.json
+id: ansible-shell-injection
+title: Variable interpolated into a shell command
+severity: medium
+cwe: [CWE-78]
+category: config
+languages: [ansible]
+why: The shell module runs its text through a shell, so a variable holding a space, semicolon or backtick changes the command. Facts, inventory data and extra vars are not always trusted.
+fix: Prefer a dedicated module or command with an argument list. If a shell is needed, pass every variable through the quote filter.
+references:
+  - https://docs.ansible.com/ansible/latest/collections/ansible/builtin/shell_module.html
+examples:
+  - language: ansible
+    vulnerable: |-
+      - name: Remove old logs
+        ansible.builtin.shell: rm -rf /var/log/{{ app_name }}
+    fixed: |-
+      - name: Remove old logs
+        ansible.builtin.file:
+          path: "/var/log/{{ app_name }}"
+          state: absent

@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../schema.json
+id: ansible-world-writable
+title: File or directory made writable by everyone
+severity: medium
+cwe: [CWE-732]
+category: config
+languages: [ansible]
+why: A mode with the write bit for others lets any local user change the file, which turns a service account or script into a way to run code as its owner.
+fix: Use 0644 for files and 0755 for directories, or tighter, and give write access to a group when several accounts need it.
+references:
+  - https://docs.ansible.com/ansible/latest/collections/ansible/builtin/file_module.html
+examples:
+  - language: ansible
+    vulnerable: |-
+      - name: Deploy config
+        ansible.builtin.copy:
+          src: app.conf
+          dest: /etc/app/app.conf
+          mode: "0666"
+    fixed: |-
+      - name: Deploy config
+        ansible.builtin.copy:
+          src: app.conf
+          dest: /etc/app/app.conf
+          mode: "0644"

@@ -35,6 +35,8 @@ type builder struct {
 	policy *repoconfig.Policy
 	repo   string
 	g      *model.Graph
+
+	ansible *ansibleState
 }
 
 func (b *builder) id(kind model.NodeKind, local string) string {
@@ -246,6 +248,12 @@ var RuleIDs = []string{
 	"tf-public-database",
 	"tf-unencrypted-storage",
 	"tf-secret-literal",
+	"ansible-secret-literal",
+	"ansible-shell-injection",
+	"ansible-curl-pipe-shell",
+	"ansible-tls-verify-off",
+	"ansible-world-writable",
+	"ansible-package-latest",
 }
 
 func (b *builder) report(rel, ownerID, ruleID string, line int, detail string) {
