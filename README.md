@@ -4,18 +4,22 @@
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/codesynapse)](https://artifacthub.io/packages/search?repo=codesynapse)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-CodeSynapse indexes a repository into a graph and answers small, precise questions from it, so your coding agent asks the graph instead of opening whole files.
+CodeSynapse reads your code once and keeps what it learned in a searchable map, called a graph. Your AI coding assistant then asks the map small, exact questions instead of opening whole files. That means fewer tokens (the unit AI models read and charge for), faster answers and better context for code review.
 
-Ask for `ReplaceRepo` and you get its signature, location, 3 callers, the 2 tests that reach it and the doc section that describes it, in a few hundred tokens. On this repository that cuts the context an agent needs per question by a median 92% (`codesynapse stats`).
+For example, ask for a function called `ReplaceRepo` and you get its signature, where it lives, its 3 callers, the 2 tests that reach it and the doc section that describes it. That is a few hundred tokens instead of several whole files. On this repository the context an assistant needs per question is a median 92% smaller (`codesynapse stats` measures it).
 
-- **Indexes** Go (type-checked, exact calls and interface dispatch), Python, JavaScript, TypeScript, Vue, Java, Kotlin, Rust, C#, PHP, Ruby, Markdown, YAML, Helm charts, git history and dependencies with their CVEs.
-- **Serves** agents over MCP, people through a web dashboard, and CI through a CLI.
-- **Reviews** security (graded A–F, with reachability), licences, unused code, duplicates and the impact of a diff.
-- **Runs** on NebulaGraph and Milvus, all Apache-2.0, on your own machine or cluster.
+New to these words? See the [glossary](docs/GLOSSARY.md).
+
+## What it does
+
+- **Reads (indexes) your project.** Go is checked with the compiler's own type information, so calls and interface use are exact. Python, JavaScript, TypeScript, Vue, Java, Kotlin, Rust, C#, PHP and Ruby are read structurally. It also reads Markdown, YAML, Helm charts, git history and your dependencies, including their known security holes (CVEs).
+- **Answers three kinds of users.** AI assistants connect over MCP, a standard way for an assistant to call outside tools. People use a web dashboard. Build servers (CI) use a command-line tool.
+- **Reviews.** It grades security from A to F and says whether vulnerable code can actually be reached. It also checks licences, finds unused and duplicated code, and shows what a change to your code affects.
+- **Runs on your own machine or cluster.** It uses NebulaGraph (the graph database) and Milvus (a store for searching by meaning), both Apache-2.0.
 
 ## Quick start
 
-You need [just](https://github.com/casey/just) and Docker or Podman.
+You need [just](https://github.com/casey/just) (a command runner) and Docker or Podman (they run the programs in containers).
 
 ```sh
 just up                       # writes .env with random secrets, builds and starts everything
@@ -23,19 +27,25 @@ open http://localhost:3000    # dashboard: sign in as admin (password in .env), 
 just ingest ~/src/my-service  # indexes a checkout (needs a git origin remote)
 ```
 
-`just ingest` indexes the checkout through the worker, named after its `origin` remote. To see it in your organisation, sign in as an owner, open Repositories, choose Add and paste the origin's address: the dashboard links the index instead of cloning (a private repository needs your organisation's Git token). Repositories you add by URL are cloned and indexed by the worker without `just ingest`.
+What these do:
 
-Then connect your agent. For Claude Code: sign in, create a key under Settings → API keys, and run
+1. `just up` starts the whole stack. The first run creates a file called `.env` with random passwords, so nothing ships with a default one.
+2. The dashboard asks you to sign in as `admin`. The password is in `.env`. You then replace this account with your own and create your organisation (your team's private space).
+3. `just ingest` indexes a project on your disk. It names the index after the checkout's `origin` remote.
+
+To see that project in your organisation, sign in as an owner, open Repositories, choose Add and paste the origin's address. The dashboard links the index it already has instead of cloning it again. A private repository needs your organisation's Git token. Repositories you add by URL are cloned and indexed by the worker, so you do not need `just ingest` for them.
+
+Then connect your assistant. For Claude Code, sign in, create a key (a long secret that lets a program act as you) under Settings → API keys, and run:
 
 ```sh
 CODESYNAPSE_MCP_TOKEN=<key> just mcp
 ```
 
-Other clients and the session contract: [Agent context](docs/features/agent-context.md#connecting-an-agent). What to ask once connected: [Agent guide](docs/AGENT_GUIDE.md).
+Other assistants and the session rules: [Agent context](docs/features/agent-context.md#connecting-an-agent). What to ask once connected: [Agent guide](docs/AGENT_GUIDE.md).
 
 ## CLI
 
-No server needed for the offline commands:
+These commands work on a folder directly. They need no running server:
 
 ```sh
 brew install astrona-io/tap/codesynapse
@@ -53,7 +63,7 @@ codesynapse review . --offline --fail-on-new high    # CI gate on what the branc
 
 ## GitHub Action
 
-Review every pull request: changed symbols and their impact, the tests to run, and the security findings the change introduces and fixes, posted as one comment that updates on each push.
+Review every pull request automatically: changed functions and their impact, the tests to run, and the security findings the change introduces and fixes, posted as one comment that updates each time you push.
 
 ```yaml
 on: pull_request
@@ -78,6 +88,8 @@ The action builds the CLI from its own source and never runs the code it reviews
 
 ## Kubernetes
 
+For a shared installation, use the Helm chart (the package for Kubernetes):
+
 ```sh
 helm install codesynapse oci://ghcr.io/astrona-io/charts/codesynapse --version X.Y.Z
 ```
@@ -100,12 +112,13 @@ just dev-web    # Nuxt dev server against the API of `just up`
 | `rules/` | Security rules, one YAML file each |
 | `deploy/helm/codesynapse` | Helm chart |
 
-Read [AGENTS.md](AGENTS.md) before changing code: it has the conventions and the security rules every change must keep. Architecture starts at [docs/architecture/overview.md](docs/architecture/overview.md).
+Read [AGENTS.md](AGENTS.md) before changing code. It has the conventions and the security rules every change must keep. Architecture starts at [docs/architecture/overview.md](docs/architecture/overview.md).
 
 ## Documentation
 
 | | |
 |---|---|
+| [Glossary](docs/GLOSSARY.md) | What each term means |
 | [Running the stack](docs/operations/running.md) | Compose, workers, sync, organisations, AI models, statistics |
 | [Security review](docs/features/security.md) | Rules, languages, reachability, CI usage |
 | [Reviews and fix branches](docs/features/reviews-fixes.md) | Agent reviews, decisions, draft PRs |

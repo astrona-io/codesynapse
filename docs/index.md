@@ -1,10 +1,14 @@
 # CodeSynapse
 
-CodeSynapse indexes a repository into one property graph and answers small, precise questions from it. A coding assistant asks the graph ("who calls `ReplaceRepo`?", "what does this diff break?") instead of opening whole files. That cuts tokens and gives better review context.
+CodeSynapse reads your code and keeps what it learned in one searchable map, called a graph. Your AI coding assistant asks the map small, exact questions ("who calls `ReplaceRepo`?", "what does this change affect?") instead of opening whole files. That saves tokens (the unit AI models read and charge for) and gives better context for code review.
 
-On this repository the context an agent needs per question drops by a median 92%, measured by `codesynapse stats`.
+On this repository the context an assistant needs per question is a median 92% smaller, measured by `codesynapse stats`.
+
+New to the terms? The [glossary](GLOSSARY.md) explains each one in plain English.
 
 ## What goes into the graph
+
+The table shows what CodeSynapse reads from a project. It keeps names, positions and short summaries, not your source code.
 
 | Source | What is extracted |
 |---|---|
@@ -51,13 +55,13 @@ flowchart LR
 
 - **I want to understand the system:** [Architecture overview](architecture/overview.md).
 - **I want to know what is stored:** [Graph schema](architecture/graph-schema.md).
-- **I am wiring up an agent:** [Agent context (MCP)](features/agent-context.md), then the [Agent guide](AGENT_GUIDE.md). For Claude Code, start with the [Claude Code bridge](operations/claude-code-bridge.md).
+- **I am connecting an AI assistant:** [Agent context (MCP)](features/agent-context.md), then the [Agent guide](AGENT_GUIDE.md). For Claude Code, start with the [Claude Code bridge](operations/claude-code-bridge.md).
 - **I am reviewing security posture:** [Security review](features/security.md) and [Security model](operations/security-model.md).
 - **I am deploying it:** [Running the stack](operations/running.md).
 
 ## Design principles
 
-1. **Deterministic answers.** Graph tools never call an LLM; the agent using them is the LLM.
+1. **Same question, same answer.** The graph tools never call an AI model. The assistant that uses them is the only AI in the loop.
 2. **Read-only by default.** Only review tools and opt-in agent memory write, and only to their own stores.
 3. **No source bodies in the graph.** Hashes, signatures, key paths, line ranges and redacted summaries only.
 4. **Untrusted input everywhere.** Repositories, model output and agent text are treated as hostile.
