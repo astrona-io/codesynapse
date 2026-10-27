@@ -169,3 +169,40 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIChatQueuesAndUsesLocalModel(t *testing.T) {
+	var got string
+	loc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = string(b)
+		assert.Equal(t, r.Header.Get("Authorization"), "Bearer local-key")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {}\n\ndata: [DONE]\n\n")
+	}))
+	defer loc.Close()
+	waited := false
+	l := &Local{BaseURL: loc.URL + "/v1", Model: "qwen", APIKey: "local-key", Acquire: func(context.Context) (func(), error) {
+		waited = true
+		return func() {}, nil
+	}}
+	o := &OpenAI{Local: func() *Local { return l }}
+	rec := httptest.NewRecorder()
+	o.ChatHandler()(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-x","stream":true,"messages":[],"tools":[{"a":1}]}`)))
+	assert.Equal(t, rec.Code, 200)
+	assert.True(t, waited)
+	assert.True(t, strings.Contains(got, `"model":"qwen"`))
+	assert.True(t, strings.Contains(got, `"tools":[{"a":1}]`), "other fields pass through")
+	assert.Equal(t, rec.Header().Get(RouteHeader), "local")
+
+	rec = httptest.NewRecorder()
+	o.ModelsHandler()(rec, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	assert.True(t, strings.Contains(rec.Body.String(), `"id":"qwen"`))
+
+	off := &OpenAI{}
+	rec = httptest.NewRecorder()
+	off.ChatHandler()(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("{}")))
+	assert.Equal(t, rec.Code, http.StatusServiceUnavailable)
+	rec = httptest.NewRecorder()
+	o.ChatHandler()(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("[")))
+	assert.Equal(t, rec.Code, http.StatusBadRequest)
+}
