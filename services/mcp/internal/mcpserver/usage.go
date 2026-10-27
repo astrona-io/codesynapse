@@ -3,11 +3,13 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/astrona-io/codesynapse/internal/logx"
 	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
@@ -45,14 +47,19 @@ func usageMiddleware(rec *usage.Recorder) mcp.Middleware {
 				case *mcp.GetPromptParams:
 					name, repo = "prompt:"+p.Name, p.Arguments["repo"]
 				}
+				ambiguous := false
 				if repo == "" {
 					resolved.mu.Lock()
 					repo = resolved.name
+					ambiguous = resolved.ambiguous
 					resolved.mu.Unlock()
 				}
 				failed := err != nil
 				if r, ok := res.(*mcp.CallToolResult); ok && r != nil && r.IsError {
 					failed = true
+				}
+				if repo == "" {
+					logUnattributed(ctx, name, sessionClient(req), failed, ambiguous)
 				}
 				tokens := 0
 				if res != nil {
@@ -66,6 +73,21 @@ func usageMiddleware(rec *usage.Recorder) mcp.Middleware {
 			return next(ctx, method, req)
 		}
 	}
+}
+
+// logUnattributed explains a call that lands in the "(no repo argument)" usage
+// row. Tools that list or catalogue are repository-less by design; any other
+// tool ending here never resolved a repository, which is a bug in the caller's
+// arguments or in our resolution, so it is logged to find out which.
+func logUnattributed(ctx context.Context, name, client string, failed, ambiguous bool) {
+	if p, ok := toolPolicies[name]; ok && (p.target == "list" || p.target == "catalog") {
+		return
+	}
+	logx.FromContext(ctx).Warn("mcp call without a resolved repository",
+		slog.String("tool", name),
+		slog.String("client", client),
+		slog.Bool("failed", failed),
+		slog.Bool("ambiguous", ambiguous))
 }
 
 type usageRepositoryKey struct{}

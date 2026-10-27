@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../schema.json
+id: ansible-tls-verify-off
+title: Certificate checks turned off in a task
+severity: medium
+cwe: [CWE-295]
+category: config
+languages: [ansible]
+why: "validate_certs: false, curl --insecure or wget --no-check-certificate accept any certificate, so anyone on the network path can serve the file or answer the API."
+fix: Leave validate_certs on and install the internal CA on the host (or point ca_path at it) instead of switching the check off.
+references:
+  - https://docs.ansible.com/ansible/latest/collections/ansible/builtin/uri_module.html
+examples:
+  - language: ansible
+    vulnerable: |-
+      - name: Call API
+        ansible.builtin.uri:
+          url: https://api.internal/health
+          validate_certs: false
+    fixed: |-
+      - name: Call API
+        ansible.builtin.uri:
+          url: https://api.internal/health
+          ca_path: /etc/ssl/certs/internal-ca.pem

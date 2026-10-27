@@ -4,15 +4,15 @@
 export const FORMAT_LABELS: Record<string, string> = {
   go: 'Go', python: 'Python', typescript: 'TypeScript', javascript: 'JavaScript', vue: 'Vue', java: 'Java', kotlin: 'Kotlin', rust: 'Rust', csharp: 'C#', php: 'PHP', ruby: 'Ruby',
   yaml: 'YAML', helm: 'Helm', 'go-template': 'Go templates', markdown: 'Markdown',
-  'github-actions': 'GitHub Actions', compose: 'Compose', dockerfile: 'Dockerfile', terraform: 'Terraform', 'git-history': 'Git history', npm: 'npm lockfiles', pypi: 'Python lockfiles',
+  'github-actions': 'GitHub Actions', compose: 'Compose', dockerfile: 'Dockerfile', terraform: 'Terraform', ansible: 'Ansible', 'git-history': 'Git history', npm: 'npm lockfiles', pypi: 'Python lockfiles',
 }
 
 // Display order: code first, then config, then docs and dependency manifests.
-export const FORMAT_ORDER = ['go', 'python', 'typescript', 'javascript', 'vue', 'java', 'kotlin', 'rust', 'csharp', 'php', 'ruby', 'helm', 'yaml', 'github-actions', 'compose', 'dockerfile', 'terraform', 'go-template', 'markdown', 'npm', 'pypi']
+export const FORMAT_ORDER = ['go', 'python', 'typescript', 'javascript', 'vue', 'java', 'kotlin', 'rust', 'csharp', 'php', 'ruby', 'helm', 'yaml', 'github-actions', 'compose', 'dockerfile', 'terraform', 'ansible', 'go-template', 'markdown', 'npm', 'pypi']
 
 export const FORMAT_GROUP: Record<string, 'code' | 'config' | 'docs' | 'deps'> = {
   go: 'code', python: 'code', typescript: 'code', javascript: 'code', vue: 'code', java: 'code', kotlin: 'code', rust: 'code', csharp: 'code', php: 'code', ruby: 'code',
-  yaml: 'config', helm: 'config', 'go-template': 'config', 'github-actions': 'config', compose: 'config', dockerfile: 'config', terraform: 'config',
+  yaml: 'config', helm: 'config', 'go-template': 'config', 'github-actions': 'config', compose: 'config', dockerfile: 'config', terraform: 'config', ansible: 'config',
   markdown: 'docs', npm: 'deps', pypi: 'deps',
 }
 

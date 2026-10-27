@@ -33,6 +33,8 @@ type Coverage struct {
 	Dockerfiles int `json:"dockerfiles,omitempty"`
 	// Terraform counts the .tf files read.
 	Terraform int `json:"terraform,omitempty"`
+	// Ansible counts the playbooks, role files, variable files and inventories read.
+	Ansible int `json:"ansible,omitempty"`
 	// HelmScanned of HelmTotal chart templates rendered to literal YAML the
 	// rules could read.
 	HelmScanned int `json:"helm_scanned,omitempty"`
@@ -68,6 +70,10 @@ func CoverageOf(g *model.Graph, notCovered map[string]int) Coverage {
 			}
 			if n.Language == "terraform" {
 				c.Terraform++
+				continue
+			}
+			if n.Language == "ansible" {
+				c.Ansible++
 				continue
 			}
 			if strings.HasPrefix(n.Summary, "unparseable YAML") {
@@ -124,7 +130,7 @@ func (c Coverage) Scannable() bool {
 	for _, n := range c.Code {
 		code += n
 	}
-	return code > 0 || c.YAML > 0 || c.Dockerfiles > 0 || c.Terraform > 0 || c.HelmScanned > 0 || c.Dependencies > 0
+	return code > 0 || c.YAML > 0 || c.Dockerfiles > 0 || c.Terraform > 0 || c.Ansible > 0 || c.HelmScanned > 0 || c.Dependencies > 0
 }
 
 // Lines words the coverage as what was checked and what was not.
@@ -149,6 +155,9 @@ func (c Coverage) Lines() (checked, notChecked []string) {
 	}
 	if c.Terraform > 0 {
 		checked = append(checked, fmt.Sprintf("%d Terraform file(s)", c.Terraform))
+	}
+	if c.Ansible > 0 {
+		checked = append(checked, fmt.Sprintf("%d Ansible file(s)", c.Ansible))
 	}
 	if c.HelmTotal > 0 {
 		checked = append(checked, fmt.Sprintf("%d of %d Helm template(s)", c.HelmScanned, c.HelmTotal))

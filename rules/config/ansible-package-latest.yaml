@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../schema.json
+id: ansible-package-latest
+title: Package installed with state latest
+severity: low
+cwe: [CWE-1357]
+category: config
+languages: [ansible]
+why: "state: latest upgrades whatever the repository holds on each run, so two runs can give different hosts different versions and a bad upstream release reaches production at once."
+fix: "Pin the version (name: nginx=1.26.*) or use state: present and upgrade in a planned change."
+references:
+  - https://docs.ansible.com/ansible/latest/collections/ansible/builtin/package_module.html
+examples:
+  - language: ansible
+    vulnerable: |-
+      - name: Install nginx
+        ansible.builtin.apt:
+          name: nginx
+          state: latest
+    fixed: |-
+      - name: Install nginx
+        ansible.builtin.apt:
+          name: nginx=1.26.*
+          state: present
