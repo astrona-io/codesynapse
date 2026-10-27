@@ -57,6 +57,10 @@ Hooks record metadata, load rules and report retrieval counts; they do not auto-
 
 ---
 
+### Shorter results
+
+The MCP server removes empty fields (`null`, `""`, `[]`, `{}`) from the JSON text of tool results, so you do not pay tokens for them. A missing field means empty; zero and `false` are always kept. Turn it off with `--slim-results=false` / `CODESYNAPSE_MCP_SLIM=false`.
+
 ### Every request is audited
 
 With accounts, each MCP request is recorded in the organisation's audit log. The entry holds who made it, which API key, the chat session, the client, the tool, the repository and the outcome. It also holds the arguments, with secrets and personal numbers removed and long values shortened. Diffs, code and conversation turns are kept only as a fingerprint. Results are never stored. Owners and admins see these entries under Settings → Audit log. **Agent sessions** in the dashboard shows the same entries per chat: the sessions of the last days (client, calls, failures, how much came back, the tools and repositories used) and, for one session, its calls in order with their size, time and arguments. Members see their own sessions there, owners and admins everyone's in the organisation (`GET /api/v1/accounts/orgs/{org}/agent-sessions[/{session}]`). A reviewer of an agent's pull request can see what it looked at before it changed the code. If the audit log cannot be written, the tool's result is withheld; retry later. Do not put secrets in tool arguments.
