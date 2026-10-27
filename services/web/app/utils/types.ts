@@ -579,8 +579,11 @@ export interface ModelStat {
   read_tokens_per_second: number | null; write_tokens_per_second: number | null
   context_p50: number | null; context_p95: number | null
   tasks: ModelTaskStat[]
+  cost_dollars?: number | null; compressed_bytes?: number
 }
 export interface ModelStats {
   range: string; models: ModelStat[]
+  // Cloud spend and the dollars prompt compression saved; null when a price is missing.
+  spent_dollars?: number | null; compression_saved_dollars?: number | null
   reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; cached_input_per_mtok?: number; estimate?: boolean; source?: string; checked?: string }
 }

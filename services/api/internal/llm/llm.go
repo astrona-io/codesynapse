@@ -621,6 +621,9 @@ func (r *Registry) Complete(ctx context.Context, name string, req Request) (Resp
 	resp.Preflight = count
 	resp.Duration = time.Since(start)
 	record(ctx, name, cfg, resp, err)
+	if saved > 0 {
+		telemetry.LLMCompressed.AddContext(ctx, float64(saved), telemetry.Tenant(ctx), name, cfg.Model)
+	}
 	r.mu.Lock()
 	u := r.usage[name]
 	u.AvgSeconds = (u.AvgSeconds*float64(u.Requests) + resp.Duration.Seconds()) / float64(u.Requests+1)

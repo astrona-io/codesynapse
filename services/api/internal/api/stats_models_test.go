@@ -25,15 +25,17 @@ func modelVM(t *testing.T, filters *[]string) *httptest.Server {
 	t.Helper()
 	q := modelQueries
 	series := map[string]string{
-		q.requests: `{"llm_provider":"local","llm_model":"qwen","task":"review","outcome":"ok"}=8;{"llm_provider":"local","llm_model":"qwen","task":"review","outcome":"error"}=2;{"llm_provider":"local","llm_model":"qwen","task":"local-answer","outcome":"ok"}=30;{"llm_provider":"cloud","llm_model":"big","task":"briefing","outcome":"ok"}=1`,
-		q.input:    `{"llm_provider":"local","llm_model":"qwen","task":"review"}=40000;{"llm_provider":"local","llm_model":"qwen","task":"local-answer"}=200000;{"llm_provider":"cloud","llm_model":"big","task":"briefing"}=900`,
-		q.output:   `{"llm_provider":"local","llm_model":"qwen","task":"review"}=3000;{"llm_provider":"local","llm_model":"qwen","task":"local-answer"}=9000`,
-		q.readS:    `{"llm_provider":"local","llm_model":"qwen"}=500`,
-		q.writeS:   `{"llm_provider":"local","llm_model":"qwen"}=400`,
-		q.readT:    `{"llm_provider":"local","llm_model":"qwen"}=220000`,
-		q.writeT:   `{"llm_provider":"local","llm_model":"qwen"}=12000`,
-		q.p50:      `{"llm_provider":"local","llm_model":"qwen"}=0.0213`,
-		q.p95:      `{"llm_provider":"local","llm_model":"qwen"}=NaN`,
+		q.requests:   `{"llm_provider":"local","llm_model":"qwen","task":"review","outcome":"ok"}=8;{"llm_provider":"local","llm_model":"qwen","task":"review","outcome":"error"}=2;{"llm_provider":"local","llm_model":"qwen","task":"local-answer","outcome":"ok"}=30;{"llm_provider":"cloud","llm_model":"big","task":"briefing","outcome":"ok"}=1`,
+		q.input:      `{"llm_provider":"local","llm_model":"qwen","task":"review"}=40000;{"llm_provider":"local","llm_model":"qwen","task":"local-answer"}=200000;{"llm_provider":"cloud","llm_model":"big","task":"briefing"}=900`,
+		q.output:     `{"llm_provider":"local","llm_model":"qwen","task":"review"}=3000;{"llm_provider":"local","llm_model":"qwen","task":"local-answer"}=9000`,
+		q.readS:      `{"llm_provider":"local","llm_model":"qwen"}=500`,
+		q.writeS:     `{"llm_provider":"local","llm_model":"qwen"}=400`,
+		q.readT:      `{"llm_provider":"local","llm_model":"qwen"}=220000`,
+		q.writeT:     `{"llm_provider":"local","llm_model":"qwen"}=12000`,
+		q.p50:        `{"llm_provider":"local","llm_model":"qwen"}=0.0213`,
+		q.p95:        `{"llm_provider":"local","llm_model":"qwen"}=NaN`,
+		q.cost:       `{"llm_provider":"cloud","llm_model":"big"}=0.0123`,
+		q.compressed: `{"llm_provider":"cloud","llm_model":"big"}=40000`,
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*filters = append(*filters, strings.Join(r.URL.Query()["extra_filters[]"], ";"))
@@ -82,6 +84,10 @@ func TestModelStats(t *testing.T) {
 	assert.Equal(t, q.Tasks[1].Failures, 2.0)
 	c := out.Models[1]
 	assert.False(t, c.Local)
+	require.True(t, out.Spent != nil && out.CompressionSaved != nil)
+	assert.Equal(t, *out.Spent, 0.0123)
+	assert.Equal(t, *out.CompressionSaved, 0.03, "10000 tokens at $3 per million")
+	assert.Equal(t, c.CompressedBytes, 40000.0)
 	assert.True(t, c.ReadTPS == nil, "no streamed answers, no speed")
 	for _, f := range filters {
 		assert.Contains(t, f, "0123456789abcdef01234567", "every query is scoped to the caller's organisations")
@@ -90,6 +96,21 @@ func TestModelStats(t *testing.T) {
 	w = httptest.NewRecorder()
 	s.handleModelStats(w, httptest.NewRequest(http.MethodGet, "/api/v1/stats/models?range=1y", nil).WithContext(ctx))
 	assert.Equal(t, w.Code, http.StatusBadRequest)
+}
+
+// A cloud model that worked without a price makes spend and compression
+// savings unknown, not zero.
+func TestMoneyTotalsUnknownWithoutPrices(t *testing.T) {
+	reg := llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{
+		{Name: "cloud", Kind: llm.KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "big"},
+	}, Default: "cloud"})
+	s := &Server{cfg: Config{LLM: reg}}
+	spent, comp := s.moneyTotals([]ModelStat{{Provider: "cloud", Model: "big", InputTokens: 900, CompressedBytes: 400}})
+	assert.True(t, spent == nil)
+	assert.True(t, comp == nil)
+	spent, comp = s.moneyTotals([]ModelStat{{Provider: "local", Model: "qwen", Local: true, InputTokens: 5}})
+	assert.True(t, spent != nil && *spent == 0)
+	assert.True(t, comp != nil && *comp == 0)
 }
 
 // ask_local's counters are tokens, never tool calls.

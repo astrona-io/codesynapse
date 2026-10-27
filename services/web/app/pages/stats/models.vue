@@ -44,7 +44,10 @@ const savedParts = computed(() => {
   const output = localOut.value * p.output_per_mtok / 1e6
   return { input, cached, output }
 })
-const saved = computed(() => (savedParts.value ? savedParts.value.input + savedParts.value.cached + savedParts.value.output : null))
+// Prompt compression is priced on the server per model; null when a price is missing.
+const compressionSaved = computed(() => m.value?.compression_saved_dollars ?? null)
+const spent = computed(() => m.value?.spent_dollars ?? null)
+const saved = computed(() => (savedParts.value ? savedParts.value.input + savedParts.value.cached + savedParts.value.output + (compressionSaved.value ?? 0) : null))
 // Where a price comes from, shown as its host and path.
 const sourceLabel = (u: string) => { try { const x = new URL(u); return x.host + x.pathname + (x.hash ? ` (${x.hash.slice(1)})` : '') } catch { return u } }
 const money = (v: number) => (v >= 100 ? `$${Math.round(v)}` : `$${v.toFixed(2)}`)
@@ -100,6 +103,8 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
           label="Total saved (est.)" :value="saved === null ? 'unknown' : money(saved)"
           :hint="price ? (price.estimate ? `at ${price.model}, rough estimate` : `at ${price.model} prices${price.checked ? ` of ${price.checked}` : ''}, estimated`) : 'no prices to estimate with: add them in config/llm.yaml'"
         />
+        <StatTile label="Spent on cloud models (est.)" :value="spent === null ? 'unknown' : money(spent)" :hint="spent === null ? 'a cloud model has no price set, so its cost is unknown' : 'reported usage at the configured prices'" />
+        <StatTile v-if="savedParts" label="Saved by shorter prompts" :value="compressionSaved === null ? 'unknown' : money(compressionSaved)" :hint="compressionSaved === null ? 'a cloud model has no price set; not in the total' : 'prose a local model shortened before it went to the cloud, at the input price'" />
         <StatTile v-if="savedParts" label="Saved on input" :value="money(savedParts.input)" :hint="`${fmtCompact(Math.max(0, localIn - localCached) + graphAvoided)} tokens never sent or read`" />
         <StatTile v-if="savedParts" label="Saved on cached input" :value="money(savedParts.cached)" :hint="`${fmtCompact(localCached)} tokens from the prompt cache`" />
         <StatTile v-if="savedParts" label="Saved on output" :value="money(savedParts.output)" :hint="`${fmtCompact(localOut)} tokens written locally`" />
