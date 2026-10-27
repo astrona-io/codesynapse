@@ -54,3 +54,7 @@ Route classified through `s.route`, limits on body and time, queue slot released
 ## OpenAI-compatible endpoints (built)
 
 For local agents: `POST /v1/chat/completions` and `GET /v1/models`, behind `CODESYNAPSE_GATEWAY=true` like the Anthropic route. These paths accept the gateway key as `Authorization: Bearer csk_…` (OpenAI clients send nothing else). They are local-only: no cloud fallback, `model` is replaced by the local model's name, other fields (tools, stream) pass through. A request waits in the local provider's queue for as long as the agent keeps the connection open. With no `gateway: true` local provider they answer 503. Same key-bound, audited runtime session as `/v1/messages`.
+
+## Organisation opt-in (built)
+
+The server switch (`CODESYNAPSE_GATEWAY`) and a `gateway: true` provider are not enough: each organisation opts in, default off (`org_gateway`, migration 0026). `GET/PUT /api/v1/accounts/orgs/{org}/gateway` reads (any member) and sets (owner or admin, signed-in session only, never an API key) the choice; the change is audited as `org.gateway.set` before it is stored, and a failed audit refuses it. Every `/v1/*` gateway request from a key of an organisation that has not opted in answers 403, before a runtime session is registered. The GET answer also says `available`: whether the operator turned the gateway on for the installation.

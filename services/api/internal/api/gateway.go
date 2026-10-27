@@ -88,6 +88,15 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 		s.problem(w, http.StatusForbidden, errors.New("the gateway needs one organisation"))
 		return r, false
 	}
+	on, err := s.cfg.Accounts.GatewayEnabled(r.Context(), m.Org.ID)
+	if err != nil {
+		s.accountError(w, err)
+		return r, false
+	}
+	if !on {
+		s.problem(w, http.StatusForbidden, errors.New("the gateway is off for this organisation; an owner or admin turns it on"))
+		return r, false
+	}
 	id, err := s.cfg.Accounts.GatewayExecutionSession(r.Context(), p, m.Org.ID)
 	if err != nil {
 		s.problem(w, http.StatusForbidden, errors.New("this key cannot use the gateway"))
@@ -99,4 +108,37 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 		return r, false
 	}
 	return r.WithContext(ctx), true
+}
+
+// handleOrgGateway reads (any member) or sets (owner or admin, signed-in
+// session only) the organisation's opt-in to the agent gateway. "available"
+// says whether the operator turned the gateway on for the installation.
+func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
+	least := accounts.Member
+	if r.Method == http.MethodPut {
+		least = accounts.Admin
+	}
+	p, o, ok := s.orgFor(w, r, least)
+	if !ok {
+		return
+	}
+	if r.Method == http.MethodPut {
+		var req struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := decodeJSON(w, r, &req); err != nil {
+			s.problem(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := s.cfg.Accounts.SetGateway(r.Context(), p, o.ID, req.Enabled); err != nil {
+			s.accountError(w, err)
+			return
+		}
+	}
+	on, err := s.cfg.Accounts.GatewaySetting(r.Context(), p, o.ID)
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": on, "available": s.cfg.Gateway})
 }
