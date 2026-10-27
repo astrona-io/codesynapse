@@ -88,6 +88,7 @@ type Jobs struct {
 	// by running jobs.
 	licenseLookup bool
 	dataflow      bool
+	moduleProxy   bool
 	sem           chan struct{}
 	// store keeps jobs durable (jobs_durable.go); owner is this process;
 	// kinds are the durable job kinds it runs (others are only recorded).
@@ -403,7 +404,7 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 	}
 	ctx = repoconfig.WithPolicy(ctx, policy)
 	endIngest := phase("job.ingest")
-	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Dataflow: j.dataflow, Branch: opts.Branch, PreviousIdentities: previous, ApprovedPolicyDigest: approved})
+	g, err := ingest.Run(ctx, ingest.Options{Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Dataflow: j.dataflow, ModuleProxy: j.moduleProxy, Branch: opts.Branch, PreviousIdentities: previous, ApprovedPolicyDigest: approved})
 	endIngest(err)
 	if err == nil && ledger != nil {
 		report := ledger.Prepare(g)

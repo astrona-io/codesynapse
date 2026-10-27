@@ -53,6 +53,9 @@ type Options struct {
 	CommitLimit int
 	// AllowNetwork lets `go list` download modules.
 	AllowNetwork bool
+	// ModuleProxy lets go list fetch missing modules from the public module
+	// proxy and nowhere else (see golang.WithModuleProxy).
+	ModuleProxy bool
 	// Dataflow adds CALLS edges for Go calls through function values (SSA
 	// and VTA). Off by default; see docs/EDGE_EVIDENCE.md.
 	Dataflow bool
@@ -73,6 +76,9 @@ type Options struct {
 
 // Run extracts code, docs and history from opts.Root.
 func Run(ctx context.Context, opts Options) (*model.Graph, error) {
+	if opts.ModuleProxy {
+		ctx = golang.WithModuleProxy(ctx)
+	}
 	logger := logx.FromContext(ctx)
 	root, err := filepath.Abs(opts.Root)
 	if err != nil {

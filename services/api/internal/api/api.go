@@ -51,6 +51,9 @@ type Config struct {
 	// AllowNetwork lets ingest download Go modules. Off by default; enable
 	// only for repositories you trust.
 	AllowNetwork bool
+	// ModuleProxy lets ingest fetch missing Go modules from the public module
+	// proxy only (no direct fetches), so dependencies can be type-checked.
+	ModuleProxy bool
 	// VulnScan checks dependencies against osv.dev during ingest.
 	VulnScan bool
 	// LicenseLookup asks deps.dev for licences not found on disk.
@@ -169,6 +172,7 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	}
 	s.jobs.licenseLookup = cfg.LicenseLookup
 	s.jobs.dataflow = cfg.Dataflow
+	s.jobs.moduleProxy = cfg.ModuleProxy
 	s.jobs.Policy = s.approveIngestPolicy
 	s.jobs.Publish = s.publishRepo
 	s.jobs.Ingested = s.afterIngest

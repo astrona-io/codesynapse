@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"io/fs"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -13,7 +12,7 @@ import (
 	"time"
 
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
-	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/ingest/golang"
 )
 
 // Paths say how an indirect dependency got into the project: the shortest
@@ -83,12 +82,8 @@ func goListDeps(ctx context.Context, dir string, allowNetwork bool) []byte {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", "list", "-e", "-deps", "-test", "-json=ImportPath,Imports,Module,Standard", "./...") //nolint:gosec // fixed arguments, no shell
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOTOOLCHAIN=local", "GOFLAGS=", "GOWORK=off")
-	if !allowNetwork {
-		cmd.Env = append(cmd.Env, "GOPROXY=off", "GONOSUMDB=*")
-	}
 	var err error
-	cmd.Env, err = execution.Environment(ctx, cmd.Env)
+	cmd.Env, err = golang.GoEnv(ctx, allowNetwork)
 	if err != nil {
 		return nil
 	}

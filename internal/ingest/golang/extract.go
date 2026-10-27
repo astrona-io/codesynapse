@@ -69,9 +69,21 @@ type Result struct {
 	ExternalImports map[string][]string
 }
 
+type moduleProxyKey struct{}
+
+// WithModuleProxy lets go commands under ctx fetch missing modules from the
+// public module proxy only. It is narrower than AllowNetwork: a repository's
+// go.mod cannot send Go to another host.
+func WithModuleProxy(ctx context.Context) context.Context {
+	return context.WithValue(ctx, moduleProxyKey{}, true)
+}
+
+// publicProxy is the one place modules are fetched from in proxy mode.
+const publicProxy = "https://proxy.golang.org"
+
 // GoEnv is the environment every go command on a repository runs with: the
 // local toolchain, no cgo, no workspace and, unless allowNetwork, no module
-// proxy.
+// proxy. With WithModuleProxy the public proxy is allowed, and nothing else.
 func GoEnv(ctx context.Context, allowNetwork bool) ([]string, error) {
 	env := append(os.Environ(),
 		"CGO_ENABLED=0",
@@ -79,7 +91,15 @@ func GoEnv(ctx context.Context, allowNetwork bool) ([]string, error) {
 		"GOFLAGS=", // default -mod: vendor when present, else readonly (sources may be mounted read-only)
 		"GOWORK=off",
 	)
-	if !allowNetwork {
+	switch proxy, _ := ctx.Value(moduleProxyKey{}).(bool); {
+	case allowNetwork:
+	case proxy:
+		// No direct fetches (GOVCS), no private-module bypass of the checksum
+		// database, so a repository cannot point Go at another host.
+		env = append(env,
+			"GOPROXY="+publicProxy, "GOSUMDB=sum.golang.org", "GONOSUMDB=", "GONOPROXY=",
+			"GOPRIVATE=", "GOINSECURE=", "GOVCS=*:off", "GOFLAGS=-mod=readonly")
+	default:
 		env = append(env, "GOPROXY=off", "GONOSUMDB=*")
 	}
 	return execution.Environment(ctx, env)
