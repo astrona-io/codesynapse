@@ -366,11 +366,14 @@ func stopGuard(ctx context.Context, in toolHookInput, logger *slog.Logger) map[s
 	saveState(state, s)
 	repo := w.repo
 	notice := ""
-	if name, known := serverRepo(ctx, in, w.root, w.repo); !known {
+	if name, known, indexing := serverRepo(ctx, in, w.root, w.repo); !known {
 		// verify_plan and get_pr_context answer "not found" for a checkout the
 		// server has not indexed, so asking for them only wastes a turn. Say so
 		// in the chat (systemMessage) rather than finishing without a word.
-		notice = fmt.Sprintf("CodeSynapse skipped its pre-finish check: %s is not in the server's index (not added yet, or its first ingest has not finished), so verify_plan and get_pr_context cannot answer for it. Index it, or wait for the ingest, to get the check.", w.repo)
+		notice = fmt.Sprintf("CodeSynapse skipped its pre-finish check: %s is not in the server's index, so verify_plan and get_pr_context cannot answer for it. Add it to get the check.", w.repo)
+		if indexing {
+			notice = fmt.Sprintf("CodeSynapse skipped its pre-finish check: %s is queued or being indexed. verify_plan and get_pr_context answer for it once the ingest finishes.", w.repo)
+		}
 		if len(change.Problems) == 0 {
 			return map[string]any{"systemMessage": notice}
 		}
@@ -398,27 +401,51 @@ func stopGuard(ctx context.Context, in toolHookInput, logger *slog.Logger) map[s
 // or no answer it stays true, since nothing says the tools are unavailable.
 // checkout is the name the checkout's origin gives; a skipped check is reported
 // under it (usage.Unindexed).
-func serverRepo(ctx context.Context, in toolHookInput, root, checkout string) (name string, known bool) {
+func serverRepo(ctx context.Context, in toolHookInput, root, checkout string) (name string, known, indexing bool) {
 	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
 	if c.token == "" || in.SessionID == "" {
-		return "", true
+		return "", true, false
 	}
 	ctx, cancel := context.WithTimeout(ctx, activityBudget)
 	defer cancel()
 	ctx, err := c.executionContext(ctx, in.SessionID, in.SessionID)
 	if err != nil {
-		return "", true
+		return "", true, false
 	}
 	name, err = c.resolveRepo(ctx, root)
 	if errors.Is(err, errNoRepo) {
+		if c.indexingNow(ctx, checkout) {
+			// Already on its way in: nothing to recommend, so it is not counted.
+			return "", false, true
+		}
 		// Counted so Statistics can recommend indexing it; best effort, the
 		// person already gets the notice either way.
 		rctx, rcancel := context.WithTimeout(context.WithoutCancel(ctx), activityBudget)
 		defer rcancel()
 		_ = c.do(rctx, http.MethodPost, "/api/v1/usage/unindexed", map[string]string{"repo": checkout, "client": "claude-code"}, nil) //nolint:errcheck // counters are best effort
-		return "", false
+		return "", false, false
 	}
-	return name, true
+	return name, true, false
+}
+
+// indexingNow reports whether a clone or ingest job for repo is queued or
+// running. Any trouble asking says no: the person then gets the plain notice.
+func (c apiClient) indexingNow(ctx context.Context, repo string) bool {
+	var list struct {
+		Jobs []struct {
+			Repo  string `json:"repo"`
+			State string `json:"state"`
+		} `json:"jobs"`
+	}
+	if c.do(ctx, http.MethodGet, "/api/v1/jobs", nil, &list) != nil {
+		return false
+	}
+	for _, j := range list.Jobs {
+		if j.State == "running" && strings.EqualFold(j.Repo, repo) {
+			return true
+		}
+	}
+	return false
 }
 
 func hookCmd(ec *app.Env) *cobra.Command {
