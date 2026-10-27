@@ -108,6 +108,9 @@ func openAIRequest(cfg ProviderConfig, req Request) map[string]any {
 		body["stream"] = true
 		body["stream_options"] = map[string]any{"include_usage": true}
 	}
+	for k, v := range kvCacheOptions(cfg) {
+		body[k] = v
+	}
 	if cfg.DisableThinking {
 		body["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
 	}
@@ -160,7 +163,20 @@ type openAIAnswer struct {
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage openAIUsage `json:"usage"`
+	Usage   openAIUsage   `json:"usage"`
+	Timings *llamaTimings `json:"timings"`
+}
+
+// llamaTimings is llama.cpp's extra block; cache_n counts the prompt tokens
+// it took from its cache instead of reading them again.
+type llamaTimings struct {
+	CacheN int `json:"cache_n"`
+}
+
+func (t *llamaTimings) apply(u *openAIUsage) {
+	if t != nil && u.PromptTokensDetails.CachedTokens == 0 && t.CacheN > 0 {
+		u.PromptTokensDetails.CachedTokens = t.CacheN
+	}
 }
 
 func (o *openAI) whole(res openAIAnswer, req Request) (Response, error) {
@@ -168,6 +184,7 @@ func (o *openAI) whole(res openAIAnswer, req Request) (Response, error) {
 	if len(res.Choices) > 0 {
 		text, finish = res.Choices[0].Message.Content, res.Choices[0].FinishReason
 	}
+	res.Timings.apply(&res.Usage)
 	return o.answer(cmpModel(res.Model, o.cfg.Model), res.Usage, len(res.Choices) > 0, text, finish, req)
 }
 
@@ -201,12 +218,13 @@ func (o *openAI) completeStream(ctx context.Context, req Request) (Response, err
 		return o.whole(whole, req)
 	}
 	var (
-		text   strings.Builder
-		model  string
-		finish string
-		usage  openAIUsage
-		first  time.Duration
-		chosen bool
+		text    strings.Builder
+		model   string
+		finish  string
+		usage   openAIUsage
+		first   time.Duration
+		chosen  bool
+		timings *llamaTimings
 	)
 	sc := bufio.NewScanner(io.LimitReader(res.Body, maxResponseBytes))
 	sc.Buffer(make([]byte, 64<<10), 4<<20)
@@ -229,8 +247,9 @@ func (o *openAI) completeStream(ctx context.Context, req Request) (Response, err
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
-			Usage *openAIUsage `json:"usage"`
-			Error *struct {
+			Usage   *openAIUsage  `json:"usage"`
+			Timings *llamaTimings `json:"timings"`
+			Error   *struct {
 				Message string `json:"message"`
 			} `json:"error"`
 		}
@@ -261,6 +280,7 @@ func (o *openAI) completeStream(ctx context.Context, req Request) (Response, err
 	if err := sc.Err(); err != nil {
 		return Response{}, fmt.Errorf("%s: reading the stream: %w", o.cfg.Name, err)
 	}
+	timings.apply(&usage)
 	resp, err := o.answer(cmpModel(model, o.cfg.Model), usage, chosen, text.String(), finish, req)
 	resp.FirstToken = first
 	return resp, err

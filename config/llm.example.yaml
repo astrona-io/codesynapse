@@ -17,6 +17,9 @@ providers:
     max_output_tokens: 32768  # longest answer; also sets how many findings go into one triage request
     disable_thinking: true    # Qwen3/R1-style models: skip the reasoning phase for fast JSON answers
     # bytes_per_token: 3      # local models: count 3 request bytes as one token (default 1, the safe upper bound)
+    # kv_cache: auto          # local servers reuse the prompt cache (auto, on, off)
+    # kv_cache_server: ollama # ollama, llamacpp, vllm or other; Ollama's port 11434 is detected
+    # kv_cache_ttl: 15m       # how long a cached prompt is kept: up to 24h, 0 for not at all, or forever
     # max_input_tokens:       # defaults to context_window - max_output_tokens - 1024
     input_budget_policy: estimate # counts final redacted request JSON bytes conservatively
     # require_exact refuses completions until a verified model/template counter is available.
