@@ -120,8 +120,8 @@ async function createOrg() {
     <section v-if="org" class="panel">
       <h2>Agent gateway</h2>
       <p class="muted small">When this is on, API keys of {{ org.name }} can send their agents’ model requests through CodeSynapse. Requests wait their turn, small ones may be answered by a local model, and every request is checked and audited. It is off until an owner or admin turns it on.</p>
-      <p v-if="gateway && !gateway.available" class="notice">Server switch off: the operator has not started the API with <code>CODESYNAPSE_GATEWAY=true</code>, so requests are refused even when this is on.</p>
-      <label v-if="canManage" class="check"><input type="checkbox" :checked="gateway?.enabled ?? false" :disabled="!gateway" @change="setGateway(($event.target as HTMLInputElement).checked)"> Let keys of this organisation use the gateway</label>
+      <p v-if="gateway && !gateway.available" class="notice">Server switch off: the operator started the API with <code>CODESYNAPSE_GATEWAY=false</code>, so requests are refused even when this is on.</p>
+      <label v-if="canManage" class="check"><input type="checkbox" :checked="gateway?.enabled ?? true" :disabled="!gateway" @change="setGateway(($event.target as HTMLInputElement).checked)"> Let keys of this organisation use the gateway</label>
       <p v-else>{{ gateway?.enabled ? 'On' : 'Off' }}. Ask an owner or admin to change it.</p>
       <p v-if="gatewaySaved" class="notice notice--ok" role="status">Gateway setting saved.</p>
     </section>
