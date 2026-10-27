@@ -767,6 +767,13 @@ func (r *Registry) Embed(ctx context.Context, name string, inputs []string) ([][
 		}
 		clean[i] = in
 	}
+	// Embeddings share the provider's queue with completions, so a local
+	// model never runs both at once; queueing does not eat the timeout.
+	release, err := r.slots[name].acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(max(cfg.TimeoutSeconds, 10))*time.Second)
 	defer cancel()
 	ctx = telemetry.WithModel(ctx, name, cfg.EmbeddingModel)
