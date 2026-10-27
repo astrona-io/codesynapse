@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -33,9 +34,15 @@ func sessionRules(ctx context.Context, in toolHookInput, logger *slog.Logger) ma
 		}
 		text += repoConventions(ctx, c, in.Cwd, logger)
 	}
-	return map[string]any{"hookSpecificOutput": map[string]any{
+	out := map[string]any{"hookSpecificOutput": map[string]any{
 		"hookEventName": "SessionStart", "additionalContext": text,
 	}}
+	if home, err := os.UserHomeDir(); err == nil {
+		if warn := gatewayWarning(ctx, home); warn != "" {
+			out["systemMessage"] = warn // shown to the person, not the model
+		}
+	}
+	return out
 }
 
 // repoConventions is the house style of the checkout's repository, as a
