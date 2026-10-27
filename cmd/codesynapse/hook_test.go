@@ -55,7 +55,16 @@ func TestReadGuard(t *testing.T) {
 	assert.True(t, readGuard(in) == nil, "0 turns the guard off")
 }
 
+// offlineAPI points the hooks at a closed port, so a developer's own token and
+// server cannot change what a test sees.
+func offlineAPI(t *testing.T) {
+	t.Helper()
+	t.Setenv("CODESYNAPSE_API_URL", "http://127.0.0.1:1")
+	t.Setenv(apiTokenEnv, "tok")
+}
+
 func TestStopGuard(t *testing.T) {
+	offlineAPI(t)
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
 	ctx := context.Background()
 	dir := gitRepo(t)
@@ -72,6 +81,42 @@ func TestStopGuard(t *testing.T) {
 	in.StopHookActive = true
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "demo.go"), []byte("package demo\n\nfunc ChangedAgain() {}\n"), 0o600))
 	assert.True(t, stopGuard(ctx, in, logger) == nil, "never while already continuing because of a stop hook")
+}
+
+func TestStopGuardSkipsUnindexedCheckout(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
+	var repos string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/execution/sessions" {
+			var body struct {
+				SessionID string `json:"session_id"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)                                                                                                                //nolint:errcheck // test server
+			_ = json.NewEncoder(w).Encode(map[string]string{"tenant_id": "t", "subject_id": "s", "session_id": body.SessionID, "parent_session_id": body.SessionID}) //nolint:errcheck // test server
+			return
+		}
+		_, _ = io.WriteString(w, repos) //nolint:errcheck // test server
+	}))
+	defer ts.Close()
+	t.Setenv("CODESYNAPSE_API_URL", ts.URL)
+	t.Setenv(apiTokenEnv, "tok")
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	dir := gitRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "demo.go"), []byte("package demo\n\nfunc Changed() {}\n"), 0o600))
+	repos = `{"repos":[{"name":"astrona-io/other","remote":"https://github.com/astrona-io/other"}]}`
+	skipped := stopGuard(ctx, toolHookInput{SessionID: "chat-1", Cwd: dir}, logger)
+	require.True(t, skipped != nil, "the skip is explained in the chat")
+	assert.True(t, skipped["decision"] == nil, "verify_plan cannot answer for a checkout the server has not indexed, so nothing blocks")
+	assert.Contains(t, skipped["systemMessage"].(string), "not in the server's index")
+
+	// Same server, but the checkout is indexed: the check is asked for.
+	repos = `{"repos":[{"name":"` + filepath.Base(dir) + `","remote":""}]}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "demo.go"), []byte("package demo\n\nfunc ChangedAgain() {}\n"), 0o600))
+	out := stopGuard(ctx, toolHookInput{SessionID: "chat-2", Cwd: dir}, logger)
+	require.True(t, out != nil)
+	assert.Contains(t, out["reason"].(string), "verify_plan")
 }
 
 func TestHookCommandPrintsJSON(t *testing.T) {
@@ -143,6 +188,7 @@ func TestSessionRulesFallBackToTheBuiltInText(t *testing.T) {
 // A checkout that was already dirty when the session began is not the
 // session's change: the Stop hook asks only once the session changes it.
 func TestStopGuardIgnoresWhatWasDirtyAtStart(t *testing.T) {
+	offlineAPI(t)
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
 	ctx := context.Background()
 	dir := gitRepo(t)
@@ -210,6 +256,7 @@ func TestStopGuardIgnoresWhatCodeSynapseDoesNotIndex(t *testing.T) {
 }
 
 func TestStopGuardReportsGoProblemsItself(t *testing.T) {
+	offlineAPI(t)
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
 	ctx := context.Background()
 	dir := gitRepo(t)
