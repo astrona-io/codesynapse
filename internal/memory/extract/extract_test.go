@@ -94,3 +94,13 @@ func TestParseKeepsFinishedTriplesOfACutOffAnswer(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, res.Truncated)
 }
+
+// A local server reuses its prompt cache only when the start of the prompt is
+// identical, so everything that varies must stay in the user part.
+func TestPromptSystemIsConstant(t *testing.T) {
+	a, _, err := Prompt(nil, []Turn{{Role: "user", Text: "one"}})
+	require.NoError(t, err)
+	b, _, err := Prompt([]string{"X"}, []Turn{{Role: "user", Text: "two"}, {Role: "assistant", Text: "three"}})
+	require.NoError(t, err)
+	assert.Equal(t, a, b)
+}
