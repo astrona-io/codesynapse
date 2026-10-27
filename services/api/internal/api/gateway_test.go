@@ -71,3 +71,22 @@ func TestGatewayOffByDefault(t *testing.T) {
 	defer res.Body.Close() //nolint:errcheck // test
 	assert.Equal(t, res.StatusCode, 404)
 }
+
+func TestGatewayOpenAIBearerKeyAndNoLocalModel(t *testing.T) {
+	f := newRuntimeFixture(t, Config{Gateway: true})
+	do := func(method, path, auth string) int {
+		req, err := http.NewRequest(method, f.client.ts.URL+path, strings.NewReader(`{"model":"x","messages":[]}`)) //nolint:noctx // test
+		require.NoError(t, err)
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_ = res.Body.Close()
+		return res.StatusCode
+	}
+	assert.Equal(t, do(http.MethodGet, "/v1/models", ""), 401)
+	assert.Equal(t, do(http.MethodGet, "/v1/models", "Bearer csk_nope"), 401)
+	assert.Equal(t, do(http.MethodGet, "/v1/models", f.client.auth), 503, "valid key, no local model")
+	assert.Equal(t, do(http.MethodPost, "/v1/chat/completions", f.client.auth), 503)
+}
