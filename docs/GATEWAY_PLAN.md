@@ -17,17 +17,17 @@ Goal: every model request an agent makes goes through CodeSynapse, waits its tur
 `POST /v1/messages` (+ `count_tokens`), streaming, reached with `ANTHROPIC_BASE_URL`.
 
 - The server forwards to Anthropic with the installation's or organisation's API key (`api_key_env`). A Claude subscription sign-in cannot be forwarded this way: it is a personal OAuth token and must not be stored on the server.
-- This sends prompts and code to a cloud provider through the server. AGENTS.md forbids that except a diff the user asked to review, so it needs an explicit, per-provider switch (`gateway: true`, off by default), and an organisation-level opt-in.
+- This sends prompts and code to a cloud provider through the server. AGENTS.md forbids that except a diff the user asked to review, so it needs an explicit, per-provider switch (`gateway: true`, off by default), and an organisation-level opt-in. Decided: allowed as that opt-in only.
 - Briefing: the plugin's `codesynapse hook brief` already adds a graph briefing to every Claude Code prompt; the gateway adds queueing, audit, usage and cost for the traffic itself.
 
-## Identity (open decision)
+## Identity (decided: option 1)
 
 Every execution needs a registered runtime session (`X-CodeSynapse-Session`, equal parent). Most agent clients cannot send custom headers, and AGENTS.md says never to generate a fallback. Options:
 
 1. Gateway key = session: an API key minted for the gateway, bound to one registered session by the dashboard (like `DashboardExecutionSession`), seven-day expiry, shown once.
 2. Require the headers: works for clients that can set them (OpenCode, the Claude Code bridge), not Cursor.
 
-Recommendation: option 1, as an explicit "gateway key" with its own audit trail.
+Decision: option 1, as an explicit "gateway key" with its own audit trail.
 
 ## Checks before merging any phase
 
