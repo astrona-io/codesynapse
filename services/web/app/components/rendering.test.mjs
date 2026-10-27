@@ -132,5 +132,5 @@ test('models and savings split the token pool without counting ask_local twice',
   assert.match(html, /Kept off cloud models 48% /, '30k never read + 65k local of a 200k pool')
   assert.match(html, /Tokens never read 50000 /)
   assert.match(html, /Handled by local models 65000 60000 read · 5000 written/)
-  assert.match(html, /Cloud cost avoided \$1\.00 at claude-opus-5-5 prices, estimated/, '(60k + 30k) × $10 + 5k × $20 per million')
+  assert.match(html, /Total saved \(est\.\) \$1\.00 at claude-opus-5-5 prices, estimated/, '(60k + 30k) × $10 + 5k × $20 per million')
 })
