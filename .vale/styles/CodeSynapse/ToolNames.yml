@@ -1,0 +1,8 @@
+extends: substitution
+message: "Tool names are case-sensitive: use '%s' instead of '%s'."
+level: error
+ignorecase: false
+scope: text
+swap:
+  '\bbash tool\b': Bash tool
+  '\bgrep tool\b': Grep tool
