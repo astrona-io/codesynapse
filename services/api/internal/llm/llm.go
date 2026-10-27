@@ -170,6 +170,15 @@ type ProviderConfig struct {
 	// as chat_template_kwargs.enable_thinking=false (MLX, vLLM, SGLang); on
 	// Ollama use Effort "none" instead.
 	DisableThinking bool `yaml:"disable_thinking" json:"disable_thinking,omitempty"`
+	// KVCache switches the local server's prompt cache options: auto (the
+	// default), on or off. Ignored for remote providers.
+	KVCache string `yaml:"kv_cache" json:"kv_cache,omitempty"`
+	// KVCacheServer names the server (ollama, llamacpp, vllm, other) when the
+	// port does not give it away.
+	KVCacheServer string `yaml:"kv_cache_server" json:"kv_cache_server,omitempty"`
+	// KVCacheTTL is how long a cached prompt is kept: a duration up to 24h,
+	// "0" for not at all, or "forever". Default 15m.
+	KVCacheTTL string `yaml:"kv_cache_ttl" json:"kv_cache_ttl,omitempty"`
 	// EmbeddingModel names the model the provider's /embeddings endpoint
 	// uses (e.g. nomic-embed-text on Ollama); empty means no embeddings.
 	EmbeddingModel string `yaml:"embedding_model" json:"embedding_model,omitempty"`
@@ -204,6 +213,8 @@ type Config struct {
 	// Tasks maps a task to a provider name; Default covers the rest.
 	Tasks   map[string]string `yaml:"tasks"`
 	Default string            `yaml:"default"`
+	// KVCacheTTL is the default for providers that do not set their own.
+	KVCacheTTL string `yaml:"kv_cache_ttl"`
 }
 
 // Local reports whether the provider runs on this machine or network,
@@ -275,6 +286,9 @@ func (c *Config) normalise(getenv func(string) string) error {
 		}
 		if p.BaseURL != "" && !strings.HasPrefix(p.BaseURL, "http://") && !strings.HasPrefix(p.BaseURL, "https://") {
 			return fmt.Errorf("provider %q: base_url must be http(s)", p.Name)
+		}
+		if err := validateKVCache(p, c.KVCacheTTL); err != nil {
+			return fmt.Errorf("provider %q: %w", p.Name, err)
 		}
 		if err := validatePriceSource(*p); err != nil {
 			return fmt.Errorf("provider %q: %w", p.Name, err)
