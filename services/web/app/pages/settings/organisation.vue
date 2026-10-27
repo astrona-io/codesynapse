@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AccountOrg, Membership, Role } from '~/utils/types'
+import type { AccountOrg, Membership, OrgGateway, Role } from '~/utils/types'
 
 const session = useSession()
 const org = computed(() => session.current.value?.org)
@@ -9,6 +9,19 @@ const { data: policy, refresh: refreshPolicy } = useApiGet<AccountOrg>(() => `ac
 const defaultAccess = ref<'NONE' | 'READ_ONLY'>('NONE')
 watch(policy, (value) => { defaultAccess.value = value?.default_repo_access ?? 'NONE' }, { immediate: true })
 const policySaved = ref(false)
+const { data: gateway, refresh: refreshGateway } = useApiGet<OrgGateway>(() => `accounts/orgs/${org.value?.slug ?? '-'}/gateway`)
+const gatewaySaved = ref(false)
+async function setGateway(enabled: boolean) {
+  error.value = ''
+  gatewaySaved.value = false
+  try {
+    await apiPut(`accounts/orgs/${org.value!.slug}/gateway`, { enabled })
+    gatewaySaved.value = true
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  }
+  await refreshGateway()
+}
 const recoverRepo = ref('')
 const recoverUser = ref('')
 const recovered = ref(false)
@@ -103,6 +116,14 @@ async function createOrg() {
       <p v-else>{{ policy?.default_repo_access === 'READ_ONLY' ? 'Read only' : 'No access' }}</p>
       <p v-if="policySaved" class="notice notice--ok" role="status">Repository default saved.</p>
       <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
+    </section>
+    <section v-if="org" class="panel">
+      <h2>Agent gateway</h2>
+      <p class="muted small">When this is on, API keys of {{ org.name }} can send their agents’ model requests through CodeSynapse. Requests wait their turn, small ones may be answered by a local model, and every request is checked and audited. It is off until an owner or admin turns it on.</p>
+      <p v-if="gateway && !gateway.available" class="notice">Server switch off: the operator has not started the API with <code>CODESYNAPSE_GATEWAY=true</code>, so requests are refused even when this is on.</p>
+      <label v-if="canManage" class="check"><input type="checkbox" :checked="gateway?.enabled ?? false" :disabled="!gateway" @change="setGateway(($event.target as HTMLInputElement).checked)"> Let keys of this organisation use the gateway</label>
+      <p v-else>{{ gateway?.enabled ? 'On' : 'Off' }}. Ask an owner or admin to change it.</p>
+      <p v-if="gatewaySaved" class="notice notice--ok" role="status">Gateway setting saved.</p>
     </section>
     <section v-if="org && session.can('owner')" class="panel">
       <h2>Recover repository administration</h2>

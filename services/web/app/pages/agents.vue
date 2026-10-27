@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AgentStatus, ApiKey, WorkspaceStats } from '~/utils/types'
+import type { AgentStatus, ApiKey, OrgGateway, WorkspaceStats } from '~/utils/types'
 
 useHead({ title: 'Agents · CodeSynapse' })
 const session = useSession()
@@ -8,6 +8,8 @@ const mcpUrl = computed(() => settings.value?.mcp_url || 'http://localhost:8090/
 // Where the bridge registers each chat. Unknown on a remote install until the operator sets CODESYNAPSE_PUBLIC_API_URL.
 const apiUrl = computed(() => settings.value?.api_url || (/^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(mcpUrl.value) ? 'http://127.0.0.1:8080' : 'https://<your-api-host>'))
 const viaBridge = computed(() => session.accounts.value)
+// Each organisation opts in to the gateway on its settings page.
+const { data: orgGateway } = useApiGet<OrgGateway>(() => `accounts/orgs/${session.current.value?.org.slug ?? '-'}/gateway`)
 
 // Step 1: a key for this agent (accounts mode). Single-tenant installs use
 // the installation's MCP token instead.
@@ -270,6 +272,7 @@ onBeforeUnmount(() => clearInterval(poll))
       <div class="stack--tight">
         <h2>Send model requests through CodeSynapse <span class="muted">(optional)</span></h2>
         <p class="muted">With the gateway on, every request your agent makes to its model goes to CodeSynapse first. It waits its turn in a queue, small requests are answered by a local model, and the rest is passed on to the cloud with your own credential, which is never stored. Each request is checked against your key and audited. The operator must run the API with <code>CODESYNAPSE_GATEWAY=true</code>; until then these requests are refused.</p>
+        <p v-if="orgGateway && !orgGateway.enabled" class="notice">The gateway is off for this organisation. An owner or admin turns it on under <NuxtLink to="/settings/organisation">Settings, Organisation</NuxtLink>; until then these requests are refused.</p>
         <template v-if="selected.includes('claude')">
           <h3>Claude Code</h3>
           <p class="muted small">Merge this into <code>~/.claude/settings.json</code>. Claude Code keeps using your own Anthropic sign-in; only the address and the header change.</p>
