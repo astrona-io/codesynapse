@@ -203,7 +203,7 @@ export interface Review extends Omit<ReviewSummary, 'counts'> { summary: string;
 export interface AIProvider {
   name: string; kind: string; model: string; endpoint: string; local: boolean; has_key: boolean; key_env?: string
   sends_source: boolean; max_output_tokens: number; max_input_tokens: number; input_budget_policy?: 'estimate' | 'require_exact'; context_window?: number; tasks: string[]
-  usage: { requests: number; failures: number; input_tokens: number; output_tokens: number; avg_seconds: number; last_error?: string }
+  usage: { requests: number; failures: number; input_tokens: number; cached_tokens?: number; output_tokens: number; avg_seconds: number; last_error?: string }
   // auto: models picked from what the server serves (model: auto); served is its last answer.
   auto?: boolean; embedding_model?: string
   prices?: { input: number; output: number; cached_input?: number; source?: string; checked?: string; feed?: string }

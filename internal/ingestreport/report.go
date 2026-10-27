@@ -167,7 +167,7 @@ func ValidPath(s string) bool {
 }
 func validDiagnostic(s string) bool {
 	switch s {
-	case "", "ignored_path", "unsupported_file_class", "no_contribution", "symlink", "special_file", "metadata_unavailable", "size_limit", "read_failed", "parse_failed", "package_load_failed", "cancelled", "not_completed", "graph_write_failed", "graph_commit_unknown", "stage_excluded", "generated_code", "binary", "non_k8s_yaml":
+	case "", "ignored_path", "unsupported_file_class", "no_contribution", "symlink", "special_file", "metadata_unavailable", "size_limit", "read_failed", "parse_failed", "package_load_failed", "dependencies_unavailable", "cancelled", "not_completed", "graph_write_failed", "graph_commit_unknown", "stage_excluded", "generated_code", "binary", "non_k8s_yaml":
 		return true
 	}
 	return false
