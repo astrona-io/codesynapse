@@ -1,5 +1,8 @@
 # Requirements
 
+!!! info "In plain words"
+    This page answers one question: will CodeSynapse fit on my machine? A modern laptop can run a trial. A team install on Kubernetes needs real servers. If you also want a **local model** (an AI that runs on your own machine, see the [glossary](../GLOSSARY.md#ai-assistants)), add its size on top. "HA" (high availability) means the setup keeps working when one machine fails.
+
 What you need to run CodeSynapse on a laptop, on a single-replica Kubernetes install, and on a highly available one. The figures come from the compose file and the Helm chart's defaults, plus a measured local stack. A local AI model needs memory on top of all of this; see [Local models](local-models.md).
 
 ## At a glance

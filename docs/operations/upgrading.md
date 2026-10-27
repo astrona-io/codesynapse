@@ -1,5 +1,8 @@
 # Upgrading
 
+!!! info "In plain words"
+    To update a Kubernetes install: take a backup, run one `helm upgrade` command, then run `helm test` to check it. The database updates itself when the new version starts. If something goes wrong, `helm rollback` returns to the old version. A job that was running when a server stopped is picked up again by another worker. On Docker Compose, the matching steps are in the compose section below.
+
 Every release publishes the Helm chart and the images at the same version, so one number describes an installation:
 
 ```sh

@@ -132,6 +132,41 @@ Plain-English meanings for the words you will meet in CodeSynapse. Each entry sa
 **Fix branch**
 :   A new git branch with a suggested fix for a review comment you accepted. It opens a *draft* pull request for a person to review. It is off unless an operator enables pushing, and it never force-pushes.
 
+## Operations
+
+**Hook**
+:   A small program an assistant such as Claude Code runs by itself at a set moment, for example when a chat starts or before a file is read.
+
+**Plugin**
+:   An add-on for Claude Code. The CodeSynapse plugin bundles the connection to the server, a usage guide and the hooks in one install.
+
+**Bridge**
+:   A small program on your computer (`codesynapse mcp bridge`) between Claude Code and the CodeSynapse server. It adds who you are and which chat it is to every request.
+
+**Migration**
+:   An automatic update of the database layout. It runs when a new version starts, so you do not do it by hand.
+
+**Lease**
+:   A temporary claim on a task. One API process holds it at a time, so a task is not done twice when several run. If it stops, another takes over.
+
+**HA (high availability)**
+:   A setup that keeps working when one machine fails, because every part has a spare.
+
+**Failover**
+:   The moment a spare takes over from a part that failed.
+
+**Session memory**
+:   Short notes about one chat, kept so old messages can leave the chat and still be found. They expire after seven days.
+
+**Redaction**
+:   Removing secrets (passwords, keys) and personal data from text before it is stored or sent.
+
+**Tag (release)**
+:   A name pinned to one commit, such as `v0.3.0`. Pushing a tag starts the release build.
+
+**Cosign**
+:   A tool that signs container images and charts, so you can check they came from the project.
+
 ## More terms
 
 **Tenant**
@@ -154,4 +189,3 @@ Plain-English meanings for the words you will meet in CodeSynapse. Each entry sa
 
 **Node / edge**
 :   The "dots" and "lines" of the graph. A node is a thing (a function, a file); an edge is a link between two nodes (for example "calls").
-

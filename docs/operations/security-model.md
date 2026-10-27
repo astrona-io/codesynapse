@@ -1,5 +1,10 @@
 # Security model
 
+!!! info "In plain words"
+    CodeSynapse reads code that other people wrote and shows pieces of it to AI models. That is risky: a repository can hide tricks, and an AI can be talked into things. So everything that comes in is treated as untrusted and checked at fixed gates. This page lists the gates and the rule at each. The rules are meant to stay strict; loosening one needs a deliberate decision.
+
+    Words used below: *LLM* is a large language model, the AI behind chat assistants. *Redaction* removes secrets (passwords, keys) and personal data from text before it is stored. A *parameterised query* hands the database the question and the values separately, so a value can never be mistaken for part of the question.
+
 CodeSynapse reads untrusted repositories and serves their contents to LLMs. Each boundary below has a rule that must not be loosened.
 
 ## Trust boundaries

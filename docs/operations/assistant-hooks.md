@@ -1,5 +1,8 @@
 # Codex and Cursor lifecycle integration
 
+!!! info "In plain words"
+    Codex and Cursor are coding assistants, like Claude Code. They can run small programs (**hooks**) at set moments, for example when a chat starts or ends. CodeSynapse installs hooks so they get the same rules, memory and review prompts. The hooks record only **metadata** (what kind of event, how long, how big), never your prompts, code or file names. The "Collection contract" section lists every recorded field.
+
 CodeSynapse installs native lifecycle adapters for Codex and Cursor. The adapters load rules, recall chat memory, apply the existing structured-file read guard, request a final diff review, report retrieval usefulness, and record metadata about assistant activity. They never approve permission requests or execute commands received in hook input.
 
 ## Setup

@@ -1,5 +1,8 @@
 # Keep chats small with a local model
 
+!!! info "In plain words"
+    An AI assistant re-reads the whole chat every time you send a message, and you pay for that reading. This page sets up a helper that moves old messages out of the chat and keeps only short notes about them (like "billing uses PostgreSQL"). When the assistant needs a note, it asks for it. Result: a smaller chat and a smaller bill.
+
 A long chat costs tokens on every turn, because the whole history is sent again each time. CodeSynapse moves older turns out of the chat into **session memory** and hands back only what a question needs. This page sets that up in about ten minutes.
 
 ## What you get, and what you do not
@@ -20,12 +23,16 @@ flowchart LR
 
 ## Before you start
 
+You need these four things. If any is missing, follow the link first.
+
 - The stack is running (`just up`) and you can sign in. See [Run the stack](running.md).
 - Claude Code is connected to CodeSynapse with a personal API key. See [Connect Claude Code](claude-code-bridge.md).
 - The repository is indexed in CodeSynapse.
 - [Ollama](https://ollama.com) is installed. Any OpenAI-compatible local server works (MLX, vLLM, LM Studio, llama.cpp); Ollama is the simplest.
 
 ## 1. Pull two models
+
+"Pull" means download. Ollama is a free program that downloads and runs AI models on your machine.
 
 ```sh
 ollama pull llama3.1:8b          # reads older turns and writes facts
@@ -73,6 +80,8 @@ The API log prints `AI providers configured … default=local-ollama`.
 
 ## 3. Check that the model is used
 
+Before relying on the hooks, make sure the model does its job.
+
 Run this once. It sends a small invented conversation through the same path the hooks use.
 
 ```sh
@@ -114,7 +123,7 @@ Do not do both; the hooks would run twice. With the plugin enabled, `mcp hooks` 
 
 ## 5. Make Claude Code compact earlier
 
-Compaction is Claude Code's. By default it waits until the chat is nearly full, and on models with a million-token window that is close to a million tokens. A cap in tokens makes the offload run and the chat shrink while it is still small.
+"Compacting" means Claude Code squeezes the old chat into a short summary. Compaction is Claude Code's. By default it waits until the chat is nearly full, and on models with a million-token window that is close to a million tokens. A cap in tokens makes the offload run and the chat shrink while it is still small.
 
 `codesynapse mcp install` and `codesynapse mcp hooks` set it for you: `autoCompactWindow` 150000 in Claude Code's settings (and `model_auto_compact_token_limit` in `~/.codex/config.toml` for Codex). A cap you set yourself is kept; `--context-cap 200k` replaces it, `--context-cap 0` leaves the settings alone. By hand, add this to `~/.claude/settings.json` (or the project's `.claude/settings.json`):
 

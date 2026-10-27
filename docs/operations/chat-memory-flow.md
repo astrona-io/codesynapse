@@ -1,5 +1,8 @@
 # Chat memory flow: every step, with its tokens
 
+!!! info "In plain words"
+    This is the detailed companion to [Keep chats small](chat-memory-setup.md), for people who want to see where the tokens go. If you only want to set the feature up, read the setup page and skip this one.
+
 This page follows one chat from start to compaction and shows each step the Claude Code plugin takes, what it asks of CodeSynapse, which steps call a **local model**, and how many tokens each one moves. Use it to find where tokens go and which step to shorten. Setup is in [Keep chats small](chat-memory-setup.md).
 
 Token figures come in two kinds:
@@ -8,6 +11,8 @@ Token figures come in two kinds:
 - **Estimate** is the size of the text divided by four, or the count the provider reported.
 
 ## The whole flow
+
+Read the diagram top to bottom. The numbers match the table after it.
 
 ```mermaid
 stateDiagram-v2

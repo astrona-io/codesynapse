@@ -1,5 +1,8 @@
 # Running the stack
 
+!!! info "In plain words"
+    CodeSynapse is not one program. It is a small set of programs that start together: a website (the **dashboard**), a service behind it (the **API**), a helper that does slow jobs (the **worker**), a service your coding assistant talks to (the **MCP server**), and a few databases. A tool called Docker (or Podman) starts them all with one command, `just up`. This page shows that command, how the pieces fit, and the settings you will most often change. Unknown word? See the [glossary](../GLOSSARY.md).
+
 ## Quick start
 
 Requires [just](https://github.com/casey/just) and Docker or Podman (`podman machine start` plus `docker-compose` on the PATH). The justfile picks whichever is installed; set `COMPOSE="docker compose"` to force one.

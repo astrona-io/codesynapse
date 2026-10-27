@@ -1,5 +1,8 @@
 # Local models
 
+!!! info "In plain words"
+    A **local model** is an AI that runs on your own computer instead of in someone else's cloud. It is slower, but it costs nothing per question and your code never leaves your machine. CodeSynapse uses it to read files for your coding assistant and hand back a short answer, so the assistant spends fewer paid tokens. A **token** is the unit AI services charge by: roughly three quarters of a word. See the [glossary](../GLOSSARY.md#ai-assistants).
+
 A model on your own machine does the reading and writing that would otherwise go through a paid cloud model. CodeSynapse routes every AI task to it, and coding agents hand it file reading through `ask_local`. Nothing a local model reads leaves your machine or network.
 
 This page covers why you would run one, what the two recommended Qwen models need, and how to set them up.

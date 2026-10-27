@@ -1,14 +1,17 @@
 # Claude Code bridge
 
+!!! info "In plain words"
+    Claude Code is a coding assistant that runs in your terminal. The **bridge** is a small program on your own computer that sits between Claude Code and the CodeSynapse server and adds the details the server needs (who you are, which chat this is) to every request. You install it once, give it a personal key and run one command to register it. The program is called `codesynapse`.
+
 Claude Code connects to CodeSynapse through `codesynapse mcp bridge`, a small stdio process that runs on the developer's machine. Every machine that uses CodeSynapse from Claude Code needs the `codesynapse` binary installed locally. The server stack can run anywhere.
 
-
 The [Claude Code plugin](claude-code-plugin.md) sets this up in one install, with a workflow skill and hooks; this page describes the bridge it runs.
+
 ## Why a bridge
 
 The MCP server only runs tools for a registered chat session. Each request must carry a personal key plus `X-CodeSynapse-Session` and `X-CodeSynapse-Parent-Session` with the chat's ID (see [runtime session setup](../AGENT_GUIDE.md#runtime-session-setup)).
 
-Claude Code passes the chat ID (`CLAUDE_CODE_SESSION_ID`) to stdio MCP servers only. Remote HTTP servers and their `headersHelper` never see it, so a plain HTTP entry in Claude Code's config can't send the session headers, and the server answers 403.
+In short: the server needs to know which chat a request comes from, and only a program on your machine can learn that. Claude Code passes the chat ID (`CLAUDE_CODE_SESSION_ID`) to stdio MCP servers only (programs it starts itself and talks to through their input and output). Remote HTTP servers and their `headersHelper` never see it, so a plain HTTP entry in Claude Code's config can't send the session headers, and the server answers 403.
 
 ```mermaid
 sequenceDiagram
@@ -64,7 +67,7 @@ Claude Code's config stores the binary's absolute path, so it doesn't need to be
 
 ## Get a personal key
 
-Sign in to the dashboard, open **Settings → API keys** and create a key. It starts with `csk_` and acts in one organisation.
+A personal key is a long password-like string that lets the bridge act as you. Sign in to the dashboard, open **Settings → API keys** and create a key. It starts with `csk_` and acts in one organisation.
 
 These won't work:
 
@@ -127,7 +130,7 @@ To trade that for fresh answers, turn the working-tree overlay on with `CODESYNA
 
 ## Check it works
 
-Send one `initialize` message through the bridge with a throwaway ID:
+This sends one test message through the bridge. If you get an answer back, everything is connected. Send one `initialize` message through the bridge with a throwaway ID:
 
 ```sh
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"check","version":"0"}}}' \
