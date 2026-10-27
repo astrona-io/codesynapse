@@ -20,6 +20,16 @@ Goal: every model request an agent makes goes through CodeSynapse, waits its tur
 - This sends prompts and code to a cloud provider through the server. AGENTS.md forbids that except a diff the user asked to review, so it needs an explicit, per-provider switch (`gateway: true`, off by default), and an organisation-level opt-in. Decided: allowed as that opt-in only.
 - Briefing: the plugin's `codesynapse hook brief` already adds a graph briefing to every Claude Code prompt; the gateway adds queueing, audit, usage and cost for the traffic itself.
 
+## Routing: answer here or go to the cloud
+
+Claude Code (`ANTHROPIC_BASE_URL` pointed at the gateway) sends every request to `POST /v1/messages`. The gateway holds it in the queue, decides, then either answers it with a local model or forwards it to Anthropic.
+
+- The decision is rules first, no model call on the hot path: background calls Claude Code makes with its small model (titles, summaries, topic checks, short prompts without tools) go to the local model; turns of the main model, tool-using turns and long contexts go to the cloud. Rules are configuration (`gateway.rules`), and each decision is audited with the rule that chose it.
+- A local answer needs the request translated from the Anthropic format (messages, system blocks, streaming events) to the OpenAI-compatible one and back. Requests with tools or images are never routed locally in the first version.
+- A request the local model cannot take (busy past a wait limit, error, no local model) falls through to the cloud unless the caller asked for local only.
+- Authorisation for the cloud leg: the caller's own `Authorization` / `x-api-key` header is passed through to Anthropic for that one request and never stored or logged, so a subscription sign-in works. A server-side key (`api_key_env`) is the alternative for shared installs.
+- Opt-in as decided: off unless the provider has `gateway: true` and the organisation allows it.
+
 ## Identity (decided: option 1)
 
 Every execution needs a registered runtime session (`X-CodeSynapse-Session`, equal parent). Most agent clients cannot send custom headers, and AGENTS.md says never to generate a fallback. Options:
