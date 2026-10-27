@@ -51,3 +51,20 @@ func TestQueuedRequestStopsWhenContextEnds(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.True(t, newSlots(ProviderConfig{BaseURL: "https://api.example.com/v1"}) == nil, "cloud is unlimited by default")
 }
+
+func TestGatewayTargetNeedsOptInAndLocal(t *testing.T) {
+	local := ProviderConfig{Name: "l", Kind: "openai", BaseURL: "http://localhost:11434/v1", Model: "m", Gateway: true}
+	cloud := ProviderConfig{Name: "c", Kind: "openai", BaseURL: "https://api.example.com/v1", Model: "m", Gateway: true}
+	r := NewRegistry(Config{Providers: []ProviderConfig{cloud}})
+	_, ok := r.GatewayTarget()
+	assert.True(t, !ok, "a cloud provider is never a gateway target")
+	local.Gateway = false
+	r = NewRegistry(Config{Providers: []ProviderConfig{local}})
+	_, ok = r.GatewayTarget()
+	assert.True(t, !ok, "off unless the provider opts in")
+	local.Gateway = true
+	r = NewRegistry(Config{Providers: []ProviderConfig{local}})
+	got, ok := r.GatewayTarget()
+	assert.True(t, ok)
+	assert.Equal(t, got.Model, "m")
+}

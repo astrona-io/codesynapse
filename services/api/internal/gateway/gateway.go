@@ -50,6 +50,8 @@ type Meta struct {
 	Stream bool
 	Bytes  int
 	Tools  bool
+	// Route is where the call was answered: local or cloud.
+	Route string
 }
 
 // Anthropic forwards Anthropic-compatible requests.
@@ -59,6 +61,9 @@ type Anthropic struct {
 	Upstream string
 	// Client must not follow redirects.
 	Client *http.Client
+	// Local, when set and returning a model, answers small tool-free requests on /v1/messages; the
+	// rest, and any it cannot take in time, go to the cloud.
+	Local func() *Local
 	// Done is called once per request with what happened; it must not retain
 	// anything but the values it is given.
 	Done func(ctx context.Context, m Meta, status int, took time.Duration)
@@ -79,6 +84,17 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			return
 		}
 		meta := inspect(upstreamPath, body)
+		if local := g.local(); local != nil && upstreamPath == "/v1/messages" {
+			rec := &statusWriter{ResponseWriter: w}
+			if local.serve(r.Context(), rec, body) {
+				if g.Done != nil {
+					meta.Route = "local"
+					g.Done(r.Context(), meta, http.StatusOK, time.Since(start))
+				}
+				return
+			}
+		}
+		meta.Route = "cloud"
 		if !hasCredential(r) {
 			problem(w, http.StatusUnauthorized, "send your Anthropic credential (Authorization or x-api-key) with the request; the gateway does not store one")
 			return
@@ -95,6 +111,13 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			g.Done(r.Context(), meta, status, time.Since(start))
 		}
 	}
+}
+
+func (g *Anthropic) local() *Local {
+	if g.Local == nil {
+		return nil
+	}
+	return g.Local()
 }
 
 func hasCredential(r *http.Request) bool {
@@ -146,6 +169,7 @@ func (g *Anthropic) forward(ctx context.Context, w http.ResponseWriter, r *http.
 			w.Header().Set(h, v)
 		}
 	}
+	w.Header().Set(RouteHeader, "cloud")
 	w.WriteHeader(resp.StatusCode)
 	flusher, _ := w.(http.Flusher)
 	buf := make([]byte, 16<<10)
@@ -165,6 +189,16 @@ func (g *Anthropic) forward(ctx context.Context, w http.ResponseWriter, r *http.
 			}
 			return resp.StatusCode, fmt.Errorf("stream: %w", rerr)
 		}
+	}
+}
+
+// statusWriter lets Local.serve write through unchanged; it exists so the
+// local path never touches the caller's headers before it commits.
+type statusWriter struct{ http.ResponseWriter }
+
+func (s *statusWriter) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
 	}
 }
 

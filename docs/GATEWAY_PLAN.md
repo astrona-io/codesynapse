@@ -39,6 +39,10 @@ Every execution needs a registered runtime session (`X-CodeSynapse-Session`, equ
 
 Decision: option 1, as an explicit "gateway key" with its own audit trail.
 
+## Local leg (built)
+
+A provider with `gateway: true` (local only, explicit `model`) answers `/v1/messages` requests that name a haiku-class model, carry no tools, tool choice, thinking or non-text blocks, and are at most 256 KiB. The request is translated to `/chat/completions`, takes the provider's queue slot (shared with CodeSynapse's own calls), and the answer is translated back to Anthropic events. If the queue wait passes 20 s, the model errors or answers non-200, nothing has been written and the cloud takes the request. `X-CodeSynapse-Route: local|cloud` says which. A local answer needs no Anthropic credential. Still to do: the organisation-level opt-in, and the OpenAI-compatible endpoint for local agents.
+
 ## Credentials (decided)
 
 The gateway key travels in `X-CodeSynapse-Key` (Claude Code: `ANTHROPIC_CUSTOM_HEADERS`). `Authorization` and `x-api-key` stay the caller's own Anthropic credential, passed to the cloud for that request only. The route is mounted only with `CODESYNAPSE_GATEWAY=true` and accounts. Requests are forwarded to `https://api.anthropic.com` only, without redirects, with a header allowlist and a 32 MiB body cap; the audit records the model, size and status, never text.
