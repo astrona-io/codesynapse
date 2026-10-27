@@ -251,6 +251,32 @@ func (s *Server) runQueue(ctx context.Context) {
 	}
 }
 
+// startRecordedClone queues a clone from a stored clone job's parameters,
+// with credentials derived again; jobCtx is the requester's rechecked context.
+func (s *Server) startRecordedClone(jobCtx context.Context, rec accounts.JobRecord) error {
+	var p cloneParams
+	if err := json.Unmarshal(rec.Params, &p); err != nil {
+		return err
+	}
+	if err := s.removePartialClone(rec.Repo); err != nil {
+		return err
+	}
+	auth := gitx.Auth{}
+	if p.Private {
+		var err error
+		if auth, err = s.orgAuth(jobCtx, rec.OrgID, p.Remote); err != nil {
+			return fmt.Errorf("the organisation's Git token is no longer available: %w", err)
+		}
+	}
+	org, authorize := s.jobAuthorization(jobCtx, rec.Repo, accounts.Admin)
+	d, err := durable(jobCtx, "clone", accounts.Admin, p)
+	if err != nil {
+		return err
+	}
+	_, err = s.startCloneAuth(p.Remote, p.Name, p.Branch, auth, JobOptions{OrgID: org, Identity: identityOf(jobCtx), Authorize: authorize, Durable: d}) //nolint:contextcheck // jobs outlive the resume pass
+	return err
+}
+
 func (s *Server) resumeJob(ctx context.Context, rec accounts.JobRecord) error {
 	if rec.Kind == "fix" && rec.Attempts > 0 {
 		return errors.New("fix branches are not restarted automatically; start the fix again")
@@ -275,25 +301,7 @@ func (s *Server) resumeJob(ctx context.Context, rec accounts.JobRecord) error {
 		}
 		_, err = s.startSync(jobCtx, rec.Repo, p.Branch, false, done)
 	case "clone":
-		var p cloneParams
-		if err := json.Unmarshal(rec.Params, &p); err != nil {
-			return err
-		}
-		if err := s.removePartialClone(rec.Repo); err != nil {
-			return err
-		}
-		auth := gitx.Auth{}
-		if p.Private {
-			if auth, err = s.orgAuth(jobCtx, rec.OrgID, p.Remote); err != nil {
-				return fmt.Errorf("the organisation's Git token is no longer available: %w", err)
-			}
-		}
-		org, authorize := s.jobAuthorization(jobCtx, rec.Repo, accounts.Admin)
-		d, derr := durable(jobCtx, "clone", accounts.Admin, p)
-		if derr != nil {
-			return derr
-		}
-		_, err = s.startCloneAuth(p.Remote, p.Name, p.Branch, auth, JobOptions{OrgID: org, Identity: identityOf(jobCtx), Authorize: authorize, Durable: d}) //nolint:contextcheck // jobs outlive the resume pass
+		err = s.startRecordedClone(jobCtx, rec)
 	case "switch":
 		var p switchParams
 		if err := json.Unmarshal(rec.Params, &p); err != nil {

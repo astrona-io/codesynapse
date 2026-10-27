@@ -143,6 +143,7 @@ type Server struct {
 	offload *offload.Worker
 	recall  *recall.Service
 	sched   *schedules
+	reclone recloner
 	orgs    *orgs
 	logger  *slog.Logger
 	mux     *http.ServeMux
