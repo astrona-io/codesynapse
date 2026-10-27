@@ -3,7 +3,9 @@
 !!! info "In plain words"
     The first time CodeSynapse starts, it makes one special account called `admin` with a long random password. Find that password, sign in, then set up your team's **organisation** and its first **owner**. The `admin` account only runs the platform; it never reads anyone's code. The steps below walk through exactly that.
 
-The first start of an empty installation **creates an administrator for you**: user `admin`, with a **random password** that is generated for that installation. You sign in with it, then replace it with your own account. Until an organisation connects single sign-on, everyone signs in with the local user database.
+The first time an empty installation starts, it **creates an administrator for you**. The user is `admin` and the password is **random**, made just for your installation. You sign in with it, then replace it with your own account.
+
+"Local user database" means CodeSynapse keeps the accounts itself, in PostgreSQL. Everyone signs in that way until an organisation connects single sign-on (SSO, sign-in through your company's identity provider).
 
 !!! warning "There is no shared default password"
     Every installation gets its own random password. Nothing in an image or a repository can sign in anywhere else. The password is stored where you deploy: in `.env` with Docker Compose, in a Secret with Kubernetes.
@@ -33,7 +35,9 @@ The guide for root has two steps:
 
 The owner gets their own guide on first sign-in: add a first repository, connect a coding agent, and (for owners and admins) invite the team. Steps that can be detected tick themselves; the others tick when you open them. Skipping is remembered per person in that browser.
 
-Until you replace the auto-created admin, a banner stays at the top of every page. The replacement is audited (`setup.root_replaced`) and can be done once: only the account made at first start can be replaced, never one you made yourself. Until the organisation exists, other sign-ups stay closed even with `CODESYNAPSE_SIGNUP_OPEN=true`.
+Until you replace the auto-created admin, a banner stays at the top of every page. The replacement is audited (`setup.root_replaced`) and can be done once. Only the account made at first start can be replaced, never one you made yourself. Until the organisation exists, other sign-ups stay closed even with `CODESYNAPSE_SIGNUP_OPEN=true`.
+
+The picture below shows the whole path:
 
 ```mermaid
 flowchart LR
@@ -45,8 +49,6 @@ flowchart LR
     out --> owner[Owner signs in]
     owner --> work([Organisation work])
 ```
-
-Until you replace it, a banner stays at the top of every page. The replacement is audited (`setup.root_replaced`) and can be done once: only the account made at first start can be replaced, never one you made yourself.
 
 !!! tip "Prefer to choose the first account yourself?"
     Set `CODESYNAPSE_AUTO_ADMIN=false` (Helm: `admin.enabled: false`). Nothing is created at start, and the first sign-up on the dashboard becomes the root account instead.

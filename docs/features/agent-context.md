@@ -7,6 +7,8 @@ The MCP server (`services/mcp`) gives assistants small composite answers. Few to
 
 ## Recommended agent workflow
 
+In short: recall earlier decisions, ask where to start, read only the lines it points to, check who calls what before editing, and check the change before finishing. The diagram shows every branch.
+
 ```mermaid
 flowchart TD
     task([New task]) --> recall[recall_context<br/>prior decisions and preferences]
@@ -31,6 +33,8 @@ flowchart TD
 ```
 
 ## Tool map
+
+Find the job you want done in the left column, then use the tool next to it. The last column names the code behind the tool, for people who want to read it.
 
 | Need | Tool | Implementation |
 |---|---|---|

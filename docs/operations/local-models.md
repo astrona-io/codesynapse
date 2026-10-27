@@ -44,6 +44,8 @@ This page covers why you would run one, what the two recommended Qwen models nee
 
 ## The two Qwen models
 
+Qwen is a family of open AI models you can download. Two words help with the table: *parameters* are the model's learned numbers (more usually means smarter and bigger), and the *context* is how much text the model can hold in mind at once, counted in tokens.
+
 | | `qwen3.8:27b` | Qwen3.8-Flash-Next (125B) |
 |---|---|---|
 | Design | Dense, 27.8B parameters | Mixture of experts: 125B total, about 6B active per token |
@@ -63,6 +65,8 @@ Every setup also needs the embedding model `nomic-embed-text` (0.3 GB) for recal
 The CodeSynapse stack itself uses about 1 GB across its containers at rest (measured with `podman stats`); see [Requirements](requirements.md).
 
 ## Set it up with Ollama
+
+[Ollama](https://ollama.com) is a free program that downloads models and runs them on your machine. These steps assume you have the CodeSynapse stack running (see [Running the stack](running.md)).
 
 1. Install [Ollama](https://ollama.com) and pull the models:
 
@@ -119,7 +123,7 @@ To check it works, ask an agent a question about a large file and look for an `a
 
 ## Queueing and shorter prompts
 
-A local provider runs one request at a time (`max_concurrent`, default 1). When several agents ask at once, the rest wait their turn and continue when the answer is ready, so the GPU stays busy without being overloaded. A waiting request gives up only when its caller does. Raise `max_concurrent` if your server batches requests (for Ollama set `OLLAMA_NUM_PARALLEL` too).
+A local provider answers one request at a time (`max_concurrent`, default 1). If several agents ask at once, the rest wait in a queue and continue when their answer is ready. That keeps the GPU busy without overloading it. A waiting request gives up only when its caller does. Raise `max_concurrent` if your server batches requests (for Ollama set `OLLAMA_NUM_PARALLEL` too).
 
 With `compress_prompts: true` at the top of `config/llm.yaml`, a prompt bound for a cloud provider first goes through a local model (task `compress`, local only) that rewrites its prose in short telegraphic form. Code, diffs, lists and JSON are never touched, a rewrite that drops a number or a backticked name is discarded, and without a local model the original is sent. The cloud model is also asked for terse answers. Bytes removed show as `compressed_bytes` in the provider usage.
 

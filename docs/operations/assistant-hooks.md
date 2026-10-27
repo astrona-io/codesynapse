@@ -7,16 +7,22 @@ CodeSynapse installs native lifecycle adapters for Codex and Cursor. The adapter
 
 ## Setup
 
-Install a current `codesynapse` binary first; `go run` executables are temporary and cannot be installed as hooks. Create a personal organisation API key in Settings → API keys. Set `CODESYNAPSE_API_TOKEN` to that key using your secret manager or shell environment. Installation stores the key in the existing user configuration token file with mode 0600. Hook files and command arguments contain no credentials.
+Before you start:
 
-For a project:
+1. Install a current `codesynapse` binary. A `go run` build is temporary and cannot be installed as a hook.
+2. Create a personal organisation API key in Settings → API keys.
+3. Set `CODESYNAPSE_API_TOKEN` to that key, using your secret manager or shell environment.
+
+The installer stores the key in the existing user configuration token file, readable only by you (mode 0600). Hook files and command arguments contain no credentials.
+
+To install hooks for one project:
 
 ```sh
 codesynapse mcp hooks . --client codex
 codesynapse mcp hooks . --client cursor
 ```
 
-These commands write `.codex/hooks.json` and `.cursor/hooks.json` respectively. For user-wide installation alongside MCP connection settings:
+These commands write `.codex/hooks.json` and `.cursor/hooks.json` respectively. To install for your whole user account instead, together with the MCP connection settings:
 
 ```sh
 codesynapse mcp install --yes --only codex,cursor
