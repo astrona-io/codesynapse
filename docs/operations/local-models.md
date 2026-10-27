@@ -114,6 +114,12 @@ The CodeSynapse stack itself uses about 1 GB across its containers at rest (meas
 
 To check it works, ask an agent a question about a large file and look for an `ask_local` call. Statistics → Agents shows the local models' work under Local models.
 
+## Queueing and shorter prompts
+
+A local provider runs one request at a time (`max_concurrent`, default 1). When several agents ask at once, the rest wait their turn and continue when the answer is ready, so the GPU stays busy without being overloaded. A waiting request gives up only when its caller does. Raise `max_concurrent` if your server batches requests (for Ollama set `OLLAMA_NUM_PARALLEL` too).
+
+With `compress_prompts: true` at the top of `config/llm.yaml`, a prompt bound for a cloud provider first goes through a local model (task `compress`, local only) that rewrites its prose in short telegraphic form. Code, diffs, lists and JSON are never touched, a rewrite that drops a number or a backticked name is discarded, and without a local model the original is sent. The cloud model is also asked for terse answers. Bytes removed show as `compressed_bytes` in the provider usage.
+
 ## Other servers
 
 Anything with an OpenAI-compatible `/v1/chat/completions` works with `kind: openai`: MLX (`mlx_lm.server`), LM Studio, vLLM, llama.cpp. On MLX, vLLM and SGLang use `disable_thinking: true` instead of `effort: none`. See [AI models](running.md#ai-models) for every provider setting.
