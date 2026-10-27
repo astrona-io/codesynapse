@@ -1,5 +1,8 @@
 # Single sign-on (phase 5)
 
+!!! tip "In plain words"
+    Single sign-on lets people log in with their company account (for example Okta or Microsoft Entra ID) instead of a separate CodeSynapse password. Each organisation can connect one provider using a standard called OpenID Connect. The provider's groups then decide each person's role and teams.
+
 Each organisation can connect one OpenID Connect provider (Entra ID, Okta, Keycloak, Google Workspace, Authentik, …). People sign in through it, get an account on first use, and the provider's groups decide their role and teams in that organisation. Passwords keep working for everyone else.
 
 Phase 5a is the API and the rules; phase 5b is the dashboard (see [Dashboard](#dashboard-5b)).

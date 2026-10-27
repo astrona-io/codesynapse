@@ -1,5 +1,8 @@
 # Overview and dependencies
 
+!!! tip "In plain words"
+    The Overview page answers "what should I look at first?" across all your repositories, worst problem first. The Dependencies page lists the libraries a repository uses, with their licences and known security holes.
+
 ## What needs attention
 
 The **Overview** page ranks what to fix across your repositories, worst first:

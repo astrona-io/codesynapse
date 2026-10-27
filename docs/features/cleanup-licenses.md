@@ -1,5 +1,8 @@
 # Cleanup and licences
 
+!!! tip "In plain words"
+    Two reports about things you can tidy up. *Unused code* lists code that nothing ever runs. *Licences* checks the rules attached to the libraries you use, because a wrong licence can be an expensive surprise. Both are worked out once, when a repository is indexed, and then stored.
+
 Both reports are computed at ingest on the complete graph and stored, so they cover everything and never hit `store.MaxLimit`.
 
 ## Unused code

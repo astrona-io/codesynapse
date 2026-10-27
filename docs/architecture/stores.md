@@ -1,5 +1,8 @@
 # Stores and backends
 
+!!! tip "In plain words"
+    CodeSynapse keeps its data in a few databases. All access goes through one interface, and there are two versions of it that must behave the same: NebulaGraph (the real graph database) and an in-memory copy for tests and offline use.
+
 All persistence goes through the `store.Store` interface in `internal/store`. Two implementations must behave identically: NebulaGraph in production and an in-memory twin for tests and offline use.
 
 ```mermaid

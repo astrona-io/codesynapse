@@ -131,3 +131,27 @@ Plain-English meanings for the words you will meet in CodeSynapse. Each entry sa
 
 **Fix branch**
 :   A new git branch with a suggested fix for a review comment you accepted. It opens a *draft* pull request for a person to review. It is off unless an operator enables pushing, and it never force-pushes.
+
+## More terms
+
+**Tenant**
+:   One customer of a shared installation. In CodeSynapse a tenant is an organisation: its repositories, reviews and memory stay private to it.
+
+**OpenID Connect (OIDC)**
+:   The standard sign-in protocol behind single sign-on. Okta, Microsoft Entra ID, Keycloak and Google Workspace all speak it.
+
+**Telemetry**
+:   Numbers about how the system behaves (requests, delays, errors). CodeSynapse never puts prompts, code or file paths into them.
+
+**NebulaGraph**
+:   The database that stores the code graph.
+
+**Milvus**
+:   The database that stores vectors for agent memory.
+
+**PostgreSQL**
+:   The database that stores accounts, organisations, sessions and the audit log.
+
+**Node / edge**
+:   The "dots" and "lines" of the graph. A node is a thing (a function, a file); an edge is a link between two nodes (for example "calls").
+

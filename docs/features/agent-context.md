@@ -1,5 +1,8 @@
 # Agent context (MCP)
 
+!!! tip "In plain words"
+    This page is about how a coding assistant (an "agent") asks CodeSynapse questions. Instead of reading whole files, the agent calls a few small tools (see [MCP](../GLOSSARY.md#ai-assistants) in the glossary) and gets a short answer. Fewer, bigger tools are better, because an agent has to carry every tool's description in its working memory on every turn.
+
 The MCP server (`services/mcp`) gives assistants small composite answers. Few tools beat many: every tool definition costs every agent context on every turn.
 
 ## Recommended agent workflow
