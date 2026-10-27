@@ -180,6 +180,26 @@ func SetClaudeGateway(file, base, key string, now time.Time) (string, error) {
 	return strings.Join(diff, "\n"), nil
 }
 
+// ClaudeGatewayConfig returns the base URL and key SetClaudeGateway wrote to
+// the settings file. ok is false unless the CodeSynapse header is present, so
+// a base URL somebody else set is never ours to check.
+func ClaudeGatewayConfig(file string) (base, key string, ok bool) {
+	doc, _, err := readSettings(file)
+	if err != nil {
+		return "", "", false
+	}
+	env, _ := doc["env"].(map[string]any)
+	base, _ = env[gatewayBaseKey].(string)
+	hdrs, _ := env[gatewayHeaderKey].(string)
+	for _, l := range headerLines(hdrs) {
+		if isOurHeader(l) {
+			_, key, _ = strings.Cut(l, ":")
+			key = strings.TrimSpace(key)
+		}
+	}
+	return base, key, base != "" && key != ""
+}
+
 // RemoveClaudeGateway undoes SetClaudeGateway. The base URL goes only when
 // the CodeSynapse header marks it as ours; other headers stay.
 func RemoveClaudeGateway(file string, now time.Time) (string, error) {
