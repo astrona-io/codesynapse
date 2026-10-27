@@ -91,7 +91,23 @@ const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
 const showPluginStatus = computed(() => viaBridge.value && selected.value.includes('claude'))
 const setupAgents = computed(() => selectedAgents.value.filter(a => a.id === 'codex' || a.id === 'cursor' || (a.id === 'claude' && viaBridge.value)))
 const stepPlugin = (agent: AgentID) => (viaBridge.value ? 4 : 3) + setupAgents.value.findIndex(a => a.id === agent)
-const stepCheck = computed(() => (viaBridge.value ? 4 : 3) + setupAgents.value.length)
+const stepGateway = computed(() => (viaBridge.value ? 4 : 3) + setupAgents.value.length)
+const stepCheck = computed(() => stepGateway.value + (session.accounts.value ? 1 : 0))
+
+// Optional: send the agent's model requests through this installation, which
+// queues them and answers small ones from a local model. Needs the operator to
+// run the API with CODESYNAPSE_GATEWAY=true. The gateway key is the key of step 1.
+const gatewayKey = computed(() => key.value || 'csk_…')
+const claudeGateway = computed(() => JSON.stringify({ env: { ANTHROPIC_BASE_URL: apiUrl.value, ANTHROPIC_CUSTOM_HEADERS: `X-CodeSynapse-Key: ${gatewayKey.value}` } }, null, 2))
+const openaiGateway = computed(() => `OPENAI_BASE_URL=${apiUrl.value}/v1\nOPENAI_API_KEY=${gatewayKey.value}`)
+const gatewayTest = computed(() => `curl -s ${shellQuote(apiUrl.value + '/v1/models')} \\\n  -H ${shellQuote('Authorization: Bearer ' + gatewayKey.value)}`)
+// The key is also used by MCP calls, so this says "the key was used since this
+// page opened", not strictly "a gateway request".
+const openedAt = Date.now()
+const gatewaySeen = computed(() => {
+  const t = keys.value?.keys.find((k) => k.id === keyId.value)?.last_used_at
+  return !!t && Date.parse(t) >= openedAt - 1000
+})
 
 // Last step: a cap on each chat's context. The agent compacts at the cap;
 // with the memory hooks the older turns are offloaded first. The setup
@@ -118,13 +134,14 @@ const checks = computed(() => [
   { id: 'key', label: 'Key created', done: !!keyId.value || !session.accounts.value, hint: 'Step 1.' },
   { id: 'connected', label: 'Agent connected', done: !!connected.value || firstCall.value, hint: connected.value ? `The key was first used ${relTime(connected.value)}.` : 'Start a new chat after completing your agent’s connection and session setup.' },
   { id: 'call', label: 'First tool call', done: firstCall.value, hint: firstCall.value ? 'A CodeSynapse tool answered a call.' : 'Ask something about a repository. Calls are counted within a minute.' },
+  ...(session.accounts.value && keyId.value ? [{ id: 'gateway', label: 'Gateway key used', done: gatewaySeen.value, hint: gatewaySeen.value ? 'The key was used since you opened this page.' : 'Optional. Run the test in the gateway step; the key counts as used within a minute.' }] : []),
   ...(showPluginStatus.value ? [{ id: 'plugin', label: 'Plugin running', done: pluginSeen.value, hint: pluginSeen.value ? 'Its hooks reported how a session began.' : 'Optional. Appears after a new chat with the plugin installed, once it has looked at code.' }] : []),
 ])
 let poll: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
   poll = setInterval(() => {
     if (document.visibilityState !== 'visible') return
-    if (keyId.value && !connected.value) refreshKeys()
+    if (keyId.value && (!connected.value || !gatewaySeen.value)) refreshKeys()
     if (!firstCall.value || (showPluginStatus.value && !pluginSeen.value)) refreshStatus()
   }, 5000)
 })
@@ -245,6 +262,28 @@ onBeforeUnmount(() => clearInterval(poll))
             <p>See Cursor’s <a href="https://cursor.com/docs/hooks" target="_blank" rel="noopener noreferrer">hook documentation</a>. Hooks leave permission decisions with Cursor and never auto-approve requests.</p>
           </div>
         </details>
+      </div>
+    </section>
+
+    <section v-if="session.accounts.value" class="panel step">
+      <p class="step__n">{{ stepGateway }}</p>
+      <div class="stack--tight">
+        <h2>Send model requests through CodeSynapse <span class="muted">(optional)</span></h2>
+        <p class="muted">With the gateway on, every request your agent makes to its model goes to CodeSynapse first. It waits its turn in a queue, small requests are answered by a local model, and the rest is passed on to the cloud with your own credential, which is never stored. Each request is checked against your key and audited. The operator must run the API with <code>CODESYNAPSE_GATEWAY=true</code>; until then these requests are refused.</p>
+        <template v-if="selected.includes('claude')">
+          <h3>Claude Code</h3>
+          <p class="muted small">Merge this into <code>~/.claude/settings.json</code>. Claude Code keeps using your own Anthropic sign-in; only the address and the header change.</p>
+          <CopyField :value="claudeGateway" multiline label="settings.json" />
+        </template>
+        <template v-else>
+          <h3>Local agents (OpenAI-compatible)</h3>
+          <p class="muted small">Set these where the agent starts. These requests are always answered by the local model, never the cloud.</p>
+          <CopyField :value="openaiGateway" multiline label="Environment" />
+        </template>
+        <p v-if="!key" class="muted small">Create the key in step 1 first: it is filled into these snippets.</p>
+        <h3>Test it</h3>
+        <p class="muted small">Lists the local model. A 401 means the key is wrong; a 503 means no local model has <code>gateway: true</code> yet.</p>
+        <CopyField :value="gatewayTest" multiline label="Shell" />
       </div>
     </section>
 
