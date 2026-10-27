@@ -58,6 +58,8 @@ flowchart LR
 
 Symbol-level reachability exists for Go. For the other ecosystems, advisories rarely list symbols, so the levels are imported (npm, PyPI, Cargo, NuGet and RubyGems, when a source file imports the package; for NuGet, a using directive whose namespace the package ID prefixes; for RubyGems, a require of the gem) or required (everything else: PHP and Java imports are not matched to Composer or Maven names). `--fail-on` gates CI on reachable vulnerabilities only.
 
+For npm and PyPI the code graph also records which members of a package your non-test code calls through an import (`lodash.template`, `yaml.safe_load`). OSV lists no affected functions for these ecosystems, so a vulnerability stays `imported`; but when its advisory text names a member you call (the full name, or the name in backticks or with parentheses), the vulnerability gets an inferred `AFFECTS` edge to that member and the call sites show with it. It is evidence for a person or an agent to check, never a `called` verdict, and `--fail-on` ignores it. A method on a value a package returned (`yaml.load(x).items()`) is not seen.
+
 ## Priority
 
 A finding's priority combines:
