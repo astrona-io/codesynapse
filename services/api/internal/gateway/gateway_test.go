@@ -51,7 +51,7 @@ func TestForwardPassesCredentialAndStreams(t *testing.T) {
 	assert.Equal(t, got.Get(KeyHeader), "")
 	assert.Equal(t, got.Get("Cookie"), "")
 	assert.Equal(t, gotBody, `{"model":"m1","stream":true,"tools":[{}]}`)
-	assert.Equal(t, meta, Meta{Path: "/v1/messages", Model: "m1", Stream: true, Bytes: len(gotBody), Tools: true})
+	assert.Equal(t, meta, Meta{Path: "/v1/messages", Model: "m1", Stream: true, Bytes: len(gotBody), Tools: true, Route: "cloud"})
 }
 
 func TestNoCredentialIsRefused(t *testing.T) {
@@ -87,3 +87,85 @@ func TestBodyIsCapped(t *testing.T) {
 type zeros struct{}
 
 func (zeros) Read(p []byte) (int, error) { clear(p); return len(p), nil }
+
+func localServer(t *testing.T, status int) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, r.URL.Path, "/v1/chat/completions")
+		if status != http.StatusOK {
+			w.WriteHeader(status)
+			return
+		}
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n"+
+			"data: {\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2}}\n\n"+
+			"data: [DONE]\n\n")
+	}))
+}
+
+func TestSmallRequestIsAnsweredLocally(t *testing.T) {
+	loc := localServer(t, http.StatusOK)
+	defer loc.Close()
+	cloudHit := false
+	cloud := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { cloudHit = true }))
+	defer cloud.Close()
+	g := NewAnthropic()
+	g.Upstream = cloud.URL
+	released := false
+	l := &Local{BaseURL: loc.URL + "/v1", Model: "qwen", Acquire: func(context.Context) (func(), error) {
+		return func() { released = true }, nil
+	}}
+	g.Local = func() *Local { return l }
+	var meta Meta
+	g.Done = func(_ context.Context, m Meta, _ int, _ time.Duration) { meta = m }
+	body := `{"model":"claude-haiku-5-5","max_tokens":50,"system":"be brief","messages":[{"role":"user","content":"hi"}],"stream":true}`
+
+	// No Anthropic credential is needed for a local answer.
+	rec := httptest.NewRecorder()
+	g.Handler("/v1/messages")(rec, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body)))
+	assert.Equal(t, rec.Code, 200)
+	assert.Equal(t, rec.Header().Get(RouteHeader), "local")
+	out := rec.Body.String()
+	for _, want := range []string{"event: message_start", `"text":"Hel"`, `"text":"lo"`, `"stop_reason":"end_turn"`, `"output_tokens":2`, "event: message_stop"} {
+		assert.True(t, strings.Contains(out, want), want)
+	}
+	assert.True(t, !cloudHit)
+	assert.True(t, released)
+	assert.Equal(t, meta.Route, "local")
+
+	rec = httptest.NewRecorder()
+	g.Handler("/v1/messages")(rec, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(strings.Replace(body, `"stream":true`, `"stream":false`, 1))))
+	assert.True(t, strings.Contains(rec.Body.String(), `"text":"Hello"`))
+}
+
+func TestLocalFallsThroughToCloud(t *testing.T) {
+	cases := map[string]struct {
+		body   string
+		status int
+		local  func(context.Context) (func(), error)
+	}{
+		"main model":   {`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`, 200, nil},
+		"has tools":    {`{"model":"claude-haiku-5-5","tools":[{"name":"x"}],"messages":[{"role":"user","content":"hi"}]}`, 200, nil},
+		"has image":    {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"image"}]}]}`, 200, nil},
+		"local errors": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 500, nil},
+		"queue timeout": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 200,
+			func(ctx context.Context) (func(), error) { <-ctx.Done(); return nil, ctx.Err() }},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			loc := localServer(t, tc.status)
+			defer loc.Close()
+			cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "cloud") }))
+			defer cloud.Close()
+			g := NewAnthropic()
+			g.Upstream = cloud.URL
+			l := &Local{BaseURL: loc.URL + "/v1", Model: "qwen", Acquire: tc.local, Wait: 20 * time.Millisecond}
+			g.Local = func() *Local { return l }
+			rec := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(tc.body))
+			r.Header.Set("X-Api-Key", "k")
+			g.Handler("/v1/messages")(rec, r)
+			assert.Equal(t, rec.Body.String(), "cloud")
+			assert.Equal(t, rec.Header().Get(RouteHeader), "cloud")
+		})
+	}
+}

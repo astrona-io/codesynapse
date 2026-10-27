@@ -37,6 +37,16 @@ func (s *Server) gatewayRoutes() {
 	}
 	g := gateway.NewAnthropic()
 	g.Upstream = s.cfg.GatewayUpstream
+	g.Local = func() *gateway.Local {
+		if s.cfg.LLM == nil {
+			return nil
+		}
+		t, ok := s.cfg.LLM.GatewayTarget()
+		if !ok {
+			return nil
+		}
+		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire}
+	}
 	for _, path := range []string{"/v1/messages", "/v1/messages/count_tokens"} {
 		h := g.Handler(path)
 		s.route("POST "+path, orgRole(accounts.Member), func(w http.ResponseWriter, r *http.Request) {
