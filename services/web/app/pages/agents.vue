@@ -38,14 +38,10 @@ const agents = [
 ] as const
 const selectedAgents = computed(() => agents.filter(a => selected.value.includes(a.id)))
 function toggleAgent(id: AgentID) {
-  selected.value = selected.value.includes(id) ? selected.value.filter(a => a !== id) : [...selected.value, id]
+  selected.value = [id] // one agent at a time for now
 }
 const install = 'brew install astrona-io/tap/codesynapse'
 const urls = computed(() => `--url ${shellQuote(mcpUrl.value)} --api-url ${shellQuote(apiUrl.value)}`)
-const combinedSetup = computed(() => {
-  const ids = selectedAgents.value.filter(a => a.id !== 'other').map(a => a.id)
-  return ids.length ? `CODESYNAPSE_MCP_TOKEN=${shellQuote(token.value)} codesynapse mcp install --yes --only ${ids.join(',')} ${urls.value}` : ''
-})
 function snippet(agent: AgentID) {
   if (viaBridge.value) {
     switch (agent) {
@@ -173,22 +169,17 @@ onBeforeUnmount(() => clearInterval(poll))
       <p class="step__n">{{ viaBridge ? 3 : 2 }}</p>
       <div class="stack--tight">
         <h2>Add CodeSynapse to your agents</h2>
-        <p id="agent-selection-hint" class="muted">Choose every agent you use. Each selected agent has its own connection settings; you can connect several on the same machine.</p>
+        <p id="agent-selection-hint" class="muted">Choose the agent you want to connect. Set up one agent at a time; come back to connect the next.</p>
         <div class="row" role="group" aria-label="Agents to connect" aria-describedby="agent-selection-hint">
           <button v-for="a in agents" :key="a.id" type="button" class="chip" :class="{ active: selected.includes(a.id) }" :aria-pressed="selected.includes(a.id)" @click="toggleAgent(a.id)">{{ a.label }}</button>
         </div>
-        <p v-if="!selectedAgents.length" class="muted" role="status">Choose at least one agent to see its setup instructions.</p>
-        <template v-if="viaBridge && combinedSetup">
-          <h3>Set up the selected agents together</h3>
-          <CopyField :value="combinedSetup" multiline label="Shell — run once" />
-          <p class="muted small">This installs connection settings and Codex/Cursor hooks, and stores the key in your private configuration. Restart each assistant, then review Codex hooks through <code>/hooks</code>.</p>
-        </template>
+        <p v-if="!selectedAgents.length" class="muted" role="status">Choose an agent to see its setup instructions.</p>
         <div v-for="a in selectedAgents" :key="a.id" class="stack--tight agent-setup">
           <h3>{{ a.label }}</h3>
           <CopyField :value="snippet(a.id)" multiline :label="`${a.label} connection`" />
           <p class="muted small">{{ where(a.id) }}</p>
         </div>
-        <p class="muted small">MCP address: <code>{{ mcpUrl }}</code><template v-if="viaBridge"> · API address: <code>{{ apiUrl }}</code></template>. Several agents on one machine? Leave out <code>--only</code> and it offers every agent it finds.</p>
+        <p class="muted small">MCP address: <code>{{ mcpUrl }}</code><template v-if="viaBridge"> · API address: <code>{{ apiUrl }}</code></template>.</p>
         <p v-if="viaBridge && apiUrl.includes('<')" class="notice notice--warn" role="status">This installation does not know its public API address. Replace <code>{{ apiUrl }}</code> with the address your API is reached at, or ask the operator to set <code>CODESYNAPSE_PUBLIC_API_URL</code>.</p>
         <details v-if="showPluginStatus">
           <summary class="muted small">Every call reaches the server (and an opt-in for fresh answers)</summary>
