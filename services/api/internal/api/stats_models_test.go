@@ -25,17 +25,21 @@ func modelVM(t *testing.T, filters *[]string) *httptest.Server {
 	t.Helper()
 	q := modelQueries
 	series := map[string]string{
-		q.requests:   `{"llm_provider":"local","llm_model":"qwen","task":"review","outcome":"ok"}=8;{"llm_provider":"local","llm_model":"qwen","task":"review","outcome":"error"}=2;{"llm_provider":"local","llm_model":"qwen","task":"local-answer","outcome":"ok"}=30;{"llm_provider":"cloud","llm_model":"big","task":"briefing","outcome":"ok"}=1`,
-		q.input:      `{"llm_provider":"local","llm_model":"qwen","task":"review"}=40000;{"llm_provider":"local","llm_model":"qwen","task":"local-answer"}=200000;{"llm_provider":"cloud","llm_model":"big","task":"briefing"}=900`,
-		q.output:     `{"llm_provider":"local","llm_model":"qwen","task":"review"}=3000;{"llm_provider":"local","llm_model":"qwen","task":"local-answer"}=9000`,
-		q.readS:      `{"llm_provider":"local","llm_model":"qwen"}=500`,
-		q.writeS:     `{"llm_provider":"local","llm_model":"qwen"}=400`,
-		q.readT:      `{"llm_provider":"local","llm_model":"qwen"}=220000`,
-		q.writeT:     `{"llm_provider":"local","llm_model":"qwen"}=12000`,
-		q.p50:        `{"llm_provider":"local","llm_model":"qwen"}=0.0213`,
-		q.p95:        `{"llm_provider":"local","llm_model":"qwen"}=NaN`,
-		q.cost:       `{"llm_provider":"cloud","llm_model":"big"}=0.0123`,
-		q.compressed: `{"llm_provider":"cloud","llm_model":"big"}=40000`,
+		q.requests:               `{"llm_provider":"local","llm_model":"qwen","task":"review","outcome":"ok"}=8;{"llm_provider":"local","llm_model":"qwen","task":"review","outcome":"error"}=2;{"llm_provider":"local","llm_model":"qwen","task":"local-answer","outcome":"ok"}=30;{"llm_provider":"cloud","llm_model":"big","task":"briefing","outcome":"ok"}=1`,
+		q.input:                  `{"llm_provider":"local","llm_model":"qwen","task":"review"}=40000;{"llm_provider":"local","llm_model":"qwen","task":"local-answer"}=200000;{"llm_provider":"cloud","llm_model":"big","task":"briefing"}=900`,
+		q.output:                 `{"llm_provider":"local","llm_model":"qwen","task":"review"}=3000;{"llm_provider":"local","llm_model":"qwen","task":"local-answer"}=9000`,
+		q.readS:                  `{"llm_provider":"local","llm_model":"qwen"}=500`,
+		q.writeS:                 `{"llm_provider":"local","llm_model":"qwen"}=400`,
+		q.readT:                  `{"llm_provider":"local","llm_model":"qwen"}=220000`,
+		q.writeT:                 `{"llm_provider":"local","llm_model":"qwen"}=12000`,
+		q.p50:                    `{"llm_provider":"local","llm_model":"qwen"}=0.0213`,
+		q.p95:                    `{"llm_provider":"local","llm_model":"qwen"}=NaN`,
+		q.cost:                   `{"llm_provider":"cloud","llm_model":"big"}=0.0123`,
+		q.compressed:             `{"llm_provider":"cloud","llm_model":"big"}=40000`,
+		gatewayQueries.requests:  `{"route":"local","class":"2xx"}=6;{"route":"cloud","class":"2xx"}=3;{"route":"cloud","class":"5xx"}=1;{"route":"rejected","class":"4xx"}=2`,
+		gatewayQueries.bytes:     `{"route":"local","direction":"in"}=1000;{"route":"cloud","direction":"in"}=3000;{"route":"local","direction":"out"}=500`,
+		gatewayQueries.tokens:    `{"kind":"input"}=100000;{"kind":"output"}=20000`,
+		gatewayQueries.unmetered: ``,
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*filters = append(*filters, strings.Join(r.URL.Query()["extra_filters[]"], ";"))
@@ -89,6 +93,11 @@ func TestModelStats(t *testing.T) {
 	assert.Equal(t, *out.CompressionSaved, 0.03, "10000 tokens at $3 per million")
 	assert.Equal(t, c.CompressedBytes, 40000.0)
 	assert.True(t, c.ReadTPS == nil, "no streamed answers, no speed")
+	gw := out.Gateway
+	assert.Equal(t, []float64{gw.Requests, gw.Local, gw.Cloud, gw.Rejected, gw.Failed, gw.LocalSharePct}, []float64{12, 6, 4, 2, 3, 50})
+	assert.Equal(t, []float64{gw.BytesIn, gw.BytesOut}, []float64{4000, 500})
+	require.True(t, gw.SavedDollars != nil)
+	assert.Equal(t, *gw.SavedDollars, 0.6, "100k in at $3 and 20k out at $15 per million")
 	for _, f := range filters {
 		assert.Contains(t, f, "0123456789abcdef01234567", "every query is scoped to the caller's organisations")
 	}

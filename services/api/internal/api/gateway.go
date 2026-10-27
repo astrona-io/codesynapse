@@ -5,9 +5,11 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/services/api/internal/gateway"
 )
 
@@ -42,6 +44,7 @@ func (s *Server) gatewayRoutes() {
 		return
 	}
 	g := gateway.NewAnthropic()
+	g.Done = recordGateway
 	g.Upstream = s.cfg.GatewayUpstream
 	g.Local = func() *gateway.Local {
 		if s.cfg.LLM == nil {
@@ -63,7 +66,7 @@ func (s *Server) gatewayRoutes() {
 			h(w, r)
 		})
 	}
-	o := &gateway.OpenAI{Local: g.Local}
+	o := &gateway.OpenAI{Local: g.Local, Done: recordGateway}
 	bound := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			r, ok := s.gatewaySession(w, r)
@@ -143,4 +146,35 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": on, "available": s.cfg.Gateway})
+}
+
+// recordGateway counts one gateway request. Only the route, the status class
+// and sizes become metrics: never the model name, path or text.
+func recordGateway(ctx context.Context, m gateway.Meta, status int, _ time.Duration) {
+	route := m.Route
+	if route != "local" && route != "cloud" {
+		route = "rejected"
+	}
+	class := "other"
+	switch {
+	case status >= 200 && status < 300:
+		class = "2xx"
+	case status >= 400 && status < 500:
+		class = "4xx"
+	case status >= 500:
+		class = "5xx"
+	}
+	tenant := telemetry.Tenant(ctx)
+	telemetry.GatewayRequests.IncContext(ctx, tenant, route, class)
+	telemetry.GatewayBytes.AddContext(ctx, float64(m.Bytes), tenant, route, "in")
+	telemetry.GatewayBytes.AddContext(ctx, float64(m.Out), tenant, route, "out")
+	if route != "local" {
+		return
+	}
+	if !m.Metered {
+		telemetry.GatewayLocalUnmetered.IncContext(ctx, tenant)
+		return
+	}
+	telemetry.GatewayLocalTokens.AddContext(ctx, float64(m.InTokens), tenant, "input")
+	telemetry.GatewayLocalTokens.AddContext(ctx, float64(m.OutTokens), tenant, "output")
 }

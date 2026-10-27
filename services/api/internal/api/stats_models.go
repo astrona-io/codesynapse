@@ -75,6 +75,32 @@ type ModelStats struct {
 	// unknown, never zero.
 	Spent            *float64 `json:"spent_dollars"`
 	CompressionSaved *float64 `json:"compression_saved_dollars"`
+	// Gateway counts the model requests agents sent through the gateway.
+	Gateway GatewayStat `json:"gateway"`
+}
+
+// GatewayStat is the gateway's traffic in the window. Routes: local (the
+// local model answered), cloud (passed on), rejected (refused before any
+// model).
+type GatewayStat struct {
+	Requests      float64 `json:"requests"`
+	Local         float64 `json:"local"`
+	Cloud         float64 `json:"cloud"`
+	Rejected      float64 `json:"rejected"`
+	Failed        float64 `json:"failed"`
+	LocalSharePct float64 `json:"local_share_pct"`
+	BytesIn       float64 `json:"bytes_in"`
+	BytesOut      float64 `json:"bytes_out"`
+	// LocalInputTokens and LocalOutputTokens are what the local model
+	// reported for the requests it answered.
+	LocalInputTokens  float64 `json:"local_input_tokens"`
+	LocalOutputTokens float64 `json:"local_output_tokens"`
+	// LocalUnmetered counts local answers whose server reported no usage.
+	LocalUnmetered float64 `json:"local_unmetered"`
+	// SavedDollars is what the reference cloud model would have charged for
+	// the locally answered tokens; nil when any local answer was unmetered
+	// (unknown, never zero).
+	SavedDollars *float64 `json:"saved_dollars"`
 }
 
 // bytesPerToken turns compressed prompt bytes into a token estimate.
@@ -121,6 +147,16 @@ var modelQueries = struct{ requests, input, output, cached, readS, writeS, readT
 	writeT:     `sum by (llm_provider, llm_model)(increase(llm_write_tokens_total[$r]))`,
 	p50:        `histogram_quantile(0.5, sum by (le, llm_provider, llm_model)(increase(llm_context_used_ratio_bucket[$r])))`,
 	p95:        `histogram_quantile(0.95, sum by (le, llm_provider, llm_model)(increase(llm_context_used_ratio_bucket[$r])))`,
+}
+
+// gatewayQueries; $r is the window.
+//
+//nolint:gosec // metric names, not credentials
+var gatewayQueries = struct{ requests, bytes, tokens, unmetered string }{
+	requests:  `sum by (route, class)(increase(gateway_requests_total[$r]))`,
+	bytes:     `sum by (route, direction)(increase(gateway_bytes_total[$r]))`,
+	tokens:    `sum by (kind)(increase(gateway_local_tokens_total[$r]))`,
+	unmetered: `sum(increase(gateway_local_unmetered_total[$r]))`,
 }
 
 func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
@@ -225,6 +261,41 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		{modelQueries.p50, func(l map[string]string, v float64) { stat(l).ContextP50 = ptr(round3(v)) }},
 		{modelQueries.p95, func(l map[string]string, v float64) { stat(l).ContextP95 = ptr(round3(v)) }},
 	}
+	var gw GatewayStat
+	steps = append(steps, []struct {
+		expr string
+		add  func(map[string]string, float64)
+	}{
+		{gatewayQueries.requests, func(l map[string]string, v float64) {
+			gw.Requests += v
+			switch l["route"] {
+			case "local":
+				gw.Local += v
+			case "cloud":
+				gw.Cloud += v
+			default:
+				gw.Rejected += v
+			}
+			if l["class"] == "4xx" || l["class"] == "5xx" {
+				gw.Failed += v
+			}
+		}},
+		{gatewayQueries.bytes, func(l map[string]string, v float64) {
+			if l["direction"] == "in" {
+				gw.BytesIn += v
+			} else {
+				gw.BytesOut += v
+			}
+		}},
+		{gatewayQueries.tokens, func(l map[string]string, v float64) {
+			if l["kind"] == "input" {
+				gw.LocalInputTokens += v
+			} else {
+				gw.LocalOutputTokens += v
+			}
+		}},
+		{gatewayQueries.unmetered, func(_ map[string]string, v float64) { gw.LocalUnmetered += v }},
+	}...)
 	for _, st := range steps {
 		if err := each(st.expr, st.add); err != nil {
 			s.problem(w, http.StatusBadGateway, err)
@@ -271,6 +342,18 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		out.Models = append(out.Models, *m)
 	}
 	out.Spent, out.CompressionSaved = s.moneyTotals(out.Models)
+	for _, f := range []*float64{&gw.Requests, &gw.Local, &gw.Cloud, &gw.Rejected, &gw.Failed, &gw.LocalUnmetered, &gw.LocalInputTokens, &gw.LocalOutputTokens, &gw.BytesIn, &gw.BytesOut} {
+		*f = math.Round(*f)
+	}
+	if gw.Requests > 0 {
+		gw.LocalSharePct = round1(gw.Local / gw.Requests * 100)
+	}
+	// The requested Claude model is client text and not a metric label, so
+	// the local tokens are priced at the reference model.
+	if gw.LocalUnmetered == 0 {
+		gw.SavedDollars = ptr(round4(gw.LocalInputTokens*out.Reference.InputPerMTok/1e6 + gw.LocalOutputTokens*out.Reference.OutputPerMTok/1e6))
+	}
+	out.Gateway = gw
 	slices.SortFunc(out.Models, func(a, b ModelStat) int {
 		return cmp.Or(cmp.Compare(b.InputTokens+b.OutputTokens, a.InputTokens+a.OutputTokens), cmp.Compare(a.Provider+a.Model, b.Provider+b.Model))
 	})

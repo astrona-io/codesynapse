@@ -46,8 +46,11 @@ const savedParts = computed(() => {
 })
 // Prompt compression is priced on the server per model; null when a price is missing.
 const compressionSaved = computed(() => m.value?.compression_saved_dollars ?? null)
+// Gateway answers the local model gave, priced at the reference model on the server; null when a local answer reported no usage.
+const gw = computed(() => m.value?.gateway)
+const gwSaved = computed(() => gw.value?.saved_dollars ?? null)
 const spent = computed(() => m.value?.spent_dollars ?? null)
-const saved = computed(() => (savedParts.value ? savedParts.value.input + savedParts.value.cached + savedParts.value.output + (compressionSaved.value ?? 0) : null))
+const saved = computed(() => (savedParts.value ? savedParts.value.input + savedParts.value.cached + savedParts.value.output + (compressionSaved.value ?? 0) + (gwSaved.value ?? 0) : null))
 // Where a price comes from, shown as its host and path.
 const sourceLabel = (u: string) => { try { const x = new URL(u); return x.host + x.pathname + (x.hash ? ` (${x.hash.slice(1)})` : '') } catch { return u } }
 const money = (v: number) => (v >= 100 ? `$${Math.round(v)}` : `$${v.toFixed(2)}`)
@@ -109,6 +112,15 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
         <StatTile v-if="savedParts" label="Saved on cached input" :value="money(savedParts.cached)" :hint="`${fmtCompact(localCached)} tokens from the prompt cache`" />
         <StatTile v-if="savedParts" label="Saved on output" :value="money(savedParts.output)" :hint="`${fmtCompact(localOut)} tokens written locally`" />
       </div>
+      <template v-if="gw && gw.requests > 0">
+        <h3 class="row-title">Gateway</h3>
+        <div class="grid kpis">
+          <StatTile label="Gateway requests" :value="fmtCompact(gw.requests)" :hint="`${fmtCompact(gw.local)} local · ${fmtCompact(gw.cloud)} cloud · ${fmtCompact(gw.rejected)} refused${gw.failed ? ` · ${fmtCompact(gw.failed)} failed` : ''}`" />
+          <StatTile label="Answered locally" :value="`${gw.local_share_pct}%`" hint="of gateway requests, by the local model" />
+          <StatTile label="Bytes in / out" :value="`${fmtCompact(gw.bytes_in)} / ${fmtCompact(gw.bytes_out)}`" hint="request and response sizes through the gateway" />
+          <StatTile label="Saved by local answers" :value="gwSaved === null ? 'unknown' : money(gwSaved)" :hint="gwSaved === null ? `${fmtCompact(gw.local_unmetered)} local answers reported no token usage; not in the total` : `${fmtCompact(gw.local_input_tokens)} read · ${fmtCompact(gw.local_output_tokens)} written locally, at the reference prices`" />
+        </div>
+      </template>
       <DonutChart
         v-if="poolTotal" :segments="pool" title="Token pool" unit="tokens"
         :center="offCloud === null ? '' : `${offCloud}%`" center-hint="kept off cloud models"
