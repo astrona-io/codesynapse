@@ -73,6 +73,15 @@ const syncText = (s?: { state: string; interval_minutes: number }) => {
   const every = ({ 15: '15 min', 30: '30 min', 60: 'hour', 360: '6 hours', 1440: 'day' } as Record<number, string>)[s.interval_minutes] ?? `${s.interval_minutes} min`
   return s.state === 'paused' ? `Auto-sync paused (every ${every})` : `Auto-sync every ${every}`
 }
+// Repositories whose latest job failed come first and are never cut off, so a
+// clone that could not reach its host is not buried under newer successes.
+const shownJobs = computed(() => {
+  const latest = new Map<string, Job>()
+  for (const j of jobs.value?.jobs ?? []) if (!latest.has(j.repo)) latest.set(j.repo, j)
+  const failed = [...latest.values()].filter((j) => j.state === 'failed')
+  const ids = new Set(failed.map((j) => j.id))
+  return [...failed, ...(jobs.value?.jobs ?? []).filter((j) => !ids.has(j.id)).slice(0, 8)]
+})
 const jobLabel = (j: Job) => ({ ingest: 'Indexing', clone: 'Cloning', sync: 'Syncing' }[j.kind ?? 'ingest'] ?? 'Indexing')
 const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state === 'succeeded' ? `done · ${fmtInt(j.nodes)} nodes` : 'failed')
 </script>
@@ -200,7 +209,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
     <section v-if="jobs?.jobs.length" class="panel">
       <p class="eyebrow">Activity</p><h2>Recent indexing</h2>
       <ul class="jobs">
-        <li v-for="j in jobs.jobs.slice(0, 8)" :key="j.id" class="job">
+        <li v-for="j in shownJobs" :key="j.id" class="job">
           <span class="dot" :class="{ 'dot--ok': j.state === 'succeeded', 'dot--bad': j.state === 'failed', 'dot--warn': j.state === 'running' }" />
           <span>{{ jobLabel(j) }} <strong class="mono">{{ j.repo }}</strong><span v-if="j.branch" class="dim"> ({{ j.branch }})</span></span>
           <span class="muted">{{ stateText(j) }}</span>

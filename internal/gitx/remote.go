@@ -339,3 +339,25 @@ func HTTPSRemote(raw string) string {
 	}
 	return raw
 }
+
+// transientRe matches git's messages for failures of the network or of the
+// host that a later attempt can get past: DNS, connection, TLS and HTTP/2
+// errors, timeouts, truncated transfers and 5xx answers.
+var transientRe = regexp.MustCompile(`(?i)could not resolve host|temporary failure in name resolution|timeout|timed out|connection (reset|refused|closed)|failed to connect|couldn't connect|network is unreachable|no route to host|tls connect error|ssl_(connect|read|error)|unexpected eof|early eof|http2 framing|rpc failed|the remote end hung up|empty reply from server|gnutls_handshake|requested url returned error: 5\d\d`)
+
+// IsTransient reports whether err from Clone, FetchCheckout or another
+// remote call is a network or host failure worth retrying. Refused
+// credentials, redirects, invalid input and a cancelled context are not.
+func IsTransient(err error) bool {
+	if err == nil || errors.Is(err, ErrNoAccess) || errors.Is(err, ErrRedirected) || errors.Is(err, ErrInvalidRemote) ||
+		errors.Is(err, ErrInvalidRev) || errors.Is(err, context.Canceled) {
+		return false
+	}
+	return TransientMessage(err.Error())
+}
+
+// TransientMessage is IsTransient for an error kept as text, such as the one
+// a failed job records.
+func TransientMessage(msg string) bool {
+	return transientRe.MatchString(msg) && !deniedRe.MatchString(msg) && !redirectRe.MatchString(msg)
+}

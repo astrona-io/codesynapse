@@ -500,6 +500,7 @@ func (s *Server) runScheduler(ctx context.Context, logger *slog.Logger) {
 				s.scanDue(ctx, now, logger)
 			} else {
 				s.scanWatches(ctx, now, logger)
+				s.retryFailedClones(ctx, now, logger)
 			}
 			for _, repo := range s.sched.due(ctx, now) {
 				sc := s.sched.get(ctx, repo)

@@ -167,7 +167,13 @@ func (s *Server) startCloneAuth(remote, name, branch string, auth gitx.Auth, acc
 	job, err := s.jobs.Start(name, dir, JobOptions{
 		Kind: "clone", Branch: branch, OrgID: opts.OrgID, Identity: opts.Identity, Authorize: opts.Authorize, Durable: opts.Durable,
 		Prepare: func(ctx context.Context) error {
-			if err := gitx.Clone(ctx, remote, branch, dir, auth); err != nil {
+			if err := retryRemote(ctx, "clone", func(ctx context.Context) error {
+				err := gitx.Clone(ctx, remote, branch, dir, auth)
+				if err != nil {
+					_ = os.RemoveAll(dir) //nolint:errcheck,gosec // a partial clone would fail the next attempt; dir is a validated workspace child
+				}
+				return err
+			}); err != nil {
 				_ = os.RemoveAll(dir) //nolint:errcheck,gosec // best-effort cleanup of a partial clone; dir is workspace/<validated name>
 				return err
 			}
@@ -293,7 +299,13 @@ func (s *Server) startSwitch(ctx context.Context, repo, dir, remote, branch stri
 	return s.jobs.Start(repo, dir, JobOptions{ //nolint:contextcheck // jobs outlive the request
 		Kind: "clone", Branch: branch, OrgID: org, Identity: identityOf(ctx), Authorize: authorize, Durable: d,
 		Prepare: func(ctx context.Context) error {
-			if err := gitx.Clone(ctx, remote, branch, dir, auth); err != nil {
+			if err := retryRemote(ctx, "clone", func(ctx context.Context) error {
+				err := gitx.Clone(ctx, remote, branch, dir, auth)
+				if err != nil {
+					_ = os.RemoveAll(dir) //nolint:errcheck,gosec // a partial clone would fail the next attempt; dir is a validated workspace child
+				}
+				return err
+			}); err != nil {
 				_ = os.RemoveAll(dir) //nolint:errcheck,gosec // best-effort cleanup; dir is a validated workspace child
 				return err
 			}
@@ -387,7 +399,9 @@ func (s *Server) startSync(ctx context.Context, repo, branch string, onlyIfChang
 				return Job{}, errUnchanged
 			}
 		}
-		opts.Prepare = func(ctx context.Context) error { return gitx.FetchCheckout(ctx, root, remote, branch, auth) }
+		opts.Prepare = func(ctx context.Context) error {
+			return retryRemote(ctx, "fetch", func(ctx context.Context) error { return gitx.FetchCheckout(ctx, root, remote, branch, auth) })
+		}
 	default:
 		if err := s.insideSources(n.Root); err != nil {
 			return Job{}, fmt.Errorf("%w: cannot sync %q: %w", errBadRequest, repo, err)
