@@ -5,6 +5,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -806,6 +807,8 @@ type mcpInstallOptions struct {
 	only    []string
 	cap     string
 	tokens  int
+	gateway bool
+	remove  bool
 }
 
 func (o *mcpInstallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -815,11 +818,19 @@ func (o *mcpInstallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.BoolVarP(&o.yes, "yes", "y", false, "Install into every detected agent without asking")
 	f.StringSliceVar(&o.only, "only", nil, "Limit to these agents (claude, codex, gemini, opencode, cursor, project)")
 	f.StringVar(&o.cap, "context-cap", "150k", "Chat size at which Claude Code and Codex compact (100k to 1M; 0 leaves their settings alone). With the memory hooks older turns are offloaded first. A cap you set yourself is kept unless you pass this flag")
+	f.BoolVar(&o.gateway, "gateway", false, "Route Claude Code's model requests through the CodeSynapse gateway (writes ANTHROPIC_BASE_URL and the key header into ~/.claude/settings.json; key from "+agentcfg.GatewayKeyEnv+")")
+	f.BoolVar(&o.remove, "remove", false, "With --gateway: take the gateway settings out of Claude Code again")
 	f.StringVar(&o.profile, "profile", toolsets.Core, "Toolsets the agents get: core (the twelve everyday tools), all, or core plus a comma list of "+strings.Join(toolsets.Names(), ", "))
 	return nil
 }
 func (o *mcpInstallOptions) Complete(context.Context, *app.Env) error { return nil }
 func (o *mcpInstallOptions) Validate(context.Context, *app.Env) error {
+	if o.remove && !o.gateway {
+		return errors.New("--remove goes with --gateway")
+	}
+	if o.gateway {
+		return nil // only the gateway settings change; no agent prompts
+	}
 	if !o.yes && !o.EC.IsTerminal {
 		return errors.New("not a terminal: pass --yes (and --only) to install without prompts")
 	}
@@ -854,6 +865,9 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
+	}
+	if o.gateway {
+		return o.runGateway(ctx, home)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -909,6 +923,34 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 	if installed == 0 && o.yes {
 		return errors.New("no matching assistants detected; install project hooks with `codesynapse mcp hooks . --client codex` or `--client cursor`")
 	}
+	return nil
+}
+
+// runGateway sets Claude Code up to send its model requests to the gateway
+// of the API, or takes that setup out again. The key comes from the
+// environment only; nothing is written when the health check fails.
+func (o *mcpInstallOptions) runGateway(ctx context.Context, home string) error {
+	file := filepath.Join(home, ".claude", "settings.json")
+	if o.remove {
+		diff, err := agentcfg.RemoveClaudeGateway(file, time.Now())
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(o.EC.Stderr, diff)
+		return nil
+	}
+	key := cmp.Or(os.Getenv(agentcfg.GatewayKeyEnv), os.Getenv(agentcfg.TokenEnv))
+	if key == "" {
+		return fmt.Errorf("set %s to a CodeSynapse key (csk_…) of the organisation to bill", agentcfg.GatewayKeyEnv)
+	}
+	if err := agentcfg.CheckGateway(ctx, nil, o.apiURL, key); err != nil {
+		return err
+	}
+	diff, err := agentcfg.SetClaudeGateway(file, o.apiURL, key, time.Now())
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(o.EC.Stderr, "Claude Code now sends its requests through %s (old file kept as a .bak beside %s):\n%s\nStart a new Claude Code session. Undo with: codesynapse mcp install --gateway --remove\n", o.apiURL, file, diff)
 	return nil
 }
 
