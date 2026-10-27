@@ -39,6 +39,8 @@ type ModelStat struct {
 	Failures      float64 `json:"failures"`
 	InputTokens   float64 `json:"input_tokens"`
 	OutputTokens  float64 `json:"output_tokens"`
+	// CachedTokens is the part of InputTokens served from the prompt cache.
+	CachedTokens float64 `json:"cached_tokens"`
 	// AvgPromptTokens is input tokens per request.
 	AvgPromptTokens float64 `json:"avg_prompt_tokens"`
 	// Read and write speed in tokens per second, from streamed answers
@@ -69,17 +71,32 @@ type PriceReference struct {
 	Model         string  `json:"model"`
 	InputPerMTok  float64 `json:"input_per_mtok"`
 	OutputPerMTok float64 `json:"output_per_mtok"`
+	// CachedInputPerMTok prices cache reads; zero means the input price.
+	CachedInputPerMTok float64 `json:"cached_input_per_mtok"`
+	// Estimate marks the built-in fallback used when no cloud provider has
+	// prices, so the page can say it is a rough figure.
+	Estimate bool `json:"estimate,omitempty"`
 	// Source and Checked say where the prices come from and when they
 	// were read (price_source and price_checked, or the price feed).
 	Source  string `json:"source,omitempty"`
 	Checked string `json:"checked,omitempty"`
 }
 
+// defaultReference values saved work when no cloud provider has prices: an
+// Opus-class list price (US dollars per million tokens), so the page can show
+// a rough dollar figure. It is marked Estimate and replaced by any
+// configured provider's prices.
+var defaultReference = PriceReference{
+	Provider: "built-in", Model: "Claude Opus 5.5 (list price estimate)",
+	InputPerMTok: 5, OutputPerMTok: 25, CachedInputPerMTok: 0.5, Estimate: true,
+}
+
 // modelQueries; $r is the window.
-var modelQueries = struct{ requests, input, output, readS, writeS, readT, writeT, p50, p95 string }{
+var modelQueries = struct{ requests, input, output, cached, readS, writeS, readT, writeT, p50, p95 string }{
 	requests: `sum by (llm_provider, llm_model, task, outcome)(increase(llm_requests_total[$r]))`,
 	input:    `sum by (llm_provider, llm_model, task)(increase(llm_tokens_input_total[$r]))`,
 	output:   `sum by (llm_provider, llm_model, task)(increase(llm_tokens_output_total[$r]))`,
+	cached:   `sum by (llm_provider, llm_model)(increase(llm_tokens_saved_total[$r]))`,
 	readS:    `sum by (llm_provider, llm_model)(increase(llm_read_seconds_total[$r]))`,
 	writeS:   `sum by (llm_provider, llm_model)(increase(llm_write_seconds_total[$r]))`,
 	readT:    `sum by (llm_provider, llm_model)(increase(llm_read_tokens_total[$r]))`,
@@ -177,6 +194,7 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 			m.OutputTokens += v
 			task(m, l["task"]).OutputTokens += v
 		}},
+		{modelQueries.cached, func(l map[string]string, v float64) { stat(l).CachedTokens += v }},
 		{modelQueries.readS, func(l map[string]string, v float64) { speedOf(l)[0] += v }},
 		{modelQueries.writeS, func(l map[string]string, v float64) { speedOf(l)[1] += v }},
 		{modelQueries.readT, func(l map[string]string, v float64) { speedOf(l)[2] += v }},
@@ -206,10 +224,13 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.LLM != nil {
 		for _, p := range s.cfg.LLM.Configs() {
 			if !p.Local() && p.PriceInputPerMTok > 0 && p.PriceOutputPerMTok > 0 {
-				out.Reference = &PriceReference{Provider: p.Name, Model: p.Model, InputPerMTok: p.PriceInputPerMTok, OutputPerMTok: p.PriceOutputPerMTok, Source: p.PriceSource, Checked: p.PriceChecked}
+				out.Reference = &PriceReference{Provider: p.Name, Model: p.Model, InputPerMTok: p.PriceInputPerMTok, OutputPerMTok: p.PriceOutputPerMTok, CachedInputPerMTok: p.PriceCachedInputPerMTok, Source: p.PriceSource, Checked: p.PriceChecked}
 				break
 			}
 		}
+	}
+	if out.Reference == nil {
+		out.Reference = &defaultReference
 	}
 	for _, m := range models {
 		if m.Requests == 0 && m.InputTokens == 0 {

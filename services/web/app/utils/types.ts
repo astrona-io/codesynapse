@@ -568,12 +568,12 @@ export interface IdentityReviewPage { reviews: { item: { id: string; created_at:
 export interface ModelTaskStat { task: string; requests: number; failures: number; input_tokens: number; output_tokens: number }
 export interface ModelStat {
   provider: string; model: string; local: boolean; configured: boolean; context_window?: number
-  requests: number; failures: number; input_tokens: number; output_tokens: number; avg_prompt_tokens: number
+  requests: number; failures: number; input_tokens: number; output_tokens: number; cached_tokens?: number; avg_prompt_tokens: number
   read_tokens_per_second: number | null; write_tokens_per_second: number | null
   context_p50: number | null; context_p95: number | null
   tasks: ModelTaskStat[]
 }
 export interface ModelStats {
   range: string; models: ModelStat[]
-  reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; source?: string; checked?: string }
+  reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; cached_input_per_mtok?: number; estimate?: boolean; source?: string; checked?: string }
 }

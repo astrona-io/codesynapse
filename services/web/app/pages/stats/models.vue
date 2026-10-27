@@ -33,11 +33,18 @@ const offCloud = computed(() => (poolTotal.value ? Math.round((100 * (graphAvoid
 // Valued at the configured cloud model's prices: what the local work and the
 // avoided reading would have cost there. An estimate, and only with prices.
 const price = computed(() => m.value?.reference_price)
-const saved = computed(() => {
+const localCached = computed(() => Math.min(sum(localModels.value, (x) => x.cached_tokens ?? 0), localIn.value))
+// Split by what the tokens would have been billed as: fresh input, cache
+// reads (at the cache price, else the input price) and output.
+const savedParts = computed(() => {
   const p = price.value
   if (!p) return null
-  return ((localIn.value + graphAvoided.value) * p.input_per_mtok + localOut.value * p.output_per_mtok) / 1e6
+  const input = ((localIn.value - localCached.value) + graphAvoided.value) * p.input_per_mtok / 1e6
+  const cached = localCached.value * (p.cached_input_per_mtok || p.input_per_mtok) / 1e6
+  const output = localOut.value * p.output_per_mtok / 1e6
+  return { input, cached, output }
 })
+const saved = computed(() => (savedParts.value ? savedParts.value.input + savedParts.value.cached + savedParts.value.output : null))
 // Where a price comes from, shown as its host and path.
 const sourceLabel = (u: string) => { try { const x = new URL(u); return x.host + x.pathname + (x.hash ? ` (${x.hash.slice(1)})` : '') } catch { return u } }
 const money = (v: number) => (v >= 100 ? `$${Math.round(v)}` : `$${v.toFixed(2)}`)
@@ -87,8 +94,11 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
         <StatTile label="Prompts pre-briefed" :value="fmtCompact(a?.local_briefs ?? 0)" hint="a local model briefed the agent first" />
         <StatTile
           label="Cloud cost avoided" :value="saved === null ? '–' : money(saved)"
-          :hint="price ? `at ${price.model} prices${price.checked ? ` of ${price.checked}` : ''}, estimated` : 'add prices to a cloud provider to estimate'"
+          :hint="price ? (price.estimate ? `at ${price.model}, rough estimate` : `at ${price.model} prices${price.checked ? ` of ${price.checked}` : ''}, estimated`) : 'no prices to estimate with'"
         />
+        <StatTile v-if="savedParts" label="Avoided on input" :value="money(savedParts.input)" :hint="`${fmtCompact(Math.max(0, localIn - localCached) + graphAvoided)} tokens never sent or read`" />
+        <StatTile v-if="savedParts" label="Avoided on cached input" :value="money(savedParts.cached)" :hint="`${fmtCompact(localCached)} tokens from the prompt cache`" />
+        <StatTile v-if="savedParts" label="Avoided on output" :value="money(savedParts.output)" :hint="`${fmtCompact(localOut)} tokens written locally`" />
       </div>
       <DonutChart
         v-if="poolTotal" :segments="pool" title="Token pool" unit="tokens"
@@ -98,8 +108,9 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
     </section>
 
     <p v-if="price" class="muted small source">
-      Cost avoided values local work and unread tokens at {{ price.model }}'s prices: ${{ price.input_per_mtok }} in and ${{ price.output_per_mtok }} out per million tokens.
-      <template v-if="price.source">Source: <a :href="price.source" target="_blank" rel="noopener noreferrer">{{ sourceLabel(price.source) }}</a><template v-if="price.checked">, checked {{ price.checked }}</template>.</template>
+      Cost avoided values local work and unread tokens at {{ price.model }}'s prices: ${{ price.input_per_mtok }} in<template v-if="price.cached_input_per_mtok">, ${{ price.cached_input_per_mtok }} cached</template> and ${{ price.output_per_mtok }} out per million tokens.
+      <template v-if="price.estimate">This is a built-in estimate; add prices to a cloud provider in config/llm.yaml (or <code>price_feed: openrouter</code>) for your own.</template>
+      <template v-else-if="price.source">Source: <a :href="price.source" target="_blank" rel="noopener noreferrer">{{ sourceLabel(price.source) }}</a><template v-if="price.checked">, checked {{ price.checked }}</template>.</template>
       <template v-else>No source given: add <code>price_source</code> and <code>price_checked</code> to that provider in config/llm.yaml, or <code>price_feed: openrouter</code>.</template>
     </p>
     <p v-if="modelsError" class="panel muted small">Model statistics need live metrics: {{ apiErrorMessage(modelsError) }}</p>
@@ -108,8 +119,8 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
         <p class="eyebrow">Speed</p><h2>How fast each model reads and writes</h2>
         <p class="muted small">Tokens per second from streamed answers ({{ windowLabel }}). Reading is the prompt, up to the first token, including loading the model into memory; writing is the answer after it. Local models stream; cloud models do not and show no speed.</p>
         <div class="grid two">
-          <div><h3>Read (prompt tokens/s)</h3><RankList :rows="readSpeed" color="var(--s-1)" suffix=" t/s" empty="No streamed answers yet." /></div>
-          <div><h3>Write (answer tokens/s)</h3><RankList :rows="writeSpeed" color="var(--s-2)" suffix=" t/s" empty="No streamed answers yet." /></div>
+          <div><h3>Input speed (prompt tokens/s)</h3><RankList :rows="readSpeed" color="var(--s-1)" suffix=" t/s" empty="No streamed answers yet." /></div>
+          <div><h3>Output speed (answer tokens/s)</h3><RankList :rows="writeSpeed" color="var(--s-2)" suffix=" t/s" empty="No streamed answers yet." /></div>
         </div>
       </section>
 
