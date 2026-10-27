@@ -72,7 +72,13 @@ type Options struct {
 	// Branch is recorded on the Repository node; when empty the checked-out
 	// branch is used.
 	Branch string
+	// Progress, when set, is told which of Steps stages begins: its number
+	// (from 1) and a plain-language name. Names carry no repository content.
+	Progress func(step int, name string)
 }
+
+// Steps is how many stages Run reports through Options.Progress.
+const Steps = 7
 
 // Run extracts code, docs and history from opts.Root.
 func Run(ctx context.Context, opts Options) (*model.Graph, error) {
@@ -144,8 +150,14 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	own := (license.Resolver{Root: root, Policy: policy}).Project()
 	repoNode.License, repoNode.LicenseSource = own.License, own.Source
 
+	progress := func(step int, name string) {
+		if opts.Progress != nil {
+			opts.Progress(step, name)
+		}
+	}
 	extImports := map[string][]string{}
 	var goRes *golang.Result
+	progress(1, "Reading Go code")
 	if hasGoModule(root, policy) {
 		res, err := golang.Extract(ctx, golang.Options{Repo: opts.Repo, Root: root, AllowNetwork: opts.AllowNetwork, Dataflow: opts.Dataflow})
 		if err != nil {
@@ -160,6 +172,7 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 		logger.Info("extracted go code", "nodes", len(code.Nodes()), "edges", len(code.Edges()))
 	}
 
+	progress(2, "Reading other languages")
 	langRes, err := lang.Extract(ctx, opts.Repo, root)
 	if err != nil {
 		return nil, fmt.Errorf("python/js/ts extraction: %w", err)
@@ -173,6 +186,7 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	}
 	// Documentation is linked last among the code languages: a mention can
 	// only resolve to a symbol that is already in the graph.
+	progress(3, "Reading docs and architecture records")
 	docGraph, err := docs.Extract(ctx, opts.Repo, root, g)
 	if err != nil {
 		return nil, fmt.Errorf("docs extraction: %w", err)
@@ -181,6 +195,7 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	if err := arch.Extract(ctx, opts.Repo, root, g); err != nil {
 		return nil, fmt.Errorf("architecture records: %w", err)
 	}
+	progress(4, "Checking dependencies and licences")
 	mods, err := addDependencies(ctx, opts, root, g, goRes, extImports)
 	if err != nil {
 		return nil, err
@@ -189,12 +204,14 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 		return nil, fmt.Errorf("licence report: %w", err)
 	}
 
+	progress(5, "Reading configuration")
 	cfgGraph, err := config.Extract(ctx, opts.Repo, root)
 	if err != nil {
 		return nil, fmt.Errorf("yaml/template extraction: %w", err)
 	}
 	g.Merge(cfgGraph)
 
+	progress(6, "Reading git history")
 	if opts.CommitLimit > 0 && repoNode.Head != "" {
 		if err := githistory.Extract(ctx, opts.Repo, root, opts.CommitLimit, g); err != nil {
 			// History is enrichment; a shallow clone or odd repo should not
@@ -205,6 +222,7 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 		}
 	}
 
+	progress(7, "Analysing the graph")
 	pruned := g.PruneDanglingEdges()
 	repoNode.Analysis = analysisSummary(g).Encode()
 	cl := cleanup.Analyze(g, extImports)

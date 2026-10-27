@@ -60,6 +60,14 @@ async function sync() {
 onBeforeUnmount(() => poller?.stop())
 const lost = computed(() => pollStatus.value === 'lost')
 const running = computed(() => job.value?.state === 'running')
+// Stage progress from the job: step N of M with a plain name. Before the
+// first stage is reported (cloning, waiting for a free slot) the bar is
+// indeterminate, so it never claims progress it does not know.
+const percent = computed(() => {
+  const j = job.value
+  return j?.steps ? Math.min(100, Math.round(((j.step ?? 0) / j.steps) * 100)) : null
+})
+const phase = computed(() => (job.value?.waiting ? 'Waiting for another job to finish' : (job.value?.phase ?? 'Starting')))
 </script>
 
 <template>
@@ -75,6 +83,10 @@ const running = computed(() => job.value?.state === 'running')
       <span class="warn small" role="status">Lost contact with the server. The sync may still be running.</span>
       <button type="button" class="secondary" @click="poller?.resume()">Check status</button>
     </template>
+    <div v-if="running" class="progress" role="progressbar" aria-label="Sync progress" :aria-valuenow="percent ?? undefined" aria-valuemin="0" aria-valuemax="100" :aria-valuetext="phase">
+      <div class="bar" :class="{ indeterminate: percent === null }"><span :style="percent === null ? undefined : { width: `${percent}%` }" /></div>
+      <span class="label small muted">{{ phase }}<template v-if="job?.steps"> · step {{ job.step }} of {{ job.steps }}</template></span>
+    </div>
     <span v-if="job && job.state === 'succeeded'" class="badge badge--green">synced {{ fmtInt(job.nodes) }} nodes</span>
     <span v-if="error" class="error small" :title="error">{{ error.length > 80 ? `${error.slice(0, 79)}…` : error }}</span>
   </div>
@@ -85,4 +97,10 @@ const running = computed(() => job.value?.state === 'running')
 .sync select { width: auto; min-width: 150px; min-height: 38px; }
 .small { font-size: 12.5px; }
 .warn { color: var(--warning); }
+.progress { flex-basis: 100%; display: grid; gap: 4px; }
+.bar { height: 8px; border: 2px solid var(--ink); border-radius: 999px; background: var(--panel-2); overflow: hidden; }
+.bar span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.4s ease; }
+.bar.indeterminate span { width: 35%; animation: sync-slide 1.2s ease-in-out infinite; }
+@keyframes sync-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+@media (prefers-reduced-motion: reduce) { .bar span { transition: none; } .bar.indeterminate span { animation: none; width: 100%; opacity: 0.5; } }
 </style>
