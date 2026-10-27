@@ -62,6 +62,8 @@ type Options struct {
 	// Offload, with Memory, adds offload_turns: background extraction of
 	// triples from conversation turns by the API's local model.
 	Offload *APIClient
+	// SlimResults drops empty fields from the JSON text of tool results (slim.go).
+	SlimResults bool
 	// Toolsets limits the tools to these sets (ParseToolsets); nil serves
 	// every tool.
 	Toolsets []string
@@ -80,6 +82,10 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	h := &handlers{svc: query.Service{R: r}}
 	if len(opts) > 0 {
 		h.access = opts[0].Access
+	}
+	// Innermost, so the audit log and usage count the bytes the agent receives.
+	if len(opts) > 0 && opts[0].SlimResults {
+		s.AddReceivingMiddleware(slimMiddleware())
 	}
 	s.AddReceivingMiddleware(h.authorizationMiddleware())
 	if len(opts) > 0 && opts[0].Usage != nil {
