@@ -33,7 +33,8 @@ func (s *Server) authenticateGateway(w http.ResponseWriter, r *http.Request) (*h
 	return r.WithContext(context.WithValue(r.Context(), principalKey{}, p)), true
 }
 
-// gatewayRoutes mounts the agent gateway when the operator turned it on.
+// gatewayRoutes mounts the agent gateway unless the operator switched it off
+// (CODESYNAPSE_GATEWAY=false).
 // Accounts are required: every request needs a key, an organisation and an
 // audited runtime session.
 func (s *Server) gatewayRoutes() {
@@ -94,7 +95,7 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 		return r, false
 	}
 	if !on {
-		s.problem(w, http.StatusForbidden, errors.New("the gateway is off for this organisation; an owner or admin turns it on"))
+		s.problem(w, http.StatusForbidden, errors.New("the gateway is switched off for this organisation; an owner or admin turns it on"))
 		return r, false
 	}
 	id, err := s.cfg.Accounts.GatewayExecutionSession(r.Context(), p, m.Org.ID)
@@ -111,7 +112,8 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 }
 
 // handleOrgGateway reads (any member) or sets (owner or admin, signed-in
-// session only) the organisation's opt-in to the agent gateway. "available"
+// session only) whether the organisation uses the agent gateway (on unless
+// switched off). "available"
 // says whether the operator turned the gateway on for the installation.
 func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 	least := accounts.Member

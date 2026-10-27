@@ -11,7 +11,10 @@ import (
 func (s *Store) GatewayEnabled(_ context.Context, orgID string) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.gateway[orgID], nil
+	if on, chose := s.gateway[orgID]; chose {
+		return on, nil
+	}
+	return true, nil // never chose: on by default
 }
 
 // SetGatewayEnabled implements accounts.Store.
