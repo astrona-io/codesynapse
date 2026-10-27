@@ -180,3 +180,24 @@ func (s *Service) DashboardExecutionSession(ctx context.Context, p Principal, or
 	}
 	return s.RegisterExecutionSession(ctx, p.User.ID, orgID, id)
 }
+
+// GatewayExecutionSession is the runtime binding of one gateway key. The agent
+// that sends model traffic through the gateway has no chat ID to name, so the
+// ID comes from the key's own ID, the organisation and a window as long as
+// ExecutionSessionTTL: only that key reaches it, a new key gets a new one, and
+// the next window opens before the last closes. Only keys get one; browser
+// sessions use DashboardExecutionSession and the service token gets none. The
+// key itself is rechecked by AuthenticateKey on every request, so revoking it
+// ends the traffic at once.
+func (s *Service) GatewayExecutionSession(ctx context.Context, p Principal, orgID string) (execution.Identity, error) {
+	if p.Via != "key" || p.KeyID == "" || p.OrgID != orgID {
+		return execution.Identity{}, ErrForbidden
+	}
+	window := s.now().Unix() / int64(ExecutionSessionTTL/time.Second)
+	sum := sha256.Sum256([]byte("gateway|" + p.KeyID + "|" + orgID + "|" + strconv.FormatInt(window, 10)))
+	id := "gw:" + hex.EncodeToString(sum[:20])
+	if got, err := s.ResolveExecutionSession(ctx, p.User.ID, orgID, id); err == nil {
+		return got, nil
+	}
+	return s.RegisterExecutionSession(ctx, p.User.ID, orgID, id)
+}
