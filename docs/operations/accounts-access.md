@@ -197,3 +197,5 @@ Keep the archive on once it is set. PostgreSQL then no longer holds the oldest e
 ## Platform administration
 
 `/api/v1/admin/*` is for platform admins only. Suspending an account ends its sessions and refuses its logins and keys on the next request. The service keeps at least one active platform admin (`ErrLastAdmin`) and refuses suspending yourself. Suspension and the admin flag need a signed-in session, never an API key.
+
+The process holding the `api-loops` lease writes daily platform statistics to `platform_stats_daily` shortly after midnight UTC: counts of organisations, users other than root, active users, memberships, seats, repository entries, graphs, finished jobs, sessions and API keys, per day and, for some, per organisation ID. Rows hold counts and opaque organisation IDs only, never names, e-mail addresses, repository names or the IDs of users, keys or sessions. A deleted organisation's rows stay. Rows are kept 400 days, independently of the audit retention, and older ones are pruned by the same loop. They feed the 90-day and 365-day ranges of the platform statistics. See [platform statistics](../PLATFORM_STATS_PLAN.md).
