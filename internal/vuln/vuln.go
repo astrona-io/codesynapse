@@ -34,6 +34,7 @@ import (
 
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"github.com/astrona-io/codesynapse/internal/ingestreport"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // Module is a required module version.
@@ -407,7 +408,9 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "codesynapse")
+	start := time.Now()
 	res, err := c.http().Do(req)
+	telemetry.RecordHTTPLookup(ctx, telemetry.LookupOSV, start, res, err)
 	if err != nil {
 		return fmt.Errorf("osv %s: %w", path, err)
 	}

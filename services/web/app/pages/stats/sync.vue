@@ -29,7 +29,7 @@ const schedules = computed(() => {
 // Live job and indexing measurements from VictoriaMetrics, from every API
 // and worker process.
 const range = computed(() => seriesRangeFor(days.value))
-const livePanels = ['jobs_finished', 'job_failures', 'job_wait', 'job_duration', 'ingest_runs', 'ingest_duration', 'ingest_phases', 'ingest_extract']
+const livePanels = ['jobs_finished', 'job_failures', 'job_wait', 'job_duration', 'ingest_runs', 'ingest_duration', 'ingest_phases', 'ingest_extract', 'git_operations', 'git_duration']
 const { panels: batch, pending: batchPending } = useSeriesBatch(livePanels, range)
 const metricsOff = ref(false)
 const hiddenPanels = ref<string[]>([])

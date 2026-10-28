@@ -184,7 +184,7 @@ The requested bootstrap-root separation belongs to the planned [phase 4d follow-
 
 ## Metrics coverage plan
 
-Status: phases 1 (platform health) and 3 (jobs and indexing) are implemented; the others are proposed. This section lists what the services measure today, where measurement is missing or thin, and the instruments that would close the gaps, in the order we would build them. Every proposal follows the rules above and the Telemetry rules in `AGENTS.md`. Where a rule blocks a useful label, the proposal says so instead of bending the rule.
+Status: phases 1 (platform health), 3 (jobs and indexing) and 4 (outbound calls and security events) are implemented; the others are proposed. This section lists what the services measure today, where measurement is missing or thin, and the instruments that would close the gaps, in the order we would build them. Every proposal follows the rules above and the Telemetry rules in `AGENTS.md`. Where a rule blocks a useful label, the proposal says so instead of bending the rule.
 
 ### What is measured today
 
@@ -285,7 +285,7 @@ Ordered by value for the effort. Each phase is one pull request with its panels,
 1. **See the platform** (small, done). Items 4, 5, 21, 22 and 23; a platform panel for `telemetry_dropped_series_total` and `platform_log_lines_dropped_total`; panels for the existing API request metrics and job queue gauges. No new tenant series.
 2. **Alerting** (medium, shipped). Optional vmalert, under the rules in decision 1, with the first rules (see "Alerting" below). It comes after phase 1 because most of its first rules read phase 1 metrics; each later phase adds the rules named for its instruments in the table.
 3. **Jobs and indexing** (medium, shipped). Items 1, 2, 3, 6 and 7, and panels for the existing `ingest_runs_total` and `ingest_duration_seconds` on Statistics → Sync.
-4. **Outbound calls and security events** (medium). Items 8 to 15. Sign-in counters are mostly platform series, because most failures have no trusted tenant.
+4. **Outbound calls and security events** (medium, shipped). Items 8 to 15. Sign-in counters are mostly platform series, because most failures have no trusted tenant.
 5. **Sharper existing families** (small). Items 16 to 20, and the cap decision applied to `mcp_tool_duration_seconds` and `http_request_duration_seconds`. New outcome values change what the `tool_errors` and `llm_provider_failures` panels count, so the same change updates those panel queries and their help text.
 6. **Web server** (small). Metrics from the Nuxt server, with the JavaScript OpenTelemetry SDK, under the rules in decision 3.
 
@@ -310,6 +310,17 @@ Ordered by value for the effort. Each phase is one pull request with its panels,
 - **Panels** (Statistics → Sync, "Jobs and indexing over time"): `jobs_finished` (by outcome), `job_failures` (errors by kind), `job_wait` and `job_duration` (p95 by kind), `ingest_runs` (by outcome), `ingest_duration` (p50, p95), `ingest_phases` (average per run of each phase) and `ingest_extract` (by language).
 - **Job failure alert input.** The error share reads `codesynapse_jobs_finished_total{outcome="error"}` against all outcomes, summed over tenants, plus the `platform_codesynapse_jobs_finished_total` twin for jobs without an organisation.
 
+### Phase 4: what shipped
+
+- **Instruments** (block "Outbound calls and security events" in `internal/telemetry/metrics.go`, helpers and label sets in `internal/telemetry/outbound.go`): items 8 to 15 as listed. They count per tenant only: the helpers drop `mcp_tool` and the model to `none`, so an audit write inside a tool call does not open a series per tool. The three histograms take a per-tenant share of one series per label value (`TenantShare`).
+- **Git.** `gitx.runRemote` times every `clone`, `fetch`, `ls-remote` (the access check, recorded as `ls_remote`) and `push`. The outcome comes from `gitx.ErrNoAccess`, `gitx.ErrRedirected` and the context's deadline, never from git's output; a call whose context was cancelled is not counted. The tenant is the one on the job's or request's context; operator mounts and the single-tenant install have none and count as the `platform_` twin.
+- **Lookups.** osv.dev (`internal/vuln`), deps.dev (`internal/license`) and the forge clients (`forge_github`, `forge_gitlab`, `forge_forgejo` for Forgejo and Gitea) record around their one `http.Client.Do`. 2xx and 404 (the package or organisation is unknown) are `ok`, 429 and a 403 with `X-RateLimit-Remaining: 0` are `rate_limited`, a deadline or network timeout is `timeout`, a cancelled request is not counted, anything else is `error`. No host, owner or package name is a label.
+- **Sign-in.** `handleLogin` (`password`), the bearer and cookie checks in `authenticate` (`api_key`, `session`; the installation token counts as `api_key`), the gateway's key check, `handleSSOCallback` (`sso`) and the MCP key check count each credential that was presented. Outcomes come from the `accounts` sentinel errors (`ErrUnauthorized`, `ErrRateLimited`, `ErrSuspended`, `ErrKeyRevoked`/`ErrSSOState` as `expired`, root, forbidden and SSO refusals as `refused`); unknown errors are not counted. The tenant is the organisation the server resolved for a successful check, and only then: every failure is a `platform_` series, never attributed to the organisation a client asked for.
+- **Audit writes.** `accounts.Service.Record` times `AddEvent`, so the HTTP middleware, the MCP audit and service events are all covered. The source comes from the context (`WithAuditSource`): `api` for everything inside an API request, `mcp` inside the MCP server, `service` otherwise. The tenant is the one on the context (the API sets it from the request's resolved organisation), never the entry's `OrgID`.
+- **Seals.** `auditarchive.Seal` records `ok`, `error` or `nothing_to_seal`; the retention loop records `no_archive` when sealed files exist but no archive is configured, and `error` when it could not read them.
+- **Panels.** Statistics → Sync gains `git_operations` (by outcome) and `git_duration` (p95 by operation); Statistics → Activity gains a group "External services and the audit log" with `lookups` (by service and outcome), `lookup_latency` (p95 by service) and `audit_write_latency` (p95 by source); Administration → Overview gains `platform_sign_in` (failures by method and outcome, plus successes) and `platform_audit_log` (failed writes by source, seals that failed or found no archive).
+- **Alerts** (`deploy/alerts/outbound.yaml`, `deploy/alerts/security.yaml`): see the table below. The label guard now also allows `operation`, `service`, `method` and `source`, all fixed sets.
+
 ### Alerting
 
 Phase 2 adds alerting for operators. It is off by default. Status: shipped (vmalert v1.155.0); how to turn it on is in [Alerting](operations/alerting.md).
@@ -317,7 +328,7 @@ Phase 2 adds alerting for operators. It is off by default. Status: shipped (vmal
 - **Component.** A `vmalert` service in `docker-compose.yml` behind the `alerting` profile (`COMPOSE_PROFILES=alerting just up`), and `alerting.enabled` in the parent chart (`templates/alerting.yaml`, not a subchart, because it needs the chart's metrics URL, public URL and environment): pinned image, one replica, internal only, no published port, a NetworkPolicy that refuses every connection to it, and `values.schema.json` updated in the same change. The metrics store's policy admits it. It reads from VictoriaMetrics with the existing read credentials (`METRICS_PASSWORD`).
 - **Receiver.** Any Alertmanager-compatible endpoint the operator names. `ALERTMANAGER_URL` (required) and optionally `ALERTMANAGER_USERNAME`/`ALERTMANAGER_PASSWORD` or `ALERTMANAGER_BEARER_TOKEN` come from the environment (Compose) or a Secret (chart, `alerting.existingSecret` or `global.existingSecret`), and reach vmalert as environment (`-envflag.enable`), never as flags. An empty URL stops vmalert at start. CodeSynapse ships no receiver of its own.
 - **Rules as files.** Rules live in `deploy/alerts/*.yaml`, are mounted read-only into vmalert and packaged with the chart (`deploy/helm/codesynapse/alerts` links to that directory). `just lint-alerts` (part of `just checks`, a CI step) runs `vmalert -dryRun`, the unit tests in `deploy/alerts/tests` with vmalert-tool, and a label guard; both images are the release Compose ships. `just chart-check` renders the chart with alerting on and off.
-- **What alerts may say.** Rules read `platform_*` metrics, or aggregate tenant series with `sum by` or `max by` over an allowlist of labels (`metric`, `reason`, `db_system`, `le`, `kind`); the label guard refuses `without`, any other grouping label and an expression without aggregation, so `tenant_id` never reaches an alert. Alert labels and annotations never carry repository names, paths, users, API keys, sessions or other request content. Annotations are constant text with the value and the label above; they link to the Statistics page (`-external.url`), not to a tenant's data.
+- **What alerts may say.** Rules read `platform_*` metrics, or aggregate tenant series with `sum by` or `max by` over an allowlist of labels (`metric`, `reason`, `db_system`, `le`, `kind`, `exporter`, `operation`, `service`, `method`, `source`); the label guard refuses `without`, any other grouping label and an expression without aggregation, so `tenant_id` never reaches an alert. Alert labels and annotations never carry repository names, paths, users, API keys, sessions or other request content. Annotations are constant text with the value and the label above; they link to the Statistics page (`-external.url`), not to a tenant's data.
 
 The rules as first planned:
 
@@ -352,13 +363,18 @@ Shipped in phase 2:
 
 `CodeSynapseJobsNotClaimed` was not in the first list: the queue gauges already exist and a missing worker role (the fix worker is off by default) is the commonest reason jobs stall.
 
-Waiting on later phases (added with the phase that records the metric, with a unit test in `deploy/alerts/tests`):
+Added in phase 4:
 
-| Rule | Waits on |
-|---|---|
-| Audit write failures | phase 4 (audit writes by outcome) |
+| Rule | File | Reads | Fires when |
+|---|---|---|---|
+| `CodeSynapseGitFailing` | `outbound.yaml` | `codesynapse_git_operations_total` and its `platform_` twin, `error` and `timeout` over all outcomes per `operation` | share above 20% over 30 minutes, with at least 10 calls; `no_access` and `redirected` are about one repository, so they do not count |
+| `CodeSynapseLookupsRateLimited` | `outbound.yaml` | `codesynapse_lookups_total{outcome="rate_limited"}` and its `platform_` twin, per `service` | any increase in 10 minutes, for 15 minutes |
+| `CodeSynapseSignInBurst` | `security.yaml` | `codesynapse_auth_attempts_total` and its `platform_` twin, `bad_credentials` and `rate_limited`, per `method` | more than 30 in 10 minutes |
+| `CodeSynapseAuditWriteFailing` | `security.yaml` | `codesynapse_audit_writes_total{outcome="error"}` and its `platform_` twin, per `source` | any increase in 10 minutes (critical) |
+| `CodeSynapseAuditSealFailing` | `security.yaml` | `platform_codesynapse_audit_seals_total{outcome="error"}` | any increase in 25 hours (sealing runs once a day) |
+| `CodeSynapseAuditNotArchived` | `security.yaml` | `platform_codesynapse_audit_seals_total{outcome="no_archive"}` | at least 2 in 49 hours |
 
-The rest of the alert column in the instrument table follows the same way.
+The rest of the alert column in the instrument table follows the same way: each later phase adds the rules named for its instruments, with a unit test in `deploy/alerts/tests`.
 
 ### Decisions (2026-10-28)
 

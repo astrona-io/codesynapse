@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // Kind names a git provider.
@@ -330,6 +331,17 @@ func (c Client) sizeParam() string {
 	return "per_page"
 }
 
+// service is the lookup label for this provider; the host never is one.
+func (c Client) service() string {
+	switch c.kind() {
+	case Forgejo:
+		return telemetry.LookupForgeForgejo
+	case GitLab:
+		return telemetry.LookupForgeGitLab
+	}
+	return telemetry.LookupForgeGitHub
+}
+
 func (c Client) label() string {
 	switch c.kind() {
 	case Forgejo:
@@ -369,7 +381,9 @@ func (c Client) getHeader(ctx context.Context, rawURL string) ([]byte, http.Head
 			req.Header.Set("PRIVATE-TOKEN", c.Token)
 		}
 	}
+	start := time.Now()
 	res, err := c.http().Do(req)
+	telemetry.RecordHTTPLookup(ctx, c.service(), start, res, err)
 	if err != nil {
 		return nil, nil, fmt.Errorf("listing repositories: %w", err)
 	}

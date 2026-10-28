@@ -9,6 +9,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/sso"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // Single sign-on (docs/SSO_PLAN.md). The dashboard starts a sign-in with
@@ -165,6 +166,7 @@ func (s *Server) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode, MaxAge: -1})
 	st, idp, secret, err := s.cfg.Accounts.TakeSSO(r.Context(), in.State, binder)
 	if err != nil {
+		accounts.RecordAuth(r.Context(), telemetry.AuthSSO, "", err)
 		s.ssoError(w, err)
 		return
 	}
@@ -179,6 +181,7 @@ func (s *Server) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	claims, err := prov.Exchange(ctx, in.Code, st.Verifier, st.Nonce)
 	if err != nil {
 		s.logger.Warn("sso token exchange failed", "org", idp.OrgID, "error", err)
+		accounts.RecordAuth(r.Context(), telemetry.AuthSSO, "", accounts.ErrUnauthorized)
 		s.record(r.Context(), accounts.Event{Via: "anonymous", OrgID: idp.OrgID, Action: "sso.login", Outcome: accounts.Failure, Detail: "token exchange or verification failed"})
 		s.problem(w, http.StatusUnauthorized, errors.New("the identity provider's answer could not be verified; start again"))
 		return
@@ -186,10 +189,13 @@ func (s *Server) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	if st.Mode == accounts.SSOLink {
 		p, ok := principal(r.Context())
 		if !ok || p.Via != "session" || p.User.ID != st.UserID {
+			accounts.RecordAuth(r.Context(), telemetry.AuthSSO, "", accounts.ErrSSOState)
 			s.ssoError(w, accounts.ErrSSOState)
 			return
 		}
-		if err := s.cfg.Accounts.CompleteSSOLink(r.Context(), st, idp, claims); err != nil {
+		err := s.cfg.Accounts.CompleteSSOLink(r.Context(), st, idp, claims)
+		accounts.RecordAuth(r.Context(), telemetry.AuthSSO, idp.OrgID, err)
+		if err != nil {
 			s.ssoError(w, err)
 			return
 		}
@@ -197,6 +203,8 @@ func (s *Server) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tok, _, err := s.cfg.Accounts.CompleteSSOLogin(r.Context(), st, idp, claims)
+	// The organisation is the provider's, from the server-side sign-in state.
+	accounts.RecordAuth(r.Context(), telemetry.AuthSSO, idp.OrgID, err)
 	if err != nil {
 		s.ssoError(w, err)
 		return

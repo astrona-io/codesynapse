@@ -249,3 +249,24 @@ var (
 	IngestPhaseRuns    = Default.ScopedCounter("codesynapse_ingest_phase_total", "Indexing job phases run, per phase and outcome.", "phase", "outcome")
 	IngestExtract      = Default.ScopedCounter("codesynapse_ingest_extract_seconds_total", "Seconds indexing spent in each extractor, by language.", "language")
 )
+
+// Outbound calls, sign-in and the audit log (docs/TELEMETRY_PLAN.md, metrics
+// coverage plan, phase 4). Record through the helpers in outbound.go, which
+// keep every label inside its fixed set and drop the tool and model the
+// context may carry, so each tenant holds only the series listed here. Hosts,
+// owners, remotes, logins, users, keys and error text are never labels.
+var (
+	GitOperations = Default.ScopedCounter("codesynapse_git_operations_total", "Remote git calls by operation (clone, fetch, ls_remote, push) and outcome (ok, error, no_access, redirected, timeout).", "operation", "outcome")
+	GitDuration   = Default.ScopedHistogram("codesynapse_git_operation_seconds", "Remote git call time by operation.", slow, "operation").TenantShare(len(gitOperations))
+
+	Lookups        = Default.ScopedCounter("codesynapse_lookups_total", "External lookups by service (osv, depsdev, forge_github, forge_gitlab, forge_forgejo) and outcome (ok, error, timeout, rate_limited).", "service", "outcome")
+	LookupDuration = Default.ScopedHistogram("codesynapse_lookup_seconds", "External lookup time by service.", latency, "service").TenantShare(len(lookupServices))
+
+	// Most failed attempts have no trusted tenant and export as platform_.
+	AuthAttempts = Default.ScopedCounter("codesynapse_auth_attempts_total", "Sign-in and credential checks by method (password, api_key, session, sso) and outcome (ok, bad_credentials, rate_limited, suspended, expired, refused).", "method", "outcome")
+
+	AuditWrites        = Default.ScopedCounter("codesynapse_audit_writes_total", "Audit log entries written, by source (api, mcp, service) and outcome (ok, error).", "source", "outcome")
+	AuditWriteDuration = Default.ScopedHistogram("codesynapse_audit_write_seconds", "Audit log write time by source.", latency, "source").TenantShare(len(auditSources))
+	// Sealing runs under the api-loops lease for the whole installation.
+	AuditSeals = Default.Counter("platform_codesynapse_audit_seals_total", "Audit archive sealing runs by outcome (ok, error, nothing_to_seal, no_archive).", "outcome")
+)

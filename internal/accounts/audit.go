@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // Outcomes.
@@ -241,7 +243,11 @@ func (s *Service) Record(ctx context.Context, e Event) (Event, error) {
 	if e.At.IsZero() {
 		e.At = s.now()
 	}
+	start := time.Now()
 	stored, err := s.St.AddEvent(ctx, e)
+	// Counted for the tenant and source ctx carries, never e.OrgID: the
+	// event's organisation may be the target of a refused request.
+	telemetry.RecordAuditWrite(ctx, time.Since(start), err == nil)
 	if err != nil {
 		return e, fmt.Errorf("audit log: %w", err)
 	}

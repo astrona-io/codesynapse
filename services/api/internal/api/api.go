@@ -259,6 +259,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("X-Request-ID", rid)
 	r = r.WithContext(accounts.WithRequestInfo(r.Context(), accounts.RequestInfo{RequestID: rid, IP: s.clientAddr(r), UserAgent: r.UserAgent()}))
+	r = r.WithContext(telemetry.WithAuditSource(r.Context(), telemetry.AuditAPI))
 	rec := &statusRecorder{ResponseWriter: w}
 	start, tenant := time.Now(), new(string)
 	r = r.WithContext(context.WithValue(r.Context(), tenantSlot{}, tenant))

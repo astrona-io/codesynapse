@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // DepsDev looks up licences on deps.dev. The zero value uses
@@ -84,7 +86,9 @@ func (c *DepsDev) get(ctx context.Context, path string, v any) error {
 	if hc == nil {
 		hc = &http.Client{Timeout: 15 * time.Second}
 	}
+	start := time.Now()
 	res, err := hc.Do(req)
+	telemetry.RecordHTTPLookup(ctx, telemetry.LookupDepsDev, start, res, err)
 	if err != nil {
 		return fmt.Errorf("deps.dev: %w", err)
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // KeyVerifier accepts personal API keys for the key's user and organisation.
@@ -18,7 +19,12 @@ import (
 // every request is checked against the accounts store.
 func KeyVerifier(acc *accounts.Service, _ string) auth.TokenVerifier {
 	return func(ctx context.Context, token string, _ *http.Request) (*auth.TokenInfo, error) {
+		ctx = telemetry.WithAuditSource(ctx, telemetry.AuditMCP)
 		p, err := acc.AuthenticateKey(ctx, token)
+		if err != nil {
+			// Accepted keys are counted once per tool call, in Authenticate.
+			accounts.RecordAuth(ctx, telemetry.AuthAPIKey, "", err)
+		}
 		if errors.Is(err, accounts.ErrRootAccount) {
 			// The caller holds a valid key; tell them why it no longer works.
 			if _, auditErr := acc.Record(ctx, accounts.Event{Action: "root.denied", Target: "mcp", Outcome: accounts.Failure, Status: http.StatusUnauthorized}); auditErr != nil {
@@ -68,6 +74,7 @@ func (a AccountsAccess) Reach(ctx context.Context, userID, orgID string) (map[st
 // Authenticate checks credentials again for each invocation, including stdio.
 func (a AccountsAccess) Authenticate(ctx context.Context, token string) (*Caller, error) {
 	p, err := a.Acc.AuthenticateKey(ctx, token)
+	accounts.RecordAuth(ctx, telemetry.AuthAPIKey, p.OrgID, err)
 	if err != nil {
 		if _, auditErr := a.Acc.Record(ctx, accounts.Event{Action: "mcp.authentication_failed", Outcome: accounts.Failure, Status: http.StatusUnauthorized}); auditErr != nil {
 			return nil, fmt.Errorf("authentication unavailable")

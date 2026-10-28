@@ -1,0 +1,41 @@
+# Calls that leave the installation (docs/TELEMETRY_PLAN.md, phase 4):
+# remote git and external lookups (osv.dev, deps.dev, git host APIs). Tenant
+# and platform (no organisation) series count together and the rules group
+# only by the fixed operation and service labels.
+groups:
+  - name: codesynapse-outbound
+    interval: 1m
+    rules:
+      # More than one remote git call in five failing or timing out. No access
+      # and redirected are answers about one repository, not a failing host,
+      # so they do not count. The minimum keeps one failure on a quiet
+      # installation from paging anyone.
+      - alert: CodeSynapseGitFailing
+        expr: |
+          (
+            sum by (operation) (increase({__name__=~"(platform_)?codesynapse_git_operations_total", outcome=~"error|timeout"}[30m]))
+            /
+            sum by (operation) (increase({__name__=~"(platform_)?codesynapse_git_operations_total"}[30m]))
+          ) > 0.2
+          and
+          sum by (operation) (increase({__name__=~"(platform_)?codesynapse_git_operations_total"}[30m])) >= 10
+        labels:
+          severity: warning
+          component: git
+        annotations:
+          summary: "Remote git {{ $labels.operation }} calls are failing"
+          description: "{{ $value | humanizePercentage }} of git {{ $labels.operation }} calls failed or timed out in the last 30 minutes. Check the git hosts' status and the workers' network."
+          dashboard: "{{ $externalURL }}/stats/sync"
+
+      # An external service keeps answering "too many requests". Vulnerability
+      # and licence data or organisation listings go stale until it stops.
+      - alert: CodeSynapseLookupsRateLimited
+        expr: sum by (service) (increase({__name__=~"(platform_)?codesynapse_lookups_total", outcome="rate_limited"}[10m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+          component: lookups
+        annotations:
+          summary: "{{ $labels.service }} is rate limiting lookups"
+          description: "{{ $value | humanize }} {{ $labels.service }} requests were rate limited in the last 10 minutes, for 15 minutes in a row. Lookups retry at the next sync; a git host token raises its limit."
+          dashboard: "{{ $externalURL }}/stats/activity"

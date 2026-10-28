@@ -75,10 +75,16 @@ The chart refuses to render alerting without a metrics store (`victoriametrics.e
 | `CodeSynapseLogShippingDropping` | warning | Log lines have not reached the log store for 15 minutes |
 | `CodeSynapseIngestMetricsRejected` | warning | Indexing file totals were refused before export in the last hour |
 | `CodeSynapseIngestMetricsCapacity` | warning | Indexing file totals reached their repository limit in the last hour |
+| `CodeSynapseGitFailing` | warning | More than 20% of a git operation's calls (clone, fetch, ls_remote, push) failed or timed out in the last 30 minutes, with at least 10 calls |
+| `CodeSynapseLookupsRateLimited` | warning | osv.dev, deps.dev or a git host's API has rate limited lookups for 15 minutes |
+| `CodeSynapseSignInBurst` | warning | More than 30 sign-ins of one method (password, api_key, session, sso) failed or were rate limited in 10 minutes |
+| `CodeSynapseAuditWriteFailing` | critical | Audit entries from the API, the MCP server or background work could not be written in the last 10 minutes, so those requests were refused |
+| `CodeSynapseAuditSealFailing` | warning | Sealing the audit log into the archive failed in the last 25 hours |
+| `CodeSynapseAuditNotArchived` | warning | Two retention runs found sealed audit files but no archive configured, so old entries are not pruned |
 
-Store alerts add up every organisation's calls per store, so no organisation appears in them. Other alerts read installation-wide numbers. The only labels an alert carries besides `severity`, `component` and `environment` are the store (`db_system`), the job kind, the instrument name and a fixed reason.
+Store alerts add up every organisation's calls per store, so no organisation appears in them. Git, lookup, sign-in and audit alerts add up every organisation's numbers too. Other alerts read installation-wide numbers. The only labels an alert carries besides `severity`, `component` and `environment` are the store (`db_system`), the job kind, the instrument name, a fixed reason, and the fixed git operation, lookup service, sign-in method or audit source.
 
-More rules follow as the numbers they need are added: failing audit-log writes. The [telemetry plan](../TELEMETRY_PLAN.md#alerting) lists which phase each waits on.
+More rules follow as the numbers they need are added. The [telemetry plan](../TELEMETRY_PLAN.md#alerting) lists which phase each waits on.
 
 ## Change or add a rule
 
