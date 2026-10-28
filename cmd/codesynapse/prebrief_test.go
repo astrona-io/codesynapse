@@ -61,6 +61,29 @@ func TestPrebrief(t *testing.T) {
 	assert.Equal(t, text, "")
 }
 
+// TestPrebriefStaysSilentOnPromptsThatAreNotCodeTasks: "start more agents"
+// (PLAN item 18, 2026-10-28) was briefed from functions named Start, and the
+// model's "Nothing relevant… the developer should clarify", backed by a
+// citation, still reached the agent. Neither happens now.
+func TestPrebriefStaysSilentOnPromptsThatAreNotCodeTasks(t *testing.T) {
+	for _, p := range []string{"start more agents", "i have new realse installed, v0.0.21 now, so we can countine"} {
+		assert.False(t, worthBriefing(p), p)
+	}
+	for _, p := range []string{"fix the Stop hook counting upstream commits", "why does handleLogin return 503"} {
+		assert.True(t, worthBriefing(p), p)
+	}
+
+	dir := askCheckout(t)
+	in := hookInput{SessionID: "chat-1", Cwd: dir, Prompt: "make One return two instead of one"}
+	var asked asklocal.Request
+	nothing := asklocal.Answer{Answer: "Nothing relevant in the given files. The developer should clarify which One they mean (pkg/one.go:3).",
+		Model: "qwen3.8:27b", Grounded: true, Citations: []asklocal.Citation{{Path: "pkg/one.go", Start: 3, End: 3}}}
+	api := prebriefAPI(t, filepath.Base(dir), nothing, &asked)
+	text, err := prebrief(context.Background(), apiClient{base: api.URL, token: "csk_test", http: api.Client()}, in)
+	require.NoError(t, err)
+	assert.Equal(t, text, "")
+}
+
 func TestPrebriefSkipsShortReplies(t *testing.T) {
 	for _, p := range []string{"yes", "go on", "ok thanks"} {
 		assert.False(t, worthRecalling(p), p)
