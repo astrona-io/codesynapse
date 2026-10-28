@@ -222,7 +222,7 @@ Each gap is a question an operator or an organisation cannot answer from metrics
 11. **Series caps.** Some instruments hit the 5,000 cap early. `mcp_tool_duration_seconds` has about 70 accepted tool and prompt names, so at about 277 combinations it starts dropping once roughly four organisations use every tool. `http_request_duration_seconds` has about 200 routes and fills its budget with one or two active organisations. Drops are counted, but no panel or alert shows them.
 12. **Unused data.** API request metrics, indexing run counters, chat-memory flow counters, the job queue gauges and the dropped-series counters are recorded but have no panel.
 
-The web dashboard (Nuxt) has no metrics of its own. Every request it proxies reaches the API and is counted there, so this plan adds none (see open questions).
+The web dashboard (Nuxt) has no metrics of its own. Every request it proxies reaches the API and is counted there, but failures that never reach the API, such as the API being unreachable, are not seen. Phase 6 adds them (see decisions).
 
 ### Proposed instruments
 
@@ -234,7 +234,9 @@ Conventions for new instruments:
 - Long-running work uses a coarse bucket set, `slow` = 1, 5, 15, 60, 300, 900, 1800, 3600 and 7200 seconds (9 buckets, about 416 combinations per histogram).
 - Where a histogram per label value would hit the cap, a pair of counters (`..._seconds_total` and `..._total`) gives the average instead, as `llm_read_seconds_total` already does.
 
-| # | Instrument | Kind, unit | Labels (bounded values) | Scope | Combinations per tenant | Recorded in | Panel or alert |
+The alerts named in the last column are the rule list for phase 2 (alerting); an alert on an instrument from a later phase is added with that phase. Until phase 2 ships they are future work.
+
+| # | Instrument | Kind, unit | Labels (bounded values) | Scope | Combinations per tenant | Recorded in | Panel or alert (alerts: phase 2 rules) |
 |---|---|---|---|---|---|---|---|
 | 1 | `codesynapse_jobs_finished_total` | counter, jobs | `kind` (`sync`, `clone`, `switch`, `ai`, `ai-auto`, `fix`), `outcome` (`ok`, `error`, `left_behind`, `cancelled`) | tenant | 24 | the job runner in `services/api/internal/api/jobs.go`, where a job ends | Statistics → Sync: "Background jobs"; alert on the error share |
 | 2 | `codesynapse_job_wait_seconds` | histogram (`slow`), s | `kind` | tenant | 6 | on claim: claim time minus queue time | "Job wait"; alert when p95 wait passes 15 minutes |
@@ -271,23 +273,55 @@ Gap 11 needs a decision before more tenant histograms are added. The options, fr
 - Keep the cap, and add a platform panel and an alert on `telemetry_dropped_series_total`, so drops are visible.
 - Give histograms with many label values a smaller bucket set, for example 8 buckets for `mcp_tool_duration_seconds`. That roughly doubles the combinations they hold.
 - Replace the per-tool or per-route histogram with a counter pair (`..._seconds_total`, `..._total`) per tool or route for averages, and keep one histogram per tenant, without the tool or route, for percentiles.
+- Cap each tenant's share of an instrument's budget, so one organisation cannot use it all up and push every other organisation's new series into the dropped count. Drops past a tenant's share are counted like any other drop.
 - Allow a cap above 5,000 for named instruments, recorded in `metrics.go` with the reason.
 
-The plan recommends the first and third options. Both keep the existing bounds.
+Decided: the smaller bucket set for the high-cardinality families, together with the per-tenant cap (see decisions). The platform panel for `telemetry_dropped_series_total` comes with phase 1 either way.
 
 ### Phases
 
 Ordered by value for the effort. Each phase is one pull request with its panels, a test that labels stay inside their sets, a test that a sample without a tenant becomes `platform_`, and the VictoriaMetrics integration check.
 
 1. **See the platform** (small). Items 4, 5, 21, 22 and 23; a platform panel for `telemetry_dropped_series_total` and `platform_log_lines_dropped_total`; panels for the existing API request metrics and job queue gauges. No new tenant series.
-2. **Jobs and indexing** (medium). Items 1, 2, 3, 6 and 7, and panels for the existing `ingest_runs_total` and `ingest_duration_seconds` on Statistics → Sync.
-3. **Outbound calls and security events** (medium). Items 8 to 15. Sign-in counters are mostly platform series, because most failures have no trusted tenant.
-4. **Sharper existing families** (small). Items 16 to 20, and the cap decision applied to `mcp_tool_duration_seconds` and `http_request_duration_seconds`. New outcome values change what the `tool_errors` and `llm_provider_failures` panels count; the panel help says so from that release on.
+2. **Alerting** (medium). Optional vmalert, under the rules in decision 1, with the first rules (see "Alerting" below). It comes after phase 1 because most of its first rules read phase 1 metrics; each later phase adds the rules named for its instruments in the table.
+3. **Jobs and indexing** (medium). Items 1, 2, 3, 6 and 7, and panels for the existing `ingest_runs_total` and `ingest_duration_seconds` on Statistics → Sync.
+4. **Outbound calls and security events** (medium). Items 8 to 15. Sign-in counters are mostly platform series, because most failures have no trusted tenant.
+5. **Sharper existing families** (small). Items 16 to 20, and the cap decision applied to `mcp_tool_duration_seconds` and `http_request_duration_seconds`. New outcome values change what the `tool_errors` and `llm_provider_failures` panels count, so the same change updates those panel queries and their help text.
+6. **Web server** (small). Metrics from the Nuxt server, with the JavaScript OpenTelemetry SDK, under the rules in decision 3.
+
+### Alerting
+
+Phase 2 adds alerting for operators. It is off by default.
+
+- **Component.** A `vmalert` service in `docker-compose.yml` (behind a profile) and a chart toggle, following the `victoriametrics` subchart: pinned image, internal only, no published port, `values.schema.json` updated in the same change. It reads from the internal VictoriaMetrics with the existing read credentials.
+- **Receiver.** Any Alertmanager-compatible endpoint the operator names. URL and credentials come from the environment (Compose) or an existing Secret (chart). CodeSynapse ships no receiver of its own.
+- **Rules as files.** Rules live in `deploy/alerts/*.yaml`, are mounted read-only into vmalert and packaged with the chart. `just checks` validates them with `vmalert -dryRun`, and `just chart-check` renders the chart with alerting on and off.
+- **What alerts may say.** Rules read `platform_*` metrics, or aggregate tenant series with `sum without (tenant_id, ...)`. Alert labels and annotations never carry repository names, paths, users, API keys, sessions or other request content. `tenant_id` may appear only on alerts routed to platform operators, and only as the opaque ID. Annotations are constant text with the value; they link to the Statistics panel, not to a tenant's data.
+
+The initial rules:
+
+| Rule | Reads | Fires when |
+|---|---|---|
+| Scheduler lease lost | `platform_codesynapse_lease_events_total{event="lost"}` | any increase in 10 minutes |
+| No scheduler holder | `platform_codesynapse_loops_lease_held` (fresh instances) | sum is not 1 for 2 minutes |
+| Job failure rate | `codesynapse_jobs_finished_total`, summed over tenants | `error` share above 20% over 30 minutes, with at least 10 jobs |
+| Audit write failures | `codesynapse_audit_writes_total{outcome="error"}` and its `platform_` twin | any increase |
+| Metrics export failing | `platform_telemetry_export_failures_total` | increases for 5 minutes |
+| Series cap overflow | `telemetry_dropped_series_total` | any increase in 1 hour, per instrument |
+| Store latency | `db_query_duration_seconds`, summed over tenants, per `db_system` | p95 above 1 s for 10 minutes |
+| Store errors | `db_query_errors_total` and timeouts, summed over tenants, per `db_system` | error share above 5% for 10 minutes |
+
+Phase 2 ships the lease, export, overflow and store rules, whose metrics exist after phase 1. The job failure rule ships with phase 3 and the audit write rule with phase 4, the phases that record those metrics, so no rule reads a metric that does not exist yet. The rest of the alert column in the instrument table follows the same way.
+
+### Decisions (2026-10-28)
+
+1. **Alerts: vmalert, optional.** vmalert (Apache-2.0 image, no Go dependency) is supported as an optional component: a Compose service and a chart toggle or store-style subchart beside the existing VictoriaMetrics setup. It evaluates rules against the internal VictoriaMetrics and sends to an Alertmanager-compatible receiver the operator configures; the receiver URL and credentials come from the environment or a Secret only, never from values files or flags. The dashboard notification feed stays the channel people in organisations see. Phase 2 delivers it; see "Alerting" below.
+2. **Series cap.** Histograms with many label values get a smaller bucket set, and each tenant gets a capped share of an instrument's budget so one organisation cannot use it all up. Both are applied in phase 5 to `mcp_tool_duration_seconds` and `http_request_duration_seconds`, and every new tenant histogram follows them.
+3. **Web server metrics: approved,** including the JavaScript OpenTelemetry SDK (`@opentelemetry/*` packages, Apache-2.0). The same rules hold as for the Go services: a bounded set of series per instrument with dropped series counted, route patterns and never raw paths, OTLP to the internal VictoriaMetrics only, and no request content, cookies, organisation slugs or client addresses as labels. Phase 6 adds them.
+4. **Runtime metrics: approved as planned.** Item 21 samples the standard library's `runtime/metrics`. The OTel contrib runtime package is not added, because it would be a new dependency and a second accumulator beside the registry.
+5. **Outcome values and panels.** A change that adds outcome values (`refused`, `timeout`, `rate_limited`) to an existing family updates the panel queries that count that family, such as `tool_errors` and `llm_provider_failures`, in the same change. This holds for every later change too.
 
 ### Open questions
 
-- **Alerts.** No alerting rules ship today: there is no vmalert in Compose or the chart. Should phase 1 add vmalert with the rules named above, or should the rules be documented for operators to load into their own system?
-- **Runtime metrics.** The plan samples `runtime/metrics` from the standard library. The OTel contrib runtime instrumentation would be a new dependency and a second accumulator beside the registry, so it is not proposed.
-- **Web dashboard.** The Nuxt server has no metrics. Adding them needs a JavaScript OTel SDK (a new dependency) and would mostly repeat the API's request metrics. The plan adds none unless proxy-only failures, such as the API being unreachable, need their own signal.
-- **Cap.** Which of the cap options to adopt.
+- **Web instruments.** Which instruments the Nuxt server records: at least proxy requests by route pattern and outcome, with a separate outcome for an unreachable API. Settled in the phase 6 pull request.
 - **Bridge.** Item 17 counts local answers the server recorded. When the server refuses or cannot record one, the bridge sends that call to the server, where `mcp_tool_calls_total` counts it. This is intended, not a gap.

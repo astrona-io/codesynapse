@@ -33,11 +33,15 @@ No metric holds prompts, answers, source code, file paths, repository names, bra
 Some parts of CodeSynapse have no live numbers yet. The [metrics coverage plan](../TELEMETRY_PLAN.md#metrics-coverage-plan) lists them and the order in which they will be added:
 
 1. **Platform health** for operators: which replica runs the scheduler, process memory and CPU, database connections, and whether metrics themselves are being dropped or fail to export.
-2. **Background jobs and indexing**: how long jobs wait and run, how many fail by kind, and indexing time by phase and language.
-3. **Outside services and security events**: git clone and fetch, vulnerability and licence lookups, sign-in attempts and rate limits, and audit-log writes.
-4. **Sharper existing numbers**: refused tool calls apart from errors, model timeouts and rate limits, gateway latency and why a request left the local model, and tool calls answered on your own machine by the Claude Code bridge.
+2. **Alerts for operators**: an optional vmalert that checks rules against these numbers and sends alerts to the operator's own Alertmanager-compatible receiver. Alerts never name repositories, files or people.
+3. **Background jobs and indexing**: how long jobs wait and run, how many fail by kind, and indexing time by phase and language.
+4. **Outside services and security events**: git clone and fetch, vulnerability and licence lookups, sign-in attempts and rate limits, and audit-log writes.
+5. **Sharper existing numbers**: refused tool calls apart from errors, model timeouts and rate limits, gateway latency and why a request left the local model, and tool calls answered on your own machine by the Claude Code bridge. The Statistics panels that count failures change in the same release, so a refused call is no longer shown as an error.
+6. **The web server**: requests the dashboard server handles, including failures that never reach the API, such as the API being unreachable.
 
-The same privacy rules apply to everything planned.
+The same privacy rules apply to everything planned. The web server's numbers use page and route patterns, never the address you opened, and contain nothing you typed.
+
+Operator alerts are for whoever runs the installation. Warnings for people in an organisation keep appearing in the dashboard's notification feed.
 
 ## Related
 
