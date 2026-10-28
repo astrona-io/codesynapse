@@ -187,3 +187,46 @@ func TestRepoExists(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, ok)
 }
+
+func TestListReposReadsPermissionsAndOwnPrivateRepositories(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/user":
+			_, _ = fmt.Fprint(w, `{"login":"Me"}`)
+		case "/user/repos":
+			assert.Equal(t, r.URL.Query().Get("affiliation"), "owner")
+			_, _ = fmt.Fprint(w, `[{"name":"secret","private":true,"permissions":{"admin":true}}]`)
+		case "/users/other/repos":
+			_, _ = fmt.Fprint(w, `[{"name":"pub","permissions":{"pull":true}}]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	c := Client{BaseURL: srv.URL, Token: "tok"}
+	got, err := c.ListRepos(context.Background(), "me")
+	require.NoError(t, err)
+	require.Len(t, got, 1, "the token owner's own listing includes private repositories")
+	assert.Equal(t, got[0].Permission, PermAdmin)
+	got, err = c.ListRepos(context.Background(), "other")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, got[0].Permission, PermRead)
+}
+
+func TestListReposExplainsSAMLRefusal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-GitHub-SSO", "required; url=https://github.com/orgs/x/sso")
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+	_, err := Client{BaseURL: srv.URL, Token: "tok"}.ListRepos(context.Background(), "x")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "single sign-on")
+}
+
+func TestGitLabPermission(t *testing.T) {
+	for level, want := range map[int]string{50: PermAdmin, 40: PermAdmin, 30: PermWrite, 20: PermRead, 10: PermRead, 0: ""} {
+		assert.Equal(t, gitlabPermission(level), want)
+	}
+}

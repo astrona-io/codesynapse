@@ -135,7 +135,25 @@ type Repo struct {
 	Fork          bool   `json:"fork"`
 	Private       bool   `json:"private"`
 	PushedAt      string `json:"pushed_at,omitempty"`
+	// Permission is what the token may do there: "admin", "write" or
+	// "read"; empty when the listing was anonymous.
+	Permission string `json:"-"`
 }
+
+// Listing is the answer of ListReposDetail.
+type Listing struct {
+	Repos []Repo
+	// SSORestricted says GitHub left out what the token is not authorised
+	// for under the organisation's SAML single sign-on.
+	SSORestricted bool
+}
+
+// Permission levels of Repo.Permission.
+const (
+	PermAdmin = "admin"
+	PermWrite = "write"
+	PermRead  = "read"
+)
 
 // Client lists repositories on one host. The zero value is GitHub with no token.
 type Client struct {
@@ -201,8 +219,17 @@ func (c Client) http() *http.Client {
 // ListRepos returns every repository of owner, an organisation (group) or
 // else a user.
 func (c Client) ListRepos(ctx context.Context, owner string) ([]Repo, error) {
+	l, err := c.ListReposDetail(ctx, owner)
+	return l.Repos, err
+}
+
+// ListReposDetail is ListRepos with what the provider said about the
+// token's reach. With a token, a user's listing is the token owner's own
+// repositories (private ones included) when owner is that user, because the
+// public user endpoints never show private repositories.
+func (c Client) ListReposDetail(ctx context.Context, owner string) (Listing, error) {
 	if !ValidOwner(c.kind(), owner) {
-		return nil, fmt.Errorf("invalid organisation name %q", owner)
+		return Listing{}, fmt.Errorf("invalid organisation name %q", owner)
 	}
 	var orgPath, userPath, query string
 	switch c.kind() {
@@ -213,14 +240,40 @@ func (c Client) ListRepos(ctx context.Context, owner string) ([]Repo, error) {
 	default:
 		orgPath, userPath, query = "/orgs/"+owner+"/repos", "/users/"+owner+"/repos", "type=all"
 	}
-	repos, err := c.list(ctx, orgPath, query)
+	l, err := c.list(ctx, orgPath, query)
 	if errors.Is(err, ErrNotFound) {
 		if c.kind() == GitHub {
 			query = "type=owner"
 		}
-		repos, err = c.list(ctx, userPath, query)
+		if self, serr := c.isTokenOwner(ctx, owner); serr == nil && self {
+			switch c.kind() {
+			case GitHub:
+				userPath, query = "/user/repos", "affiliation=owner&visibility=all"
+			case Forgejo:
+				userPath = "/user/repos"
+			}
+		}
+		l, err = c.list(ctx, userPath, query)
 	}
-	return repos, err
+	return l, err
+}
+
+// isTokenOwner says whether the token belongs to the user login.
+func (c Client) isTokenOwner(ctx context.Context, login string) (bool, error) {
+	if c.Token == "" || c.kind() == GitLab {
+		return false, nil
+	}
+	body, _, err := c.getHeader(ctx, c.apiBase()+"/user")
+	if err != nil {
+		return false, err
+	}
+	var me struct {
+		Login string `json:"login"`
+	}
+	if err := json.Unmarshal(body, &me); err != nil {
+		return false, fmt.Errorf("decode %s user: %w", c.Host, err)
+	}
+	return me.Login != "" && strings.EqualFold(me.Login, login), nil
 }
 
 func (c Client) pageSize() int {
@@ -230,8 +283,8 @@ func (c Client) pageSize() int {
 	return 100
 }
 
-func (c Client) list(ctx context.Context, path, query string) ([]Repo, error) {
-	var all []Repo
+func (c Client) list(ctx context.Context, path, query string) (Listing, error) {
+	var l Listing
 	size := c.pageSize()
 	for page := 1; page <= maxPages; page++ {
 		sep := ""
@@ -242,22 +295,25 @@ func (c Client) list(ctx context.Context, path, query string) ([]Repo, error) {
 		if c.kind() == GitHub {
 			q += "&sort=full_name"
 		}
-		body, err := c.get(ctx, c.apiBase()+path+"?"+q)
+		body, h, err := c.getHeader(ctx, c.apiBase()+path+"?"+q)
 		if err != nil {
-			return nil, err
+			return Listing{}, err
+		}
+		if c.kind() == GitHub && h.Get("X-GitHub-SSO") != "" {
+			l.SSORestricted = true
 		}
 		batch, err := c.decode(body)
 		if err != nil {
-			return nil, err
+			return Listing{}, err
 		}
-		all = append(all, batch...)
+		l.Repos = append(l.Repos, batch...)
 		// Gitea and Forgejo admins can lower the page cap below what we ask
 		// for, so a short page does not mean the last one there.
 		if len(batch) == 0 || (c.kind() != Forgejo && len(batch) < size) {
 			break
 		}
 	}
-	return all, nil
+	return l, nil
 }
 
 func (c Client) sizeParam() string {
@@ -278,9 +334,14 @@ func (c Client) label() string {
 }
 
 func (c Client) get(ctx context.Context, rawURL string) ([]byte, error) {
+	body, _, err := c.getHeader(ctx, rawURL)
+	return body, err
+}
+
+func (c Client) getHeader(ctx context.Context, rawURL string) ([]byte, http.Header, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req.Header.Set("User-Agent", "codesynapse")
 	switch c.kind() {
@@ -303,24 +364,26 @@ func (c Client) get(ctx context.Context, rawURL string) ([]byte, error) {
 	}
 	res, err := c.http().Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("listing repositories: %w", err)
+		return nil, nil, fmt.Errorf("listing repositories: %w", err)
 	}
 	defer res.Body.Close() //nolint:errcheck // read-only
 	body, err := io.ReadAll(io.LimitReader(res.Body, maxPageBytes))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	switch {
 	case res.StatusCode == http.StatusNotFound:
-		return nil, ErrNotFound
+		return nil, nil, ErrNotFound
 	case res.StatusCode == http.StatusUnauthorized:
-		return nil, fmt.Errorf("%s rejected the token (401); check the token configured for %s", c.label(), c.host())
+		return nil, nil, fmt.Errorf("%s rejected the token (401); check the token configured for %s", c.label(), c.host())
+	case res.StatusCode == http.StatusForbidden && c.kind() == GitHub && res.Header.Get("X-GitHub-SSO") != "":
+		return nil, nil, fmt.Errorf("the organisation uses SAML single sign-on and the token for %s is not authorised for it; authorise the token for the organisation in GitHub's token settings", c.host())
 	case res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusTooManyRequests:
-		return nil, fmt.Errorf("%s refused the request (rate limit or missing access); configure a token for %s", c.label(), c.host())
+		return nil, nil, fmt.Errorf("%s refused the request (rate limit or missing access); configure a token for %s", c.label(), c.host())
 	case res.StatusCode != http.StatusOK:
-		return nil, fmt.Errorf("%s answered %s", c.label(), res.Status)
+		return nil, nil, fmt.Errorf("%s answered %s", c.label(), res.Status)
 	}
-	return body, nil
+	return body, res.Header, nil
 }
 
 // decode maps one page of the provider's answer to Repo values.
@@ -338,20 +401,37 @@ func (c Client) decode(body []byte) ([]Repo, error) {
 			ForkedFrom     json.RawMessage `json:"forked_from_project"`
 			Visibility     string          `json:"visibility"`
 			LastActivityAt string          `json:"last_activity_at"`
+			Permissions    struct {
+				Project *struct {
+					Level int `json:"access_level"`
+				} `json:"project_access"`
+				Group *struct {
+					Level int `json:"access_level"`
+				} `json:"group_access"`
+			} `json:"permissions"`
 		}
 		if err := json.Unmarshal(body, &in); err != nil {
 			return bad(err)
 		}
 		out := make([]Repo, 0, len(in))
 		for _, r := range in {
+			level := 0
+			if p := r.Permissions.Project; p != nil {
+				level = p.Level
+			}
+			if g := r.Permissions.Group; g != nil && g.Level > level {
+				level = g.Level
+			}
 			out = append(out, Repo{Name: r.Path, DefaultBranch: r.DefaultBranch, Description: r.Description, Archived: r.Archived,
-				Fork: len(r.ForkedFrom) > 0 && string(r.ForkedFrom) != "null", Private: r.Visibility != "public", PushedAt: r.LastActivityAt})
+				Fork: len(r.ForkedFrom) > 0 && string(r.ForkedFrom) != "null", Private: r.Visibility != "public", PushedAt: r.LastActivityAt,
+				Permission: gitlabPermission(level)})
 		}
 		return out, nil
 	case Forgejo:
 		var in []struct {
 			Repo
-			UpdatedAt string `json:"updated_at"`
+			UpdatedAt   string       `json:"updated_at"`
+			Permissions *permissions `json:"permissions"`
 		}
 		if err := json.Unmarshal(body, &in); err != nil {
 			return bad(err)
@@ -359,15 +439,62 @@ func (c Client) decode(body []byte) ([]Repo, error) {
 		out := make([]Repo, 0, len(in))
 		for _, r := range in {
 			r.PushedAt = r.UpdatedAt
+			r.Permission = r.Permissions.level()
 			out = append(out, r.Repo)
 		}
 		return out, nil
 	}
-	var repos []Repo
-	if err := json.Unmarshal(body, &repos); err != nil {
+	var in []struct {
+		Repo
+		Permissions *permissions `json:"permissions"`
+	}
+	if err := json.Unmarshal(body, &in); err != nil {
 		return bad(err)
 	}
-	return repos, nil
+	out := make([]Repo, 0, len(in))
+	for _, r := range in {
+		r.Permission = r.Permissions.level()
+		out = append(out, r.Repo)
+	}
+	return out, nil
+}
+
+// permissions is the permissions object of GitHub and Forgejo; it is only
+// present when the request carried a token.
+type permissions struct {
+	Admin    bool `json:"admin"`
+	Maintain bool `json:"maintain"`
+	Push     bool `json:"push"`
+	Triage   bool `json:"triage"`
+	Pull     bool `json:"pull"`
+}
+
+func (p *permissions) level() string {
+	switch {
+	case p == nil:
+		return ""
+	case p.Admin || p.Maintain:
+		return PermAdmin
+	case p.Push:
+		return PermWrite
+	case p.Pull || p.Triage:
+		return PermRead
+	}
+	return ""
+}
+
+// gitlabPermission maps GitLab access levels: 40 maintainer, 30 developer,
+// 10 guest and 20 reporter.
+func gitlabPermission(level int) string {
+	switch {
+	case level >= 40:
+		return PermAdmin
+	case level >= 30:
+		return PermWrite
+	case level >= 10:
+		return PermRead
+	}
+	return ""
 }
 
 // RepoExists reports whether owner/name still exists as far as the token can
