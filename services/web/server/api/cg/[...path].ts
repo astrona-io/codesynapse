@@ -48,21 +48,51 @@ function apiMode(base: string): Promise<'single' | 'accounts'> {
   return pendingMode
 }
 
+// counted passes the API's answer through and records its outcome once: ok
+// at the end, the failure's kind when the API stops mid-answer (the status
+// is already sent, so the visitor sees a cut-off answer), nothing when the
+// visitor went away.
+function counted(answer: ReadableStream<Uint8Array>, gone: AbortSignal): ReadableStream<Uint8Array> {
+  const reader = answer.getReader()
+  return new ReadableStream<Uint8Array>({
+    async pull(ctl) {
+      try {
+        const { done, value } = await reader.read()
+        if (done) {
+          recordProxy('ok')
+          ctl.close()
+        } else {
+          ctl.enqueue(value)
+        }
+      } catch (e) {
+        if (!gone.aborted) recordProxy(proxyFailure(e))
+        ctl.error(e)
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason)
+    },
+  })
+}
+
 export default defineEventHandler(async (event) => {
   const method = event.method.toUpperCase()
   if (!ALLOWED_METHODS.has(method)) {
+    recordProxy('refused')
     throw createError({ statusCode: 405, statusMessage: 'Method Not Allowed' })
   }
   // The raw path, not the router param: the param is already decoded, which
   // would turn owner%2Fname into two path elements.
   const path = getRequestURL(event).pathname.replace(/^\/api\/cg\//, '')
   if (!SAFE_PATH.test(path) || hasDotSegment(path)) {
+    recordProxy('refused')
     throw createError({ statusCode: 400, statusMessage: 'Bad path' })
   }
   if (method !== 'GET') {
     const origin = getRequestHeader(event, 'origin')
     const host = getRequestHeader(event, 'host')
     if (!origin || !host || new URL(origin).host !== host) {
+      recordProxy('refused')
       throw createError({ statusCode: 403, statusMessage: 'Cross-origin request rejected' })
     }
   }
@@ -98,16 +128,31 @@ export default defineEventHandler(async (event) => {
     try {
       body = await readBounded(getRequestWebStream(event), Number(maxBodyBytes), getRequestHeader(event, 'content-length'))
     } catch (e) {
-      if (e instanceof BodyTooLarge) throw createError({ statusCode: 413, statusMessage: 'Request body too large' })
+      if (e instanceof BodyTooLarge) {
+        recordProxy('refused')
+        throw createError({ statusCode: 413, statusMessage: 'Request body too large' })
+      }
       throw e
     }
   }
   // A visitor who navigates away stops the API's work too, not only after
-  // the timeout.
+  // the timeout. That is the visitor's choice, not an API failure, so it is
+  // never counted as one.
   const gone = new AbortController()
   const out = event.node.res
   out?.once?.('close', () => { if (!out.writableFinished) gone.abort() })
-  const res = await fetch(target, { method, headers, body, redirect: 'error', signal: AbortSignal.any([AbortSignal.timeout(120_000), gone.signal]) })
+  let res: Response
+  try {
+    res = await fetch(target, { method, headers, body, redirect: 'error', signal: AbortSignal.any([AbortSignal.timeout(120_000), gone.signal]) })
+  } catch (e) {
+    if (gone.signal.aborted) throw createError({ statusCode: 499, statusMessage: 'Client closed request' })
+    // The API never answered. Counted by kind for the platform panels; the
+    // visitor gets a gateway error, not the cause.
+    const outcome = proxyFailure(e)
+    recordProxy(outcome)
+    if (outcome === 'timeout') throw createError({ statusCode: 504, statusMessage: 'The API did not answer in time' })
+    throw createError({ statusCode: 502, statusMessage: 'The API could not be reached' })
+  }
   setResponseStatus(event, res.status)
   const ct = res.headers.get('content-type')
   if (ct) setResponseHeader(event, 'content-type', ct)
@@ -121,7 +166,11 @@ export default defineEventHandler(async (event) => {
   }
   setResponseHeader(event, 'cache-control', 'no-store')
   // Streamed, not buffered: large reports reach the browser as the API
-  // writes them, and the server holds no copy.
-  if (res.status === 204 || !res.body) return null
-  return res.body
+  // writes them, and the server holds no copy. The call is counted when the
+  // answer has been read to the end, or failed part way.
+  if (res.status === 204 || !res.body) {
+    recordProxy('ok')
+    return null
+  }
+  return counted(res.body, gone.signal)
 })

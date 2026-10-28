@@ -88,7 +88,7 @@ const phase = computed(() => (job.value?.waiting ? 'Waiting for another job to f
       <span class="label small muted">{{ phase }}<template v-if="job?.steps"> · step {{ job.step }} of {{ job.steps }}</template></span>
     </div>
     <span v-if="job && job.state === 'succeeded'" class="badge badge--green">synced {{ fmtInt(job.nodes) }} nodes</span>
-    <span v-if="error" class="error small" :title="error">{{ error.length > 80 ? `${error.slice(0, 79)}…` : error }}</span>
+    <span v-if="error" class="error small break" role="alert" :title="error">{{ error.length > 80 ? `${error.slice(0, 79)}…` : error }}</span>
   </div>
 </template>
 
@@ -98,8 +98,8 @@ const phase = computed(() => (job.value?.waiting ? 'Waiting for another job to f
 .small { font-size: 12.5px; }
 .warn { color: var(--warning); }
 .progress { flex-basis: 100%; display: grid; gap: 4px; }
-.bar { height: 8px; border: 2px solid var(--ink); border-radius: 999px; background: var(--panel-2); overflow: hidden; }
-.bar span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.4s ease; }
+.bar { height: 8px; border: 2px solid var(--ink); border-radius: var(--pill); background: var(--panel-2); overflow: hidden; }
+.bar span { display: block; height: 100%; background: var(--accent); border-radius: var(--pill); transition: width 0.4s ease; }
 .bar.indeterminate span { width: 35%; animation: sync-slide 1.2s ease-in-out infinite; }
 @keyframes sync-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
 @media (prefers-reduced-motion: reduce) { .bar span { transition: none; } .bar.indeterminate span { animation: none; width: 100%; opacity: 0.5; } }

@@ -66,7 +66,7 @@ const tip = computed(() => {
 .seg:last-child { border-radius: 0 4px 4px 0; }
 .seg:only-child { border-radius: 4px; }
 .seg.dim { opacity: 0.4; }
-.seg:focus-visible { box-shadow: 0 0 0 2px var(--line-strong); }
+.seg:focus-visible { box-shadow: 0 0 0 2px var(--focus-ring); }
 .tip { margin: 0; }
 .tip strong { color: var(--ink); }
 .small { font-size: 12.5px; }

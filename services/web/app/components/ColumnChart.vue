@@ -86,7 +86,7 @@ svg { width: 100%; display: block; overflow: visible; }
 path { transition: opacity 120ms; }
 path.dim { opacity: 0.45; }
 .hit { fill: transparent; cursor: default; outline: none; }
-.hit:focus-visible { stroke: var(--line-strong); stroke-width: 1; }
+.hit:focus-visible { stroke: var(--focus-ring); stroke-width: 2; }
 .tooltip { position: absolute; top: 0; transform: translate(-50%, -100%); pointer-events: none; padding: 6px 10px; border-radius: var(--radius-xs); background: var(--panel); border: 1px solid var(--line-strong); font-size: 12px; white-space: nowrap; z-index: 2; }
 .tooltip strong { color: var(--ink); font-size: 14px; }
 .table-view summary { cursor: pointer; color: var(--muted); font-size: 12px; }

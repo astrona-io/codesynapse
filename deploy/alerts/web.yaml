@@ -1,0 +1,28 @@
+# The web server (docs/TELEMETRY_PLAN.md, "Phase 6"). It has no trusted
+# tenant, so its metrics are platform_* and labelled only by route pattern,
+# method, status class and a fixed proxy outcome; the rule sums them all away.
+groups:
+  - name: codesynapse-web
+    interval: 1m
+    rules:
+      # The dashboard reaches the API only through the web server's proxy.
+      # Refused calls (bad method, path, origin or size) are the browser's
+      # doing and are left out. At least one call a minute keeps a single
+      # failure on an idle installation from firing.
+      - alert: CodeSynapseDashboardAPIUnreachable
+        expr: |
+          (
+            sum(rate(platform_web_proxy_requests_total{outcome=~"unreachable|timeout"}[10m]))
+            /
+            sum(rate(platform_web_proxy_requests_total{outcome!="refused"}[10m]))
+          ) > 0.05
+          and
+          sum(rate(platform_web_proxy_requests_total{outcome!="refused"}[10m])) > 1/60
+        for: 10m
+        labels:
+          severity: critical
+          component: web
+        annotations:
+          summary: "The dashboard cannot reach the API"
+          description: "{{ $value | humanizePercentage }} of the dashboard's API calls found the API unreachable or timed out over the last 10 minutes, above 5% for 10 minutes."
+          dashboard: "{{ $externalURL }}/admin"

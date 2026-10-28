@@ -50,6 +50,9 @@ function only(kind: keyof typeof narrowers, value?: string) {
   action.value = 'mcp.'
 }
 const open = ref<number | null>(null)
+const toggle = (eid: number) => { open.value = open.value === eid ? null : eid }
+// Several logs can share a page (organisation and platform), so ids are unique.
+const uid = useId()
 </script>
 
 <template>
@@ -58,32 +61,33 @@ const open = ref<number | null>(null)
       <div class="panel__header">
         <h2>Audit log</h2>
         <div class="row">
-          <span v-if="verifyChain && verify" class="pill"><span class="dot" :class="verify.ok ? 'dot--ok' : 'dot--bad'" />{{ verifyText }}</span>
-          <button v-if="verifyChain" class="secondary tiny" @click="reverify()">Verify again</button>
-          <button v-if="verifyChain && verify?.segments && !deep" class="secondary tiny" @click="deep = true">Check archive files</button>
+          <span v-if="verifyChain && verify" class="pill" role="status"><span class="dot" :class="verify.ok ? 'dot--ok' : 'dot--bad'" />{{ verifyText }}</span>
+          <button v-if="verifyChain" type="button" class="secondary tiny" @click="reverify()">Verify again</button>
+          <button v-if="verifyChain && verify?.segments && !deep" type="button" class="secondary tiny" @click="deep = true">Check archive files</button>
         </div>
       </div>
       <p class="muted small">Every change, security event and agent (MCP) request, append-only and hash-chained: altering or removing an entry breaks the chain. Agent requests record the person, API key, chat session, client, tool, repository and arguments; code and conversations appear only as a fingerprint. Keep exports as evidence (NIS2).</p>
       <div class="row filters">
-        <div class="field"><label for="act">What</label><select id="act" v-model="action"><option v-for="a in ACTIONS" :key="a.id" :value="a.id">{{ a.label }}</option></select></div>
-        <div class="field"><label for="who">Who (email)</label><input id="who" v-model.lazy="actor" type="email" placeholder="anyone"></div>
-        <div class="field"><label for="out">Outcome</label><select id="out" v-model="outcome"><option value="">Any</option><option value="success">Succeeded</option><option value="failure">Failed or refused</option></select></div>
-        <div class="field"><label for="ses">Chat session</label><input id="ses" v-model.lazy="session" placeholder="any" autocomplete="off"></div>
-        <div class="field"><label for="tool">Tool</label><input id="tool" v-model.lazy="tool" placeholder="any" autocomplete="off"></div>
-        <div class="field"><label for="repo">Repository</label><input id="repo" v-model.lazy="repo" placeholder="any" autocomplete="off"></div>
-        <div class="field"><label for="days">Period</label><select id="days" v-model.number="days"><option :value="1">Last 24 hours</option><option :value="7">Last 7 days</option><option :value="30">Last 30 days</option><option :value="400">Last 400 days</option></select></div>
+        <div class="field"><label :for="`${uid}-act`">What</label><select :id="`${uid}-act`" v-model="action"><option v-for="a in ACTIONS" :key="a.id" :value="a.id">{{ a.label }}</option></select></div>
+        <div class="field"><label :for="`${uid}-who`">Who (email)</label><input :id="`${uid}-who`" v-model.lazy="actor" type="email" placeholder="anyone"></div>
+        <div class="field"><label :for="`${uid}-out`">Outcome</label><select :id="`${uid}-out`" v-model="outcome"><option value="">Any</option><option value="success">Succeeded</option><option value="failure">Failed or refused</option></select></div>
+        <div class="field"><label :for="`${uid}-ses`">Chat session</label><input :id="`${uid}-ses`" v-model.lazy="session" placeholder="any" autocomplete="off"></div>
+        <div class="field"><label :for="`${uid}-tool`">Tool</label><input :id="`${uid}-tool`" v-model.lazy="tool" placeholder="any" autocomplete="off"></div>
+        <div class="field"><label :for="`${uid}-repo`">Repository</label><input :id="`${uid}-repo`" v-model.lazy="repo" placeholder="any" autocomplete="off"></div>
+        <div class="field"><label :for="`${uid}-days`">Period</label><select :id="`${uid}-days`" v-model.number="days"><option :value="1">Last 24 hours</option><option :value="7">Last 7 days</option><option :value="30">Last 30 days</option><option :value="400">Last 400 days</option></select></div>
         <div class="field export"><span class="label">Export</span><div class="row"><a class="btn btn--ghost" :href="exportUrl('csv')">CSV</a><a class="btn btn--ghost" :href="exportUrl('jsonl')">JSON Lines</a></div></div>
       </div>
     </section>
-    <p v-if="error" class="notice notice--danger">{{ apiErrorMessage(error) }}</p>
-    <section class="panel" :class="{ refreshing: pending }">
-      <div v-if="events.length" class="table-wrap">
+    <DataState v-if="error" :error="error" />
+    <section class="panel" :class="{ refreshing: pending }" :aria-busy="pending">
+      <DataState :pending="pending" :empty="!events.length" title="No entries" text="Nothing matches these filters in this period.">
+      <div class="table-wrap">
         <table>
           <thead><tr><th>When</th><th>Who</th><th>What</th><th>Target</th><th>Outcome</th></tr></thead>
           <tbody>
             <template v-for="e in events" :key="e.id">
-              <tr class="ev" @click="open = open === e.id ? null : e.id">
-                <td class="nowrap" :title="e.at">{{ new Date(e.at).toLocaleString() }}</td>
+              <tr class="ev" @click="toggle(e.id)">
+                <td class="nowrap" :title="e.at"><button type="button" class="link" :aria-expanded="open === e.id" @click.stop="toggle(e.id)">{{ new Date(e.at).toLocaleString() }}</button></td>
                 <td>{{ e.actor_email || e.via }}<div v-if="e.actor_email" class="muted small">{{ e.via }}</div></td>
                 <td class="mono">{{ e.action }}</td>
                 <td class="small target">{{ e.target }}</td>
@@ -116,7 +120,7 @@ const open = ref<number | null>(null)
         </table>
         <p v-if="events.length === 200" class="muted small">Showing the newest 200; export to get everything in the period.</p>
       </div>
-      <p v-else class="empty"><strong>No entries</strong>Nothing matches these filters in this period.</p>
+      </DataState>
     </section>
   </div>
 </template>
