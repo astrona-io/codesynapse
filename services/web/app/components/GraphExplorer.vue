@@ -402,7 +402,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.explorer-canvas { position: relative; width: 100%; height: 100%; min-height: 420px; border-radius: 8px; overflow: hidden; }
+.explorer-canvas { position: relative; width: 100%; height: 100%; min-height: 420px; border-radius: var(--radius-xs); overflow: hidden; }
 canvas { display: block; touch-action: none; cursor: grab; }
-canvas:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+canvas:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -3px; }
 </style>
