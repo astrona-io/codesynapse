@@ -84,6 +84,7 @@ nav:
       - Governance:
           - Architecture catalog: features/architecture.md
           - Indexing policy and reports: features/indexing-policy.md
+          - Statistics and telemetry: features/telemetry.md
   - Architecture:
       - architecture/index.md
       - Overview: architecture/overview.md
