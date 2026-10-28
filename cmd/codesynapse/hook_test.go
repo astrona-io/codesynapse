@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/astrona-io/codesynapse/internal/app"
+	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
@@ -293,4 +294,36 @@ func TestStopGuardReportsGoProblemsItself(t *testing.T) {
 	assert.Contains(t, reason, "broken.go:3")
 	assert.Contains(t, reason, "ugly.go: not gofmt-formatted")
 	assert.Contains(t, reason, "verify_plan")
+}
+
+// TestStopGuardIgnoresUpstreamCommits: a checkout behind its upstream (others
+// merged since it last pulled) has not changed the files those merges did.
+func TestStopGuardIgnoresUpstreamCommits(t *testing.T) {
+	offlineAPI(t)
+	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
+	ctx := context.Background()
+	dir := gitRepo(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	git := func(dir string, args ...string) {
+		t.Helper()
+		_, err := gitx.Run(ctx, dir, append([]string{"-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
+		require.NoError(t, err, strings.Join(args, " "))
+	}
+	// The upstream gains a commit merged elsewhere; this branch only tracks it.
+	git(dir, "checkout", "-q", "-b", "upstream")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "merged.go"), []byte("package demo\n\nfunc Merged() {}\n"), 0o600))
+	git(dir, "add", "-A")
+	git(dir, "commit", "-q", "-m", "merged elsewhere")
+	git(dir, "checkout", "-q", "main")
+	git(dir, "branch", "-q", "--set-upstream-to=upstream")
+
+	in := toolHookInput{SessionID: "chat-1", Cwd: dir}
+	assert.True(t, stopGuard(ctx, in, logger) == nil, "upstream commits are not this session's change")
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "local.go"), []byte("package demo\n\nfunc Local() {}\n"), 0o600))
+	git(dir, "add", "-A")
+	git(dir, "commit", "-q", "-m", "local")
+	out := stopGuard(ctx, in, logger)
+	require.True(t, out != nil)
+	assert.Contains(t, out["reason"].(string), "1 file(s)", "only the unpushed commit counts")
 }
