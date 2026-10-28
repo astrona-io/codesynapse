@@ -82,35 +82,43 @@ func (s *Server) auditRequest(r *http.Request, pattern string, status int) {
 	s.record(r.Context(), e)
 }
 
-// deniedLimit bounds how many refused requests per client address reach the
-// database each minute; the log sink sees all of them.
-var deniedLimit = struct {
-	sync.Mutex
+// deniedLimiter bounds how many refused requests per client address reach
+// the database each minute; the log sink sees all of them. Each Server has its
+// own, so servers in one process (tests) never use up each other's budget.
+type deniedLimiter struct {
+	mu   sync.Mutex
 	seen map[string][]time.Time
-}{seen: map[string][]time.Time{}}
+}
+
+// deniedPerMinute is how many refused requests per address are stored.
+const deniedPerMinute = 10
+
+// allow reports whether a refused request from ip at now is stored.
+func (l *deniedLimiter) allow(ip string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.seen == nil || len(l.seen) > 100_000 {
+		l.seen = map[string][]time.Time{}
+	}
+	recent := l.seen[ip][:0]
+	for _, t := range l.seen[ip] {
+		if now.Sub(t) < time.Minute {
+			recent = append(recent, t)
+		}
+	}
+	ok := len(recent) < deniedPerMinute
+	if ok {
+		recent = append(recent, now)
+	}
+	l.seen[ip] = recent
+	return ok
+}
 
 func (s *Server) auditDenied(r *http.Request, status int) {
 	e := accounts.Event{Via: "anonymous", Action: "auth.denied", Target: r.Method + " " + r.URL.Path, Outcome: accounts.Failure, Status: status, At: time.Now()}
 	ri := accounts.RequestInfoFrom(r.Context())
 	e.RequestID, e.IP, e.UserAgent = ri.RequestID, ri.IP, ri.UserAgent
-	now := time.Now()
-	deniedLimit.Lock()
-	recent := deniedLimit.seen[ri.IP][:0]
-	for _, t := range deniedLimit.seen[ri.IP] {
-		if now.Sub(t) < time.Minute {
-			recent = append(recent, t)
-		}
-	}
-	store := len(recent) < 10
-	if store {
-		recent = append(recent, now)
-	}
-	deniedLimit.seen[ri.IP] = recent
-	if len(deniedLimit.seen) > 100_000 {
-		deniedLimit.seen = map[string][]time.Time{}
-	}
-	deniedLimit.Unlock()
-	if !store {
+	if !s.denied.allow(ri.IP, time.Now()) {
 		s.logAudit(e)
 		return
 	}
