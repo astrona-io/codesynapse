@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import type { ImportCandidate } from '~/utils/types'
+
 // Import with accounts: list an organisation's repositories (private ones too
 // when the selected organisation has a Git token for the host), pick
 // some, and add each one to the selected organisation the same way a single
 // URL is added (POST /repos), so access checks and grants are the API's.
-interface Candidate { name: string; repo: string; url: string; default_branch?: string; description?: string; archived?: boolean; fork?: boolean; private?: boolean; permission?: string; pushed_at?: string; added: boolean }
+type Candidate = ImportCandidate
 interface Listing { provider: string; host: string; org: string; repos: Candidate[]; truncated: boolean; authenticated?: boolean; sso_restricted?: boolean }
 
 const PROVIDERS = [{ v: '', label: 'Detect from host' }, { v: 'github', label: 'GitHub' }, { v: 'forgejo', label: 'Forgejo / Gitea / Codeberg' }, { v: 'gitlab', label: 'GitLab' }]

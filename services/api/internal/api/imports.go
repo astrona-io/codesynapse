@@ -17,17 +17,21 @@ import (
 // (public or proved private access, same-remote linking, the initial admin
 // grant). The installation-wide watch list (orgs.go) stays single-tenant.
 //
-// Listing uses the selected organisation's own Git token for the host when
-// it has one and the caller is an owner or admin there, the people who
-// manage that token: private repositories the token reads are listed with
-// the token's permission on each. Everyone else, and every organisation
-// without a token, lists anonymously and sees public repositories only.
-// The token is stored per organisation and host, not per namespace, so it
-// lists whatever organisation on that host its owner can read; that is why
-// only its managers may use it here. It never lists the token owner's own
-// account (forge uses the public user endpoints only), and private
-// repositories are answered without their descriptions. The token goes to
-// that host alone (forge follows no redirects and refuses internal
+// Listing for a member's own space (space "me") uses the caller's own Git
+// token for the host when they saved one, never the organisation's: it also
+// shows the private repositories that token reads, and adding one proves
+// access with the same token again. Listing for the organisation uses the
+// selected organisation's own Git token for the host when it has one and the
+// caller is an owner or admin there, the people who manage that token:
+// private repositories the token reads are listed with the token's
+// permission on each. Everyone else, and every organisation without a
+// token, lists anonymously and sees public repositories only.
+// The organisation token is stored per organisation and host, not per
+// namespace, so it lists whatever organisation on that host its owner can
+// read; that is why only its managers may use it here. It never lists the
+// token owner's own account (forge uses the public user endpoints only), and
+// private repositories are answered without their descriptions. A token goes
+// to that host alone (forge follows no redirects and refuses internal
 // addresses when it connects), and adding a private repository still proves
 // access with it (proveAccess) before anything is cloned.
 
@@ -40,6 +44,9 @@ type importListRequest struct {
 	Org             string `json:"org"`
 	IncludeArchived bool   `json:"include_archived"`
 	IncludeForks    bool   `json:"include_forks"`
+	// Space "me" lists with the caller's own token; anything else lists
+	// anonymously for the organisation.
+	Space string `json:"space"`
 }
 
 // ImportCandidate is one listed repository. URL is built from the validated
@@ -53,7 +60,7 @@ type ImportCandidate struct {
 	Archived      bool   `json:"archived,omitempty"`
 	Fork          bool   `json:"fork,omitempty"`
 	Private       bool   `json:"private,omitempty"`
-	// Permission is the organisation token's access: admin, write or read.
+	// Permission is the listing token's access: admin, write or read.
 	Permission string `json:"permission,omitempty"`
 	PushedAt   string `json:"pushed_at,omitempty"`
 	// Added says the selected organisation already has this repository.
@@ -75,8 +82,8 @@ func (s *Server) publicForgeClient(ctx context.Context, kind forge.Kind, host, l
 }
 
 // keepListed says whether a listed repository can be imported under the
-// archived and fork filters: public (or private when the listing used the
-// organisation's token), with a name that is safe to clone.
+// archived and fork filters: public (or private when the listing used a
+// token), with a name that is safe to clone.
 func keepListed(x forge.Repo, archived, forks, private bool) bool {
 	return validRepoSegment(x.Name) && (private || !x.Private) && (archived || !x.Archived) && (forks || !x.Fork)
 }
@@ -110,14 +117,21 @@ func (s *Server) handleImportList(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
+	if req.Space != "" && req.Space != spaceOrg && req.Space != spaceMe {
+		s.problem(w, http.StatusBadRequest, errors.New(`space must be "org" or "me"`))
+		return
+	}
 	c, err := s.publicForgeClient(r.Context(), kind, host, login)
 	if err != nil {
 		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
-	switch err := s.cfg.Accounts.Require(r.Context(), p, m.Org.ID, accounts.Admin); {
-	case err == nil:
-		tok, err := s.cfg.Accounts.OpenGitToken(r.Context(), m.Org.ID, host)
+	whose, action := "the organisation's token", "git_token.list"
+	if req.Space == spaceMe {
+		// Never the organisation's token: what a member lists for their own
+		// space is what their own token reads. Without one it stays public.
+		whose, action = "your Git token", "user_git_token.list"
+		tok, err := s.cfg.Accounts.OpenUserGitToken(r.Context(), m.Org.ID, p.User.ID, host)
 		switch {
 		case err == nil:
 			c.Token = tok
@@ -125,14 +139,26 @@ func (s *Server) handleImportList(w http.ResponseWriter, r *http.Request) {
 			s.accountError(w, err)
 			return
 		}
-	case !errors.Is(err, accounts.ErrForbidden):
-		s.accountError(w, err)
-		return
+	} else {
+		switch err := s.cfg.Accounts.Require(r.Context(), p, m.Org.ID, accounts.Admin); {
+		case err == nil:
+			tok, err := s.cfg.Accounts.OpenGitToken(r.Context(), m.Org.ID, host)
+			switch {
+			case err == nil:
+				c.Token = tok
+			case !errors.Is(err, accounts.ErrNotFound) && !errors.Is(err, accounts.ErrNoSecretKey):
+				s.accountError(w, err)
+				return
+			}
+		case !errors.Is(err, accounts.ErrForbidden):
+			s.accountError(w, err)
+			return
+		}
 	}
 	authed := c.Token != ""
 	if authed {
 		if _, err := s.cfg.Accounts.Record(r.Context(), accounts.Event{UserID: p.User.ID, Via: p.Via, OrgID: m.Org.ID,
-			Action: "git_token.list", Target: host + "/" + login, Outcome: accounts.Success, Status: http.StatusOK}); err != nil {
+			Action: action, Target: host + "/" + login, Outcome: accounts.Success, Status: http.StatusOK}); err != nil {
 			s.accountError(w, err)
 			return
 		}
@@ -144,7 +170,7 @@ func (s *Server) handleImportList(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, forge.ErrNotFound) {
 			what := "public repositories"
 			if authed {
-				what = "repositories the organisation's token can read"
+				what = "repositories " + whose + " can read"
 			}
 			s.problem(w, http.StatusNotFound, errors.New(login+" was not found on "+host+", or it has no "+what))
 			return

@@ -36,8 +36,9 @@ type Store struct {
 	segments       []accounts.AuditSegment
 	segmentID      int64
 	tip            string
-	repos          map[string]accounts.Repository // org|graph
-	tokens         map[string]accounts.GitToken   // org|host
+	repos          map[string]accounts.Repository   // org|graph
+	tokens         map[string]accounts.GitToken     // org|host
+	userTokens     map[string]accounts.UserGitToken // user|host
 	teams          map[string]accounts.Team
 	tuples         map[accounts.Tuple]bool // keys have CreatedBy/CreatedAt zeroed
 	tupleAt        map[accounts.Tuple]accounts.Tuple
@@ -68,7 +69,7 @@ var _ accounts.Store = (*Store)(nil)
 // New returns an empty store.
 func New() *Store {
 	return &Store{outbox: map[string]int64{}, users: map[string]accounts.User{}, orgs: map[string]accounts.Org{}, members: map[string]map[string]member{},
-		sessions: map[string]accounts.Session{}, executions: map[string]accounts.ExecutionSession{}, keys: map[string]accounts.APIKey{}, repos: map[string]accounts.Repository{}, tokens: map[string]accounts.GitToken{},
+		sessions: map[string]accounts.Session{}, executions: map[string]accounts.ExecutionSession{}, keys: map[string]accounts.APIKey{}, repos: map[string]accounts.Repository{}, tokens: map[string]accounts.GitToken{}, userTokens: map[string]accounts.UserGitToken{},
 		teams: map[string]accounts.Team{}, tuples: map[accounts.Tuple]bool{}, tupleAt: map[accounts.Tuple]accounts.Tuple{}, repoPolicies: map[string]accounts.RepoPolicyApproval{}, annotations: map[string]map[string]accounts.RepositoryAnnotation{}, ingestRuns: map[string]ingestRecord{}, ingestEntries: map[string]ingestEntry{},
 		idps: map[string]accounts.IdentityProvider{}, identities: map[string]accounts.ExternalIdentity{}, ssoStates: map[string]accounts.SSOState{}, managed: map[string]bool{}}
 }

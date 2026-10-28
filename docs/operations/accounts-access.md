@@ -91,7 +91,9 @@ Settings → Organisation → "Members may add their own repositories" turns per
 
 When the organisation adds a repository a member already has in their own space (an owner or admin adding it, or their watch finding it), the member's entry becomes the organisation's. The move is audited as `repo.space_moved` before it happens. The member keeps an explicit admin grant and whoever added it gets one; other members get the organisation default and whatever grants already exist, nothing more. A member's private entry moves only when the organisation can read the repository with its own Git token; until then the add answers 409 with a message saying a member of the organisation has it privately, without saying who. A member adding a repository that the organisation or another member already has answers 409. Adding it again in the same space does nothing. Owner recovery works on organisation repositories only: an owner cannot recover administration of a member's personal repository.
 
-A private repository can only be added for the organisation: its access is proved with the organisation's Git token, and a member's own space must not hide a repository the organisation can read from its admins. Personal Git tokens are not supported yet. A watch created by a member adds to that member's own space, and skips new repositories while members' own repositories are turned off. A watch skips what it cannot add without an audit entry and without counting it as added.
+Each space uses only its own Git tokens. Organisation repositories use the organisation's tokens; a private repository in a member's own space uses only that member's own token (see [personal Git tokens](#personal-git-tokens)), never the organisation's, even when the organisation's token could read it. A private personal repository can be added only after the owner's own token read it; without one the API answers 403 and names Profile → Git tokens.
+
+A watch created by a member adds to that member's own space, and skips new repositories while members' own repositories are turned off. A watch skips what it cannot add without an audit entry and without counting it as added.
 
 ## API route scoping
 
@@ -156,9 +158,22 @@ flowchart TD
 
 An organisation admin stores a token per host (`PUT /api/v1/accounts/orgs/{org}/git-tokens/github.com`, or Settings). Keep `SECRET_KEY` from `.env`: tokens sealed with a lost key have to be set again.
 
-To add many repositories at once, **Import** lists the public repositories of an organisation or user on GitHub, Forgejo/Gitea or GitLab and adds the ones you pick. Private repositories are added by URL, if the organisation can read them with its own token.
+To add many repositories at once, **Import** lists the repositories of an organisation or user on GitHub, Forgejo/Gitea or GitLab and adds the ones you pick. For the organisation space an owner or admin lists with the organisation's token for the host when it has one (audited `git_token.list`), so private repositories that token reads are shown too; without a token the listing is anonymous and shows public repositories only. For your own space (`"space": "me"`) the listing uses your own token for that host when you saved one, so it also shows private repositories that token can see (marked `private`). On GitHub, `/users/{login}/repos` returns public repositories only even with a token, so add your own private GitHub repositories by URL.
 
 Organisations never use the installation's tokens. A public repository is cloned anonymously. An existing graph is linked only for the same remote (`sameRemote`), so a name cannot open someone else's graph. Tokens are shown only as previews and never logged or audited in clear.
+
+## Personal Git tokens
+
+Each member can store their own token per host under Profile → Git tokens (`GET /api/v1/me/git-tokens`, `PUT`/`DELETE /api/v1/me/git-tokens/{host}`). Only a signed-in session can list or change them, for its own account only; API keys get 403. Changes are audited as `user.git_token.set` and `user.git_token.remove`, without the token. Tokens are sealed with `accounts.Sealer` bound to the user and host, kept per user (not per organisation), and opened only for repositories in that user's own space, and only while the user is still an active member of the entry's organisation.
+
+They are used, with no fallback to the organisation's token, to:
+
+- prove access once before a private personal repository is added (one `ls-remote`);
+- clone, fetch and sync it, and recheck access at every sync: without a working token the entry is marked lost (`repo.access_lost`); saving a working token restores it (`repo.access_restored`) and the answer lists the restored repositories;
+- push fix branches for it;
+- list repositories for Import into your own space.
+
+Organisation watches still add public repositories only, to the organisation space.
 
 ## Audit log
 

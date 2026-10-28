@@ -211,10 +211,7 @@ func (s *Server) buildAttention(ctx context.Context, only string, now time.Time)
 		if only != "" && l.Graph != only {
 			continue
 		}
-		add(AttentionItem{Level: "high", Kind: "access", Repo: l.Graph,
-			Title:  "Your organisation can no longer read this private repository",
-			Detail: "Its Git token was removed or lost access, so the repository is hidden from your organisation. An admin can save a working token.",
-			Action: "Fix the Git token", Link: "/settings/git-tokens"})
+		add(lostAccessItem(l))
 	}
 
 	if only == "" {
@@ -247,12 +244,32 @@ func (s *Server) buildAttention(ctx context.Context, only string, now time.Time)
 	return a, nil
 }
 
+// lostAccessItem words a lost entry for whoever sees it: a member's own
+// repository is read with their own token, never the organisation's.
+func lostAccessItem(r accounts.Repository) AttentionItem {
+	if r.Personal() {
+		return AttentionItem{Level: "high", Kind: "access", Repo: r.Graph,
+			Title:  "You can no longer read this private repository",
+			Detail: "Your Git token for its host was removed or lost access, so the repository is hidden. Save a working token in your profile.",
+			Action: "Fix your Git token", Link: "/settings/profile?tab=git"}
+	}
+	return AttentionItem{Level: "high", Kind: "access", Repo: r.Graph,
+		Title:  "Your organisation can no longer read this private repository",
+		Detail: "Its Git token was removed or lost access, so the repository is hidden from your organisation. An admin can save a working token.",
+		Action: "Fix the Git token", Link: "/settings/git-tokens"}
+}
+
 // lostAccess lists the private entries of the request's organisations that
 // lost access. They are outside the scope (hidden), so they are read from
-// the registry directly, for the organisations the caller acts in.
+// the registry directly, for the organisations the caller acts in. A
+// member's own entry is shown to that member only: its name is theirs.
 func (s *Server) lostAccess(ctx context.Context) ([]accounts.Repository, error) {
 	if s.cfg.Accounts == nil {
 		return nil, nil
+	}
+	var userID string
+	if p, ok := principal(ctx); ok {
+		userID = p.User.ID
 	}
 	sc := scopeFrom(ctx)
 	var orgIDs []string
@@ -268,7 +285,7 @@ func (s *Server) lostAccess(ctx context.Context) ([]accounts.Repository, error) 
 			return nil, err
 		}
 		for _, r := range repos {
-			if !r.Usable() {
+			if !r.Usable() && (!r.Personal() || (userID != "" && r.OwnerID == userID)) {
 				out = append(out, r)
 			}
 		}

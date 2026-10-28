@@ -56,6 +56,11 @@ func (s *Store) ReplaceRoot(_ context.Context, oldID string, u accounts.User) er
 			delete(s.keys, id)
 		}
 	}
+	for k, t := range s.userTokens {
+		if t.UserID == oldID {
+			delete(s.userTokens, k)
+		}
+	}
 	u.BootstrapRoot = true
 	s.users[u.ID] = u
 	if s.setup.RootUserID == oldID {

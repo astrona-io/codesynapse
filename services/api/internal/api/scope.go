@@ -333,11 +333,6 @@ func spaceTakeover(existing []accounts.Repository, entry accounts.Repository) (s
 	return "", nil
 }
 
-// errPersonalPrivate refuses a private repository in a member's own space:
-// its access was proved with the organisation's token, which would let a
-// member keep an organisation-readable repository out of the admins' sight.
-var errPersonalPrivate = fmt.Errorf("%w: a private repository can only be added for the organisation; ask an admin to add it", accounts.ErrForbidden)
-
 // errMemberReposOff says why a member's own repository was refused.
 var errMemberReposOff = fmt.Errorf("%w: your organisation does not let members add their own repositories; ask an admin to add it", accounts.ErrForbidden)
 
@@ -378,12 +373,7 @@ func (s *Server) linkEntry(ctx context.Context, graph, remote, visibility, space
 	if _, err := s.cfg.Accounts.ResolveExecutionSession(ctx, p.User.ID, m.Org.ID, id.SessionID); err != nil {
 		return accounts.Repository{}, "", err
 	}
-	if space == "" {
-		space = spaceMe
-		if m.Role.AtLeast(accounts.Admin) {
-			space = spaceOrg
-		}
-	}
+	space = defaultSpace(m, space)
 	entry := accounts.Repository{OrgID: m.Org.ID, Graph: graph, Remote: remote,
 		Visibility: visibility, AddedBy: p.User.ID, AddedAt: time.Now().UTC().Truncate(time.Microsecond)}
 	least := accounts.Admin
@@ -395,6 +385,39 @@ func (s *Server) linkEntry(ctx context.Context, graph, remote, visibility, space
 		return accounts.Repository{}, "", fmt.Errorf("%w: space must be %q or %q", accounts.ErrInvalidInput, spaceOrg, spaceMe)
 	}
 	return entry, least, nil
+}
+
+// defaultSpace picks the organisation for its owners and admins and the
+// member's own space for everyone else when the caller named none.
+func defaultSpace(m accounts.Membership, space string) string {
+	if space != "" {
+		return space
+	}
+	if m.Role.AtLeast(accounts.Admin) {
+		return spaceOrg
+	}
+	return spaceMe
+}
+
+// errPersonalPrivate refuses a private repository in a member's own space
+// unless the member proved access with their own Git token: the
+// organisation's token must never pull a repository into a space its
+// admins do not see.
+var errPersonalPrivate = fmt.Errorf("%w: a private repository in your own space needs your own Git token (Profile, Git tokens)", accounts.ErrForbidden)
+
+type ownerProvedKey struct{}
+
+type ownerProof struct{ org, owner, graph string }
+
+// withOwnerProof records that owner's own token read graph's remote just
+// now, which is what lets linkPolicyRepository accept the private entry.
+func withOwnerProof(ctx context.Context, org, owner, graph string) context.Context {
+	return context.WithValue(ctx, ownerProvedKey{}, ownerProof{org, owner, graph})
+}
+
+func ownerProved(ctx context.Context, e accounts.Repository) bool {
+	p, ok := ctx.Value(ownerProvedKey{}).(ownerProof)
+	return ok && e.OwnerID != "" && p == ownerProof{e.OrgID, e.OwnerID, e.Graph}
 }
 
 // linkError answers a failed linkRepo.
@@ -452,7 +475,7 @@ func (s *Server) linkPolicyRepository(ctx context.Context, entry accounts.Reposi
 				}
 			}
 		}
-		if entry.Personal() && entry.Visibility == accounts.Private {
+		if entry.Personal() && entry.Visibility == accounts.Private && !ownerProved(ctx, entry) {
 			return errPersonalPrivate
 		}
 		if entry.Personal() {
@@ -530,7 +553,7 @@ func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request) {
 		vis = accounts.Public
 	}
 	if vis == accounts.Private {
-		if _, err := s.proveAccess(r.Context(), o.ID, n.URL); err != nil {
+		if _, err := s.proveAccess(r.Context(), o.ID, "", n.URL); err != nil {
 			s.accountError(w, accounts.ErrForbidden)
 			return
 		}

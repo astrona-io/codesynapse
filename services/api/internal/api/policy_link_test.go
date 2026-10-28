@@ -111,7 +111,16 @@ func TestRepositorySpaces(t *testing.T) {
 
 	private := entry("space/private", f.user.ID)
 	private.Visibility = accounts.Private
-	assert.True(t, errors.Is(f.server.linkPolicyRepository(workCtx, private, accounts.Member), errPersonalPrivate), "proved with the organisation's token, so not personal")
+	for name, c := range map[string]context.Context{
+		"no proof":       workCtx,
+		"another owner":  withOwnerProof(workCtx, f.org.ID, "someone-else", private.Graph),
+		"another graph":  withOwnerProof(workCtx, f.org.ID, f.user.ID, "space/other"),
+		"another tenant": withOwnerProof(workCtx, "other-org", f.user.ID, private.Graph),
+	} {
+		assert.True(t, errors.Is(f.server.linkPolicyRepository(c, private, accounts.Member), errPersonalPrivate), name)
+	}
+	require.NoError(t, f.server.linkPolicyRepository(withOwnerProof(workCtx, f.org.ID, f.user.ID, private.Graph), private, accounts.Member), "the owner's own token proved access")
+
 	require.NoError(t, f.accounts.St.SetMemberReposEnabled(ctx, f.org.ID, false))
 	err = f.server.linkPolicyRepository(workCtx, entry("space/later", f.user.ID), accounts.Member)
 	assert.True(t, errors.Is(err, accounts.ErrForbidden), "members' own repositories are turned off")
@@ -120,7 +129,7 @@ func TestRepositorySpaces(t *testing.T) {
 	assert.False(t, watchSkip(accounts.ErrForbidden), "other refusals still fail the scan")
 	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/later", ""), accounts.Admin), "the organisation can still add it")
 
-	for err, code := range map[error]int{errSpaceTaken{}: 409, errMemberReposOff: 403, accounts.ErrInvalidInput: 400} {
+	for err, code := range map[error]int{errSpaceTaken{}: 409, errMemberReposOff: 403, errPersonalPrivate: 403, accounts.ErrInvalidInput: 400} {
 		w := httptest.NewRecorder()
 		f.server.linkError(w, err)
 		assert.Equal(t, w.Code, code, err.Error())

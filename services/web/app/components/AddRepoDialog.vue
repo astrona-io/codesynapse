@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import type { Job } from '~/utils/types'
+import type { ImportCandidate, Job } from '~/utils/types'
 
 // Add repositories: one by URL, or the repositories of an organisation or
-// user (listed with the organisation's token for the host when it has one,
-// then picked). Both end in POST /repos, so
-// access checks and grants stay the API's.
-interface Candidate { name: string; repo: string; url: string; archived?: boolean; fork?: boolean; private?: boolean; permission?: string; description?: string; added: boolean }
+// user (listed, then picked). Both end in POST /repos, so access checks and
+// grants stay the API's. The listing uses the organisation's token for the
+// organisation's space and your own Git token for your own space, so it can
+// include private repositories either token reads.
+type Candidate = ImportCandidate
 interface Listing { provider: string; host: string; org: string; repos: Candidate[]; truncated: boolean; authenticated?: boolean; sso_restricted?: boolean }
 
 const props = defineProps<{ open: boolean; cloneEnabled?: boolean; hostTokens?: string[]; busy?: boolean }>()
@@ -50,7 +51,7 @@ async function list() {
   listError.value = ''
   loading.value = true
   try {
-    listing.value = await apiPost<Listing>('imports/list', { ...form, host: form.host.trim(), org: form.org.trim() })
+    listing.value = await apiPost<Listing>('imports/list', { ...form, host: form.host.trim(), org: form.org.trim(), ...spaceBody() })
     for (const k of Object.keys(picked)) delete picked[k]
     for (const k of Object.keys(outcome)) delete outcome[k]
   } catch (e) {
@@ -60,6 +61,8 @@ async function list() {
     loading.value = false
   }
 }
+// A list read for one space does not fit the other (own token or none).
+watch(space, () => { listing.value = undefined })
 const shown = computed(() => (listing.value?.repos ?? []).filter((r) => !filter.value || r.name.toLowerCase().includes(filter.value.toLowerCase())))
 const openRepos = computed(() => shown.value.filter((r) => !r.added && !outcome[r.repo]?.ok))
 const chosen = computed(() => (listing.value?.repos ?? []).filter((r) => picked[r.repo] && !r.added && !outcome[r.repo]?.ok))
@@ -137,7 +140,8 @@ async function addChosen() {
           </div>
           <p v-if="regOk" class="ok">{{ regOk }}</p>
           <p v-if="regError" class="error">{{ regError }}</p>
-          <p v-if="urlHost && !hostHasToken" class="muted small">No Git token is set for {{ urlHost }}: if this repository is private, cloning will fail.</p>
+          <p v-if="urlHost && space === 'me'" class="muted small">A private repository in your own space is read with your own Git token for {{ urlHost }} (<NuxtLink to="/settings/profile?tab=git">Profile, Git tokens</NuxtLink>).</p>
+          <p v-else-if="urlHost && !hostHasToken" class="muted small">No Git token is set for {{ urlHost }}: if this repository is private, cloning will fail.</p>
         </form>
 
         <div v-else-if="!session.accounts.value" class="form">
@@ -163,7 +167,13 @@ async function addChosen() {
               <label class="check"><input v-model="form.include_forks" type="checkbox"> Include forks</label>
               <button type="submit" :disabled="!form.org.trim() || loading">{{ loading ? 'Listing…' : 'List repositories' }}</button>
             </div>
-            <p class="muted small"><template v-if="listing?.authenticated">Listed with your organisation's token for {{ listing.host }}: private repositories it can read are included.</template><template v-else>Private repositories are listed when your organisation has a Git token for the host in Settings; otherwise only public ones are.</template></p>
+            <fieldset v-if="session.accounts.value" class="space">
+              <legend>Add to</legend>
+              <label class="check"><input v-model="space" type="radio" value="org" :disabled="!canOrg"> The organisation<span v-if="!canOrg" class="dim"> (owners and admins)</span></label>
+              <label class="check"><input v-model="space" type="radio" value="me" :disabled="!canMe"> Only me<span v-if="!canMe" class="dim"> (turned off by your organisation)</span></label>
+            </fieldset>
+            <p v-if="space === 'me'" class="muted small">Listed with your own Git token for the host when you saved one (Profile, Git tokens), so private repositories it reads are shown too.</p>
+            <p v-else class="muted small"><template v-if="listing?.authenticated">Listed with your organisation's token for {{ listing.host }}: private repositories it can read are included.</template><template v-else>Private repositories are listed when your organisation has a Git token for the host in Settings; otherwise only public ones are.</template></p>
             <p v-if="listing?.sso_restricted" class="muted small">GitHub left out repositories the token is not authorised for under the organisation's SAML single sign-on. Authorise the token for the organisation in GitHub's token settings.</p>
             <p v-if="listError" class="error">{{ listError }}</p>
           </form>
@@ -188,10 +198,11 @@ async function addChosen() {
               <li v-for="r in shown" :key="r.repo" class="repo">
                 <input v-if="!r.added && !outcome[r.repo]?.ok" v-model="picked[r.repo]" type="checkbox" :aria-label="`Select ${r.name}`">
                 <span class="mono name">{{ r.name }}</span>
+                <span v-if="r.private" class="badge badge--violet">private</span>
                 <span v-if="r.archived" class="badge badge--amber">archived</span>
                 <span v-if="r.fork" class="badge badge--violet">fork</span>
                 <span v-if="r.private" class="badge badge--pink">private</span>
-                <span v-if="r.permission" class="badge badge--violet" :title="`The organisation's token has ${r.permission} access`">{{ r.permission }}</span>
+                <span v-if="r.permission" class="badge badge--violet" :title="`The listing token has ${r.permission} access`">{{ r.permission }}</span>
                 <span v-if="r.added" class="badge badge--green">added</span>
                 <span v-else-if="outcome[r.repo]?.ok" class="badge badge--cyan">{{ outcome[r.repo]!.text }}</span>
                 <span class="muted small desc">{{ r.description }}</span>
