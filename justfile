@@ -200,7 +200,7 @@ image-build tag="dev":
     done
     {{engine}} build $plat --build-arg VERSION={{version}} -f services/mcp/Dockerfile \
         -t codesynapse-mcp:{{tag}} -t {{registry}}/codesynapse-mcp:{{tag}} .
-    {{engine}} build $plat -f services/web/Dockerfile -t codesynapse-web:{{tag}} -t {{registry}}/codesynapse-web:{{tag}} .
+    {{engine}} build $plat --build-arg VERSION={{version}} -f services/web/Dockerfile -t codesynapse-web:{{tag}} -t {{registry}}/codesynapse-web:{{tag}} .
 
 # Scan a built image for fixable HIGH/CRITICAL vulnerabilities (.trivyignore.yaml); types limits it to os packages when the libraries are upstream's. Works the same with Docker and Podman: the image is saved and scanned as a file.
 scan-image image types="os,library":

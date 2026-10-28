@@ -32,6 +32,11 @@ spec:
           env:
             - {name: NUXT_API_BASE, value: "http://{{ include "cs.name" (list . "api") }}:8080"}
             {{- include "cs.secretEnv" (list . "NUXT_API_TOKEN" "CODESYNAPSE_API_TOKEN") | nindent 12 }}
+            # Platform metrics only: the web server has no trusted tenant.
+            - {name: CODESYNAPSE_METRICS_URL, value: {{ include "cs.metricsURL" . | quote }}}
+            - {name: CODESYNAPSE_METRICS_USER, value: codesynapse}
+            {{- include "cs.secretEnv" (list . "CODESYNAPSE_METRICS_PASSWORD" "METRICS_PASSWORD") | nindent 12 }}
+            - {name: CODESYNAPSE_ENVIRONMENT, value: {{ .Values.environment | quote }}}
           readinessProbe:
             httpGet: {path: /api/health, port: http}
             periodSeconds: 10
