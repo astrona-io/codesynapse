@@ -151,6 +151,7 @@ func TestLocalGitCallsAreCounted(t *testing.T) {
 		`{"tool":"git_log","client":"claude-code","duration_ms":99999999}`,
 		`{"tool":"git_log","client":"claude-code","response_tokens":-5}`,
 		`{"tool":"git_log","client":"claude-code","path":"/etc/passwd"}`, // nothing about the checkout is accepted
+		`{"tool":"git_log","client":"claude-code","repo":"../etc"}`,
 	} {
 		assert.Equal(t, post(t, ts, path, body), 400, body)
 	}

@@ -69,6 +69,10 @@ func TestBridgeAnswersFromTheWorkingTree(t *testing.T) {
 	t.Cleanup(srv.Close)
 	var reported []string
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos" {
+			_, _ = io.WriteString(w, `{"repos":[]}`)
+			return
+		}
 		var u localUsage
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&u))
 		mu.Lock()
@@ -87,7 +91,7 @@ func TestBridgeAnswersFromTheWorkingTree(t *testing.T) {
 		t.Helper()
 		in := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n" + strings.Join(lines, "\n") + "\n"
 		var out bytes.Buffer
-		b := &bridge{url: srv.URL, token: "csk_test", session: "chat-1", out: &out, http: srv.Client(), worktree: wt,
+		b := &bridge{url: srv.URL, token: "csk_test", session: "chat-1", out: &out, http: srv.Client(), worktree: wt, gitDir: dir,
 			report: apiClient{base: api.URL, token: "csk_test", http: api.Client()}}
 		require.NoError(t, b.run(ctx, strings.NewReader(in)))
 		got := map[string]json.RawMessage{}

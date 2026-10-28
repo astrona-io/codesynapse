@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/catalog"
+	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"github.com/astrona-io/codesynapse/internal/coretools"
 	"github.com/astrona-io/codesynapse/internal/forge"
 	"github.com/astrona-io/codesynapse/internal/gitx"
@@ -50,6 +51,18 @@ type worktree struct {
 	key     string       // fingerprint of the tree the graph was built from
 	graph   store.Reader // nil until the first build
 	pending *worktreeBuild
+	// failed is the fingerprint of the last tree whose graph could not be
+	// built: calls go to the server until the tree changes, instead of
+	// paying for the same failing build on every call.
+	failed string
+	// refused is the digest of a .codesynapse.yaml whose exclusions need an
+	// approval this machine cannot give (ingest.ErrPolicyApproval): no
+	// working-tree graph until the file changes, whatever else does.
+	refused string
+	builds  int // builds started, for tests
+
+	// ingest builds the graph; nil is ingest.Run.
+	ingest func(context.Context, ingest.Options) (*model.Graph, error)
 
 	// The base a change is judged against (get_pr_context): one graph per
 	// base commit, built once.
@@ -146,19 +159,33 @@ func hashStatus(h io.Writer, root string, status []byte) (files int) {
 	return files
 }
 
+// errWorktreeUnavailable means no working-tree graph can be had for the
+// tree as it is (its build failed, or its policy needs approval): the call
+// goes to the server, and the reason was logged once.
+var errWorktreeUnavailable = errors.New("working-tree graph unavailable")
+
 // graphFor returns the working-tree graph for key, building it once per
-// key; calls for the same key share one build.
+// key; calls for the same key share one build. A key whose build failed is
+// not built again.
 func (w *worktree) graphFor(ctx context.Context, key string) (store.Reader, error) {
+	if !w.policyAllowed(ctx) {
+		return nil, errWorktreeUnavailable
+	}
 	w.mu.Lock()
 	if w.key == key && w.graph != nil {
 		g := w.graph
 		w.mu.Unlock()
 		return g, nil
 	}
+	if w.failed == key {
+		w.mu.Unlock()
+		return nil, errWorktreeUnavailable
+	}
 	b := w.pending
 	if b == nil || b.key != key {
 		b = &worktreeBuild{key: key, done: make(chan struct{})}
 		w.pending = b
+		w.builds++
 		go w.build(context.WithoutCancel(ctx), b)
 	}
 	w.mu.Unlock()
@@ -170,6 +197,27 @@ func (w *worktree) graphFor(ctx context.Context, key string) (store.Reader, erro
 	}
 }
 
+// policyAllowed reports whether the checkout's policy may be built here: not
+// while it is the one whose approval was refused. A changed or unreadable
+// file lifts the refusal and lets the build decide again.
+func (w *worktree) policyAllowed(ctx context.Context) bool {
+	w.mu.Lock()
+	refused := w.refused
+	w.mu.Unlock()
+	if refused == "" {
+		return true
+	}
+	if p, err := repoconfig.Load(ctx, w.root); err == nil && p.Digest() == refused {
+		return false
+	}
+	w.mu.Lock()
+	if w.refused == refused {
+		w.refused = ""
+	}
+	w.mu.Unlock()
+	return true
+}
+
 func (w *worktree) build(ctx context.Context, b *worktreeBuild) {
 	defer close(b.done)
 	ctx, cancel := context.WithTimeout(ctx, worktreeBuildTimeout)
@@ -177,7 +225,11 @@ func (w *worktree) build(ctx context.Context, b *worktreeBuild) {
 	// Ingest logs through the bridge's logger: stdout carries the protocol.
 	ctx = logx.WithLogger(ctx, w.logger)
 	start := time.Now()
-	g, err := ingest.Run(ctx, ingest.Options{Repo: w.repo, Root: w.root})
+	run := w.ingest
+	if run == nil {
+		run = ingest.Run
+	}
+	g, err := run(ctx, ingest.Options{Repo: w.repo, Root: w.root})
 	if err == nil {
 		mem := memory.New()
 		if err = mem.ReplaceRepo(ctx, w.repo, g); err == nil {
@@ -191,11 +243,23 @@ func (w *worktree) build(ctx context.Context, b *worktreeBuild) {
 	if w.pending == b {
 		w.pending = nil
 	}
-	if err != nil {
-		w.logger.Warn("working-tree graph failed; answering from the server", "error", err)
+	switch {
+	case errors.Is(err, ingest.ErrPolicyApproval):
+		// Approval is given on the server, per digest; this machine never
+		// has it, so every build of this policy would fail the same way.
+		if p, perr := repoconfig.Load(ctx, w.root); perr == nil {
+			w.refused = p.Digest()
+		} else {
+			w.failed = b.key
+		}
+		w.logger.Warn("the checkout's .codesynapse.yaml excludes files and needs approval; answering from the server until it changes", "repo", w.repo)
+		return
+	case err != nil:
+		w.failed = b.key
+		w.logger.Warn("working-tree graph failed; answering from the server until the checkout changes", "error", err)
 		return
 	}
-	w.key, w.graph = b.key, b.graph
+	w.key, w.graph, w.failed = b.key, b.graph, ""
 	w.logger.Info("working-tree graph built", "repo", w.repo, "duration", time.Since(start).Round(time.Millisecond))
 }
 

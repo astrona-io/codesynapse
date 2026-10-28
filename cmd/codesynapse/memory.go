@@ -126,9 +126,9 @@ func (c apiClient) request(ctx context.Context, method, path string, rd io.Reade
 			Detail string `json:"detail"`
 		}
 		if json.Unmarshal(data, &p) == nil && p.Detail != "" {
-			return errors.New(p.Detail)
+			return &statusError{Status: res.StatusCode, msg: p.Detail}
 		}
-		return fmt.Errorf("%s %s: status %d", method, path, res.StatusCode)
+		return &statusError{Status: res.StatusCode, msg: fmt.Sprintf("%s %s: status %d", method, path, res.StatusCode)}
 	}
 	if out != nil {
 		return json.Unmarshal(data, out)
@@ -152,6 +152,16 @@ func (c apiClient) executionContext(ctx context.Context, primary, parent string)
 	}
 	return execution.With(ctx, id)
 }
+
+// statusError is an answer of the API other than success. Its text is the
+// problem's detail, as before; Status lets callers tell a refusal from an
+// outage.
+type statusError struct {
+	Status int
+	msg    string
+}
+
+func (e *statusError) Error() string { return e.msg }
 
 // errNoRepo means the directory's repository is not indexed in CodeSynapse.
 var errNoRepo = errors.New("no indexed repository matches")

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -35,7 +36,7 @@ const localGitTimeout = 30 * time.Second
 // whether it did.
 func (b *bridge) answerGit(ctx context.Context, msg []byte, m rpcMessage) bool {
 	var c toolCall
-	if json.Unmarshal(msg, &c) != nil || !isLocalTool(c.Params.Name) || len(m.ID) == 0 {
+	if json.Unmarshal(msg, &c) != nil || !isLocalTool(c.Params.Name) || len(m.ID) == 0 || !b.mayAnswer(c.Params.Name) {
 		return false
 	}
 	start := time.Now()
@@ -48,8 +49,10 @@ func (b *bridge) answerGit(ctx context.Context, msg []byte, m rpcMessage) bool {
 		out = errorResponse(m.ID, err)
 		failed = true
 	}
+	if !b.reportLocal(ctx, c.Params.Name, time.Since(start), len(out)/4, failed) {
+		return false
+	}
 	b.write(out)
-	b.reportLocal(ctx, c.Params.Name, time.Since(start), len(out)/4, failed)
 	return true
 }
 
@@ -104,26 +107,72 @@ func (b *bridge) checkout(ctx context.Context) (string, error) {
 	return b.gitDir, nil
 }
 
-// localUsage is what the server is told about a local call.
+// localUsage is what the server is told about a local call: the tool, the
+// client, the repository the checkout is, how long it took, how large the
+// answer was and whether it failed. Never arguments, paths or contents.
 type localUsage struct {
 	Tool           string `json:"tool"`
 	Client         string `json:"client"`
+	Repo           string `json:"repo,omitempty"`
 	DurationMs     int    `json:"duration_ms"`
 	ResponseTokens int    `json:"response_tokens"`
 	Failed         bool   `json:"failed,omitempty"`
 }
 
-// reportLocal tells the server about a call it did not see. A failure is
-// logged and dropped: the answer was already given, and the counts are best
-// effort.
-func (b *bridge) reportLocal(ctx context.Context, tool string, d time.Duration, tokens int, failed bool) {
+// mayAnswer reports whether the bridge may still answer tool itself. Once
+// the server refused to record local answers, they go to the server.
+func (b *bridge) mayAnswer(tool string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return !b.localOff && !b.refused[tool]
+}
+
+// reportLocal tells the server about a call it did not see, before the
+// answer is written: the server counts it and records it in the audit log
+// with the chat's session. It returns false when the answer must not be
+// given here, and the call then goes to the server:
+//   - the server could not be reached: this call only;
+//   - the key or session was refused (401, 403) or the audit entry could not
+//     be written (503): every local answer of this chat from now on;
+//   - the server does not accept reports of this tool (an older server
+//     answers 400): this tool from now on.
+func (b *bridge) reportLocal(ctx context.Context, tool string, d time.Duration, tokens int, failed bool) bool {
 	if b.report.base == "" {
-		return
+		return true // no API to report to (tests, single-tenant setups without one)
 	}
-	body := localUsage{Tool: tool, Client: "claude-code", DurationMs: int(d.Milliseconds()), ResponseTokens: tokens, Failed: failed}
+	b.mu.Lock()
+	client := cmp.Or(b.client, "claude-code")
+	b.mu.Unlock()
+	body := localUsage{Tool: tool, Client: client, Repo: b.checkoutRepo(ctx), DurationMs: int(d.Milliseconds()), ResponseTokens: tokens, Failed: failed}
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := b.report.do(rctx, http.MethodPost, "/api/v1/usage/local", body, nil); err != nil && b.logger != nil {
-		b.logger.Debug("local call not reported", "tool", tool, "error", err)
+	err := b.report.do(rctx, http.MethodPost, "/api/v1/usage/local", body, nil)
+	if err == nil {
+		return true
+	}
+	var se *statusError
+	switch {
+	case !errors.As(err, &se) || (se.Status >= 500 && se.Status != http.StatusServiceUnavailable):
+		b.warn("local call not recorded; asking the server", "tool", tool, "error", err)
+	case se.Status == http.StatusUnauthorized || se.Status == http.StatusForbidden || se.Status == http.StatusServiceUnavailable:
+		b.mu.Lock()
+		b.localOff = true
+		b.mu.Unlock()
+		b.warn("the server did not record a local call; every call goes to the server from now on", "tool", tool, "error", err)
+	default:
+		b.mu.Lock()
+		if b.refused == nil {
+			b.refused = map[string]bool{}
+		}
+		b.refused[tool] = true
+		b.mu.Unlock()
+		b.warn("the server does not record local calls of this tool; it goes to the server from now on", "tool", tool, "error", err)
+	}
+	return false
+}
+
+func (b *bridge) warn(msg string, args ...any) {
+	if b.logger != nil {
+		b.logger.Warn(msg, args...)
 	}
 }
