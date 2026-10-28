@@ -27,6 +27,16 @@ Both appear on the **Statistics** page. Every number belongs to one organisation
 
 Some numbers are estimates and are labelled so: cost depends on the prices you configured, and a call without reported usage or a known price shows as a gap, never as zero.
 
+### Token savings
+
+Agents re-send their whole context every turn, and most of it comes back from the provider's prompt cache. CodeSynapse neither causes nor removes those cache reads, so they are left out of the savings figures:
+
+- **Work tokens** are the agent's fresh input, cache writes and output.
+- **Share of agent work avoided** is avoided tokens ÷ (work tokens + avoided tokens). It reads "unknown", not 0, when a turn did not report its cache fields.
+- Answers about lines the session already had count for nothing, and agents whose hooks cannot tell those apart yet (older CLIs) are left out of the share and the saved cost.
+- An **upper figure** also counts the avoided context the agent would have re-sent from its cache. It is shown apart, labelled, and never used in tiles or totals.
+- The saved cost values each avoided token once, at the cache-write price for providers that cache by default and the input price otherwise. The provider's own prompt-cache saving on CodeSynapse's model calls is shown apart and never added to it.
+
 ## What is never measured
 
 No metric holds prompts, answers, source code, file paths, repository names, branch names, people, email addresses, API keys, session IDs or client addresses. Labels only take values from fixed lists, such as the names of CodeSynapse's own tools or the models you configured. The one exception is the per-repository file counts on the Ingestion page, which use an opaque ID, not the repository name.

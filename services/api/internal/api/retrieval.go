@@ -56,6 +56,14 @@ type retrievalReport struct {
 	// Bash counts shell commands per usage.BashClasses class that a
 	// CodeSynapse tool answers with less output; never the commands.
 	Bash map[string]int `json:"bash,omitempty"`
+	// AvoidedRepeatRanges counts, per tool, answered ranges that overlap what
+	// the session was already answered or read. A report that carries the
+	// field (even empty) comes from a client that tells repeats apart, so
+	// its avoided tokens count in the share (docs/PLATFORM_STATS_PLAN.md).
+	AvoidedRepeatRanges map[string]int `json:"avoided_repeat_ranges"`
+	// ResendTokenTurns is, per tool, answer tokens still in context times
+	// the turns run since; the server turns it into avoided re-sent tokens.
+	ResendTokenTurns map[string]int `json:"resend_token_turns,omitempty"`
 }
 
 func (s *Server) retrievalRoutes() {
@@ -112,6 +120,19 @@ func (s *Server) handleRetrievalReport(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if in.AvoidedRepeatRanges != nil {
+		buckets = append(buckets, usage.Bucket{Day: day, Org: org, Repo: repo, Tool: usage.RepeatAware, Client: in.Client, Calls: 1})
+	}
+	for tool, n := range in.AvoidedRepeatRanges {
+		if n > 0 {
+			buckets = append(buckets, usage.Bucket{Day: day, Org: org, Repo: repo, Tool: usage.RepeatTool(tool), Client: in.Client, Calls: n})
+		}
+	}
+	for tool, n := range in.ResendTokenTurns {
+		if n > 0 {
+			buckets = append(buckets, usage.Bucket{Day: day, Org: org, Repo: repo, Tool: usage.ResendTool(tool), Client: in.Client, Calls: n})
+		}
+	}
 	for class, n := range in.Bash {
 		if n > 0 {
 			buckets = append(buckets, usage.Bucket{Day: day, Org: org, Repo: repo, Tool: usage.BashTool(class), Client: in.Client, Calls: n})
@@ -142,7 +163,7 @@ func (in retrievalReport) validate() error {
 			return err
 		}
 	}
-	if len(in.Tools) > maxRetrievalTools || (len(in.Tools) == 0 && in.Workflow == nil && in.Tokens == nil && in.Edits == nil && len(in.Bash) == 0) {
+	if len(in.Tools) > maxRetrievalTools || (len(in.Tools) == 0 && in.Workflow == nil && in.Tokens == nil && in.Edits == nil && len(in.Bash) == 0 && in.AvoidedRepeatRanges == nil) {
 		return fmt.Errorf("report up to %d tools, or the workflow counts", maxRetrievalTools)
 	}
 	if wf := in.Workflow; wf != nil {
@@ -155,6 +176,19 @@ func (in retrievalReport) validate() error {
 	for class, n := range in.Bash {
 		if !slices.Contains(usage.BashClasses, class) || n < 0 || n > maxRetrievalRanges {
 			return fmt.Errorf("bash: unknown class %q or count out of range", class)
+		}
+	}
+	if len(in.AvoidedRepeatRanges) > maxRetrievalTools || len(in.ResendTokenTurns) > maxRetrievalTools {
+		return fmt.Errorf("report repeats and re-sends for up to %d tools", maxRetrievalTools)
+	}
+	for tool, n := range in.AvoidedRepeatRanges {
+		if !toolsets.Known(tool) || n < 0 || n > maxRetrievalRanges {
+			return fmt.Errorf("avoided_repeat_ranges: unknown tool %q or count out of range", tool)
+		}
+	}
+	for tool, n := range in.ResendTokenTurns {
+		if !toolsets.Known(tool) || n < 0 || n > usage.MaxHookTokens {
+			return fmt.Errorf("resend_token_turns: unknown tool %q or count out of range", tool)
 		}
 	}
 	for tool, c := range in.Tools {
