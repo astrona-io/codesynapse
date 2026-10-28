@@ -69,7 +69,7 @@ There is no licence or seat limit in CodeSynapse today. "Seats" here is a count,
 | MCP calls, errors and sessions per period; by tool (org) | VictoriaMetrics `mcp_tool_calls_total`, `mcp_sessions_total` | 1 min to 6 h | 30 days |
 | The same per day for longer ranges, by tool and by client | usage buckets, summed over repositories | day | 180 days, rollup 400 days |
 | Tool latency p50 and p95, per tool for the top tools | `mcp_tool_duration_seconds` | 1 min to 6 h | 30 days |
-| Tokens served to agents, estimated tokens avoided | `mcp_response_tokens_total`; usage buckets and the existing avoided-token method | day | as above |
+| Tokens served to agents, tokens avoided, and the share of agent work tokens avoided (without prompt-cache reads) | `mcp_response_tokens_total`; usage buckets; see [token savings without the prompt cache](#token-savings-without-the-prompt-cache) | day | as above |
 | Answered on the developer's machine versus server | usage buckets (`usage/local`); later `mcp_local_answers_total` (coverage plan item 17) | day | as above |
 | Agent workflow: sessions that began with CodeSynapse, reads turned back, Bash classes | usage pseudo tools (`usage.IsWorkflow`, `usage.BashClasses`) | day | as above |
 | Unindexed checkouts reported: count of distinct names per organisation, never the names | usage pseudo tool `usage.Unindexed` | day | as above |
@@ -111,7 +111,7 @@ The `repo` label of the three `codesynapse_files_*_total` metrics is never shown
 | Estimated cost by provider and model, with price source and date (org) | `llm_cost_estimated_dollars`; `price_source` and `price_checked` from the provider config | as above | as above |
 | Calls with unknown cost: usage not reported, prices missing | `llm_usage_unknown_total`, `llm_pricing_missing_total` | as above | as above |
 | Local versus cloud share of requests and tokens | the same series split by `llm_provider`, with `ProviderConfig.Local()` applied in the API, as `stats_models.go` does | as above | as above |
-| Cloud request bytes; prompt-cache savings estimate | `cloud_bytes_sent_total`, `llm_cost_saved_estimated_dollars_total` | as above | as above |
+| Cloud request bytes; the provider's prompt-cache saving on CodeSynapse's own calls, shown apart and never added to CodeSynapse savings | `cloud_bytes_sent_total`, `llm_cost_saved_estimated_dollars_total` | as above | as above |
 | Time to first token and request time p95 per model | `llm_time_to_first_token_seconds`, `llm_request_duration_seconds` | as above | 30 days |
 | Embeddings and memory extraction | `memory_entities_embedded_total`, `memory_offload_turns_total` | as above | 30 days |
 
@@ -219,6 +219,74 @@ These hold for every figure, endpoint, export and alert in this plan. They follo
 - Local providers show tokens and requests, and no cost. Local execution alone is never shown as cloud savings; the cloud-bytes-avoided figure appears only with a measured fallback baseline, as on the existing panel.
 - Small amounts show as `<$0.001`, not `$0.000`.
 
+## Token savings without the prompt cache
+
+Cloud agents re-send their whole context on every turn, and the provider serves most of it from its prompt cache. In a long Claude Code session, cache reads are often more than 90% of all input tokens. They are cheap, and CodeSynapse neither causes nor removes them. A percentage with cache reads in its denominator looks tiny. A percentage that counts every later re-send of an avoided file as "saved" looks huge. Neither is realistic. This section fixes one definition for the admin view and the per-organisation Statistics pages.
+
+### How it is computed today
+
+- **Avoided tokens.**
+  - Navigation tools: each successful call is counted. The tools are listed in `navigationTools` (`services/api/internal/api/stats.go:24-31`). The formula is avoided = response tokens × success share × (ratio − 1) (`stats.go:499-509`).
+  - The ratio: each repository's token benchmark from ingest, in baseline tokens per graph token (`stats.go:392-404`).
+  - The baseline: "defining file + files of direct callers, callees and reaching tests; tokens ≈ bytes/4" (`internal/metrics/metrics.go:509-510`). That file reading is the "normal agent" CodeSynapse compares with.
+  - ask_local: adds what the local model read, minus the answer (`stats.go:453-456`; method text at `stats.go:414`).
+- **The current percentage.**
+  - `ContextSavedPct` = avoided ÷ (served + avoided) (`stats.go:552-555`; test `token_stats_test.go:33-40`).
+  - It compares a graph answer with the files it replaces. It does not involve the agent's own tokens or the cache, so this section does not change it.
+  - It is renamed "Smaller than reading the files", so it is not read as a share of the agent's tokens.
+- **Agent tokens.** The hooks read the agent's transcript.
+  - Claude: input = uncached input + cache reads + cache writes, and `CachedInput` = cache reads (`cmd/codesynapse/hook_tokens.go:62-67`). Cache writes are folded into input and not kept apart.
+  - Codex: `cached_input_tokens` is the cached part of input (`hook_tokens.go:78-80`).
+  - Both are stored as `usage.TokenCounts`, where `CachedInput` is a subset of `Input` (`internal/usage/tokens.go:15-22`).
+  - The total is input + output, with cache reads included (`stats.go:543`).
+- **Where the cache leaks in.**
+  - The Models page puts `tokens.total` ("Cloud agents") into the token pool. "Kept off cloud models" = (graph avoided + local tokens) ÷ pool (`services/web/app/pages/stats/models.vue:22-31`). Cache reads dominate that denominator.
+  - The Agents page shows cached input as a tile next to the savings (`services/web/app/pages/stats/agents.vue:98`).
+- **Cost.**
+  - `llm.Cost` prices fresh input, cache reads and cache writes separately (`services/api/internal/llm/llm.go:650-664`).
+  - The page values graph-avoided tokens at the full input price (`models.vue:39-46`).
+  - `PriceReference` has no cache-write price (`services/api/internal/api/stats_models.go:116-131`).
+  - `llm_cost_saved_estimated_dollars_total` is the provider's prompt-cache saving on CodeSynapse's own model calls (`llm.go:701-703`; panel `llm_savings` in `series.go:115-116`). It is not a CodeSynapse saving.
+
+### The definition
+
+For a window and a scope (one organisation, or the platform):
+
+- **W, the agent's work tokens** = fresh input + cache writes + output = `Input − CachedInput + Output`. Cache reads are left out.
+- **A, avoided tokens** = the existing figure (graph answers and ask_local). Each answer counts once, as the turn on which the agent would have read the files.
+- **Share avoided** = A ÷ (W + A). This is the share of work tokens the agent would have spent on top of W had it read the files itself. MCP answers are already inside W, because they reach the agent as input.
+
+Rules:
+
+1. **Cache reads never count.** They are not in W, not in A and not in the denominator. Adding cache reads to a fixture must not change the share.
+2. **Re-sends earn no credit.** An avoided file would have entered the context once, as fresh input or a cache write. It would then have been re-sent as cache reads on every later turn. Only the first entry counts; the later re-sends are not claimed.
+3. **Answers about content already in context earn nothing.**
+   - If the agent already had those files in its context earlier in the session, reading them again would have been a cache hit. The server cannot see that.
+   - The plugin hook already keeps the session's answered and read `file:start-end` ranges in its local state file. It adds one count, `avoided_repeat_ranges`: answered ranges that overlap a range the session already answered or read.
+   - The server scales each bucket's avoided figure down by that overlap share.
+   - Until a client reports the count, its avoided figure is labelled "upper estimate".
+4. **Unknown means unknown, not 0 and not raw.**
+   - The share is "unknown" when the window has no hook token counts, or when any counted turn did not report its cache fields.
+   - The hook records a new daily counter, `(tokens:cache-known-turns)`, for turns whose usage carried the cache fields.
+   - The share is computed only when that counter equals `(tokens:turns)` for every bucket in the scope. It never falls back to `Input + Output`.
+5. **The raw figure is secondary.** A ÷ (Input + Output + A), with cache reads included, appears only in the method note, labelled "including prompt-cache reads, which CodeSynapse does not affect". It is never a tile and never an export headline.
+
+**Cost uses the same rule.**
+
+- Avoided tokens are valued once, at the price the reference cloud model would have charged for their first entry. That is the cache-write price when the agent's provider caches by default (Anthropic), and the input price otherwise.
+- Later re-sends are not valued, not even at the cache-read price.
+- Local model work keeps today's split: fresh input at the input price, cached input at the cache-read price, output at the output price (`models.vue:39-46`).
+- `PriceReference` gains `cache_write_per_mtok`.
+- When a needed price is missing, that part of the saving is "unknown", never $0.
+- The provider's own prompt-cache saving (`llm_savings`) stays a separate, labelled figure. It is never added to "Saved by CodeSynapse".
+
+**Where it applies.**
+
+- The admin Usage and Models sections and the existing Statistics pages (`stats/agents.vue`, `stats/models.vue`) all use this one definition.
+- The server computes it in `agentStats` as new fields: `work_tokens`, `share_avoided_pct`, `share_avoided_known` and `share_avoided_basis`.
+- The pages stop computing shares in the browser, so the two views cannot drift.
+- "Kept off cloud models" uses W, not `tokens.total`, for the cloud-agent part of its pool.
+
 ## API
 
 All routes are account routes of class `governanceRoute`, each calling `PlatformStats` first. `TestEveryRouteIsClassified` covers them.
@@ -250,19 +318,31 @@ A new **Statistics** tab under Administration (`services/web/app/pages/admin/sta
 Each phase is one pull request with its API, page, tests and docs (`docs/operations/accounts-access.md`, `docs/features/telemetry.md`). Each runs `just test`, `just lint` and `just web-check`; phases with a migration also run `just test-postgres`, and phases with new store reads run `just test-nebula`.
 
 1. **Access, tenants and sessions.** `PlatformStats` helper and audit event; `summary`, `tenants` and `sessions` sections from PostgreSQL; the Statistics tab with tiles, the range picker (1h to 30d) and the organisation picker; CSV and JSON export. Tests: `TestEveryRouteIsClassified` and `TestRootRefusedEveryBusinessRoute` stay green; a scope test per route (non-admin 403, API key 403, installation token 403, root allowed, suspended refused, admin with no memberships allowed); the audit event is written and a failed write answers 503 with no body figures; responses for fixtures with a repository called `secret-repo` and a user `a@example.com` never contain either string.
-2. **Usage and traffic.** `adminPanels`, `/admin/stats/series` and `/batch`, tenant ID to name mapping; the `usage` section from VictoriaMetrics and usage buckets; panels for `http_requests_total` and the gateway; the four existing platform panels move. Tests: every admin panel query has no placeholder other than `$w`; the small-group fold (fewer than three organisations folds to "other"); top-N fold; unknown tenant IDs map to "deleted organisation"; the old panel names still answer with the old checks.
-3. **Jobs, indexing and ingest.** Depends on telemetry coverage phases 1 and 3. `jobs` and `ingest` sections; `platform_codesynapse_worker_roles` gauge; oldest waiting job from PostgreSQL. Tests: the gauge's label set (`ingest`, `ai`, `fix`) and its `platform_` export; no job `Repo` or `Error` value in any response; the `repo` label never appears in a platform panel's grouping.
-4. **Models and cost.** `models` section with local versus cloud split, price source per provider and the unknown-cost counts. Tests: cost reads "unknown" when every call lacks a price; a local provider has no cost; a configured model not in the allowlist is not shown by name.
-5. **Storage and alerts.** Depends on telemetry coverage phase 2 for alerts. Daily store sampler under `api-loops`; `platform_codesynapse_store_rows` and `_bytes`; `storage` and `alerts` sections; `CODESYNAPSE_ALERTS_URL` for the internal vmalert, from the environment, https or the internal service name only, no redirects, response capped. Tests: label sets from the allowlists; constant statements (no caller value in nGQL or SQL text); the sampler skips while a replace lease is held; alert labels outside the passed-on set are dropped.
-6. **Security and audit.** `security` and `audit` sections; scheduled chain verification with the stored result; the `(at, action)` index if missing. Tests: no finding text, path or symbol in the response; rule IDs fold below three organisations; verification result read, not recomputed, on a view.
-7. **Long ranges.** Migration for `platform_stats_daily`, the daily writer under `api-loops`, the 90-day and 365-day ranges, 400-day pruning. Tests: the writer is idempotent (run twice, same rows); metric and dimension allowlist enforced by the store; pruning; memstore and pgstore agree (`accountstest`).
+2. **Realistic token savings.** Puts the definition from [token savings without the prompt cache](#token-savings-without-the-prompt-cache) on the existing Statistics pages first.
+   - Hook: the `(tokens:cache-known-turns)` counter and `avoided_repeat_ranges`. This needs a CLI release.
+   - Server: `work_tokens`, `share_avoided_pct`, `share_avoided_known` and `share_avoided_basis` in `agentStats`, and `cache_write_per_mtok` in `PriceReference`. The pages read the server's share.
+   - Tests:
+     - A fixture with 950,000 cache reads in 1,000,000 input gives the same share as the same fixture with no cache reads. Doubling the cache reads changes nothing.
+     - A bucket without cache fields makes the share unknown: not 0, and not the raw figure.
+     - Repeat ranges lower the avoided figure.
+     - Avoided tokens are valued once, at the cache-write or input price, and never for re-sends. A missing price makes that part unknown.
+     - `llm_savings` is never part of the CodeSynapse total.
+     - The Claude and Codex transcript parsers keep the cache fields apart, and the fuzz test covers the new fields.
+3. **Usage and traffic.** `adminPanels`, `/admin/stats/series` and `/batch`, tenant ID to name mapping; the `usage` section from VictoriaMetrics and usage buckets; panels for `http_requests_total` and the gateway; the four existing platform panels move. Tests: every admin panel query has no placeholder other than `$w`; the small-group fold (fewer than three organisations folds to "other"); top-N fold; unknown tenant IDs map to "deleted organisation"; the old panel names still answer with the old checks.
+4. **Jobs, indexing and ingest.** Depends on telemetry coverage phases 1 and 3. `jobs` and `ingest` sections; `platform_codesynapse_worker_roles` gauge; oldest waiting job from PostgreSQL. Tests: the gauge's label set (`ingest`, `ai`, `fix`) and its `platform_` export; no job `Repo` or `Error` value in any response; the `repo` label never appears in a platform panel's grouping.
+5. **Models and cost.** `models` section with local versus cloud split, price source per provider and the unknown-cost counts. Tests: cost reads "unknown" when every call lacks a price; a local provider has no cost; a configured model not in the allowlist is not shown by name.
+6. **Storage and alerts.** Depends on telemetry coverage phase 2 for alerts. Daily store sampler under `api-loops`; `platform_codesynapse_store_rows` and `_bytes`; `storage` and `alerts` sections; `CODESYNAPSE_ALERTS_URL` for the internal vmalert, from the environment, https or the internal service name only, no redirects, response capped. Tests: label sets from the allowlists; constant statements (no caller value in nGQL or SQL text); the sampler skips while a replace lease is held; alert labels outside the passed-on set are dropped.
+7. **Security and audit.** `security` and `audit` sections; scheduled chain verification with the stored result; the `(at, action)` index if missing. Tests: no finding text, path or symbol in the response; rule IDs fold below three organisations; verification result read, not recomputed, on a view.
+8. **Long ranges.** Migration for `platform_stats_daily`, the daily writer under `api-loops`, the 90-day and 365-day ranges, 400-day pruning. Tests: the writer is idempotent (run twice, same rows); metric and dimension allowlist enforced by the store; pruning; memstore and pgstore agree (`accountstest`).
 
-Phases 1 and 2 need nothing from the telemetry branches. Phase 3 waits for telemetry phases 1 and 3, phase 5 for telemetry phase 2. Until then those figures show "Not measured yet".
+Phases 1, 2 and 3 need nothing from the telemetry branches. Phase 4 waits for telemetry phases 1 and 3, and phase 6 waits for telemetry phase 2. Phase 3 shows the share from phase 2 per organisation. Until then those figures show "Not measured yet".
 
 ## Open questions
 
 1. **Seats.** CodeSynapse has no seat or licence limit. Is "active non-guest members per organisation" the seat count you want, or should seats become a configured quota per organisation later?
 2. **Organisation names for root.** Root is shown organisation names in the tables, as it already sees them under Administration → Organisations. Should root see only opaque organisation IDs instead?
-3. **Other admin reads.** The existing `GET /api/v1/admin/users`, `/admin/orgs`, `/admin/health` and the platform panels on `/stats/series` accept a platform admin's API key today. Should they also be limited to signed-in sessions and audited on view, in the same change as phase 1 or 2? It breaks scripts that read them with a key.
+3. **Other admin reads.** The existing `GET /api/v1/admin/users`, `/admin/orgs`, `/admin/health` and the platform panels on `/stats/series` accept a platform admin's API key today. Should they also be limited to signed-in sessions and audited on view, in the same change as phase 1 or 3? It breaks scripts that read them with a key.
 4. **Long-range retention.** Is 400 days of daily rollups right, or should it follow `CODESYNAPSE_AUDIT_RETENTION_DAYS`?
 5. **Small-group threshold.** Is three organisations the right minimum for cross-tenant breakdowns, given that small installations will see most breakdowns folded into "other"?
+6. **Re-sends.** The share credits an avoided file once and never counts its later re-sends as cache reads. That is the low figure, the one that holds up. Should there also be a separate upper figure that values those re-sends at the cache-read price, or only the low one?
+7. **Repeat answers before the hook reports them.** Until a client sends `avoided_repeat_ranges`, should its avoided tokens be shown as an "upper estimate", or left out of the share?
