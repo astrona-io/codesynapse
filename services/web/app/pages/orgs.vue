@@ -9,7 +9,10 @@ interface Org {
   repos: OrgRepo[]; counts: Record<string, number>
 }
 
-const { data, refresh } = useApiGet<{ orgs: Org[]; enabled: boolean }>('orgs')
+const { data, refresh, error: loadError } = useApiGet<{ orgs: Org[]; enabled: boolean }>('orgs')
+// The API serves this page only without accounts; with accounts,
+// organisations watch through "Add repositories" on the Repositories page.
+const LOAD_ERRORS = { 403: 'Watching organisations here is available only on installations without accounts. Use “Add repositories” on the Repositories page instead.' }
 const { data: settings } = useApiGet<{ git_token_configured: boolean; git_token_host: string; git_token_hosts?: string[] }>('settings')
 
 const PROVIDERS = [{ v: '', label: 'Detect from host' }, { v: 'github', label: 'GitHub' }, { v: 'forgejo', label: 'Forgejo / Gitea / Codeberg' }, { v: 'gitlab', label: 'GitLab' }]
@@ -18,6 +21,7 @@ const form = reactive({ provider: '', host: '', org: '', include_archived: false
 const adding = ref(false)
 const error = ref('')
 async function add() {
+  if (adding.value) return
   error.value = ''
   adding.value = true
   try {
@@ -25,23 +29,38 @@ async function add() {
     form.org = ''
     await refresh()
   } catch (e) {
-    error.value = apiErrorMessage(e)
+    error.value = plainError(e)
   } finally {
     adding.value = false
   }
 }
 
-async function call(method: 'PUT' | 'DELETE' | 'POST', path: string, body?: Record<string, unknown>) {
+const acting = ref(false)
+const notice = ref('')
+async function call(method: 'PUT' | 'DELETE' | 'POST', path: string, body?: Record<string, unknown>, done = '') {
+  if (acting.value) return
+  acting.value = true
   error.value = ''
+  notice.value = ''
   try {
-    await $fetch(apiPath(path), { method, body })
+    if (method === 'PUT') await apiPut(path, body)
+    else if (method === 'POST') await apiPost(path, body ?? {})
+    else await apiDelete(path)
+    notice.value = done
     await refresh()
   } catch (e) {
-    error.value = apiErrorMessage(e)
+    error.value = plainError(e)
+  } finally {
+    acting.value = false
   }
 }
-const rescan = (o: Org) => call('POST', `orgs/${encodeURIComponent(o.key)}/scan`)
-const stop = (o: Org) => call('DELETE', `orgs/${encodeURIComponent(o.key)}`)
+const rescan = (o: Org) => call('POST', `orgs/${encodeURIComponent(o.key)}/scan`, undefined, `Scanning ${o.key}.`)
+const stopping = ref<Org | null>(null)
+async function stop() {
+  const o = stopping.value
+  if (o) await call('DELETE', `orgs/${encodeURIComponent(o.key)}`, undefined, `Stopped watching ${o.key}. Indexed repositories stay.`)
+  stopping.value = null
+}
 const index = (o: Org, r: OrgRepo) => call('POST', `orgs/${encodeURIComponent(o.key)}/repos/${encodeURIComponent(r.name)}/index`)
 const setting = (o: Org, patch: Partial<Pick<Org, 'include_archived' | 'include_forks' | 'auto_index'>>) =>
   call('PUT', `orgs/${encodeURIComponent(o.key)}`, { include_archived: o.include_archived, include_forks: o.include_forks, auto_index: o.auto_index, ...patch })
@@ -73,6 +92,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   <div class="stack">
     <PageHeader eyebrow="Workspace" title="Organisations" lede="Watch an organisation on GitHub, Forgejo, Gitea or GitLab and CodeSynapse lists every repository in it, indexes them, and picks up new repositories automatically. The same organisation name on two hosts stays two separate organisations." />
 
+    <p v-if="loadError" class="notice notice--danger" role="alert">{{ plainError(loadError, LOAD_ERRORS) }}</p>
     <p v-if="data && !data.enabled" class="error">Cloning is off: set CODESYNAPSE_WORKSPACE on the API to watch organisations.</p>
 
     <section class="panel">
@@ -84,7 +104,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
             <option v-for="p in PROVIDERS" :key="p.v" :value="p.v">{{ p.label }}</option>
           </select>
         </label>
-        <label>Host <span class="muted small">(empty = github.com)</span>
+        <label>Host <span class="muted small">(empty means github.com)</span>
           <input v-model="form.host" placeholder="git.example.com" autocomplete="off">
         </label>
         <label class="grow">Organisation or user
@@ -101,7 +121,8 @@ const STATUS: Record<string, { label: string; cls: string }> = {
           </span>
         </div>
       </form>
-      <p v-if="error" class="error">{{ error }}</p>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <p v-if="notice" class="notice notice--ok" role="status">{{ notice }}</p>
     </section>
 
     <section v-for="o in data?.orgs ?? []" :key="o.key" class="panel org">
@@ -118,9 +139,9 @@ const STATUS: Record<string, { label: string; cls: string }> = {
           </p>
         </div>
         <div class="row tight-actions">
-          <button class="secondary tiny" @click="rescan(o)">Scan now</button>
-          <button class="secondary tiny" @click="open[o.key] = !open[o.key]">{{ open[o.key] ? 'Hide repositories' : 'Show repositories' }}</button>
-          <button class="secondary tiny" title="Stops watching; indexed repositories stay" @click="stop(o)">Stop watching</button>
+          <button type="button" class="secondary tiny" :disabled="acting" @click="rescan(o)">Scan now</button>
+          <button type="button" class="secondary tiny" :aria-expanded="!!open[o.key]" @click="open[o.key] = !open[o.key]">{{ open[o.key] ? 'Hide repositories' : 'Show repositories' }}</button>
+          <button type="button" class="secondary tiny" title="Stops watching; indexed repositories stay" :disabled="acting" @click="stopping = o">Stop watching</button>
         </div>
       </div>
       <p v-if="o.last_error" class="error small">Last scan failed: {{ o.last_error }}</p>
@@ -141,7 +162,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
             <span v-if="r.fork" class="badge badge--violet">fork</span>
             <span class="badge" :class="STATUS[r.status]?.cls">{{ STATUS[r.status]?.label ?? r.status }}</span>
             <span class="muted small desc">{{ r.description }}</span>
-            <button v-if="r.status === 'available' || r.status === 'failed' || r.status === 'excluded'" class="secondary tiny" @click="index(o, r)">{{ r.status === 'failed' ? 'Retry' : 'Index' }}</button>
+            <button v-if="r.status === 'available' || r.status === 'failed' || r.status === 'excluded'" type="button" class="secondary tiny" :disabled="acting" :aria-label="`${r.status === 'failed' ? 'Retry' : 'Index'} ${r.name}`" @click="index(o, r)">{{ r.status === 'failed' ? 'Retry' : 'Index' }}</button>
             <p v-if="r.status === 'failed' && r.last_error" class="error small full">{{ r.last_error }}</p>
           </li>
         </ul>
@@ -149,6 +170,9 @@ const STATUS: Record<string, { label: string; cls: string }> = {
     </section>
 
     <div v-if="data && !data.orgs.length" class="empty"><strong>No organisations yet</strong>Enter an organisation above, for example <code>astrona-io</code> on GitHub or <code>https://codeberg.org/team</code>.</div>
+    <ConfirmDialog :open="!!stopping" title="Stop watching?" confirm-label="Stop watching" danger :busy="acting" @confirm="stop" @cancel="stopping = null">
+      <p>New repositories of {{ stopping?.key }} are no longer picked up. Repositories already indexed stay.</p>
+    </ConfirmDialog>
   </div>
 </template>
 

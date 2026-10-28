@@ -4,13 +4,16 @@ import type { Job, Source, WorkspaceOverview } from '~/utils/types'
 
 interface Settings { git_token_configured: boolean; git_token_host: string; git_token_hosts?: string[]; git_tokens?: { host: string; preview: string }[]; clone_enabled: boolean; allow_private_git: boolean; vuln_scan: boolean }
 
-const { data: ov, refresh: refreshOverview } = useApiGet<WorkspaceOverview>('overview')
-const { data: sources } = useApiGet<{ sources: Source[] }>('sources')
+const session = useSession()
+const { data: ov, refresh: refreshOverview, error: ovError } = useApiGet<WorkspaceOverview>('overview')
+// Mounted folders exist only without accounts: the API refuses /sources
+// and /ingest in accounts mode, even for platform admins.
+const mounted = computed(() => !session.accounts.value)
+const { data: sources } = useApiGet<{ sources: Source[] }>('sources', { immediate: mounted.value })
 const { data: jobs, refresh: refreshJobs } = useApiGet<{ jobs: Job[] }>('jobs')
 const { data: settings } = useApiGet<Settings>('settings')
-const session = useSession()
-// Installation tokens and mounted folders belong to whoever runs
-// CodeSynapse; organisations use their own Git tokens.
+// Installation tokens belong to whoever runs CodeSynapse; organisations use
+// their own Git tokens.
 const operator = computed(() => !session.accounts.value || session.isPlatformAdmin.value)
 
 // One row per repository, GitHub-style.
@@ -31,13 +34,18 @@ watch(running, (now, before) => {
 onBeforeUnmount(() => timer && clearInterval(timer))
 
 const error = ref('')
+const starting = ref('')
 async function ingest(source: string) {
+  if (starting.value) return
+  starting.value = source
   error.value = ''
   try {
     await apiPost<Job>('ingest', { source })
     await refreshJobs()
   } catch (e) {
-    error.value = apiErrorMessage(e)
+    error.value = plainError(e, { 409: 'Indexing is already running. Wait for it to finish, then try again.' })
+  } finally {
+    starting.value = ''
   }
 }
 
@@ -60,17 +68,33 @@ async function onAdded() {
 interface Watch { key: string; provider: string; host: string; org: string; paused: boolean; last_scan?: string; last_status?: string; last_error?: string; next_scan?: string; added: number; mine: boolean }
 const { data: watchList, refresh: refreshWatches } = useApiGet<{ watches: Watch[] }>('watches')
 const watchError = ref('')
+const watchNotice = ref('')
+const watchBusy = ref(false)
+const stopping = ref<Watch | null>(null)
 async function watchCall(method: 'PUT' | 'DELETE', w: Watch, body?: object) {
+  if (watchBusy.value) return
+  watchBusy.value = true
   watchError.value = ''
+  watchNotice.value = ''
   try {
-    const path = `watches/${w.host}/${w.org}`
+    const path = `watches/${encodeURIComponent(w.host)}/${encodeURIComponent(w.org)}`
     if (method === 'PUT') await apiPut(path, body)
     else await apiDelete(path)
+    watchNotice.value = method === 'DELETE' ? `Stopped watching ${w.key}. Repositories it added stay.` : `${w.paused ? 'Resumed' : 'Paused'} ${w.key}.`
     await refreshWatches()
   } catch (e) {
-    watchError.value = apiErrorMessage(e)
+    watchError.value = plainError(e)
+  } finally {
+    watchBusy.value = false
   }
 }
+async function stopWatching() {
+  const w = stopping.value
+  if (w) await watchCall('DELETE', w)
+  stopping.value = null
+}
+// Messages are about the organisation they came from.
+watch(() => session.orgSlug.value, () => { error.value = ''; watchError.value = ''; watchNotice.value = ''; page.value = 1 })
 
 // "host/owner/name" or "owner/name": the prefix is shown dimmed before the name.
 const splitName = (name: string) => {
@@ -102,6 +126,8 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
       <span class="pill"><span class="dot" :class="running ? 'dot--warn' : 'dot--ok'" />{{ running ? 'Indexing…' : `${plural(ov?.repos.length ?? 0, 'repository', 'repositories')} indexed` }}</span>
     </PageHeader>
 
+    <p v-if="ovError" class="notice notice--danger" role="alert">{{ plainError(ovError) }}</p>
+    <p v-else-if="!ov" class="muted small" role="status">Loading repositories…</p>
     <section v-if="ov?.repos.length" class="panel repo-panel">
       <ul class="repo-list">
         <li v-for="r in visibleRepos" :key="r.name" class="repo-row">
@@ -142,11 +168,11 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
       </ul>
     </section>
     <nav v-if="pageCount > 1" class="pager" aria-label="Repository pages">
-      <button class="secondary tiny" :disabled="page <= 1" @click="page--">Previous</button>
+      <button type="button" class="secondary tiny" :disabled="page <= 1" @click="page--">Previous</button>
       <span class="muted small">Page {{ page }} of {{ pageCount }} · {{ plural(ov?.repos.length ?? 0, 'repository', 'repositories') }}</span>
-      <button class="secondary tiny" :disabled="page >= pageCount" @click="page++">Next</button>
+      <button type="button" class="secondary tiny" :disabled="page >= pageCount" @click="page++">Next</button>
     </nav>
-    <div v-else-if="!ov?.repos.length" class="empty"><strong>No repositories yet</strong>Use “Add repositories” below. It takes about a minute.</div>
+    <div v-else-if="ov && !ov.repos.length" class="empty"><strong>No repositories yet</strong>Use “Add repositories” below. It takes about a minute.</div>
 
     <div class="grid cols-2">
       <section class="panel">
@@ -175,18 +201,18 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
         </div>
       </section>
 
-      <section v-if="operator" class="panel">
+      <section v-if="mounted" class="panel">
         <p class="eyebrow">Mounted sources</p>
         <h2>Folders available to index</h2>
         <p class="muted small">Everything under <code>./sources</code> in the project folder. Copy a checkout there with <code>just ingest ~/src/repo</code>.</p>
-        <p v-if="error" class="error">{{ error }}</p>
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
         <ul v-if="sources?.sources.length" class="sources">
           <li v-for="s in sources.sources" :key="s.name" class="source">
             <div class="source-head">
               <strong class="mono">{{ s.name }}</strong>
               <span v-if="indexed.has(s.name)" class="badge badge--green">indexed</span>
               <span v-if="s.is_git" class="badge badge--violet">git</span>
-              <button class="secondary tiny" :disabled="running" @click="ingest(s.name)">{{ indexed.has(s.name) ? 'Re-index' : 'Index' }}</button>
+              <button type="button" class="secondary tiny" :disabled="running || !!starting" :aria-label="`${indexed.has(s.name) ? 'Re-index' : 'Index'} ${s.name}`" @click="ingest(s.name)">{{ starting === s.name ? 'Starting…' : indexed.has(s.name) ? 'Re-index' : 'Index' }}</button>
             </div>
             <FormatChips :formats="s.content" compact />
             <p v-if="s.truncated" class="muted small">Large folder: counts are from the first 20,000 files.</p>
@@ -206,14 +232,18 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
           <span class="muted">{{ w.paused ? 'paused' : w.last_status || 'waiting for first check' }} · {{ plural(w.added, 'repository', 'repositories') }} added</span>
           <span v-if="w.last_scan" class="muted small">checked {{ relTime(w.last_scan) }}</span>
           <span class="right row tight-actions">
-            <button class="secondary tiny" @click="watchCall('PUT', w, { paused: !w.paused })">{{ w.paused ? 'Resume' : 'Pause' }}</button>
-            <button class="secondary tiny" @click="watchCall('DELETE', w)">Stop watching</button>
+            <button type="button" class="secondary tiny" :disabled="watchBusy" :aria-label="`${w.paused ? 'Resume' : 'Pause'} ${w.key}`" @click="watchCall('PUT', w, { paused: !w.paused })">{{ w.paused ? 'Resume' : 'Pause' }}</button>
+            <button type="button" class="secondary tiny" :disabled="watchBusy" :aria-label="`Stop watching ${w.key}`" @click="stopping = w">Stop watching</button>
           </span>
           <p v-if="w.last_error" class="error small job-error">{{ w.last_error }}</p>
         </li>
       </ul>
-      <p v-if="watchError" class="error">{{ watchError }}</p>
+      <p v-if="watchError" class="error" role="alert">{{ watchError }}</p>
+      <p v-if="watchNotice" class="notice notice--ok" role="status">{{ watchNotice }}</p>
     </section>
+    <ConfirmDialog :open="!!stopping" title="Stop watching?" confirm-label="Stop watching" danger :busy="watchBusy" @confirm="stopWatching" @cancel="stopping = null">
+      <p>New repositories of {{ stopping?.key }} are no longer added. Repositories it already added stay.</p>
+    </ConfirmDialog>
 
     <component :is="AddRepoDialog" v-if="AddRepoDialog" :open="addOpen" :clone-enabled="settings?.clone_enabled" :host-tokens="settings?.git_token_hosts" :busy="running" @close="addOpen = false" @added="onAdded" />
 
