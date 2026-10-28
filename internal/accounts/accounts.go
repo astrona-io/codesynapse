@@ -498,6 +498,12 @@ type Store interface {
 
 	// AddRepository links a graph to an organisation (ErrExists if linked).
 	AddRepository(ctx context.Context, r Repository) error
+	// MoveRepositoryToOrg turns ownerID's own entry for r.Graph into the
+	// organisation's, in one transaction: it audits repo.space_moved first,
+	// keeps ownerID an explicit repository admin and makes r.AddedBy one,
+	// the way adding it for the organisation would. r.Visibility replaces
+	// the entry's. ErrNotFound unless ownerID holds the entry.
+	MoveRepositoryToOrg(ctx context.Context, ownerID string, r Repository) error
 	// RemoveRepository unlinks it and returns how many organisations still
 	// reference the graph.
 	RemoveRepository(ctx context.Context, orgID, graph string) (int, error)

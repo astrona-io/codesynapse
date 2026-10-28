@@ -578,6 +578,51 @@ func (s *Store) addRepository(_ context.Context, r accounts.Repository) error {
 	return nil
 }
 
+// MoveRepositoryToOrg implements accounts.Store.
+func (s *Store) MoveRepositoryToOrg(ctx context.Context, ownerID string, r accounts.Repository) error {
+	return s.PolicyTransaction(ctx, r.OrgID, func(st accounts.Store) error {
+		if ownerID == "" || r.OwnerID != "" || r.AddedBy == "" || (r.Visibility != accounts.Public && r.Visibility != accounts.Private) {
+			return accounts.ErrInvalidInput
+		}
+		u, err := st.UserByID(ctx, r.AddedBy)
+		if err != nil || u.DisabledAt != nil {
+			return accounts.ErrForbidden
+		}
+		if _, err := st.MemberRole(ctx, r.OrgID, r.AddedBy); err != nil {
+			return accounts.ErrForbidden
+		}
+		if _, err := st.AddEvent(ctx, accounts.Event{At: r.AddedAt, UserID: r.AddedBy, ActorEmail: u.Email, OrgID: r.OrgID, Action: "repo.space_moved", Target: r.Graph, Detail: "from member " + ownerID, Outcome: accounts.Success}); err != nil {
+			return err
+		}
+		if err := st.(*Store).moveRepositoryToOrg(ctx, ownerID, r); err != nil {
+			return err
+		}
+		object := accounts.RepoObject(r.OrgID, r.Graph)
+		for _, admin := range slices.Compact([]string{ownerID, r.AddedBy}) {
+			if _, err := st.DeleteTuples(ctx, accounts.TupleFilter{ObjectType: accounts.TypeRepository, ObjectID: object, SubjectType: accounts.TypeUser, SubjectID: admin}); err != nil {
+				return err
+			}
+			if err := st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: object, Relation: accounts.RepoAdmin, SubjectType: accounts.TypeUser, SubjectID: admin, CreatedBy: r.AddedBy, CreatedAt: r.AddedAt}); err != nil {
+				return err
+			}
+		}
+		return st.TouchPolicy(ctx, r.OrgID)
+	})
+}
+
+func (s *Store) moveRepositoryToOrg(_ context.Context, ownerID string, r accounts.Repository) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := r.OrgID + "|" + r.Graph
+	cur, ok := s.repos[k]
+	if !ok || cur.OwnerID != ownerID {
+		return fmt.Errorf("repository: %w", accounts.ErrNotFound)
+	}
+	cur.OwnerID, cur.Visibility = "", r.Visibility
+	s.repos[k] = cur
+	return nil
+}
+
 // SetRepositoryAccess implements accounts.Store.
 func (s *Store) SetRepositoryAccess(ctx context.Context, orgID, graph, access string, at time.Time) error {
 	return s.PolicyTransaction(ctx, "", func(st accounts.Store) error {

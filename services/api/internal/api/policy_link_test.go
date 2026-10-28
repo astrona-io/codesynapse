@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,9 +78,33 @@ func TestRepositorySpaces(t *testing.T) {
 
 	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/mine", f.user.ID), accounts.Member))
 	assert.True(t, errors.Is(f.server.linkPolicyRepository(workCtx, entry("space/mine", f.user.ID), accounts.Member), accounts.ErrExists), "the same space again")
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/mine", ""), accounts.Admin), "the organisation takes a member's entry over")
+	rows, err := f.accounts.St.GraphRepositories(ctx, "space/mine")
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "moved, not copied")
+	assert.False(t, rows[0].Personal())
+	moves, err := f.accounts.St.ListEvents(ctx, accounts.EventFilter{OrgID: f.org.ID, Action: "repo.space_moved", Limit: 10})
+	require.NoError(t, err)
+	assert.Len(t, moves, 1, "the move is audited")
 	var taken errSpaceTaken
-	assert.True(t, errors.As(f.server.linkPolicyRepository(workCtx, entry("space/mine", ""), accounts.Admin), &taken), "not again for the organisation")
-	assert.Equal(t, taken.existing.OwnerID, f.user.ID)
+
+	// A member's private entry stays theirs until the organisation proves
+	// it can read the repository with its own token.
+	hidden := entry("space/hidden", f.user.ID)
+	hidden.Visibility = accounts.Private
+	require.NoError(t, f.accounts.St.AddRepository(ctx, hidden))
+	err = f.server.linkPolicyRepository(workCtx, entry("space/hidden", ""), accounts.Admin)
+	require.True(t, errors.As(err, &taken), "not without the organisation's own access")
+	assert.True(t, taken.private)
+	assert.False(t, strings.Contains(err.Error(), f.user.ID) || strings.Contains(err.Error(), f.user.Email), "the answer does not say whose space holds it")
+	assert.True(t, watchSkip(err), "a watch skips it")
+	proved := entry("space/hidden", "")
+	proved.Visibility = accounts.Private
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, proved, accounts.Admin), "proved with the organisation's token")
+	rows, err = f.accounts.St.GraphRepositories(ctx, "space/hidden")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.False(t, rows[0].Personal())
 
 	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/shared", ""), accounts.Admin))
 	assert.True(t, errors.As(f.server.linkPolicyRepository(workCtx, entry("space/shared", f.user.ID), accounts.Member), &taken), "not again in a member's space")
