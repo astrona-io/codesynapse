@@ -64,7 +64,7 @@ const sourceLabel = (u: string) => { try { const x = new URL(u); return x.host +
 const money = (v: number) => (v >= 100 ? `$${Math.round(v)}` : `$${v.toFixed(2)}`)
 
 const TASK_LABEL: Record<string, string> = {
-  'local-answer': 'Agent questions', review: 'Code review', 'security-triage': 'Security triage', briefing: 'Briefings', fix: 'Fixes',
+  'local-answer': 'Agent questions', 'local-draft': 'Code drafts', review: 'Code review', 'security-triage': 'Security triage', briefing: 'Briefings', fix: 'Fixes',
   memory: 'Memory', embeddings: 'Embeddings', 'code-annotation': 'Annotations', 'pr-summary': 'Change summaries', 'cleanup-briefing': 'Cleanup briefings', other: 'Other',
 }
 // Three most used tasks keep their colour; the rest fold into Other.
@@ -107,6 +107,7 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
         <StatTile label="Tokens never read" :value="fmtCompact(a?.avoided_tokens ?? 0)" :hint="`graph answers and ask_local, estimated`" />
         <StatTile label="Handled by local models" :value="fmtCompact(localIn + localOut)" :hint="`${fmtCompact(localIn)} read · ${fmtCompact(localOut)} written`" />
         <StatTile label="Prompts pre-briefed" :value="fmtCompact(a?.local_briefs ?? 0)" hint="a local model briefed the agent first" />
+        <StatTile label="Code drafts" :value="fmtCompact(a?.local_drafts ?? 0)" hint="a local model drafted code the agent then checked" />
       </div>
       <h3 class="row-title">Money (estimate)</h3>
       <div class="grid kpis">

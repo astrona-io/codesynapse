@@ -120,6 +120,14 @@ func (r Request) Validate() error {
 		return fmt.Errorf("%w: question is longer than %d characters", ErrInvalid, MaxQuestion)
 	case r.Mode != "" && r.Mode != ModeBrief:
 		return fmt.Errorf("%w: mode must be empty or %q", ErrInvalid, ModeBrief)
+	}
+	return r.validateFiles()
+}
+
+// validateFiles checks the files against the limits ask_local and
+// local_draft share.
+func (r Request) validateFiles() error {
+	switch {
 	case len(r.Files) == 0:
 		return fmt.Errorf("%w: no files to read", ErrInvalid)
 	case len(r.Files) > MaxFiles:

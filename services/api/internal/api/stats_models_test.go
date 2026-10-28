@@ -154,11 +154,14 @@ func TestAgentStatsCountsAskLocal(t *testing.T) {
 		{Day: day, Repo: "r", Tool: "ask_local", Client: "claude-code", Calls: 1, ResponseTokens: 300},
 		{Day: day, Repo: "r", Tool: usage.LocalRead, Client: "claude-code", Calls: 11000},
 		{Day: day, Repo: "r", Tool: usage.LocalAvoided, Client: "claude-code", Calls: 9700},
+		{Day: day, Repo: "r", Tool: "local_draft", Client: "claude-code", Calls: 1, ResponseTokens: 200},
+		{Day: day, Repo: "r", Tool: usage.LocalDrafts, Client: "claude-code", Calls: 1},
 	}, 7, now, nil, 1)
-	assert.Equal(t, a.Calls, 1)
+	assert.Equal(t, a.Calls, 2)
+	assert.Equal(t, a.LocalDrafts, 1, "a draft is counted, and adds nothing to tokens avoided")
 	assert.Equal(t, a.LocalReadTokens, 11000)
 	assert.Equal(t, a.AvoidedTokens, 9700)
 	assert.Equal(t, a.LocalAvoidedTokens, 9700)
 	assert.Equal(t, a.Daily[len(a.Daily)-1].AvoidedTokens, 9700)
-	assert.Equal(t, a.ContextTotalTokens, 10000)
+	assert.Equal(t, a.ContextTotalTokens, 10200, "the draft the agent got joins its context")
 }

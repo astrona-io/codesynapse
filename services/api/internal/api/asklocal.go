@@ -71,31 +71,42 @@ const briefMergeSystem = `You merge notes taken from parts of a codebase into on
 
 func (s *Server) askLocalRoutes() {
 	s.route("POST /api/v1/repos/{repo}/ask-local", repoRole(accounts.Member), s.withExecution(s.handleAskLocal))
+	s.route("POST /api/v1/repos/{repo}/local-draft", repoRole(accounts.Member), s.withExecution(s.handleLocalDraft))
 	s.route("POST /api/v1/repos/{repo}/brief-plan", repoRole(accounts.Viewer), s.handleBriefPlan)
 }
 
-func (s *Server) handleAskLocal(w http.ResponseWriter, r *http.Request) {
+// decodeLocal reads the body of an ask-local or local-draft request into v
+// and validates it; false means the problem was written. orElse names what
+// the agent does without a local model.
+func (s *Server) decodeLocal(w http.ResponseWriter, r *http.Request, v interface{ Validate() error }, orElse string) bool {
 	if s.cfg.LLM == nil {
-		s.problem(w, http.StatusConflict, fmt.Errorf("%w: no AI providers are configured; read the files yourself", llm.ErrNoLocalModel))
-		return
+		s.problem(w, http.StatusConflict, fmt.Errorf("%w: no AI providers are configured; %s", llm.ErrNoLocalModel, orElse))
+		return false
 	}
 	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 		s.problem(w, http.StatusBadRequest, errors.New("content-type must be application/json"))
-		return
+		return false
 	}
-	var req asklocal.Request
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAskLocalBody))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
+	if err := dec.Decode(v); err != nil {
 		s.problem(w, http.StatusBadRequest, fmt.Errorf("invalid json body: %w", err))
-		return
+		return false
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		s.problem(w, http.StatusBadRequest, errors.New("body must contain a single json object"))
-		return
+		return false
 	}
-	if err := req.Validate(); err != nil {
+	if err := v.Validate(); err != nil {
 		s.problem(w, http.StatusBadRequest, err)
+		return false
+	}
+	return true
+}
+
+func (s *Server) handleAskLocal(w http.ResponseWriter, r *http.Request) {
+	var req asklocal.Request
+	if !s.decodeLocal(w, r, &req, "read the files yourself") {
 		return
 	}
 	org, err := s.repoOrg(r, r.PathValue("repo"))
