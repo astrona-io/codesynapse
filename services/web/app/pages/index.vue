@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Component } from 'vue'
 import type { Job, Source, WorkspaceOverview } from '~/utils/types'
 
 interface Settings { git_token_configured: boolean; git_token_host: string; git_token_hosts?: string[]; git_tokens?: { host: string; preview: string }[]; clone_enabled: boolean; allow_private_git: boolean; vuln_scan: boolean }
@@ -41,6 +42,15 @@ async function ingest(source: string) {
 }
 
 const addOpen = ref(false)
+// The dialog (and the space settings it asks the API for) loads on the first
+// click, not with every landing page. It mounts closed and then opens, so its
+// open watcher shows it as before.
+const AddRepoDialog = shallowRef<Component | null>(null)
+async function openAdd() {
+  AddRepoDialog.value ??= (await import('~/components/AddRepoDialog.vue')).default
+  await nextTick()
+  addOpen.value = true
+}
 async function onAdded() {
   await Promise.all([refreshJobs(), refreshOverview(), refreshWatches()])
 }
@@ -143,7 +153,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
         <p class="eyebrow">Add a repository</p>
         <h2>Scan one repository or a whole organisation</h2>
         <p class="muted small">Clone from GitHub, GitLab or any HTTPS git host. Pick a single URL, or list an organisation and add everything in it.</p>
-        <div class="row"><button type="button" :disabled="settings?.clone_enabled === false" @click="addOpen = true">Add repositories</button></div>
+        <div class="row"><button type="button" :disabled="settings?.clone_enabled === false" @click="openAdd">Add repositories</button></div>
 
         <p v-if="!operator" class="notice">Public repositories work right away. For private ones, an admin of your organisation adds a Git token under <NuxtLink to="/settings/git-tokens">Settings → Git tokens</NuxtLink>.</p>
         <div v-else class="token" :class="settings?.git_token_configured ? 'token--ok' : 'token--missing'">
@@ -205,7 +215,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
       <p v-if="watchError" class="error">{{ watchError }}</p>
     </section>
 
-    <AddRepoDialog :open="addOpen" :clone-enabled="settings?.clone_enabled" :host-tokens="settings?.git_token_hosts" :busy="running" @close="addOpen = false" @added="onAdded" />
+    <component :is="AddRepoDialog" v-if="AddRepoDialog" :open="addOpen" :clone-enabled="settings?.clone_enabled" :host-tokens="settings?.git_token_hosts" :busy="running" @close="addOpen = false" @added="onAdded" />
 
     <section v-if="jobs?.jobs.length" class="panel">
       <p class="eyebrow">Activity</p><h2>Recent indexing</h2>
