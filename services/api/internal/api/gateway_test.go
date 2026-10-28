@@ -75,8 +75,13 @@ func TestGatewayAuditsCallsWithoutPrompts(t *testing.T) {
 	_ = res.Body.Close()
 	require.Equal(t, res.StatusCode, 200)
 
-	rows, err := f.accounts.St.ListEvents(t.Context(), accounts.EventFilter{OrgID: f.org.ID, Action: "gateway.request", Limit: 10})
-	require.NoError(t, err)
+	// The gateway audits once the handler returns, which can be after the
+	// client has read the whole answer.
+	var rows []accounts.Event
+	for deadline := time.Now().Add(5 * time.Second); len(rows) == 0 && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		rows, err = f.accounts.St.ListEvents(t.Context(), accounts.EventFilter{OrgID: f.org.ID, Action: "gateway.request", Limit: 10})
+		require.NoError(t, err)
+	}
 	require.Len(t, rows, 1)
 	assert.Contains(t, rows[0].Detail, "route=cloud")
 	assert.Contains(t, rows[0].Detail, "model=claude-x")
