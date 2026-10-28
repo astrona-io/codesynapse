@@ -12,7 +12,8 @@ import (
 )
 
 // TestHardcodedSecretSkipsCounterLabels: a constant named Token… whose value
-// is a parenthesised counter label ("(tokens:input)") is not a credential.
+// is a parenthesised counter label ("(tokens:input)") or a bare enum of
+// lowercase words ("no_hook_tokens") is not a credential.
 // A real brief listed internal/usage/tokens.go as a high finding (PLAN item
 // 18); credential-looking values beside it are still reported.
 func TestHardcodedSecretSkipsCounterLabels(t *testing.T) {
@@ -27,10 +28,10 @@ func TestHardcodedSecretSkipsCounterLabels(t *testing.T) {
 			flagged = append(flagged, name)
 		}
 	}
-	for _, label := range []string{"TokenInput", "TokenCached", "TokenTurns"} {
+	for _, label := range []string{"TokenInput", "TokenCached", "TokenTurns", "basisNoTokens"} {
 		assert.NotContains(t, flagged, label)
 	}
-	for _, secret := range []string{"apiToken", "sessionToken", "adminPassword"} {
+	for _, secret := range []string{"apiToken", "sessionToken", "adminPassword", "mixedToken", "casedSecret"} {
 		assert.Contains(t, flagged, secret)
 	}
 }
