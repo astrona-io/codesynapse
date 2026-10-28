@@ -84,4 +84,36 @@ func RunMemberRepos(t *testing.T, st accounts.Store) {
 	_, err = svc.SetRepoGrant(ctx, memberP, org.ID, "space/mine", accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: other.ID}, accounts.Viewer)
 	require.NoError(t, err)
 	assert.Equal(t, role(other, "space/mine"), accounts.Viewer, "the owner can share it")
+
+	err = svc.RecoverRepoAdmin(ctx, ownerP, org.ID, "space/mine", owner.ID)
+	assert.True(t, errors.Is(err, accounts.ErrNotFound), "an organisation owner cannot recover a member's own repository")
+	assert.Equal(t, role(owner, "space/mine"), accounts.Role(""), "so it stays out of the owner's reach")
+	require.NoError(t, svc.RecoverRepoAdmin(ctx, ownerP, org.ID, "space/shared", owner.ID), "organisation repositories can still be recovered")
+	assert.Equal(t, role(owner, "space/shared"), accounts.Admin)
+
+	// The organisation adding a member's repository takes the entry over.
+	moved := accounts.Repository{OrgID: org.ID, Graph: "space/mine", AddedBy: owner.ID, Visibility: accounts.Public, AddedAt: now}
+	assert.True(t, errors.Is(st.MoveRepositoryToOrg(ctx, other.ID, moved), accounts.ErrNotFound), "only from the member who holds it")
+	assert.True(t, errors.Is(st.MoveRepositoryToOrg(ctx, member.ID, accounts.Repository{OrgID: org.ID, Graph: "space/mine", AddedBy: owner.ID, OwnerID: member.ID, Visibility: accounts.Public}), accounts.ErrInvalidInput), "into the organisation's space only")
+	assert.True(t, errors.Is(st.MoveRepositoryToOrg(ctx, member.ID, accounts.Repository{OrgID: org.ID, Graph: "space/mine", Visibility: accounts.Public}), accounts.ErrInvalidInput), "someone adds it")
+	rows, err = st.ListEvents(ctx, accounts.EventFilter{OrgID: org.ID, Action: "repo.space_moved", Limit: 10})
+	require.NoError(t, err)
+	assert.Len(t, rows, 0, "refused moves leave no event")
+	require.NoError(t, st.MoveRepositoryToOrg(ctx, member.ID, moved))
+	repos, err = st.OrgRepositories(ctx, org.ID)
+	require.NoError(t, err)
+	for _, r := range repos {
+		if r.Graph == "space/mine" {
+			assert.False(t, r.Personal(), "it is the organisation's now")
+		}
+	}
+	assert.Len(t, repos, 2, "moved, not copied")
+	assert.Equal(t, role(member, "space/mine"), accounts.Admin, "the member keeps administering it")
+	assert.Equal(t, role(owner, "space/mine"), accounts.Admin, "the adder administers it, as for any organisation add")
+	assert.Equal(t, role(other, "space/mine"), accounts.Viewer, "everyone else gets the organisation's default")
+	rows, err = st.ListEvents(ctx, accounts.EventFilter{OrgID: org.ID, Action: "repo.space_moved", Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "the move is audited")
+	assert.Equal(t, rows[0].Target, "space/mine")
+	assert.True(t, errors.Is(st.MoveRepositoryToOrg(ctx, member.ID, moved), accounts.ErrNotFound), "only once")
 }

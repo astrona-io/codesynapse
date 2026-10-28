@@ -89,11 +89,11 @@ Whoever adds a repository gets an explicit admin grant on it, in either space. T
 
 Settings → Organisation → "Members may add their own repositories" turns personal additions on or off. It is on until an admin changes it (`GET`/`PUT /api/v1/accounts/orgs/{org}/member-repos`; changing it needs Admin in a signed-in session and is audited as `org.member_repos.set`). Turning it off stops new personal additions with 403; entries that already exist stay.
 
-Adding a repository that already has an entry in the other space, or in another member's space, answers 409. CodeSynapse does not move entries between spaces automatically, because that would change who can read the code without the owner's say. Adding it again in the same space does nothing. Organisation watches always add to the organisation space.
+When the organisation adds a repository a member already has in their own space (an owner or admin adding it, or their watch finding it), the member's entry becomes the organisation's. The move is audited as `repo.space_moved` before it happens. The member keeps an explicit admin grant and whoever added it gets one; other members get the organisation default and whatever grants already exist, nothing more. A member's private entry moves only when the organisation can read the repository with its own Git token; until then the add answers 409 with a message saying a member of the organisation has it privately, without saying who. A member adding a repository that the organisation or another member already has answers 409. Adding it again in the same space does nothing. Owner recovery works on organisation repositories only: an owner cannot recover administration of a member's personal repository.
 
 Each space uses only its own Git tokens. Organisation repositories use the organisation's tokens; a private repository in a member's own space uses only that member's own token (see [personal Git tokens](#personal-git-tokens)), never the organisation's, even when the organisation's token could read it. A private personal repository can be added only after the owner's own token read it; without one the API answers 403 and names Profile → Git tokens.
 
-A watch created by a member adds to that member's own space, and skips new repositories while members' own repositories are turned off.
+A watch created by a member adds to that member's own space, and skips new repositories while members' own repositories are turned off. A watch skips what it cannot add without an audit entry and without counting it as added.
 
 ## API route scoping
 
