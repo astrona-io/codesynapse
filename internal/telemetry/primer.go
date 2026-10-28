@@ -78,6 +78,7 @@ func (e *firstValueExporter) Export(ctx context.Context, data *metricdata.Resour
 	}
 	if len(added) > 0 {
 		if err := e.Exporter.Export(ctx, &zero); err != nil {
+			ExportFailed(ctx, ExporterOTLP)
 			return exportError(ctx)
 		}
 		for _, id := range added {
@@ -85,6 +86,7 @@ func (e *firstValueExporter) Export(ctx context.Context, data *metricdata.Resour
 		}
 	}
 	if err := e.Exporter.Export(ctx, data); err != nil {
+		ExportFailed(ctx, ExporterOTLP)
 		return exportError(ctx)
 	}
 	return nil

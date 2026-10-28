@@ -22,6 +22,7 @@ Both appear on the **Statistics** page. Every number belongs to one organisation
 | Assistant hooks | lifecycle events and observed byte counts from Codex and Cursor |
 | Indexing | files scanned, indexed and skipped per repository, annotation jobs; indexing runs and time, time per phase (fetching, extraction, storing the graph) and extraction time per language |
 | Background jobs | finished jobs by outcome, failures by kind, how long jobs waited for a worker and how long they ran (Statistics → Sync) |
+| Platform health (platform administrators) | API requests and latency, the job queue, which replica runs the scheduler and lease losses, goroutines, heap, CPU and garbage-collection pauses per service, database connection pool use and waits, dropped series and log lines, failed metric exports |
 
 Some numbers are estimates and are labelled so: cost depends on the prices you configured, and a call without reported usage or a known price shows as a gap, never as zero.
 
@@ -37,8 +38,8 @@ Whoever runs the installation can turn on alerts: an optional vmalert checks rul
 
 Some parts of CodeSynapse have no live numbers yet. The [metrics coverage plan](../TELEMETRY_PLAN.md#metrics-coverage-plan) lists them and the order in which they will be added:
 
-1. **Platform health** for operators: which replica runs the scheduler, process memory and CPU, database connections, and whether metrics themselves are being dropped or fail to export.
-2. **More operator alerts**: rules for the platform-health numbers above (scheduler lease, failing metric export) and, with the later steps, failing jobs and audit-log writes.
+1. **Platform health** for operators (done): see the table above and Administration → Overview.
+2. **More operator alerts**: failing audit-log writes, once those writes are counted.
 3. **Background jobs and indexing** (available now, see the table above).
 4. **Outside services and security events**: git clone and fetch, vulnerability and licence lookups, sign-in attempts and rate limits, and audit-log writes.
 5. **Sharper existing numbers**: refused tool calls apart from errors, model timeouts and rate limits, gateway latency and why a request left the local model, and tool calls answered on your own machine by the Claude Code bridge. The Statistics panels that count failures change in the same release, so a refused call is no longer shown as an error.

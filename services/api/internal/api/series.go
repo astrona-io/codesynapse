@@ -214,7 +214,67 @@ var seriesPanels = map[string]seriesPanel{
 		queries: []seriesQuery{{expr: `sum by (tenant_id) (increase(mcp_tool_calls_total[$w]))`, by: "tenant_id"}}},
 }
 
+// platformHealthPanels show the process and platform state of the
+// installation (metrics coverage plan, phase 1): platform admins only, never
+// scoped to a tenant. Process gauges are per instance, so panels take the
+// maximum per service (job) and never sum them, except the loops lease, whose
+// sum is how many processes think they lead.
+var platformHealthPanels = map[string]seriesPanel{
+	"platform_api_requests": {Title: "API requests by status", Unit: "requests", Kind: "count",
+		Help:    "API and worker requests per step by status class, signed in or not.",
+		queries: []seriesQuery{{expr: `sum by (code) (increase({__name__=~"(platform_)?http_requests_total"}[$w]))`, by: "code"}}},
+	"platform_api_latency": {Title: "API latency", Unit: "seconds", Kind: "gauge",
+		Help: "Median and 95th percentile API request time across routes.",
+		queries: []seriesQuery{
+			{name: "p50", expr: `histogram_quantile(0.5, sum by (le) (increase({__name__=~"(platform_)?http_request_duration_seconds_bucket"}[$w])))`},
+			{name: "p95", expr: `histogram_quantile(0.95, sum by (le) (increase({__name__=~"(platform_)?http_request_duration_seconds_bucket"}[$w])))`},
+		}},
+	"platform_job_queue": {Title: "Job queue", Unit: "jobs", Kind: "gauge",
+		Help: "Jobs a worker could claim now, and jobs queued or running, reported by the process running the scheduler.",
+		queries: []seriesQuery{
+			{name: "waiting", expr: `sum(max by (kind) (platform_codesynapse_jobs_waiting))`},
+			{name: "queued or running", expr: `sum(max by (kind) (platform_codesynapse_jobs_active))`},
+		}},
+	"platform_loops_lease": {Title: "Scheduler holders", Unit: "processes", Kind: "gauge",
+		Help:    "API processes that hold the scheduler lease. Anything but 1 means no process, or more than one, runs the scheduler and maintenance loops.",
+		queries: []seriesQuery{{name: "holders", expr: `sum(platform_codesynapse_loops_lease_held)`}}},
+	"platform_lease_events": {Title: "Lease changes", Unit: "events", Kind: "count",
+		Help:    "Scheduler lease taken, lost or not renewed, and durable job leases not renewed or given up.",
+		queries: []seriesQuery{{expr: `sum by (series) (label_join(increase(platform_codesynapse_lease_events_total[$w]), "series", " ", "lease", "event"))`, by: "series"}}},
+	"platform_goroutines": {Title: "Goroutines", Unit: "goroutines", Kind: "gauge",
+		Help:    "Live goroutines, the highest instance of each service.",
+		queries: []seriesQuery{{expr: `max by (job) (platform_go_goroutines)`, by: "job"}}},
+	"platform_heap": {Title: "Heap in use", Unit: "bytes", Kind: "gauge",
+		Help:    "Heap held by live and not yet swept objects, the highest instance of each service.",
+		queries: []seriesQuery{{expr: `max by (job) (platform_go_heap_bytes)`, by: "job"}}},
+	"platform_cpu": {Title: "CPU", Unit: "cores", Kind: "gauge",
+		Help:    "CPU used by Go code and the Go runtime, summed over each service's instances. The runtime updates it at each garbage collection, so it lags a little.",
+		queries: []seriesQuery{{expr: `sum by (job) (rate(platform_process_cpu_seconds_total[$w]))`, by: "job"}}},
+	"platform_gc_pause": {Title: "Garbage collection pauses", Unit: "%", Kind: "gauge",
+		Help:    "Share of time the busiest instance of each service was stopped for garbage collection (estimate).",
+		queries: []seriesQuery{{expr: `100 * max by (job) (rate(platform_go_gc_pause_seconds_total[$w]))`, by: "job"}}},
+	"platform_db_pool": {Title: "PostgreSQL connections", Unit: "connections", Kind: "gauge",
+		Help:    "Connections idle and in use, and the pool limit, the highest instance of each kind.",
+		queries: []seriesQuery{{expr: `max by (state) (platform_db_pool_connections{db_system="postgres"})`, by: "state"}}},
+	"platform_db_pool_waits": {Title: "Waits for a PostgreSQL connection", Unit: "acquires", Kind: "count",
+		Help:    "Requests that found every pooled connection busy and had to wait.",
+		queries: []seriesQuery{{name: "waits", expr: `sum(increase(platform_db_pool_acquire_waits_total{db_system="postgres"}[$w]))`}}},
+	"platform_telemetry_drops": {Title: "Measurements dropped", Unit: "samples", Kind: "count",
+		Help: "New label combinations an instrument refused at its series cap, by instrument, and log lines not shipped.",
+		queries: []seriesQuery{
+			{expr: `sum by (metric) (increase(telemetry_dropped_series_total[$w]))`, by: "metric"},
+			{name: "log lines", expr: `sum(increase(platform_log_lines_dropped_total[$w]))`},
+		}},
+	"platform_telemetry_exports": {Title: "Failed metric exports", Unit: "exports", Kind: "count",
+		Help:    "Metric exports that failed, by exporter. A failure is counted when the next export succeeds.",
+		queries: []seriesQuery{{expr: `sum by (exporter) (increase(platform_telemetry_export_failures_total[$w]))`, by: "exporter"}}},
+}
+
 func init() {
+	for name, panel := range platformHealthPanels {
+		panel.platform = true
+		seriesPanels[name] = panel
+	}
 	for _, name := range []string{"llm_cost", "tool_latency", "db_latency"} {
 		panel := seriesPanels[name]
 		panel.platform = true

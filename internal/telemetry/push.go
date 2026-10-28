@@ -81,6 +81,9 @@ func (p *Pusher) Run(ctx context.Context, every time.Duration, onErr func(error)
 	defer t.Stop()
 	var lastErr time.Time
 	report := func(err error) {
+		if err != nil {
+			ExportFailed(ctx, ExporterPrometheus)
+		}
 		if err != nil && time.Since(lastErr) > time.Minute {
 			lastErr = time.Now()
 			onErr(err)
