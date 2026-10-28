@@ -5,7 +5,8 @@ const route = useRoute()
 const repo = computed(() => route.params.repo as string)
 const base = computed(() => `/repos/${encodeURIComponent(repo.value)}`)
 const { data: providers } = useApiGet<{ providers: AIProvider[] }>('ai/providers')
-const { data: reviews, refresh: refreshReviews } = useApiGet<{ reviews: ReviewSummary[] }>(() => repoPath(repo.value, 'reviews'))
+useHead({ title: () => `AI assistant · ${repo.value}` })
+const { data: reviews, error: reviewsError, refresh: refreshReviews } = useApiGet<{ reviews: ReviewSummary[] }>(() => repoPath(repo.value, 'reviews'))
 const aiResults = computed(() => (reviews.value?.reviews ?? []).filter((r) => r.source === 'ai'))
 
 const TASKS = [
@@ -24,26 +25,50 @@ const jobs = reactive<Record<string, Job | null>>({})
 const errors = reactive<Record<string, string>>({})
 const timers: Record<string, ReturnType<typeof setInterval>> = {}
 
+function stopAll() {
+  for (const task of Object.keys(timers)) {
+    clearInterval(timers[task])
+    delete timers[task]
+  }
+}
 async function run(task: string) {
   errors[task] = ''
+  clearInterval(timers[task])
   try {
     const body: Record<string, string> = { provider: choice[task] || '' }
     if ((task === 'review' || task === 'pr-summary') && diff.value.trim()) body.diff = diff.value
-    jobs[task] = await apiPost<Job>(repoPath(repo.value, `ai/${task}`), body)
+    const job = await apiPost<Job>(repoPath(repo.value, `ai/${task}`), body)
+    jobs[task] = job
+    let misses = 0
     timers[task] = setInterval(async () => {
-      const j = await $fetch<Job>(apiPath(`jobs/${jobs[task]!.id}`))
-      jobs[task] = j
-      if (j.state !== 'running') {
-        clearInterval(timers[task])
-        if (j.state === 'failed') errors[task] = j.error ?? 'failed'
-        refreshReviews()
+      try {
+        const j = await apiGet<Job>(`jobs/${encodeURIComponent(job.id)}`)
+        misses = 0
+        jobs[task] = j
+        if (j.state !== 'running') {
+          clearInterval(timers[task])
+          if (j.state === 'failed') errors[task] = j.error ?? 'failed'
+          void refreshReviews()
+        }
+      } catch (e) {
+        // A few failed polls are network noise; after that, say so and stop.
+        if (++misses >= 3) {
+          clearInterval(timers[task])
+          errors[task] = `Lost track of the job: ${apiErrorMessage(e)}. The result still appears in Reviews when it finishes.`
+        }
       }
     }, 2500)
   } catch (e) {
     errors[task] = apiErrorMessage(e)
   }
 }
-onBeforeUnmount(() => Object.values(timers).forEach(clearInterval))
+// Jobs belong to one repository: forget them when another one is opened.
+watch(repo, () => {
+  stopAll()
+  for (const k of Object.keys(jobs)) delete jobs[k]
+  for (const k of Object.keys(errors)) delete errors[k]
+})
+onBeforeUnmount(stopAll)
 const elapsed = (j: Job) => Math.round((Date.now() - Date.parse(j.started_at)) / 1000)
 </script>
 
@@ -61,7 +86,7 @@ const elapsed = (j: Job) => Math.round((Date.now() - Date.parse(j.started_at)) /
       <section v-for="t in tasks" :key="t.id" class="panel task">
         <h2>{{ t.title }}</h2>
         <p class="muted">{{ t.body }}</p>
-        <textarea v-if="t.id === 'review' || t.id === 'pr-summary'" v-model="diff" :placeholder="t.id === 'review' ? 'Optional: paste a git diff to review a change instead' : 'Paste a git diff to summarise'" class="diff" />
+        <textarea v-if="t.id === 'review' || t.id === 'pr-summary'" v-model="diff" :placeholder="t.id === 'review' ? 'Optional: paste a git diff to review a change instead' : 'Paste a git diff to summarise'" class="diff" :aria-label="t.id === 'review' ? 'Git diff to review (optional)' : 'Git diff to summarise'" />
         <label class="row tight">Model
           <select v-model="choice[t.id]" :aria-label="`Model for ${t.title}`">
             <option value="">{{ routed(t.id) }} (default)</option>
@@ -73,7 +98,7 @@ const elapsed = (j: Job) => Math.round((Date.now() - Date.parse(j.started_at)) /
           <NuxtLink v-if="jobs[t.id]?.state === 'succeeded' && jobs[t.id]?.result" :to="{ path: `${base}/reviews`, query: { id: jobs[t.id]!.result } }" class="btn btn--ghost">Open result →</NuxtLink>
         </div>
         <p v-if="jobs[t.id]?.state === 'running'" class="muted small">Local models can take a few minutes; you can leave this page — the result appears in Reviews.</p>
-        <p v-if="errors[t.id]" class="error small">{{ errors[t.id] }}</p>
+        <p v-if="errors[t.id]" class="error small" role="alert">{{ errors[t.id] }}</p>
       </section>
     </div>
 
@@ -86,19 +111,20 @@ const elapsed = (j: Job) => Math.round((Date.now() - Date.parse(j.started_at)) /
             <tr v-for="r in aiResults" :key="r.id">
               <td><NuxtLink :to="{ path: `${base}/reviews`, query: { id: r.id } }">{{ r.title }}</NuxtLink> <span v-if="r.kind === 'report'" class="badge badge--violet">report</span></td>
               <td class="mono dim">{{ r.author }}</td>
-              <td class="num">{{ r.kind === 'report' ? '–' : r.counts.open }}</td>
+              <td class="num">{{ r.kind === 'report' ? '–' : fmtInt(r.counts.open) }}</td>
               <td class="muted">{{ relTime(r.created_at) }}</td>
             </tr>
           </tbody>
         </table>
       </div>
+      <p v-else-if="reviewsError" class="notice notice--danger" role="alert">{{ apiErrorMessage(reviewsError) }}</p>
+      <p v-else-if="!reviews" class="muted" role="status">Loading…</p>
       <p v-else class="muted">Nothing generated yet.</p>
     </section>
   </div>
 </template>
 
 <style scoped>
-.grid.cols-3 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
 .task { gap: 10px; }
 .diff { min-height: 90px; }
 .tight { gap: 8px; }

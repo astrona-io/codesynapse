@@ -25,7 +25,7 @@ const charts = computed(() => [
   { title: 'Tests and docs, % (higher is better)', lines: [line('test_reach_pct', 'Reached by tests'), line('doc_coverage_pct', 'Documented')] },
   { title: 'Licence conflicts (lower is better)', lines: [line('licence_conflicts', 'Conflicts')] },
 ].map((c) => ({ ...c, lines: c.lines.filter((l): l is SeriesLine => !!l) })))
-const when = (iso?: string) => (iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '')
+const when = (iso?: string) => (iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : '')
 </script>
 
 <template>
