@@ -17,6 +17,7 @@ const { space, canOrg, canMe, body: spaceBody } = useRepoSpace()
 const PROVIDERS = [{ v: '', label: 'Detect from host' }, { v: 'github', label: 'GitHub' }, { v: 'forgejo', label: 'Forgejo / Gitea / Codeberg' }, { v: 'gitlab', label: 'GitLab' }]
 const dialog = ref<HTMLDialogElement | null>(null)
 const tab = ref<'single' | 'org'>('single')
+const uid = useId()
 watch(() => props.open, (open) => {
   if (open && !dialog.value?.open) dialog.value?.showModal()
   else if (!open && dialog.value?.open) dialog.value.close()
@@ -106,21 +107,22 @@ async function addChosen() {
 
 <template>
   <Teleport to="#teleports">
-    <dialog ref="dialog" class="add-dialog" @cancel.prevent="emit('close')" @close="emit('close')">
+    <dialog ref="dialog" class="add-dialog" :aria-labelledby="`${uid}-title`" @cancel.prevent="emit('close')" @close="emit('close')">
       <div class="body">
         <header class="head">
           <div>
             <p class="eyebrow">Add repositories</p>
-            <h2>Scan one repository or a whole organisation</h2>
+            <h2 :id="`${uid}-title`">Scan one repository or a whole organisation</h2>
           </div>
           <button type="button" class="secondary tiny" aria-label="Close" @click="emit('close')">Close</button>
         </header>
 
         <div class="tabs" role="tablist">
-          <button type="button" role="tab" :aria-selected="tab === 'single'" :class="{ on: tab === 'single' }" @click="tab = 'single'">Single repository</button>
-          <button type="button" role="tab" :aria-selected="tab === 'org'" :class="{ on: tab === 'org' }" @click="tab = 'org'">Whole organisation</button>
+          <button :id="`${uid}-tab-single`" type="button" role="tab" :aria-controls="`${uid}-panel`" :aria-selected="tab === 'single'" :class="{ on: tab === 'single' }" @click="tab = 'single'">Single repository</button>
+          <button :id="`${uid}-tab-org`" type="button" role="tab" :aria-controls="`${uid}-panel`" :aria-selected="tab === 'org'" :class="{ on: tab === 'org' }" @click="tab = 'org'">Whole organisation</button>
         </div>
 
+        <div :id="`${uid}-panel`" role="tabpanel" :aria-labelledby="`${uid}-tab-${tab}`">
         <form v-if="tab === 'single'" class="form" @submit.prevent="register">
           <label>Repository URL
             <input v-model="reg.url" type="url" required placeholder="https://github.com/org/repo.git" autocomplete="off">
@@ -138,15 +140,15 @@ async function addChosen() {
             <button type="submit" :disabled="!reg.url || busy || cloneEnabled === false">Clone &amp; index</button>
             <span class="muted small">Shallow clone over HTTPS; nothing is pushed.</span>
           </div>
-          <p v-if="regOk" class="ok">{{ regOk }}</p>
-          <p v-if="regError" class="error">{{ regError }}</p>
+          <p class="ok" role="status">{{ regOk }}</p>
+          <p v-if="regError" class="error" role="alert">{{ regError }}</p>
           <p v-if="urlHost && space === 'me'" class="muted small">A private repository in your own space is read with your own Git token for {{ urlHost }} (<NuxtLink to="/settings/profile?tab=git">Profile, Git tokens</NuxtLink>).</p>
           <p v-else-if="urlHost && !hostHasToken" class="muted small">No Git token is set for {{ urlHost }}: if this repository is private, cloning will fail.</p>
         </form>
 
         <div v-else-if="!session.accounts.value" class="form">
           <p class="muted">Without accounts, organisations are watched installation-wide and every repository is indexed and kept in sync.</p>
-          <NuxtLink to="/orgs" class="button-link">Open organisation import</NuxtLink>
+          <NuxtLink to="/orgs" class="btn">Open organisation import</NuxtLink>
         </div>
 
         <div v-else class="form">
@@ -175,7 +177,7 @@ async function addChosen() {
             <p v-if="space === 'me'" class="muted small">Listed with your own Git token for the host when you saved one (Profile, Git tokens), so private repositories it reads are shown too.</p>
             <p v-else class="muted small"><template v-if="listing?.authenticated">Listed with your organisation's token for {{ listing.host }}: private repositories it can read are included.</template><template v-else>Private repositories are listed when your organisation has a Git token for the host in Settings; otherwise only public ones are.</template></p>
             <p v-if="listing?.sso_restricted" class="muted small">GitHub left out repositories the token is not authorised for under the organisation's SAML single sign-on. Authorise the token for the organisation in GitHub's token settings.</p>
-            <p v-if="listError" class="error">{{ listError }}</p>
+            <p v-if="listError" class="error" role="alert">{{ listError }}</p>
           </form>
 
           <section v-if="listing" class="found">
@@ -189,7 +191,7 @@ async function addChosen() {
               <label class="check"><input v-model="space" type="radio" value="me" :disabled="!canMe"> Only me<span v-if="!canMe" class="dim"> (turned off by your organisation)</span></label>
             </fieldset>
             <label class="check"><input v-model="autoAdd" type="checkbox"> Automatically add new repositories {{ listing.org }} creates later</label>
-            <p v-if="watchNote" class="muted small">{{ watchNote }}</p>
+            <p class="muted small" role="status">{{ watchNote }}</p>
             <div class="row opts">
               <input v-model="filter" class="find" placeholder="Filter repositories" aria-label="Filter repositories">
               <label class="check"><input type="checkbox" :checked="allPicked" :disabled="!openRepos.length" @change="pickAll(($event.target as HTMLInputElement).checked)"> Select all shown</label>
@@ -201,7 +203,6 @@ async function addChosen() {
                 <span v-if="r.private" class="badge badge--violet">private</span>
                 <span v-if="r.archived" class="badge badge--amber">archived</span>
                 <span v-if="r.fork" class="badge badge--violet">fork</span>
-                <span v-if="r.private" class="badge badge--pink">private</span>
                 <span v-if="r.permission" class="badge badge--violet" :title="`The listing token has ${r.permission} access`">{{ r.permission }}</span>
                 <span v-if="r.added" class="badge badge--green">added</span>
                 <span v-else-if="outcome[r.repo]?.ok" class="badge badge--cyan">{{ outcome[r.repo]!.text }}</span>
@@ -212,14 +213,15 @@ async function addChosen() {
             <div v-if="!listing.repos.length" class="empty"><strong>Nothing to import</strong>No repositories match. Try including archived repositories or forks.</div>
           </section>
         </div>
+        </div>
       </div>
     </dialog>
   </Teleport>
 </template>
 
 <style scoped>
-.add-dialog { border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); color: var(--ink); padding: 0; width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 48px); box-shadow: var(--shadow-pop); }
-.add-dialog::backdrop { background: rgba(15, 17, 21, 0.45); backdrop-filter: blur(4px); }
+.add-dialog { border: 2px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); color: var(--ink); padding: 0; width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 48px); box-shadow: var(--shadow-pop); }
+.add-dialog::backdrop { background: var(--backdrop); backdrop-filter: blur(4px); }
 .body { display: grid; gap: 14px; padding: 22px 24px; }
 .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .form { display: grid; gap: 10px; }
@@ -236,9 +238,10 @@ async function addChosen() {
 .repos { list-style: none; margin: 0; padding: 0; display: grid; max-height: 320px; overflow: auto; }
 .repo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px dashed var(--line); }
 .repo:last-child { border-bottom: 0; }
-.name { font-weight: 600; }
+.name { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
 .desc { flex: 1 1 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .full { flex-basis: 100%; }
 .small { font-size: 12.5px; }
 .ok { color: var(--success); }
+.ok:empty, p[role='status']:empty { display: none; }
 </style>

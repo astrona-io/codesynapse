@@ -95,6 +95,13 @@ function shortcut(e: KeyboardEvent) {
 }
 onMounted(() => window.addEventListener('keydown', shortcut))
 onBeforeUnmount(() => window.removeEventListener('keydown', shortcut))
+// Said once typing settles, in a region that stays mounted so screen
+// readers hear the change.
+const announce = computed(() => {
+  if (!open.value || !query.value.trim()) return ''
+  if (searching.value) return 'Searching…'
+  return results.value.length ? `${results.value.length} results` : 'No results'
+})
 const isMac = ref(false)
 onMounted(() => { isMac.value = /Mac|iPhone|iPad/.test(navigator.platform) })
 </script>
@@ -106,7 +113,7 @@ onMounted(() => { isMac.value = /Mac|iPhone|iPad/.test(navigator.platform) })
       <span class="sr-only">Search</span>
       <input
         :id="`${id}-q`" ref="input" v-model="query" type="search" placeholder="Search symbols, repos, findings…" autocomplete="off"
-        role="combobox" :aria-expanded="open && results.length > 0" :aria-controls="`${id}-list`"
+        role="combobox" aria-autocomplete="list" :aria-expanded="open && results.length > 0" :aria-controls="`${id}-list`"
         :aria-activedescendant="results.length ? `${id}-opt-${active}` : undefined"
         @keydown="onKey" @focus="open = true"
       >
@@ -119,26 +126,26 @@ onMounted(() => { isMac.value = /Mac|iPhone|iPad/.test(navigator.platform) })
           <span class="qs__group">{{ it.group }}</span>
         </a>
       </li>
-      <li v-if="searching" class="qs__none" aria-live="polite">Searching the graph…</li>
+      <li v-if="searching" class="qs__none">Searching the graph…</li>
       <li v-else-if="!results.length" class="qs__none">Nothing matches “{{ query.trim() }}”.</li>
     </ul>
+    <span class="sr-only" role="status">{{ announce }}</span>
   </div>
 </template>
 
 <style scoped>
 .qs { position: relative; flex: 1 1 320px; min-width: 0; max-width: 520px; }
-.qs__box { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 8px 0 14px; border-radius: 999px; background: var(--panel-2); color: var(--ink); font-weight: 400; cursor: text; }
+.qs__box { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 8px 0 14px; border-radius: var(--pill); background: var(--panel-2); color: var(--ink); font-weight: 400; cursor: text; }
 .qs__box:focus-within { box-shadow: inset 0 0 0 2px var(--line-strong); }
 .qs__box input { flex: 1; min-width: 0; min-height: 0; padding: 0; border: 0; background: transparent; box-shadow: none; font-size: 14px; }
 .qs__box input:focus { box-shadow: none; }
-kbd { flex: none; padding: 3px 8px; border-radius: 8px; background: var(--panel); font: 600 11.5px var(--font-mono); color: var(--muted); }
-.qs__list { position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; right: 0; margin: 0; padding: 8px; list-style: none; background: var(--panel); border: 2px solid var(--line-strong); border-radius: 20px; box-shadow: var(--shadow-pop); max-height: 420px; overflow-y: auto; }
-.qs__list a { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; padding: 8px 12px; border-radius: 12px; color: var(--ink); }
+kbd { flex: none; padding: 3px 8px; border-radius: var(--radius-xs); background: var(--panel); font: 600 11.5px var(--font-mono); color: var(--muted); }
+.qs__list { position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; right: 0; margin: 0; padding: 8px; list-style: none; background: var(--panel); border: 2px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-pop); max-height: 420px; overflow-y: auto; }
+.qs__list a { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; padding: 8px 12px; border-radius: var(--radius-sm); color: var(--ink); }
 .qs__list a.active { background: var(--panel-2); text-decoration: none; }
 .qs__text { display: flex; flex-direction: column; min-width: 0; }
 .qs__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .qs__hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--font-mono); color: var(--muted); }
 .qs__group { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); }
 .qs__none { padding: 10px 12px; color: var(--muted); font-size: 14px; }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>

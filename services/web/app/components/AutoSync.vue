@@ -41,8 +41,8 @@ function until(iso?: string) {
     <select :value="sc.interval_minutes" aria-label="Auto-sync interval" @change="save(Number(($event.target as HTMLSelectElement).value), false)">
       <option v-for="o in OPTIONS" :key="o.v" :value="o.v">{{ o.label }}</option>
     </select>
-    <button v-if="sc.state !== 'manual'" class="secondary tiny" @click="save(sc.interval_minutes, !sc.paused)">{{ sc.paused ? 'Resume' : 'Pause' }}</button>
-    <span v-if="sc.last_status === 'failed'" class="error small" :title="sc.last_error">last auto-sync failed</span>
+    <button v-if="sc.state !== 'manual'" type="button" class="secondary tiny" @click="save(sc.interval_minutes, !sc.paused)">{{ sc.paused ? 'Resume' : 'Pause' }}</button>
+    <span v-if="sc.last_status === 'failed'" class="error small" role="status" :title="sc.last_error">last auto-sync failed</span>
     <span class="sep" />
     <span class="muted">After each sync:</span>
     <label class="toggle" :title="hasAI ? 'Review the commits that arrived with the sync' : 'Configure an AI model first'">
@@ -52,7 +52,7 @@ function until(iso?: string) {
       <input type="checkbox" :checked="sc.auto_triage" :disabled="!hasAI" @change="save(sc.interval_minutes, sc.paused, sc.auto_review, ($event.target as HTMLInputElement).checked)"> AI-triage new findings
     </label>
     <NuxtLink v-if="!hasAI" to="/ai" class="small">set up a model</NuxtLink>
-    <span v-if="error" class="error small">{{ error }}</span>
+    <span v-if="error" class="error small" role="alert">{{ error }}</span>
   </div>
 </template>
 
