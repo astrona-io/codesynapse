@@ -132,11 +132,16 @@ func (e *IngestExporter) Export(ctx context.Context, s IngestSnapshot) error {
 	if e.exporter != nil {
 		data := ingestMetricData(s)
 		if err := e.exporter.Export(ctx, &data); err != nil {
+			ExportFailed(ctx, ExporterIngest)
 			return exportError(ctx)
 		}
 		return nil
 	}
-	return e.push(ctx, s)
+	if err := e.push(ctx, s); err != nil {
+		ExportFailed(ctx, ExporterIngest)
+		return err
+	}
+	return nil
 }
 
 func (e *IngestExporter) validate(ctx context.Context, s IngestSnapshot) string {

@@ -184,7 +184,7 @@ The requested bootstrap-root separation belongs to the planned [phase 4d follow-
 
 ## Metrics coverage plan
 
-Status: proposed. Nothing in this section is implemented yet. It lists what the services measure today, where measurement is missing or thin, and the instruments that would close the gaps, in the order we would build them. Every proposal follows the rules above and the Telemetry rules in `AGENTS.md`. Where a rule blocks a useful label, the proposal says so instead of bending the rule.
+Status: phase 1 (platform health) is implemented; the later phases are proposed. This section lists what the services measure today, where measurement is missing or thin, and the instruments that would close the gaps, in the order we would build them. Every proposal follows the rules above and the Telemetry rules in `AGENTS.md`. Where a rule blocks a useful label, the proposal says so instead of bending the rule.
 
 ### What is measured today
 
@@ -259,7 +259,7 @@ The alerts named in the last column are the rule list for phase 2 (alerting); an
 | 19 | `gateway_fallthrough_total` | counter, requests | `reason`: a fixed set taken from the return points of `serve` in `services/api/internal/gateway/local.go`, for example `not_eligible`, `too_large`, `unavailable`, `no_first_chunk`, `bad_tool_call` | tenant | about 5 | `local.go` | "Why requests left the local model" |
 | 20 | `llm_requests_total` (existing) | counter | `outcome` gains `timeout`, `rate_limited` and `refused`, mapped from status codes and context errors, never from error text | tenant | +3 per model and task | `llm.go` | `llm_provider_failures` split by cause |
 | 21 | `platform_go_goroutines`, `platform_go_heap_bytes`, `platform_go_gc_pause_seconds_total`, `platform_process_cpu_seconds_total` | gauges and counters | none (service and instance come from the resource) | platform | 1 each | a 15-second sampler of the standard library's `runtime/metrics` in `internal/app`, one per process | platform "Process health"; alerts on heap and goroutine growth |
-| 22 | `platform_db_pool_connections` | gauge, connections | `db_system` (`postgres`), `state` (`idle`, `in_use`, `waiting`) | platform | 3 | pgx pool statistics, sampled with item 21 | alert when `waiting` stays above 0 |
+| 22 | `platform_db_pool_connections`, `platform_db_pool_acquire_waits_total`, `platform_db_pool_acquire_wait_seconds_total` | gauge, connections; counters, acquires and s | `db_system` (`postgres`); the gauge also `state` (`idle`, `in_use`, `max`) | platform | 3 + 1 + 1 | pgx pool statistics, sampled with item 21 | alert when acquire waits keep increasing, or `in_use` equals `max` |
 | 23 | `platform_telemetry_export_failures_total` | counter, exports | `exporter` (`otlp`, `prometheus`, `ingest`) | platform | 3 | the push and export loops started in `internal/app/metrics.go` | alert on any increase |
 
 Process gauges (items 5, 21 and 22) are per instance. Panels show them per `service.instance.id` or take the maximum. They are never summed into a durable count. Item 5 is the one exception that is summed, because the sum means "how many replicas think they lead".
@@ -282,12 +282,21 @@ Decided: the smaller bucket set for the high-cardinality families, together with
 
 Ordered by value for the effort. Each phase is one pull request with its panels, a test that labels stay inside their sets, a test that a sample without a tenant becomes `platform_`, and the VictoriaMetrics integration check.
 
-1. **See the platform** (small). Items 4, 5, 21, 22 and 23; a platform panel for `telemetry_dropped_series_total` and `platform_log_lines_dropped_total`; panels for the existing API request metrics and job queue gauges. No new tenant series.
+1. **See the platform** (small, done). Items 4, 5, 21, 22 and 23; a platform panel for `telemetry_dropped_series_total` and `platform_log_lines_dropped_total`; panels for the existing API request metrics and job queue gauges. No new tenant series.
 2. **Alerting** (medium). Optional vmalert, under the rules in decision 1, with the first rules (see "Alerting" below). It comes after phase 1 because most of its first rules read phase 1 metrics; each later phase adds the rules named for its instruments in the table.
 3. **Jobs and indexing** (medium). Items 1, 2, 3, 6 and 7, and panels for the existing `ingest_runs_total` and `ingest_duration_seconds` on Statistics → Sync.
 4. **Outbound calls and security events** (medium). Items 8 to 15. Sign-in counters are mostly platform series, because most failures have no trusted tenant.
 5. **Sharper existing families** (small). Items 16 to 20, and the cap decision applied to `mcp_tool_duration_seconds` and `http_request_duration_seconds`. New outcome values change what the `tool_errors` and `llm_provider_failures` panels count, so the same change updates those panel queries and their help text.
 6. **Web server** (small). Metrics from the Nuxt server, with the JavaScript OpenTelemetry SDK, under the rules in decision 3.
+
+### Phase 1: what shipped
+
+- **Instruments** (block "Platform health" in `internal/telemetry/metrics.go`): `platform_codesynapse_lease_events_total{lease,event}`, `platform_codesynapse_loops_lease_held`, `platform_go_goroutines`, `platform_go_heap_bytes`, `platform_go_gc_pause_seconds_total`, `platform_process_cpu_seconds_total`, `platform_db_pool_connections{db_system,state}`, `platform_db_pool_acquire_waits_total{db_system}`, `platform_db_pool_acquire_wait_seconds_total{db_system}` and `platform_telemetry_export_failures_total{exporter}`. Labels pass allowlists (`RecordLease`, `ExportFailed`, `TrackPool`); anything else is dropped. Unscoped gauges are new (`Registry.Gauge`) and must be named `platform_*`.
+- **Runtime sampler** (`internal/app/runtime.go`): every process that exports metrics reads `runtime/metrics` and the tracked pools every 15 seconds. Cumulative runtime values become counter increases, so the registry stays the only accumulator. CPU is `/cpu/classes/total` minus `/cpu/classes/idle`; the runtime updates these at each garbage collection (at least every 2 minutes), so the CPU panel is coarse. GC pause seconds are estimated from the pause histogram's bucket midpoints.
+- **Pool: no `waiting` state.** pgx reports no count of callers waiting right now. The gauge has `idle`, `in_use` and `max`, and two counters record acquires that had to wait and how long they waited. An alert uses `increase(platform_db_pool_acquire_waits_total[5m]) > 0` or `in_use == max`.
+- **Leases.** The `api-loops` lease records `acquired`, `lost` and `renew_failed` (a failed `TakeLease` call). Durable job leases record `renew_failed` and `lost` only: a claim is not a lease event, and job counts arrive with phase 3. A renewal that fails because the job ended is not counted. The `held` gauge is 1 in a process without accounts, which always runs the loops.
+- **Export failures** are counted by the OTLP exporter, the Prometheus push loop and the ingestion exporter, before any log throttling.
+- **Panels** (platform admins only; Administration → Overview → "Platform health"): `platform_api_requests`, `platform_api_latency`, `platform_job_queue`, `platform_loops_lease`, `platform_lease_events`, `platform_goroutines`, `platform_heap`, `platform_cpu`, `platform_gc_pause`, `platform_db_pool`, `platform_db_pool_waits`, `platform_telemetry_drops` (with `platform_log_lines_dropped_total`) and `platform_telemetry_exports`. Process panels take the maximum per service (`job`), never a sum, except the lease holder count.
 
 ### Alerting
 

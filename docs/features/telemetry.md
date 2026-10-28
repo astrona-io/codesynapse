@@ -21,6 +21,7 @@ Both appear on the **Statistics** page. Every number belongs to one organisation
 | Agent memory | stored facts, saves, recalls, offloaded turns and tokens |
 | Assistant hooks | lifecycle events and observed byte counts from Codex and Cursor |
 | Indexing | files scanned, indexed and skipped per repository, annotation jobs |
+| Platform health (platform administrators) | API requests and latency, the job queue, which replica runs the scheduler and lease losses, goroutines, heap, CPU and garbage-collection pauses per service, database connection pool use and waits, dropped series and log lines, failed metric exports |
 
 Some numbers are estimates and are labelled so: cost depends on the prices you configured, and a call without reported usage or a known price shows as a gap, never as zero.
 
@@ -32,7 +33,7 @@ No metric holds prompts, answers, source code, file paths, repository names, bra
 
 Some parts of CodeSynapse have no live numbers yet. The [metrics coverage plan](../TELEMETRY_PLAN.md#metrics-coverage-plan) lists them and the order in which they will be added:
 
-1. **Platform health** for operators: which replica runs the scheduler, process memory and CPU, database connections, and whether metrics themselves are being dropped or fail to export.
+1. **Platform health** for operators (done): see the table above and Administration → Overview.
 2. **Alerts for operators**: an optional vmalert that checks rules against these numbers and sends alerts to the operator's own Alertmanager-compatible receiver. Alerts never name repositories, files or people.
 3. **Background jobs and indexing**: how long jobs wait and run, how many fail by kind, and indexing time by phase and language.
 4. **Outside services and security events**: git clone and fetch, vulnerability and licence lookups, sign-in attempts and rate limits, and audit-log writes.

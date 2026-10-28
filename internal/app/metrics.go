@@ -21,12 +21,26 @@ const (
 )
 
 // StartMetrics exports one cumulative metric stream every 15s when a URL is
-// configured. Stop flushes once with a five-second deadline, even after ctx ends.
+// configured, and samples process health (runtime.go) for it. Stop flushes
+// once with a five-second deadline, even after ctx ends.
 func StartMetrics(ctx context.Context, logger *slog.Logger, job string, versions ...string) (stop func(), err error) {
-	url := os.Getenv(EnvMetricsURL)
-	if url == "" {
+	if os.Getenv(EnvMetricsURL) == "" {
 		return func() {}, nil
 	}
+	stopExport, err := startExport(ctx, logger, job, versions...)
+	if err != nil {
+		return nil, err
+	}
+	sampleCtx, stopSampling := context.WithCancel(ctx)
+	go runRuntimeMetrics(sampleCtx)
+	return sync.OnceFunc(func() {
+		stopSampling()
+		stopExport()
+	}), nil
+}
+
+func startExport(ctx context.Context, logger *slog.Logger, job string, versions ...string) (stop func(), err error) {
+	url := os.Getenv(EnvMetricsURL)
 	if err := telemetry.CheckURL(url); err != nil {
 		return nil, fmt.Errorf("%s: %w", EnvMetricsURL, err)
 	}

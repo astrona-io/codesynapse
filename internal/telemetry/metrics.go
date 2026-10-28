@@ -1,6 +1,9 @@
 package telemetry
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // Default holds the metrics every service records; Push sends it.
 var Default = NewRegistry()
@@ -146,3 +149,84 @@ const (
 )
 
 var ingestExportRejections = Default.Counter("platform_ingest_metric_export_rejections_total", "Durable ingest metric snapshots rejected before export.", "reason")
+
+// ---- Platform health (metrics coverage plan, phase 1) ----
+//
+// Process state that belongs to no tenant: plain platform_ instruments, never
+// scoped, with no tenant, tool or model attribute. Service and instance come
+// from the export resource, never from a label. Every label has a fixed value
+// set enforced by the helpers below; other values are dropped, not echoed.
+var (
+	// LeaseEvents counts lease changes: the api-loops lease that runs the
+	// scheduler and maintenance loops, and this process's durable job leases.
+	LeaseEvents = Default.Counter("platform_codesynapse_lease_events_total", "Lease changes by lease (api_loops, job) and event (acquired, lost, renew_failed).", "lease", "event")
+	// LoopsLeaseHeld is 1 while this process runs the singleton loops. The sum
+	// over fresh instances is how many processes think they lead: it must be 1.
+	LoopsLeaseHeld = Default.Gauge("platform_codesynapse_loops_lease_held", "1 while this process holds the api-loops lease and runs the scheduler, else 0.")
+
+	// Sampled from the standard library's runtime/metrics (internal/app);
+	// no second SDK accumulator and no contrib runtime package.
+	GoGoroutines = Default.Gauge("platform_go_goroutines", "Live goroutines in this process.")
+	GoHeapBytes  = Default.Gauge("platform_go_heap_bytes", "Heap memory occupied by live objects and objects not yet swept.")
+	// GoGCPauseSeconds is estimated from the runtime's pause histogram
+	// (bucket midpoints), so it is close but not exact.
+	GoGCPauseSeconds = Default.Counter("platform_go_gc_pause_seconds_total", "Estimated time the process spent stopped for garbage collection.")
+	// ProcessCPUSeconds is the runtime's CPU estimate for Go code and the Go
+	// runtime (total minus idle). The runtime updates it at each garbage
+	// collection, at least every two minutes, so it lags a little.
+	ProcessCPUSeconds = Default.Counter("platform_process_cpu_seconds_total", "Estimated CPU time spent running Go code and the Go runtime.")
+
+	// Connection pools, summed over the pools of one db_system in a process.
+	DBPoolConnections = Default.Gauge("platform_db_pool_connections", "Pool connections by database and state (idle, in_use, max).", "db_system", "state")
+	// The pool keeps no count of callers waiting now; these count the
+	// acquires that found no free connection and how long they waited.
+	DBPoolAcquireWaits       = Default.Counter("platform_db_pool_acquire_waits_total", "Connection acquires that had to wait for a free connection.", "db_system")
+	DBPoolAcquireWaitSeconds = Default.Counter("platform_db_pool_acquire_wait_seconds_total", "Time acquires spent waiting for a free connection.", "db_system")
+
+	exportFailures = Default.Counter("platform_telemetry_export_failures_total", "Metric exports that failed, by exporter (otlp, prometheus, ingest).", "exporter")
+)
+
+// Lease names and events: the fixed values of LeaseEvents.
+const (
+	LeaseLoops = "api_loops"
+	LeaseJob   = "job"
+
+	LeaseAcquired    = "acquired"
+	LeaseLost        = "lost"
+	LeaseRenewFailed = "renew_failed"
+)
+
+// RecordLease counts one lease event; values outside the fixed sets are dropped.
+func RecordLease(ctx context.Context, lease, event string) {
+	if (lease != LeaseLoops && lease != LeaseJob) || (event != LeaseAcquired && event != LeaseLost && event != LeaseRenewFailed) {
+		return
+	}
+	LeaseEvents.IncContext(ctx, lease, event)
+}
+
+// SetLoopsLeaseHeld records whether this process runs the singleton loops.
+func SetLoopsLeaseHeld(ctx context.Context, held bool) {
+	v := 0.0
+	if held {
+		v = 1
+	}
+	LoopsLeaseHeld.SetContext(ctx, v)
+}
+
+// Exporter names: the fixed values of platform_telemetry_export_failures_total.
+const (
+	ExporterOTLP       = "otlp"
+	ExporterPrometheus = "prometheus"
+	ExporterIngest     = "ingest"
+)
+
+// ExportFailed counts one failed metric export. A failure is counted even
+// when the export carrying the count fails too: it arrives with the next one.
+func ExportFailed(ctx context.Context, exporter string) {
+	switch exporter {
+	case ExporterOTLP, ExporterPrometheus, ExporterIngest:
+		exportFailures.IncContext(ctx, exporter)
+	}
+}
+
+// ---- end platform health ----

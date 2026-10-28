@@ -12,6 +12,13 @@ const checks = computed(() => (h.value ? [
 // Live statistics that were never set up are off, not broken.
 const off = (c: HealthCheck) => !c.ok && c.detail.startsWith('not configured')
 const range = ref<SeriesRange>('24h')
+// Process health of every CodeSynapse service, loaded in one request.
+const healthPanels = [
+  'platform_api_requests', 'platform_api_latency', 'platform_job_queue', 'platform_loops_lease',
+  'platform_lease_events', 'platform_goroutines', 'platform_heap', 'platform_cpu', 'platform_gc_pause',
+  'platform_db_pool', 'platform_db_pool_waits', 'platform_telemetry_drops', 'platform_telemetry_exports',
+]
+const { panels: health, pending: healthPending } = useSeriesBatch(healthPanels, range)
 const assignTo = reactive<Record<string, string>>({})
 watch(() => h.value?.unowned, (gs) => gs?.forEach((g) => { assignTo[g] ??= '' }), { immediate: true })
 const msg = ref('')
@@ -78,6 +85,13 @@ async function assign(graph: string) {
           <SeriesCard panel="platform_llm_cost" :range="range" :tick="0" />
           <SeriesCard panel="platform_tool_latency" :range="range" :tick="0" />
           <SeriesCard panel="platform_db_latency" :range="range" :tick="0" />
+        </div>
+      </section>
+      <section v-if="h.metrics.ok" class="panel">
+        <h2>Platform health</h2>
+        <p class="muted small">Requests, jobs, leases, memory, CPU, connection pools and the statistics pipeline itself, per service. The range above applies.</p>
+        <div class="grid cols-2">
+          <SeriesCard v-for="p in healthPanels" :key="p" :panel="p" :range="range" :tick="0" :batched="health[p] ?? null" :batch-pending="healthPending" />
         </div>
       </section>
     </template>
