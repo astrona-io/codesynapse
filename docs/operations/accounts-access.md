@@ -78,6 +78,21 @@ Organisation owner and admin roles manage membership and policy; they do not gra
 
 Settings → Organisation controls the default and owner recovery; Settings → Teams and each repository's Access page manage grants. Changes are audited. See the [upgrade notes](../ACCESS_CONTROL_PLAN.md#implementation-and-upgrade) before upgrading an existing accounts database.
 
+### Organisation and personal repositories
+
+Each organisation has at most one entry per repository, and that entry lives in one of two spaces:
+
+- **The organisation:** grants, team grants and the organisation default (`READ_ONLY` or `NONE`) apply as above. Adding a repository here needs the Admin role.
+- **Only me:** a member's personal repository. The organisation default does not apply, so other members see it only if the owner grants them (or a team) access. Adding one needs the Member role and the setting below.
+
+Whoever adds a repository gets an explicit admin grant on it, in either space. The dashboard marks personal entries with a "personal" badge, and the Add dialog and the import page ask where to add it. Without a choice, owners and admins add to the organisation and other members to their own space.
+
+Settings → Organisation → "Members may add their own repositories" turns personal additions on or off. It is on until an admin changes it (`GET`/`PUT /api/v1/accounts/orgs/{org}/member-repos`; changing it needs Admin in a signed-in session and is audited as `org.member_repos.set`). Turning it off stops new personal additions with 403; entries that already exist stay.
+
+When the organisation adds a repository a member already has in their own space (an owner or admin adding it, or their watch finding it), the member's entry becomes the organisation's. The move is audited as `repo.space_moved` before it happens. The member keeps an explicit admin grant and whoever added it gets one; other members get the organisation default and whatever grants already exist, nothing more. A member's private entry moves only when the organisation can read the repository with its own Git token; until then the add answers 409 with a message saying a member of the organisation has it privately, without saying who. A member adding a repository that the organisation or another member already has answers 409. Adding it again in the same space does nothing. Owner recovery works on organisation repositories only: an owner cannot recover administration of a member's personal repository.
+
+A private repository can only be added for the organisation: its access is proved with the organisation's Git token, and a member's own space must not hide a repository the organisation can read from its admins. Personal Git tokens are not supported yet. A watch created by a member adds to that member's own space, and skips new repositories while members' own repositories are turned off. A watch skips what it cannot add without an audit entry and without counting it as added.
+
 ## API route scoping
 
 Every API route is registered with `s.route(pattern, policy, handler)` in `services/api/internal/api/scope.go`.

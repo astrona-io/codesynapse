@@ -90,7 +90,7 @@ func AccessSnapshot(ctx context.Context, source accounts.Store, orgID string) (m
 	objects := []string{}
 	repoIDs := map[string]string{}
 	for _, r := range repos {
-		s.Repos = append(s.Repos, model.AccessRepo{ID: r.Graph, GraphID: r.Graph, Usable: r.Usable()})
+		s.Repos = append(s.Repos, model.AccessRepo{ID: r.Graph, GraphID: r.Graph, Usable: r.Usable(), Personal: r.Personal()})
 		object := accounts.RepoObject(orgID, r.Graph)
 		objects = append(objects, object)
 		repoIDs[object] = r.Graph

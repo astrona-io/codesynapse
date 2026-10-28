@@ -20,9 +20,9 @@ func accessContract(t *testing.T, db interface {
 	ctx := context.Background()
 	x := model.AccessSnapshot{TenantID: fmt.Sprintf("access-fixture-%d", time.Now().UnixNano()), Revision: 1, Default: "READ_ONLY",
 		Users: []model.AccessUser{{ID: "reader", Active: true, InheritsDefault: true}, {ID: "denied", Active: true, InheritsDefault: true}, {ID: "team", Active: true}, {ID: "guest", Active: true}, {ID: "default", Active: true, InheritsDefault: true}, {ID: "suspended", InheritsDefault: true}},
-		Teams: []string{"admins", "writers"}, Repos: []model.AccessRepo{{ID: "r", GraphID: "shared", Usable: true}, {ID: "lost", GraphID: "lost", Usable: false}},
+		Teams: []string{"admins", "writers"}, Repos: []model.AccessRepo{{ID: "r", GraphID: "shared", Usable: true}, {ID: "lost", GraphID: "lost", Usable: false}, {ID: "p", GraphID: "personal", Usable: true, Personal: true}},
 		Members: []model.AccessMembership{{UserID: "reader", TeamID: "admins"}, {UserID: "denied", TeamID: "admins"}, {UserID: "team", TeamID: "writers"}, {UserID: "team", TeamID: "admins"}},
-		Grants:  []model.AccessGrant{{SubjectKind: model.KindTeam, SubjectID: "admins", RepoID: "r", Role: "ADMIN"}, {SubjectKind: model.KindTeam, SubjectID: "writers", RepoID: "r", Role: "WRITE"}, {SubjectKind: model.KindUser, SubjectID: "reader", RepoID: "r", Role: "READ"}, {SubjectKind: model.KindUser, SubjectID: "denied", RepoID: "r", Role: "NONE"}}}
+		Grants:  []model.AccessGrant{{SubjectKind: model.KindTeam, SubjectID: "admins", RepoID: "r", Role: "ADMIN"}, {SubjectKind: model.KindTeam, SubjectID: "writers", RepoID: "r", Role: "WRITE"}, {SubjectKind: model.KindUser, SubjectID: "reader", RepoID: "r", Role: "READ"}, {SubjectKind: model.KindUser, SubjectID: "denied", RepoID: "r", Role: "NONE"}, {SubjectKind: model.KindUser, SubjectID: "reader", RepoID: "p", Role: "READ"}}}
 	require.NoError(t, db.ReplaceAccess(ctx, x))
 	require.NoError(t, db.ReplaceAccess(ctx, x), "retry is idempotent")
 	reordered := x
@@ -45,6 +45,12 @@ func accessContract(t *testing.T, db interface {
 			require.NoError(t, err)
 			assert.Equal(t, got, model.AccessDecision{GraphID: tc.graph, Rank: tc.rank})
 		})
+	}
+	// A member's own repository gets no organisation default: only grants open it.
+	for user, rank := range map[string]int{"default": 0, "reader": 1} {
+		got, err := db.AccessAt(ctx, x.TenantID, 1, user, "p")
+		require.NoError(t, err)
+		assert.Equal(t, got.Rank, rank, "personal repository for "+user)
 	}
 	for _, args := range []struct {
 		tenant, user, repo string

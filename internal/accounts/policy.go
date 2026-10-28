@@ -61,6 +61,8 @@ func (s *Service) SetDefaultRepoAccess(ctx context.Context, p Principal, orgID, 
 
 // RecoverRepoAdmin explicitly assigns an existing member to an orphaned
 // repository. Organisation ownership grants this recovery action, not code access.
+// It covers organisation repositories only: a member's own entry has no
+// organisation default, so recovering it would hand an owner a private repository.
 func (s *Service) RecoverRepoAdmin(ctx context.Context, p Principal, orgID, graph, userID string) error {
 	_, err := policyChange(ctx, s, func(tx *Service) (struct{}, error) {
 		if p.Via != "session" || (p.OrgID != "" && p.OrgID != orgID) {
@@ -73,7 +75,7 @@ func (s *Service) RecoverRepoAdmin(ctx context.Context, p Principal, orgID, grap
 		if err := tx.ValidatePrincipal(ctx, p); err != nil {
 			return struct{}{}, err
 		}
-		if !tx.orgHasRepo(ctx, orgID, graph) {
+		if r, ok := tx.orgEntry(ctx, orgID, graph); !ok || r.Personal() {
 			return struct{}{}, ErrNotFound
 		}
 		if _, err := tx.St.MemberRole(ctx, orgID, userID); err != nil {

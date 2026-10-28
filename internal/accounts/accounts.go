@@ -143,7 +143,14 @@ type Repository struct {
 	// the organisation until a working token restores them.
 	Access     string     `json:"access"`
 	VerifiedAt *time.Time `json:"verified_at,omitempty"`
+	// OwnerID is empty for an organisation repository. Otherwise the entry
+	// is in that member's own space (always the member who added it): the
+	// organisation's default access does not apply to it.
+	OwnerID string `json:"owner_id,omitempty"`
 }
+
+// Personal reports whether the entry is in a member's own space.
+func (r Repository) Personal() bool { return r.OwnerID != "" }
 
 // Repository access states.
 const (
@@ -417,6 +424,10 @@ type Store interface {
 	// (true when it never chose); SetGatewayEnabled records the choice.
 	GatewayEnabled(ctx context.Context, orgID string) (bool, error)
 	SetGatewayEnabled(ctx context.Context, orgID string, enabled bool) error
+	// MemberReposEnabled says whether members may add repositories to their
+	// own space (true when the organisation never chose).
+	MemberReposEnabled(ctx context.Context, orgID string) (bool, error)
+	SetMemberReposEnabled(ctx context.Context, orgID string, enabled bool) error
 	// ImageScan reads the image findings of a repository namespace; ok is
 	// false when none were uploaded. SetImageScan replaces them and
 	// DeleteImageScan removes them.
@@ -487,6 +498,12 @@ type Store interface {
 
 	// AddRepository links a graph to an organisation (ErrExists if linked).
 	AddRepository(ctx context.Context, r Repository) error
+	// MoveRepositoryToOrg turns ownerID's own entry for r.Graph into the
+	// organisation's, in one transaction: it audits repo.space_moved first,
+	// keeps ownerID an explicit repository admin and makes r.AddedBy one,
+	// the way adding it for the organisation would. r.Visibility replaces
+	// the entry's. ErrNotFound unless ownerID holds the entry.
+	MoveRepositoryToOrg(ctx context.Context, ownerID string, r Repository) error
 	// RemoveRepository unlinks it and returns how many organisations still
 	// reference the graph.
 	RemoveRepository(ctx context.Context, orgID, graph string) (int, error)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,4 +60,69 @@ func TestFilteredGraphLinkRequiresMatchingTenantApproval(t *testing.T) {
 	require.NoError(t, f.store.ReplaceRepo(ctx, storetest.Repo, graph))
 	entry.OrgID = other.ID
 	require.NoError(t, link(entry), "unfiltered graphs can be shared without an exclusion approval")
+}
+
+// One entry per organisation and graph: a repository in a member's own
+// space keeps the organisation from adding it too, and the reverse.
+func TestRepositorySpaces(t *testing.T) {
+	f := newRuntimeFixture(t, Config{})
+	ctx := t.Context()
+	principal := accounts.Principal{User: f.user, Via: "session"}
+	id, err := f.accounts.RegisterExecutionSession(ctx, f.user.ID, f.org.ID, "spaces")
+	require.NoError(t, err)
+	workCtx, err := execution.With(context.WithValue(ctx, principalKey{}, principal), id)
+	require.NoError(t, err)
+	entry := func(graph, owner string) accounts.Repository {
+		return accounts.Repository{OrgID: f.org.ID, Graph: graph, Visibility: accounts.Public, OwnerID: owner, AddedBy: f.user.ID, AddedAt: time.Now()}
+	}
+
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/mine", f.user.ID), accounts.Member))
+	assert.True(t, errors.Is(f.server.linkPolicyRepository(workCtx, entry("space/mine", f.user.ID), accounts.Member), accounts.ErrExists), "the same space again")
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/mine", ""), accounts.Admin), "the organisation takes a member's entry over")
+	rows, err := f.accounts.St.GraphRepositories(ctx, "space/mine")
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "moved, not copied")
+	assert.False(t, rows[0].Personal())
+	moves, err := f.accounts.St.ListEvents(ctx, accounts.EventFilter{OrgID: f.org.ID, Action: "repo.space_moved", Limit: 10})
+	require.NoError(t, err)
+	assert.Len(t, moves, 1, "the move is audited")
+	var taken errSpaceTaken
+
+	// A member's private entry stays theirs until the organisation proves
+	// it can read the repository with its own token.
+	hidden := entry("space/hidden", f.user.ID)
+	hidden.Visibility = accounts.Private
+	require.NoError(t, f.accounts.St.AddRepository(ctx, hidden))
+	err = f.server.linkPolicyRepository(workCtx, entry("space/hidden", ""), accounts.Admin)
+	require.True(t, errors.As(err, &taken), "not without the organisation's own access")
+	assert.True(t, taken.private)
+	assert.False(t, strings.Contains(err.Error(), f.user.ID) || strings.Contains(err.Error(), f.user.Email), "the answer does not say whose space holds it")
+	assert.True(t, watchSkip(err), "a watch skips it")
+	proved := entry("space/hidden", "")
+	proved.Visibility = accounts.Private
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, proved, accounts.Admin), "proved with the organisation's token")
+	rows, err = f.accounts.St.GraphRepositories(ctx, "space/hidden")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.False(t, rows[0].Personal())
+
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/shared", ""), accounts.Admin))
+	assert.True(t, errors.As(f.server.linkPolicyRepository(workCtx, entry("space/shared", f.user.ID), accounts.Member), &taken), "not again in a member's space")
+
+	private := entry("space/private", f.user.ID)
+	private.Visibility = accounts.Private
+	assert.True(t, errors.Is(f.server.linkPolicyRepository(workCtx, private, accounts.Member), errPersonalPrivate), "proved with the organisation's token, so not personal")
+	require.NoError(t, f.accounts.St.SetMemberReposEnabled(ctx, f.org.ID, false))
+	err = f.server.linkPolicyRepository(workCtx, entry("space/later", f.user.ID), accounts.Member)
+	assert.True(t, errors.Is(err, accounts.ErrForbidden), "members' own repositories are turned off")
+	assert.True(t, watchSkip(err), "a member's watch skips it instead of failing every scan")
+	assert.True(t, watchSkip(errSpaceTaken{}), "a watch skips what the organisation has")
+	assert.False(t, watchSkip(accounts.ErrForbidden), "other refusals still fail the scan")
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/later", ""), accounts.Admin), "the organisation can still add it")
+
+	for err, code := range map[error]int{errSpaceTaken{}: 409, errMemberReposOff: 403, accounts.ErrInvalidInput: 400} {
+		w := httptest.NewRecorder()
+		f.server.linkError(w, err)
+		assert.Equal(t, w.Code, code, err.Error())
+	}
 }

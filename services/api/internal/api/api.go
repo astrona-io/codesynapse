@@ -484,11 +484,13 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	repos = visibleRepos(r.Context(), repos)
+	sc := scopeFrom(r.Context())
 	out := make([]map[string]any, 0, len(repos))
 	for _, n := range repos {
 		out = append(out, map[string]any{
 			"name": n.Name, "head": n.Head, "ingested_at": n.Time, "root": s.displayRoot(n.Root),
 			"branch": n.Branch, "remote": n.URL, "managed": s.inWorkspace(n.Root),
+			"personal": sc.reach[n.Name].Personal,
 		})
 	}
 	writeJSON(w, 200, map[string]any{"repos": out})

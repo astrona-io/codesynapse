@@ -408,9 +408,11 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 		fail("failed", err)
 		return
 	}
+	// A member's own entry is not the organisation's: an organisation
+	// watch takes it over (spaceTakeover), any other watch skips it.
 	linked := map[string]bool{}
 	for _, x := range have {
-		linked[x.Graph] = true
+		linked[x.Graph] = !x.Personal()
 	}
 	known := map[string]bool{}
 	for _, k := range w.Known {
@@ -426,9 +428,9 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 			if added == maxClonesPerScan {
 				break // the rest wait for the next scan
 			}
-			if err := s.addWatched(wctx, w, c.CloneURL(w.Login, x.Name), name); err != nil {
+			if ok, err := s.addWatched(wctx, w, c.CloneURL(w.Login, x.Name), name); err != nil {
 				lastErr = name + ": " + err.Error()
-			} else {
+			} else if ok {
 				added++
 			}
 		}
@@ -452,38 +454,85 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 	}
 }
 
+// watchSkip says the watch has nothing to add: the organisation already has
+// the repository in another space it does not take over (another member's
+// for a member's watch, the organisation's, or a member's private entry),
+// or the creator is a member, whose space it would go to, and members' own
+// repositories are turned off. An organisation watch takes a member's
+// public entry over instead.
+func watchSkip(err error) bool {
+	var taken errSpaceTaken
+	return errors.As(err, &taken) || errors.Is(err, errMemberReposOff)
+}
+
+// watchSkips reports, before anything is audited, whether linkRepo would
+// answer watchSkip for this add, so a no-op leaves no watch.repo_add entry;
+// other skips in a scan (known, filtered or linked repositories) are not
+// audited either. linkPolicyRepository decides again under the policy lock.
+func (s *Server) watchSkips(ctx context.Context, name, remote string) (bool, error) {
+	entry, _, err := s.linkEntry(ctx, name, remote, accounts.Public, "")
+	if err != nil {
+		return false, err
+	}
+	if entry.Personal() {
+		on, err := s.cfg.Accounts.St.MemberReposEnabled(ctx, entry.OrgID)
+		if err != nil {
+			return false, err
+		}
+		if !on {
+			return true, nil
+		}
+	}
+	existing, err := s.cfg.Accounts.St.GraphRepositories(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	_, err = spaceTakeover(existing, entry)
+	return watchSkip(err), nil
+}
+
 // addWatched attaches one new public repository the way POST /repos does:
 // an indexed graph is linked only for the same remote, otherwise it is
 // cloned anonymously. The audit entry is written first; without it nothing
-// is added.
-func (s *Server) addWatched(ctx context.Context, w accounts.OrgWatch, remote, name string) error {
+// is added. It reports whether anything was added: a skip (watchSkips) is
+// not, and is not audited.
+func (s *Server) addWatched(ctx context.Context, w accounts.OrgWatch, remote, name string) (bool, error) {
 	if !validRepoName(name) {
-		return errors.New("the name is not valid here")
+		return false, errors.New("the name is not valid here")
 	}
 	remote, err := gitx.ValidateRemote(ctx, remote, gitx.RemoteOptions{AllowPrivate: s.cfg.AllowPrivateGit})
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !publicRemote(ctx, remote) {
-		return errors.New("not readable without a token")
+		return false, errors.New("not readable without a token")
+	}
+	if skip, err := s.watchSkips(ctx, name, remote); err != nil || skip {
+		return false, err
 	}
 	if _, err := s.cfg.Accounts.Record(ctx, accounts.Event{UserID: w.ActorID, Via: "automation", OrgID: w.OrgID, Action: "watch.repo_add", Target: name, Outcome: accounts.Success}); err != nil {
-		return err
+		return false, err
 	}
 	if n, err := s.st.Node(ctx, model.NodeID(name, model.KindRepository, name)); err == nil {
 		if n.URL == "" || !sameRemote(n.URL, remote) {
-			return errors.New("the name is already used for another source")
+			return false, errors.New("the name is already used for another source")
 		}
-		return s.linkRepo(ctx, name, remote, accounts.Public)
+		err := s.linkRepo(ctx, name, remote, accounts.Public, "")
+		if watchSkip(err) {
+			return false, nil
+		}
+		return err == nil, err
 	}
-	if err := s.linkRepo(ctx, name, remote, accounts.Public); err != nil {
-		return err
+	if err := s.linkRepo(ctx, name, remote, accounts.Public, ""); watchSkip(err) {
+		return false, nil // nothing to clone
+	} else if err != nil {
+		return false, err
 	}
 	org, authorize := s.jobAuthorization(ctx, name, accounts.Admin)
 	d, err := s.durableIf(ctx, "clone", accounts.Admin, cloneParams{Remote: remote, Name: name})
 	if err != nil {
-		return err
+		return false, err
 	}
 	_, err = s.startCloneAuth(remote, name, "", gitx.Auth{}, JobOptions{OrgID: org, Identity: identityOf(ctx), Authorize: authorize, Durable: d}) //nolint:contextcheck // jobs outlive the scan
-	return err
+	return err == nil, err
 }

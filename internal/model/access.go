@@ -34,6 +34,10 @@ type AccessUser struct {
 type AccessRepo struct {
 	ID, GraphID string
 	Usable      bool
+	// Personal entries are in a member's own space: the organisation default
+	// gives no access to them. Omitted when false, so digests of snapshots
+	// without personal entries stay as they were.
+	Personal bool `json:",omitempty"`
 }
 
 // AccessMembership connects an enrolled user to a team in the same tenant.
@@ -170,7 +174,7 @@ func (s AccessSnapshot) Evaluate(userID, repoID string) AccessDecision {
 		return AccessDecision{}
 	}
 	result := AccessDecision{GraphID: repo.GraphID}
-	if user.InheritsDefault && s.Default == "READ_ONLY" {
+	if user.InheritsDefault && s.Default == "READ_ONLY" && !repo.Personal {
 		result.Rank = 1
 	}
 	teams := map[string]bool{}

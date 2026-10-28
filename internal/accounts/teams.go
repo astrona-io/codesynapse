@@ -395,16 +395,22 @@ func (s *Service) RepoGrants(ctx context.Context, p Principal, orgID, graph stri
 }
 
 func (s *Service) orgHasRepo(ctx context.Context, orgID, graph string) bool {
+	_, ok := s.orgEntry(ctx, orgID, graph)
+	return ok
+}
+
+// orgEntry is the organisation's entry for graph, in either space.
+func (s *Service) orgEntry(ctx context.Context, orgID, graph string) (Repository, bool) {
 	repos, err := s.St.OrgRepositories(ctx, orgID)
 	if err != nil {
-		return false
+		return Repository{}, false
 	}
 	for _, r := range repos {
 		if r.Graph == graph {
-			return true
+			return r, true
 		}
 	}
-	return false
+	return Repository{}, false
 }
 
 // describe names a grant's subject and whether it is outside orgID.

@@ -22,6 +22,19 @@ async function setGateway(enabled: boolean) {
   }
   await refreshGateway()
 }
+const { data: memberRepos, refresh: refreshMemberRepos } = useApiGet<{ enabled: boolean }>(() => `accounts/orgs/${org.value?.slug ?? '-'}/member-repos`)
+const memberReposSaved = ref(false)
+async function setMemberRepos(enabled: boolean) {
+  error.value = ''
+  memberReposSaved.value = false
+  try {
+    await apiPut(`accounts/orgs/${org.value!.slug}/member-repos`, { enabled })
+    memberReposSaved.value = true
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  }
+  await refreshMemberRepos()
+}
 const recoverRepo = ref('')
 const recoverUser = ref('')
 const recovered = ref(false)
@@ -116,6 +129,13 @@ async function createOrg() {
       <p v-else>{{ policy?.default_repo_access === 'READ_ONLY' ? 'Read only' : 'No access' }}</p>
       <p v-if="policySaved" class="notice notice--ok" role="status">Repository default saved.</p>
       <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
+    </section>
+    <section v-if="org" class="panel">
+      <h2>Members’ own repositories</h2>
+      <p class="muted small">Owners and admins add repositories for all of {{ org.name }}; those follow the default above and the grants. When this is on, other members can also add a repository to their own space: only they, and the people they share it with, can open it. Turning it off keeps what members already added.</p>
+      <label v-if="canManage" class="check"><input type="checkbox" :checked="memberRepos?.enabled ?? true" :disabled="!memberRepos" @change="setMemberRepos(($event.target as HTMLInputElement).checked)"> Let members add their own repositories</label>
+      <p v-else>{{ memberRepos?.enabled ?? true ? 'On' : 'Off' }}. Ask an owner or admin to change it.</p>
+      <p v-if="memberReposSaved" class="notice notice--ok" role="status">Setting saved.</p>
     </section>
     <section v-if="org" class="panel">
       <h2>Agent gateway</h2>

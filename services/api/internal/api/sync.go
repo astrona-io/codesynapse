@@ -31,6 +31,9 @@ type registerRequest struct {
 	URL    string `json:"url"`
 	Name   string `json:"name"`
 	Branch string `json:"branch"`
+	// Space is "org" or "me"; empty picks the organisation for its owners
+	// and admins and the caller's own space for other members.
+	Space string `json:"space"`
 }
 
 // handleRegister clones a remote repository into the workspace and indexes it.
@@ -105,8 +108,8 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 				s.problem(w, http.StatusConflict, errors.New("the name "+req.Name+" is already used for another source; choose another name"))
 				return
 			}
-			if err := s.linkRepo(r.Context(), req.Name, remote, vis); err != nil {
-				s.problem(w, 400, err)
+			if err := s.linkRepo(r.Context(), req.Name, remote, vis, req.Space); err != nil {
+				s.linkError(w, err)
 				return
 			}
 			if vis == accounts.Private {
@@ -116,8 +119,8 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]any{"repo": req.Name, "shared": true, "visibility": vis, "note": "already indexed: linked to your organisation"})
 			return
 		}
-		if err := s.linkRepo(r.Context(), req.Name, remote, vis); err != nil {
-			s.problem(w, 400, err)
+		if err := s.linkRepo(r.Context(), req.Name, remote, vis, req.Space); err != nil {
+			s.linkError(w, err)
 			return
 		}
 	}
