@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"time"
+
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // Loops that must run in one API process at a time (scheduler, pruning,
@@ -21,11 +23,14 @@ const (
 // when the lease comes back.
 func (s *Server) singleton(ctx context.Context, loops ...func(context.Context)) {
 	if s.cfg.Accounts == nil {
+		// The only process: it always leads.
+		telemetry.SetLoopsLeaseHeld(ctx, true)
 		for _, loop := range loops {
 			go loop(ctx)
 		}
 		return
 	}
+	telemetry.SetLoopsLeaseHeld(ctx, false)
 	owner := newOwner()
 	go func() {
 		t := time.NewTicker(loopsLeaseRenew)
@@ -37,6 +42,7 @@ func (s *Server) singleton(ctx context.Context, loops ...func(context.Context)) 
 			if err != nil && ctx.Err() == nil {
 				// Without a renewal another process may take over: stop.
 				s.logger.Warn("renewing the loops lease", "error", err)
+				telemetry.RecordLease(ctx, telemetry.LeaseLoops, telemetry.LeaseRenewFailed)
 				held = false
 			}
 			switch {
@@ -46,17 +52,21 @@ func (s *Server) singleton(ctx context.Context, loops ...func(context.Context)) 
 				for _, loop := range loops {
 					go loop(leadCtx)
 				}
+				telemetry.RecordLease(ctx, telemetry.LeaseLoops, telemetry.LeaseAcquired)
 				s.logger.Info("this API process runs the scheduler and maintenance loops")
 			case !held && stop != nil:
 				stop()
 				stop = nil
+				telemetry.RecordLease(ctx, telemetry.LeaseLoops, telemetry.LeaseLost)
 				s.logger.Info("another API process runs the scheduler and maintenance loops")
 			}
+			telemetry.SetLoopsLeaseHeld(ctx, stop != nil)
 			select {
 			case <-ctx.Done():
 				if stop != nil {
 					stop()
 				}
+				telemetry.SetLoopsLeaseHeld(ctx, false)
 				return
 			case <-t.C:
 			}

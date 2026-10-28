@@ -53,7 +53,7 @@ func metricUnit(name string) string {
 	switch {
 	case strings.Contains(name, "_seconds"):
 		return "s"
-	case strings.Contains(name, "_bytes_"):
+	case strings.Contains(name, "_bytes_"), strings.HasSuffix(name, "_bytes"):
 		return "By"
 	case strings.Contains(name, "_dollars"):
 		return "{USD}"

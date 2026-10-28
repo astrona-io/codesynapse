@@ -154,9 +154,14 @@ func (j *Jobs) heartbeat(ctx context.Context) {
 				renewed = now
 				continue
 			}
+			if ctx.Err() != nil {
+				return // stopping, not a failed renewal
+			}
 			j.logger.Warn("renewing job leases", "error", err)
+			telemetry.RecordLease(ctx, telemetry.LeaseJob, telemetry.LeaseRenewFailed)
 			if now.Sub(renewed) >= jobLease-jobHeartbeat {
 				j.logger.Error("job leases may expire before the next renewal; stopping this process's jobs for another to resume", "since", renewed)
+				telemetry.RecordLease(ctx, telemetry.LeaseJob, telemetry.LeaseLost)
 				j.dropLeases()
 				renewed = now
 			}

@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 //go:embed migrations/*.sql
@@ -34,6 +35,8 @@ type Store struct {
 	db     database
 	pool   *pgxpool.Pool
 	policy bool
+	// untrack stops the runtime sampler reading this pool (root store only).
+	untrack func()
 }
 
 var _ accounts.Store = (*Store)(nil)
@@ -59,7 +62,18 @@ func Open(ctx context.Context, url string) (*Store, error) {
 		pool.Close()
 		return nil, fmt.Errorf("connecting to PostgreSQL: %w", err)
 	}
-	return &Store{db: pool, pool: pool}, nil
+	return &Store{db: pool, pool: pool, untrack: telemetry.TrackPool(telemetry.DBSystemPostgres, poolStat(pool))}, nil
+}
+
+// poolStat reads what the pool reports for platform_db_pool_*.
+func poolStat(pool *pgxpool.Pool) func() telemetry.PoolStat {
+	return func() telemetry.PoolStat {
+		st := pool.Stat()
+		return telemetry.PoolStat{
+			Idle: int(st.IdleConns()), InUse: int(st.AcquiredConns()), Max: int(st.MaxConns()),
+			EmptyAcquires: st.EmptyAcquireCount(), EmptyAcquireWait: st.EmptyAcquireWaitTime(),
+		}
+	}
 }
 
 // OpenWait retries Open for about a minute, since PostgreSQL may still be
@@ -82,7 +96,12 @@ func OpenWait(ctx context.Context, url string, onRetry func(attempt int, err err
 }
 
 // Close releases the pool.
-func (s *Store) Close() { s.pool.Close() }
+func (s *Store) Close() {
+	if s.untrack != nil {
+		s.untrack()
+	}
+	s.pool.Close()
+}
 
 // Migrate implements accounts.Store.
 func (s *Store) Migrate(ctx context.Context) error {

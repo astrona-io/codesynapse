@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -28,6 +29,18 @@ func (r *Registry) UpdateGauges(update func()) {
 func (r *Registry) ScopedGauge(name, help string, labels ...string) *Gauge {
 	g := &Gauge{family: newFamily(r, name, help, "gauge", labels), vals: map[string]float64{}}
 	g.scope()
+	r.add(g)
+	return g
+}
+
+// Gauge registers a current-value metric without core attributes, for
+// process state that belongs to no tenant. Its name must start with
+// platform_, so it never mixes with tenant series.
+func (r *Registry) Gauge(name, help string, labels ...string) *Gauge {
+	if !strings.HasPrefix(name, "platform_") {
+		panic("telemetry: unscoped gauge " + name + " must be named platform_*") // programmer error
+	}
+	g := &Gauge{family: newFamily(r, name, help, "gauge", labels), vals: map[string]float64{}}
 	r.add(g)
 	return g
 }

@@ -88,7 +88,11 @@ func TestSeriesScopedByTenant(t *testing.T) {
 	require.Equal(t, admin.do("GET", "/api/v1/stats/series?panel=llm_cost", "", &p), 200)
 	filter, _ = vm.last()
 	assert.Equal(t, filter, `{tenant_id=~"`+adminSigned.Org.ID+`"}`, "ordinary panels never elevate platform users")
-	for _, panel := range []string{"platform_llm_cost", "platform_tool_latency", "platform_db_latency"} {
+	platformPanels := []string{"platform_llm_cost", "platform_tool_latency", "platform_db_latency"}
+	for name := range platformHealthPanels {
+		platformPanels = append(platformPanels, name)
+	}
+	for _, panel := range platformPanels {
 		assert.Equal(t, bob.do("GET", "/api/v1/stats/series?panel="+panel, "", nil), 403)
 		require.Equal(t, admin.do("GET", "/api/v1/stats/series?panel="+panel, "", nil), 200)
 		filter, _ = vm.last()
