@@ -87,8 +87,9 @@ type Anthropic struct {
 	Upstream string
 	// Client must not follow redirects.
 	Client *http.Client
-	// Local, when set and returning a model, answers small tool-free requests on /v1/messages; the
-	// rest, and any it cannot take in time, go to the cloud.
+	// Local, when set and returning a model, answers the requests on
+	// /v1/messages it accepts (see Local.Eligible); the rest, and any it
+	// cannot take in time or answer whole, go to the cloud.
 	Local func() *Local
 	// Done is called once per request with what happened; it must not retain
 	// anything but the values it is given.

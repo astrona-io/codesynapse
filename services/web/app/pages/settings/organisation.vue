@@ -11,11 +11,11 @@ watch(policy, (value) => { defaultAccess.value = value?.default_repo_access ?? '
 const policySaved = ref(false)
 const { data: gateway, refresh: refreshGateway } = useApiGet<OrgGateway>(() => `accounts/orgs/${org.value?.slug ?? '-'}/gateway`)
 const gatewaySaved = ref(false)
-async function setGateway(enabled: boolean) {
+async function setGateway(change: { enabled?: boolean; local_first?: boolean }) {
   error.value = ''
   gatewaySaved.value = false
   try {
-    await apiPut(`accounts/orgs/${org.value!.slug}/gateway`, { enabled })
+    await apiPut(`accounts/orgs/${org.value!.slug}/gateway`, change)
     gatewaySaved.value = true
   } catch (err) {
     error.value = apiErrorMessage(err)
@@ -139,10 +139,14 @@ async function createOrg() {
     </section>
     <section v-if="org" class="panel">
       <h2>Agent gateway</h2>
-      <p class="muted small">When this is on, API keys of {{ org.name }} can send their agents’ model requests through CodeSynapse. Requests wait their turn, small ones may be answered by a local model, and every request is checked and audited. It is off until an owner or admin turns it on.</p>
+      <p class="muted small">When this is on, API keys of {{ org.name }} can send their agents’ model requests through CodeSynapse. Requests wait their turn, may be answered by a local model, and every request is checked and audited. It is on until an owner or admin turns it off.</p>
       <p v-if="gateway && !gateway.available" class="notice">Server switch off: the operator started the API with <code>CODESYNAPSE_GATEWAY=false</code>, so requests are refused even when this is on.</p>
-      <label v-if="canManage" class="check"><input type="checkbox" :checked="gateway?.enabled ?? true" :disabled="!gateway" @change="setGateway(($event.target as HTMLInputElement).checked)"> Let keys of this organisation use the gateway</label>
-      <p v-else>{{ gateway?.enabled ? 'On' : 'Off' }}. Ask an owner or admin to change it.</p>
+      <template v-if="canManage">
+        <label class="check"><input type="checkbox" :checked="gateway?.enabled ?? true" :disabled="!gateway" @change="setGateway({ enabled: ($event.target as HTMLInputElement).checked })"> Let keys of this organisation use the gateway</label>
+        <label class="check"><input type="checkbox" :checked="gateway?.local_first ?? true" :disabled="!gateway?.enabled" @change="setGateway({ local_first: ($event.target as HTMLInputElement).checked })"> Answer with the local model first</label>
+        <p class="muted small">Turn this off if the local model is too small for your agents’ main model; quick requests still go to it.</p>
+      </template>
+      <p v-else>{{ gateway?.enabled ? 'On' : 'Off' }}{{ gateway?.enabled ? (gateway.local_first ? ', local model first' : ', local model for quick requests only') : '' }}. Ask an owner or admin to change it.</p>
       <p v-if="gatewaySaved" class="notice notice--ok" role="status">Gateway setting saved.</p>
     </section>
     <section v-if="org && session.can('owner')" class="panel">
