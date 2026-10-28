@@ -121,6 +121,10 @@ type family struct {
 	inputLabels []string
 	scoped      bool
 	budget      int
+	// share caps the series one tenant_id value may hold, so one
+	// organisation cannot use up the budget every other one shares; 0 means
+	// no cap below the budget. Set with TenantShare.
+	share int
 }
 
 var nameRe = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
@@ -307,6 +311,17 @@ type Histogram struct {
 	vals    map[string]*hist
 	fresh   born
 	started born
+	// perTenant counts series per tenant_id value while share is set.
+	perTenant map[string]int
+}
+
+// TenantShare caps the series each tenant_id value may hold in h, on top of
+// the instrument's budget: past it, that tenant's new combinations are
+// dropped and counted in telemetry_dropped_series_total like any other drop.
+// Call it where the instrument is declared, before it records.
+func (h *Histogram) TenantShare(n int) *Histogram {
+	h.share = max(0, n)
+	return h
 }
 
 type hist struct {
@@ -338,7 +353,7 @@ func (h *Histogram) observe(ctx context.Context, v float64, values ...string) {
 	}
 	s := h.vals[key]
 	if s == nil {
-		if len(h.vals) >= h.budget {
+		if len(h.vals) >= h.budget || !h.admitTenant(key) {
 			h.reg.dropped.AddContext(ctx, 1, h.name)
 			return
 		}
@@ -352,6 +367,24 @@ func (h *Histogram) observe(ctx context.Context, v float64, values ...string) {
 	}
 	s.sum += v
 	s.count++
+}
+
+// admitTenant reports whether the tenant of a new series key is still within
+// its share, and counts the series when it is. Callers hold mu.
+func (h *Histogram) admitTenant(key string) bool {
+	i := slices.Index(h.labels, "tenant_id")
+	if h.share <= 0 || i < 0 {
+		return true
+	}
+	tenant := strings.Split(key, "\xff")[i]
+	if h.perTenant == nil {
+		h.perTenant = map[string]int{}
+	}
+	if h.perTenant[tenant] >= h.share {
+		return false
+	}
+	h.perTenant[tenant]++
+	return true
 }
 
 func (h *Histogram) write(w io.Writer) error {

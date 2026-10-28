@@ -74,6 +74,8 @@ type Job struct {
 	durable  bool
 	// leases is j.held when the job was queued (jobs_durable.go).
 	leases context.Context
+	// queuedAt starts the job's wait (codesynapse_job_wait_seconds).
+	queuedAt time.Time
 }
 
 // Jobs runs ingest jobs, at most one per repository at a time and one
@@ -192,7 +194,7 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 		kind = "ingest"
 	}
 	now := time.Now().UTC()
-	job := &Job{ID: hex.EncodeToString(b), Repo: repo, OrgID: opts.OrgID, Identity: opts.Identity, Kind: kind, Branch: opts.Branch, State: JobRunning, StartedAt: now.Format(time.RFC3339), Task: opts.Task, Waiting: true}
+	job := &Job{ID: hex.EncodeToString(b), Repo: repo, OrgID: opts.OrgID, Identity: opts.Identity, Kind: kind, Branch: opts.Branch, State: JobRunning, StartedAt: now.Format(time.RFC3339), Task: opts.Task, Waiting: true, queuedAt: now}
 	runID := job.ID
 	if d := opts.Durable; j.store != nil {
 		job.durable = true
@@ -201,6 +203,12 @@ func (j *Jobs) Start(repo, root string, opts JobOptions) (Job, error) {
 			// interrupted run is reconciled, not overwritten.
 			job.ID, job.Attempts = d.resume.ID, d.resume.Attempts
 			job.StartedAt = d.resume.CreatedAt.Format(time.RFC3339)
+			if d.resume.Attempts == 0 {
+				// A worker claiming a queued job: its wait began when the
+				// job was recorded. A job started again after an interrupted
+				// attempt reported that wait already; only this one is new.
+				job.queuedAt = d.resume.CreatedAt
+			}
 			runID = fmt.Sprintf("%s.%d", job.ID, d.resume.Attempts+1)
 		} else {
 			rec := accounts.JobRecord{ID: job.ID, Kind: d.Kind, Repo: repo, OrgID: opts.OrgID, ActorID: d.ActorID, Via: d.Via, KeyID: d.KeyID,
@@ -271,14 +279,25 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 		trace.WithAttributes(attribute.String("job.kind", job.Kind), attribute.String("job.id", job.ID), attribute.Int("job.attempt", job.Attempts+1)))
 	defer span.End()
 	phase := func(name string) func(error) {
-		_, s := telemetry.Tracer().Start(ctx, name)
+		_, s := telemetry.Tracer().Start(ctx, "job."+name)
+		began := time.Now()
 		return func(err error) {
 			if err != nil {
 				s.SetStatus(codes.Error, "failed")
 			}
 			s.End()
+			telemetry.RecordIngestPhase(ctx, name, time.Since(began), err == nil)
 		}
 	}
+	// Job metrics carry the job's organisation, which Start checked against
+	// its execution identity, and a kind from the fixed set.
+	metricsCtx := telemetry.WithTenant(context.WithoutCancel(ctx), opts.OrgID)
+	kind := job.Kind
+	if opts.Durable != nil {
+		kind = opts.Durable.Kind
+	}
+	var claimed time.Time
+	handedOver := false
 	ctx, identityErr := execution.With(ctx, job.Identity)
 	graphAttempted, reportPublished := false, false
 	fin := func(job *Job, nodes, edges int, err error) {
@@ -302,11 +321,26 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 		if err != nil {
 			span.SetStatus(codes.Error, "job failed")
 		}
+		outcome := telemetry.JobOK
 		switch {
 		case job.durable && j.leftBehind(ctx, err):
+			outcome = telemetry.JobLeftBehind
 			j.logger.Info("job left for another process to resume", "job", job.ID, "cause", context.Cause(ctx))
 		case job.durable:
 			j.endDurable(ctx, job, err)
+		}
+		switch {
+		case outcome != telemetry.JobOK || err == nil:
+		case handedOver:
+			outcome = telemetry.JobLeftBehind
+		case errors.Is(err, context.Canceled):
+			outcome = telemetry.JobCancelled
+		default:
+			outcome = telemetry.JobError
+		}
+		telemetry.RecordJobFinished(metricsCtx, kind, outcome)
+		if !claimed.IsZero() {
+			telemetry.RecordJobDuration(metricsCtx, kind, time.Since(claimed))
 		}
 		if opts.Done != nil {
 			opts.Done(err)
@@ -324,7 +358,7 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 				// Another process took it over (or the store is down): do
 				// not run it twice.
 				j.logger.Warn("job not started: lease lost", "job", job.ID, "error", err)
-				job.durable = false
+				job.durable, handedOver = false, true
 				fin(job, 0, 0, fmt.Errorf("job handed to another process or not recorded: %w", err))
 				return
 			}
@@ -335,6 +369,8 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 		j.mu.Lock()
 		job.Waiting = false
 		j.mu.Unlock()
+		claimed = time.Now()
+		telemetry.RecordJobWait(metricsCtx, kind, claimed.Sub(job.queuedAt))
 	case <-ctx.Done():
 		fin(job, 0, 0, ctx.Err())
 		return
@@ -376,7 +412,7 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 		return
 	}
 	if opts.Prepare != nil {
-		end := phase("job.prepare")
+		end := phase(telemetry.PhasePrepare)
 		err := opts.Prepare(ctx)
 		end(err)
 		if err != nil {
@@ -408,13 +444,14 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 		return
 	}
 	ctx = repoconfig.WithPolicy(ctx, policy)
-	endIngest := phase("job.ingest")
+	endIngest := phase(telemetry.PhaseIngest)
 	progress := func(step int, name string) {
 		j.mu.Lock()
 		job.Phase, job.Step, job.Steps = name, step, ingest.Steps+1
 		j.mu.Unlock()
 	}
-	g, err := ingest.Run(ctx, ingest.Options{Progress: progress, Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Dataflow: j.dataflow, ModuleProxy: j.moduleProxy, Branch: opts.Branch, PreviousIdentities: previous, ApprovedPolicyDigest: approved})
+	g, err := ingest.Run(ctx, ingest.Options{Progress: progress, Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Dataflow: j.dataflow, ModuleProxy: j.moduleProxy, Branch: opts.Branch, PreviousIdentities: previous, ApprovedPolicyDigest: approved,
+		Extracted: func(extractor string, d time.Duration) { telemetry.RecordExtract(ctx, extractor, d) }})
 	endIngest(err)
 	if err == nil {
 		progress(ingest.Steps+1, "Saving the graph")
@@ -489,7 +526,7 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 			}
 			return nil
 		}
-		endPublish := phase("job.publish")
+		endPublish := phase(telemetry.PhasePublish)
 		if j.Publish != nil {
 			err = j.Publish(ctx, job.Repo, publish)
 		} else {
