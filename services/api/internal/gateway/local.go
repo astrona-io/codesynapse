@@ -28,8 +28,8 @@ const (
 // reported nothing.
 type Usage struct{ In, Out int }
 
-// Local answers small, tool-free requests from a local OpenAI-compatible
-// model. Anything else goes to the cloud.
+// Local answers small requests, with or without tools, from a local
+// OpenAI-compatible model. Anything else goes to the cloud.
 type Local struct {
 	BaseURL string
 	Model   string
@@ -121,32 +121,40 @@ func (l *Local) translate(body []byte) (in anthropicIn, out []byte, ok bool) {
 	if elig == nil {
 		elig = SmallModel
 	}
-	if !elig(in.Model) || len(in.Messages) == 0 || len(in.Tools) > 0 || present(in.ToolChoice) ||
-		(in.Thinking.Type != "" && in.Thinking.Type != "disabled") {
+	if !elig(in.Model) || len(in.Messages) == 0 || (in.Thinking.Type != "" && in.Thinking.Type != "disabled") {
 		return in, nil, false
 	}
-	type msg struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
-	var msgs []msg
+	var msgs []oaMsg
 	if present(in.System) {
 		sys, ok := text(in.System)
 		if !ok {
 			return in, nil, false
 		}
-		msgs = append(msgs, msg{"system", sys})
+		msgs = append(msgs, oaMsg{Role: "system", Content: sys})
 	}
 	for _, m := range in.Messages {
-		t, ok := text(m.Content)
-		if !ok || (m.Role != "user" && m.Role != "assistant") {
+		conv, ok := convertMessage(m)
+		if !ok {
 			return in, nil, false
 		}
-		msgs = append(msgs, msg{m.Role, t})
+		msgs = append(msgs, conv...)
+	}
+	tools, choice, parallel, ok := convertTools(in.Tools, in.ToolChoice)
+	if !ok {
+		return in, nil, false
 	}
 	// include_usage makes the server report the tokens it used, so the
 	// gateway can say what a local answer saved.
 	req := map[string]any{"model": l.Model, "messages": msgs, "stream": true, "stream_options": map[string]bool{"include_usage": true}}
+	if len(tools) > 0 {
+		req["tools"] = tools
+		if choice != nil {
+			req["tool_choice"] = choice
+		}
+		if !parallel {
+			req["parallel_tool_calls"] = false
+		}
+	}
 	if in.MaxTokens > 0 {
 		req["max_tokens"] = in.MaxTokens
 	}
@@ -205,6 +213,20 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
 	next := func() (chunk, bool) { return readChunk(sc) }
+	if len(in.Tools) > 0 {
+		// A tool call is only usable whole: collect the answer, check it, and
+		// let the cloud take the request if the local model got it wrong.
+		first, more := next()
+		ans, ok := collect(first, more, next, declaredTools(in.Tools))
+		if !ok || sc.Err() != nil {
+			return Usage{}, false
+		}
+		w.Header().Set(RouteHeader, "local")
+		if in.Stream {
+			return streamCollected(w, in.Model, ans), true
+		}
+		return jsonCollected(w, in.Model, ans), true
+	}
 	// Wait for the first chunk before writing anything, so a model that
 	// fails to start still falls through to the cloud.
 	first, more := next()
@@ -221,8 +243,16 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 	return u, true
 }
 
+type toolDelta struct {
+	Index int
+	ID    string
+	Name  string
+	Args  string
+}
+
 type chunk struct {
 	Text   string
+	Calls  []toolDelta
 	Finish string
 	In     int
 	Out    int
@@ -242,7 +272,15 @@ func readChunk(sc *bufio.Scanner) (chunk, bool) {
 		var v struct {
 			Choices []struct {
 				Delta struct {
-					Content string `json:"content"`
+					Content   string `json:"content"`
+					ToolCalls []struct {
+						Index    int    `json:"index"`
+						ID       string `json:"id"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
 				} `json:"delta"`
 				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
@@ -257,6 +295,9 @@ func readChunk(sc *bufio.Scanner) (chunk, bool) {
 		var c chunk
 		if len(v.Choices) > 0 {
 			c.Text, c.Finish = v.Choices[0].Delta.Content, v.Choices[0].FinishReason
+			for _, tc := range v.Choices[0].Delta.ToolCalls {
+				c.Calls = append(c.Calls, toolDelta{tc.Index, tc.ID, tc.Function.Name, tc.Function.Arguments})
+			}
 		}
 		if v.Usage != nil {
 			c.In, c.Out = v.Usage.Prompt, v.Usage.Completion

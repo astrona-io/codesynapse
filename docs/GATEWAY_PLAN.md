@@ -24,8 +24,8 @@ Goal: every model request an agent makes goes through CodeSynapse, waits its tur
 
 Claude Code (`ANTHROPIC_BASE_URL` pointed at the gateway) sends every request to `POST /v1/messages`. The gateway holds it in the queue, decides, then either answers it with a local model or forwards it to Anthropic.
 
-- The decision is rules first, no model call on the hot path: background calls Claude Code makes with its small model (titles, summaries, topic checks, short prompts without tools) go to the local model; turns of the main model, tool-using turns and long contexts go to the cloud. Rules are configuration (`gateway.rules`), and each decision is audited with the rule that chose it.
-- A local answer needs the request translated from the Anthropic format (messages, system blocks, streaming events) to the OpenAI-compatible one and back. Requests with tools or images are never routed locally in the first version.
+- The decision is rules first, no model call on the hot path: background calls Claude Code makes with its small model (titles, summaries, topic checks, short prompts without tools) go to the local model, with or without tools; turns of the main model and long contexts go to the cloud. Rules are configuration (`gateway.rules`), and each decision is audited with the rule that chose it.
+- A local answer needs the request translated from the Anthropic format (messages, system blocks, streaming events) to the OpenAI-compatible one and back. Tool-using requests are translated too (see below); requests with images are never routed locally.
 - A request the local model cannot take (busy past a wait limit, error, no local model) falls through to the cloud unless the caller asked for local only.
 - Authorisation for the cloud leg: the caller's own `Authorization` / `x-api-key` header is passed through to Anthropic for that one request and never stored or logged, so a subscription sign-in works. A server-side key (`api_key_env`) is the alternative for shared installs.
 - On by default, can be disabled: the installation switch (`CODESYNAPSE_GATEWAY=false`) or the organisation setting turns it off. Local answering still needs a provider with `gateway: true`; without one every request goes to the cloud as a plain pass-through.
@@ -41,7 +41,16 @@ Decision: option 1, as an explicit "gateway key" with its own audit trail.
 
 ## Local leg (built)
 
-A provider with `gateway: true` (local only, explicit `model`) answers `/v1/messages` requests that name a haiku-class model, carry no tools, tool choice, thinking or non-text blocks, and are at most 256 KiB. The request is translated to `/chat/completions`, takes the provider's queue slot (shared with CodeSynapse's own calls), and the answer is translated back to Anthropic events. If the queue wait passes 20 s, the model errors or answers non-200, nothing has been written and the cloud takes the request. `X-CodeSynapse-Route: local|cloud` says which. A local answer needs no Anthropic credential. Still to do: the organisation-level opt-in, and the OpenAI-compatible endpoint for local agents.
+A provider with `gateway: true` (local only, explicit `model`) answers `/v1/messages` requests that name a haiku-class model, carry no thinking, no image or other non-text blocks, and are at most 256 KiB. Tools are allowed (see below). The request is translated to `/chat/completions`, takes the provider's queue slot (shared with CodeSynapse's own calls), and the answer is translated back to Anthropic events. If the queue wait passes 20 s, the model errors or answers non-200, nothing has been written and the cloud takes the request. `X-CodeSynapse-Route: local|cloud` says which. A local answer needs no Anthropic credential.
+
+### Local answers with tools (decided)
+
+Decision: the local model also takes requests that use tools, because background and small-model turns often carry tool definitions and should stay on the premises.
+
+- `tools[]` become OpenAI `tools` (`name`, `description`, `input_schema` as `parameters`). `tool_choice` maps `auto` to `auto`, `any` to `required`, `none` to `none` and `{tool, name}` to a named function; `disable_parallel_tool_use` becomes `parallel_tool_calls: false`. A `tool_choice` without tools, an unknown type, or a server tool (web search, code execution, which run at the provider) sends the request to the cloud.
+- Assistant `tool_use` blocks become `tool_calls`; user `tool_result` blocks become `role: tool` messages (text only, `is_error` is prefixed `[error]`). Image blocks, also inside a result, keep the request ineligible.
+- A tool answer is collected whole before anything is written, checked, then sent as Anthropic events (`tool_use` blocks with `input_json_delta`, `stop_reason: tool_use`) or one JSON message. If a call names a tool the request did not offer, its arguments are not a JSON object or the answer is over 1 MiB, nothing has been written and the cloud takes the request. Missing call ids get a generated `toolu_cs_…` id. Plain text answers to tool requests stream as before.
+- Tool definitions, arguments and results go only to the local provider and are never logged; audit and telemetry keep their counts (the `tools` flag already exists).
 
 ## Credentials (decided)
 

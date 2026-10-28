@@ -182,7 +182,7 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 		local  func(context.Context) (func(), error)
 	}{
 		"main model":   {`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`, 200, nil},
-		"has tools":    {`{"model":"claude-haiku-5-5","tools":[{"name":"x"}],"messages":[{"role":"user","content":"hi"}]}`, 200, nil},
+		"server tool":  {`{"model":"claude-haiku-5-5","tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"hi"}]}`, 200, nil},
 		"has image":    {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"image"}]}]}`, 200, nil},
 		"local errors": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 500, nil},
 		"queue timeout": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 200,

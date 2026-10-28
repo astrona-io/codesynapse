@@ -7,7 +7,7 @@
 
 Coding assistants send many small background requests, such as naming a chat or summarising a line. Paying a big cloud model for those wastes money and tokens. The gateway sits between the assistant and the cloud and does three things:
 
-1. **Answers small requests locally.** A request qualifies when it asks for one of Claude's small (haiku-class) models, uses no tools, no thinking and no images, and is at most 256 KiB. A local model that you configured answers it. Nothing is sent to the cloud.
+1. **Answers small requests locally.** A request qualifies when it asks for one of Claude's small (haiku-class) models, uses no thinking and no images (tools are fine), and is at most 256 KiB. When the request offers tools, the local model may call them and read their results; the call is checked first, and if the model gets it wrong (a tool that was not offered, broken arguments) the cloud answers instead. Tool data stays on your side. A local model that you configured answers it. Nothing is sent to the cloud.
 2. **Passes everything else on.** Other requests go to `api.anthropic.com` and nowhere else. The assistant's own Anthropic credential is used for that one request and is never stored.
 3. **Falls back safely.** If the local model is busy for more than 20 seconds, fails, or answers with an error, nothing has been written yet and the request goes to the cloud instead.
 
@@ -31,7 +31,7 @@ The organisation switch is audited as `org.gateway.set`. It cannot be changed wi
 Local answering needs a local provider that you opt in explicitly. In `config/llm.yaml` give that provider `gateway: true` and an explicit `model`:
 
 ```yaml
-    gateway: true   # answer small tool-free requests (Claude haiku class) from this local model
+    gateway: true   # answer small requests (Claude haiku class), tools included from this local model
 ```
 
 See `config/llm.example.yaml` for the full provider block and [Local models](local-models.md) for choosing a model. Without such a provider the gateway still works, but every request goes to the cloud as a plain pass-through.
