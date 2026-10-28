@@ -210,7 +210,7 @@ type GitToken struct {
 
 // UserGitToken is a person's own credential for one Git host, used only
 // for the repositories in their own space. Sealed like GitToken but bound
-// to the person (userTokenPurpose), so it never opens as an organisation's.
+// to the person (personalSealPurpose), so it never opens as an organisation's.
 type UserGitToken struct {
 	UserID    string    `json:"-"`
 	Host      string    `json:"host"`

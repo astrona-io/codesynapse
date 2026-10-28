@@ -13,9 +13,9 @@ import (
 // Only the person manages their tokens, in a signed-in session; agents
 // (API keys) never see or change them.
 
-// userTokenPurpose binds a sealed token to a person instead of an
+// personalSealPurpose binds a sealed token to a person instead of an
 // organisation, so a row copied between the two tables does not open.
-const userTokenPurpose = "user-git-token"
+const personalSealPurpose = "user-git-token"
 
 // selfOnly allows a person's own signed-in, business-capable session.
 func (s *Service) selfOnly(ctx context.Context, p Principal) (User, error) {
@@ -51,7 +51,7 @@ func (s *Service) SetUserGitToken(ctx context.Context, p Principal, host, token 
 	if token, err = checkToken(token); err != nil {
 		return UserGitToken{}, err
 	}
-	sealed, err := s.Secrets.SealFor(userTokenPurpose, token, u.ID, host)
+	sealed, err := s.Secrets.SealFor(personalSealPurpose, token, u.ID, host)
 	if err != nil {
 		return UserGitToken{}, err
 	}
@@ -117,5 +117,5 @@ func (s *Service) OpenUserGitToken(ctx context.Context, orgID, userID, host stri
 	if err != nil {
 		return "", err
 	}
-	return s.Secrets.OpenFor(userTokenPurpose, t.Sealed, t.KeyID, userID, host)
+	return s.Secrets.OpenFor(personalSealPurpose, t.Sealed, t.KeyID, userID, host)
 }
