@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import type { ImportCandidate, Job } from '~/utils/types'
 
-// Add repositories: one by URL, or every public repository of an
-// organisation or user (listed, then picked). Both end in POST /repos, so
-// access checks and grants stay the API's. Listing for your own space uses
-// your own Git token, so it can include private repositories.
+// Add repositories: one by URL, or the repositories of an organisation or
+// user (listed, then picked). Both end in POST /repos, so access checks and
+// grants stay the API's. The listing uses the organisation's token for the
+// organisation's space and your own Git token for your own space, so it can
+// include private repositories either token reads.
 type Candidate = ImportCandidate
-interface Listing { provider: string; host: string; org: string; repos: Candidate[]; truncated: boolean }
+interface Listing { provider: string; host: string; org: string; repos: Candidate[]; truncated: boolean; authenticated?: boolean; sso_restricted?: boolean }
 
 const props = defineProps<{ open: boolean; cloneEnabled?: boolean; hostTokens?: string[]; busy?: boolean }>()
 const emit = defineEmits<{ close: []; added: [] }>()
@@ -172,7 +173,8 @@ async function addChosen() {
               <label class="check"><input v-model="space" type="radio" value="me" :disabled="!canMe"> Only me<span v-if="!canMe" class="dim"> (turned off by your organisation)</span></label>
             </fieldset>
             <p v-if="space === 'me'" class="muted small">Listed with your own Git token for the host when you saved one (Profile, Git tokens), so private repositories it reads are shown too.</p>
-            <p v-else class="muted small">Only public repositories are listed. Add a private one by its URL.</p>
+            <p v-else class="muted small"><template v-if="listing?.authenticated">Listed with your organisation's token for {{ listing.host }}: private repositories it can read are included.</template><template v-else>Private repositories are listed when your organisation has a Git token for the host in Settings; otherwise only public ones are.</template></p>
+            <p v-if="listing?.sso_restricted" class="muted small">GitHub left out repositories the token is not authorised for under the organisation's SAML single sign-on. Authorise the token for the organisation in GitHub's token settings.</p>
             <p v-if="listError" class="error">{{ listError }}</p>
           </form>
 
@@ -181,6 +183,11 @@ async function addChosen() {
               <p class="muted small"><strong class="mono">{{ listing.org }}/*</strong> · {{ plural(listing.repos.length, 'repository', 'repositories') }} · {{ listing.repos.filter((r) => r.added).length }} already added<template v-if="listing.truncated"> · only the first {{ listing.repos.length }} are shown</template></p>
               <button type="button" :disabled="(!chosen.length && !autoAdd) || adding" @click="addChosen">{{ adding ? 'Adding…' : chosen.length ? `Add ${chosen.length} selected` : autoAdd ? 'Watch for new repositories' : 'Add selected' }}</button>
             </div>
+            <fieldset v-if="session.accounts.value" class="space">
+              <legend>Add to</legend>
+              <label class="check"><input v-model="space" type="radio" value="org" :disabled="!canOrg"> The organisation<span v-if="!canOrg" class="dim"> (owners and admins)</span></label>
+              <label class="check"><input v-model="space" type="radio" value="me" :disabled="!canMe"> Only me<span v-if="!canMe" class="dim"> (turned off by your organisation)</span></label>
+            </fieldset>
             <label class="check"><input v-model="autoAdd" type="checkbox"> Automatically add new repositories {{ listing.org }} creates later</label>
             <p v-if="watchNote" class="muted small">{{ watchNote }}</p>
             <div class="row opts">
@@ -194,13 +201,15 @@ async function addChosen() {
                 <span v-if="r.private" class="badge badge--violet">private</span>
                 <span v-if="r.archived" class="badge badge--amber">archived</span>
                 <span v-if="r.fork" class="badge badge--violet">fork</span>
+                <span v-if="r.private" class="badge badge--pink">private</span>
+                <span v-if="r.permission" class="badge badge--violet" :title="`The listing token has ${r.permission} access`">{{ r.permission }}</span>
                 <span v-if="r.added" class="badge badge--green">added</span>
                 <span v-else-if="outcome[r.repo]?.ok" class="badge badge--cyan">{{ outcome[r.repo]!.text }}</span>
                 <span class="muted small desc">{{ r.description }}</span>
                 <p v-if="outcome[r.repo] && !outcome[r.repo]!.ok" class="error small full">{{ outcome[r.repo]!.text }}</p>
               </li>
             </ul>
-            <div v-if="!listing.repos.length" class="empty"><strong>Nothing to import</strong>No public repositories match. Try including archived repositories or forks.</div>
+            <div v-if="!listing.repos.length" class="empty"><strong>Nothing to import</strong>No repositories match. Try including archived repositories or forks.</div>
           </section>
         </div>
       </div>

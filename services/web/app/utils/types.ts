@@ -247,7 +247,7 @@ export interface WorkspaceStats {
     context_total_tokens: number; context_saved_pct: number
     sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; avoided_method: string
     // ask_local: tokens local models read, and its part of avoided_tokens.
-    local_read_tokens?: number; local_avoided_tokens?: number; local_briefs?: number
+    local_read_tokens?: number; local_avoided_tokens?: number; local_briefs?: number; local_drafts?: number
     unindexed?: { repos: { repo: string; skipped: number }[]; skipped: number; avoided_per_session: number }
     // How sessions began, reported by the Claude Code plugin's hooks.
     workflow: { first_codesynapse: number; first_native: number; reads_turned_back: number; first_share_pct: number; files_edited: number; files_edited_found: number; edit_recall_pct: number; bash: Record<string, number> | null; bash_total: number }
@@ -388,6 +388,7 @@ export interface ImportCandidate {
   archived?: boolean
   fork?: boolean
   private?: boolean
+  permission?: string
   pushed_at?: string
   added: boolean
 }
@@ -612,6 +613,9 @@ export interface ModelStats {
   range: string; models: ModelStat[]
   // Cloud spend and the dollars prompt compression saved; null when a price is missing.
   spent_dollars?: number | null; compression_saved_dollars?: number | null
+  // Whether CodeSynapse's own AI tasks get shortened prompts, and why not:
+  // disabled, no_local_model or no_ai. Gateway traffic is never shortened.
+  compression_enabled?: boolean; compression_off?: 'disabled' | 'no_local_model' | 'no_ai'
   gateway?: GatewayStat
   reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; cached_input_per_mtok?: number; estimate?: boolean; source?: string; checked?: string }
 }

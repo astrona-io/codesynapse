@@ -420,7 +420,7 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 	}
 	added, lastErr := 0, ""
 	for _, x := range listed {
-		if known[x.Name] || !keepListed(x, w.IncludeArchived, w.IncludeForks) {
+		if known[x.Name] || !keepListed(x, w.IncludeArchived, w.IncludeForks, false) {
 			continue
 		}
 		name := forge.RepoName(w.Host, w.Login, x.Name)

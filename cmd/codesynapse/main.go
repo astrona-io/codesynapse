@@ -820,7 +820,7 @@ func (o *mcpInstallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.cap, "context-cap", "150k", "Chat size at which Claude Code and Codex compact (100k to 1M; 0 leaves their settings alone). With the memory hooks older turns are offloaded first. A cap you set yourself is kept unless you pass this flag")
 	f.BoolVar(&o.gateway, "gateway", false, "Route Claude Code's model requests through the CodeSynapse gateway (writes ANTHROPIC_BASE_URL and the key header into ~/.claude/settings.json; key from "+agentcfg.GatewayKeyEnv+")")
 	f.BoolVar(&o.remove, "remove", false, "With --gateway: take the gateway settings out of Claude Code again")
-	f.StringVar(&o.profile, "profile", toolsets.Core, "Toolsets the agents get: core (the twelve everyday tools), all, or core plus a comma list of "+strings.Join(toolsets.Names(), ", "))
+	f.StringVar(&o.profile, "profile", toolsets.Core, "Toolsets the agents get: core (the thirteen everyday tools), all, or core plus a comma list of "+strings.Join(toolsets.Names(), ", "))
 	return nil
 }
 func (o *mcpInstallOptions) Complete(context.Context, *app.Env) error { return nil }

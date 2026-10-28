@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { ImportCandidate } from '~/utils/types'
 
-// Import with accounts: list an organisation's public repositories, pick
+// Import with accounts: list an organisation's repositories (private ones too
+// when the selected organisation has a Git token for the host), pick
 // some, and add each one to the selected organisation the same way a single
 // URL is added (POST /repos), so access checks and grants are the API's.
 type Candidate = ImportCandidate
-interface Listing { provider: string; host: string; org: string; repos: Candidate[]; truncated: boolean }
+interface Listing { provider: string; host: string; org: string; repos: Candidate[]; truncated: boolean; authenticated?: boolean; sso_restricted?: boolean }
 
 const PROVIDERS = [{ v: '', label: 'Detect from host' }, { v: 'github', label: 'GitHub' }, { v: 'forgejo', label: 'Forgejo / Gitea / Codeberg' }, { v: 'gitlab', label: 'GitLab' }]
 const form = reactive({ provider: '', host: '', org: '', include_archived: false, include_forks: false })
@@ -83,7 +84,7 @@ async function addChosen() {
         <label class="check"><input v-model="form.include_forks" type="checkbox"> Include forks</label>
         <div class="row">
           <button type="submit" :disabled="!form.org.trim() || loading">{{ loading ? 'Listing…' : 'List repositories' }}</button>
-          <span class="muted small">Only public repositories are listed. Add a private one by its URL on <NuxtLink to="/">Repositories</NuxtLink>, with a Git token for its host in <NuxtLink to="/settings">Settings</NuxtLink>.</span>
+          <span class="muted small">Private repositories are listed when your organisation has a Git token for the host in <NuxtLink to="/settings">Settings</NuxtLink>; otherwise only public ones are.</span>
         </div>
       </form>
       <p v-if="error" class="error">{{ error }}</p>
@@ -94,7 +95,8 @@ async function addChosen() {
         <div>
           <p class="eyebrow">{{ listing.host }}</p>
           <h2 class="mono">{{ listing.org }}/*</h2>
-          <p class="muted small">{{ plural(listing.repos.length, 'repository', 'repositories') }} · {{ listing.repos.filter((r) => r.added).length }} already in your organisation<template v-if="listing.truncated"> · only the first {{ listing.repos.length }} are shown</template></p>
+          <p class="muted small">{{ plural(listing.repos.length, 'repository', 'repositories') }} · {{ listing.repos.filter((r) => r.added).length }} already in your organisation<template v-if="listing.truncated"> · only the first {{ listing.repos.length }} are shown</template><template v-if="listing.authenticated"> · listed with your organisation's token</template></p>
+          <p v-if="listing.sso_restricted" class="muted small">GitHub left out repositories the token is not authorised for under the organisation's SAML single sign-on. Authorise the token for the organisation in GitHub's token settings.</p>
         </div>
         <div class="row tight-actions">
           <button :disabled="!chosen.length || adding" @click="addChosen">{{ adding ? 'Adding…' : chosen.length ? `Add ${chosen.length} selected` : 'Add selected' }}</button>
@@ -116,13 +118,15 @@ async function addChosen() {
           <span v-else class="mono name">{{ r.name }}</span>
           <span v-if="r.archived" class="badge badge--amber">archived</span>
           <span v-if="r.fork" class="badge badge--violet">fork</span>
+          <span v-if="r.private" class="badge badge--pink">private</span>
+          <span v-if="r.permission" class="badge badge--violet" :title="`The organisation's token has ${r.permission} access`">{{ r.permission }}</span>
           <span v-if="r.added" class="badge badge--green">added</span>
           <span v-else-if="outcome[r.repo]?.ok" class="badge badge--cyan">{{ outcome[r.repo]!.text }}</span>
           <span class="muted small desc">{{ r.description }}</span>
           <p v-if="outcome[r.repo] && !outcome[r.repo]!.ok" class="error small full">{{ outcome[r.repo]!.text }}</p>
         </li>
       </ul>
-      <div v-if="!listing.repos.length" class="empty"><strong>Nothing to import</strong>No public repositories match. Try including archived repositories or forks.</div>
+      <div v-if="!listing.repos.length" class="empty"><strong>Nothing to import</strong>No repositories match. Try including archived repositories or forks.</div>
     </section>
   </div>
 </template>

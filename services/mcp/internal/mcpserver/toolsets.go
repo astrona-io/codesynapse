@@ -96,6 +96,7 @@ var instructionRules = [][]clause{
 	},
 	{
 		{nil, `Save tokens with a local model: to learn what files say (how something works, where something is handled, what a long file or test log contains) without reading them into your context, call ask_local with the question and the files, directories or file:start-end ranges. A local model reads them and answers briefly with file:line citations; read those cited lines yourself before you edit or rely on a detail. When it answers that nothing is in the files, has no local model or cites nothing, read the files as usual. Never use it for the exact text you are about to edit.`},
+		{nil, `For self-contained, well-specified code (a helper function, a test table, boilerplate), local_draft has the local model write a draft from the task and the files you name; pass target path:start-end when it replaces those lines. The draft is unverified: compare it with the real file, fix what is wrong and apply it with your own edit; never apply it blindly. Write security-sensitive code (authentication, permissions, secrets, input validation, cryptography) yourself.`},
 	},
 	{
 		{[]string{"reviews"}, `Reviews: when asked to review code, analyse it with get_pr_context.`},

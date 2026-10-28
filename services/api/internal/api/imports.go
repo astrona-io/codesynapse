@@ -17,12 +17,23 @@ import (
 // (public or proved private access, same-remote linking, the initial admin
 // grant). The installation-wide watch list (orgs.go) stays single-tenant.
 //
-// Listing for the organisation is anonymous: organisation Git tokens are
-// opened only to clone, fetch or push, so that list shows public
-// repositories and private ones are added by URL. Listing for the caller's
-// own space (space "me") uses the caller's own token for the host when they
-// saved one, so it also shows the private repositories that token reads;
-// adding one proves access with the same token again.
+// Listing for a member's own space (space "me") uses the caller's own Git
+// token for the host when they saved one, never the organisation's: it also
+// shows the private repositories that token reads, and adding one proves
+// access with the same token again. Listing for the organisation uses the
+// selected organisation's own Git token for the host when it has one and the
+// caller is an owner or admin there, the people who manage that token:
+// private repositories the token reads are listed with the token's
+// permission on each. Everyone else, and every organisation without a
+// token, lists anonymously and sees public repositories only.
+// The organisation token is stored per organisation and host, not per
+// namespace, so it lists whatever organisation on that host its owner can
+// read; that is why only its managers may use it here. It never lists the
+// token owner's own account (forge uses the public user endpoints only), and
+// private repositories are answered without their descriptions. A token goes
+// to that host alone (forge follows no redirects and refuses internal
+// addresses when it connects), and adding a private repository still proves
+// access with it (proveAccess) before anything is cloned.
 
 // maxImportListed bounds one answer; forge already caps the pages it reads.
 const maxImportListed = 2000
@@ -48,8 +59,10 @@ type ImportCandidate struct {
 	Description   string `json:"description,omitempty"`
 	Archived      bool   `json:"archived,omitempty"`
 	Fork          bool   `json:"fork,omitempty"`
-	PushedAt      string `json:"pushed_at,omitempty"`
 	Private       bool   `json:"private,omitempty"`
+	// Permission is the listing token's access: admin, write or read.
+	Permission string `json:"permission,omitempty"`
+	PushedAt   string `json:"pushed_at,omitempty"`
 	// Added says the selected organisation already has this repository.
 	Added bool `json:"added"`
 }
@@ -58,7 +71,8 @@ type ImportCandidate struct {
 // than github.com come from the user, so they pass the same SSRF check as
 // clone URLs.
 func (s *Server) publicForgeClient(ctx context.Context, kind forge.Kind, host, login string) (forge.Client, error) {
-	c := forge.Client{Kind: kind, Host: host, BaseURL: s.cfg.ForgeAPI}
+	// ForgeAPI is the operator's (or a test's) endpoint, not the user's host.
+	c := forge.Client{Kind: kind, Host: host, BaseURL: s.cfg.ForgeAPI, AllowPrivate: s.cfg.AllowPrivateGit || s.cfg.ForgeAPI != ""}
 	if s.cfg.ForgeAPI == "" && host != forge.DefaultHost {
 		if _, err := gitx.ValidateRemote(ctx, c.CloneURL(login, "x"), gitx.RemoteOptions{AllowPrivate: s.cfg.AllowPrivateGit}); err != nil {
 			return c, err
@@ -68,16 +82,10 @@ func (s *Server) publicForgeClient(ctx context.Context, kind forge.Kind, host, l
 }
 
 // keepListed says whether a listed repository can be imported under the
-// archived and fork filters: public, with a name that is safe to clone.
-func keepListed(x forge.Repo, archived, forks bool) bool {
-	return validRepoSegment(x.Name) && !x.Private && (archived || !x.Archived) && (forks || !x.Fork)
-}
-
-// keepOwnListed is keepListed for a list read with the caller's own token,
-// which may also show the private repositories that token reads.
-func keepOwnListed(x forge.Repo, archived, forks bool) bool {
-	x.Private = false
-	return keepListed(x, archived, forks)
+// archived and fork filters: public (or private when the listing used a
+// token), with a name that is safe to clone.
+func keepListed(x forge.Repo, archived, forks, private bool) bool {
+	return validRepoSegment(x.Name) && (private || !x.Private) && (archived || !x.Archived) && (forks || !x.Fork)
 }
 
 func (s *Server) importRoutes() {
@@ -118,31 +126,59 @@ func (s *Server) handleImportList(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
-	keep := keepListed
+	whose, action := "the organisation's token", "git_token.list"
 	if req.Space == spaceMe {
 		// Never the organisation's token: what a member lists for their own
 		// space is what their own token reads. Without one it stays public.
+		whose, action = "your Git token", "user_git_token.list"
 		tok, err := s.cfg.Accounts.OpenUserGitToken(r.Context(), m.Org.ID, p.User.ID, host)
 		switch {
 		case err == nil:
-			c.Token, keep = tok, keepOwnListed
-		case errors.Is(err, accounts.ErrNotFound), errors.Is(err, accounts.ErrNoSecretKey):
-		default:
+			c.Token = tok
+		case !errors.Is(err, accounts.ErrNotFound) && !errors.Is(err, accounts.ErrNoSecretKey):
+			s.accountError(w, err)
+			return
+		}
+	} else {
+		switch err := s.cfg.Accounts.Require(r.Context(), p, m.Org.ID, accounts.Admin); {
+		case err == nil:
+			tok, err := s.cfg.Accounts.OpenGitToken(r.Context(), m.Org.ID, host)
+			switch {
+			case err == nil:
+				c.Token = tok
+			case !errors.Is(err, accounts.ErrNotFound) && !errors.Is(err, accounts.ErrNoSecretKey):
+				s.accountError(w, err)
+				return
+			}
+		case !errors.Is(err, accounts.ErrForbidden):
+			s.accountError(w, err)
+			return
+		}
+	}
+	authed := c.Token != ""
+	if authed {
+		if _, err := s.cfg.Accounts.Record(r.Context(), accounts.Event{UserID: p.User.ID, Via: p.Via, OrgID: m.Org.ID,
+			Action: action, Target: host + "/" + login, Outcome: accounts.Success, Status: http.StatusOK}); err != nil {
 			s.accountError(w, err)
 			return
 		}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	listed, err := c.ListRepos(ctx, login)
+	listing, err := c.ListReposDetail(ctx, login)
 	if err != nil {
 		if errors.Is(err, forge.ErrNotFound) {
-			s.problem(w, http.StatusNotFound, errors.New(login+" was not found on "+host+", or it has no public repositories"))
+			what := "public repositories"
+			if authed {
+				what = "repositories " + whose + " can read"
+			}
+			s.problem(w, http.StatusNotFound, errors.New(login+" was not found on "+host+", or it has no "+what))
 			return
 		}
 		s.orgError(w, err)
 		return
 	}
+	listed := listing.Repos
 	added := map[string]bool{}
 	repos, err := s.cfg.Accounts.St.OrgRepositories(r.Context(), m.Org.ID)
 	if err != nil {
@@ -157,12 +193,18 @@ func (s *Server) handleImportList(w http.ResponseWriter, r *http.Request) {
 		if len(out) == maxImportListed {
 			break
 		}
-		if !keep(x, req.IncludeArchived, req.IncludeForks) {
+		if !keepListed(x, req.IncludeArchived, req.IncludeForks, authed) {
 			continue
 		}
 		name := forge.RepoName(host, login, x.Name)
+		desc := firstLineOf(x.Description)
+		if x.Private {
+			desc = "" // what a private repository says about itself stays with its owners
+		}
 		out = append(out, ImportCandidate{Name: x.Name, Repo: name, URL: c.CloneURL(login, x.Name), DefaultBranch: x.DefaultBranch,
-			Description: firstLineOf(x.Description), Archived: x.Archived, Fork: x.Fork, PushedAt: x.PushedAt, Private: x.Private, Added: added[name]})
+			Description: desc, Archived: x.Archived, Fork: x.Fork, Private: x.Private, Permission: x.Permission,
+			PushedAt: x.PushedAt, Added: added[name]})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"provider": kind, "host": host, "org": login, "repos": out, "truncated": len(out) == maxImportListed})
+	writeJSON(w, http.StatusOK, map[string]any{"provider": kind, "host": host, "org": login, "repos": out, "truncated": len(out) == maxImportListed,
+		"authenticated": authed, "sso_restricted": listing.SSORestricted})
 }

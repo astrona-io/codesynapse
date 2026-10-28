@@ -42,13 +42,14 @@ const (
 )
 
 // Tasks a provider can be routed to.
-var Tasks = []string{"security-triage", "review", "briefing", "fix", "memory", "embeddings", "code-annotation", "pr-summary", "cleanup-briefing", "local-answer", "compress"}
+var Tasks = []string{"security-triage", "review", "briefing", "fix", "memory", "embeddings", "code-annotation", "pr-summary", "cleanup-briefing", "local-answer", "local-draft", "compress"}
 
 // LocalTasks run only on a local model: they read a diff, the cleanup plan
-// or files of the developer's checkout (local-answer, the ask_local tool).
+// or files of the developer's checkout (local-answer and local-draft, the
+// ask_local and local_draft tools).
 // Without a routed local provider they pick the first local one; with none,
 // the task is unavailable.
-var LocalTasks = []string{"pr-summary", "cleanup-briefing", "local-answer", "compress"}
+var LocalTasks = []string{"pr-summary", "cleanup-briefing", "local-answer", "local-draft", "compress"}
 
 // ErrNoLocalModel means a local-only task has no local provider to run on.
 var ErrNoLocalModel = errors.New("this task runs only on a local model and none is configured")
@@ -224,7 +225,9 @@ type Config struct {
 	KVCacheTTL string `yaml:"kv_cache_ttl"`
 	// CompressPrompts has a local model shorten the prose of prompts bound for
 	// a cloud provider and asks the cloud model for terse answers (compress.go).
-	CompressPrompts bool `yaml:"compress_prompts"`
+	// Unset means on whenever the "compress" task resolves to a local model;
+	// false turns it off. It never makes a cloud model do the shortening.
+	CompressPrompts *bool `yaml:"compress_prompts"`
 }
 
 // Local reports whether the provider runs on this machine or network,

@@ -28,84 +28,166 @@ import (
 // and the time is spent to save the agent's tokens.
 const askLocalTimeout = 30 * time.Minute
 
-// answerAskLocal answers a tools/call for ask_local and reports whether it did.
+// answerAskLocal answers a tools/call for ask_local or local_draft and
+// reports whether it did.
 func (b *bridge) answerAskLocal(ctx context.Context, msg []byte, m rpcMessage) bool {
 	var c toolCall
-	if json.Unmarshal(msg, &c) != nil || c.Params.Name != asklocal.Tool || len(m.ID) == 0 {
+	if json.Unmarshal(msg, &c) != nil || len(m.ID) == 0 {
+		return false
+	}
+	answer := b.askLocal
+	switch c.Params.Name {
+	case asklocal.Tool:
+	case asklocal.DraftTool:
+		answer = b.localDraft
+	default:
 		return false
 	}
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, askLocalTimeout)
 	defer cancel()
 
-	result, failed := b.askLocal(ctx, msg, c)
+	result, failed := answer(ctx, msg, c)
 	out, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": result})
 	if err != nil {
 		out = errorResponse(m.ID, err)
 		failed = true
 	}
 	b.write(out)
-	b.reportLocal(ctx, asklocal.Tool, time.Since(start), len(out)/4, failed)
+	b.reportLocal(ctx, c.Params.Name, time.Since(start), len(out)/4, failed)
 	return true
 }
 
-func (b *bridge) askLocal(ctx context.Context, msg []byte, c toolCall) (map[string]any, bool) {
-	fail := func(err error) (map[string]any, bool) {
-		msg, _, _ := strings.Cut(err.Error(), "\n")
-		return map[string]any{"isError": true, "content": []map[string]any{{"type": "text", "text": msg}}}, true
-	}
-	var in asklocal.In
-	dec := json.NewDecoder(bytes.NewReader(c.Params.Arguments))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&in); err != nil {
-		return fail(fmt.Errorf("%w: %w", asklocal.ErrInvalid, err))
-	}
-	dir, err := b.checkout(ctx)
+// localFail is the tool result for err: its first line, as an error.
+func localFail(err error) (map[string]any, bool) {
+	msg, _, _ := strings.Cut(err.Error(), "\n")
+	return map[string]any{"isError": true, "content": []map[string]any{{"type": "text", "text": msg}}}, true
+}
+
+// localResult is the tool result for an answer of the local model.
+func localResult(v any) (map[string]any, bool) {
+	raw, err := json.Marshal(v)
 	if err != nil {
-		return fail(err)
-	}
-	files, skipped, err := readTracked(ctx, dir, in.Paths)
-	if err != nil {
-		return fail(err)
-	}
-	req := asklocal.Request{Question: in.Question, Files: files}
-	if err := req.Validate(); err != nil {
-		return fail(err)
-	}
-	repo := b.checkoutRepo(ctx)
-	if repo == "" {
-		return fail(errors.New("this checkout is not indexed in CodeSynapse; read the files yourself"))
-	}
-	session := b.session
-	if b.routes != nil {
-		chat, err := b.routes.forCall(ctx, msg)
-		if err != nil {
-			return fail(err)
-		}
-		session = chat.session
-	}
-	ectx, err := b.report.executionContext(ctx, session, session)
-	if err != nil {
-		return fail(err)
-	}
-	api := b.report
-	api.http = &http.Client{} // the context bounds it; the default client gives up after seconds
-	var ans asklocal.Answer
-	if err := api.do(ectx, http.MethodPost, "/api/v1/repos/"+url.PathEscape(repo)+"/ask-local", req, &ans); err != nil {
-		return fail(fmt.Errorf("ask_local: %w", err))
-	}
-	if len(skipped) > 0 {
-		ans.Note = strings.TrimSpace(ans.Note + " Not read (binary, too large or over the file limit): " + strings.Join(skipped, ", ") + ".")
-	}
-	raw, err := json.Marshal(ans)
-	if err != nil {
-		return fail(err)
+		return localFail(err)
 	}
 	return map[string]any{
 		"content":           []map[string]any{{"type": "text", "text": string(raw)}},
 		"structuredContent": json.RawMessage(raw),
 		"_meta":             map[string]any{"codesynapse/source": "local-model"},
 	}, false
+}
+
+// decodeArgs decodes the tool arguments strictly into v.
+func decodeArgs(c toolCall, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(c.Params.Arguments))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return fmt.Errorf("%w: %w", asklocal.ErrInvalid, err)
+	}
+	return nil
+}
+
+// postLocal sends req to an endpoint (ask-local, local-draft) of the
+// checkout's repository, as the chat's runtime session, and decodes out.
+func (b *bridge) postLocal(ctx context.Context, msg []byte, endpoint string, req, out any) error {
+	repo := b.checkoutRepo(ctx)
+	if repo == "" {
+		return errors.New("this checkout is not indexed in CodeSynapse; read the files yourself")
+	}
+	session := b.session
+	if b.routes != nil {
+		chat, err := b.routes.forCall(ctx, msg)
+		if err != nil {
+			return err
+		}
+		session = chat.session
+	}
+	ectx, err := b.report.executionContext(ctx, session, session)
+	if err != nil {
+		return err
+	}
+	api := b.report
+	api.http = &http.Client{} // the context bounds it; the default client gives up after seconds
+	return api.do(ectx, http.MethodPost, "/api/v1/repos/"+url.PathEscape(repo)+"/"+endpoint, req, out)
+}
+
+func (b *bridge) askLocal(ctx context.Context, msg []byte, c toolCall) (map[string]any, bool) {
+	var in asklocal.In
+	if err := decodeArgs(c, &in); err != nil {
+		return localFail(err)
+	}
+	dir, err := b.checkout(ctx)
+	if err != nil {
+		return localFail(err)
+	}
+	files, skipped, err := readTracked(ctx, dir, in.Paths)
+	if err != nil {
+		return localFail(err)
+	}
+	req := asklocal.Request{Question: in.Question, Files: files}
+	if err := req.Validate(); err != nil {
+		return localFail(err)
+	}
+	var ans asklocal.Answer
+	if err := b.postLocal(ctx, msg, "ask-local", req, &ans); err != nil {
+		return localFail(fmt.Errorf("ask_local: %w", err))
+	}
+	if len(skipped) > 0 {
+		ans.Note = strings.TrimSpace(ans.Note + " Not read (binary, too large or over the file limit): " + strings.Join(skipped, ", ") + ".")
+	}
+	return localResult(ans)
+}
+
+// localDraft has the local model draft code. A target range is sent with
+// the context files, so the model sees the lines its code replaces; a
+// target without a range may name a file that does not exist yet.
+func (b *bridge) localDraft(ctx context.Context, msg []byte, c toolCall) (map[string]any, bool) {
+	var in asklocal.DraftIn
+	if err := decodeArgs(c, &in); err != nil {
+		return localFail(err)
+	}
+	dir, err := b.checkout(ctx)
+	if err != nil {
+		return localFail(err)
+	}
+	target, start, end, err := asklocal.ParseSpec(in.Target)
+	if err != nil {
+		return localFail(err)
+	}
+	paths := in.Paths
+	if target != "" {
+		if target, err = gittools.CleanPath(target); err != nil {
+			return localFail(fmt.Errorf("%w: target: %w", asklocal.ErrInvalid, err))
+		}
+		if start > 0 {
+			paths = append(slices.Clone(paths), fmt.Sprintf("%s:%d-%d", target, start, end))
+		}
+	}
+	files, skipped, err := readTracked(ctx, dir, paths)
+	if err != nil {
+		return localFail(err)
+	}
+	req := asklocal.DraftRequest{Task: in.Task, Target: target, Files: files}
+	if start > 0 {
+		// readTracked clips the range to the file; the draft replaces what was sent.
+		for _, f := range files {
+			if f.Path == target && f.Start == start {
+				end = f.End
+			}
+		}
+		req.Target = fmt.Sprintf("%s:%d-%d", target, start, end)
+	}
+	if err := req.Validate(); err != nil {
+		return localFail(err)
+	}
+	var d asklocal.Draft
+	if err := b.postLocal(ctx, msg, "local-draft", req, &d); err != nil {
+		return localFail(fmt.Errorf("local_draft: %w", err))
+	}
+	if len(skipped) > 0 {
+		d.Notes = strings.TrimSpace(d.Notes + "\n\nNot read (binary, too large or over the file limit): " + strings.Join(skipped, ", ") + ".")
+	}
+	return localResult(d)
 }
 
 // readTracked reads the files paths name in the checkout at dir: files,
