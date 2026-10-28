@@ -88,12 +88,15 @@ func TestMinimalContextNamedIdentifiersOutrankTaskWords(t *testing.T) {
 	}
 }
 
-func TestKeywordsPutNamedIdentifiersFirst(t *testing.T) {
-	kw := keywords("Implement phase 2 of the hook counter for the token savings share, then wire agentStats and PriceReference")
-	assert.Equal(t, kw[0], "agentStats")
-	assert.Equal(t, kw[1], "PriceReference")
-	for _, generic := range []string{"Implement", "phase", "only", "start"} {
+func TestKeywordsKeepNamedIdentifiersUnderTheCap(t *testing.T) {
+	task := "Implement phase 2 of the plan: the hook counter for cached tokens, the savings share on the statistics page and dashboard cards, then wire agentStats and PriceReference"
+	kw := keywords(task)
+	assert.LessOrEqual(t, len(kw), maxKeywords)
+	assert.Contains(t, kw, "agentStats", "a late identifier survives the cap")
+	assert.Contains(t, kw, "PriceReference")
+	for _, generic := range []string{"Implement", "phase"} {
 		assert.NotContains(t, kw, generic)
 	}
+	assert.Equal(t, keywords("hook counter agentStats")[0], "hook", "under the cap the task's order stays")
 	assert.Contains(t, keywords("Handler Do main Usage"), "Handler", "a task of plain names keeps them")
 }

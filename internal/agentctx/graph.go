@@ -341,9 +341,12 @@ var (
 		"make": true, "use": true, "using": true, "should": true, "need": true, "want": true, "all": true, "any": true,
 		"not": true, "are": true, "can": true, "get": true, "set": true, "new": true, "change": true, "update": true,
 		"code": true, "function": true, "method": true, "file": true, "test": true, "tests": true, "bug": true,
-		// Task words that say what to do, not where: matched by name they
-		// pulled Implementations, RecordIngestPhase and AuditLog.only into
-		// briefs about unrelated work.
+	}
+	// taskWords say what to do, not where: matched by name they pulled
+	// Implementations, RecordIngestPhase and AuditLog.only into briefs about
+	// unrelated work. Unlike stopwords they are dropped capitalised too
+	// ("Implement phase 1 of …").
+	taskWords = map[string]bool{
 		"implement": true, "implements": true, "implementing": true, "phase": true, "step": true, "only": true,
 		"start": true, "helper": true, "reuse": true, "reuses": true,
 	}
@@ -376,28 +379,22 @@ func keywords(task string) []string {
 	var out []string
 	add := func(w string) {
 		lw := strings.ToLower(strings.Trim(w, "./()*"))
-		// A capitalised stopword ("Implement phase 1") is still prose.
-		if lw == "" || seen[lw] || (len(lw) < 3 && w == strings.ToLower(w)) || (stopwords[lw] && !identLike(w)) {
+		if lw == "" || seen[lw] || ((len(lw) < 3 || stopwords[lw]) && w == strings.ToLower(w)) || (taskWords[lw] && !identLike(w)) {
 			return
 		}
 		seen[lw] = true
 		out = append(out, strings.Trim(w, "./()*"))
 	}
 	words := identRe.FindAllString(task, -1)
-	// Whole identifiers precede prose and prose precedes split fragments, so
-	// neither the opening words of a long task nor an early CamelCase term
-	// can consume the keyword cap and hide a later exact identifier.
-	for _, code := range []bool{true, false} {
-		for _, w := range words {
-			if identLike(strings.TrimRight(w, ":-")) != code {
-				continue
-			}
-			add(w)
-			// Preserve punctuation in identifiers, but also accept a prose colon
-			// or dash following a symbol: "Handler: fix nil checks".
-			add(strings.TrimRight(w, ":-"))
-		}
+	// Whole identifiers precede split fragments so an early CamelCase term
+	// cannot consume the keyword cap and hide a later exact identifier.
+	for _, w := range words {
+		add(w)
+		// Preserve punctuation in identifiers, but also accept a prose colon
+		// or dash following a symbol: "Handler: fix nil checks".
+		add(strings.TrimRight(w, ":-"))
 	}
+	whole := len(out)
 	for _, w := range words {
 		if i := strings.LastIndexAny(w, "./"); i >= 0 {
 			add(w[i+1:])
@@ -406,7 +403,40 @@ func keywords(task string) []string {
 			add(part)
 		}
 	}
-	return out[:min(len(out), 12)]
+	return capKeywords(out, whole, maxKeywords)
+}
+
+// maxKeywords bounds the searches one task makes.
+const maxKeywords = 12
+
+// capKeywords keeps at most n keywords in task order. When there are more,
+// the identifiers among the first whole words are kept before prose and
+// fragments, so a long task that names agentStats late still searches it.
+// The order stays the task's: search uses the first few, and the task eval
+// scores it.
+func capKeywords(kw []string, whole, n int) []string {
+	if len(kw) <= n {
+		return kw
+	}
+	keep := make([]bool, len(kw))
+	left := n
+	for i := range whole {
+		if left > 0 && identLike(kw[i]) {
+			keep[i], left = true, left-1
+		}
+	}
+	for i := range kw {
+		if left > 0 && !keep[i] {
+			keep[i], left = true, left-1
+		}
+	}
+	out := make([]string, 0, n)
+	for i, k := range keep {
+		if k {
+			out = append(out, kw[i])
+		}
+	}
+	return out
 }
 
 func splitIdent(w string) []string {
