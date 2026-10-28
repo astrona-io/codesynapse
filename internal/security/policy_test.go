@@ -45,3 +45,27 @@ func TestApprovedOptionsFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+func TestApprovedOptionsInlineIgnores(t *testing.T) {
+	node := model.Node{Repo: "repo", Rule: "exec-variable", File: "tools/gen.go", Ignore: "fixed build input"}
+	for _, tc := range []struct {
+		name, config, want string
+	}{
+		{"approved", "version: 1\nscanners:\n  security:\n    inline_ignores: true\n", "In code: fixed build input"},
+		{"not requested", "version: 1\nscanners:\n  security:\n    ignore_rules:\n      - rule_id: yaml-hardcoded-secret\n        paths: [mock.yaml]\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			policy, err := repoconfig.Parse([]byte(tc.config))
+			require.NoError(t, err)
+			canonical, err := json.Marshal(policy.Config())
+			require.NoError(t, err)
+			approval := accounts.RepoPolicyApproval{OrgID: "org", Graph: "repo", Digest: policy.Digest(), ConfigJSON: string(canonical), AllowSuppressions: true, Reason: "Approved"}
+			opts := ApprovedOptions("low", "org", "repo", policy.Digest(), approval)
+			require.True(t, opts.Suppression != nil)
+			assert.Equal(t, opts.Suppression(node), tc.want)
+			unmarked := node
+			unmarked.Ignore = ""
+			assert.Equal(t, opts.Suppression(unmarked), "")
+		})
+	}
+}

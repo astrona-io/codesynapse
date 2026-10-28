@@ -65,6 +65,7 @@ func To(n model.Node) map[string]any {
 	setBool("is_test", n.IsTest)
 	setStr("severity", n.Severity)
 	setStr("rule", n.Rule)
+	setStr("ignore", n.Ignore)
 	setStr("version", n.Version)
 	setStr("fixed_version", n.FixedVersion)
 	setStr("reachability", n.Reachability)
@@ -110,7 +111,7 @@ func From(p map[string]any) model.Node {
 		StartLine: i("start_line"), EndLine: i("end_line"), Complexity: i("complexity"),
 		LOC: i("loc"), Level: i("level"), Churn: i("churn"),
 		Exported: b("exported"), IsTest: b("is_test"),
-		Severity: s("severity"), Rule: s("rule"), Version: s("version"), FixedVersion: s("fixed_version"),
+		Severity: s("severity"), Rule: s("rule"), Ignore: s("ignore"), Version: s("version"), FixedVersion: s("fixed_version"),
 		Reachability: s("reachability"), CodeAbsent: b("code_absent"), URL: s("url"), Indirect: b("indirect"), Latest: s("latest"), Deprecated: s("deprecated"), Behind: i("behind"),
 		Liveness: s("liveness"), Cleanup: s("cleanup"), Licenses: s("licenses"), Coverage: s("coverage"), Language: s("language"), Ecosystem: s("ecosystem"),
 		License: s("license"), LicenseSource: s("license_source"), Dev: b("dev"),
