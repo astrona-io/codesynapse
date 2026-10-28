@@ -121,7 +121,15 @@ export interface RuleGuide {
 export interface SecFinding {
   id: string; rule: string; title: string; severity: string; cwe?: string[]; location: string; detail: string; language?: string
   owner?: NodeRef; code_owners?: string[]; exposed: boolean; tested: boolean; priority: number; suppression_reason?: string
+  fingerprint?: string; triage?: SecTriage
 }
+export type TriageState = 'accepted_risk' | 'false_positive' | 'fixed_by'
+export interface SecTriage { state: TriageState; reference?: string; reason: string; by?: string; at: string; expires_at?: string }
+export interface FindingTriage {
+  fingerprint: string; rule: string; file: string; state: TriageState; reference?: string; reason: string
+  actor_name?: string; created_at: string; expires_at?: string
+}
+export interface FindingTriageList { triage: FindingTriage[]; states: TriageState[]; can_edit: boolean }
 export interface SecVuln {
   id: string; cve?: string[]; aliases?: string[]; summary: string; severity: string; cwe?: string[]
   module: string; version: string; via?: string; roots?: number; fixed?: string; reachability: 'called' | 'imported' | 'required'; url: string

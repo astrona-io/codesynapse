@@ -29,16 +29,22 @@ var severityBase = map[string]int{"critical": 90, "high": 70, "medium": 45, "low
 
 // Finding is a code finding with context.
 type Finding struct {
-	SuppressionReason string     `json:"suppression_reason,omitempty"`
-	ID                string     `json:"id"`
-	Rule              string     `json:"rule"`
-	Title             string     `json:"title"`
-	Severity          string     `json:"severity"`
-	CWE               []string   `json:"cwe,omitempty"`
-	Location          string     `json:"location"`
-	Language          string     `json:"language,omitempty"`
-	Detail            string     `json:"detail"`
-	Owner             *query.Ref `json:"owner,omitempty"`
+	SuppressionReason string `json:"suppression_reason,omitempty"`
+	// Triage is the organisation's recorded decision when it is what
+	// suppresses the finding.
+	Triage *Triage `json:"triage,omitempty"`
+	ID     string  `json:"id"`
+	// Fingerprint is the finding's stable key (model.FindingFingerprint):
+	// the same across line moves and re-indexing.
+	Fingerprint string     `json:"fingerprint,omitempty"`
+	Rule        string     `json:"rule"`
+	Title       string     `json:"title"`
+	Severity    string     `json:"severity"`
+	CWE         []string   `json:"cwe,omitempty"`
+	Location    string     `json:"location"`
+	Language    string     `json:"language,omitempty"`
+	Detail      string     `json:"detail"`
+	Owner       *query.Ref `json:"owner,omitempty"`
 	// CodeOwners are the CODEOWNERS owners of the finding's file.
 	CodeOwners []string `json:"code_owners,omitempty"`
 	// Exposed means the owner is an entry point or reachable from one
@@ -158,6 +164,10 @@ type Options struct {
 	// Suppression returns a reason only for an active, authorised tenant approval.
 	// Raw findings and findings beyond the report limit remain unchanged.
 	Suppression func(model.Node) string
+	// Triage holds the organisation's active triage decisions by finding
+	// fingerprint. A finding is suppressed when Suppression or Triage says
+	// so; the approved policy's reason wins when both do.
+	Triage map[string]Triage
 	// MinSeverity drops findings and vulnerabilities below it ("" keeps all).
 	MinSeverity string
 }
@@ -182,6 +192,11 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 		if err != nil {
 			return rep, err
 		}
+		var ownerNode *model.Node
+		if len(owners) > 0 {
+			ownerNode = &owners[0].Node
+		}
+		fv.Fingerprint = model.FindingFingerprint(n.Rule, model.FindingOwnerName(ownerNode, n.File), n.File)
 		if len(owners) > 0 {
 			o := owners[0].Node
 			ref := query.RefOf(o)
@@ -223,6 +238,10 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 		}
 		if opts.Suppression != nil {
 			fv.SuppressionReason = redact.Summary(redact.Free(strings.TrimSpace(opts.Suppression(n))), 500)
+		}
+		if t, ok := opts.Triage[fv.Fingerprint]; ok && fv.SuppressionReason == "" {
+			fv.Triage = &t
+			fv.SuppressionReason = t.Label()
 		}
 		if fv.SuppressionReason != "" {
 			rep.SuppressedCounts[n.Severity]++
@@ -567,7 +586,7 @@ func WriteMarkdown(w io.Writer, r Report) error {
 		b.WriteString("\n")
 	}
 	if len(r.Suppressed) > 0 {
-		fmt.Fprintf(&b, "## Approved suppressions\n\n%s. These findings remain stored and are excluded from this tenant's grade.\n\n| Sev | Rule | Location | Reason |\n|---|---|---|---|\n", counts(r.SuppressedCounts))
+		fmt.Fprintf(&b, "## Approved suppressions and triage\n\n%s. These findings remain stored and are excluded from this tenant's grade.\n\n| Sev | Rule | Location | Reason |\n|---|---|---|---|\n", counts(r.SuppressedCounts))
 		escape := strings.NewReplacer("|", "\\|", "\n", " ", "\r", " ")
 		for _, f := range r.Suppressed {
 			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", f.Severity, f.Rule, escape.Replace(f.Location), escape.Replace(f.SuppressionReason))

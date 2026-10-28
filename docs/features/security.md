@@ -88,6 +88,12 @@ At ingest `security.CoverageOf` counts what rules read, and `security.Inventory`
 
 A repository where nothing is scannable gets **N/A**, not a grade. The report also names the commit it describes.
 
+## Triage
+
+An editor of a repository can triage a finding on the Security page: **Accepted risk**, **False positive** or **Fixed by** a commit SHA or pull request number, with a reason and an optional expiry. Viewers see the decisions but not the action. The decision belongs to the organisation, not to the shared graph: it is stored in PostgreSQL with who made it and when, every set and clear is written to the audit log (`finding.triage.set`, `finding.triage.clear`) in the same transaction, and another organisation that indexes the same repository sees the finding as before.
+
+A triaged finding stays in the graph. The report moves it to the suppressed list with its state, reason, who and when, and leaves it out of the active counts and the grade. Once the expiry passes it counts again. Decisions follow a finding's fingerprint (rule, owning symbol and file, no line numbers), so they survive code moving within a file; a finding that moves to another symbol or file needs a new decision. When an approved repository policy already suppresses a finding, the policy reason is shown. The API is `GET`/`PUT /api/v1/repos/{repo}/triage` and `DELETE /api/v1/repos/{repo}/triage/{fingerprint}`; MCP reads the decisions through `security_report` but cannot change them. At most 5,000 decisions are kept per repository.
+
 ## Owners (CODEOWNERS)
 
 When the repository has a CODEOWNERS file (`.github/CODEOWNERS`, `CODEOWNERS`, `docs/CODEOWNERS` or `.gitlab/CODEOWNERS`, the first found, as GitHub looks), every finding names the owners of its file, and the report counts the listed findings per owner, most severe work first, with a "no owner" row for files no rule covers. The Security page shows that as **Findings by owner** (a row filters the findings to that owner), `codesynapse audit` as a table, SARIF as a `code_owners` property, and `get_pr_context` lists the owners of the changed files as `code_owners`, the people to ask for review.
