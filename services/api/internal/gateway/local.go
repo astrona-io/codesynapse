@@ -16,9 +16,12 @@ import (
 const (
 	// RouteHeader tells the agent where the answer came from.
 	RouteHeader = "X-CodeSynapse-Route"
-	// maxLocalBody: bigger requests are agent turns with long context, which
-	// the main model should read.
-	maxLocalBody = 256 << 10
+	// maxLocalBody bounds what the local model is offered whatever its
+	// context window, so a request held for it stays small in memory.
+	maxLocalBody = 4 << 20
+	// unknownWindowBody is the cap when the operator did not say how large
+	// the local model's context is.
+	unknownWindowBody = 256 << 10
 	// defaultWait is how long a request queues for the local model before the
 	// gateway sends it to the cloud instead.
 	defaultWait = 20 * time.Second
@@ -28,16 +31,20 @@ const (
 // reported nothing.
 type Usage struct{ In, Out int }
 
-// Local answers small requests, with or without tools, from a local
+// Local answers requests that fit it, with or without tools, from a local
 // OpenAI-compatible model. Anything else goes to the cloud.
 type Local struct {
 	BaseURL string
 	Model   string
 	APIKey  string
 	Client  *http.Client
-	// Eligible says whether a requested model name is a small background
-	// model that the local one may replace; nil means SmallModel.
+	// Eligible says whether a requested model name is one the local model
+	// may replace; nil means every model when the request's organisation
+	// answers locally first (WithLocalFirst), SmallModel otherwise.
 	Eligible func(model string) bool
+	// ContextWindow is the local model's context in tokens; a request whose
+	// estimate does not fit goes to the cloud. 0 means unknown.
+	ContextWindow int
 	// Acquire takes the local model's queue slot and returns its release.
 	Acquire func(ctx context.Context) (func(), error)
 	// Wait bounds the time in the queue; 0 means defaultWait.
@@ -58,6 +65,28 @@ func (l *Local) client() *http.Client {
 
 // SmallModel is the default Eligible: Claude's small model class.
 func SmallModel(model string) bool { return strings.Contains(strings.ToLower(model), "haiku") }
+
+type localFirstKey struct{}
+
+// WithLocalFirst records whether the request's organisation offers every
+// model's requests to the local model first, not only the small model's.
+func WithLocalFirst(ctx context.Context, on bool) context.Context {
+	return context.WithValue(ctx, localFirstKey{}, on)
+}
+
+func localFirst(ctx context.Context) bool {
+	on, _ := ctx.Value(localFirstKey{}).(bool)
+	return on
+}
+
+// fits estimates the request at four bytes per token (JSON overcounts, which
+// errs towards the cloud) plus the answer it asks room for.
+func (l *Local) fits(size, maxTokens int) bool {
+	if l.ContextWindow <= 0 {
+		return size <= unknownWindowBody
+	}
+	return size <= maxLocalBody && size/4+max(maxTokens, 0) <= l.ContextWindow
+}
 
 type anthropicIn struct {
 	Model         string            `json:"model"`
@@ -113,13 +142,16 @@ func present(raw json.RawMessage) bool {
 
 // translate builds the OpenAI-compatible request; ok is false when the
 // request is not one the local model should take.
-func (l *Local) translate(body []byte) (in anthropicIn, out []byte, ok bool) {
-	if len(body) > maxLocalBody || json.Unmarshal(body, &in) != nil {
+func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out []byte, ok bool) {
+	if len(body) > maxLocalBody || json.Unmarshal(body, &in) != nil || !l.fits(len(body), in.MaxTokens) {
 		return in, nil, false
 	}
 	elig := l.Eligible
 	if elig == nil {
 		elig = SmallModel
+		if localFirst(ctx) {
+			elig = func(string) bool { return true }
+		}
 	}
 	if !elig(in.Model) || len(in.Messages) == 0 || (in.Thinking.Type != "" && in.Thinking.Type != "disabled") {
 		return in, nil, false
@@ -174,7 +206,7 @@ func (l *Local) translate(body []byte) (in anthropicIn, out []byte, ok bool) {
 // serve tries to answer from the local model. It returns false, with nothing
 // written, when the cloud should take the request.
 func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (Usage, bool) {
-	in, req, ok := l.translate(body)
+	in, req, ok := l.translate(ctx, body)
 	if !ok {
 		return Usage{}, false
 	}
@@ -213,12 +245,15 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
 	next := func() (chunk, bool) { return readChunk(sc) }
-	if len(in.Tools) > 0 {
+	// A request for a bigger model than the small one may ask more than the
+	// local model can do: hold its answer and keep it only when it is whole.
+	strict := !SmallModel(in.Model)
+	if len(in.Tools) > 0 || strict {
 		// A tool call is only usable whole: collect the answer, check it, and
 		// let the cloud take the request if the local model got it wrong.
 		first, more := next()
 		ans, ok := collect(first, more, next, declaredTools(in.Tools))
-		if !ok || sc.Err() != nil {
+		if !ok || sc.Err() != nil || (strict && !ans.complete()) {
 			return Usage{}, false
 		}
 		w.Header().Set(RouteHeader, "local")

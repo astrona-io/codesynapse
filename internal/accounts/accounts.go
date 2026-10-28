@@ -428,6 +428,10 @@ type Store interface {
 	// own space (true when the organisation never chose).
 	MemberReposEnabled(ctx context.Context, orgID string) (bool, error)
 	SetMemberReposEnabled(ctx context.Context, orgID string, enabled bool) error
+	// GatewayLocalFirst says whether the gateway offers every model's
+	// requests to the local model first (true when it never chose).
+	GatewayLocalFirst(ctx context.Context, orgID string) (bool, error)
+	SetGatewayLocalFirst(ctx context.Context, orgID string, on bool) error
 	// ImageScan reads the image findings of a repository namespace; ok is
 	// false when none were uploaded. SetImageScan replaces them and
 	// DeleteImageScan removes them.

@@ -9,8 +9,9 @@ import (
 	"strings"
 )
 
-// maxCollected bounds what the gateway holds of one tool-using answer before
-// it checks it; a runaway local model goes to the cloud instead.
+// maxCollected bounds what the gateway holds of one held answer (tool-using,
+// or for a bigger model than the small one) before it checks it; a runaway
+// local model goes to the cloud instead.
 const maxCollected = 1 << 20
 
 // oaMsg is one OpenAI chat message.
@@ -183,6 +184,12 @@ type answer struct {
 	Finish string
 	In     int
 	Out    int
+}
+
+// complete says the answer ended on its own with something in it: not cut
+// off by the token limit and not a stream that stopped without a reason.
+func (a answer) complete() bool {
+	return a.Finish != "" && a.Finish != "length" && (strings.TrimSpace(a.Text) != "" || len(a.Calls) > 0)
 }
 
 func (a answer) stopReason() string {

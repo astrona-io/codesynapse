@@ -197,7 +197,7 @@ func TestLocalToolChoiceMapping(t *testing.T) {
 				body += `,"tool_choice":` + tc.choice
 			}
 			l := &Local{}
-			_, out, ok := l.translate([]byte(body + `}`))
+			_, out, ok := l.translate(t.Context(), []byte(body+`}`))
 			if name == "unknown type" {
 				assert.True(t, !ok, "unknown tool_choice goes to the cloud")
 				return

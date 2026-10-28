@@ -7,6 +7,9 @@ type GatewayTarget struct {
 	BaseURL string
 	Model   string
 	APIKey  string
+	// ContextWindow is the model's context in tokens (0 when not known); the
+	// gateway sends requests that would not fit to the cloud.
+	ContextWindow int
 	// Acquire takes the provider's queue slot, so gateway traffic and
 	// CodeSynapse's own calls share one GPU in turn.
 	Acquire func(ctx context.Context) (func(), error)
@@ -21,7 +24,7 @@ func (r *Registry) GatewayTarget() (GatewayTarget, bool) {
 		if !p.Gateway || !p.Local() || p.Model == "" || p.BaseURL == "" {
 			continue
 		}
-		return GatewayTarget{BaseURL: p.BaseURL, Model: p.Model, APIKey: p.apiKey, Acquire: r.slots[p.Name].acquire}, true
+		return GatewayTarget{BaseURL: p.BaseURL, Model: p.Model, APIKey: p.apiKey, ContextWindow: p.ContextWindow, Acquire: r.slots[p.Name].acquire}, true
 	}
 	return GatewayTarget{}, false
 }
