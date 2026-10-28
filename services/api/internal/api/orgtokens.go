@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"time"
@@ -93,20 +94,55 @@ func hostOf(remote string) string {
 	return u.Hostname()
 }
 
-// orgAuth opens orgID's token for remote's host (accounts.ErrNotFound
-// without one).
-func (s *Server) orgAuth(ctx context.Context, orgID, remote string) (gitx.Auth, error) {
+// repoAuth picks the one credential an entry may use: a personal entry
+// (ownerID set) only its owner's own token, an organisation entry only the
+// organisation's. There is no fallback between the two, so a member cannot
+// pull what the organisation's token reads into a space its admins do not
+// see.
+func (s *Server) repoAuth(ctx context.Context, orgID, ownerID, remote string) (gitx.Auth, error) {
 	host := hostOf(remote)
-	tok, err := s.cfg.Accounts.OpenGitToken(ctx, orgID, host)
+	var (
+		tok string
+		err error
+	)
+	if ownerID != "" {
+		tok, err = s.cfg.Accounts.OpenUserGitToken(ctx, orgID, ownerID, host)
+	} else {
+		tok, err = s.cfg.Accounts.OpenGitToken(ctx, orgID, host)
+	}
 	if err != nil {
 		return gitx.Auth{}, err
 	}
 	return gitx.Auth{Host: host, Token: tok}, nil
 }
 
-// proveAccess checks that orgID's own token reads remote.
-func (s *Server) proveAccess(ctx context.Context, orgID, remote string) (gitx.Auth, error) {
-	auth, err := s.orgAuth(ctx, orgID, remote)
+// entryAuth is repoAuth for orgID's entry of graph (accounts.ErrNotFound
+// when orgID does not have it).
+func (s *Server) entryAuth(ctx context.Context, orgID, graph, remote string) (gitx.Auth, error) {
+	e, err := s.orgEntry(ctx, orgID, graph)
+	if err != nil {
+		return gitx.Auth{}, err
+	}
+	return s.repoAuth(ctx, orgID, e.OwnerID, remote)
+}
+
+func (s *Server) orgEntry(ctx context.Context, orgID, graph string) (accounts.Repository, error) {
+	entries, err := s.cfg.Accounts.St.GraphRepositories(ctx, graph)
+	if err != nil {
+		return accounts.Repository{}, err
+	}
+	for _, e := range entries {
+		if e.OrgID == orgID {
+			return e, nil
+		}
+	}
+	return accounts.Repository{}, fmt.Errorf("repository: %w", accounts.ErrNotFound)
+}
+
+// proveAccess checks that the entry's own token (ownerID's for a personal
+// entry, orgID's otherwise) reads remote.
+func (s *Server) proveAccess(ctx context.Context, orgID, ownerID, remote string) (gitx.Auth, error) {
+	auth, err := s.repoAuth(ctx, orgID, ownerID, remote)
 	if err != nil {
 		return gitx.Auth{}, err
 	}
@@ -136,7 +172,7 @@ func (s *Server) verifyAccess(ctx context.Context, graph string) {
 
 // verifyLink checks one private entry and reports whether it is usable.
 func (s *Server) verifyLink(ctx context.Context, l accounts.Repository) bool {
-	_, err := s.proveAccess(ctx, l.OrgID, l.Remote)
+	_, err := s.proveAccess(ctx, l.OrgID, l.OwnerID, l.Remote)
 	access := accounts.AccessOK
 	switch {
 	case err == nil:
@@ -160,7 +196,8 @@ func (s *Server) verifyLink(ctx context.Context, l accounts.Repository) bool {
 }
 
 // reverifyOrgHost re-checks orgID's private repositories on host after its
-// token changed, and returns the graphs that became usable again.
+// token changed, and returns the graphs that became usable again. Personal
+// entries are left alone: the organisation's token is not theirs.
 func (s *Server) reverifyOrgHost(ctx context.Context, orgID, host string) []string {
 	repos, err := s.cfg.Accounts.St.OrgRepositories(ctx, orgID)
 	if err != nil {
@@ -168,15 +205,38 @@ func (s *Server) reverifyOrgHost(ctx context.Context, orgID, host string) []stri
 	}
 	restored := []string{}
 	for _, l := range repos {
-		if l.Visibility == accounts.Private && hostOf(l.Remote) == host && !l.Usable() && s.verifyLink(ctx, l) {
+		if !l.Personal() && l.Visibility == accounts.Private && hostOf(l.Remote) == host && !l.Usable() && s.verifyLink(ctx, l) {
 			restored = append(restored, l.Graph)
 		}
 	}
 	return restored
 }
 
-// pushAuth picks credentials to push a fix branch: an organisation pushes
-// with its own token. Single-tenant installs use the installation token.
+// reverifyUserHost re-checks userID's own private repositories on host, in
+// every organisation they belong to, after their token changed.
+func (s *Server) reverifyUserHost(ctx context.Context, userID, host string) []string {
+	ms, err := s.cfg.Accounts.St.UserMemberships(ctx, userID)
+	if err != nil {
+		return nil
+	}
+	restored := []string{}
+	for _, m := range ms {
+		repos, err := s.cfg.Accounts.St.OrgRepositories(ctx, m.Org.ID)
+		if err != nil {
+			continue
+		}
+		for _, l := range repos {
+			if l.OwnerID == userID && l.Visibility == accounts.Private && hostOf(l.Remote) == host && !l.Usable() && s.verifyLink(ctx, l) {
+				restored = append(restored, l.Graph)
+			}
+		}
+	}
+	return restored
+}
+
+// pushAuth picks credentials to push a fix branch: the entry's own token
+// (the owner's for a personal repository, the organisation's otherwise).
+// Single-tenant installs use the installation token.
 func (s *Server) pushAuth(r *http.Request, graph, remote string) (gitx.Auth, error) {
 	if s.cfg.Accounts == nil {
 		return s.installPushAuth(remote), nil
@@ -185,11 +245,23 @@ func (s *Server) pushAuth(r *http.Request, graph, remote string) (gitx.Auth, err
 	if err != nil {
 		return gitx.Auth{}, err
 	}
-	auth, err := s.orgAuth(r.Context(), org, remote)
+	return s.entryPushAuth(r.Context(), org, graph, remote)
+}
+
+func (s *Server) entryPushAuth(ctx context.Context, orgID, graph, remote string) (gitx.Auth, error) {
+	e, err := s.orgEntry(ctx, orgID, graph)
 	if err != nil {
+		return gitx.Auth{}, err
+	}
+	auth, err := s.repoAuth(ctx, orgID, e.OwnerID, remote)
+	switch {
+	case err == nil:
+		return auth, nil
+	case e.Personal():
+		return gitx.Auth{}, errors.New("pushing a fix branch to your own repository needs your Git token for " + hostOf(remote) + " (Profile, Git tokens)")
+	default:
 		return gitx.Auth{}, errors.New("pushing a fix branch needs your organisation's Git token for " + hostOf(remote))
 	}
-	return auth, nil
 }
 
 // pushAuthFor is pushAuth for a context without a request (workers): the
@@ -202,14 +274,11 @@ func (s *Server) pushAuthFor(ctx context.Context, graph, remote string) (gitx.Au
 	if !ok || reach.Ambiguous || reach.OrgID == "" {
 		return gitx.Auth{}, accounts.ErrNotFound
 	}
-	auth, err := s.orgAuth(ctx, reach.OrgID, remote)
-	if err != nil {
-		return gitx.Auth{}, errors.New("pushing a fix branch needs your organisation's Git token for " + hostOf(remote))
-	}
-	return auth, nil
+	return s.entryPushAuth(ctx, reach.OrgID, graph, remote)
 }
 
-// syncAuth uses only the selected tenant's credentials in accounts mode.
+// syncAuth uses only the selected tenant entry's credentials in accounts
+// mode.
 func (s *Server) syncAuth(ctx context.Context, graph, remote string) gitx.Auth {
 	if s.cfg.Accounts == nil {
 		return s.authFor(remote)
@@ -218,7 +287,7 @@ func (s *Server) syncAuth(ctx context.Context, graph, remote string) gitx.Auth {
 	if !ok || reach.Ambiguous {
 		return gitx.Auth{}
 	}
-	if auth, err := s.orgAuth(ctx, reach.OrgID, remote); err == nil {
+	if auth, err := s.entryAuth(ctx, reach.OrgID, graph, remote); err == nil {
 		return auth
 	}
 	return gitx.Auth{} // public repositories need none

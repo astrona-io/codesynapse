@@ -370,6 +370,27 @@ export interface GitToken {
   preview: string
   updated_at: string
 }
+// Your own token (GET /me/git-tokens): only for repositories in your space.
+export interface UserGitToken {
+  host: string
+  preview: string
+  created_at: string
+  updated_at: string
+}
+// One repository from POST /imports/list. private is set only when the
+// listing used your own token (space "me").
+export interface ImportCandidate {
+  name: string
+  repo: string
+  url: string
+  default_branch?: string
+  description?: string
+  archived?: boolean
+  fork?: boolean
+  private?: boolean
+  pushed_at?: string
+  added: boolean
+}
 
 // Relationship-based access (teams, repository grants and shares).
 export interface TeamMember { user: AccountUser; relation: 'member' | 'maintainer' }

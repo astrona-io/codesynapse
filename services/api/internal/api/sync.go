@@ -81,25 +81,37 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			s.problem(w, http.StatusBadRequest, err)
 			return
 		}
+		p, _ := principal(r.Context())
 		vis := accounts.Public
 		auth = gitx.Auth{}
-		if !publicRemote(r.Context(), remote) {
-			orgAuth, err := s.proveAccess(r.Context(), m.Org.ID, remote)
+		// A repository in the member's own space is read only with their
+		// own token, an organisation's only with the organisation's.
+		req.Space = defaultSpace(m, req.Space)
+		ctx := r.Context()
+		if !publicRemote(ctx, remote) {
+			owner, where, whose := "", "your organisation's settings", "your organisation's token"
+			if req.Space == spaceMe {
+				owner, where, whose = p.User.ID, "your profile (Git tokens)", "your token"
+			}
+			entryAuth, err := s.proveAccess(ctx, m.Org.ID, owner, remote)
 			switch {
 			case errors.Is(err, accounts.ErrNotFound):
-				s.problem(w, http.StatusForbidden, errors.New("this repository is private or does not exist; add a Git token for "+hostOf(remote)+" in your organisation's settings"))
+				s.problem(w, http.StatusForbidden, errors.New("this repository is private or does not exist; add a Git token for "+hostOf(remote)+" in "+where))
 				return
 			case errors.Is(err, accounts.ErrNoSecretKey):
 				s.accountError(w, err)
 				return
 			case errors.Is(err, gitx.ErrNoAccess):
-				s.problem(w, http.StatusForbidden, errors.New("your organisation's token for "+hostOf(remote)+" cannot read this repository"))
+				s.problem(w, http.StatusForbidden, errors.New(whose+" for "+hostOf(remote)+" cannot read this repository"))
 				return
 			case err != nil:
 				s.problem(w, http.StatusBadGateway, err)
 				return
 			}
-			vis, auth, private = accounts.Private, orgAuth, true
+			vis, auth, private = accounts.Private, entryAuth, true
+			if owner != "" {
+				ctx = withOwnerProof(ctx, m.Org.ID, owner, req.Name)
+			}
 		}
 		if n, err := s.st.Node(r.Context(), model.NodeID(req.Name, model.KindRepository, req.Name)); err == nil {
 			// The name alone must not open a graph: an organisation could
@@ -108,7 +120,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 				s.problem(w, http.StatusConflict, errors.New("the name "+req.Name+" is already used for another source; choose another name"))
 				return
 			}
-			if err := s.linkRepo(r.Context(), req.Name, remote, vis, req.Space); err != nil {
+			if err := s.linkRepo(ctx, req.Name, remote, vis, req.Space); err != nil {
 				s.linkError(w, err)
 				return
 			}
@@ -119,7 +131,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]any{"repo": req.Name, "shared": true, "visibility": vis, "note": "already indexed: linked to your organisation"})
 			return
 		}
-		if err := s.linkRepo(r.Context(), req.Name, remote, vis, req.Space); err != nil {
+		if err := s.linkRepo(ctx, req.Name, remote, vis, req.Space); err != nil {
 			s.linkError(w, err)
 			return
 		}

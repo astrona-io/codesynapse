@@ -264,8 +264,8 @@ func (s *Server) startRecordedClone(jobCtx context.Context, rec accounts.JobReco
 	auth := gitx.Auth{}
 	if p.Private {
 		var err error
-		if auth, err = s.orgAuth(jobCtx, rec.OrgID, p.Remote); err != nil {
-			return fmt.Errorf("the organisation's Git token is no longer available: %w", err)
+		if auth, err = s.entryAuth(jobCtx, rec.OrgID, rec.Repo, p.Remote); err != nil {
+			return fmt.Errorf("the repository's Git token is no longer available: %w", err)
 		}
 	}
 	org, authorize := s.jobAuthorization(jobCtx, rec.Repo, accounts.Admin)
@@ -310,7 +310,7 @@ func (s *Server) resumeJob(ctx context.Context, rec accounts.JobRecord) error {
 		if err := s.removePartialClone(rec.Repo); err != nil {
 			return err
 		}
-		auth, aerr := s.orgAuth(jobCtx, rec.OrgID, p.Remote)
+		auth, aerr := s.entryAuth(jobCtx, rec.OrgID, rec.Repo, p.Remote)
 		if aerr != nil {
 			auth = gitx.Auth{} // public repositories need none
 		}

@@ -9,9 +9,14 @@ const route = useRoute()
 const router = useRouter()
 const user = computed(() => session.me.value?.user)
 
-type Tab = 'profile' | 'security' | 'organisations'
-const tabs: { id: Tab; label: string }[] = [{ id: 'profile', label: 'Profile' }, { id: 'security', label: 'Security' }, { id: 'organisations', label: 'Organisations' }]
-const tab = computed<Tab>(() => (tabs.some((t) => t.id === route.query.tab) ? route.query.tab as Tab : 'profile'))
+type Tab = 'profile' | 'security' | 'organisations' | 'git'
+// Your own Git tokens read repositories in your own space only; a restricted
+// session (root, setup) has no space, so it gets no tab.
+const tabs = computed<{ id: Tab; label: string }[]>(() => [
+  { id: 'profile', label: 'Profile' }, { id: 'security', label: 'Security' }, { id: 'organisations', label: 'Organisations' },
+  ...(session.restricted.value ? [] : [{ id: 'git' as Tab, label: 'Git tokens' }]),
+])
+const tab = computed<Tab>(() => (tabs.value.some((t) => t.id === route.query.tab) ? route.query.tab as Tab : 'profile'))
 const pick = (t: Tab) => router.replace({ query: { ...route.query, tab: t === 'profile' ? undefined : t } })
 
 const initials = computed(() => {
@@ -220,6 +225,14 @@ const manages = (role: string) => role === 'owner' || role === 'admin'
         </div>
         <p v-if="ssoError" class="notice notice--danger" role="alert">{{ ssoError }}</p>
       </section>
+    </div>
+
+    <!-- Git tokens -->
+    <div v-else-if="tab === 'git'" class="stack" role="tabpanel">
+      <GitTokensEditor path="me/git-tokens" title="Your Git tokens" :can-manage="true"
+        empty-note="You can add public repositories to your own space. Add a token to add private ones." remove-note="in your own space become hidden at their next sync.">
+        <p class="muted small">Used for repositories in your own space: to list, clone, sync and push them. Never for your organisation's repositories (those use the organisation's tokens), and never with an API key. Store a read-only token per Git host; it is encrypted and shown only as a preview. CodeSynapse checks at every sync that it can still read each private repository in your space; if it cannot, the repository is hidden until a working token is saved.</p>
+      </GitTokensEditor>
     </div>
 
     <!-- Organisations -->

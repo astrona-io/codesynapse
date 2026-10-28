@@ -17,9 +17,12 @@ import (
 // (public or proved private access, same-remote linking, the initial admin
 // grant). The installation-wide watch list (orgs.go) stays single-tenant.
 //
-// Listing is anonymous: organisation Git tokens are opened only to clone,
-// fetch or push, so the list shows public repositories. Private ones are
-// added by URL.
+// Listing for the organisation is anonymous: organisation Git tokens are
+// opened only to clone, fetch or push, so that list shows public
+// repositories and private ones are added by URL. Listing for the caller's
+// own space (space "me") uses the caller's own token for the host when they
+// saved one, so it also shows the private repositories that token reads;
+// adding one proves access with the same token again.
 
 // maxImportListed bounds one answer; forge already caps the pages it reads.
 const maxImportListed = 2000
@@ -30,6 +33,9 @@ type importListRequest struct {
 	Org             string `json:"org"`
 	IncludeArchived bool   `json:"include_archived"`
 	IncludeForks    bool   `json:"include_forks"`
+	// Space "me" lists with the caller's own token; anything else lists
+	// anonymously for the organisation.
+	Space string `json:"space"`
 }
 
 // ImportCandidate is one listed repository. URL is built from the validated
@@ -43,6 +49,7 @@ type ImportCandidate struct {
 	Archived      bool   `json:"archived,omitempty"`
 	Fork          bool   `json:"fork,omitempty"`
 	PushedAt      string `json:"pushed_at,omitempty"`
+	Private       bool   `json:"private,omitempty"`
 	// Added says the selected organisation already has this repository.
 	Added bool `json:"added"`
 }
@@ -64,6 +71,13 @@ func (s *Server) publicForgeClient(ctx context.Context, kind forge.Kind, host, l
 // archived and fork filters: public, with a name that is safe to clone.
 func keepListed(x forge.Repo, archived, forks bool) bool {
 	return validRepoSegment(x.Name) && !x.Private && (archived || !x.Archived) && (forks || !x.Fork)
+}
+
+// keepOwnListed is keepListed for a list read with the caller's own token,
+// which may also show the private repositories that token reads.
+func keepOwnListed(x forge.Repo, archived, forks bool) bool {
+	x.Private = false
+	return keepListed(x, archived, forks)
 }
 
 func (s *Server) importRoutes() {
@@ -95,10 +109,28 @@ func (s *Server) handleImportList(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
+	if req.Space != "" && req.Space != spaceOrg && req.Space != spaceMe {
+		s.problem(w, http.StatusBadRequest, errors.New(`space must be "org" or "me"`))
+		return
+	}
 	c, err := s.publicForgeClient(r.Context(), kind, host, login)
 	if err != nil {
 		s.problem(w, http.StatusBadRequest, err)
 		return
+	}
+	keep := keepListed
+	if req.Space == spaceMe {
+		// Never the organisation's token: what a member lists for their own
+		// space is what their own token reads. Without one it stays public.
+		tok, err := s.cfg.Accounts.OpenUserGitToken(r.Context(), m.Org.ID, p.User.ID, host)
+		switch {
+		case err == nil:
+			c.Token, keep = tok, keepOwnListed
+		case errors.Is(err, accounts.ErrNotFound), errors.Is(err, accounts.ErrNoSecretKey):
+		default:
+			s.accountError(w, err)
+			return
+		}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
@@ -125,12 +157,12 @@ func (s *Server) handleImportList(w http.ResponseWriter, r *http.Request) {
 		if len(out) == maxImportListed {
 			break
 		}
-		if !keepListed(x, req.IncludeArchived, req.IncludeForks) {
+		if !keep(x, req.IncludeArchived, req.IncludeForks) {
 			continue
 		}
 		name := forge.RepoName(host, login, x.Name)
 		out = append(out, ImportCandidate{Name: x.Name, Repo: name, URL: c.CloneURL(login, x.Name), DefaultBranch: x.DefaultBranch,
-			Description: firstLineOf(x.Description), Archived: x.Archived, Fork: x.Fork, PushedAt: x.PushedAt, Added: added[name]})
+			Description: firstLineOf(x.Description), Archived: x.Archived, Fork: x.Fork, PushedAt: x.PushedAt, Private: x.Private, Added: added[name]})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"provider": kind, "host": host, "org": login, "repos": out, "truncated": len(out) == maxImportListed})
 }

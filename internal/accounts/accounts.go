@@ -208,6 +208,19 @@ type GitToken struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// UserGitToken is a person's own credential for one Git host, used only
+// for the repositories in their own space. Sealed like GitToken but bound
+// to the person (userTokenPurpose), so it never opens as an organisation's.
+type UserGitToken struct {
+	UserID    string    `json:"-"`
+	Host      string    `json:"host"`
+	Preview   string    `json:"preview"`
+	KeyID     string    `json:"-"`
+	Sealed    []byte    `json:"-"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // Event is an audit log entry. Entries form a hash chain (see audit.go):
 // each Hash covers the entry and the previous entry's Hash, so a changed or
 // removed entry is detectable.
@@ -542,6 +555,12 @@ type Store interface {
 	GitToken(ctx context.Context, orgID, host string) (GitToken, error) // ErrNotFound
 	GitTokens(ctx context.Context, orgID string) ([]GitToken, error)    // by host
 	DeleteGitToken(ctx context.Context, orgID, host string) error       // ErrNotFound
+
+	// PutUserGitToken inserts or replaces a person's own token for a host.
+	PutUserGitToken(ctx context.Context, t UserGitToken) error
+	UserGitToken(ctx context.Context, userID, host string) (UserGitToken, error) // ErrNotFound
+	UserGitTokens(ctx context.Context, userID string) ([]UserGitToken, error)    // by host
+	DeleteUserGitToken(ctx context.Context, userID, host string) error           // ErrNotFound
 
 	// AddEvent appends e to the audit chain: under a lock, it sets
 	// e.PrevHash to the last entry's hash and e.Hash = e.ChainHash().

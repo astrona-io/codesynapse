@@ -36,6 +36,7 @@ func TestContract(t *testing.T) {
 	accountstest.RunExecutionSessions(t, st)
 	accountstest.RunGateway(t, st)
 	accountstest.RunMemberRepos(t, st)
+	accountstest.RunUserGitTokens(t, st)
 	accountstest.RunRepoPolicy(t, st)
 	accountstest.RunIngest(t, st)
 
@@ -126,6 +127,6 @@ func TestBootstrapContract(t *testing.T) {
 // reset drops every table the migrations create.
 func reset(ctx context.Context, t *testing.T, st *Store) {
 	t.Helper()
-	_, err := st.db.Exec(ctx, "DROP TABLE IF EXISTS org_member_repos, org_gateway, audit_segments, org_watches, image_scans, menu_prefs, notifications_seen, login_attempts, schedules, leases, jobs, idp_memberships, sso_states, external_identities, identity_providers, installation_setup, ingest_runs, ingest_repository_totals, ingest_metric_stream, repository_annotations, repository_policy_approvals, execution_sessions, access_policy_outbox, relation_tuples, teams, org_git_tokens, repositories, audit_head, events, api_keys, sessions, memberships, orgs, users, schema_migrations CASCADE")
+	_, err := st.db.Exec(ctx, "DROP TABLE IF EXISTS org_member_repos, org_gateway, audit_segments, org_watches, image_scans, menu_prefs, notifications_seen, login_attempts, schedules, leases, jobs, idp_memberships, sso_states, external_identities, identity_providers, installation_setup, ingest_runs, ingest_repository_totals, ingest_metric_stream, repository_annotations, repository_policy_approvals, execution_sessions, access_policy_outbox, relation_tuples, teams, user_git_tokens, org_git_tokens, repositories, audit_head, events, api_keys, sessions, memberships, orgs, users, schema_migrations CASCADE")
 	require.NoError(t, err)
 }

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/gitx"
 )
 
 // A person's own account from the profile page: name, email and sessions
@@ -18,6 +19,66 @@ func (s *Server) profileRoutes() {
 	s.account("POST /api/v1/me/sessions/end-others", governanceRoute, s.handleEndOtherSessions)
 	s.account("GET /api/v1/me/menu", businessRoute, s.handleMenuPrefs)
 	s.account("PUT /api/v1/me/menu", businessRoute, s.handleSetMenuPrefs)
+	s.account("GET /api/v1/me/git-tokens", businessRoute, s.handleMyGitTokens)
+	s.account("PUT /api/v1/me/git-tokens/{host}", businessRoute, s.handleSetMyGitToken)
+	s.account("DELETE /api/v1/me/git-tokens/{host}", businessRoute, s.handleRemoveMyGitToken)
+}
+
+// A person's own Git tokens read the private repositories in their own
+// space, never the organisation's. The service refuses API keys.
+
+func (s *Server) handleMyGitTokens(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.caller(w, r)
+	if !ok {
+		return
+	}
+	ts, err := s.cfg.Accounts.UserGitTokens(r.Context(), p)
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tokens": ts, "enabled": s.cfg.Accounts.Secrets != nil})
+}
+
+func (s *Server) handleSetMyGitToken(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.caller(w, r)
+	if !ok {
+		return
+	}
+	var req gitTokenRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		s.problem(w, http.StatusBadRequest, err)
+		return
+	}
+	host, err := accounts.NormalizeHost(r.PathValue("host"))
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	// The same rules as remotes: https, no internal hosts unless allowed.
+	if _, err := gitx.ValidateRemote(r.Context(), "https://"+host+"/", gitx.RemoteOptions{AllowPrivate: s.cfg.AllowPrivateGit}); err != nil {
+		s.problem(w, http.StatusBadRequest, err)
+		return
+	}
+	t, err := s.cfg.Accounts.SetUserGitToken(r.Context(), p, host, req.Token)
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	restored := s.reverifyUserHost(r.Context(), p.User.ID, host)
+	writeJSON(w, http.StatusOK, map[string]any{"token": t, "restored": restored})
+}
+
+func (s *Server) handleRemoveMyGitToken(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.caller(w, r)
+	if !ok {
+		return
+	}
+	if err := s.cfg.Accounts.RemoveUserGitToken(r.Context(), p, r.PathValue("host")); err != nil {
+		s.accountError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
