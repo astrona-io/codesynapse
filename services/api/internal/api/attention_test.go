@@ -5,6 +5,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -170,4 +172,58 @@ func TestAgentUsageUsesEachRepositorysRatio(t *testing.T) {
 	// Ratio 10: each returned token stands for 9 more that file reading
 	// would have cost; the failed calls answered nothing.
 	assert.Equal(t, u.AvoidedTokens, 500*9)
+}
+
+// A member's own private repository that lost access is that member's to
+// see: another member of the organisation must not learn its name.
+func TestLostAccessShowsPersonalEntriesToTheirOwnerOnly(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	acc := accounts.NewService(acctmem.New(), true)
+	bootstrapAccounts(t, acc)
+	ada, org, err := acc.SignUp(ctx, "ada@example.com", "Ada", pw)
+	require.NoError(t, err)
+	srv := New(ctx, Config{Accounts: acc}, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for _, r := range []accounts.Repository{
+		{Graph: "acme/shared"},
+		{Graph: "ada/diary", OwnerID: ada.ID},
+		{Graph: "ada/working", OwnerID: ada.ID},
+	} {
+		r.OrgID, r.AddedBy, r.Visibility, r.Remote, r.AddedAt = org.ID, ada.ID, accounts.Private, "https://github.com/"+r.Graph, time.Now()
+		require.NoError(t, acc.St.AddRepository(ctx, r))
+		if r.Graph != "ada/working" {
+			require.NoError(t, acc.St.SetRepositoryAccess(ctx, org.ID, r.Graph, accounts.AccessLost, time.Now()))
+		}
+	}
+	links := map[string]string{"acme/shared": "/settings/git-tokens", "ada/diary": "/settings/profile?tab=git"}
+
+	for _, tc := range []struct {
+		name   string
+		caller string
+		want   []string
+	}{
+		{"the owner sees their own and the organisation's", ada.ID, []string{"acme/shared", "ada/diary"}},
+		{"another member sees the organisation's only", "bob", []string{"acme/shared"}},
+		{"no principal sees the organisation's only", "", []string{"acme/shared"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := context.WithValue(ctx, scopeKey{}, scope{orgs: []accounts.Membership{{Org: org, Role: accounts.Viewer}}})
+			if tc.caller != "" {
+				c = context.WithValue(c, principalKey{}, accounts.Principal{User: accounts.User{ID: tc.caller}, Via: "session"})
+			}
+			lost, err := srv.lostAccess(c)
+			require.NoError(t, err)
+			var got []string
+			for _, l := range lost {
+				got = append(got, l.Graph)
+				item := lostAccessItem(l)
+				assert.Equal(t, item.Link, links[l.Graph], l.Graph)
+				assert.Equal(t, item.Kind, "access")
+			}
+			slices.Sort(got)
+			assert.Equal(t, strings.Join(got, ","), strings.Join(tc.want, ","))
+		})
+	}
+	org1 := lostAccessItem(accounts.Repository{Graph: "acme/shared"})
+	assert.Equal(t, org1.Title, "Your organisation can no longer read this private repository", "organisation entries keep their wording")
 }
