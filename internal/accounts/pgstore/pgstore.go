@@ -540,12 +540,12 @@ func (s *Store) TouchAPIKey(ctx context.Context, keyID string, at time.Time) err
 	return err
 }
 
-const repoCols = "org_id, graph, remote, visibility, added_by, added_at, access, verified_at"
+const repoCols = "org_id, graph, remote, visibility, added_by, added_at, access, verified_at, owner_id"
 
 // AddRepository implements accounts.Store.
 func (s *Store) AddRepository(ctx context.Context, r accounts.Repository) error {
 	return s.PolicyTransaction(ctx, r.OrgID, func(st accounts.Store) error {
-		if r.AddedBy == "" {
+		if r.AddedBy == "" || (r.OwnerID != "" && r.OwnerID != r.AddedBy) {
 			return accounts.ErrInvalidInput
 		}
 		u, err := st.UserByID(ctx, r.AddedBy)
@@ -570,8 +570,8 @@ func (s *Store) AddRepository(ctx context.Context, r accounts.Repository) error 
 }
 
 func (s *Store) addRepository(ctx context.Context, r accounts.Repository) error {
-	_, err := s.db.Exec(ctx, "INSERT INTO repositories ("+repoCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-		r.OrgID, r.Graph, r.Remote, r.Visibility, r.AddedBy, r.AddedAt, cmp.Or(r.Access, accounts.AccessOK), r.VerifiedAt)
+	_, err := s.db.Exec(ctx, "INSERT INTO repositories ("+repoCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+		r.OrgID, r.Graph, r.Remote, r.Visibility, r.AddedBy, r.AddedAt, cmp.Or(r.Access, accounts.AccessOK), r.VerifiedAt, r.OwnerID)
 	return mapErr(err, "repository")
 }
 
@@ -1065,7 +1065,7 @@ func (s *Store) SetPlatformAdmin(ctx context.Context, userID string, admin bool)
 
 func scanRepo(r pgx.CollectableRow) (accounts.Repository, error) {
 	var x accounts.Repository
-	err := r.Scan(&x.OrgID, &x.Graph, &x.Remote, &x.Visibility, &x.AddedBy, &x.AddedAt, &x.Access, &x.VerifiedAt)
+	err := r.Scan(&x.OrgID, &x.Graph, &x.Remote, &x.Visibility, &x.AddedBy, &x.AddedAt, &x.Access, &x.VerifiedAt, &x.OwnerID)
 	x.AddedAt = x.AddedAt.UTC()
 	if x.VerifiedAt != nil {
 		v := x.VerifiedAt.UTC()

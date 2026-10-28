@@ -22,6 +22,7 @@ type Store struct {
 	users          map[string]accounts.User
 	menuPrefs      map[string]accounts.MenuPrefs
 	gateway        map[string]bool
+	memberRepos    map[string]bool
 	imageScans     map[string]accounts.ImageScan
 	seen           map[string]time.Time // notifications seen, per user
 	orgs           map[string]accounts.Org
@@ -538,7 +539,7 @@ func (s *Store) DropAuditSegment(_ context.Context, id int64) error {
 // AddRepository implements accounts.Store.
 func (s *Store) AddRepository(ctx context.Context, r accounts.Repository) error {
 	return s.PolicyTransaction(ctx, r.OrgID, func(st accounts.Store) error {
-		if r.AddedBy == "" {
+		if r.AddedBy == "" || (r.OwnerID != "" && r.OwnerID != r.AddedBy) {
 			return accounts.ErrInvalidInput
 		}
 		u, err := st.UserByID(ctx, r.AddedBy)

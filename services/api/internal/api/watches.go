@@ -452,6 +452,16 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 	}
 }
 
+// watchLink treats a repository the organisation already has in another
+// space as added: the watch has nothing to do.
+func watchLink(err error) error {
+	var taken errSpaceTaken
+	if errors.As(err, &taken) {
+		return nil
+	}
+	return err
+}
+
 // addWatched attaches one new public repository the way POST /repos does:
 // an indexed graph is linked only for the same remote, otherwise it is
 // cloned anonymously. The audit entry is written first; without it nothing
@@ -474,9 +484,12 @@ func (s *Server) addWatched(ctx context.Context, w accounts.OrgWatch, remote, na
 		if n.URL == "" || !sameRemote(n.URL, remote) {
 			return errors.New("the name is already used for another source")
 		}
-		return s.linkRepo(ctx, name, remote, accounts.Public)
+		return watchLink(s.linkRepo(ctx, name, remote, accounts.Public, ""))
 	}
-	if err := s.linkRepo(ctx, name, remote, accounts.Public); err != nil {
+	var taken errSpaceTaken
+	if err := s.linkRepo(ctx, name, remote, accounts.Public, ""); errors.As(err, &taken) {
+		return nil // nothing to clone: the organisation already has it
+	} else if err != nil {
 		return err
 	}
 	org, authorize := s.jobAuthorization(ctx, name, accounts.Admin)

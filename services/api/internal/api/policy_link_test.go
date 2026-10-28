@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -58,4 +59,39 @@ func TestFilteredGraphLinkRequiresMatchingTenantApproval(t *testing.T) {
 	require.NoError(t, f.store.ReplaceRepo(ctx, storetest.Repo, graph))
 	entry.OrgID = other.ID
 	require.NoError(t, link(entry), "unfiltered graphs can be shared without an exclusion approval")
+}
+
+// One entry per organisation and graph: a repository in a member's own
+// space keeps the organisation from adding it too, and the reverse.
+func TestRepositorySpaces(t *testing.T) {
+	f := newRuntimeFixture(t, Config{})
+	ctx := t.Context()
+	principal := accounts.Principal{User: f.user, Via: "session"}
+	id, err := f.accounts.RegisterExecutionSession(ctx, f.user.ID, f.org.ID, "spaces")
+	require.NoError(t, err)
+	workCtx, err := execution.With(context.WithValue(ctx, principalKey{}, principal), id)
+	require.NoError(t, err)
+	entry := func(graph, owner string) accounts.Repository {
+		return accounts.Repository{OrgID: f.org.ID, Graph: graph, Visibility: accounts.Public, OwnerID: owner, AddedBy: f.user.ID, AddedAt: time.Now()}
+	}
+
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/mine", f.user.ID), accounts.Member))
+	assert.True(t, errors.Is(f.server.linkPolicyRepository(workCtx, entry("space/mine", f.user.ID), accounts.Member), accounts.ErrExists), "the same space again")
+	var taken errSpaceTaken
+	assert.True(t, errors.As(f.server.linkPolicyRepository(workCtx, entry("space/mine", ""), accounts.Admin), &taken), "not again for the organisation")
+	assert.Equal(t, taken.existing.OwnerID, f.user.ID)
+
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/shared", ""), accounts.Admin))
+	assert.True(t, errors.As(f.server.linkPolicyRepository(workCtx, entry("space/shared", f.user.ID), accounts.Member), &taken), "not again in a member's space")
+
+	require.NoError(t, f.accounts.St.SetMemberReposEnabled(ctx, f.org.ID, false))
+	err = f.server.linkPolicyRepository(workCtx, entry("space/later", f.user.ID), accounts.Member)
+	assert.True(t, errors.Is(err, accounts.ErrForbidden), "members' own repositories are turned off")
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/later", ""), accounts.Admin), "the organisation can still add it")
+
+	for err, code := range map[error]int{errSpaceTaken{}: 409, errMemberReposOff: 403, accounts.ErrInvalidInput: 400} {
+		w := httptest.NewRecorder()
+		f.server.linkError(w, err)
+		assert.Equal(t, w.Code, code, err.Error())
+	}
 }

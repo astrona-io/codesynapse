@@ -283,8 +283,32 @@ func visibleRepos(ctx context.Context, repos []model.Node) []model.Node {
 	return slices.DeleteFunc(slices.Clone(repos), func(n model.Node) bool { return !sc.sees(n.Name) })
 }
 
-// linkRepo atomically links the repository and grants its creating member ADMIN.
-func (s *Server) linkRepo(ctx context.Context, graph, remote, visibility string) error {
+// Spaces a repository can be added to (POST /repos "space").
+const (
+	spaceOrg = "org" // the organisation's: owners and admins add it, the default access applies
+	spaceMe  = "me"  // the adder's own: members add it while the organisation allows it
+)
+
+// errSpaceTaken refuses adding a repository the organisation already has in
+// another space: there is one entry per organisation, and a member cannot
+// take an organisation repository into their own space to get around its
+// grants.
+type errSpaceTaken struct{ existing accounts.Repository }
+
+func (e errSpaceTaken) Error() string {
+	if !e.existing.Personal() {
+		return "this repository is already an organisation repository; ask its repository admin for access"
+	}
+	return "a member already added this repository to their own space; ask them for access"
+}
+
+// errMemberReposOff says why a member's own repository was refused.
+var errMemberReposOff = fmt.Errorf("%w: your organisation does not let members add their own repositories; ask an admin to add it", accounts.ErrForbidden)
+
+// linkRepo atomically links the repository and grants its creating member
+// ADMIN. space is spaceOrg, spaceMe or empty, which picks the organisation
+// for its owners and admins and the member's own space for everyone else.
+func (s *Server) linkRepo(ctx context.Context, graph, remote, visibility, space string) error {
 	if s.cfg.Accounts == nil {
 		return nil
 	}
@@ -304,12 +328,40 @@ func (s *Server) linkRepo(ctx context.Context, graph, remote, visibility string)
 	if _, err := s.cfg.Accounts.ResolveExecutionSession(ctx, p.User.ID, m.Org.ID, id.SessionID); err != nil {
 		return err
 	}
-	err = s.linkPolicyRepository(ctx, accounts.Repository{OrgID: m.Org.ID, Graph: graph, Remote: remote,
-		Visibility: visibility, AddedBy: p.User.ID, AddedAt: time.Now().UTC().Truncate(time.Microsecond)}, accounts.Member)
+	if space == "" {
+		space = spaceMe
+		if m.Role.AtLeast(accounts.Admin) {
+			space = spaceOrg
+		}
+	}
+	entry := accounts.Repository{OrgID: m.Org.ID, Graph: graph, Remote: remote,
+		Visibility: visibility, AddedBy: p.User.ID, AddedAt: time.Now().UTC().Truncate(time.Microsecond)}
+	least := accounts.Admin
+	switch space {
+	case spaceOrg:
+	case spaceMe:
+		entry.OwnerID, least = p.User.ID, accounts.Member
+	default:
+		return fmt.Errorf("%w: space must be %q or %q", accounts.ErrInvalidInput, spaceOrg, spaceMe)
+	}
+	err = s.linkPolicyRepository(ctx, entry, least)
 	if errors.Is(err, accounts.ErrExists) {
-		return nil // already linked: adding it again is fine
+		return nil // already linked in the same space: adding it again is fine
 	}
 	return err
+}
+
+// linkError answers a failed linkRepo.
+func (s *Server) linkError(w http.ResponseWriter, err error) {
+	var taken errSpaceTaken
+	switch {
+	case errors.As(err, &taken):
+		s.problem(w, http.StatusConflict, err)
+	case errors.Is(err, accounts.ErrForbidden), errors.Is(err, accounts.ErrInvalidInput):
+		s.accountError(w, err)
+	default:
+		s.problem(w, http.StatusBadRequest, err)
+	}
 }
 
 // A shared filtered graph is usable only under the same reviewed policy. The
@@ -354,7 +406,29 @@ func (s *Server) linkPolicyRepository(ctx context.Context, entry accounts.Reposi
 				}
 			}
 		}
-		return st.AddRepository(ctx, entry)
+		if entry.Personal() {
+			on, err := st.MemberReposEnabled(ctx, entry.OrgID)
+			if err != nil {
+				return err
+			}
+			if !on {
+				return errMemberReposOff
+			}
+		}
+		err = st.AddRepository(ctx, entry)
+		if !errors.Is(err, accounts.ErrExists) {
+			return err
+		}
+		entries, lerr := st.GraphRepositories(ctx, entry.Graph)
+		if lerr != nil {
+			return lerr
+		}
+		for _, e := range entries {
+			if e.OrgID == entry.OrgID && e.OwnerID != entry.OwnerID {
+				return errSpaceTaken{existing: e}
+			}
+		}
+		return err
 	})
 }
 
@@ -423,6 +497,11 @@ func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request) {
 	if err == nil && vis == accounts.Private {
 		// Recheck the organisation credential before exposing private content.
 		s.verifyLink(r.Context(), accounts.Repository{OrgID: o.ID, Graph: req.Graph, Remote: n.URL, Visibility: vis, Access: accounts.AccessOK})
+	}
+	var taken errSpaceTaken
+	if errors.As(err, &taken) {
+		s.problem(w, http.StatusConflict, err)
+		return
 	}
 	if err != nil {
 		s.accountError(w, err)

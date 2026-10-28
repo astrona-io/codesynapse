@@ -101,6 +101,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
                 <span v-if="splitName(r.name).prefix" class="repo-owner">{{ splitName(r.name).prefix }}</span><strong>{{ splitName(r.name).base }}</strong>
               </NuxtLink>
               <span class="badge">{{ r.managed ? 'cloned' : 'mounted' }}</span>
+              <span v-if="r.personal" class="badge badge--violet" title="A member's own repository: only they and the people they share it with can open it">personal</span>
               <span v-if="r.stale" class="badge badge--amber">out of date</span>
             </div>
             <p class="repo-verdict" :class="{ bad: (r.findings.critical ?? 0) + (r.findings.high ?? 0) }">

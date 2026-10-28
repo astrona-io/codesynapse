@@ -13,6 +13,8 @@ const error = ref('')
 const picked = reactive<Record<string, boolean>>({})
 const outcome = reactive<Record<string, { ok: boolean; text: string }>>({})
 const filter = ref('')
+const session = useSession()
+const { space, canOrg, canMe, body: spaceBody } = useRepoSpace()
 
 async function list() {
   error.value = ''
@@ -45,7 +47,7 @@ async function addChosen() {
   try {
     for (const r of chosen.value) {
       try {
-        const res = await apiPost<{ shared?: boolean }>('repos', { url: r.url, name: r.repo })
+        const res = await apiPost<{ shared?: boolean }>('repos', { url: r.url, name: r.repo, ...spaceBody() })
         outcome[r.repo] = { ok: true, text: res?.shared ? 'linked' : 'queued' }
         picked[r.repo] = false
       } catch (e) {
@@ -96,6 +98,11 @@ async function addChosen() {
           <button :disabled="!chosen.length || adding" @click="addChosen">{{ adding ? 'Adding…' : chosen.length ? `Add ${chosen.length} selected` : 'Add selected' }}</button>
         </div>
       </div>
+      <fieldset v-if="session.accounts.value" class="space">
+        <legend>Add to</legend>
+        <label class="check"><input v-model="space" type="radio" value="org" :disabled="!canOrg"> The organisation<span v-if="!canOrg" class="muted small"> (owners and admins)</span></label>
+        <label class="check"><input v-model="space" type="radio" value="me" :disabled="!canMe"> Only me<span v-if="!canMe" class="muted small"> (turned off by your organisation)</span></label>
+      </fieldset>
       <div class="row opts">
         <input v-model="filter" class="find" placeholder="Filter repositories" aria-label="Filter repositories">
         <label class="check"><input type="checkbox" :checked="allPicked" :disabled="!open.length" @change="pickAll(($event.target as HTMLInputElement).checked)"> Select all shown</label>
@@ -123,6 +130,8 @@ async function addChosen() {
 .add label { display: grid; gap: 4px; }
 .check { display: flex !important; align-items: center; gap: 8px; }
 .grow { flex: 1 1 220px; }
+.space { display: flex; flex-wrap: wrap; gap: 6px 16px; border: 0; padding: 0; margin: 0; }
+.space legend { font-weight: 600; margin-bottom: 4px; }
 .org { display: grid; gap: 12px; }
 .org-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .opts { gap: 18px; flex-wrap: wrap; align-items: center; }

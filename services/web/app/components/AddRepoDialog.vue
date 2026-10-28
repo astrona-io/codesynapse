@@ -10,6 +10,7 @@ interface Listing { provider: string; host: string; org: string; repos: Candidat
 const props = defineProps<{ open: boolean; cloneEnabled?: boolean; hostTokens?: string[]; busy?: boolean }>()
 const emit = defineEmits<{ close: []; added: [] }>()
 const session = useSession()
+const { space, canOrg, canMe, body: spaceBody } = useRepoSpace()
 
 const PROVIDERS = [{ v: '', label: 'Detect from host' }, { v: 'github', label: 'GitHub' }, { v: 'forgejo', label: 'Forgejo / Gitea / Codeberg' }, { v: 'gitlab', label: 'GitLab' }]
 const dialog = ref<HTMLDialogElement | null>(null)
@@ -28,7 +29,7 @@ async function register() {
   regError.value = ''
   regOk.value = ''
   try {
-    const job = await apiPost<Job & { shared?: boolean }>('repos', { url: reg.url.trim(), branch: reg.branch.trim(), name: reg.name.trim() })
+    const job = await apiPost<Job & { shared?: boolean }>('repos', { url: reg.url.trim(), branch: reg.branch.trim(), name: reg.name.trim(), ...spaceBody() })
     regOk.value = job.shared ? 'Already indexed: linked to your organisation.' : `Cloning ${job.repo}… it appears in the list when indexing finishes.`
     reg.url = ''; reg.branch = ''; reg.name = ''
     emit('added')
@@ -77,7 +78,7 @@ async function addChosen() {
   try {
     for (const r of chosen.value) {
       try {
-        const res = await apiPost<{ shared?: boolean }>('repos', { url: r.url, name: r.repo })
+        const res = await apiPost<{ shared?: boolean }>('repos', { url: r.url, name: r.repo, ...spaceBody() })
         outcome[r.repo] = { ok: true, text: res?.shared ? 'linked' : 'queued' }
         picked[r.repo] = false
       } catch (e) {
@@ -124,6 +125,11 @@ async function addChosen() {
             <label class="grow">Branch <span class="dim">(optional)</span><input v-model="reg.branch" placeholder="default branch"></label>
             <label class="grow">Name <span class="dim">(optional)</span><input v-model="reg.name" placeholder="owner/name from the URL"></label>
           </div>
+          <fieldset v-if="session.accounts.value" class="space">
+            <legend>Add to</legend>
+            <label class="check"><input v-model="space" type="radio" value="org" :disabled="!canOrg"> The organisation<span v-if="!canOrg" class="dim"> (owners and admins)</span></label>
+            <label class="check"><input v-model="space" type="radio" value="me" :disabled="!canMe"> Only me<span v-if="!canMe" class="dim"> (turned off by your organisation)</span></label>
+          </fieldset>
           <div class="row">
             <button type="submit" :disabled="!reg.url || busy || cloneEnabled === false">Clone &amp; index</button>
             <span class="muted small">Shallow clone over HTTPS; nothing is pushed.</span>
@@ -165,6 +171,11 @@ async function addChosen() {
               <p class="muted small"><strong class="mono">{{ listing.org }}/*</strong> · {{ plural(listing.repos.length, 'repository', 'repositories') }} · {{ listing.repos.filter((r) => r.added).length }} already added<template v-if="listing.truncated"> · only the first {{ listing.repos.length }} are shown</template></p>
               <button type="button" :disabled="(!chosen.length && !autoAdd) || adding" @click="addChosen">{{ adding ? 'Adding…' : chosen.length ? `Add ${chosen.length} selected` : autoAdd ? 'Watch for new repositories' : 'Add selected' }}</button>
             </div>
+            <fieldset v-if="session.accounts.value" class="space">
+              <legend>Add to</legend>
+              <label class="check"><input v-model="space" type="radio" value="org" :disabled="!canOrg"> The organisation<span v-if="!canOrg" class="dim"> (owners and admins)</span></label>
+              <label class="check"><input v-model="space" type="radio" value="me" :disabled="!canMe"> Only me<span v-if="!canMe" class="dim"> (turned off by your organisation)</span></label>
+            </fieldset>
             <label class="check"><input v-model="autoAdd" type="checkbox"> Automatically add new repositories {{ listing.org }} creates later</label>
             <p v-if="watchNote" class="muted small">{{ watchNote }}</p>
             <div class="row opts">
@@ -198,6 +209,9 @@ async function addChosen() {
 .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .form { display: grid; gap: 10px; }
 .form label { display: grid; gap: 4px; }
+.space { display: flex; flex-wrap: wrap; gap: 6px 16px; border: 0; padding: 0; margin: 0; }
+.space legend { font-weight: 600; margin-bottom: 4px; }
+.space label.check { display: flex; }
 .grow { flex: 1 1 180px; }
 .opts { gap: 18px; flex-wrap: wrap; align-items: center; }
 .check { display: flex !important; align-items: center; gap: 8px; }

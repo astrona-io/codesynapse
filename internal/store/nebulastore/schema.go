@@ -143,7 +143,7 @@ var schemaItems = func() []schemaItem {
 	// Access projections (access.go): one tag for every kind, and their own
 	// edge types, apart from the code graph.
 	items = append(items, schemaItem{name: "access_vertex", cols: slices.Concat(texts("aid", "kind", "tenant_id", "user_id", "team_id", "repo_id", "graph_id", "default_repo_access", "digest"),
-		longs("policy_revision"), bools("active", "inherits_default", "usable")),
+		longs("policy_revision"), bools("active", "inherits_default", "usable", "personal")),
 		indexes: []index{{"access_by_tenant_revision", []indexCol{{"tenant_id", 64}, {"policy_revision", 0}}}, {"access_by_tenant_kind", []indexCol{{"tenant_id", 64}, {"kind", 24}}}}})
 	for _, k := range accessEdges {
 		items = append(items, schemaItem{name: k, edge: true, cols: slices.Concat(texts("tenant_id", "role"), longs("rank"))})

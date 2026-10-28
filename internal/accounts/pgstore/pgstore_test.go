@@ -35,6 +35,7 @@ func TestContract(t *testing.T) {
 	accountstest.RunPolicyRecovery(t, st)
 	accountstest.RunExecutionSessions(t, st)
 	accountstest.RunGateway(t, st)
+	accountstest.RunMemberRepos(t, st)
 	accountstest.RunRepoPolicy(t, st)
 	accountstest.RunIngest(t, st)
 

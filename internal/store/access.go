@@ -40,7 +40,7 @@ func AccessRows(s model.AccessSnapshot) (map[model.NodeKind][]map[string]any, []
 		edge(model.KindTeam, t, model.KindOrganization, s.TenantID, "BELONGS_TO", "TEAM_BELONGS_TO_ORG", "")
 	}
 	for _, r := range s.Repos {
-		add(model.KindAccessRepository, r.ID, map[string]any{"repo_id": r.ID, "graph_id": r.GraphID, "usable": r.Usable})
+		add(model.KindAccessRepository, r.ID, map[string]any{"repo_id": r.ID, "graph_id": r.GraphID, "usable": r.Usable, "personal": r.Personal})
 		edge(model.KindAccessRepository, r.ID, model.KindOrganization, s.TenantID, "BELONGS_TO", "REPO_BELONGS_TO_ORG", "")
 	}
 	for _, m := range s.Members {

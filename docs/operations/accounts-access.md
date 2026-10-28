@@ -78,6 +78,21 @@ Organisation owner and admin roles manage membership and policy; they do not gra
 
 Settings → Organisation controls the default and owner recovery; Settings → Teams and each repository's Access page manage grants. Changes are audited. See the [upgrade notes](../ACCESS_CONTROL_PLAN.md#implementation-and-upgrade) before upgrading an existing accounts database.
 
+### Organisation and personal repositories
+
+Each organisation has at most one entry per repository, and that entry lives in one of two spaces:
+
+- **The organisation:** grants, team grants and the organisation default (`READ_ONLY` or `NONE`) apply as above. Adding a repository here needs the Admin role.
+- **Only me:** a member's personal repository. The organisation default does not apply, so other members see it only if the owner grants them (or a team) access. Adding one needs the Member role and the setting below.
+
+Whoever adds a repository gets an explicit admin grant on it, in either space. The dashboard marks personal entries with a "personal" badge, and the Add dialog and the import page ask where to add it. Without a choice, owners and admins add to the organisation and other members to their own space.
+
+Settings → Organisation → "Members may add their own repositories" turns personal additions on or off. It is on until an admin changes it (`GET`/`PUT /api/v1/accounts/orgs/{org}/member-repos`; changing it needs Admin in a signed-in session and is audited as `org.member_repos.set`). Turning it off stops new personal additions with 403; entries that already exist stay.
+
+Adding a repository that already has an entry in the other space, or in another member's space, answers 409. CodeSynapse does not move entries between spaces automatically, because that would change who can read the code without the owner's say. Adding it again in the same space does nothing. Organisation watches always add to the organisation space.
+
+Private personal repositories are cloned with the organisation's Git token, the same as organisation repositories. Personal Git tokens are not supported yet.
+
 ## API route scoping
 
 Every API route is registered with `s.route(pattern, policy, handler)` in `services/api/internal/api/scope.go`.

@@ -20,7 +20,7 @@ var accessCols = map[model.NodeKind][]string{
 	model.KindOrganization:     {"default_repo_access"},
 	model.KindUser:             {"user_id", "active", "inherits_default"},
 	model.KindTeam:             {"team_id"},
-	model.KindAccessRepository: {"repo_id", "graph_id", "usable"},
+	model.KindAccessRepository: {"repo_id", "graph_id", "usable", "personal"},
 	"AccessHead":               {"digest"},
 }
 
@@ -278,7 +278,7 @@ func (s *Store) AccessAt(ctx context.Context, tenant string, revision int64, use
 		}
 	}
 	fallback := 0
-	if u["inherits_default"] == true && o["default_repo_access"] == "READ_ONLY" {
+	if u["inherits_default"] == true && o["default_repo_access"] == "READ_ONLY" && r["personal"] != true {
 		fallback = 1
 	}
 	rank := fallback

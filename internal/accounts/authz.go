@@ -57,6 +57,8 @@ type RepoAccess struct {
 	// Via explains the strongest path: "organisation", "user" or "team".
 	Via      string `json:"via"`
 	Revision int64  `json:"revision"`
+	// Personal: a member's own repository, not the organisation's.
+	Personal bool `json:"personal,omitempty"`
 }
 
 // Access is everything a user can reach.
@@ -217,13 +219,13 @@ func (s *Service) accessOf(ctx context.Context, userID string) (Access, error) {
 			role, via = repoRelationRole[d.Relation], TypeUser
 		} else if t, ok := teamBest[key]; ok {
 			role, via = t, TypeTeam
-		} else if org.DefaultRepoAccess == DefaultRepoReadOnly && membershipRole(ms, orgID) != Guest {
+		} else if !repo.Personal() && org.DefaultRepoAccess == DefaultRepoReadOnly && membershipRole(ms, orgID) != Guest {
 			role = Viewer
 		}
 		if role != Viewer && role != Member && role != Admin {
 			continue
 		}
-		a.Repos = append(a.Repos, RepoAccess{OrgID: orgID, Graph: repo.Graph, Role: role, Via: via, Revision: org.PolicyRevision})
+		a.Repos = append(a.Repos, RepoAccess{OrgID: orgID, Graph: repo.Graph, Role: role, Via: via, Revision: org.PolicyRevision, Personal: repo.Personal()})
 	}
 	return a, nil
 }
@@ -323,6 +325,8 @@ type Reach struct {
 	// Ambiguous: several selected organisations use the graph, so writes
 	// must say which (X-CodeSynapse-Org).
 	Ambiguous bool
+	// Personal: the entry used is a member's own repository.
+	Personal bool
 }
 
 // Scope selects only the caller's explicitly enrolled organisations. A key in
@@ -339,7 +343,7 @@ func (a Access) Scope(selected map[string]bool) map[string]Reach {
 			cur.Role = Max(cur.Role, r.Role)
 			out[r.Graph] = cur
 		} else {
-			out[r.Graph] = Reach{Role: r.Role, OrgID: r.OrgID}
+			out[r.Graph] = Reach{Role: r.Role, OrgID: r.OrgID, Personal: r.Personal}
 		}
 	}
 	return out

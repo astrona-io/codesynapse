@@ -72,7 +72,7 @@ export interface Dashboard {
   recent_commits: Ranked[]
   authors: Ranked[]
 }
-export interface RepoInfo { name: string; head?: string; ingested_at?: string; root?: string; branch?: string; remote?: string; managed?: boolean }
+export interface RepoInfo { name: string; head?: string; ingested_at?: string; root?: string; branch?: string; remote?: string; managed?: boolean; personal?: boolean }
 // What a repository has, for its menu (GET /repos/{repo}/sections).
 // One result of the site search (GET /search).
 export interface SiteSearchHit { kind: string; repo: string; id?: string; name: string; location?: string; file?: string; severity?: string }
@@ -157,7 +157,7 @@ export interface MetricsReport {
 }
 
 export interface RepoSummary {
-  name: string; branch?: string; head?: string; remote?: string; managed: boolean; ingested_at?: string
+  name: string; branch?: string; head?: string; remote?: string; managed: boolean; personal?: boolean; ingested_at?: string
   age_hours: number; stale: boolean; nodes: number; edges: number; loc: number; files: number; docs: number
   configs: number; templates: number; modules: number; grade: string; score: number
   findings: Record<string, number>; vulns: Record<string, number>; vulns_called: number
