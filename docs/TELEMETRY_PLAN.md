@@ -46,7 +46,7 @@ Select one exporter per metric stream during migration. Do not push the same obs
 
 `GET /api/v1/stats/models?range=1h|6h|24h|7d|30d` returns one row per model for the window: requests and failures, input and output tokens, average prompt, read and write tokens per second, the median and 95th percentile of context use, and the same counts per task, with `local` and `context_window` from the configuration. Its queries are fixed MetricsQL with the caller's organisations as `extra_filters`, like the series panels.
 
-`ask_local` adds two daily counters to the usage buckets: `(local:read)`, the tokens a local model read, and `(local:avoided)`, the files' tokens (bytes/4) minus the answer the agent got instead. The second joins tokens avoided on Statistics.
+`ask_local` adds two daily counters to the usage buckets: `(local:read)`, the tokens a local model read, and `(local:avoided)`, the files' tokens (bytes/4) minus the answer the agent got instead. The second joins tokens avoided on Statistics. `local_draft` adds `(local:drafts)`, one per draft, and the tokens the model read to `(local:read)`; it adds nothing to `(local:avoided)`, because the agent still reads and checks every draft and what writing it saved is not measured.
 
 Cached tokens can still be billed and sent over the network. Label the panel “Input tokens served from cache”; do not present it as tokens never sent. Keep graph-context reduction separate from provider caching. Provider usage omissions are “unknown”, not zero cost. Track missing-price calls separately; do not silently price them at zero. Retry attempts count actual usage when reported. Do not claim visibility into tokens consumed by an external agent's own model.
 

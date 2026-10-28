@@ -132,7 +132,7 @@ func (s *Server) handleLocalUsage(w http.ResponseWriter, r *http.Request) {
 
 func (in localUsageReport) validate() error {
 	switch {
-	case !slices.Contains(gittools.Tools, in.Tool) && !slices.Contains(ghtools.Tools, in.Tool) && in.Tool != asklocal.Tool:
+	case !slices.Contains(gittools.Tools, in.Tool) && !slices.Contains(ghtools.Tools, in.Tool) && in.Tool != asklocal.Tool && in.Tool != asklocal.DraftTool:
 		return fmt.Errorf("unknown local tool %q", in.Tool)
 	case !clientNameRe.MatchString(in.Client):
 		return errors.New("client must be a short lower-case name, e.g. claude-code")

@@ -123,3 +123,74 @@ func TestBridgeAnswersAskLocal(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(other), &m))
 	assert.False(t, b.answerAskLocal(context.Background(), []byte(other), m), "other tools go to the server")
 }
+
+// local_draft sends the target's lines with the context files, clipped to
+// the file, and returns the draft without writing anything.
+func TestBridgeAnswersLocalDraft(t *testing.T) {
+	dir := askCheckout(t)
+	var mu sync.Mutex
+	var asked asklocal.DraftRequest
+	var reports []localUsage
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/api/v1/execution/sessions":
+			_ = json.NewEncoder(w).Encode(execution.Identity{TenantID: "org", SubjectID: "u", SessionID: "chat-1", ParentSessionID: "chat-1"})
+		case "/api/v1/repos/acme%2Fapp/local-draft", "/api/v1/repos/acme/app/local-draft":
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&asked))
+			_ = json.NewEncoder(w).Encode(asklocal.Draft{Warning: asklocal.DraftWarning, Format: asklocal.FormatCode, Code: "func One() int { return 11 }", Model: "qwen", Files: 2})
+		case "/api/v1/usage/local":
+			var u localUsage
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&u))
+			reports = append(reports, u)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(api.Close)
+	var out bytes.Buffer
+	b := &bridge{token: "csk_test", session: "chat-1", out: &out, gitDir: dir, repoName: "acme/app", logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		report: apiClient{base: api.URL, token: "csk_test", http: api.Client()}}
+	b.repoOnce.Do(func() {})
+	call := func(args string) map[string]any {
+		t.Helper()
+		out.Reset()
+		msg := `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"local_draft","arguments":` + args + `}}`
+		var m rpcMessage
+		require.NoError(t, json.Unmarshal([]byte(msg), &m))
+		require.True(t, b.answerAskLocal(context.Background(), []byte(msg), m))
+		var res struct {
+			Result map[string]any `json:"result"`
+		}
+		require.NoError(t, json.Unmarshal(out.Bytes(), &res))
+		return res.Result
+	}
+
+	res := call(`{"task":"Make One return 11","paths":["pkg/two.go"],"target":"pkg/one.go:3-9"}`)
+	assert.Equal(t, res["isError"], nil)
+	assert.Equal(t, res["structuredContent"].(map[string]any)["code"], "func One() int { return 11 }")
+	assert.Equal(t, res["structuredContent"].(map[string]any)["warning"], asklocal.DraftWarning)
+
+	for _, bad := range []string{
+		`{"task":"x","paths":["pkg/two.go"],"target":"../one.go"}`,
+		`{"task":"x","paths":["pkg/two.go"],"target":".env:1-1"}`,
+		`{"task":"","paths":["pkg/two.go"]}`,
+		`{"task":"x","paths":["pkg/two.go"],"write":true}`,
+	} {
+		assert.Equal(t, call(bad)["isError"], true, bad)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, asked.Task, "Make One return 11")
+	assert.Equal(t, asked.Target, "pkg/one.go:3-3", "the range is clipped to what was sent")
+	require.Len(t, asked.Files, 2)
+	assert.Equal(t, []string{asked.Files[0].Path, asked.Files[1].Path}, []string{"pkg/two.go", "pkg/one.go"})
+	assert.Equal(t, asked.Files[1].Text, "func One() int { return 1 }\n")
+	require.Len(t, reports, 5, "failed calls are reported too")
+	assert.Equal(t, reports[0].Tool, asklocal.DraftTool)
+	assert.False(t, reports[0].Failed)
+	assert.True(t, reports[1].Failed)
+}
