@@ -73,7 +73,10 @@ func TestPlatformContentIsolation(t *testing.T) {
 	}
 	service := newClient(t, ts)
 	service.auth = "Bearer svc"
-	for name, c := range map[string]*client{"platform": admin, "service": service} {
+	for name, c := range map[string]*struct {
+		*client
+		health int
+	}{"platform": {admin, 200}, "service": {service, 403}} {
 		t.Run(name, func(t *testing.T) {
 			var repos struct{ Repos []struct{ Name string } }
 			require.Equal(t, c.do("GET", "/api/v1/repos", "", &repos), 200)
@@ -81,7 +84,7 @@ func TestPlatformContentIsolation(t *testing.T) {
 			assert.Equal(t, c.do("GET", "/api/v1/repos/"+storetest.Repo+"/overview", "", nil), 404)
 			assert.Equal(t, c.do("GET", "/api/v1/repos", "", nil, OrgHeader, signed.Org.Slug), 404)
 			assert.Equal(t, c.do("POST", "/api/v1/ingest", `{}`, nil), 403)
-			assert.Equal(t, c.do("GET", "/api/v1/admin/health", "", nil), 200)
+			assert.Equal(t, c.do("GET", "/api/v1/admin/health", "", nil), c.health, "platform reads need an administrator's session")
 		})
 	}
 	require.Equal(t, owner.do("PUT", "/api/v1/accounts/orgs/"+signed.Org.Slug+"/members", `{"email":"admin@example.com","role":"viewer"}`, nil), 200)

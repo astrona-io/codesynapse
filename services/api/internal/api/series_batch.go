@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,8 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
 // A page of charts (Live activity has 22) asked for each panel on its own,
@@ -38,8 +41,26 @@ func (s *Server) handleSeriesBatch(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusBadRequest, errors.New("panels must name 1 to 32 panels, comma separated"))
 		return
 	}
+	// Platform panels of one batch are one view: authorised and recorded
+	// once, or each refused on its own below.
+	var platform []string
+	for _, n := range names {
+		if seriesPanels[n].platform {
+			platform = append(platform, n)
+		}
+	}
+	ctx := r.Context()
+	if len(platform) > 0 && s.cfg.Accounts != nil && s.cfg.Metrics != nil {
+		if _, ok := seriesRanges[cmp.Or(q.Get("range"), "24h")]; ok {
+			if p, ok := principal(ctx); ok {
+				if _, err := s.cfg.Accounts.PlatformStats(ctx, p, accounts.StatsRequest{Section: "series", Panel: strings.Join(platform, ","), Range: cmp.Or(q.Get("range"), "24h")}); err == nil {
+					ctx = context.WithValue(ctx, platformAuditedKey{}, true)
+				}
+			}
+		}
+	}
 	items := make([]SeriesBatchItem, len(names))
-	_ = forEach(r.Context(), len(names), func(ctx context.Context, i int) error { //nolint:errcheck // each item carries its own status
+	_ = forEach(ctx, len(names), func(ctx context.Context, i int) error { //nolint:errcheck // each item carries its own status
 		v := url.Values{"panel": {names[i]}}
 		for _, k := range []string{"range", "repo"} {
 			if q.Has(k) {

@@ -22,6 +22,7 @@ Both appear on the **Statistics** page. Every number belongs to one organisation
 | Assistant hooks | lifecycle events and observed byte counts from Codex and Cursor |
 | Indexing | files scanned, indexed and skipped per repository, annotation jobs; indexing runs and time, time per phase (fetching, extraction, storing the graph) and extraction time per language |
 | Background jobs | finished jobs by outcome, failures by kind, how long jobs waited for a worker and how long they ran (Statistics → Sync) |
+| Platform statistics (platform administrators) | organisations, people, active people, memberships by role, seats, teams, repository entries, single sign-on, watches, browser and runtime sessions and API keys, across every organisation (Administration → Statistics). Counted in PostgreSQL, not in the metrics store, and every view is audited. |
 | Platform health (platform administrators) | API requests and latency, the job queue, which replica runs the scheduler and lease losses, goroutines, heap, CPU and garbage-collection pauses per service, database connection pool use and waits, dropped series and log lines, failed metric exports |
 
 Some numbers are estimates and are labelled so: cost depends on the prices you configured, and a call without reported usage or a known price shows as a gap, never as zero.

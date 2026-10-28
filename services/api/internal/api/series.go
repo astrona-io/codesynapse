@@ -323,11 +323,9 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusBadRequest, errors.New("range must be 1h, 6h, 24h, 7d or 30d"))
 		return
 	}
-	sc := scopeFrom(r.Context())
 	var tenants []string // nil: every tenant (platform admins, single-tenant installs)
 	caller, _ := principal(r.Context())
-	if p.platform && !sc.all && !caller.User.PlatformAdmin {
-		s.problem(w, http.StatusForbidden, errors.New("platform admins only"))
+	if p.platform && !s.platformPanelView(w, r, []string{name}, rng) {
 		return
 	}
 	if !p.platform {

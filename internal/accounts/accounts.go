@@ -413,6 +413,10 @@ type Store interface {
 	OrgBySlug(ctx context.Context, slug string) (Org, error)
 	OrgByID(ctx context.Context, id string) (Org, error)
 	ListOrgs(ctx context.Context, limit int) ([]Org, error)
+	// TenantStats and SessionStats answer the platform statistics
+	// sections (platformstats.go): aggregates only, root excluded.
+	TenantStats(ctx context.Context, q StatsQuery) (TenantStats, error)
+	SessionStats(ctx context.Context, q StatsQuery) (SessionStats, error)
 	// Memberships of a user, by org name; or of an org, by user email.
 	UserMemberships(ctx context.Context, userID string) ([]Membership, error)
 	OrgMembers(ctx context.Context, orgID string) ([]Membership, error)

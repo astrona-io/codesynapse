@@ -42,7 +42,7 @@ type AdminMembership struct {
 }
 
 func (s *Server) handleAdminOrgsDetail(w http.ResponseWriter, r *http.Request) {
-	if !s.platformAdmin(w, r) {
+	if _, ok := s.platformView(w, r, accounts.StatsRequest{Section: "orgs"}); !ok {
 		return
 	}
 	ctx := r.Context()
@@ -86,7 +86,7 @@ func (s *Server) handleAdminOrgsDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminUsersDetail(w http.ResponseWriter, r *http.Request) {
-	if !s.platformAdmin(w, r) {
+	if _, ok := s.platformView(w, r, accounts.StatsRequest{Section: "users"}); !ok {
 		return
 	}
 	ctx := r.Context()
@@ -202,7 +202,7 @@ func timed(f func() (string, error)) HealthCheck {
 }
 
 func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
-	if !s.platformAdmin(w, r) {
+	if _, ok := s.platformView(w, r, accounts.StatsRequest{Section: "health"}); !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)

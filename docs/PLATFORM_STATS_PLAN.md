@@ -1,6 +1,6 @@
 # Platform statistics for administrators
 
-Status: proposed. Nothing in this plan is implemented yet. It builds on [platform administration](operations/accounts-access.md#platform-administration), [root separation](ROOT_BOOTSTRAP_PLAN.md), [repository permissions](ACCESS_CONTROL_PLAN.md), [telemetry](TELEMETRY_PLAN.md) and its [metrics coverage plan](TELEMETRY_PLAN.md#metrics-coverage-plan), and [ingestion transparency](INGEST_TRANSPARENCY_PLAN.md).
+Status: phase 1 (access, tenants, sessions) is implemented; later phases are proposed. It builds on [platform administration](operations/accounts-access.md#platform-administration), [root separation](ROOT_BOOTSTRAP_PLAN.md), [repository permissions](ACCESS_CONTROL_PLAN.md), [telemetry](TELEMETRY_PLAN.md) and its [metrics coverage plan](TELEMETRY_PLAN.md#metrics-coverage-plan), and [ingestion transparency](INGEST_TRANSPARENCY_PLAN.md).
 
 !!! tip "In plain words"
     Platform administrators run the installation. Today they see a health check, a list of organisations and users, the audit log and four charts. This plan adds a Statistics area under Administration: how the platform grows, how it is used, how jobs, indexing, models and stores behave, and what security and audit look like across all organisations. It shows counts and timings only. It never shows code, repository names, paths, prompts or e-mail addresses in cross-tenant figures.
