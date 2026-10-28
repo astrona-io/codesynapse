@@ -54,3 +54,17 @@ groups:
           summary: "Indexing file totals reached their repository limit"
           description: "{{ $value | humanize }} file-total series were not admitted in the last hour, so some repositories have no Ingestion panels."
           dashboard: "{{ $externalURL }}/stats"
+
+      # A process failed to export metrics (exporter is otlp, prometheus or
+      # ingest). The count arrives with the next export that succeeds, so a
+      # store that refuses every push shows up as missing data instead.
+      - alert: CodeSynapseMetricsExportFailing
+        expr: sum by (exporter) (increase(platform_telemetry_export_failures_total[10m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+          component: telemetry
+        annotations:
+          summary: "{{ $labels.exporter }} metric exports are failing"
+          description: "{{ $value | humanize }} {{ $labels.exporter }} exports failed in the last 10 minutes for 15 minutes in a row, so panels miss data."
+          dashboard: "{{ $externalURL }}/stats"

@@ -191,3 +191,68 @@ tests:
               summary: "sync jobs are failing"
               description: "50% of sync jobs failed in the last 30 minutes."
               dashboard: "https://codesynapse.example.com/stats"
+
+  - name: metric export failures, per exporter
+    interval: 1m
+    input_series:
+      - series: 'platform_telemetry_export_failures_total{exporter="otlp",service_instance_id="api-1"}'
+        values: '0+1x40'
+      # ingest: one failure, then fine.
+      - series: 'platform_telemetry_export_failures_total{exporter="ingest",service_instance_id="api-1"}'
+        values: '0 1x40'
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: codesynapse-telemetry
+        alertname: CodeSynapseMetricsExportFailing
+        exp_alerts:
+          - exp_labels: {severity: warning, component: telemetry, exporter: otlp}
+            exp_annotations:
+              summary: "otlp metric exports are failing"
+              description: "10 otlp exports failed in the last 10 minutes for 15 minutes in a row, so panels miss data."
+              dashboard: "https://codesynapse.example.com/stats"
+
+  - name: scheduler lease lost
+    interval: 1m
+    input_series:
+      - series: 'platform_codesynapse_lease_events_total{lease="api_loops",event="lost",service_instance_id="api-1"}'
+        values: '0x10 1x30'
+      # Job leases do not page about the scheduler.
+      - series: 'platform_codesynapse_lease_events_total{lease="job",event="lost",service_instance_id="api-2"}'
+        values: '0 1x40'
+    alert_rule_test:
+      - eval_time: 5m
+        groupname: codesynapse-scheduler
+        alertname: CodeSynapseSchedulerLeaseLost
+        exp_alerts: []
+      - eval_time: 15m
+        groupname: codesynapse-scheduler
+        alertname: CodeSynapseSchedulerLeaseLost
+        exp_alerts:
+          - exp_labels: {severity: warning, component: scheduler}
+            exp_annotations:
+              summary: "An API replica lost the scheduler lease"
+              description: "The scheduler lease was lost 1 times in the last 15 minutes. Check the API replicas' connection to PostgreSQL."
+              dashboard: "https://codesynapse.example.com/admin"
+
+  - name: no scheduler holder
+    interval: 1m
+    input_series:
+      # api-1 holds the lease for 10 minutes, then nobody does.
+      - series: 'platform_codesynapse_loops_lease_held{service_instance_id="api-1"}'
+        values: '1x10 0x30'
+      - series: 'platform_codesynapse_loops_lease_held{service_instance_id="api-2"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 12m
+        groupname: codesynapse-scheduler
+        alertname: CodeSynapseNoSchedulerHolder
+        exp_alerts: []
+      - eval_time: 30m
+        groupname: codesynapse-scheduler
+        alertname: CodeSynapseNoSchedulerHolder
+        exp_alerts:
+          - exp_labels: {severity: critical, component: scheduler}
+            exp_annotations:
+              summary: "No API replica runs the scheduler"
+              description: "For 10 minutes no API replica has held the scheduler lease, so scheduled syncs, watches and audit sealing do not run."
+              dashboard: "https://codesynapse.example.com/admin"

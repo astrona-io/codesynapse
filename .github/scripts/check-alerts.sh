@@ -20,7 +20,7 @@ tool=$(printf '%s\n' "$vmalert" | sed 's#/vmalert:#/vmalert-tool:#')
 # rule that needs another must be reviewed against AGENTS.md (Telemetry).
 python3 - deploy/alerts/*.yaml <<'PY'
 import re, sys
-allowed = {"metric", "reason", "db_system", "le", "kind"}
+allowed = {"metric", "reason", "db_system", "le", "kind", "exporter"}
 bad = []
 for path in sys.argv[1:]:
     text = open(path).read()

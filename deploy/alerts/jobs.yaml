@@ -42,3 +42,33 @@ groups:
           summary: "{{ $labels.kind }} jobs are failing"
           description: "{{ $value | humanizePercentage }} of {{ $labels.kind }} jobs failed in the last 30 minutes."
           dashboard: "{{ $externalURL }}/stats"
+
+  # The api-loops lease decides which API replica runs the scheduler and the
+  # maintenance loops. Every API process reports whether it holds it.
+  - name: codesynapse-scheduler
+    interval: 1m
+    rules:
+      # A replica lost the lease it held: its loops stopped mid-run and
+      # another replica takes over at the next attempt.
+      - alert: CodeSynapseSchedulerLeaseLost
+        expr: sum(increase(platform_codesynapse_lease_events_total{lease="api_loops", event="lost"}[15m])) > 0
+        labels:
+          severity: warning
+          component: scheduler
+        annotations:
+          summary: "An API replica lost the scheduler lease"
+          description: "The scheduler lease was lost {{ $value | humanize }} times in the last 15 minutes. Check the API replicas' connection to PostgreSQL."
+          dashboard: "{{ $externalURL }}/admin"
+
+      # No replica runs the scheduler: syncs, schedules, watches and audit
+      # sealing stop. "or vector(0)" makes no API reporting at all fire too.
+      - alert: CodeSynapseNoSchedulerHolder
+        expr: (sum(max_over_time(platform_codesynapse_loops_lease_held[5m])) or vector(0)) < 1
+        for: 10m
+        labels:
+          severity: critical
+          component: scheduler
+        annotations:
+          summary: "No API replica runs the scheduler"
+          description: "For 10 minutes no API replica has held the scheduler lease, so scheduled syncs, watches and audit sealing do not run."
+          dashboard: "{{ $externalURL }}/admin"
