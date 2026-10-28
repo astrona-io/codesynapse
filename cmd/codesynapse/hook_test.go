@@ -21,7 +21,7 @@ import (
 
 func TestReadGuard(t *testing.T) {
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
-	dir := t.TempDir()
+	dir := gitRepo(t)
 	var src strings.Builder
 	src.WriteString("package big\n\ntype Store struct{}\n\n")
 	for i := range 200 {
@@ -31,11 +31,13 @@ func TestReadGuard(t *testing.T) {
 	require.NoError(t, os.WriteFile(big, []byte(src.String()), 0o600))
 	small := filepath.Join(dir, "small.go")
 	require.NoError(t, os.WriteFile(small, []byte("package big\n"), 0o600))
+	_, err := gitx.Run(context.Background(), dir, "add", "big.go", "small.go")
+	require.NoError(t, err)
 
 	read := func(file string, offset int) map[string]any {
 		var in toolHookInput
 		in.SessionID, in.ToolInput.FilePath, in.ToolInput.Offset = "chat-1", file, offset
-		return readGuard(in)
+		return readGuard(context.Background(), in)
 	}
 	out := read(big, 0)
 	require.True(t, out != nil, "the first whole read of a large file is turned back")
@@ -53,7 +55,7 @@ func TestReadGuard(t *testing.T) {
 	t.Setenv("CODESYNAPSE_READ_GUARD_LINES", "0")
 	var in toolHookInput
 	in.SessionID, in.ToolInput.FilePath = "chat-2", big
-	assert.True(t, readGuard(in) == nil, "0 turns the guard off")
+	assert.True(t, readGuard(context.Background(), in) == nil, "0 turns the guard off")
 }
 
 // offlineAPI points the hooks at a closed port, so a developer's own token and

@@ -37,6 +37,8 @@ func noteEdit(in toolHookInput, failed bool) {
 	}
 	if failed {
 		e.Failed++
+	} else {
+		noteEditDir(&s, in)
 	}
 	if e.Validate() == nil {
 		saveState(state, s)
