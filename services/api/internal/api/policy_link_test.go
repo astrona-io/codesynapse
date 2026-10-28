@@ -84,9 +84,15 @@ func TestRepositorySpaces(t *testing.T) {
 	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/shared", ""), accounts.Admin))
 	assert.True(t, errors.As(f.server.linkPolicyRepository(workCtx, entry("space/shared", f.user.ID), accounts.Member), &taken), "not again in a member's space")
 
+	private := entry("space/private", f.user.ID)
+	private.Visibility = accounts.Private
+	assert.True(t, errors.Is(f.server.linkPolicyRepository(workCtx, private, accounts.Member), errPersonalPrivate), "proved with the organisation's token, so not personal")
 	require.NoError(t, f.accounts.St.SetMemberReposEnabled(ctx, f.org.ID, false))
 	err = f.server.linkPolicyRepository(workCtx, entry("space/later", f.user.ID), accounts.Member)
 	assert.True(t, errors.Is(err, accounts.ErrForbidden), "members' own repositories are turned off")
+	assert.True(t, watchSkip(err), "a member's watch skips it instead of failing every scan")
+	assert.True(t, watchSkip(errSpaceTaken{}), "a watch skips what the organisation has")
+	assert.False(t, watchSkip(accounts.ErrForbidden), "other refusals still fail the scan")
 	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/later", ""), accounts.Admin), "the organisation can still add it")
 
 	for err, code := range map[error]int{errSpaceTaken{}: 409, errMemberReposOff: 403, accounts.ErrInvalidInput: 400} {

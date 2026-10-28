@@ -295,12 +295,16 @@ const (
 // grants.
 type errSpaceTaken struct{ existing accounts.Repository }
 
+// The message is the same for both spaces, so it does not tell a member
+// that a colleague keeps a personal copy.
 func (e errSpaceTaken) Error() string {
-	if !e.existing.Personal() {
-		return "this repository is already an organisation repository; ask its repository admin for access"
-	}
-	return "a member already added this repository to their own space; ask them for access"
+	return "your organisation already has this repository; ask its repository admin for access"
 }
+
+// errPersonalPrivate refuses a private repository in a member's own space:
+// its access was proved with the organisation's token, which would let a
+// member keep an organisation-readable repository out of the admins' sight.
+var errPersonalPrivate = fmt.Errorf("%w: a private repository can only be added for the organisation; ask an admin to add it", accounts.ErrForbidden)
 
 // errMemberReposOff says why a member's own repository was refused.
 var errMemberReposOff = fmt.Errorf("%w: your organisation does not let members add their own repositories; ask an admin to add it", accounts.ErrForbidden)
@@ -405,6 +409,9 @@ func (s *Server) linkPolicyRepository(ctx context.Context, entry accounts.Reposi
 					return fmt.Errorf("%w: this indexed graph contains approved exclusions; use an unfiltered graph until this organisation has a matching policy", accounts.ErrForbidden)
 				}
 			}
+		}
+		if entry.Personal() && entry.Visibility == accounts.Private {
+			return errPersonalPrivate
 		}
 		if entry.Personal() {
 			on, err := st.MemberReposEnabled(ctx, entry.OrgID)

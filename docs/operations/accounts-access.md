@@ -91,7 +91,7 @@ Settings → Organisation → "Members may add their own repositories" turns per
 
 Adding a repository that already has an entry in the other space, or in another member's space, answers 409. CodeSynapse does not move entries between spaces automatically, because that would change who can read the code without the owner's say. Adding it again in the same space does nothing. Organisation watches always add to the organisation space.
 
-Private personal repositories are cloned with the organisation's Git token, the same as organisation repositories. Personal Git tokens are not supported yet.
+A private repository can only be added for the organisation: its access is proved with the organisation's Git token, and a member's own space must not hide a repository the organisation can read from its admins. Personal Git tokens are not supported yet. A watch created by a member adds to that member's own space, and skips new repositories while members' own repositories are turned off.
 
 ## API route scoping
 

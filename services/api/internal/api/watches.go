@@ -452,14 +452,12 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 	}
 }
 
-// watchLink treats a repository the organisation already has in another
-// space as added: the watch has nothing to do.
-func watchLink(err error) error {
+// watchSkip says the watch has nothing to add: the organisation already has
+// the repository in another space, or the creator is a member, whose space
+// it would go to, and members' own repositories are turned off.
+func watchSkip(err error) bool {
 	var taken errSpaceTaken
-	if errors.As(err, &taken) {
-		return nil
-	}
-	return err
+	return errors.As(err, &taken) || errors.Is(err, errMemberReposOff)
 }
 
 // addWatched attaches one new public repository the way POST /repos does:
@@ -484,11 +482,13 @@ func (s *Server) addWatched(ctx context.Context, w accounts.OrgWatch, remote, na
 		if n.URL == "" || !sameRemote(n.URL, remote) {
 			return errors.New("the name is already used for another source")
 		}
-		return watchLink(s.linkRepo(ctx, name, remote, accounts.Public, ""))
+		if err := s.linkRepo(ctx, name, remote, accounts.Public, ""); !watchSkip(err) {
+			return err
+		}
+		return nil
 	}
-	var taken errSpaceTaken
-	if err := s.linkRepo(ctx, name, remote, accounts.Public, ""); errors.As(err, &taken) {
-		return nil // nothing to clone: the organisation already has it
+	if err := s.linkRepo(ctx, name, remote, accounts.Public, ""); watchSkip(err) {
+		return nil // nothing to clone
 	} else if err != nil {
 		return err
 	}

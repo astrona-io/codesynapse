@@ -341,6 +341,8 @@ func (a Access) Scope(selected map[string]bool) map[string]Reach {
 		if exists && cur.OrgID != r.OrgID {
 			cur.Ambiguous = true
 			cur.Role = Max(cur.Role, r.Role)
+			// Personal only when every entry is someone's own.
+			cur.Personal = cur.Personal && r.Personal
 			out[r.Graph] = cur
 		} else {
 			out[r.Graph] = Reach{Role: r.Role, OrgID: r.OrgID, Personal: r.Personal}
