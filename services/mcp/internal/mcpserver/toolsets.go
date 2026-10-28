@@ -32,6 +32,7 @@ var promptToolsets = map[string]string{
 	"code-review":     "reviews",
 	"briefing":        "reviews",
 	"security-triage": "security",
+	"security-review": "security",
 	"context-offload": "memory",
 }
 

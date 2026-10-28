@@ -296,8 +296,10 @@ Each prompt is also served natively as an MCP prompt (see section 4), so clients
 > 3. Check recent churn (`get_symbol_context` verbosity "full" → `churn`, and `file_history`) on the affected files to spot regressions.
 > 4. Give me a focused list of only the exact files and symbol line ranges I need to inspect."
 
-### E. Security review (CodeSynapse addition)
-> "Use `security_report` (min_severity: "high") and `security_symbols` to list exposed, untested findings and vulnerable dependencies that are *called*. For each, call `rule_guide` with the finding's rule and language, then give the file:line, why it is reachable, and the smallest fix following the guide's example."
+### E. Security review — prompt `security-review`
+> "Use `security_report` (min_severity: "high") and `security_symbols` to list exposed, untested findings and vulnerable dependencies that are *called*. For an area, also call `get_symbol_context` on its main symbols (`security`) and `attack_surface` for the entry points involved. For each finding, call `rule_guide` with the finding's rule and language, then give the file:line, why it is reachable, and the smallest fix following the guide's example."
+
+The prompt takes an optional `target` (a symbol, file, package or entry point); without one it reviews the whole repository. It reports and submits nothing; use `security-triage` to record a triage as a review.
 
 ### G. Code review that shows up in CodeSynapse — prompt `code-review`
 > "Review `<TARGET>` (a diff, base..head, files or a package) with CodeSynapse: use `get_pr_context`, `security_report` and `rule_guide`, read only the lines you need, then call `submit_review` with a title, summary, verdict and one comment per issue anchored to file:line, with severity, category and a concrete suggestion. Reply with the review page."
@@ -406,6 +408,7 @@ Check budget omissions and the suggested next step before treating an answer as 
 | Start a new task | `minimal_context` | `max_tokens: 1500` | Describe the task; read only the returned line ranges. |
 | Quick lookup | `get_symbol_context` | `verbosity: "outline"` | Signature, doc, risk, direct callers/callees, tests, and `duplicate` (exact or edited copies elsewhere, with their locations) when the function has any. |
 | Before editing | `get_symbol_context` | `verbosity: "full"` | Adds transitive callers, untested public callers, docs, churn. |
+| Before editing sensitive code | `get_symbol_context` | `security` | Set when the symbol reaches sensitive operations or carries findings: `reaches` (exec, sql, filesystem, network, … with the closest call and its depth), `checks_auth` when an authorization call is in reach, and for the nearest entry points leading here (`limit` of them) `entry_points_checked` and `unguarded` (no guard at registration and no authorization call), with a `note` when any is unguarded. `verbosity: "full"` lists those `entry_points` with their guards. Keep the checks in that path intact when you change the symbol. |
 | Change analysis | `get_pr_context` | default | Diff, file list or base/head; risk, tests, findings in one call, and `duplicated_changed`: changed functions that have copies elsewhere (the change probably belongs there too, or they should be merged), and `code_owners`: the CODEOWNERS owners of the changed files, who should review it, and `used_elsewhere`: changed exported Go functions that other repositories you can see call, with the version they require and up to ten callers each. Ingest keeps calls into modules with the same owner as the repository's own module (`github.com/acme/…` for `github.com/acme/app`, the whole host for vanity paths), so a library's callers are found only in repositories of that owner. Only functions in the last ingest are checked; `codesynapse review --offline` indexes the working tree first, so new code is covered. |
 | Interface navigation | `get_implementations` | default | Resolve `DISPATCHES_TO` / `IMPLEMENTS` without guessing types. |
 | Deep dive | `get_call_graph` | `depth: 2` | Raise depth only when 2 is not enough (max 4). Each edge has `evidence`; check `inferred` edges in the code. |
@@ -468,6 +471,8 @@ Every answer uses `qualified_id` values (`store.(*Store).Get`) that you can pass
       "arguments": [{ "name": "task", "description": "The feature or bug you are about to work on, in a sentence", "required": true }] },
     { "name": "code-review", "description": "Review a change or area of the code with CodeSynapse and submit the review so it appears in the UI.",
       "arguments": [{ "name": "target", "description": "What to review: a diff, base..head refs, file paths, or a package", "required": true }] },
+    { "name": "security-review", "description": "Find exposed, reachable security issues in the repository or one area of it, with the smallest fix for each.",
+      "arguments": [{ "name": "target", "description": "Optional area to review: a symbol, file, package or entry point; empty for the whole repository" }] },
     { "name": "security-triage", "description": "Triage the security findings of a repository yourself and submit the result, without calling an external AI provider.",
       "arguments": [{ "name": "min_severity", "description": "Lowest severity to triage: low, medium (default), high or critical" }] },
     { "name": "briefing", "description": "Write a short briefing of the repository yourself and submit it as a report, without calling an external AI provider." },

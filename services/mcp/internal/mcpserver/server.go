@@ -123,6 +123,7 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	}
 	registerArchitectureTools(s, h, add, len(opts) > 0 && opts[0].CatalogWrites && opts[0].Curated != nil)
 	registerPrompts(s)
+	registerSecurityReviewPrompt(s)
 	if len(opts) > 0 && opts[0].History != nil {
 		h.history = opts[0].History
 		mcp.AddTool(s, add("repo_trend",

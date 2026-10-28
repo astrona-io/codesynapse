@@ -132,6 +132,35 @@ func registerPrompts(s *mcp.Server) {
 	}
 }
 
+// securityReviewPrompt is guide prompt E: what is exposed and reachable,
+// with the smallest fix, for the repository or one area of it.
+func securityReviewPrompt(target string) string {
+	scope := "this repository"
+	if target != "" {
+		scope = target
+	}
+	return fmt.Sprintf(`Review the security of %s with CodeSynapse and report what needs fixing.
+
+1. Call security_report (min_severity: "high"; "medium" for a small area) and security_symbols. Start with findings that are exposed and untested, and vulnerable dependencies whose vulnerable code is called.
+2. For an area, also call get_symbol_context on its main symbols: security lists the sensitive operations each reaches (exec, sql, filesystem, network, …), whether an authorization call is in reach, and how many of the entry points leading there have no guard; verbosity "full" names those entry points and their guards. Call attack_surface (unguarded: true, or reaching a tag) for the routes, MCP tools and CLI commands involved.
+3. For each finding call rule_guide with its rule and language, and read only the lines around its location.
+4. Report each issue with its file:line, why it is reachable (the entry point and the path to it, or why it is not), and the smallest fix following the guide's example. Keep confirmed issues apart from ones that need a closer look, and say which checks you could not make.`, scope)
+}
+
+func registerSecurityReviewPrompt(s *mcp.Server) {
+	s.AddPrompt(&mcp.Prompt{
+		Name:        "security-review",
+		Description: "Find exposed, reachable security issues in the repository or one area of it, with the smallest fix for each.",
+		Arguments:   []*mcp.PromptArgument{{Name: "target", Description: "Optional area to review: a symbol, file, package or entry point; empty for the whole repository"}},
+	}, func(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		target := strings.TrimSpace(req.Params.Arguments["target"])
+		if len(target) > 2000 {
+			return nil, fmt.Errorf("argument %q is too long", "target")
+		}
+		return &mcp.GetPromptResult{Description: "Guided security review", Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: securityReviewPrompt(target)}}}}, nil
+	})
+}
+
 // registerReviewPrompt adds the guided code-review workflow (only when the
 // review tools are enabled).
 func registerReviewPrompt(s *mcp.Server) {

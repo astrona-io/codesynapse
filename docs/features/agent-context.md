@@ -51,7 +51,7 @@ Find the job you want done in the left column, then use the tool next to it. The
 | Memory | `recall_context`, `upsert_graph_triples`, `search_graph_nodes`, `query_subgraph`, `offload_turns` | `internal/memory` |
 | Reviews | `submit_review`, `update_review_comment`, `list_reviews`, `get_review` | `internal/reviews` |
 
-Prompts: `code-review`, `security-triage`, `briefing`, plus the refactor, PR-impact, onboarding, bug-investigation, reuse-first, dependency-review and context-offload prompts described in the [Agent guide](../AGENT_GUIDE.md).
+Prompts: `code-review`, `security-triage`, `security-review`, `briefing`, plus the refactor, PR-impact, onboarding, bug-investigation, reuse-first, dependency-review and context-offload prompts described in the [Agent guide](../AGENT_GUIDE.md).
 
 ## minimal_context
 

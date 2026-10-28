@@ -209,15 +209,23 @@ func (s Service) entryPoint(ctx context.Context, r model.Node) (EntryPoint, erro
 	}
 	h := handlers[0].Node
 	ep.Handler = h.ShortName()
-	reached, err := s.R.Traverse(ctx, h.ID, []model.EdgeKind{model.EdgeCalls, model.EdgeDispatchesTo}, store.Out, surfaceDepth, store.MaxLimit)
+	ep.Reaches, ep.ChecksAuth, err = s.sinksFrom(ctx, h)
+	return ep, err
+}
+
+// sinksFrom lists the sensitive operations n reaches through the call
+// graph, closest first, and whether it reaches an authorization call.
+func (s Service) sinksFrom(ctx context.Context, n model.Node) ([]Sink, bool, error) {
+	reached, err := s.R.Traverse(ctx, n.ID, []model.EdgeKind{model.EdgeCalls, model.EdgeDispatchesTo}, store.Out, surfaceDepth, store.MaxLimit)
 	if err != nil {
-		return ep, err
+		return nil, false, err
 	}
+	checksAuth := false
 	best := map[string]Sink{}
 	note := func(n model.Node, depth int) {
 		for _, tag := range n.SecurityTags {
 			if tag == authTag {
-				ep.ChecksAuth = true
+				checksAuth = true
 				continue
 			}
 			if _, ok := sinkWeight[tag]; !ok {
@@ -231,23 +239,24 @@ func (s Service) entryPoint(ctx context.Context, r model.Node) (EntryPoint, erro
 			}
 		}
 	}
-	note(h, 0)
+	note(n, 0)
 	for _, hit := range reached {
 		note(hit.Node, hit.Depth)
 	}
+	var sinks []Sink
 	for _, sk := range best {
-		ep.Reaches = append(ep.Reaches, sk)
+		sinks = append(sinks, sk)
 	}
-	slices.SortFunc(ep.Reaches, func(a, b Sink) int { return cmp.Or(cmp.Compare(a.Depth, b.Depth), cmp.Compare(a.Tag, b.Tag)) })
-	return ep, nil
+	slices.SortFunc(sinks, func(a, b Sink) int { return cmp.Or(cmp.Compare(a.Depth, b.Depth), cmp.Compare(a.Tag, b.Tag)) })
+	return sinks, checksAuth, nil
 }
 
-// reachedFrom lists the entry points whose handlers lead to id, nearest
-// first, and how many there are.
-func (s Service) reachedFrom(ctx context.Context, id string, limit int) ([]Ref, int, error) {
+// routesTo lists the entry points whose handlers lead to id, nearest
+// first.
+func (s Service) routesTo(ctx context.Context, id string) ([]model.Hit, error) {
 	hits, err := s.R.Traverse(ctx, id, []model.EdgeKind{model.EdgeCalls, model.EdgeDispatchesTo, model.EdgeHandledBy}, store.In, surfaceDepth+1, store.MaxLimit)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	var routes []model.Hit
 	for _, h := range hits {
@@ -258,8 +267,5 @@ func (s Service) reachedFrom(ctx context.Context, id string, limit int) ([]Ref, 
 	slices.SortStableFunc(routes, func(a, b model.Hit) int {
 		return cmp.Or(cmp.Compare(a.Depth, b.Depth), cmp.Compare(a.Node.ShortName(), b.Node.ShortName()))
 	})
-	if len(routes) == 0 {
-		return nil, 0, nil
-	}
-	return refs(routes, limit, false), len(routes), nil
+	return routes, nil
 }

@@ -119,12 +119,15 @@ type SymbolContext struct {
 	Implementations []Ref           `json:"implementations,omitempty"`
 	// ReachedFrom lists the entry points (HTTP routes, MCP tools, CLI
 	// commands) whose handlers lead here through the call graph.
-	ReachedFrom []Ref         `json:"reached_from,omitempty"`
-	Docs        []Ref         `json:"docs,omitempty"`
-	Findings    []Ref         `json:"findings,omitempty"`
-	Churn       *Churn        `json:"churn,omitempty"`
-	Package     *PackageCtx   `json:"package,omitempty"`
-	Analysis    *AnalysisNote `json:"analysis,omitempty"`
+	ReachedFrom []Ref `json:"reached_from,omitempty"`
+	Docs        []Ref `json:"docs,omitempty"`
+	Findings    []Ref `json:"findings,omitempty"`
+	// Security is set when the symbol reaches sensitive operations or
+	// carries findings.
+	Security *SecurityContext `json:"security,omitempty"`
+	Churn    *Churn           `json:"churn,omitempty"`
+	Package  *PackageCtx      `json:"package,omitempty"`
+	Analysis *AnalysisNote    `json:"analysis,omitempty"`
 	// Duplicate is set when the function has exact or edited copies elsewhere.
 	Duplicate *duplicates.Info `json:"duplicate,omitempty"`
 	// Measured is the function's coverage in the last recorded test run.
@@ -206,8 +209,12 @@ func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts Co
 	if err := s.labelEvidence(ctx, n.ID, tests, out.Tests, nil, nil); err != nil {
 		return out, err
 	}
-	if out.ReachedFrom, out.Counts.EntryPoints, err = s.reachedFrom(ctx, n.ID, limit); err != nil {
+	routes, err := s.routesTo(ctx, n.ID)
+	if err != nil {
 		return out, err
+	}
+	if out.Counts.EntryPoints = len(routes); len(routes) > 0 {
+		out.ReachedFrom = refs(routes, limit, false)
 	}
 	if f, ok, stale, err := s.runtimeFacts(ctx, repo); err != nil {
 		return out, err
@@ -234,6 +241,9 @@ func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts Co
 		r := refOf(f.Node, 0, true)
 		r.QualifiedID = f.Node.Severity + " " + f.Node.Rule
 		out.Findings = append(out.Findings, r)
+	}
+	if out.Security, err = s.securityOf(ctx, n, routes, len(findings), limit, full); err != nil {
+		return out, err
 	}
 
 	if n.Kind.IsCallable() {
@@ -289,7 +299,7 @@ func (s Service) SymbolContext(ctx context.Context, repo, symbol string, opts Co
 			out.Churn = churn
 		}
 	} else {
-		out.Hint = "verbosity=full adds transitive callers, untested public callers, docs and file churn"
+		out.Hint = "verbosity=full adds transitive callers, untested public callers, docs, file churn and the guards of the entry points in security"
 	}
 	return finishSymbol(out, opts.MaxTokens)
 }
