@@ -83,3 +83,41 @@ func TestAttackSurface(t *testing.T) {
 	assert.Equal(t, sc.ReachedFrom[0].QualifiedID, "http POST /run")
 	assert.Equal(t, sc.ReachedFrom[1].QualifiedID, "mcp run_tool")
 }
+
+func TestSymbolSecurityContext(t *testing.T) {
+	ctx := context.Background()
+	s := surfaceService(t)
+
+	sc, err := s.SymbolContext(ctx, "r", "app.run", ContextOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, sc.Security)
+	assert.Equal(t, sc.Security.Reaches, []Sink{{Tag: "exec", Via: "app.runner", Depth: 1}})
+	assert.False(t, sc.Security.ChecksAuth)
+	assert.Equal(t, sc.Security.EntryPointsChecked, 2)
+	assert.Equal(t, sc.Security.Unguarded, 1, "run_tool has no guard; POST /run has two")
+	assert.Contains(t, sc.Security.Note, "1 of 2 entry points")
+	assert.Len(t, sc.Security.EntryPoints, 0, "outline leaves the list out")
+
+	full, err := s.SymbolContext(ctx, "r", "app.run", ContextOptions{Verbosity: Full})
+	require.NoError(t, err)
+	require.Len(t, full.Security.EntryPoints, 2)
+	assert.Equal(t, full.Security.EntryPoints[0].Name, "POST /run")
+	assert.Equal(t, full.Security.EntryPoints[0].Guards, []string{`"admin"`, "withAudit"})
+	assert.Len(t, full.Security.EntryPoints[0].Reaches, 0)
+
+	// The external call carries the tag itself.
+	sc, err = s.SymbolContext(ctx, "r", "app.runner", ContextOptions{Limit: 1})
+	require.NoError(t, err)
+	require.NotNil(t, sc.Security)
+	assert.Equal(t, sc.Security.Reaches[0], Sink{Tag: "exec", Via: "app.runner", Depth: 0})
+	assert.Equal(t, sc.Security.EntryPointsChecked, 1)
+	assert.Equal(t, sc.Security.Unguarded, 0, "POST /run is nearest by name and guarded")
+	assert.Contains(t, sc.Security.Note, "nearest 1 of 2 entry points")
+
+	// Nothing sensitive and no findings: no section.
+	for _, sym := range []string{"app.list", "app.open"} {
+		sc, err = s.SymbolContext(ctx, "r", sym, ContextOptions{})
+		require.NoError(t, err)
+		assert.True(t, sc.Security == nil, sym)
+	}
+}

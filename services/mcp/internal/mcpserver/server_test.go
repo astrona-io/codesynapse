@@ -314,6 +314,12 @@ func TestAgentTaskPromptsAndReport(t *testing.T) {
 	got, err = cs.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "briefing"})
 	require.NoError(t, err)
 	assert.Contains(t, got.Messages[0].Content.(*mcp.TextContent).Text, `kind: "report"`)
+	got, err = cs.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "security-review"})
+	require.NoError(t, err)
+	assert.Contains(t, got.Messages[0].Content.(*mcp.TextContent).Text, "security of this repository")
+	got, err = cs.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "security-review", Arguments: map[string]string{"target": "internal/gitx"}})
+	require.NoError(t, err)
+	assert.Contains(t, got.Messages[0].Content.(*mcp.TextContent).Text, "security of internal/gitx")
 
 	var sub struct{ ID string }
 	res := call(t, cs, "submit_review", map[string]any{"kind": "report", "title": "Briefing: app", "summary": "## What this is\nAn app."}, &sub)

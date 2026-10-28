@@ -75,7 +75,7 @@ func TestToolsetSelection(t *testing.T) {
 	want := slices.Clone(Toolsets[ToolsetCore])
 	slices.Sort(want)
 	assert.Equal(t, tools, want)
-	for _, p := range []string{"code-review", "briefing", "security-triage", "context-offload"} {
+	for _, p := range []string{"code-review", "briefing", "security-triage", "security-review", "context-offload"} {
 		assert.True(t, slices.Contains(allPrompts, p), p)
 		assert.False(t, slices.Contains(prompts, p), "%s needs a toolset core lacks", p)
 	}

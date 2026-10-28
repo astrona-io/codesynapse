@@ -110,6 +110,11 @@ func finishSymbol(out SymbolContext, maxTokens int) (SymbolContext, error) {
 			out.Duplicate = nil
 			return 1
 		}
+		if sc := out.Security; sc != nil {
+			if n := trimTail(&sc.EntryPoints); n > 0 {
+				return n
+			}
+		}
 		for _, refs := range []*[]Ref{&out.Docs, &out.UntestedCallers, &out.Implementations, &out.Callees, &out.Callers, &out.Tests, &out.Findings} {
 			if n := trimTail(refs); n > 0 {
 				return n
