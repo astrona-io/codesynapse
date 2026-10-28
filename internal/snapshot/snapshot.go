@@ -25,7 +25,7 @@ func Take(ctx context.Context, r store.Reader, repo string) (history.Snapshot, e
 	if err != nil {
 		return history.Snapshot{}, err
 	}
-	s := history.Snapshot{At: n.Time, Head: n.Head}
+	s := history.Snapshot{At: n.Time, Head: n.Head, Branch: n.Branch}
 
 	sec, err := security.Build(ctx, r, repo, security.Options{MinSeverity: "info"})
 	if err != nil {

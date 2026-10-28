@@ -127,6 +127,8 @@ const steps = computed<Step[]>(() => {
       <HealthCard v-if="savingsCard" label="Context for AI agents" tip="reduction" :value="savingsCard.value" :verdict="savingsCard.verdict" tone="good" :to="`${base}/metrics`" action="See benchmark" />
     </div>
 
+    <SecurityTrend :repo="repo" />
+
     <section class="panel">
       <div class="panel__header">
         <div><p class="eyebrow">Next steps</p><h2>What to do now, most important first</h2></div>

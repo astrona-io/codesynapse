@@ -127,7 +127,7 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	if len(opts) > 0 && opts[0].History != nil {
 		h.history = opts[0].History
 		mcp.AddTool(s, add("repo_trend",
-			"How a repository is changing: the security grade and score, vulnerabilities your code calls, serious findings, licence conflicts, duplicate and unused code, test reach and documentation after each sync, and what got worse or better since the sync before. Use it to answer whether the codebase is improving, and to check your change did not make something worse."),
+			"How a repository is changing: the security grade and score, vulnerabilities your code calls, serious findings, licence conflicts, duplicate and unused code, test reach and documentation after each sync, and what got worse or better since the previous sync of the same branch. branches gives the security grade and findings by severity per indexed branch. Use it to answer whether the codebase is improving, and to check your change did not make something worse."),
 			h.repoTrend)
 	}
 	if len(opts) > 0 && opts[0].Reviews != nil {
