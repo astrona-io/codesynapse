@@ -32,6 +32,8 @@ scanners:
     ignore_rules:
       - rule_id: "sec-yaml-plain-secret"
         paths: ["test/mock_secrets.yaml"]
+    # Honour codesynapse:ignore comments next to findings (needs approval)
+    inline_ignores: true
 
 # Async AI Annotation Agent controls
 annotation:
@@ -49,6 +51,24 @@ annotation:
 ```
 
 `sec-yaml-plain-secret` is a compatibility alias for the existing catalogue rule `yaml-hardcoded-secret`. The parser normalizes it and returns a diagnostic. Unknown rules fail validation; stored finding IDs retain their catalogue spelling.
+
+### Inline ignores
+
+A comment on a finding's line, or on the line above it, can ask to suppress that one finding:
+
+```go
+// codesynapse:ignore exec-variable the generator only runs our own templates
+cmd := exec.Command(tool, args...)
+```
+
+```yaml
+# codesynapse:ignore yaml-hardcoded-secret test fixture, not a real password
+password: example
+```
+
+The comment names the finding's rule ID (or its alias) and gives a reason. A comment without a reason, or naming another rule, does nothing. The marker counts only after a comment opener (`//`, `#`, `/*`, `--`, `<!--`, `;`, `*`, `{{/*`), so a string that happens to contain it does not. Ingest reads the line next to each finding from regular files inside the checkout (no symlinks, at most 1 MiB per file, never paths the policy excludes) and stores the reason on the finding node (`ignore`, redacted with `redact.Free` and capped at 200 bytes). The finding is never removed.
+
+A comment alone suppresses nothing: anyone who can push to the repository could write one. It takes effect only when `scanners.security.inline_ignores: true` is in the configuration and the organisation's current approval of that digest has `allow_suppressions`. Until then the report keeps the finding active and shows the request as `ignore_request`. With the approval, the finding moves to the suppressed list with the reason `In code: <reason>`. The field is omitted from the normalized configuration when false, so digests and approvals made before it existed stay valid.
 
 ## Parser and defaults
 

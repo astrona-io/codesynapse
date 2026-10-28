@@ -222,6 +222,8 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 		}
 	}
 
+	markInlineIgnores(ctx, root, g, policy)
+
 	progress(7, "Analysing the graph")
 	pruned := g.PruneDanglingEdges()
 	repoNode.Analysis = analysisSummary(g).Encode()

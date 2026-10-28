@@ -28,7 +28,7 @@ func edgeKinds() []string {
 // package nodeprops; "id" is stored as "nid". Lists are JSON text.
 var (
 	nodeTexts = []string{"nid", "kind", "repo", "name", "qualified_name", "package", "file", "signature", "summary", "body_hash", "clone_hash", "clone_sig", "via", "doc_type", "status", "meta", "duplicates",
-		"time", "head", "root", "branch", "metrics", "severity", "rule", "version", "fixed_version", "reachability", "url",
+		"time", "head", "root", "branch", "metrics", "severity", "rule", "ignore", "version", "fixed_version", "reachability", "url",
 		"liveness", "cleanup", "licenses", "coverage", "language", "ecosystem", "license", "license_source", "symbol_id", "revision", "identities", "analysis", "latest", "deprecated",
 		// The publication run that last wrote the node (replace.go).
 		"run"}

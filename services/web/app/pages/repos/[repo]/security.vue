@@ -236,7 +236,7 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
                 </td>
                 <td><span class="badge" :class="f.exposed ? 'badge--pink' : ''">{{ f.exposed ? 'yes' : 'no' }}</span></td>
                 <td><span class="badge" :class="f.tested ? 'badge--green' : 'badge--amber'">{{ f.tested ? 'yes' : 'no' }}</span></td>
-                <td class="detail">{{ f.detail }}</td>
+                <td class="detail">{{ f.detail }}<div v-if="f.ignore_request" class="small muted" title="A codesynapse:ignore comment asks to suppress this finding. It stays active until the organisation approves inline ignores for this repository.">Ignore requested in code: {{ f.ignore_request }}</div></td>
                 <td><button class="secondary tiny" :aria-expanded="open.has(f.id)" @click="toggle(f.id)">{{ open.has(f.id) ? 'Hide fix' : 'How to fix' }}</button></td>
               </tr>
               <tr v-if="open.has(f.id)" class="fix-row">
