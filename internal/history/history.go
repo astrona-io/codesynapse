@@ -22,6 +22,10 @@ type Snapshot struct {
 	// At is the ingest time (RFC 3339) and identifies the snapshot.
 	At   string `json:"at"`
 	Head string `json:"head,omitempty"`
+	// Branch is the branch that was indexed ("" when unknown: a detached
+	// checkout, or a snapshot taken before branches were recorded). Snapshots
+	// are compared only with earlier ones of the same branch.
+	Branch string `json:"branch,omitempty"`
 
 	Grade string `json:"grade,omitempty"`
 	Score int    `json:"score"`
@@ -127,6 +131,57 @@ type Trend struct {
 	Improvements []Change `json:"improvements"`
 	// Since is the time of the snapshot compared with.
 	Since string `json:"since,omitempty"`
+	// Branches is the security trend of each branch, the branch of the
+	// latest snapshot first.
+	Branches []BranchTrend `json:"branches"`
+}
+
+// SecurityPoint is the security state after one ingest of a branch.
+type SecurityPoint struct {
+	At       string `json:"at"`
+	Head     string `json:"head,omitempty"`
+	Grade    string `json:"grade,omitempty"`
+	Score    int    `json:"score"`
+	Critical int    `json:"critical"`
+	High     int    `json:"high"`
+	Medium   int    `json:"medium"`
+	Low      int    `json:"low"`
+	// VulnsHigh counts high and critical dependency advisories.
+	VulnsHigh int `json:"vulns_high"`
+}
+
+// BranchTrend is the security grade and finding counts of one branch over
+// its snapshots, oldest first, and what got worse or better at its latest
+// sync.
+type BranchTrend struct {
+	Branch       string          `json:"branch"`
+	Points       []SecurityPoint `json:"points"`
+	Regressions  []Change        `json:"regressions"`
+	Improvements []Change        `json:"improvements"`
+	Since        string          `json:"since,omitempty"`
+}
+
+// Latest returns the newest snapshot of snaps (oldest first) and the one
+// before it on the same branch. ok is false when that branch has only one.
+// Comparing across branches would call a branch switch a regression.
+func Latest(snaps []Snapshot) (prev, cur Snapshot, ok bool) {
+	if len(snaps) == 0 {
+		return Snapshot{}, Snapshot{}, false
+	}
+	cur = snaps[len(snaps)-1]
+	for i := len(snaps) - 2; i >= 0; i-- {
+		if snaps[i].Branch == cur.Branch {
+			return snaps[i], cur, true
+		}
+	}
+	return Snapshot{}, cur, false
+}
+
+// GradeWorse reports a step down of the security grade from prev to cur. No
+// grade before means nothing to compare with; a repository that stops being
+// checkable counts as worse.
+func GradeWorse(prev, cur Snapshot) bool {
+	return prev.Grade != "" && rankOf(cur.Grade) > rankOf(prev.Grade)
 }
 
 // Compare lists what got worse and better from prev to cur. Metrics whose
@@ -169,11 +224,12 @@ func describe(m metric, from, to float64) string {
 	return fmt.Sprintf("%s %s to %s", m.label, f(from), f(to))
 }
 
-// Build orders snapshots by time and compares the last two.
+// Build orders snapshots by time and compares the latest with the one before
+// it on the same branch.
 func Build(snaps []Snapshot) Trend {
 	snaps = slices.Clone(snaps)
 	slices.SortFunc(snaps, func(a, b Snapshot) int { return cmp.Compare(a.At, b.At) })
-	t := Trend{Snapshots: snaps, Series: []Series{}, Regressions: []Change{}, Improvements: []Change{}}
+	t := Trend{Snapshots: snaps, Series: []Series{}, Regressions: []Change{}, Improvements: []Change{}, Branches: branches(snaps)}
 	if t.Snapshots == nil {
 		t.Snapshots = []Snapshot{}
 	}
@@ -184,9 +240,50 @@ func Build(snaps []Snapshot) Trend {
 		}
 		t.Series = append(t.Series, s)
 	}
-	if len(snaps) >= 2 {
-		t.Regressions, t.Improvements = Compare(snaps[len(snaps)-2], snaps[len(snaps)-1])
-		t.Since = snaps[len(snaps)-2].At
+	if prev, cur, ok := Latest(snaps); ok {
+		t.Regressions, t.Improvements = Compare(prev, cur)
+		t.Since = prev.At
 	}
 	return t
+}
+
+// branches splits snaps (oldest first) by branch.
+func branches(snaps []Snapshot) []BranchTrend {
+	idx := map[string]int{}
+	out := []BranchTrend{}
+	byBranch := [][]Snapshot{}
+	for _, s := range snaps {
+		i, ok := idx[s.Branch]
+		if !ok {
+			i = len(out)
+			idx[s.Branch] = i
+			out = append(out, BranchTrend{Branch: s.Branch, Points: []SecurityPoint{}, Regressions: []Change{}, Improvements: []Change{}})
+			byBranch = append(byBranch, nil)
+		}
+		byBranch[i] = append(byBranch[i], s)
+		out[i].Points = append(out[i].Points, SecurityPoint{At: s.At, Head: s.Head, Grade: s.Grade, Score: s.Score,
+			Critical: s.Findings["critical"], High: s.Findings["high"], Medium: s.Findings["medium"], Low: s.Findings["low"],
+			VulnsHigh: sev(s.Vulns, "high", "critical")})
+	}
+	for i := range out {
+		if prev, cur, ok := Latest(byBranch[i]); ok {
+			out[i].Regressions, out[i].Improvements = Compare(prev, cur)
+			out[i].Since = prev.At
+		}
+	}
+	latest := ""
+	if len(snaps) > 0 {
+		latest = snaps[len(snaps)-1].Branch
+	}
+	slices.SortStableFunc(out, func(a, b BranchTrend) int {
+		return cmp.Or(cmp.Compare(b2i(b.Branch == latest), b2i(a.Branch == latest)), cmp.Compare(a.Branch, b.Branch))
+	})
+	return out
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
