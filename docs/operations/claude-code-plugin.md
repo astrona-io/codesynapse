@@ -46,7 +46,7 @@ edit metadata and forward a `transcript_path` when supplied by the runtime.
 
 | Part | What it does |
 |---|---|
-| MCP server `codesynapse` | `codesynapse mcp bridge`: the CodeSynapse tools; every call goes to the server (opt in to working-tree answers with `CODESYNAPSE_BRIDGE_WORKTREE=true`). In Claude Code the tools are named `mcp__plugin_codesynapse_codesynapse__<tool>`. |
+| MCP server `codesynapse` | `codesynapse mcp bridge`: the CodeSynapse tools; core tools for the checkout are answered from the working tree while it has unsynced changes and reported to the server; everything else goes to the server (`CODESYNAPSE_BRIDGE_WORKTREE=false` sends every call). In Claude Code the tools are named `mcp__plugin_codesynapse_codesynapse__<tool>`. |
 | Skill `/codesynapse:codesynapse` | The workflow: `minimal_context` first, `get_symbol_context` before editing, `file_outline` before reading, `change_checklist` before changes that ripple, `verify_plan` and `get_pr_context` before finishing. Claude loads it on its own for work in an indexed repository. |
 | SessionStart hook: ruleset | `codesynapse hook session`: puts the CodeSynapse ruleset in the session's context, so agents use the tools before reading files without anyone pasting a prompt. It asks the server (`GET /api/v1/agent-rules`, so the wording can be improved for every machine at once) and falls back to the built-in text when the server cannot be reached. In a checkout of an indexed repository it adds that repository's house style (`GET /api/v1/repos/{repo}/conventions`): how its tests assert, how errors and logs are made, its frameworks. |
 | SessionStart hook: memory | `codesynapse memory recall --hook`: recent memory facts of the repository. |

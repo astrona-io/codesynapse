@@ -126,6 +126,8 @@ func TestLocalGitCallsAreCounted(t *testing.T) {
 	require.Equal(t, post(t, ts, path, `{"tool":"git_status","client":"claude-code","duration_ms":42,"response_tokens":180}`), 204)
 	require.Equal(t, post(t, ts, path, `{"tool":"git_status","client":"claude-code","duration_ms":8,"response_tokens":20,"failed":true}`), 204)
 	require.Equal(t, post(t, ts, path, `{"tool":"git_blame","client":"claude-code","duration_ms":15,"response_tokens":90}`), 204)
+	// Core tools the bridge answered from the working tree.
+	require.Equal(t, post(t, ts, path, `{"tool":"search","client":"claude-code","duration_ms":30,"response_tokens":400}`), 204)
 
 	var st Stats
 	require.Equal(t, get(t, ts, "/api/v1/stats", &st), 200)
@@ -138,16 +140,18 @@ func TestLocalGitCallsAreCounted(t *testing.T) {
 	assert.Equal(t, by["git_status"].ResponseTokens, 200)
 	assert.Equal(t, by["git_status"].Kind, "git")
 	assert.Equal(t, by["git_blame"].Calls, 1)
-	assert.Equal(t, st.Agents.Calls, 3, "they count as tool calls like any other")
+	assert.Equal(t, by["search"].Calls, 1)
+	assert.Equal(t, st.Agents.Calls, 4, "they count as tool calls like any other")
 
 	for _, body := range []string{
-		`{"tool":"search","client":"claude-code"}`, // only the local tools are reported this way
+		`{"tool":"security_report","client":"claude-code"}`, // only the local tools are reported this way
 		`{"tool":"rm_rf","client":"claude-code"}`,
 		`{"tool":"git_log","client":"Claude Code"}`,
 		`{"tool":"git_log","client":"claude-code","duration_ms":-1}`,
 		`{"tool":"git_log","client":"claude-code","duration_ms":99999999}`,
 		`{"tool":"git_log","client":"claude-code","response_tokens":-5}`,
 		`{"tool":"git_log","client":"claude-code","path":"/etc/passwd"}`, // nothing about the checkout is accepted
+		`{"tool":"git_log","client":"claude-code","repo":"../etc"}`,
 	} {
 		assert.Equal(t, post(t, ts, path, body), 400, body)
 	}

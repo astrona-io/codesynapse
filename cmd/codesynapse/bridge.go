@@ -55,7 +55,7 @@ func (o *mcpBridgeOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.client, "client", "", "Runtime metadata adapter: codex or cursor (default: per-chat Claude bridge)")
 	f.StringVar(&o.url, "url", app.Getenv("CODESYNAPSE_MCP_URL", "http://localhost:8090/mcp"), "MCP endpoint to forward to")
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "CodeSynapse API that registers the chat session")
-	f.BoolVar(&o.worktree, "worktree", app.Getenv("CODESYNAPSE_BRIDGE_WORKTREE", "false") == "true", "Opt in: while this checkout has changes the server has not indexed, answer the core repository tools from a graph of the working tree built on this machine (those answers never reach the server, so they are not audited or counted)")
+	f.BoolVar(&o.worktree, "worktree", app.Getenv("CODESYNAPSE_BRIDGE_WORKTREE", "true") != "false", "While this checkout has changes the server has not indexed, answer the core repository tools from a graph of the working tree built on this machine and report each call to the server (CODESYNAPSE_BRIDGE_WORKTREE=false sends every call to the server)")
 	f.StringVar(&o.repo, "repo", "", "The name the server knows this checkout by (default: from the origin remote)")
 	return nil
 }
@@ -64,8 +64,11 @@ func (o *mcpBridgeOptions) Validate(context.Context, *app.Env) error {
 	if o.client != "" && o.client != "codex" && o.client != "cursor" {
 		return errors.New("--client must be codex or cursor")
 	}
-	if o.client != "" && o.worktree {
-		return errors.New("runtime adapters require server-side answers; turn off --worktree")
+	if o.client != "" {
+		if o.worktree && o.EC.Command.Flags().Changed("worktree") {
+			return errors.New("runtime adapters require server-side answers; turn off --worktree")
+		}
+		o.worktree = false
 	}
 	for _, u := range []string{o.url, o.apiURL} {
 		if err := checkBridgeURL(u); err != nil {
@@ -124,7 +127,10 @@ func (o *mcpBridgeOptions) Run(ctx context.Context, _ *app.Env) error {
 	if c.token == "" {
 		return fmt.Errorf("no API key: set %s or run `codesynapse mcp install`", apiTokenEnv)
 	}
-	if _, err := c.executionContext(ctx, session, session); err != nil {
+	// Keep the registered session in the context: reports of local answers
+	// (reportLocal) carry it, so the audit entry names the chat.
+	ctx, err := c.executionContext(ctx, session, session)
+	if err != nil {
 		return err
 	}
 	b := &bridge{url: o.url, token: c.token, session: session, out: o.EC.Stdout, report: c, logger: o.EC.Logger,
@@ -153,6 +159,10 @@ type bridge struct {
 
 	// worktree answers core tools from the working tree; nil forwards all.
 	worktree *worktree
+	// localOff and refused (guarded by mu) send local tools to the server
+	// once it refused to record their answers (reportLocal).
+	localOff bool
+	refused  map[string]bool
 
 	// The git tools are answered here (gitbridge.go). report tells the API
 	// about each call; gitDir is the checkout, found on first use.
@@ -250,18 +260,23 @@ func (b *bridge) run(ctx context.Context, in io.Reader) error {
 // applies, and reports whether it did.
 func (b *bridge) answerLocally(ctx context.Context, msg []byte, m rpcMessage) bool {
 	c, ok := b.worktree.local(msg)
-	if !ok || len(m.ID) == 0 {
+	if !ok || len(m.ID) == 0 || !b.mayAnswer(c.Params.Name) {
 		return false
 	}
+	start := time.Now()
 	result, err := b.worktree.answer(ctx, c)
 	if err != nil {
-		if !errors.Is(err, errNoChanges) {
+		if !errors.Is(err, errNoChanges) && !errors.Is(err, errWorktreeUnavailable) {
 			b.worktree.logger.Warn("answering from the server instead of the working tree", "tool", c.Params.Name, "error", err)
 		}
 		return false
 	}
 	out, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": result})
 	if err != nil {
+		return false
+	}
+	failed, _ := result["isError"].(bool)
+	if !b.reportLocal(ctx, c.Params.Name, time.Since(start), len(out)/4, failed) {
 		return false
 	}
 	b.write(out)
