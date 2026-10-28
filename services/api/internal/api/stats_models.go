@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
 // Per-model statistics over one window, for the model table and charts:
@@ -75,6 +76,12 @@ type ModelStats struct {
 	// unknown, never zero.
 	Spent            *float64 `json:"spent_dollars"`
 	CompressionSaved *float64 `json:"compression_saved_dollars"`
+	// CompressionEnabled says whether prompts of CodeSynapse's own AI tasks
+	// are shortened before they go to a cloud model; CompressionOff says why
+	// not ("disabled", "no_local_model", "no_ai"). Gateway traffic is never
+	// shortened.
+	CompressionEnabled bool   `json:"compression_enabled"`
+	CompressionOff     string `json:"compression_off,omitempty"`
 	// Gateway counts the model requests agents sent through the gateway.
 	Gateway GatewayStat `json:"gateway"`
 }
@@ -342,6 +349,7 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		out.Models = append(out.Models, *m)
 	}
 	out.Spent, out.CompressionSaved = s.moneyTotals(out.Models)
+	out.CompressionEnabled, out.CompressionOff = compressionState(s.cfg.LLM)
 	for _, f := range []*float64{&gw.Requests, &gw.Local, &gw.Cloud, &gw.Rejected, &gw.Failed, &gw.LocalUnmetered, &gw.LocalInputTokens, &gw.LocalOutputTokens, &gw.BytesIn, &gw.BytesOut} {
 		*f = math.Round(*f)
 	}
@@ -371,6 +379,19 @@ func deref(p *float64) float64 {
 		return 0
 	}
 	return *p
+}
+
+// compressionState says whether prompt shortening runs and, when it does
+// not, why: "no_ai" without any AI configuration, otherwise the registry's
+// reason.
+func compressionState(reg *llm.Registry) (bool, string) {
+	if reg == nil {
+		return false, "no_ai"
+	}
+	if st := reg.CompressionStatus(); st != llm.CompressionOn {
+		return false, st
+	}
+	return true, ""
 }
 
 // moneyTotals sums the cloud models' spend and the dollars compression saved

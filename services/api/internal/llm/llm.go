@@ -224,7 +224,9 @@ type Config struct {
 	KVCacheTTL string `yaml:"kv_cache_ttl"`
 	// CompressPrompts has a local model shorten the prose of prompts bound for
 	// a cloud provider and asks the cloud model for terse answers (compress.go).
-	CompressPrompts bool `yaml:"compress_prompts"`
+	// Unset means on whenever the "compress" task resolves to a local model;
+	// false turns it off. It never makes a cloud model do the shortening.
+	CompressPrompts *bool `yaml:"compress_prompts"`
 }
 
 // Local reports whether the provider runs on this machine or network,
