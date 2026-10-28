@@ -28,9 +28,11 @@ func TestFindingTriageEndpoints(t *testing.T) {
 	g.AddEdge(model.Edge{From: storetest.ID(model.KindMethod, "(*app.impl).Do"), To: shell, Kind: model.EdgeHasFinding})
 	require.NoError(t, f.store.ReplaceRepo(t.Context(), storetest.Repo, g))
 
+	rt := runtimeHeaders("thread-a")
 	var list triageList
-	require.Equal(t, f.client.do("GET", path, "", &list), 200)
-	assert.True(t, list.CanEdit, "an editor's API key may triage")
+	assert.Equal(t, f.client.do("GET", path, "", nil), 403, "triage needs a runtime session")
+	require.Equal(t, f.client.do("GET", path, "", &list, rt...), 200)
+	assert.True(t, list.CanEdit, "a repository admin's API key may triage")
 	assert.Len(t, list.Triage, 0)
 	assert.Len(t, list.States, 3)
 
@@ -53,12 +55,12 @@ func TestFindingTriageEndpoints(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, f.client.do("PUT", path, tc.body, nil), tc.status)
+			assert.Equal(t, f.client.do("PUT", path, tc.body, nil, rt...), tc.status)
 		})
 	}
 
 	var saved accounts.FindingTriage
-	require.Equal(t, f.client.do("PUT", path, body(map[string]any{"finding_id": shell, "state": "fixed_by", "reference": "412", "reason": "Removed the shell call"}), &saved), 200)
+	require.Equal(t, f.client.do("PUT", path, body(map[string]any{"finding_id": shell, "state": "fixed_by", "reference": "412", "reason": "Removed the shell call"}), &saved, rt...), 200)
 	assert.Equal(t, saved.Reference, "#412")
 	assert.Equal(t, saved.Rule, "exec-shell")
 	assert.Len(t, saved.Fingerprint, 64)
@@ -91,8 +93,8 @@ func TestFindingTriageEndpoints(t *testing.T) {
 	assert.Equal(t, browser.do("PUT", path, body(map[string]any{"finding_id": shell, "state": "false_positive", "reason": "x"}), nil, org...), 403)
 	assert.Equal(t, browser.do("DELETE", path+"/"+saved.Fingerprint, "", nil, org...), 403)
 
-	require.Equal(t, f.client.do("DELETE", path+"/"+saved.Fingerprint, "", nil), 204)
-	assert.Equal(t, f.client.do("DELETE", path+"/"+saved.Fingerprint, "", nil), 404)
+	require.Equal(t, f.client.do("DELETE", path+"/"+saved.Fingerprint, "", nil, rt...), 204)
+	assert.Equal(t, f.client.do("DELETE", path+"/"+saved.Fingerprint, "", nil, rt...), 404)
 	var after security.Report
 	require.Equal(t, f.client.do("GET", report, "", &after), 200)
 	assert.Len(t, after.Suppressed, 0)

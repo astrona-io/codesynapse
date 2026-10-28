@@ -82,7 +82,7 @@ const gradeColor = computed(() => ({ A: 'var(--success)', B: 'var(--info)', C: '
 const explore = (id: string) => ({ path: `/repos/${encodeURIComponent(repo.value)}/explore`, query: { id } })
 const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--amber', required: '' }[r] ?? '')
 
-// Triage: an editor records why a finding no longer counts. The API checks
+// Triage: a repository admin records why a finding no longer counts. The API checks
 // the role again; the flag only decides whether the action is shown.
 const TRIAGE_LABELS: Record<TriageState, string> = { accepted_risk: 'Accepted risk', false_positive: 'False positive', fixed_by: 'Fixed by' }
 const canTriage = computed(() => !!triage.value?.can_edit)

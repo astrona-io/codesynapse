@@ -117,15 +117,15 @@ func PrepareFindingTriage(t FindingTriage) (FindingTriage, error) {
 }
 
 // SetFindingTriage records or replaces the caller's organisation's decision
-// about a finding. It needs editor access to the repository, from a
-// signed-in session or an API key, like review comment decisions; the
-// record and its audit event commit together.
+// about a finding. It needs admin access to the repository, from a
+// signed-in session or an API key; the record and its audit event commit
+// together.
 func (s *Service) SetFindingTriage(ctx context.Context, p Principal, t FindingTriage) (FindingTriage, error) {
 	return policyChange(ctx, s, func(tx *Service) (FindingTriage, error) {
 		if p.Via != "session" && p.Via != "key" {
 			return FindingTriage{}, ErrForbidden
 		}
-		if _, err := tx.ResolveRepository(ctx, p, t.OrgID, t.Graph, Member); err != nil {
+		if _, err := tx.ResolveRepository(ctx, p, t.OrgID, t.Graph, Admin); err != nil {
 			return FindingTriage{}, err
 		}
 		t.ActorID, t.CreatedAt = p.User.ID, tx.now()
@@ -154,7 +154,7 @@ func (s *Service) ClearFindingTriage(ctx context.Context, p Principal, orgID, gr
 		if !fingerprintPattern.MatchString(fingerprint) {
 			return struct{}{}, ErrInvalidInput
 		}
-		if _, err := tx.ResolveRepository(ctx, p, orgID, graph, Member); err != nil {
+		if _, err := tx.ResolveRepository(ctx, p, orgID, graph, Admin); err != nil {
 			return struct{}{}, err
 		}
 		if err := tx.St.DeleteFindingTriage(ctx, orgID, graph, fingerprint); err != nil {

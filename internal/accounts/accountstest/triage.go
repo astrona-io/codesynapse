@@ -12,7 +12,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
-// RunFindingTriage checks triage decisions: editors only, per organisation,
+// RunFindingTriage checks triage decisions: repository admins only, per organisation,
 // audited in the same transaction, validated, bounded and gone with the
 // repository entry.
 func RunFindingTriage(t *testing.T, st accounts.Store) {
@@ -81,15 +81,20 @@ func RunFindingTriage(t *testing.T, st accounts.Store) {
 		})
 	}
 
-	// Editors may triage, viewers may not; API keys act like sessions.
+	// Repository admins may triage, editors and viewers may not; API keys
+	// act like sessions.
+	admin, _, err := svc.SignUp(ctx, "triage-admin@example.com", "Triage admin", pw)
+	require.NoError(t, err)
 	editor, _, err := svc.SignUp(ctx, "triage-editor@example.com", "Triage editor", pw)
 	require.NoError(t, err)
 	viewer, _, err := svc.SignUp(ctx, "triage-viewer@example.com", "Triage viewer", pw)
 	require.NoError(t, err)
-	for _, u := range []accounts.User{editor, viewer} {
+	for _, u := range []accounts.User{admin, editor, viewer} {
 		_, err = svc.AddMember(ctx, p, org.ID, u.Email, accounts.Member)
 		require.NoError(t, err)
 	}
+	_, err = svc.SetRepoGrant(ctx, p, org.ID, graph, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: admin.ID}, accounts.Admin)
+	require.NoError(t, err)
 	_, err = svc.SetRepoGrant(ctx, p, org.ID, graph, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: editor.ID}, accounts.Member)
 	require.NoError(t, err)
 	_, err = svc.SetRepoGrant(ctx, p, org.ID, graph, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: viewer.ID}, accounts.Viewer)
@@ -97,14 +102,17 @@ func RunFindingTriage(t *testing.T, st accounts.Store) {
 	_, err = svc.SetFindingTriage(ctx, accounts.Principal{User: viewer, Via: "session"}, base)
 	assert.True(t, errors.Is(err, accounts.ErrForbidden), "viewer: %v", err)
 	assert.True(t, errors.Is(svc.ClearFindingTriage(ctx, accounts.Principal{User: viewer, Via: "session"}, org.ID, graph, fp), accounts.ErrForbidden))
-	_, err = svc.SetFindingTriage(ctx, accounts.Principal{User: editor, Via: "automation", OrgID: org.ID}, base)
-	assert.True(t, errors.Is(err, accounts.ErrForbidden), "automation: %v", err)
 	_, err = svc.SetFindingTriage(ctx, accounts.Principal{User: editor, Via: "session"}, base)
+	assert.True(t, errors.Is(err, accounts.ErrForbidden), "editor: %v", err)
+	assert.True(t, errors.Is(svc.ClearFindingTriage(ctx, accounts.Principal{User: editor, Via: "session"}, org.ID, graph, fp), accounts.ErrForbidden))
+	_, err = svc.SetFindingTriage(ctx, accounts.Principal{User: admin, Via: "automation", OrgID: org.ID}, base)
+	assert.True(t, errors.Is(err, accounts.ErrForbidden), "automation: %v", err)
+	_, err = svc.SetFindingTriage(ctx, accounts.Principal{User: admin, Via: "session"}, base)
 	require.NoError(t, err)
 	rows, err = st.ListFindingTriage(ctx, org.ID, graph, 10)
 	require.NoError(t, err)
 	require.Len(t, rows, 1, "a second decision replaces the first")
-	assert.Equal(t, rows[0].ActorID, editor.ID)
+	assert.Equal(t, rows[0].ActorID, admin.ID)
 
 	// A failed audit rolls the change back.
 	broken := accounts.NewService(failedRepoPolicyAudit{st}, true)
@@ -118,7 +126,7 @@ func RunFindingTriage(t *testing.T, st accounts.Store) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, rows[0].Reason, "Input is a constant from config")
 
-	require.NoError(t, svc.ClearFindingTriage(ctx, accounts.Principal{User: editor, Via: "session"}, org.ID, graph, fp))
+	require.NoError(t, svc.ClearFindingTriage(ctx, accounts.Principal{User: admin, Via: "session"}, org.ID, graph, fp))
 	assert.True(t, errors.Is(svc.ClearFindingTriage(ctx, p, org.ID, graph, fp), accounts.ErrNotFound))
 	events, err = st.ListEvents(ctx, accounts.EventFilter{OrgID: org.ID, Action: "finding.triage.clear"})
 	require.NoError(t, err)
