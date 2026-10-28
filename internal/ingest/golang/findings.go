@@ -63,7 +63,8 @@ type scanner struct {
 	quiet bool
 	sum   *summary
 	sums  map[*types.Func]*summary
-	name  string // the function scanned, for findings reached through calls
+	lits  map[*ast.FuncLit]*summary // closures reached through function values
+	name  string                    // the function scanned, for findings reached through calls
 }
 
 // pkgInfo is the slice of packages.Package the scanner needs.
@@ -195,6 +196,9 @@ func (s *scanner) builtDynamically(e ast.Expr) bool {
 func (s *scanner) call(call *ast.CallExpr) {
 	fn := calleeFunc(s.p.info, call.Fun)
 	if fn == nil {
+		for _, sum := range s.dynamicSummaries(call) {
+			s.through(call, types.ExprString(call.Fun), sum)
+		}
 		s.conversion(call)
 		return
 	}
@@ -205,7 +209,7 @@ func (s *scanner) call(call *ast.CallExpr) {
 	full, pkg := fn.FullName(), fn.Pkg().Path()
 	args := call.Args
 	for _, sum := range s.summariesOf(fn) {
-		s.through(call, fn, sum)
+		s.through(call, fn.Name(), sum)
 	}
 
 	switch full {

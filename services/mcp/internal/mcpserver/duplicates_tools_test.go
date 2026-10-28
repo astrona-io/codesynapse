@@ -149,8 +149,8 @@ func TestRepoTrendTool(t *testing.T) {
 	ctx := context.Background()
 	s := memory.New()
 	require.NoError(t, s.ReplaceRepo(ctx, "org/a", dupRepo(t, "org/a", "h1")))
-	require.NoError(t, s.AddSnapshot(ctx, "org/a", history.Snapshot{At: "2026-10-01T00:00:00Z", Grade: "A", Score: 95}))
-	require.NoError(t, s.AddSnapshot(ctx, "org/a", history.Snapshot{At: "2026-10-02T00:00:00Z", Grade: "B", Score: 85, VulnsCalled: 1}))
+	require.NoError(t, s.AddSnapshot(ctx, "org/a", history.Snapshot{At: "2026-10-01T00:00:00Z", Branch: "main", Grade: "A", Score: 95}))
+	require.NoError(t, s.AddSnapshot(ctx, "org/a", history.Snapshot{At: "2026-10-02T00:00:00Z", Branch: "main", Grade: "B", Score: 85, VulnsCalled: 1, Findings: map[string]int{"high": 2}}))
 	ct, st := mcp.NewInMemoryTransports()
 	_, err := newTestServer(t, s, "test", Options{Reviews: s, History: s}).Connect(ctx, st, nil)
 	require.NoError(t, err)
@@ -168,6 +168,10 @@ func TestRepoTrendTool(t *testing.T) {
 	}
 	assert.Contains(t, keys, "grade")
 	assert.Contains(t, keys, "vulns_called")
+	require.Len(t, got.Branches, 1)
+	assert.Equal(t, got.Branches[0].Branch, "main")
+	require.Len(t, got.Branches[0].Points, 2)
+	assert.Equal(t, got.Branches[0].Points[1].High, 2, "the security trend per branch")
 
 	res = call(t, cs, "repo_trend", map[string]any{"repo": "org/a", "limit": 1}, &got)
 	require.False(t, res.IsError)

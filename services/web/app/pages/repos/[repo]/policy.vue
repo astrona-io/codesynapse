@@ -76,7 +76,7 @@ async function revoke() {
         <details open><summary>Validated requests</summary><pre>{{ JSON.stringify(preview.config, null, 2) }}</pre></details>
         <p v-for="diagnostic in preview.diagnostics" :key="diagnostic.field + diagnostic.code" class="small muted">{{ diagnostic.field }}: {{ diagnostic.code }}</p>
         <label><input v-model="exclusions" type="checkbox"> Approve requested indexing and Kubernetes exclusions</label>
-        <label><input v-model="suppressions" type="checkbox"> Approve requested security finding suppressions</label>
+        <label><input v-model="suppressions" type="checkbox"> Approve requested security finding suppressions (rule paths and, with inline_ignores, codesynapse:ignore comments)</label>
         <label><input v-model="annotation" type="checkbox"> Allow requested local annotation jobs</label>
         <div class="field"><label for="policy-reason">Reason</label><input id="policy-reason" v-model="reason" maxlength="2048" required></div>
         <div class="field"><label for="policy-expiry">Expiry (optional)</label><input id="policy-expiry" v-model="expires" type="datetime-local"></div>

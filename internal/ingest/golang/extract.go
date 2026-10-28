@@ -217,12 +217,14 @@ func Extract(ctx context.Context, opts Options) (*Result, error) {
 		x.pkg(p, true)
 	}
 	x.implementations(primary)
-	x.interprocedural()
+	// Data-flow runs first so the taint pass can follow calls through
+	// function values to the targets VTA resolved.
 	if opts.Dataflow {
 		if err := x.dataflow(ctx, primary); err != nil {
 			return nil, err
 		}
 	}
+	x.interprocedural()
 	x.recordAnalysis()
 	x.g.PruneDanglingEdges()
 	for _, node := range x.g.Nodes() {
@@ -247,12 +249,17 @@ type extractor struct {
 	// dispatch the concrete methods behind each interface method.
 	taintFuncs []*taintFunc
 	dispatch   map[*types.Func][]*types.Func
-	policy     *repoconfig.Policy
-	opts       Options
-	g          *model.Graph
-	modules    map[string]bool
-	srcs       map[string][]byte
-	res        *Result
+	// dynamic holds what each call through a function value can reach, by
+	// the call's Lparen, and taintLits the closures among those targets;
+	// both are filled by dataflow.go only when it runs.
+	dynamic   map[token.Pos][]dynTarget
+	taintLits []*taintLit
+	policy    *repoconfig.Policy
+	opts      Options
+	g         *model.Graph
+	modules   map[string]bool
+	srcs      map[string][]byte
+	res       *Result
 	// nested holds repo-relative prefixes ("sources/other/") of nested git
 	// repositories, which are separate graphs and must not be merged in.
 	nested []string

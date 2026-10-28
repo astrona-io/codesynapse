@@ -27,8 +27,8 @@ What CodeSynapse answers once a repository is indexed. Pick the area you care ab
 
 - **Governance**
 
-    Architecture records and what gets indexed.
+    Architecture records, what gets indexed and what CodeSynapse measures.
 
-    [Architecture catalog](architecture.md) · [Indexing policy and reports](indexing-policy.md)
+    [Architecture catalog](architecture.md) · [Indexing policy and reports](indexing-policy.md) · [Statistics and telemetry](telemetry.md)
 
 </div>

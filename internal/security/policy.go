@@ -19,9 +19,16 @@ func ApprovedOptions(minSeverity, tenant, repo, digest string, approval accounts
 	if err != nil || policy.Digest() != digest {
 		return opts
 	}
+	inline := policy.Config().Scanners.Security.InlineIgnores
 	opts.Suppression = func(n model.Node) string {
-		if n.Repo == repo && policy.Suppresses(n.Rule, n.File) {
+		if n.Repo != repo {
+			return ""
+		}
+		if policy.Suppresses(n.Rule, n.File) {
 			return approval.Reason
+		}
+		if inline && n.Ignore != "" {
+			return "In code: " + n.Ignore
 		}
 		return ""
 	}

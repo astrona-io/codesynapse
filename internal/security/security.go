@@ -33,7 +33,10 @@ type Finding struct {
 	// Triage is the organisation's recorded decision when it is what
 	// suppresses the finding.
 	Triage *Triage `json:"triage,omitempty"`
-	ID     string  `json:"id"`
+	// IgnoreRequest is the reason of a codesynapse:ignore comment next to the
+	// finding. It suppresses only when the tenant approved inline ignores.
+	IgnoreRequest string `json:"ignore_request,omitempty"`
+	ID            string `json:"id"`
 	// Fingerprint is the finding's stable key (model.FindingFingerprint):
 	// the same across line moves and re-indexing.
 	Fingerprint string     `json:"fingerprint,omitempty"`
@@ -188,6 +191,7 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 	for _, f := range findings {
 		n := f.Node
 		fv := Finding{ID: n.ID, Rule: n.Rule, Title: n.Name, Severity: n.Severity, CWE: n.CWE, Location: n.Location(), Detail: n.Summary, Language: findingLanguage(n)}
+		fv.IgnoreRequest = redact.Summary(redact.Free(n.Ignore), 200)
 		owners, err := r.Traverse(ctx, n.ID, []model.EdgeKind{model.EdgeHasFinding}, store.In, 1, 1)
 		if err != nil {
 			return rep, err

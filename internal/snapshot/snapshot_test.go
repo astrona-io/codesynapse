@@ -28,7 +28,7 @@ func repoWithReports(t *testing.T) (*memory.Store, *model.Graph) {
 	require.NoError(t, err)
 	met, err := metrics.Encode(metrics.Report{Tests: metrics.Tests{ReachablePct: 61.5}, Docs: metrics.Docs{CoveragePct: 33}})
 	require.NoError(t, err)
-	rn.Cleanup, rn.Duplicates, rn.Licenses, rn.Metrics = cl, dup, lic, met
+	rn.Cleanup, rn.Duplicates, rn.Licenses, rn.Metrics, rn.Branch = cl, dup, lic, met, "main"
 	s := memory.New()
 	require.NoError(t, s.ReplaceRepo(context.Background(), storetest.Repo, g))
 	return s, g
@@ -40,6 +40,7 @@ func TestTakeReadsTheStoredReports(t *testing.T) {
 	snap, err := Take(ctx, s, storetest.Repo)
 	require.NoError(t, err)
 	assert.Equal(t, snap.Head, "abc")
+	assert.Equal(t, snap.Branch, "main", "the indexed branch, so the trend compares like with like")
 	assert.Equal(t, snap.At, "2026-01-01T00:00:00Z", "the ingest time identifies the snapshot")
 	assert.True(t, snap.Grade != "", "the security report is taken from the graph")
 	assert.Equal(t, snap.DeadFunctions, 5)
