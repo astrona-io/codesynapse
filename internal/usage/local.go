@@ -9,6 +9,9 @@ const (
 	LocalAvoided = "(local:avoided)" //nolint:gosec // daily counter identifier, not a credential
 	// LocalBriefs counts prompts a local model briefed the agent on.
 	LocalBriefs = "(local:briefs)" //nolint:gosec // daily counter identifier, not a credential
+	// LocalDrafts counts drafts a local model wrote (local_draft). They
+	// have no avoided figure: the agent still checks every draft.
+	LocalDrafts = "(local:drafts)" //nolint:gosec // daily counter identifier, not a credential
 )
 
 // Unindexed counts, per checkout name (the bucket's Repo), the pre-finish

@@ -92,6 +92,8 @@ func TestModelStats(t *testing.T) {
 	assert.Equal(t, *out.Spent, 0.0123)
 	assert.Equal(t, *out.CompressionSaved, 0.03, "10000 tokens at $3 per million")
 	assert.Equal(t, c.CompressedBytes, 40000.0)
+	assert.True(t, out.CompressionEnabled, "a local model is configured, so shortening is on by default")
+	assert.Equal(t, out.CompressionOff, "")
 	assert.True(t, c.ReadTPS == nil, "no streamed answers, no speed")
 	gw := out.Gateway
 	assert.Equal(t, []float64{gw.Requests, gw.Local, gw.Cloud, gw.Rejected, gw.Failed, gw.LocalSharePct}, []float64{12, 6, 4, 2, 3, 50})
@@ -122,6 +124,28 @@ func TestMoneyTotalsUnknownWithoutPrices(t *testing.T) {
 	assert.True(t, comp != nil && *comp == 0)
 }
 
+// The tile says why prompts are not shortened instead of showing $0.
+func TestCompressionState(t *testing.T) {
+	cloud := llm.ProviderConfig{Name: "cloud", Kind: llm.KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "big"}
+	local := llm.ProviderConfig{Name: "local", Kind: llm.KindOpenAI, BaseURL: "http://127.0.0.1:11434/v1", Model: "qwen"}
+	for name, tc := range map[string]struct {
+		reg    *llm.Registry
+		on     bool
+		reason string
+	}{
+		"no AI":          {nil, false, "no_ai"},
+		"cloud only":     {llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{cloud}, Default: "cloud"}), false, llm.CompressionNoLocalModel},
+		"turned off":     {llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{cloud, local}, Default: "cloud", CompressPrompts: new(false)}), false, llm.CompressionDisabled},
+		"local model on": {llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{cloud, local}, Default: "cloud"}), true, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			on, reason := compressionState(tc.reg)
+			assert.Equal(t, on, tc.on)
+			assert.Equal(t, reason, tc.reason)
+		})
+	}
+}
+
 // ask_local's counters are tokens, never tool calls.
 func TestAgentStatsCountsAskLocal(t *testing.T) {
 	now := time.Now()
@@ -130,11 +154,14 @@ func TestAgentStatsCountsAskLocal(t *testing.T) {
 		{Day: day, Repo: "r", Tool: "ask_local", Client: "claude-code", Calls: 1, ResponseTokens: 300},
 		{Day: day, Repo: "r", Tool: usage.LocalRead, Client: "claude-code", Calls: 11000},
 		{Day: day, Repo: "r", Tool: usage.LocalAvoided, Client: "claude-code", Calls: 9700},
+		{Day: day, Repo: "r", Tool: "local_draft", Client: "claude-code", Calls: 1, ResponseTokens: 200},
+		{Day: day, Repo: "r", Tool: usage.LocalDrafts, Client: "claude-code", Calls: 1},
 	}, 7, now, nil, 1)
-	assert.Equal(t, a.Calls, 1)
+	assert.Equal(t, a.Calls, 2)
+	assert.Equal(t, a.LocalDrafts, 1, "a draft is counted, and adds nothing to tokens avoided")
 	assert.Equal(t, a.LocalReadTokens, 11000)
 	assert.Equal(t, a.AvoidedTokens, 9700)
 	assert.Equal(t, a.LocalAvoidedTokens, 9700)
 	assert.Equal(t, a.Daily[len(a.Daily)-1].AvoidedTokens, 9700)
-	assert.Equal(t, a.ContextTotalTokens, 10000)
+	assert.Equal(t, a.ContextTotalTokens, 10200, "the draft the agent got joins its context")
 }
