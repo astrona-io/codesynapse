@@ -6,23 +6,42 @@ interface OutlineEntry { id: string; kind: string; name: string; lines: string; 
 const route = useRoute()
 const router = useRouter()
 const repo = computed(() => route.params.repo as string)
+useHead({ title: () => `Docs · ${repo.value}` })
 const { data: docs, error } = useApiGet<{ results: Ranked[] }>(() => repoPath(repo.value, 'list?kind=Document&metric=loc&limit=200'))
 const selected = computed(() => (route.query.file as string | undefined) ?? docs.value?.results[0]?.node.file ?? '')
 const outline = ref<OutlineEntry[]>([])
 const mentions = ref<Record<string, { id: string; name: string; kind: string }[]>>({})
 const filter = ref('')
 
-watch(selected, async (file) => {
+const outlineError = ref('')
+const outlineLoading = ref(false)
+// Each change of repository or document starts a new load; answers of an older one are dropped.
+let loadSeq = 0
+watch([repo, selected], async ([name, file]) => {
+  const seq = ++loadSeq
   outline.value = []
   mentions.value = {}
+  outlineError.value = ''
+  outlineLoading.value = false
   if (!file) return
-  const res = await $fetch<{ entries: OutlineEntry[] }>(apiPath(repoPath(repo.value, 'outline')), { query: { file } })
-  outline.value = res.entries.filter((e) => e.kind === 'Section')
-  // Code each section mentions, fetched in parallel.
+  outlineLoading.value = true
+  try {
+    const res = await apiGet<{ entries: OutlineEntry[] }>(repoPath(name, `outline?file=${encodeURIComponent(file)}`))
+    if (seq !== loadSeq) return
+    outline.value = res.entries.filter((e) => e.kind === 'Section')
+  } catch (e) {
+    if (seq === loadSeq) outlineError.value = apiErrorMessage(e)
+    return
+  } finally {
+    if (seq === loadSeq) outlineLoading.value = false
+  }
+  // Code each section mentions, fetched in parallel; a section without an answer shows no mentions.
   await Promise.all(outline.value.map(async (s) => {
-    const v = await $fetch<GraphView>(apiPath(repoPath(repo.value, 'graph/expand')), { query: { id: s.id, edge: 'MENTIONS', limit: 20 } })
-    const code = v.nodes.filter((n) => n.id !== s.id && ['Function', 'Method', 'InterfaceMethod', 'Type'].includes(n.kind))
-    if (code.length) mentions.value = { ...mentions.value, [s.id]: code }
+    try {
+      const v = await apiGet<GraphView>(repoPath(name, `graph/expand?id=${encodeURIComponent(s.id)}&edge=MENTIONS&limit=20`))
+      const code = v.nodes.filter((n) => n.id !== s.id && ['Function', 'Method', 'InterfaceMethod', 'Type'].includes(n.kind))
+      if (code.length && seq === loadSeq) mentions.value = { ...mentions.value, [s.id]: code }
+    } catch { /* mentions are optional */ }
   }))
 }, { immediate: true })
 
@@ -40,30 +59,36 @@ const tokens = (bytes?: number) => Math.round((bytes ?? 0) / 4)
       lede="Markdown indexed into sections with line ranges and summaries, linked to the code they mention. Agents read one section instead of a whole file."
       :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Docs' }]"
     />
-    <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
+    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
     <div v-else class="docs-layout">
       <aside class="panel doc-list">
-        <p class="eyebrow">Documents · {{ docs?.results.length ?? 0 }}</p>
+        <p class="eyebrow">Documents · {{ fmtInt(docs?.results.length ?? 0) }}</p>
         <input v-model="filter" type="search" placeholder="Filter…" aria-label="Filter documents">
-        <nav>
+        <nav aria-label="Documents">
           <button
             v-for="d in visibleDocs" :key="d.node.id" class="doc-link" :class="{ 'is-active': d.node.file === selected }"
+            :aria-current="d.node.file === selected ? 'page' : undefined"
             @click="router.push({ query: { file: d.node.file } })"
           >
             <span class="doc-title">{{ d.node.name }}</span>
-            <span class="mono dim">{{ d.node.file }} · {{ d.node.loc }} lines</span>
+            <span class="mono dim">{{ d.node.file }} · {{ plural(d.node.loc ?? 0, 'line') }}</span>
           </button>
         </nav>
-        <p v-if="!visibleDocs.length" class="muted">No Markdown documents indexed.</p>
+        <p v-if="!docs" class="muted" role="status">Loading…</p>
+        <p v-else-if="!docs.results.length" class="muted">No Markdown documents indexed.</p>
+        <p v-else-if="!visibleDocs.length" class="muted">No document matches “{{ filter }}”.</p>
       </aside>
 
       <section class="panel">
         <template v-if="current">
           <div class="panel__header">
-            <div><p class="eyebrow">{{ current.file }}</p><h2>{{ current.name }}</h2></div>
-            <span class="badge badge--violet">{{ outline.length }} sections · ~{{ fmtInt(tokens(current.bytes)) }} tokens</span>
+            <div class="head"><p class="eyebrow path">{{ current.file }}</p><h2>{{ current.name }}</h2></div>
+            <span class="badge badge--violet">{{ plural(outline.length, 'section') }} · ~{{ fmtInt(tokens(current.bytes)) }} tokens</span>
           </div>
           <p v-if="current.summary" class="muted">{{ current.summary }}</p>
+          <p v-if="outlineError" class="notice notice--danger" role="alert">{{ outlineError }}</p>
+          <p v-else-if="outlineLoading" class="muted" role="status">Loading sections…</p>
+          <p v-else-if="!outline.length" class="muted">This document has no sections.</p>
           <ol class="outline">
             <li v-for="s in outline" :key="s.id" :style="{ marginLeft: `${indent(s)}px` }">
               <div class="row between">
@@ -78,7 +103,7 @@ const tokens = (bytes?: number) => Math.round((bytes ?? 0) / 4)
             </li>
           </ol>
         </template>
-        <div v-else class="empty"><strong>No document selected</strong>Pick one on the left.</div>
+        <div v-else-if="docs?.results.length" class="empty"><strong>No document selected</strong>Pick one from the list.</div>
       </section>
     </div>
   </div>
@@ -90,8 +115,12 @@ const tokens = (bytes?: number) => Math.round((bytes ?? 0) / 4)
 .doc-list nav { display: flex; flex-direction: column; gap: 2px; }
 .doc-link { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: var(--radius-sm); }
 .doc-link:hover { background: var(--hover); }
+.doc-link:focus-visible { box-shadow: var(--focus); }
+.doc-link .mono { overflow-wrap: anywhere; }
 .doc-link.is-active { background: var(--primary); color: var(--on-primary); }
-.doc-link.is-active :is(.muted, .dim, .small) { color: inherit; }
+.doc-link.is-active :is(.muted, .dim, .small, .doc-title) { color: inherit; }
+.head { min-width: 0; }
+.path { overflow-wrap: anywhere; }
 .doc-title { font-size: 14px; font-weight: 500; color: var(--ink); }
 .outline { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; }
 .outline li { padding: 12px 0; border-bottom: 1px dashed var(--line); }

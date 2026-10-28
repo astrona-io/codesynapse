@@ -6,6 +6,7 @@ interface OutlineEntry { id: string; kind: string; name: string; lines: string; 
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
 const base = computed(() => `/repos/${encodeURIComponent(repo.value)}`)
+useHead({ title: () => `Kubernetes & Helm · ${repo.value}` })
 const { data: files, error } = useApiGet<{ results: Ranked[] }>(() => repoPath(repo.value, 'list?kind=Config&metric=loc&limit=500'))
 const { data: templates } = useApiGet<{ results: Ranked[] }>(() => repoPath(repo.value, 'list?kind=Template&metric=loc&limit=500'))
 const { data: entries } = useApiGet<{ results: Ranked[] }>(() => repoPath(repo.value, 'list?kind=ConfigEntry&metric=name&limit=500'))
@@ -69,14 +70,24 @@ const configRule = (rule: string) => /^(k8s-|compose-|gha-|yaml-)/.test(rule)
 const findings = computed(() => (sec.value?.findings ?? []).filter((f) => configRule(f.rule)))
 
 const openFile = ref('')
-const outline = ref<OutlineEntry[]>([])
+const outline = ref<OutlineEntry[] | null>(null)
+const outlineError = ref('')
+// Only the newest request may fill the outline: a slow answer for another file is dropped.
+let outlineSeq = 0
 async function toggleFile(file: string) {
+  const seq = ++outlineSeq
   if (openFile.value === file) { openFile.value = ''; return }
   openFile.value = file
-  outline.value = []
-  const res = await $fetch<{ entries: OutlineEntry[] }>(apiPath(repoPath(repo.value, 'outline')), { query: { file } })
-  outline.value = res.entries
+  outline.value = null
+  outlineError.value = ''
+  try {
+    const res = await apiGet<{ entries: OutlineEntry[] }>(`${repoPath(repo.value, 'outline')}?${new URLSearchParams({ file })}`)
+    if (seq === outlineSeq) outline.value = res.entries ?? []
+  } catch (e) {
+    if (seq === outlineSeq) outlineError.value = apiErrorMessage(e)
+  }
 }
+watch(repo, () => { outlineSeq++; openFile.value = ''; outline.value = null; outlineError.value = ''; typeFilter.value = 'all'; q.value = '' })
 </script>
 
 <template>
@@ -86,13 +97,14 @@ async function toggleFile(file: string) {
       lede="Every YAML manifest, Helm chart, compose file and CI workflow in the repository: what it deploys, where it lives, and what is risky about it. Values are never stored — only structure."
       :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: base }, { label: 'Kubernetes & Helm' }]"
     />
-    <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
+    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
+    <p v-else-if="!files" class="muted" role="status">Loading configuration files…</p>
     <template v-else>
       <div class="grid grid--stats">
-        <StatTile label="YAML files" :value="yamlFiles.length" :hint="Object.entries(typeCounts).map(([k, v]) => `${v} ${k}`).join(' · ') || 'none'" />
-        <StatTile label="Kubernetes resources" :value="resources.length" :hint="byKind.slice(0, 3).map((k) => `${k.value} ${k.label}`).join(' · ') || 'none'" />
-        <StatTile label="Helm charts" :value="charts.length" :hint="`${templates?.results.length ?? 0} templates`" />
-        <StatTile label="Config findings" :value="findings.length" :hint="findings.length ? 'misconfigurations to review' : 'no misconfigurations found'" />
+        <StatTile label="YAML files" :value="fmtInt(yamlFiles.length)" :hint="Object.entries(typeCounts).map(([k, v]) => `${fmtInt(v)} ${k}`).join(' · ') || 'none'" />
+        <StatTile label="Kubernetes resources" :value="entries ? fmtInt(resources.length) : '…'" :hint="byKind.slice(0, 3).map((k) => `${fmtInt(k.value)} ${k.label}`).join(' · ') || 'none'" />
+        <StatTile label="Helm charts" :value="templates ? fmtInt(charts.length) : '…'" :hint="plural(templates?.results.length ?? 0, 'template')" />
+        <StatTile label="Config findings" :value="sec ? fmtInt(findings.length) : '…'" :hint="!sec ? 'checking' : findings.length ? 'misconfigurations to review' : 'no misconfigurations found'" />
       </div>
 
       <section v-if="findings.length" class="panel">
@@ -107,13 +119,13 @@ async function toggleFile(file: string) {
               <tr v-for="f in findings.slice(0, 30)" :key="f.id">
                 <td><SevBadge :severity="f.severity" /></td>
                 <td>{{ f.title }}<div class="mono dim">{{ f.rule }}</div></td>
-                <td class="mono">{{ f.location }}<div v-if="f.owner" class="dim">{{ f.owner.name }}</div></td>
+                <td class="mono path-wrap">{{ f.location }}<div v-if="f.owner" class="dim">{{ f.owner.name }}</div></td>
                 <td class="muted small">{{ f.detail }}</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p v-if="findings.length > 30" class="muted small">{{ findings.length - 30 }} more on the Security page.</p>
+        <p v-if="findings.length > 30" class="muted small">{{ fmtInt(findings.length - 30) }} more on the Security page.</p>
       </section>
 
       <div class="grid cols-2">
@@ -128,8 +140,8 @@ async function toggleFile(file: string) {
               <thead><tr><th>Chart</th><th class="num">Templates</th><th class="num">Lines</th><th class="num">Unused values</th></tr></thead>
               <tbody>
                 <tr v-for="c in charts" :key="c.chart">
-                  <td class="mono">{{ c.chart }}</td><td class="num">{{ c.templates }}</td><td class="num">{{ fmtInt(c.lines) }}</td>
-                  <td class="num"><NuxtLink v-if="unusedValuesByChart[c.chart]" :to="`${base}/cleanup`">{{ unusedValuesByChart[c.chart] }}</NuxtLink><span v-else class="dim">0</span></td>
+                  <td class="mono">{{ c.chart }}</td><td class="num">{{ fmtInt(c.templates) }}</td><td class="num">{{ fmtInt(c.lines) }}</td>
+                  <td class="num"><NuxtLink v-if="unusedValuesByChart[c.chart]" :to="`${base}/cleanup`">{{ fmtInt(unusedValuesByChart[c.chart] ?? 0) }}</NuxtLink><span v-else class="dim">0</span></td>
                 </tr>
               </tbody>
             </table>
@@ -144,22 +156,24 @@ async function toggleFile(file: string) {
           <div><p class="eyebrow">Files</p><h2>YAML files <span class="muted">· click one to see its resources and keys</span></h2></div>
         </div>
         <div class="row">
-          <button class="chip" :class="{ active: typeFilter === 'all' }" @click="typeFilter = 'all'">All · {{ yamlFiles.length }}</button>
-          <button v-for="(n, t) in typeCounts" :key="t" class="chip" :class="{ active: typeFilter === t }" @click="typeFilter = t as string">{{ t }} · {{ n }}</button>
+          <button class="chip" :class="{ active: typeFilter === 'all' }" :aria-pressed="typeFilter === 'all'" @click="typeFilter = 'all'">All · {{ fmtInt(yamlFiles.length) }}</button>
+          <button v-for="(n, t) in typeCounts" :key="t" class="chip" :class="{ active: typeFilter === t }" :aria-pressed="typeFilter === t" @click="typeFilter = t as string">{{ t }} · {{ fmtInt(n) }}</button>
           <input v-model="q" type="search" placeholder="Filter by path…" class="filter" aria-label="Filter files">
         </div>
         <ul v-if="shownFiles.length" class="files">
           <li v-for="f in shownFiles" :key="f.id">
             <button class="file" :aria-expanded="openFile === f.file" @click="toggleFile(f.file!)">
               <span class="badge" :class="f.type.cls">{{ f.type.label }}</span>
-              <span class="mono path">{{ f.file }}</span>
+              <span class="mono path" :title="f.file">{{ f.file }}</span>
               <span class="muted summary">{{ f.summary }}</span>
-              <span class="dim mono">{{ f.loc }} lines</span>
+              <span class="dim mono">{{ plural(f.loc ?? 0, 'line') }}</span>
             </button>
             <div v-if="openFile === f.file" class="outline">
-              <p v-if="!outline.length" class="muted small">Loading…</p>
-              <div v-for="e in outline" :key="e.id" class="entry" :class="{ res: isResource(e.signature) }">
-                <span class="mono">{{ e.name }}</span>
+              <p v-if="outlineError" class="error small" role="alert">{{ outlineError }}</p>
+              <p v-else-if="!outline" class="muted small" role="status">Loading…</p>
+              <p v-else-if="!outline.length" class="muted small">No resources or keys in this file.</p>
+              <div v-for="e in outline ?? []" :key="e.id" class="entry" :class="{ res: isResource(e.signature) }">
+                <span class="mono path-wrap">{{ e.name }}</span>
                 <span v-if="isResource(e.signature)" class="badge badge--green">{{ e.signature }}</span>
                 <span class="dim mono">L{{ e.lines }}</span>
               </div>
@@ -174,7 +188,8 @@ async function toggleFile(file: string) {
 
 <style scoped>
 .small { font-size: 12.5px; }
-.filter { max-width: 260px; margin-left: auto; }
+.filter { max-width: 260px; margin-left: auto; min-width: 0; }
+.path-wrap { overflow-wrap: anywhere; }
 .files { list-style: none; margin: 0; padding: 0; display: grid; }
 .files li { border-bottom: 1px dashed var(--line); }
 .files li:last-child { border-bottom: 0; }
