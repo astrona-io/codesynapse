@@ -3,6 +3,7 @@ import type { DuplicatesReport, RefactorPlan } from '~/utils/types'
 
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
+useHead({ title: () => `Duplicate code · ${repo.value}` })
 const { data: rep, error } = useApiGet<DuplicatesReport>(() => repoPath(repo.value, 'duplicates'))
 const scope = ref('all')
 const kind = ref('all')
@@ -17,15 +18,22 @@ async function showPlan(g: { hash: string; kind: string }) {
   open.value = open.value === k ? '' : k
   if (open.value !== k || plans[k]) return
   try {
-    plans[k] = await $fetch<RefactorPlan>(apiPath(repoPath(repo.value, 'duplicates/refactor')), { query: { hash: g.hash, kind: g.kind } })
+    const name = repo.value
+    const plan = await apiGet<RefactorPlan>(repoPath(name, `duplicates/refactor?hash=${encodeURIComponent(g.hash)}&kind=${encodeURIComponent(g.kind)}`))
+    if (name === repo.value) plans[k] = plan
   } catch (e) {
     plans[k] = apiErrorMessage(e)
   }
 }
+// Plans and the open group belong to one repository.
+watch(repo, () => {
+  open.value = ''
+  for (const k of Object.keys(plans)) delete plans[k]
+})
 const asked = computed(() => ({ hash: String(route.query.group ?? ''), kind: String(route.query.kind ?? 'exact') }))
 watch([rep, asked], () => {
   const g = rep.value?.groups.find((x) => x.hash === asked.value.hash && x.kind === asked.value.kind)
-  if (g && open.value !== key(g)) { open.value = ''; showPlan(g) }
+  if (g && open.value !== key(g)) { open.value = ''; void showPlan(g) }
 }, { immediate: true })
 const explore = (id: string) => ({ path: `/repos/${encodeURIComponent(repo.value)}/explore`, query: { id } })
 const scopeClass = (s: string) => ({ file: 'badge--green', package: 'badge--amber', repository: 'badge--pink' }[s] ?? '')
@@ -47,45 +55,45 @@ const scopeHint: Record<string, string> = {
     </PageHeader>
     <CodeHealthTabs :repo="repo" />
 
-    <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
+    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="rep">
       <div class="grid grid--stats">
-        <StatTile label="Duplicate groups" :value="rep.summary.groups" :hint="`${rep.summary.duplicated_functions} functions involved`" />
+        <StatTile label="Duplicate groups" :value="fmtInt(rep.summary.groups)" :hint="`${plural(rep.summary.duplicated_functions, 'function')} involved`" />
         <StatTile label="Redundant lines" :value="fmtInt(rep.summary.redundant_loc + rep.summary.near_redundant_loc)" :hint="`${rep.summary.percent.toFixed(1)}% of ${fmtInt(rep.summary.function_loc)} function lines`" />
-        <StatTile label="Edited copies" :value="rep.summary.near_groups" :hint="`${fmtInt(rep.summary.near_redundant_loc)} lines differ between the variants`" />
+        <StatTile label="Edited copies" :value="fmtInt(rep.summary.near_groups)" :hint="`${fmtInt(rep.summary.near_redundant_loc)} lines differ between the variants`" />
       </div>
       <p v-if="rep.truncated" class="notice">Only the largest groups are listed.</p>
 
       <section class="panel">
         <div class="panel__header">
-          <div><p class="eyebrow">Code</p><h2>Copies <span class="muted">· {{ groups.length }}</span></h2></div>
+          <div><p class="eyebrow">Code</p><h2>Copies <span class="muted">· {{ fmtInt(groups.length) }}</span></h2></div>
         </div>
         <div class="row">
           <span class="label">Kind</span>
-          <button v-for="c in ['all', 'exact', 'near']" :key="c" class="chip" :class="{ active: kind === c }" @click="kind = c">{{ c === 'near' ? 'edited' : c }}</button>
+          <button v-for="c in ['all', 'exact', 'near']" :key="c" class="chip" :class="{ active: kind === c }" :aria-pressed="kind === c" @click="kind = c">{{ c === 'near' ? 'edited' : c }}</button>
           <span class="label">Where</span>
-          <button v-for="c in ['all', 'file', 'package', 'repository']" :key="c" class="chip" :class="{ active: scope === c }" @click="scope = c">{{ c }}</button>
+          <button v-for="c in ['all', 'file', 'package', 'repository']" :key="c" class="chip" :class="{ active: scope === c }" :aria-pressed="scope === c" @click="scope = c">{{ c }}</button>
         </div>
         <div v-if="groups.length" class="stack">
-          <article v-for="g in groups" :key="g.hash" class="group">
+          <article v-for="g in groups" :key="key(g)" class="group">
             <header class="row">
-              <strong>{{ g.copies }} copies of {{ g.loc }} lines</strong>
+              <strong>{{ fmtInt(g.copies) }} copies of {{ plural(g.loc, 'line') }}</strong>
               <span class="badge" :class="scopeClass(g.scope)" :title="scopeHint[g.scope]">{{ g.scope }}</span>
               <span v-if="g.kind === 'near'" class="badge badge--violet" title="Copies that were edited after copying; the variants differ a little">edited · ~{{ Math.round(g.similarity * 100) }}% alike</span>
-              <span class="muted">{{ g.redundant_loc }} redundant lines · {{ scopeHint[g.scope] }}</span>
+              <span class="muted">{{ plural(g.redundant_loc, 'redundant line') }} · {{ scopeHint[g.scope] }}</span>
             </header>
             <ul class="members">
               <li v-for="m in g.members" :key="m.id">
                 <NuxtLink :to="explore(m.id)" class="mono">{{ m.name }}</NuxtLink>
-                <span class="mono muted">{{ m.file }}:{{ m.start_line }}-{{ m.end_line }}</span>
+                <span class="mono muted path">{{ m.file }}:{{ m.start_line }}-{{ m.end_line }}</span>
               </li>
             </ul>
             <div>
-              <button class="chip" :class="{ active: open === key(g) }" @click="showPlan(g)">{{ open === key(g) ? 'Hide' : 'How to merge' }}</button>
+              <button class="chip" :class="{ active: open === key(g) }" :aria-expanded="open === key(g)" @click="showPlan(g)">{{ open === key(g) ? 'Hide' : 'How to merge' }}</button>
             </div>
             <div v-if="open === key(g)" class="plan">
-              <p v-if="!plans[key(g)]" class="muted">Working it out…</p>
-              <p v-else-if="typeof plans[key(g)] === 'string'" class="error">{{ plans[key(g)] }}</p>
+              <p v-if="!plans[key(g)]" class="muted" role="status">Working it out…</p>
+              <p v-else-if="typeof plans[key(g)] === 'string'" class="error" role="alert">{{ plans[key(g)] }}</p>
               <template v-else>
                 <template v-for="p in [plans[key(g)] as RefactorPlan]" :key="p.hash">
                   <p><strong>Suggested:</strong> a function called <span class="mono">{{ p.name }}</span> in {{ p.home }}.</p>
@@ -96,7 +104,7 @@ const scopeHint: Record<string, string> = {
                     <thead><tr><th>Copy</th><th class="num">Callers</th><th class="num">Tests</th></tr></thead>
                     <tbody><tr v-for="c in p.copies" :key="c.id">
                       <td><NuxtLink :to="explore(c.id)" class="mono">{{ c.name }}</NuxtLink><div class="mono muted">{{ c.location }}</div></td>
-                      <td class="num">{{ c.callers.length }}</td>
+                      <td class="num">{{ fmtInt(c.callers.length) }}</td>
                       <td class="num" :class="{ error: !c.tests.length }">{{ c.tests.length }}</td>
                     </tr></tbody>
                   </table></div>
@@ -109,7 +117,7 @@ const scopeHint: Record<string, string> = {
         <div v-else class="empty"><strong>No duplicates</strong>for the current filter.</div>
       </section>
     </template>
-    <p v-else class="muted">Loading…</p>
+    <p v-else class="muted" role="status">Loading…</p>
   </div>
 </template>
 
@@ -121,4 +129,5 @@ const scopeHint: Record<string, string> = {
 .plan p, .plan ul, .plan ol { margin: 0; }
 .steps { padding-left: 20px; display: grid; gap: 2px; }
 .small { font-size: 12.5px; }
+.path { overflow-wrap: anywhere; }
 </style>

@@ -32,6 +32,8 @@ func TestRetrievalReport(t *testing.T) {
 	assert.Equal(t, byTool["get_symbol_context"].RangesRead, 4)
 	assert.Equal(t, byTool["search"].RangesReturned, 2)
 	assert.Equal(t, st.Agents.Calls, 0, "a report counts ranges, not calls")
+	require.Equal(t, post(t, ts, path, `{"client":"claude-code","avoided_repeat_ranges":{}}`), 204, "a repeat-aware report with nothing else is accepted")
+	require.Equal(t, post(t, ts, path, `{"client":"claude-code","avoided_repeat_ranges":{"search":2},"resend_token_turns":{"search":900}}`), 204)
 
 	for _, body := range []string{
 		`{"client":"Claude Code","tools":{"search":{"returned":1,"read":0}}}`,
@@ -45,6 +47,14 @@ func TestRetrievalReport(t *testing.T) {
 		`{"client":"claude-code","tools":{"search":{"returned":-1,"read":0}}}`,
 		`{"client":"claude-code","tools":{"search":{"returned":10001,"read":0}}}`,
 		`{"client":"claude-code","tools":{"search":{"returned":1,"read":0,"paths":["a.go"]}}}`,
+		`{"client":"claude-code","avoided_repeat_ranges":{"rm_rf":1}}`,
+		`{"client":"claude-code","avoided_repeat_ranges":{"search":-1}}`,
+		`{"client":"claude-code","avoided_repeat_ranges":{"search":10001}}`,
+		`{"client":"claude-code","avoided_repeat_ranges":{},"resend_token_turns":{"search":1000000001}}`,
+		`{"client":"claude-code","avoided_repeat_ranges":{},"resend_token_turns":{"rm_rf":1}}`,
+		`{"client":"claude-code","avoided_repeat_ranges":{},"resend_token_turns":{"search":-5}}`,
+		`{"client":"claude-code","tokens":{"input":10,"cached_input":6,"cache_write":5,"turns":1}}`,
+		`{"client":"claude-code","tokens":{"input":10,"turns":1,"cache_known_turns":2}}`,
 	} {
 		assert.Equal(t, post(t, ts, path, body), 400, body)
 	}

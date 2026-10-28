@@ -104,6 +104,15 @@ type hookState struct {
 	// Counts are the per-tool totals so far, Sent what Stop has reported.
 	Counts map[string]rangeCounts `json:"counts,omitempty"`
 	Sent   map[string]rangeCounts `json:"sent,omitempty"`
+	// Spans are the line spans Read covered, so an answer naming lines the
+	// agent already had counts as a repeat (docs/PLATFORM_STATS_PLAN.md).
+	Spans []answerRange `json:"spans,omitempty"`
+	// Live holds, per tool and repository ("tool|repo"), the answer tokens
+	// that stay in the agent's context and are re-sent on every later turn;
+	// LivePending is what was answered since the last report and joins Live
+	// once that report is sent.
+	Live        map[string]int `json:"live,omitempty"`
+	LivePending map[string]int `json:"live_pending,omitempty"`
 	// First is how the session began: its first code lookup was a
 	// "codesynapse" tool or a "native" one (Read, Grep, Glob). TurnedBack
 	// counts whole-file reads the guard sent back; Reported is what Stop
@@ -149,11 +158,15 @@ type answerRange struct {
 	Start int    `json:"s"`
 	End   int    `json:"e"`
 	Read  bool   `json:"d,omitempty"`
+	// Repeat: the lines overlap what the session was already answered or
+	// read, so this range is not counted as returned.
+	Repeat bool `json:"x,omitempty"`
 }
 
 type rangeCounts struct {
 	Returned int `json:"returned"`
 	Read     int `json:"read"`
+	Repeat   int `json:"repeat,omitempty"`
 }
 
 // stateFile is per session, in the plugin's data folder (or the user
@@ -187,6 +200,9 @@ func saveState(file string, s hookState) {
 	}
 	if len(s.Ranges) > maxTrackedRanges {
 		s.Ranges = s.Ranges[len(s.Ranges)-maxTrackedRanges:]
+	}
+	if len(s.Spans) > maxTrackedSpans {
+		s.Spans = s.Spans[len(s.Spans)-maxTrackedSpans:]
 	}
 	raw, err := json.Marshal(s)
 	if err != nil || os.MkdirAll(filepath.Dir(file), 0o700) != nil {

@@ -6,15 +6,11 @@ import { createSSRApp, computed, ref, watch } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { parse, compileScript } from 'vue/compiler-sfc'
 
-async function renderComponent(t, file, globals, props = {}) {
-  for (const [key, value] of Object.entries({ computed, ref, watch, ...globals })) {
-    const previous = Object.getOwnPropertyDescriptor(globalThis, key)
-    Object.defineProperty(globalThis, key, { value, configurable: true })
-    t.after(() => {
-      if (previous) Object.defineProperty(globalThis, key, previous)
-      else delete globalThis[key]
-    })
-  }
+// Nuxt auto-imports these; useId only has to be stable within one render.
+let nextId = 0
+const useId = () => `v-${nextId++}`
+
+async function compileComponent(t, file) {
   const source = await readFile(new URL(file, import.meta.url), 'utf8')
   const { descriptor } = parse(source)
   let script = compileScript(descriptor, { id: file, inlineTemplate: true }).content
@@ -24,6 +20,19 @@ async function renderComponent(t, file, globals, props = {}) {
   // the stubs it captured, its own.
   script += `\n// ${t.fullName}`
   const { default: component } = await import(`data:text/javascript;base64,${Buffer.from(script).toString('base64')}`)
+  return component
+}
+
+async function renderComponent(t, file, globals, props = {}) {
+  for (const [key, value] of Object.entries({ computed, ref, watch, useId, ...globals })) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key)
+    Object.defineProperty(globalThis, key, { value, configurable: true })
+    t.after(() => {
+      if (previous) Object.defineProperty(globalThis, key, previous)
+      else delete globalThis[key]
+    })
+  }
+  const component = await compileComponent(t, file)
   const setup = component.setup
   component.setup = async (p, ctx) => {
     const render = setup(p, ctx)
@@ -38,6 +47,7 @@ async function renderComponent(t, file, globals, props = {}) {
   app.component('ColumnChart', { template: '<div />' })
   app.component('RankList', { template: '<div />' })
   app.component('NuxtLink', { template: '<a><slot /></a>' })
+  app.component('DataState', await compileComponent(t, './DataState.vue'))
   return renderToString(app)
 }
 
@@ -82,6 +92,33 @@ test('statistics renders missing token and edit fields from an older API', async
   assert.doesNotMatch(html, /Local models/, 'no AI providers in an older API, no local-model section')
 })
 
+test('statistics show the server share of agent work, or why it is unknown', async (t) => {
+  const base = { sessions: 1, calls: 10, errors: 0, response_tokens: 1000, avoided_tokens: 3000, context_total_tokens: 4000, context_saved_pct: 75,
+    tokens: { input: 2000000, output: 50000, cached_input: 1900000, cache_write: 20000, turns: 10, cache_known_turns: 10, total: 2050000, input_pct: 98, output_pct: 2 },
+    tools: [], clients: [], repos: [], daily: [], workflow: { first_codesynapse: 0, first_native: 0 } }
+  const render = (st, agents) => renderComponent(st, '../pages/stats/agents.vue', {
+    useStatistics: () => ({ days: ref(30), error: ref(null), pending: ref(false), s: ref({ agents }) }),
+    fmtCompact: (n) => String(n),
+    fmtInt: (n) => String(n),
+    useModelUsage: () => ({ ready: ref(false), usageOf: () => null }),
+    seriesRangeFor: () => '30d',
+  })
+  await t.test('known', async (st) => {
+    const html = await render(st, { ...base, work_tokens: 150000, share_avoided_tokens: 3000, share_avoided_pct: 2, share_avoided_known: true,
+      share_avoided_basis: 'work_tokens', share_upper_pct: 2.5, share_raw_pct: 0.1, avoided_repeat_ranges: 4 })
+    assert.match(html, /Work tokens 150000 /)
+    assert.match(html, /Share of agent work avoided 2% /)
+    assert.match(html, /Upper figure: .*2\.5%/, 'the upper figure is labelled and apart')
+    assert.doesNotMatch(html, /Share of agent work avoided 2\.5%/)
+    assert.match(html, /Smaller than reading the files 75% /)
+  })
+  await t.test('unknown', async (st) => {
+    const html = await render(st, { ...base, work_tokens: 150000, share_avoided_pct: null, share_avoided_known: false, share_avoided_basis: 'cache_fields_missing', share_upper_pct: null })
+    assert.match(html, /Share of agent work avoided unknown some turns did not report their prompt-cache fields/)
+    assert.doesNotMatch(html, /Upper figure/)
+  })
+})
+
 test('statistics show local model work from the metrics store', async (t) => {
   const usage = { 'local-ollama': { requests: 40, failures: 1, input: 9000, output: 1000 }, claude: { requests: 10, failures: 0, input: 500, output: 100 } }
   const html = await renderComponent(t, '../pages/stats/agents.vue', {
@@ -123,7 +160,8 @@ test('models and savings split the token pool without counting ask_local twice',
   const html = await renderComponent(t, '../pages/stats/models.vue', {
     useStatistics: () => ({
       days: ref(30), error: ref(null), pending: ref(false),
-      s: ref({ agents: { tokens: { total: 100000 }, avoided_tokens: 50000, local_avoided_tokens: 20000 } }),
+      s: ref({ agents: { tokens: { total: 100000 }, work_tokens: 100000, avoided_tokens: 50000, local_avoided_tokens: 20000,
+        saved: { tokens: 30000, price: 'input', per_mtok: 10, dollars: 0.3, resend_tokens: 0, upper_dollars: null, unaware_tokens: 0 } } }),
     }),
     useApiGet: () => ({ data: ref(models), error: ref(null) }),
     seriesRangeFor: () => '30d',
@@ -134,7 +172,8 @@ test('models and savings split the token pool without counting ask_local twice',
   assert.match(html, /Kept off cloud models 48% /, '30k never read + 65k local of a 200k pool')
   assert.match(html, /Tokens never read 50000 /)
   assert.match(html, /Handled by local models 65000 60000 read · 5000 written/)
-  assert.match(html, /Total saved \(est\.\) \$1\.75 at claude-opus-5-5 prices, estimated/, '(60k + 30k) × $10 + 5k × $20 per million, plus $0.50 from shorter prompts and $0.25 from gateway answers')
+  assert.match(html, /Total saved \(est\.\) \$1\.75 at claude-opus-5-5 prices, estimated/, '60k × $10 + 5k × $20 per million, $0.30 for graph answers from the server, plus $0.50 from shorter prompts and $0.25 from gateway answers')
+  assert.match(html, /Saved by graph answers \$0\.30 30000 tokens never read, each once at the input price/)
   assert.match(html, /Spent on cloud models \(est\.\) \$0\.25 /)
   assert.match(html, /Saved by shorter prompts \$0\.50 CodeSynapse&#39;s own AI tasks/)
   assert.match(html, /gateway traffic is passed on unchanged/)

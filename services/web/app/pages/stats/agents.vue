@@ -7,6 +7,15 @@ const tokens = computed(() => a.value?.tokens ?? { input: 0, output: 0, cached_i
 const edits = computed(() => a.value?.edits ?? { edits: 0, writes: 0, failed: 0, baseline_bytes: 0, estimated_output_saved: 0, avoided_pct: 0 })
 const contextTotal = computed(() => a.value?.context_total_tokens ?? ((a.value?.response_tokens ?? 0) + (a.value?.avoided_tokens ?? 0)))
 const contextSavedPct = computed(() => a.value?.context_saved_pct ?? (contextTotal.value ? Math.round(100 * (a.value?.avoided_tokens ?? 0) / contextTotal.value) : 0))
+// The share of the agent's own work avoided comes from the server; it is
+// never recomputed here (docs/PLATFORM_STATS_PLAN.md).
+const shareKnown = computed(() => a.value?.share_avoided_known === true && a.value?.share_avoided_pct != null)
+const shareWhy = computed(() => ({
+  no_hook_tokens: 'no model usage was reported by agent hooks in this period',
+  cache_fields_missing: 'some turns did not report their prompt-cache fields; update the CodeSynapse CLI',
+  repeats_not_reported: 'the agents in this period cannot yet tell repeated answers apart; update the CodeSynapse CLI',
+  work_tokens: '',
+} as Record<string, string>)[a.value?.share_avoided_basis ?? 'no_hook_tokens'] ?? '')
 const errorRate = computed(() => (a.value?.calls ? `${((a.value.errors / a.value.calls) * 100).toFixed(1)}%` : '–'))
 const callsPerDay = computed(() => (a.value?.daily ?? []).map((d) => ({ label: d.day, value: d.calls, detail: `${d.sessions} session(s), ${d.errors} error(s)` })))
 const avoidedPerDay = computed(() => (a.value?.daily ?? []).map((d) => ({ label: d.day, value: d.avoided_tokens, detail: `${fmtInt(d.response_tokens)} served` })))
@@ -95,28 +104,44 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
             <StatTile label="Input tokens" :value="fmtCompact(tokens.input)" :hint="`${tokens.input_pct}% of reported tokens · includes cached input`" />
             <StatTile label="Output tokens" :value="fmtCompact(tokens.output)" :hint="`${tokens.output_pct}% of reported tokens`" />
             <StatTile label="Total model tokens" :value="fmtCompact(tokens.total)" hint="reported input + output" />
-            <StatTile label="Cached input tokens" :value="fmtCompact(tokens.cached_input)" hint="included in input; separate from context savings" />
+            <StatTile label="Work tokens" :value="fmtCompact(a.work_tokens ?? 0)" hint="fresh input + cache writes + output; prompt-cache reads left out" />
           </div>
           <div class="token-split" role="img" :aria-label="`Input ${tokens.input_pct}%, output ${tokens.output_pct}%`">
             <span :style="{ width: `${tokens.input_pct}%` }" />
             <span :style="{ width: `${tokens.output_pct}%` }" />
           </div>
-          <p class="muted small">Input {{ tokens.input_pct }}% · Output {{ tokens.output_pct }}%. Covers usage supplied by agent hooks; other clients and unreported turns are not included.</p>
+          <p class="muted small">Input {{ tokens.input_pct }}% · Output {{ tokens.output_pct }}%. Input includes {{ fmtCompact(tokens.cached_input) }} prompt-cache reads, which CodeSynapse neither causes nor removes. Covers usage supplied by agent hooks; other clients and unreported turns are not included.</p>
         </template>
         <div v-else class="empty"><strong>Model usage unavailable</strong>The updated Claude Code Stop hook reports input and output usage from the local transcript. MCP tool responses alone cannot measure an agent’s model usage.</div>
       </section>
       <section class="panel">
         <p class="eyebrow">Context</p><h2>Savings estimate</h2>
         <div class="grid kpis two">
+          <StatTile label="Share of agent work avoided" :value="shareKnown ? `${a.share_avoided_pct}%` : 'unknown'" :hint="shareKnown ? 'avoided ÷ (work tokens + avoided)' : shareWhy" />
           <StatTile label="Tokens saved (est.)" :value="fmtCompact(a.avoided_tokens)" hint="file-reading context avoided" />
           <StatTile label="Context total (est.)" :value="fmtCompact(contextTotal)" hint="MCP tokens served + estimated saved" />
-          <StatTile label="Context saved" :value="contextTotal ? `${contextSavedPct}%` : '–'" hint="saved ÷ estimated context total" />
+          <StatTile label="Smaller than reading the files" :value="contextTotal ? `${contextSavedPct}%` : '–'" hint="saved ÷ (served + saved); not a share of the agent's tokens" />
         </div>
-        <div v-if="contextTotal" class="token-split saved" role="img" :aria-label="`${contextSavedPct}% of the estimated context saved`">
-          <span :style="{ width: `${contextSavedPct}%` }" />
+        <div v-if="shareKnown" class="token-split saved" role="img" :aria-label="`${a.share_avoided_pct}% of the agent's work avoided`">
+          <span :style="{ width: `${a.share_avoided_pct}%` }" />
         </div>
+        <p v-if="shareKnown && a.share_upper_pct != null" class="muted small">
+          Upper figure: also counts the avoided context the agent would have re-sent from its prompt cache: {{ a.share_upper_pct }}%.
+        </p>
+        <p v-if="(a.avoided_unaware_tokens ?? 0) > 0" class="muted small">
+          {{ fmtCompact(a.avoided_unaware_tokens ?? 0) }} of the tokens avoided came from agents that cannot yet tell repeated answers apart; they are left out of the share and the saved cost.
+        </p>
         <p class="muted small">Savings compare graph answers with reading repository files. They estimate reduced context, not measured model output or billing savings.</p>
-        <details class="method"><summary>How tokens avoided are estimated</summary><p class="muted small">{{ a.avoided_method }}</p></details>
+        <details class="method">
+          <summary>How tokens avoided are estimated</summary>
+          <p class="muted small">{{ a.avoided_method }}</p>
+          <p class="muted small">
+            The share counts each avoided file once, as the turn on which the agent would have read it, and leaves out answers about lines the session already had
+            <template v-if="a.avoided_repeat_ranges">({{ fmtInt(a.avoided_repeat_ranges) }} repeated line ranges in this period)</template>.
+            Work tokens are fresh input, cache writes and output; prompt-cache reads are not counted.
+            <template v-if="a.share_raw_pct != null">With prompt-cache reads in the denominator, which CodeSynapse does not affect, it would read {{ a.share_raw_pct }}%.</template>
+          </p>
+        </details>
       </section>
     </div>
 

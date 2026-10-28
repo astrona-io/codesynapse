@@ -23,8 +23,19 @@ Both appear on the **Statistics** page. Every number belongs to one organisation
 | Indexing | files scanned, indexed and skipped per repository, annotation jobs; indexing runs and time, time per phase (fetching, extraction, storing the graph) and extraction time per language |
 | Background jobs | finished jobs by outcome, failures by kind, how long jobs waited for a worker and how long they ran (Statistics → Sync) |
 | Platform health (platform administrators) | API requests and latency, the job queue, which replica runs the scheduler and lease losses, goroutines, heap, CPU and garbage-collection pauses per service, database connection pool use and waits, dropped series and log lines, failed metric exports |
+| Web server (platform administrators) | requests the dashboard server answers by status, its latency, and dashboard calls that never reached the API (unreachable, timed out or refused), all labelled by page or route pattern, never the address you opened |
 
 Some numbers are estimates and are labelled so: cost depends on the prices you configured, and a call without reported usage or a known price shows as a gap, never as zero.
+
+### Token savings
+
+Agents re-send their whole context every turn, and most of it comes back from the provider's prompt cache. CodeSynapse neither causes nor removes those cache reads, so they are left out of the savings figures:
+
+- **Work tokens** are the agent's fresh input, cache writes and output.
+- **Share of agent work avoided** is avoided tokens ÷ (work tokens + avoided tokens). It reads "unknown", not 0, when a turn did not report its cache fields.
+- Answers about lines the session already had count for nothing, and agents whose hooks cannot tell those apart yet (older CLIs) are left out of the share and the saved cost.
+- An **upper figure** also counts the avoided context the agent would have re-sent from its cache. It is shown apart, labelled, and never used in tiles or totals.
+- The saved cost values each avoided token once, at the cache-write price for providers that cache by default and the input price otherwise. The provider's own prompt-cache saving on CodeSynapse's model calls is shown apart and never added to it.
 
 ## What is never measured
 
@@ -32,7 +43,7 @@ No metric holds prompts, answers, source code, file paths, repository names, bra
 
 ## Alerts for operators
 
-Whoever runs the installation can turn on alerts: an optional vmalert checks rules against these numbers every minute and sends what fires to an Alertmanager-compatible receiver they run. The first rules cover slow or failing databases, jobs no worker picks up, and metrics or logs being lost. Alerts add up organisations and never name repositories, files or people. [Alerting](../operations/alerting.md) explains how to turn it on.
+Whoever runs the installation can turn on alerts: an optional vmalert checks rules against these numbers every minute and sends what fires to an Alertmanager-compatible receiver they run. The first rules cover slow or failing databases, jobs no worker picks up, a dashboard that cannot reach the API, and metrics or logs being lost. Alerts add up organisations and never name repositories, files or people. [Alerting](../operations/alerting.md) explains how to turn it on.
 
 ## What is planned
 
@@ -43,9 +54,9 @@ Some parts of CodeSynapse have no live numbers yet. The [metrics coverage plan](
 3. **Background jobs and indexing** (available now, see the table above).
 4. **Outside services and security events**: git clone and fetch, vulnerability and licence lookups, sign-in attempts and rate limits, and audit-log writes.
 5. **Sharper existing numbers**: refused tool calls apart from errors, model timeouts and rate limits, gateway latency and why a request left the local model, and tool calls answered on your own machine by the Claude Code bridge. The Statistics panels that count failures change in the same release, so a refused call is no longer shown as an error.
-6. **The web server**: requests the dashboard server handles, including failures that never reach the API, such as the API being unreachable.
+6. **The web server** (available now, see the table above).
 
-The same privacy rules apply to everything planned. The web server's numbers use page and route patterns, never the address you opened, and contain nothing you typed.
+The same privacy rules apply to everything planned.
 
 Operator alerts are for whoever runs the installation. Warnings for people in an organisation keep appearing in the dashboard's notification feed.
 

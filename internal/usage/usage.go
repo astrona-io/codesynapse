@@ -58,7 +58,7 @@ func BashClassOf(tool string) (string, bool) {
 
 // IsWorkflow reports whether tool is one of the workflow pseudo tools.
 func IsWorkflow(tool string) bool {
-	if _, ok := BashClassOf(tool); ok || IsMemoryCounter(tool) {
+	if _, ok := BashClassOf(tool); ok || IsMemoryCounter(tool) || isRepeatCounter(tool) {
 		return true
 	}
 	switch tool {

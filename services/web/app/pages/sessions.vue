@@ -1,4 +1,5 @@
 <script setup lang="ts">
+useHead({ title: 'Agent sessions · CodeSynapse' })
 import type { AgentSessionDetail, AgentSessionList, SessionCall } from '~/utils/types'
 
 // What each agent chat asked CodeSynapse, in order (from the MCP audit
@@ -49,7 +50,7 @@ watch(selected, () => { open.value = null })
           </div>
         </div>
         <p v-if="list?.scope === 'own'" class="muted small">You see your own sessions; owners and admins see everyone's in {{ org.name }}.</p>
-        <p v-if="listError" class="notice notice--danger">{{ apiErrorMessage(listError) }}</p>
+        <p v-if="listError" class="notice notice--danger">{{ plainError(listError) }}</p>
         <div v-if="list?.sessions.length" class="table-wrap">
           <table>
             <thead><tr><th>Last call</th><th v-if="list.scope === 'organisation'">Who</th><th>Client</th><th>API key</th><th class="num">Calls</th><th class="num">Returned</th><th>Most used</th><th>Repositories</th></tr></thead>
@@ -77,7 +78,7 @@ watch(selected, () => { open.value = null })
           <button class="secondary tiny" @click="pick(selected)">Close</button>
         </div>
         <p class="muted small mono">{{ selected }}<template v-if="detail"> · {{ detail.actor }}<template v-if="detail.key"> · key {{ detail.key }}</template></template></p>
-        <p v-if="detailError" class="notice notice--danger">{{ apiErrorMessage(detailError) }}</p>
+        <p v-if="detailError" class="notice notice--danger">{{ plainError(detailError) }}</p>
         <ol v-if="detail" class="timeline">
           <li v-for="(c, i) in detail.calls" :key="i" :class="{ failed: c.outcome === 'failure' }">
             <button class="call" :aria-expanded="open === i" @click="open = open === i ? null : i">

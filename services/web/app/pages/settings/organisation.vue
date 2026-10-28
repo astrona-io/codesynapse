@@ -11,27 +11,29 @@ watch(policy, (value) => { defaultAccess.value = value?.default_repo_access ?? '
 const policySaved = ref(false)
 const { data: gateway, refresh: refreshGateway } = useApiGet<OrgGateway>(() => `accounts/orgs/${org.value?.slug ?? '-'}/gateway`)
 const gatewaySaved = ref(false)
+const gatewayError = ref('')
 async function setGateway(change: { enabled?: boolean; local_first?: boolean }) {
-  error.value = ''
+  gatewayError.value = ''
   gatewaySaved.value = false
   try {
     await apiPut(`accounts/orgs/${org.value!.slug}/gateway`, change)
     gatewaySaved.value = true
   } catch (err) {
-    error.value = apiErrorMessage(err)
+    gatewayError.value = plainError(err)
   }
   await refreshGateway()
 }
 const { data: memberRepos, refresh: refreshMemberRepos } = useApiGet<{ enabled: boolean }>(() => `accounts/orgs/${org.value?.slug ?? '-'}/member-repos`)
 const memberReposSaved = ref(false)
+const memberReposError = ref('')
 async function setMemberRepos(enabled: boolean) {
-  error.value = ''
+  memberReposError.value = ''
   memberReposSaved.value = false
   try {
     await apiPut(`accounts/orgs/${org.value!.slug}/member-repos`, { enabled })
     memberReposSaved.value = true
   } catch (err) {
-    error.value = apiErrorMessage(err)
+    memberReposError.value = plainError(err)
   }
   await refreshMemberRepos()
 }
@@ -40,19 +42,29 @@ const recoverUser = ref('')
 const recovered = ref(false)
 const { data: accessChanges, refresh: refreshAccessChanges } = useApiGet<{ orphaned_repositories: string[]; inactive_external_grants: number; malformed_grants: number }>(() => `accounts/orgs/${org.value?.slug ?? '-'}/access-changes`, { immediate: false })
 watch(() => session.current.value, (membership) => { if (membership?.role === 'owner') refreshAccessChanges() }, { immediate: true })
+const recoverError = ref('')
+const recovering = ref(false)
 async function recoverAdmin() {
-  error.value = ''
+  if (recovering.value) return
+  recovering.value = true
+  recoverError.value = ''
   recovered.value = false
   try {
     await apiPost(`accounts/orgs/${org.value!.slug}/repos/${encodeURIComponent(recoverRepo.value)}/recover-admin`, { user: recoverUser.value })
     recovered.value = true
     await refreshAccessChanges()
   } catch (err) {
-    error.value = apiErrorMessage(err)
+    recoverError.value = plainError(err)
+  } finally {
+    recovering.value = false
   }
 }
+const policyError = ref('')
+const savingPolicy = ref(false)
 async function savePolicy() {
-  error.value = ''
+  if (savingPolicy.value) return
+  savingPolicy.value = true
+  policyError.value = ''
   policySaved.value = false
   try {
     await apiPut(`accounts/orgs/${org.value!.slug}/repo-policy`, { default_repo_access: defaultAccess.value })
@@ -60,7 +72,9 @@ async function savePolicy() {
     await session.load()
     policySaved.value = true
   } catch (err) {
-    error.value = apiErrorMessage(err)
+    policyError.value = plainError(err)
+  } finally {
+    savingPolicy.value = false
   }
 }
 const roles: { id: Role; label: string; help: string }[] = [
@@ -73,47 +87,83 @@ const roles: { id: Role; label: string; help: string }[] = [
 const email = ref('')
 const role = ref<Role>('member')
 const error = ref('')
-async function put(e: string, r: Role) {
+const notice = ref('')
+const busy = ref(false)
+async function put(e: string, r: Role, done: string) {
+  if (busy.value) return false
+  busy.value = true
   error.value = ''
+  notice.value = ''
+  let ok = false
   try {
-    await $fetch(apiPath(`accounts/orgs/${org.value!.slug}/members`), { method: 'PUT', body: { email: e, role: r } })
-    await refresh()
+    await apiPut(`accounts/orgs/${org.value!.slug}/members`, { email: e, role: r })
+    notice.value = done
+    ok = true
   } catch (err) {
-    error.value = apiErrorMessage(err)
-    await refresh()
+    error.value = plainError(err)
+  } finally {
+    busy.value = false
   }
+  // Refresh either way: a refused role change leaves the select showing the
+  // role that was not saved until the list is read again.
+  await refresh()
+  return ok
 }
 async function add() {
-  await put(email.value, role.value)
-  if (!error.value) email.value = ''
+  if (await put(email.value, role.value, `Added ${email.value}.`)) email.value = ''
 }
+const changeRole = (m: Membership, r: Role) => put(m.user.email, r, `${m.user.name} is now ${r}.`)
 const removing = ref<Membership | null>(null)
 async function remove() {
   const m = removing.value
-  removing.value = null
-  if (!m) return
+  if (!m || busy.value) return
+  busy.value = true
   error.value = ''
+  notice.value = ''
   try {
-    await $fetch(apiPath(`accounts/orgs/${org.value!.slug}/members/${m.user.id}`), { method: 'DELETE' })
-    await refresh()
+    await apiDelete(`accounts/orgs/${org.value!.slug}/members/${encodeURIComponent(m.user.id)}`)
+    notice.value = `${m.user.name} removed.`
   } catch (err) {
-    error.value = apiErrorMessage(err)
+    error.value = plainError(err)
+  } finally {
+    busy.value = false
+    removing.value = null
   }
+  await refresh()
 }
 const newOrg = ref('')
 const created = ref('')
+const createError = ref('')
+const creating = ref(false)
 async function createOrg() {
-  error.value = ''
+  if (creating.value) return
+  creating.value = true
+  createError.value = ''
+  created.value = ''
   try {
     const o = await apiPost<AccountOrg>('accounts/orgs', { name: newOrg.value })
-    created.value = o.name
     newOrg.value = ''
     await session.load()
     await session.switchOrg(o.slug)
+    created.value = o.name
   } catch (err) {
-    error.value = apiErrorMessage(err)
+    createError.value = plainError(err)
+  } finally {
+    creating.value = false
   }
 }
+// Messages belong to the organisation they were about; the watch on the
+// organisation clears them when the sidebar switches to another one. The
+// "created" message is set after the switch, so it survives it.
+watch(() => org.value?.slug, () => {
+  for (const r of [error, notice, policyError, gatewayError, memberReposError, recoverError, createError]) r.value = ''
+  policySaved.value = false
+  gatewaySaved.value = false
+  memberReposSaved.value = false
+  recovered.value = false
+  recoverRepo.value = ''
+  recoverUser.value = ''
+})
 </script>
 
 <template>
@@ -124,11 +174,11 @@ async function createOrg() {
       <p class="muted small">Applies to members without a user or team grant. Guests always need a grant. Organisation roles do not grant repository administration.</p>
       <form v-if="canManage" class="row" @submit.prevent="savePolicy">
         <div class="field"><label for="default-access">Default</label><select id="default-access" v-model="defaultAccess"><option value="NONE">No access</option><option value="READ_ONLY">Read only</option></select></div>
-        <button type="submit" class="align-end">Save default</button>
+        <button type="submit" class="align-end" :disabled="savingPolicy">{{ savingPolicy ? 'Saving…' : 'Save default' }}</button>
       </form>
       <p v-else>{{ policy?.default_repo_access === 'READ_ONLY' ? 'Read only' : 'No access' }}</p>
       <p v-if="policySaved" class="notice notice--ok" role="status">Repository default saved.</p>
-      <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
+      <p v-if="policyError" class="notice notice--danger" role="alert">{{ policyError }}</p>
     </section>
     <section v-if="org" class="panel">
       <h2>Members’ own repositories</h2>
@@ -136,6 +186,7 @@ async function createOrg() {
       <label v-if="canManage" class="check"><input type="checkbox" :checked="memberRepos?.enabled ?? true" :disabled="!memberRepos" @change="setMemberRepos(($event.target as HTMLInputElement).checked)"> Let members add their own repositories</label>
       <p v-else>{{ memberRepos?.enabled ?? true ? 'On' : 'Off' }}. Ask an owner or admin to change it.</p>
       <p v-if="memberReposSaved" class="notice notice--ok" role="status">Setting saved.</p>
+      <p v-if="memberReposError" class="notice notice--danger" role="alert">{{ memberReposError }}</p>
     </section>
     <section v-if="org" class="panel">
       <h2>Agent gateway</h2>
@@ -148,6 +199,7 @@ async function createOrg() {
       </template>
       <p v-else>{{ gateway?.enabled ? 'On' : 'Off' }}{{ gateway?.enabled ? (gateway.local_first ? ', local model first' : ', local model for quick requests only') : '' }}. Ask an owner or admin to change it.</p>
       <p v-if="gatewaySaved" class="notice notice--ok" role="status">Gateway setting saved.</p>
+      <p v-if="gatewayError" class="notice notice--danger" role="alert">{{ gatewayError }}</p>
     </section>
     <section v-if="org && session.can('owner')" class="panel">
       <h2>Recover repository administration</h2>
@@ -156,29 +208,31 @@ async function createOrg() {
       <p v-if="accessChanges?.malformed_grants" class="notice">{{ accessChanges.malformed_grants }} malformed grant(s) need repair. Recovery keeps affected members denied except the administrator you assign.</p>
       <p v-if="accessChanges?.orphaned_repositories.length" class="notice">Repositories needing an administrator: {{ accessChanges.orphaned_repositories.join(', ') }}.</p>
       <form class="row" @submit.prevent="recoverAdmin">
-        <div class="field grow"><label for="recover-repo">Repository name</label><input id="recover-repo" v-model="recoverRepo" required></div>
+        <div class="field grow"><label for="recover-repo">Repository name</label><input id="recover-repo" v-model="recoverRepo" required autocomplete="off" spellcheck="false"></div>
         <div class="field grow"><label for="recover-user">Member email</label><input id="recover-user" v-model="recoverUser" type="email" required></div>
-        <button type="submit" class="align-end">Assign administrator</button>
+        <button type="submit" class="align-end" :disabled="recovering">{{ recovering ? 'Assigning…' : 'Assign administrator' }}</button>
       </form>
       <p v-if="recovered" class="notice notice--ok" role="status">Repository administrator assigned.</p>
+      <p v-if="recoverError" class="notice notice--danger" role="alert">{{ recoverError }}</p>
     </section>
     <section v-if="org" class="panel">
-      <div class="panel__header"><h2>Members of {{ org.name }}</h2><span class="muted small">{{ data?.members.length ?? 0 }} member(s)</span></div>
-      <p v-if="loadError" class="notice notice--danger">{{ apiErrorMessage(loadError) }}</p>
+      <div class="panel__header"><h2>Members of {{ org.name }}</h2><span v-if="data" class="muted small">{{ data.members.length }} member(s)</span></div>
+      <p v-if="loadError" class="notice notice--danger" role="alert">{{ plainError(loadError) }}</p>
+      <p v-else-if="!data" class="muted small" role="status">Loading members…</p>
       <div v-if="data" class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th /></tr></thead>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th><span class="sr-only">Actions</span></th></tr></thead>
           <tbody>
             <tr v-for="m in data.members" :key="m.user.id">
               <td>{{ m.user.name }}<span v-if="m.user.id === session.me.value?.user.id" class="muted"> (you)</span></td>
-              <td>{{ m.user.email }}</td>
+              <td class="wrap">{{ m.user.email }}</td>
               <td>
-                <select v-if="canManage" :value="m.role" :aria-label="`Role of ${m.user.name}`" class="role" @change="put(m.user.email, ($event.target as HTMLSelectElement).value as Role)">
+                <select v-if="canManage" :value="m.role" :aria-label="`Role of ${m.user.name}`" class="role" :disabled="busy" @change="changeRole(m, ($event.target as HTMLSelectElement).value as Role)">
                   <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.label }}</option>
                 </select>
                 <span v-else class="badge">{{ m.role }}</span>
               </td>
-              <td class="num"><button v-if="canManage" class="secondary tiny" @click="removing = m">Remove</button></td>
+              <td class="num"><button v-if="canManage" type="button" class="secondary tiny" :disabled="busy" :aria-label="`Remove ${m.user.name}`" @click="removing = m">Remove</button></td>
             </tr>
           </tbody>
         </table>
@@ -186,10 +240,11 @@ async function createOrg() {
       <form v-if="canManage" class="row" @submit.prevent="add">
         <div class="field grow"><label for="memail">Add a member by email</label><input id="memail" v-model="email" type="email" placeholder="name@company.com" required></div>
         <div class="field"><label for="mrole">Role</label><select id="mrole" v-model="role"><option v-for="r in roles" :key="r.id" :value="r.id">{{ r.label }}</option></select></div>
-        <button type="submit" class="align-end">Add</button>
+        <button type="submit" class="align-end" :disabled="busy">Add</button>
       </form>
       <p v-if="canManage" class="muted small">People need an account first. Then they appear here with the role you chose.</p>
       <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
+      <p v-if="notice" class="notice notice--ok" role="status">{{ notice }}</p>
       <details>
         <summary class="muted small">What the roles can do</summary>
         <dl class="roles"><template v-for="r in roles" :key="r.id"><dt>{{ r.label }}</dt><dd class="muted">{{ r.help }}</dd></template></dl>
@@ -200,11 +255,12 @@ async function createOrg() {
       <p class="muted small">Organisations keep repositories, agent memory, reviews and statistics apart. You become its owner.</p>
       <form class="row" @submit.prevent="createOrg">
         <div class="field grow"><label for="oname">Name</label><input id="oname" v-model="newOrg" required maxlength="80" placeholder="e.g. Platform Team"></div>
-        <button type="submit" class="align-end">Create</button>
+        <button type="submit" class="align-end" :disabled="creating">{{ creating ? 'Creating…' : 'Create' }}</button>
       </form>
+      <p v-if="createError" class="notice notice--danger" role="alert">{{ createError }}</p>
       <p v-if="created" class="notice notice--ok" role="status">Created {{ created }}. You are working in it now.</p>
     </section>
-    <ConfirmDialog :open="!!removing" title="Remove this member?" confirm-label="Remove" danger @confirm="remove" @cancel="removing = null">
+    <ConfirmDialog :open="!!removing" title="Remove this member?" confirm-label="Remove" danger :busy="busy" @confirm="remove" @cancel="removing = null">
       <p>{{ removing?.user.name }} loses access to {{ org?.name }}, and their API keys for it stop working.</p>
     </ConfirmDialog>
   </div>
@@ -213,6 +269,7 @@ async function createOrg() {
 <style scoped>
 .grow { flex: 1; min-width: 220px; }
 .align-end { align-self: flex-end; }
+.wrap { overflow-wrap: anywhere; }
 .role { width: auto; min-height: 30px; padding: 3px 8px; }
 .roles { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0 0; }
 .roles dd { margin: 0; }

@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import type { AIProvider } from '~/utils/types'
 
-const { data, refresh } = useApiGet<{ providers: AIProvider[]; tasks: string[]; routing: { default: string; tasks: Record<string, string> } }>('ai/providers')
+const session = useSession()
+// Routing and connection tests change or probe the installation's models,
+// which the API allows platform admins only when there are accounts.
+const operator = computed(() => !session.accounts.value || session.isPlatformAdmin.value)
+const { data, refresh, error: loadError } = useApiGet<{ providers: AIProvider[]; tasks: string[]; routing: { default: string; tasks: Record<string, string> } }>('ai/providers')
 interface ProviderStatus { name: string; checked: boolean; online: boolean; model_available: boolean; latency_ms?: number; error?: string }
 // The day's totals from every process (p.usage counts the API process only).
 const { usageOf: dayUsage } = useModelUsage('24h')
@@ -40,15 +44,16 @@ const saving = ref(false)
 const saved = ref('')
 const routeError = ref('')
 async function saveRouting() {
+  if (saving.value || !operator.value) return
   saving.value = true
   saved.value = ''
   routeError.value = ''
   try {
-    await $fetch(apiPath('ai/routing'), { method: 'PUT', body: { default: routing.default, tasks: routing.tasks } })
-    saved.value = 'Saved'
-    refresh()
+    await apiPut('ai/routing', { default: routing.default, tasks: routing.tasks })
+    saved.value = 'Routing saved.'
+    await refresh()
   } catch (e) {
-    routeError.value = apiErrorMessage(e)
+    routeError.value = plainError(e)
   } finally {
     saving.value = false
   }
@@ -57,12 +62,13 @@ const TASK_LABEL: Record<string, string> = { 'security-triage': 'Security triage
 interface TestResult { ok: boolean; error?: string; reply?: string; models?: string[]; missing?: string[]; seconds?: number; model?: string }
 const tests = ref<Record<string, TestResult | 'running'>>({})
 async function test(name: string) {
+  if (tests.value[name] === 'running') return
   tests.value = { ...tests.value, [name]: 'running' }
   try {
     const r = await apiPost<TestResult>(`ai/providers/${encodeURIComponent(name)}/test`, {})
     tests.value = { ...tests.value, [name]: r }
   } catch (e) {
-    tests.value = { ...tests.value, [name]: { ok: false, error: apiErrorMessage(e) } }
+    tests.value = { ...tests.value, [name]: { ok: false, error: plainError(e) } }
   } finally {
     refresh()
     refreshStatus()
@@ -76,7 +82,14 @@ const resultOf = (n: string) => tests.value[n]
     <PageHeader eyebrow="Workspace" title="AI models"
       lede="Language models CodeSynapse uses to triage findings, review code and write briefings. Local models (MLX, Ollama, vLLM) keep code on your machine; cloud models only get what you allow." />
 
-    <div v-if="!data?.providers.length" class="panel how">
+    <p v-if="loadError" class="notice notice--danger" role="alert">{{ plainError(loadError) }}</p>
+    <p v-else-if="!data" class="muted small" role="status">Loading models…</p>
+    <div v-else-if="!data.providers.length && !operator" class="panel how">
+      <p class="eyebrow eyebrow--green">No model configured</p>
+      <h2>No language model is connected yet</h2>
+      <p class="muted">Whoever runs CodeSynapse connects models for the whole installation. Ask them to add a local or cloud model; until then, reviews, briefings and security analysis by a model are not available.</p>
+    </div>
+    <div v-else-if="!data.providers.length" class="panel how">
       <p class="eyebrow eyebrow--green">No model configured</p>
       <h2>Connect a local or cloud model</h2>
       <p class="muted">With nothing configured, CodeSynapse uses a local model server it finds when the API starts: Ollama on port 11434 or LM Studio on 1234. Start one, pull a model (<code>ollama pull qwen3.8:27b</code>) and restart the API. To choose yourself:</p>
@@ -92,25 +105,26 @@ const resultOf = (n: string) => tests.value[n]
       <div class="panel__header">
         <div><p class="eyebrow">Routing</p><h2>Which model does what</h2></div>
         <div class="row">
-          <span v-if="saved" class="ok small">{{ saved }}</span>
-          <button :disabled="saving" @click="saveRouting">{{ saving ? 'Saving…' : 'Save routing' }}</button>
+          <span v-if="saved" class="ok small" role="status">{{ saved }}</span>
+          <button v-if="operator" type="button" :disabled="saving" @click="saveRouting">{{ saving ? 'Saving…' : 'Save routing' }}</button>
         </div>
       </div>
+      <p v-if="!operator" class="notice">Only whoever runs CodeSynapse can change which model does what. This shows the current choice.</p>
       <p class="muted small">The global model handles everything. Pick a different model for an area when it needs one — for example a cloud model for security analysis and a fast local one for reviews.</p>
       <div class="route route--global">
         <div><strong>Global</strong><p class="muted small">Fallback for every area without its own model</p></div>
-        <select v-model="routing.default" aria-label="Global model">
+        <select v-model="routing.default" aria-label="Global model" :disabled="!operator">
           <option v-for="p in data.providers" :key="p.name" :value="p.name">{{ p.name }} · {{ p.model || 'server default' }} · {{ p.local ? 'local' : 'cloud' }}</option>
         </select>
       </div>
       <div v-for="a in AREAS" :key="a.task" class="route">
         <div><strong>{{ a.label }}</strong><p class="muted small">{{ a.hint }}</p></div>
-        <select v-model="routing.tasks[a.task]" :aria-label="`Model for ${a.label}`">
+        <select v-model="routing.tasks[a.task]" :aria-label="`Model for ${a.label}`" :disabled="!operator">
           <option value="">{{ a.local && !globalIsLocal ? 'First local model' : `Use global (${routing.default})` }}</option>
           <option v-for="p in data.providers.filter(x => !a.local || x.local)" :key="p.name" :value="p.name">{{ p.name }} · {{ p.local ? 'local' : 'cloud' }}</option>
         </select>
       </div>
-      <p v-if="routeError" class="error small">{{ routeError }}</p>
+      <p v-if="routeError" class="error small" role="alert">{{ routeError }}</p>
     </section>
 
     <div v-if="data?.providers.length" class="grid cols-2">
@@ -121,12 +135,12 @@ const resultOf = (n: string) => tests.value[n]
             <h2 class="mono">{{ p.name }}</h2>
             <p class="status-line"><span class="badge" :class="health(p.name).tone">{{ health(p.name).label }}</span><span class="muted small">{{ health(p.name).note }}</span></p>
           </div>
-          <button class="secondary" :disabled="resultOf(p.name) === 'running'" @click="test(p.name)">{{ resultOf(p.name) === 'running' ? 'Testing…' : 'Test connection' }}</button>
+          <button v-if="operator" type="button" class="secondary" :disabled="resultOf(p.name) === 'running'" :aria-label="`Test connection to ${p.name}`" @click="test(p.name)">{{ resultOf(p.name) === 'running' ? 'Testing…' : 'Test connection' }}</button>
         </div>
         <dl class="facts">
           <dt>Model<InfoTip v-if="p.auto" text="model: auto in config/llm.yaml. CodeSynapse asks the server what it serves every five minutes and uses the chat model with the most parameters, and an embedding model for recall, so a model you pull is used without a restart." /></dt>
-          <dd class="mono">{{ p.model === 'auto' ? 'none yet' : (p.model || '(server default)') }}<span v-if="p.auto" class="badge badge--green auto">picked automatically</span></dd>
-          <dt>Endpoint</dt><dd class="mono">{{ p.endpoint }}</dd>
+          <dd class="mono wrap">{{ p.model === 'auto' ? 'none yet' : (p.model || '(server default)') }}<span v-if="p.auto" class="badge badge--green auto">picked automatically</span></dd>
+          <dt>Endpoint</dt><dd class="mono wrap">{{ p.endpoint }}</dd>
           <dt>API key</dt><dd>{{ p.has_key ? `set (${p.key_env})` : p.key_env ? `missing — set ${p.key_env}` : 'none needed' }}</dd>
           <template v-if="p.prices">
             <dt>Prices<InfoTip text="US dollars per million tokens, for the cost and savings estimates. price_source and price_checked in config/llm.yaml say where they come from; price_feed: openrouter reads them from OpenRouter's public model list once a day." /></dt>
@@ -149,7 +163,7 @@ const resultOf = (n: string) => tests.value[n]
         <details v-if="p.served" class="served" :open="p.model === 'auto'">
           <summary>What the server offers ({{ p.served.models.length }})<span v-if="p.served.error" class="error"> · last check failed</span></summary>
           <p v-if="p.served.error" class="error small">{{ p.served.error }}</p>
-          <table v-if="p.served.models.length">
+          <div v-if="p.served.models.length" class="table-wrap"><table>
             <thead><tr><th>Model</th><th>Can</th><th class="num">Size</th><th class="num">Context</th><th>Used for</th></tr></thead>
             <tbody>
               <tr v-for="m in p.served.models" :key="m.name">
@@ -160,7 +174,7 @@ const resultOf = (n: string) => tests.value[n]
                 <td><span v-if="m.name === p.model" class="badge badge--green">answers</span><span v-if="m.name === p.embedding_model" class="badge badge--violet">recall</span></td>
               </tr>
             </tbody>
-          </table>
+          </table></div>
           <p v-else-if="!p.served.error" class="muted small">The server offers no models yet. On Ollama: <code>ollama pull qwen3.8:27b</code>.</p>
         </details>
         <template v-if="resultOf(p.name) && resultOf(p.name) !== 'running'">
@@ -190,9 +204,10 @@ const resultOf = (n: string) => tests.value[n]
 .served table { margin-top: 8px; font-size: 13px; }
 .served .badge + .badge { margin-left: 4px; }
 .steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
-.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13.5px; }
+.facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: 13.5px; }
 .facts dt { color: var(--muted); }
-.facts dd { margin: 0; }
+.facts dd { margin: 0; min-width: 0; }
+.wrap { overflow-wrap: anywhere; }
 .ok { color: var(--success); }
 .status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 0; }
 .small { font-size: 12.5px; }

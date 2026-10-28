@@ -28,7 +28,7 @@ async function list() {
     for (const k of Object.keys(outcome)) delete outcome[k]
   } catch (e) {
     listing.value = undefined
-    error.value = apiErrorMessage(e)
+    error.value = plainError(e)
   } finally {
     loading.value = false
   }
@@ -54,7 +54,7 @@ async function addChosen() {
         outcome[r.repo] = { ok: true, text: res?.shared ? 'linked' : 'queued' }
         picked[r.repo] = false
       } catch (e) {
-        outcome[r.repo] = { ok: false, text: apiErrorMessage(e) }
+        outcome[r.repo] = { ok: false, text: plainError(e) }
       }
     }
   } finally {
@@ -84,7 +84,7 @@ async function addChosen() {
         <label class="check"><input v-model="form.include_forks" type="checkbox"> Include forks</label>
         <div class="row">
           <button type="submit" :disabled="!form.org.trim() || loading">{{ loading ? 'Listing…' : 'List repositories' }}</button>
-          <span class="muted small">Private repositories are listed when your organisation has a Git token for the host in <NuxtLink to="/settings">Settings</NuxtLink>; otherwise only public ones are.</span>
+          <span class="muted small">Private repositories are listed when your organisation has a Git token for the host in <NuxtLink to="/settings/git-tokens">Settings → Git tokens</NuxtLink>; otherwise only public ones are.</span>
         </div>
       </form>
       <p v-if="error" class="error">{{ error }}</p>

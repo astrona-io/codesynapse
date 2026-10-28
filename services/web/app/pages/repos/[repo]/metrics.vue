@@ -3,6 +3,7 @@ import type { Distribution, MetricsReport } from '~/utils/types'
 
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
+useHead({ title: () => `Metrics · ${repo.value}` })
 const { data: m, error } = useApiGet<MetricsReport>(() => repoPath(repo.value, 'metrics'))
 const explore = (id: string) => ({ path: `/repos/${encodeURIComponent(repo.value)}/explore`, query: { id } })
 const bars = (d?: Distribution) => (d?.buckets ?? []).map((b) => ({ label: b.label, value: b.count }))
@@ -22,7 +23,7 @@ const short = (p: string) => p.replace(/^.*?\/internal\//, 'internal/').replace(
     </PageHeader>
     <CodeHealthTabs :repo="repo" />
 
-    <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
+    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="m">
       <section class="panel bench">
         <div class="panel__header">
@@ -50,14 +51,14 @@ const short = (p: string) => p.replace(/^.*?\/internal\//, 'internal/').replace(
       </section>
 
       <div class="grid grid--stats">
-        <StatTile label="Code" :value="fmtInt(m.code.loc)" :hint="`LOC · ${m.code.packages} packages · ${m.code.files} files`" />
-        <StatTile label="Callables" :value="fmtInt(m.code.functions + m.code.methods)" :hint="`${m.code.types} types · ${m.code.interfaces} interfaces`" />
-        <StatTile label="Reached by tests" :value="`${m.tests.reachable_pct}%`" :hint="`${m.tests.reachable}/${m.tests.total} · ${m.tests.exported_untested} exported untested`" />
-        <StatTile label="Doc coverage" :value="`${m.docs.coverage_pct}%`" :hint="`${m.docs.documented}/${m.docs.exported} exported · ${m.docs.documents} docs`" />
-        <StatTile label="Avg complexity" :value="m.code.avg_complexity.toFixed(1)" :hint="`${m.code.complex_over_10} over 10 · ${m.code.complex_over_20} over 20`" />
-        <StatTile label="Test / code" :value="m.tests.test_to_code_ratio.toFixed(2)" :hint="`${fmtInt(m.code.test_loc)} test LOC · ${m.tests.test_functions} tests`" />
-        <StatTile label="Call edges" :value="fmtInt(m.code.call_edges)" :hint="`${m.code.security_symbols} security-sensitive functions`" />
-        <StatTile label="Dead-code candidates" :value="m.dead_code.length" hint="unexported, no static callers" />
+        <StatTile label="Code" :value="fmtInt(m.code.loc)" :hint="`LOC · ${plural(m.code.packages, 'package')} · ${plural(m.code.files, 'file')}`" />
+        <StatTile label="Callables" :value="fmtInt(m.code.functions + m.code.methods)" :hint="`${plural(m.code.types, 'type')} · ${plural(m.code.interfaces, 'interface')}`" />
+        <StatTile label="Reached by tests" :value="`${m.tests.reachable_pct}%`" :hint="`${fmtInt(m.tests.reachable)}/${fmtInt(m.tests.total)} · ${fmtInt(m.tests.exported_untested)} exported untested`" />
+        <StatTile label="Doc coverage" :value="`${m.docs.coverage_pct}%`" :hint="`${fmtInt(m.docs.documented)}/${fmtInt(m.docs.exported)} exported · ${plural(m.docs.documents, 'doc')}`" />
+        <StatTile label="Avg complexity" :value="m.code.avg_complexity.toFixed(1)" :hint="`${fmtInt(m.code.complex_over_10)} over 10 · ${fmtInt(m.code.complex_over_20)} over 20`" />
+        <StatTile label="Test / code" :value="m.tests.test_to_code_ratio.toFixed(2)" :hint="`${fmtInt(m.code.test_loc)} test LOC · ${plural(m.tests.test_functions, 'test')}`" />
+        <StatTile label="Call edges" :value="fmtInt(m.code.call_edges)" :hint="`${fmtInt(m.code.security_symbols)} security-sensitive functions`" />
+        <StatTile label="Dead-code candidates" :value="fmtInt(m.dead_code.length)" hint="unexported, no static callers" />
       </div>
 
       <div class="grid cols-2">
@@ -73,7 +74,7 @@ const short = (p: string) => p.replace(/^.*?\/internal\//, 'internal/').replace(
         <div class="panel__header">
           <div><p class="eyebrow">Architecture</p><h2>Packages <span class="muted">· instability = Ce / (Ca + Ce)</span></h2></div>
           <div class="row">
-            <button v-for="k in (['loc', 'instability', 'avg_complexity', 'tested_pct'] as const)" :key="k" class="chip" :class="{ active: pkgSort === k }" @click="pkgSort = k">{{ k.replace('_', ' ') }}</button>
+            <button v-for="k in (['loc', 'instability', 'avg_complexity', 'tested_pct'] as const)" :key="k" class="chip" :class="{ active: pkgSort === k }" :aria-pressed="pkgSort === k" @click="pkgSort = k">{{ k.replace('_', ' ') }}</button>
           </div>
         </div>
         <div class="table-wrap">
@@ -111,7 +112,7 @@ const short = (p: string) => p.replace(/^.*?\/internal\//, 'internal/').replace(
         </section>
       </div>
     </template>
-    <p v-else class="muted">Loading…</p>
+    <p v-else class="muted" role="status">Loading…</p>
   </div>
 </template>
 

@@ -52,7 +52,7 @@ const finished = computed(() => steps.value.length - open.value.length)
           <span class="muted small">{{ s.text }}</span>
         </div>
         <div class="step__act">
-          <NuxtLink v-if="!s.done" :to="s.to" class="btn accent tiny" @click="s.manual && welcome.markDone(s.id)">{{ s.action }}</NuxtLink>
+          <NuxtLink v-if="!s.done" :to="s.to" class="btn btn--accent btn--tiny" @click="s.manual && welcome.markDone(s.id)">{{ s.action }}</NuxtLink>
           <span v-else class="muted small">Done</span>
         </div>
       </li>

@@ -99,6 +99,9 @@ type symbol struct {
 	// guards are checks the declaration itself carries (@login_required,
 	// an auth mixin): a route it handles inherits them.
 	guards []string
+	// inputs are parameters a route handler receives from the client
+	// (Flask/FastAPI path and query parameters), for taint.go.
+	inputs []string
 }
 
 type call struct {

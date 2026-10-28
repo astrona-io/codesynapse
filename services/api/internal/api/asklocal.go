@@ -341,6 +341,12 @@ func (s *Server) handleBriefPlan(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusBadRequest, errors.New("prompt must be 1 to 8000 bytes"))
 		return
 	}
+	// A prompt that is not about code gets no ranges, so a client that does
+	// not gate it itself reads nothing and calls no model.
+	if !asklocal.WorthBriefing(in.Prompt) {
+		writeJSON(w, http.StatusOK, BriefPlan{Ranges: []string{}, Keywords: []string{}})
+		return
+	}
 	repo := r.PathValue("repo")
 	mc, err := agentctx.Service{R: store.ForRepository(s.st, repo)}.MinimalContext(r.Context(), repo, in.Prompt, nil, 4000)
 	if err != nil {

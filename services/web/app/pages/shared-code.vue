@@ -14,7 +14,7 @@ const explore = (repo: string, id: string) => ({ path: `/repos/${encodeURICompon
       <NuxtLink to="/overview" class="btn btn--ghost">What needs attention</NuxtLink>
     </PageHeader>
 
-    <p v-if="error" class="notice notice--danger">{{ apiErrorMessage(error) }}</p>
+    <p v-if="error" class="notice notice--danger">{{ plainError(error) }}</p>
     <template v-else-if="data">
       <div v-if="data.repos < 2" class="empty">
         <strong>Add a second repository</strong>

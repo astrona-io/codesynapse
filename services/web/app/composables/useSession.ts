@@ -14,8 +14,14 @@ export function useSession() {
 
   async function load() {
     const fetcher = useRequestFetch()
-    status.value = await fetcher<AuthStatus>('/api/cg/auth/status').catch(() => ({ mode: 'accounts' }) as AuthStatus)
-    me.value = status.value.mode === 'accounts' ? await fetcher<Me>('/api/cg/me').catch(() => null) : null
+    // Both at once: every first page load waits for these before it renders.
+    // Without accounts the answer about the user is dropped.
+    const [st, user] = await Promise.all([
+      fetcher<AuthStatus>('/api/cg/auth/status').catch(() => ({ mode: 'accounts' }) as AuthStatus),
+      fetcher<Me>('/api/cg/me').catch(() => null),
+    ])
+    status.value = st
+    me.value = st.mode === 'accounts' ? user : null
     loaded.value = true
     const ms = me.value?.memberships ?? []
     // Platform administration does not grant organisation membership.

@@ -3,6 +3,7 @@ import type { CleanupReport } from '~/utils/types'
 
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
+useHead({ title: () => `Unused code · ${repo.value}` })
 const { data: rep, error } = useApiGet<CleanupReport>(() => repoPath(repo.value, 'cleanup'))
 const category = ref('all')
 const minConf = ref('low')
@@ -33,13 +34,13 @@ const steps = [
     </PageHeader>
     <CodeHealthTabs :repo="repo" />
 
-    <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
+    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="rep">
       <div class="grid grid--stats">
-        <StatTile label="Unused functions" :value="rep.summary.unreachable + rep.summary.test_only" :hint="`${rep.summary.unreachable} unreachable · ${rep.summary.test_only} test-only · of ${fmtInt(rep.summary.functions)}`" />
-        <StatTile label="Removable lines" :value="fmtInt(rep.summary.dead_loc)" :hint="`${rep.summary.dead_pct}% of function code · ${rep.summary.dead_files} whole files`" />
-        <StatTile label="Unused dependencies" :value="rep.summary.unused_modules" :hint="`${rep.summary.cves_removable} CVEs removed with them`" />
-        <StatTile label="Security-relevant" :value="rep.summary.security_relevant" hint="dead code with findings or sensitive calls" />
+        <StatTile label="Unused functions" :value="fmtInt(rep.summary.unreachable + rep.summary.test_only)" :hint="`${fmtInt(rep.summary.unreachable)} unreachable · ${fmtInt(rep.summary.test_only)} test-only · of ${fmtInt(rep.summary.functions)}`" />
+        <StatTile label="Removable lines" :value="fmtInt(rep.summary.dead_loc)" :hint="`${rep.summary.dead_pct}% of function code · ${plural(rep.summary.dead_files, 'whole file')}`" />
+        <StatTile label="Unused dependencies" :value="fmtInt(rep.summary.unused_modules)" :hint="`${plural(rep.summary.cves_removable, 'CVE')} removed with them`" />
+        <StatTile label="Security-relevant" :value="fmtInt(rep.summary.security_relevant)" hint="dead code with findings or sensitive calls" />
       </div>
 
       <section class="panel">
@@ -52,7 +53,7 @@ const steps = [
         <div class="table-wrap"><table><tbody>
           <tr v-for="m in rep.modules" :key="`${m.ecosystem ?? 'Go'}:${m.path}`">
             <td class="mono">{{ m.path }}<span v-if="m.ecosystem" class="muted"> ({{ m.ecosystem }})</span></td><td class="mono muted">{{ m.version }}</td>
-            <td><span v-for="v in m.vulnerabilities ?? []" :key="v" class="sev sev--high">{{ v }}</span><span v-if="!m.vulnerabilities?.length" class="muted">no known CVEs</span></td>
+            <td><span v-for="v in m.vulnerabilities ?? []" :key="v" class="tag sec mono">{{ v }}</span><span v-if="!m.vulnerabilities?.length" class="muted">no known CVEs</span></td>
           </tr>
         </tbody></table></div>
       </section>
@@ -63,9 +64,9 @@ const steps = [
         </div>
         <div class="row">
           <span class="label">Category</span>
-          <button v-for="c in ['all', 'unreachable', 'test-only']" :key="c" class="chip" :class="{ active: category === c }" @click="category = c">{{ c }}</button>
+          <button v-for="c in ['all', 'unreachable', 'test-only']" :key="c" class="chip" :class="{ active: category === c }" :aria-pressed="category === c" @click="category = c">{{ c }}</button>
           <span class="label">Confidence ≥</span>
-          <button v-for="c in ['low', 'medium', 'high']" :key="c" class="chip" :class="{ active: minConf === c }" @click="minConf = c">{{ c }}</button>
+          <button v-for="c in ['low', 'medium', 'high']" :key="c" class="chip" :class="{ active: minConf === c }" :aria-pressed="minConf === c" @click="minConf = c">{{ c }}</button>
           <label class="row compact"><input v-model="securityOnly" type="checkbox"> security-relevant only</label>
         </div>
         <div v-if="items.length" class="table-wrap">
@@ -76,7 +77,7 @@ const steps = [
                 <td><NuxtLink :to="explore(i.id)" class="mono">{{ i.name }}</NuxtLink><div class="mono muted">{{ i.location }}</div></td>
                 <td><span class="badge" :class="i.category === 'unreachable' ? 'badge--pink' : 'badge--violet'">{{ i.category }}</span></td>
                 <td><span class="badge" :class="confClass(i.confidence)">{{ i.confidence }}</span></td>
-                <td class="num">{{ i.loc }}</td>
+                <td class="num">{{ fmtInt(i.loc) }}</td>
                 <td>
                   <span v-for="s in i.security ?? []" :key="s" class="tag sec">{{ s }}</span>
                   <div class="muted small">{{ i.reason }}</div>
@@ -92,7 +93,7 @@ const steps = [
         <section class="panel">
           <p class="eyebrow">Files</p><h2>Files with nothing live</h2>
           <div class="table-wrap"><table><tbody>
-            <tr v-for="f in rep.files" :key="f.file"><td class="mono">{{ f.file }}</td><td class="num">{{ f.symbols }} symbols</td><td class="num">{{ f.loc }} lines</td></tr>
+            <tr v-for="f in rep.files" :key="f.file"><td class="mono">{{ f.file }}</td><td class="num">{{ plural(f.symbols, 'symbol') }}</td><td class="num">{{ plural(f.loc, 'line') }}</td></tr>
           </tbody></table></div>
           <p v-if="!rep.files.length" class="muted">Every file has live code.</p>
         </section>
@@ -107,7 +108,7 @@ const steps = [
         </section>
       </div>
     </template>
-    <p v-else class="muted">Loading…</p>
+    <p v-else class="muted" role="status">Loading…</p>
   </div>
 </template>
 
