@@ -181,3 +181,26 @@ func TestGatewayOrganisationCanSwitchItOff(t *testing.T) {
 	require.Equal(t, f.client.do("GET", path, "", &got), 200)
 	assert.False(t, got.Enabled)
 }
+
+func TestGatewayLocalFirstSetting(t *testing.T) {
+	f := newRuntimeFixture(t, Config{Gateway: true})
+	path := "/api/v1/accounts/orgs/" + f.org.Slug + "/gateway"
+	type setting struct {
+		Enabled    bool `json:"enabled"`
+		LocalFirst bool `json:"local_first"`
+	}
+	var got setting
+	require.Equal(t, f.client.do("GET", path, "", &got), 200)
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true}, "both on by default")
+	assert.Equal(t, f.client.do("PUT", path, `{"local_first":false}`, nil), 403, "API keys cannot change it")
+
+	owner := newClient(t, f.client.ts)
+	require.Equal(t, owner.do("POST", "/api/v1/auth/login", `{"email":"runtime@example.com","password":"`+pw+`"}`, nil), 200)
+	assert.Equal(t, owner.do("PUT", path, `{}`, nil), 400, "nothing to change")
+	require.Equal(t, owner.do("PUT", path, `{"local_first":false}`, &got), 200)
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: false}, "enabled is left alone")
+	require.Equal(t, owner.do("PUT", path, `{"enabled":false}`, &got), 200)
+	assert.Equal(t, got, setting{Enabled: false, LocalFirst: false}, "older clients send only enabled")
+	require.Equal(t, owner.do("PUT", path, `{"enabled":true,"local_first":true}`, &got), 200)
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true})
+}

@@ -48,6 +48,7 @@ func (s *Store) PolicyTransaction(ctx context.Context, _ string, fn func(account
 	s.ingestEntries = tx.ingestEntries
 	s.ingestMetrics = tx.ingestMetrics
 	s.setup = tx.setup
+	s.gateway, s.localFirst = tx.gateway, tx.localFirst
 	s.idps, s.identities, s.ssoStates, s.managed = tx.idps, tx.identities, tx.ssoStates, tx.managed
 	return nil
 }
@@ -196,6 +197,7 @@ func (s *Store) snapshot() *Store {
 	tx.ingestEntries = maps.Clone(s.ingestEntries)
 	tx.ingestMetrics = s.ingestMetrics
 	tx.setup = s.setup
+	tx.gateway, tx.localFirst = maps.Clone(s.gateway), maps.Clone(s.localFirst)
 	tx.idps, tx.identities, tx.ssoStates, tx.managed = maps.Clone(s.idps), maps.Clone(s.identities), maps.Clone(s.ssoStates), maps.Clone(s.managed)
 	tx.jobs = s.jobTable() // shared, not transactional
 	tx.sched = s.scheduleTable()

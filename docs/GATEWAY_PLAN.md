@@ -24,7 +24,7 @@ Goal: every model request an agent makes goes through CodeSynapse, waits its tur
 
 Claude Code (`ANTHROPIC_BASE_URL` pointed at the gateway) sends every request to `POST /v1/messages`. The gateway holds it in the queue, decides, then either answers it with a local model or forwards it to Anthropic.
 
-- The decision is rules first, no model call on the hot path: background calls Claude Code makes with its small model (titles, summaries, topic checks, short prompts without tools) go to the local model, with or without tools; turns of the main model and long contexts go to the cloud. Rules are configuration (`gateway.rules`), and each decision is audited with the rule that chose it.
+- The decision is rules first, no model call on the hot path: background calls Claude Code makes with its small model (titles, summaries, topic checks, short prompts without tools) go to the local model, with or without tools; with local first on (the default) turns of the main model do too, and contexts larger than the local model's go to the cloud. Rules are configuration (`gateway.rules`), and each decision is audited with the rule that chose it.
 - A local answer needs the request translated from the Anthropic format (messages, system blocks, streaming events) to the OpenAI-compatible one and back. Tool-using requests are translated too (see below); requests with images are never routed locally.
 - A request the local model cannot take (busy past a wait limit, error, no local model) falls through to the cloud unless the caller asked for local only.
 - Authorisation for the cloud leg: the caller's own `Authorization` / `x-api-key` header is passed through to Anthropic for that one request and never stored or logged, so a subscription sign-in works. A server-side key (`api_key_env`) is the alternative for shared installs.
@@ -41,7 +41,11 @@ Decision: option 1, as an explicit "gateway key" with its own audit trail.
 
 ## Local leg (built)
 
-A provider with `gateway: true` (local only, explicit `model`) answers `/v1/messages` requests that name a haiku-class model, carry no thinking, no image or other non-text blocks, and are at most 256 KiB. Tools are allowed (see below). The request is translated to `/chat/completions`, takes the provider's queue slot (shared with CodeSynapse's own calls), and the answer is translated back to Anthropic events. If the queue wait passes 20 s, the model errors or answers non-200, nothing has been written and the cloud takes the request. `X-CodeSynapse-Route: local|cloud` says which. A local answer needs no Anthropic credential.
+A provider with `gateway: true` (local only, explicit `model`) answers `/v1/messages` requests that carry no thinking and no image or other non-text blocks, and that fit its context: body bytes / 4 + `max_tokens` <= the provider's `context_window`, with an absolute 4 MiB body cap (256 KiB when `context_window` is unknown). With local first on (the organisation default) that is any model; with it off, only haiku-class models. Tools are allowed (see below). The request is translated to `/chat/completions`, takes the provider's queue slot (shared with CodeSynapse's own calls), and the answer is translated back to Anthropic events. If the queue wait passes 20 s, the model errors or answers non-200, nothing has been written and the cloud takes the request. `X-CodeSynapse-Route: local|cloud` says which. A local answer needs no Anthropic credential.
+
+### Local first (decided, on by default)
+
+Every request is offered to the local model first, to keep as much as possible on the premises; an organisation whose local model is too small for its main model switches it off (`org_gateway.local_first`, migration 0029; no row or a row written only for `enabled` counts as on). `PUT /api/v1/accounts/orgs/{org}/gateway` takes `local_first` beside `enabled` and changes only the fields sent; owner or admin, signed-in session, audited as `org.gateway.local_first.set` before the write. The setting is read on every gateway request. A non-haiku request answered locally is buffered and checked before anything is written: an empty answer, `finish_reason: length` or a stream with no finish reason sends it to the cloud. Haiku requests keep streaming.
 
 ### Local answers with tools (decided)
 

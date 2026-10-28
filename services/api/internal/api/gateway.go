@@ -113,7 +113,7 @@ func (s *Server) gatewayRoutes() {
 		if !ok {
 			return nil
 		}
-		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire}
+		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire, ContextWindow: t.ContextWindow}
 	}
 	g.Done = s.auditGateway
 	var open keyLimit
@@ -165,6 +165,11 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 		s.problem(w, http.StatusForbidden, errors.New("the gateway is switched off for this organisation; an owner or admin turns it on"))
 		return r, false
 	}
+	first, err := s.cfg.Accounts.GatewayLocalFirst(r.Context(), m.Org.ID)
+	if err != nil {
+		s.accountError(w, err)
+		return r, false
+	}
 	id, err := s.cfg.Accounts.GatewayExecutionSession(r.Context(), p, m.Org.ID)
 	if err != nil {
 		s.problem(w, http.StatusForbidden, errors.New("this key cannot use the gateway"))
@@ -175,13 +180,14 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 		s.problem(w, http.StatusForbidden, err)
 		return r, false
 	}
-	return r.WithContext(ctx), true
+	return r.WithContext(gateway.WithLocalFirst(ctx, first)), true
 }
 
 // handleOrgGateway reads (any member) or sets (owner or admin, signed-in
 // session only) whether the organisation uses the agent gateway (on unless
-// switched off). "available"
-// says whether the operator turned the gateway on for the installation.
+// switched off) and whether the local model answers first (on unless switched
+// off). A PUT changes only the fields it sends. "available" says whether the
+// operator turned the gateway on for the installation.
 func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 	least := accounts.Member
 	if r.Method == http.MethodPut {
@@ -193,23 +199,36 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPut {
 		var req struct {
-			Enabled bool `json:"enabled"`
+			Enabled    *bool `json:"enabled"`
+			LocalFirst *bool `json:"local_first"`
 		}
 		if err := decodeJSON(w, r, &req); err != nil {
 			s.problem(w, http.StatusBadRequest, err)
 			return
 		}
-		if err := s.cfg.Accounts.SetGateway(r.Context(), p, o.ID, req.Enabled); err != nil {
-			s.accountError(w, err)
+		if req.Enabled == nil && req.LocalFirst == nil {
+			s.problem(w, http.StatusBadRequest, errors.New("send enabled, local_first or both"))
 			return
 		}
+		if req.Enabled != nil {
+			if err := s.cfg.Accounts.SetGateway(r.Context(), p, o.ID, *req.Enabled); err != nil {
+				s.accountError(w, err)
+				return
+			}
+		}
+		if req.LocalFirst != nil {
+			if err := s.cfg.Accounts.SetGatewayLocalFirst(r.Context(), p, o.ID, *req.LocalFirst); err != nil {
+				s.accountError(w, err)
+				return
+			}
+		}
 	}
-	on, err := s.cfg.Accounts.GatewaySetting(r.Context(), p, o.ID)
+	set, err := s.cfg.Accounts.GatewaySetting(r.Context(), p, o.ID)
 	if err != nil {
 		s.accountError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": on, "available": s.cfg.Gateway})
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": set.Enabled, "local_first": set.LocalFirst, "available": s.cfg.Gateway})
 }
 
 // recordGateway counts one gateway request. Only the route, the status class

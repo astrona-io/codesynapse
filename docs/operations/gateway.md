@@ -1,15 +1,18 @@
 # Agent gateway
 
 !!! info "In plain words"
-    The gateway is a doorway that your coding assistant (for example Claude Code) can talk through. Small, simple requests are answered by a model on your own machine, so they cost nothing and the text never leaves your premises. Everything else is passed straight on to Anthropic using your own credential. It is **on by default** and you can switch it off. Unknown word? See the [glossary](../GLOSSARY.md).
+    The gateway is a doorway that your coding assistant (for example Claude Code) can talk through. Every request is first offered to a model on your own machine, so what it can answer costs nothing and the text never leaves your premises. Whatever it cannot answer well is passed straight on to Anthropic using your own credential. It is **on by default** and you can switch it off. Unknown word? See the [glossary](../GLOSSARY.md).
 
 ## What it does and why
 
 Coding assistants send many small background requests, such as naming a chat or summarising a line. Paying a big cloud model for those wastes money and tokens. The gateway sits between the assistant and the cloud and does three things:
 
-1. **Answers small requests locally.** A request qualifies when it asks for one of Claude's small (haiku-class) models, uses no thinking and no images (tools are fine), and is at most 256 KiB. When the request offers tools, the local model may call them and read their results; the call is checked first, and if the model gets it wrong (a tool that was not offered, broken arguments) the cloud answers instead. Tool data stays on your side. A local model that you configured answers it. Nothing is sent to the cloud.
-2. **Passes everything else on.** Other requests go to `api.anthropic.com` and nowhere else. The assistant's own Anthropic credential is used for that one request and is never stored.
-3. **Falls back safely.** If the local model is busy for more than 20 seconds, fails, or answers with an error, nothing has been written yet and the request goes to the cloud instead.
+1. **Answers locally first.** Every request is offered to the local model when it uses no thinking and no images (tools are fine) and fits the local model's context: the body size divided by four plus `max_tokens` must be at most the provider's `context_window`, and the body at most 4 MiB. When `context_window` is not known, the old limit of 256 KiB applies. When the request offers tools, the local model may call them and read their results; the call is checked first, and if the model gets it wrong (a tool that was not offered, broken arguments) the cloud answers instead. Tool data stays on your side. Nothing is sent to the cloud.
+2. **Checks the answer for the main model.** A request for a larger model than haiku is buffered: if the local answer is empty, stopped at `max_tokens` or broke off, the cloud answers instead. Haiku requests keep streaming as they are written.
+3. **Passes everything else on.** Other requests go to `api.anthropic.com` and nowhere else. The assistant's own Anthropic credential is used for that one request and is never stored.
+4. **Falls back safely.** If the local model is busy for more than 20 seconds, fails, or answers with an error, nothing has been written yet and the request goes to the cloud instead.
+
+An organisation whose local model is too small for its agents' main model turns **Answer with the local model first** off; then only haiku-class requests go to it, as before.
 
 Each answer carries a header, `X-CodeSynapse-Route: local` or `X-CodeSynapse-Route: cloud`, so you can see where it came from.
 
@@ -24,14 +27,15 @@ The gateway is on by default, and it needs accounts (a PostgreSQL database). Two
 | `CODESYNAPSE_GATEWAY=false` | The operator, on the API | Off for the whole installation |
 | **Settings → Organisation → Agent gateway** | An organisation owner or admin, signed in on the dashboard | Off for that organisation only. Its keys get `403` from the gateway |
 
-The organisation switch is audited as `org.gateway.set`. It cannot be changed with an API key. If the operator switched the gateway off, the Settings page says so, and requests are refused even when the organisation switch is on.
+The same panel has **Answer with the local model first** (on by default; `local_first` on `PUT /api/v1/accounts/orgs/{org}/gateway`, which changes only the fields it is sent). Both switches are audited, as `org.gateway.set` and `org.gateway.local_first.set`. Neither can be changed with an API key. If the operator switched the gateway off, the Settings page says so, and requests are refused even when the organisation switch is on.
 
 ## Set up the local model
 
 Local answering needs a local provider that you opt in explicitly. In `config/llm.yaml` give that provider `gateway: true` and an explicit `model`:
 
 ```yaml
-    gateway: true   # answer small requests (Claude haiku class), tools included from this local model
+    gateway: true   # answer gateway requests, tools included, from this local model
+    context_window: 131072   # how much fits; requests that do not go to the cloud
 ```
 
 See `config/llm.example.yaml` for the full provider block and [Local models](local-models.md) for choosing a model. Without such a provider the gateway still works, but every request goes to the cloud as a plain pass-through.

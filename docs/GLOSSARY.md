@@ -49,7 +49,7 @@ Plain-English meanings for the words you will meet in CodeSynapse. Each entry sa
 :   An AI model that runs on your own machine (for example through Ollama) instead of a cloud service. Your text does not leave the machine. CodeSynapse uses one for jobs that touch source code or conversations, such as shortening text before it goes to a cloud model.
 
 **Gateway**
-:   An optional front door for your agent's own model traffic. Instead of your agent talking to the model provider directly, it talks to CodeSynapse first. CodeSynapse puts the request in a queue, may answer small ones with your local model, and otherwise forwards it to the cloud model. It is off by default and has to be switched on by the operator and by the organisation. See the [gateway plan](GATEWAY_PLAN.md).
+:   An optional front door for your agent's own model traffic. Instead of your agent talking to the model provider directly, it talks to CodeSynapse first. CodeSynapse puts the request in a queue, offers it to your local model first, and forwards it to the cloud model when the local one cannot answer it well. It is on by default; the operator or the organisation can switch it off. See the [gateway plan](GATEWAY_PLAN.md).
 
 **Queue**
 :   A waiting line. A local model can only do so much at once, so requests wait their turn.
