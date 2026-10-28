@@ -85,7 +85,7 @@ volumeClaimTemplates:
 {{- printf "%s-codesynapse" .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{/* A store accepts only api, worker, fix-worker and mcp of the same release. Args: root, store. */}}
+{{/* A store accepts only api, worker, fix-worker and mcp of the same release, and the metrics store also vmalert (alerting.enabled in the parent chart). Args: root, store. */}}
 {{- define "cs.storePolicy" -}}
 {{- $root := index . 0 -}}{{- $store := index . 1 -}}
 {{- if $root.Values.global.networkPolicies }}
@@ -102,7 +102,9 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
-        {{- range $client := list "api" "worker" "fix-worker" "mcp" }}
+        {{- $clients := list "api" "worker" "fix-worker" "mcp" }}
+        {{- if eq $store "victoriametrics" }}{{ $clients = append $clients "vmalert" }}{{ end }}
+        {{- range $client := $clients }}
         - podSelector:
             matchLabels:
               {{- include "cs.selector" (list $root $client) | nindent 14 }}

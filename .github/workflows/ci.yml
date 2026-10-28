@@ -115,6 +115,8 @@ jobs:
         run: just lint-shell
       - name: YAML
         run: just lint-yaml
+      - name: Alert rules (vmalert)
+        run: just lint-alerts
       - name: Secrets
         run: just secrets
       - name: Vulnerabilities and misconfigurations (Trivy)

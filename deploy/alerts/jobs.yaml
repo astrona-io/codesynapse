@@ -1,0 +1,24 @@
+# Background job queue (docs/TELEMETRY_PLAN.md, "Alerting"). The API process
+# holding the api-loops lease sets both gauges per job kind, without a
+# tenant. A process that just lost the lease may still report for a moment,
+# so each gauge is taken as the maximum over instances, never summed.
+groups:
+  - name: codesynapse-jobs
+    interval: 1m
+    rules:
+      # Waiting jobs with none running: no worker with that role is up, or
+      # every worker of it is stuck. Jobs left behind by a stopped process
+      # count as waiting until another worker claims them.
+      - alert: CodeSynapseJobsNotClaimed
+        expr: |
+          max by (kind) (platform_codesynapse_jobs_waiting) > 0
+          and
+          (max by (kind) (platform_codesynapse_jobs_active) - max by (kind) (platform_codesynapse_jobs_waiting)) == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: jobs
+        annotations:
+          summary: "{{ $labels.kind }} jobs are waiting and no worker runs them"
+          description: "{{ $value }} {{ $labels.kind }} jobs have waited for 15 minutes with none running. Check that a worker with that role is up (fix jobs need the fix worker)."
+          dashboard: "{{ $externalURL }}/stats"

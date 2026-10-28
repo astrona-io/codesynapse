@@ -1,0 +1,56 @@
+# Alerts on the telemetry pipeline itself (docs/TELEMETRY_PLAN.md, "Alerting").
+# Every expression reads a metric without a tenant or sums tenants away, and
+# labels and annotations carry only instrument names and fixed label values:
+# never repositories, paths, users, keys, sessions or request content.
+groups:
+  - name: codesynapse-telemetry
+    interval: 1m
+    rules:
+      # Each instrument keeps at most 5,000 label combinations per process;
+      # past that, new combinations are dropped and panels undercount.
+      - alert: CodeSynapseSeriesCapOverflow
+        expr: sum by (metric) (increase(telemetry_dropped_series_total[1h])) > 0
+        labels:
+          severity: warning
+          component: telemetry
+        annotations:
+          summary: "{{ $labels.metric }} reached its series cap"
+          description: "{{ $value | humanize }} label combinations of {{ $labels.metric }} were dropped in the last hour, so panels that read it undercount. See \"Cap pressure\" in docs/TELEMETRY_PLAN.md."
+          dashboard: "{{ $externalURL }}/stats"
+
+      # Lines that did not reach the log store are still on stderr, but the
+      # log search misses them. reason is too_long, queue_full or send_failed.
+      - alert: CodeSynapseLogShippingDropping
+        expr: sum by (reason) (increase(platform_log_lines_dropped_total[10m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+          component: telemetry
+        annotations:
+          summary: "Log lines are not reaching the log store ({{ $labels.reason }})"
+          description: "{{ $value | humanize }} log lines were dropped in the last 10 minutes for 15 minutes in a row. They are on the services' stderr only."
+          dashboard: "{{ $externalURL }}/stats"
+
+      # The durable file totals (codesynapse_files_*_total) are exported by a
+      # fenced exporter that refuses snapshots it cannot prove consistent.
+      - alert: CodeSynapseIngestMetricsRejected
+        expr: sum by (reason) (increase(platform_ingest_metric_export_rejections_total[1h])) > 0
+        labels:
+          severity: warning
+          component: telemetry
+        annotations:
+          summary: "Indexing file totals were not exported ({{ $labels.reason }})"
+          description: "{{ $value | humanize }} snapshots of the indexing file totals were rejected before export in the last hour. The totals stay in PostgreSQL; the Ingestion panels lag until an export passes."
+          dashboard: "{{ $externalURL }}/stats"
+
+      # The exporter admits a bounded number of repositories; the rest are
+      # counted here instead of exported.
+      - alert: CodeSynapseIngestMetricsCapacity
+        expr: sum(increase(platform_codesynapse_ingest_metric_series_dropped_total[1h])) > 0
+        labels:
+          severity: warning
+          component: telemetry
+        annotations:
+          summary: "Indexing file totals reached their repository limit"
+          description: "{{ $value | humanize }} file-total series were not admitted in the last hour, so some repositories have no Ingestion panels."
+          dashboard: "{{ $externalURL }}/stats"

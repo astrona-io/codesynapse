@@ -1,0 +1,166 @@
+# Unit tests for the alert rules (`just lint-alerts`, vmalert-tool unittest).
+# Each rule fires on the series that should trigger it, keeps quiet on the
+# ones that should not, and its alert carries no tenant_id.
+rule_files:
+  - ../telemetry.yaml
+  - ../stores.yaml
+  - ../jobs.yaml
+evaluation_interval: 1m
+
+tests:
+  - name: series cap overflow, per instrument
+    interval: 1m
+    input_series:
+      - series: 'telemetry_dropped_series_total{metric="mcp_tool_duration_seconds",service_name="mcp"}'
+        values: '0x60 4+1x30'
+      # Dropped once, more than an hour ago: quiet now.
+      - series: 'telemetry_dropped_series_total{metric="http_requests_total",service_name="api"}'
+        values: '3x90'
+    alert_rule_test:
+      - eval_time: 80m
+        groupname: codesynapse-telemetry
+        alertname: CodeSynapseSeriesCapOverflow
+        exp_alerts:
+          - exp_labels: {severity: warning, component: telemetry, metric: mcp_tool_duration_seconds}
+            exp_annotations:
+              summary: "mcp_tool_duration_seconds reached its series cap"
+              description: "23 label combinations of mcp_tool_duration_seconds were dropped in the last hour, so panels that read it undercount. See \"Cap pressure\" in docs/TELEMETRY_PLAN.md."
+              dashboard: "https://codesynapse.example.com/stats"
+
+  - name: log lines dropped for 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'platform_log_lines_dropped_total{reason="send_failed"}'
+        values: '0+10x40'
+      - series: 'platform_log_lines_dropped_total{reason="too_long"}'
+        values: '0x20 1x20'
+    alert_rule_test:
+      - eval_time: 10m
+        groupname: codesynapse-telemetry
+        alertname: CodeSynapseLogShippingDropping
+        exp_alerts: []
+      - eval_time: 35m
+        groupname: codesynapse-telemetry
+        alertname: CodeSynapseLogShippingDropping
+        exp_alerts:
+          - exp_labels: {severity: warning, component: telemetry, reason: send_failed}
+            exp_annotations:
+              summary: "Log lines are not reaching the log store (send_failed)"
+              description: "100 log lines were dropped in the last 10 minutes for 15 minutes in a row. They are on the services' stderr only."
+              dashboard: "https://codesynapse.example.com/stats"
+
+  - name: ingest metric export rejected and over capacity
+    interval: 1m
+    input_series:
+      - series: 'platform_ingest_metric_export_rejections_total{reason="capacity"}'
+        values: '0x5 1x30'
+      - series: 'platform_codesynapse_ingest_metric_series_dropped_total'
+        values: '0x5 2x30'
+    alert_rule_test:
+      - eval_time: 20m
+        groupname: codesynapse-telemetry
+        alertname: CodeSynapseIngestMetricsRejected
+        exp_alerts:
+          - exp_labels: {severity: warning, component: telemetry, reason: capacity}
+            exp_annotations:
+              summary: "Indexing file totals were not exported (capacity)"
+              description: "1 snapshots of the indexing file totals were rejected before export in the last hour. The totals stay in PostgreSQL; the Ingestion panels lag until an export passes."
+              dashboard: "https://codesynapse.example.com/stats"
+      - eval_time: 20m
+        groupname: codesynapse-telemetry
+        alertname: CodeSynapseIngestMetricsCapacity
+        exp_alerts:
+          - exp_labels: {severity: warning, component: telemetry}
+            exp_annotations:
+              summary: "Indexing file totals reached their repository limit"
+              description: "2 file-total series were not admitted in the last hour, so some repositories have no Ingestion panels."
+              dashboard: "https://codesynapse.example.com/stats"
+
+  # Two tenants and the platform stream of the same store: the alert sums
+  # them per db_system and names no tenant. Milvus stays fast.
+  - name: store latency summed over tenants
+    interval: 1m
+    input_series:
+      - series: 'db_query_duration_seconds_bucket{tenant_id="t1",db_system="nebulagraph",operation="read",le="1"}'
+        values: '0+1x40'
+      - series: 'db_query_duration_seconds_bucket{tenant_id="t1",db_system="nebulagraph",operation="read",le="5"}'
+        values: '0+10x40'
+      - series: 'db_query_duration_seconds_bucket{tenant_id="t1",db_system="nebulagraph",operation="read",le="+Inf"}'
+        values: '0+10x40'
+      - series: 'platform_db_query_duration_seconds_bucket{tenant_id="none",db_system="nebulagraph",operation="read",le="1"}'
+        values: '0+1x40'
+      - series: 'platform_db_query_duration_seconds_bucket{tenant_id="none",db_system="nebulagraph",operation="read",le="5"}'
+        values: '0+10x40'
+      - series: 'platform_db_query_duration_seconds_bucket{tenant_id="none",db_system="nebulagraph",operation="read",le="+Inf"}'
+        values: '0+10x40'
+      - series: 'db_query_duration_seconds_bucket{tenant_id="t2",db_system="milvus",operation="search",le="1"}'
+        values: '0+10x40'
+      - series: 'db_query_duration_seconds_bucket{tenant_id="t2",db_system="milvus",operation="search",le="5"}'
+        values: '0+10x40'
+      - series: 'db_query_duration_seconds_bucket{tenant_id="t2",db_system="milvus",operation="search",le="+Inf"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 8m
+        groupname: codesynapse-stores
+        alertname: CodeSynapseStoreSlow
+        exp_alerts: []
+      - eval_time: 30m
+        groupname: codesynapse-stores
+        alertname: CodeSynapseStoreSlow
+        exp_alerts:
+          - exp_labels: {severity: warning, component: stores, db_system: nebulagraph}
+            exp_annotations:
+              summary: "nebulagraph answers slowly"
+              description: "95% of nebulagraph round trips took up to 4.778s over the last 10 minutes, above 1 s for 10 minutes."
+              dashboard: "https://codesynapse.example.com/stats"
+
+  - name: store errors, with a minimum call rate
+    interval: 1m
+    input_series:
+      # PostgreSQL: 10 calls a minute, 1 failing (10%).
+      - series: 'db_query_duration_seconds_count{tenant_id="t1",db_system="postgres",operation="query"}'
+        values: '0+10x40'
+      - series: 'db_query_errors_total{tenant_id="t1",db_system="postgres",operation="query"}'
+        values: '0+1x40'
+      # Milvus: one call in ten minutes, and it failed. Too few calls to page.
+      - series: 'platform_db_query_duration_seconds_count{tenant_id="none",db_system="milvus",operation="search"}'
+        values: '0x10 1x30'
+      - series: 'platform_db_query_errors_total{tenant_id="none",db_system="milvus",operation="search"}'
+        values: '0x10 1x30'
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: codesynapse-stores
+        alertname: CodeSynapseStoreErrors
+        exp_alerts:
+          - exp_labels: {severity: critical, component: stores, db_system: postgres}
+            exp_annotations:
+              summary: "postgres calls are failing"
+              description: "10% of postgres round trips failed over the last 10 minutes, above 5% for 10 minutes."
+              dashboard: "https://codesynapse.example.com/stats"
+
+  - name: jobs waiting with none running
+    interval: 1m
+    input_series:
+      # fix: two waiting, none running. sync: one waiting, one running.
+      - series: 'platform_codesynapse_jobs_waiting{kind="fix",service_instance_id="api-1"}'
+        values: '2x30'
+      - series: 'platform_codesynapse_jobs_active{kind="fix",service_instance_id="api-1"}'
+        values: '2x30'
+      - series: 'platform_codesynapse_jobs_waiting{kind="sync",service_instance_id="api-1"}'
+        values: '1x30'
+      - series: 'platform_codesynapse_jobs_active{kind="sync",service_instance_id="api-1"}'
+        values: '2x30'
+    alert_rule_test:
+      - eval_time: 10m
+        groupname: codesynapse-jobs
+        alertname: CodeSynapseJobsNotClaimed
+        exp_alerts: []
+      - eval_time: 20m
+        groupname: codesynapse-jobs
+        alertname: CodeSynapseJobsNotClaimed
+        exp_alerts:
+          - exp_labels: {severity: warning, component: jobs, kind: fix}
+            exp_annotations:
+              summary: "fix jobs are waiting and no worker runs them"
+              description: "2 fix jobs have waited for 15 minutes with none running. Check that a worker with that role is up (fix jobs need the fix worker)."
+              dashboard: "https://codesynapse.example.com/stats"

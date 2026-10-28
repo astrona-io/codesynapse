@@ -1,0 +1,42 @@
+# Store health (docs/TELEMETRY_PLAN.md, "Alerting"). A store call made for an
+# organisation is recorded as db_*; one without a trusted tenant as
+# platform_db_*. Both are read and summed per db_system (nebulagraph, milvus,
+# postgres), so no tenant reaches an alert.
+groups:
+  - name: codesynapse-stores
+    interval: 1m
+    rules:
+      - alert: CodeSynapseStoreSlow
+        expr: |
+          histogram_quantile(0.95,
+            sum by (db_system, le) (rate({__name__=~"(platform_)?db_query_duration_seconds_bucket"}[10m]))
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+          component: stores
+        annotations:
+          summary: "{{ $labels.db_system }} answers slowly"
+          description: "95% of {{ $labels.db_system }} round trips took up to {{ $value | humanizeDuration }} over the last 10 minutes, above 1 s for 10 minutes."
+          dashboard: "{{ $externalURL }}/stats"
+
+      # Timeouts are counted in db_query_errors_total as well, so they are not
+      # added again. At least one call a minute keeps a single failure on an
+      # idle installation from firing.
+      - alert: CodeSynapseStoreErrors
+        expr: |
+          (
+            sum by (db_system) (rate({__name__=~"(platform_)?db_query_errors_total"}[10m]))
+            /
+            sum by (db_system) (rate({__name__=~"(platform_)?db_query_duration_seconds_count"}[10m]))
+          ) > 0.05
+          and
+          sum by (db_system) (rate({__name__=~"(platform_)?db_query_duration_seconds_count"}[10m])) > 1/60
+        for: 10m
+        labels:
+          severity: critical
+          component: stores
+        annotations:
+          summary: "{{ $labels.db_system }} calls are failing"
+          description: "{{ $value | humanizePercentage }} of {{ $labels.db_system }} round trips failed over the last 10 minutes, above 5% for 10 minutes."
+          dashboard: "{{ $externalURL }}/stats"

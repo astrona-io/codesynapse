@@ -26,6 +26,13 @@ check milvus deploy/helm/codesynapse/charts/milvus/values.yaml
 check victoria-metrics deploy/helm/codesynapse/charts/victoriametrics/values.yaml
 check victoria-traces deploy/helm/codesynapse/charts/victoriatraces/values.yaml
 check victoria-logs deploy/helm/codesynapse/charts/victorialogs/values.yaml
+# vmalert (alerting.image in the parent chart).
+want=$(sh .github/scripts/compose-image.sh vmalert)
+got=$(sed -n 's/^  image:[[:space:]]*\(.*\/vmalert:.*\)$/\1/p' deploy/helm/codesynapse/values.yaml | head -n 1)
+if [ "$want" != "$got" ]; then
+    echo "values.yaml: alerting.image is '$got', docker-compose.yml ships '$want'" >&2
+    fail=1
+fi
 # NebulaGraph is four images in one pod: metad, storaged, graphd and the console.
 for part in metad storaged graphd console; do
     want=$(sh .github/scripts/compose-image.sh "nebula-$part")

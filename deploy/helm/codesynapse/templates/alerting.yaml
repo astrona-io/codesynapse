@@ -1,0 +1,108 @@
+{{- if .Values.alerting.enabled }}
+{{- /*
+Alerts for operators (docs/operations/alerting.md): vmalert evaluates the
+rules in deploy/alerts (packaged as alerts/, a link to that directory)
+against the metrics store and sends what fires to the Alertmanager-compatible
+receiver named in a Secret. Credentials reach it as environment
+(-envflag.enable), never as arguments or values. Nothing connects to it.
+*/}}
+{{- $url := include "cs.metricsURL" . }}
+{{- if not $url }}
+{{- fail "alerting.enabled needs a metrics store: victoriametrics.enabled, or victoriametrics.externalURL" }}
+{{- end }}
+{{- $rules := .Files.Glob "alerts/*.yaml" }}
+{{- if not $rules }}
+{{- fail "alerting.enabled but the chart has no alert rules in alerts/" }}
+{{- end }}
+{{- $secret := .Values.alerting.existingSecret | default (include "cs.secret" .) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cs.name" (list . "vmalert") }}
+  labels:
+    {{- include "cs.labels" (list . "vmalert") | nindent 4 }}
+data:
+  {{- $rules.AsConfig | nindent 2 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cs.name" (list . "vmalert") }}
+  labels:
+    {{- include "cs.labels" (list . "vmalert") | nindent 4 }}
+spec:
+  # One evaluator: a second would send every alert twice.
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cs.selector" (list . "vmalert") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cs.labels" (list . "vmalert") | nindent 8 }}
+      annotations:
+        checksum/rules: {{ $rules.AsConfig | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "cs.name" (list . "codesynapse") }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- include "cs.pullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "cs.podSecurity" 65534 | nindent 8 }}
+      containers:
+        - name: vmalert
+          image: {{ .Values.alerting.image }}
+          args:
+            - -envflag.enable
+            - -rule=/etc/codesynapse/alerts/*.yaml
+            - -datasource.url={{ $url }}
+            - -datasource.basicAuth.username=codesynapse
+            - -evaluationInterval={{ .Values.alerting.evaluationInterval }}
+            - -external.url={{ .Values.publicURL }}
+            - -external.alert.source=stats
+            - -external.label=environment={{ .Values.environment }}
+          env:
+            {{- include "cs.secretEnv" (list . "datasource_basicAuth_password" "METRICS_PASSWORD") | nindent 12 }}
+            - name: notifier_url
+              valueFrom:
+                secretKeyRef: {name: {{ $secret }}, key: ALERTMANAGER_URL}
+            {{- range $env, $key := dict "notifier_basicAuth_username" "ALERTMANAGER_USERNAME" "notifier_basicAuth_password" "ALERTMANAGER_PASSWORD" "notifier_bearerToken" "ALERTMANAGER_BEARER_TOKEN" }}
+            - name: {{ $env }}
+              valueFrom:
+                secretKeyRef: {name: {{ $secret }}, key: {{ $key }}, optional: true}
+            {{- end }}
+          ports:
+            - {name: http, containerPort: 8880}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.alerting.resources | nindent 12 }}
+          securityContext:
+            {{- include "cs.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - {name: rules, mountPath: /etc/codesynapse/alerts, readOnly: true}
+      volumes:
+        - name: rules
+          configMap:
+            name: {{ include "cs.name" (list . "vmalert") }}
+{{- if .Values.global.networkPolicies }}
+---
+# vmalert serves nothing anyone needs: refuse every connection to it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cs.name" (list . "vmalert") }}
+  labels:
+    {{- include "cs.labels" (list . "vmalert") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "cs.selector" (list . "vmalert") | nindent 6 }}
+  policyTypes: [Ingress]
+{{- end }}
+{{- end }}

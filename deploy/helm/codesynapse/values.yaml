@@ -84,6 +84,22 @@ llmConfig: ""
 traces:
   sample: "1"
 
+# Alerts for operators (docs/operations/alerting.md), off by default. vmalert
+# evaluates the rules in alerts/ (deploy/alerts in the repository) against
+# the metrics store and sends what fires to an Alertmanager-compatible
+# receiver. Its address and credentials come only from the Secret:
+# ALERTMANAGER_URL (required) and optionally ALERTMANAGER_USERNAME with
+# ALERTMANAGER_PASSWORD, or ALERTMANAGER_BEARER_TOKEN.
+alerting:
+  enabled: false
+  image: quay.io/victoriametrics/vmalert:v1.155.0
+  # A Secret with the ALERTMANAGER_* keys; empty uses global.existingSecret.
+  existingSecret: ""
+  evaluationInterval: 1m
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
 # api, mcp and web keep no state between requests (docs/SAAS.md, 6c): run
 # two or more for availability. With replicas > 1 each gets a disruption
 # budget, and pods spread over nodes and zones where they can.

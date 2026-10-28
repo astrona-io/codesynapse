@@ -216,6 +216,35 @@
         }
       }
     },
+    "alerting": {
+      "description": "Alerts for operators: vmalert evaluates the chart's alert rules against the metrics store and sends what fires to the Alertmanager-compatible receiver named in the Secret (ALERTMANAGER_URL, optionally ALERTMANAGER_USERNAME and ALERTMANAGER_PASSWORD, or ALERTMANAGER_BEARER_TOKEN).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Run vmalert. Needs a metrics store (victoriametrics.enabled or victoriametrics.externalURL).",
+          "type": "boolean"
+        },
+        "image": {
+          "description": "The vmalert image, pinned to an exact version or digest.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9./:-]*/vmalert(:[A-Za-z0-9._-]+)?(@sha256:[a-f0-9]{64})?$"
+        },
+        "existingSecret": {
+          "description": "Name of a Secret with the ALERTMANAGER_* keys; empty uses global.existingSecret.",
+          "type": "string",
+          "pattern": "^([a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?)?$"
+        },
+        "evaluationInterval": {
+          "description": "How often each rule group is evaluated when the group sets no interval of its own, e.g. 1m.",
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(s|m|h)$"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        }
+      }
+    },
     "api": {
       "$ref": "#/definitions/scaledComponent"
     },

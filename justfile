@@ -434,6 +434,10 @@ lint-shell:
 lint-yaml:
     uvx --quiet --from yamllint==1.38.0 yamllint --strict $(git ls-files '*.yml' '*.yaml')
 
+# Alert rules in deploy/alerts: vmalert -dryRun, the rule unit tests and the label guard
+lint-alerts:
+    CONTAINER_ENGINE={{engine}} sh .github/scripts/check-alerts.sh
+
 # Lint prose in the agent-facing docs (.vale.ini)
 lint-prose:
     go run github.com/errata-ai/vale/v3/cmd/vale@v3.25.1 AGENTS.md CLAUDE.md docs/AGENT_GUIDE.md
@@ -453,7 +457,7 @@ licenses-check:
     sh .github/scripts/check-licenses.sh
 
 # Every project check besides tests, Go lint and the web build
-checks: lint-actions lint-docker lint-shell lint-yaml lint-prose check-test-images secrets scan vuln
+checks: lint-actions lint-docker lint-shell lint-yaml lint-alerts lint-prose check-test-images secrets scan vuln
 
 # Everything CI runs on a pull request (the integration contracts run separately)
 ci: lint test web-check licenses-check checks eval
