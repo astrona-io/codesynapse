@@ -23,8 +23,10 @@ const (
 	maxIgnoreText = 200
 )
 
-// ignoreAliases are earlier rule IDs a comment may still name.
-var ignoreAliases = map[string]string{"sec-yaml-plain-secret": "yaml-hardcoded-secret"} //nolint:gosec // rule IDs, not credentials
+// ignoreAliases pairs earlier rule IDs a comment may still name with the
+// current ones. Pairs rather than a map: the secret detector reads a map entry
+// keyed by a secret-looking name as an assignment.
+var ignoreAliases = [][2]string{{"sec-yaml-plain-secret", "yaml-hardcoded-secret"}}
 
 // commentStarts are the comment openers a marker must follow, so a string
 // literal that happens to contain the marker does not count.
@@ -120,8 +122,10 @@ func ignoreComment(line, rule string) (string, bool) {
 		return "", false
 	}
 	named := fields[0]
-	if alias, ok := ignoreAliases[named]; ok {
-		named = alias
+	for _, alias := range ignoreAliases {
+		if named == alias[0] {
+			named = alias[1]
+		}
 	}
 	if named != rule {
 		return "", false
