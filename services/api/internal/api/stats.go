@@ -67,6 +67,33 @@ type AgentStats struct {
 	LocalReadTokens int `json:"local_read_tokens"`
 	// LocalAvoidedTokens is the ask_local part of AvoidedTokens.
 	LocalAvoidedTokens int `json:"local_avoided_tokens"`
+	// WorkTokens is the agent's own work from the hooks: fresh input, cache
+	// writes and output, without cache reads (stats_share.go).
+	WorkTokens int `json:"work_tokens"`
+	// ShareAvoidedTokens is the avoided figure of clients that report
+	// repeated ranges, after repeats; ShareLocalAvoidedTokens its ask_local
+	// part. ShareAvoidedPct = ShareAvoidedTokens / (WorkTokens +
+	// ShareAvoidedTokens), nil when unknown (ShareAvoidedBasis says why).
+	ShareAvoidedTokens      int      `json:"share_avoided_tokens"`
+	ShareLocalAvoidedTokens int      `json:"share_local_avoided_tokens"`
+	ShareAvoidedPct         *float64 `json:"share_avoided_pct"`
+	ShareAvoidedKnown       bool     `json:"share_avoided_known"`
+	ShareAvoidedBasis       string   `json:"share_avoided_basis"`
+	// ShareUpperPct also counts the avoided context the agent would have
+	// re-sent from its prompt cache, with cache reads on both sides; it is
+	// shown apart and never in tiles, exports or summaries. ShareRawPct has
+	// cache reads in the denominator, for the method note only.
+	ShareUpperPct *float64 `json:"share_upper_pct"`
+	ShareRawPct   *float64 `json:"share_raw_pct"`
+	// AvoidedResendTokens is the re-sent avoided context of the upper figure.
+	AvoidedResendTokens int `json:"avoided_resend_tokens"`
+	// AvoidedUnawareTokens were avoided by clients that do not report
+	// repeated ranges yet; they are in AvoidedTokens but not in the share.
+	AvoidedUnawareTokens int `json:"avoided_unaware_tokens"`
+	// AvoidedRepeatRanges counts answered ranges the session already had.
+	AvoidedRepeatRanges int `json:"avoided_repeat_ranges"`
+	// Saved values the share's graph part at the reference cloud model.
+	Saved SavedEstimate `json:"saved"`
 	// LocalBriefs counts prompts a local model briefed the agent on.
 	LocalBriefs int `json:"local_briefs"`
 	// LocalDrafts counts drafts a local model wrote for an agent.
@@ -339,6 +366,7 @@ func (s *Server) buildStats(ctx context.Context, days int, now time.Time) (Stats
 				return err
 			}
 			st.Agents = agentUsage(buckets, ov.Repos, days, now)
+			st.Agents.Saved = savedEstimate(st.Agents, s.priceReference())
 			st.Memory, err = s.memoryStats(ctx, buckets, st.Agents.Sessions, days, now)
 			return err
 		},
@@ -422,6 +450,7 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 	clients := map[string]*ClientStat{}
 	repos := map[string]*RepoUsage{}
 	unindexed := map[string]int{}
+	sh := newShareInputs(buckets, func(d string) bool { return daily[d] != nil })
 	var totalMs int
 	for _, bk := range buckets {
 		day := daily[bk.Day]
@@ -451,15 +480,16 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 			continue
 		}
 		if bk.Tool == usage.LocalAvoided {
-			a.AvoidedTokens += bk.Calls
-			a.LocalAvoidedTokens += bk.Calls
-			day.AvoidedTokens += bk.Calls
+			avoided := sh.scale(bk, float64(bk.Calls), true)
+			a.AvoidedTokens += avoided
+			a.LocalAvoidedTokens += avoided
+			day.AvoidedTokens += avoided
 			ru := repos[bk.Repo]
 			if ru == nil {
 				ru = &RepoUsage{Repo: bk.Repo}
 				repos[bk.Repo] = ru
 			}
-			ru.AvoidedTokens += bk.Calls
+			ru.AvoidedTokens += avoided
 			continue
 		}
 		if usage.IsWorkflow(bk.Tool) {
@@ -505,8 +535,10 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 			// Failed calls (ambiguous names, bad arguments) answered nothing,
 			// so only the successful share of the tokens counts.
 			ok := float64(bk.Calls-bk.Errors) / float64(bk.Calls)
-			avoided = max(0, int(float64(bk.ResponseTokens)*ok*(r-1)))
+			// Ranges the session already had would have been cache hits.
+			avoided = sh.scale(bk, max(0, float64(bk.ResponseTokens)*ok*(r-1)), false)
 		}
+		sh.response(bk)
 		a.Calls += bk.Calls
 		a.Errors += bk.Errors
 		a.ResponseTokens += bk.ResponseTokens
@@ -549,6 +581,7 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 		a.Tokens.InputPct = round1(100 * float64(a.Tokens.Input) / float64(a.Tokens.Total))
 		a.Tokens.OutputPct = round1(100 - a.Tokens.InputPct)
 	}
+	sh.finish(&a)
 	a.ContextTotalTokens = a.ResponseTokens + a.AvoidedTokens
 	if a.ContextTotalTokens > 0 {
 		a.ContextSavedPct = round1(100 * float64(a.AvoidedTokens) / float64(a.ContextTotalTokens))

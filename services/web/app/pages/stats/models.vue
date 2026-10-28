@@ -19,10 +19,12 @@ const cloudTokens = computed(() => sum(models.value.filter((x) => !x.local), (x)
 // The graph tools' part of tokens avoided; ask_local's part is the local
 // models' reading, counted once under them.
 const graphAvoided = computed(() => Math.max(0, (a.value?.avoided_tokens ?? 0) - (a.value?.local_avoided_tokens ?? 0)))
-const agentTokens = computed(() => a.value?.tokens.total ?? 0)
+// The agents' own work: fresh input, cache writes and output. Prompt-cache
+// reads are left out; CodeSynapse neither causes nor removes them.
+const agentTokens = computed(() => a.value?.work_tokens ?? a.value?.tokens.total ?? 0)
 
 const pool = computed(() => [
-  { label: 'Cloud agents', value: agentTokens.value, color: 'var(--s-1)', detail: 'what Claude Code and Codex reported for their own model' },
+  { label: 'Cloud agents', value: agentTokens.value, color: 'var(--s-1)', detail: 'fresh input, cache writes and output Claude Code and Codex reported; prompt-cache reads left out' },
   { label: 'Never read (graph answers)', value: graphAvoided.value, color: 'var(--s-2)', detail: 'file tokens the graph tools answered instead' },
   { label: 'Local models', value: localIn.value + localOut.value, color: 'var(--s-3)', detail: 'ask_local, reviews, memory and other AI work on your machine' },
   { label: 'CodeSynapse on cloud models', value: cloudTokens.value, color: 'var(--s-4)', detail: 'AI work routed to a cloud provider' },
@@ -34,12 +36,16 @@ const offCloud = computed(() => (poolTotal.value ? Math.round((100 * (graphAvoid
 // avoided reading would have cost there. An estimate, and only with prices.
 const price = computed(() => m.value?.reference_price)
 const localCached = computed(() => Math.min(sum(localModels.value, (x) => x.cached_tokens ?? 0), localIn.value))
+// The graph answers' part is valued on the server, once, at the price the
+// avoided context would have entered at (stats_share.go); null is unknown and
+// stays out of the total. The provider's own prompt-cache saving is never ours.
+const graphSaved = computed(() => a.value?.saved?.dollars ?? null)
 // Split by what the tokens would have been billed as: fresh input, cache
 // reads (at the cache price, else the input price) and output.
 const savedParts = computed(() => {
   const p = price.value
   if (!p) return null
-  const input = ((localIn.value - localCached.value) + graphAvoided.value) * p.input_per_mtok / 1e6
+  const input = (localIn.value - localCached.value) * p.input_per_mtok / 1e6
   const cached = localCached.value * (p.cached_input_per_mtok || p.input_per_mtok) / 1e6
   const output = localOut.value * p.output_per_mtok / 1e6
   return { input, cached, output }
@@ -58,7 +64,7 @@ const compressionOffHint = computed(() => `${COMPRESSION_OFF[m.value?.compressio
 const gw = computed(() => m.value?.gateway)
 const gwSaved = computed(() => gw.value?.saved_dollars ?? null)
 const spent = computed(() => m.value?.spent_dollars ?? null)
-const saved = computed(() => (savedParts.value ? savedParts.value.input + savedParts.value.cached + savedParts.value.output + (compressionSaved.value ?? 0) + (gwSaved.value ?? 0) : null))
+const saved = computed(() => (savedParts.value ? savedParts.value.input + savedParts.value.cached + savedParts.value.output + (graphSaved.value ?? 0) + (compressionSaved.value ?? 0) + (gwSaved.value ?? 0) : null))
 // Where a price comes from, shown as its host and path.
 const sourceLabel = (u: string) => { try { const x = new URL(u); return x.host + x.pathname + (x.hash ? ` (${x.hash.slice(1)})` : '') } catch { return u } }
 const money = (v: number) => (v >= 100 ? `$${Math.round(v)}` : `$${v.toFixed(2)}`)
@@ -121,7 +127,12 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
           :value="!compressionOn ? 'off' : compressionSaved === null ? 'unknown' : money(compressionSaved)"
           :hint="!compressionOn ? compressionOffHint : compressionSaved === null ? 'a cloud model has no price set; not in the total' : 'CodeSynapse\'s own AI tasks: prose a local model shortened before it went to the cloud, at the input price; gateway traffic is passed on unchanged'"
         />
-        <StatTile v-if="savedParts" label="Saved on input" :value="money(savedParts.input)" :hint="`${fmtCompact(Math.max(0, localIn - localCached) + graphAvoided)} tokens never sent or read`" />
+        <StatTile
+          v-if="savedParts" label="Saved by graph answers"
+          :value="graphSaved === null ? 'unknown' : money(graphSaved)"
+          :hint="graphSaved === null ? 'agents that cannot tell repeated answers apart, or no price for the avoided context; not in the total' : `${fmtCompact(a?.saved?.tokens ?? 0)} tokens never read, each once at the ${a?.saved?.price === 'cache_write' ? 'cache-write' : 'input'} price`"
+        />
+        <StatTile v-if="savedParts" label="Saved on input" :value="money(savedParts.input)" :hint="`${fmtCompact(Math.max(0, localIn - localCached))} tokens read by local models instead`" />
         <StatTile v-if="savedParts" label="Saved on cached input" :value="money(savedParts.cached)" :hint="`${fmtCompact(localCached)} tokens from the prompt cache`" />
         <StatTile v-if="savedParts" label="Saved on output" :value="money(savedParts.output)" :hint="`${fmtCompact(localOut)} tokens written locally`" />
       </div>

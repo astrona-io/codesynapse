@@ -27,8 +27,21 @@ The Stop hook also reads model usage from the local `transcript_path`: input,
 output, cached input and reported assistant turns. It counts duplicate assistant
 blocks once and reports only new numeric totals after a successful report.
 Claude input includes uncached input, cache reads and cache writes; cached input
-is shown as part of input, not added again to the total. Statistics shows the
-input/output percentage split and keeps estimated context savings separate.
+(cache reads) and cache writes are kept apart, and a turn counts as
+`cache-known` only when its usage carried both cache fields. Statistics shows the
+input/output percentage split and the share of the agent's work tokens (fresh
+input + cache writes + output, without cache reads) that CodeSynapse answers
+avoided; that share is unknown until every counted turn reported its cache
+fields.
+
+The hooks also count answered line ranges the session already had (an earlier
+answer or `Read` overlapped them), as `avoided_repeat_ranges` per tool, and
+`resend_token_turns` per tool: the new part of each answer's tokens times the
+turns the session ran after it. Only counts per tool name leave the machine,
+never paths, ranges or session IDs. The server scales avoided tokens down by
+the repeat share; re-sends feed only the separately labelled upper figure.
+Clients that do not send `avoided_repeat_ranges` (older CLIs) are left out of
+the share and the saved cost.
 Transcripts are read locally with a 64 MiB limit; their text, paths and message
 IDs are never sent. Missing or unsupported usage remains unavailable. The parser
 also accepts Codex cumulative `token_count` events when a hook supplies its
