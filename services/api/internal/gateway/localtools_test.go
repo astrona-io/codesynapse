@@ -28,7 +28,7 @@ func toolServer(t *testing.T, stream string, got *string) *httptest.Server {
 func askLocal(t *testing.T, l *Local, body string) (*httptest.ResponseRecorder, bool) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	_, ok := l.serve(t.Context(), rec, []byte(body))
+	_, _, ok := l.serve(t.Context(), rec, []byte(body))
 	return rec, ok
 }
 
@@ -197,12 +197,13 @@ func TestLocalToolChoiceMapping(t *testing.T) {
 				body += `,"tool_choice":` + tc.choice
 			}
 			l := &Local{}
-			_, out, ok := l.translate(t.Context(), []byte(body+`}`))
+			_, out, reason := l.translate(t.Context(), []byte(body+`}`))
 			if name == "unknown type" {
-				assert.True(t, !ok, "unknown tool_choice goes to the cloud")
+				assert.Equal(t, reason, FallNotEligible, "unknown tool_choice goes to the cloud")
 				return
 			}
-			require.True(t, ok)
+			require.Equal(t, reason, "")
+			require.True(t, out != nil)
 			s := string(out)
 			if tc.want != "" {
 				assert.True(t, strings.Contains(s, tc.want), tc.want)

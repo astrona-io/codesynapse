@@ -25,7 +25,7 @@ func modelVM(t *testing.T, filters *[]string) *httptest.Server {
 	t.Helper()
 	q := modelQueries
 	series := map[string]string{
-		q.requests:               `{"llm_provider":"local","llm_model":"qwen","task":"review","outcome":"ok"}=8;{"llm_provider":"local","llm_model":"qwen","task":"review","outcome":"error"}=2;{"llm_provider":"local","llm_model":"qwen","task":"local-answer","outcome":"ok"}=30;{"llm_provider":"cloud","llm_model":"big","task":"briefing","outcome":"ok"}=1`,
+		q.requests:               `{"llm_provider":"local","llm_model":"qwen","task":"review","outcome":"ok"}=8;{"llm_provider":"local","llm_model":"qwen","task":"review","outcome":"error"}=1;{"llm_provider":"local","llm_model":"qwen","task":"review","outcome":"timeout"}=1;{"llm_provider":"local","llm_model":"qwen","task":"local-answer","outcome":"ok"}=30;{"llm_provider":"cloud","llm_model":"big","task":"briefing","outcome":"ok"}=1`,
 		q.input:                  `{"llm_provider":"local","llm_model":"qwen","task":"review"}=40000;{"llm_provider":"local","llm_model":"qwen","task":"local-answer"}=200000;{"llm_provider":"cloud","llm_model":"big","task":"briefing"}=900`,
 		q.output:                 `{"llm_provider":"local","llm_model":"qwen","task":"review"}=3000;{"llm_provider":"local","llm_model":"qwen","task":"local-answer"}=9000`,
 		q.readS:                  `{"llm_provider":"local","llm_model":"qwen"}=500`,

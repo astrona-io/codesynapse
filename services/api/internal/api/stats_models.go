@@ -122,6 +122,11 @@ type PriceReference struct {
 	OutputPerMTok float64 `json:"output_per_mtok"`
 	// CachedInputPerMTok prices cache reads; zero means the input price.
 	CachedInputPerMTok float64 `json:"cached_input_per_mtok"`
+	// CacheWritePerMTok prices cache writes; zero means unknown.
+	CacheWritePerMTok float64 `json:"cache_write_per_mtok"`
+	// CachesByDefault: the provider caches prompts without being asked
+	// (Anthropic), so avoided context would have entered as a cache write.
+	CachesByDefault bool `json:"caches_by_default"`
 	// Estimate marks the built-in fallback used when no cloud provider has
 	// prices, so the page can say it is a rough figure.
 	Estimate bool `json:"estimate,omitempty"`
@@ -137,7 +142,22 @@ type PriceReference struct {
 // configured provider's prices.
 var defaultReference = PriceReference{
 	Provider: "built-in", Model: "Claude Opus 5.5 (list price estimate)",
-	InputPerMTok: 5, OutputPerMTok: 25, CachedInputPerMTok: 0.5, Estimate: true,
+	InputPerMTok: 5, OutputPerMTok: 25, CachedInputPerMTok: 0.5, CacheWritePerMTok: 6.25, CachesByDefault: true, Estimate: true,
+}
+
+// priceReference is the first configured cloud provider with input and
+// output prices, or the built-in estimate.
+func (s *Server) priceReference() PriceReference {
+	if s.cfg.LLM != nil {
+		for _, p := range s.cfg.LLM.Configs() {
+			if !p.Local() && p.PriceInputPerMTok > 0 && p.PriceOutputPerMTok > 0 {
+				return PriceReference{Provider: p.Name, Model: p.Model, InputPerMTok: p.PriceInputPerMTok, OutputPerMTok: p.PriceOutputPerMTok,
+					CachedInputPerMTok: p.PriceCachedInputPerMTok, CacheWritePerMTok: p.PriceCacheWritePerMTok, CachesByDefault: p.Kind == llm.KindAnthropic,
+					Source: p.PriceSource, Checked: p.PriceChecked}
+			}
+		}
+	}
+	return defaultReference
 }
 
 // modelQueries; $r is the window.
@@ -240,7 +260,9 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 			t := task(m, l["task"])
 			m.Requests += v
 			t.Requests += v
-			if l["outcome"] == "error" {
+			// Every outcome but ok is a failure: error, timeout, rate_limited
+			// and refused (docs/TELEMETRY_PLAN.md, phase 5).
+			if l["outcome"] != "ok" {
 				m.Failures += v
 				t.Failures += v
 			}
@@ -321,18 +343,8 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 			m.WriteTPS = ptr(round1(sp[3] / sp[1]))
 		}
 	}
-	out := ModelStats{Range: rng, Models: []ModelStat{}}
-	if s.cfg.LLM != nil {
-		for _, p := range s.cfg.LLM.Configs() {
-			if !p.Local() && p.PriceInputPerMTok > 0 && p.PriceOutputPerMTok > 0 {
-				out.Reference = &PriceReference{Provider: p.Name, Model: p.Model, InputPerMTok: p.PriceInputPerMTok, OutputPerMTok: p.PriceOutputPerMTok, CachedInputPerMTok: p.PriceCachedInputPerMTok, Source: p.PriceSource, Checked: p.PriceChecked}
-				break
-			}
-		}
-	}
-	if out.Reference == nil {
-		out.Reference = &defaultReference
-	}
+	ref := s.priceReference()
+	out := ModelStats{Range: rng, Models: []ModelStat{}, Reference: &ref}
 	for _, m := range models {
 		if m.Requests == 0 && m.InputTokens == 0 {
 			continue

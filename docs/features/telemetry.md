@@ -14,9 +14,9 @@ Both appear on the **Statistics** page. Every number belongs to one organisation
 
 | Area | What you can see |
 |---|---|
-| Agent tools | sessions, tool calls and failures, tool latency, tokens served to agents, MCP traffic in bytes |
-| AI models | requests and failures per provider and model, input, output and cached tokens, estimated cost and cache savings, time to first token, read and write speed, how much of the context window requests used |
-| Agent gateway | requests answered by the local model or the cloud, bytes, local tokens |
+| Agent tools | sessions, tool calls, failures and refusals (a call the server turned down is counted apart from one that failed), calls answered on your own machine by the Claude Code bridge, tool latency, tokens served to agents, MCP traffic in bytes |
+| AI models | requests and failures per provider and model, and why requests failed (timeout, rate limit, refused or other error), input, output and cached tokens, estimated cost and cache savings, time to first token, read and write speed, how much of the context window requests used |
+| Agent gateway | requests answered by the local model or the cloud, response time per route, why a request left the local model, bytes, local tokens |
 | Databases | latency (median, 95th and 99th percentile), requests, errors and timeouts, graph rows and vector matches |
 | Agent memory | stored facts, saves, recalls, offloaded turns and tokens |
 | Assistant hooks | lifecycle events and observed byte counts from Codex and Cursor |
@@ -27,6 +27,16 @@ Both appear on the **Statistics** page. Every number belongs to one organisation
 | Web server (platform administrators) | requests the dashboard server answers by status, its latency, and dashboard calls that never reached the API (unreachable, timed out or refused), all labelled by page or route pattern, never the address you opened |
 
 Some numbers are estimates and are labelled so: cost depends on the prices you configured, and a call without reported usage or a known price shows as a gap, never as zero.
+
+### Token savings
+
+Agents re-send their whole context every turn, and most of it comes back from the provider's prompt cache. CodeSynapse neither causes nor removes those cache reads, so they are left out of the savings figures:
+
+- **Work tokens** are the agent's fresh input, cache writes and output.
+- **Share of agent work avoided** is avoided tokens ÷ (work tokens + avoided tokens). It reads "unknown", not 0, when a turn did not report its cache fields.
+- Answers about lines the session already had count for nothing, and agents whose hooks cannot tell those apart yet (older CLIs) are left out of the share and the saved cost.
+- An **upper figure** also counts the avoided context the agent would have re-sent from its cache. It is shown apart, labelled, and never used in tiles or totals.
+- The saved cost values each avoided token once, at the cache-write price for providers that cache by default and the input price otherwise. The provider's own prompt-cache saving on CodeSynapse's model calls is shown apart and never added to it.
 
 ## What is never measured
 
@@ -44,7 +54,7 @@ Some parts of CodeSynapse have no live numbers yet. The [metrics coverage plan](
 2. **More operator alerts** (done): each later step adds the alerts for its numbers.
 3. **Background jobs and indexing** (available now, see the table above).
 4. **Outside services and security events** (available now, see the table above).
-5. **Sharper existing numbers**: refused tool calls apart from errors, model timeouts and rate limits, gateway latency and why a request left the local model, and tool calls answered on your own machine by the Claude Code bridge. The Statistics panels that count failures change in the same release, so a refused call is no longer shown as an error.
+5. **Sharper existing numbers** (available now, see the table above): refused tool calls apart from errors, model timeouts and rate limits, gateway latency and why a request left the local model, and tool calls answered on your own machine by the Claude Code bridge. A refused tool call is no longer shown as an error, and the model failure panels count timeouts, rate limits and refusals as failures.
 6. **The web server** (available now, see the table above).
 
 The same privacy rules apply to everything planned.

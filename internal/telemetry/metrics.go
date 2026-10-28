@@ -26,15 +26,15 @@ var (
 // MCP: sessions, tool calls, latency and the size of what agents receive.
 var (
 	MCPSessions       = Default.ScopedCounter("mcp_sessions_total", "MCP sessions started.", "tenant_id")
-	MCPToolCalls      = Default.ScopedCounter("mcp_tool_calls_total", "MCP tool and prompt calls by outcome (ok, error).", "tenant_id", "mcp_tool", "outcome")
-	MCPToolDuration   = Default.ScopedHistogram("mcp_tool_duration_seconds", "MCP tool execution time.", latency, "tenant_id", "mcp_tool")
+	MCPToolCalls      = Default.ScopedCounter("mcp_tool_calls_total", "MCP tool and prompt calls by outcome (ok, error, refused).", "tenant_id", "mcp_tool", "outcome")
+	MCPToolDuration   = Default.ScopedHistogram("mcp_tool_duration_seconds", "MCP tool execution time.", fast, "tenant_id", "mcp_tool").TenantShare(toolShare)
 	MCPResponseTokens = Default.ScopedCounter("mcp_response_tokens_total", "Estimated tokens MCP tools returned to agents.", "tenant_id", "mcp_tool")
 )
 
 // LLM calls made by CodeSynapse itself (reviews, triage, briefings,
 // memory extraction).
 var (
-	LLMRequests   = Default.ScopedCounter("llm_requests_total", "LLM requests by outcome.", "tenant_id", "llm_provider", "llm_model", "task", "outcome")
+	LLMRequests   = Default.ScopedCounter("llm_requests_total", "LLM requests by outcome (ok, error, timeout, rate_limited, refused).", "tenant_id", "llm_provider", "llm_model", "task", "outcome")
 	LLMInput      = Default.ScopedCounter("llm_tokens_input_total", "Prompt tokens consumed.", "tenant_id", "llm_provider", "llm_model", "task")
 	LLMOutput     = Default.ScopedCounter("llm_tokens_output_total", "Completion tokens generated.", "tenant_id", "llm_provider", "llm_model", "task")
 	LLMSaved      = Default.ScopedCounter("llm_tokens_saved_total", "Input tokens served from the provider's prompt cache.", "tenant_id", "llm_provider", "llm_model", "task")
@@ -84,7 +84,7 @@ var (
 // API and ingestion.
 var (
 	HTTPRequests       = Default.ScopedCounter("http_requests_total", "API requests by route pattern and status class.", "tenant_id", "route", "method", "code")
-	HTTPDuration       = Default.ScopedHistogram("http_request_duration_seconds", "API request time by route pattern.", latency, "route", "method")
+	HTTPDuration       = Default.ScopedHistogram("http_request_duration_seconds", "API request time by route pattern.", fast, "route", "method").TenantShare(routeShare)
 	IngestRuns         = Default.ScopedCounter("ingest_runs_total", "Repository indexing runs by outcome.", "db_system", "outcome")
 	IngestDuration     = Default.ScopedHistogram("ingest_duration_seconds", "Repository indexing time, extraction and storage.", latency, "db_system")
 	IngestNodes        = Default.ScopedCounter("ingest_nodes_total", "Nodes written by indexing.", "db_system")
@@ -270,3 +270,34 @@ var (
 	// Sealing runs under the api-loops lease for the whole installation.
 	AuditSeals = Default.Counter("platform_codesynapse_audit_seals_total", "Audit archive sealing runs by outcome (ok, error, nothing_to_seal, no_archive).", "outcome")
 )
+
+// ---- Sharper existing families (docs/TELEMETRY_PLAN.md, metrics coverage
+// plan, phase 5). Record through the helpers in outcomes.go, which keep every
+// label inside its fixed set. ----
+var (
+	// fast buckets the request paths that answer within seconds: eight
+	// buckets instead of latency's fifteen leave room for many more tool,
+	// route and tenant series under the same budget.
+	fast = []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 5, 30}
+
+	// MCPLocalAnswers counts calls the Claude Code bridge answered on the
+	// developer's machine; mcp_tool comes from WithTool, limited to the
+	// local tool set the API registers.
+	MCPLocalAnswers = Default.ScopedCounter("mcp_local_answers_total", "MCP calls answered on the developer's machine, by outcome (recorded, refused).", "outcome")
+	// GatewayDuration shares its budget per tenant like the job histograms:
+	// three routes times a few tools and models per organisation.
+	GatewayDuration    = Default.ScopedHistogram("gateway_request_duration_seconds", "Gateway request time by route (local, cloud, rejected).", latency, "route").TenantShare(gatewayShare)
+	GatewayFallthrough = Default.ScopedCounter("gateway_fallthrough_total", "Gateway requests offered to the local model that went to the cloud, by reason.", "reason")
+)
+
+// Per-tenant shares of the request-path histograms. One organisation calling
+// every tool or route still fits; one flooding new combinations (a model
+// allowlist, many tools under many models) stops at its share instead of
+// taking the series the other organisations need.
+const (
+	toolShare    = 48
+	routeShare   = 64
+	gatewayShare = 12
+)
+
+// ---- end sharper existing families ----
