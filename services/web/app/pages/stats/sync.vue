@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useStatistics } from '~/composables/useStatistics'
-const { s, error, pending } = useStatistics()
+const { days, s, error, pending } = useStatistics()
 const w = computed(() => s.value?.workspace)
 const j = computed(() => s.value?.jobs)
 const outcomes = computed(() => [
@@ -25,6 +25,18 @@ const schedules = computed(() => {
     { label: 'Manual only', value: by.manual },
   ]
 })
+
+// Live job and indexing measurements from VictoriaMetrics, from every API
+// and worker process.
+const range = computed(() => seriesRangeFor(days.value))
+const livePanels = ['jobs_finished', 'job_failures', 'job_wait', 'job_duration', 'ingest_runs', 'ingest_duration', 'ingest_phases', 'ingest_extract']
+const { panels: batch, pending: batchPending } = useSeriesBatch(livePanels, range)
+const metricsOff = ref(false)
+const hiddenPanels = ref<string[]>([])
+function unavailable(panel: string, status: number) {
+  if (status === 409) metricsOff.value = true
+  else if (!hiddenPanels.value.includes(panel)) hiddenPanels.value.push(panel)
+}
 </script>
 
 <template>
@@ -73,6 +85,17 @@ const schedules = computed(() => {
         <div v-else class="empty"><strong>No failures</strong>Every recent job finished cleanly.</div>
       </section>
     </div>
+
+    <section class="panel">
+      <p class="eyebrow">Live</p><h2>Jobs and indexing over time</h2>
+      <p class="muted lead">How long jobs wait and run, how they end, and where indexing spends its time, measured in every API and worker process.</p>
+      <div v-if="metricsOff" class="empty"><strong>Time series are not switched on</strong>They need VictoriaMetrics: the compose stack runs it, other installs set <code>CODESYNAPSE_METRICS_URL</code> on the API and worker services.</div>
+      <div v-else class="grid cols-2">
+        <template v-for="p in livePanels" :key="p">
+          <SeriesCard v-if="!hiddenPanels.includes(p)" :panel="p" :range="range" :batched="batch[p] ?? null" :batch-pending="batchPending" @unavailable="(status) => unavailable(p, status)" />
+        </template>
+      </div>
+    </section>
   </div>
   <p v-else class="muted">Loading…</p>
 </template>

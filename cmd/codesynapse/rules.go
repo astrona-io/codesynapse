@@ -94,14 +94,16 @@ func noteBaseline(ctx context.Context, in toolHookInput, logger *slog.Logger) {
 	if w == nil {
 		return
 	}
-	key, _, err := w.changes(ctx)
-	if err != nil {
-		return
-	}
 	s := loadState(state)
-	s.Stop = key       // "" for a clean tree: any later change differs from it
 	if s.Base == nil { // a resumed session keeps where it began
 		s.Base = baseOf(ctx, w.root)
+	}
+	if in.Source != "compact" {
+		// The key Stop compares with, computed the same way (it once took the
+		// bridge's tree fingerprint, which never matched, so a checkout dirty
+		// at the start was asked about at the first stop). After compaction
+		// the session goes on, and what it changed so far is still unchecked.
+		s.Stop = stopChanges(ctx, w.root, s.Base).Key
 	}
 	saveState(state, s)
 }

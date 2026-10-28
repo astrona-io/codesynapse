@@ -116,7 +116,10 @@ func decodeLifecycle(in io.Reader, client, event string) (lifecycleInput, toolHo
 	if raw.Cwd == "" && len(raw.WorkspaceRoots) == 1 {
 		raw.Cwd = raw.WorkspaceRoots[0]
 	}
-	tool := toolHookInput{SessionID: raw.SessionID, Cwd: raw.Cwd, ToolName: raw.ToolName, StopHookActive: raw.StopHookActive || raw.LoopCount > 0, Client: client, TranscriptPath: raw.TranscriptPath}
+	tool := toolHookInput{SessionID: raw.SessionID, Cwd: raw.Cwd, ToolName: raw.ToolName, StopHookActive: raw.StopHookActive || raw.LoopCount > 0, Client: client, TranscriptPath: raw.TranscriptPath, Source: raw.Source}
+	if client == "claude" {
+		tool.AgentID = raw.AgentID // set only inside a subagent
+	}
 	input := raw.ToolInput
 	if len(input) > 0 && input[0] == '"' {
 		var s string
@@ -349,7 +352,7 @@ func (o *lifecycleOptions) Run(ctx context.Context, _ *app.Env) error {
 	case "PreToolUse", "preToolUse", "beforeReadFile", "beforeMCPExecution":
 		noteLookup(tool)
 		if activity.Category == "read" {
-			out = readGuard(tool)
+			out = readGuard(ctx, tool)
 		}
 		if activity.Category == "shell" && o.client == "codex" {
 			out = bashHint(tool)

@@ -169,7 +169,8 @@ func (s *Server) approveIngestPolicy(ctx context.Context, repo string, p *repoco
 	return p.Digest(), nil
 }
 
-// A missing, expired or changed approval keeps all detected findings active.
+// A missing, expired or changed approval keeps all detected findings active;
+// the organisation's triage decisions apply either way.
 func (s *Server) repositorySecurityOptions(ctx context.Context, graph, minSeverity string) security.Options {
 	opts := security.Options{MinSeverity: minSeverity}
 	if s.cfg.Accounts == nil {
@@ -179,6 +180,10 @@ func (s *Server) repositorySecurityOptions(ctx context.Context, graph, minSeveri
 	if err != nil {
 		return opts
 	}
+	return s.triageOptions(ctx, org, graph, s.approvedOptions(ctx, org, graph, opts))
+}
+
+func (s *Server) approvedOptions(ctx context.Context, org, graph string, opts security.Options) security.Options {
 	n, err := s.st.Node(ctx, model.NodeID(graph, model.KindRepository, graph))
 	if err != nil {
 		return opts
@@ -191,5 +196,5 @@ func (s *Server) repositorySecurityOptions(ctx context.Context, graph, minSeveri
 	if err != nil || !policyActive(approval, meta.Digest) || !approval.AllowSuppressions {
 		return opts
 	}
-	return security.ApprovedOptions(minSeverity, org, graph, meta.Digest, approval)
+	return security.ApprovedOptions(opts.MinSeverity, org, graph, meta.Digest, approval)
 }

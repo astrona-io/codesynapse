@@ -146,3 +146,22 @@ const (
 )
 
 var ingestExportRejections = Default.Counter("platform_ingest_metric_export_rejections_total", "Durable ingest metric snapshots rejected before export.", "reason")
+
+// Background jobs and indexing (docs/TELEMETRY_PLAN.md, metrics coverage
+// plan, phase 3). Record through the helpers in jobs.go, which keep every
+// label inside its fixed set. The tenant is the job's stored organisation.
+var (
+	// slow buckets long-running work: one second to two hours.
+	slow = []float64{1, 5, 15, 60, 300, 900, 1800, 3600, 7200}
+
+	JobsFinished = Default.ScopedCounter("codesynapse_jobs_finished_total", "Background jobs that ended, by kind and outcome (ok, error, left_behind, cancelled).", "kind", "outcome")
+	// The job histograms hold one series per kind and tenant; the share
+	// keeps one organisation from filling the budget the others share.
+	JobWait     = Default.ScopedHistogram("codesynapse_job_wait_seconds", "Time from queueing a job to a process claiming it, by kind.", slow, "kind").TenantShare(len(jobKinds) + 1)
+	JobDuration = Default.ScopedHistogram("codesynapse_job_duration_seconds", "Time from claiming a job to its end, by kind.", slow, "kind").TenantShare(len(jobKinds) + 1)
+	// A phase's average is seconds_total over total; a histogram per phase
+	// and outcome would cost more of the budget than the average is worth.
+	IngestPhaseSeconds = Default.ScopedCounter("codesynapse_ingest_phase_seconds_total", "Seconds indexing jobs spent per phase (prepare, ingest, publish) and outcome.", "phase", "outcome")
+	IngestPhaseRuns    = Default.ScopedCounter("codesynapse_ingest_phase_total", "Indexing job phases run, per phase and outcome.", "phase", "outcome")
+	IngestExtract      = Default.ScopedCounter("codesynapse_ingest_extract_seconds_total", "Seconds indexing spent in each extractor, by language.", "language")
+)

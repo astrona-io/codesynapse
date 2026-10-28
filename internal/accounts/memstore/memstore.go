@@ -44,6 +44,7 @@ type Store struct {
 	tupleAt        map[accounts.Tuple]accounts.Tuple
 	repoPolicies   map[string]accounts.RepoPolicyApproval
 	annotations    map[string]map[string]accounts.RepositoryAnnotation
+	triage         map[string]map[string]accounts.FindingTriage // org|graph -> fingerprint
 	ingestRuns     map[string]ingestRecord
 	ingestEntries  map[string]ingestEntry
 	ingestMetrics  accounts.IngestMetricSnapshot
@@ -70,7 +71,7 @@ var _ accounts.Store = (*Store)(nil)
 func New() *Store {
 	return &Store{outbox: map[string]int64{}, users: map[string]accounts.User{}, orgs: map[string]accounts.Org{}, members: map[string]map[string]member{},
 		sessions: map[string]accounts.Session{}, executions: map[string]accounts.ExecutionSession{}, keys: map[string]accounts.APIKey{}, repos: map[string]accounts.Repository{}, tokens: map[string]accounts.GitToken{}, userTokens: map[string]accounts.UserGitToken{},
-		teams: map[string]accounts.Team{}, tuples: map[accounts.Tuple]bool{}, tupleAt: map[accounts.Tuple]accounts.Tuple{}, repoPolicies: map[string]accounts.RepoPolicyApproval{}, annotations: map[string]map[string]accounts.RepositoryAnnotation{}, ingestRuns: map[string]ingestRecord{}, ingestEntries: map[string]ingestEntry{},
+		teams: map[string]accounts.Team{}, tuples: map[accounts.Tuple]bool{}, tupleAt: map[accounts.Tuple]accounts.Tuple{}, repoPolicies: map[string]accounts.RepoPolicyApproval{}, annotations: map[string]map[string]accounts.RepositoryAnnotation{}, triage: map[string]map[string]accounts.FindingTriage{}, ingestRuns: map[string]ingestRecord{}, ingestEntries: map[string]ingestEntry{},
 		idps: map[string]accounts.IdentityProvider{}, identities: map[string]accounts.ExternalIdentity{}, ssoStates: map[string]accounts.SSOState{}, managed: map[string]bool{}}
 }
 
@@ -732,6 +733,7 @@ func (s *Store) removeRepository(_ context.Context, orgID, graph string) (int, e
 	delete(s.repos, k)
 	delete(s.repoPolicies, k)
 	delete(s.annotations, k)
+	delete(s.triage, k)
 	s.expireIngestReports(orgID, graph)
 	n := 0
 	for _, r := range s.repos {

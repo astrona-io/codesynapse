@@ -341,6 +341,7 @@ func (s *Server) routes() {
 	s.watchRoutes()
 	s.sessionMemoryRoutes()
 	s.repoPolicyRoutes()
+	s.triageRoutes()
 	s.runtimeRoutes()
 	s.imageScanRoutes()
 	s.semanticRoutes()

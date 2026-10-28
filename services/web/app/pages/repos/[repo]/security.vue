@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import type { ImageScan, RuleGuide, SecFinding, SecurityReport } from '~/utils/types'
+import type { FindingTriageList, ImageScan, RuleGuide, SecFinding, SecurityReport, TriageState } from '~/utils/types'
 
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
-const { data: rep, error } = useApiGet<SecurityReport>(() => repoPath(repo.value, 'security'))
+const { data: rep, error, refresh } = useApiGet<SecurityReport>(() => repoPath(repo.value, 'security'))
+// Answers 409 without accounts; then nobody sees the triage action.
+const { data: triage, refresh: refreshTriage } = useApiGet<FindingTriageList>(() => repoPath(repo.value, 'triage'))
 // 404 until CI uploads a scan (codesynapse images upload): the panel stays hidden.
 const { data: images } = useApiGet<ImageScan>(() => repoPath(repo.value, 'images'))
 const { data: catalog } = useApiGet<{ rules: RuleGuide[] }>('rules')
@@ -79,6 +81,46 @@ const total = (m: Record<string, number> | undefined) => Object.values(m ?? {}).
 const gradeColor = computed(() => ({ A: 'var(--success)', B: 'var(--info)', C: 'var(--warning)', D: 'var(--accent)', F: 'var(--danger)', 'N/A': 'var(--muted)' }[rep.value?.grade ?? 'A']))
 const explore = (id: string) => ({ path: `/repos/${encodeURIComponent(repo.value)}/explore`, query: { id } })
 const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--amber', required: '' }[r] ?? '')
+
+// Triage: a repository admin records why a finding no longer counts. The API checks
+// the role again; the flag only decides whether the action is shown.
+const TRIAGE_LABELS: Record<TriageState, string> = { accepted_risk: 'Accepted risk', false_positive: 'False positive', fixed_by: 'Fixed by' }
+const canTriage = computed(() => !!triage.value?.can_edit)
+const triaging = ref('')
+const triageForm = reactive({ state: 'accepted_risk' as TriageState, reason: '', reference: '', expires: '' })
+const triageError = ref('')
+const triageBusy = ref(false)
+function startTriage(f: SecFinding) {
+  triaging.value = triaging.value === f.id ? '' : f.id
+  Object.assign(triageForm, { state: 'accepted_risk', reason: '', reference: '', expires: '' })
+  triageError.value = ''
+}
+async function saveTriage(f: SecFinding) {
+  triageBusy.value = true
+  triageError.value = ''
+  try {
+    await apiPut(repoPath(repo.value, 'triage'), {
+      finding_id: f.id, state: triageForm.state, reason: triageForm.reason,
+      reference: triageForm.state === 'fixed_by' ? triageForm.reference : undefined,
+      expires_at: triageForm.expires ? new Date(`${triageForm.expires}T23:59:59`).toISOString() : undefined,
+    })
+    triaging.value = ''
+    await Promise.all([refresh(), refreshTriage()])
+  } catch (err) {
+    triageError.value = apiErrorMessage(err)
+  } finally {
+    triageBusy.value = false
+  }
+}
+async function clearTriage(fingerprint: string) {
+  triageError.value = ''
+  try {
+    await apiDelete(repoPath(repo.value, `triage/${fingerprint}`))
+    await Promise.all([refresh(), refreshTriage()])
+  } catch (err) {
+    triageError.value = apiErrorMessage(err)
+  }
+}
 </script>
 
 <template>
@@ -123,10 +165,21 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
       </section>
 
       <section v-if="rep.suppressed?.length" class="panel stack">
-        <h2>Approved exceptions · {{ rep.suppressed.length }}</h2>
-        <p class="muted">These findings remain stored. This organisation's current approval excludes them from this report's active findings and grade.</p>
-        <article v-for="finding in rep.suppressed" :key="finding.id">
-          <strong>{{ finding.title }}</strong><p class="small mono">{{ finding.location }} · {{ finding.rule }}</p><p>{{ finding.suppression_reason }}</p>
+        <h2>Approved exceptions and triage · {{ rep.suppressed.length }}</h2>
+        <p class="muted">These findings remain stored. This organisation's approved policy or its triage decisions exclude them from this report's active findings and grade.</p>
+        <p v-if="triageError && !triaging" class="error">{{ triageError }}</p>
+        <article v-for="finding in rep.suppressed" :key="finding.id" class="suppressed">
+          <div>
+            <strong>{{ finding.title }}</strong>
+            <span v-if="finding.triage" class="badge badge--cyan">{{ TRIAGE_LABELS[finding.triage.state] ?? finding.triage.state }}<template v-if="finding.triage.reference"> {{ finding.triage.reference }}</template></span>
+            <span v-else class="badge badge--violet">Approved policy</span>
+          </div>
+          <p class="small mono">{{ finding.location }} · {{ finding.rule }}</p>
+          <p>{{ finding.triage ? finding.triage.reason : finding.suppression_reason }}</p>
+          <p v-if="finding.triage" class="small muted">
+            {{ finding.triage.by || 'Someone' }} · {{ relTime(finding.triage.at) }}<template v-if="finding.triage.expires_at"> · until {{ new Date(finding.triage.expires_at).toLocaleDateString() }}</template>
+            <button v-if="canTriage && finding.fingerprint" class="secondary tiny clear" @click="clearTriage(finding.fingerprint)">Clear triage</button>
+          </p>
         </article>
       </section>
 
@@ -237,7 +290,33 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
                 <td><span class="badge" :class="f.exposed ? 'badge--pink' : ''">{{ f.exposed ? 'yes' : 'no' }}</span></td>
                 <td><span class="badge" :class="f.tested ? 'badge--green' : 'badge--amber'">{{ f.tested ? 'yes' : 'no' }}</span></td>
                 <td class="detail">{{ f.detail }}<div v-if="f.ignore_request" class="small muted" title="A codesynapse:ignore comment asks to suppress this finding. It stays active until the organisation approves inline ignores for this repository.">Ignore requested in code: {{ f.ignore_request }}</div></td>
-                <td><button class="secondary tiny" :aria-expanded="open.has(f.id)" @click="toggle(f.id)">{{ open.has(f.id) ? 'Hide fix' : 'How to fix' }}</button></td>
+                <td class="actions">
+                  <button class="secondary tiny" :aria-expanded="open.has(f.id)" @click="toggle(f.id)">{{ open.has(f.id) ? 'Hide fix' : 'How to fix' }}</button>
+                  <button v-if="canTriage" class="secondary tiny" :aria-expanded="triaging === f.id" @click="startTriage(f)">Triage</button>
+                </td>
+              </tr>
+              <tr v-if="triaging === f.id" class="fix-row">
+                <td colspan="7">
+                  <form class="triage" @submit.prevent="saveTriage(f)">
+                    <label>Decision
+                      <select v-model="triageForm.state">
+                        <option v-for="st in triage?.states ?? []" :key="st" :value="st">{{ TRIAGE_LABELS[st] ?? st }}</option>
+                      </select>
+                    </label>
+                    <label v-if="triageForm.state === 'fixed_by'">Commit or pull request
+                      <input v-model="triageForm.reference" required placeholder="#412 or a commit SHA" maxlength="64">
+                    </label>
+                    <label>Expires (optional)<input v-model="triageForm.expires" type="date"></label>
+                    <label class="wide">Why
+                      <input v-model="triageForm.reason" required maxlength="1000" placeholder="What makes this safe, or what fixed it">
+                    </label>
+                    <p v-if="triageError" class="error wide">{{ triageError }}</p>
+                    <div class="row wide">
+                      <button type="submit" :disabled="triageBusy">Save decision</button>
+                      <button type="button" class="secondary" @click="triaging = ''">Cancel</button>
+                    </div>
+                  </form>
+                </td>
               </tr>
               <tr v-if="open.has(f.id)" class="fix-row">
                 <td colspan="7">
@@ -315,4 +394,10 @@ const reachClass = (r: string) => ({ called: 'badge--pink', imported: 'badge--am
 .good-code { border: 2px solid var(--success); }
 .label.bad { color: var(--danger); }
 .label.good { color: var(--success); }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.suppressed .badge { margin-left: 8px; }
+.suppressed .clear { margin-left: 10px; }
+.triage { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 10px 14px; padding: 6px 4px 10px; max-width: 1100px; }
+.triage label { display: grid; gap: 4px; font-size: 13px; }
+.triage .wide { grid-column: 1 / -1; }
 </style>

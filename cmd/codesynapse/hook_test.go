@@ -14,13 +14,14 @@ import (
 	"testing"
 
 	"github.com/astrona-io/codesynapse/internal/app"
+	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
 func TestReadGuard(t *testing.T) {
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
-	dir := t.TempDir()
+	dir := gitRepo(t)
 	var src strings.Builder
 	src.WriteString("package big\n\ntype Store struct{}\n\n")
 	for i := range 200 {
@@ -30,11 +31,13 @@ func TestReadGuard(t *testing.T) {
 	require.NoError(t, os.WriteFile(big, []byte(src.String()), 0o600))
 	small := filepath.Join(dir, "small.go")
 	require.NoError(t, os.WriteFile(small, []byte("package big\n"), 0o600))
+	_, err := gitx.Run(context.Background(), dir, "add", "big.go", "small.go")
+	require.NoError(t, err)
 
 	read := func(file string, offset int) map[string]any {
 		var in toolHookInput
 		in.SessionID, in.ToolInput.FilePath, in.ToolInput.Offset = "chat-1", file, offset
-		return readGuard(in)
+		return readGuard(context.Background(), in)
 	}
 	out := read(big, 0)
 	require.True(t, out != nil, "the first whole read of a large file is turned back")
@@ -52,7 +55,7 @@ func TestReadGuard(t *testing.T) {
 	t.Setenv("CODESYNAPSE_READ_GUARD_LINES", "0")
 	var in toolHookInput
 	in.SessionID, in.ToolInput.FilePath = "chat-2", big
-	assert.True(t, readGuard(in) == nil, "0 turns the guard off")
+	assert.True(t, readGuard(context.Background(), in) == nil, "0 turns the guard off")
 }
 
 // offlineAPI points the hooks at a closed port, so a developer's own token and
@@ -293,4 +296,36 @@ func TestStopGuardReportsGoProblemsItself(t *testing.T) {
 	assert.Contains(t, reason, "broken.go:3")
 	assert.Contains(t, reason, "ugly.go: not gofmt-formatted")
 	assert.Contains(t, reason, "verify_plan")
+}
+
+// TestStopGuardIgnoresUpstreamCommits: a checkout behind its upstream (others
+// merged since it last pulled) has not changed the files those merges did.
+func TestStopGuardIgnoresUpstreamCommits(t *testing.T) {
+	offlineAPI(t)
+	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
+	ctx := context.Background()
+	dir := gitRepo(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	git := func(dir string, args ...string) {
+		t.Helper()
+		_, err := gitx.Run(ctx, dir, append([]string{"-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
+		require.NoError(t, err, strings.Join(args, " "))
+	}
+	// The upstream gains a commit merged elsewhere; this branch only tracks it.
+	git(dir, "checkout", "-q", "-b", "upstream")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "merged.go"), []byte("package demo\n\nfunc Merged() {}\n"), 0o600))
+	git(dir, "add", "-A")
+	git(dir, "commit", "-q", "-m", "merged elsewhere")
+	git(dir, "checkout", "-q", "main")
+	git(dir, "branch", "-q", "--set-upstream-to=upstream")
+
+	in := toolHookInput{SessionID: "chat-1", Cwd: dir}
+	assert.True(t, stopGuard(ctx, in, logger) == nil, "upstream commits are not this session's change")
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "local.go"), []byte("package demo\n\nfunc Local() {}\n"), 0o600))
+	git(dir, "add", "-A")
+	git(dir, "commit", "-q", "-m", "local")
+	out := stopGuard(ctx, in, logger)
+	require.True(t, out != nil)
+	assert.Contains(t, out["reason"].(string), "1 file(s)", "only the unpushed commit counts")
 }
