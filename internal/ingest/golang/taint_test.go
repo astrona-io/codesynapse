@@ -89,3 +89,60 @@ func TestTaintThroughCalls(t *testing.T) {
 	assert.Len(t, byFunc["CleanCaller"], 0)
 	assert.Len(t, byFunc["CleanLookupByID"], 0, "a record found by the input is not the input")
 }
+
+// TestTaintThroughFunctionValues: with data-flow analysis, request input
+// passed through closures, func-typed parameters and fields and method
+// values is reported where it reaches a sink; clean values and targets
+// without sinks add nothing, and without the analysis nothing changes.
+func TestTaintThroughFunctionValues(t *testing.T) {
+	root, err := filepath.Abs("testdata/taintfunc")
+	require.NoError(t, err)
+	findings := func(t *testing.T, opts Options) map[string]map[string]string {
+		t.Helper()
+		opts.Repo, opts.Root = "taintfunc", root
+		res, err := Extract(context.Background(), opts)
+		require.NoError(t, err)
+		g := res.Graph
+		out := map[string]map[string]string{}
+		for _, e := range g.Edges() {
+			if e.Kind != model.EdgeHasFinding {
+				continue
+			}
+			owner, _ := g.Node(e.From)
+			f, _ := g.Node(e.To)
+			if !strings.HasSuffix(f.Rule, "-from-request") {
+				continue
+			}
+			if out[owner.Name] == nil {
+				out[owner.Name] = map[string]string{}
+			}
+			out[owner.Name][f.Rule] = f.Summary
+		}
+		return out
+	}
+	on := findings(t, Options{Dataflow: true})
+	tests := []struct {
+		name, owner, rule, detail string
+	}{
+		{"closure", "ThroughClosure", "exec-from-request", "via r.FormValue in ThroughClosure, passed to run"},
+		{"func-typed parameter", "runCommand", "exec-from-request", "via r.FormValue in ThroughParameter, passed to apply"},
+		{"func-valued field", "findUser", "sql-from-request", "via r.FormValue in ThroughField, passed to h.onName"},
+		{"method value", "Delete", "sql-from-request", "via r.PathValue in ThroughMethodValue, passed to del"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := on[tt.owner][tt.rule]
+			require.True(t, ok, tt.owner+" reports "+tt.rule)
+			assert.Contains(t, got, tt.detail)
+		})
+	}
+	t.Run("clean", func(t *testing.T) {
+		for _, owner := range []string{"CleanThroughClosure", "CleanThroughParameter", "CleanTarget", "logName"} {
+			assert.Len(t, on[owner], 0, owner)
+		}
+		assert.Len(t, on, len(tests), "only the expected functions report")
+	})
+	t.Run("without dataflow", func(t *testing.T) {
+		assert.Len(t, findings(t, Options{}), 0, "calls through function values are not followed")
+	})
+}

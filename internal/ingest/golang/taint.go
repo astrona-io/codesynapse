@@ -155,7 +155,15 @@ func (s *scanner) taintOf(e ast.Expr) string {
 			return s.taintOf(v.Args[0]) // string(b), []byte(s)
 		}
 		fn := calleeFunc(s.p.info, v.Fun)
-		if fn == nil || fn.Pkg() == nil {
+		if fn == nil {
+			for _, sum := range s.dynamicSummaries(v) {
+				if d := s.returnsTaint(v, sum); d != "" {
+					return d
+				}
+			}
+			return ""
+		}
+		if fn.Pkg() == nil {
 			return ""
 		}
 		if sums := s.summariesOf(fn.Origin()); len(sums) > 0 {
