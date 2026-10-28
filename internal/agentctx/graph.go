@@ -341,8 +341,33 @@ var (
 		"make": true, "use": true, "using": true, "should": true, "need": true, "want": true, "all": true, "any": true,
 		"not": true, "are": true, "can": true, "get": true, "set": true, "new": true, "change": true, "update": true,
 		"code": true, "function": true, "method": true, "file": true, "test": true, "tests": true, "bug": true,
+		// Task words that say what to do, not where: matched by name they
+		// pulled Implementations, RecordIngestPhase and AuditLog.only into
+		// briefs about unrelated work.
+		"implement": true, "implements": true, "implementing": true, "phase": true, "step": true, "only": true,
+		"start": true, "helper": true, "reuse": true, "reuses": true,
 	}
 )
+
+// proseWeight scales the keywords of plain words once a task names code
+// exactly: "hook" or "token" in a task that names agentStats must not
+// outrank agentStats.
+const proseWeight = 0.3
+
+// identLike reports whether a word of a task names code rather than being
+// prose: CamelCase, a dotted or slashed path, snake_case, a call, or a word
+// with digits or a colon ("tokens:cache-read", "E-42").
+func identLike(w string) bool {
+	if strings.ContainsAny(w, "_./()*:0123456789") {
+		return true
+	}
+	for i, r := range w {
+		if i > 0 && unicode.IsUpper(r) {
+			return true
+		}
+	}
+	return false
+}
 
 // keywords extracts identifier-like terms, splitting CamelCase and
 // snake_case so "ReplaceRepo" also searches "replace" and "repo".
@@ -351,20 +376,27 @@ func keywords(task string) []string {
 	var out []string
 	add := func(w string) {
 		lw := strings.ToLower(strings.Trim(w, "./()*"))
-		if lw == "" || seen[lw] || ((len(lw) < 3 || stopwords[lw]) && w == strings.ToLower(w)) {
+		// A capitalised stopword ("Implement phase 1") is still prose.
+		if lw == "" || seen[lw] || (len(lw) < 3 && w == strings.ToLower(w)) || (stopwords[lw] && !identLike(w)) {
 			return
 		}
 		seen[lw] = true
 		out = append(out, strings.Trim(w, "./()*"))
 	}
 	words := identRe.FindAllString(task, -1)
-	// Whole identifiers precede split fragments so an early CamelCase term
-	// cannot consume the keyword cap and hide a later exact identifier.
-	for _, w := range words {
-		add(w)
-		// Preserve punctuation in identifiers, but also accept a prose colon
-		// or dash following a symbol: "Handler: fix nil checks".
-		add(strings.TrimRight(w, ":-"))
+	// Whole identifiers precede prose and prose precedes split fragments, so
+	// neither the opening words of a long task nor an early CamelCase term
+	// can consume the keyword cap and hide a later exact identifier.
+	for _, code := range []bool{true, false} {
+		for _, w := range words {
+			if identLike(strings.TrimRight(w, ":-")) != code {
+				continue
+			}
+			add(w)
+			// Preserve punctuation in identifiers, but also accept a prose colon
+			// or dash following a symbol: "Handler: fix nil checks".
+			add(strings.TrimRight(w, ":-"))
+		}
 	}
 	for _, w := range words {
 		if i := strings.LastIndexAny(w, "./"); i >= 0 {
@@ -447,11 +479,29 @@ func (s Service) MinimalContext(ctx context.Context, repo, task string, files []
 		exact bool
 	}
 	byID := map[string]*scored{}
+	// Once a task names code exactly (CamelCase, dotted, snake_case), its
+	// plain words are prose: they can still find something, but never as an
+	// exact match and with less weight, so "only" or "hook" in the task does
+	// not put AuditLog.only above the identifiers it names. A task of plain
+	// words alone ("Handler") keeps them as names.
+	named := false
+	for _, word := range identRe.FindAllString(task, -1) {
+		if identLike(strings.TrimRight(strings.Trim(word, "./"), ":-")) {
+			named = true
+			break
+		}
+	}
 	exactTerms := map[string]bool{}
+	prose := map[string]bool{}
 	for _, word := range identRe.FindAllString(task, -1) {
 		word = strings.Trim(word, "./")
+		bare := strings.TrimRight(word, ":-")
+		if named && !identLike(bare) {
+			prose[strings.Trim(bare, "()*")] = true
+			continue
+		}
 		exactTerms[word] = true
-		exactTerms[strings.TrimRight(word, ":-")] = true
+		exactTerms[bare] = true
 	}
 	// Files too: a task often names a file or area (Dockerfile, a chart, a
 	// page) before any symbol in it, and the task eval finds more with them.
@@ -475,6 +525,9 @@ func (s Service) MinimalContext(ctx context.Context, repo, task string, files []
 			}
 		}
 		weight := 1.0 / (1 + float64(i)*0.15) // earlier keywords matter more
+		if prose[kw] {
+			weight *= proseWeight
+		}
 		seen := map[string]bool{}
 		for _, n := range hits {
 			if seen[n.ID] {
