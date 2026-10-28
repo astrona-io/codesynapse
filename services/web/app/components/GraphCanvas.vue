@@ -9,7 +9,9 @@ const emit = defineEmits<{ select: [id: string] }>()
 const width = 900
 const height = computed(() => props.height ?? 560)
 interface P { id: string; x: number; y: number; vx: number; vy: number; n: ViewNode }
-const points = ref<P[]>([])
+// Plain objects: the layout is computed once per graph and never mutated
+// after, so deep reactivity on every coordinate would only cost proxies.
+const points = shallowRef<P[]>([])
 const hovered = ref<string | null>(null)
 
 function layout() {
@@ -60,15 +62,16 @@ const lines = computed(() =>
     .map((e) => ({ e, a: byId.value.get(e.from), b: byId.value.get(e.to) }))
     .filter((l) => l.a && l.b),
 )
-const neighbours = computed(() => {
-  const set = new Set<string>()
-  if (!hovered.value) return set
-  for (const e of props.edges) {
-    if (e.from === hovered.value) set.add(e.to)
-    if (e.to === hovered.value) set.add(e.from)
-  }
-  return set
+// Built once per graph, so hovering a node looks up its neighbours instead
+// of walking every edge.
+const adjacency = computed(() => {
+  const m = new Map<string, Set<string>>()
+  const add = (a: string, b: string) => { let s = m.get(a); if (!s) m.set(a, (s = new Set())); s.add(b) }
+  for (const e of props.edges) { add(e.from, e.to); add(e.to, e.from) }
+  return m
 })
+const none = new Set<string>()
+const neighbours = computed(() => (hovered.value && adjacency.value.get(hovered.value)) || none)
 
 function color(n: ViewNode): string {
   if (n.id === props.root) return 'var(--accent)'

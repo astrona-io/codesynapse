@@ -29,8 +29,10 @@ function hasDotSegment(path: string): boolean {
 }
 
 let mode: { value: 'single' | 'accounts'; at: number } | undefined
-async function apiMode(base: string): Promise<'single' | 'accounts'> {
-  if (mode && Date.now() - mode.at < 30_000) return mode.value
+// A page load sends several requests at once; when the cached mode has
+// expired they share one lookup instead of each asking the API.
+let pendingMode: Promise<'single' | 'accounts'> | undefined
+async function readMode(base: string): Promise<'single' | 'accounts'> {
   try {
     const res = await fetch(`${base}/api/v1/auth/status`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(5_000) })
     const body = (await res.json()) as { mode?: string }
@@ -39,6 +41,11 @@ async function apiMode(base: string): Promise<'single' | 'accounts'> {
   } catch {
     return 'accounts'
   }
+}
+function apiMode(base: string): Promise<'single' | 'accounts'> {
+  if (mode && Date.now() - mode.at < 30_000) return Promise.resolve(mode.value)
+  pendingMode ??= readMode(base).finally(() => { pendingMode = undefined })
+  return pendingMode
 }
 
 export default defineEventHandler(async (event) => {
@@ -95,7 +102,12 @@ export default defineEventHandler(async (event) => {
       throw e
     }
   }
-  const res = await fetch(target, { method, headers, body, redirect: 'error', signal: AbortSignal.timeout(120_000) })
+  // A visitor who navigates away stops the API's work too, not only after
+  // the timeout.
+  const gone = new AbortController()
+  const out = event.node.res
+  out?.once?.('close', () => { if (!out.writableFinished) gone.abort() })
+  const res = await fetch(target, { method, headers, body, redirect: 'error', signal: AbortSignal.any([AbortSignal.timeout(120_000), gone.signal]) })
   setResponseStatus(event, res.status)
   const ct = res.headers.get('content-type')
   if (ct) setResponseHeader(event, 'content-type', ct)
@@ -108,5 +120,8 @@ export default defineEventHandler(async (event) => {
     if (c.startsWith(`${SESSION_COOKIE}=`) || (c.startsWith(`${SSO_COOKIE}=`) && SSO_PATH.test(path))) appendResponseHeader(event, 'set-cookie', c)
   }
   setResponseHeader(event, 'cache-control', 'no-store')
-  return res.status === 204 ? null : new Uint8Array(await res.arrayBuffer())
+  // Streamed, not buffered: large reports reach the browser as the API
+  // writes them, and the server holds no copy.
+  if (res.status === 204 || !res.body) return null
+  return res.body
 })

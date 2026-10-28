@@ -6,9 +6,31 @@ const repo = computed(() => route.params.repo as string)
 const base = computed(() => `/repos/${encodeURIComponent(repo.value)}`)
 const { data: d, error } = useApiGet<Dashboard>(() => repoPath(repo.value, 'dashboard'))
 const { data: attention } = useApiGet<Attention>(() => `attention?repo=${encodeURIComponent(repo.value)}`)
-const { data: sec } = useApiGet<SecurityReport>(() => repoPath(repo.value, 'security'))
-const { data: clean } = useApiGet<CleanupReport>(() => repoPath(repo.value, 'cleanup'))
-const { data: met } = useApiGet<MetricsReport>(() => repoPath(repo.value, 'metrics'))
+// The cards and next steps read a few fields of three large reports; only
+// those are kept, so the page payload does not carry every finding.
+const { data: sec } = useApiGet(() => repoPath(repo.value, 'security'), { view: {
+  name: 'summary',
+  pick: (s: SecurityReport) => ({
+    grade: s.grade, finding_counts: s.finding_counts ?? {}, vuln_counts: s.vuln_counts ?? {},
+    findings: (s.findings ?? []).filter((f) => f.severity === 'critical' || (f.severity === 'high' && f.exposed)),
+    vulnerabilities: (s.vulnerabilities ?? []).filter((v) => v.reachability !== 'required' && v.fixed),
+  }),
+} })
+const { data: clean } = useApiGet(() => repoPath(repo.value, 'cleanup'), { view: {
+  name: 'summary',
+  pick: (c: CleanupReport) => {
+    const mods = c.modules ?? []
+    const mod = mods.find((m) => m.vulnerabilities?.length) ?? mods[0]
+    return { summary: c.summary, modules: mod ? [mod] : [], items: (c.items ?? []).filter((i) => i.security?.length) }
+  },
+} })
+const { data: met } = useApiGet(() => repoPath(repo.value, 'metrics'), { view: {
+  name: 'summary',
+  pick: (m: MetricsReport) => ({
+    tests: m.tests && { ...m.tests, untested_complex: (m.tests.untested_complex ?? []).slice(0, 1) },
+    benchmark: m.benchmark && { samples: m.benchmark.samples, median_reduction_pct: m.benchmark.median_reduction_pct },
+  }),
+} })
 
 const explore = (id: string) => ({ path: `${base.value}/explore`, query: { id } })
 const { data: repos, refresh: refreshRepos } = useApiGet<{ repos: { name: string; managed?: boolean; remote?: string; branch?: string }[] }>('repos')
@@ -58,12 +80,12 @@ const steps = computed<Step[]>(() => {
   const out: Step[] = []
   const s = sec.value
   if (s) {
-    const urgent = s.findings.filter((f) => f.severity === 'critical' || (f.severity === 'high' && f.exposed))
+    const urgent = s.findings // critical, or high and exposed
     if (urgent.length) {
       const f = urgent[0]!
       out.push({ tone: 'bad', title: `Fix ${plural(urgent.length, 'urgent security issue')}`, why: `Start with “${f.title}” in ${f.location}${f.exposed ? ', reachable from outside' : ''}.`, to: `${base.value}/security`, cta: 'See how to fix' })
     }
-    const reached = s.vulnerabilities.filter((v) => v.reachability !== 'required' && v.fixed)
+    const reached = s.vulnerabilities // fixable and not only required
     if (reached.length) {
       const v = reached[0]!
       out.push({ tone: v.reachability === 'called' ? 'bad' : 'warn', title: `Upgrade ${v.module} to ${v.fixed}`, why: `${v.id}${v.cve?.length ? ` (${v.cve[0]})` : ''}: ${v.summary}. ${REACH_TEXT[v.reachability]}.`, to: `${base.value}/security`, cta: 'Review vulnerability' })
@@ -71,9 +93,9 @@ const steps = computed<Step[]>(() => {
   }
   const c = clean.value
   if (c) {
-    const mod = c.modules.find((m) => m.vulnerabilities?.length) ?? c.modules[0]
+    const mod = c.modules[0] // the first with vulnerabilities, else the first
     if (mod) out.push({ tone: mod.vulnerabilities?.length ? 'bad' : 'warn', title: `Remove unused dependency ${mod.path}`, why: mod.vulnerabilities?.length ? `Nothing imports it, and removing it eliminates ${plural(mod.vulnerabilities.length, 'vulnerability', 'vulnerabilities')}.` : 'Nothing in the repository imports it.', to: `${base.value}/cleanup`, cta: 'Open cleanup' })
-    const risky = c.items.filter((i) => i.security?.length)
+    const risky = c.items // the ones with security impact
     if (risky.length) out.push({ tone: 'warn', title: `Delete ${plural(risky.length, 'unused function')} with security impact`, why: `For example ${risky[0]!.name}: ${risky[0]!.security![0]}. Dead code is still shipped and attackable.`, to: `${base.value}/cleanup`, cta: 'Open cleanup' })
   }
   const gap = met.value?.tests.untested_complex?.[0]
