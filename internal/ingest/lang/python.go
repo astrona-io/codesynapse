@@ -45,7 +45,12 @@ func pyLines(src []byte) (lines []pyLine, open string) {
 
 // maskPyStrings replaces string literal contents with spaces and strips
 // comments. open is the triple quote still open from previous lines.
-func maskPyStrings(l, open string) (string, string) {
+func maskPyStrings(l, open string) (string, string) { return maskPy(l, open, false) }
+
+// maskPy is maskPyStrings; with keepFormat the replacement fields of a
+// one-line f-string stay code (f"id = {uid}" keeps "{uid}"), for taint
+// tracking. Triple-quoted f-strings are masked whole.
+func maskPy(l, open string, keepFormat bool) (string, string) {
 	var b strings.Builder
 	i := 0
 	for i < len(l) {
@@ -77,7 +82,11 @@ func maskPyStrings(l, open string) (string, string) {
 				j++
 			}
 			b.WriteByte(c)
-			b.WriteString(strings.Repeat(" ", max(0, min(j, len(l))-i-1)))
+			if keepFormat && fPrefixed(l, i) {
+				b.WriteString(formatFields(l[i+1 : min(j, len(l))]))
+			} else {
+				b.WriteString(strings.Repeat(" ", max(0, min(j, len(l))-i-1)))
+			}
 			if j < len(l) {
 				b.WriteByte(c)
 			}
@@ -109,12 +118,19 @@ func parsePython(src []byte) *fileResult {
 		}
 	}
 	lastCode := 0
+	brackets := 0
 	for i, l := range lines {
 		n := i + 1
 		if l.blank {
 			continue
 		}
-		closeTo(l.indent, lastCode)
+		// A line inside open brackets continues the statement above, so its
+		// indent (the "):" closing a multi-line def) ends no block.
+		inside := brackets > 0
+		brackets = max(0, brackets+bracketDelta(l.text)+strings.Count(l.text, "{")-strings.Count(l.text, "}"))
+		if !inside {
+			closeTo(l.indent, lastCode)
+		}
 		lastCode = n
 		if m := pyDecorator.FindStringSubmatch(l.text); m != nil {
 			pendingDecorators = append(pendingDecorators, m[1])
@@ -166,6 +182,7 @@ func parsePython(src []byte) *fileResult {
 				}
 			}
 			s.doc = pyDocstring(raw, i+1)
+			s.inputs = pyInputParams(pendingRaw, lines, n)
 			fr.routes = append(fr.routes, pyRoutesFor(pendingRaw, pendingDecorators, s.start, s.name)...)
 			fr.symbols = append(fr.symbols, s)
 			stack = append(stack, openSym{s, l.indent})
@@ -202,6 +219,7 @@ func parsePython(src []byte) *fileResult {
 		fr.findings = append(fr.findings, pyRules(raw[i], l.text, n, ownerName(owner))...)
 	}
 	closeTo(-1, lastCode)
+	fr.findings = supersede(fr.findings, pyTaintFindings(fr, raw, lines))
 	for _, s := range fr.symbols {
 		if s.kind == model.KindType {
 			continue

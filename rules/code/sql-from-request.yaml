@@ -4,9 +4,9 @@ title: SQL text taken from the request
 severity: critical
 cwe: [CWE-89]
 category: code
-languages: [go]
+languages: [go, python, javascript, typescript]
 why: Request input that becomes part of the SQL text lets the client rewrite the query, to read other rows, change data or run statements; it is the classic SQL injection.
-fix: Pass request values as query parameters ($1, ?) and never into the SQL text; for identifiers such as a sort column, map the input to a fixed allowlist.
+fix: Pass request values as query parameters ($1, ?, %s) and never into the SQL text; for identifiers such as a sort column, map the input to a fixed allowlist.
 references:
   - https://cwe.mitre.org/data/definitions/89.html
 examples:
@@ -17,3 +17,17 @@ examples:
     fixed: |-
       name := r.FormValue("name")
       rows, err := db.Query("SELECT id FROM users WHERE name = $1", name)
+  - language: python
+    vulnerable: |-
+      name = request.args.get("name")
+      cursor.execute(f"SELECT id FROM users WHERE name = '{name}'")
+    fixed: |-
+      name = request.args.get("name")
+      cursor.execute("SELECT id FROM users WHERE name = %s", (name,))
+  - language: typescript
+    vulnerable: |-
+      const { name } = req.query
+      const rows = await db.query(`SELECT id FROM users WHERE name = '${name}'`)
+    fixed: |-
+      const { name } = req.query
+      const rows = await db.query('SELECT id FROM users WHERE name = $1', [name])
