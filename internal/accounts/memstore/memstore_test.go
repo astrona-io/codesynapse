@@ -24,6 +24,7 @@ func TestContract(t *testing.T) {
 	accountstest.RunMemberRepos(t, st)
 	accountstest.RunUserGitTokens(t, st)
 	accountstest.RunRepoPolicy(t, st)
+	accountstest.RunFindingTriage(t, st)
 	accountstest.RunIngest(t, st)
 	accountstest.RunBootstrap(t, func(*testing.T) accounts.Store { return New() })
 	accountstest.RunSSOStore(t, func(*testing.T) accounts.Store { return New() })

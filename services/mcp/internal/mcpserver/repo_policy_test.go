@@ -49,6 +49,24 @@ func TestMCPSecurityUsesTenantPolicy(t *testing.T) {
 	require.False(t, call(t, a, "security_report", map[string]any{}, &revoked).IsError)
 	assert.Len(t, revoked.Suppressed, 0)
 	assert.Equal(t, revoked.FindingCounts["high"], 1)
+
+	// Triage applies to the deciding organisation only, without a policy.
+	finding, err := reader.Node(ctx, storetest.ID(model.KindFinding, "mock"))
+	require.NoError(t, err)
+	key, err := security.FindingKey(ctx, reader, finding)
+	require.NoError(t, err)
+	_, err = acc.SetFindingTriage(ctx, principal, accounts.FindingTriage{OrgID: principal.OrgID, Graph: storetest.Repo, Fingerprint: key, Rule: finding.Rule, File: finding.File, State: accounts.TriageFalsePositive, Reason: "Mock credential for tests"})
+	require.NoError(t, err)
+	var triaged, untriaged security.Report
+	require.False(t, call(t, a, "security_report", map[string]any{}, &triaged).IsError)
+	require.False(t, call(t, b, "security_report", map[string]any{}, &untriaged).IsError)
+	require.Len(t, triaged.Suppressed, 1)
+	require.True(t, triaged.Suppressed[0].Triage != nil)
+	assert.Equal(t, triaged.Suppressed[0].Triage.State, accounts.TriageFalsePositive)
+	assert.Equal(t, triaged.FindingCounts["high"], 0)
+	assert.Len(t, untriaged.Suppressed, 0)
+	assert.Equal(t, untriaged.FindingCounts["high"], 1)
+
 	filterFindingsByPath(&approved, "different/")
 	assert.Len(t, approved.Suppressed, 0)
 	assert.Equal(t, approved.SuppressedCounts["high"], 0)

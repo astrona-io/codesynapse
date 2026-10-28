@@ -535,6 +535,15 @@ type Store interface {
 	DeleteRepoPolicy(ctx context.Context, orgID, graph string) error
 	UpsertAnnotations(ctx context.Context, records []RepositoryAnnotation) error
 	ListAnnotations(ctx context.Context, orgID, graph string, limit int) ([]RepositoryAnnotation, error)
+	// PutFindingTriage records or replaces one organisation's decision
+	// about a finding of its repository entry: ErrNotFound without the
+	// entry, ErrAccessLimit beyond MaxFindingTriage.
+	PutFindingTriage(ctx context.Context, t FindingTriage) error
+	// DeleteFindingTriage removes it; ErrNotFound when there is none.
+	DeleteFindingTriage(ctx context.Context, orgID, graph, fingerprint string) error
+	// ListFindingTriage returns the entry's decisions, expired ones
+	// included, with the actor's name, newest first.
+	ListFindingTriage(ctx context.Context, orgID, graph string, limit int) ([]FindingTriage, error)
 	BeginIngestRun(ctx context.Context, run IngestRun) error
 	SaveIngestRun(ctx context.Context, run IngestRun) error
 	ReconcileIngestRun(ctx context.Context, orgID, graph, runID string, commit ingestreport.GraphCommit) error

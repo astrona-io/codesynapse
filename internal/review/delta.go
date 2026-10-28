@@ -87,7 +87,7 @@ func CompareFindings(ctx context.Context, base, head store.Reader, repo string, 
 
 func fingerprint(f DeltaFinding) string {
 	file, _, _ := strings.Cut(f.Location, ":")
-	return f.Rule + "\x00" + f.Owner + "\x00" + file
+	return model.FindingFingerprint(f.Rule, f.Owner, file)
 }
 
 // Findings lists the security findings in files with the symbol that owns
@@ -113,14 +113,15 @@ func findingsIn(ctx context.Context, r store.Reader, repo string, files []string
 			if n.File != file {
 				continue // a longer path with the same prefix
 			}
-			owner := file
 			hits, err := r.Traverse(ctx, n.ID, []model.EdgeKind{model.EdgeHasFinding}, store.In, 1, 1)
 			if err != nil {
 				return nil, err
 			}
+			var on *model.Node
 			if len(hits) > 0 {
-				owner = hits[0].Node.ShortName()
+				on = &hits[0].Node
 			}
+			owner := model.FindingOwnerName(on, file)
 			out = append(out, DeltaFinding{Rule: n.Rule, Severity: n.Severity, Title: n.Name, Owner: owner, Location: n.Location()})
 		}
 	}
