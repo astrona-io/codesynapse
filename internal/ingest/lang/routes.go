@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/astrona-io/codesynapse/internal/model"
 )
@@ -246,6 +247,25 @@ func httpVerb(m string) string {
 // its closing parenthesis; nested brackets stay whole.
 func splitArgs(s string) []string {
 	var out []string
+	for _, sp := range argSpans(s) {
+		out = append(out, s[sp[0]:sp[1]])
+	}
+	return out
+}
+
+// argSpans is splitArgs as byte offsets into s, so a caller can read the
+// same argument in an unmasked copy of s (masking keeps offsets).
+func argSpans(s string) [][2]int {
+	var out [][2]int
+	add := func(from, to int) {
+		seg := s[from:to]
+		trimmed := strings.TrimSpace(seg)
+		if trimmed == "" {
+			return
+		}
+		lead := len(seg) - len(strings.TrimLeftFunc(seg, unicode.IsSpace))
+		out = append(out, [2]int{from + lead, from + lead + len(trimmed)})
+	}
 	depth, start := 0, 0
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
@@ -253,24 +273,18 @@ func splitArgs(s string) []string {
 			depth++
 		case ')', ']', '}':
 			if depth == 0 {
-				if a := strings.TrimSpace(s[start:i]); a != "" {
-					out = append(out, a)
-				}
+				add(start, i)
 				return out
 			}
 			depth--
 		case ',':
 			if depth == 0 {
-				if a := strings.TrimSpace(s[start:i]); a != "" {
-					out = append(out, a)
-				}
+				add(start, i)
 				start = i + 1
 			}
 		}
 	}
-	if a := strings.TrimSpace(s[start:]); a != "" {
-		out = append(out, a)
-	}
+	add(start, len(s))
 	return out
 }
 

@@ -4,7 +4,7 @@ title: Process started with request input
 severity: critical
 cwe: [CWE-78, CWE-88]
 category: code
-languages: [go]
+languages: [go, python, javascript, typescript]
 why: When request input chooses the program or its arguments, the client can run other programs or pass options that change what the program does (git's --upload-pack, curl's -o), often up to running its own code.
 fix: Never take the program from the request; map request values to fixed arguments, put "--" before any value that must stay an operand, and validate it against an allowlist.
 references:
@@ -22,3 +22,17 @@ examples:
           return
       }
       out, err := exec.Command("git", "log", "--end-of-options", ref).Output()
+  - language: python
+    vulnerable: |-
+      host = request.args["host"]
+      subprocess.run(f"ping -c 1 {host}", shell=True)
+    fixed: |-
+      host = request.args["host"]
+      subprocess.run("ping -c 1 " + shlex.quote(host), shell=True)
+  - language: javascript
+    vulnerable: |-
+      const host = req.query.host
+      cp.exec(`ping -c 1 ${host}`)
+    fixed: |-
+      const port = Number(req.query.port)
+      cp.execFile('nc', ['-z', 'localhost', String(port)])

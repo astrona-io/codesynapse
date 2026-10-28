@@ -4,7 +4,7 @@ title: Outbound request URL from HTTP request input
 severity: high
 cwe: [CWE-918]
 category: code
-languages: [go]
+languages: [go, python, javascript, typescript]
 why: Fetching URLs chosen by the client lets attackers reach internal services and cloud metadata endpoints.
 fix: Allowlist hosts and block internal address ranges.
 references:
@@ -16,3 +16,17 @@ examples:
       u, err := url.Parse(r.URL.Query().Get("url"))
       if err != nil || !allowedHosts[u.Hostname()] { return errForbidden }
       client.Get(u.String())
+  - language: python
+    vulnerable: |-
+      target = request.args["url"]
+      return requests.get(target, timeout=5).text
+    fixed: |-
+      user_id = int(request.args["id"])
+      return requests.get(f"https://api.example.com/users/{user_id}", timeout=5).text
+  - language: typescript
+    vulnerable: |-
+      const target = req.body.callback
+      const res = await fetch(target)
+    fixed: |-
+      const id = req.body.id
+      const res = await fetch(`https://api.example.com/users/${encodeURIComponent(id)}`)
