@@ -165,6 +165,12 @@ func TestBriefPlan(t *testing.T) {
 	assert.Contains(t, strings.Join(plan.Ranges, ","), "app/app.go:")
 	assert.True(t, len(plan.Ranges) <= maxBriefRanges)
 	assert.Equal(t, f.client.do("POST", path, `{"prompt":"  "}`, nil, runtimeHeaders("thread-a")...), 400)
+
+	// Not a code task (PLAN item 18): no ranges, so an older client reads
+	// nothing and calls no model.
+	var none BriefPlan
+	require.Equal(t, f.client.do("POST", path, `{"prompt":"start more agents"}`, &none, runtimeHeaders("thread-a")...), 200)
+	assert.Len(t, none.Ranges, 0)
 }
 
 // In brief mode the local model briefs instead of answering, and the brief
