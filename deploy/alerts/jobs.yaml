@@ -22,3 +22,23 @@ groups:
           summary: "{{ $labels.kind }} jobs are waiting and no worker runs them"
           description: "{{ $value }} {{ $labels.kind }} jobs have waited for 15 minutes with none running. Check that a worker with that role is up (fix jobs need the fix worker)."
           dashboard: "{{ $externalURL }}/stats"
+
+      # A kind whose jobs fail more than one time in five. Tenant and platform
+      # (no organisation) jobs count together; the minimum keeps a single
+      # failure on a quiet installation from paging anyone.
+      - alert: CodeSynapseJobFailureRate
+        expr: |
+          (
+            sum by (kind) (increase({__name__=~"(platform_)?codesynapse_jobs_finished_total", outcome="error"}[30m]))
+            /
+            sum by (kind) (increase({__name__=~"(platform_)?codesynapse_jobs_finished_total"}[30m]))
+          ) > 0.2
+          and
+          sum by (kind) (increase({__name__=~"(platform_)?codesynapse_jobs_finished_total"}[30m])) >= 10
+        labels:
+          severity: warning
+          component: jobs
+        annotations:
+          summary: "{{ $labels.kind }} jobs are failing"
+          description: "{{ $value | humanizePercentage }} of {{ $labels.kind }} jobs failed in the last 30 minutes."
+          dashboard: "{{ $externalURL }}/stats"

@@ -164,3 +164,30 @@ tests:
               summary: "fix jobs are waiting and no worker runs them"
               description: "2 fix jobs have waited for 15 minutes with none running. Check that a worker with that role is up (fix jobs need the fix worker)."
               dashboard: "https://codesynapse.example.com/stats"
+
+  - name: job failure rate, per kind
+    interval: 1m
+    input_series:
+      # sync: half of its jobs fail, across a tenant and the platform twin.
+      - series: 'codesynapse_jobs_finished_total{kind="sync",outcome="ok",tenant_id="org-a",service_instance_id="api-1"}'
+        values: '0+1x40'
+      - series: 'platform_codesynapse_jobs_finished_total{kind="sync",outcome="error",service_instance_id="api-1"}'
+        values: '0+1x40'
+      # clone: one failure in ten minutes against one success a minute.
+      - series: 'codesynapse_jobs_finished_total{kind="clone",outcome="ok",tenant_id="org-a",service_instance_id="api-1"}'
+        values: '0+1x40'
+      - series: 'codesynapse_jobs_finished_total{kind="clone",outcome="error",tenant_id="org-a",service_instance_id="api-1"}'
+        values: '0+0.1x40'
+      # fix: every job fails, but too few ran to alert.
+      - series: 'codesynapse_jobs_finished_total{kind="fix",outcome="error",tenant_id="org-a",service_instance_id="api-1"}'
+        values: '0+0.1x40'
+    alert_rule_test:
+      - eval_time: 35m
+        groupname: codesynapse-jobs
+        alertname: CodeSynapseJobFailureRate
+        exp_alerts:
+          - exp_labels: {severity: warning, component: jobs, kind: sync}
+            exp_annotations:
+              summary: "sync jobs are failing"
+              description: "50% of sync jobs failed in the last 30 minutes."
+              dashboard: "https://codesynapse.example.com/stats"

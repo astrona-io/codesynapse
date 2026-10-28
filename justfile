@@ -440,7 +440,7 @@ lint-alerts:
 
 # Lint prose in the agent-facing docs (.vale.ini)
 lint-prose:
-    go run github.com/errata-ai/vale/v3/cmd/vale@v3.25.1 AGENTS.md CLAUDE.md docs/AGENT_GUIDE.md
+    go run github.com/vale-cli/vale/v3/cmd/vale@v3.25.1 AGENTS.md CLAUDE.md docs/AGENT_GUIDE.md
 
 # Scan the git history for secrets (.gitleaks.toml, .gitleaksignore)
 secrets:
