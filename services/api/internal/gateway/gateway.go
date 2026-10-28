@@ -60,6 +60,10 @@ type Meta struct {
 	// answer; Metered says it reported any.
 	InTokens, OutTokens int
 	Metered             bool
+	// Fallthrough is why a request offered to the local model went on to
+	// the cloud: one of the Fall* reasons, empty when the local model
+	// answered or was never asked.
+	Fallthrough string
 }
 
 // countWriter counts the bytes of the response.
@@ -127,12 +131,14 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 		meta := inspect(upstreamPath, body)
 		if local := g.local(); local != nil && upstreamPath == "/v1/messages" {
 			rec := &statusWriter{ResponseWriter: w}
-			if u, ok := local.serve(r.Context(), rec, body); ok {
+			u, reason, ok := local.serve(r.Context(), rec, body)
+			if ok {
 				meta.Route = "local"
 				meta.InTokens, meta.OutTokens, meta.Metered = u.In, u.Out, u.In+u.Out > 0
 				done(r.Context(), meta, http.StatusOK)
 				return
 			}
+			meta.Fallthrough = reason
 		}
 		meta.Route = "cloud"
 		if !hasCredential(r) {

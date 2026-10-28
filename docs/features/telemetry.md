@@ -14,9 +14,9 @@ Both appear on the **Statistics** page. Every number belongs to one organisation
 
 | Area | What you can see |
 |---|---|
-| Agent tools | sessions, tool calls and failures, tool latency, tokens served to agents, MCP traffic in bytes |
-| AI models | requests and failures per provider and model, input, output and cached tokens, estimated cost and cache savings, time to first token, read and write speed, how much of the context window requests used |
-| Agent gateway | requests answered by the local model or the cloud, bytes, local tokens |
+| Agent tools | sessions, tool calls, failures and refusals (a call the server turned down is counted apart from one that failed), calls answered on your own machine by the Claude Code bridge, tool latency, tokens served to agents, MCP traffic in bytes |
+| AI models | requests and failures per provider and model, and why requests failed (timeout, rate limit, refused or other error), input, output and cached tokens, estimated cost and cache savings, time to first token, read and write speed, how much of the context window requests used |
+| Agent gateway | requests answered by the local model or the cloud, response time per route, why a request left the local model, bytes, local tokens |
 | Databases | latency (median, 95th and 99th percentile), requests, errors and timeouts, graph rows and vector matches |
 | Agent memory | stored facts, saves, recalls, offloaded turns and tokens |
 | Assistant hooks | lifecycle events and observed byte counts from Codex and Cursor |
@@ -53,7 +53,7 @@ Some parts of CodeSynapse have no live numbers yet. The [metrics coverage plan](
 2. **More operator alerts**: failing audit-log writes, once those writes are counted.
 3. **Background jobs and indexing** (available now, see the table above).
 4. **Outside services and security events**: git clone and fetch, vulnerability and licence lookups, sign-in attempts and rate limits, and audit-log writes.
-5. **Sharper existing numbers**: refused tool calls apart from errors, model timeouts and rate limits, gateway latency and why a request left the local model, and tool calls answered on your own machine by the Claude Code bridge. The Statistics panels that count failures change in the same release, so a refused call is no longer shown as an error.
+5. **Sharper existing numbers** (available now, see the table above): refused tool calls apart from errors, model timeouts and rate limits, gateway latency and why a request left the local model, and tool calls answered on your own machine by the Claude Code bridge. A refused tool call is no longer shown as an error, and the model failure panels count timeouts, rate limits and refusals as failures.
 6. **The web server** (available now, see the table above).
 
 The same privacy rules apply to everything planned.

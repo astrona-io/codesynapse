@@ -140,11 +140,28 @@ func present(raw json.RawMessage) bool {
 	return len(raw) > 0 && string(raw) != "null"
 }
 
-// translate builds the OpenAI-compatible request; ok is false when the
-// request is not one the local model should take.
-func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out []byte, ok bool) {
-	if len(body) > maxLocalBody || json.Unmarshal(body, &in) != nil || !l.fits(len(body), in.MaxTokens) {
-		return in, nil, false
+// Reasons a request offered to the local model went to the cloud instead,
+// one per return point of serve: the fixed values of Meta.Fallthrough.
+const (
+	FallNotEligible  = "not_eligible"   // model, thinking, content or tools the local model does not take
+	FallTooLarge     = "too_large"      // the request does not fit the local model's context
+	FallBusy         = "busy"           // no queue slot within the wait
+	FallUnavailable  = "unavailable"    // the local server could not be reached, did not answer 200 or broke off
+	FallNoFirstChunk = "no_first_chunk" // the stream failed before its first chunk
+	FallBadAnswer    = "bad_answer"     // a held answer was not whole: a bad tool call or a cut-off answer
+)
+
+// translate builds the OpenAI-compatible request; when the request is not
+// one the local model should take, out is nil and reason says why.
+func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out []byte, reason string) {
+	if len(body) > maxLocalBody {
+		return in, nil, FallTooLarge
+	}
+	if json.Unmarshal(body, &in) != nil {
+		return in, nil, FallNotEligible
+	}
+	if !l.fits(len(body), in.MaxTokens) {
+		return in, nil, FallTooLarge
 	}
 	elig := l.Eligible
 	if elig == nil {
@@ -154,26 +171,26 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 		}
 	}
 	if !elig(in.Model) || len(in.Messages) == 0 || (in.Thinking.Type != "" && in.Thinking.Type != "disabled") {
-		return in, nil, false
+		return in, nil, FallNotEligible
 	}
 	var msgs []oaMsg
 	if present(in.System) {
 		sys, ok := text(in.System)
 		if !ok {
-			return in, nil, false
+			return in, nil, FallNotEligible
 		}
 		msgs = append(msgs, oaMsg{Role: "system", Content: sys})
 	}
 	for _, m := range in.Messages {
 		conv, ok := convertMessage(m)
 		if !ok {
-			return in, nil, false
+			return in, nil, FallNotEligible
 		}
 		msgs = append(msgs, conv...)
 	}
 	tools, choice, parallel, ok := convertTools(in.Tools, in.ToolChoice)
 	if !ok {
-		return in, nil, false
+		return in, nil, FallNotEligible
 	}
 	// include_usage makes the server report the tokens it used, so the
 	// gateway can say what a local answer saved.
@@ -200,15 +217,18 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 		req["stop"] = in.StopSequences
 	}
 	out, err := json.Marshal(req)
-	return in, out, err == nil
+	if err != nil {
+		return in, nil, FallNotEligible
+	}
+	return in, out, ""
 }
 
 // serve tries to answer from the local model. It returns false, with nothing
-// written, when the cloud should take the request.
-func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (Usage, bool) {
-	in, req, ok := l.translate(ctx, body)
-	if !ok {
-		return Usage{}, false
+// written and one of the Fall* reasons, when the cloud should take the request.
+func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (Usage, string, bool) {
+	in, req, reason := l.translate(ctx, body)
+	if req == nil {
+		return Usage{}, reason, false
 	}
 	release := func() {}
 	if l.Acquire != nil {
@@ -221,14 +241,14 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 		release, err = l.Acquire(qctx)
 		cancel()
 		if err != nil {
-			return Usage{}, false
+			return Usage{}, FallBusy, false
 		}
 	}
 	defer release()
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(l.BaseURL, "/")+"/chat/completions", bytes.NewReader(req))
 	if err != nil {
-		return Usage{}, false
+		return Usage{}, FallUnavailable, false
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if l.APIKey != "" {
@@ -236,11 +256,11 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 	}
 	resp, err := l.client().Do(httpReq)
 	if err != nil {
-		return Usage{}, false
+		return Usage{}, FallUnavailable, false
 	}
 	defer resp.Body.Close() //nolint:errcheck // read side
 	if resp.StatusCode != http.StatusOK {
-		return Usage{}, false
+		return Usage{}, FallUnavailable, false
 	}
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
@@ -253,20 +273,23 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 		// let the cloud take the request if the local model got it wrong.
 		first, more := next()
 		ans, ok := collect(first, more, next, declaredTools(in.Tools))
-		if !ok || sc.Err() != nil || (strict && !ans.complete()) {
-			return Usage{}, false
+		if sc.Err() != nil {
+			return Usage{}, FallUnavailable, false
+		}
+		if !ok || (strict && !ans.complete()) {
+			return Usage{}, FallBadAnswer, false
 		}
 		w.Header().Set(RouteHeader, "local")
 		if in.Stream {
-			return streamCollected(w, in.Model, ans), true
+			return streamCollected(w, in.Model, ans), "", true
 		}
-		return jsonCollected(w, in.Model, ans), true
+		return jsonCollected(w, in.Model, ans), "", true
 	}
 	// Wait for the first chunk before writing anything, so a model that
 	// fails to start still falls through to the cloud.
 	first, more := next()
 	if !more && sc.Err() != nil {
-		return Usage{}, false
+		return Usage{}, FallNoFirstChunk, false
 	}
 	w.Header().Set(RouteHeader, "local")
 	var u Usage
@@ -275,7 +298,7 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 	} else {
 		u = jsonAnswer(w, in.Model, first, more, next)
 	}
-	return u, true
+	return u, "", true
 }
 
 type toolDelta struct {

@@ -231,9 +231,10 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": set.Enabled, "local_first": set.LocalFirst, "available": s.cfg.Gateway})
 }
 
-// recordGateway counts one gateway request. Only the route, the status class
-// and sizes become metrics: never the model name, path or text.
-func recordGateway(ctx context.Context, m gateway.Meta, status int, _ time.Duration) {
+// recordGateway counts one gateway request. Only the route, the status class,
+// sizes, time taken and fall-through reason become metrics: never the model
+// name, path or text.
+func recordGateway(ctx context.Context, m gateway.Meta, status int, took time.Duration) {
 	route := m.Route
 	if route != "local" && route != "cloud" {
 		route = "rejected"
@@ -251,6 +252,8 @@ func recordGateway(ctx context.Context, m gateway.Meta, status int, _ time.Durat
 	telemetry.GatewayRequests.IncContext(ctx, tenant, route, class)
 	telemetry.GatewayBytes.AddContext(ctx, float64(m.Bytes), tenant, route, "in")
 	telemetry.GatewayBytes.AddContext(ctx, float64(m.Out), tenant, route, "out")
+	telemetry.RecordGatewayDuration(ctx, route, took)
+	telemetry.RecordGatewayFallthrough(ctx, m.Fallthrough)
 	if route != "local" {
 		return
 	}

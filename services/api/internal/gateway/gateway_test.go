@@ -180,13 +180,14 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 		body   string
 		status int
 		local  func(context.Context) (func(), error)
+		reason string
 	}{
-		"main model":   {`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`, 200, nil},
-		"server tool":  {`{"model":"claude-haiku-5-5","tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"hi"}]}`, 200, nil},
-		"has image":    {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"image"}]}]}`, 200, nil},
-		"local errors": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 500, nil},
+		"main model":   {`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallNotEligible},
+		"server tool":  {`{"model":"claude-haiku-5-5","tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallNotEligible},
+		"has image":    {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"image"}]}]}`, 200, nil, FallNotEligible},
+		"local errors": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 500, nil, FallUnavailable},
 		"queue timeout": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 200,
-			func(ctx context.Context) (func(), error) { <-ctx.Done(); return nil, ctx.Err() }},
+			func(ctx context.Context) (func(), error) { <-ctx.Done(); return nil, ctx.Err() }, FallBusy},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -198,12 +199,15 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 			g.Upstream = cloud.URL
 			l := &Local{BaseURL: loc.URL + "/v1", Model: "qwen", Acquire: tc.local, Wait: 20 * time.Millisecond}
 			g.Local = func() *Local { return l }
+			var meta Meta
+			g.Done = func(_ context.Context, m Meta, _ int, _ time.Duration) { meta = m }
 			rec := httptest.NewRecorder()
 			r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(tc.body))
 			r.Header.Set("X-Api-Key", "k")
 			g.Handler("/v1/messages")(rec, r)
 			assert.Equal(t, rec.Body.String(), "cloud")
 			assert.Equal(t, rec.Header().Get(RouteHeader), "cloud")
+			assert.Equal(t, meta.Fallthrough, tc.reason, "why the local model did not answer")
 		})
 	}
 }

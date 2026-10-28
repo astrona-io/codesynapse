@@ -14,6 +14,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/ghtools"
 	"github.com/astrona-io/codesynapse/internal/gittools"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
@@ -44,6 +45,9 @@ type localUsageReport struct {
 }
 
 func (s *Server) usageLocalRoutes() {
+	// mcp_local_answers_total names the tool, so the API accepts the same
+	// fixed set as validate; ToolLabel turns anything else into unknown.
+	telemetry.AllowTools(localTools()...)
 	s.route("POST /api/v1/usage/local", visibleOnly, s.handleLocalUsage)
 	s.route("POST /api/v1/usage/unindexed", anyone, s.handleUnindexedUsage)
 }
@@ -112,10 +116,12 @@ func (s *Server) handleUnindexedUsage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLocalUsage(w http.ResponseWriter, r *http.Request) {
 	var in localUsageReport
 	if err := decodeJSON(w, r, &in); err != nil {
+		telemetry.RecordLocalAnswer(r.Context(), "", telemetry.LocalRefused)
 		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
 	if err := in.validate(); err != nil {
+		telemetry.RecordLocalAnswer(r.Context(), in.Tool, telemetry.LocalRefused)
 		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
@@ -140,9 +146,12 @@ func (s *Server) handleLocalUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	// A local answer is audited like a tool call: it needs the chat's
 	// registered runtime session, and no entry means no answer.
-	if r, ok := s.executionRequest(w, r, true); ok {
-		s.auditLocal(w, r, in, e)
+	er, ok := s.executionRequest(w, r, true)
+	if !ok {
+		telemetry.RecordLocalAnswer(r.Context(), in.Tool, telemetry.LocalRefused)
+		return
 	}
+	s.auditLocal(w, er, in, e)
 }
 
 // auditLocal writes the mcp.local_answer entry of a local call in the
@@ -152,6 +161,7 @@ func (s *Server) auditLocal(w http.ResponseWriter, r *http.Request, in localUsag
 	p, _ := principal(r.Context())
 	id, err := execution.Require(r.Context())
 	if err != nil {
+		telemetry.RecordLocalAnswer(r.Context(), in.Tool, telemetry.LocalRefused)
 		s.problem(w, http.StatusForbidden, err)
 		return
 	}
@@ -166,6 +176,7 @@ func (s *Server) auditLocal(w http.ResponseWriter, r *http.Request, in localUsag
 	e.MCP.SessionID = id.SessionID
 	if _, err := s.cfg.Accounts.Record(r.Context(), e); err != nil {
 		s.logger.Error("audit log write failed", "action", e.Action, "error", err)
+		telemetry.RecordLocalAnswer(r.Context(), in.Tool, telemetry.LocalRefused)
 		s.problem(w, http.StatusServiceUnavailable, errors.New("the audit log could not record this call; ask the server instead"))
 		return
 	}
@@ -173,9 +184,11 @@ func (s *Server) auditLocal(w http.ResponseWriter, r *http.Request, in localUsag
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// countLocal adds a local call to the usage buckets. A failure loses only
-// the count: the call is already in the audit log.
+// countLocal adds a local call to the usage buckets and to
+// mcp_local_answers_total. A failure loses only the bucket: the call is
+// already in the audit log.
 func (s *Server) countLocal(r *http.Request, in localUsageReport, org, repo string) {
+	telemetry.RecordLocalAnswer(r.Context(), in.Tool, telemetry.LocalRecorded)
 	b := usage.Bucket{Day: usage.Day(time.Now()), Org: org, Repo: repo, Tool: in.Tool, Client: in.Client, Calls: 1,
 		ResponseTokens: in.ResponseTokens, DurationMs: in.DurationMs, MaxDurationMs: in.DurationMs}
 	if in.Failed {
@@ -189,9 +202,14 @@ func (s *Server) countLocal(r *http.Request, in localUsageReport, org, repo stri
 // localAnswerAction is the audit action of a call the bridge answered.
 const localAnswerAction = "mcp.local_answer"
 
+// localTools are the tools the bridge may answer on the developer's machine.
+func localTools() []string {
+	return slices.Concat(gittools.Tools, ghtools.Tools, coretools.Local, []string{asklocal.Tool, asklocal.DraftTool})
+}
+
 func (in localUsageReport) validate() error {
 	switch {
-	case !slices.Contains(gittools.Tools, in.Tool) && !slices.Contains(ghtools.Tools, in.Tool) && !slices.Contains(coretools.Local, in.Tool) && in.Tool != asklocal.Tool && in.Tool != asklocal.DraftTool:
+	case !slices.Contains(localTools(), in.Tool):
 		return fmt.Errorf("unknown local tool %q", in.Tool)
 	case !clientNameRe.MatchString(in.Client):
 		return errors.New("client must be a short lower-case name, e.g. claude-code")

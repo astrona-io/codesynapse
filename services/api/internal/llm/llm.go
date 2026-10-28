@@ -681,11 +681,7 @@ func pricesKnown(cfg ProviderConfig, resp Response) bool {
 func record(ctx context.Context, name string, cfg ProviderConfig, resp Response, err error) {
 	ctx = telemetry.WithModel(ctx, name, cfg.Model)
 	tenant, task := telemetry.Tenant(ctx), taskOf(ctx)
-	outcome := "ok"
-	if err != nil {
-		outcome = "error"
-	}
-	telemetry.LLMRequests.IncContext(ctx, tenant, name, cfg.Model, task, outcome)
+	telemetry.LLMRequests.IncContext(ctx, tenant, name, cfg.Model, task, outcomeOf(err))
 	telemetry.LLMDuration.ObserveContext(ctx, resp.Duration.Seconds(), tenant, name, cfg.Model)
 	if !resp.UsageKnown {
 		telemetry.LLMUsageUnknown.IncContext(ctx, tenant, name, cfg.Model)

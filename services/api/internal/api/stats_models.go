@@ -260,7 +260,9 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 			t := task(m, l["task"])
 			m.Requests += v
 			t.Requests += v
-			if l["outcome"] == "error" {
+			// Every outcome but ok is a failure: error, timeout, rate_limited
+			// and refused (docs/TELEMETRY_PLAN.md, phase 5).
+			if l["outcome"] != "ok" {
 				m.Failures += v
 				t.Failures += v
 			}
