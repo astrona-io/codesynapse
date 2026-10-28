@@ -474,6 +474,9 @@ services:
     environment:
       NUXT_API_BASE: http://api:8080
       NUXT_API_TOKEN: ${CODESYNAPSE_API_TOKEN}
+      CODESYNAPSE_METRICS_URL: http://victoriametrics:8428
+      CODESYNAPSE_METRICS_USER: codesynapse
+      CODESYNAPSE_METRICS_PASSWORD: ${METRICS_PASSWORD}
     ports:
       - "127.0.0.1:3000:3000"
     read_only: true

@@ -44,18 +44,21 @@ async function apiMode(base: string): Promise<'single' | 'accounts'> {
 export default defineEventHandler(async (event) => {
   const method = event.method.toUpperCase()
   if (!ALLOWED_METHODS.has(method)) {
+    recordProxy('refused')
     throw createError({ statusCode: 405, statusMessage: 'Method Not Allowed' })
   }
   // The raw path, not the router param: the param is already decoded, which
   // would turn owner%2Fname into two path elements.
   const path = getRequestURL(event).pathname.replace(/^\/api\/cg\//, '')
   if (!SAFE_PATH.test(path) || hasDotSegment(path)) {
+    recordProxy('refused')
     throw createError({ statusCode: 400, statusMessage: 'Bad path' })
   }
   if (method !== 'GET') {
     const origin = getRequestHeader(event, 'origin')
     const host = getRequestHeader(event, 'host')
     if (!origin || !host || new URL(origin).host !== host) {
+      recordProxy('refused')
       throw createError({ statusCode: 403, statusMessage: 'Cross-origin request rejected' })
     }
   }
@@ -91,11 +94,27 @@ export default defineEventHandler(async (event) => {
     try {
       body = await readBounded(getRequestWebStream(event), Number(maxBodyBytes), getRequestHeader(event, 'content-length'))
     } catch (e) {
-      if (e instanceof BodyTooLarge) throw createError({ statusCode: 413, statusMessage: 'Request body too large' })
+      if (e instanceof BodyTooLarge) {
+        recordProxy('refused')
+        throw createError({ statusCode: 413, statusMessage: 'Request body too large' })
+      }
       throw e
     }
   }
-  const res = await fetch(target, { method, headers, body, redirect: 'error', signal: AbortSignal.timeout(120_000) })
+  let res: Response
+  let answer: Uint8Array<ArrayBuffer> | null
+  try {
+    res = await fetch(target, { method, headers, body, redirect: 'error', signal: AbortSignal.timeout(120_000) })
+    answer = res.status === 204 ? null : new Uint8Array(await res.arrayBuffer())
+  } catch (e) {
+    // The API never answered (or stopped mid-answer). Counted by kind for
+    // the platform panels; the visitor gets a gateway error, not the cause.
+    const outcome = proxyFailure(e)
+    recordProxy(outcome)
+    if (outcome === 'timeout') throw createError({ statusCode: 504, statusMessage: 'The API did not answer in time' })
+    throw createError({ statusCode: 502, statusMessage: 'The API could not be reached' })
+  }
+  recordProxy('ok')
   setResponseStatus(event, res.status)
   const ct = res.headers.get('content-type')
   if (ct) setResponseHeader(event, 'content-type', ct)
@@ -108,5 +127,5 @@ export default defineEventHandler(async (event) => {
     if (c.startsWith(`${SESSION_COOKIE}=`) || (c.startsWith(`${SSO_COOKIE}=`) && SSO_PATH.test(path))) appendResponseHeader(event, 'set-cookie', c)
   }
   setResponseHeader(event, 'cache-control', 'no-store')
-  return res.status === 204 ? null : new Uint8Array(await res.arrayBuffer())
+  return answer
 })
