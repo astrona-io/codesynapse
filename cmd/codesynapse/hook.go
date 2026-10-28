@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,7 +24,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/astrona-io/codesynapse/internal/app"
+	"github.com/astrona-io/codesynapse/internal/asklocal"
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
@@ -31,11 +35,11 @@ import (
 // fail a session: any problem means "no opinion" and exit 0.
 //
 //   - hook read (PreToolUse on Read): the first time in a session the agent
-//     reads all of a large file, it is turned back with the file's outline
+//     reads all of a large file git tracks, it is turned back with the file's outline
 //     and line ranges, and pointed at ask_local to have a local model read
 //     it, so it reads only what it needs. Reading it again is
 //     allowed: the guard nudges, it does not forbid.
-//   - hook stop (Stop): when the working tree changed since the last check,
+//   - hook stop (Stop): when the session changed files since the last check,
 //     the agent is asked once to run verify_plan and get_pr_context before
 //     it finishes. The tools do the work (through the bridge's cached
 //     working-tree graph), so the hook itself stays instant.
@@ -70,8 +74,11 @@ type toolHookInput struct {
 	SessionID      string `json:"session_id"`
 	Cwd            string `json:"cwd"`
 	StopHookActive bool   `json:"stop_hook_active"`
-	ToolName       string `json:"tool_name"`
-	ToolInput      struct {
+	// AgentID is set when the hook fires inside a subagent (Claude Code).
+	AgentID   string `json:"agent_id"`
+	Source    string `json:"source"` // SessionStart: startup, resume, clear or compact
+	ToolName  string `json:"tool_name"`
+	ToolInput struct {
 		OldString string `json:"old_string"`
 		NewString string `json:"new_string"`
 		Content   string `json:"content"`
@@ -106,6 +113,9 @@ type hookState struct {
 	Reported workflowSent `json:"reported,omitempty"`
 	// Base is the checkout as the session began (edits.go).
 	Base *treeBase `json:"base,omitempty"`
+	// EditDirs are the directories the session's own agent edited files in
+	// (stop.go), so Stop knows which checkouts it worked in.
+	EditDirs []string `json:"edit_dirs,omitempty"`
 	// Bash counts the shell commands CodeSynapse answers with less output, per
 	// usage class; Hinted are the classes already hinted, BashSent what Stop
 	// has reported (bash.go).
@@ -202,7 +212,7 @@ func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 	started := time.Now()
 	switch o.event {
 	case "read":
-		out = readGuard(in)
+		out = readGuard(ctx, in)
 	case "stop":
 		reportRetrieval(ctx, in, o.EC.Logger)
 		captureCase(ctx, in, o.EC.Logger)
@@ -237,7 +247,7 @@ func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 }
 
 // readGuard turns back the first whole read of a large file in a session.
-func readGuard(in toolHookInput) map[string]any {
+func readGuard(ctx context.Context, in toolHookInput) map[string]any {
 	limit := readGuardLines
 	if v, err := strconv.Atoi(os.Getenv("CODESYNAPSE_READ_GUARD_LINES")); err == nil {
 		limit = v
@@ -247,7 +257,7 @@ func readGuard(in toolHookInput) map[string]any {
 		return nil
 	}
 	lines := countLines(file, limit)
-	if lines < limit {
+	if lines < limit || !guardable(ctx, file) {
 		return nil
 	}
 	state := stateFile(in.SessionID)
@@ -270,6 +280,23 @@ func readGuard(in toolHookInput) map[string]any {
 	return map[string]any{"hookSpecificOutput": map[string]any{
 		"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": b.String(),
 	}}
+}
+
+// guardable reports a file the turned-back read can point somewhere useful
+// for: one git tracks (ask_local reads only those, and the graph indexes
+// only those), and, unless CodeSynapse indexes its kind, small enough for
+// ask_local. A saved tool output, a log or a scratch file outside a checkout
+// is read as asked: nothing the guard suggests could answer for it.
+func guardable(ctx context.Context, file string) bool {
+	if !filepath.IsAbs(file) {
+		return false
+	}
+	st, err := os.Stat(file)
+	if err != nil || !st.Mode().IsRegular() || !indexable(file) && st.Size() > asklocal.MaxFileBytes {
+		return false
+	}
+	_, err = gitx.Run(ctx, filepath.Dir(file), "ls-files", "--error-unmatch", "--", filepath.Base(file))
+	return err == nil
 }
 
 // countLines counts up to stop lines (it only needs to know "large").
@@ -341,59 +368,110 @@ func exprString(e ast.Expr) string {
 	return "?"
 }
 
-// stopGuard asks for a check once per state of the working tree.
+// stopGuard asks for a check once per state of what the session changed. It
+// asks only about the session's own work that the tools can answer for: in
+// the checkout the session began in (the one the bridge answers for, so no
+// arguments are needed) and in other worktrees of the same repository the
+// session's agent edited (there the files are named, since no arguments
+// would answer for the start checkout). Changes that were there when the
+// session began, a start checkout someone else edits while the session works
+// elsewhere, other repositories and subagent worktrees are left alone.
 func stopGuard(ctx context.Context, in toolHookInput, logger *slog.Logger) map[string]any {
-	if in.StopHookActive || in.Cwd == "" {
-		return nil // already continuing because of a stop hook
+	if in.StopHookActive || in.Cwd == "" || in.AgentID != "" {
+		return nil // already continuing because of a stop hook, or a subagent's
 	}
 	w := newWorktree(ctx, in.Cwd, "", logger)
 	if w == nil {
 		return nil
-	}
-	change := stopChanges(ctx, w.root)
-	if change.Key == "" {
-		return nil // nothing CodeSynapse can say anything about
 	}
 	state := stateFile(in.SessionID)
 	if state == "" {
 		return nil
 	}
 	s := loadState(state)
-	if s.Stop == change.Key {
-		return nil // this tree was checked already, or is how the session began
+	inStart, elsewhere, siblings := editedTrees(ctx, w.root, s.EditDirs)
+	var change stopChange
+	if inStart || !elsewhere {
+		// A session that edited only other checkouts did not make the start
+		// checkout's changes: the person works there meanwhile.
+		change = stopChanges(ctx, w.root, s.Base)
 	}
-	s.Stop = change.Key
+	type tree struct {
+		root   string
+		change stopChange
+	}
+	var others []tree
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "%s\x00", change.Key) //nolint:errcheck // hashes never fail
+	for _, root := range siblings {
+		if c := stopChanges(ctx, root, nil); c.Key != "" {
+			others = append(others, tree{root, c})
+			_, _ = fmt.Fprintf(h, "%s\x00%s\x00", root, c.Key) //nolint:errcheck // hashes never fail
+		}
+	}
+	if change.Key == "" && len(others) == 0 {
+		return nil // nothing of this session CodeSynapse can say anything about
+	}
+	key := change.Key
+	if len(others) > 0 {
+		key = hex.EncodeToString(h.Sum(nil))
+	}
+	if s.Stop == key {
+		return nil // this state was checked already, or is how the session began
+	}
+	s.Stop = key
 	saveState(state, s)
+	problems := change.Problems
+	for _, t := range others {
+		for _, p := range t.change.Problems {
+			problems = append(problems, filepath.Base(t.root)+": "+p)
+		}
+	}
 	repo := w.repo
-	notice := ""
 	if name, known, indexing := serverRepo(ctx, in, w.root, w.repo); !known {
 		// verify_plan and get_pr_context answer "not found" for a checkout the
 		// server has not indexed, so asking for them only wastes a turn. Say so
 		// in the chat (systemMessage) rather than finishing without a word.
-		notice = fmt.Sprintf("CodeSynapse skipped its pre-finish check: %s is not in the server's index, so verify_plan and get_pr_context cannot answer for it. Add it to get the check.", w.repo)
+		notice := fmt.Sprintf("CodeSynapse skipped its pre-finish check: %s is not in the server's index, so verify_plan and get_pr_context cannot answer for it. Add it to get the check.", w.repo)
 		if indexing {
 			notice = fmt.Sprintf("CodeSynapse skipped its pre-finish check: %s is queued or being indexed. verify_plan and get_pr_context answer for it once the ingest finishes.", w.repo)
 		}
-		if len(change.Problems) == 0 {
+		if len(problems) == 0 {
 			return map[string]any{"systemMessage": notice}
 		}
 		return map[string]any{
 			"decision":      "block",
-			"reason":        "Fix these first:\n- " + strings.Join(change.Problems, "\n- "),
+			"reason":        "Fix these first:\n- " + strings.Join(problems, "\n- "),
 			"systemMessage": notice,
 		}
 	} else if name != "" {
 		repo = name // the server may know the checkout by another name than its remote
 	}
-	reason := fmt.Sprintf("Before you finish: %d file(s) in %s changed since CodeSynapse last checked. "+
-		"Call verify_plan (no arguments: your current change) and run the commands it lists; "+
-		"call get_pr_context (no arguments) and fix any finding its security_delta lists as introduced. "+
-		"Then finish. If the CodeSynapse tools are not available, finish now.", change.Files, repo)
-	if len(change.Problems) > 0 {
+	var b strings.Builder
+	if len(problems) > 0 {
 		// Found by parsing and formatting the changed Go files here.
-		reason = "Fix these first:\n- " + strings.Join(change.Problems, "\n- ") + "\n\n" + reason
+		b.WriteString("Fix these first:\n- " + strings.Join(problems, "\n- ") + "\n\n")
 	}
-	return map[string]any{"decision": "block", "reason": reason}
+	b.WriteString("Before you finish:")
+	if change.Key != "" {
+		fmt.Fprintf(&b, " %d file(s) in %s changed since CodeSynapse last checked. "+
+			"Call verify_plan (no arguments: your current change) and run the commands it lists; "+
+			"call get_pr_context (no arguments) and fix any finding its security_delta lists as introduced.", change.Files, repo)
+	}
+	for _, t := range others {
+		// The bridge answers no-argument calls for the start checkout, so a
+		// change in another worktree is named file by file.
+		files, _ := json.Marshal(t.change.Paths) //nolint:errcheck // a list of strings
+		fmt.Fprintf(&b, " %d file(s) of %s changed in the worktree %s, not in %s where this session started, "+
+			"so calls with no arguments would check the wrong tree. Call verify_plan with files %s and run the commands it lists in %s; "+
+			"call get_pr_context with the same files and fix any finding its security_delta lists as introduced.",
+			t.change.Files, repo, t.root, w.root, files, t.root)
+		if t.change.Files > len(t.change.Paths) {
+			fmt.Fprintf(&b, " Only the first %d files are named.", len(t.change.Paths))
+		}
+	}
+	b.WriteString(" Then finish. If the CodeSynapse tools are not available, finish now.")
+	return map[string]any{"decision": "block", "reason": b.String()}
 }
 
 // serverRepo asks the server which indexed repository root is. known is false
