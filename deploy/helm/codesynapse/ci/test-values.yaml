@@ -23,3 +23,6 @@ worker:
   egressAllow:
     - {cidr: 10.20.0.0/24, ports: [5432]}
     - {cidr: 10.30.0.5/32}
+# vmalert renders too (off by default).
+alerting:
+  enabled: true

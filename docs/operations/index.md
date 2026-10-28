@@ -13,7 +13,7 @@ For the people who run CodeSynapse for a team.
 
     Run it, release it, upgrade it.
 
-    [Requirements](requirements.md) · [Running the stack](running.md) · [Local models](local-models.md) · [Releasing](releasing.md) · [Upgrading](upgrading.md)
+    [Requirements](requirements.md) · [Running the stack](running.md) · [Local models](local-models.md) · [Alerting](alerting.md) · [Releasing](releasing.md) · [Upgrading](upgrading.md)
 
 - **People and access**
 

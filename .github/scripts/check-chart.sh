@@ -17,7 +17,9 @@ helm template codesynapse "$chart" -f "$chart/ci/kind-values.yaml" > /dev/null
 helm template codesynapse "$chart" -f "$values" \
     --set postgresql.enabled=false,nebula.enabled=false,milvus.enabled=false \
     --set victoriametrics.enabled=false,victoriatraces.enabled=false,victorialogs.enabled=false \
-    --set nebula.externalAddrs=nebula.example.com:9669 > /dev/null
+    --set nebula.externalAddrs=nebula.example.com:9669 \
+    --set victoriametrics.externalURL=https://metrics.example.com > "$out/external.yaml"
+grep -q -- '-datasource.url=https://metrics.example.com' "$out/external.yaml"
 
 # values.schema.json (and each store's) must refuse what the chart would
 # ignore or break on: unknown keys, wrong types, invalid enums.
@@ -42,6 +44,29 @@ if helm template codesynapse "$chart" -f "$values" --set auditArchive.s3.endpoin
     echo "chart rendered the audit archive without a bucket" >&2
     exit 1
 fi
+
+# Alerting (on in the test values): vmalert gets every rule file, reads the
+# receiver from the Secret only, and the metrics store admits it. Off, nothing
+# of it renders. Without a metrics store it refuses to render.
+for want in 'name: codesynapse-vmalert' 'key: ALERTMANAGER_URL' 'telemetry.yaml: |' 'stores.yaml: |' 'jobs.yaml: |'; do
+    grep -q "$want" "$out/rendered.yaml" || { echo "alerting: rendered chart lacks $want" >&2; exit 1; }
+done
+if grep -q 'alerts.test.yaml' "$out/rendered.yaml"; then echo "alerting: rule tests rendered as rules" >&2; exit 1; fi
+helm template codesynapse "$chart" -f "$values" --set alerting.enabled=false > "$out/no-alerting.yaml"
+if grep -q -e "name: codesynapse-vmalert" -e "image: .*/vmalert:" "$out/no-alerting.yaml"; then echo "vmalert rendered with alerting off" >&2; exit 1; fi
+helm template codesynapse "$chart" -f "$values" --set alerting.existingSecret=alertmanager > "$out/alert-secret.yaml"
+grep -q 'name: alertmanager, key: ALERTMANAGER_URL' "$out/alert-secret.yaml"
+if helm template codesynapse "$chart" -f "$values" --set victoriametrics.enabled=false > /dev/null 2>&1; then
+    echo "chart rendered alerting without a metrics store" >&2
+    exit 1
+fi
+for bad in alerting.enabled=maybe alerting.extra=1 alerting.evaluationInterval=soon alerting.image=vmalert:latest \
+    alerting.existingSecret=Not_A_Name alerting.resources.limits.memory=lots; do
+    if helm template codesynapse "$chart" -f "$values" --set "$bad" > /dev/null 2>&1; then
+        echo "values.schema.json accepted $bad" >&2
+        exit 1
+    fi
+done
 
 # Queue scaling renders the object of the tool the cluster has, and only that
 # one; the fix worker is never scaled. The CRD of KEDA is not installed here,

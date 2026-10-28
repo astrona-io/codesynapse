@@ -283,7 +283,7 @@ Decided: the smaller bucket set for the high-cardinality families, together with
 Ordered by value for the effort. Each phase is one pull request with its panels, a test that labels stay inside their sets, a test that a sample without a tenant becomes `platform_`, and the VictoriaMetrics integration check.
 
 1. **See the platform** (small, done). Items 4, 5, 21, 22 and 23; a platform panel for `telemetry_dropped_series_total` and `platform_log_lines_dropped_total`; panels for the existing API request metrics and job queue gauges. No new tenant series.
-2. **Alerting** (medium). Optional vmalert, under the rules in decision 1, with the first rules (see "Alerting" below). It comes after phase 1 because most of its first rules read phase 1 metrics; each later phase adds the rules named for its instruments in the table.
+2. **Alerting** (medium, shipped). Optional vmalert, under the rules in decision 1, with the first rules (see "Alerting" below). It comes after phase 1 because most of its first rules read phase 1 metrics; each later phase adds the rules named for its instruments in the table.
 3. **Jobs and indexing** (medium, shipped). Items 1, 2, 3, 6 and 7, and panels for the existing `ingest_runs_total` and `ingest_duration_seconds` on Statistics → Sync.
 4. **Outbound calls and security events** (medium). Items 8 to 15. Sign-in counters are mostly platform series, because most failures have no trusted tenant.
 5. **Sharper existing families** (small). Items 16 to 20, and the cap decision applied to `mcp_tool_duration_seconds` and `http_request_duration_seconds`. New outcome values change what the `tool_errors` and `llm_provider_failures` panels count, so the same change updates those panel queries and their help text.
@@ -312,14 +312,14 @@ Ordered by value for the effort. Each phase is one pull request with its panels,
 
 ### Alerting
 
-Phase 2 adds alerting for operators. It is off by default.
+Phase 2 adds alerting for operators. It is off by default. Status: shipped (vmalert v1.155.0); how to turn it on is in [Alerting](operations/alerting.md).
 
-- **Component.** A `vmalert` service in `docker-compose.yml` (behind a profile) and a chart toggle, following the `victoriametrics` subchart: pinned image, internal only, no published port, `values.schema.json` updated in the same change. It reads from the internal VictoriaMetrics with the existing read credentials.
-- **Receiver.** Any Alertmanager-compatible endpoint the operator names. URL and credentials come from the environment (Compose) or an existing Secret (chart). CodeSynapse ships no receiver of its own.
-- **Rules as files.** Rules live in `deploy/alerts/*.yaml`, are mounted read-only into vmalert and packaged with the chart. `just checks` validates them with `vmalert -dryRun`, and `just chart-check` renders the chart with alerting on and off.
-- **What alerts may say.** Rules read `platform_*` metrics, or aggregate tenant series with `sum without (tenant_id, ...)`. Alert labels and annotations never carry repository names, paths, users, API keys, sessions or other request content. `tenant_id` may appear only on alerts routed to platform operators, and only as the opaque ID. Annotations are constant text with the value; they link to the Statistics panel, not to a tenant's data.
+- **Component.** A `vmalert` service in `docker-compose.yml` behind the `alerting` profile (`COMPOSE_PROFILES=alerting just up`), and `alerting.enabled` in the parent chart (`templates/alerting.yaml`, not a subchart, because it needs the chart's metrics URL, public URL and environment): pinned image, one replica, internal only, no published port, a NetworkPolicy that refuses every connection to it, and `values.schema.json` updated in the same change. The metrics store's policy admits it. It reads from VictoriaMetrics with the existing read credentials (`METRICS_PASSWORD`).
+- **Receiver.** Any Alertmanager-compatible endpoint the operator names. `ALERTMANAGER_URL` (required) and optionally `ALERTMANAGER_USERNAME`/`ALERTMANAGER_PASSWORD` or `ALERTMANAGER_BEARER_TOKEN` come from the environment (Compose) or a Secret (chart, `alerting.existingSecret` or `global.existingSecret`), and reach vmalert as environment (`-envflag.enable`), never as flags. An empty URL stops vmalert at start. CodeSynapse ships no receiver of its own.
+- **Rules as files.** Rules live in `deploy/alerts/*.yaml`, are mounted read-only into vmalert and packaged with the chart (`deploy/helm/codesynapse/alerts` links to that directory). `just lint-alerts` (part of `just checks`, a CI step) runs `vmalert -dryRun`, the unit tests in `deploy/alerts/tests` with vmalert-tool, and a label guard; both images are the release Compose ships. `just chart-check` renders the chart with alerting on and off.
+- **What alerts may say.** Rules read `platform_*` metrics, or aggregate tenant series with `sum by` or `max by` over an allowlist of labels (`metric`, `reason`, `db_system`, `le`, `kind`); the label guard refuses `without`, any other grouping label and an expression without aggregation, so `tenant_id` never reaches an alert. Alert labels and annotations never carry repository names, paths, users, API keys, sessions or other request content. Annotations are constant text with the value and the label above; they link to the Statistics page (`-external.url`), not to a tenant's data.
 
-The initial rules:
+The rules as first planned:
 
 | Rule | Reads | Fires when |
 |---|---|---|
@@ -332,7 +332,33 @@ The initial rules:
 | Store latency | `db_query_duration_seconds`, summed over tenants, per `db_system` | p95 above 1 s for 10 minutes |
 | Store errors | `db_query_errors_total` and timeouts, summed over tenants, per `db_system` | error share above 5% for 10 minutes |
 
-Phase 2 ships the lease, export, overflow and store rules, whose metrics exist after phase 1. The job failure rule ships with phase 3 and the audit write rule with phase 4, the phases that record those metrics, so no rule reads a metric that does not exist yet. The rest of the alert column in the instrument table follows the same way.
+Phase 2 shipped before phase 1 merged, so it ships only rules whose metrics already exist; no rule reads a metric that does not exist yet.
+
+Shipped in phase 2:
+
+| Rule | File | Reads | Fires when |
+|---|---|---|---|
+| `CodeSynapseSeriesCapOverflow` | `telemetry.yaml` | `telemetry_dropped_series_total`, per `metric` | any increase in 1 hour |
+| `CodeSynapseLogShippingDropping` | `telemetry.yaml` | `platform_log_lines_dropped_total`, per `reason` | any increase in 10 minutes, for 15 minutes |
+| `CodeSynapseIngestMetricsRejected` | `telemetry.yaml` | `platform_ingest_metric_export_rejections_total`, per `reason` | any increase in 1 hour |
+| `CodeSynapseIngestMetricsCapacity` | `telemetry.yaml` | `platform_codesynapse_ingest_metric_series_dropped_total` | any increase in 1 hour |
+| `CodeSynapseStoreSlow` | `stores.yaml` | `db_query_duration_seconds` and its `platform_` twin, summed per `db_system` | p95 above 1 s for 10 minutes |
+| `CodeSynapseStoreErrors` | `stores.yaml` | `db_query_errors_total` over `db_query_duration_seconds_count` (and `platform_` twins), per `db_system` | error share above 5% for 10 minutes, with at least one call a minute; timeouts are already errors, so they are not added again |
+| `CodeSynapseSchedulerLeaseLost` | `jobs.yaml` | `platform_codesynapse_lease_events_total{lease="api_loops",event="lost"}`, summed | any increase in 15 minutes (added once phase 1 merged) |
+| `CodeSynapseNoSchedulerHolder` | `jobs.yaml` | `platform_codesynapse_loops_lease_held`, summed over instances (no report counts as 0) | below 1 for 10 minutes (added once phase 1 merged) |
+| `CodeSynapseMetricsExportFailing` | `telemetry.yaml` | `platform_telemetry_export_failures_total`, per `exporter` | any increase in 10 minutes, for 15 minutes (added once phase 1 merged) |
+| `CodeSynapseJobFailureRate` | `jobs.yaml` | `codesynapse_jobs_finished_total` and its `platform_` twin, `error` over all outcomes per `kind` | share above 20% over 30 minutes, with at least 10 jobs (added once phase 3 merged) |
+| `CodeSynapseJobsNotClaimed` | `jobs.yaml` | `platform_codesynapse_jobs_waiting` and `_active`, maximum per `kind` | jobs wait and none of that kind runs, for 15 minutes |
+
+`CodeSynapseJobsNotClaimed` was not in the first list: the queue gauges already exist and a missing worker role (the fix worker is off by default) is the commonest reason jobs stall.
+
+Waiting on later phases (added with the phase that records the metric, with a unit test in `deploy/alerts/tests`):
+
+| Rule | Waits on |
+|---|---|
+| Audit write failures | phase 4 (audit writes by outcome) |
+
+The rest of the alert column in the instrument table follows the same way.
 
 ### Decisions (2026-10-28)
 

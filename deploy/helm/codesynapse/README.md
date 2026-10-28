@@ -82,6 +82,7 @@ Every value is described and type-checked in `values.schema.json` (each store's 
 | `<store>.enabled`, `<store>.externalURL` | in-chart | See [Stores](#stores) |
 | `features.allowPush` | `false` | Fix branches for accepted review comments |
 | `traces.sample` | `1` | Share of new traces kept |
+| `alerting.enabled`, `alerting.existingSecret` | `false`, empty | vmalert with the rules in `alerts/`, sending to the receiver in `ALERTMANAGER_URL` (plus optional `ALERTMANAGER_USERNAME`/`ALERTMANAGER_PASSWORD` or `ALERTMANAGER_BEARER_TOKEN`) from that Secret, or `global.existingSecret` when empty. Needs a metrics store. See [Alerting](https://github.com/astrona-io/codesynapse/blob/main/docs/operations/alerting.md) |
 | `llmConfig` | empty | The content of `config/llm.yaml`; keys go in the Secret |
 
 ## Stores

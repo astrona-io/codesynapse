@@ -265,6 +265,8 @@ Traces go to [VictoriaTraces](https://docs.victoriametrics.com/victoriatraces/) 
 
 Log lines of every service also go to [VictoriaLogs](https://docs.victoriametrics.com/victorialogs/) (Apache-2.0), still written to stderr as before. Search them at http://localhost:9428/select/vmui with the same login, for example `service:codesynapse-api AND trace_id:<id>` for one request. The structured `audit` lines are there too, with actor emails and client addresses, so treat the store like the audit log: keep it internal and give only operators the password. Lines are kept for `LOGS_RETENTION` (default 30 days); the hash-chained audit log in PostgreSQL stays the record. See [logs](../TELEMETRY_PLAN.md#logs).
 
+Alerts for operators are optional: `COMPOSE_PROFILES=alerting just up` adds vmalert, which checks rules in `deploy/alerts` against VictoriaMetrics and sends what fires to the Alertmanager-compatible receiver in `ALERTMANAGER_URL`. See [Alerting](alerting.md).
+
 ## Building this documentation
 
 ```sh

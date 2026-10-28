@@ -30,12 +30,16 @@ Some numbers are estimates and are labelled so: cost depends on the prices you c
 
 No metric holds prompts, answers, source code, file paths, repository names, branch names, people, email addresses, API keys, session IDs or client addresses. Labels only take values from fixed lists, such as the names of CodeSynapse's own tools or the models you configured. The one exception is the per-repository file counts on the Ingestion page, which use an opaque ID, not the repository name.
 
+## Alerts for operators
+
+Whoever runs the installation can turn on alerts: an optional vmalert checks rules against these numbers every minute and sends what fires to an Alertmanager-compatible receiver they run. The first rules cover slow or failing databases, jobs no worker picks up, and metrics or logs being lost. Alerts add up organisations and never name repositories, files or people. [Alerting](../operations/alerting.md) explains how to turn it on.
+
 ## What is planned
 
 Some parts of CodeSynapse have no live numbers yet. The [metrics coverage plan](../TELEMETRY_PLAN.md#metrics-coverage-plan) lists them and the order in which they will be added:
 
 1. **Platform health** for operators (done): see the table above and Administration → Overview.
-2. **Alerts for operators**: an optional vmalert that checks rules against these numbers and sends alerts to the operator's own Alertmanager-compatible receiver. Alerts never name repositories, files or people.
+2. **More operator alerts**: failing audit-log writes, once those writes are counted.
 3. **Background jobs and indexing** (available now, see the table above).
 4. **Outside services and security events**: git clone and fetch, vulnerability and licence lookups, sign-in attempts and rate limits, and audit-log writes.
 5. **Sharper existing numbers**: refused tool calls apart from errors, model timeouts and rate limits, gateway latency and why a request left the local model, and tool calls answered on your own machine by the Claude Code bridge. The Statistics panels that count failures change in the same release, so a refused call is no longer shown as an error.

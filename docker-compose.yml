@@ -136,6 +136,46 @@ services:
       timeout: 3s
       retries: 20
 
+  # Alerts for operators (docs/operations/alerting.md), off unless the
+  # "alerting" profile is on: COMPOSE_PROFILES=alerting just up. Evaluates
+  # deploy/alerts/*.yaml against VictoriaMetrics and sends to the
+  # Alertmanager-compatible receiver in ALERTMANAGER_URL (.env). Credentials
+  # reach it as environment (-envflag.enable), never as arguments, and it
+  # listens on loopback inside its container only.
+  vmalert:
+    image: quay.io/victoriametrics/vmalert:v1.155.0
+    profiles: [alerting]
+    user: "65534:65534"
+    command:
+      - -envflag.enable
+      - -rule=/etc/codesynapse/alerts/*.yaml
+      - -datasource.url=http://victoriametrics:8428
+      - -datasource.basicAuth.username=codesynapse
+      - -external.url=${CODESYNAPSE_PUBLIC_URL:-http://localhost:3000}
+      - -external.alert.source=stats
+      - -httpListenAddr=127.0.0.1:8880
+    environment:
+      datasource_basicAuth_password: ${METRICS_PASSWORD:?run "just init" to add METRICS_PASSWORD to .env}
+      # Empty values send no credentials. Set a user and password, or a
+      # bearer token, not both.
+      notifier_url: ${ALERTMANAGER_URL:-}
+      notifier_basicAuth_username: ${ALERTMANAGER_USERNAME:-}
+      notifier_basicAuth_password: ${ALERTMANAGER_PASSWORD:-}
+      notifier_bearerToken: ${ALERTMANAGER_BEARER_TOKEN:-}
+    volumes:
+      - ./deploy/alerts:/etc/codesynapse/alerts:ro
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8880/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      victoriametrics:
+        condition: service_healthy
+
   # Traces: one request followed through the API, its job, the worker, the
   # graph store and model calls (docs/SAAS.md, 5e). Spans carry no content.
   # Search them at http://localhost:10428/select/vmui (same login as metrics).
