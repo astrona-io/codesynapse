@@ -2,14 +2,26 @@
 import type { ArchIssue, ArchPage, ArchProposal } from '~/utils/types'
 
 const route = useRoute()
+const router = useRouter()
 const repo = computed(() => route.params.repo as string)
 useHead({ title: () => `Architecture · ${repo.value}` })
 
-const type = ref('')
-const status = ref('')
-const component = ref('')
-const q = ref('')
-const bindingOnly = ref(false)
+// Filters live in the URL, so links, reloads and Back keep them.
+const fromQuery = (k: string) => { const v = route.query[k]; return typeof v === 'string' ? v : '' }
+const type = ref(fromQuery('type'))
+const status = ref(fromQuery('status'))
+const component = ref(fromQuery('component'))
+const q = ref(fromQuery('q'))
+const bindingOnly = ref(fromQuery('binding') === '1')
+watch([type, status, component, q, bindingOnly], ([t, s, c, text, b]) => {
+  const next = { ...route.query, type: t || undefined, status: s || undefined, component: c || undefined, q: text.trim() || undefined, binding: b ? '1' : undefined }
+  if (['type', 'status', 'component', 'q', 'binding'].some((k) => (next as Record<string, unknown>)[k] !== route.query[k])) void router.replace({ query: next })
+})
+watch(() => route.query, () => {
+  type.value = fromQuery('type'); status.value = fromQuery('status'); component.value = fromQuery('component')
+  if (fromQuery('q') !== q.value.trim()) q.value = fromQuery('q')
+  bindingOnly.value = fromQuery('binding') === '1'
+})
 const offset = ref(0)
 const LIMIT = 25
 const query = computed(() => {
@@ -29,6 +41,8 @@ const { data: proposalData, refresh: refreshProposals } = useApiGet<{ proposals:
 const proposals = computed(() => (proposalData.value?.proposals ?? []).filter((p) => p.state !== 'withdrawn'))
 const form = reactive({ type: 'adr', title: '', body: '', topic: '', components: '', supersedes: '', implements: '' })
 const formError = ref('')
+const listError = ref('')
+watch(repo, () => { formError.value = ''; listError.value = '' })
 const saving = ref(false)
 const list = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean)
 async function propose() {
@@ -47,15 +61,17 @@ async function propose() {
     saving.value = false
   }
 }
-async function withdraw(id: string) {
+async function withdraw(id: string, title: string) {
+  if (!confirm(`Withdraw the proposal “${title}”?`)) return
+  listError.value = ''
   try {
-    await apiPost(repoPath(repo.value, `architecture/proposals/${id}/withdraw`), {})
+    await apiPost(repoPath(repo.value, `architecture/proposals/${encodeURIComponent(id)}/withdraw`), {})
     await refreshProposals()
   } catch (e) {
-    formError.value = apiErrorMessage(e)
+    listError.value = apiErrorMessage(e)
   }
 }
-const exportHref = (id: string) => apiPath(repoPath(repo.value, `architecture/proposals/${id}/export`))
+const exportHref = (id: string) => apiPath(repoPath(repo.value, `architecture/proposals/${encodeURIComponent(id)}/export`))
 const TYPE: Record<string, string> = { adr: 'Decisions (ADR)', rfc: 'RFCs', standard: 'Standards', policy: 'Policies', overview: 'Overviews', runbook: 'Runbooks', diagram: 'Diagrams' }
 const total = computed(() => Object.values(page.value?.facets.types ?? {}).reduce((a, b) => a + b, 0))
 const inForce = computed(() => (page.value?.entries ?? []).filter((e) => e.binding).length)
@@ -87,7 +103,7 @@ implements: [internal/store]
       <SyncControl :repo="repo" />
     </PageHeader>
 
-    <p v-if="error" class="notice notice--danger">{{ apiErrorMessage(error) }}</p>
+    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="page">
       <p class="muted small">
         Indexed at commit <span class="mono">{{ page.source.head?.slice(0, 8) || 'unknown' }}</span>
@@ -104,10 +120,10 @@ implements: [internal/store]
 
       <template v-else>
         <div class="grid cols-4">
-          <StatTile label="Records" :value="String(total)" :hint="`${page.total} match the filters`" />
-          <StatTile label="Rules in force on this page" :value="String(inForce)" hint="accepted decisions and active standards" />
-          <StatTile label="Needs a look" :value="String(issuesData?.issues.length ?? page.issues)" hint="conflicts, mismatches, broken references" />
-          <StatTile label="Types" :value="String(Object.keys(page.facets.types).length)" />
+          <StatTile label="Records" :value="fmtInt(total)" :hint="`${fmtInt(page.total)} match the filters`" />
+          <StatTile label="Rules in force on this page" :value="fmtInt(inForce)" hint="accepted decisions and active standards" />
+          <StatTile label="Needs a look" :value="fmtInt(issuesData?.issues.length ?? page.issues)" hint="conflicts, mismatches, broken references" />
+          <StatTile label="Types" :value="fmtInt(Object.keys(page.facets.types).length)" />
         </div>
 
         <section v-if="issuesData?.issues.length" class="panel">
@@ -124,15 +140,16 @@ implements: [internal/store]
 
         <section class="panel">
           <p class="eyebrow">Proposals, not decisions</p>
-          <h2>Drafts waiting to become records <span class="muted">· {{ proposals.length }}</span></h2>
+          <h2>Drafts waiting to become records <span class="muted">· {{ fmtInt(proposals.length) }}</span></h2>
+          <p v-if="listError" class="notice notice--danger" role="alert">{{ listError }}</p>
           <p class="muted small">A proposal is stored here and is not in the repository. Nothing is in force until someone commits it as a file with an accepted status; download the file, put it in the suggested place and review it like any change.</p>
           <ul v-if="proposals.length" class="plain">
             <li v-for="p in proposals" :key="p.id">
               <strong>{{ p.title }}</strong> <span class="badge">{{ p.type }}</span> <span class="badge badge--amber">{{ p.state === 'merged' ? 'merged: now a record' : p.status + ' · not a decision' }}</span>
-              <div class="muted small">Suggested file <span class="mono">{{ p.suggested_path }}</span> · by {{ p.client || p.created_by || 'a user' }} · {{ when(p.created_at) }}</div>
+              <div class="muted small">Suggested file <span class="mono wrap">{{ p.suggested_path }}</span> · by {{ p.client || p.created_by || 'a user' }} · {{ when(p.created_at) }}</div>
               <div class="row">
-                <a :href="exportHref(p.id)" download class="chip">Download file</a>
-                <button v-if="p.state === 'open'" class="chip" @click="withdraw(p.id)">Withdraw</button>
+                <a :href="exportHref(p.id)" download class="chip" :aria-label="`Download the file for ${p.title}`">Download file</a>
+                <button v-if="p.state === 'open'" type="button" class="chip" :aria-label="`Withdraw the proposal ${p.title}`" @click="withdraw(p.id, p.title)">Withdraw</button>
               </div>
             </li>
           </ul>
@@ -157,20 +174,20 @@ implements: [internal/store]
         <section class="panel">
           <div class="row" role="group" aria-label="Filter by type">
             <span class="label">Type</span>
-            <button class="chip" :class="{ active: !type }" @click="type = ''">All</button>
-            <button v-for="(n, t) in page.facets.types" :key="t" class="chip" :class="{ active: type === t }" @click="type = type === t ? '' : (t as string)">{{ TYPE[t] ?? t }} · {{ n }}</button>
+            <button type="button" class="chip" :class="{ active: !type }" :aria-pressed="!type" @click="type = ''">All</button>
+            <button v-for="(n, t) in page.facets.types" :key="t" type="button" class="chip" :class="{ active: type === t }" :aria-pressed="type === t" @click="type = type === t ? '' : (t as string)">{{ TYPE[t] ?? t }} · {{ fmtInt(n) }}</button>
           </div>
           <div class="row" role="group" aria-label="Filter by status">
             <span class="label">Status</span>
-            <button class="chip" :class="{ active: !status }" @click="status = ''">Any</button>
-            <button v-for="(n, s) in page.facets.statuses" :key="s" class="chip" :class="{ active: status === s }" @click="status = status === s ? '' : (s as string)">{{ s }} · {{ n }}</button>
+            <button type="button" class="chip" :class="{ active: !status }" :aria-pressed="!status" @click="status = ''">Any</button>
+            <button v-for="(n, s) in page.facets.statuses" :key="s" type="button" class="chip" :class="{ active: status === s }" :aria-pressed="status === s" @click="status = status === s ? '' : (s as string)">{{ s }} · {{ fmtInt(n) }}</button>
           </div>
           <div class="row">
             <label class="row compact"><input v-model="bindingOnly" type="checkbox"> Rules in force only</label>
             <label class="row compact"><span class="label">Component</span>
               <select v-model="component" aria-label="Filter by component"><option value="">Any</option><option v-for="(n, c) in page.facets.components" :key="c" :value="c">{{ c }} ({{ n }})</option></select>
             </label>
-            <input v-model="q" class="search" placeholder="Search records" aria-label="Search records">
+            <input v-model="q" type="search" class="search" placeholder="Search records" aria-label="Search records">
           </div>
 
           <div v-if="page.entries.length" class="table-wrap">
@@ -179,7 +196,7 @@ implements: [internal/store]
               <tbody>
                 <tr v-for="e in page.entries" :key="e.id">
                   <td>
-                    <NuxtLink :to="detail(e.id)" class="mono">{{ e.id }}</NuxtLink>
+                    <NuxtLink :to="detail(e.id)" class="mono wrap">{{ e.id }}</NuxtLink>
                     <div>{{ e.title }}</div>
                     <div v-if="e.summary" class="muted small">{{ e.summary }}</div>
                   </td>
@@ -191,26 +208,26 @@ implements: [internal/store]
                     <div v-if="issueOf(e.id).length" class="small"><span class="badge badge--amber">needs a look</span></div>
                   </td>
                   <td class="small">
-                    <button v-for="c in e.components" :key="c" class="chip" @click="component = c">{{ c }}</button>
+                    <button v-for="c in e.components" :key="c" type="button" class="chip" :aria-label="`Show records for component ${c}`" @click="component = c">{{ c }}</button>
                     <span v-if="!e.components?.length" class="muted">whole system</span>
                   </td>
-                  <td class="mono muted small">{{ e.location }}</td>
+                  <td class="mono muted small wrap">{{ e.location }}</td>
                 </tr>
               </tbody>
             </table>
           </div>
           <div v-else class="empty"><strong>No records match</strong>Change the filters.</div>
 
-          <div class="row">
-            <button class="chip" :disabled="offset === 0" @click="offset = Math.max(0, offset - LIMIT)">Previous</button>
-            <span class="muted small">{{ page.total ? offset + 1 : 0 }}–{{ Math.min(offset + LIMIT, page.total) }} of {{ page.total }}</span>
-            <button class="chip" :disabled="offset + LIMIT >= page.total" @click="offset += LIMIT">Next</button>
-          </div>
-          <p v-if="page.truncated" class="notice">This repository has more records than can be read at once; narrow the filters.</p>
+          <nav class="row" aria-label="Record pages">
+            <button type="button" class="chip" :disabled="offset === 0" @click="offset = Math.max(0, offset - LIMIT)">Previous</button>
+            <span class="muted small">{{ fmtInt(page.total ? offset + 1 : 0) }}–{{ fmtInt(Math.min(offset + LIMIT, page.total)) }} of {{ fmtInt(page.total) }}</span>
+            <button type="button" class="chip" :disabled="offset + LIMIT >= page.total" @click="offset += LIMIT">Next</button>
+          </nav>
+          <p v-if="page.truncated" class="notice notice--warn">This repository has more records than can be read at once; narrow the filters.</p>
         </section>
       </template>
     </template>
-    <p v-else class="muted">Loading…</p>
+    <p v-else class="muted" role="status">Loading…</p>
   </div>
 </template>
 
@@ -220,6 +237,7 @@ implements: [internal/store]
 .propose { margin-top: 12px; }
 .propose form { margin-top: 10px; max-width: 640px; }
 .propose label { display: grid; gap: 4px; }
-.search { width: 220px; min-height: 30px; padding: 4px 10px; }
+.search { width: 220px; max-width: 100%; min-height: 30px; padding: 4px 10px; }
+.wrap { overflow-wrap: anywhere; }
 .small { font-size: 12.5px; }
 </style>

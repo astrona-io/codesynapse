@@ -75,6 +75,7 @@ The chart refuses to render alerting without a metrics store (`victoriametrics.e
 | `CodeSynapseLogShippingDropping` | warning | Log lines have not reached the log store for 15 minutes |
 | `CodeSynapseIngestMetricsRejected` | warning | Indexing file totals were refused before export in the last hour |
 | `CodeSynapseIngestMetricsCapacity` | warning | Indexing file totals reached their repository limit in the last hour |
+| `CodeSynapseDashboardAPIUnreachable` | critical | More than 5% of the dashboard's API calls find the API unreachable or time out for 10 minutes, with at least one call a minute |
 
 Store alerts add up every organisation's calls per store, so no organisation appears in them. Other alerts read installation-wide numbers. The only labels an alert carries besides `severity`, `component` and `environment` are the store (`db_system`), the job kind, the instrument name and a fixed reason.
 

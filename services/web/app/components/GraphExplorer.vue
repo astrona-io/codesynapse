@@ -23,6 +23,8 @@ const sims = new Map<string, Sim>()
 let view = { x: 0, y: 0, k: 1 }
 let alpha = 1
 let raf = 0
+let drawReq = 0
+let fitTimer: ReturnType<typeof setTimeout> | undefined
 let size = { w: 800, h: 600 }
 let palette: Record<string, string> = {}
 const hovered = ref<string | null>(null)
@@ -122,13 +124,16 @@ function step() {
   alpha *= 0.985
 }
 
-function radius(s: Sim): number {
-  return 4 + Math.min(9, Math.sqrt(degree.value.get(s.id) ?? 0) * 1.6)
+// draw passes the degree map it read once, instead of one computed read per
+// node per pass.
+function radius(s: Sim, deg: Map<string, number> = degree.value): number {
+  return 4 + Math.min(9, Math.sqrt(deg.get(s.id) ?? 0) * 1.6)
 }
 
 function draw() {
   const c = canvas.value
   if (!c) return
+  const deg = degree.value
   const ctx = c.getContext('2d')
   if (!ctx) return
   const dpr = window.devicePixelRatio || 1
@@ -163,7 +168,7 @@ function draw() {
     // Arrowhead at the target's rim.
     const dx = b.x - a.x, dy = b.y - a.y
     const d = Math.sqrt(dx * dx + dy * dy) || 1
-    const r = radius(b) + 2
+    const r = radius(b, deg) + 2
     const tx = b.x - (dx / d) * r, ty = b.y - (dy / d) * r
     const s = 5 / view.k
     ctx.beginPath()
@@ -179,7 +184,7 @@ function draw() {
   for (const n of visibleNodes.value) {
     const s = sims.get(n.id)
     if (!s) continue
-    const r = radius(s)
+    const r = radius(s, deg)
     ctx.globalAlpha = focus && !focusSet.has(n.id) ? 0.18 : 1
     ctx.beginPath()
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2)
@@ -212,15 +217,15 @@ function draw() {
   for (const n of visibleNodes.value) {
     const s = sims.get(n.id)
     if (!s) continue
-    const show = focusSet.has(n.id) || view.k > 1.4 || (degree.value.get(n.id) ?? 0) >= 6
+    const show = focusSet.has(n.id) || view.k > 1.4 || (deg.get(n.id) ?? 0) >= 6
     if (!show || (focus && !focusSet.has(n.id))) continue
     const label = n.name.length > 40 ? `${n.name.slice(0, 39)}…` : n.name
     ctx.globalAlpha = 1
     ctx.lineWidth = 3 / view.k
     ctx.strokeStyle = palette['--surface-2']!
-    ctx.strokeText(label, s.x + radius(s) + 3 / view.k, s.y)
+    ctx.strokeText(label, s.x + radius(s, deg) + 3 / view.k, s.y)
     ctx.fillStyle = palette['--text']!
-    ctx.fillText(label, s.x + radius(s) + 3 / view.k, s.y)
+    ctx.fillText(label, s.x + radius(s, deg) + 3 / view.k, s.y)
   }
   ctx.globalAlpha = 1
 }
@@ -233,8 +238,11 @@ function frame() {
 function start() {
   if (!raf && typeof window !== 'undefined') raf = requestAnimationFrame(frame)
 }
+// Pointer moves, wheel and resize can ask several times per frame: one draw
+// per frame is enough, and none while the simulation loop draws anyway.
 function redraw() {
-  if (!raf) requestAnimationFrame(draw)
+  if (raf || drawReq) return
+  drawReq = requestAnimationFrame(() => { drawReq = 0; draw() })
 }
 
 // --- interaction ---------------------------------------------------------
@@ -379,10 +387,12 @@ onMounted(() => {
   mq = window.matchMedia('(prefers-color-scheme: dark)')
   mq.addEventListener('change', onScheme)
   start()
-  setTimeout(fit, 900)
+  fitTimer = setTimeout(fit, 900)
 })
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf)
+  cancelAnimationFrame(drawReq)
+  clearTimeout(fitTimer)
   ro?.disconnect()
   mq?.removeEventListener('change', onScheme)
 })
@@ -402,7 +412,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.explorer-canvas { position: relative; width: 100%; height: 100%; min-height: 420px; border-radius: 8px; overflow: hidden; }
+.explorer-canvas { position: relative; width: 100%; height: 100%; min-height: 420px; border-radius: var(--radius-xs); overflow: hidden; }
 canvas { display: block; touch-action: none; cursor: grab; }
-canvas:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+canvas:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -3px; }
 </style>

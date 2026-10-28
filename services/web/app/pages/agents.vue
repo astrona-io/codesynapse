@@ -17,14 +17,21 @@ const name = ref('')
 const key = ref('')
 const keyId = ref('')
 const error = ref('')
+const creating = ref(false)
+// The key belongs to the organisation it was made in; switching hides it.
+watch(() => session.current.value?.org.slug, () => { key.value = ''; keyId.value = ''; error.value = '' })
 async function createKey() {
+  if (creating.value) return
+  creating.value = true
   error.value = ''
   try {
     const res = await apiPost<{ key: string; api_key: ApiKey }>('me/keys', { org: session.current.value?.org.slug ?? session.memberships.value[0]?.org.slug, name: name.value || 'agent', ttl_days: 0 })
     key.value = res.key
     keyId.value = res.api_key.id
   } catch (e) {
-    error.value = apiErrorMessage(e)
+    error.value = plainError(e)
+  } finally {
+    creating.value = false
   }
 }
 const token = computed(() => key.value || (session.accounts.value ? 'csk_…' : '$CODESYNAPSE_MCP_TOKEN'))
@@ -162,11 +169,11 @@ onBeforeUnmount(() => clearInterval(poll))
           <p class="muted">The key acts as you in <strong>{{ session.current.value?.org.name ?? 'your organisation' }}</strong>: the agent sees repositories you can access there, and its memory and statistics stay there. You can revoke it any time under <NuxtLink to="/settings/keys">Settings → API keys</NuxtLink>.</p>
           <form v-if="!key" class="row" @submit.prevent="createKey">
             <div class="field grow"><label for="aname">Name it after the machine or agent</label><input id="aname" v-model="name" placeholder="e.g. laptop Claude Code" maxlength="80"></div>
-            <button type="submit" class="align-end">Create key</button>
+            <button type="submit" class="align-end" :disabled="creating">{{ creating ? 'Creating…' : 'Create key' }}</button>
           </form>
           <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
           <div v-if="key" class="stack--tight">
-            <p class="notice notice--ok">Created. The key is filled into the setup below; it is shown only on this page, so finish the steps below before you leave.</p>
+            <p class="notice notice--ok" role="status">Created. The key is filled into the setup below; it is shown only on this page, so finish the steps below before you leave.</p>
             <CopyField :value="key" secret label="Your key" />
           </div>
         </template>

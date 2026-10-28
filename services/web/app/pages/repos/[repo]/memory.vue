@@ -3,6 +3,7 @@ import type { MemoryFact, MemoryGraph } from '~/utils/types'
 
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
+useHead({ title: () => `Agent memory · ${repo.value}` })
 const query = ref('')
 const applied = ref('')
 const { data: g, error, refresh } = useApiGet<MemoryGraph>(() => repoPath(repo.value, `memory?limit=100${applied.value ? `&q=${encodeURIComponent(applied.value)}` : ''}`))
@@ -18,7 +19,7 @@ async function remove(kind: 'fact' | 'entity', id: string, what: string) {
   busy.value = id
   failed.value = ''
   try {
-    await $fetch(apiPath(repoPath(repo.value, `memory?${kind}=${encodeURIComponent(id)}`)), { method: 'DELETE' })
+    await apiDelete(repoPath(repo.value, `memory?${kind}=${encodeURIComponent(id)}`))
     await refresh()
   } catch (e) {
     failed.value = apiErrorMessage(e)
@@ -37,29 +38,29 @@ const factText = (f: MemoryFact) => `${label(f.subject)} ${f.predicate} ${label(
       :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Agent memory' }]"
     />
 
-    <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
+    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="g">
       <form class="row" @submit.prevent="applied = query.trim()">
         <input v-model="query" class="grow" placeholder="Search entities, e.g. payments team" aria-label="Search memory">
         <button type="submit">Search</button>
         <button v-if="applied" type="button" class="secondary" @click="query = ''; applied = ''">Clear</button>
       </form>
-      <p v-if="failed" class="error">{{ failed }}</p>
+      <p v-if="failed" class="notice notice--danger" role="alert">{{ failed }}</p>
 
       <section v-if="g.facts.length" class="panel">
-        <p class="eyebrow">Facts <span class="muted">· {{ g.facts.length }}</span></p>
+        <p class="eyebrow">Facts <span class="muted">· {{ fmtInt(g.facts.length) }}</span></p>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Subject</th><th>Relation</th><th>Object</th><th>Saved by</th><th class="num">Seen</th><th>Updated</th><th /></tr></thead>
+            <thead><tr><th>Subject</th><th>Relation</th><th>Object</th><th>Saved by</th><th class="num">Seen</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead>
             <tbody>
               <tr v-for="f in g.facts" :key="f.id">
                 <td>{{ label(f.subject) }} <div class="mono muted small">{{ type(f.subject) }}</div></td>
                 <td class="mono pred">{{ f.predicate }}</td>
                 <td>{{ label(f.object) }} <div class="mono muted small">{{ type(f.object) }}</div></td>
                 <td class="mono small">{{ f.source }}</td>
-                <td class="num" :title="`saved ${f.confirmations} time(s)`">{{ f.confirmations }}</td>
+                <td class="num" :title="`saved ${plural(f.confirmations, 'time')}`">{{ fmtInt(f.confirmations) }}</td>
                 <td class="muted small" :title="f.updated_at">{{ relTime(f.updated_at) }}</td>
-                <td><button class="secondary tiny danger" :disabled="busy === f.id" @click="remove('fact', f.id, factText(f))">Delete</button></td>
+                <td><button class="danger tiny" :disabled="busy === f.id" :aria-label="`Delete the fact ${factText(f)}`" @click="remove('fact', f.id, factText(f))">Delete</button></td>
               </tr>
             </tbody>
           </table>
@@ -67,17 +68,17 @@ const factText = (f: MemoryFact) => `${label(f.subject)} ${f.predicate} ${label(
       </section>
 
       <section v-if="g.entities.length" class="panel">
-        <p class="eyebrow">Entities <span class="muted">· {{ g.entities.length }}</span></p>
+        <p class="eyebrow">Entities <span class="muted">· {{ fmtInt(g.entities.length) }}</span></p>
         <ul class="entities">
           <li v-for="e in g.entities" :key="e.id">
             <span>{{ e.name }}</span> <span class="badge badge--violet">{{ e.type }}</span>
             <span class="muted small">{{ relTime(e.updated_at) }}</span>
-            <button class="secondary tiny danger" :disabled="busy === e.id" @click="remove('entity', e.id, e.name)">Delete</button>
+            <button class="danger tiny" :disabled="busy === e.id" :aria-label="`Delete ${e.name}`" @click="remove('entity', e.id, e.name)">Delete</button>
           </li>
         </ul>
       </section>
 
-      <div v-if="!g.entities.length" class="empty">
+      <div v-if="!g.entities.length && !g.facts.length" class="empty">
         <template v-if="applied"><strong>No match</strong>Nothing saved matches “{{ applied }}”.</template>
         <template v-else>
           <strong>Nothing saved yet</strong>
@@ -86,7 +87,7 @@ const factText = (f: MemoryFact) => `${label(f.subject)} ${f.predicate} ${label(
       </div>
       <p class="muted small">{{ g.notice }}</p>
     </template>
-    <p v-else class="muted">Loading…</p>
+    <p v-else class="muted" role="status">Loading…</p>
   </div>
 </template>
 
@@ -96,5 +97,5 @@ const factText = (f: MemoryFact) => `${label(f.subject)} ${f.predicate} ${label(
 .entities { list-style: none; margin: 0; padding: 0; display: grid; }
 .entities li { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
 .entities li button { margin-left: auto; }
-.danger { color: var(--danger); }
+.grow { flex: 1 1 200px; min-width: 0; }
 </style>
