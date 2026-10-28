@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 	"github.com/astrona-io/codesynapse/services/api/internal/gateway"
@@ -203,4 +206,26 @@ func TestGatewayLocalFirstSetting(t *testing.T) {
 	assert.Equal(t, got, setting{Enabled: false, LocalFirst: false}, "older clients send only enabled")
 	require.Equal(t, owner.do("PUT", path, `{"enabled":true,"local_first":true}`, &got), 200)
 	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true})
+}
+
+func TestRecordGatewayTimeAndFallthrough(t *testing.T) {
+	ctx := telemetry.WithTenant(context.Background(), "abababababababababababab")
+	reasons := []string{gateway.FallNotEligible, gateway.FallTooLarge, gateway.FallBusy, gateway.FallUnavailable, gateway.FallNoFirstChunk, gateway.FallBadAnswer}
+	for _, reason := range reasons {
+		recordGateway(ctx, gateway.Meta{Route: "cloud", Fallthrough: reason}, http.StatusOK, 2*time.Second)
+	}
+	recordGateway(ctx, gateway.Meta{Route: "local", Metered: true}, http.StatusOK, 40*time.Millisecond)
+	recordGateway(ctx, gateway.Meta{Route: "sideways"}, http.StatusBadRequest, time.Millisecond)
+
+	var out bytes.Buffer
+	require.NoError(t, telemetry.Default.WriteText(&out))
+	text := out.String()
+	const id = `tenant_id="abababababababababababab"`
+	for _, reason := range reasons {
+		assert.Contains(t, text, `gateway_fallthrough_total{reason="`+reason+`",`+id, "every fall-through point has its own reason")
+	}
+	assert.False(t, strings.Contains(text, `gateway_fallthrough_total{reason="other",`+id), "no gateway reason falls outside the fixed set")
+	assert.Contains(t, text, `gateway_request_duration_seconds_count{route="cloud",`+id)
+	assert.Contains(t, text, `gateway_request_duration_seconds_count{route="local",`+id)
+	assert.Contains(t, text, `gateway_request_duration_seconds_count{route="rejected",`+id)
 }

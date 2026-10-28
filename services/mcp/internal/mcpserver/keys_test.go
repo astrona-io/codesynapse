@@ -176,6 +176,7 @@ func TestTelemetryCarriesTenant(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, call(t, a, "repo_list", map[string]any{}, nil).IsError)
 	require.False(t, call(t, a, "search_graph_nodes", map[string]any{"repo": storetest.Repo}, nil).IsError)
+	require.True(t, call(t, a, "file_outline", map[string]any{"repo": "someone/hidden", "file": "x.go"}, nil).IsError)
 	_, err = a.CallTool(context.Background(), &mcp.CallToolParams{Name: "no_such_tool_" + p.OrgID, Arguments: map[string]any{}})
 	assert.Error(t, err)
 
@@ -183,7 +184,8 @@ func TestTelemetryCarriesTenant(t *testing.T) {
 	require.NoError(t, telemetry.Default.WriteText(&b))
 	out := b.String()
 	assert.Contains(t, out, `mcp_tool_calls_total{tenant_id="`+p.OrgID+`",mcp_tool="repo_list",outcome="ok",llm_provider="none",llm_model="none"}`)
-	assert.Contains(t, out, `mcp_tool_calls_total{tenant_id="`+p.OrgID+`",mcp_tool="unknown",outcome="error",llm_provider="none",llm_model="none"}`, "names a client invents are not labels")
+	assert.Contains(t, out, `mcp_tool_calls_total{tenant_id="`+p.OrgID+`",mcp_tool="unknown",outcome="refused",llm_provider="none",llm_model="none"}`, "names a client invents are not labels, and a call without a policy is refused")
+	assert.Contains(t, out, `mcp_tool_calls_total{tenant_id="`+p.OrgID+`",mcp_tool="file_outline",outcome="refused",llm_provider="none",llm_model="none"}`, "a repository outside the caller's scope is a refusal, not an error")
 	assert.False(t, strings.Contains(out, "no_such_tool_"), "the invented name never reaches a series")
 	assert.Contains(t, out, `agent_memory_recalls_total{tenant_id="`+p.OrgID+`",mcp_tool="search_graph_nodes",llm_provider="none",llm_model="none"}`, "accepted tool context reaches memory instrumentation")
 }

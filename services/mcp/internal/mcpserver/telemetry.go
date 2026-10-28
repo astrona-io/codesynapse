@@ -14,6 +14,8 @@ import (
 // response size for VictoriaMetrics. Only names of tools and prompts the
 // server accepted become labels: unknown names fail at the protocol level
 // (err != nil) and are counted as "unknown", so a client cannot mint series.
+// A call the authorization middleware turned down (permission, scope or
+// policy, the calls it audits as denied) is counted as refused, not error.
 func telemetryMiddleware() mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
@@ -26,7 +28,8 @@ func telemetryMiddleware() mcp.Middleware {
 				return res, err
 			case "tools/call", "prompts/get":
 				start := time.Now()
-				res, err := next(ctx, method, req)
+				refused := new(bool)
+				res, err := next(context.WithValue(ctx, refusalKey{}, refused), method, req)
 				name := ""
 				switch p := req.GetParams().(type) {
 				case *mcp.CallToolParamsRaw:
@@ -39,11 +42,7 @@ func telemetryMiddleware() mcp.Middleware {
 				}
 				ctx = telemetry.WithTool(ctx, name)
 				tool, tenant := telemetry.Tool(ctx), telemetry.Tenant(ctx)
-				outcome := "ok"
-				if r, ok := res.(*mcp.CallToolResult); err != nil || (ok && r != nil && r.IsError) {
-					outcome = "error"
-				}
-				telemetry.MCPToolCalls.IncContext(ctx, tenant, tool, outcome)
+				telemetry.MCPToolCalls.IncContext(ctx, tenant, tool, callOutcome(res, err, *refused))
 				telemetry.MCPToolDuration.ObserveContext(ctx, time.Since(start).Seconds(), tenant, tool)
 				if res != nil {
 					if b, merr := json.Marshal(res); merr == nil {
@@ -55,4 +54,28 @@ func telemetryMiddleware() mcp.Middleware {
 			return next(ctx, method, req)
 		}
 	}
+}
+
+// refusalKey carries a *bool the authorization middleware sets when it turns
+// a call down, so the telemetry middleware around it can tell a refusal from
+// a tool that ran and failed.
+type refusalKey struct{}
+
+// markRefused notes that the server refused the call in ctx.
+func markRefused(ctx context.Context) {
+	if p, ok := ctx.Value(refusalKey{}).(*bool); ok {
+		*p = true
+	}
+}
+
+// callOutcome is the outcome label of mcp_tool_calls_total.
+func callOutcome(res mcp.Result, err error, refused bool) string {
+	r, ok := res.(*mcp.CallToolResult)
+	switch {
+	case refused:
+		return telemetry.OutcomeRefused
+	case err != nil || (ok && r != nil && r.IsError):
+		return telemetry.OutcomeError
+	}
+	return telemetry.OutcomeOK
 }
