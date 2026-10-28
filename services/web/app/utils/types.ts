@@ -591,6 +591,9 @@ export interface ModelStats {
   range: string; models: ModelStat[]
   // Cloud spend and the dollars prompt compression saved; null when a price is missing.
   spent_dollars?: number | null; compression_saved_dollars?: number | null
+  // Whether CodeSynapse's own AI tasks get shortened prompts, and why not:
+  // disabled, no_local_model or no_ai. Gateway traffic is never shortened.
+  compression_enabled?: boolean; compression_off?: 'disabled' | 'no_local_model' | 'no_ai'
   gateway?: GatewayStat
   reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; cached_input_per_mtok?: number; estimate?: boolean; source?: string; checked?: string }
 }

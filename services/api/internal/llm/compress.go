@@ -69,25 +69,60 @@ func keepsFacts(orig, short string) bool {
 	return true
 }
 
+// Compression states, as CompressionStatus reports them.
+const (
+	CompressionOn = "on"
+	// CompressionDisabled: compress_prompts is false.
+	CompressionDisabled = "disabled"
+	// CompressionNoLocalModel: no local model is configured for the
+	// "compress" task, so nothing is shortened.
+	CompressionNoLocalModel = "no_local_model"
+)
+
+// CompressionStatus says whether prompts bound for cloud providers are
+// shortened, and why not when they are not.
+func (r *Registry) CompressionStatus() string {
+	_, status := r.compressor()
+	return status
+}
+
+// compressor resolves the provider for the "compress" task. The task is in
+// LocalTasks, so ProviderFor never returns a cloud model for it; the Local
+// check repeats that so the default can never send prose to the cloud for
+// shortening.
+func (r *Registry) compressor() (string, string) {
+	r.mu.Lock()
+	setting := r.cfg.CompressPrompts
+	r.mu.Unlock()
+	if setting != nil && !*setting {
+		return "", CompressionDisabled
+	}
+	name, err := r.ProviderFor("compress", "")
+	if err != nil {
+		return "", CompressionNoLocalModel
+	}
+	if cfg, ok := r.Config(name); !ok || !cfg.Local() {
+		return "", CompressionNoLocalModel
+	}
+	return name, CompressionOn
+}
+
 // compressCloud shortens the user part of a request that goes to a non-local
 // provider, using the local "compress" task, and returns the request to send
 // plus the bytes saved. Any problem (no local model, error, rewrite that lost
 // a fact or did not shrink) keeps the original text.
 func (r *Registry) compressCloud(ctx context.Context, name string, req Request) (Request, int) {
-	r.mu.Lock()
-	on := r.cfg.CompressPrompts
-	r.mu.Unlock()
-	if !on || taskOf(ctx) == "compress" {
+	if taskOf(ctx) == "compress" {
 		return req, 0
 	}
 	if cfg, ok := r.Config(name); !ok || cfg.Local() {
 		return req, 0
 	}
-	req.System += terseSuffix
-	local, err := r.ProviderFor("compress", "")
-	if err != nil {
+	local, status := r.compressor()
+	if status != CompressionOn {
 		return req, 0
 	}
+	req.System += terseSuffix
 	paras := strings.Split(req.User, "\n\n")
 	saved, calls := 0, 0
 	for i, p := range paras {

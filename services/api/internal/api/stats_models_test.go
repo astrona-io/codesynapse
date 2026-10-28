@@ -92,6 +92,8 @@ func TestModelStats(t *testing.T) {
 	assert.Equal(t, *out.Spent, 0.0123)
 	assert.Equal(t, *out.CompressionSaved, 0.03, "10000 tokens at $3 per million")
 	assert.Equal(t, c.CompressedBytes, 40000.0)
+	assert.True(t, out.CompressionEnabled, "a local model is configured, so shortening is on by default")
+	assert.Equal(t, out.CompressionOff, "")
 	assert.True(t, c.ReadTPS == nil, "no streamed answers, no speed")
 	gw := out.Gateway
 	assert.Equal(t, []float64{gw.Requests, gw.Local, gw.Cloud, gw.Rejected, gw.Failed, gw.LocalSharePct}, []float64{12, 6, 4, 2, 3, 50})
@@ -120,6 +122,28 @@ func TestMoneyTotalsUnknownWithoutPrices(t *testing.T) {
 	spent, comp = s.moneyTotals([]ModelStat{{Provider: "local", Model: "qwen", Local: true, InputTokens: 5}})
 	assert.True(t, spent != nil && *spent == 0)
 	assert.True(t, comp != nil && *comp == 0)
+}
+
+// The tile says why prompts are not shortened instead of showing $0.
+func TestCompressionState(t *testing.T) {
+	cloud := llm.ProviderConfig{Name: "cloud", Kind: llm.KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "big"}
+	local := llm.ProviderConfig{Name: "local", Kind: llm.KindOpenAI, BaseURL: "http://127.0.0.1:11434/v1", Model: "qwen"}
+	for name, tc := range map[string]struct {
+		reg    *llm.Registry
+		on     bool
+		reason string
+	}{
+		"no AI":          {nil, false, "no_ai"},
+		"cloud only":     {llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{cloud}, Default: "cloud"}), false, llm.CompressionNoLocalModel},
+		"turned off":     {llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{cloud, local}, Default: "cloud", CompressPrompts: new(false)}), false, llm.CompressionDisabled},
+		"local model on": {llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{cloud, local}, Default: "cloud"}), true, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			on, reason := compressionState(tc.reg)
+			assert.Equal(t, on, tc.on)
+			assert.Equal(t, reason, tc.reason)
+		})
+	}
 }
 
 // ask_local's counters are tokens, never tool calls.

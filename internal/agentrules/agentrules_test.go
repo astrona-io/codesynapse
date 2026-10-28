@@ -42,3 +42,16 @@ func TestDefaultNamesRealTools(t *testing.T) {
 	}
 	assert.True(t, len(Default) < MaxBytes, "it is added to every session")
 }
+
+// The answer-style block keeps negations and exact text, and names the cases
+// that stay in full sentences.
+func TestDefaultAnswerStyle(t *testing.T) {
+	for _, want := range []string{
+		"Answer first", "Never drop a negation", "not, never, no, only, except",
+		"numbers, code, commands, paths and error text exact", "changed lines plus 1-2 lines of context",
+		"security warnings", "irreversible actions", "ordered steps", "questions or options",
+		"code, comments, commits, docs, PRs",
+	} {
+		assert.Contains(t, Default, want)
+	}
+}

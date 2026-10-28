@@ -125,7 +125,13 @@ To check it works, ask an agent a question about a large file and look for an `a
 
 A local provider answers one request at a time (`max_concurrent`, default 1). If several agents ask at once, the rest wait in a queue and continue when their answer is ready. That keeps the GPU busy without overloading it. A waiting request gives up only when its caller does. Raise `max_concurrent` if your server batches requests (for Ollama set `OLLAMA_NUM_PARALLEL` too).
 
-With `compress_prompts: true` at the top of `config/llm.yaml`, a prompt bound for a cloud provider first goes through a local model (task `compress`, local only) that rewrites its prose in short telegraphic form. Code, diffs, lists and JSON are never touched, a rewrite that drops a number or a backticked name is discarded, and without a local model the original is sent. The cloud model is also asked for terse answers. Bytes removed show as `compressed_bytes` in the provider usage.
+When a local model is configured, a prompt from one of CodeSynapse's own AI tasks (reviews, triage, briefings) that is bound for a cloud provider first goes through it (task `compress`, local only). The local model rewrites the prose in short telegraphic form. Code, diffs, lists and JSON are never touched. A rewrite that drops a number or a backticked name is discarded, and the original is sent. The cloud model is also asked for terse answers. Bytes removed show as `compressed_bytes` in the provider usage, and Statistics → Models & savings values them at the input price under "Saved by shorter prompts".
+
+This is on by default whenever the `compress` task resolves to a local model: the first local provider, or the one named under `tasks: compress:`. Routing `compress` to a cloud provider does not turn it on; the task refuses non-local models. Without a local model nothing is shortened, the request goes out unchanged, and the Statistics tile says "off" with the reason. Set `compress_prompts: false` at the top of `config/llm.yaml` to turn it off.
+
+Gateway traffic is never shortened. The gateway passes agents' requests on byte for byte, because rewriting them would break the provider's prompt cache, which saves far more.
+
+The session ruleset (`GET /api/v1/agent-rules`) also asks agents for short answers: answer first, no recaps or closing offers, exact numbers, code and paths, full sentences for warnings and steps. That cuts output tokens, but there is no honest baseline to compare against, so Statistics does not count it as a saving.
 
 ## Other servers
 
