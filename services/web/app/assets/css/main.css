@@ -28,10 +28,15 @@
   --primary: #1b1530;
   --primary-hover: #362c5e;
   --on-primary: #ffffff;
+  /* Focus rings need 3:1 against the surface: the deep pink in light. */
+  --focus-ring: #b5175f;
+  --backdrop: rgba(15, 17, 21, 0.45);
 
-  --success: #137a4f;
+  /* Text on the soft tints stays above 4.5:1 even on --panel-2. */
+  --success: #0f7049;
   --warning: #855600;
-  --danger: #c8203a;
+  --danger: #b81c35;
+  --on-danger: #ffffff;
   --info: #0b67a0;
   --success-soft: rgba(61, 220, 151, 0.2);
   --warning-soft: rgba(255, 216, 77, 0.3);
@@ -66,6 +71,7 @@
   --e-doc: #c75a1c;
 
   --radius: 24px;
+  --radius-md: 20px;
   --radius-sm: 14px;
   --radius-xs: 8px;
   --pill: 999px;
@@ -73,7 +79,7 @@
   --font-sans: 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
   --gutter: 28px;
-  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--focus-ring);
 }
 
 /* Dark: chosen explicitly, or by the system when no choice was made. */
@@ -99,6 +105,9 @@
   --primary: #f5f1ff;
   --primary-hover: #ffffff;
   --on-primary: #1b1530;
+  --on-danger: #1b1530;
+  --focus-ring: #ff7ab3;
+  --backdrop: rgba(5, 3, 12, 0.6);
   --success: #4fe3a6;
   --warning: #ffd84d;
   --danger: #ff7a8c;
@@ -150,9 +159,12 @@
     --accent-ink: #ff8fc0;
     --on-accent: #1b1530;
     --accent-soft: rgba(255, 122, 179, 0.16);
-  --primary: #f5f1ff;
-  --primary-hover: #ffffff;
-  --on-primary: #1b1530;
+    --primary: #f5f1ff;
+    --primary-hover: #ffffff;
+    --on-primary: #1b1530;
+    --on-danger: #1b1530;
+    --focus-ring: #ff7ab3;
+    --backdrop: rgba(5, 3, 12, 0.6);
     --success: #4fe3a6;
     --warning: #ffd84d;
     --danger: #ff7a8c;
@@ -193,10 +205,15 @@ html, body { margin: 0; background: var(--bg); color: var(--ink); }
 body { font: 15px/1.6 var(--font-sans); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 a { color: var(--accent-ink); text-decoration: none; }
 a:hover { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 3px; }
-:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--radius-xs); }
+:focus-visible { outline: none; box-shadow: var(--focus); }
+/* Zero specificity: rounds the ring of plain links and summaries without
+   squaring pill buttons or chips, which keep their own radius. */
+:where(a:focus-visible, summary:focus-visible, [tabindex]:focus-visible) { border-radius: var(--radius-xs); }
 code, .mono { font-family: var(--font-mono); font-size: 12.5px; }
 code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
 pre code { background: none; padding: 0; }
+/* Long identifiers (hashes, run and session IDs) wrap instead of widening the page. */
+.break { overflow-wrap: anywhere; word-break: break-word; }
 h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 800; line-height: 1.15; margin: 0; letter-spacing: -0.03em; }
 h1 { font-size: clamp(28px, 3vw, 40px); line-height: 1.05; letter-spacing: -0.035em; }
 h2 { font-size: 20px; margin-bottom: 2px; letter-spacing: -0.02em; }
@@ -282,19 +299,19 @@ button, .btn {
 }
 button:hover:not(:disabled), .btn:hover { background: var(--primary-hover); color: var(--on-primary); text-decoration: none; }
 /* The candy accent, for the one action a page leads with. */
-button.accent, .btn--accent { background: var(--accent); color: var(--on-accent); }
-button.accent:hover:not(:disabled), .btn--accent:hover { background: var(--accent-hover); color: var(--on-accent); }
+button.accent, .btn.accent, .btn--accent { background: var(--accent); color: var(--on-accent); }
+button.accent:hover:not(:disabled), .btn.accent:hover, .btn--accent:hover { background: var(--accent-hover); color: var(--on-accent); }
 button.secondary, .btn--ghost {
   background: var(--panel-2);
   color: var(--ink);
   border-color: transparent;
 }
 button.secondary:hover:not(:disabled), .btn--ghost:hover { background: var(--panel-2); border-color: var(--line-strong); color: var(--ink); }
-button.danger { background: var(--danger); color: #fff; }
-button.danger:hover:not(:disabled) { background: var(--danger); filter: brightness(1.08); }
+button.danger, .btn--danger { background: var(--danger); color: var(--on-danger); }
+button.danger:hover:not(:disabled), .btn--danger:hover:not(:disabled) { background: var(--danger); color: var(--on-danger); filter: brightness(1.08); }
 button.link { background: none; color: var(--accent-ink); padding: 0; min-height: 0; font-weight: 500; }
 button.link:hover:not(:disabled) { background: none; text-decoration: underline; }
-button.tiny { min-height: 30px; padding: 3px 12px; font-size: 12.5px; }
+button.tiny, .btn--tiny { min-height: 30px; padding: 3px 12px; font-size: 12.5px; }
 button:disabled { opacity: 0.5; cursor: default; }
 
 /* Inputs */
@@ -309,7 +326,7 @@ input, textarea, select {
   min-height: 44px;
 }
 input::placeholder, textarea::placeholder { color: var(--dim); }
-input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--focus-ring); box-shadow: 0 0 0 3px var(--accent-soft); }
 textarea { font-family: var(--font-mono); font-size: 12.5px; min-height: 180px; }
 input[type='checkbox'], input[type='radio'] { width: auto; min-height: 0; accent-color: var(--accent); }
 label { font-size: 13.5px; font-weight: 600; color: var(--ink); }
@@ -343,7 +360,7 @@ label { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 
 /* Severity */
 .sev { font: 600 11.5px/1.5 var(--font-sans); padding: 2px 8px; border-radius: var(--pill); white-space: nowrap; }
-.sev--critical { background: var(--danger); color: #fff; }
+.sev--critical { background: var(--danger); color: var(--on-danger); }
 .sev--high { background: var(--danger-soft); color: var(--danger); }
 .sev--medium { background: var(--warning-soft); color: var(--warning); }
 .sev--low { background: var(--info-soft); color: var(--info); }
