@@ -6,7 +6,7 @@ import type { UserGitToken } from '~/utils/types'
 // decides who may change them; canManage only hides the controls.
 const props = defineProps<{ path: string; title: string; canManage: boolean; removeNote: string; emptyNote: string }>()
 
-const { data, refresh } = useApiGet<{ tokens: Pick<UserGitToken, 'host' | 'preview' | 'updated_at'>[]; enabled: boolean }>(() => props.path)
+const { data, pending, error: loadError, refresh } = useApiGet<{ tokens: Pick<UserGitToken, 'host' | 'preview' | 'updated_at'>[]; enabled: boolean }>(() => props.path)
 const host = ref('github.com')
 const token = ref('')
 const error = ref('')
@@ -43,20 +43,21 @@ async function remove() {
     <h2>{{ title }}</h2>
     <slot />
     <p v-if="data && !data.enabled" class="notice notice--warn">Git tokens are switched off on this installation: the API needs <code>CODESYNAPSE_SECRET_KEY</code>. See <NuxtLink to="/help#git-tokens">Help</NuxtLink>.</p>
-    <div v-if="data?.tokens.length" class="table-wrap">
+    <DataState :pending="pending" :error="loadError" :empty="!data?.tokens.length" title="No tokens" :text="emptyNote">
+    <div class="table-wrap">
       <table>
-        <thead><tr><th>Host</th><th>Token</th><th>Updated</th><th /></tr></thead>
+        <thead><tr><th>Host</th><th>Token</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead>
         <tbody>
-          <tr v-for="t in data.tokens" :key="t.host">
-            <td class="mono">{{ t.host }}</td>
-            <td class="mono">{{ t.preview }}</td>
+          <tr v-for="t in data?.tokens ?? []" :key="t.host">
+            <td class="mono break">{{ t.host }}</td>
+            <td class="mono break">{{ t.preview }}</td>
             <td>{{ relTime(t.updated_at) }}</td>
-            <td class="num"><button v-if="canManage" class="secondary tiny" @click="removing = t.host">Remove</button></td>
+            <td class="num"><button v-if="canManage" type="button" class="secondary tiny" :aria-label="`Remove the token for ${t.host}`" @click="removing = t.host">Remove</button></td>
           </tr>
         </tbody>
       </table>
     </div>
-    <p v-else class="empty"><strong>No tokens</strong>{{ emptyNote }}</p>
+    </DataState>
   </section>
   <section v-if="canManage && data?.enabled" class="panel">
     <h2>Add or replace a token</h2>
@@ -77,5 +78,5 @@ async function remove() {
 
 <style scoped>
 .grow { flex: 1; min-width: 240px; }
-.host { width: 220px; }
+.host { width: min(220px, 100%); }
 </style>

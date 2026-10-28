@@ -9,8 +9,12 @@ const emit = defineEmits<{ select: [id: string] }>()
 const width = 900
 const height = computed(() => props.height ?? 560)
 interface P { id: string; x: number; y: number; vx: number; vy: number; n: ViewNode }
-const points = ref<P[]>([])
+// Plain objects: the layout is computed once per graph and never mutated
+// after, so deep reactivity on every coordinate would only cost proxies.
+const points = shallowRef<P[]>([])
 const hovered = ref<string | null>(null)
+// Two graphs on one page must not share the arrow marker.
+const arrow = `${useId()}-arrow`
 
 function layout() {
   const n = props.nodes.length
@@ -60,15 +64,16 @@ const lines = computed(() =>
     .map((e) => ({ e, a: byId.value.get(e.from), b: byId.value.get(e.to) }))
     .filter((l) => l.a && l.b),
 )
-const neighbours = computed(() => {
-  const set = new Set<string>()
-  if (!hovered.value) return set
-  for (const e of props.edges) {
-    if (e.from === hovered.value) set.add(e.to)
-    if (e.to === hovered.value) set.add(e.from)
-  }
-  return set
+// Built once per graph, so hovering a node looks up its neighbours instead
+// of walking every edge.
+const adjacency = computed(() => {
+  const m = new Map<string, Set<string>>()
+  const add = (a: string, b: string) => { let s = m.get(a); if (!s) m.set(a, (s = new Set())); s.add(b) }
+  for (const e of props.edges) { add(e.from, e.to); add(e.to, e.from) }
+  return m
 })
+const none = new Set<string>()
+const neighbours = computed(() => (hovered.value && adjacency.value.get(hovered.value)) || none)
 
 function color(n: ViewNode): string {
   if (n.id === props.root) return 'var(--accent)'
@@ -88,9 +93,9 @@ function label(name: string): string {
 
 <template>
   <div class="canvas-wrap">
-    <svg :viewBox="`0 0 ${width} ${height}`" role="img" aria-label="Call graph">
+    <svg :viewBox="`0 0 ${width} ${height}`" role="group" aria-label="Call graph">
       <defs>
-        <marker id="arrow" viewBox="0 0 10 10" refX="16" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <marker :id="arrow" viewBox="0 0 10 10" refX="16" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--line)" />
         </marker>
       </defs>
@@ -99,12 +104,14 @@ function label(name: string): string {
         :x1="l.a!.x" :y1="l.a!.y" :x2="l.b!.x" :y2="l.b!.y"
         :stroke="hovered && (l.e.from === hovered || l.e.to === hovered) ? 'var(--accent)' : 'var(--line)'"
         :stroke-dasharray="l.e.kind === 'DISPATCHES_TO' ? '4 3' : undefined"
-        stroke-width="1.4" marker-end="url(#arrow)"
+        stroke-width="1.4" :marker-end="`url(#${arrow})`"
       />
       <g
         v-for="p in points" :key="p.id" class="node"
         :opacity="hovered && hovered !== p.id && !neighbours.has(p.id) ? 0.25 : 1"
-        @mouseenter="hovered = p.id" @mouseleave="hovered = null" @click="emit('select', p.id)"
+        tabindex="0" role="button" :aria-label="`${p.n.name}${p.n.location ? `, ${p.n.location}` : ''}`"
+        @mouseenter="hovered = p.id" @mouseleave="hovered = null" @focus="hovered = p.id" @blur="hovered = null"
+        @click="emit('select', p.id)" @keydown.enter.prevent="emit('select', p.id)" @keydown.space.prevent="emit('select', p.id)"
       >
         <circle :cx="p.x" :cy="p.y" :r="radius(p.n)" :fill="color(p.n)" stroke="var(--panel)" stroke-width="2" />
         <text :x="p.x + radius(p.n) + 4" :y="p.y + 4">{{ label(p.n.name) }}</text>
@@ -123,8 +130,11 @@ function label(name: string): string {
 </template>
 
 <style scoped>
-.canvas-wrap svg { width: 100%; height: auto; display: block; background: var(--panel-2); border-radius: 8px; }
+.canvas-wrap svg { width: 100%; height: auto; display: block; background: var(--panel-2); border-radius: var(--radius-xs); }
 .node { cursor: pointer; }
+/* SVG ignores box-shadow, so the focus ring is a stroke on the dot. */
+.node:focus { outline: none; }
+.node:focus-visible circle { stroke: var(--focus-ring); stroke-width: 3; }
 .node text { font: 11px var(--font-mono); fill: var(--ink); paint-order: stroke; stroke: var(--panel-2); stroke-width: 3px; }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; margin-top: 8px; }
 .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onBeforeUnmount } from 'vue'
 import type { GraphView, NodeRef, SymbolCard } from '~/utils/types'
 
 const route = useRoute()
@@ -9,20 +10,28 @@ const q = ref('')
 const results = ref<NodeRef[]>([])
 const searchError = ref('')
 
+
 let debounce: ReturnType<typeof setTimeout> | undefined
+// Answers can arrive out of order; only the newest search may fill the list.
+let searchSeq = 0
 watch(q, (val) => {
   clearTimeout(debounce)
-  if (val.trim().length < 2) { results.value = []; return }
+  const seq = ++searchSeq
+  if (val.trim().length < 2) { results.value = []; searchError.value = ''; return }
   debounce = setTimeout(async () => {
     try {
-      const res = await $fetch<{ results: NodeRef[] }>(apiPath(repoPath(repo.value, 'search')), { query: { q: val, limit: 30 } })
+      const res = await apiGet<{ results: NodeRef[] }>(`${repoPath(repo.value, 'search')}?${new URLSearchParams({ q: val, limit: '30' })}`)
+      if (seq !== searchSeq) return
       results.value = res.results ?? []
       searchError.value = ''
     } catch (e) {
-      searchError.value = apiErrorMessage(e)
+      if (seq === searchSeq) searchError.value = apiErrorMessage(e)
     }
   }, 200)
 })
+// Results belong to one repository.
+watch(repo, () => { q.value = ''; results.value = []; searchError.value = '' })
+onBeforeUnmount(() => clearTimeout(debounce))
 
 const card = ref<SymbolCard | null>(null)
 const graph = ref<GraphView | null>(null)
@@ -67,29 +76,29 @@ const isCode = (r: NodeRef) => ['Function', 'Method', 'InterfaceMethod', 'Type']
       :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Explore' }]" />
     <div class="panel">
       <input v-model="q" type="search" placeholder="Search functions, types, files, doc sections…" aria-label="Search">
-      <p v-if="searchError" class="error">{{ searchError }}</p>
+      <p v-if="searchError" class="error" role="alert">{{ searchError }}</p>
       <div v-if="results.length" class="results">
         <button v-for="r in results" :key="r.id" class="secondary result" :disabled="!isCode(r)" @click="pick(r.id)">
-          <span class="tag">{{ r.kind }}</span> <span class="mono">{{ r.name }}</span>
+          <span class="tag">{{ r.kind }}</span> <span class="mono name">{{ r.name }}</span>
           <span class="muted mono loc">{{ r.location }}</span>
         </button>
       </div>
     </div>
 
-    <p v-if="loadError" class="panel error">{{ loadError }}</p>
-    <p v-if="graphError && card" class="panel error">Call neighbourhood unavailable: {{ graphError }}</p>
+    <p v-if="loadError" class="notice notice--danger" role="alert">{{ loadError }}</p>
+    <p v-if="graphError && card" class="notice notice--warn" role="status">Call neighbourhood unavailable: {{ graphError }}</p>
     <p v-if="loading && !card" class="panel muted" role="status">Loading symbol details…</p>
 
     <template v-if="card">
       <div class="panel">
         <div class="row" style="justify-content: space-between">
-          <h1 class="mono" style="font-size: 17px">{{ shortName(card.symbol) }}</h1>
+          <h2 class="mono symbol-name">{{ shortName(card.symbol) }}</h2>
           <span class="tag">{{ card.symbol.kind }}</span>
         </div>
-        <p class="mono muted">{{ location(card.symbol) }}</p>
+        <p class="mono muted path">{{ location(card.symbol) }}</p>
         <p v-if="card.resolved_from" class="small" role="status">Resolved through a human identity review from <span class="mono">{{ card.resolved_from }}</span>.</p>
         <p v-if="card.symbol.symbol_id" class="small">
-          <NuxtLink :to="`/repos/${encodeURIComponent(repo)}/identities?id=${card.symbol.symbol_id}`">Identity, annotations and reuse: <span class="mono">{{ card.symbol.symbol_id }}</span></NuxtLink>
+          <NuxtLink :to="`/repos/${encodeURIComponent(repo)}/identities?id=${encodeURIComponent(card.symbol.symbol_id)}`">Identity, annotations and reuse: <span class="mono">{{ card.symbol.symbol_id }}</span></NuxtLink>
           <span v-if="card.symbol.revision" class="muted"> · revision {{ card.symbol.revision.slice(0, 12) }}</span>
         </p>
         <pre v-if="card.symbol.signature" class="sig mono">{{ card.symbol.signature }}</pre>
@@ -112,7 +121,7 @@ const isCode = (r: NodeRef) => ['Function', 'Method', 'InterfaceMethod', 'Type']
         <div class="table-wrap"><table><tbody>
           <tr v-for="o in card.duplicate.others" :key="o.id">
             <td><a href="#" class="mono" @click.prevent="pick(o.id)">{{ o.name }}</a></td>
-            <td class="mono muted">{{ o.file }}:{{ o.start_line }}-{{ o.end_line }}</td>
+            <td class="mono muted path">{{ o.file }}:{{ o.start_line }}-{{ o.end_line }}</td>
           </tr>
         </tbody></table></div>
         <NuxtLink :to="`/repos/${encodeURIComponent(repo)}/duplicates`" class="small">All duplicates in this repository</NuxtLink>
@@ -141,7 +150,7 @@ const isCode = (r: NodeRef) => ['Function', 'Method', 'InterfaceMethod', 'Type']
                     <a v-if="isCode(r)" href="#" class="mono" @click.prevent="pick(r.id)">{{ r.name }}</a>
                     <span v-else class="mono">{{ r.name }}</span>
                   </td>
-                  <td class="mono muted">{{ r.location }}</td>
+                  <td class="mono muted path">{{ r.location }}</td>
                   <td v-if="r.depth && r.depth > 1" class="num muted">d{{ r.depth }}</td>
                 </tr>
               </tbody>
@@ -156,7 +165,10 @@ const isCode = (r: NodeRef) => ['Function', 'Method', 'InterfaceMethod', 'Type']
 
 <style scoped>
 .results { display: grid; gap: 4px; margin-top: 10px; max-height: 320px; overflow-y: auto; }
-.result { text-align: left; display: flex; gap: 8px; align-items: center; }
+.result { text-align: left; display: flex; gap: 8px; align-items: center; min-width: 0; }
+.result .name { overflow-wrap: anywhere; }
+.symbol-name { font-size: 17px; margin: 0; overflow-wrap: anywhere; }
+.path { overflow-wrap: anywhere; }
 .result .loc { margin-left: auto; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sig { background: var(--panel-2); padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
+.sig { background: var(--panel-2); padding: 8px 10px; border-radius: var(--radius-xs); white-space: pre-wrap; word-break: break-word; }
 </style>

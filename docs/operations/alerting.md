@@ -81,6 +81,7 @@ The chart refuses to render alerting without a metrics store (`victoriametrics.e
 | `CodeSynapseAuditWriteFailing` | critical | Audit entries from the API, the MCP server or background work could not be written in the last 10 minutes, so those requests were refused |
 | `CodeSynapseAuditSealFailing` | warning | Sealing the audit log into the archive failed in the last 25 hours |
 | `CodeSynapseAuditNotArchived` | warning | Two retention runs found sealed audit files but no archive configured, so old entries are not pruned |
+| `CodeSynapseDashboardAPIUnreachable` | critical | More than 5% of the dashboard's API calls find the API unreachable or time out for 10 minutes, with at least one call a minute |
 
 Store alerts add up every organisation's calls per store, so no organisation appears in them. Git, lookup, sign-in and audit alerts add up every organisation's numbers too. Other alerts read installation-wide numbers. The only labels an alert carries besides `severity`, `component` and `environment` are the store (`db_system`), the job kind, the instrument name, a fixed reason, and the fixed git operation, lookup service, sign-in method or audit source.
 

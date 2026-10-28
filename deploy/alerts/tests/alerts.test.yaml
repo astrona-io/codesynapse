@@ -7,6 +7,7 @@ rule_files:
   - ../jobs.yaml
   - ../outbound.yaml
   - ../security.yaml
+  - ../web.yaml
 evaluation_interval: 1m
 
 tests:
@@ -391,3 +392,43 @@ tests:
               summary: "The audit log has sealed files but no archive"
               description: "Retention found sealed audit files but no archive in two runs, so old entries are not pruned. Set CODESYNAPSE_AUDIT_ARCHIVE_DIR or the archive bucket again."
               dashboard: "https://codesynapse.example.com/admin"
+
+  - name: dashboard cannot reach the API
+    interval: 1m
+    input_series:
+      # A call a second reaches the API throughout; after 10 minutes, half
+      # as many again find it unreachable.
+      - series: 'platform_web_proxy_requests_total{outcome="ok",service_instance_id="web-1"}'
+        values: '0+60x40'
+      - series: 'platform_web_proxy_requests_total{outcome="unreachable",service_instance_id="web-1"}'
+        values: '0x10 30+30x30'
+      # Refused calls are the browser's doing and do not count.
+      - series: 'platform_web_proxy_requests_total{outcome="refused",service_instance_id="web-1"}'
+        values: '0+600x40'
+    alert_rule_test:
+      - eval_time: 12m
+        groupname: codesynapse-web
+        alertname: CodeSynapseDashboardAPIUnreachable
+        exp_alerts: []
+      - eval_time: 30m
+        groupname: codesynapse-web
+        alertname: CodeSynapseDashboardAPIUnreachable
+        exp_alerts:
+          - exp_labels: {severity: critical, component: web}
+            exp_annotations:
+              summary: "The dashboard cannot reach the API"
+              description: "33.33% of the dashboard's API calls found the API unreachable or timed out over the last 10 minutes, above 5% for 10 minutes."
+              dashboard: "https://codesynapse.example.com/admin"
+
+  - name: idle dashboard with one failure
+    interval: 1m
+    input_series:
+      - series: 'platform_web_proxy_requests_total{outcome="ok",service_instance_id="web-1"}'
+        values: '0x40'
+      - series: 'platform_web_proxy_requests_total{outcome="timeout",service_instance_id="web-1"}'
+        values: '0x5 1x35'
+    alert_rule_test:
+      - eval_time: 30m
+        groupname: codesynapse-web
+        alertname: CodeSynapseDashboardAPIUnreachable
+        exp_alerts: []

@@ -50,6 +50,18 @@ async function submitIdentityReview() {
   finally { reviewing.value = false }
 }
 useHead({ title: () => `Identity and reuse · ${repo.value}` })
+// Paging and messages belong to one repository.
+watch(repo, () => {
+  offset.value = 0; reviewOffset.value = 0; recordOffset.value = 0
+  saved.value = false; saveError.value = ''; reviewSaved.value = false; reviewError.value = ''
+})
+const idLink = (id: string, r = repo.value) => `/repos/${encodeURIComponent(r)}/identities?${new URLSearchParams({ id })}`
+function when(iso?: string): string {
+  if (!iso) return 'at an unknown time'
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' })
+}
+const FIELD_LABEL: Record<string, string> = { reason: 'Reason', modifications: 'Modifications', compatibility: 'Compatibility', license: 'Licence', attribution: 'Attribution', validation: 'Validation' }
 </script>
 
 <template>
@@ -62,38 +74,38 @@ useHead({ title: () => `Identity and reuse · ${repo.value}` })
       <NuxtLink v-if="selected" :to="`${base}/identities`">All identities</NuxtLink>
     </div>
     <p v-if="pending" role="status">Loading identities…</p>
-    <p v-else-if="error" class="panel error" role="alert">{{ apiErrorMessage(error) }}</p>
+    <p v-else-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="page">
       <p v-if="!page.available" class="panel">Identity analysis is not available for this index. Sync the repository to initialise it.</p>
       <template v-else>
-        <p class="small muted">Indexed {{ page.indexed_at || 'at an unknown time' }} · revision {{ page.revision || 'unavailable' }}. This describes the indexed source; sync after changes.</p>
+        <p class="small muted">Indexed {{ when(page.indexed_at) }} · revision {{ page.revision || 'unavailable' }}. This describes the indexed source; sync after changes.</p>
         <p v-if="!page.symbols.length" class="panel">No matching symbol identities.</p>
         <section v-for="symbol in page.symbols" :key="symbol.id" class="panel stack">
           <div class="row">
-            <h2 class="mono">{{ symbol.current.name }}</h2>
+            <h2 class="mono wrap">{{ symbol.current.name }}</h2>
             <span class="tag">{{ symbol.active ? 'Current' : 'Historical · removed' }}</span>
-            <NuxtLink :to="`${base}/identities?id=${symbol.id}`" class="mono small">{{ symbol.id }}</NuxtLink>
+            <NuxtLink :to="idLink(symbol.id)" class="mono small wrap">{{ symbol.id }}</NuxtLink>
           </div>
-          <p class="mono small">{{ symbol.current.file || 'Package' }}<template v-if="symbol.current.start_line">:{{ symbol.current.start_line }}–{{ symbol.current.end_line }}</template></p>
+          <p class="mono small wrap">{{ symbol.current.file || 'Package' }}<template v-if="symbol.current.start_line">:{{ symbol.current.start_line }}–{{ symbol.current.end_line }}</template></p>
           <p class="small">{{ symbol.match }}</p>
-          <p v-if="symbol.current.neighbour_count" class="small muted">{{ symbol.current.neighbour_count }} call neighbours<template v-if="symbol.current.neighbours_omitted"> · incomplete evidence</template></p>
-          <NuxtLink v-if="symbol.active" :to="`${base}/explore?id=${symbol.id}`">Explore current code and callers</NuxtLink>
+          <p v-if="symbol.current.neighbour_count" class="small muted">{{ plural(symbol.current.neighbour_count ?? 0, 'call neighbour') }}<template v-if="symbol.current.neighbours_omitted"> · incomplete evidence</template></p>
+          <NuxtLink v-if="symbol.active" :to="{ path: `${base}/explore`, query: { id: symbol.id } }">Explore current code and callers</NuxtLink>
           <div v-if="symbol.candidates?.length || symbol.candidates_omitted">
             <strong>Review required</strong>
             <p>These are possible prior identities or copies. No identity was transferred and no lineage is verified.</p>
-            <ul><li v-for="id in symbol.candidates" :key="id"><NuxtLink :to="`${base}/identities?id=${id}`" class="mono">{{ id }}</NuxtLink> <button v-if="symbol.active" class="secondary" @click="identityReview.from = id; identityReview.to = symbol.id">Review this match</button></li></ul>
-            <p v-if="symbol.candidates_omitted">Up to {{ symbol.candidates_omitted }} additional candidates were not examined or displayed.</p>
+            <ul><li v-for="id in symbol.candidates" :key="id"><NuxtLink :to="idLink(id)" class="mono wrap">{{ id }}</NuxtLink> <button v-if="symbol.active" type="button" class="secondary" @click="identityReview.from = id; identityReview.to = symbol.id">Review this match</button></li></ul>
+            <p v-if="symbol.candidates_omitted">Up to {{ fmtInt(symbol.candidates_omitted) }} additional candidates were not examined or displayed.</p>
           </div>
           <details v-if="symbol.history?.length">
-            <summary>Earlier occurrences ({{ symbol.history.length }})</summary>
-            <ul><li v-for="(old, i) in symbol.history" :key="i" class="small mono">{{ old.name }} · {{ old.file }} · {{ old.revision || 'revision unavailable' }}</li></ul>
-            <p v-if="symbol.history_omitted">{{ symbol.history_omitted }} older occurrences omitted by the retention bound.</p>
+            <summary>Earlier occurrences ({{ fmtInt(symbol.history.length) }})</summary>
+            <ul><li v-for="(old, i) in symbol.history" :key="i" class="small mono wrap">{{ old.name }} · {{ old.file }} · {{ old.revision || 'revision unavailable' }}</li></ul>
+            <p v-if="symbol.history_omitted">{{ fmtInt(symbol.history_omitted) }} older occurrences omitted by the retention bound.</p>
           </details>
         </section>
         <nav class="row" aria-label="Identity pages">
-          <button class="secondary" :disabled="offset === 0" @click="offset = Math.max(0, offset - limit)">Previous</button>
-          <span>{{ page.total }} matching identities</span>
-          <button class="secondary" :disabled="offset + limit >= page.total" @click="offset += limit">Next</button>
+          <button type="button" class="secondary" :disabled="offset === 0" @click="offset = Math.max(0, offset - limit)">Previous</button>
+          <span>{{ plural(page.total, 'matching identity', 'matching identities') }}</span>
+          <button type="button" class="secondary" :disabled="offset + limit >= page.total" @click="offset += limit">Next</button>
         </nav>
       </template>
     </template>
@@ -102,18 +114,18 @@ useHead({ title: () => `Identity and reuse · ${repo.value}` })
       <h2>Human identity reviews</h2>
       <p class="small muted">Reviews belong to the selected organisation. A same-symbol review lets the prior permanent ID resolve to current code here. Copy and distinct reviews keep the identities separate. Earlier reviews remain in history. A copy classification needs a separate reuse record for licence and validation details.</p>
       <p v-if="reviewsError" class="error" role="alert">{{ apiErrorMessage(reviewsError) }}</p>
-      <p v-else-if="!reviews">Loading reviews…</p>
+      <p v-else-if="!reviews" role="status">Loading reviews…</p>
       <p v-else-if="!reviews.reviews.length">No identity reviews in this scope.</p>
       <article v-for="review in reviews?.reviews" :key="review.item.id">
         <h3>{{ review.item.identity_review.relation }} · {{ review.state }}</h3>
-        <p class="small mono">{{ review.item.identity_review.from }} → {{ review.item.identity_review.to }}</p>
+        <p class="small mono wrap">{{ review.item.identity_review.from }} → {{ review.item.identity_review.to }}</p>
         <p>{{ review.item.identity_review.reason }}</p>
-        <p class="small muted">{{ review.item.created_at }} · reviewed revision {{ review.item.identity_review.revision || 'unavailable' }}</p>
+        <p class="small muted">{{ when(review.item.created_at) }} · reviewed revision {{ review.item.identity_review.revision || 'unavailable' }}</p>
       </article>
       <nav v-if="reviews" class="row" aria-label="Identity review pages">
-        <button class="secondary" :disabled="reviewOffset === 0" @click="reviewOffset = Math.max(0, reviewOffset - 20)">Previous reviews</button>
-        <span>{{ reviews.total }} reviews</span>
-        <button class="secondary" :disabled="reviewOffset + 20 >= reviews.total" @click="reviewOffset += 20">Next reviews</button>
+        <button type="button" class="secondary" :disabled="reviewOffset === 0" @click="reviewOffset = Math.max(0, reviewOffset - 20)">Previous reviews</button>
+        <span>{{ plural(reviews.total, 'review') }}</span>
+        <button type="button" class="secondary" :disabled="reviewOffset + 20 >= reviews.total" @click="reviewOffset += 20">Next reviews</button>
       </nav>
     </section>
     <form v-if="page?.available" class="panel stack" @submit.prevent="submitIdentityReview">
@@ -132,28 +144,28 @@ useHead({ title: () => `Identity and reuse · ${repo.value}` })
       <h2>Annotations and recorded reuse</h2>
       <p class="muted small">Attributed evidence from people and agents. Licence, compatibility and validation text records what the author checked; it does not independently verify those claims. Changes are never propagated automatically.</p>
       <p v-if="recordError" class="error" role="alert">{{ apiErrorMessage(recordError) }}</p>
-      <p v-else-if="!records">Loading records…</p>
+      <p v-else-if="!records" role="status">Loading records…</p>
       <p v-else-if="!records.records.length">No recorded annotations or reuse in this scope.</p>
       <p v-if="records?.storage_truncated">The storage query reached its limit; this list may be incomplete.</p>
       <p v-if="records?.sources_restricted" role="status">Some reuse records are unavailable because their sources are outside your current access.</p>
       <article v-for="record in records?.records" :key="record.item.id" class="stack">
         <h3>{{ record.item.code.method }} · {{ record.freshness }}</h3>
-        <p class="small muted">{{ record.item.client || 'Unknown client' }} · {{ record.item.created_at }}</p>
+        <p class="small muted">{{ record.item.client || 'Unknown client' }} · {{ when(record.item.created_at) }}</p>
         <p v-if="record.source_unavailable" role="status">Source analysis is unavailable. This record needs review.</p>
         <p>{{ record.item.code.purpose || record.item.code.reason }}</p>
         <p v-if="record.item.code.labels.length" class="small">Labels: {{ record.item.code.labels.join(', ') }}</p>
         <p v-for="change in record.changed" :key="change" class="small">{{ change }}</p>
         <details>
           <summary>Provenance and validation</summary>
-          <p v-for="source in record.item.code.sources" :key="source.id" class="small mono">Origin: <NuxtLink :to="`/repos/${encodeURIComponent(source.repo || repo)}/identities?id=${source.id}`">{{ source.repo || repo }} · {{ source.id }}</NuxtLink> · {{ source.revision || 'revision unavailable' }} · {{ source.fingerprint || 'fingerprint unavailable' }}</p>
-          <p v-for="target in record.item.code.targets" :key="target.id" class="small mono">Destination: {{ target.id }} · {{ target.revision || 'revision unavailable' }}</p>
-          <dl><template v-for="field in ['modifications', 'compatibility', 'license', 'attribution', 'validation'] as const" :key="field"><dt>{{ field }}</dt><dd>{{ record.item.code[field] || 'Not recorded' }}</dd></template></dl>
+          <p v-for="source in record.item.code.sources" :key="source.id" class="small mono wrap">Origin: <NuxtLink :to="idLink(source.id, source.repo || repo)">{{ source.repo || repo }} · {{ source.id }}</NuxtLink> · {{ source.revision || 'revision unavailable' }} · {{ source.fingerprint || 'fingerprint unavailable' }}</p>
+          <p v-for="target in record.item.code.targets" :key="target.id" class="small mono wrap">Destination: {{ target.id }} · {{ target.revision || 'revision unavailable' }}</p>
+          <dl><template v-for="field in ['modifications', 'compatibility', 'license', 'attribution', 'validation'] as const" :key="field"><dt>{{ FIELD_LABEL[field] }}</dt><dd>{{ record.item.code[field] || 'Not recorded' }}</dd></template></dl>
         </details>
       </article>
       <nav v-if="records" class="row" aria-label="Record pages">
-        <button class="secondary" :disabled="recordOffset === 0" @click="recordOffset = Math.max(0, recordOffset - 20)">Previous records</button>
-        <span>{{ records.total }} records in the storage window</span>
-        <button class="secondary" :disabled="recordOffset + 20 >= records.total" @click="recordOffset += 20">Next records</button>
+        <button type="button" class="secondary" :disabled="recordOffset === 0" @click="recordOffset = Math.max(0, recordOffset - 20)">Previous records</button>
+        <span>{{ plural(records.total, 'record') }} in the storage window</span>
+        <button type="button" class="secondary" :disabled="recordOffset + 20 >= records.total" @click="recordOffset += 20">Next records</button>
       </nav>
     </section>
 
@@ -169,7 +181,7 @@ useHead({ title: () => `Identity and reuse · ${repo.value}` })
       <template v-else>
         <label>Source repository (leave empty for this repository) <input v-model="form.origin_repo" maxlength="300" placeholder="owner/repository"></label>
         <label>Origin IDs, separated by commas <input v-model="form.origins" required maxlength="800"></label>
-        <label v-for="field in ['reason', 'modifications', 'compatibility', 'license', 'attribution', 'validation'] as const" :key="field">{{ field }} <textarea v-model="form[field]" :required="field !== 'modifications'" maxlength="1000" /></label>
+        <label v-for="field in ['reason', 'modifications', 'compatibility', 'license', 'attribution', 'validation'] as const" :key="field">{{ FIELD_LABEL[field] }} <textarea v-model="form[field]" :required="field !== 'modifications'" maxlength="1000" /></label>
         <p class="small muted">If a check was unavailable or not run, say so explicitly.</p>
       </template>
       <p v-if="saveError" class="error" role="alert">{{ saveError }}</p>
@@ -178,3 +190,7 @@ useHead({ title: () => `Identity and reuse · ${repo.value}` })
     </form>
   </div>
 </template>
+
+<style scoped>
+.wrap { overflow-wrap: anywhere; min-width: 0; }
+</style>

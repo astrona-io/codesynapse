@@ -6,9 +6,9 @@ const repo = computed(() => route.params.repo as string)
 useHead({ title: () => `Dependency review · ${repo.value}` })
 const sbomHref = computed(() => apiPath(repoPath(repo.value, 'sbom')))
 const { data: mods, error } = useApiGet<{ results: Ranked[] }>(() => repoPath(repo.value, 'list?kind=Module&metric=name&limit=500'))
-const { data: sec } = useApiGet<SecurityReport>(() => repoPath(repo.value, 'security'))
-const { data: lic } = useApiGet<LicenseReport>(() => repoPath(repo.value, 'licenses'))
-const { data: clean } = useApiGet<CleanupReport>(() => repoPath(repo.value, 'cleanup'))
+const { data: sec, error: secError } = useApiGet<SecurityReport>(() => repoPath(repo.value, 'security'))
+const { data: lic, error: licError } = useApiGet<LicenseReport>(() => repoPath(repo.value, 'licenses'))
+const { data: clean, error: cleanError } = useApiGet<CleanupReport>(() => repoPath(repo.value, 'cleanup'))
 
 type Verdict = { level: string; reason: string }
 type Row = {
@@ -97,6 +97,9 @@ const WHY: Record<string, (n: string) => string> = {
 }
 const why = (r: Row) => (WHY[r.ecosystem] ?? WHY.go!)(r.name)
 
+// Until every report has answered, an empty table would claim there is nothing to do.
+const ready = computed(() => !!mods.value && !!(sec.value || secError.value) && !!(lic.value || licError.value) && !!(clean.value || cleanError.value))
+const missing = computed(() => [secError.value && 'vulnerabilities', licError.value && 'licences', cleanError.value && 'unused dependencies'].filter(Boolean).join(', '))
 const actionable = computed(() => rows.value.filter((r) => actions(r).length))
 const called = computed(() => rows.value.filter((r) => r.vulns.some((v) => v.reachability === 'called')).length)
 const unusedCount = computed(() => rows.value.filter((r) => r.unused).length)
@@ -132,28 +135,30 @@ const agentText = computed(() => `Run the dependency-review prompt for ${repo.va
       :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Dependency review' }]">
       <a :href="sbomHref" download class="btn btn--ghost" title="Dependencies resolved by go.mod and the lockfiles, as CycloneDX 1.5 JSON. Not the contents of a built artifact.">Download SBOM</a>
     </PageHeader>
-    <p v-if="error" class="notice notice--danger">{{ apiErrorMessage(error) }}</p>
+    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
+    <p v-else-if="!ready" class="muted" role="status">Loading the dependency reports…</p>
+    <p v-if="ready && missing" class="notice notice--warn" role="status">Some reports could not be loaded ({{ missing }}), so the list below may be incomplete.</p>
 
-    <div class="grid cols-4">
-      <StatTile label="Need a decision" :value="String(actionable.length)" :hint="`of ${sec?.modules.total ?? lic?.total ?? 0} dependencies`" />
-      <StatTile label="Called vulnerable code" :value="String(called)" hint="fix these first" />
-      <StatTile label="Licence conflicts" :value="String(conflicts)" :hint="`${lic?.review ?? 0} more to review`" />
-      <StatTile label="Unused" :value="String(unusedCount)" hint="nothing imports them" />
+    <div v-if="ready" class="grid cols-4">
+      <StatTile label="Need a decision" :value="fmtInt(actionable.length)" :hint="`of ${plural(sec?.modules.total ?? lic?.total ?? 0, 'dependency', 'dependencies')}`" />
+      <StatTile label="Called vulnerable code" :value="fmtInt(called)" hint="fix these first" />
+      <StatTile label="Licence conflicts" :value="fmtInt(conflicts)" :hint="`${fmtInt(lic?.review ?? 0)} more to review`" />
+      <StatTile label="Unused" :value="fmtInt(unusedCount)" hint="nothing imports them" />
     </div>
 
-    <section class="panel">
+    <section v-if="ready" class="panel">
       <div class="panel__header"><h2>Findings</h2><NuxtLink :to="`/repos/${encodeURIComponent(repo)}/dependencies`" class="small">All packages</NuxtLink></div>
       <div v-if="actionable.length" class="table-wrap">
         <table>
           <thead><tr><th>Dependency and version</th><th>Introduced by</th><th>Usage</th><th>Licence</th><th>Advisory</th><th>Proposed action</th><th>Verified outcome</th></tr></thead>
           <tbody>
             <tr v-for="r in actionable" :key="r.key">
-              <td><span class="mono">{{ r.name }}</span><div class="mono muted">{{ r.version || '–' }}</div><span class="badge">{{ r.ecosystem }}</span><span v-if="r.dev" class="badge">dev</span></td>
+              <td><span class="mono wrap">{{ r.name }}</span><div class="mono muted">{{ r.version || '–' }}</div><span class="badge">{{ ecosystemLabel(r.ecosystem) }}</span><span v-if="r.dev" class="badge">dev</span></td>
               <td>
                 <template v-if="r.direct">Direct: your manifest</template>
                 <template v-else-if="r.via">
-                  Indirect, via <span class="mono">{{ r.via }}</span>
-                  <div v-if="r.roots > 1" class="muted small">{{ r.roots }} of your dependencies lead to it</div>
+                  Indirect, via <span class="mono wrap">{{ r.via }}</span>
+                  <div v-if="r.roots > 1" class="muted small">{{ fmtInt(r.roots) }} of your dependencies lead to it</div>
                   <div v-else class="muted small">only through that chain</div>
                 </template>
                 <template v-else>Indirect: path not recorded<div><button class="chip" :title="`Copy: ${why(r)}`" @click="copy(why(r))">{{ copied === why(r) ? 'Copied' : 'Copy how to find it' }}</button></div></template>
@@ -167,8 +172,8 @@ const agentText = computed(() => `Run the dependency-review prompt for ${repo.va
               <td>
                 <span v-if="!r.vulns.length" class="muted">none known</span>
                 <div v-for="v in r.vulns" :key="v.id" class="vuln">
-                  <span :class="`sev sev--${v.severity}`">{{ v.severity }}</span>
-                  <a :href="v.url" target="_blank" rel="noopener noreferrer" class="mono">{{ v.id }}</a>
+                  <SevBadge :severity="v.severity" />
+                  <a :href="v.url" target="_blank" rel="noopener noreferrer" class="mono">{{ v.id }}<span class="sr-only"> (opens in a new tab)</span></a>
                   <span v-if="v.fixed" class="small">fixed in <span class="mono">{{ v.fixed }}</span></span>
                 </div>
               </td>
@@ -206,5 +211,6 @@ const agentText = computed(() => `Run the dependency-review prompt for ${repo.va
 .vuln { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 td .badge { margin-right: 4px; }
 td p { margin: 0 0 4px; }
-.sig { white-space: pre-wrap; }
+.sig { white-space: pre-wrap; overflow-wrap: anywhere; }
+.wrap { overflow-wrap: anywhere; }
 </style>

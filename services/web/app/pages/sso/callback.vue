@@ -25,7 +25,11 @@ onMounted(async () => {
     await session.load()
     await navigateTo(safeNext(res.next), { replace: true })
   } catch (e) {
-    error.value = apiErrorMessage(e)
+    error.value = plainError(e, {
+      401: 'The sign-in could not be checked. Start again from the sign-in page; links from the identity provider work only once and only in the browser that started them.',
+      502: 'Your organisation\'s identity provider could not be reached. Try again in a moment.',
+      403: 'Your identity provider confirmed you, but this account cannot sign in here. Ask an owner or admin of your organisation to check your access.',
+    })
   }
 })
 </script>

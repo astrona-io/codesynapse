@@ -4,11 +4,34 @@ import type { Attention, CleanupReport, Dashboard, MetricsReport, SecurityReport
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
 const base = computed(() => `/repos/${encodeURIComponent(repo.value)}`)
+useHead({ title: () => repo.value })
 const { data: d, error } = useApiGet<Dashboard>(() => repoPath(repo.value, 'dashboard'))
 const { data: attention } = useApiGet<Attention>(() => `attention?repo=${encodeURIComponent(repo.value)}`)
-const { data: sec } = useApiGet<SecurityReport>(() => repoPath(repo.value, 'security'))
-const { data: clean } = useApiGet<CleanupReport>(() => repoPath(repo.value, 'cleanup'))
-const { data: met } = useApiGet<MetricsReport>(() => repoPath(repo.value, 'metrics'))
+// The cards and next steps read a few fields of three large reports; only
+// those are kept, so the page payload does not carry every finding.
+const { data: sec } = useApiGet(() => repoPath(repo.value, 'security'), { view: {
+  name: 'summary',
+  pick: (s: SecurityReport) => ({
+    grade: s.grade, finding_counts: s.finding_counts ?? {}, vuln_counts: s.vuln_counts ?? {},
+    findings: (s.findings ?? []).filter((f) => f.severity === 'critical' || (f.severity === 'high' && f.exposed)),
+    vulnerabilities: (s.vulnerabilities ?? []).filter((v) => v.reachability !== 'required' && v.fixed),
+  }),
+} })
+const { data: clean } = useApiGet(() => repoPath(repo.value, 'cleanup'), { view: {
+  name: 'summary',
+  pick: (c: CleanupReport) => {
+    const mods = c.modules ?? []
+    const mod = mods.find((m) => m.vulnerabilities?.length) ?? mods[0]
+    return { summary: c.summary, modules: mod ? [mod] : [], items: (c.items ?? []).filter((i) => i.security?.length) }
+  },
+} })
+const { data: met } = useApiGet(() => repoPath(repo.value, 'metrics'), { view: {
+  name: 'summary',
+  pick: (m: MetricsReport) => ({
+    tests: m.tests && { ...m.tests, untested_complex: (m.tests.untested_complex ?? []).slice(0, 1) },
+    benchmark: m.benchmark && { samples: m.benchmark.samples, median_reduction_pct: m.benchmark.median_reduction_pct },
+  }),
+} })
 
 const explore = (id: string) => ({ path: `${base.value}/explore`, query: { id } })
 const { data: repos, refresh: refreshRepos } = useApiGet<{ repos: { name: string; managed?: boolean; remote?: string; branch?: string }[] }>('repos')
@@ -17,36 +40,38 @@ const isManaged = computed(() => repoInfo.value?.managed ?? false)
 const ageDays = computed(() => (d.value?.ingested_at ? (Date.now() - Date.parse(d.value.ingested_at)) / 86_400_000 : 0))
 
 // --- health cards ---------------------------------------------------------
-const secCard = computed(() => {
+type Tone = 'good' | 'warn' | 'bad'
+interface Card { value: string; tone: Tone; verdict: string }
+const secCard = computed((): Card | null => {
   const s = sec.value
   if (!s) return null
   const urgent = (s.finding_counts.critical ?? 0) + (s.finding_counts.high ?? 0)
   const vulns = Object.values(s.vuln_counts).reduce((a, b) => a + b, 0)
-  const tone = s.grade === 'A' ? 'good' : s.grade === 'B' || s.grade === 'C' ? 'warn' : 'bad'
+  const tone: Tone = s.grade === 'A' ? 'good' : s.grade === 'B' || s.grade === 'C' ? 'warn' : 'bad'
   const parts = [urgent ? `${plural(urgent, 'critical/high issue')}` : 'no critical or high issues', vulns ? plural(vulns, 'known vulnerability', 'known vulnerabilities') : 'no known vulnerabilities']
   return { value: s.grade, tone, verdict: `${GRADE_TEXT[s.grade]} — ${parts.join(', ')}.` }
 })
-const testCard = computed(() => {
+const testCard = computed((): Card | null => {
   const t = met.value?.tests
   if (!t || !t.total) return null
   const pctv = Math.round(t.reachable_pct)
-  return { value: `${pctv}%`, tone: pctv >= 70 ? 'good' : pctv >= 40 ? 'warn' : 'bad', verdict: `${t.reachable} of ${plural(t.total, 'function')} are reached by a test.` }
+  return { value: `${pctv}%`, tone: pctv >= 70 ? 'good' : pctv >= 40 ? 'warn' : 'bad', verdict: `${fmtInt(t.reachable)} of ${plural(t.total, 'function')} are reached by a test.` }
 })
-const cleanCard = computed(() => {
+const cleanCard = computed((): Card | null => {
   const c = clean.value?.summary
   if (!c) return null
   const n = c.unreachable + c.test_only
   if (!n && !c.unused_modules) return { value: '0', tone: 'good', verdict: 'No unused code found.' }
   const mods = c.unused_modules ? `, ${plural(c.unused_modules, 'unused dependency', 'unused dependencies')}` : ''
-  return { value: String(n), tone: c.security_relevant ? 'bad' : 'warn', verdict: `${plural(n, 'unused function')} (${plural(c.dead_loc, 'line')})${mods} can be removed.` }
+  return { value: fmtInt(n), tone: c.security_relevant ? 'bad' : 'warn', verdict: `${plural(n, 'unused function')} (${plural(c.dead_loc, 'line')})${mods} can be removed.` }
 })
-const docCard = computed(() => {
+const docCard = computed((): Card | null => {
   const s = d.value?.stats
   if (!s || !s.exported) return null
   const p = Math.round((s.documented / s.exported) * 100)
-  return { value: `${p}%`, tone: p >= 80 ? 'good' : p >= 50 ? 'warn' : 'bad', verdict: `${s.documented} of ${plural(s.exported, 'public symbol')} have a doc comment.` }
+  return { value: `${p}%`, tone: p >= 80 ? 'good' : p >= 50 ? 'warn' : 'bad', verdict: `${fmtInt(s.documented)} of ${plural(s.exported, 'public symbol')} have a doc comment.` }
 })
-const savingsCard = computed(() => {
+const savingsCard = computed((): Card | null => {
   const b = met.value?.benchmark
   if (!b?.samples) return null
   return { value: `${(b.median_reduction_pct ?? 0).toFixed(0)}%`, tone: 'good', verdict: 'less context an AI agent needs per question, compared with reading the files.' }
@@ -58,12 +83,12 @@ const steps = computed<Step[]>(() => {
   const out: Step[] = []
   const s = sec.value
   if (s) {
-    const urgent = s.findings.filter((f) => f.severity === 'critical' || (f.severity === 'high' && f.exposed))
+    const urgent = s.findings // critical, or high and exposed
     if (urgent.length) {
       const f = urgent[0]!
       out.push({ tone: 'bad', title: `Fix ${plural(urgent.length, 'urgent security issue')}`, why: `Start with “${f.title}” in ${f.location}${f.exposed ? ', reachable from outside' : ''}.`, to: `${base.value}/security`, cta: 'See how to fix' })
     }
-    const reached = s.vulnerabilities.filter((v) => v.reachability !== 'required' && v.fixed)
+    const reached = s.vulnerabilities // fixable and not only required
     if (reached.length) {
       const v = reached[0]!
       out.push({ tone: v.reachability === 'called' ? 'bad' : 'warn', title: `Upgrade ${v.module} to ${v.fixed}`, why: `${v.id}${v.cve?.length ? ` (${v.cve[0]})` : ''}: ${v.summary}. ${REACH_TEXT[v.reachability]}.`, to: `${base.value}/security`, cta: 'Review vulnerability' })
@@ -71,9 +96,9 @@ const steps = computed<Step[]>(() => {
   }
   const c = clean.value
   if (c) {
-    const mod = c.modules.find((m) => m.vulnerabilities?.length) ?? c.modules[0]
+    const mod = c.modules[0] // the first with vulnerabilities, else the first
     if (mod) out.push({ tone: mod.vulnerabilities?.length ? 'bad' : 'warn', title: `Remove unused dependency ${mod.path}`, why: mod.vulnerabilities?.length ? `Nothing imports it, and removing it eliminates ${plural(mod.vulnerabilities.length, 'vulnerability', 'vulnerabilities')}.` : 'Nothing in the repository imports it.', to: `${base.value}/cleanup`, cta: 'Open cleanup' })
-    const risky = c.items.filter((i) => i.security?.length)
+    const risky = c.items // the ones with security impact
     if (risky.length) out.push({ tone: 'warn', title: `Delete ${plural(risky.length, 'unused function')} with security impact`, why: `For example ${risky[0]!.name}: ${risky[0]!.security![0]}. Dead code is still shipped and attackable.`, to: `${base.value}/cleanup`, cta: 'Open cleanup' })
   }
   const gap = met.value?.tests.untested_complex?.[0]
@@ -86,7 +111,7 @@ const steps = computed<Step[]>(() => {
 </script>
 
 <template>
-  <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
+  <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
   <div v-else-if="d" class="stack">
     <PageHeader eyebrow="Repository summary" :title="repo" :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo }]">
       <template #meta>
@@ -102,7 +127,7 @@ const steps = computed<Step[]>(() => {
     <div class="panel autosync-bar"><AutoSync :repo="repo" /></div>
 
     <section v-if="attention" class="panel">
-      <div class="panel__header"><h2>Needs attention <span class="muted">{{ attention.items.length }}</span></h2></div>
+      <div class="panel__header"><h2>Needs attention <span class="muted">{{ fmtInt(attention.items.length) }}</span></h2></div>
       <AttentionList v-if="attention.items.length" :items="attention.items" :show-repo="false" :limit="6" />
       <p v-else class="notice notice--ok">Nothing flagged: no critical or high findings, no vulnerable or conflicting dependencies, update automation in place, and indexed recently.</p>
     </section>
@@ -120,10 +145,10 @@ const steps = computed<Step[]>(() => {
     </section>
 
     <div class="grid grid--health">
-      <HealthCard v-if="secCard" label="Security" :value="secCard.value" :verdict="secCard.verdict" :tone="secCard.tone as any" :to="`${base}/security`" action="Open security review" />
-      <HealthCard v-if="testCard" label="Test reach" tip="tested" :value="testCard.value" :verdict="testCard.verdict" :tone="testCard.tone as any" :to="`${base}/metrics`" action="See test gaps" />
-      <HealthCard v-if="cleanCard" label="Unused code" tip="unreachable" :value="cleanCard.value" :verdict="cleanCard.verdict" :tone="cleanCard.tone as any" :to="`${base}/cleanup`" action="Clean up" />
-      <HealthCard v-if="docCard" label="Documentation" :value="docCard.value" :verdict="docCard.verdict" :tone="docCard.tone as any" :to="`${base}/docs`" action="Open docs" />
+      <HealthCard v-if="secCard" label="Security" :value="secCard.value" :verdict="secCard.verdict" :tone="secCard.tone" :to="`${base}/security`" action="Open security review" />
+      <HealthCard v-if="testCard" label="Test reach" tip="tested" :value="testCard.value" :verdict="testCard.verdict" :tone="testCard.tone" :to="`${base}/metrics`" action="See test gaps" />
+      <HealthCard v-if="cleanCard" label="Unused code" tip="unreachable" :value="cleanCard.value" :verdict="cleanCard.verdict" :tone="cleanCard.tone" :to="`${base}/cleanup`" action="Clean up" />
+      <HealthCard v-if="docCard" label="Documentation" :value="docCard.value" :verdict="docCard.verdict" :tone="docCard.tone" :to="`${base}/docs`" action="Open docs" />
       <HealthCard v-if="savingsCard" label="Context for AI agents" tip="reduction" :value="savingsCard.value" :verdict="savingsCard.verdict" tone="good" :to="`${base}/metrics`" action="See benchmark" />
     </div>
 
@@ -135,7 +160,7 @@ const steps = computed<Step[]>(() => {
       </div>
       <ol v-if="steps.length" class="steps">
         <li v-for="(s, i) in steps" :key="i" class="step" :class="`step--${s.tone}`">
-          <span class="num">{{ i + 1 }}</span>
+          <span class="step-num" aria-hidden="true">{{ i + 1 }}</span>
           <div class="step-body">
             <strong>{{ s.title }}</strong>
             <p class="muted">{{ s.why }}</p>
@@ -156,8 +181,8 @@ const steps = computed<Step[]>(() => {
             <thead><tr><th>Function</th><th class="num">Complexity</th><th class="num">Changes</th><th class="num">Callers</th></tr></thead>
             <tbody>
               <tr v-for="h in d.hotspots.slice(0, 8)" :key="h.id">
-                <td><NuxtLink :to="explore(h.id)" class="mono">{{ h.name }}</NuxtLink><div class="mono dim">{{ h.location }}</div></td>
-                <td class="num">{{ h.complexity }}</td><td class="num">{{ h.file_churn }}</td><td class="num">{{ h.fan_in }}</td>
+                <td><NuxtLink :to="explore(h.id)" class="mono">{{ h.name }}</NuxtLink><div class="mono dim path">{{ h.location }}</div></td>
+                <td class="num">{{ fmtInt(h.complexity) }}</td><td class="num">{{ fmtInt(h.file_churn) }}</td><td class="num">{{ fmtInt(h.fan_in) }}</td>
               </tr>
             </tbody>
           </table>
@@ -174,7 +199,7 @@ const steps = computed<Step[]>(() => {
         <div class="table-wrap">
           <table><tbody>
             <tr v-for="c in d.recent_commits.slice(0, 8)" :key="c.node.id">
-              <td class="mono dim">{{ c.node.name.slice(0, 8) }}</td><td><span class="truncate">{{ c.node.summary }}</span></td><td class="muted nowrap">{{ relTime(c.node.time) }}</td>
+              <td class="mono dim">{{ c.node.name.slice(0, 8) }}</td><td><span class="truncate">{{ c.node.summary }}</span></td><td class="muted nowrap" :title="c.node.time ? new Date(c.node.time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : undefined">{{ relTime(c.node.time) }}</td>
             </tr>
           </tbody></table>
         </div>
@@ -186,7 +211,7 @@ const steps = computed<Step[]>(() => {
       </section>
     </div>
   </div>
-  <p v-else class="muted">Loading…</p>
+  <p v-else class="muted" role="status">Loading…</p>
 </template>
 
 <style scoped>
@@ -198,12 +223,13 @@ const steps = computed<Step[]>(() => {
 .step--bad { background: var(--danger-soft); }
 .step--warn { background: var(--warning-soft); }
 .step--neutral { background: var(--info-soft); }
-.num { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--panel-2); font: 600 12px var(--font-mono); color: var(--muted); }
+.step-num { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--panel-2); font: 600 12px var(--font-mono); color: var(--muted); }
 .step-body { display: grid; gap: 2px; min-width: 0; }
 .step-body p { font-size: 13.5px; }
 .cta { white-space: nowrap; }
 .section-title { margin: 8px 0 -8px; font-size: 15px; color: var(--muted); font-weight: 500; }
 .small { font-size: 13px; }
 .nowrap { white-space: nowrap; }
+.path { overflow-wrap: anywhere; }
 @media (max-width: 640px) { .step { grid-template-columns: 28px 1fr; } .cta { grid-column: 2; justify-self: start; } }
 </style>

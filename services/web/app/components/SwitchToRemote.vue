@@ -55,8 +55,8 @@ async function confirm() {
 <template>
   <span class="switch">
     <button v-if="jobState !== 'running'" class="secondary" :class="{ tiny: small }" :disabled="settings && !settings.clone_enabled" title="Clone it from GitHub so CodeSynapse can sync branches and push fix branches" @click.prevent.stop="start">Switch to clone</button>
-    <span v-else class="pill small"><span class="dot dot--warn" />Cloning and indexing…</span>
-    <span v-if="jobState === 'failed'" class="error small" :title="jobError">switch failed</span>
+    <span v-else class="pill small" role="status"><span class="dot dot--warn" />Cloning and indexing…</span>
+    <span v-if="jobState === 'failed'" class="error small" role="alert" :title="jobError">switch failed</span>
   </span>
   <ConfirmDialog :open="open" :title="`Clone ${repo} from its remote?`" confirm-label="Clone and switch" :busy="busy" @confirm="confirm" @cancel="open = false">
     <p>Right now CodeSynapse reads <strong>{{ repo }}</strong> from your <code>./sources</code> folder, which it can't write to. Switching clones the repository into CodeSynapse's own workspace and indexes it from there, under the same name.</p>
@@ -72,7 +72,7 @@ async function confirm() {
       <li><strong>Untouched:</strong> your folder in <code>./sources</code>. You can delete it afterwards.</li>
     </ul>
     <p v-if="settings && !settings.git_token_configured" class="warn small">No git token is set. Public repositories clone fine; private ones and fix branches need <code>just git-token</code>.</p>
-    <p v-if="error" class="error small">{{ error }}</p>
+    <p v-if="error" class="error small" role="alert">{{ error }}</p>
   </ConfirmDialog>
 </template>
 

@@ -23,6 +23,9 @@ var RuleIDs = []string{
 	"hardcoded-secret",
 	"dom-xss",
 	"path-from-request",
+	"sql-from-request",  // taint.go
+	"exec-from-request", // taint.go
+	"ssrf-from-request", // taint.go
 	"open-redirect",
 	"jwt-unverified",
 	"insecure-rand",

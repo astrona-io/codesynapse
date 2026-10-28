@@ -7,13 +7,21 @@ import type { AttackSurface, EntryPoint, Sink } from '~/utils/types'
 const route = useRoute()
 const router = useRouter()
 const repo = computed(() => route.params.repo as string)
+useHead({ title: () => `Entry points · ${repo.value}` })
 const kind = computed(() => (route.query.kind as string | undefined) ?? '')
 const reaching = computed(() => (route.query.reaching as string | undefined) ?? '')
 const unguarded = computed(() => route.query.unguarded === 'true')
 const q = ref((route.query.q as string | undefined) ?? '')
 const set = (key: string, value: string) => router.replace({ query: { ...route.query, [key]: value || undefined } })
 let typing: ReturnType<typeof setTimeout> | undefined
-watch(q, (v) => { clearTimeout(typing); typing = setTimeout(() => set('q', v.trim()), 250) })
+watch(q, (v) => {
+  clearTimeout(typing)
+  if (v.trim() === ((route.query.q as string | undefined) ?? '')) return
+  typing = setTimeout(() => set('q', v.trim()), 250)
+})
+// Back, forward and links change the URL without typing: follow them.
+watch(() => route.query.q, (v) => { if (((v as string | undefined) ?? '') !== q.value.trim()) q.value = (v as string | undefined) ?? '' })
+onBeforeUnmount(() => clearTimeout(typing))
 
 const query = computed(() => {
   const p = new URLSearchParams({ limit: '200' })
@@ -52,9 +60,9 @@ const at = (e: EntryPoint) => {
     </PageHeader>
 
     <div v-if="all" class="grid grid--stats">
-      <StatTile label="Entry points" :value="all.total" :hint="Object.entries(all.by_kind).map(([k, n]) => `${n} ${kindLabel(k)}`).join(' · ') || 'none found'" />
-      <StatTile label="No guard seen" :value="all.unguarded" hint="nothing at registration, no authorization call reached" />
-      <StatTile label="Reach exec, SQL or templates" :value="severe" hint="the operations attackers look for first" />
+      <StatTile label="Entry points" :value="fmtInt(all.total)" :hint="Object.entries(all.by_kind).map(([k, n]) => `${fmtInt(n)} ${kindLabel(k)}`).join(' · ') || 'none found'" />
+      <StatTile label="No guard seen" :value="fmtInt(all.unguarded)" hint="nothing at registration, no authorization call reached" />
+      <StatTile label="Reach exec, SQL or templates" :value="fmtInt(severe)" hint="the operations attackers look for first" />
     </div>
 
     <section class="panel filters" aria-label="Filters">
@@ -73,7 +81,8 @@ const at = (e: EntryPoint) => {
       </div>
     </section>
 
-    <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
+    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
+    <p v-else-if="!data" class="muted" role="status">Loading entry points…</p>
     <template v-else-if="data">
       <div v-if="!data.entry_points.length" class="empty">
         <strong>{{ all?.total ? 'Nothing matches' : 'No entry points found' }}</strong>
@@ -90,7 +99,7 @@ const at = (e: EntryPoint) => {
           <p class="ep__meta small">
             <template v-if="e.handler">Handled by <NuxtLink :to="handlerLink(e)" class="mono">{{ e.handler }}</NuxtLink></template>
             <template v-else-if="e.inline_handler">Inline handler: read it at the registration</template>
-            · registered at <span class="mono">{{ at(e).file }}:{{ at(e).line }}</span>
+            · registered at <span class="mono path">{{ at(e).file }}:{{ at(e).line }}</span>
           </p>
           <div v-if="e.guards?.length" class="row">
             <span class="label">Guards</span>
@@ -98,7 +107,7 @@ const at = (e: EntryPoint) => {
           </div>
           <div v-if="e.reaches?.length" class="row">
             <span class="label">Reaches</span>
-            <span v-for="s in e.reaches" :key="s.tag" class="sev" :class="sinkCls(s)" :title="`via ${s.via}, ${s.depth} call(s) from the handler`">{{ s.tag }} <span class="via">via {{ s.via }}</span></span>
+            <span v-for="s in e.reaches" :key="s.tag" class="sev" :class="sinkCls(s)" :title="`via ${s.via}, ${plural(s.depth, 'call')} from the handler`">{{ s.tag }} <span class="via">via {{ s.via }}</span></span>
           </div>
         </li>
       </ul>
@@ -122,4 +131,5 @@ const at = (e: EntryPoint) => {
 .via { font-weight: 400; opacity: 0.85; }
 .notes summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .refreshing { opacity: 0.6; }
+.path { overflow-wrap: anywhere; }
 </style>

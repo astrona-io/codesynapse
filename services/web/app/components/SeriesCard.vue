@@ -41,7 +41,8 @@ const headline = computed(() => {
       <p class="label">{{ data?.title ?? panel }}</p>
       <span v-if="headline" class="headline mono">{{ headline }}</span>
     </div>
-    <p v-if="error && error.statusCode !== 409 && error.statusCode !== 403" class="muted small">{{ error.message }}</p>
+    <DataState v-if="error && error.statusCode !== 409 && error.statusCode !== 403" :error="error.message" compact />
+    <DataState v-else-if="pending && !data" pending empty compact />
     <template v-else-if="data">
       <LineChart v-if="!empty" :times="data.times" :series="data.series" :title="data.title" :unit="data.unit" :step-seconds="data.step_seconds" />
       <p v-else class="muted small empty-chart">{{ data.empty }}</p>
@@ -54,6 +55,6 @@ const headline = computed(() => {
 .series-card { display: grid; gap: 6px; min-width: 0; }
 .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .headline { color: var(--ink); font-size: 13px; }
-.empty-chart { padding: 24px 0; text-align: center; border: 1px dashed var(--line); border-radius: var(--radius-xs); }
+.empty-chart { padding: 24px 0; text-align: center; border: 2px dashed var(--line); border-radius: var(--radius-xs); }
 .refreshing { opacity: 0.7; }
 </style>
