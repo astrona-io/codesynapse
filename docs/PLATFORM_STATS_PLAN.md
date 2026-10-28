@@ -37,10 +37,11 @@ The plan extends these pieces. It does not replace them.
 **Decisions.**
 
 1. **Platform administrators only, from a signed-in browser session.** API keys and the installation token are refused, as for suspending users and the platform admin flag (`accounts.requirePlatform`). An API key acts in one organisation; cross-tenant figures do not belong to one. There is no MCP tool for these figures.
-2. **Root sees them.** The bootstrap root is created with platform administration and is limited to governance. [ROOT_BOOTSTRAP_PLAN.md](ROOT_BOOTSTRAP_PLAN.md) lists telemetry, health and audit as governance, and these statistics hold no repository content. So the routes are governance routes (`s.account(..., governanceRoute, ...)`). If an installation is classified `ambiguous`, every platform admin is limited to governance and still sees them.
+2. **Root sees them.** The bootstrap root is created with platform administration and is limited to governance. [ROOT_BOOTSTRAP_PLAN.md](ROOT_BOOTSTRAP_PLAN.md) lists telemetry, health and audit as governance, and these statistics hold no repository content. So the routes are governance routes (`s.account(..., governanceRoute, ...)`). If an installation is classified `ambiguous`, every platform admin is limited to governance and still sees them. Root sees organisation names in the admin tables, as it already does under Administration → Organisations (decided).
 3. **No code access follows from it.** Platform administration gives no repository permissions. Nothing here links into an organisation's repositories, reviews, memory or findings. Drill-down stops at the organisation.
 4. **Every view is audited.** `GET` requests are not covered by the HTTP audit middleware, which records changing requests. Each statistics request therefore records a semantic event with `Service.Record` before it answers: `admin.stats.view` with the section and range as target, or `admin.stats.export` with section, range and format. If the event cannot be written, the request answers 503 and returns no figures, as MCP withholds a result it cannot audit. To keep the log readable, the page loads one tab with one batch request, so one tab view is one event, and automatic refresh is off by default (at most once a minute when switched on, each refresh audited).
-5. **Single-tenant installs.** Without accounts there are no platform admins. The Statistics pages there stay the workspace pages they are today.
+5. **The existing admin reads follow the same rule (decided).** `GET /api/v1/admin/users`, `/admin/orgs`, `/admin/health` and the platform panels on `/api/v1/stats/series` also become signed-in only and audited on view (`admin.users.view`, `admin.orgs.view`, `admin.health.view`, `admin.stats.view`). They refuse API keys. **This breaks scripts that read them with a key.** The change ships in phase 1, and its release notes and `docs/operations/accounts-access.md` say so.
+6. **Single-tenant installs.** Without accounts there are no platform admins. The Statistics pages there stay the workspace pages they are today.
 
 **Enforcement.** One helper, `accounts.Service.PlatformStats(ctx, p, section)`, reuses `requirePlatform` (session only, fresh principal, platform admin flag read from the store) and writes the audit event. Every handler calls it first. A suspended account fails at authentication, as today.
 
@@ -50,17 +51,25 @@ Each group lists its figures, the source (see the next section for the rules), t
 
 ### 1. Tenants and growth
 
+How people are counted (decided):
+
+- There is one root account, and there are organisation admins and members. Root is never a member of an organisation. An ordinary account can be admin in one organisation and a member in others.
+- Platform totals count each distinct user once, never once per membership.
+- Per-organisation figures count that organisation's memberships. Their sum over organisations is therefore larger than the platform total when people belong to several organisations, and the page says so next to the total.
+- Root is never counted as a user, a member, an active user or a seat. It appears only as the root line of the health view.
+- A seat is an active non-guest member: a membership with a role other than guest whose account is not suspended. Seats are a count, not a quota.
+
 | Figure | Source | Step | Kept |
 |---|---|---|---|
 | Organisations: total, created per period, with no members left, with SSO | PostgreSQL (`orgs`, `sso_providers`) | day | rollup 400 days |
-| Users: total, created per period, suspended, platform admins, guests only | PostgreSQL (`users`, `memberships`) | day | rollup 400 days |
-| Active users: distinct users with a successful sign-in, a session or key use, or a new execution session in the window (1, 7, 30 days) | PostgreSQL (`events` with `user.login` success, `api_keys.last_used_at`, `execution_sessions.created_at`) | day | rollup 400 days |
-| Members per organisation, by role; teams per organisation (org) | PostgreSQL | now | current only |
+| Users: distinct accounts other than root, created per period, suspended, platform admins, accounts that are guests everywhere, accounts in more than one organisation | PostgreSQL (`users`, `memberships`) | day | rollup 400 days |
+| Active users: distinct accounts other than root with a successful sign-in, a session or key use, or a new execution session in the window (1, 7, 30 days) | PostgreSQL (`events` with `user.login` success, `api_keys.last_used_at`, `execution_sessions.created_at`) | day | rollup 400 days |
+| Memberships per organisation, by role (each person once per organisation); teams per organisation (org) | PostgreSQL | now | current only |
 | Repository entries: organisation and personal, public and private, `lost`; distinct graphs (a public graph linked by several organisations counts once) (org) | PostgreSQL (`repositories`), graph `Repos` | day | rollup 400 days |
 | Watches and imports: active watches, repositories added by watches per period | PostgreSQL (`org_watches`, `events` `watch.repo_add`) | day | rollup 400 days |
-| Seats: active members per organisation (members who are not guests and not suspended) (org) | PostgreSQL | day | rollup 400 days |
+| Seats: active non-guest members per organisation (org), and distinct seated people on the platform | PostgreSQL | day | rollup 400 days |
 
-There is no licence or seat limit in CodeSynapse today. "Seats" here is a count, not a quota (see open questions).
+There is no licence or seat limit in CodeSynapse, and this plan adds none.
 
 ### 2. Usage
 
@@ -184,7 +193,7 @@ Alert labels and annotations are constant text by the rules in [TELEMETRY_PLAN.m
 | Usage buckets | MCP usage beyond 30 days, workflow, Bash, local answers | `store.UsageStore.Usage`, summed over repositories in the API before anything leaves the server. |
 | Daily rollup | Everything kept longer than its source | A new PostgreSQL table, below. |
 
-**Daily rollup.** A new table `platform_stats_daily (day, metric, dimension, org_id, value)` holds one row per day, metric and dimension, with `org_id` empty for platform totals. `metric` and `dimension` come from a fixed list in the code; a value outside it is refused by a check in the store. The process holding `api-loops` writes yesterday's rows shortly after midnight UTC with an upsert, so a retry or a second writer changes nothing. Rows are kept 400 days, the default audit retention. Deleting an organisation keeps its rows, because they hold only counts and an opaque ID; its name then shows as "deleted organisation". The rollup is the source for the 90-day and 365-day ranges.
+**Daily rollup.** A new table `platform_stats_daily (day, metric, dimension, org_id, value)` holds one row per day, metric and dimension, with `org_id` empty for platform totals. `metric` and `dimension` come from a fixed list in the code; a value outside it is refused by a check in the store. The process holding `api-loops` writes yesterday's rows shortly after midnight UTC with an upsert, so a retry or a second writer changes nothing. Rows are kept 400 days (decided), the same as the default audit retention, and independent of it. Deleting an organisation keeps its rows, because they hold only counts and an opaque ID; its name then shows as "deleted organisation". The rollup is the source for the 90-day and 365-day ranges.
 
 ## Privacy rules
 
@@ -207,7 +216,7 @@ These hold for every figure, endpoint, export and alert in this plan. They follo
 **Limits.**
 
 - **Top N.** Every breakdown shows at most the top 10 values plus "other", and every organisation table shows at most 50 rows per page, sorted by the chosen column. Charts keep the existing rule: four named series and "other".
-- **Small groups.** A breakdown that does not name an organisation (rule IDs, languages, clients, tools) shows a value only when at least three organisations contribute to it in the window; otherwise it is folded into "other". This stops a cross-tenant breakdown from pointing at one organisation's stack. Organisation rows themselves are not folded, because the admin needs them, but they show only the counts listed above.
+- **Small groups.** A breakdown that does not name an organisation (rule IDs, languages, clients, tools) shows a value only when at least three organisations contribute to it in the window (decided); otherwise it is folded into "other". This stops a cross-tenant breakdown from pointing at one organisation's stack. Organisation rows themselves are not folded, because the admin needs them, but they show only the counts listed above.
 - **Windows.** Ranges are 1h, 6h, 24h, 7d and 30d from VictoriaMetrics, and 90d and 365d from the rollup. No other value is accepted.
 - **Size.** Responses are capped (one section at most 1 MiB), exports at 10,000 rows, queries at the existing timeouts. The batch endpoint takes at most 20 panels.
 - **Cardinality.** The new instruments (worker roles, store rows and bytes) are platform gauges with fixed label sets of at most a few dozen values. They go in `internal/telemetry/metrics.go` and get a label-set test, like the coverage plan's instruments.
@@ -259,22 +268,27 @@ For a window and a scope (one organisation, or the platform):
 Rules:
 
 1. **Cache reads never count.** They are not in W, not in A and not in the denominator. Adding cache reads to a fixture must not change the share.
-2. **Re-sends earn no credit.** An avoided file would have entered the context once, as fresh input or a cache write. It would then have been re-sent as cache reads on every later turn. Only the first entry counts; the later re-sends are not claimed.
+2. **Re-sends earn no credit in the main figure.** An avoided file would have entered the context once, as fresh input or a cache write. It would then have been re-sent as cache reads on every later turn. Only the first entry counts in the main figure; the re-sends appear only in the upper figure below.
 3. **Answers about content already in context earn nothing.**
    - If the agent already had those files in its context earlier in the session, reading them again would have been a cache hit. The server cannot see that.
    - The plugin hook already keeps the session's answered and read `file:start-end` ranges in its local state file. It adds one count, `avoided_repeat_ranges`: answered ranges that overlap a range the session already answered or read.
    - The server scales each bucket's avoided figure down by that overlap share.
-   - Until a client reports the count, its avoided figure is labelled "upper estimate".
+   - Until a client reports the count, its avoided tokens are left out of the share and out of the saved cost (decided). They are still shown as "tokens avoided" with a note that this client cannot yet tell repeats apart.
 4. **Unknown means unknown, not 0 and not raw.**
    - The share is "unknown" when the window has no hook token counts, or when any counted turn did not report its cache fields.
    - The hook records a new daily counter, `(tokens:cache-known-turns)`, for turns whose usage carried the cache fields.
    - The share is computed only when that counter equals `(tokens:turns)` for every bucket in the scope. It never falls back to `Input + Output`.
-5. **The raw figure is secondary.** A ÷ (Input + Output + A), with cache reads included, appears only in the method note, labelled "including prompt-cache reads, which CodeSynapse does not affect". It is never a tile and never an export headline.
+5. **An upper figure, labelled, beside the main one (decided).**
+   - The hook reports `avoided_resend_tokens`: for each counted answer, its avoided tokens times the turns the session ran after it. Repeats (rule 3) are left out here too.
+   - Upper share = (A + R) ÷ (W + C + A + R), where R is the re-sent tokens and C is the agent's own cache reads. Both sides then include cache reads.
+   - Upper saving = the main saving + R at the cache-read price.
+   - It is labelled "Upper figure: also counts the avoided context the agent would have re-sent from its prompt cache". The main figure is always the larger, first number on the page. It is the only one used in tiles, exports and the admin summary.
+6. **The raw figure is secondary.** A ÷ (Input + Output + A), with cache reads included, appears only in the method note, labelled "including prompt-cache reads, which CodeSynapse does not affect". It is never a tile and never an export headline.
 
 **Cost uses the same rule.**
 
 - Avoided tokens are valued once, at the price the reference cloud model would have charged for their first entry. That is the cache-write price when the agent's provider caches by default (Anthropic), and the input price otherwise.
-- Later re-sends are not valued, not even at the cache-read price.
+- Later re-sends are not valued in the main saving. The upper figure values them at the cache-read price (rule 5).
 - Local model work keeps today's split: fresh input at the input price, cached input at the cache-read price, output at the output price (`models.vue:39-46`).
 - `PriceReference` gains `cache_write_per_mtok`.
 - When a needed price is missing, that part of the saving is "unknown", never $0.
@@ -299,7 +313,7 @@ All routes are account routes of class `governanceRoute`, each calling `Platform
 | `GET /api/v1/admin/stats/series/batch` | Several panels in one request and one audit event, as `/stats/series/batch` |
 | `GET /api/v1/admin/stats/export?section=&range=&format=csv\|json` | A section as a file. CSV cells are formula-neutralised as in the audit export. Audited as `admin.stats.export` |
 
-The existing `platform: true` panels on `/api/v1/stats/series` (`tenants`, `platform_llm_cost`, `platform_tool_latency`, `platform_db_latency`) move to `adminPanels`. The old names stay for one release and answer the same data with the same checks, then are removed (see open questions).
+The existing `platform: true` panels on `/api/v1/stats/series` (`tenants`, `platform_llm_cost`, `platform_tool_latency`, `platform_db_latency`) move to `adminPanels`. Until they are removed in phase 3, the old names refuse API keys and are audited on view, as decided above.
 
 ## Dashboard
 
@@ -317,18 +331,19 @@ A new **Statistics** tab under Administration (`services/web/app/pages/admin/sta
 
 Each phase is one pull request with its API, page, tests and docs (`docs/operations/accounts-access.md`, `docs/features/telemetry.md`). Each runs `just test`, `just lint` and `just web-check`; phases with a migration also run `just test-postgres`, and phases with new store reads run `just test-nebula`.
 
-1. **Access, tenants and sessions.** `PlatformStats` helper and audit event; `summary`, `tenants` and `sessions` sections from PostgreSQL; the Statistics tab with tiles, the range picker (1h to 30d) and the organisation picker; CSV and JSON export. Tests: `TestEveryRouteIsClassified` and `TestRootRefusedEveryBusinessRoute` stay green; a scope test per route (non-admin 403, API key 403, installation token 403, root allowed, suspended refused, admin with no memberships allowed); the audit event is written and a failed write answers 503 with no body figures; responses for fixtures with a repository called `secret-repo` and a user `a@example.com` never contain either string.
+1. **Access, tenants and sessions.** `PlatformStats` helper and audit event; the existing admin reads (`/admin/users`, `/admin/orgs`, `/admin/health`, platform series panels) become session-only and audited on view, which breaks scripts that use an API key; `summary`, `tenants` and `sessions` sections from PostgreSQL; the Statistics tab with tiles, the range picker (1h to 30d) and the organisation picker; CSV and JSON export. Tests: `TestEveryRouteIsClassified` and `TestRootRefusedEveryBusinessRoute` stay green; a scope test per route (non-admin 403, API key 403, installation token 403, root allowed, suspended refused, admin with no memberships allowed; the existing admin reads refuse API keys and write their view events); a fixture with one person in three organisations counts one user and three memberships, and root is in no user, member or seat count; the audit event is written and a failed write answers 503 with no body figures; responses for fixtures with a repository called `secret-repo` and a user `a@example.com` never contain either string.
 2. **Realistic token savings.** Puts the definition from [token savings without the prompt cache](#token-savings-without-the-prompt-cache) on the existing Statistics pages first.
-   - Hook: the `(tokens:cache-known-turns)` counter and `avoided_repeat_ranges`. This needs a CLI release.
+   - Hook: the `(tokens:cache-known-turns)` counter, `avoided_repeat_ranges` and `avoided_resend_tokens`. This needs a CLI release.
    - Server: `work_tokens`, `share_avoided_pct`, `share_avoided_known` and `share_avoided_basis` in `agentStats`, and `cache_write_per_mtok` in `PriceReference`. The pages read the server's share.
    - Tests:
      - A fixture with 950,000 cache reads in 1,000,000 input gives the same share as the same fixture with no cache reads. Doubling the cache reads changes nothing.
      - A bucket without cache fields makes the share unknown: not 0, and not the raw figure.
-     - Repeat ranges lower the avoided figure.
+     - Repeat ranges lower the avoided figure. A client without `avoided_repeat_ranges` adds nothing to the share.
+     - The upper figure is never smaller than the main one, and it is never used in tiles, exports or the summary.
      - Avoided tokens are valued once, at the cache-write or input price, and never for re-sends. A missing price makes that part unknown.
      - `llm_savings` is never part of the CodeSynapse total.
      - The Claude and Codex transcript parsers keep the cache fields apart, and the fuzz test covers the new fields.
-3. **Usage and traffic.** `adminPanels`, `/admin/stats/series` and `/batch`, tenant ID to name mapping; the `usage` section from VictoriaMetrics and usage buckets; panels for `http_requests_total` and the gateway; the four existing platform panels move. Tests: every admin panel query has no placeholder other than `$w`; the small-group fold (fewer than three organisations folds to "other"); top-N fold; unknown tenant IDs map to "deleted organisation"; the old panel names still answer with the old checks.
+3. **Usage and traffic.** `adminPanels`, `/admin/stats/series` and `/batch`, tenant ID to name mapping; the `usage` section from VictoriaMetrics and usage buckets; panels for `http_requests_total` and the gateway; the four existing platform panels move. Tests: every admin panel query has no placeholder other than `$w`; the small-group fold (fewer than three organisations folds to "other"); top-N fold; unknown tenant IDs map to "deleted organisation"; the old panel names are removed and answer 404.
 4. **Jobs, indexing and ingest.** Depends on telemetry coverage phases 1 and 3. `jobs` and `ingest` sections; `platform_codesynapse_worker_roles` gauge; oldest waiting job from PostgreSQL. Tests: the gauge's label set (`ingest`, `ai`, `fix`) and its `platform_` export; no job `Repo` or `Error` value in any response; the `repo` label never appears in a platform panel's grouping.
 5. **Models and cost.** `models` section with local versus cloud split, price source per provider and the unknown-cost counts. Tests: cost reads "unknown" when every call lacks a price; a local provider has no cost; a configured model not in the allowlist is not shown by name.
 6. **Storage and alerts.** Depends on telemetry coverage phase 2 for alerts. Daily store sampler under `api-loops`; `platform_codesynapse_store_rows` and `_bytes`; `storage` and `alerts` sections; `CODESYNAPSE_ALERTS_URL` for the internal vmalert, from the environment, https or the internal service name only, no redirects, response capped. Tests: label sets from the allowlists; constant statements (no caller value in nGQL or SQL text); the sampler skips while a replace lease is held; alert labels outside the passed-on set are dropped.
@@ -337,12 +352,14 @@ Each phase is one pull request with its API, page, tests and docs (`docs/operati
 
 Phases 1, 2 and 3 need nothing from the telemetry branches. Phase 4 waits for telemetry phases 1 and 3, and phase 6 waits for telemetry phase 2. Phase 3 shows the share from phase 2 per organisation. Until then those figures show "Not measured yet".
 
-## Open questions
+## Decided questions
 
-1. **Seats.** CodeSynapse has no seat or licence limit. Is "active non-guest members per organisation" the seat count you want, or should seats become a configured quota per organisation later?
-2. **Organisation names for root.** Root is shown organisation names in the tables, as it already sees them under Administration → Organisations. Should root see only opaque organisation IDs instead?
-3. **Other admin reads.** The existing `GET /api/v1/admin/users`, `/admin/orgs`, `/admin/health` and the platform panels on `/stats/series` accept a platform admin's API key today. Should they also be limited to signed-in sessions and audited on view, in the same change as phase 1 or 3? It breaks scripts that read them with a key.
-4. **Long-range retention.** Is 400 days of daily rollups right, or should it follow `CODESYNAPSE_AUDIT_RETENTION_DAYS`?
-5. **Small-group threshold.** Is three organisations the right minimum for cross-tenant breakdowns, given that small installations will see most breakdowns folded into "other"?
-6. **Re-sends.** The share credits an avoided file once and never counts its later re-sends as cache reads. That is the low figure, the one that holds up. Should there also be a separate upper figure that values those re-sends at the cache-read price, or only the low one?
-7. **Repeat answers before the hook reports them.** Until a client sends `avoided_repeat_ranges`, should its avoided tokens be shown as an "upper estimate", or left out of the share?
+The user answered the open questions of the first draft. The answers are written into the sections above.
+
+1. **Seats:** active non-guest members, counted per organisation and as distinct people on the platform. There is no quota.
+2. **Root and names:** root sees organisation names in the admin tables. Root is never a member, so it is never counted as a user, member or seat. Each person counts once in platform totals and once per organisation in membership counts.
+3. **Existing admin reads:** they become session-only and audited on view in phase 1. API keys are refused, which breaks scripts that use one.
+4. **Retention:** daily rollups are kept for 400 days.
+5. **Small groups:** a breakdown that does not name organisations needs at least three organisations.
+6. **Re-sends:** an upper figure values re-sends at the cache-read price. It is shown apart and clearly labelled, and the conservative figure is the main one.
+7. **Repeats before the hook reports them:** that client's avoided tokens are left out of the share. There is no "upper estimate" for them.
