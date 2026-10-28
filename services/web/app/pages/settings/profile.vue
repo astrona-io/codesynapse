@@ -24,75 +24,95 @@ const initials = computed(() => {
   return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || '·'
 })
 
+// Which form is on its way to the API, so its button waits and a second
+// press cannot send the same change twice.
+const pending = ref('')
+async function once(id: string, fn: () => Promise<void>) {
+  if (pending.value) return
+  pending.value = id
+  try { await fn() } finally { pending.value = '' }
+}
+// A 401 on these forms means the current password was not right (or the
+// session ended), not that the account is gone.
+const WRONG_PASSWORD = { 401: 'The current password is not right, or your session has ended. Check it and try again.' }
+
 // Profile: name and email.
 const name = ref(user.value?.name ?? '')
 const nameMsg = ref('')
 const nameError = ref('')
-async function saveName() {
+const saveName = () => once('name', async () => {
   nameMsg.value = nameError.value = ''
   try {
     await apiPatch('me', { name: name.value })
     await session.load()
     nameMsg.value = 'Name saved.'
-  } catch (e) { nameError.value = apiErrorMessage(e) }
-}
+  } catch (e) { nameError.value = plainError(e) }
+})
 const username = ref(user.value?.username ?? '')
 const usernameMsg = ref('')
 const usernameError = ref('')
-async function saveUsername() {
+const saveUsername = () => once('username', async () => {
   usernameMsg.value = usernameError.value = ''
   try {
     await apiPatch('me', { username: username.value.trim() })
     await session.load()
     usernameMsg.value = username.value.trim() ? 'Username saved.' : 'Username removed.'
-  } catch (e) { usernameError.value = apiErrorMessage(e) }
-}
+  } catch (e) { usernameError.value = plainError(e, { 409: 'That username is taken. Choose another one.' }) }
+})
 const newEmail = ref('')
 const emailPassword = ref('')
 const emailMsg = ref('')
 const emailError = ref('')
-async function changeEmail() {
+const changeEmail = () => once('email', async () => {
   emailMsg.value = emailError.value = ''
   try {
     await apiPost('me/email', { email: newEmail.value, password: emailPassword.value })
     await session.load()
     emailMsg.value = 'Email changed. Your other sessions were signed out.'
     newEmail.value = emailPassword.value = ''
-  } catch (e) { emailError.value = apiErrorMessage(e) }
-}
+  } catch (e) {
+    emailPassword.value = ''
+    emailError.value = plainError(e, { ...WRONG_PASSWORD, 409: 'That email cannot be used. Choose another one.' })
+  }
+})
 
 // Security: password, sessions, single sign-on.
 const current = ref('')
 const next = ref('')
 const pwMsg = ref('')
 const pwError = ref('')
-async function changePassword() {
+const changePassword = () => once('password', async () => {
   pwMsg.value = pwError.value = ''
   try {
     await apiPost('me/password', { current: current.value, next: next.value })
     pwMsg.value = 'Password changed. Other devices were signed out.'
     current.value = next.value = ''
-  } catch (e) { pwError.value = apiErrorMessage(e) }
-}
+  } catch (e) {
+    current.value = ''
+    pwError.value = plainError(e, WRONG_PASSWORD)
+  }
+})
 const { data: sessions, refresh: refreshSessions } = useApiGet<{ sessions: SessionView[] }>('me/sessions')
 const sessionError = ref('')
-async function endSession(s: SessionView) {
-  sessionError.value = ''
+const sessionMsg = ref('')
+const endSession = (s: SessionView) => once(`session-${s.id}`, async () => {
+  sessionError.value = sessionMsg.value = ''
   try {
     await apiDelete(`me/sessions/${encodeURIComponent(s.id)}`)
     if (s.current) { await session.load(); await navigateTo('/login'); return }
+    sessionMsg.value = 'That session is signed out.'
     await refreshSessions()
-  } catch (e) { sessionError.value = apiErrorMessage(e) }
-}
+  } catch (e) { sessionError.value = plainError(e) }
+})
 const endingOthers = ref(false)
-async function endOthers() {
-  endingOthers.value = false
-  sessionError.value = ''
+const endOthers = () => once('others', async () => {
+  sessionError.value = sessionMsg.value = ''
   try {
     await apiPost('me/sessions/end-others', {})
+    sessionMsg.value = 'Every other session is signed out.'
     await refreshSessions()
-  } catch (e) { sessionError.value = apiErrorMessage(e) }
-}
+  } catch (e) { sessionError.value = plainError(e) } finally { endingOthers.value = false }
+})
 const others = computed(() => (sessions.value?.sessions ?? []).filter((s) => !s.current).length)
 
 // Root never signs in with single sign-on, so it has no identities.
@@ -101,19 +121,18 @@ const orgName = (id: string) => session.memberships.value.find((m) => m.org.id =
 const ssoError = ref('')
 async function link(slug: string) {
   ssoError.value = ''
-  try { await startSSO(`me/sso/${encodeURIComponent(slug)}/link`) } catch (e) { ssoError.value = apiErrorMessage(e) }
+  try { await startSSO(`me/sso/${encodeURIComponent(slug)}/link`) } catch (e) { ssoError.value = plainError(e) }
 }
 const unlinking = ref<ExternalIdentity | null>(null)
-async function unlink() {
+const unlink = () => once('unlink', async () => {
   const i = unlinking.value
-  unlinking.value = null
   if (!i) return
   ssoError.value = ''
   try {
     await apiDelete(`me/identities/${encodeURIComponent(i.id)}`)
     await refreshIdents()
-  } catch (e) { ssoError.value = apiErrorMessage(e) }
-}
+  } catch (e) { ssoError.value = plainError(e) } finally { unlinking.value = null }
+})
 
 // Organisations.
 const { data: access } = useApiGet<{ repos: ReachView[] }>('me/access', { immediate: !session.restricted.value })
@@ -151,13 +170,13 @@ const manages = (role: string) => role === 'owner' || role === 'admin'
           <div class="field"><label for="name">Name</label><input id="name" v-model="name" type="text" autocomplete="name" maxlength="100" required><span class="hint">Shown to your colleagues and in the audit log.</span></div>
           <p v-if="nameMsg" class="notice notice--ok" role="status">{{ nameMsg }}</p>
           <p v-if="nameError" class="notice notice--danger" role="alert">{{ nameError }}</p>
-          <div><button type="submit" :disabled="name.trim() === user.name">Save name</button></div>
+          <div><button type="submit" :disabled="!!pending || name.trim() === user.name">{{ pending === 'name' ? 'Saving…' : 'Save name' }}</button></div>
         </form>
         <form class="stack--tight" @submit.prevent="saveUsername">
-          <div class="field"><label for="username">Username</label><input id="username" v-model="username" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="32"><span class="hint">Optional. Sign in with it instead of your email. Leave empty to remove it.</span></div>
+          <div class="field"><label for="username">Username</label><input id="username" v-model="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32"><span class="hint">Optional. Sign in with it instead of your email. Leave empty to remove it.</span></div>
           <p v-if="usernameMsg" class="notice notice--ok" role="status">{{ usernameMsg }}</p>
           <p v-if="usernameError" class="notice notice--danger" role="alert">{{ usernameError }}</p>
-          <div><button type="submit" :disabled="username.trim() === (user.username ?? '')">Save username</button></div>
+          <div><button type="submit" :disabled="!!pending || username.trim() === (user.username ?? '')">{{ pending === 'username' ? 'Saving…' : 'Save username' }}</button></div>
         </form>
         <p class="muted small">Member since {{ new Date(user.created_at).toLocaleDateString() }}.</p>
       </section>
@@ -169,7 +188,7 @@ const manages = (role: string) => role === 'owner' || role === 'admin'
           <div class="field"><label for="email-pw">Current password</label><input id="email-pw" v-model="emailPassword" type="password" autocomplete="current-password" required></div>
           <p v-if="emailMsg" class="notice notice--ok" role="status">{{ emailMsg }}</p>
           <p v-if="emailError" class="notice notice--danger" role="alert">{{ emailError }}</p>
-          <div><button type="submit">Change email</button></div>
+          <div><button type="submit" :disabled="!!pending">{{ pending === 'email' ? 'Changing…' : 'Change email' }}</button></div>
         </form>
       </section>
     </div>
@@ -185,13 +204,13 @@ const manages = (role: string) => role === 'owner' || role === 'admin'
           <div class="field"><label for="new">New password</label><input id="new" v-model="next" type="password" autocomplete="new-password" minlength="12" required><span class="hint">At least 12 characters.</span></div>
           <p v-if="pwMsg" class="notice notice--ok" role="status">{{ pwMsg }}</p>
           <p v-if="pwError" class="notice notice--danger" role="alert">{{ pwError }}</p>
-          <div><button type="submit">Update password</button></div>
+          <div><button type="submit" :disabled="!!pending">{{ pending === 'password' ? 'Updating…' : 'Update password' }}</button></div>
         </form>
       </section>
       <section class="panel">
         <div class="panel__header">
           <h2>Active sessions</h2>
-          <button v-if="others" type="button" class="secondary tiny" @click="endingOthers = true">Sign out everywhere else</button>
+          <button v-if="others" type="button" class="secondary tiny" :disabled="!!pending" @click="endingOthers = true">Sign out everywhere else</button>
         </div>
         <ul v-if="sessions?.sessions.length" class="sessions">
           <li v-for="s in sessions.sessions" :key="s.id" class="session">
@@ -200,11 +219,12 @@ const manages = (role: string) => role === 'owner' || role === 'admin'
               <span class="muted small">Signed in {{ relTime(s.created_at) }}</span>
             </span>
             <span v-if="s.current" class="pill">This device</span>
-            <button v-else type="button" class="secondary tiny" @click="endSession(s)">Sign out</button>
+            <button v-else type="button" class="secondary tiny" :disabled="!!pending" @click="endSession(s)">{{ pending === `session-${s.id}` ? 'Signing out…' : 'Sign out' }}</button>
           </li>
         </ul>
         <p v-else class="muted small">No sessions.</p>
         <p v-if="sessionError" class="notice notice--danger" role="alert">{{ sessionError }}</p>
+        <p v-if="sessionMsg" class="notice notice--ok" role="status">{{ sessionMsg }}</p>
       </section>
       <section v-if="!session.restricted.value" class="panel">
         <h2>Single sign-on</h2>
@@ -215,7 +235,7 @@ const manages = (role: string) => role === 'owner' || role === 'admin'
               <strong>{{ orgName(i.org_id) }}</strong>
               <span class="muted small">{{ i.email }} · linked {{ relTime(i.linked_at) }}<template v-if="i.last_login_at"> · last used {{ relTime(i.last_login_at) }}</template></span>
             </span>
-            <button type="button" class="secondary tiny" @click="unlinking = i">Unlink</button>
+            <button type="button" class="secondary tiny" :disabled="!!pending" @click="unlinking = i">Unlink</button>
           </li>
         </ul>
         <p v-else class="muted small">No identities linked.</p>
@@ -267,10 +287,10 @@ const manages = (role: string) => role === 'owner' || role === 'admin'
       </section>
     </div>
 
-    <ConfirmDialog :open="!!unlinking" title="Unlink this identity?" confirm-label="Unlink" danger @confirm="unlink" @cancel="unlinking = null">
+    <ConfirmDialog :open="!!unlinking" title="Unlink this identity?" confirm-label="Unlink" danger :busy="pending === 'unlink'" @confirm="unlink" @cancel="unlinking = null">
       You will no longer sign in through {{ unlinking ? orgName(unlinking.org_id) : '' }}'s identity provider with this account.
     </ConfirmDialog>
-    <ConfirmDialog :open="endingOthers" title="Sign out everywhere else?" confirm-label="Sign out" @confirm="endOthers" @cancel="endingOthers = false">
+    <ConfirmDialog :open="endingOthers" title="Sign out everywhere else?" confirm-label="Sign out" :busy="pending === 'others'" @confirm="endOthers" @cancel="endingOthers = false">
       Every other browser signed in to your account is signed out. This one stays signed in.
     </ConfirmDialog>
   </div>
