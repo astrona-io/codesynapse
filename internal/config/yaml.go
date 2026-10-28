@@ -7,7 +7,7 @@ var fields = map[string]map[string]string{
 	"ignore":                           {"paths": "strings"},
 	"scanners":                         {"kubernetes": "map", "security": "map"},
 	"scanners.kubernetes":              {"enabled": "bool", "ignore_paths": "strings"},
-	"scanners.security":                {"ignore_rules": "rules"},
+	"scanners.security":                {"ignore_rules": "rules", "inline_ignores": "bool"},
 	"scanners.security.ignore_rules[]": {"rule_id": "string", "paths": "strings"},
 	"annotation":                       {"enabled": "bool", "provider_task": "string", "max_batch_size": "int", "ignore_paths": "strings", "taxonomy_hints": "strings"},
 }

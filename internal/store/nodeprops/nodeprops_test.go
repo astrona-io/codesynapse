@@ -28,6 +28,8 @@ func TestPropsRoundTrip(t *testing.T) {
 	assert.Equal(t, From(To(mod)), mod)
 	vuln := model.Node{ID: "r|Vulnerability|x@GO-1", Kind: model.KindVulnerability, Repo: "r", Name: "GO-1", Reachability: "required", CodeAbsent: true}
 	assert.Equal(t, From(To(vuln)), vuln)
+	finding := model.Node{ID: "r|Finding|f", Kind: model.KindFinding, Repo: "r", Name: "f", Rule: "exec-variable", Severity: "high", Ignore: "fixed input"}
+	assert.Equal(t, From(To(finding)), finding)
 	repoNode := model.Node{ID: "r|Repository|r", Kind: model.KindRepository, Repo: "r", Name: "r", License: "Apache-2.0", LicenseSource: "LICENSE", Licenses: `{"total":1}`, Coverage: `{"yaml":3}`, Duplicates: `{"groups":[]}`}
 	assert.Equal(t, From(To(repoNode)), repoNode)
 	assert.Equal(t, From(To(mod)), mod)

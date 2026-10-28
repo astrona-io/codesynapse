@@ -120,7 +120,7 @@ export interface RuleGuide {
 }
 export interface SecFinding {
   id: string; rule: string; title: string; severity: string; cwe?: string[]; location: string; detail: string; language?: string
-  owner?: NodeRef; code_owners?: string[]; exposed: boolean; tested: boolean; priority: number; suppression_reason?: string
+  owner?: NodeRef; code_owners?: string[]; exposed: boolean; tested: boolean; priority: number; suppression_reason?: string; ignore_request?: string
 }
 export interface SecVuln {
   id: string; cve?: string[]; aliases?: string[]; summary: string; severity: string; cwe?: string[]
@@ -548,7 +548,7 @@ export interface ArchProposal {
 export interface RepositoryConfig {
   version: number
   ignore: { paths: string[] | null }
-  scanners: { kubernetes: { enabled?: boolean; ignore_paths: string[] | null }; security: { ignore_rules: { rule_id: string; paths: string[] }[] | null } }
+  scanners: { kubernetes: { enabled?: boolean; ignore_paths: string[] | null }; security: { ignore_rules: { rule_id: string; paths: string[] }[] | null; inline_ignores?: boolean } }
   annotation: { enabled?: boolean; provider_task: string; max_batch_size: number; ignore_paths: string[] | null; taxonomy_hints: string[] | null }
 }
 export interface PolicyDiagnostic { code: string; field: string; line: number }

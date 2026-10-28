@@ -154,3 +154,29 @@ func TestCanonicalRoundTrip(t *testing.T) {
 		assert.Error(t, err)
 	}
 }
+
+func TestInlineIgnoresRequest(t *testing.T) {
+	p, err := Parse([]byte("version: 1\nscanners:\n  security:\n    inline_ignores: true\n"))
+	require.NoError(t, err)
+	assert.True(t, p.Config().Scanners.Security.InlineIgnores)
+	// Like ignore_rules, it needs a suppression approval, not an ingestion one.
+	assert.False(t, p.RequiresApproval())
+	require.Len(t, p.Diagnostics(), 1)
+	assert.Equal(t, p.Diagnostics()[0].Field, "scanners.security.inline_ignores")
+	canonical, err := json.Marshal(p.Config())
+	require.NoError(t, err)
+	q, err := ParseCanonicalJSON(canonical)
+	require.NoError(t, err)
+	assert.Equal(t, q.Digest(), p.Digest())
+
+	// false is the default, so it leaves earlier digests and approvals as they were.
+	off, err := Parse([]byte("version: 1\nscanners:\n  security:\n    inline_ignores: false\n"))
+	require.NoError(t, err)
+	plain, err := Parse([]byte("version: 1"))
+	require.NoError(t, err)
+	assert.Equal(t, off.Digest(), plain.Digest())
+	assert.False(t, off.RequiresApproval())
+
+	_, err = Parse([]byte("version: 1\nscanners:\n  security:\n    inline_ignores: yes please\n"))
+	assert.Error(t, err)
+}

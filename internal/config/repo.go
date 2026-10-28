@@ -57,6 +57,9 @@ type KubernetesConfig struct {
 // SecurityConfig contains requests requiring separate trusted suppression approval.
 type SecurityConfig struct {
 	IgnoreRules []RuleRequest `yaml:"ignore_rules" json:"ignore_rules"`
+	// InlineIgnores asks to honour codesynapse:ignore comments next to findings.
+	// Omitted when false so earlier digests and approvals stay valid.
+	InlineIgnores bool `yaml:"inline_ignores" json:"inline_ignores,omitempty"`
 }
 
 // RuleRequest names one canonical security rule and its requested path exceptions.
@@ -312,6 +315,7 @@ func (p *Policy) validate(doc *yaml.Node) error {
 		{"ignore.paths", len(p.ignore) > 0},
 		{"scanners.kubernetes", len(p.kubernetes) > 0 || c.Scanners.Kubernetes.Enabled != nil && !*c.Scanners.Kubernetes.Enabled},
 		{"scanners.security.ignore_rules", len(c.Scanners.Security.IgnoreRules) > 0},
+		{"scanners.security.inline_ignores", c.Scanners.Security.InlineIgnores},
 		{"annotation.enabled", a.Enabled != nil && *a.Enabled},
 	}
 	for _, r := range requests {

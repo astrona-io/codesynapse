@@ -218,6 +218,9 @@ type Node struct {
 	Severity string `json:"severity,omitempty"`
 	// Rule is the finding rule ID.
 	Rule string `json:"rule,omitempty"`
+	// Ignore is the redacted reason of a codesynapse:ignore comment next to
+	// the finding. It only suppresses under an approved inline_ignores policy.
+	Ignore string `json:"ignore,omitempty"`
 	// CWE lists weakness IDs such as "CWE-89".
 	CWE []string `json:"cwe,omitempty"`
 	// Aliases lists other IDs of a vulnerability (CVE, GHSA).

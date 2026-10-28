@@ -29,16 +29,19 @@ var severityBase = map[string]int{"critical": 90, "high": 70, "medium": 45, "low
 
 // Finding is a code finding with context.
 type Finding struct {
-	SuppressionReason string     `json:"suppression_reason,omitempty"`
-	ID                string     `json:"id"`
-	Rule              string     `json:"rule"`
-	Title             string     `json:"title"`
-	Severity          string     `json:"severity"`
-	CWE               []string   `json:"cwe,omitempty"`
-	Location          string     `json:"location"`
-	Language          string     `json:"language,omitempty"`
-	Detail            string     `json:"detail"`
-	Owner             *query.Ref `json:"owner,omitempty"`
+	SuppressionReason string `json:"suppression_reason,omitempty"`
+	// IgnoreRequest is the reason of a codesynapse:ignore comment next to the
+	// finding. It suppresses only when the tenant approved inline ignores.
+	IgnoreRequest string     `json:"ignore_request,omitempty"`
+	ID            string     `json:"id"`
+	Rule          string     `json:"rule"`
+	Title         string     `json:"title"`
+	Severity      string     `json:"severity"`
+	CWE           []string   `json:"cwe,omitempty"`
+	Location      string     `json:"location"`
+	Language      string     `json:"language,omitempty"`
+	Detail        string     `json:"detail"`
+	Owner         *query.Ref `json:"owner,omitempty"`
 	// CodeOwners are the CODEOWNERS owners of the finding's file.
 	CodeOwners []string `json:"code_owners,omitempty"`
 	// Exposed means the owner is an entry point or reachable from one
@@ -178,6 +181,7 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 	for _, f := range findings {
 		n := f.Node
 		fv := Finding{ID: n.ID, Rule: n.Rule, Title: n.Name, Severity: n.Severity, CWE: n.CWE, Location: n.Location(), Detail: n.Summary, Language: findingLanguage(n)}
+		fv.IgnoreRequest = redact.Summary(redact.Free(n.Ignore), 200)
 		owners, err := r.Traverse(ctx, n.ID, []model.EdgeKind{model.EdgeHasFinding}, store.In, 1, 1)
 		if err != nil {
 			return rep, err
