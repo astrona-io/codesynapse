@@ -21,7 +21,11 @@ import (
 //
 // Static calls to the repository's functions are followed, and calls
 // through the repository's interfaces apply the summaries of every
-// implementation in the repository; calls through function values are not.
+// implementation in the repository. With --dataflow, calls through function
+// values (closures, func-typed parameters and fields, method values) apply
+// the summaries of every repository function or closure VTA says can reach
+// the call; without it, or for a value VTA resolved nowhere, they add
+// nothing.
 
 const (
 	maxTaintRounds    = 8
@@ -113,7 +117,7 @@ func (s *scanner) sink(rule string, pos token.Pos, detail, from string) {
 // through applies a callee's summary at a call: a marked parameter passed
 // on adds the callee's sinks to this function's summary, request input
 // reports them.
-func (s *scanner) through(call *ast.CallExpr, fn *types.Func, sum *summary) {
+func (s *scanner) through(call *ast.CallExpr, callee string, sum *summary) {
 	for j, a := range call.Args {
 		from := s.taintOf(a)
 		if from == "" {
@@ -131,7 +135,7 @@ func (s *scanner) through(call *ast.CallExpr, fn *types.Func, sum *summary) {
 				continue
 			}
 			if !s.quiet {
-				s.x.addFinding(ref.rel, ref.line, ref.ownerID, ref.rule, fmt.Sprintf(reachedSinkDetail, ref.detail, from, s.name, fn.Name()))
+				s.x.addFinding(ref.rel, ref.line, ref.ownerID, ref.rule, fmt.Sprintf(reachedSinkDetail, ref.detail, from, s.name, callee))
 			}
 		}
 	}
@@ -146,6 +150,22 @@ func (s *scanner) summariesOf(fn *types.Func) []*summary {
 	var out []*summary
 	for _, impl := range s.x.dispatch[fn] {
 		if sum := s.sums[impl]; sum != nil {
+			out = append(out, sum)
+		}
+	}
+	return out
+}
+
+// dynamicSummaries are the summaries a call through a function value
+// applies: those of the targets dataflow resolved for it.
+func (s *scanner) dynamicSummaries(call *ast.CallExpr) []*summary {
+	var out []*summary
+	for _, t := range s.x.dynamic[call.Lparen] {
+		sum := s.sums[t.fn]
+		if t.lit != nil {
+			sum = s.lits[t.lit]
+		}
+		if sum != nil {
 			out = append(out, sum)
 		}
 	}
@@ -174,6 +194,15 @@ type taintFunc struct {
 	rel     string
 }
 
+// taintLit is a closure some call through a function value reaches. It is
+// summarised in the context of the declared function it belongs to, which
+// owns the findings inside it.
+type taintLit struct {
+	lit  *ast.FuncLit
+	sig  *types.Signature
+	encl *taintFunc
+}
+
 // interprocedural computes the summaries and reports what they reveal.
 func (x *extractor) interprocedural() {
 	if len(x.taintFuncs) == 0 {
@@ -183,35 +212,47 @@ func (x *extractor) interprocedural() {
 	for _, f := range x.taintFuncs {
 		sums[f.fn] = newSummary(f.fn.Signature())
 	}
+	lits := make(map[*ast.FuncLit]*summary, len(x.taintLits))
+	for _, l := range x.taintLits {
+		lits[l.lit] = newSummary(l.sig)
+	}
+	// learn scans one body with its parameters marked and reports whether
+	// the summary grew.
+	learn := func(sum *summary, f *taintFunc, params *ast.FieldList, body *ast.BlockStmt) bool {
+		before := sum.size()
+		s := x.newScanner(f.info, f.fset, f.ownerID, f.rel)
+		s.quiet, s.sum, s.sums, s.lits, s.name = true, sum, sums, lits, f.fn.Name()
+		i := 0
+		for _, field := range params.List {
+			for _, name := range field.Names {
+				if obj := f.info.Defs[name]; obj != nil {
+					s.taint[obj] = paramTaint(i)
+				}
+				i++
+			}
+			if len(field.Names) == 0 {
+				i++
+			}
+		}
+		s.walk(body)
+		return sum.size() != before
+	}
 	for range maxTaintRounds {
 		changed := false
 		for _, f := range x.taintFuncs {
-			sum := sums[f.fn]
-			before := sum.size()
-			s := x.newScanner(f.info, f.fset, f.ownerID, f.rel)
-			s.quiet, s.sum, s.sums, s.name = true, sum, sums, f.fn.Name()
-			i := 0
-			for _, field := range f.decl.Type.Params.List {
-				for _, name := range field.Names {
-					if obj := f.info.Defs[name]; obj != nil {
-						s.taint[obj] = paramTaint(i)
-					}
-					i++
-				}
-				if len(field.Names) == 0 {
-					i++
-				}
-			}
-			s.walk(f.decl.Body)
-			changed = changed || sum.size() != before
+			changed = learn(sums[f.fn], f, f.decl.Type.Params, f.decl.Body) || changed
+		}
+		for _, l := range x.taintLits {
+			changed = learn(lits[l.lit], l.encl, l.lit.Type.Params, l.lit.Body) || changed
 		}
 		if !changed {
 			break
 		}
 	}
+	// Closures are walked as part of the function they belong to.
 	for _, f := range x.taintFuncs {
 		s := x.newScanner(f.info, f.fset, f.ownerID, f.rel)
-		s.sums, s.name = sums, f.fn.Name()
+		s.sums, s.lits, s.name = sums, lits, f.fn.Name()
 		s.walk(f.decl.Body)
 	}
 }

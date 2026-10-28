@@ -33,12 +33,17 @@ const (
 	notifyCacheMax = 256
 	notifyTimeout  = 5 * time.Second
 	notifyTextMax  = 200
+	// notifySnaps is how many recent snapshots of a repository are read to
+	// find the previous one of the latest snapshot's branch.
+	notifySnaps     = 20
+	notifyBranchMax = 60
 )
 
 // Notification is one thing that happened.
 type Notification struct {
 	ID string `json:"id"`
-	// Kind is findings, sync_failed or review.
+	// Kind is findings, grade (the security grade fell with no new serious
+	// findings), sync_failed or review.
 	Kind  string `json:"kind"`
 	Tone  string `json:"tone"` // bad, warn, info
 	Repo  string `json:"repo"`
@@ -147,7 +152,7 @@ func (s *Server) notificationFeed(ctx context.Context) ([]Notification, error) {
 	since := time.Now().Add(-notifyWindow)
 	var items []Notification
 	for _, repo := range repos {
-		snaps, err := s.st.Snapshots(ctx, repo.Name, 2)
+		snaps, err := s.st.Snapshots(ctx, repo.Name, notifySnaps)
 		if err != nil {
 			return nil, err
 		}
@@ -195,13 +200,15 @@ func (s *Server) notificationFeed(ctx context.Context) ([]Notification, error) {
 	return items, nil
 }
 
-// findingsNotification reports a sync that added critical or high findings
-// or vulnerabilities, from the last two snapshots.
+// findingsNotification alerts on a sync that made security worse: it added
+// critical or high findings or vulnerabilities, or the grade fell. The latest
+// snapshot is compared with the one before it on the same branch (snaps are
+// oldest first), so switching the indexed branch is never called a regression.
 func findingsNotification(repo string, snaps []history.Snapshot, since time.Time) (Notification, bool) {
-	if len(snaps) < 2 {
+	prev, cur, ok := history.Latest(snaps)
+	if !ok {
 		return Notification{}, false
 	}
-	prev, cur := snaps[len(snaps)-2], snaps[len(snaps)-1]
 	at, err := time.Parse(time.RFC3339, cur.At)
 	if err != nil || at.Before(since) {
 		return Notification{}, false
@@ -209,7 +216,8 @@ func findingsNotification(repo string, snaps []history.Snapshot, since time.Time
 	serious := func(m map[string]int) int { return m["critical"] + m["high"] }
 	findings := serious(cur.Findings) - serious(prev.Findings)
 	vulns := serious(cur.Vulns) - serious(prev.Vulns)
-	if findings <= 0 && vulns <= 0 {
+	worse := history.GradeWorse(prev, cur)
+	if findings <= 0 && vulns <= 0 && !worse {
 		return Notification{}, false
 	}
 	var parts []string
@@ -219,12 +227,21 @@ func findingsNotification(repo string, snaps []history.Snapshot, since time.Time
 	if vulns > 0 {
 		parts = append(parts, plural(vulns, "new serious vulnerability", "new serious vulnerabilities"))
 	}
-	body := ""
+	grade := ""
 	if prev.Grade != "" && cur.Grade != "" && prev.Grade != cur.Grade {
-		body = fmt.Sprintf("Security grade %s → %s", prev.Grade, cur.Grade)
+		grade = fmt.Sprintf("Security grade %s → %s", prev.Grade, cur.Grade)
 	}
-	return Notification{ID: "findings:" + repo + "@" + cur.At, Kind: "findings", Tone: "bad", Repo: repo,
-		Title: strings.Join(parts, " and ") + " in " + repo, Body: body,
+	kind, title, body := "findings", strings.Join(parts, " and ")+" in "+repo, grade
+	if len(parts) == 0 {
+		kind, title, body = "grade", grade+" in "+repo, ""
+	}
+	// The branch name comes from the indexed repository, so it is treated
+	// like any other text taken from it.
+	if cur.Branch != "" {
+		title += " (" + redact.Free(clip(cur.Branch, notifyBranchMax)) + ")"
+	}
+	return Notification{ID: "findings:" + repo + "@" + cur.At, Kind: kind, Tone: "bad", Repo: repo,
+		Title: clip(title, notifyTextMax), Body: body,
 		Link: "/repos/" + url.PathEscape(repo) + "/security", At: at.UTC().Format(time.RFC3339)}, true
 }
 

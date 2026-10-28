@@ -79,7 +79,7 @@ export interface SiteSearchHit { kind: string; repo: string; id?: string; name: 
 export interface SiteSearch { results: SiteSearchHit[]; searched: number; truncated: boolean }
 
 // The dashboard's notifications (GET /notifications).
-export interface AppNotification { id: string; kind: 'findings' | 'sync_failed' | 'review'; tone: 'bad' | 'warn' | 'info'; repo: string; title: string; body?: string; link: string; at: string }
+export interface AppNotification { id: string; kind: 'findings' | 'grade' | 'sync_failed' | 'review'; tone: 'bad' | 'warn' | 'info'; repo: string; title: string; body?: string; link: string; at: string }
 export interface AppNotifications { items: AppNotification[]; seen_at?: string; unread: number }
 
 // One of your own sign-in sessions (GET /me/sessions).
@@ -502,7 +502,7 @@ export interface RefactorPlan {
 
 // GET /api/v1/repos/{repo}/history
 export interface HistorySnapshot {
-  at: string; head?: string; grade?: string; score: number
+  at: string; head?: string; branch?: string; grade?: string; score: number
   findings?: Record<string, number>; vulns?: Record<string, number>; vulns_called: number
   modules: number; direct: number; licence_conflicts: number; licence_review: number
   functions: number; function_loc: number; dead_functions: number; dead_loc: number; unused_modules: number
@@ -510,9 +510,19 @@ export interface HistorySnapshot {
 }
 export interface HistorySeries { key: string; label: string; unit?: string; lower_is_better: boolean; values: number[] }
 export interface HistoryChange { key: string; label: string; from: number; to: number; detail: string }
+export interface SecurityPoint {
+  at: string; head?: string; grade?: string; score: number
+  critical: number; high: number; medium: number; low: number; vulns_high: number
+}
+// One branch's security trend; branch is '' for snapshots without a recorded branch.
+export interface BranchTrend {
+  branch: string; points: SecurityPoint[]
+  regressions: HistoryChange[]; improvements: HistoryChange[]; since?: string
+}
 export interface HistoryTrend {
   snapshots: HistorySnapshot[]; series: HistorySeries[]
   regressions: HistoryChange[]; improvements: HistoryChange[]; since?: string
+  branches: BranchTrend[]
 }
 
 // GET /api/v1/repos/{repo}/architecture

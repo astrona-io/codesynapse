@@ -312,13 +312,18 @@ func firstLineOf(s string) string {
 var urgentRegressions = map[string]bool{"grade": true, "vulns_called": true, "findings_high": true, "vulns_high": true, "licence_conflicts": true}
 
 // regressionItem adds one item for a repository that got worse since the
-// snapshot before the last ingest. One snapshot or none means nothing to say.
+// previous snapshot of the same branch. One snapshot of that branch or none
+// means nothing to say.
 func (s *Server) regressionItem(ctx context.Context, repo string, add func(AttentionItem)) {
-	snaps, err := s.st.Snapshots(ctx, repo, 2)
-	if err != nil || len(snaps) < 2 {
+	snaps, err := s.st.Snapshots(ctx, repo, notifySnaps)
+	if err != nil {
 		return
 	}
-	reg, _ := history.Compare(snaps[0], snaps[1])
+	prev, cur, ok := history.Latest(snaps)
+	if !ok {
+		return
+	}
+	reg, _ := history.Compare(prev, cur)
 	if len(reg) == 0 {
 		return
 	}

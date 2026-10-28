@@ -34,6 +34,19 @@ func TestFindingsNotification(t *testing.T) {
 			"2 new critical or high findings in r"},
 		{"new vulnerability", []history.Snapshot{{At: at(2 * time.Hour)}, {At: at(time.Hour), Vulns: map[string]int{"critical": 1}}}, "1 new serious vulnerability in r"},
 		{"too old", []history.Snapshot{{At: at(30 * 24 * time.Hour)}, {At: at(20 * 24 * time.Hour), Findings: map[string]int{"high": 3}}}, ""},
+		{"grade fell", []history.Snapshot{{At: at(2 * time.Hour), Grade: "A"}, {At: at(time.Hour), Grade: "C", Findings: map[string]int{"medium": 9}}},
+			"Security grade A → C in r"},
+		{"grade rose", []history.Snapshot{{At: at(2 * time.Hour), Grade: "C"}, {At: at(time.Hour), Grade: "A"}}, ""},
+		{"no checkable grade", []history.Snapshot{{At: at(2 * time.Hour), Grade: "B"}, {At: at(time.Hour), Grade: "N/A"}}, "Security grade B → N/A in r"},
+		{"same branch, past another", []history.Snapshot{
+			{At: at(3 * time.Hour), Branch: "main", Grade: "B", Findings: map[string]int{"high": 1}},
+			{At: at(2 * time.Hour), Branch: "dev", Grade: "F", Findings: map[string]int{"high": 9}},
+			{At: at(time.Hour), Branch: "main", Grade: "B", Findings: map[string]int{"high": 2}},
+		}, "1 new critical or high finding in r (main)"},
+		{"switching branch is not a regression", []history.Snapshot{
+			{At: at(2 * time.Hour), Branch: "main", Grade: "A"},
+			{At: at(time.Hour), Branch: "dev", Grade: "F", Findings: map[string]int{"critical": 4}},
+		}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -45,6 +58,10 @@ func TestFindingsNotification(t *testing.T) {
 	n, _ := findingsNotification("r", tests[3].snaps, since)
 	assert.Equal(t, n.Body, "Security grade B → C")
 	assert.Equal(t, n.Link, "/repos/r/security")
+	assert.Equal(t, n.Kind, "findings")
+	n, _ = findingsNotification("r", tests[6].snaps, since)
+	assert.Equal(t, n.Kind, "grade")
+	assert.Equal(t, n.Body, "")
 }
 
 func feedStore(t *testing.T) *memory.Store {

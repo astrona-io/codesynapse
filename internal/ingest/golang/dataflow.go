@@ -1,9 +1,13 @@
 package golang
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"go/ast"
+	"go/token"
 	"go/types"
+	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/callgraph"
@@ -65,6 +69,7 @@ func (x *extractor) dataflow(ctx context.Context, primary []*packages.Package) e
 	for _, p := range wellTyped {
 		x.pkgAnalysis(p).Dataflow = model.DataflowVTA
 	}
+	x.recordDynamic(cg)
 
 	// SSA turns some calls the type checker could not follow (fn := f;
 	// fn()) into static calls, so static sites are kept too: a site counts
@@ -180,4 +185,116 @@ func (x *extractor) ssaFuncID(fn *ssa.Function) string {
 		return ""
 	}
 	return id
+}
+
+// maxDynamicTargets bounds the targets kept for one call through a function
+// value; the first ones in source order are kept.
+const maxDynamicTargets = 64
+
+// dynTarget is what a call through a function value can reach: a declared
+// function or method of the repository (fn), or a closure in one (lit). at
+// orders targets by source position, which unlike token.Pos does not depend
+// on the order files were parsed in.
+type dynTarget struct {
+	fn  *types.Func
+	lit *ast.FuncLit
+	at  string
+}
+
+// recordDynamic keeps, for every call site VTA resolved that is not an
+// interface call, the repository functions and closures it can reach, so
+// the taint pass (interprocedural.go) can apply their summaries. Targets
+// outside the repository, in test files, or synthetic wrappers whose
+// parameters do not line up with the method's (method expressions) are
+// left out: a value with no kept target adds nothing.
+func (x *extractor) recordDynamic(cg *callgraph.Graph) {
+	byFunc := make(map[*types.Func]*taintFunc, len(x.taintFuncs))
+	for _, f := range x.taintFuncs {
+		byFunc[f.fn] = f
+	}
+	lits := map[*ast.FuncLit]*taintLit{}
+	sites := map[token.Pos]map[dynTarget]bool{}
+	for fn, node := range cg.Nodes {
+		if fn == nil {
+			continue
+		}
+		for _, e := range node.Out {
+			c := e.Site.Common()
+			if c.IsInvoke() || !c.Pos().IsValid() {
+				continue
+			}
+			t, ok := dynTargetOf(e.Callee.Func, byFunc, lits)
+			if !ok {
+				continue
+			}
+			if sites[c.Pos()] == nil {
+				sites[c.Pos()] = map[dynTarget]bool{}
+			}
+			sites[c.Pos()][t] = true
+		}
+	}
+	x.dynamic = make(map[token.Pos][]dynTarget, len(sites))
+	for pos, set := range sites {
+		ts := make([]dynTarget, 0, len(set))
+		for t := range set {
+			ts = append(ts, t)
+		}
+		slices.SortFunc(ts, func(a, b dynTarget) int { return cmp.Compare(a.at, b.at) })
+		if len(ts) > maxDynamicTargets {
+			ts = ts[:maxDynamicTargets]
+		}
+		x.dynamic[pos] = ts
+	}
+	x.taintLits = x.taintLits[:0]
+	for _, l := range lits {
+		x.taintLits = append(x.taintLits, l)
+	}
+	slices.SortFunc(x.taintLits, func(a, b *taintLit) int {
+		return cmp.Compare(sourceAt(a.encl, a.lit.Pos()), sourceAt(b.encl, b.lit.Pos()))
+	})
+}
+
+// dynTargetOf maps a VTA callee to the function or closure the taint pass
+// holds a summary for, adding closures to lits as they are met.
+func dynTargetOf(fn *ssa.Function, byFunc map[*types.Func]*taintFunc, lits map[*ast.FuncLit]*taintLit) (dynTarget, bool) {
+	if fn.Parent() != nil {
+		lit, ok := fn.Syntax().(*ast.FuncLit)
+		encl := byFunc[declaredFunc(enclosing(fn))]
+		if !ok || encl == nil {
+			return dynTarget{}, false
+		}
+		if lits[lit] == nil {
+			sig, ok := encl.info.TypeOf(lit).(*types.Signature)
+			if !ok {
+				return dynTarget{}, false
+			}
+			lits[lit] = &taintLit{lit: lit, sig: sig, encl: encl}
+		}
+		return dynTarget{lit: lit, at: sourceAt(encl, lit.Pos())}, true
+	}
+	obj := declaredFunc(fn)
+	f := byFunc[obj]
+	if f == nil || fn.Signature.Params().Len() != obj.Signature().Params().Len() {
+		return dynTarget{}, false // a method expression takes the receiver first
+	}
+	return dynTarget{fn: obj, at: sourceAt(f, f.decl.Pos())}, true
+}
+
+// declaredFunc is the declared (generic origin) function an SSA function,
+// instance or method wrapper stands for, or nil.
+func declaredFunc(fn *ssa.Function) *types.Func {
+	if origin := fn.Origin(); origin != nil {
+		fn = origin
+	}
+	obj, ok := fn.Object().(*types.Func)
+	if !ok {
+		return nil
+	}
+	return obj.Origin()
+}
+
+// sourceAt is a sortable "file:offset" for pos inside f's file.
+func sourceAt(f *taintFunc, pos token.Pos) string {
+	p := f.fset.Position(pos)
+	return fmt.Sprintf("%s:%010d", f.rel, p.Offset)
 }

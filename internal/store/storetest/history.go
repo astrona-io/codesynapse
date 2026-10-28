@@ -31,7 +31,7 @@ func historyContract(t *testing.T, db interface {
 	})
 	at := func(i int) string { return time.Date(2026, 10, 1, 0, i, 0, 0, time.UTC).Format(time.RFC3339) }
 	snap := func(i int, grade string) history.Snapshot {
-		return history.Snapshot{At: at(i), Head: fmt.Sprintf("c%d", i), Grade: grade, Score: 90 - i, Findings: map[string]int{"high": i}, DupPct: 1.5}
+		return history.Snapshot{At: at(i), Head: fmt.Sprintf("c%d", i), Branch: fmt.Sprintf("b%d", i%2), Grade: grade, Score: 90 - i, Findings: map[string]int{"high": i}, DupPct: 1.5}
 	}
 
 	got, err := db.Snapshots(ctx, repo, 10)
@@ -49,6 +49,8 @@ func historyContract(t *testing.T, db interface {
 	assert.Equal(t, got[2].At, at(3))
 	assert.Equal(t, got[2].Findings["high"], 3)
 	assert.Equal(t, got[1].DupPct, 1.5)
+	assert.Equal(t, got[0].Branch, "b1", "the branch comes back, so trends can be read per branch")
+	assert.Equal(t, got[1].Branch, "b0")
 
 	require.NoError(t, db.AddSnapshot(ctx, repo, snap(2, "B")))
 	got, err = db.Snapshots(ctx, repo, 10)
