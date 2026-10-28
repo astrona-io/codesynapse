@@ -201,10 +201,10 @@ onBeforeUnmount(() => clearInterval(poll))
         <p class="muted small">MCP address: <code>{{ mcpUrl }}</code><template v-if="viaBridge"> · API address: <code>{{ apiUrl }}</code></template>.</p>
         <p v-if="viaBridge && apiUrl.includes('<')" class="notice notice--warn" role="status">This installation does not know its public API address. Replace <code>{{ apiUrl }}</code> with the address your API is reached at, or ask the operator to set <code>CODESYNAPSE_PUBLIC_API_URL</code>.</p>
         <details v-if="showPluginStatus">
-          <summary class="muted small">Every call reaches the server (and an opt-in for fresh answers)</summary>
+          <summary class="muted small">Fresh answers from your working tree</summary>
           <div class="stack--tight small">
-            <p>By default the bridge sends every call to your system: it is signed with your key, checked against your permissions, written to the audit log and counted here. The server's graph reflects the last sync, so it does not know edits you made since. If you prefer fast answers that include uncommitted edits, you can opt in to answering ten core tools from your working tree on your machine; those answers never reach the server, so they are not audited or counted. Set this where Claude Code starts, for example in your shell profile:</p>
-            <CopyField value="export CODESYNAPSE_BRIDGE_WORKTREE=true" />
+            <p>The server's graph reflects the last sync, so it does not know edits you made since. While your checkout has such edits, the bridge answers ten core tools from your working tree on your machine and reports each call here, so it is still written to the audit log and counted; no code is sent. Every other call goes to your system, signed with your key and checked against your permissions. To send every call to the server instead, set this where Claude Code starts, for example in your shell profile:</p>
+            <CopyField value="export CODESYNAPSE_BRIDGE_WORKTREE=false" />
             <p class="muted">Remote servers must use <code>https</code>; the bridge refuses plain <code>http</code> to anything but this machine.</p>
           </div>
         </details>

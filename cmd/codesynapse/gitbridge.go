@@ -124,6 +124,6 @@ func (b *bridge) reportLocal(ctx context.Context, tool string, d time.Duration, 
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := b.report.do(rctx, http.MethodPost, "/api/v1/usage/local", body, nil); err != nil && b.logger != nil {
-		b.logger.Debug("local git call not reported", "tool", tool, "error", err)
+		b.logger.Debug("local call not reported", "tool", tool, "error", err)
 	}
 }

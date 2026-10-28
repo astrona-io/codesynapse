@@ -8,13 +8,15 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/asklocal"
+	"github.com/astrona-io/codesynapse/internal/coretools"
 	"github.com/astrona-io/codesynapse/internal/ghtools"
 	"github.com/astrona-io/codesynapse/internal/gittools"
 	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
 // Calls the Claude Code bridge answers on the developer's machine (the git
-// tools read a checkout the server cannot see) are reported here, so they are
+// tools read a checkout the server cannot see, and the core tools answer from
+// the working tree while it has unsynced changes) are reported here, so they are
 // counted on Statistics and appear in the audit log (the HTTP middleware
 // records every changing request) like the calls the MCP server answers. The
 // report carries the tool name, the time it took and the size of the answer,
@@ -132,7 +134,7 @@ func (s *Server) handleLocalUsage(w http.ResponseWriter, r *http.Request) {
 
 func (in localUsageReport) validate() error {
 	switch {
-	case !slices.Contains(gittools.Tools, in.Tool) && !slices.Contains(ghtools.Tools, in.Tool) && in.Tool != asklocal.Tool:
+	case !slices.Contains(gittools.Tools, in.Tool) && !slices.Contains(ghtools.Tools, in.Tool) && !slices.Contains(coretools.Local, in.Tool) && in.Tool != asklocal.Tool:
 		return fmt.Errorf("unknown local tool %q", in.Tool)
 	case !clientNameRe.MatchString(in.Client):
 		return errors.New("client must be a short lower-case name, e.g. claude-code")

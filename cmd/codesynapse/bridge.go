@@ -55,7 +55,7 @@ func (o *mcpBridgeOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.client, "client", "", "Runtime metadata adapter: codex or cursor (default: per-chat Claude bridge)")
 	f.StringVar(&o.url, "url", app.Getenv("CODESYNAPSE_MCP_URL", "http://localhost:8090/mcp"), "MCP endpoint to forward to")
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "CodeSynapse API that registers the chat session")
-	f.BoolVar(&o.worktree, "worktree", app.Getenv("CODESYNAPSE_BRIDGE_WORKTREE", "false") == "true", "Opt in: while this checkout has changes the server has not indexed, answer the core repository tools from a graph of the working tree built on this machine (those answers never reach the server, so they are not audited or counted)")
+	f.BoolVar(&o.worktree, "worktree", app.Getenv("CODESYNAPSE_BRIDGE_WORKTREE", "true") != "false", "While this checkout has changes the server has not indexed, answer the core repository tools from a graph of the working tree built on this machine and report each call to the server (CODESYNAPSE_BRIDGE_WORKTREE=false sends every call to the server)")
 	f.StringVar(&o.repo, "repo", "", "The name the server knows this checkout by (default: from the origin remote)")
 	return nil
 }
@@ -64,8 +64,11 @@ func (o *mcpBridgeOptions) Validate(context.Context, *app.Env) error {
 	if o.client != "" && o.client != "codex" && o.client != "cursor" {
 		return errors.New("--client must be codex or cursor")
 	}
-	if o.client != "" && o.worktree {
-		return errors.New("runtime adapters require server-side answers; turn off --worktree")
+	if o.client != "" {
+		if o.worktree && o.EC.Command.Flags().Changed("worktree") {
+			return errors.New("runtime adapters require server-side answers; turn off --worktree")
+		}
+		o.worktree = false
 	}
 	for _, u := range []string{o.url, o.apiURL} {
 		if err := checkBridgeURL(u); err != nil {
@@ -253,6 +256,7 @@ func (b *bridge) answerLocally(ctx context.Context, msg []byte, m rpcMessage) bo
 	if !ok || len(m.ID) == 0 {
 		return false
 	}
+	start := time.Now()
 	result, err := b.worktree.answer(ctx, c)
 	if err != nil {
 		if !errors.Is(err, errNoChanges) {
@@ -265,6 +269,8 @@ func (b *bridge) answerLocally(ctx context.Context, msg []byte, m rpcMessage) bo
 		return false
 	}
 	b.write(out)
+	failed, _ := result["isError"].(bool)
+	b.reportLocal(ctx, c.Params.Name, time.Since(start), len(out)/4, failed)
 	return true
 }
 
