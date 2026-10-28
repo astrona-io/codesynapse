@@ -386,4 +386,6 @@ The SaaS roadmap includes completed phases [platform isolation and repository pe
 
 Next for telemetry: the [metrics coverage plan](TELEMETRY_PLAN.md#metrics-coverage-plan) (proposed) adds jobs, leases, indexing phases, outbound calls, sign-in, audit writes, process health, optional vmalert alerting and the web server in six phases, under the same label rules.
 
+Next for administrators: the [platform statistics plan](PLATFORM_STATS_PLAN.md) (proposed) adds a Statistics area under Administration for platform admins in a signed-in session: growth, usage, jobs and indexing, ingest, models and cost, storage, security posture, audit, sessions and alerts across organisations. Counts and timings only, every view audited, built in seven phases on the telemetry above.
+
 Development and production Kubernetes manifests are deferred to the final deployment phase, after the application phases and SSO. Prepared deployment work remains on `feat/k8s-production` for later review and revalidation; it is not part of the active development phase.

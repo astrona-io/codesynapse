@@ -130,4 +130,5 @@ nav:
           - Repo config plan: REPO_CONFIG_PLAN.md
           - Ingest transparency plan: INGEST_TRANSPARENCY_PLAN.md
       - Telemetry plan: TELEMETRY_PLAN.md
+      - Platform statistics plan: PLATFORM_STATS_PLAN.md
       - Glossary: GLOSSARY.md
