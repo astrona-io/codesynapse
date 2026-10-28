@@ -84,6 +84,25 @@ func TestPrebriefStaysSilentOnPromptsThatAreNotCodeTasks(t *testing.T) {
 	assert.Equal(t, text, "")
 }
 
+// TestPrebriefStaysSilentOnHarnessTurns: UserPromptSubmit also fires for
+// turns Claude Code starts itself, and the payload carries only the text in
+// "prompt" (PLAN item 18, 2026-10-28: a subagent's hand-back was briefed
+// from twelve unrelated Text and Report helpers). These payloads are the
+// shapes Claude Code sends.
+func TestPrebriefStaysSilentOnHarnessTurns(t *testing.T) {
+	for _, payload := range []string{
+		`{"session_id":"chat-1","transcript_path":"/tmp/t.jsonl","cwd":"/tmp","permission_mode":"auto","hook_event_name":"UserPromptSubmit",` +
+			`"prompt":"Another Claude session sent a message:\n<agent-message from=\"a3e3303db7523bc45\" name=\"Telemetry phase 6 web metrics\">[Subagent hand-back] The text below is the final report of a subagent this session delegated to.\n  Added RecordWebRequest in internal/telemetry/metrics.go with tests in telemetry_test.go; the Report helper in gateway/local.go is unchanged. just test and just lint pass.\n</agent-message>"}`,
+		`{"session_id":"chat-1","transcript_path":"/tmp/t.jsonl","cwd":"/tmp","permission_mode":"auto","hook_event_name":"UserPromptSubmit",` +
+			`"prompt":"<task-notification>\n<task-id>bw53zr0gx</task-id>\n<tool-use-id>toolu_01</tool-use-id>\n<output-file>/tmp/tasks/bw53zr0gx.output</output-file>\n<status>completed</status>\n<summary>Background command \"Run handleLogin tests\" completed (exit code 0)</summary>\n</task-notification>"}`,
+	} {
+		var in hookInput
+		require.NoError(t, json.Unmarshal([]byte(payload), &in))
+		assert.True(t, len(in.Prompt) > 0)
+		assert.False(t, worthBriefing(in.Prompt), in.Prompt)
+	}
+}
+
 func TestPrebriefSkipsShortReplies(t *testing.T) {
 	for _, p := range []string{"yes", "go on", "ok thanks"} {
 		assert.False(t, worthRecalling(p), p)

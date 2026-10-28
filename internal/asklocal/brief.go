@@ -42,7 +42,7 @@ const briefWords = 20
 func WorthBriefing(prompt string) bool {
 	p := strings.TrimSpace(prompt)
 	switch {
-	case p == "":
+	case p == "", HarnessTurn(p):
 		return false
 	case codeToken.MatchString(p), errorText.MatchString(p):
 		return true
@@ -52,11 +52,42 @@ func WorthBriefing(prompt string) bool {
 	return len(strings.Fields(p)) >= briefWords
 }
 
+// harnessPrefixes open the turns Claude Code starts on its own rather than
+// the developer typing them: a background task's notification, another
+// session's or a subagent's message, a reminder or a system notification.
+// UserPromptSubmit fires for them with the text in "prompt" and no field that
+// says where it came from, so the text is all there is to go on. A real
+// session (PLAN item 18, 2026-10-28) briefed a subagent's hand-back: long and
+// full of identifiers, it matched twelve unrelated helpers by common words.
+var harnessPrefixes = []string{
+	"<task-notification>",
+	"<agent-message",
+	"<system-reminder>",
+	"[system notification",
+	"another claude session sent a message",
+}
+
+// HarnessTurn reports whether a prompt is a turn the harness injected, not
+// one the developer wrote.
+func HarnessTurn(prompt string) bool {
+	p := strings.ToLower(strings.TrimSpace(prompt))
+	for _, h := range harnessPrefixes {
+		if strings.HasPrefix(p, h) {
+			return true
+		}
+	}
+	return false
+}
+
 // NothingRelevant reports whether a brief only says the files do not bear
 // on the request ("Nothing relevant in the given files. The developer
 // should clarify..."): the agent learns nothing from it, so it is dropped.
 func NothingRelevant(answer string) bool {
 	a := strings.ToLower(strings.TrimLeft(answer, " \t\r\n*#_>-"))
-	return strings.HasPrefix(a, "nothing relevant") || strings.HasPrefix(a, "not in the given files") ||
-		strings.Contains(a, "nothing relevant in the given files")
+	for _, p := range []string{"nothing relevant", "not in the given files", "no relevant code", "none of the provided files", "none of the given files"} {
+		if strings.HasPrefix(a, p) {
+			return true
+		}
+	}
+	return strings.Contains(a, "nothing relevant in the given files") || strings.Contains(a, "no relevant code for the request")
 }
