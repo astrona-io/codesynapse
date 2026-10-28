@@ -74,11 +74,44 @@ func TestOrgWatchAddsNewPublicRepositories(t *testing.T) {
 	assert.Equal(t, linked(), 0, "what existed when the watch was created is not added")
 	assert.Equal(t, watches().LastStatus, "ok")
 
-	// A repository the watch has not seen: it is the one created since.
-	require.NoError(t, acc.St.RecordWatchScan(ctx, org.ID, created.Key, accounts.WatchScan{LastStatus: "ok", Known: []string{"old"}}))
+	events := func(action string) int {
+		rows, err := acc.St.ListEvents(ctx, accounts.EventFilter{OrgID: org.ID, Action: action, Limit: 10})
+		require.NoError(t, err)
+		return len(rows)
+	}
+	unseen := func() {
+		require.NoError(t, acc.St.RecordWatchScan(ctx, org.ID, created.Key, accounts.WatchScan{LastStatus: "ok", Known: []string{"old"}}))
+	}
+	member := func(v string) {
+		_, _ = acc.St.RemoveRepository(ctx, org.ID, graph)
+		require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: org.ID, Graph: graph, Visibility: v, OwnerID: signed.User.ID, AddedBy: signed.User.ID, AddedAt: time.Now()}))
+	}
+
+	// A member holds it privately: the organisation's watch has not read
+	// it with an organisation token, so it skips it without an audit entry.
+	member(accounts.Private)
+	unseen()
+	srv.scanWatch(ctx, watches(), time.Now().UTC(), logger)
+	assert.Equal(t, watches().Added, 0, "a skip adds nothing")
+	assert.Equal(t, watches().LastStatus, "ok")
+	assert.Equal(t, events("watch.repo_add"), 0, "and leaves no watch.repo_add entry")
+	rows, err := acc.St.GraphRepositories(ctx, graph)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.True(t, rows[0].Personal(), "it stays the member's")
+
+	// A member's public entry is taken over for the organisation.
+	member(accounts.Public)
+	unseen()
 	srv.scanWatch(ctx, watches(), time.Now().UTC(), logger)
 	assert.Equal(t, linked(), 1, "the new public repository is added")
 	assert.Equal(t, watches().Added, 1)
+	assert.Equal(t, events("watch.repo_add"), 1)
+	assert.Equal(t, events("repo.space_moved"), 1)
+	rows, err = acc.St.GraphRepositories(ctx, graph)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.False(t, rows[0].Personal(), "the organisation's now")
 	srv.scanWatch(ctx, watches(), time.Now().UTC(), logger)
 	assert.Equal(t, watches().Added, 1, "it is not added twice")
 
