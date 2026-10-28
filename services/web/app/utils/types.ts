@@ -251,8 +251,17 @@ export interface WorkspaceStats {
   generated_at: string; days: number
   agents: {
     edits: { edits: number; writes: number; failed: number; patch_bytes: number; write_bytes: number; baseline_bytes: number; avoided_bytes: number; estimated_output_saved: number; avoided_pct: number }
-    tokens: { input: number; output: number; cached_input: number; turns: number; total: number; input_pct: number; output_pct: number }
+    tokens: { input: number; output: number; cached_input: number; cache_write?: number; turns: number; cache_known_turns?: number; total: number; input_pct: number; output_pct: number }
     context_total_tokens: number; context_saved_pct: number
+    // Share of the agent's own work avoided, without prompt-cache reads
+    // (docs/PLATFORM_STATS_PLAN.md). null when unknown; basis says why.
+    work_tokens?: number; share_avoided_tokens?: number; share_local_avoided_tokens?: number
+    share_avoided_pct?: number | null; share_avoided_known?: boolean
+    share_avoided_basis?: 'work_tokens' | 'no_hook_tokens' | 'cache_fields_missing' | 'repeats_not_reported'
+    // Shown apart and labelled; never a tile, export or summary figure.
+    share_upper_pct?: number | null; share_raw_pct?: number | null
+    avoided_resend_tokens?: number; avoided_unaware_tokens?: number; avoided_repeat_ranges?: number
+    saved?: { tokens: number; price: 'cache_write' | 'input'; per_mtok: number; dollars: number | null; resend_tokens: number; upper_dollars: number | null; unaware_tokens: number }
     sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; avoided_method: string
     // ask_local: tokens local models read, and its part of avoided_tokens.
     local_read_tokens?: number; local_avoided_tokens?: number; local_briefs?: number; local_drafts?: number
@@ -664,5 +673,5 @@ export interface ModelStats {
   // disabled, no_local_model or no_ai. Gateway traffic is never shortened.
   compression_enabled?: boolean; compression_off?: 'disabled' | 'no_local_model' | 'no_ai'
   gateway?: GatewayStat
-  reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; cached_input_per_mtok?: number; estimate?: boolean; source?: string; checked?: string }
+  reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; cached_input_per_mtok?: number; cache_write_per_mtok?: number; caches_by_default?: boolean; estimate?: boolean; source?: string; checked?: string }
 }

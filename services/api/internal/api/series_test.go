@@ -187,3 +187,25 @@ func TestSeriesQueryMeasurementSemantics(t *testing.T) {
 	assert.Contains(t, seriesPanels["db_rows"].queries[0].expr, "db_graph_rows_returned_total")
 	assert.False(t, strings.Contains(seriesPanels["llm_cost"].Help, "free"))
 }
+
+func TestPhaseFivePanels(t *testing.T) {
+	for _, tc := range []struct{ panel, contains, by string }{
+		{"tool_errors", `mcp_tool_calls_total{outcome="error"}`, "mcp_tool"},
+		{"tool_refusals", `mcp_tool_calls_total{outcome="refused"}`, "mcp_tool"},
+		{"local_answers", `mcp_local_answers_total{outcome="recorded"}`, "mcp_tool"},
+		{"llm_provider_failures", `llm_requests_total{outcome!="ok"}`, "llm_provider"},
+		{"llm_failure_causes", `llm_requests_total{outcome!="ok"}`, "outcome"},
+		{"gateway_latency", `gateway_request_duration_seconds_bucket`, "route"},
+		{"gateway_fallthrough", `gateway_fallthrough_total`, "reason"},
+	} {
+		t.Run(tc.panel, func(t *testing.T) {
+			p, ok := seriesPanels[tc.panel]
+			require.True(t, ok)
+			require.Len(t, p.queries, 1)
+			assert.Contains(t, p.queries[0].expr, tc.contains)
+			assert.Equal(t, p.queries[0].by, tc.by)
+			assert.False(t, p.platform, "tenant panels stay scoped to the caller")
+		})
+	}
+	assert.Contains(t, seriesPanels["tool_errors"].Help, "refused", "the help says refusals are counted apart")
+}

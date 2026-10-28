@@ -69,8 +69,9 @@ func TestRetrievalCounts(t *testing.T) {
 	require.Len(t, reports, 1)
 	assert.Equal(t, paths[0], "/api/v1/repos/acme%2Fdemo/usage/retrieval")
 	var got struct {
-		Client string                 `json:"client"`
-		Tools  map[string]rangeCounts `json:"tools"`
+		Client  string                 `json:"client"`
+		Tools   map[string]rangeCounts `json:"tools"`
+		Repeats map[string]int         `json:"avoided_repeat_ranges"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(reports[0]), &got))
 	assert.Equal(t, got.Client, "claude-code")
@@ -78,6 +79,7 @@ func TestRetrievalCounts(t *testing.T) {
 		"get_symbol_context": {Returned: 2, Read: 1},
 		"search":             {Returned: 1, Read: 1},
 	}, "a range given twice counts once; another repository's and another server's are left out")
+	assert.Equal(t, got.Repeats, map[string]int{"search": 1}, "the second answer of svc.go:10-20 is a repeat")
 	assert.NotContains(t, reports[0], "svc.go", "no paths leave the machine")
 
 	reportRetrieval(context.Background(), stop, logger)
@@ -85,7 +87,7 @@ func TestRetrievalCounts(t *testing.T) {
 	read("internal/svc/svc_test.go", 1, 0)
 	reportRetrieval(context.Background(), stop, logger)
 	require.Len(t, reports, 2)
-	assert.Equal(t, reports[1], `{"client":"claude-code","tools":{"get_symbol_context":{"returned":0,"read":1}}}`)
+	assert.Equal(t, reports[1], `{"avoided_repeat_ranges":{},"client":"claude-code","tools":{"get_symbol_context":{"returned":0,"read":1}}}`)
 }
 
 // TestEditRecall: of the files the session changed (not those already
@@ -264,4 +266,59 @@ func TestConventionsRepoRenamed(t *testing.T) {
 	c := newAPIClient(api.URL)
 	got := repoConventions(context.Background(), c, dir, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	assert.Contains(t, got, "Wrap errors with %w.")
+}
+
+// TestRepeatRangesAndResend: ranges that overlap an earlier answer or a span
+// the agent already read are repeats, not returned ranges; answer tokens are
+// re-sent on the turns after the report that first counted them, scaled by
+// the answer's share of new ranges.
+func TestRepeatRangesAndResend(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
+	t.Setenv(apiTokenEnv, "csk_test")
+	type report struct {
+		Tools   map[string]rangeCounts `json:"tools"`
+		Repeats map[string]int         `json:"avoided_repeat_ranges"`
+		Resend  map[string]int         `json:"resend_token_turns"`
+	}
+	var reports []report
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in report
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&in))
+		reports = append(reports, in)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(api.Close)
+	t.Setenv("CODESYNAPSE_API_URL", api.URL)
+	dir := gitRepo(t)
+	transcript := filepath.Join(t.TempDir(), "session.jsonl")
+	turn := func(id string) string {
+		return `{"type":"assistant","message":{"id":"` + id + `","usage":{"input_tokens":10,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}` + "\n"
+	}
+	require.NoError(t, os.WriteFile(transcript, []byte(turn("t1")), 0o600))
+	answer := func(text string) {
+		t.Helper()
+		in := toolHookInput{SessionID: "chat-r", Cwd: dir, ToolName: "mcp__codesynapse__search"}
+		in.ToolResponse = []byte(`"` + text + `"`)
+		noteAnswer(in)
+	}
+	answer("a.go:1-10" + strings.Repeat(" ", 390)) // 100 tokens, one new range
+	read := toolHookInput{SessionID: "chat-r", Cwd: dir}
+	read.ToolInput.FilePath, read.ToolInput.Offset, read.ToolInput.Limit = filepath.Join(dir, "b.go"), 1, 50
+	noteRead(read)
+	// a.go:5-8 overlaps the answer, b.go:20-30 the read; c.go:1 is new.
+	answer("a.go:5-8 b.go:20-30 c.go:1" + strings.Repeat(" ", 274)) // 75 tokens, a third new
+
+	stop := toolHookInput{SessionID: "chat-r", Cwd: dir, TranscriptPath: transcript}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	reportRetrieval(context.Background(), stop, logger)
+	require.Len(t, reports, 1)
+	assert.Equal(t, reports[0].Tools, map[string]rangeCounts{"search": {Returned: 2}})
+	assert.Equal(t, reports[0].Repeats, map[string]int{"search": 2})
+	assert.Equal(t, len(reports[0].Resend), 0, "answers of this window are not re-sent yet")
+
+	require.NoError(t, os.WriteFile(transcript, []byte(turn("t1")+turn("t2")+turn("t3")), 0o600))
+	reportRetrieval(context.Background(), stop, logger)
+	require.Len(t, reports, 2)
+	assert.Equal(t, reports[1].Resend, map[string]int{"search": (100 + 25) * 2}, "two later turns re-send the new share of both answers")
+	assert.Equal(t, len(reports[1].Repeats), 0)
 }

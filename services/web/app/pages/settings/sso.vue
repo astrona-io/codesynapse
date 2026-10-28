@@ -30,37 +30,53 @@ function toMap(list: Mapping[]) {
   return Object.fromEntries(list.filter((m) => m.group.trim() && m.value).map((m) => [m.group.trim(), m.value]))
 }
 async function save() {
+  if (busy.value) return
   busy.value = true
   error.value = ''
   saved.value = ''
   try {
-    await $fetch(apiPath(`accounts/orgs/${org.value!.slug}/sso`), {
-      method: 'PUT',
-      body: {
+    await apiPut(`accounts/orgs/${org.value!.slug}/sso`, {
         name: form.name.trim(), issuer: form.issuer.trim(), client_id: form.client_id.trim(), client_secret: form.client_secret,
         enabled: form.enabled, groups_claim: form.groups_claim.trim(), default_role: form.default_role || undefined,
         scopes: form.scopes.split(/\s+/).filter(Boolean), role_groups: toMap(roles.value), team_groups: toMap(teamMaps.value),
-      },
     })
     saved.value = 'Saved. The provider answered OpenID discovery.'
     await refresh()
   } catch (e) {
-    error.value = apiErrorMessage(e)
+    error.value = plainError(e)
   } finally {
     busy.value = false
   }
 }
 const confirmRemove = ref(false)
 async function remove() {
-  confirmRemove.value = false
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  saved.value = ''
   try {
-    await $fetch(apiPath(`accounts/orgs/${org.value!.slug}/sso`), { method: 'DELETE' })
+    await apiDelete(`accounts/orgs/${org.value!.slug}/sso`)
+    saved.value = 'Single sign-on is disconnected.'
     await refresh()
   } catch (e) {
-    error.value = apiErrorMessage(e)
+    error.value = plainError(e)
+  } finally {
+    busy.value = false
+    confirmRemove.value = false
   }
 }
-const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => undefined)
+watch(() => org.value?.slug, () => { error.value = ''; saved.value = '' })
+// Which value was just copied, so its button can say so for a moment.
+const copied = ref('')
+async function copy(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    copied.value = text
+    setTimeout(() => { if (copied.value === text) copied.value = '' }, 2000)
+  } catch {
+    copied.value = ''
+  }
+}
 </script>
 
 <template>
@@ -71,13 +87,13 @@ const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => 
       <section class="panel">
         <h2>Single sign-on for {{ org.name }}</h2>
         <p class="muted small">Connect your organisation's OpenID Connect provider (Entra ID, Okta, Keycloak, Google Workspace, Authentik and others). People sign in through it, get an account the first time, and its groups decide their role and teams here. Members you added by hand keep the role you gave them, and the last owner is never removed. Passwords keep working.</p>
-        <p v-if="loadError" class="notice notice--danger" role="alert">{{ apiErrorMessage(loadError) }}</p>
+        <p v-if="loadError" class="notice notice--danger" role="alert">{{ plainError(loadError) }}</p>
         <dl v-if="data" class="facts">
           <dt>Redirect URI</dt>
-          <dd><code>{{ data.redirect_uri }}</code> <button class="secondary tiny" type="button" @click="copy(data.redirect_uri)">Copy</button><span class="hint">Register this with your provider as the sign-in redirect.</span></dd>
+          <dd><code>{{ data.redirect_uri }}</code> <button class="secondary tiny" type="button" aria-label="Copy the redirect URI" @click="copy(data.redirect_uri)">{{ copied === data.redirect_uri ? 'Copied' : 'Copy' }}</button><span class="hint">Register this with your provider as the sign-in redirect.</span></dd>
           <template v-if="data.provider">
             <dt>Sign-in link</dt>
-            <dd><code>{{ signInLink }}</code> <button class="secondary tiny" type="button" @click="copy(signInLink)">Copy</button><span class="hint">Send this to your people; it opens the sign-in page with your organisation filled in.</span></dd>
+            <dd><code>{{ signInLink }}</code> <button class="secondary tiny" type="button" aria-label="Copy the sign-in link" @click="copy(signInLink)">{{ copied === signInLink ? 'Copied' : 'Copy' }}</button><span class="hint">Send this to your people; it opens the sign-in page with your organisation filled in.</span></dd>
             <dt>Status</dt>
             <dd><span class="badge" :class="data.provider.enabled ? 'badge--green' : 'badge--amber'">{{ data.provider.enabled ? 'on' : 'off' }}</span> <span class="muted small">updated {{ relTime(data.provider.updated_at) }}</span></dd>
           </template>
@@ -108,7 +124,7 @@ const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => 
           <div v-for="(m, i) in roles" :key="'r' + i" class="row map">
             <input v-model="m.group" placeholder="group name or ID" aria-label="Group">
             <select v-model="m.value" aria-label="Role"><option v-for="r in ROLES" :key="r" :value="r">{{ r }}</option></select>
-            <button class="secondary tiny" type="button" @click="roles.splice(i, 1)">Remove</button>
+            <button class="secondary tiny" type="button" :aria-label="`Remove the mapping for ${m.group || 'this group'}`" @click="roles.splice(i, 1)">Remove</button>
           </div>
           <div><button class="secondary tiny" type="button" @click="roles.push({ group: '', value: 'member' })">Add a role mapping</button></div>
 
@@ -118,7 +134,7 @@ const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => 
             <div v-for="(m, i) in teamMaps" :key="'t' + i" class="row map">
               <input v-model="m.group" placeholder="group name or ID" aria-label="Group">
               <select v-model="m.value" aria-label="Team"><option v-for="t in teams.teams" :key="t.id" :value="t.id">{{ t.name }}</option></select>
-              <button class="secondary tiny" type="button" @click="teamMaps.splice(i, 1)">Remove</button>
+              <button class="secondary tiny" type="button" :aria-label="`Remove the mapping for ${m.group || 'this group'}`" @click="teamMaps.splice(i, 1)">Remove</button>
             </div>
             <div><button class="secondary tiny" type="button" @click="teamMaps.push({ group: '', value: teams.teams[0]!.id })">Add a team mapping</button></div>
           </template>
@@ -128,11 +144,11 @@ const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => 
           <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
           <div class="row">
             <button type="submit" :disabled="busy">{{ busy ? 'Checking the provider…' : 'Save' }}</button>
-            <button v-if="data?.provider" class="btn--danger" type="button" @click="confirmRemove = true">Disconnect</button>
+            <button v-if="data?.provider" class="danger" type="button" :disabled="busy" @click="confirmRemove = true">Disconnect</button>
           </div>
         </form>
       </section>
-      <ConfirmDialog :open="confirmRemove" title="Disconnect single sign-on?" confirm-label="Disconnect" danger @confirm="remove" @cancel="confirmRemove = false">
+      <ConfirmDialog :open="confirmRemove" title="Disconnect single sign-on?" confirm-label="Disconnect" danger :busy="busy" @confirm="remove" @cancel="confirmRemove = false">
         Nobody can sign in through {{ data?.provider?.name }} until it is connected again. Accounts, memberships and linked identities stay; people with a password can still sign in.
       </ConfirmDialog>
     </template>
@@ -140,11 +156,13 @@ const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => 
 </template>
 
 <style scoped>
-.facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; }
+.facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 0; }
 .facts dt { color: var(--muted); }
-.facts dd { margin: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.facts dd code { overflow-wrap: anywhere; min-width: 0; }
+.facts dd { min-width: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .facts .hint { flex-basis: 100%; }
 .grow { flex: 1 1 220px; }
 .map input { flex: 1 1 200px; }
+@media (max-width: 520px) { .facts { grid-template-columns: minmax(0, 1fr); } }
 .check { display: flex; align-items: center; gap: 8px; }
 </style>

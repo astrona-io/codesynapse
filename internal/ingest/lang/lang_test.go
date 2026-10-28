@@ -113,14 +113,17 @@ func TestFindings(t *testing.T) {
 			byRule[n.Rule] = append(byRule[n.Rule], n)
 		}
 	}
-	for _, r := range []string{"exec-shell", "sql-concat", "hardcoded-secret", "code-injection", "dom-xss", "vue-v-html"} {
+	// The fixture's shell command is built from request.args, so taint
+	// reports exec-from-request in place of exec-shell.
+	for _, r := range []string{"exec-from-request", "sql-concat", "hardcoded-secret", "code-injection", "dom-xss", "vue-v-html"} {
 		assert.Contains(t, keys(byRule), r)
 	}
 	for _, f := range byRule["hardcoded-secret"] {
 		assert.NotContains(t, f.Summary, "s3cr3t")
 		assert.NotContains(t, f.Summary, "sk_live")
 	}
-	assert.Equal(t, byRule["exec-shell"][0].Severity, "critical")
+	assert.NotContains(t, keys(byRule), "exec-shell")
+	assert.Equal(t, byRule["exec-from-request"][0].Severity, "critical")
 	for _, f := range res.Graph.Nodes() {
 		if f.Kind == model.KindFinding {
 			assert.NotEqual(t, f.File, "web/src/client.test.ts", "no findings in tests")

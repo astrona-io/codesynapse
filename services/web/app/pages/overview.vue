@@ -41,8 +41,9 @@ const where = computed(() => session.current.value?.org.name ?? 'your repositori
       <NuxtLink to="/" class="btn btn--ghost">All repositories</NuxtLink>
     </PageHeader>
 
-    <p v-if="error" class="notice notice--danger">{{ apiErrorMessage(error) }}</p>
-    <template v-else-if="data">
+    <p v-if="error" class="notice notice--danger" role="alert">{{ plainError(error) }}</p>
+    <p v-else-if="!data" class="muted small" role="status">Loading what needs attention…</p>
+    <template v-else>
       <div v-if="!data.repos" class="empty">
         <strong>No repositories yet</strong>
         Add one on <NuxtLink to="/">Repositories</NuxtLink>; this page then shows what to fix first.
@@ -59,7 +60,7 @@ const where = computed(() => session.current.value?.org.name ?? 'your repositori
           <div class="panel__header">
             <h2>Needs attention <span class="muted">{{ items.length }}</span></h2>
             <div class="row" role="tablist" aria-label="Filter">
-              <button v-for="f in filters" :key="f.id" class="chip" :class="{ active: filter === f.id }" role="tab" :aria-selected="filter === f.id" @click="filter = f.id">{{ f.label }}</button>
+              <button v-for="f in filters" :key="f.id" type="button" class="chip" :class="{ active: filter === f.id }" role="tab" :aria-selected="filter === f.id" @click="filter = f.id">{{ f.label }}</button>
             </div>
           </div>
           <AttentionList v-if="items.length" :items="items" :limit="12" />

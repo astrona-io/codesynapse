@@ -94,13 +94,13 @@ func (a *anthropicProvider) Complete(ctx context.Context, req Request) (Response
 	if err := stream.Err(); err != nil {
 		var apiErr *anthropic.Error
 		if errors.As(err, &apiErr) {
-			return response(), fmt.Errorf("%s: HTTP %d: %s", a.cfg.Name, apiErr.StatusCode, strings.TrimSpace(apiErr.Error()))
+			return response(), &httpError{name: a.cfg.Name, status: apiErr.StatusCode, msg: strings.TrimSpace(apiErr.Error())}
 		}
 		return response(), fmt.Errorf("%s: %w", a.cfg.Name, err)
 	}
 	switch msg.StopReason {
 	case anthropic.BetaStopReasonRefusal:
-		return response(), fmt.Errorf("%s: the model declined the request", a.cfg.Name)
+		return response(), fmt.Errorf("%s: %w", a.cfg.Name, ErrDeclined)
 	case anthropic.BetaStopReasonMaxTokens:
 		// Keep what was produced; callers validate structure.
 	}

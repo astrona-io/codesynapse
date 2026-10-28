@@ -100,6 +100,7 @@ func (h *handlers) authorizationMiddleware() mcp.Middleware {
 			}
 			policy, known := toolPolicies[p.Name]
 			if !known {
+				markRefused(ctx)
 				if h.access != nil {
 					if err := h.access.Denied(ctx, callerFrom(ctx), "unknown"); err != nil {
 						return nil, fmt.Errorf("recording authorization denial: %w", err)
@@ -113,6 +114,7 @@ func (h *handlers) authorizationMiddleware() mcp.Middleware {
 				err = h.authorizeTool(ctx, policy, p.Arguments)
 			}
 			if err != nil {
+				markRefused(ctx)
 				if h.access != nil {
 					if auditErr := h.access.Denied(ctx, callerFrom(ctx), p.Name); auditErr != nil {
 						return nil, fmt.Errorf("recording authorization denial: %w", auditErr)

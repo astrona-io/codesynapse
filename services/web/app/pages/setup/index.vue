@@ -20,7 +20,14 @@ const username = ref('')
 const password = ref('')
 const error = ref('')
 const busy = ref(false)
+const errorEl = ref<HTMLElement | null>(null)
+watch(error, async (e) => {
+  if (!e) return
+  await nextTick()
+  errorEl.value?.focus()
+})
 async function submit() {
+  if (busy.value) return
   busy.value = true
   error.value = ''
   const body: SetupInput = { email: email.value, username: username.value.trim(), name: name.value, password: password.value }
@@ -31,7 +38,7 @@ async function submit() {
     session.me.value = null
     await navigateTo('/setup/done')
   } catch (e) {
-    error.value = apiErrorMessage(e)
+    error.value = plainError(e)
   } finally {
     busy.value = false
   }
@@ -60,20 +67,20 @@ async function submit() {
     <div class="field"><label for="name">Owner's name</label><input id="name" v-model="name" autocomplete="off" required></div>
     <div class="field">
       <label for="email">Owner's email</label>
-      <input id="email" v-model="email" type="email" autocomplete="off" required>
-      <span class="hint">A different person or address than the root account.</span>
+      <input id="email" v-model="email" type="email" autocomplete="off" required aria-describedby="email-hint">
+      <span id="email-hint" class="hint">A different person or address than the root account.</span>
     </div>
     <div class="field">
       <label for="username">Owner's username <span class="muted">(optional)</span></label>
-      <input id="username" v-model="username" autocomplete="off" autocapitalize="none" spellcheck="false" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{2,31}" maxlength="32">
-      <span class="hint">A second way to sign in besides the email.</span>
+      <input id="username" v-model="username" autocomplete="off" autocapitalize="none" spellcheck="false" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{2,31}" maxlength="32" title="3 to 32 letters, digits, dots, dashes or underscores, starting with a letter or digit" aria-describedby="username-hint">
+      <span id="username-hint" class="hint">A second way to sign in besides the email.</span>
     </div>
     <div class="field">
       <label for="password">Owner's password</label>
-      <input id="password" v-model="password" type="password" autocomplete="new-password" minlength="12" required>
-      <span class="hint">At least 12 characters. The owner signs in with it next.</span>
+      <input id="password" v-model="password" type="password" autocomplete="new-password" minlength="12" required aria-describedby="password-hint">
+      <span id="password-hint" class="hint">At least 12 characters. The owner signs in with it next.</span>
     </div>
-    <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
+    <p v-if="error" ref="errorEl" class="notice notice--danger" role="alert" tabindex="-1">{{ error }}</p>
     <button type="submit" :disabled="busy">{{ busy ? 'Setting up…' : 'Create the organisation and its owner' }}</button>
   </form>
   <p class="muted small"><button class="link" type="button" @click="session.logout()">Sign out</button></p>

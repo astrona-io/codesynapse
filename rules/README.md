@@ -9,7 +9,7 @@ The detection logic lives in Go next to the parser for each language:
 | Category | Detector |
 |---|---|
 | Go | `internal/ingest/golang/findings.go` |
-| Python, JavaScript, TypeScript, Vue | `internal/ingest/lang/rules.go` |
+| Python, JavaScript, TypeScript, Vue | `internal/ingest/lang/rules.go`; request-input taint in `taint.go` |
 | YAML (Kubernetes, compose, GitHub Actions) | `internal/ingest/config/yaml.go` |
 | Dockerfile, Containerfile | `internal/ingest/config/dockerfile.go` (ids listed in `yaml.go`) |
 | Ansible | `internal/ingest/config/ansible.go` (ids listed in `yaml.go`) |

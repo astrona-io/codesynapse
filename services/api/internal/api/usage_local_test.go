@@ -1,10 +1,13 @@
 package api
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/store/storetest"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
@@ -35,4 +38,19 @@ func TestLocalAnswersAreAuditedWithTheirSession(t *testing.T) {
 	assert.Equal(t, got.MCP.Bytes, int64(1200))
 	assert.Equal(t, rows[1].MCP.Repo, "")
 	assert.Equal(t, rows[1].Target, "git_status")
+
+	var out bytes.Buffer
+	require.NoError(t, telemetry.Default.WriteText(&out))
+	series := func(outcome, tool string) bool {
+		for line := range strings.Lines(out.String()) {
+			if strings.HasPrefix(line, `mcp_local_answers_total{outcome="`+outcome+`",tenant_id="`+f.org.ID+`",mcp_tool="`+tool+`"`) {
+				return true
+			}
+		}
+		return false
+	}
+	assert.True(t, series(telemetry.LocalRecorded, "file_outline"), "recorded local answers carry the tool")
+	assert.True(t, series(telemetry.LocalRecorded, "git_status"))
+	assert.True(t, series(telemetry.LocalRefused, "file_outline"), "a missing or unknown session is a refusal")
+	assert.True(t, series(telemetry.LocalRefused, "git_status"), "so is a report that fails validation")
 }
