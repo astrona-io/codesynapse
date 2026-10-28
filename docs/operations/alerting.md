@@ -67,6 +67,7 @@ The chart refuses to render alerting without a metrics store (`victoriametrics.e
 | `CodeSynapseStoreSlow` | warning | The 95th percentile of NebulaGraph, Milvus or PostgreSQL round trips is above 1 s for 10 minutes |
 | `CodeSynapseStoreErrors` | critical | More than 5% of a store's round trips fail for 10 minutes, with at least one call a minute |
 | `CodeSynapseJobsNotClaimed` | warning | Jobs of a kind have waited 15 minutes with none of that kind running: no worker with that role is up |
+| `CodeSynapseJobFailureRate` | warning | More than 20% of a kind's jobs failed in the last 30 minutes, with at least 10 jobs |
 | `CodeSynapseSeriesCapOverflow` | warning | An instrument reached its series cap in the last hour, so its panels undercount |
 | `CodeSynapseLogShippingDropping` | warning | Log lines have not reached the log store for 15 minutes |
 | `CodeSynapseIngestMetricsRejected` | warning | Indexing file totals were refused before export in the last hour |
@@ -74,7 +75,7 @@ The chart refuses to render alerting without a metrics store (`victoriametrics.e
 
 Store alerts add up every organisation's calls per store, so no organisation appears in them. Other alerts read installation-wide numbers. The only labels an alert carries besides `severity`, `component` and `environment` are the store (`db_system`), the job kind, the instrument name and a fixed reason.
 
-More rules follow as the numbers they need are added: losing the scheduler lease, no replica holding it, failing metric export, the job failure rate and failing audit-log writes. The [telemetry plan](../TELEMETRY_PLAN.md#alerting) lists which phase each waits on.
+More rules follow as the numbers they need are added: losing the scheduler lease, no replica holding it, failing metric export and failing audit-log writes. The [telemetry plan](../TELEMETRY_PLAN.md#alerting) lists which phase each waits on.
 
 ## Change or add a rule
 

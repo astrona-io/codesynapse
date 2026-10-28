@@ -335,6 +335,7 @@ Shipped in phase 2:
 | `CodeSynapseIngestMetricsCapacity` | `telemetry.yaml` | `platform_codesynapse_ingest_metric_series_dropped_total` | any increase in 1 hour |
 | `CodeSynapseStoreSlow` | `stores.yaml` | `db_query_duration_seconds` and its `platform_` twin, summed per `db_system` | p95 above 1 s for 10 minutes |
 | `CodeSynapseStoreErrors` | `stores.yaml` | `db_query_errors_total` over `db_query_duration_seconds_count` (and `platform_` twins), per `db_system` | error share above 5% for 10 minutes, with at least one call a minute; timeouts are already errors, so they are not added again |
+| `CodeSynapseJobFailureRate` | `jobs.yaml` | `codesynapse_jobs_finished_total` and its `platform_` twin, `error` over all outcomes per `kind` | share above 20% over 30 minutes, with at least 10 jobs (added once phase 3 merged) |
 | `CodeSynapseJobsNotClaimed` | `jobs.yaml` | `platform_codesynapse_jobs_waiting` and `_active`, maximum per `kind` | jobs wait and none of that kind runs, for 15 minutes |
 
 `CodeSynapseJobsNotClaimed` was not in the first list: the queue gauges already exist and a missing worker role (the fix worker is off by default) is the commonest reason jobs stall.
@@ -346,7 +347,6 @@ Waiting on later phases (added with the phase that records the metric, with a un
 | Scheduler lease lost | phase 1 (lease events) |
 | No scheduler holder | phase 1 (lease held gauge) |
 | Metrics export failing | phase 1 (export failures) |
-| Job failure rate | phase 3 (`codesynapse_jobs_finished_total{kind,outcome}` and its `platform_` twin: `error` over all outcomes, summed by `kind`) |
 | Audit write failures | phase 4 (audit writes by outcome) |
 
 The rest of the alert column in the instrument table follows the same way.
