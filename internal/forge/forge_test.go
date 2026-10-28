@@ -2,6 +2,7 @@ package forge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -46,7 +47,7 @@ func TestListReposPagesAndFallsBackToUser(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c := Client{BaseURL: srv.URL, Token: "tok"}
+	c := Client{BaseURL: srv.URL, AllowPrivate: true, Token: "tok"}
 
 	got, err := c.ListRepos(context.Background(), "big")
 	require.NoError(t, err)
@@ -74,7 +75,7 @@ func TestListReposDoesNotFollowRedirects(t *testing.T) {
 		http.Redirect(w, r, other.URL, http.StatusFound)
 	}))
 	defer srv.Close()
-	_, err := Client{BaseURL: srv.URL, Token: "tok"}.ListRepos(context.Background(), "x")
+	_, err := Client{BaseURL: srv.URL, AllowPrivate: true, Token: "tok"}.ListRepos(context.Background(), "x")
 	assert.Error(t, err)
 }
 
@@ -120,7 +121,7 @@ func TestForgejoAndGitLab(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := Client{Kind: Forgejo, Host: "git.example.com", BaseURL: srv.URL, Token: "tok"}.ListRepos(context.Background(), "team")
+	got, err := Client{Kind: Forgejo, Host: "git.example.com", BaseURL: srv.URL, AllowPrivate: true, Token: "tok"}.ListRepos(context.Background(), "team")
 	require.NoError(t, err)
 	require.Len(t, got, 1, "a short page is not the last one")
 	assert.Equal(t, got[0].Name, "api")
@@ -129,7 +130,7 @@ func TestForgejoAndGitLab(t *testing.T) {
 	assert.Equal(t, got[0].PushedAt, "2026-01-02T03:04:05Z")
 	assert.Equal(t, seen[0], "/orgs/team/repos|token tok|")
 
-	got, err = Client{Kind: GitLab, Host: "gitlab.example.com", BaseURL: srv.URL, Token: "tok"}.ListRepos(context.Background(), "grp")
+	got, err = Client{Kind: GitLab, Host: "gitlab.example.com", BaseURL: srv.URL, AllowPrivate: true, Token: "tok"}.ListRepos(context.Background(), "grp")
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 	assert.Equal(t, got[0].Name, "svc")
@@ -172,7 +173,7 @@ func TestRepoExists(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	gh := Client{BaseURL: srv.URL}
+	gh := Client{BaseURL: srv.URL, AllowPrivate: true}
 	ok, err := gh.RepoExists(context.Background(), "o", "here")
 	require.NoError(t, err)
 	assert.True(t, ok)
@@ -183,19 +184,26 @@ func TestRepoExists(t *testing.T) {
 	assert.Error(t, err, "a refusal is not proof the repository is gone")
 	_, err = gh.RepoExists(context.Background(), "o", "../x")
 	assert.Error(t, err)
-	ok, err = Client{Kind: GitLab, BaseURL: srv.URL}.RepoExists(context.Background(), "grp", "here")
+	ok, err = Client{Kind: GitLab, BaseURL: srv.URL, AllowPrivate: true}.RepoExists(context.Background(), "grp", "here")
 	require.NoError(t, err)
 	assert.True(t, ok)
 }
 
-func TestListReposReadsPermissionsAndOwnPrivateRepositories(t *testing.T) {
+func TestListReposReadsPermissionsAndNeverTheTokenOwnersRepositories(t *testing.T) {
+	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.URL.Query().Get("page") > "1" {
+			_, _ = fmt.Fprint(w, `[]`) // Forgejo reads until an empty page
+			return
+		}
 		switch r.URL.Path {
 		case "/user":
 			_, _ = fmt.Fprint(w, `{"login":"Me"}`)
 		case "/user/repos":
-			assert.Equal(t, r.URL.Query().Get("affiliation"), "owner")
 			_, _ = fmt.Fprint(w, `[{"name":"secret","private":true,"permissions":{"admin":true}}]`)
+		case "/users/me/repos":
+			_, _ = fmt.Fprint(w, `[{"name":"mine","permissions":{"admin":true}}]`)
 		case "/users/other/repos":
 			_, _ = fmt.Fprint(w, `[{"name":"pub","permissions":{"pull":true}}]`)
 		default:
@@ -203,15 +211,38 @@ func TestListReposReadsPermissionsAndOwnPrivateRepositories(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c := Client{BaseURL: srv.URL, Token: "tok"}
-	got, err := c.ListRepos(context.Background(), "me")
-	require.NoError(t, err)
-	require.Len(t, got, 1, "the token owner's own listing includes private repositories")
-	assert.Equal(t, got[0].Permission, PermAdmin)
-	got, err = c.ListRepos(context.Background(), "other")
+	for _, kind := range []Kind{GitHub, Forgejo} {
+		paths = nil
+		c := Client{Kind: kind, BaseURL: srv.URL, AllowPrivate: true, Token: "tok"}
+		got, err := c.ListRepos(context.Background(), "me")
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, got[0].Name, "mine", "the token owner's login lists only the public user endpoint")
+		assert.Equal(t, got[0].Permission, PermAdmin)
+		for _, p := range paths {
+			assert.True(t, !strings.HasPrefix(p, "/user/") && p != "/user", "never asks about the token's owner: "+p)
+		}
+	}
+	got, err := Client{BaseURL: srv.URL, AllowPrivate: true, Token: "tok"}.ListRepos(context.Background(), "other")
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, got[0].Permission, PermRead)
+}
+
+func TestClientRefusesInternalAddressesWhenItConnects(t *testing.T) {
+	var auth []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = append(auth, r.Header.Get("Authorization"))
+		_, _ = fmt.Fprint(w, `[]`)
+	}))
+	defer srv.Close()
+	_, err := Client{BaseURL: srv.URL, Token: "tok"}.ListRepos(context.Background(), "x")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrInternalAddress), err.Error())
+	assert.Len(t, auth, 0, "the token never reached the internal address")
+	_, err = Client{BaseURL: srv.URL, AllowPrivate: true, Token: "tok"}.ListRepos(context.Background(), "x")
+	require.NoError(t, err, "allowed with CODESYNAPSE_ALLOW_PRIVATE_GIT")
+	assert.Len(t, auth, 1)
 }
 
 func TestListReposExplainsSAMLRefusal(t *testing.T) {
@@ -220,7 +251,7 @@ func TestListReposExplainsSAMLRefusal(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	defer srv.Close()
-	_, err := Client{BaseURL: srv.URL, Token: "tok"}.ListRepos(context.Background(), "x")
+	_, err := Client{BaseURL: srv.URL, AllowPrivate: true, Token: "tok"}.ListRepos(context.Background(), "x")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "single sign-on")
 }

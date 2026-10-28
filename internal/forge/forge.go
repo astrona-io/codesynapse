@@ -11,11 +11,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/astrona-io/codesynapse/internal/gitx"
 )
 
 // Kind names a git provider.
@@ -42,6 +46,14 @@ const (
 // ErrNotFound means the organisation or user does not exist (or the token
 // cannot see it).
 var ErrNotFound = errors.New("organisation not found")
+
+// ErrInternalAddress refuses a connection to a loopback, private or
+// link-local address when the client does not allow private hosts.
+var ErrInternalAddress = errors.New("the git host resolves to an internal address")
+
+// ErrSSORequired means GitHub refused the token because the organisation
+// enforces SAML single sign-on and the token is not authorised for it.
+var ErrSSORequired = errors.New("token not authorised for SAML single sign-on")
 
 // ParseKind accepts a provider name; "gitea" is an alias of "forgejo".
 func ParseKind(s string) (Kind, bool) {
@@ -165,7 +177,12 @@ type Client struct {
 	BaseURL string
 	// Token is for private repositories; sent only to this host.
 	Token string
-	HTTP  *http.Client
+	// AllowPrivate permits connections to loopback, private and link-local
+	// addresses (CODESYNAPSE_ALLOW_PRIVATE_GIT). Without it the default
+	// client refuses them when it connects, so a DNS answer that changed
+	// after the host was checked cannot carry the token inside.
+	AllowPrivate bool
+	HTTP         *http.Client
 }
 
 func (c Client) kind() Kind {
@@ -209,8 +226,22 @@ func (c Client) http() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	if !c.AllowPrivate {
+		dialer.Control = func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			if ip := net.ParseIP(host); ip == nil || gitx.InternalIP(ip) {
+				return ErrInternalAddress
+			}
+			return nil
+		}
+	}
 	return &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout:   30 * time.Second,
+		Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, DialContext: dialer.DialContext, TLSHandshakeTimeout: 10 * time.Second, IdleConnTimeout: time.Minute},
 		// The token must not follow a redirect to another host.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
@@ -224,9 +255,7 @@ func (c Client) ListRepos(ctx context.Context, owner string) ([]Repo, error) {
 }
 
 // ListReposDetail is ListRepos with what the provider said about the
-// token's reach. With a token, a user's listing is the token owner's own
-// repositories (private ones included) when owner is that user, because the
-// public user endpoints never show private repositories.
+// token's reach.
 func (c Client) ListReposDetail(ctx context.Context, owner string) (Listing, error) {
 	if !ValidOwner(c.kind(), owner) {
 		return Listing{}, fmt.Errorf("invalid organisation name %q", owner)
@@ -245,35 +274,13 @@ func (c Client) ListReposDetail(ctx context.Context, owner string) (Listing, err
 		if c.kind() == GitHub {
 			query = "type=owner"
 		}
-		if self, serr := c.isTokenOwner(ctx, owner); serr == nil && self {
-			switch c.kind() {
-			case GitHub:
-				userPath, query = "/user/repos", "affiliation=owner&visibility=all"
-			case Forgejo:
-				userPath = "/user/repos"
-			}
-		}
+		// Always the public user endpoint, never /user/repos: the token may
+		// belong to someone other than the person asking, and listing the
+		// token owner's own private repositories would show them to that
+		// person.
 		l, err = c.list(ctx, userPath, query)
 	}
 	return l, err
-}
-
-// isTokenOwner says whether the token belongs to the user login.
-func (c Client) isTokenOwner(ctx context.Context, login string) (bool, error) {
-	if c.Token == "" || c.kind() == GitLab {
-		return false, nil
-	}
-	body, _, err := c.getHeader(ctx, c.apiBase()+"/user")
-	if err != nil {
-		return false, err
-	}
-	var me struct {
-		Login string `json:"login"`
-	}
-	if err := json.Unmarshal(body, &me); err != nil {
-		return false, fmt.Errorf("decode %s user: %w", c.Host, err)
-	}
-	return me.Login != "" && strings.EqualFold(me.Login, login), nil
 }
 
 func (c Client) pageSize() int {
@@ -377,7 +384,7 @@ func (c Client) getHeader(ctx context.Context, rawURL string) ([]byte, http.Head
 	case res.StatusCode == http.StatusUnauthorized:
 		return nil, nil, fmt.Errorf("%s rejected the token (401); check the token configured for %s", c.label(), c.host())
 	case res.StatusCode == http.StatusForbidden && c.kind() == GitHub && res.Header.Get("X-GitHub-SSO") != "":
-		return nil, nil, fmt.Errorf("the organisation uses SAML single sign-on and the token for %s is not authorised for it; authorise the token for the organisation in GitHub's token settings", c.host())
+		return nil, nil, fmt.Errorf("%w: the organisation uses SAML single sign-on and the token for %s is not authorised for it; authorise the token for the organisation in GitHub's token settings", ErrSSORequired, c.host())
 	case res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusTooManyRequests:
 		return nil, nil, fmt.Errorf("%s refused the request (rate limit or missing access); configure a token for %s", c.label(), c.host())
 	case res.StatusCode != http.StatusOK:

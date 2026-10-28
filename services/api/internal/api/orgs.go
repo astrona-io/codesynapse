@@ -254,6 +254,7 @@ func (o *orgs) end(login string) {
 func (s *Server) forgeClient(ctx context.Context, o Org) (forge.Client, error) {
 	c := o.client()
 	c.BaseURL = s.cfg.ForgeAPI
+	c.AllowPrivate = s.cfg.AllowPrivateGit || s.cfg.ForgeAPI != ""
 	if s.cfg.ForgeAPI == "" && o.Host != forge.DefaultHost {
 		if _, err := gitx.ValidateRemote(ctx, o.cloneURL("x"), gitx.RemoteOptions{AllowPrivate: s.cfg.AllowPrivateGit}); err != nil {
 			return c, fmt.Errorf("%w: %w", errBadRequest, err)
@@ -609,6 +610,9 @@ func (s *Server) orgError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, forge.ErrNotFound):
 		s.problem(w, 404, err)
+	case errors.Is(err, forge.ErrSSORequired):
+		// The person can fix this in GitHub, so the explanation is kept.
+		s.problem(w, http.StatusForbidden, err)
 	case errors.Is(err, errBadRequest):
 		s.problem(w, 400, err)
 	case errors.Is(err, errConflict):

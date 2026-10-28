@@ -18,11 +18,18 @@ import (
 // grant). The installation-wide watch list (orgs.go) stays single-tenant.
 //
 // Listing uses the selected organisation's own Git token for the host when
-// it has one, so private repositories the token reads are listed with the
-// token's permission on each; without a token the listing is anonymous and
-// shows public repositories only. The token goes to that host alone (forge
-// follows no redirects), and adding a private repository still proves access
-// with it (proveAccess) before anything is cloned.
+// it has one and the caller is an owner or admin there, the people who
+// manage that token: private repositories the token reads are listed with
+// the token's permission on each. Everyone else, and every organisation
+// without a token, lists anonymously and sees public repositories only.
+// The token is stored per organisation and host, not per namespace, so it
+// lists whatever organisation on that host its owner can read; that is why
+// only its managers may use it here. It never lists the token owner's own
+// account (forge uses the public user endpoints only), and private
+// repositories are answered without their descriptions. The token goes to
+// that host alone (forge follows no redirects and refuses internal
+// addresses when it connects), and adding a private repository still proves
+// access with it (proveAccess) before anything is cloned.
 
 // maxImportListed bounds one answer; forge already caps the pages it reads.
 const maxImportListed = 2000
@@ -57,7 +64,8 @@ type ImportCandidate struct {
 // than github.com come from the user, so they pass the same SSRF check as
 // clone URLs.
 func (s *Server) publicForgeClient(ctx context.Context, kind forge.Kind, host, login string) (forge.Client, error) {
-	c := forge.Client{Kind: kind, Host: host, BaseURL: s.cfg.ForgeAPI}
+	// ForgeAPI is the operator's (or a test's) endpoint, not the user's host.
+	c := forge.Client{Kind: kind, Host: host, BaseURL: s.cfg.ForgeAPI, AllowPrivate: s.cfg.AllowPrivateGit || s.cfg.ForgeAPI != ""}
 	if s.cfg.ForgeAPI == "" && host != forge.DefaultHost {
 		if _, err := gitx.ValidateRemote(ctx, c.CloneURL(login, "x"), gitx.RemoteOptions{AllowPrivate: s.cfg.AllowPrivateGit}); err != nil {
 			return c, err
@@ -107,11 +115,17 @@ func (s *Server) handleImportList(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
-	tok, err := s.cfg.Accounts.OpenGitToken(r.Context(), m.Org.ID, host)
-	switch {
+	switch err := s.cfg.Accounts.Require(r.Context(), p, m.Org.ID, accounts.Admin); {
 	case err == nil:
-		c.Token = tok
-	case !errors.Is(err, accounts.ErrNotFound) && !errors.Is(err, accounts.ErrNoSecretKey):
+		tok, err := s.cfg.Accounts.OpenGitToken(r.Context(), m.Org.ID, host)
+		switch {
+		case err == nil:
+			c.Token = tok
+		case !errors.Is(err, accounts.ErrNotFound) && !errors.Is(err, accounts.ErrNoSecretKey):
+			s.accountError(w, err)
+			return
+		}
+	case !errors.Is(err, accounts.ErrForbidden):
 		s.accountError(w, err)
 		return
 	}
@@ -157,8 +171,12 @@ func (s *Server) handleImportList(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		name := forge.RepoName(host, login, x.Name)
+		desc := firstLineOf(x.Description)
+		if x.Private {
+			desc = "" // what a private repository says about itself stays with its owners
+		}
 		out = append(out, ImportCandidate{Name: x.Name, Repo: name, URL: c.CloneURL(login, x.Name), DefaultBranch: x.DefaultBranch,
-			Description: firstLineOf(x.Description), Archived: x.Archived, Fork: x.Fork, Private: x.Private, Permission: x.Permission,
+			Description: desc, Archived: x.Archived, Fork: x.Fork, Private: x.Private, Permission: x.Permission,
 			PushedAt: x.PushedAt, Added: added[name]})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"provider": kind, "host": host, "org": login, "repos": out, "truncated": len(out) == maxImportListed,

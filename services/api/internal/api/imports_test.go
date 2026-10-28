@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -67,23 +69,46 @@ func TestImportListShowsPublicRepositories(t *testing.T) {
 func TestImportListUsesTheOrganisationsToken(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	var seen []string
+	type hit struct{ path, auth string }
+	var (
+		mu   sync.Mutex
+		hits []hit
+	)
+	last := func() hit {
+		mu.Lock()
+		defer mu.Unlock()
+		require.True(t, len(hits) > 0)
+		return hits[len(hits)-1]
+	}
 	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.Header.Get("Authorization"))
-		if r.URL.Path != "/orgs/work/repos" {
+		mu.Lock()
+		hits = append(hits, hit{r.URL.Path, r.Header.Get("Authorization")})
+		mu.Unlock()
+		authed := r.Header.Get("Authorization") != ""
+		switch {
+		case r.URL.Query().Get("page") > "1":
+			_, _ = fmt.Fprint(w, `[]`)
+		case r.URL.Path == "/orgs/work/repos" && !authed:
+			_, _ = fmt.Fprint(w, `[{"name":"open","default_branch":"main","description":"public words"}]`)
+		case r.URL.Path == "/orgs/work/repos":
+			w.Header().Set("X-GitHub-SSO", "partial-results; organizations=1")
+			_, _ = fmt.Fprint(w, `[
+				{"name":"open","default_branch":"main","description":"public words","permissions":{"admin":false,"push":false,"pull":true}},
+				{"name":"closed","default_branch":"main","private":true,"description":"secret plans","permissions":{"admin":false,"push":true,"pull":true}},
+				{"name":"owned","private":true,"permissions":{"admin":true,"push":true,"pull":true}}
+			]`)
+		case r.URL.Path == "/orgs/saml/repos" && authed:
+			w.Header().Set("X-GitHub-SSO", "required; url=https://github.com/orgs/saml/sso")
+			w.WriteHeader(http.StatusForbidden)
+		case r.URL.Path == "/user":
+			_, _ = fmt.Fprint(w, `{"login":"tokenowner"}`)
+		case r.URL.Path == "/user/repos":
+			_, _ = fmt.Fprint(w, `[{"name":"diary","private":true}]`)
+		case r.URL.Path == "/users/tokenowner/repos":
+			_, _ = fmt.Fprint(w, `[{"name":"dotfiles","default_branch":"main"}]`)
+		default:
 			http.NotFound(w, r)
-			return
 		}
-		if r.Header.Get("Authorization") == "" {
-			_, _ = fmt.Fprint(w, `[{"name":"open","default_branch":"main"}]`)
-			return
-		}
-		w.Header().Set("X-GitHub-SSO", "partial-results; organizations=1")
-		_, _ = fmt.Fprint(w, `[
-			{"name":"open","default_branch":"main","permissions":{"admin":false,"push":false,"pull":true}},
-			{"name":"closed","default_branch":"main","private":true,"permissions":{"admin":false,"push":true,"pull":true}},
-			{"name":"owned","private":true,"permissions":{"admin":true,"push":true,"pull":true}}
-		]`)
 	}))
 	t.Cleanup(gh.Close)
 	acc := accounts.NewService(acctmem.New(), true)
@@ -99,39 +124,87 @@ func TestImportListUsesTheOrganisationsToken(t *testing.T) {
 
 	bob := newClient(t, ts)
 	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 201)
+	carol := newClient(t, ts)
+	require.Equal(t, carol.do("POST", "/api/v1/auth/signup", `{"email":"carol@example.com","name":"Carol","password":"`+pw+`"}`, nil), 201)
 	var org accounts.Org
 	require.Equal(t, bob.do("POST", "/api/v1/accounts/orgs", `{"name":"Work"}`, &org), 201)
+	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+org.Slug+"/members", `{"email":"carol@example.com","role":"member"}`, nil), 200)
 	type answer struct {
 		Repos         []ImportCandidate
 		Authenticated bool
 		SSORestricted bool `json:"sso_restricted"`
 	}
-	list := func() answer {
+	list := func(c *client, body string) answer {
+		t.Helper()
 		var got answer
-		require.Equal(t, bob.do("POST", "/api/v1/imports/list", `{"org":"work"}`, &got, OrgHeader, org.Slug), 200)
+		require.Equal(t, c.do("POST", "/api/v1/imports/list", body, &got, OrgHeader, org.Slug), 200)
 		return got
 	}
 
-	got := list()
+	got := list(bob, `{"org":"work"}`)
 	assert.False(t, got.Authenticated)
 	require.Len(t, got.Repos, 1, "without a token only public repositories are listed")
-	assert.Equal(t, seen[len(seen)-1], "", "anonymous without a token")
+	assert.Equal(t, last().auth, "", "anonymous without a token")
 
 	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+org.Slug+"/git-tokens/github.com", `{"token":"ghp_listing_token_123456"}`, nil), 200)
-	got = list()
+	got = list(bob, `{"org":"work"}`)
 	assert.True(t, got.Authenticated)
 	assert.True(t, got.SSORestricted, "GitHub's SAML hint is passed on")
-	require.Len(t, got.Repos, 3, "the organisation's token lists private repositories")
-	assert.Equal(t, seen[len(seen)-1], "Bearer ghp_listing_token_123456")
-	perms := map[string]string{}
+	require.Len(t, got.Repos, 3, "the organisation's token lists private repositories for its managers")
+	assert.Equal(t, last().auth, "Bearer ghp_listing_token_123456")
+	perms, descs := map[string]string{}, map[string]string{}
 	for _, r := range got.Repos {
-		perms[r.Name] = r.Permission
+		perms[r.Name], descs[r.Name] = r.Permission, r.Description
 		assert.Equal(t, r.URL, "https://github.com/work/"+r.Name+".git", "clone URLs are built, never taken from the answer")
 	}
 	assert.Equal(t, perms, map[string]string{"open": "read", "closed": "write", "owned": "admin"})
+	assert.Equal(t, descs, map[string]string{"open": "public words", "closed": "", "owned": ""}, "private repositories are listed without descriptions")
 	assert.True(t, got.Repos[1].Private)
+
+	t.Run("a member lists anonymously", func(t *testing.T) {
+		got := list(carol, `{"org":"work"}`)
+		assert.False(t, got.Authenticated)
+		require.Len(t, got.Repos, 1)
+		assert.Equal(t, got.Repos[0].Name, "open")
+		assert.Equal(t, last().auth, "", "the organisation's token is not used for a member")
+	})
+
+	t.Run("the token owner's login never lists their own account", func(t *testing.T) {
+		mu.Lock()
+		hits = nil
+		mu.Unlock()
+		got := list(bob, `{"org":"tokenowner"}`)
+		require.Len(t, got.Repos, 1)
+		assert.Equal(t, got.Repos[0].Name, "dotfiles")
+		mu.Lock()
+		defer mu.Unlock()
+		for _, h := range hits {
+			assert.True(t, h.path != "/user" && h.path != "/user/repos", "asked "+h.path)
+		}
+	})
+
+	t.Run("a token for one host is never sent to another", func(t *testing.T) {
+		mu.Lock()
+		hits = nil
+		mu.Unlock()
+		got := list(bob, `{"provider":"forgejo","host":"git.example.com","org":"work"}`)
+		assert.False(t, got.Authenticated)
+		mu.Lock()
+		defer mu.Unlock()
+		require.True(t, len(hits) > 0)
+		for _, h := range hits {
+			assert.Equal(t, h.auth, "", "the github.com token stays with github.com")
+		}
+	})
+
+	t.Run("SAML refusal is explained", func(t *testing.T) {
+		var problem struct{ Detail string }
+		assert.Equal(t, bob.do("POST", "/api/v1/imports/list", `{"org":"saml"}`, &problem, OrgHeader, org.Slug), http.StatusForbidden)
+		assert.Contains(t, problem.Detail, "single sign-on")
+		assert.False(t, strings.Contains(problem.Detail, "ghp_"), "the token is never echoed")
+	})
 
 	events, err := acc.St.ListEvents(ctx, accounts.EventFilter{Action: "git_token.list"})
 	require.NoError(t, err)
-	assert.Len(t, events, 1, "listing with the token is audited")
+	assert.Len(t, events, 3, "every listing with the token is audited")
 }
