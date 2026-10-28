@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/store/memory"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
@@ -20,9 +22,10 @@ func TestJobLogsHowItEnded(t *testing.T) {
 		err     error
 		want    string
 		notWant string
+		outcome string
 	}{
-		{"succeeded", nil, "job finished", "job failed"},
-		{"failed", errors.New("boom"), "job failed", "job finished"},
+		{"succeeded", nil, "job finished", "job failed", "ok"},
+		{"failed", errors.New("boom"), "job failed", "job finished", "error"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -47,6 +50,11 @@ func TestJobLogsHowItEnded(t *testing.T) {
 			if bytes.Contains(out.Bytes(), []byte(tc.notWant)) {
 				t.Errorf("log has %q for a %s job:\n%s", tc.notWant, tc.name, log)
 			}
+			var metrics strings.Builder
+			require.NoError(t, telemetry.Default.WriteText(&metrics))
+			assert.Contains(t, metrics.String(), `codesynapse_jobs_finished_total{kind="ai",outcome="`+tc.outcome+`"`)
+			assert.Contains(t, metrics.String(), `codesynapse_job_wait_seconds_count{kind="ai"`)
+			assert.Contains(t, metrics.String(), `codesynapse_job_duration_seconds_count{kind="ai"`)
 		})
 	}
 }

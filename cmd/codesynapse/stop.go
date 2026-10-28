@@ -55,7 +55,9 @@ func stopRelevant(p string) bool {
 // commits not yet pushed, fingerprints them and checks the Go ones.
 func stopChanges(ctx context.Context, root string) stopChange {
 	paths := changedPaths(ctx, root)
-	if out, err := gitx.Run(ctx, root, "diff", "--name-only", "--no-renames", "@{upstream}..HEAD"); err == nil {
+	// Three dots: from the merge base, so commits the upstream gained since
+	// (a checkout behind after others merged) are not taken for this session's.
+	if out, err := gitx.Run(ctx, root, "diff", "--name-only", "--no-renames", "@{upstream}...HEAD"); err == nil {
 		paths = append(paths, strings.Fields(string(out))...)
 	}
 	slices.Sort(paths)

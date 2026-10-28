@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"github.com/astrona-io/codesynapse/internal/ingestreport"
@@ -168,11 +169,14 @@ type Result struct {
 	ExternalCalls map[string][]string
 	// Languages counts indexed files per language.
 	Languages map[string]int
+	// Parsing is the time spent parsing files of each language. Linking
+	// across files is not in it: it serves every language at once.
+	Parsing map[string]time.Duration
 }
 
 // Extract indexes every Python, JavaScript, TypeScript and Vue file under root.
 func Extract(ctx context.Context, repo, root string) (*Result, error) {
-	ix := &indexer{repo: repo, g: model.NewGraph(), files: map[string]*parsedFile{}, res: &Result{ExternalImports: map[string][]string{}, ExternalCalls: map[string][]string{}, Languages: map[string]int{}}}
+	ix := &indexer{repo: repo, g: model.NewGraph(), files: map[string]*parsedFile{}, res: &Result{ExternalImports: map[string][]string{}, ExternalCalls: map[string][]string{}, Languages: map[string]int{}, Parsing: map[string]time.Duration{}}}
 	ix.g.AddNode(model.Node{ID: model.NodeID(repo, model.KindRepository, repo), Kind: model.KindRepository, Repo: repo, Name: repo})
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -213,7 +217,9 @@ func Extract(ctx context.Context, repo, root string) (*Result, error) {
 			ingestreport.Observe(ctx, rel, ingestreport.Language, ingestreport.StageFailed, "read_failed")
 			return nil //nolint:nilerr // unreadable file: skip
 		}
+		began := time.Now()
 		ix.parse(filepath.ToSlash(rel), lang, src)
+		ix.res.Parsing[lang] += time.Since(began)
 		ingestreport.Observe(ctx, rel, ingestreport.Language, ingestreport.StageSucceeded, "")
 		return nil
 	})

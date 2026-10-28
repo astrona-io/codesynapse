@@ -45,6 +45,7 @@ func (s *Store) PolicyTransaction(ctx context.Context, _ string, fn func(account
 	s.repoPolicies = tx.repoPolicies
 	s.memberRepos = tx.memberRepos
 	s.annotations = tx.annotations
+	s.triage = tx.triage
 	s.ingestRuns = tx.ingestRuns
 	s.ingestEntries = tx.ingestEntries
 	s.ingestMetrics = tx.ingestMetrics
@@ -195,6 +196,7 @@ func (s *Store) snapshot() *Store {
 	tx.repoPolicies = maps.Clone(s.repoPolicies)
 	tx.memberRepos = maps.Clone(s.memberRepos)
 	tx.annotations = maps.Clone(s.annotations)
+	tx.triage = maps.Clone(s.triage)
 	tx.ingestRuns = maps.Clone(s.ingestRuns)
 	tx.ingestEntries = maps.Clone(s.ingestEntries)
 	tx.ingestMetrics = s.ingestMetrics
@@ -205,6 +207,9 @@ func (s *Store) snapshot() *Store {
 	tx.sched = s.scheduleTable()
 	for key, annotations := range tx.annotations {
 		tx.annotations[key] = maps.Clone(annotations)
+	}
+	for key, rows := range tx.triage {
+		tx.triage[key] = maps.Clone(rows)
 	}
 	return tx
 }

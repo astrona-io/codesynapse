@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -75,6 +76,11 @@ type Options struct {
 	// Progress, when set, is told which of Steps stages begins: its number
 	// (from 1) and a plain-language name. Names carry no repository content.
 	Progress func(step int, name string)
+	// Extracted, when set, is told how long each extractor took: "go",
+	// "docs" (Markdown and architecture records), "config" (YAML, templates
+	// and Helm) or a language of the lang package, once per run. Names
+	// carry no repository content.
+	Extracted func(extractor string, d time.Duration)
 }
 
 // Steps is how many stages Run reports through Options.Progress.
@@ -155,11 +161,18 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 			opts.Progress(step, name)
 		}
 	}
+	extracted := func(extractor string, d time.Duration) {
+		if opts.Extracted != nil {
+			opts.Extracted(extractor, d)
+		}
+	}
 	extImports := map[string][]string{}
 	var goRes *golang.Result
 	progress(1, "Reading Go code")
 	if hasGoModule(root, policy) {
+		began := time.Now()
 		res, err := golang.Extract(ctx, golang.Options{Repo: opts.Repo, Root: root, AllowNetwork: opts.AllowNetwork, Dataflow: opts.Dataflow})
+		extracted("go", time.Since(began))
 		if err != nil {
 			return nil, fmt.Errorf("go extraction: %w", err)
 		}
@@ -178,6 +191,9 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 		return nil, fmt.Errorf("python/js/ts extraction: %w", err)
 	}
 	g.Merge(langRes.Graph)
+	for _, name := range slices.Sorted(maps.Keys(langRes.Parsing)) {
+		extracted(name, langRes.Parsing[name])
+	}
 	for k, v := range langRes.ExternalImports {
 		extImports[k] = append(extImports[k], v...)
 	}
@@ -187,6 +203,7 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	// Documentation is linked last among the code languages: a mention can
 	// only resolve to a symbol that is already in the graph.
 	progress(3, "Reading docs and architecture records")
+	began := time.Now()
 	docGraph, err := docs.Extract(ctx, opts.Repo, root, g)
 	if err != nil {
 		return nil, fmt.Errorf("docs extraction: %w", err)
@@ -195,6 +212,7 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	if err := arch.Extract(ctx, opts.Repo, root, g); err != nil {
 		return nil, fmt.Errorf("architecture records: %w", err)
 	}
+	extracted("docs", time.Since(began))
 	progress(4, "Checking dependencies and licences")
 	mods, err := addDependencies(ctx, opts, root, g, goRes, extImports, langRes.ExternalCalls)
 	if err != nil {
@@ -205,7 +223,9 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	}
 
 	progress(5, "Reading configuration")
+	began = time.Now()
 	cfgGraph, err := config.Extract(ctx, opts.Repo, root)
+	extracted("config", time.Since(began))
 	if err != nil {
 		return nil, fmt.Errorf("yaml/template extraction: %w", err)
 	}

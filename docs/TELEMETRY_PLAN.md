@@ -184,7 +184,7 @@ The requested bootstrap-root separation belongs to the planned [phase 4d follow-
 
 ## Metrics coverage plan
 
-Status: phase 1 (platform health) is implemented; the later phases are proposed. This section lists what the services measure today, where measurement is missing or thin, and the instruments that would close the gaps, in the order we would build them. Every proposal follows the rules above and the Telemetry rules in `AGENTS.md`. Where a rule blocks a useful label, the proposal says so instead of bending the rule.
+Status: phases 1 (platform health) and 3 (jobs and indexing) are implemented; the others are proposed. This section lists what the services measure today, where measurement is missing or thin, and the instruments that would close the gaps, in the order we would build them. Every proposal follows the rules above and the Telemetry rules in `AGENTS.md`. Where a rule blocks a useful label, the proposal says so instead of bending the rule.
 
 ### What is measured today
 
@@ -238,7 +238,7 @@ The alerts named in the last column are the rule list for phase 2 (alerting); an
 
 | # | Instrument | Kind, unit | Labels (bounded values) | Scope | Combinations per tenant | Recorded in | Panel or alert (alerts: phase 2 rules) |
 |---|---|---|---|---|---|---|---|
-| 1 | `codesynapse_jobs_finished_total` | counter, jobs | `kind` (`sync`, `clone`, `switch`, `ai`, `ai-auto`, `fix`), `outcome` (`ok`, `error`, `left_behind`, `cancelled`) | tenant | 24 | the job runner in `services/api/internal/api/jobs.go`, where a job ends | Statistics → Sync: "Background jobs"; alert on the error share |
+| 1 | `codesynapse_jobs_finished_total` | counter, jobs | `kind` (`ingest`, `sync`, `clone`, `switch`, `ai`, `ai-auto`, `fix`, `other`), `outcome` (`ok`, `error`, `left_behind`, `cancelled`) | tenant | 32 | the job runner in `services/api/internal/api/jobs.go`, where a job ends | Statistics → Sync: "Background jobs"; alert on the error share |
 | 2 | `codesynapse_job_wait_seconds` | histogram (`slow`), s | `kind` | tenant | 6 | on claim: claim time minus queue time | "Job wait"; alert when p95 wait passes 15 minutes |
 | 3 | `codesynapse_job_duration_seconds` | histogram (`slow`), s | `kind` | tenant | 6 | the job runner, next to item 1 | "Job run time" |
 | 4 | `platform_codesynapse_lease_events_total` | counter, events | `lease` (`api_loops`, `job`), `event` (`acquired`, `lost`, `renew_failed`) | platform | 6 | `services/api/internal/api/singleton.go`, durable job lease renewal in `jobs_durable.go` | platform panel; alert on `lost` |
@@ -284,7 +284,7 @@ Ordered by value for the effort. Each phase is one pull request with its panels,
 
 1. **See the platform** (small, done). Items 4, 5, 21, 22 and 23; a platform panel for `telemetry_dropped_series_total` and `platform_log_lines_dropped_total`; panels for the existing API request metrics and job queue gauges. No new tenant series.
 2. **Alerting** (medium). Optional vmalert, under the rules in decision 1, with the first rules (see "Alerting" below). It comes after phase 1 because most of its first rules read phase 1 metrics; each later phase adds the rules named for its instruments in the table.
-3. **Jobs and indexing** (medium). Items 1, 2, 3, 6 and 7, and panels for the existing `ingest_runs_total` and `ingest_duration_seconds` on Statistics → Sync.
+3. **Jobs and indexing** (medium, shipped). Items 1, 2, 3, 6 and 7, and panels for the existing `ingest_runs_total` and `ingest_duration_seconds` on Statistics → Sync.
 4. **Outbound calls and security events** (medium). Items 8 to 15. Sign-in counters are mostly platform series, because most failures have no trusted tenant.
 5. **Sharper existing families** (small). Items 16 to 20, and the cap decision applied to `mcp_tool_duration_seconds` and `http_request_duration_seconds`. New outcome values change what the `tool_errors` and `llm_provider_failures` panels count, so the same change updates those panel queries and their help text.
 6. **Web server** (small). Metrics from the Nuxt server, with the JavaScript OpenTelemetry SDK, under the rules in decision 3.
@@ -297,6 +297,18 @@ Ordered by value for the effort. Each phase is one pull request with its panels,
 - **Leases.** The `api-loops` lease records `acquired`, `lost` and `renew_failed` (a failed `TakeLease` call). Durable job leases record `renew_failed` and `lost` only: a claim is not a lease event, and job counts arrive with phase 3. A renewal that fails because the job ended is not counted. The `held` gauge is 1 in a process without accounts, which always runs the loops.
 - **Export failures** are counted by the OTLP exporter, the Prometheus push loop and the ingestion exporter, before any log throttling.
 - **Panels** (platform admins only; Administration → Overview → "Platform health"): `platform_api_requests`, `platform_api_latency`, `platform_job_queue`, `platform_loops_lease`, `platform_lease_events`, `platform_goroutines`, `platform_heap`, `platform_cpu`, `platform_gc_pause`, `platform_db_pool`, `platform_db_pool_waits`, `platform_telemetry_drops` (with `platform_log_lines_dropped_total`) and `platform_telemetry_exports`. Process panels take the maximum per service (`job`), never a sum, except the lease holder count.
+
+### Phase 3: what shipped
+
+- **Instruments** (`internal/telemetry/metrics.go`, helpers and label sets in `internal/telemetry/jobs.go`): `codesynapse_jobs_finished_total{kind,outcome}`, `codesynapse_job_wait_seconds{kind}` and `codesynapse_job_duration_seconds{kind}` (both `slow`), `codesynapse_ingest_phase_seconds_total` and `codesynapse_ingest_phase_total{phase,outcome}`, `codesynapse_ingest_extract_seconds_total{language}`. All are tenant-scoped; the tenant is the job's organisation (`JobOptions.OrgID`, which `Start` checked against the job's execution identity), and a job without one is recorded as the `platform_` twin.
+- **Kinds.** `ingest` (the non-durable mounted-source and CLI-style run) joins the list, and any unknown kind is recorded as `other`, so the set is 8 kinds. A durable job is counted under its durable kind (`switch` stays `switch` although it runs as a clone).
+- **Outcomes.** `left_behind` is a durable job `leftBehind` keeps for another process, or one whose durable record could not be claimed (`StartJob` failed on a lost lease). `cancelled` is `context.Canceled` only; the one-hour job timeout counts as `error`. Unknown outcomes are not recorded.
+- **Wait and run time.** Wait runs from queueing (or, for a job a worker claims, the record's creation on its first attempt) to the job taking its slot; a job started again after an interrupted attempt reports no second wait. Run time runs from that slot to the end, and is not recorded for a job that never started.
+- **Phases** are timed in the `phase` helper beside the existing spans (`job.prepare`, `job.ingest`, `job.publish`), so the metric and the span cover the same work.
+- **Languages.** `internal/ingest` stays free of telemetry: `ingest.Options.Extracted` reports each extractor's time (`lang.Result.Parsing` per language), and the API maps the names to the fixed `language` set.
+- **Per-tenant share.** `Histogram.TenantShare(n)` caps the series each `tenant_id` may hold; the two job histograms use one series per kind (8). Drops past the share are counted in `telemetry_dropped_series_total` like any other drop. Together with the 9-bucket `slow` set this is decision 2 applied to new tenant histograms.
+- **Panels** (Statistics → Sync, "Jobs and indexing over time"): `jobs_finished` (by outcome), `job_failures` (errors by kind), `job_wait` and `job_duration` (p95 by kind), `ingest_runs` (by outcome), `ingest_duration` (p50, p95), `ingest_phases` (average per run of each phase) and `ingest_extract` (by language).
+- **Job failure alert input.** The error share reads `codesynapse_jobs_finished_total{outcome="error"}` against all outcomes, summed over tenants, plus the `platform_codesynapse_jobs_finished_total` twin for jobs without an organisation.
 
 ### Alerting
 
