@@ -279,7 +279,7 @@ async function removeReview() {
       </aside>
 
       <section class="detail">
-        <p v-if="loadError" class="panel error">{{ loadError }}</p>
+        <p v-if="loadError" class="notice notice--danger" role="alert">{{ loadError }}</p>
         <template v-if="review && counts">
           <!-- Review header -->
           <div class="panel head">

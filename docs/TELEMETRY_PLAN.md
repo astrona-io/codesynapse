@@ -184,7 +184,7 @@ The requested bootstrap-root separation belongs to the planned [phase 4d follow-
 
 ## Metrics coverage plan
 
-Status: phases 1 (platform health), 3 (jobs and indexing) and 5 (sharper existing families) are implemented; the others are proposed. This section lists what the services measure today, where measurement is missing or thin, and the instruments that would close the gaps, in the order we would build them. Every proposal follows the rules above and the Telemetry rules in `AGENTS.md`. Where a rule blocks a useful label, the proposal says so instead of bending the rule.
+Status: phases 1 (platform health), 3 (jobs and indexing), 5 (sharper existing families) and 6 (web server) are implemented; the others are proposed. This section lists what the services measure today, where measurement is missing or thin, and the instruments that would close the gaps, in the order we would build them. Every proposal follows the rules above and the Telemetry rules in `AGENTS.md`. Where a rule blocks a useful label, the proposal says so instead of bending the rule.
 
 ### What is measured today
 
@@ -201,6 +201,7 @@ All instruments live in `internal/telemetry/metrics.go`, plus `flow.go`, `logshi
 | API | `http_requests_total{route,method,code}`, `http_request_duration_seconds{route,method}` | `services/api/internal/api/api.go` (API and worker processes) | No panel |
 | Indexing | `ingest_runs_total{db_system,outcome}`, `ingest_duration_seconds`, `ingest_nodes_total`, `codesynapse_annotation_jobs_total`, `codesynapse_annotation_duration_seconds`, `codesynapse_files_scanned/indexed/skipped_total{repo}` (durable totals, fenced exporter) | `services/api/internal/api/jobs.go`, `ingestion_metrics.go`, `services/api/internal/annotation/worker.go` | Repository → Ingestion: `ingest_files`, `ingest_skips`, `annotation_jobs`; the run counters have no panel |
 | Job queue | `platform_codesynapse_jobs_waiting{kind}`, `platform_codesynapse_jobs_active{kind}`, set by the `api-loops` holder | `services/api/internal/api/jobqueue_metric.go` | Worker autoscaling in the Helm chart; no panel |
+| Web server | `platform_web_requests_total{route,method,status_class}`, `platform_web_request_duration_seconds{route}`, `platform_web_proxy_requests_total{outcome}` (OTel JS SDK, platform only) | `services/web/server/utils/webMetrics.ts`, `services/web/server/plugins/metrics.ts`, `services/web/server/api/cg/[...path].ts` | Administration → Overview: `platform_web_requests`, `platform_web_latency`, `platform_web_proxy` |
 | Telemetry itself | `telemetry_dropped_series_total{metric}`, `platform_log_lines_dropped_total{reason}`, `platform_ingest_metric_export_rejections_total{reason}`, `platform_codesynapse_ingest_metric_series_dropped_total` | `internal/telemetry` | No panel |
 
 Traces cover API requests, MCP methods, jobs with their `job.prepare`/`job.ingest`/`job.publish` phases, NebulaGraph reads and writes, and model calls. Daily `:McpUsage` buckets (`internal/usage`) hold per-repository tool counts, bridge local answers and hook-reported workflow counts. They feed the Statistics totals and are not OTel metrics.
@@ -222,7 +223,7 @@ Each gap is a question an operator or an organisation cannot answer from metrics
 11. **Series caps.** Some instruments hit the 5,000 cap early. `mcp_tool_duration_seconds` has about 70 accepted tool and prompt names, so at about 277 combinations it starts dropping once roughly four organisations use every tool. `http_request_duration_seconds` has about 200 routes and fills its budget with one or two active organisations. Drops are counted, but no panel or alert shows them.
 12. **Unused data.** API request metrics, indexing run counters, chat-memory flow counters, the job queue gauges and the dropped-series counters are recorded but have no panel.
 
-The web dashboard (Nuxt) has no metrics of its own. Every request it proxies reaches the API and is counted there, but failures that never reach the API, such as the API being unreachable, are not seen. Phase 6 adds them (see decisions).
+The web dashboard (Nuxt) had no metrics of its own: failures that never reached the API, such as the API being unreachable, were not seen. Phase 6 added them (see "Phase 6: what shipped").
 
 ### Proposed instruments
 
@@ -287,7 +288,7 @@ Ordered by value for the effort. Each phase is one pull request with its panels,
 3. **Jobs and indexing** (medium, shipped). Items 1, 2, 3, 6 and 7, and panels for the existing `ingest_runs_total` and `ingest_duration_seconds` on Statistics → Sync.
 4. **Outbound calls and security events** (medium). Items 8 to 15. Sign-in counters are mostly platform series, because most failures have no trusted tenant.
 5. **Sharper existing families** (small, shipped). Items 16 to 20, and the cap decision applied to `mcp_tool_duration_seconds` and `http_request_duration_seconds`. New outcome values change what the `tool_errors` and `llm_provider_failures` panels count, so the same change updates those panel queries and their help text.
-6. **Web server** (small). Metrics from the Nuxt server, with the JavaScript OpenTelemetry SDK, under the rules in decision 3.
+6. **Web server** (small, shipped). Metrics from the Nuxt server, with the JavaScript OpenTelemetry SDK, under the rules in decision 3.
 
 ### Phase 1: what shipped
 
@@ -319,6 +320,22 @@ Ordered by value for the effort. Each phase is one pull request with its panels,
 - **Model outcomes.** `llm_requests_total` adds `timeout`, `rate_limited` and `refused`. `outcomeOf` (`services/api/internal/llm/outcome.go`) looks only at the error's type, status code and context error: HTTP 408 and 504, `context.DeadlineExceeded` and a network timeout are `timeout`; 429 is `rate_limited`; 401, 403 and the model's own refusal stop reason (`ErrDeclined`) are `refused`; everything else, `context.Canceled` included, is `error`. Error text never decides. The Anthropic stream path now returns the same `httpError` as the other providers, so its status codes are seen.
 - **Series cap (decision 2).** `mcp_tool_duration_seconds` and `http_request_duration_seconds` use the 8-bucket `fast` set (10 ms to 30 s). Each tenant may hold 48 tool series and 64 route series; drops past the share are counted in `telemetry_dropped_series_total`.
 - **Panels (decision 5).** `tool_errors` keeps its query (`outcome="error"`), and its help now says refusals are counted apart. `llm_provider_failures` counts every outcome other than `ok`. New panels: `tool_refusals` and `local_answers` (by tool), `llm_failure_causes` (by outcome), `gateway_latency` (p95 by route) and `gateway_fallthrough` (by reason). They are on Statistics → Activity; the gateway panels have their own "Model gateway" group there instead of Statistics → Models, which has no time series. The per-model failure count on Statistics → Models (`stats/models`) also counts every outcome other than `ok`.
+
+### Phase 6: what shipped
+
+- **Packages** (`services/web/package.json`, exact versions, all Apache-2.0): `@opentelemetry/api` 1.9.1, `@opentelemetry/sdk-metrics` 2.12.0, `@opentelemetry/resources` 2.12.0 and `@opentelemetry/exporter-metrics-otlp-http` 0.223.0 (OTLP over HTTP with JSON, so no protobuf runtime). The licence check walks them in `.output/server/node_modules`.
+- **Instruments** (`services/web/server/utils/webMetrics.ts`). The web server has no trusted tenant, so every series is `platform_*`:
+  - `platform_web_requests_total{route,method,status_class}`: every request the Nuxt server answers, page renders and `/api/cg` proxy calls alike. `method` is one of seven values (`OTHER` for the rest) and `status_class` is `1xx` to `5xx` or `other`.
+  - `platform_web_request_duration_seconds{route}`: the same requests' time, with the API's latency buckets.
+  - `platform_web_proxy_requests_total{outcome}`: `/api/cg` calls by `ok`, `refused` (the proxy's own method, path, origin or size check), `unreachable`, `timeout` and `error`. The outcome comes from the error's name and code (`ECONNREFUSED`, `ENOTFOUND`, `UND_ERR_*`, `TimeoutError` and the like), never its text. Every outcome starts at zero, like the Go exporter's first-value rule. An unreachable API now answers 502 and a timeout 504 instead of a bare 500.
+  - `platform_telemetry_export_failures_total{exporter="otlp"}` and `telemetry_dropped_series_total{metric}`, the same names as the Go services, so the existing panels and `CodeSynapseMetricsExportFailing` cover the web server.
+- **Route patterns** (`services/web/server/utils/routePattern.ts`), never visited paths. A page render is labelled by the vue-router definition it matched (`/repos/{repo}/security`), which `app/plugins/metrics-route.server.ts` hands to the server through the request context. A proxy call is labelled from allowlists of the API's top-level segments and repository sub-resources (`/api/cg/repos/{repo}/security`, `/api/cg/accounts/*`); anything else becomes `other`, so a list that drifts from the API only loses detail. Assets are `static`.
+- **Caps.** `platform_web_requests_total` holds at most 2,000 label combinations and the histogram 300 routes. Further combinations are dropped and counted per metric.
+- **Export.** `CODESYNAPSE_METRICS_URL`, `_USER` and `_PASSWORD` from the environment, the same as the Go services. Every 15 seconds, OTLP/HTTP to `<url>/opentelemetry/v1/metrics` with cumulative temporality and an 8-second timeout. `CODESYNAPSE_METRICS_EXPORTER` must be `otlp` (the default); `prometheus` stops the server at start. The resource is `service.name=codesynapse-web`, `job`, `instance` (a random ID per process), `service.version` (`CODESYNAPSE_VERSION`, set by the image build) and `deployment.environment.name` (`CODESYNAPSE_ENVIRONMENT`). Failed pushes are logged at most once a minute, with the error but not the URL. Without a URL, nothing is recorded.
+- **Errors.** h3 skips its after-response hook when Nitro's error handler has already answered, so the plugin also records from Nitro's `error` hook and marks the event so a request is counted once.
+- **Wiring.** The `web` service in `docker-compose.yml` and the chart's web Deployment set the metrics variables. The chart's VictoriaMetrics NetworkPolicy now admits the web pods. No chart values were added.
+- **Panels** (platform admins only; Administration → Overview): `platform_web_requests` (by status class), `platform_web_latency` (p50, p95) and `platform_web_proxy` (calls that did not reach the API, by outcome).
+- **Alert.** `CodeSynapseDashboardAPIUnreachable` (`deploy/alerts/web.yaml`, critical) fires when more than 5% of the proxy's calls find the API unreachable or time out for 10 minutes, with at least one call a minute. Calls the proxy refused are left out.
 
 ### Alerting
 
@@ -359,6 +376,7 @@ Shipped in phase 2:
 | `CodeSynapseMetricsExportFailing` | `telemetry.yaml` | `platform_telemetry_export_failures_total`, per `exporter` | any increase in 10 minutes, for 15 minutes (added once phase 1 merged) |
 | `CodeSynapseJobFailureRate` | `jobs.yaml` | `codesynapse_jobs_finished_total` and its `platform_` twin, `error` over all outcomes per `kind` | share above 20% over 30 minutes, with at least 10 jobs (added once phase 3 merged) |
 | `CodeSynapseJobsNotClaimed` | `jobs.yaml` | `platform_codesynapse_jobs_waiting` and `_active`, maximum per `kind` | jobs wait and none of that kind runs, for 15 minutes |
+| `CodeSynapseDashboardAPIUnreachable` | `web.yaml` | `platform_web_proxy_requests_total`, `unreachable` and `timeout` over all but `refused`, summed | share above 5% over 10 minutes, for 10 minutes, with at least one call a minute (phase 6) |
 
 `CodeSynapseJobsNotClaimed` was not in the first list: the queue gauges already exist and a missing worker role (the fix worker is off by default) is the commonest reason jobs stall.
 
@@ -380,5 +398,4 @@ The rest of the alert column in the instrument table follows the same way.
 
 ### Open questions
 
-- **Web instruments.** Which instruments the Nuxt server records: at least proxy requests by route pattern and outcome, with a separate outcome for an unreachable API. Settled in the phase 6 pull request.
 - **Bridge.** Item 17 counts local answers the server recorded. When the server refuses or cannot record one, the bridge sends that call to the server, where `mcp_tool_calls_total` counts it. This is intended, not a gap.

@@ -312,6 +312,7 @@ func parseJS(src []byte, _ bool) *fileResult {
 		}
 		fr.findings = append(fr.findings, jsRules(raw[i], l, n, ownerName(o), childProcess)...)
 	}
+	fr.findings = supersede(fr.findings, jsTaintFindings(raw, lines, depth, owners, childProcess))
 	for _, s := range fr.symbols {
 		if s.kind == model.KindType {
 			continue

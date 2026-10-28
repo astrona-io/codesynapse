@@ -291,6 +291,21 @@ var platformHealthPanels = map[string]seriesPanel{
 	"platform_telemetry_exports": {Title: "Failed metric exports", Unit: "exports", Kind: "count",
 		Help:    "Metric exports that failed, by exporter. A failure is counted when the next export succeeds.",
 		queries: []seriesQuery{{expr: `sum by (exporter) (increase(platform_telemetry_export_failures_total[$w]))`, by: "exporter"}}},
+	// The web server (telemetry phase 6) labels requests by route pattern,
+	// never by the visited path.
+	"platform_web_requests": {Title: "Web requests by status", Unit: "requests", Kind: "count",
+		Help:    "Pages and dashboard API calls the web server answered, by status class.",
+		queries: []seriesQuery{{expr: `sum by (status_class) (increase(platform_web_requests_total[$w]))`, by: "status_class"}}},
+	"platform_web_latency": {Title: "Web latency", Unit: "seconds", Kind: "gauge",
+		Help: "Median and 95th percentile time the web server took to answer, page renders and API calls together.",
+		queries: []seriesQuery{
+			{name: "p50", expr: `histogram_quantile(0.5, sum by (le) (increase(platform_web_request_duration_seconds_bucket[$w])))`},
+			{name: "p95", expr: `histogram_quantile(0.95, sum by (le) (increase(platform_web_request_duration_seconds_bucket[$w])))`},
+		}},
+	"platform_web_proxy": {Title: "Dashboard calls that did not reach the API", Unit: "requests", Kind: "count",
+		Help:    "Calls the web server refused itself, or that found the API unreachable, timed out or failed otherwise.",
+		Empty:   "Every dashboard call in this window reached the API.",
+		queries: []seriesQuery{{expr: `sum by (outcome) (increase(platform_web_proxy_requests_total{outcome!="ok"}[$w]))`, by: "outcome"}}},
 }
 
 func init() {

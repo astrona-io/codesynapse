@@ -40,16 +40,16 @@ const effortLabel = (e: number) => ({ 1: 'small', 2: 'medium', 3: 'large' }[e] ?
     <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="plan">
       <div class="grid grid--stats">
-        <StatTile label="Steps" :value="plan.summary.steps" hint="ranked below" />
+        <StatTile label="Steps" :value="fmtInt(plan.summary.steps)" hint="ranked below" />
         <StatTile label="Lines you could remove" :value="`up to ${fmtInt(plan.summary.lines_up_to)}`" hint="steps can overlap" />
-        <StatTile label="Advisories fixed" :value="plan.summary.advisories" hint="by removing or upgrading" />
+        <StatTile label="Advisories fixed" :value="fmtInt(plan.summary.advisories)" hint="by removing or upgrading" />
       </div>
 
       <section class="panel">
         <div class="panel__header">
           <h2>Steps <span class="muted">· {{ steps.length }}</span></h2>
           <div class="row">
-            <button v-for="(g, id) in GROUPS" :key="id" class="chip" :class="{ active: group === id }" @click="group = id as string">{{ g.label }}</button>
+            <button v-for="(g, id) in GROUPS" :key="id" class="chip" :class="{ active: group === id }" :aria-pressed="group === id" @click="group = id as string">{{ g.label }}</button>
           </div>
         </div>
         <ol v-if="steps.length" class="steps">

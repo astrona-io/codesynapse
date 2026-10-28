@@ -45,6 +45,15 @@ var secretName = regexp.MustCompile(`(?i)(passw(or)?d|passwd|secret|token|api[_-
 // placeholder values that are not real secrets.
 var placeholder = regexp.MustCompile(`(?i)^(\$\{.*\}|<.*>|x+|\*+|changeme|change-me.*|example.*|dummy|test|password|secret|token|redacted|todo|none|null|env:.*)$`)
 
+// counterLabel matches a label of lowercase words, not a credential: a
+// parenthesised usage counter name such as "(tokens:cached-input)" or a bare
+// enum value such as "no_hook_tokens" (a share basis), both held by
+// constants whose names say "token". Bare values join two or more words with
+// "_", "." or ":" but not "-", because lowercase words joined by hyphens is
+// how passphrases are written. Digits, capitals or anything else still count
+// as a possible secret.
+var counterLabel = regexp.MustCompile(`^(\([a-z]+(?:[-_:.][a-z]+)*\)|[a-z]+(?:[_:.][a-z]+)+)$`)
+
 var shells = map[string]bool{"sh": true, "bash": true, "zsh": true, "/bin/sh": true, "/bin/bash": true, "cmd": true, "cmd.exe": true, "powershell": true, "pwsh": true}
 
 type scanner struct {
@@ -419,7 +428,7 @@ func (s *scanner) secretAssign(lhs, rhs ast.Expr) {
 		return
 	}
 	val, ok := s.constString(rhs)
-	if !ok || len(val) < 8 || placeholder.MatchString(val) || strings.ContainsAny(val, " /") || isEnvName(val) {
+	if !ok || len(val) < 8 || placeholder.MatchString(val) || counterLabel.MatchString(val) || strings.ContainsAny(val, " /") || isEnvName(val) {
 		return
 	}
 	s.report("hardcoded-secret", rhs.Pos(), fmt.Sprintf("%s is assigned a %d-character constant", name, len(val)))

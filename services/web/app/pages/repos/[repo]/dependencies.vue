@@ -2,6 +2,7 @@
 import type { DependencyList, LicenseReport, SecurityReport, SecVuln } from '~/utils/types'
 
 const route = useRoute()
+const router = useRouter()
 const repo = computed(() => route.params.repo as string)
 useHead({ title: () => `Dependencies · ${repo.value}` })
 const sbomHref = computed(() => apiPath(repoPath(repo.value, 'sbom')))
@@ -50,6 +51,15 @@ const licenseFilter = ref(typeof route.query.license === 'string' ? route.query.
 const show = ref<Show>(licenseFilter.value ? 'all' : 'attention')
 const query = ref('')
 const ecosystem = ref(typeof route.query.ecosystem === 'string' ? route.query.ecosystem : 'all')
+// Keep the language and licence filters in the URL, so links and reloads keep them.
+watch([ecosystem, licenseFilter], ([e, l]) => {
+  const next = { ...route.query, ecosystem: e === 'all' ? undefined : e, license: l || undefined }
+  if (next.ecosystem !== route.query.ecosystem || next.license !== route.query.license) void router.replace({ query: next })
+})
+watch(() => [route.query.ecosystem, route.query.license], ([e, l]) => {
+  ecosystem.value = typeof e === 'string' ? e : 'all'
+  licenseFilter.value = typeof l === 'string' ? l : ''
+})
 const shown = computed(() => rows.value
   .filter((r) => show.value === 'all' || (show.value === 'direct' ? r.direct : r.vulns.length || r.deprecated || (r.licence && r.licence.level !== 'ok')))
   .filter((r) => !licenseFilter.value || (r.license || 'unknown') === licenseFilter.value)
@@ -74,47 +84,49 @@ const shownCount = computed(() => groups.value.reduce((n, g) => n + g.rows.lengt
     <PageHeader eyebrow="Dependencies" title="What this repository depends on" lede="Every package it uses, with known vulnerabilities, licences and whether updates are automated. Fix vulnerabilities your code calls first." :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Dependencies' }]">
       <a :href="sbomHref" download class="btn btn--ghost" title="Dependencies resolved by go.mod and the lockfiles, as CycloneDX 1.5 JSON. Not the contents of a built artifact.">Download SBOM</a>
     </PageHeader>
-    <p v-if="error" class="notice notice--danger">{{ apiErrorMessage(error) }}</p>
+    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
+    <p v-else-if="!deps" class="muted" role="status">Loading dependencies…</p>
+    <template v-if="deps">
     <div class="grid cols-4">
-      <StatTile label="Dependencies" :value="String(total)" :hint="ecosystems.map(([e, c]) => `${c} ${ecosystemLabel(e)}`).join(' · ') || '–'" />
-      <StatTile label="Vulnerable" :value="String(vulnsByModule.size)" :hint="`${(sec?.vulnerabilities ?? []).filter((v) => v.reachability === 'called').length} called by your code`" />
-      <StatTile label="Licence issues" :value="String((lic?.conflict ?? 0) + (lic?.review ?? 0))" :hint="`${lic?.conflict ?? 0} conflict · ${lic?.review ?? 0} to review`" />
-      <StatTile label="Update automation" :value="missing ? 'Missing' : automation.length ? 'Needs care' : 'In place'" :hint="missing ? 'no Renovate or Dependabot config' : automation.length ? `${automation.length} configuration issue(s)` : 'Renovate or Dependabot is configured'" />
+      <StatTile label="Dependencies" :value="fmtInt(total)" :hint="ecosystems.map(([e, c]) => `${fmtInt(c)} ${ecosystemLabel(e)}`).join(' · ') || '–'" />
+      <StatTile label="Vulnerable" :value="sec ? fmtInt(vulnsByModule.size) : '…'" :hint="`${fmtInt((sec?.vulnerabilities ?? []).filter((v) => v.reachability === 'called').length)} called by your code`" />
+      <StatTile label="Licence issues" :value="lic ? fmtInt(lic.conflict + lic.review) : '…'" :hint="`${fmtInt(lic?.conflict ?? 0)} conflict · ${fmtInt(lic?.review ?? 0)} to review`" />
+      <StatTile label="Update automation" :value="!sec ? '…' : missing ? 'Missing' : automation.length ? 'Needs care' : 'In place'" :hint="!sec ? 'checking' : missing ? 'no Renovate or Dependabot config' : automation.length ? plural(automation.length, 'configuration issue') : 'Renovate or Dependabot is configured'" />
     </div>
 
     <section v-if="automation.length" class="panel">
       <h2>Keeping dependencies up to date</h2>
       <p class="muted small">Security fixes in dependencies only help once they are installed. Renovate or Dependabot opens the update pull requests for you.</p>
       <ul class="plain">
-        <li v-for="f in automation" :key="f.id"><span :class="`sev sev--${f.severity}`">{{ f.severity }}</span> <strong>{{ f.title }}</strong> <span class="muted small">{{ f.location }}</span><p class="muted small">{{ f.detail }}</p></li>
+        <li v-for="f in automation" :key="f.id"><SevBadge :severity="f.severity" /> <strong>{{ f.title }}</strong> <span class="muted small">{{ f.location }}</span><p class="muted small">{{ f.detail }}</p></li>
       </ul>
     </section>
 
     <section class="panel">
       <div class="panel__header">
-        <h2>Packages <span class="muted">· {{ shownCount }}</span></h2>
+        <h2>Packages <span class="muted">· {{ fmtInt(shownCount) }}</span></h2>
         <div class="row">
-          <button v-for="s in (['attention', 'direct', 'all'] as Show[])" :key="s" class="chip" :class="{ active: show === s }" @click="show = s">{{ s === 'attention' ? 'Needs attention' : s === 'direct' ? 'Direct' : 'All' }}</button>
+          <button v-for="s in (['attention', 'direct', 'all'] as Show[])" :key="s" class="chip" :class="{ active: show === s }" :aria-pressed="show === s" @click="show = s">{{ s === 'attention' ? 'Needs attention' : s === 'direct' ? 'Direct' : 'All' }}</button>
           <input v-model="query" class="search" placeholder="Filter by name" aria-label="Filter packages">
         </div>
       </div>
       <div class="row langs" role="tablist" aria-label="Language">
         <button class="chip" role="tab" :aria-selected="ecosystem === 'all'" :class="{ active: ecosystem === 'all' }" @click="ecosystem = 'all'">All languages</button>
-        <button v-for="[e, c] in ecosystems" :key="e" class="chip" role="tab" :aria-selected="ecosystem === e" :class="{ active: ecosystem === e }" @click="ecosystem = e">{{ ecosystemLabel(e) }} <span class="muted">{{ c }}</span></button>
+        <button v-for="[e, c] in ecosystems" :key="e" class="chip" role="tab" :aria-selected="ecosystem === e" :class="{ active: ecosystem === e }" @click="ecosystem = e">{{ ecosystemLabel(e) }} <span class="muted">{{ fmtInt(c) }}</span></button>
       </div>
       <p v-if="licenseFilter" class="row filter">
         <span>Licence <span class="mono">{{ licenseFilter }}</span></span>
         <button class="chip" aria-label="Show every licence" @click="licenseFilter = ''">clear ×</button>
       </p>
       <div v-for="g in groups" :key="g.ecosystem" class="group">
-        <h3 v-if="ecosystem === 'all'">{{ ecosystemLabel(g.ecosystem) }} <span class="muted">· {{ g.rows.length }}</span></h3>
+        <h3 v-if="ecosystem === 'all'">{{ ecosystemLabel(g.ecosystem) }} <span class="muted">· {{ fmtInt(g.rows.length) }}</span></h3>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Package</th><th>Version</th><th>Licence</th><th>Vulnerabilities</th></tr></thead>
             <tbody>
               <tr v-for="r in g.rows" :key="r.ecosystem + r.name">
-                <td><span class="mono">{{ r.name }}</span><span v-if="!r.direct" class="badge" :title="r.via ? `Via ${r.via}${r.roots > 1 ? ` · ${r.roots} of your dependencies lead to it` : ''}` : 'Not declared by this repository'">indirect</span><span v-if="r.via" class="muted small"> via {{ r.via }}</span><span v-if="r.dev" class="badge">dev</span><span v-if="r.deprecated" class="badge badge--amber" :title="r.deprecated">deprecated</span></td>
-                <td class="mono">{{ r.version || '–' }}<div v-if="r.behind && r.latest" class="muted small" :title="`${r.behind} newer release(s)`">latest {{ r.latest }}</div></td>
+                <td><span class="mono pkg">{{ r.name }}</span><span v-if="!r.direct" class="badge" :title="r.via ? `Via ${r.via}${r.roots > 1 ? ` · ${fmtInt(r.roots)} of your dependencies lead to it` : ''}` : 'Not declared by this repository'">indirect</span><span v-if="r.via" class="muted small"> via {{ r.via }}</span><span v-if="r.dev" class="badge">dev</span><span v-if="r.deprecated" class="badge badge--amber" :title="r.deprecated">deprecated</span></td>
+                <td class="mono">{{ r.version || '–' }}<div v-if="r.behind && r.latest" class="muted small" :title="plural(r.behind, 'newer release')">latest {{ r.latest }}</div></td>
                 <td>
                   {{ r.license || 'unknown' }}
                   <span v-if="r.licence && r.licence.level !== 'ok'" :class="r.licence.level === 'conflict' ? 'badge badge--pink' : 'badge badge--amber'" :title="r.licence.reason">{{ r.licence.level }}</span>
@@ -122,7 +134,7 @@ const shownCount = computed(() => groups.value.reduce((n, g) => n + g.rows.lengt
                 <td>
                   <span v-if="!r.vulns.length" class="muted">none known</span>
                   <div v-for="v in r.vulns" :key="v.id" class="vuln">
-                    <span :class="`sev sev--${v.severity}`">{{ v.severity }}</span>
+                    <SevBadge :severity="v.severity" />
                     <a :href="v.url" target="_blank" rel="noopener noreferrer" class="mono">{{ v.id }}</a>
                     <span class="small" :class="v.reachability === 'called' ? 'error' : 'muted'">{{ REACH[v.reachability] }}</span>
                     <span v-if="v.fixed" class="small">· fixed in <span class="mono">{{ v.fixed }}</span></span>
@@ -136,12 +148,14 @@ const shownCount = computed(() => groups.value.reduce((n, g) => n + g.rows.lengt
       <p v-if="deps?.truncated" class="muted small">The list stops at the store's dependency limit; run <code>codesynapse sbom</code> for every package.</p>
       <div v-if="!shownCount" class="empty"><strong>{{ show === 'attention' && !licenseFilter ? 'Nothing needs attention' : 'No packages' }}</strong>{{ show === 'attention' && !licenseFilter ? 'No vulnerable packages and no licence issues.' : rows.length ? 'Nothing matches the current filter.' : 'No dependency manifests were found.' }}</div>
     </section>
+    </template>
   </div>
 </template>
 
 <style scoped>
 .plain { list-style: none; padding: 0; display: grid; gap: 10px; }
-.search { width: 200px; min-height: 30px; padding: 4px 10px; }
+.search { width: 200px; max-width: 100%; min-height: 30px; padding: 4px 10px; }
+.pkg { overflow-wrap: anywhere; }
 .vuln { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 td .badge { margin-left: 4px; }
 .langs { flex-wrap: wrap; margin: 8px 0 4px; }

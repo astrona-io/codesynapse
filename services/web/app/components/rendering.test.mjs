@@ -6,15 +6,11 @@ import { createSSRApp, computed, ref, watch } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { parse, compileScript } from 'vue/compiler-sfc'
 
-async function renderComponent(t, file, globals, props = {}) {
-  for (const [key, value] of Object.entries({ computed, ref, watch, ...globals })) {
-    const previous = Object.getOwnPropertyDescriptor(globalThis, key)
-    Object.defineProperty(globalThis, key, { value, configurable: true })
-    t.after(() => {
-      if (previous) Object.defineProperty(globalThis, key, previous)
-      else delete globalThis[key]
-    })
-  }
+// Nuxt auto-imports these; useId only has to be stable within one render.
+let nextId = 0
+const useId = () => `v-${nextId++}`
+
+async function compileComponent(t, file) {
   const source = await readFile(new URL(file, import.meta.url), 'utf8')
   const { descriptor } = parse(source)
   let script = compileScript(descriptor, { id: file, inlineTemplate: true }).content
@@ -24,6 +20,19 @@ async function renderComponent(t, file, globals, props = {}) {
   // the stubs it captured, its own.
   script += `\n// ${t.fullName}`
   const { default: component } = await import(`data:text/javascript;base64,${Buffer.from(script).toString('base64')}`)
+  return component
+}
+
+async function renderComponent(t, file, globals, props = {}) {
+  for (const [key, value] of Object.entries({ computed, ref, watch, useId, ...globals })) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key)
+    Object.defineProperty(globalThis, key, { value, configurable: true })
+    t.after(() => {
+      if (previous) Object.defineProperty(globalThis, key, previous)
+      else delete globalThis[key]
+    })
+  }
+  const component = await compileComponent(t, file)
   const setup = component.setup
   component.setup = async (p, ctx) => {
     const render = setup(p, ctx)
@@ -38,6 +47,7 @@ async function renderComponent(t, file, globals, props = {}) {
   app.component('ColumnChart', { template: '<div />' })
   app.component('RankList', { template: '<div />' })
   app.component('NuxtLink', { template: '<a><slot /></a>' })
+  app.component('DataState', await compileComponent(t, './DataState.vue'))
   return renderToString(app)
 }
 

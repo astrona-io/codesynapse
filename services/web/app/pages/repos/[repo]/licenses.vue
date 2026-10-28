@@ -3,6 +3,7 @@ import type { DependencyList, DependencyPackage, LicenseCategory, LicenseReport 
 
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
+useHead({ title: () => `Licences · ${repo.value}` })
 const { data: rep, error } = useApiGet<LicenseReport>(() => repoPath(repo.value, 'licenses'))
 
 const verdict = ref<'all' | 'conflict' | 'review'>('all')
@@ -27,6 +28,7 @@ const maxCount = computed(() => Math.max(1, ...(rep.value?.by_license ?? []).map
 // grouped by language.
 const { data: deps } = useApiGet<DependencyList>(() => repoPath(repo.value, 'dependencies'))
 const open = ref<string | null>(null)
+watch(repo, () => { open.value = null })
 const toggle = (license: string) => { open.value = open.value === license ? null : license }
 const packagesOf = (license: string) => {
   const groups = new Map<string, DependencyPackage[]>()
@@ -48,7 +50,7 @@ const dependenciesLink = (license: string) => ({ path: `/repos/${encodeURICompon
       <SyncControl :repo="repo" />
     </PageHeader>
 
-    <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
+    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
     <template v-else-if="rep">
       <section class="panel">
         <p class="eyebrow">This repository</p>
@@ -60,9 +62,9 @@ const dependenciesLink = (license: string) => ({ path: `/repos/${encodeURICompon
 
       <div class="grid grid--stats">
         <StatTile label="Dependencies" :value="fmtInt(rep.total)" :hint="rep.online ? 'licences from disk and deps.dev' : 'licences from disk only'" />
-        <StatTile label="Conflicts" :value="rep.conflict" hint="cannot ship under your licence" />
-        <StatTile label="To review" :value="rep.review" hint="weak copyleft, dev-only conflicts, unknown" />
-        <StatTile label="No licence found" :value="rep.unknown" :hint="rep.online ? 'not on disk or deps.dev' : 'enable CODESYNAPSE_LICENSE_LOOKUP'" />
+        <StatTile label="Conflicts" :value="fmtInt(rep.conflict)" hint="cannot ship under your licence" />
+        <StatTile label="To review" :value="fmtInt(rep.review)" hint="weak copyleft, dev-only conflicts, unknown" />
+        <StatTile label="No licence found" :value="fmtInt(rep.unknown)" :hint="rep.online ? 'not on disk or deps.dev' : 'enable CODESYNAPSE_LICENSE_LOOKUP'" />
       </div>
 
       <section class="panel">
@@ -71,7 +73,7 @@ const dependenciesLink = (license: string) => ({ path: `/repos/${encodeURICompon
         </div>
         <div class="row">
           <span class="label">Verdict</span>
-          <button v-for="v in (['all', 'conflict', 'review'] as const)" :key="v" class="chip" :class="{ active: verdict === v }" @click="verdict = v">{{ v }}</button>
+          <button v-for="v in (['all', 'conflict', 'review'] as const)" :key="v" class="chip" :class="{ active: verdict === v }" :aria-pressed="verdict === v" @click="verdict = v">{{ v }}</button>
           <label class="row compact"><input v-model="shippedOnly" type="checkbox"> hide development dependencies</label>
         </div>
         <div v-if="issues.length" class="table-wrap">
@@ -95,7 +97,7 @@ const dependenciesLink = (license: string) => ({ path: `/repos/${encodeURICompon
           </table>
         </div>
         <div v-else class="empty"><strong>Nothing to look at</strong>{{ rep.issues.length ? 'for the current filter.' : 'Every dependency licence fits this repository’s licence.' }}</div>
-        <p v-if="rep.truncated" class="muted small">{{ rep.truncated }} more not listed; run <code>codesynapse licenses</code> for the full list.</p>
+        <p v-if="rep.truncated" class="muted small">{{ fmtInt(rep.truncated) }} more not listed; run <code>codesynapse licenses</code> for the full list.</p>
       </section>
 
       <section class="panel">
@@ -107,16 +109,16 @@ const dependenciesLink = (license: string) => ({ path: `/repos/${encodeURICompon
               <span class="mono name">{{ c.license }}</span>
               <span class="badge" :class="cat(c.category).cls">{{ cat(c.category).label }}</span>
               <span class="bar"><span :style="{ width: `${(c.count / maxCount) * 100}%` }" :class="`fill--${cat(c.category).cls.replace('badge--', '')}`" /></span>
-              <span class="num">{{ c.count }}</span>
+              <span class="num">{{ fmtInt(c.count) }}</span>
             </button>
             <div v-if="open === c.license" class="packages">
-              <p v-if="!deps" class="muted small">Loading…</p>
+              <p v-if="!deps" class="muted small" role="status">Loading…</p>
               <template v-else>
                 <div v-for="[eco, list] in packagesOf(c.license)" :key="eco" class="packages__group">
-                  <p class="label">{{ ecosystemLabel(eco) }} <span class="muted">· {{ list.length }}</span></p>
+                  <p class="label">{{ ecosystemLabel(eco) }} <span class="muted">· {{ fmtInt(list.length) }}</span></p>
                   <ul class="plain">
                     <li v-for="p in list" :key="p.name + p.version">
-                      <span class="mono">{{ p.name }}</span> <span class="mono muted">{{ p.version }}</span>
+                      <span class="mono pkg">{{ p.name }}</span> <span class="mono muted">{{ p.version }}</span>
                       <span v-if="!p.direct" class="badge">indirect</span><span v-if="p.dev" class="badge">dev</span>
                     </li>
                   </ul>
@@ -129,7 +131,7 @@ const dependenciesLink = (license: string) => ({ path: `/repos/${encodeURICompon
         </ul>
       </section>
     </template>
-    <p v-else class="muted">Loading…</p>
+    <p v-else class="muted" role="status">Loading…</p>
   </div>
 </template>
 
@@ -138,9 +140,11 @@ const dependenciesLink = (license: string) => ({ path: `/repos/${encodeURICompon
 .small { font-size: 12.5px; margin-top: 4px; }
 .bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .bars__row { display: grid; grid-template-columns: minmax(120px, 1.2fr) auto 2fr 48px; gap: 12px; align-items: center; width: 100%;
-  background: none; border: 0; padding: 4px 6px; margin: 0 -6px; border-radius: 6px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  background: none; border: 0; padding: 4px 6px; margin: 0 -6px; border-radius: var(--radius-xs); color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .bars__row:hover, .bars__row[aria-expanded="true"] { background: var(--panel-2); }
-.packages { margin: 6px 0 10px 12px; padding-left: 12px; border-left: 2px solid var(--line); display: grid; gap: 8px; }
+.bars__row:focus-visible { box-shadow: var(--focus); }
+.packages { margin: 6px 0 10px; padding: 10px 12px; background: var(--panel-raised); border-radius: var(--radius-sm); display: grid; gap: 8px; }
+.pkg { overflow-wrap: anywhere; }
 .packages__group .plain { list-style: none; padding: 0; margin: 4px 0 0; display: grid; gap: 4px; font-size: 13px; }
 .packages .badge { margin-left: 4px; }
 .bars .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

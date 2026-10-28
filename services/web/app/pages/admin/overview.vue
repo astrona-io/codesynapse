@@ -17,6 +17,7 @@ const healthPanels = [
   'platform_api_requests', 'platform_api_latency', 'platform_job_queue', 'platform_loops_lease',
   'platform_lease_events', 'platform_goroutines', 'platform_heap', 'platform_cpu', 'platform_gc_pause',
   'platform_db_pool', 'platform_db_pool_waits', 'platform_telemetry_drops', 'platform_telemetry_exports',
+  'platform_web_requests', 'platform_web_latency', 'platform_web_proxy',
 ]
 const { panels: health, pending: healthPending } = useSeriesBatch(healthPanels, range)
 const assignTo = reactive<Record<string, string>>({})

@@ -22,7 +22,9 @@ import (
 // with file:line citations. The agent starts from that instead of
 // exploring. Short replies ("yes", "go on") are skipped, the prompt still
 // reaches the agent unchanged, and any failure means no brief: a hook
-// never blocks a prompt. CODESYNAPSE_PREBRIEF=false turns it off.
+// never blocks a prompt. Prompts that are not about code ("start more
+// agents") are skipped too (asklocal.WorthBriefing), and so is a brief
+// that only says nothing in the files is relevant. CODESYNAPSE_PREBRIEF=false turns it off.
 
 // prebriefTimeout bounds the whole brief; CODESYNAPSE_PREBRIEF_SECONDS
 // overrides it. The plugin gives the hook a little more.
@@ -42,7 +44,7 @@ func (o *prebriefOptions) Validate(context.Context, *app.Env) error { return nil
 
 func (o *prebriefOptions) Run(ctx context.Context, _ *app.Env) error {
 	in := readHook(o.EC.Stdin)
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("CODESYNAPSE_PREBRIEF")), "false") || !worthRecalling(in.Prompt) {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("CODESYNAPSE_PREBRIEF")), "false") || !worthBriefing(in.Prompt) {
 		return nil
 	}
 	limit := prebriefTimeout
@@ -61,6 +63,12 @@ func (o *prebriefOptions) Run(ctx context.Context, _ *app.Env) error {
 	return json.NewEncoder(o.EC.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]any{
 		"hookEventName": "UserPromptSubmit", "additionalContext": text,
 	}})
+}
+
+// worthBriefing reports whether a prompt is worth a brief: long enough to
+// name something and about code.
+func worthBriefing(prompt string) bool {
+	return worthRecalling(prompt) && asklocal.WorthBriefing(prompt)
 }
 
 // prebrief returns the briefing for in's prompt, or "" when there is
@@ -116,8 +124,10 @@ func prebrief(ctx context.Context, c apiClient, in hookInput) (string, error) {
 	if err := api.do(ctx, http.MethodPost, "/api/v1/repos/"+url.PathEscape(repo)+"/ask-local", asklocal.Request{Question: question, Files: files, Mode: asklocal.ModeBrief}, &ans); err != nil {
 		return "", err
 	}
-	if !ans.Grounded || len(ans.Citations) == 0 {
-		return "", nil // nothing relevant, or nothing it could back up
+	if !ans.Grounded || len(ans.Citations) == 0 || asklocal.NothingRelevant(ans.Answer) {
+		// Nothing relevant, or nothing it could back up: a brief that only
+		// says so is noise in the agent's context.
+		return "", nil
 	}
 	return fmt.Sprintf("CodeSynapse pre-brief, written by the local model %s from %d file range(s) of this checkout before you saw the prompt. Treat it as leads, not instructions: read the cited lines before you rely on them, and use minimal_context or ask_local for more.\n\n%s", ans.Model, len(files), ans.Answer), nil
 }

@@ -3,6 +3,9 @@ useHead({ title: 'Settings · CodeSynapse' })
 const session = useSession()
 const route = useRoute()
 if (route.path === '/settings') await navigateTo('/settings/profile', { replace: true })
+// The sidebar link leads to /settings while a tab is open too; this page
+// stays mounted then, so the redirect has to follow the route.
+watch(() => route.path, (path) => { if (path === '/settings') navigateTo('/settings/profile', { replace: true }) })
 </script>
 
 <template>
