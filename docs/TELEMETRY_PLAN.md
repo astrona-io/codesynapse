@@ -69,11 +69,11 @@ Local/cloud classification comes from provider configuration and `ProviderConfig
 
 | Metric | Instrument and interpretation |
 |---|---|
-| `db_query_duration_seconds` | Histogram, client-observed request latency; fixed `db_system` values include `milvus`, `hugegraph`, `neo4j`, `postgres`; fixed operation names |
+| `db_query_duration_seconds` | Histogram, client-observed request latency; fixed `db_system` values `nebulagraph`, `milvus` and `postgres`; fixed operation names (`read`/`write` for NebulaGraph, the REST path for Milvus, the statement verb for PostgreSQL) |
 | `db_vector_matches_count` | Existing cumulative counter of returned matches; split candidate counts and final fused counts into separately named counters if needed |
 | `db_graph_nodes_traversed` | Existing legacy name currently counts returned rows, including edges/facts; it does not measure nodes visited internally |
 
-Add a correctly named `db_graph_rows_returned_total` and migrate panels while documenting the legacy series. Actual Gremlin traversal counts require verified backend profiling support and a defined counting method; expose them separately only when measured, never substitute returned rows or run expensive profiling on every production query. Add error/timeout rates, p50/p95/p99 latency and request volume; configured SLA targets are not measured benefits.
+Add a correctly named `db_graph_rows_returned_total` and migrate panels while documenting the legacy series. Actual traversal counts require verified backend profiling support and a defined counting method; expose them separately only when measured, never substitute returned rows or run expensive profiling on every production query. Add error/timeout rates, p50/p95/p99 latency and request volume; configured SLA targets are not measured benefits.
 
 ## Worker queue depth
 
@@ -131,7 +131,7 @@ Keep time windows and panel IDs allowlisted in `services/api/internal/api/series
 
 ## Traces
 
-One request is followed through the API, its job, the worker, HugeGraph and model calls (docs/SAAS.md, 5e).
+One request is followed through the API, its job, the worker, NebulaGraph and model calls (docs/SAAS.md, 5e).
 
 - **Export:** OTLP/HTTP to `CODESYNAPSE_TRACES_URL`, the full traces endpoint. Compose runs VictoriaTraces (Apache-2.0) at `http://victoriatraces:10428/insert/opentelemetry/v1/traces` with the metrics login; its UI is at `http://localhost:10428/select/vmui`.
   - `CODESYNAPSE_TRACES_SAMPLE` keeps that share of new traces (default 1); children follow their parent's decision.
@@ -141,7 +141,7 @@ One request is followed through the API, its job, the worker, HugeGraph and mode
   - API requests, named by route pattern (`POST /api/v1/repos/{repo}/sync`), with method, route and status;
   - MCP HTTP requests and one span per MCP method, with the tool or prompt name;
   - `job <kind>`, with kind, opaque job ID and attempt, and its `job.prepare`, `job.ingest` and `job.publish` phases;
-  - `hugegraph read`/`write`;
+  - `nebula read`/`write`;
   - `llm complete`, with the configured provider and model and the token counts.
 - **No content:** spans never carry paths, repository names, people, prompts, code, arguments, scripts or bindings. A test checks that no span names or attributes contain the repository name.
 - **Across processes:** the queueing request's `traceparent` is stored on the job row (migration 0015). The worker that runs the job, now or after a restart, continues the trace.
@@ -181,3 +181,113 @@ No equivalent cloud fallback currently exists, so avoided cloud bytes remain unm
 ## Root governance follow-up
 
 The requested bootstrap-root separation belongs to the planned [phase 4d follow-up](ROOT_BOOTSTRAP_PLAN.md). Root may inspect platform telemetry, health and audit logs, but must provision a distinct standard owner and require a fresh standard-user login before organisation work. Phase 4e's platform panels do not implement or weaken that future restriction.
+
+## Metrics coverage plan
+
+Status: proposed. Nothing in this section is implemented yet. It lists what the services measure today, where measurement is missing or thin, and the instruments that would close the gaps, in the order we would build them. Every proposal follows the rules above and the Telemetry rules in `AGENTS.md`. Where a rule blocks a useful label, the proposal says so instead of bending the rule.
+
+### What is measured today
+
+All instruments live in `internal/telemetry/metrics.go`, plus `flow.go`, `logship.go` and the durable file totals in `ingest.go`. Scoped instruments always carry `tenant_id`, `mcp_tool`, `llm_provider` and `llm_model`, filled from the context. A sample without a trusted tenant is exported as `platform_<name>`. Each instrument holds at most 5,000 label combinations per process (`maxSeries`). A histogram shares that budget with its buckets, so a 15-bucket histogram holds about 277 combinations. Excess combinations are dropped and counted in `telemetry_dropped_series_total{metric}`.
+
+| Area | Instruments | Recorded in | Read by |
+|---|---|---|---|
+| MCP tools | `mcp_sessions_total`, `mcp_tool_calls_total{outcome}`, `mcp_tool_duration_seconds`, `mcp_response_tokens_total`, `net_bytes_received_total`, `net_bytes_sent_total` | `services/mcp/internal/mcpserver/telemetry.go`, `transport_metrics.go` | Statistics → Activity: `sessions`, `tool_calls`, `tool_errors`, `tool_latency`, `served_tokens`, `bandwidth`; `tenants` (platform) |
+| Models | `llm_requests_total{task,outcome}`, `llm_tokens_input/output/saved_total`, `llm_cost_estimated_dollars`, `llm_cost_saved_estimated_dollars_total`, `llm_usage_unknown_total`, `llm_pricing_missing_total`, `llm_request_duration_seconds`, `llm_time_to_first_token_seconds`, `llm_read/write_seconds_total`, `llm_read/write_tokens_total`, `llm_context_used_ratio{task}`, `llm_compressed_bytes_total`, `cloud_bytes_sent_total` | `services/api/internal/llm/llm.go`, `transport.go` | Activity: `llm_*`, `cloud_traffic`; Statistics → Models (`GET /api/v1/stats/models`); `platform_llm_cost` on the admin overview |
+| Agent gateway | `gateway_requests_total{route,class}`, `gateway_bytes_total{route,direction}`, `gateway_local_tokens_total{kind}`, `gateway_local_unmetered_total` | `services/api/internal/api/gateway.go` | Statistics → Models |
+| Databases | `db_query_duration_seconds{db_system,operation}`, `db_query_errors_total`, `db_query_timeouts_total`, `db_graph_rows_returned_total` (and the legacy `db_graph_nodes_traversed`), `db_vector_matches_count` | `internal/store/nebulastore/client.go`, `internal/vector/milvus/milvus.go`, `internal/accounts/pgstore/trace.go` | Activity: `db_latency`, `db_latency_tail`, `db_requests`, `db_errors`, `db_rows` |
+| Memory | `memory_facts_saved_total{source}`, `memory_offload_turns_total`, `memory_offload_tokens_total`, `memory_recall_total{mode}`, `agent_memory_recalls_total`, `memory_entities_embedded_total`, `agent_memory_facts_count`, `agent_memory_facts_observed_at_seconds`, `platform_memory_facts_collection_errors_total`, `flow_step_calls_total`, `flow_step_tokens_total` | `services/api/internal/offload`, `services/api/internal/recall`, `services/api/internal/api/memorymetrics.go`, `services/mcp/internal/mcpserver/memory.go` | Activity: `memory`, `memory_facts`; the flow counters have no panel |
+| Assistant hooks | `agent_hook_events_total`, `agent_hook_duration_seconds`, `agent_hook_bytes_total` | `services/api/internal/api/agentactivity.go` | Activity: `agent_hook_events`, `agent_hook_bytes` |
+| API | `http_requests_total{route,method,code}`, `http_request_duration_seconds{route,method}` | `services/api/internal/api/api.go` (API and worker processes) | No panel |
+| Indexing | `ingest_runs_total{db_system,outcome}`, `ingest_duration_seconds`, `ingest_nodes_total`, `codesynapse_annotation_jobs_total`, `codesynapse_annotation_duration_seconds`, `codesynapse_files_scanned/indexed/skipped_total{repo}` (durable totals, fenced exporter) | `services/api/internal/api/jobs.go`, `ingestion_metrics.go`, `services/api/internal/annotation/worker.go` | Repository → Ingestion: `ingest_files`, `ingest_skips`, `annotation_jobs`; the run counters have no panel |
+| Job queue | `platform_codesynapse_jobs_waiting{kind}`, `platform_codesynapse_jobs_active{kind}`, set by the `api-loops` holder | `services/api/internal/api/jobqueue_metric.go` | Worker autoscaling in the Helm chart; no panel |
+| Telemetry itself | `telemetry_dropped_series_total{metric}`, `platform_log_lines_dropped_total{reason}`, `platform_ingest_metric_export_rejections_total{reason}`, `platform_codesynapse_ingest_metric_series_dropped_total` | `internal/telemetry` | No panel |
+
+Traces cover API requests, MCP methods, jobs with their `job.prepare`/`job.ingest`/`job.publish` phases, NebulaGraph reads and writes, and model calls. Daily `:McpUsage` buckets (`internal/usage`) hold per-repository tool counts, bridge local answers and hook-reported workflow counts. They feed the Statistics totals and are not OTel metrics.
+
+### Gaps
+
+Each gap is a question an operator or an organisation cannot answer from metrics today. All were checked against the code.
+
+1. **Background jobs.** Only queue depth exists. There is no count of finished jobs by kind and outcome, no time a job waited before a worker claimed it, and no run time per kind. Only indexing (`ingest_runs_total`) and annotation have outcome counters; AI, fix, clone and switch jobs have none. A job left for another process (`errLeaseLost`, `leftBehind`) is not counted.
+2. **Leases.** Nothing records whether a process holds the `api-loops` lease, how often it changes hands, or how often durable job leases fail to renew. A cluster where no replica runs the scheduler looks healthy.
+3. **Indexing detail.** `ingest_duration_seconds` is one number per run. Phase times exist only as trace spans. There is no split by language or by cause of failure.
+4. **Outbound calls.** git clone, fetch, `ls-remote` and push (`internal/gitx`), OSV lookups (`internal/vuln`), deps.dev lookups (`internal/license/depsdev.go`) and forge listings (`internal/forge`) have no metrics. A slow or failing provider shows up only as a failed or slow job.
+5. **Sign-in.** Password logins, API-key and session checks, rate-limit refusals (`TakeAttempt`) and SSO callbacks have no metrics. They are in the audit log only, so a burst of failed logins cannot drive an alert.
+6. **Audit log.** Audit writes, their failures (which refuse the request, or withhold an MCP result) and archive sealing (`internal/auditarchive`) are not measured.
+7. **MCP outcomes.** `mcp_tool_calls_total` has `ok` and `error` only, so a permission refusal looks like a bug. Bridge local answers (`POST /api/v1/usage/local`) are in the daily buckets and the audit log, not in the minute-level series, so the share of calls answered on the developer's machine is not visible next to server calls.
+8. **Gateway.** `recordGateway` receives the request duration and drops it. When the local model cannot answer and the request falls through to the cloud, only the final route is counted, not why it fell through.
+9. **Model errors.** `llm_requests_total` has `ok` and `error`. Timeouts, rate limits and refused requests are not told apart.
+10. **Process health.** There are no Go runtime or process metrics (goroutines, heap, GC pauses, CPU), no connection-pool metrics, and no counter for failed metric exports, which are only logged.
+11. **Series caps.** Some instruments hit the 5,000 cap early. `mcp_tool_duration_seconds` has about 70 accepted tool and prompt names, so at about 277 combinations it starts dropping once roughly four organisations use every tool. `http_request_duration_seconds` has about 200 routes and fills its budget with one or two active organisations. Drops are counted, but no panel or alert shows them.
+12. **Unused data.** API request metrics, indexing run counters, chat-memory flow counters, the job queue gauges and the dropped-series counters are recorded but have no panel.
+
+The web dashboard (Nuxt) has no metrics of its own. Every request it proxies reaches the API and is counted there, so this plan adds none (see open questions).
+
+### Proposed instruments
+
+Conventions for new instruments:
+
+- Extend an existing family where one exists (`mcp_`, `llm_`, `gateway_`, `http_`, `db_`). New subsystems use the `codesynapse_` prefix, like `codesynapse_jobs_active`.
+- Tenant work uses `ScopedCounter`/`ScopedHistogram` and the context-aware methods. The tenant comes from `telemetry.WithTenant` on the authenticated caller or the job's stored identity, never from arguments. Work without a trusted tenant becomes `platform_<name>` automatically. Process state with no tenant uses an unscoped instrument with a `platform_` name.
+- Every label has a fixed value set, enforced by an allowlist next to the instrument, as `flow.go` does for steps. Anything else maps to `other` or is dropped.
+- Long-running work uses a coarse bucket set, `slow` = 1, 5, 15, 60, 300, 900, 1800, 3600 and 7200 seconds (9 buckets, about 416 combinations per histogram).
+- Where a histogram per label value would hit the cap, a pair of counters (`..._seconds_total` and `..._total`) gives the average instead, as `llm_read_seconds_total` already does.
+
+| # | Instrument | Kind, unit | Labels (bounded values) | Scope | Combinations per tenant | Recorded in | Panel or alert |
+|---|---|---|---|---|---|---|---|
+| 1 | `codesynapse_jobs_finished_total` | counter, jobs | `kind` (`sync`, `clone`, `switch`, `ai`, `ai-auto`, `fix`), `outcome` (`ok`, `error`, `left_behind`, `cancelled`) | tenant | 24 | the job runner in `services/api/internal/api/jobs.go`, where a job ends | Statistics → Sync: "Background jobs"; alert on the error share |
+| 2 | `codesynapse_job_wait_seconds` | histogram (`slow`), s | `kind` | tenant | 6 | on claim: claim time minus queue time | "Job wait"; alert when p95 wait passes 15 minutes |
+| 3 | `codesynapse_job_duration_seconds` | histogram (`slow`), s | `kind` | tenant | 6 | the job runner, next to item 1 | "Job run time" |
+| 4 | `platform_codesynapse_lease_events_total` | counter, events | `lease` (`api_loops`, `job`), `event` (`acquired`, `lost`, `renew_failed`) | platform | 6 | `services/api/internal/api/singleton.go`, durable job lease renewal in `jobs_durable.go` | platform panel; alert on `lost` |
+| 5 | `platform_codesynapse_loops_lease_held` | gauge, 0 or 1 | none (the instance comes from the resource) | platform | 1 | `singleton.go` | alert when the sum over fresh instances is not 1 for 2 minutes |
+| 6 | `codesynapse_ingest_phase_seconds_total`, `codesynapse_ingest_phase_total` | counters, s and runs | `phase` (`prepare`, `ingest`, `publish`), `outcome` (`ok`, `error`) | tenant | 12 | the `phase` helper in `jobs.go` that already opens the spans | "Indexing time by phase" |
+| 7 | `codesynapse_ingest_extract_seconds_total` | counter, s | `language`: one fixed value per parser in `internal/ingest` (`go`, `python`, `jsts` for JavaScript, TypeScript and Vue, `jvm` for Java and Kotlin, `rust`, `csharp`, `php`, `ruby`, `docs`, `config` for YAML, templates and Helm), plus `other` | tenant | 11 | each extractor in `internal/ingest`; divided by the durable file totals for an average | "Extraction time by language" |
+| 8 | `codesynapse_git_operations_total` | counter, operations | `operation` (`clone`, `fetch`, `ls_remote`, `push`), `outcome` (`ok`, `error`, `no_access`, `redirected`, `timeout`) | tenant; platform for operator mounts | 20 | `gitx.Clone`, `FetchCheckout`, `PushBranch` and the access check, mapping the `gitx` sentinel errors | "Git operations"; alert on the `error` and `timeout` share |
+| 9 | `codesynapse_git_operation_seconds` | histogram (`slow`), s | `operation` | tenant | 4 | same | "Git operation time" |
+| 10 | `codesynapse_lookups_total` | counter, requests | `service` (`osv`, `depsdev`, `forge_github`, `forge_gitlab`, `forge_forgejo`), `outcome` (`ok`, `error`, `timeout`, `rate_limited`) | tenant, else platform | 20 | `internal/vuln`, `internal/license/depsdev.go`, the `internal/forge` clients | "External lookups"; alert on `rate_limited` |
+| 11 | `codesynapse_lookup_seconds` | histogram (`latency`), s | `service` | tenant, else platform | 5 | same | "External lookup latency" |
+| 12 | `codesynapse_auth_attempts_total` | counter, attempts | `method` (`password`, `api_key`, `session`, `sso`), `outcome` (`ok`, `bad_credentials`, `rate_limited`, `suspended`, `expired`, `refused`) | platform before authentication; tenant once an organisation is known | 24 | `handleLogin` (`auth.go`), the bearer and cookie middleware, `handleSSOCallback` (`sso.go`) | platform "Sign-in" panel; alert on bursts of `rate_limited` and `bad_credentials` |
+| 13 | `codesynapse_audit_writes_total` | counter, entries | `source` (`api`, `mcp`, `service`), `outcome` (`ok`, `error`) | tenant, else platform | 6 | `accounts.Service.Record`, the HTTP audit middleware, `services/mcp/internal/mcpserver/audit.go` | alert on any `error`: a failed write refuses the request or withholds an MCP result |
+| 14 | `codesynapse_audit_write_seconds` | histogram (`latency`), s | `source` | tenant, else platform | 3 | same | "Audit write latency" |
+| 15 | `platform_codesynapse_audit_seals_total` | counter, runs | `outcome` (`ok`, `error`, `nothing_to_seal`, `no_archive`) | platform | 4 | `auditarchive.Seal`, run under the `api-loops` lease | alert on `error` or repeated `no_archive` |
+| 16 | `mcp_tool_calls_total` (existing) | counter | `outcome` gains `refused` (permission, scope or policy refusal) | tenant | +1 per tool | `services/mcp/internal/mcpserver/telemetry.go` | `tool_errors` stops counting refusals as errors |
+| 17 | `mcp_local_answers_total` | counter, calls | `mcp_tool`: only `gittools.Tools`, `ghtools.Tools`, `coretools.Local`, `ask_local` and `local_draft`, registered with `AllowTools` in the API; `outcome` (`recorded`, `refused`) | tenant | about 30 | `services/api/internal/api/usage_local.go` | "Answered on the developer's machine" next to `tool_calls` |
+| 18 | `gateway_request_duration_seconds` | histogram (`latency`), s | `route` (`local`, `cloud`, `rejected`) | tenant | 3 | `recordGateway`, from the duration it already receives | Statistics → Models |
+| 19 | `gateway_fallthrough_total` | counter, requests | `reason`: a fixed set taken from the return points of `serve` in `services/api/internal/gateway/local.go`, for example `not_eligible`, `too_large`, `unavailable`, `no_first_chunk`, `bad_tool_call` | tenant | about 5 | `local.go` | "Why requests left the local model" |
+| 20 | `llm_requests_total` (existing) | counter | `outcome` gains `timeout`, `rate_limited` and `refused`, mapped from status codes and context errors, never from error text | tenant | +3 per model and task | `llm.go` | `llm_provider_failures` split by cause |
+| 21 | `platform_go_goroutines`, `platform_go_heap_bytes`, `platform_go_gc_pause_seconds_total`, `platform_process_cpu_seconds_total` | gauges and counters | none (service and instance come from the resource) | platform | 1 each | a 15-second sampler of the standard library's `runtime/metrics` in `internal/app`, one per process | platform "Process health"; alerts on heap and goroutine growth |
+| 22 | `platform_db_pool_connections` | gauge, connections | `db_system` (`postgres`), `state` (`idle`, `in_use`, `waiting`) | platform | 3 | pgx pool statistics, sampled with item 21 | alert when `waiting` stays above 0 |
+| 23 | `platform_telemetry_export_failures_total` | counter, exports | `exporter` (`otlp`, `prometheus`, `ingest`) | platform | 3 | the push and export loops started in `internal/app/metrics.go` | alert on any increase |
+
+Process gauges (items 5, 21 and 22) are per instance. Panels show them per `service.instance.id` or take the maximum. They are never summed into a durable count. Item 5 is the one exception that is summed, because the sum means "how many replicas think they lead".
+
+**Must not become labels**, in these or any later instruments: repository names, graph IDs and repository-entry IDs (the three `codesynapse_files_*_total` metrics stay the only exception), git hosts, forge owners and logins, remote URLs, branch names and revisions, file paths and file names, user IDs, emails, API key IDs, session IDs (runtime, login and transport), job IDs, IdP issuers and client IDs, client addresses and user agents, error messages and provider status text, prompt or answer text, model names a client asked for, and raw HTTP paths (route patterns only). The `language` label in item 7 names an extractor, never a file.
+
+### Cap pressure
+
+Gap 11 needs a decision before more tenant histograms are added. The options, from least to most change:
+
+- Keep the cap, and add a platform panel and an alert on `telemetry_dropped_series_total`, so drops are visible.
+- Give histograms with many label values a smaller bucket set, for example 8 buckets for `mcp_tool_duration_seconds`. That roughly doubles the combinations they hold.
+- Replace the per-tool or per-route histogram with a counter pair (`..._seconds_total`, `..._total`) per tool or route for averages, and keep one histogram per tenant, without the tool or route, for percentiles.
+- Allow a cap above 5,000 for named instruments, recorded in `metrics.go` with the reason.
+
+The plan recommends the first and third options. Both keep the existing bounds.
+
+### Phases
+
+Ordered by value for the effort. Each phase is one pull request with its panels, a test that labels stay inside their sets, a test that a sample without a tenant becomes `platform_`, and the VictoriaMetrics integration check.
+
+1. **See the platform** (small). Items 4, 5, 21, 22 and 23; a platform panel for `telemetry_dropped_series_total` and `platform_log_lines_dropped_total`; panels for the existing API request metrics and job queue gauges. No new tenant series.
+2. **Jobs and indexing** (medium). Items 1, 2, 3, 6 and 7, and panels for the existing `ingest_runs_total` and `ingest_duration_seconds` on Statistics → Sync.
+3. **Outbound calls and security events** (medium). Items 8 to 15. Sign-in counters are mostly platform series, because most failures have no trusted tenant.
+4. **Sharper existing families** (small). Items 16 to 20, and the cap decision applied to `mcp_tool_duration_seconds` and `http_request_duration_seconds`. New outcome values change what the `tool_errors` and `llm_provider_failures` panels count; the panel help says so from that release on.
+
+### Open questions
+
+- **Alerts.** No alerting rules ship today: there is no vmalert in Compose or the chart. Should phase 1 add vmalert with the rules named above, or should the rules be documented for operators to load into their own system?
+- **Runtime metrics.** The plan samples `runtime/metrics` from the standard library. The OTel contrib runtime instrumentation would be a new dependency and a second accumulator beside the registry, so it is not proposed.
+- **Web dashboard.** The Nuxt server has no metrics. Adding them needs a JavaScript OTel SDK (a new dependency) and would mostly repeat the API's request metrics. The plan adds none unless proxy-only failures, such as the API being unreachable, need their own signal.
+- **Cap.** Which of the cap options to adopt.
+- **Bridge.** Item 17 counts local answers the server recorded. When the server refuses or cannot record one, the bridge sends that call to the server, where `mcp_tool_calls_total` counts it. This is intended, not a gap.
