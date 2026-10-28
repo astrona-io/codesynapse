@@ -25,7 +25,7 @@ func TestLocalProviderRunsOneRequestAtATime(t *testing.T) {
 		now.Add(-1)
 		return "ok"
 	}}
-	r, _, ctx := compressRegistry(t, false, local)
+	r, _, ctx := compressRegistry(t, new(false), local)
 	var wg sync.WaitGroup
 	for range 5 {
 		wg.Add(1)

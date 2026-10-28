@@ -68,7 +68,9 @@ type AgentStats struct {
 	// LocalAvoidedTokens is the ask_local part of AvoidedTokens.
 	LocalAvoidedTokens int `json:"local_avoided_tokens"`
 	// LocalBriefs counts prompts a local model briefed the agent on.
-	LocalBriefs  int        `json:"local_briefs"`
+	LocalBriefs int `json:"local_briefs"`
+	// LocalDrafts counts drafts a local model wrote for an agent.
+	LocalDrafts  int        `json:"local_drafts"`
 	AvgLatencyMs float64    `json:"avg_latency_ms"`
 	MaxLatencyMs int        `json:"max_latency_ms"`
 	Daily        []DayStat  `json:"daily"`
@@ -438,6 +440,10 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 		}
 		if bk.Tool == usage.LocalBriefs {
 			a.LocalBriefs += bk.Calls
+			continue
+		}
+		if bk.Tool == usage.LocalDrafts {
+			a.LocalDrafts += bk.Calls
 			continue
 		}
 		if bk.Tool == usage.LocalRead {

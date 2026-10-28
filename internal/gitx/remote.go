@@ -73,6 +73,13 @@ type RemoteOptions struct {
 	}
 }
 
+// InternalIP reports whether ip is loopback, private, link-local or
+// unspecified: the addresses remotes and forge API calls may not reach
+// unless private hosts are allowed.
+func InternalIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
 // ValidateRemote accepts https URLs without embedded credentials whose host
 // does not resolve to an internal address (unless AllowPrivate). It returns
 // the normalised URL.
@@ -97,7 +104,7 @@ func ValidateRemote(ctx context.Context, raw string, opts RemoteOptions) (string
 			return "", fmt.Errorf("%w: resolving %s: %w", ErrInvalidRemote, u.Hostname(), err)
 		}
 		for _, a := range addrs {
-			if a.IP.IsLoopback() || a.IP.IsPrivate() || a.IP.IsLinkLocalUnicast() || a.IP.IsLinkLocalMulticast() || a.IP.IsUnspecified() {
+			if InternalIP(a.IP) {
 				return "", fmt.Errorf("%w: %s resolves to an internal address", ErrInvalidRemote, u.Hostname())
 			}
 		}

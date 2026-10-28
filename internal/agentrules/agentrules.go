@@ -17,7 +17,7 @@ const MaxBytes = 4 << 10
 
 // Version changes when the built-in text changes meaning, so the Statistics
 // page can tell which wording a session ran with.
-const Version = 4
+const Version = 5
 
 // Default is the built-in ruleset.
 const Default = `CodeSynapse is connected for this repository. Use its tools before you read or search files:
@@ -29,7 +29,15 @@ const Default = `CodeSynapse is connected for this repository. Use its tools bef
 6. Prefer targeted Edit/apply_patch changes to existing files. Read only the needed ranges, emit only changed text and avoid full-file rewrites when a small patch suffices. Use Write for new files or changes that require replacing the whole file.
 7. Before writing new code, look for what exists with search, then duplicate_code; reuse or extend it instead of adding a second copy.
 8. To learn what files, a directory or a log say without reading them into your context, call ask_local with your question and the paths: a local model reads them and answers with file:line citations. Read the cited lines before you edit or rely on a detail. If it has no local model, finds nothing or cites nothing, read the files as usual.
-Use Read and Grep for what the graph does not answer. The graph reflects the last ingest, so files you edited in this session may differ. If CodeSynapse tools are missing or fail, tell the user instead of quietly reading and grepping.`
+Use Read and Grep for what the graph does not answer. The graph reflects the last ingest, so files you edited in this session may differ. If CodeSynapse tools are missing or fail, tell the user instead of quietly reading and grepping.
+
+Answer style in chat:
+- Answer first, then the reason, then the next step. No greetings, hedging, recaps or closing offers.
+- Short sentences. Never drop a negation (not, never, no, only, except).
+- Keep numbers, code, commands, paths and error text exact.
+- Code in chat: only the changed lines plus 1-2 lines of context.
+- Tool status: one line.
+Write in full sentences for security warnings, irreversible actions, ordered steps, and questions or options for the user. Anything persisted (code, comments, commits, docs, PRs) follows its own conventions, not this style.`
 
 // Load returns the ruleset: the contents of file when it is set and usable
 // (non-empty, at most MaxBytes), otherwise the built-in text. custom says

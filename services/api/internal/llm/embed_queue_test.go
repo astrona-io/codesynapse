@@ -16,7 +16,7 @@ func (*embedStub) Embed(_ context.Context, _ string, in []string) ([][]float32, 
 }
 
 func TestEmbedWaitsForTheProviderSlot(t *testing.T) {
-	r, _, ctx := compressRegistry(t, false, &stubProvider{text: func(Request) string { return "ok" }})
+	r, _, ctx := compressRegistry(t, new(false), &stubProvider{text: func(Request) string { return "ok" }})
 	r.mu.Lock()
 	for i := range r.cfg.Providers {
 		if r.cfg.Providers[i].Name == "local" {

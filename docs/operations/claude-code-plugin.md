@@ -66,7 +66,7 @@ The hooks never fail a session: a problem (no repository, no git, unreadable inp
 
 ## The ruleset and how to improve it
 
-The built-in ruleset is short (`internal/agentrules`): start with `minimal_context`, `get_symbol_context` before editing, `file_outline` before large reads, `change_checklist` before ripples, `verify_plan` and `get_pr_context` before finishing. To use your own wording, put it in a file (at most 4 KiB) and set `CODESYNAPSE_AGENT_RULES_FILE` on the API; every session picks it up at its next start, with no plugin update.
+The built-in ruleset is short (`internal/agentrules`): start with `minimal_context`, `get_symbol_context` before editing, `file_outline` before large reads, `change_checklist` before ripples, `verify_plan` and `get_pr_context` before finishing. A short answer-style block follows: answer first, no greetings, recaps or closing offers, negations and exact text kept, only changed lines of code in chat, and full sentences for security warnings, irreversible actions, ordered steps, questions to the user and anything persisted. Its effect on output tokens is not measured. To use your own wording, put it in a file (at most 4 KiB) and set `CODESYNAPSE_AGENT_RULES_FILE` on the API; every session picks it up at its next start, with no plugin update.
 
 **Statistics → Agents → Do agents use CodeSynapse first?** shows the share of sessions that began with a CodeSynapse tool, the sessions that began with Read or Grep, and the whole-file reads turned back. Change the wording, then watch whether the first share rises. Without the plugin the same ruleset is still available to paste (`GET /api/v1/agent-rules`) or to write into `AGENTS.md` with `codesynapse mcp agents-md`.
 
