@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -66,6 +67,20 @@ func TestBridgeAnswersFromTheWorkingTree(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"from":"server"}}`, m.ID)
 	}))
 	t.Cleanup(srv.Close)
+	var reported []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos" {
+			_, _ = io.WriteString(w, `{"repos":[]}`)
+			return
+		}
+		var u localUsage
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&u))
+		mu.Lock()
+		reported = append(reported, r.URL.Path+" "+u.Tool)
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(api.Close)
 
 	ctx := context.Background()
 	wt := newWorktree(ctx, filepath.Join(dir), "", slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -76,7 +91,8 @@ func TestBridgeAnswersFromTheWorkingTree(t *testing.T) {
 		t.Helper()
 		in := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n" + strings.Join(lines, "\n") + "\n"
 		var out bytes.Buffer
-		b := &bridge{url: srv.URL, token: "csk_test", session: "chat-1", out: &out, http: srv.Client(), worktree: wt}
+		b := &bridge{url: srv.URL, token: "csk_test", session: "chat-1", out: &out, http: srv.Client(), worktree: wt, gitDir: dir,
+			report: apiClient{base: api.URL, token: "csk_test", http: api.Client()}}
 		require.NoError(t, b.run(ctx, strings.NewReader(in)))
 		got := map[string]json.RawMessage{}
 		for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
@@ -93,6 +109,7 @@ func TestBridgeAnswersFromTheWorkingTree(t *testing.T) {
 
 	got := call(search)
 	assert.Equal(t, string(got["2"]), `{"from":"server"}`, "a clean tree is answered by the server")
+	assert.Len(t, reported, 0, "the server saw the call itself")
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "demo.go"), []byte("package demo\n\n// Synced is in the server's graph.\nfunc Synced() int { return 1 }\n\n// Edited is not synced yet.\nfunc Edited() int { return 2 }\n"), 0o600))
 	mu.Lock()
@@ -128,6 +145,8 @@ func TestBridgeAnswersFromTheWorkingTree(t *testing.T) {
 	for _, f := range forwarded {
 		assert.False(t, strings.HasSuffix(f, " 2") || strings.HasSuffix(f, " 5"), "answered locally, never sent: "+f)
 	}
+	slices.Sort(reported)
+	assert.Equal(t, reported, []string{"/api/v1/usage/local file_outline", "/api/v1/usage/local search"}, "local answers are reported, so they are counted and audited")
 }
 
 func TestWorktreeLocalCalls(t *testing.T) {

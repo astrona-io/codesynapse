@@ -32,7 +32,7 @@ const askLocalTimeout = 30 * time.Minute
 // reports whether it did.
 func (b *bridge) answerAskLocal(ctx context.Context, msg []byte, m rpcMessage) bool {
 	var c toolCall
-	if json.Unmarshal(msg, &c) != nil || len(m.ID) == 0 {
+	if json.Unmarshal(msg, &c) != nil || len(m.ID) == 0 || !b.mayAnswer(c.Params.Name) {
 		return false
 	}
 	answer := b.askLocal
@@ -53,8 +53,10 @@ func (b *bridge) answerAskLocal(ctx context.Context, msg []byte, m rpcMessage) b
 		out = errorResponse(m.ID, err)
 		failed = true
 	}
+	if !b.reportLocal(ctx, c.Params.Name, time.Since(start), len(out)/4, failed) {
+		return false
+	}
 	b.write(out)
-	b.reportLocal(ctx, c.Params.Name, time.Since(start), len(out)/4, failed)
 	return true
 }
 

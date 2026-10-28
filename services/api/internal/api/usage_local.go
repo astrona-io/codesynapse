@@ -1,24 +1,33 @@
 package api
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"net/http"
 	"slices"
 	"time"
 
+	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/asklocal"
+	"github.com/astrona-io/codesynapse/internal/coretools"
+	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/ghtools"
 	"github.com/astrona-io/codesynapse/internal/gittools"
 	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
 // Calls the Claude Code bridge answers on the developer's machine (the git
-// tools read a checkout the server cannot see) are reported here, so they are
-// counted on Statistics and appear in the audit log (the HTTP middleware
-// records every changing request) like the calls the MCP server answers. The
-// report carries the tool name, the time it took and the size of the answer,
-// nothing about the checkout.
+// tools read a checkout the server cannot see, and the core tools answer from
+// the working tree while it has unsynced changes) are reported here before
+// the bridge gives the answer, so they are counted on Statistics and recorded
+// in the audit log like the calls the MCP server answers: an mcp.local_answer
+// entry with the caller, the chat's runtime session, the client, the tool and
+// the repository. The report carries the tool name, the repository the
+// checkout is, the time it took and the size of the answer; never arguments,
+// paths or contents. The bridge answers locally only when this succeeded, so
+// a refused session or an audit log that cannot be written sends the call to
+// the MCP server instead.
 
 const (
 	maxLocalDurationMs = 10 * 60 * 1000
@@ -28,13 +37,14 @@ const (
 type localUsageReport struct {
 	Tool           string `json:"tool"`
 	Client         string `json:"client"`
+	Repo           string `json:"repo"`
 	DurationMs     int    `json:"duration_ms"`
 	ResponseTokens int    `json:"response_tokens"`
 	Failed         bool   `json:"failed"`
 }
 
 func (s *Server) usageLocalRoutes() {
-	s.route("POST /api/v1/usage/local", anyone, s.handleLocalUsage)
+	s.route("POST /api/v1/usage/local", visibleOnly, s.handleLocalUsage)
 	s.route("POST /api/v1/usage/unindexed", anyone, s.handleUnindexedUsage)
 }
 
@@ -109,33 +119,84 @@ func (s *Server) handleLocalUsage(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
-	org := ""
-	if s.cfg.Accounts != nil {
-		m, err := scopeFrom(r.Context()).selected()
-		if err != nil {
-			s.problem(w, http.StatusBadRequest, err)
-			return
-		}
-		org = m.Org.ID
+	// The repository is the bridge's name for the checkout; one the caller
+	// cannot read is dropped, not refused, so the git tools of a checkout
+	// that is not indexed (or not theirs) keep working.
+	repo := in.Repo
+	if !scopeFrom(r.Context()).sees(repo) {
+		repo = ""
 	}
-	b := usage.Bucket{Day: usage.Day(time.Now()), Org: org, Tool: in.Tool, Client: in.Client, Calls: 1,
+	e := accounts.Event{Action: localAnswerAction, Target: cmp.Or(repo, in.Tool), Outcome: accounts.Success, Status: http.StatusNoContent,
+		MCP: &accounts.MCPRequest{Method: "tools/call", Name: in.Tool, Repo: repo, Client: in.Client,
+			DurationMS: int64(in.DurationMs), Bytes: int64(in.ResponseTokens) * 4}}
+	if in.Failed {
+		e.Outcome = accounts.Failure
+	}
+	if s.cfg.Accounts == nil {
+		s.record(r.Context(), e)
+		s.countLocal(r, in, "", repo)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	// A local answer is audited like a tool call: it needs the chat's
+	// registered runtime session, and no entry means no answer.
+	if r, ok := s.executionRequest(w, r, true); ok {
+		s.auditLocal(w, r, in, e)
+	}
+}
+
+// auditLocal writes the mcp.local_answer entry of a local call in the
+// session's organisation and counts it; w gets 204 only when the entry was
+// written.
+func (s *Server) auditLocal(w http.ResponseWriter, r *http.Request, in localUsageReport, e accounts.Event) {
+	p, _ := principal(r.Context())
+	id, err := execution.Require(r.Context())
+	if err != nil {
+		s.problem(w, http.StatusForbidden, err)
+		return
+	}
+	org := id.TenantID
+	repo := e.MCP.Repo
+	if reach, ok := scopeFrom(r.Context()).reach[repo]; repo != "" && (!ok || reach.OrgID != org) {
+		// Seen through another organisation than the session's.
+		repo = ""
+		e.Target, e.MCP.Repo = in.Tool, ""
+	}
+	e.UserID, e.ActorEmail, e.Via, e.KeyID, e.OrgID = p.User.ID, p.User.Email, p.Via, p.KeyID, org
+	e.MCP.SessionID = id.SessionID
+	if _, err := s.cfg.Accounts.Record(r.Context(), e); err != nil {
+		s.logger.Error("audit log write failed", "action", e.Action, "error", err)
+		s.problem(w, http.StatusServiceUnavailable, errors.New("the audit log could not record this call; ask the server instead"))
+		return
+	}
+	s.countLocal(r, in, org, repo)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// countLocal adds a local call to the usage buckets. A failure loses only
+// the count: the call is already in the audit log.
+func (s *Server) countLocal(r *http.Request, in localUsageReport, org, repo string) {
+	b := usage.Bucket{Day: usage.Day(time.Now()), Org: org, Repo: repo, Tool: in.Tool, Client: in.Client, Calls: 1,
 		ResponseTokens: in.ResponseTokens, DurationMs: in.DurationMs, MaxDurationMs: in.DurationMs}
 	if in.Failed {
 		b.Errors = 1
 	}
 	if err := s.st.AddUsage(r.Context(), []usage.Bucket{b}); err != nil {
-		s.problem(w, http.StatusInternalServerError, err)
-		return
+		s.logger.Warn("local call not counted", "tool", in.Tool, "error", err)
 	}
-	w.WriteHeader(http.StatusNoContent)
 }
+
+// localAnswerAction is the audit action of a call the bridge answered.
+const localAnswerAction = "mcp.local_answer"
 
 func (in localUsageReport) validate() error {
 	switch {
-	case !slices.Contains(gittools.Tools, in.Tool) && !slices.Contains(ghtools.Tools, in.Tool) && in.Tool != asklocal.Tool && in.Tool != asklocal.DraftTool:
+	case !slices.Contains(gittools.Tools, in.Tool) && !slices.Contains(ghtools.Tools, in.Tool) && !slices.Contains(coretools.Local, in.Tool) && in.Tool != asklocal.Tool && in.Tool != asklocal.DraftTool:
 		return fmt.Errorf("unknown local tool %q", in.Tool)
 	case !clientNameRe.MatchString(in.Client):
 		return errors.New("client must be a short lower-case name, e.g. claude-code")
+	case in.Repo != "" && !validRepoName(in.Repo):
+		return errors.New("repo must be a repository name such as owner/name")
 	case in.DurationMs < 0 || in.DurationMs > maxLocalDurationMs:
 		return errors.New("duration_ms out of range")
 	case in.ResponseTokens < 0 || in.ResponseTokens > maxLocalTokens:

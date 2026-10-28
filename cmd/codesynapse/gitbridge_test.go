@@ -41,6 +41,10 @@ func TestBridgeAnswersGitToolsLocallyAndReportsThem(t *testing.T) {
 	var reports []localUsage
 	var auth string
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos" {
+			_, _ = io.WriteString(w, `{"repos":[]}`) // the checkout is named before the first report
+			return
+		}
 		require.Equal(t, r.URL.Path, "/api/v1/usage/local")
 		var u localUsage
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&u))

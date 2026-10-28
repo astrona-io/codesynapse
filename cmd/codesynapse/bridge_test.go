@@ -191,20 +191,31 @@ func TestBridgeAnswersAProbeBeforeInitialize(t *testing.T) {
 	assert.Equal(t, got["1"], "result", "initialize is still answered")
 }
 
-// Every call goes to the server unless the user opts in to local answers:
-// they would not be audited or counted there.
-func TestBridgeWorktreeAnswersAreOptIn(t *testing.T) {
-	t.Setenv("CODESYNAPSE_BRIDGE_WORKTREE", "")
-	ec := &app.Env{Command: &cobra.Command{Use: "bridge"}}
-	o := &mcpBridgeOptions{EC: ec}
-	require.NoError(t, o.SetupFlags(context.Background(), ec))
-	assert.False(t, o.worktree, "off by default")
-
-	t.Setenv("CODESYNAPSE_BRIDGE_WORKTREE", "true")
-	ec = &app.Env{Command: &cobra.Command{Use: "bridge"}}
-	o = &mcpBridgeOptions{EC: ec}
-	require.NoError(t, o.SetupFlags(context.Background(), ec))
-	assert.True(t, o.worktree, "on when asked for")
+// Working-tree answers are on unless turned off, and never for the runtime
+// adapters, which need the server to answer.
+func TestBridgeWorktreeAnswersAreTheDefault(t *testing.T) {
+	options := func(env string, args ...string) (*mcpBridgeOptions, error) {
+		t.Setenv("CODESYNAPSE_BRIDGE_WORKTREE", env)
+		ec := &app.Env{Command: &cobra.Command{Use: "bridge"}}
+		o := &mcpBridgeOptions{EC: ec}
+		require.NoError(t, o.SetupFlags(context.Background(), ec))
+		require.NoError(t, ec.Command.Flags().Parse(args))
+		return o, o.Validate(context.Background(), ec)
+	}
+	o, err := options("")
+	require.NoError(t, err)
+	assert.True(t, o.worktree, "on by default")
+	o, err = options("false")
+	require.NoError(t, err)
+	assert.False(t, o.worktree, "off when turned off")
+	o, err = options("", "--worktree=false")
+	require.NoError(t, err)
+	assert.False(t, o.worktree, "off with the flag")
+	o, err = options("", "--client", "codex")
+	require.NoError(t, err)
+	assert.False(t, o.worktree, "runtime adapters always ask the server")
+	_, err = options("", "--client", "codex", "--worktree")
+	assert.Error(t, err, "asking for both is refused")
 }
 
 func TestBridgeNoteClient(t *testing.T) {
