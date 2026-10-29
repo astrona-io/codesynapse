@@ -58,6 +58,8 @@ type Store struct {
 	jobsOnce       sync.Once
 	sched          *scheduleTable
 	schedOnce      sync.Once
+	daily          *dailyTable
+	dailyOnce      sync.Once
 }
 
 type member struct {
