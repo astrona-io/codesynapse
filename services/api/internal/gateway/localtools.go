@@ -184,6 +184,7 @@ type answer struct {
 	Finish string
 	In     int
 	Out    int
+	Cached int
 }
 
 // complete says the answer ended on its own with something in it: not cut
@@ -237,7 +238,7 @@ func collect(first chunk, more bool, next func() (chunk, bool), allowed map[stri
 			a.Finish = c.Finish
 		}
 		if c.In > 0 || c.Out > 0 {
-			a.In, a.Out = c.In, c.Out
+			a.In, a.Out, a.Cached = c.In, c.Out, c.Cached
 		}
 	}
 	a.Text = text.String()
@@ -304,7 +305,7 @@ func streamCollected(w http.ResponseWriter, model string, a answer) Usage {
 	}
 	send("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": a.stopReason(), "stop_sequence": nil}, "usage": map[string]int{"input_tokens": a.In, "output_tokens": a.Out}})
 	send("message_stop", map[string]string{"type": "message_stop"})
-	return Usage{In: a.In, Out: a.Out}
+	return Usage{In: a.In, Out: a.Out, Cached: a.Cached}
 }
 
 // jsonCollected writes the single Anthropic message for a collected answer.
@@ -322,5 +323,5 @@ func jsonCollected(w http.ResponseWriter, model string, a answer) Usage {
 		"content": content, "stop_reason": a.stopReason(), "stop_sequence": nil,
 		"usage": map[string]int{"input_tokens": a.In, "output_tokens": a.Out},
 	})
-	return Usage{In: a.In, Out: a.Out}
+	return Usage{In: a.In, Out: a.Out, Cached: a.Cached}
 }

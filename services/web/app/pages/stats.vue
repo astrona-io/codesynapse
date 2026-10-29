@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { STAT_WINDOWS, useStatistics } from '~/composables/useStatistics'
+import { STAT_WINDOWS, useStatistics, windowChip } from '~/composables/useStatistics'
 useHead({ title: 'Statistics · CodeSynapse' })
 const route = useRoute()
 if (route.path === '/stats') await navigateTo('/stats/agents', { replace: true })
@@ -28,7 +28,7 @@ const showWindow = computed(() => !route.path.endsWith('/activity'))
     <div v-if="showWindow" class="row filters">
       <span class="label" id="stat-window">Window</span>
       <div class="segmented" role="group" aria-labelledby="stat-window">
-        <button v-for="d in STAT_WINDOWS" :key="d" type="button" :aria-pressed="days === d" @click="days = d">last {{ d }} days</button>
+        <button v-for="d in STAT_WINDOWS" :key="d" type="button" :aria-pressed="days === d" @click="days = d">{{ windowChip(d) }}</button>
       </div>
       <span v-if="pending" class="muted small">refreshing…</span>
     </div>

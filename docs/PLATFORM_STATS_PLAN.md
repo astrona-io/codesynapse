@@ -291,9 +291,11 @@ Rules:
 
 **Cost uses the same rule.**
 
-- Avoided tokens are valued once, at the price the reference cloud model would have charged for their first entry. That is the cache-write price when the agent's provider caches by default (Anthropic), and the input price otherwise.
+- Avoided tokens are valued once, at the price the reference cloud model would have charged for their first entry. That is the cache-write price when the agent's provider caches by default (Anthropic), and the input price otherwise. When the reference has no cache-write price, the input price is used instead of leaving the figure unknown.
+- Tokens avoided by clients without `avoided_repeat_ranges` stay out of the share, but they are valued apart at the input price (`saved.unaware_dollars`; their repeats cannot be taken out). `saved.total_dollars` adds both parts and is what the money total uses; the tile names how many tokens came from such clients. Before this, a window where every avoided token came from such clients showed "unknown" for the whole graph saving and left it out of the total.
+- The built-in reference, used when no cloud provider has prices, is Claude Opus 5.5's list price: $4 input, $20 output, $0.20 cache reads and $5 five-minute cache writes per million tokens (platform.claude.com pricing, checked 2026-10-29).
 - Later re-sends are not valued in the main saving. The upper figure values them at the cache-read price (rule 5).
-- Local model work keeps today's split: fresh input at the input price, cached input at the cache-read price, output at the output price (`models.vue:39-46`).
+- Local model work keeps today's split: fresh input at the input price, cached input at the cache-read price, output at the output price (`models.vue:39-46`). Cached input is what the local runtime reports: `prompt_tokens_details.cached_tokens` (vLLM, LM Studio) or llama.cpp's `timings.cache_n`. Ollama reports no cache use, so the tile says "none reported" instead of $0. The gateway's local answers record the same count as `gateway_local_tokens_total{kind="cached"}` and price it at the cache-read price.
 - `PriceReference` gains `cache_write_per_mtok`.
 - When a needed price is missing, that part of the saving is "unknown", never $0.
 - The provider's own prompt-cache saving (`llm_savings`) stays a separate, labelled figure. It is never added to "Saved by CodeSynapse".

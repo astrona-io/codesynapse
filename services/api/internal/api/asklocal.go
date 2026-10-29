@@ -14,6 +14,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/agentctx"
 	"github.com/astrona-io/codesynapse/internal/asklocal"
+	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/redact"
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
@@ -347,17 +348,68 @@ func (s *Server) handleBriefPlan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, BriefPlan{Ranges: []string{}, Keywords: []string{}})
 		return
 	}
-	repo := r.PathValue("repo")
-	mc, err := agentctx.Service{R: store.ForRepository(s.st, repo)}.MinimalContext(r.Context(), repo, in.Prompt, nil, 4000)
+	plan, err := briefPlan(r.Context(), s.st, r.PathValue("repo"), in.Prompt)
 	if err != nil {
 		s.problem(w, http.StatusBadGateway, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, plan)
+}
+
+// maxBackEndRanges bounds the back-end ranges of a plan for a prompt about
+// the user interface that found front-end code too.
+const maxBackEndRanges = 3
+
+// briefPlan picks the ranges for prompt from the graph alone. A prompt about
+// the user interface (asklocal.AboutUI: an icon, mouse over, a page) puts
+// front-end files first, and once one is found, drops back-end types that
+// only share a word with the prompt (the "stats" of a statistics page is not
+// the Go Stats structs, PLAN item 18 case g) and keeps few other back-end
+// ranges. Quoted text is looked up by the client in its checkout, since the
+// graph holds no literal text.
+func briefPlan(ctx context.Context, st store.Reader, repo, prompt string) (BriefPlan, error) {
+	ui := asklocal.AboutUI(prompt)
+	budget := 4000
+	if ui {
+		// A deeper pool, so front-end matches ranked below the first dozen
+		// back-end names can still lead; the plan stays maxBriefRanges.
+		budget = 3 * budget
+	}
+	mc, err := agentctx.Service{R: store.ForRepository(st, repo)}.MinimalContext(ctx, repo, prompt, nil, budget)
+	if err != nil {
+		return BriefPlan{}, err
+	}
 	plan := BriefPlan{Ranges: []string{}, Keywords: mc.Keywords}
-	for _, it := range mc.Items {
+	items := mc.Items
+	if ui {
+		var front, back []agentctx.MinimalItem
+		for _, it := range items {
+			if asklocal.FrontEnd(rangePath(it.Read)) {
+				front = append(front, it)
+			} else {
+				back = append(back, it)
+			}
+		}
+		if len(front) > 0 {
+			back = slices.DeleteFunc(back, func(it agentctx.MinimalItem) bool {
+				return it.Kind == model.KindType && it.Retrieval != "exact"
+			})
+			back = back[:min(len(back), maxBackEndRanges)]
+		}
+		items = append(front, back...)
+	}
+	for _, it := range items {
 		if it.Read != "" && !slices.Contains(plan.Ranges, it.Read) && len(plan.Ranges) < maxBriefRanges {
 			plan.Ranges = append(plan.Ranges, it.Read)
 		}
 	}
-	writeJSON(w, http.StatusOK, plan)
+	return plan, nil
+}
+
+// rangePath is the file of a "path:start-end" location.
+func rangePath(loc string) string {
+	if i := strings.LastIndexByte(loc, ':'); i > 0 {
+		return loc[:i]
+	}
+	return loc
 }

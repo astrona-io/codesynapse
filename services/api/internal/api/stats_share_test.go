@@ -187,26 +187,37 @@ func TestSavedEstimatePricing(t *testing.T) {
 	anthropic := PriceReference{InputPerMTok: 5, OutputPerMTok: 25, CachedInputPerMTok: 0.5, CacheWritePerMTok: 6.25, CachesByDefault: true}
 	openai := PriceReference{InputPerMTok: 2, OutputPerMTok: 8, CachedInputPerMTok: 0.5}
 	a := AgentStats{ShareAvoidedTokens: 3_000_000, ShareLocalAvoidedTokens: 1_000_000, AvoidedResendTokens: 10_000_000}
+	// 2.5M avoided by clients without repeat reports, 0.5M of it ask_local.
+	mixed := a
+	mixed.AvoidedUnawareTokens, mixed.AvoidedUnawareLocalTokens = 2_500_000, 500_000
+	unaware := AgentStats{AvoidedUnawareTokens: 2_600_000, AvoidedUnawareLocalTokens: 100_000}
 	for _, tc := range []struct {
-		name           string
-		a              AgentStats
-		ref            PriceReference
-		price          string
-		dollars, upper *float64
+		name                  string
+		a                     AgentStats
+		ref                   PriceReference
+		price                 string
+		dollars, upper        *float64
+		unawareTok            int
+		unawareDollars, total *float64
 	}{
-		{"caches by default: cache-write price", a, anthropic, savedPriceCacheWrite, ptr(12.5), ptr(17.5)},
-		{"no default cache: input price", a, openai, savedPriceInput, ptr(4), ptr(9)},
-		{"missing cache-write price", a, PriceReference{InputPerMTok: 5, CachesByDefault: true, CachedInputPerMTok: 0.5}, savedPriceCacheWrite, nil, nil},
-		{"missing input price", a, PriceReference{CachedInputPerMTok: 0.5}, savedPriceInput, nil, nil},
-		{"missing cache-read price: upper unknown", a, PriceReference{InputPerMTok: 2}, savedPriceInput, ptr(4), nil},
-		{"only clients without repeats", AgentStats{AvoidedUnawareTokens: 5000}, openai, savedPriceInput, nil, nil},
-		{"nothing avoided", AgentStats{}, openai, savedPriceInput, ptr(0), ptr(0)},
+		{"caches by default: cache-write price", a, anthropic, savedPriceCacheWrite, ptr(12.5), ptr(17.5), 0, ptr(0), ptr(12.5)},
+		{"no default cache: input price", a, openai, savedPriceInput, ptr(4), ptr(9), 0, ptr(0), ptr(4)},
+		{"missing cache-write price: input price", a, PriceReference{InputPerMTok: 5, CachesByDefault: true, CachedInputPerMTok: 0.5}, savedPriceInput, ptr(10), ptr(15), 0, ptr(0), ptr(10)},
+		{"missing input price", a, PriceReference{CachedInputPerMTok: 0.5}, savedPriceInput, nil, nil, 0, nil, nil},
+		{"missing cache-read price: upper unknown", a, PriceReference{InputPerMTok: 2}, savedPriceInput, ptr(4), nil, 0, ptr(0), ptr(4)},
+		{"clients without repeats: input price, apart", mixed, anthropic, savedPriceCacheWrite, ptr(12.5), ptr(17.5), 2_000_000, ptr(10), ptr(22.5)},
+		{"only clients without repeats: valued, not unknown", unaware, defaultReference, savedPriceCacheWrite, ptr(0), ptr(0), 2_500_000, ptr(10), ptr(10)},
+		{"only clients without repeats, no price", unaware, PriceReference{}, savedPriceInput, nil, nil, 2_500_000, nil, nil},
+		{"nothing avoided", AgentStats{}, openai, savedPriceInput, ptr(0), ptr(0), 0, ptr(0), ptr(0)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := savedEstimate(tc.a, tc.ref)
 			assert.Equal(t, e.Price, tc.price)
 			assert.Equal(t, e.Dollars, tc.dollars)
 			assert.Equal(t, e.UpperDollars, tc.upper)
+			assert.Equal(t, e.UnawareGraphTokens, tc.unawareTok)
+			assert.Equal(t, e.UnawareDollars, tc.unawareDollars)
+			assert.Equal(t, e.TotalDollars, tc.total)
 		})
 	}
 	// Re-sends never change the main saving.
@@ -219,7 +230,10 @@ func TestSavedEstimatePricing(t *testing.T) {
 func TestPriceReference(t *testing.T) {
 	ref := (&Server{}).priceReference()
 	assert.Equal(t, ref, defaultReference)
-	assert.Equal(t, ref.CacheWritePerMTok, 6.25)
+	// Claude Opus 5.5 list prices (platform.claude.com pricing, 2026-10-29).
+	assert.Equal(t, []float64{ref.InputPerMTok, ref.OutputPerMTok, ref.CachedInputPerMTok, ref.CacheWritePerMTok}, []float64{4, 20, 0.2, 5})
+	assert.True(t, ref.Estimate)
+	assert.True(t, ref.Source != "" && ref.Checked != "", "the built-in price names its source and date")
 	reg := llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{
 		{Name: "claude", Kind: llm.KindAnthropic, Model: "m", PriceInputPerMTok: 3, PriceOutputPerMTok: 15, PriceCacheWritePerMTok: 3.75, PriceCachedInputPerMTok: 0.3},
 	}, Default: "claude"})

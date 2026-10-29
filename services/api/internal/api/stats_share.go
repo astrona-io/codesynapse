@@ -23,11 +23,12 @@ const (
 	savedPriceInput      = "input"
 )
 
-// SavedEstimate is what the avoided context in the share would have cost at
-// the reference cloud model, valued once at the price of its first entry.
-// Dollars is nil when that price is missing or no avoided tokens can be
-// valued (unknown, never zero). UpperDollars adds the re-sent context at the
-// cache-read price; it is shown apart and never added to totals.
+// SavedEstimate is what the graph answers' avoided context would have cost
+// at the reference cloud model, valued once at the price of its first entry.
+// Dollars covers the share's tokens (clients that report repeats); it is nil
+// only when the reference has no price (unknown, never zero). UpperDollars
+// adds the re-sent context at the cache-read price; it is shown apart and
+// never added to totals.
 type SavedEstimate struct {
 	Tokens       int      `json:"tokens"`
 	Price        string   `json:"price"`
@@ -35,9 +36,18 @@ type SavedEstimate struct {
 	Dollars      *float64 `json:"dollars"`
 	ResendTokens int      `json:"resend_tokens"`
 	UpperDollars *float64 `json:"upper_dollars"`
-	// UnawareTokens were avoided by clients that do not report repeats;
-	// they are left out of Tokens and Dollars.
+	// UnawareTokens were avoided by clients that do not report repeats,
+	// ask_local included; they stay out of the share and out of Tokens.
 	UnawareTokens int `json:"unaware_tokens"`
+	// UnawareGraphTokens is their graph part (ask_local is valued with the
+	// local models). Their repeats cannot be taken out, so they are valued
+	// at the plain input price (UnawarePerMTok) and shown apart.
+	UnawareGraphTokens int      `json:"unaware_graph_tokens"`
+	UnawarePerMTok     float64  `json:"unaware_per_mtok"`
+	UnawareDollars     *float64 `json:"unaware_dollars"`
+	// TotalDollars is Dollars plus UnawareDollars, the figure totals add;
+	// nil when neither can be valued.
+	TotalDollars *float64 `json:"total_dollars"`
 }
 
 type shareTool struct{ day, org, client, tool string }
@@ -58,11 +68,12 @@ type shareInputs struct {
 	resend   map[shareTool]int
 	groups   map[shareGroup]*usage.TokenCounts
 	// Filled during the main pass.
-	avoided     map[shareTool]*shareAvoided
-	unaware     float64
-	share       float64
-	shareLocal  float64
-	repeatTotal int
+	avoided      map[shareTool]*shareAvoided
+	unaware      float64
+	unawareLocal float64
+	share        float64
+	shareLocal   float64
+	repeatTotal  int
 }
 
 func newShareInputs(buckets []usage.Bucket, inWindow func(day string) bool) *shareInputs {
@@ -118,6 +129,9 @@ func (sh *shareInputs) scale(bk usage.Bucket, avoided float64, local bool) int {
 	k := shareToolOf(bk)
 	if !sh.aware[shareClient{k.day, k.org, k.client}] {
 		sh.unaware += avoided
+		if local {
+			sh.unawareLocal += avoided
+		}
 		return int(avoided)
 	}
 	sh.of(k).unscaled += avoided
@@ -188,6 +202,7 @@ func (sh *shareInputs) finish(a *AgentStats) {
 	a.ShareAvoidedTokens = int(sh.share)
 	a.ShareLocalAvoidedTokens = int(sh.shareLocal)
 	a.AvoidedUnawareTokens = int(sh.unaware)
+	a.AvoidedUnawareLocalTokens = int(sh.unawareLocal)
 	a.AvoidedRepeatRanges = sh.repeatTotal
 	a.AvoidedResendTokens = int(sh.resendTokens())
 	known, basis := sh.cacheKnown()
@@ -214,25 +229,36 @@ func (sh *shareInputs) finish(a *AgentStats) {
 	}
 }
 
-// savedEstimate values the graph part of the share's avoided tokens once, at
-// the reference model's cache-write price when its provider caches by
-// default and its input price otherwise. ask_local is valued with the local
-// models, and the provider's own prompt-cache saving (llm_savings) is never
-// part of it.
+// savedEstimate values the graph part of the avoided tokens once. The
+// share's tokens enter at the reference model's cache-write price when its
+// provider caches by default (the input price when that price is missing)
+// and at its input price otherwise. Tokens of clients that do not report
+// repeats are valued apart at the input price and stay out of the share.
+// ask_local is valued with the local models, and the provider's own
+// prompt-cache saving (llm_savings) is never part of it.
 func savedEstimate(a AgentStats, ref PriceReference) SavedEstimate {
 	e := SavedEstimate{Tokens: max(0, a.ShareAvoidedTokens-a.ShareLocalAvoidedTokens), ResendTokens: a.AvoidedResendTokens,
-		UnawareTokens: a.AvoidedUnawareTokens, Price: savedPriceInput, PerMTok: ref.InputPerMTok}
-	if ref.CachesByDefault {
+		UnawareTokens: a.AvoidedUnawareTokens, UnawareGraphTokens: max(0, a.AvoidedUnawareTokens-a.AvoidedUnawareLocalTokens),
+		Price: savedPriceInput, PerMTok: ref.InputPerMTok, UnawarePerMTok: ref.InputPerMTok}
+	if ref.CachesByDefault && ref.CacheWritePerMTok > 0 {
 		e.Price, e.PerMTok = savedPriceCacheWrite, ref.CacheWritePerMTok
 	}
-	if e.PerMTok <= 0 || (e.Tokens == 0 && e.UnawareTokens > 0) {
-		return e
+	var total float64
+	if e.PerMTok > 0 {
+		d := round4(float64(e.Tokens) * e.PerMTok / 1e6)
+		e.Dollars, total = &d, d
+		if ref.CachedInputPerMTok > 0 {
+			u := round4(d + float64(e.ResendTokens)*ref.CachedInputPerMTok/1e6)
+			e.UpperDollars = &u
+		}
 	}
-	d := round4(float64(e.Tokens) * e.PerMTok / 1e6)
-	e.Dollars = &d
-	if ref.CachedInputPerMTok > 0 {
-		u := round4(d + float64(e.ResendTokens)*ref.CachedInputPerMTok/1e6)
-		e.UpperDollars = &u
+	if e.UnawarePerMTok > 0 {
+		d := round4(float64(e.UnawareGraphTokens) * e.UnawarePerMTok / 1e6)
+		e.UnawareDollars, total = &d, total+d
+	}
+	if e.Dollars != nil || e.UnawareDollars != nil {
+		t := round4(total)
+		e.TotalDollars = &t
 	}
 	return e
 }

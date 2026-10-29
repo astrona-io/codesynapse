@@ -57,9 +57,11 @@ type Meta struct {
 	// Out is the response size in bytes.
 	Out int
 	// InTokens and OutTokens are what the local model reported for a local
-	// answer; Metered says it reported any.
-	InTokens, OutTokens int
-	Metered             bool
+	// answer; Metered says it reported any. CachedTokens is the part of
+	// InTokens its prompt cache served, zero when the runtime reports none
+	// (Ollama never does).
+	InTokens, OutTokens, CachedTokens int
+	Metered                           bool
 	// Fallthrough is why a request offered to the local model went on to
 	// the cloud: one of the Fall* reasons, empty when the local model
 	// answered or was never asked.
@@ -134,7 +136,7 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			u, reason, ok := local.serve(r.Context(), rec, body)
 			if ok {
 				meta.Route = "local"
-				meta.InTokens, meta.OutTokens, meta.Metered = u.In, u.Out, u.In+u.Out > 0
+				meta.InTokens, meta.OutTokens, meta.CachedTokens, meta.Metered = u.In, u.Out, u.Cached, u.In+u.Out > 0
 				done(r.Context(), meta, http.StatusOK)
 				return
 			}

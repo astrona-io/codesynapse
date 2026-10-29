@@ -63,10 +63,12 @@ const table = computed(() => (tab.value === 'tenants' ? tenants.value : tab.valu
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? '–' : `${v}%`)
 const shareHint = computed(() => {
   const t = usage.value?.totals
-  if (!t?.share_known) return 'no token counts from the hooks in this window'
-  const basis = t.share_basis === 'known_only' ? ' · organisations without token counts left out' : ''
-  return `of the agents' work tokens${basis}`
+  if (!t?.share_known) return 'not measured in this window'
+  return t.share_basis === 'known_only' ? 'of work tokens · some left out' : 'of work tokens'
 })
+const shareTip = 'The share of the agents\' work tokens that CodeSynapse answers saved, from the token counts the hooks report. '
+  + 'Organisations (or, for 90 days and 1 year, organisation-days) without token counts are left out rather than counted as zero.'
+
 // The upper figure (repeats counted) stays beside the main one in the text
 // below the tiles, never in a tile or an export.
 const upperShare = computed(() => {
@@ -84,7 +86,7 @@ const missing = (figure: string) => table.value?.rollup?.unavailable.includes(fi
 const day = (iso: string) => new Date(iso).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })
 const activeHint = computed(() => {
   const r = summary.value?.rollup
-  if (!r) return 'signed in, opened a session or used a key'
+  if (!r) return ''
   return r.latest ? `in the 30 days to ${day(r.latest)}` : 'no daily figures recorded yet'
 })
 </script>
@@ -116,7 +118,7 @@ const activeHint = computed(() => {
     <div v-if="summary" class="grid cols-4">
       <StatTile label="Organisations" :value="n(summary.orgs)" :hint="`${summary.orgs_created} new in this window`" />
       <StatTile label="People" :value="n(summary.users)" :hint="`${summary.users_created} new · ${summary.memberships} memberships`" />
-      <StatTile label="Active people" :value="n(summary.active_users)" :hint="activeHint" />
+      <StatTile label="Active people" :value="n(summary.active_users)" :hint="activeHint" tip="signed in, opened a session or used a key" />
       <StatTile label="Seats" :value="n(summary.seats)" :hint="`held by ${summary.seated_people} people`" />
       <StatTile label="Runtime sessions" :value="n(summary.execution_active)" :hint="`${summary.execution_created} started in this window`" />
       <StatTile label="API keys" :value="n(summary.keys_active)" :hint="`${summary.browser_active} browser sessions open`" />
@@ -197,8 +199,9 @@ const activeHint = computed(() => {
         <div class="grid cols-4 usage-tiles">
           <StatTile label="Agent sessions" :value="n(usage.totals.sessions)" :hint="`${usage.from} to ${usage.to} (UTC)`" />
           <StatTile label="Tool calls" :value="n(usage.totals.calls)" :hint="`${fmtCompact(usage.totals.errors)} failed`" />
-          <StatTile label="Tokens avoided" :value="pct(usage.totals.share_avoided_pct)" :hint="shareHint" />
-          <StatTile label="Unindexed checkouts" :value="n(usage.totals.unindexed_checkouts)" hint="distinct checkouts agents used without an index" />
+          <StatTile label="Tokens avoided" :value="pct(usage.totals.share_avoided_pct)" :hint="shareHint" :tip="shareTip" />
+          <StatTile label="Unindexed checkouts" :value="n(usage.totals.unindexed_checkouts)" :hint="usage.totals.unindexed_checkouts === null ? 'live ranges only' : 'without an index'"
+            tip="Distinct checkouts agents worked in that CodeSynapse has not indexed. Not kept per day, so 90 days and 1 year show none." />
         </div>
         <p class="muted small">
           {{ fmtCompact(usage.totals.response_tokens) }} tokens served · {{ fmtCompact(usage.totals.avoided_tokens) }} avoided<template v-if="upperShare !== null">

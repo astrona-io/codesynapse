@@ -28,8 +28,9 @@ const (
 )
 
 // Usage is what the local model reported for one answer; zero when it
-// reported nothing.
-type Usage struct{ In, Out int }
+// reported nothing. Cached is the part of In its prompt cache served
+// (prompt_tokens_details.cached_tokens, or llama.cpp's timings.cache_n).
+type Usage struct{ In, Out, Cached int }
 
 // Local answers requests that fit it, with or without tools, from a local
 // OpenAI-compatible model. Anything else goes to the cloud.
@@ -314,6 +315,7 @@ type chunk struct {
 	Finish string
 	In     int
 	Out    int
+	Cached int
 }
 
 // readChunk returns the next OpenAI stream chunk; false at the end.
@@ -345,7 +347,13 @@ func readChunk(sc *bufio.Scanner) (chunk, bool) {
 			Usage *struct {
 				Prompt     int `json:"prompt_tokens"`
 				Completion int `json:"completion_tokens"`
+				Details    *struct {
+					Cached int `json:"cached_tokens"`
+				} `json:"prompt_tokens_details"`
 			} `json:"usage"`
+			Timings *struct {
+				CacheN int `json:"cache_n"`
+			} `json:"timings"`
 		}
 		if json.Unmarshal([]byte(data), &v) != nil {
 			continue
@@ -359,10 +367,22 @@ func readChunk(sc *bufio.Scanner) (chunk, bool) {
 		}
 		if v.Usage != nil {
 			c.In, c.Out = v.Usage.Prompt, v.Usage.Completion
+			if v.Usage.Details != nil {
+				c.Cached = v.Usage.Details.Cached
+			}
 		}
+		if c.Cached == 0 && v.Timings != nil {
+			c.Cached = v.Timings.CacheN
+		}
+		c.Cached = clampCached(c.Cached, c.In)
 		return c, true
 	}
 	return chunk{}, false
+}
+
+// clampCached keeps a reported cache count within the prompt it is part of.
+func clampCached(cached, in int) int {
+	return max(0, min(cached, in))
 }
 
 func stopReason(finish string) string {
@@ -397,7 +417,7 @@ func streamAnswer(w http.ResponseWriter, model string, first chunk, more bool, n
 	}})
 	send("content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]string{"type": "text", "text": ""}})
 	var finish string
-	var inTok, outTok int
+	var inTok, outTok, cachedTok int
 	for c, ok := first, more; ok; c, ok = next() {
 		if c.Text != "" {
 			send("content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]string{"type": "text_delta", "text": c.Text}})
@@ -406,27 +426,27 @@ func streamAnswer(w http.ResponseWriter, model string, first chunk, more bool, n
 			finish = c.Finish
 		}
 		if c.In > 0 || c.Out > 0 {
-			inTok, outTok = c.In, c.Out
+			inTok, outTok, cachedTok = c.In, c.Out, c.Cached
 		}
 	}
 	send("content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
 	send("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stopReason(finish), "stop_sequence": nil}, "usage": map[string]int{"input_tokens": inTok, "output_tokens": outTok}})
 	send("message_stop", map[string]string{"type": "message_stop"})
-	return Usage{In: inTok, Out: outTok}
+	return Usage{In: inTok, Out: outTok, Cached: cachedTok}
 }
 
 // jsonAnswer writes the single Anthropic message for the chunks.
 func jsonAnswer(w http.ResponseWriter, model string, first chunk, more bool, next func() (chunk, bool)) Usage {
 	var b strings.Builder
 	var finish string
-	var inTok, outTok int
+	var inTok, outTok, cachedTok int
 	for c, ok := first, more; ok; c, ok = next() {
 		b.WriteString(c.Text)
 		if c.Finish != "" {
 			finish = c.Finish
 		}
 		if c.In > 0 || c.Out > 0 {
-			inTok, outTok = c.In, c.Out
+			inTok, outTok, cachedTok = c.In, c.Out, c.Cached
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -436,5 +456,5 @@ func jsonAnswer(w http.ResponseWriter, model string, first chunk, more bool, nex
 		"stop_reason": stopReason(finish), "stop_sequence": nil,
 		"usage": map[string]int{"input_tokens": inTok, "output_tokens": outTok},
 	})
-	return Usage{In: inTok, Out: outTok}
+	return Usage{In: inTok, Out: outTok, Cached: cachedTok}
 }

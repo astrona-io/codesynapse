@@ -261,7 +261,14 @@ export interface WorkspaceStats {
     // Shown apart and labelled; never a tile, export or summary figure.
     share_upper_pct?: number | null; share_raw_pct?: number | null
     avoided_resend_tokens?: number; avoided_unaware_tokens?: number; avoided_repeat_ranges?: number
-    saved?: { tokens: number; price: 'cache_write' | 'input'; per_mtok: number; dollars: number | null; resend_tokens: number; upper_dollars: number | null; unaware_tokens: number }
+    avoided_unaware_local_tokens?: number
+    // Graph answers valued at the reference model. dollars covers the share's
+    // tokens; unaware_* the agents that cannot tell repeats apart, at the
+    // input price and outside the share; total_dollars is what totals add.
+    saved?: {
+      tokens: number; price: 'cache_write' | 'input'; per_mtok: number; dollars: number | null; resend_tokens: number; upper_dollars: number | null; unaware_tokens: number
+      unaware_graph_tokens?: number; unaware_per_mtok?: number; unaware_dollars?: number | null; total_dollars?: number | null
+    }
     sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; avoided_method: string
     // ask_local: tokens local models read, and its part of avoided_tokens.
     local_read_tokens?: number; local_avoided_tokens?: number; local_briefs?: number; local_drafts?: number
@@ -679,6 +686,8 @@ export interface ModelStat {
 export interface GatewayStat {
   requests: number; local: number; cloud: number; rejected: number; failed: number; local_share_pct: number
   bytes_in: number; bytes_out: number; local_input_tokens: number; local_output_tokens: number
+  // The part of local_input_tokens the runtime's prompt cache served; 0 when it reports none (Ollama).
+  local_cached_tokens?: number
   local_unmetered: number; saved_dollars: number | null
 }
 export interface ModelStats {
@@ -689,5 +698,24 @@ export interface ModelStats {
   // disabled, no_local_model or no_ai. Gateway traffic is never shortened.
   compression_enabled?: boolean; compression_off?: 'disabled' | 'no_local_model' | 'no_ai'
   gateway?: GatewayStat
-  reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; cached_input_per_mtok?: number; cache_write_per_mtok?: number; caches_by_default?: boolean; estimate?: boolean; source?: string; checked?: string }
+  reference_price?: ReferencePrice
+}
+export interface ReferencePrice { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; cached_input_per_mtok?: number; cache_write_per_mtok?: number; caches_by_default?: boolean; estimate?: boolean; source?: string; checked?: string }
+// GET /api/v1/stats/savings: the window of /stats cut into UTC buckets
+// (hour for one day, 6h up to a week, day up to 30 days, week Monday to
+// Sunday beyond). Dollars are null when they cannot be valued.
+export interface SavingsBucket {
+  start: number; end: number // unix seconds
+  never_read_tokens: number; graph_saved_dollars: number | null
+  local_input_tokens: number; local_output_tokens: number; local_cached_tokens: number
+  compression_saved_dollars: number | null; gateway_saved_dollars: number | null
+}
+export interface SavingsSeries {
+  days: number; step: 'hour' | '6h' | 'day' | 'week'; buckets: SavingsBucket[]
+  // False without the metrics store: local model work is missing and graph
+  // answers cannot be placed below a day.
+  metrics: boolean
+  // Graph answers of days with no hourly measurement: in the tiles, in no bucket.
+  unplaced_never_read_tokens: number; unplaced_graph_saved_dollars: number
+  reference_price: ReferencePrice | null
 }

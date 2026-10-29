@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/asklocal"
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store/memory"
 	"github.com/astrona-io/codesynapse/internal/store/storetest"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
@@ -171,6 +174,54 @@ func TestBriefPlan(t *testing.T) {
 	var none BriefPlan
 	require.Equal(t, f.client.do("POST", path, `{"prompt":"start more agents"}`, &none, runtimeHeaders("thread-a")...), 200)
 	assert.Len(t, none.Ranges, 0)
+}
+
+// TestBriefPlanPutsTheFrontEndFirstForUIPrompts: PLAN item 18, case g
+// (2026-10-29). A prompt about an info icon on mouse over on the statistics
+// page got Go Stats structs and builders that only share the word "stats".
+// Front-end code now leads, and back-end types that only share a word are
+// left out once it is found. The quoted text itself is looked up by the
+// client (cmd/codesynapse TestBriefRangesFollowQuotedText).
+func TestBriefPlanPutsTheFrontEndFirstForUIPrompts(t *testing.T) {
+	g := model.NewGraph()
+	add := func(kind model.NodeKind, name, qualified, file string, start int) {
+		g.AddNode(model.Node{ID: storetest.ID(kind, qualified), Repo: storetest.Repo, Kind: kind, Name: name,
+			QualifiedName: qualified, File: file, StartLine: start, EndLine: start + 10, Exported: name[0] >= 'A' && name[0] <= 'Z'})
+	}
+	for i, f := range []string{"internal/model/model.go", "internal/memory/memory.go", "internal/semantic/store.go", "internal/store/stats.go", "services/api/internal/api/stats.go"} {
+		add(model.KindType, "Stats", fmt.Sprintf("pkg%d.Stats", i), f, 10*i+1)
+	}
+	add(model.KindFunction, "loadModelStats", "models.loadModelStats", "services/web/app/pages/stats/models.vue", 60)
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(t.Context(), storetest.Repo, g))
+
+	cases := []struct {
+		name, prompt string
+		first        string
+		onlyFrontEnd bool
+	}{{
+		name:         "case g: an info icon with a mouse over",
+		prompt:       `to cut down the information the explaining below the stats pls make it a 'info' icon with a mouse over eg. "CodeSynapse's own AI tasks: prose a local model shortened before it went to the cloud, at the input price; gateway traffic is passed on unchanged" are only interesting if you hold mouse over`,
+		first:        "services/web/app/pages/stats/models.vue:60-70",
+		onlyFrontEnd: true,
+	}, {
+		name:   "not about the UI: the graph's order",
+		prompt: "make the Stats struct count tokens too",
+		first:  "internal/model/model.go:1-11",
+	}}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, err := briefPlan(t.Context(), st, storetest.Repo, tc.prompt)
+			require.NoError(t, err)
+			require.True(t, len(plan.Ranges) > 0)
+			assert.Equal(t, plan.Ranges[0], tc.first)
+			if tc.onlyFrontEnd {
+				for _, r := range plan.Ranges {
+					assert.True(t, asklocal.FrontEnd(rangePath(r)), r)
+				}
+			}
+		})
+	}
 }
 
 // In brief mode the local model briefs instead of answering, and the brief

@@ -90,6 +90,8 @@ type AgentStats struct {
 	// AvoidedUnawareTokens were avoided by clients that do not report
 	// repeated ranges yet; they are in AvoidedTokens but not in the share.
 	AvoidedUnawareTokens int `json:"avoided_unaware_tokens"`
+	// AvoidedUnawareLocalTokens is the ask_local part of them.
+	AvoidedUnawareLocalTokens int `json:"avoided_unaware_local_tokens"`
 	// AvoidedRepeatRanges counts answered ranges the session already had.
 	AvoidedRepeatRanges int `json:"avoided_repeat_ranges"`
 	// Saved values the share's graph part at the reference cloud model.
