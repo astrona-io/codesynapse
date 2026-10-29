@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/astrona-io/codesynapse/internal/modelpattern"
 )
 
 const (
@@ -22,9 +24,10 @@ const (
 	// unknownWindowBody is the cap when the operator did not say how large
 	// the local model's context is.
 	unknownWindowBody = 256 << 10
-	// defaultWait is how long a request queues for the local model before the
-	// gateway sends it to the cloud instead.
-	defaultWait = 20 * time.Second
+	// defaultWait is how long a request queues for a free local slot before
+	// the gateway sends it to the cloud instead (gateway_wait_seconds). The
+	// answer itself is bounded by the provider's timeout_seconds.
+	defaultWait = 60 * time.Second
 )
 
 // Usage is what the local model reported for one answer; zero when it
@@ -40,9 +43,13 @@ type Local struct {
 	APIKey  string
 	Client  *http.Client
 	// Eligible says whether a requested model name is one the local model
-	// may replace; nil means every model when the request's organisation
-	// answers locally first (WithLocalFirst), SmallModel otherwise.
+	// may replace; nil means every model unless the request's organisation
+	// switched local first off (WithLocalFirst), SmallModel then.
 	Eligible func(model string) bool
+	// Exclude is the installation's list of model patterns that never go to
+	// the local model (gateway_exclude in config/llm.yaml), normalized by
+	// modelpattern. The organisation's own list (WithExclude) adds to it.
+	Exclude []string
 	// ContextWindow is the local model's context in tokens; a request whose
 	// estimate does not fit goes to the cloud. 0 means unknown.
 	ContextWindow int
@@ -71,13 +78,29 @@ type localFirstKey struct{}
 
 // WithLocalFirst records whether the request's organisation offers every
 // model's requests to the local model first, not only the small model's.
+// A request that carries no choice is local first: that is the default.
 func WithLocalFirst(ctx context.Context, on bool) context.Context {
 	return context.WithValue(ctx, localFirstKey{}, on)
 }
 
 func localFirst(ctx context.Context) bool {
-	on, _ := ctx.Value(localFirstKey{}).(bool)
-	return on
+	on, chose := ctx.Value(localFirstKey{}).(bool)
+	return on || !chose
+}
+
+type excludeKey struct{}
+
+// WithExclude records the organisation's model patterns (normalized by
+// modelpattern) that must never be answered locally.
+func WithExclude(ctx context.Context, patterns []string) context.Context {
+	return context.WithValue(ctx, excludeKey{}, patterns)
+}
+
+// excluded says whether the installation or the request's organisation keeps
+// model away from the local model. It wins over every other choice.
+func (l *Local) excluded(ctx context.Context, model string) bool {
+	org, _ := ctx.Value(excludeKey{}).([]string)
+	return modelpattern.Match(l.Exclude, model) || modelpattern.Match(org, model)
 }
 
 // fits estimates the request at four bytes per token (JSON overcounts, which
@@ -144,6 +167,7 @@ func present(raw json.RawMessage) bool {
 // Reasons a request offered to the local model went to the cloud instead,
 // one per return point of serve: the fixed values of Meta.Fallthrough.
 const (
+	FallExcluded     = "excluded"       // the model is on the installation's or organisation's exclude list
 	FallNotEligible  = "not_eligible"   // model, thinking, content or tools the local model does not take
 	FallTooLarge     = "too_large"      // the request does not fit the local model's context
 	FallBusy         = "busy"           // no queue slot within the wait
@@ -160,6 +184,9 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 	}
 	if json.Unmarshal(body, &in) != nil {
 		return in, nil, FallNotEligible
+	}
+	if l.excluded(ctx, in.Model) {
+		return in, nil, FallExcluded
 	}
 	if !l.fits(len(body), in.MaxTokens) {
 		return in, nil, FallTooLarge
