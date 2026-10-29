@@ -7,7 +7,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -30,7 +32,14 @@ const (
 // Usage is what the local model reported for one answer; zero when it
 // reported nothing. Cached is the part of In its prompt cache served
 // (prompt_tokens_details.cached_tokens, or llama.cpp's timings.cache_n).
-type Usage struct{ In, Out, Cached int }
+// Wait is the time spent in the local model's queue and Answer the time from
+// the slot to the answer, or to the point it fell through; Asked says the
+// request got as far as the queue.
+type Usage struct {
+	In, Out, Cached int
+	Wait, Answer    time.Duration
+	Asked           bool
+}
 
 // Local answers requests that fit it, with or without tools, from a local
 // OpenAI-compatible model. Anything else goes to the cloud.
@@ -141,16 +150,71 @@ func present(raw json.RawMessage) bool {
 	return len(raw) > 0 && string(raw) != "null"
 }
 
-// Reasons a request offered to the local model went to the cloud instead,
-// one per return point of serve: the fixed values of Meta.Fallthrough.
+// Reasons a request offered to the local model went to the cloud instead:
+// the fixed values of Meta.Fallthrough, mirrored in the telemetry allowlist
+// (internal/telemetry/outcomes.go). Each says one thing, so the statistics
+// can tell a slow model (queue_timeout, answer_timeout) from a broken one.
 const (
-	FallNotEligible  = "not_eligible"   // model, thinking, content or tools the local model does not take
+	FallNotEligible  = "not_eligible"   // the model, tools or content are not ones the local model takes
 	FallTooLarge     = "too_large"      // the request does not fit the local model's context
-	FallBusy         = "busy"           // no queue slot within the wait
-	FallUnavailable  = "unavailable"    // the local server could not be reached, did not answer 200 or broke off
-	FallNoFirstChunk = "no_first_chunk" // the stream failed before its first chunk
-	FallBadAnswer    = "bad_answer"     // a held answer was not whole: a bad tool call or a cut-off answer
+	FallHasThinking  = "has_thinking"   // extended thinking was asked for or sent back
+	FallHasImage     = "has_image"      // the request carries an image or a document
+	FallQueueTimeout = "queue_timeout"  // no queue slot within the wait
+	FallCancelled    = "cancelled"      // the agent went away while the request waited
+	FallTimeout      = "answer_timeout" // the local model took too long to answer
+	FallModelError   = "model_error"    // the local server could not be reached or broke off
+	FallBadStatus    = "bad_status"     // the local server answered with a status other than 200
+	FallEmptyAnswer  = "empty_answer"   // a held answer had no text and no tool call
+	FallTruncated    = "truncated"      // a held answer stopped at max tokens or ended without a finish
+	FallBadAnswer    = "bad_answer"     // a held answer had a bad tool call or was too large to hold
+	FallNoLocalModel = "no_local_model" // the gateway has no local model to offer the request to
 )
+
+// failure names why a call to the local model failed: a deadline is a
+// timeout, the agent leaving is a cancel, anything else a model error.
+func failure(ctx context.Context, err error) string {
+	var ne net.Error
+	switch {
+	case ctx.Err() != nil && !errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return FallCancelled
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &ne) && ne.Timeout():
+		return FallTimeout
+	}
+	return FallModelError
+}
+
+// heldFailure names why a held answer that is not complete was not kept: it
+// stopped at max tokens or without a finish (truncated), or said nothing.
+func heldFailure(a answer) string {
+	if a.Finish != "length" && strings.TrimSpace(a.Text) == "" && len(a.Calls) == 0 {
+		return FallEmptyAnswer
+	}
+	return FallTruncated
+}
+
+// contentKinds reports whether content holds an image or document block, or a
+// thinking block, looking inside tool results too.
+func contentKinds(raw json.RawMessage) (image, thinking bool) {
+	var blocks []struct {
+		Type    string          `json:"type"`
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(raw, &blocks) != nil {
+		return false, false
+	}
+	for _, b := range blocks {
+		switch b.Type {
+		case "image", "document":
+			image = true
+		case "thinking", "redacted_thinking":
+			thinking = true
+		case "tool_result":
+			i, t := contentKinds(b.Content)
+			image, thinking = image || i, thinking || t
+		}
+	}
+	return image, thinking
+}
 
 // translate builds the OpenAI-compatible request; when the request is not
 // one the local model should take, out is nil and reason says why.
@@ -171,8 +235,19 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 			elig = func(string) bool { return true }
 		}
 	}
-	if !elig(in.Model) || len(in.Messages) == 0 || (in.Thinking.Type != "" && in.Thinking.Type != "disabled") {
+	if !elig(in.Model) || len(in.Messages) == 0 {
 		return in, nil, FallNotEligible
+	}
+	if in.Thinking.Type != "" && in.Thinking.Type != "disabled" {
+		return in, nil, FallHasThinking
+	}
+	for _, m := range in.Messages {
+		switch image, thinking := contentKinds(m.Content); {
+		case image:
+			return in, nil, FallHasImage
+		case thinking:
+			return in, nil, FallHasThinking
+		}
 	}
 	var msgs []oaMsg
 	if present(in.System) {
@@ -231,25 +306,39 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 	if req == nil {
 		return Usage{}, reason, false
 	}
+	u := Usage{Asked: true}
 	release := func() {}
 	if l.Acquire != nil {
 		wait := l.Wait
 		if wait <= 0 {
 			wait = defaultWait
 		}
+		queued := time.Now()
 		qctx, cancel := context.WithTimeout(ctx, wait)
 		var err error
 		release, err = l.Acquire(qctx)
 		cancel()
+		u.Wait = time.Since(queued)
 		if err != nil {
-			return Usage{}, FallBusy, false
+			if ctx.Err() != nil {
+				return u, FallCancelled, false
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				return u, FallQueueTimeout, false
+			}
+			return u, FallModelError, false
 		}
 	}
 	defer release()
+	started := time.Now()
+	fail := func(reason string) (Usage, string, bool) {
+		u.Answer = time.Since(started)
+		return u, reason, false
+	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(l.BaseURL, "/")+"/chat/completions", bytes.NewReader(req))
 	if err != nil {
-		return Usage{}, FallUnavailable, false
+		return fail(FallModelError)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if l.APIKey != "" {
@@ -257,15 +346,19 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 	}
 	resp, err := l.client().Do(httpReq)
 	if err != nil {
-		return Usage{}, FallUnavailable, false
+		return fail(failure(ctx, err))
 	}
 	defer resp.Body.Close() //nolint:errcheck // read side
 	if resp.StatusCode != http.StatusOK {
-		return Usage{}, FallUnavailable, false
+		return fail(FallBadStatus)
 	}
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
 	next := func() (chunk, bool) { return readChunk(sc) }
+	answered := func(got Usage) (Usage, string, bool) {
+		got.Wait, got.Answer, got.Asked = u.Wait, time.Since(started), true
+		return got, "", true
+	}
 	// A request for a bigger model than the small one may ask more than the
 	// local model can do: hold its answer and keep it only when it is whole.
 	strict := !SmallModel(in.Model)
@@ -274,32 +367,32 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 		// let the cloud take the request if the local model got it wrong.
 		first, more := next()
 		ans, ok := collect(first, more, next, declaredTools(in.Tools))
-		if sc.Err() != nil {
-			return Usage{}, FallUnavailable, false
+		if err := sc.Err(); err != nil {
+			return fail(failure(ctx, err))
 		}
-		if !ok || (strict && !ans.complete()) {
-			return Usage{}, FallBadAnswer, false
+		if !ok {
+			return fail(FallBadAnswer)
+		}
+		if strict && !ans.complete() {
+			return fail(heldFailure(ans))
 		}
 		w.Header().Set(RouteHeader, "local")
 		if in.Stream {
-			return streamCollected(w, in.Model, ans), "", true
+			return answered(streamCollected(w, in.Model, ans))
 		}
-		return jsonCollected(w, in.Model, ans), "", true
+		return answered(jsonCollected(w, in.Model, ans))
 	}
 	// Wait for the first chunk before writing anything, so a model that
 	// fails to start still falls through to the cloud.
 	first, more := next()
-	if !more && sc.Err() != nil {
-		return Usage{}, FallNoFirstChunk, false
+	if err := sc.Err(); !more && err != nil {
+		return fail(failure(ctx, err))
 	}
 	w.Header().Set(RouteHeader, "local")
-	var u Usage
 	if in.Stream {
-		u = streamAnswer(w, in.Model, first, more, next)
-	} else {
-		u = jsonAnswer(w, in.Model, first, more, next)
+		return answered(streamAnswer(w, in.Model, first, more, next))
 	}
-	return u, "", true
+	return answered(jsonAnswer(w, in.Model, first, more, next))
 }
 
 type toolDelta struct {

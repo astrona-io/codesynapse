@@ -53,6 +53,9 @@ func orgsUsing(metric string) string {
 	return `count by (mcp_tool) (sum by (mcp_tool, tenant_id) (increase(` + metric + `[$w])) > 0)`
 }
 
+// gatewayRouteOrgs counts the organisations behind each gateway route.
+const gatewayRouteOrgs = `count by (route) (sum by (route, tenant_id) (increase(gateway_request_duration_seconds_count[$w])) > 0)`
+
 var adminPanels = map[string]adminPanel{
 	"org_tool_calls": {byTenant: true, seriesPanel: seriesPanel{Title: "Tool calls by organisation", Unit: "calls", Kind: "count",
 		Help:    "MCP tool and prompt calls per step, by organisation.",
@@ -103,6 +106,18 @@ var adminPanels = map[string]adminPanel{
 		Help:    "Gateway requests by route (local, cloud, rejected) and status class.",
 		Empty:   "No gateway request in this window.",
 		queries: []seriesQuery{{expr: `sum by (series) (label_join(increase(gateway_requests_total[$w]), "series", " ", "route", "class"))`, by: "series"}}}},
+	"gateway_latency": {groups: gatewayRouteOrgs, seriesPanel: seriesPanel{Title: "Gateway response time (p95)", Unit: "seconds", Kind: "gauge",
+		Help:    "95th percentile time to answer a gateway request, by route, every organisation.",
+		Empty:   "No gateway request in this window.",
+		queries: []seriesQuery{{expr: gatewayP95, by: "route"}}}},
+	"gateway_latency_avg": {groups: gatewayRouteOrgs, seriesPanel: seriesPanel{Title: "Gateway response time (average)", Unit: "seconds", Kind: "gauge",
+		Help:    "Average time to answer a gateway request, by route, every organisation.",
+		Empty:   "No gateway request in this window.",
+		queries: []seriesQuery{{expr: gatewayAvg, by: "route"}}}},
+	"gateway_fallthrough": {groups: `count by (reason) (sum by (reason, tenant_id) (increase(gateway_fallthrough_total[$w])) > 0)`, seriesPanel: seriesPanel{Title: "Requests the local model did not answer", Unit: "requests", Kind: "count",
+		Help:    "Gateway requests the local model did not answer, by reason, every organisation. queue_timeout and answer_timeout mean it was too slow.",
+		Empty:   "Every request offered to the local model was answered in this window.",
+		queries: []seriesQuery{{expr: gatewayReasons, by: "reason"}}}},
 	"llm_cost": {seriesPanel: seriesPanel{Title: "AI model cost (estimate)", Unit: "USD", Kind: "count",
 		Help:    "Estimated from configured input, output and cache prices, every organisation. Calls with missing usage or prices are excluded.",
 		queries: []seriesQuery{{expr: `sum by (llm_model) (increase(llm_cost_estimated_dollars[$w]))`, by: "llm_model"}}}},

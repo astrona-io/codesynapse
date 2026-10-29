@@ -287,7 +287,19 @@ var (
 	// GatewayDuration shares its budget per tenant like the job histograms:
 	// three routes times a few tools and models per organisation.
 	GatewayDuration    = Default.ScopedHistogram("gateway_request_duration_seconds", "Gateway request time by route (local, cloud, rejected).", latency, "route").TenantShare(gatewayShare)
-	GatewayFallthrough = Default.ScopedCounter("gateway_fallthrough_total", "Gateway requests offered to the local model that went to the cloud, by reason.", "reason")
+	GatewayFallthrough = Default.ScopedCounter("gateway_fallthrough_total", "Gateway requests the local model did not answer, by reason and the route that took them instead (cloud, rejected, or local where no cloud follows).", "reason", "route")
+	// queueWait reaches past the gateway's wait for the local model, so a
+	// slow queue shows how slow before it turns into a fall-through.
+	queueWait = []float64{0.01, 0.1, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 120}
+	// GatewayQueueWait is how long a request waited for the local model's
+	// queue slot, whether it got one or not.
+	GatewayQueueWait = Default.ScopedHistogram("gateway_queue_wait_seconds", "Time gateway requests waited for the local model's queue slot.", queueWait).TenantShare(gatewayShare)
+	// GatewayLocalAnswer is the local model's own time, from its slot to an
+	// answer or to the failure that sent the request on.
+	GatewayLocalAnswer = Default.ScopedHistogram("gateway_local_answer_seconds", "Time the local model took from its queue slot to an answer or a failure, by outcome (answered, failed).", latency, "outcome").TenantShare(gatewayShare)
+	// GatewayFirstByte covers streamed answers only: the time the agent
+	// waits before anything arrives.
+	GatewayFirstByte = Default.ScopedHistogram("gateway_first_byte_seconds", "Time to the first byte of a streamed gateway answer, by route (local, cloud).", ttft, "route").TenantShare(gatewayShare)
 )
 
 // Per-tenant shares of the request-path histograms. One organisation calling
