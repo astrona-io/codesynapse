@@ -53,32 +53,32 @@ async function revoke(g: RepoGrant) {
     <PageHeader eyebrow="Access" :title="`Who can use ${repo}`" lede="A direct user grant overrides team access. Otherwise the strongest team grant applies, then the organisation default. Every person must belong to the owning organisation." :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Access' }]" />
     <p v-if="!org" class="notice">Choose the organisation that owns this repository in the sidebar.</p>
     <template v-else>
-      <p v-if="loadError" class="notice notice--danger" role="alert">{{ apiErrorMessage(loadError) }}</p>
-      <p v-else-if="!data" class="muted" role="status">Loading access…</p>
-      <section v-else class="panel">
-        <h2>In {{ org.name }}</h2>
-        <p class="muted small">Organisation default: {{ data.default_repo_access === 'READ_ONLY' ? 'read only' : 'no access' }}. Removing a direct grant restores inheritance.</p>
-        <p v-if="data?.effective" class="muted small">Your permission: {{ roleLabel[data.effective.role] }}. From: {{ data.effective.via }}.</p>
-        <form v-if="canManage" class="row" @submit.prevent="grant">
-          <div class="field"><label for="kind">Give access to</label><select id="kind" v-model="kind"><option value="user">A person</option><option value="team">A team</option></select></div>
-          <div class="field grow"><label for="who">{{ kind === 'user' ? 'Email' : 'Team' }}</label><input id="who" v-model="who" :type="kind === 'user' ? 'email' : 'text'" required :placeholder="kind === 'user' ? 'name@company.com' : 'e.g. contractors'"></div>
-          <div class="field"><label for="role">Role</label><select id="role" v-model="role"><option value="viewer">Read</option><option value="member">Write</option><option value="admin">Admin</option><option v-if="kind === 'user'" value="none">No access (override)</option></select></div>
-          <button type="submit" class="align-end">Give access</button>
-        </form>
-        <div v-if="internal.length" class="table-wrap">
-          <table>
-            <thead><tr><th>Who</th><th>Role</th><th><span class="sr-only">Actions</span></th></tr></thead>
-            <tbody>
-              <tr v-for="g in internal" :key="g.subject_type + g.subject_id">
-                <td><span class="badge">{{ g.subject_type === 'team' ? 'team' : 'person' }}</span> {{ g.label }}</td>
-                <td>{{ roleLabel[g.role] }}</td>
-                <td class="num"><button v-if="canManage" class="secondary tiny" :aria-label="`Remove access for ${g.label}`" @click="revoke(g)">Remove</button></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p v-else class="muted small">No direct grants.</p>
-      </section>
+      <DataState :error="loadError" :pending="!data" :empty="!data" loading="Loading access…">
+        <section v-if="data" class="panel">
+          <h2>In {{ org.name }}</h2>
+          <p class="muted small">Organisation default: {{ data.default_repo_access === 'READ_ONLY' ? 'read only' : 'no access' }}. Removing a direct grant restores inheritance.</p>
+          <p v-if="data?.effective" class="muted small">Your permission: {{ roleLabel[data.effective.role] }}. From: {{ data.effective.via }}.</p>
+          <form v-if="canManage" class="row" @submit.prevent="grant">
+            <div class="field"><label for="kind">Give access to</label><select id="kind" v-model="kind"><option value="user">A person</option><option value="team">A team</option></select></div>
+            <div class="field grow"><label for="who">{{ kind === 'user' ? 'Email' : 'Team' }}</label><input id="who" v-model="who" :type="kind === 'user' ? 'email' : 'text'" required :placeholder="kind === 'user' ? 'name@company.com' : 'e.g. contractors'"></div>
+            <div class="field"><label for="role">Role</label><select id="role" v-model="role"><option value="viewer">Read</option><option value="member">Write</option><option value="admin">Admin</option><option v-if="kind === 'user'" value="none">No access (override)</option></select></div>
+            <button type="submit" class="align-end">Give access</button>
+          </form>
+          <div v-if="internal.length" class="table-wrap">
+            <table>
+              <thead><tr><th>Who</th><th>Role</th><th><span class="sr-only">Actions</span></th></tr></thead>
+              <tbody>
+                <tr v-for="g in internal" :key="g.subject_type + g.subject_id">
+                  <td><span class="badge">{{ g.subject_type === 'team' ? 'team' : 'person' }}</span> {{ g.label }}</td>
+                  <td>{{ roleLabel[g.role] }}</td>
+                  <td class="num"><button v-if="canManage" class="secondary tiny" :aria-label="`Remove access for ${g.label}`" @click="revoke(g)">Remove</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-else class="muted small">No direct grants.</p>
+        </section>
+      </DataState>
       <section v-if="data && external.length" class="panel">
         <h2>Inactive external grants</h2>
         <p class="muted small">External grants do not provide access. Add a recipient as a guest of this organisation before giving them a repository grant.</p>

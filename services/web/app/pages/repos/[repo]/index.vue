@@ -111,107 +111,107 @@ const steps = computed<Step[]>(() => {
 </script>
 
 <template>
-  <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
-  <div v-else-if="d" class="stack">
-    <PageHeader eyebrow="Repository summary" :title="repo" :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo }]">
-      <template #meta>
-        <p class="muted">
-          <span v-if="d.head">Commit <span class="mono">{{ d.head.slice(0, 10) }}</span> · </span>indexed {{ relTime(d.ingested_at) }}
-          · {{ fmtInt(d.stats.total_loc) }} lines of code
-        </p>
-      </template>
-      <SyncControl :repo="repo" />
-      <SwitchToRemote v-if="repos && !isManaged" :repo="repo" :remote="repoInfo?.remote" :branch="repoInfo?.branch" @switched="refreshRepos" />
-      <RemoveRepo :repo="repo" :managed="isManaged" @removed="navigateTo('/')" />
-    </PageHeader>
-    <div class="panel autosync-bar"><AutoSync :repo="repo" /></div>
+  <DataState :error="error" :pending="!d" :empty="!d">
+    <div v-if="d" class="stack">
+      <PageHeader eyebrow="Repository summary" :title="repo" :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo }]">
+        <template #meta>
+          <p class="muted">
+            <span v-if="d.head">Commit <span class="mono">{{ d.head.slice(0, 10) }}</span> · </span>indexed {{ relTime(d.ingested_at) }}
+            · {{ fmtInt(d.stats.total_loc) }} lines of code
+          </p>
+        </template>
+        <SyncControl :repo="repo" />
+        <SwitchToRemote v-if="repos && !isManaged" :repo="repo" :remote="repoInfo?.remote" :branch="repoInfo?.branch" @switched="refreshRepos" />
+        <RemoveRepo :repo="repo" :managed="isManaged" @removed="navigateTo('/')" />
+      </PageHeader>
+      <div class="panel autosync-bar"><AutoSync :repo="repo" /></div>
 
-    <section v-if="attention" class="panel">
-      <div class="panel__header"><h2>Needs attention <span class="muted">{{ fmtInt(attention.items.length) }}</span></h2></div>
-      <AttentionList v-if="attention.items.length" :items="attention.items" :show-repo="false" :limit="6" />
-      <p v-else class="notice notice--ok">Nothing flagged: no critical or high findings, no vulnerable or conflicting dependencies, update automation in place, and indexed recently.</p>
-    </section>
+      <section v-if="attention" class="panel">
+        <div class="panel__header"><h2>Needs attention <span class="muted">{{ fmtInt(attention.items.length) }}</span></h2></div>
+        <AttentionList v-if="attention.items.length" :items="attention.items" :show-repo="false" :limit="6" />
+        <p v-else class="notice notice--ok">Nothing flagged: no critical or high findings, no vulnerable or conflicting dependencies, update automation in place, and indexed recently.</p>
+      </section>
 
-    <section class="panel">
-      <div class="panel__header">
-        <div><p class="eyebrow">What's indexed</p><h2>Everything CodeSynapse understands in this repository</h2></div>
+      <section class="panel">
+        <div class="panel__header">
+          <div><p class="eyebrow">What's indexed</p><h2>Everything CodeSynapse understands in this repository</h2></div>
+        </div>
+        <FormatChips :formats="d.stats.formats" :helm-charts="d.stats.helm_charts" :k8s="d.stats.k8s_resources" />
+        <div class="row quick">
+          <NuxtLink v-if="d.stats.k8s_resources || d.stats.helm_charts || d.stats.formats?.yaml" :to="`${base}/config`" class="btn btn--ghost">Kubernetes & Helm</NuxtLink>
+          <NuxtLink v-if="d.stats.formats?.markdown" :to="`${base}/docs`" class="btn btn--ghost">Read the docs</NuxtLink>
+          <NuxtLink :to="`${base}/graph`" class="btn btn--ghost">Explore the graph</NuxtLink>
+        </div>
+      </section>
+
+      <div class="grid grid--health">
+        <HealthCard v-if="secCard" label="Security" :value="secCard.value" :verdict="secCard.verdict" :tone="secCard.tone" :to="`${base}/security`" action="Open security review" />
+        <HealthCard v-if="testCard" label="Test reach" tip="tested" :value="testCard.value" :verdict="testCard.verdict" :tone="testCard.tone" :to="`${base}/metrics`" action="See test gaps" />
+        <HealthCard v-if="cleanCard" label="Unused code" tip="unreachable" :value="cleanCard.value" :verdict="cleanCard.verdict" :tone="cleanCard.tone" :to="`${base}/cleanup`" action="Clean up" />
+        <HealthCard v-if="docCard" label="Documentation" :value="docCard.value" :verdict="docCard.verdict" :tone="docCard.tone" :to="`${base}/docs`" action="Open docs" />
+        <HealthCard v-if="savingsCard" label="Context for AI agents" tip="reduction" :value="savingsCard.value" :verdict="savingsCard.verdict" tone="good" :to="`${base}/metrics`" action="See benchmark" />
       </div>
-      <FormatChips :formats="d.stats.formats" :helm-charts="d.stats.helm_charts" :k8s="d.stats.k8s_resources" />
-      <div class="row quick">
-        <NuxtLink v-if="d.stats.k8s_resources || d.stats.helm_charts || d.stats.formats?.yaml" :to="`${base}/config`" class="btn btn--ghost">Kubernetes & Helm</NuxtLink>
-        <NuxtLink v-if="d.stats.formats?.markdown" :to="`${base}/docs`" class="btn btn--ghost">Read the docs</NuxtLink>
-        <NuxtLink :to="`${base}/graph`" class="btn btn--ghost">Explore the graph</NuxtLink>
-      </div>
-    </section>
 
-    <div class="grid grid--health">
-      <HealthCard v-if="secCard" label="Security" :value="secCard.value" :verdict="secCard.verdict" :tone="secCard.tone" :to="`${base}/security`" action="Open security review" />
-      <HealthCard v-if="testCard" label="Test reach" tip="tested" :value="testCard.value" :verdict="testCard.verdict" :tone="testCard.tone" :to="`${base}/metrics`" action="See test gaps" />
-      <HealthCard v-if="cleanCard" label="Unused code" tip="unreachable" :value="cleanCard.value" :verdict="cleanCard.verdict" :tone="cleanCard.tone" :to="`${base}/cleanup`" action="Clean up" />
-      <HealthCard v-if="docCard" label="Documentation" :value="docCard.value" :verdict="docCard.verdict" :tone="docCard.tone" :to="`${base}/docs`" action="Open docs" />
-      <HealthCard v-if="savingsCard" label="Context for AI agents" tip="reduction" :value="savingsCard.value" :verdict="savingsCard.verdict" tone="good" :to="`${base}/metrics`" action="See benchmark" />
-    </div>
+      <SecurityTrend :repo="repo" />
 
-    <SecurityTrend :repo="repo" />
+      <section class="panel">
+        <div class="panel__header">
+          <div><p class="eyebrow">Next steps</p><h2>What to do now, most important first</h2></div>
+        </div>
+        <ol v-if="steps.length" class="steps">
+          <li v-for="(s, i) in steps" :key="i" class="step" :class="`step--${s.tone}`">
+            <span class="step-num" aria-hidden="true">{{ i + 1 }}</span>
+            <div class="step-body">
+              <strong>{{ s.title }}</strong>
+              <p class="muted">{{ s.why }}</p>
+            </div>
+            <NuxtLink :to="s.to" class="btn btn--ghost cta">{{ s.cta }}</NuxtLink>
+          </li>
+        </ol>
+        <div v-else class="empty"><strong>Nothing urgent</strong>Security, tests, cleanup and docs all look fine. Keep syncing as the code changes.</div>
+      </section>
 
-    <section class="panel">
-      <div class="panel__header">
-        <div><p class="eyebrow">Next steps</p><h2>What to do now, most important first</h2></div>
-      </div>
-      <ol v-if="steps.length" class="steps">
-        <li v-for="(s, i) in steps" :key="i" class="step" :class="`step--${s.tone}`">
-          <span class="step-num" aria-hidden="true">{{ i + 1 }}</span>
-          <div class="step-body">
-            <strong>{{ s.title }}</strong>
-            <p class="muted">{{ s.why }}</p>
+      <h2 class="section-title">Details</h2>
+      <div class="grid cols-2">
+        <section class="panel">
+          <p class="eyebrow">Risk<InfoTip term="hotspot" /></p><h2>Hotspots</h2>
+          <p class="muted small">Complex functions in files that change often. Review and test these first.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Function</th><th class="num">Complexity</th><th class="num">Changes</th><th class="num">Callers</th></tr></thead>
+              <tbody>
+                <tr v-for="h in d.hotspots.slice(0, 8)" :key="h.id">
+                  <td><NuxtLink :to="explore(h.id)" class="mono">{{ h.name }}</NuxtLink><div class="mono dim path">{{ h.location }}</div></td>
+                  <td class="num">{{ fmtInt(h.complexity) }}</td><td class="num">{{ fmtInt(h.file_churn) }}</td><td class="num">{{ fmtInt(h.fan_in) }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-          <NuxtLink :to="s.to" class="btn btn--ghost cta">{{ s.cta }}</NuxtLink>
-        </li>
-      </ol>
-      <div v-else class="empty"><strong>Nothing urgent</strong>Security, tests, cleanup and docs all look fine. Keep syncing as the code changes.</div>
-    </section>
-
-    <h2 class="section-title">Details</h2>
-    <div class="grid cols-2">
-      <section class="panel">
-        <p class="eyebrow">Risk<InfoTip term="hotspot" /></p><h2>Hotspots</h2>
-        <p class="muted small">Complex functions in files that change often. Review and test these first.</p>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Function</th><th class="num">Complexity</th><th class="num">Changes</th><th class="num">Callers</th></tr></thead>
-            <tbody>
-              <tr v-for="h in d.hotspots.slice(0, 8)" :key="h.id">
-                <td><NuxtLink :to="explore(h.id)" class="mono">{{ h.name }}</NuxtLink><div class="mono dim path">{{ h.location }}</div></td>
-                <td class="num">{{ fmtInt(h.complexity) }}</td><td class="num">{{ fmtInt(h.file_churn) }}</td><td class="num">{{ fmtInt(h.fan_in) }}</td>
+          <p v-if="!d.hotspots.length" class="muted">No hotspots yet — history is needed to measure change frequency.</p>
+        </section>
+        <section class="panel">
+          <p class="eyebrow">Architecture</p><h2>Most-used functions</h2>
+          <p class="muted small">Changing these affects the most callers.</p>
+          <BarList :items="d.most_called.slice(0, 8).map((r) => ({ label: shortName(r.node), value: r.score, to: `${base}/explore?id=${encodeURIComponent(r.node.id)}` }))" unit=" callers" />
+        </section>
+        <section class="panel">
+          <p class="eyebrow">Activity</p><h2>Recent commits</h2>
+          <div class="table-wrap">
+            <table><tbody>
+              <tr v-for="c in d.recent_commits.slice(0, 8)" :key="c.node.id">
+                <td class="mono dim">{{ c.node.name.slice(0, 8) }}</td><td><span class="truncate">{{ c.node.summary }}</span></td><td class="muted nowrap" :title="c.node.time ? new Date(c.node.time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : undefined">{{ relTime(c.node.time) }}</td>
               </tr>
-            </tbody>
-          </table>
-        </div>
-        <p v-if="!d.hotspots.length" class="muted">No hotspots yet — history is needed to measure change frequency.</p>
-      </section>
-      <section class="panel">
-        <p class="eyebrow">Architecture</p><h2>Most-used functions</h2>
-        <p class="muted small">Changing these affects the most callers.</p>
-        <BarList :items="d.most_called.slice(0, 8).map((r) => ({ label: shortName(r.node), value: r.score, to: `${base}/explore?id=${encodeURIComponent(r.node.id)}` }))" unit=" callers" />
-      </section>
-      <section class="panel">
-        <p class="eyebrow">Activity</p><h2>Recent commits</h2>
-        <div class="table-wrap">
-          <table><tbody>
-            <tr v-for="c in d.recent_commits.slice(0, 8)" :key="c.node.id">
-              <td class="mono dim">{{ c.node.name.slice(0, 8) }}</td><td><span class="truncate">{{ c.node.summary }}</span></td><td class="muted nowrap" :title="c.node.time ? new Date(c.node.time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : undefined">{{ relTime(c.node.time) }}</td>
-            </tr>
-          </tbody></table>
-        </div>
-        <p v-if="!d.recent_commits.length" class="muted">No git history indexed.</p>
-      </section>
-      <section class="panel">
-        <p class="eyebrow">Activity</p><h2>Most-changed files</h2>
-        <BarList :items="d.churn_files.filter((r) => r.score).slice(0, 8).map((r) => ({ label: r.node.file ?? r.node.name, value: r.score }))" unit=" commits" />
-      </section>
+            </tbody></table>
+          </div>
+          <p v-if="!d.recent_commits.length" class="muted">No git history indexed.</p>
+        </section>
+        <section class="panel">
+          <p class="eyebrow">Activity</p><h2>Most-changed files</h2>
+          <BarList :items="d.churn_files.filter((r) => r.score).slice(0, 8).map((r) => ({ label: r.node.file ?? r.node.name, value: r.score }))" unit=" commits" />
+        </section>
+      </div>
     </div>
-  </div>
-  <p v-else class="muted" role="status">Loading…</p>
+  </DataState>
 </template>
 
 <style scoped>

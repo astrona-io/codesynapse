@@ -50,26 +50,26 @@ watch(selected, () => { open.value = null })
           </div>
         </div>
         <p v-if="list?.scope === 'own'" class="muted small">You see your own sessions; owners and admins see everyone's in {{ org.name }}.</p>
-        <p v-if="listError" class="notice notice--danger">{{ plainError(listError) }}</p>
-        <div v-if="list?.sessions.length" class="table-wrap">
-          <table>
-            <thead><tr><th>Last call</th><th v-if="list.scope === 'organisation'">Who</th><th>Client</th><th>API key</th><th class="num">Calls</th><th class="num">Returned</th><th>Most used</th><th>Repositories</th></tr></thead>
-            <tbody>
-              <tr v-for="s in list.sessions" :key="s.id" class="row-link" :class="{ active: s.id === selected }" tabindex="0" @click="pick(s.id)" @keydown.enter="pick(s.id)">
-                <td class="nowrap" :title="new Date(s.last).toLocaleString()">{{ relTime(s.last) }}</td>
-                <td v-if="list.scope === 'organisation'">{{ s.actor }}</td>
-                <td class="small">{{ s.client || '–' }}</td>
-                <td class="small mono">{{ s.key || '–' }}</td>
-                <td class="num">{{ fmtInt(s.calls) }}<span v-if="s.errors" class="badge badge--pink small">{{ s.errors }} failed</span></td>
-                <td class="num" :title="`${fmtInt(s.bytes)} bytes`">~{{ tokens(s.bytes) }} tokens</td>
-                <td><span v-for="[t, n] in topTools(s.tools)" :key="t" class="chip mono">{{ t }} ×{{ n }}</span></td>
-                <td class="small mono">{{ s.repos.join(', ') || '–' }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <p v-if="list.truncated" class="muted small">The period has more requests than one page reads; older sessions may look shorter than they were. Choose a shorter period.</p>
-        </div>
-        <p v-else-if="list" class="empty"><strong>No agent sessions</strong>Nothing called CodeSynapse through an agent in this period. Connect one on the Agents page.</p>
+        <DataState :error="listError ? plainError(listError) : ''" :pending="pending" :empty="!list?.sessions.length" title="No agent sessions" text="Nothing called CodeSynapse through an agent in this period. Connect one on the Agents page.">
+          <div v-if="list" class="table-wrap">
+            <table>
+              <thead><tr><th>Last call</th><th v-if="list.scope === 'organisation'">Who</th><th>Client</th><th>API key</th><th class="num">Calls</th><th class="num">Returned</th><th>Most used</th><th>Repositories</th></tr></thead>
+              <tbody>
+                <tr v-for="s in list.sessions" :key="s.id" class="row-link" :class="{ active: s.id === selected }" tabindex="0" @click="pick(s.id)" @keydown.enter="pick(s.id)">
+                  <td class="nowrap" :title="new Date(s.last).toLocaleString()">{{ relTime(s.last) }}</td>
+                  <td v-if="list.scope === 'organisation'">{{ s.actor }}</td>
+                  <td class="small">{{ s.client || '–' }}</td>
+                  <td class="small mono">{{ s.key || '–' }}</td>
+                  <td class="num">{{ fmtInt(s.calls) }}<span v-if="s.errors" class="badge badge--pink small">{{ s.errors }} failed</span></td>
+                  <td class="num" :title="`${fmtInt(s.bytes)} bytes`">~{{ tokens(s.bytes) }} tokens</td>
+                  <td><span v-for="[t, n] in topTools(s.tools)" :key="t" class="chip mono">{{ t }} ×{{ n }}</span></td>
+                  <td class="small mono">{{ s.repos.join(', ') || '–' }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <p v-if="list.truncated" class="muted small">The period has more requests than one page reads; older sessions may look shorter than they were. Choose a shorter period.</p>
+          </div>
+        </DataState>
       </section>
 
       <section v-if="selected" class="panel">

@@ -104,22 +104,21 @@ const elapsed = (j: Job) => Math.round((Date.now() - Date.parse(j.started_at)) /
 
     <section class="panel">
       <p class="eyebrow">History</p><h2>AI results for {{ repo }}</h2>
-      <div v-if="aiResults.length" class="table-wrap">
-        <table>
-          <thead><tr><th>Result</th><th>Model</th><th>Open</th><th>When</th></tr></thead>
-          <tbody>
-            <tr v-for="r in aiResults" :key="r.id">
-              <td><NuxtLink :to="{ path: `${base}/reviews`, query: { id: r.id } }">{{ r.title }}</NuxtLink> <span v-if="r.kind === 'report'" class="badge badge--violet">report</span></td>
-              <td class="mono dim">{{ r.author }}</td>
-              <td class="num">{{ r.kind === 'report' ? '–' : fmtInt(r.counts.open) }}</td>
-              <td class="muted">{{ relTime(r.created_at) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p v-else-if="reviewsError" class="notice notice--danger" role="alert">{{ apiErrorMessage(reviewsError) }}</p>
-      <p v-else-if="!reviews" class="muted" role="status">Loading…</p>
-      <p v-else class="muted">Nothing generated yet.</p>
+      <DataState :error="reviewsError" :pending="!reviews" :empty="!aiResults.length" compact text="Nothing generated yet.">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Result</th><th>Model</th><th>Open</th><th>When</th></tr></thead>
+            <tbody>
+              <tr v-for="r in aiResults" :key="r.id">
+                <td><NuxtLink :to="{ path: `${base}/reviews`, query: { id: r.id } }">{{ r.title }}</NuxtLink> <span v-if="r.kind === 'report'" class="badge badge--violet">report</span></td>
+                <td class="mono dim">{{ r.author }}</td>
+                <td class="num">{{ r.kind === 'report' ? '–' : fmtInt(r.counts.open) }}</td>
+                <td class="muted">{{ relTime(r.created_at) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </DataState>
     </section>
   </div>
 </template>

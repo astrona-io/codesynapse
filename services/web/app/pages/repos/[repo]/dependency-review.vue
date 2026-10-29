@@ -135,8 +135,7 @@ const agentText = computed(() => `Run the dependency-review prompt for ${repo.va
       :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Dependency review' }]">
       <a :href="sbomHref" download class="btn btn--ghost" title="Dependencies resolved by go.mod and the lockfiles, as CycloneDX 1.5 JSON. Not the contents of a built artifact.">Download SBOM</a>
     </PageHeader>
-    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
-    <p v-else-if="!ready" class="muted" role="status">Loading the dependency reports…</p>
+    <DataState :error="error" :pending="!ready" :empty="!ready" loading="Loading the dependency reports…" />
     <p v-if="ready && missing" class="notice notice--warn" role="status">Some reports could not be loaded ({{ missing }}), so the list below may be incomplete.</p>
 
     <div v-if="ready" class="grid cols-4">

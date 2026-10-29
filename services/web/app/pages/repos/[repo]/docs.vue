@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import type { GraphView, Ranked } from '~/utils/types'
-
-interface OutlineEntry { id: string; kind: string; name: string; lines: string; summary?: string; level?: number }
+import type { GraphView, OutlineEntry, Ranked } from '~/utils/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -74,9 +72,7 @@ const tokens = (bytes?: number) => Math.round((bytes ?? 0) / 4)
             <span class="mono dim">{{ d.node.file }} · {{ plural(d.node.loc ?? 0, 'line') }}</span>
           </button>
         </nav>
-        <p v-if="!docs" class="muted" role="status">Loading…</p>
-        <p v-else-if="!docs.results.length" class="muted">No Markdown documents indexed.</p>
-        <p v-else-if="!visibleDocs.length" class="muted">No document matches “{{ filter }}”.</p>
+        <DataState :pending="!docs" :empty="!visibleDocs.length" compact :text="docs?.results.length ? `No document matches “${filter}”.` : `No Markdown documents indexed.`" />
       </aside>
 
       <section class="panel">
@@ -86,9 +82,7 @@ const tokens = (bytes?: number) => Math.round((bytes ?? 0) / 4)
             <span class="badge badge--violet">{{ plural(outline.length, 'section') }} · ~{{ fmtInt(tokens(current.bytes)) }} tokens</span>
           </div>
           <p v-if="current.summary" class="muted">{{ current.summary }}</p>
-          <p v-if="outlineError" class="notice notice--danger" role="alert">{{ outlineError }}</p>
-          <p v-else-if="outlineLoading" class="muted" role="status">Loading sections…</p>
-          <p v-else-if="!outline.length" class="muted">This document has no sections.</p>
+          <DataState :error="outlineError" :pending="outlineLoading" :empty="!outline.length" loading="Loading sections…" text="This document has no sections." compact />
           <ol class="outline">
             <li v-for="s in outline" :key="s.id" :style="{ marginLeft: `${indent(s)}px` }">
               <div class="row between">
