@@ -19,4 +19,9 @@ export function useModelUsage(range: MaybeRefOrGetter<string>) {
 
 // The metrics store keeps at most 30 days of series: longer windows show the
 // last 30 days.
-export const seriesRangeFor = (days: number) => (days <= 7 ? '7d' : '30d')
+export const seriesRangeFor = (days: number) => (days === 1 ? '24h' : days <= 7 ? '7d' : '30d')
+
+const RANGE_LABEL: Record<string, string> = { '24h': 'Last 24 hours', '7d': 'Last 7 days' }
+
+// seriesRangeLabel names a series range at the start of a sentence.
+export const seriesRangeLabel = (range: string) => RANGE_LABEL[range] ?? 'Last 30 days'

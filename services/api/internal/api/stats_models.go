@@ -6,7 +6,9 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -206,17 +208,16 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusConflict, errors.New("metrics are not configured (CODESYNAPSE_METRICS_URL)"))
 		return
 	}
-	rng := cmp.Or(r.URL.Query().Get("range"), "7d")
-	sr, ok := seriesRanges[rng]
-	if !ok {
-		s.problem(w, http.StatusBadRequest, errors.New("range must be 1h, 6h, 24h, 7d or 30d"))
+	end := time.Now().Truncate(time.Second)
+	rng, window, span, err := modelWindow(r.URL.Query(), end)
+	if err != nil {
+		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
 	tenants := callerTenants(r)
-	end := time.Now().Truncate(time.Second)
 	ctx := r.Context()
 	query := func(ctx context.Context, expr string) ([]telemetry.Series, error) {
-		return s.cfg.Metrics.QueryRange(ctx, strings.ReplaceAll(expr, "$r", rng), end, end, sr.span, tenants)
+		return s.cfg.Metrics.QueryRange(ctx, strings.ReplaceAll(expr, "$r", window), end, end, span, tenants)
 	}
 	models := map[[2]string]*ModelStat{}
 	stat := func(l map[string]string) *ModelStat {
@@ -396,6 +397,28 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		return cmp.Or(cmp.Compare(b.InputTokens+b.OutputTokens, a.InputTokens+a.OutputTokens), cmp.Compare(a.Provider+a.Model, b.Provider+b.Model))
 	})
 	writeJSON(w, http.StatusOK, out)
+}
+
+// modelWindow is the window GET /api/v1/stats/models covers: a fixed range,
+// or with days the days of GET /api/v1/stats (from midnight UTC days-1 days
+// ago until now), so the money tiles and the savings chart cover the same
+// time. It returns the range's name, its MetricsQL duration and its span.
+func modelWindow(q url.Values, end time.Time) (name, window string, span time.Duration, err error) {
+	if d := q.Get("days"); d != "" {
+		days, err := strconv.Atoi(d)
+		if err != nil || days < 1 || days > 180 {
+			return "", "", 0, errors.New("days must be a whole number from 1 to 180")
+		}
+		start := end.UTC().Truncate(24*time.Hour).AddDate(0, 0, -(days - 1))
+		span = max(time.Second, end.Sub(start).Truncate(time.Second))
+		return strconv.Itoa(days) + "d", strconv.Itoa(int(span/time.Second)) + "s", span, nil
+	}
+	rng := cmp.Or(q.Get("range"), "7d")
+	sr, ok := seriesRanges[rng]
+	if !ok {
+		return "", "", 0, errors.New("range must be 1h, 6h, 24h, 7d or 30d")
+	}
+	return rng, rng, sr.span, nil
 }
 
 func ptr(v float64) *float64 { return &v }

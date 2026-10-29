@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useStatistics } from '~/composables/useStatistics'
+import { useStatistics, windowLabel } from '~/composables/useStatistics'
 const { days, s, error, pending } = useStatistics()
 const m = computed(() => s.value?.memory)
 
@@ -81,7 +81,7 @@ function unavailable(panel: string, status: number) {
   <div v-else-if="s && m" :class="{ refreshing: pending }" class="stack">
     <section class="panel">
       <p class="eyebrow">Context offloading</p><h2>Agent memory</h2>
-      <p class="muted lead">Decisions, conventions and open issues agents keep between chats, so a new session recalls a few facts instead of re-reading the code. Activity covers the last {{ days }} days; stored facts are counted now.</p>
+      <p class="muted lead">Decisions, conventions and open issues agents keep between chats, so a new session recalls a few facts instead of re-reading the code. Activity covers {{ windowLabel(days) }}; stored facts are counted now.</p>
       <div class="grid kpis">
         <StatTile label="Facts stored" :value="fmtCompact(m.facts)" :hint="`${fmtInt(m.entities)} entities in ${activeRepos} ${activeRepos === 1 ? 'repository' : 'repositories'}`" />
         <StatTile label="Replaced facts" :value="fmtCompact(m.history ?? 0)" :hint="`${replacedPct}% of all versions kept as history`" />
@@ -115,7 +115,7 @@ function unavailable(panel: string, status: number) {
           </div>
         </aside>
       </div>
-      <div v-else class="empty"><strong>No memory activity in the last {{ days }} days</strong>Agents save with <code>upsert_graph_triples</code> and recall with <code>recall_context</code>, <code>search_graph_nodes</code> or <code>query_subgraph</code>; the Claude Code plugin also looks up memory for each prompt and offloads older turns before a compaction.</div>
+      <div v-else class="empty"><strong>No memory activity in {{ windowLabel(days) }}</strong>Agents save with <code>upsert_graph_triples</code> and recall with <code>recall_context</code>, <code>search_graph_nodes</code> or <code>query_subgraph</code>; the Claude Code plugin also looks up memory for each prompt and offloads older turns before a compaction.</div>
     </section>
 
     <section class="panel">

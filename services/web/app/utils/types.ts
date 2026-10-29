@@ -686,5 +686,24 @@ export interface ModelStats {
   // disabled, no_local_model or no_ai. Gateway traffic is never shortened.
   compression_enabled?: boolean; compression_off?: 'disabled' | 'no_local_model' | 'no_ai'
   gateway?: GatewayStat
-  reference_price?: { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; cached_input_per_mtok?: number; cache_write_per_mtok?: number; caches_by_default?: boolean; estimate?: boolean; source?: string; checked?: string }
+  reference_price?: ReferencePrice
+}
+export interface ReferencePrice { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; cached_input_per_mtok?: number; cache_write_per_mtok?: number; caches_by_default?: boolean; estimate?: boolean; source?: string; checked?: string }
+// GET /api/v1/stats/savings: the window of /stats cut into UTC buckets
+// (hour for one day, 6h up to a week, day up to 30 days, week Monday to
+// Sunday beyond). Dollars are null when they cannot be valued.
+export interface SavingsBucket {
+  start: number; end: number // unix seconds
+  never_read_tokens: number; graph_saved_dollars: number | null
+  local_input_tokens: number; local_output_tokens: number; local_cached_tokens: number
+  compression_saved_dollars: number | null; gateway_saved_dollars: number | null
+}
+export interface SavingsSeries {
+  days: number; step: 'hour' | '6h' | 'day' | 'week'; buckets: SavingsBucket[]
+  // False without the metrics store: local model work is missing and graph
+  // answers cannot be placed below a day.
+  metrics: boolean
+  // Graph answers of days with no hourly measurement: in the tiles, in no bucket.
+  unplaced_never_read_tokens: number; unplaced_graph_saved_dollars: number
+  reference_price: ReferencePrice | null
 }

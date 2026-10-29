@@ -67,7 +67,7 @@ const share = (q: number) => (allRequests.value ? Math.round((100 * q) / allRequ
 
     <section class="panel">
       <p class="eyebrow">AI providers</p><h2>Model usage</h2>
-      <p class="muted small">{{ ready ? `Last ${range === '7d' ? 7 : 30} days, every process${days > 30 ? ' (the metrics store keeps 30 days)' : ''}.` : 'Since the API started; live metrics are off.' }}</p>
+      <p class="muted small">{{ ready ? `${seriesRangeLabel(range)}, every process${days > 30 ? ' (the metrics store keeps 30 days)' : ''}.` : 'Since the API started; live metrics are off.' }}</p>
       <div v-if="providers.length" class="table-wrap">
         <table>
           <thead><tr><th>Provider</th><th>Share of requests</th><th class="num">Requests</th><th class="num">Tokens in / out</th></tr></thead>

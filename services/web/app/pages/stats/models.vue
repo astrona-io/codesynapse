@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import type { ModelStats } from '~/utils/types'
+import type { ModelStats, SavingsSeries } from '~/utils/types'
 import { useStatistics } from '~/composables/useStatistics'
 
 // What the connected models do and what they save. Agent tokens and tokens
 // avoided come from the daily usage counters (the window chips); model work
-// comes from the metrics store, which keeps at most 30 days.
+// comes from the metrics store, which keeps at most 30 days. Both cover the
+// same UTC days, so the savings chart adds up to the tiles.
 const { days, s, error: statsError } = useStatistics()
-const range = computed(() => seriesRangeFor(days.value))
-const { data: m, error: modelsError } = useApiGet<ModelStats>(() => `stats/models?range=${range.value}`)
+const { data: m, error: modelsError } = useApiGet<ModelStats>(() => `stats/models?days=${days.value}`)
+const { data: series, error: seriesError, pending: seriesPending } = useApiGet<SavingsSeries>(() => `stats/savings?days=${days.value}`)
 
 const a = computed(() => s.value?.agents)
 const models = computed(() => m.value?.models ?? [])
@@ -56,14 +57,7 @@ const graphShort = computed(() => {
 })
 // Split by what the tokens would have been billed as: fresh input, cache
 // reads (at the cache price, else the input price) and output.
-const savedParts = computed(() => {
-  const p = price.value
-  if (!p) return null
-  const input = (localIn.value - localCached.value) * p.input_per_mtok / 1e6
-  const cached = localCached.value * (p.cached_input_per_mtok || p.input_per_mtok) / 1e6
-  const output = localOut.value * p.output_per_mtok / 1e6
-  return { input, cached, output }
-})
+const savedParts = computed(() => (price.value ? localSaved(price.value, localIn.value, localCached.value, localOut.value) : null))
 // Prompt compression is priced on the server per model; null when a price is missing.
 const compressionSaved = computed(() => m.value?.compression_saved_dollars ?? null)
 // An API older than compression_enabled leaves it out: treat that as on.
@@ -78,7 +72,7 @@ const compressionOffHint = computed(() => `${COMPRESSION_OFF[m.value?.compressio
 const gw = computed(() => m.value?.gateway)
 const gwSaved = computed(() => gw.value?.saved_dollars ?? null)
 const spent = computed(() => m.value?.spent_dollars ?? null)
-const saved = computed(() => (savedParts.value ? savedParts.value.input + savedParts.value.cached + savedParts.value.output + (graphSaved.value ?? 0) + (compressionSaved.value ?? 0) + (gwSaved.value ?? 0) : null))
+const saved = computed(() => totalSaved(price.value, { input: localIn.value, cached: localCached.value, output: localOut.value }, [graphSaved.value, compressionSaved.value, gwSaved.value]))
 // Where a price comes from, shown as its host and path.
 const sourceLabel = (u: string) => { try { const x = new URL(u); return x.host + x.pathname + (x.hash ? ` (${x.hash.slice(1)})` : '') } catch { return u } }
 const money = (v: number) => (v >= 100 ? `$${Math.round(v)}` : `$${v.toFixed(2)}`)
@@ -112,7 +106,7 @@ const readSpeed = computed(() => models.value.filter((x) => x.read_tokens_per_se
 const writeSpeed = computed(() => models.value.filter((x) => x.write_tokens_per_second != null)
   .map((x) => ({ label: x.model, value: x.write_tokens_per_second!, detail: `${fmtCompact(x.output_tokens)} tokens written` }))
   .sort((p, q) => q.value - p.value))
-const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics store keeps no more)' : `last ${range.value === '7d' ? 7 : 30} days`))
+const modelWindow = computed(() => (days.value > 30 ? 'the last 30 days (the metrics store keeps no more)' : windowLabel(days.value)))
 </script>
 
 <template>
@@ -170,6 +164,16 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
       <p v-else class="muted small">No tokens counted yet in this window.</p>
     </section>
 
+    <section class="panel">
+      <p class="eyebrow">Over time</p><h2>Savings, {{ windowLabel(days) }}</h2>
+      <DataState
+        :pending="seriesPending" :error="seriesError" :empty="!series || !series.buckets.length"
+        title="No savings to chart" text="Nothing was counted in this window." compact
+      >
+        <SavingsChart v-if="series" :series="series" :price="price ?? series.reference_price" />
+      </DataState>
+    </section>
+
     <p v-if="price" class="muted small source">
       The total saved values local work and unread tokens at {{ price.model }}'s prices: ${{ price.input_per_mtok }} in<template v-if="price.cached_input_per_mtok">, ${{ price.cached_input_per_mtok }} cached</template> and ${{ price.output_per_mtok }} out per million tokens.
       <template v-if="price.estimate">This is a built-in estimate<template v-if="price.source"> from <a :href="price.source" target="_blank" rel="noopener noreferrer">{{ sourceLabel(price.source) }}</a><template v-if="price.checked">, checked {{ price.checked }}</template></template>; add prices to a cloud provider in config/llm.yaml (or <code>price_feed: openrouter</code>) for your own.</template>
@@ -180,7 +184,7 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
     <template v-else-if="m">
       <section class="panel">
         <p class="eyebrow">Speed</p><h2>How fast each model reads and writes</h2>
-        <p class="muted small">Tokens per second from streamed answers ({{ windowLabel }}). Reading is the prompt, up to the first token, including loading the model into memory; writing is the answer after it. Local models stream; cloud models do not and show no speed.</p>
+        <p class="muted small">Tokens per second from streamed answers ({{ modelWindow }}). Reading is the prompt, up to the first token, including loading the model into memory; writing is the answer after it. Local models stream; cloud models do not and show no speed.</p>
         <div class="grid two">
           <div><h3>Input speed (prompt tokens/s)</h3><RankList :rows="readSpeed" color="var(--s-1)" suffix=" t/s" empty="No streamed answers yet." /></div>
           <div><h3>Output speed (answer tokens/s)</h3><RankList :rows="writeSpeed" color="var(--s-2)" suffix=" t/s" empty="No streamed answers yet." /></div>
@@ -189,7 +193,7 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
 
       <section class="panel">
         <p class="eyebrow">Work</p><h2>Which models get which work</h2>
-        <p class="muted small">Tokens (read + written) per model and task, {{ windowLabel }}.</p>
+        <p class="muted small">Tokens (read + written) per model and task, {{ modelWindow }}.</p>
         <StackedBars v-if="taskRows.length" :rows="taskRows" :keys="taskKeys" title="Model" unit="tokens" />
         <p v-else class="muted small">No model calls recorded in this window.</p>
       </section>
