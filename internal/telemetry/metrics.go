@@ -287,7 +287,7 @@ var (
 	GitOperations = Default.ScopedCounter("codesynapse_git_operations_total", "Remote git calls by operation (clone, fetch, ls_remote, push) and outcome (ok, error, no_access, redirected, timeout).", "operation", "outcome")
 	GitDuration   = Default.ScopedHistogram("codesynapse_git_operation_seconds", "Remote git call time by operation.", slow, "operation").TenantShare(len(gitOperations))
 
-	Lookups        = Default.ScopedCounter("codesynapse_lookups_total", "External lookups by service (osv, depsdev, forge_github, forge_gitlab, forge_forgejo) and outcome (ok, error, timeout, rate_limited).", "service", "outcome")
+	Lookups        = Default.ScopedCounter("codesynapse_lookups_total", "External lookups by service (osv, depsdev, goproxy, forge_github, forge_gitlab, forge_forgejo) and outcome (ok, error, timeout, rate_limited).", "service", "outcome")
 	LookupDuration = Default.ScopedHistogram("codesynapse_lookup_seconds", "External lookup time by service.", latency, "service").TenantShare(len(lookupServices))
 
 	// Most failed attempts have no trusted tenant and export as platform_.

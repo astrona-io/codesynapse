@@ -59,11 +59,11 @@ func TestSeriesScopedByTenant(t *testing.T) {
 		User accounts.User
 		Org  accounts.Org
 	}
-	require.Equal(t, admin.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, &adminSigned), 201)
+	require.Equal(t, admin.signUp(`{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, &adminSigned), 202)
 	require.NoError(t, acc.SetPlatformAdmin(ctx, rootSession(t, acc), adminSigned.User.ID, true))
 	bob := newClient(t, ts)
 	var signed struct{ Org accounts.Org }
-	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 201)
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 202)
 
 	var p SeriesPanel
 	require.Equal(t, bob.do("GET", "/api/v1/stats/series?panel=tool_calls&range=1h", "", &p), 200)
@@ -249,4 +249,40 @@ func TestGatewayPanels(t *testing.T) {
 		assert.Equal(t, a.queries[0].expr, seriesPanels[name].queries[0].expr, "the platform panel shows the same series across tenants")
 		assert.True(t, a.groups != "", "values few organisations use are folded")
 	}
+}
+
+// The response-time quantile panels are four fixed histogram_quantile
+// queries per route. The organisation panels never name a tenant (it comes
+// from extra_filters); the platform twins run the same expressions and hide
+// a route fewer than minGroupOrgs organisations used.
+func TestGatewayQuantilePanels(t *testing.T) {
+	want := []struct{ name, phi string }{{"p50", "0.5"}, {"p75", "0.75"}, {"p95", "0.95"}, {"p99", "0.99"}}
+	for _, route := range []string{"local", "cloud"} {
+		name := "gateway_latency_" + route
+		t.Run(name, func(t *testing.T) {
+			p, ok := seriesPanels[name]
+			require.True(t, ok)
+			assert.False(t, p.platform, "organisation panels stay scoped to the caller")
+			assert.Equal(t, p.Kind, "gauge")
+			assert.Equal(t, p.Unit, "seconds")
+			assert.Contains(t, p.Help, "estimated from histogram buckets", "the tip says quantiles are bucket estimates")
+			require.Len(t, p.queries, len(want))
+			for i, q := range p.queries {
+				assert.Equal(t, q.name, want[i].name)
+				assert.Equal(t, q.by, "")
+				assert.Equal(t, q.expr, `histogram_quantile(`+want[i].phi+`, sum by (le) (increase(gateway_request_duration_seconds_bucket{route="`+route+`"}[$w])))`)
+				assert.False(t, strings.Contains(q.expr, "tenant_id"), "the tenant comes from extra_filters, never the query")
+			}
+			a, ok := adminPanels[name]
+			require.True(t, ok)
+			for i, q := range a.queries {
+				assert.Equal(t, q.expr, p.queries[i].expr, "the platform panel shows the same series across tenants")
+			}
+			assert.Equal(t, a.groups, `count(sum by (tenant_id) (increase(gateway_request_duration_seconds_count{route="`+route+`"}[$w])) > 0)`)
+		})
+	}
+	lines := []SeriesLine{{Name: "p50"}, {Name: "p99"}}
+	assert.Equal(t, len(hideSmallPanel(lines, map[string]int{"": minGroupOrgs - 1})), 0, "a route few organisations used is not shown")
+	assert.Equal(t, len(hideSmallPanel(lines, map[string]int{"": minGroupOrgs})), 2)
+	assert.Equal(t, len(hideSmallPanel(lines, map[string]int{})), 0, "no count is no organisation")
 }

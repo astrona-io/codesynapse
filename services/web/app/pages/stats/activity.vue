@@ -8,7 +8,6 @@ const RANGES: { id: SeriesRange; label: string }[] = [
 ]
 const GROUPS = [
   { title: 'Tokens and model cost', help: 'Provider-reported tokens and configured prices. Missing usage or prices leave a measurement gap.', panels: ['llm_tokens', 'llm_cost', 'llm_savings', 'llm_coverage', 'llm_failure_causes', 'llm_ttft', 'served_tokens'] },
-  { title: 'Model gateway', help: 'Requests agents sent through the gateway: time per route (average and 95th percentile), how long requests waited for the local model, how often it timed out, and why requests offered to it went to the cloud. Prompts are never recorded.', panels: ['gateway_latency_avg', 'gateway_latency', 'gateway_timeouts', 'gateway_queue_wait', 'gateway_fallthrough'] },
   { title: 'Network and cloud bandwidth', help: 'Application payload bytes. Avoided cloud traffic needs an equivalent configured fallback; local execution alone has no savings baseline.', panels: ['bandwidth', 'cloud_traffic', 'cloud_savings'] },
   { title: 'External services and the audit log', help: 'Requests to osv.dev, deps.dev and git host APIs carry only package names, versions and organisation names. Every changing request waits for its audit entry.', panels: ['lookups', 'lookup_latency', 'audit_write_latency'] },
   { title: 'Database performance', help: 'Measured request latency, volume and returned rows. Graph rows do not measure internal nodes traversed.', panels: ['db_latency', 'db_latency_tail', 'db_requests', 'db_rows', 'db_errors'] },
@@ -47,6 +46,7 @@ onBeforeUnmount(() => clearInterval(timer))
 <section class="panel">
   <p class="eyebrow">Live activity</p><h2>By the minute and hour</h2>
   <p class="muted small">Recorded by the services every 15 seconds: agent calls, latency, AI model tokens and cost, database work and memory. Counts are per step of the chart ({{ range === '1h' ? '1 minute' : range === '6h' ? '5 minutes' : range === '24h' ? '15 minutes' : range === '7d' ? '1 hour' : '6 hours' }}). These panels show your organisation's activity. Platform-wide telemetry is available in Administration.</p>
+  <p class="muted small">Model gateway response times, queue wait and timeouts are under <NuxtLink to="/stats/gateway">Statistics → Gateway</NuxtLink>.</p>
   <div class="row filters">
     <span class="label">Window</span>
     <button v-for="r in RANGES" :key="r.id" class="chip" :class="{ active: range === r.id }" @click="range = r.id">{{ r.label }}</button>

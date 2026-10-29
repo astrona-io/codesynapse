@@ -35,7 +35,10 @@ func TestAdminPanelQueries(t *testing.T) {
 				}
 				assert.False(t, strings.Contains(e, "tenant_id=") || strings.Contains(e, "tenant_id=~"), "tenants are chosen through extra_filters only: "+e)
 			}
-			if p.groups != "" {
+			if p.groups != "" && p.queries[0].by == "" {
+				// Named lines (one route's quantiles): one count for the whole panel.
+				assert.True(t, strings.HasPrefix(p.groups, "count(sum by (tenant_id) "), "the groups query counts the organisations behind the whole panel: "+p.groups)
+			} else if p.groups != "" {
 				assert.Contains(t, p.groups, "("+p.queries[0].by+")", "the groups query counts organisations per value of the panel's label")
 				assert.False(t, p.byTenant, "per-organisation panels name organisations, not shared values")
 			}
@@ -154,7 +157,7 @@ func TestUsageSection(t *testing.T) {
 			User accounts.User
 			Org  accounts.Org
 		}
-		require.Equal(t, c.do("POST", "/api/v1/auth/signup", `{"email":"`+email+`","name":"`+name+`","password":"`+pw+`"}`, &signed), 201)
+		require.Equal(t, c.signUp(`{"email":"`+email+`","name":"`+name+`","password":"`+pw+`"}`, &signed), 202)
 		return c, signed.User, signed.Org
 	}
 	ada, adaUser, adaOrg := signup("ada@example.com", "Ada")

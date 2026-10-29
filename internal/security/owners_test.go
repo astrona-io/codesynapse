@@ -62,6 +62,8 @@ func TestDeprecatedDependencies(t *testing.T) {
 	mod("zz-direct", false, "moved to zz2", 3)
 	mod("aa-indirect", true, "unmaintained", 1)
 	mod("fine", false, "", 0)
+	g.AddNode(model.Node{ID: model.NodeID("r", model.KindModule, "example.com/bad"), Kind: model.KindModule, Repo: "r", Name: "example.com/bad", Version: "v1.2.0",
+		Ecosystem: "Go", Retracted: "published with a broken | build"})
 	st := memory.New()
 	require.NoError(t, st.ReplaceRepo(ctx, "r", g))
 	rep, err := Build(ctx, st, "r", Options{})
@@ -73,4 +75,9 @@ func TestDeprecatedDependencies(t *testing.T) {
 	var md bytes.Buffer
 	require.NoError(t, WriteMarkdown(&md, rep))
 	assert.Contains(t, md.String(), "| `zz-direct` | 1.0.0 | 2.0.0 | yes | moved to zz2 |")
+	assert.Equal(t, rep.Modules.Retracted, 1)
+	require.Len(t, rep.Retracted, 1)
+	assert.Equal(t, rep.Retracted[0].Reason, "published with a broken | build")
+	assert.Contains(t, md.String(), "## Retracted Go module versions")
+	assert.Contains(t, md.String(), "| `example.com/bad` | v1.2.0 | ? | yes | published with a broken \\| build |")
 }

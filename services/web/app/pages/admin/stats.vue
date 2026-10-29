@@ -40,7 +40,7 @@ const { data: ingest, error: ingestError, refresh: refreshIngest, execute: loadI
 // use are "other" unless one organisation is selected.
 const chartPanels: Partial<Record<Tab, string[]>> = {
   usage: ['sessions', 'mcp_calls', 'mcp_errors', 'mcp_tokens', 'local_answers', 'tool_latency', 'tool_latency_by_tool',
-  'org_tool_calls', 'org_sessions', 'org_tokens', 'api_routes', 'api_failures', 'api_route_latency', 'gateway_requests', 'gateway_latency_avg', 'gateway_latency', 'gateway_fallthrough', 'llm_cost', 'db_latency'],
+  'org_tool_calls', 'org_sessions', 'org_tokens', 'api_routes', 'api_failures', 'api_route_latency', 'gateway_requests', 'gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_fallthrough', 'llm_cost', 'db_latency'],
   jobs: ['jobs_finished', 'jobs_failures', 'jobs_org_finished', 'jobs_queue', 'jobs_wait', 'jobs_duration', 'jobs_worker_roles', 'jobs_scheduler', 'jobs_leases'],
   ingest: ['ingest_runs', 'ingest_org_runs', 'ingest_phases', 'ingest_extract', 'ingest_files', 'ingest_skips'],
 }

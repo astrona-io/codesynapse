@@ -157,12 +157,24 @@ func Run(ctx context.Context, dir, tool string, args json.RawMessage) (any, erro
 // MaxWaitSeconds is the longest gh_pr_status may wait for checks.
 const MaxWaitSeconds = 300
 
-// The poll interval and the grace are variables so tests do not sleep.
+// The poll interval, the grace and the clock are variables so tests run on a
+// fake clock instead of depending on how fast gh answers.
 var (
 	pollInterval = 15 * time.Second
 	// noChecksGrace is how long a wait lets checks appear: right after a push
 	// none exist yet, and a repository without CI never gets any.
 	noChecksGrace = 45 * time.Second
+	now           = time.Now
+	sleep         = func(ctx context.Context, d time.Duration) error {
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+			return nil
+		}
+	}
 )
 
 // Timeout is how long the bridge should let a call run: the usual bound plus
@@ -182,7 +194,7 @@ func Status(ctx context.Context, dir string, in PRStatusIn) (PRStatus, error) {
 	if in.Number < 0 || in.Number > MaxNumber || in.WaitSeconds < 0 || in.WaitSeconds > MaxWaitSeconds {
 		return PRStatus{}, fmt.Errorf("%w: number must be a pull request number and wait_seconds between 0 and %d", ErrInvalid, MaxWaitSeconds)
 	}
-	start := time.Now()
+	start := now()
 	deadline := start.Add(time.Duration(in.WaitSeconds) * time.Second)
 	for {
 		st, err := status(ctx, dir, in.Number)
@@ -192,16 +204,14 @@ func Status(ctx context.Context, dir string, in PRStatusIn) (PRStatus, error) {
 		c := st.Checks
 		total := c.Pass + c.Fail + c.Pending + c.Skipped
 		finished := st.State != "OPEN" || c.Fail > 0 || (c.Done && total > 0) ||
-			(total == 0 && time.Since(start) >= noChecksGrace)
-		if finished || !time.Now().Before(deadline) {
-			st.WaitedSeconds = int(time.Since(start).Round(time.Second) / time.Second)
+			(total == 0 && now().Sub(start) >= noChecksGrace)
+		if finished || !now().Before(deadline) {
+			st.WaitedSeconds = int(now().Sub(start).Round(time.Second) / time.Second)
 			st.TimedOut = !finished
 			return st, nil
 		}
-		select {
-		case <-ctx.Done():
-			return st, ctx.Err()
-		case <-time.After(min(pollInterval, time.Until(deadline))):
+		if err := sleep(ctx, min(pollInterval, deadline.Sub(now()))); err != nil {
+			return st, err
 		}
 	}
 }

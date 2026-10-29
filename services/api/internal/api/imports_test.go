@@ -30,7 +30,7 @@ func TestImportListShowsPublicRepositories(t *testing.T) {
 
 	bob := newClient(t, ts)
 	var signed struct{ User accounts.User }
-	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 201)
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 202)
 	var org accounts.Org
 	require.Equal(t, bob.do("POST", "/api/v1/accounts/orgs", `{"name":"Platform Team"}`, &org), 201)
 	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: org.ID, Graph: "acme/api", Remote: "https://github.com/acme/api.git",
@@ -62,7 +62,7 @@ func TestImportListShowsPublicRepositories(t *testing.T) {
 	agent.auth = "Bearer " + created.Key
 	assert.Equal(t, list(agent, `{"org":"acme"}`, nil), 403, "importing is a signed-in session's work")
 	eve := newClient(t, ts)
-	require.Equal(t, eve.do("POST", "/api/v1/auth/signup", `{"email":"eve@example.com","name":"Eve","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, eve.signUp(`{"email":"eve@example.com","name":"Eve","password":"`+pw+`"}`, nil), 202)
 	assert.Equal(t, list(eve, `{"org":"acme"}`, nil), 404, "other organisations cannot use it")
 }
 
@@ -123,9 +123,9 @@ func TestImportListUsesTheOrganisationsToken(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	bob := newClient(t, ts)
-	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 202)
 	carol := newClient(t, ts)
-	require.Equal(t, carol.do("POST", "/api/v1/auth/signup", `{"email":"carol@example.com","name":"Carol","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, carol.signUp(`{"email":"carol@example.com","name":"Carol","password":"`+pw+`"}`, nil), 202)
 	var org accounts.Org
 	require.Equal(t, bob.do("POST", "/api/v1/accounts/orgs", `{"name":"Work"}`, &org), 201)
 	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+org.Slug+"/members", `{"email":"carol@example.com","role":"member"}`, nil), 200)
