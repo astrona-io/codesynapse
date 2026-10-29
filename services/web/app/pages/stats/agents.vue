@@ -193,7 +193,7 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
 
     <section v-if="local" class="panel">
       <p class="eyebrow">Local models</p><h2>AI work that stayed on your network</h2>
-      <p class="muted small">Reviews, security triage, briefings and memory extraction CodeSynapse ran on {{ local.models.join(', ') }}. {{ modelsReady ? `Last ${modelRange === '7d' ? 7 : 30} days, every process.` : 'Since the API started; live metrics are off.' }}</p>
+      <p class="muted small">Reviews, security triage, briefings and memory extraction CodeSynapse ran on {{ local.models.join(', ') }}. {{ modelsReady ? `${seriesRangeLabel(modelRange)}, every process.` : 'Since the API started; live metrics are off.' }}</p>
       <div class="grid kpis">
         <StatTile label="Local requests" :value="fmtCompact(local.requests)" :hint="local.failures ? `${local.failures} failed` : 'no failures'" />
         <StatTile label="Tokens processed locally" :value="fmtCompact(local.tokens)" hint="input + output, no cloud bill" />

@@ -2,9 +2,16 @@ import type { WorkspaceStats } from '~/utils/types'
 import type { InjectionKey } from 'vue'
 import { inject, provide, watch } from 'vue'
 
-// The Statistics pages share one window (the last 7, 30 or 90 days, kept in
-// the URL as ?days=) and one fetch of the workspace figures.
-export const STAT_WINDOWS = [7, 30, 90]
+// The Statistics pages share one window (today, or the last 7, 30 or 90
+// days, kept in the URL as ?days=) and one fetch of the workspace figures.
+// The days are UTC days: a window starts at midnight UTC.
+export const STAT_WINDOWS = [1, 7, 30, 90]
+
+// windowLabel names a window in running text ("the last 30 days").
+export const windowLabel = (days: number) => (days === 1 ? 'today (since 00:00 UTC)' : `the last ${days} days`)
+
+// windowChip is the window picker's label.
+export const windowChip = (days: number) => (days === 1 ? 'today' : `last ${days} days`)
 
 const statisticsKey: InjectionKey<ReturnType<typeof createStatistics>> = Symbol('statistics')
 
