@@ -24,10 +24,10 @@ const graphAvoided = computed(() => Math.max(0, (a.value?.avoided_tokens ?? 0) -
 const agentTokens = computed(() => a.value?.work_tokens ?? a.value?.tokens.total ?? 0)
 
 const pool = computed(() => [
-  { label: 'Cloud agents', value: agentTokens.value, color: 'var(--s-1)', detail: 'fresh input, cache writes and output Claude Code and Codex reported; prompt-cache reads left out' },
-  { label: 'Never read (graph answers)', value: graphAvoided.value, color: 'var(--s-2)', detail: 'file tokens the graph tools answered instead' },
-  { label: 'Local models', value: localIn.value + localOut.value, color: 'var(--s-3)', detail: 'ask_local, reviews, memory and other AI work on your machine' },
-  { label: 'CodeSynapse on cloud models', value: cloudTokens.value, color: 'var(--s-4)', detail: 'AI work routed to a cloud provider' },
+  { label: 'Cloud agents', value: agentTokens.value, color: 'var(--s-1)', tip: 'fresh input, cache writes and output Claude Code and Codex reported; prompt-cache reads left out' },
+  { label: 'Never read (graph answers)', value: graphAvoided.value, color: 'var(--s-2)', tip: 'file tokens the graph tools answered instead' },
+  { label: 'Local models', value: localIn.value + localOut.value, color: 'var(--s-3)', tip: 'ask_local, reviews, memory and other AI work on your machine' },
+  { label: 'CodeSynapse on cloud models', value: cloudTokens.value, color: 'var(--s-4)', tip: 'AI work routed to a cloud provider' },
 ])
 const poolTotal = computed(() => pool.value.reduce((t, p) => t + p.value, 0))
 const offCloud = computed(() => (poolTotal.value ? Math.round((100 * (graphAvoided.value + localIn.value + localOut.value)) / poolTotal.value) : null))
@@ -49,6 +49,10 @@ const graphHint = computed(() => {
   const parts = sv.tokens > 0 || unaware === 0 ? [`${fmtCompact(sv.tokens)} tokens never read, each once at the ${sv.price === 'cache_write' ? 'cache-write' : 'input'} price`] : []
   if (unaware > 0) parts.push(`${fmtCompact(unaware)} tokens never read by agents that cannot tell repeated answers apart${sv.unaware_dollars != null ? ` (${money(sv.unaware_dollars)})` : ''}, at the input price; left out of the share`)
   return parts.join('; ')
+})
+const graphShort = computed(() => {
+  const sv = a.value?.saved
+  return graphSaved.value === null || !sv ? '' : `${fmtCompact(sv.tokens + (sv.unaware_graph_tokens ?? 0))} tokens never read`
 })
 // Split by what the tokens would have been billed as: fresh input, cache
 // reads (at the cache price, else the input price) and output.
@@ -119,30 +123,32 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
       <p class="muted small">Every token an agent or CodeSynapse spent, or did not have to spend, in the window. Cloud agents' tokens come from Claude Code and Codex hooks; the rest from CodeSynapse's own counters. Estimates say how they are estimated.</p>
       <h3 class="row-title">Counts</h3>
       <div class="grid kpis">
-        <StatTile label="Kept off cloud models" :value="offCloud === null ? '–' : `${offCloud}%`" hint="never read, or read by a local model" />
-        <StatTile label="Tokens never read" :value="fmtCompact(a?.avoided_tokens ?? 0)" :hint="`graph answers and ask_local, estimated`" />
+        <StatTile label="Kept off cloud models" :value="offCloud === null ? '–' : `${offCloud}%`" tip="never read, or read by a local model" />
+        <StatTile label="Tokens never read" :value="fmtCompact(a?.avoided_tokens ?? 0)" tip="graph answers and ask_local, estimated" />
         <StatTile label="Handled by local models" :value="fmtCompact(localIn + localOut)" :hint="`${fmtCompact(localIn)} read · ${fmtCompact(localOut)} written`" />
-        <StatTile label="Prompts pre-briefed" :value="fmtCompact(a?.local_briefs ?? 0)" hint="a local model briefed the agent first" />
-        <StatTile label="Code drafts" :value="fmtCompact(a?.local_drafts ?? 0)" hint="a local model drafted code the agent then checked" />
+        <StatTile label="Prompts pre-briefed" :value="fmtCompact(a?.local_briefs ?? 0)" tip="a local model briefed the agent first" />
+        <StatTile label="Code drafts" :value="fmtCompact(a?.local_drafts ?? 0)" tip="a local model drafted code the agent then checked" />
       </div>
       <h3 class="row-title">Money (estimate)</h3>
       <div class="grid kpis">
         <StatTile
           label="Total saved (est.)" :value="saved === null ? 'unknown' : money(saved)"
-          :hint="price ? (price.estimate ? `at ${price.model}, rough estimate` : `at ${price.model} prices${price.checked ? ` of ${price.checked}` : ''}, estimated`) : 'no prices to estimate with: add them in config/llm.yaml'"
+          :hint="price ? `at ${price.model} prices` : 'no prices set'"
+          :tip="price ? (price.estimate ? 'a rough estimate from built-in list prices' : `estimated${price.checked ? `, prices of ${price.checked}` : ''}`) : 'no prices to estimate with: add them in config/llm.yaml'"
         />
-        <StatTile label="Spent on cloud models (est.)" :value="spent === null ? 'unknown' : money(spent)" :hint="spent === null ? 'a cloud model has no price set, so its cost is unknown' : 'reported usage at the configured prices'" />
+        <StatTile label="Spent on cloud models (est.)" :value="spent === null ? 'unknown' : money(spent)" :tip="spent === null ? 'a cloud model has no price set, so its cost is unknown' : 'reported usage at the configured prices'" />
         <StatTile
           v-if="savedParts" label="Saved by shorter prompts"
           :value="!compressionOn ? 'off' : compressionSaved === null ? 'unknown' : money(compressionSaved)"
-          :hint="!compressionOn ? compressionOffHint : compressionSaved === null ? 'a cloud model has no price set; not in the total' : 'CodeSynapse\'s own AI tasks: prose a local model shortened before it went to the cloud, at the input price; gateway traffic is passed on unchanged'"
+          :tip="!compressionOn ? compressionOffHint : compressionSaved === null ? 'a cloud model has no price set; not in the total' : 'CodeSynapse\'s own AI tasks: prose a local model shortened before it went to the cloud, at the input price; gateway traffic is passed on unchanged'"
         />
-        <StatTile v-if="savedParts" label="Saved by graph answers" :value="graphSaved === null ? 'unknown' : money(graphSaved)" :hint="graphHint" />
+        <StatTile v-if="savedParts" label="Saved by graph answers" :value="graphSaved === null ? 'unknown' : money(graphSaved)" :hint="graphShort" :tip="graphHint" />
         <StatTile v-if="savedParts" label="Saved on input" :value="money(savedParts.input)" :hint="`${fmtCompact(Math.max(0, localIn - localCached))} tokens read by local models instead`" />
         <StatTile
           v-if="savedParts" label="Saved on cached input"
           :value="localCached ? money(savedParts.cached) : 'none reported'"
-          :hint="localCached ? `${fmtCompact(localCached)} tokens the local models' prompt cache served, at the cache-read price; agents' own prompt cache is never counted` : 'the local runtime reported no prompt-cache hits (Ollama does not report them); agents\' own prompt cache is never counted'"
+          :hint="localCached ? `${fmtCompact(localCached)} tokens from the local prompt cache` : ''"
+          :tip="localCached ? `${fmtCompact(localCached)} tokens the local models' prompt cache served, at the cache-read price; agents' own prompt cache is never counted` : 'the local runtime reported no prompt-cache hits (Ollama does not report them); agents\' own prompt cache is never counted'"
         />
         <StatTile v-if="savedParts" label="Saved on output" :value="money(savedParts.output)" :hint="`${fmtCompact(localOut)} tokens written locally`" />
       </div>
@@ -151,8 +157,10 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
         <div class="grid kpis">
           <StatTile label="Gateway requests" :value="fmtCompact(gw.requests)" :hint="`${fmtCompact(gw.local)} local · ${fmtCompact(gw.cloud)} cloud · ${fmtCompact(gw.rejected)} refused${gw.failed ? ` · ${fmtCompact(gw.failed)} failed` : ''}`" />
           <StatTile label="Answered locally" :value="`${gw.local_share_pct}%`" hint="of gateway requests, by the local model" />
-          <StatTile label="Bytes in / out" :value="`${fmtCompact(gw.bytes_in)} / ${fmtCompact(gw.bytes_out)}`" hint="request and response sizes through the gateway" />
-          <StatTile label="Saved by local answers" :value="gwSaved === null ? 'unknown' : money(gwSaved)" :hint="gwSaved === null ? `${fmtCompact(gw.local_unmetered)} local answers reported no token usage; not in the total` : `${fmtCompact(gw.local_input_tokens)} read${gw.local_cached_tokens ? ` (${fmtCompact(gw.local_cached_tokens)} from its prompt cache)` : ''} · ${fmtCompact(gw.local_output_tokens)} written locally, at the reference prices`" />
+          <StatTile label="Bytes in / out" :value="`${fmtCompact(gw.bytes_in)} / ${fmtCompact(gw.bytes_out)}`" tip="request and response sizes through the gateway" />
+          <StatTile label="Saved by local answers" :value="gwSaved === null ? 'unknown' : money(gwSaved)"
+            :hint="gwSaved === null ? `${fmtCompact(gw.local_unmetered)} answers without usage` : `${fmtCompact(gw.local_input_tokens)} read · ${fmtCompact(gw.local_output_tokens)} written`"
+            :tip="gwSaved === null ? `${fmtCompact(gw.local_unmetered)} local answers reported no token usage; not in the total` : `${fmtCompact(gw.local_input_tokens)} read${gw.local_cached_tokens ? ` (${fmtCompact(gw.local_cached_tokens)} from its prompt cache)` : ''} · ${fmtCompact(gw.local_output_tokens)} written locally, at the reference prices`" />
         </div>
       </template>
       <DonutChart

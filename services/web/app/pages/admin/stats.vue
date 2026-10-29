@@ -52,7 +52,7 @@ const missing = (figure: string) => table.value?.rollup?.unavailable.includes(fi
 const day = (iso: string) => new Date(iso).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })
 const activeHint = computed(() => {
   const r = summary.value?.rollup
-  if (!r) return 'signed in, opened a session or used a key'
+  if (!r) return ''
   return r.latest ? `in the 30 days to ${day(r.latest)}` : 'no daily figures recorded yet'
 })
 </script>
@@ -84,7 +84,7 @@ const activeHint = computed(() => {
     <div v-if="summary" class="grid cols-4">
       <StatTile label="Organisations" :value="n(summary.orgs)" :hint="`${summary.orgs_created} new in this window`" />
       <StatTile label="People" :value="n(summary.users)" :hint="`${summary.users_created} new · ${summary.memberships} memberships`" />
-      <StatTile label="Active people" :value="n(summary.active_users)" :hint="activeHint" />
+      <StatTile label="Active people" :value="n(summary.active_users)" :hint="activeHint" tip="signed in, opened a session or used a key" />
       <StatTile label="Seats" :value="n(summary.seats)" :hint="`held by ${summary.seated_people} people`" />
       <StatTile label="Runtime sessions" :value="n(summary.execution_active)" :hint="`${summary.execution_created} started in this window`" />
       <StatTile label="API keys" :value="n(summary.keys_active)" :hint="`${summary.browser_active} browser sessions open`" />

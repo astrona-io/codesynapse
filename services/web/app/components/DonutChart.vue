@@ -4,7 +4,7 @@
 // a legend with every value and share (so colour is never the only cue), a
 // tooltip per segment on hover and focus, and a table view.
 const props = withDefaults(defineProps<{
-  segments: { label: string; value: number; color: string; detail?: string }[]
+  segments: { label: string; value: number; color: string; detail?: string; tip?: string }[]
   title: string
   unit?: string
   center?: string
@@ -75,7 +75,7 @@ const tip = computed(() => (hover.value >= 0 ? props.segments[hover.value] : und
     <ul class="legend">
       <li v-for="(s, i) in segments" :key="s.label" :class="{ active: hover === i }" @pointerenter="hover = i" @pointerleave="hover = -1">
         <span class="key" :style="{ background: s.color }" />
-        <span class="name">{{ s.label }}</span>
+        <span class="name">{{ s.label }}<InfoTip v-if="s.tip" :text="s.tip" :label="`About ${s.label}`" /></span>
         <span class="val">{{ fmtCompact(s.value) }} <span class="muted">· {{ pct(s.value).toFixed(1) }}%</span></span>
         <span v-if="s.detail" class="muted detail">{{ s.detail }}</span>
       </li>

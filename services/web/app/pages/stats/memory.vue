@@ -85,7 +85,7 @@ function unavailable(panel: string, status: number) {
       <div class="grid kpis">
         <StatTile label="Facts stored" :value="fmtCompact(m.facts)" :hint="`${fmtInt(m.entities)} entities in ${activeRepos} ${activeRepos === 1 ? 'repository' : 'repositories'}`" />
         <StatTile label="Replaced facts" :value="fmtCompact(m.history ?? 0)" :hint="`${replacedPct}% of all versions kept as history`" />
-        <StatTile label="Confirmations" :value="fmtCompact(m.confirmations)" :hint="`${confirmsPerFact} per fact: saved again by a later chat`" />
+        <StatTile label="Confirmations" :value="fmtCompact(m.confirmations)" :hint="`${confirmsPerFact} per fact`" tip="saved again by a later chat" />
         <StatTile label="Saves" :value="fmtCompact(m.saves)" :hint="`${fmtCompact(m.offload_facts ?? 0)} more facts from offloading`" />
         <StatTile label="Recalls" :value="fmtCompact(m.recalls)" :hint="`${m.model.recalls_per_session} per session${m.model.measured ? '' : ' (assumed)'}`" />
         <StatTile label="Tokens per recall" :value="fmtInt(Math.round(m.model.tokens_per_recall))" :hint="`${m.model.tokens_per_fact} per fact${m.model.measured ? ', measured' : ', estimated'}`" />
