@@ -324,6 +324,13 @@ export interface SeriesPanel {
   times: number[]
   series: SeriesLine[]
 }
+// The time-series panels of Statistics → Gateway. The two response-time
+// panels carry four lines each, named p50, p75, p95 and p99 (quantiles
+// estimated from histogram buckets); the platform statistics have
+// cross-tenant twins of both under /admin/stats/series.
+export type GatewaySeriesPanel =
+  | 'gateway_latency_local' | 'gateway_latency_cloud' | 'gateway_latency_avg'
+  | 'gateway_queue_wait' | 'gateway_timeouts'
 
 // Accounts (GET /api/v1/auth/status, /me and the settings endpoints).
 export interface AuthStatus {

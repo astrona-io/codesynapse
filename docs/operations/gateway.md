@@ -92,7 +92,7 @@ They send the gateway key as `Authorization: Bearer csk_...`. These paths are **
 
 ## Seeing how well the local model keeps up
 
-**Statistics → Models** has a Gateway row for the selected window:
+**Statistics → Gateway** shows the gateway on its own page, with the same window chips as the other Statistics pages. Its tiles cover the selected window:
 
 | Tile | What it shows |
 |---|---|
@@ -101,8 +101,17 @@ They send the gateway key as `Authorization: Bearer csk_...`. These paths are **
 | Not answered locally | Every request the local model did not answer, by reason (below) |
 | Response time, local / cloud | Average time from request to last byte by the route that answered, with the 95th percentile. The cloud figure includes any time first spent on the local model |
 | Queue wait, local | How long requests waited for the local model's slot, average and 95th percentile, and how long its own answers took |
+| Bytes in / out | Request and response sizes through the gateway |
 
-**Statistics → Activity → Model gateway** charts the same over time: response time (average and 95th percentile) by route, local model timeouts, queue wait and every fall-through by reason. Platform administrators see the same charts across organisations under **Administration → Statistics**, where a route or reason fewer than three organisations use is folded into "other". Yesterday's totals are also kept for 400 days in the daily platform statistics (`gateway` metric), so they outlive the metrics store.
+What gateway answers saved stays on **Statistics → Models & savings** as "Saved by gateway answers", because it is part of the total saved there.
+
+Below the tiles, the page charts the same over time from the metrics store, which keeps 30 days (a 90-day window shows the last 30):
+
+- **Response time, local model** and **Response time, cloud**: the 50th, 75th, 95th and 99th percentile as lines, one chart per route. The two charts share one y axis by default, so the route whose lines sit lower is the faster one; "Own scale" gives each its own. The percentiles are `histogram_quantile` estimates from the request-duration histogram, whose buckets end at 5, 10, 25, 50, 100, 250 and 500 ms and 1, 2.5, 5, 10, 30, 60, 120 and 300 s, so a value is only as precise as the bucket it falls in.
+- **Gateway response time (average)** by route, **Local model queue wait** and **Local model timeouts**, as lines.
+- **Not answered locally, by reason**: the fall-through reasons for the window, as bars, largest first.
+
+Platform administrators see the response-time percentiles across organisations under **Administration → Statistics**. A route fewer than three organisations used in the window is hidden there, and a reason fewer than three organisations share is folded into "other". Yesterday's totals are also kept for 400 days in the daily platform statistics (`gateway` metric), so they outlive the metrics store.
 
 The reasons a request was not answered locally are a fixed list:
 

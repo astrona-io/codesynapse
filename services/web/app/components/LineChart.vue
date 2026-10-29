@@ -13,7 +13,9 @@ const props = withDefaults(defineProps<{
   unit: string
   stepSeconds: number
   height?: number
-}>(), { height: 180 })
+  // yMax raises the top of the y axis so small multiples share one scale.
+  yMax?: number
+}>(), { height: 180, yMax: 0 })
 
 const PALETTE = ['var(--s-1)', 'var(--s-2)', 'var(--s-3)', 'var(--s-4)']
 const color = (s: SeriesLine, i: number) => (s.name === 'other' ? 'var(--s-other)' : PALETTE[i % PALETTE.length])
@@ -23,7 +25,7 @@ const PAD = { top: 12, right: 96, bottom: 22, left: 48 }
 const plotW = W - PAD.left - PAD.right
 const plotH = computed(() => props.height - PAD.top - PAD.bottom)
 const n = computed(() => props.times.length)
-const maxV = computed(() => niceMax(Math.max(0, ...props.series.flatMap((s) => s.values.map((v) => v ?? 0)))))
+const maxV = computed(() => niceMax(Math.max(0, props.yMax, ...props.series.flatMap((s) => s.values.map((v) => v ?? 0)))))
 const x = (i: number) => PAD.left + (n.value <= 1 ? plotW / 2 : (i / (n.value - 1)) * plotW)
 const y = (v: number) => PAD.top + plotH.value - (maxV.value ? (v / maxV.value) * plotH.value : 0)
 
