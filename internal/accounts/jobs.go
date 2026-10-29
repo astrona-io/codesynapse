@@ -74,10 +74,13 @@ type JobRecord struct {
 
 // JobQueue counts jobs per kind. Waiting are those a worker could claim now
 // (queued, or running with an expired lease); Active also includes the ones a
-// process is running, which is how many workers the work needs.
+// process is running, which is how many workers the work needs. Oldest is
+// the creation time of the oldest job per kind that has not started or was
+// interrupted (queued, or with an expired lease): how long work has waited.
 type JobQueue struct {
 	Waiting map[string]int
 	Active  map[string]int
+	Oldest  map[string]time.Time
 }
 
 // Active reports whether the job is queued or running.

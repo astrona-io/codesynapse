@@ -240,6 +240,8 @@ func (s *Server) accountRoutes() {
 	s.account("GET /api/v1/admin/stats/tenants", governanceRoute, s.handleStatsTenants)
 	s.account("GET /api/v1/admin/stats/sessions", governanceRoute, s.handleStatsSessions)
 	s.account("GET /api/v1/admin/stats/usage", governanceRoute, s.handleStatsUsage)
+	s.account("GET /api/v1/admin/stats/jobs", governanceRoute, s.handleStatsJobs)
+	s.account("GET /api/v1/admin/stats/ingest", governanceRoute, s.handleStatsIngest)
 	s.account("GET /api/v1/admin/stats/series", governanceRoute, s.handleAdminSeries)
 	s.account("GET /api/v1/admin/stats/series/batch", governanceRoute, s.handleAdminSeriesBatch)
 	s.account("GET /api/v1/admin/stats/export", governanceRoute, s.handleStatsExport)

@@ -171,6 +171,11 @@ func (s *Store) CountPlatformStats(ctx context.Context, day time.Time) ([]accoun
 		}); err != nil {
 			return err
 		}
+		ingest, err := ingestStats(ctx, tx, start, end)
+		if err != nil {
+			return err
+		}
+		accounts.AddIngestStats(set, ingest)
 		return scanRows(ctx, tx, statKeysSQL, []any{start, end, end.AddDate(0, 0, 14)}, func(r pgx.Rows) error {
 			var org string
 			var v [3]int64

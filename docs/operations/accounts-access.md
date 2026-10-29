@@ -217,13 +217,15 @@ Administration → Statistics shows the figures (`docs/PLATFORM_STATS_PLAN.md`, 
 
 | Route | Answers |
 |---|---|
-| `GET /api/v1/admin/stats/summary?range=` | Tiles: organisations, people, active people, memberships, seats, runtime sessions, API keys, browser sessions. Graphs, jobs, cost and alerts are `null` until later phases. |
+| `GET /api/v1/admin/stats/summary?range=` | Tiles: organisations, people, active people, memberships, seats, runtime sessions, API keys, browser sessions, jobs waiting now and jobs failed in the range (`null` without metrics). Graphs, cost and alerts are `null` until later phases. |
 | `GET /api/v1/admin/stats/tenants?range=&org=&sort=&page=` | Platform totals and one row per organisation: members by role, seats, active members, teams, repository entries, single sign-on, watches. |
 | `GET /api/v1/admin/stats/sessions?range=&org=&sort=&page=` | Browser sessions, runtime sessions (agent, dashboard, gateway) and API keys (active, used, expiring within 14 days), per organisation. |
 | `GET /api/v1/admin/stats/usage?range=&org=&sort=&page=` | Agent sessions, tool calls and errors, tokens served and avoided, the token share, workflow counts and unindexed checkouts per organisation, with the tools and clients used. A tool or client fewer than three organisations use is counted as "other" unless `org` is set. |
+| `GET /api/v1/admin/stats/jobs?range=&org=&sort=&page=` | The job queue per kind with the age of the oldest waiting job (as of now), and finished jobs by outcome per organisation and per kind. Never a repository name, error text or job ID. Jobs without an organisation count only in the totals. |
+| `GET /api/v1/admin/stats/ingest?range=&org=&sort=&page=` | Indexing runs by outcome (and running now), files scanned, indexed, skipped, failed and unprocessed, and skips by reason, per organisation, summed from the ingest run reports. |
 | `GET /api/v1/admin/stats/series?panel=&range=&org=` | One usage chart from VictoriaMetrics (`range` up to `30d`). Series per organisation carry its name; a deleted one reads "deleted organisation". |
 | `GET /api/v1/admin/stats/series/batch?panels=&range=&org=` | Up to 20 of those charts in one request and one audit event. |
-| `GET /api/v1/admin/stats/export?section=summary\|tenants\|sessions\|usage&range=&org=&format=csv\|json` | The whole section, at most 10,000 rows. CSV cells are formula-neutralised. |
+| `GET /api/v1/admin/stats/export?section=summary\|tenants\|sessions\|usage\|jobs\|ingest&range=&org=&format=csv\|json` | The whole section, at most 10,000 rows. CSV cells are formula-neutralised. |
 
 `range` is `1h`, `6h`, `24h`, `7d`, `30d`, `90d` or `365d`; anything else answers 400. `org` is an organisation ID and must exist; it filters the rows, never the totals. Tables have 50 rows per page. The former panels `tenants`, `platform_llm_cost`, `platform_tool_latency` and `platform_db_latency` of `/api/v1/stats/series` were removed and answer 404; their figures are the admin panels `org_sessions`, `llm_cost`, `tool_latency` and `db_latency`. The figures are counts only: organisation names and slugs appear, repository names, graph IDs, paths, e-mail addresses and user, key or session IDs never do. Root is never counted. A person counts once in the platform totals and once in each organisation they belong to. Seats are active members other than guests. Active people signed in, opened a browser or runtime session, or used an API key in the window.
 

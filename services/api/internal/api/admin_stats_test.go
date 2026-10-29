@@ -45,6 +45,12 @@ var statsReads = []string{
 	"/api/v1/admin/stats/summary?range=90d",
 	"/api/v1/admin/stats/sessions?range=365d",
 	"/api/v1/admin/stats/export?section=tenants&range=365d&format=json",
+	"/api/v1/admin/stats/jobs?range=24h",
+	"/api/v1/admin/stats/jobs?range=90d",
+	"/api/v1/admin/stats/ingest?range=7d",
+	"/api/v1/admin/stats/ingest?range=365d",
+	"/api/v1/admin/stats/export?section=jobs&range=24h&format=csv",
+	"/api/v1/admin/stats/export?section=ingest&range=30d&format=json",
 	"/api/v1/admin/users",
 	"/api/v1/admin/orgs",
 	"/api/v1/admin/health",
@@ -191,10 +197,12 @@ func TestPlatformStats(t *testing.T) {
 
 		var summary map[string]any
 		require.Equal(t, ada.do("GET", "/api/v1/admin/stats/summary", "", &summary), 200)
-		for _, k := range []string{"graphs", "jobs_waiting", "jobs_failed", "cost", "alerts_firing"} {
+		for _, k := range []string{"graphs", "cost", "alerts_firing"} {
 			v, ok := summary[k]
 			assert.True(t, ok && v == nil, k+" is null until a later phase")
 		}
+		assert.Equal(t, summary["jobs_waiting"], any(float64(0)), "the queue is read from PostgreSQL")
+		assert.True(t, summary["jobs_failed"] != nil, "failed jobs come from metrics, which this server has")
 	})
 
 	t.Run("long ranges read the daily rollup", func(t *testing.T) {

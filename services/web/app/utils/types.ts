@@ -556,6 +556,17 @@ export interface OrgUsageRow extends UsageFigures { org_id: string; slug: string
 export interface UsageCount { name: string; calls: number; errors: number; sessions: number }
 export interface UsageSection extends StatsTable<UsageFigures, OrgUsageRow> { from: string; to: string; tools: UsageCount[]; clients: UsageCount[] }
 export interface StatsTable<T, R> { range: StatsRange; totals: T; rows: R[]; page: number; pages: number; total: number; rollup?: StatsRollup }
+export interface JobFigures { finished: number; ok: number; error: number; left_behind: number; cancelled: number }
+export interface OrgJobRow extends JobFigures { org_id: string; slug: string; name: string; deleted: boolean }
+export interface JobQueueRow { kind: string; waiting: number; active: number; oldest_waiting_seconds: number | null }
+export interface JobsSection extends StatsTable<JobFigures, OrgJobRow> { queue: JobQueueRow[]; kinds: (JobFigures & { kind: string })[]; measured: boolean }
+export interface IngestFigures {
+  succeeded: number; failed: number; cancelled: number; running: number; without_report: number; incomplete_discovery: number
+  scanned: number; indexed: number; skipped: number; files_failed: number; unprocessed: number
+  skips: { ignored_path: number; generated_code: number; binary: number; non_k8s_yaml: number }
+}
+export interface OrgIngestRow extends IngestFigures { org_id: string; slug: string; name: string; deleted: boolean }
+export type IngestSection = StatsTable<IngestFigures, OrgIngestRow>
 export interface AdminHealth {
   version: string; checked: string
   graph: HealthCheck; accounts: HealthCheck; metrics: HealthCheck; audit: HealthCheck
