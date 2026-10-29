@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/accounts/accountstest"
@@ -225,6 +226,40 @@ func TestAuditTrail(t *testing.T) {
 	var v accounts.Verification
 	require.Equal(t, root.do("GET", "/api/v1/admin/audit/verify", "", &v), 200)
 	assert.True(t, v.OK, v.Reason)
+}
+
+// TestDeniedLimitPerServer: refused requests are stored at most
+// deniedPerMinute times per address and minute, and that budget belongs to
+// one server, so refusals at one never hide those at another.
+func TestDeniedLimitPerServer(t *testing.T) {
+	t.Run("window", func(t *testing.T) {
+		var l deniedLimiter
+		now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+		for i := range deniedPerMinute {
+			assert.True(t, l.allow("192.0.2.1", now.Add(time.Duration(i)*time.Second)))
+		}
+		assert.False(t, l.allow("192.0.2.1", now.Add(20*time.Second)), "the eleventh in a minute is only logged")
+		assert.True(t, l.allow("192.0.2.2", now.Add(20*time.Second)), "another address has its own budget")
+		assert.True(t, l.allow("192.0.2.1", now.Add(61*time.Second)), "the first entry left the window")
+	})
+
+	denied := func(ts *httptest.Server) int {
+		root := newClient(t, ts)
+		require.Equal(t, root.do("POST", "/api/v1/auth/login", `{"email":"`+accountstest.RootEmail+`","password":"`+accountstest.SetupPassword+`"}`, nil), 200)
+		var out struct{ Events []accounts.Event }
+		require.Equal(t, root.do("GET", "/api/v1/admin/audit?action=auth.denied&limit=100", "", &out), 200)
+		return len(out.Events)
+	}
+	busy, _ := accountsServer(t)
+	anon := newClient(t, busy)
+	for range deniedPerMinute + 5 {
+		assert.Equal(t, anon.do("DELETE", "/api/v1/repos/"+storetest.Repo, "", nil), 401)
+	}
+	assert.Equal(t, denied(busy), deniedPerMinute)
+
+	quiet, _ := accountsServer(t)
+	assert.Equal(t, newClient(t, quiet).do("DELETE", "/api/v1/repos/"+storetest.Repo, "", nil), 401)
+	assert.Equal(t, denied(quiet), 1, "the other server's refusals do not use this one's budget")
 }
 
 func TestCSVSafe(t *testing.T) {

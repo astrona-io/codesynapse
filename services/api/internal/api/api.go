@@ -144,6 +144,7 @@ type Server struct {
 	st          store.Store
 	jobs        *Jobs
 	notify      notifyCache
+	denied      deniedLimiter // refused requests stored per address
 	overviews   overviewCache
 	rules       ruleCache
 	aiProbe     aiStatusCache

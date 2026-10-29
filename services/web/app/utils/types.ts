@@ -461,6 +461,33 @@ export interface Attention {
 export interface AdminOrg extends AccountOrg { members: number; roles: Record<string, number>; repositories: number; lost_access: number; teams: number }
 export interface AdminUser extends AccountUser { disabled_at?: string; orgs: { slug: string; name: string; role: Role }[]; active_keys: number; last_key_use?: string }
 export interface HealthCheck { ok: boolean; detail: string; seconds: number }
+
+// Platform statistics (GET /api/v1/admin/stats/*): aggregates only, root
+// never counted. Tiles a later phase fills are null until then.
+export interface StatsSummary {
+  range: SeriesRange
+  orgs: number; orgs_created: number; users: number; users_created: number; active_users: number
+  memberships: number; seats: number; seated_people: number
+  execution_active: number; execution_created: number; keys_active: number; browser_active: number
+  graphs: number | null; jobs_waiting: number | null; jobs_failed: number | null; cost: number | null; alerts_firing: number | null
+}
+export interface TenantTotals {
+  orgs: number; orgs_created: number; orgs_without_members: number; orgs_with_sso: number
+  users: number; users_created: number; users_suspended: number; platform_admins: number; guest_only_users: number; multi_org_users: number; active_users: number
+  memberships: number; roles: Record<string, number>; seats: number; seated_people: number; teams: number
+  entries: number; org_entries: number; personal_entries: number; public_entries: number; private_entries: number; local_entries: number; lost_entries: number; graphs: number
+  watches: number; watch_adds: number
+}
+export interface OrgTenantRow {
+  org_id: string; slug: string; name: string; created_at: string
+  members: number; roles: Record<string, number>; seats: number; active_members: number; teams: number
+  entries: number; personal_entries: number; private_entries: number; lost_entries: number; sso: boolean; watches: number
+}
+export interface ExecutionCounts { active: number; created: number; revoked: number; dashboard: number; gateway: number; runtime: number }
+export interface KeyCounts { active: number; used: number; expiring: number }
+export interface SessionTotals { browser_active: number; browser_created: number; execution: ExecutionCounts; keys: KeyCounts }
+export interface OrgSessionRow { org_id: string; slug: string; name: string; execution: ExecutionCounts; keys: KeyCounts }
+export interface StatsTable<T, R> { range: SeriesRange; totals: T; rows: R[]; page: number; pages: number; total: number }
 export interface AdminHealth {
   version: string; checked: string
   graph: HealthCheck; accounts: HealthCheck; metrics: HealthCheck; audit: HealthCheck

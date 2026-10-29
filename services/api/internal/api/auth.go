@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -138,6 +139,16 @@ func (s *Server) clientAddr(r *http.Request) string {
 // accountError maps account errors to HTTP statuses.
 func (s *Server) accountError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, accounts.ErrAuditUnavailable):
+		// The view was not recorded, so no figures: say why, not the driver error.
+		s.logger.Error("audit write failed", "error", err)
+		w.Header().Set("Retry-After", "60")
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck // client went away
+			"type": "about:blank", "title": http.StatusText(http.StatusServiceUnavailable), "status": http.StatusServiceUnavailable,
+			"detail": "the audit log could not record this view, so no figures are shown",
+		})
 	case errors.Is(err, execution.ErrInvalid), errors.Is(err, accounts.ErrInvalidInput):
 		s.problem(w, http.StatusBadRequest, err)
 	case errors.Is(err, accounts.ErrUnauthorized), errors.Is(err, accounts.ErrKeyRevoked):
@@ -221,6 +232,10 @@ func (s *Server) accountRoutes() {
 	s.account("POST /api/v1/admin/users/{id}/resume", governanceRoute, s.handleResumeUser)
 	s.account("PUT /api/v1/admin/users/{id}/platform-admin", governanceRoute, s.handleSetPlatformAdmin)
 	s.account("GET /api/v1/admin/health", governanceRoute, s.handleAdminHealth)
+	s.account("GET /api/v1/admin/stats/summary", governanceRoute, s.handleStatsSummary)
+	s.account("GET /api/v1/admin/stats/tenants", governanceRoute, s.handleStatsTenants)
+	s.account("GET /api/v1/admin/stats/sessions", governanceRoute, s.handleStatsSessions)
+	s.account("GET /api/v1/admin/stats/export", governanceRoute, s.handleStatsExport)
 	s.account("POST /api/v1/admin/orgs/{id}/owner", governanceRoute, s.handleRecoverOwner)
 }
 

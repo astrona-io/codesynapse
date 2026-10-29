@@ -115,6 +115,7 @@ func TestBootstrapContract(t *testing.T) {
 	accountstest.RunProfile(t, fresh)
 	accountstest.RunUsername(t, fresh)
 	accountstest.RunInitialAdmin(t, fresh)
+	accountstest.RunPlatformStats(t, fresh)
 	accountstest.RunPlatformStatsDaily(t, fresh)
 	accountstest.RunBootstrap(t, func(t *testing.T) accounts.Store {
 		st, err := Open(ctx, url)
