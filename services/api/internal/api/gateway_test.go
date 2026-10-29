@@ -190,24 +190,34 @@ func TestGatewayLocalFirstSetting(t *testing.T) {
 	f := newRuntimeFixture(t, Config{Gateway: true})
 	path := "/api/v1/accounts/orgs/" + f.org.Slug + "/gateway"
 	type setting struct {
-		Enabled      bool     `json:"enabled"`
-		LocalFirst   bool     `json:"local_first"`
-		LocalExclude []string `json:"local_exclude"`
+		Enabled        bool     `json:"enabled"`
+		LocalFirst     bool     `json:"local_first"`
+		LocalExclude   []string `json:"local_exclude"`
+		ShortenPrompts bool     `json:"shorten_prompts"`
 	}
 	var got setting
 	require.Equal(t, f.client.do("GET", path, "", &got), 200)
-	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true, LocalExclude: []string{}}, "both on by default, nothing excluded")
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true, LocalExclude: []string{}, ShortenPrompts: true}, "on by default, nothing excluded, shortening on")
 	assert.Equal(t, f.client.do("PUT", path, `{"local_first":false}`, nil), 403, "API keys cannot change it")
+	assert.Equal(t, f.client.do("PUT", path, `{"shorten_prompts":false}`, nil), 403, "API keys cannot turn shortening off")
 
 	owner := newClient(t, f.client.ts)
 	require.Equal(t, owner.do("POST", "/api/v1/auth/login", `{"email":"runtime@example.com","password":"`+pw+`"}`, nil), 200)
 	assert.Equal(t, owner.do("PUT", path, `{}`, nil), 400, "nothing to change")
 	require.Equal(t, owner.do("PUT", path, `{"local_first":false}`, &got), 200)
-	assert.Equal(t, got, setting{Enabled: true, LocalFirst: false, LocalExclude: []string{}}, "enabled is left alone")
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: false, LocalExclude: []string{}, ShortenPrompts: true}, "enabled is left alone")
 	require.Equal(t, owner.do("PUT", path, `{"enabled":false}`, &got), 200)
-	assert.Equal(t, got, setting{Enabled: false, LocalFirst: false, LocalExclude: []string{}}, "older clients send only enabled")
+	assert.Equal(t, got, setting{Enabled: false, LocalFirst: false, LocalExclude: []string{}, ShortenPrompts: true}, "older clients send only enabled")
 	require.Equal(t, owner.do("PUT", path, `{"enabled":true,"local_first":true}`, &got), 200)
-	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true, LocalExclude: []string{}})
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true, LocalExclude: []string{}, ShortenPrompts: true})
+	require.Equal(t, owner.do("PUT", path, `{"shorten_prompts":false}`, &got), 200)
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true, LocalExclude: []string{}, ShortenPrompts: false})
+	rows, err := f.accounts.St.ListEvents(t.Context(), accounts.EventFilter{OrgID: f.org.ID, Action: "org.gateway.shorten_prompts.set", Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "the change is audited")
+	assert.Equal(t, rows[0].Detail, "shorten_prompts=false")
+	require.Equal(t, owner.do("PUT", path, `{"shorten_prompts":true}`, &got), 200)
+	assert.True(t, got.ShortenPrompts)
 
 	// The exclude list: validated before anything changes, normalized, and
 	// left alone by PUTs that do not send it.
@@ -224,13 +234,13 @@ func TestGatewayLocalFirstSetting(t *testing.T) {
 	}
 	assert.Equal(t, owner.do("PUT", path, `{"local_exclude":[`+strings.Join(many, ",")+`]}`, nil), 400, "at most 32 entries")
 	require.Equal(t, owner.do("GET", path, "", &got), 200)
-	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true, LocalExclude: []string{}}, "a refused PUT changes nothing")
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true, LocalExclude: []string{}, ShortenPrompts: true}, "a refused PUT changes nothing")
 	assert.Equal(t, f.client.do("PUT", path, `{"local_exclude":["gpt-5"]}`, nil), 403, "API keys cannot change it")
 
 	require.Equal(t, owner.do("PUT", path, `{"local_exclude":["GPT-5","claude-opus-*","gpt-5"]}`, &got), 200)
-	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true, LocalExclude: []string{"claude-opus-*", "gpt-5"}})
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true, LocalExclude: []string{"claude-opus-*", "gpt-5"}, ShortenPrompts: true})
 	require.Equal(t, owner.do("PUT", path, `{"local_first":false}`, &got), 200)
-	assert.Equal(t, got, setting{Enabled: true, LocalFirst: false, LocalExclude: []string{"claude-opus-*", "gpt-5"}}, "the list is left alone")
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: false, LocalExclude: []string{"claude-opus-*", "gpt-5"}, ShortenPrompts: true}, "the list is left alone")
 	require.Equal(t, owner.do("PUT", path, `{"local_exclude":[]}`, &got), 200)
 	assert.Equal(t, got.LocalExclude, []string{}, "an empty list clears it")
 }

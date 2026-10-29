@@ -50,88 +50,88 @@ const dependenciesLink = (license: string) => ({ path: `/repos/${encodeURICompon
       <SyncControl :repo="repo" />
     </PageHeader>
 
-    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
-    <template v-else-if="rep">
-      <section class="panel">
-        <p class="eyebrow">This repository</p>
-        <h2 v-if="rep.project.license" class="mono">{{ rep.project.license }} <span class="badge" :class="cat(rep.category).cls">{{ cat(rep.category).label }}</span></h2>
-        <h2 v-else>No licence found</h2>
-        <p v-if="rep.project.license" class="muted small">Read from <span class="mono">{{ rep.project.source }}</span>.</p>
-        <p v-else class="muted small">No LICENSE file, package.json or pyproject.toml licence. Without one, all rights are reserved and nobody may reuse the code; verdicts below treat the project as proprietary.</p>
-      </section>
+    <DataState :error="error" :pending="!rep" :empty="!rep">
+      <template v-if="rep">
+        <section class="panel">
+          <p class="eyebrow">This repository</p>
+          <h2 v-if="rep.project.license" class="mono">{{ rep.project.license }} <span class="badge" :class="cat(rep.category).cls">{{ cat(rep.category).label }}</span></h2>
+          <h2 v-else>No licence found</h2>
+          <p v-if="rep.project.license" class="muted small">Read from <span class="mono">{{ rep.project.source }}</span>.</p>
+          <p v-else class="muted small">No LICENSE file, package.json or pyproject.toml licence. Without one, all rights are reserved and nobody may reuse the code; verdicts below treat the project as proprietary.</p>
+        </section>
 
-      <div class="grid grid--stats">
-        <StatTile label="Dependencies" :value="fmtInt(rep.total)" :hint="rep.online ? 'licences from disk and deps.dev' : 'licences from disk only'" />
-        <StatTile label="Conflicts" :value="fmtInt(rep.conflict)" hint="cannot ship under your licence" />
-        <StatTile label="To review" :value="fmtInt(rep.review)" hint="weak copyleft, dev-only conflicts, unknown" />
-        <StatTile label="No licence found" :value="fmtInt(rep.unknown)" :hint="rep.online ? 'not on disk or deps.dev' : 'enable CODESYNAPSE_LICENSE_LOOKUP'" />
-      </div>
+        <div class="grid grid--stats">
+          <StatTile label="Dependencies" :value="fmtInt(rep.total)" :hint="rep.online ? 'licences from disk and deps.dev' : 'licences from disk only'" />
+          <StatTile label="Conflicts" :value="fmtInt(rep.conflict)" hint="cannot ship under your licence" />
+          <StatTile label="To review" :value="fmtInt(rep.review)" hint="weak copyleft, dev-only conflicts, unknown" />
+          <StatTile label="No licence found" :value="fmtInt(rep.unknown)" :hint="rep.online ? 'not on disk or deps.dev' : 'enable CODESYNAPSE_LICENSE_LOOKUP'" />
+        </div>
 
-      <section class="panel">
-        <div class="panel__header">
-          <div><p class="eyebrow">Needs attention</p><h2>Conflicts and reviews <span class="muted">· {{ issues.length }}</span></h2></div>
-        </div>
-        <div class="row">
-          <span class="label">Verdict</span>
-          <button v-for="v in (['all', 'conflict', 'review'] as const)" :key="v" class="chip" :class="{ active: verdict === v }" :aria-pressed="verdict === v" @click="verdict = v">{{ v }}</button>
-          <label class="row compact"><input v-model="shippedOnly" type="checkbox"> hide development dependencies</label>
-        </div>
-        <div v-if="issues.length" class="table-wrap">
-          <table>
-            <thead><tr><th>Verdict</th><th>Dependency</th><th>Licence</th><th>Why</th></tr></thead>
-            <tbody>
-              <tr v-for="e in issues" :key="`${e.ecosystem}|${e.name}|${e.version}`">
-                <td><span class="sev" :class="levelCls(e.verdict.level)">{{ e.verdict.level }}</span></td>
-                <td>
-                  <span class="mono">{{ e.name }}</span> <span class="mono muted">{{ e.version }}</span>
-                  <div class="muted small">{{ e.ecosystem }} · {{ e.direct ? 'direct' : 'indirect' }}<template v-if="e.dev"> · dev only</template></div>
-                </td>
-                <td>
-                  <span class="mono">{{ e.license || 'unknown' }}</span>
-                  <div><span class="badge" :class="cat(e.category).cls">{{ cat(e.category).label }}</span></div>
-                  <div v-if="e.source" class="muted small">from <span class="mono">{{ e.source }}</span></div>
-                </td>
-                <td class="small">{{ e.verdict.reason }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div v-else class="empty"><strong>Nothing to look at</strong>{{ rep.issues.length ? 'for the current filter.' : 'Every dependency licence fits this repository’s licence.' }}</div>
-        <p v-if="rep.truncated" class="muted small">{{ fmtInt(rep.truncated) }} more not listed; run <code>codesynapse licenses</code> for the full list.</p>
-      </section>
+        <section class="panel">
+          <div class="panel__header">
+            <div><p class="eyebrow">Needs attention</p><h2>Conflicts and reviews <span class="muted">· {{ issues.length }}</span></h2></div>
+          </div>
+          <div class="row">
+            <span class="label">Verdict</span>
+            <button v-for="v in (['all', 'conflict', 'review'] as const)" :key="v" class="chip" :class="{ active: verdict === v }" :aria-pressed="verdict === v" @click="verdict = v">{{ v }}</button>
+            <label class="row compact"><input v-model="shippedOnly" type="checkbox"> hide development dependencies</label>
+          </div>
+          <div v-if="issues.length" class="table-wrap">
+            <table>
+              <thead><tr><th>Verdict</th><th>Dependency</th><th>Licence</th><th>Why</th></tr></thead>
+              <tbody>
+                <tr v-for="e in issues" :key="`${e.ecosystem}|${e.name}|${e.version}`">
+                  <td><span class="sev" :class="levelCls(e.verdict.level)">{{ e.verdict.level }}</span></td>
+                  <td>
+                    <span class="mono">{{ e.name }}</span> <span class="mono muted">{{ e.version }}</span>
+                    <div class="muted small">{{ e.ecosystem }} · {{ e.direct ? 'direct' : 'indirect' }}<template v-if="e.dev"> · dev only</template></div>
+                  </td>
+                  <td>
+                    <span class="mono">{{ e.license || 'unknown' }}</span>
+                    <div><span class="badge" :class="cat(e.category).cls">{{ cat(e.category).label }}</span></div>
+                    <div v-if="e.source" class="muted small">from <span class="mono">{{ e.source }}</span></div>
+                  </td>
+                  <td class="small">{{ e.verdict.reason }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="empty"><strong>Nothing to look at</strong>{{ rep.issues.length ? 'for the current filter.' : 'Every dependency licence fits this repository’s licence.' }}</div>
+          <p v-if="rep.truncated" class="muted small">{{ fmtInt(rep.truncated) }} more not listed; run <code>codesynapse licenses</code> for the full list.</p>
+        </section>
 
-      <section class="panel">
-        <p class="eyebrow">Inventory</p><h2>Licences in use</h2>
-        <p class="muted small">Select a licence to see the packages it covers.</p>
-        <ul class="bars">
-          <li v-for="c in rep.by_license" :key="c.license">
-            <button class="bars__row" :aria-expanded="open === c.license" @click="toggle(c.license)">
-              <span class="mono name">{{ c.license }}</span>
-              <span class="badge" :class="cat(c.category).cls">{{ cat(c.category).label }}</span>
-              <span class="bar"><span :style="{ width: `${(c.count / maxCount) * 100}%` }" :class="`fill--${cat(c.category).cls.replace('badge--', '')}`" /></span>
-              <span class="num">{{ fmtInt(c.count) }}</span>
-            </button>
-            <div v-if="open === c.license" class="packages">
-              <p v-if="!deps" class="muted small" role="status">Loading…</p>
-              <template v-else>
-                <div v-for="[eco, list] in packagesOf(c.license)" :key="eco" class="packages__group">
-                  <p class="label">{{ ecosystemLabel(eco) }} <span class="muted">· {{ fmtInt(list.length) }}</span></p>
-                  <ul class="plain">
-                    <li v-for="p in list" :key="p.name + p.version">
-                      <span class="mono pkg">{{ p.name }}</span> <span class="mono muted">{{ p.version }}</span>
-                      <span v-if="!p.direct" class="badge">indirect</span><span v-if="p.dev" class="badge">dev</span>
-                    </li>
-                  </ul>
-                </div>
-                <p v-if="!packagesOf(c.license).length" class="muted small">No package list for this licence; sync the repository to refresh it.</p>
-                <NuxtLink :to="dependenciesLink(c.license)" class="small">Open in Dependencies →</NuxtLink>
-              </template>
-            </div>
-          </li>
-        </ul>
-      </section>
-    </template>
-    <p v-else class="muted" role="status">Loading…</p>
+        <section class="panel">
+          <p class="eyebrow">Inventory</p><h2>Licences in use</h2>
+          <p class="muted small">Select a licence to see the packages it covers.</p>
+          <ul class="bars">
+            <li v-for="c in rep.by_license" :key="c.license">
+              <button class="bars__row" :aria-expanded="open === c.license" @click="toggle(c.license)">
+                <span class="mono name">{{ c.license }}</span>
+                <span class="badge" :class="cat(c.category).cls">{{ cat(c.category).label }}</span>
+                <span class="bar"><span :style="{ width: `${(c.count / maxCount) * 100}%` }" :class="`fill--${cat(c.category).cls.replace('badge--', '')}`" /></span>
+                <span class="num">{{ fmtInt(c.count) }}</span>
+              </button>
+              <div v-if="open === c.license" class="packages">
+                <p v-if="!deps" class="muted small" role="status">Loading…</p>
+                <template v-else>
+                  <div v-for="[eco, list] in packagesOf(c.license)" :key="eco" class="packages__group">
+                    <p class="label">{{ ecosystemLabel(eco) }} <span class="muted">· {{ fmtInt(list.length) }}</span></p>
+                    <ul class="plain">
+                      <li v-for="p in list" :key="p.name + p.version">
+                        <span class="mono pkg">{{ p.name }}</span> <span class="mono muted">{{ p.version }}</span>
+                        <span v-if="!p.direct" class="badge">indirect</span><span v-if="p.dev" class="badge">dev</span>
+                      </li>
+                    </ul>
+                  </div>
+                  <p v-if="!packagesOf(c.license).length" class="muted small">No package list for this licence; sync the repository to refresh it.</p>
+                  <NuxtLink :to="dependenciesLink(c.license)" class="small">Open in Dependencies →</NuxtLink>
+                </template>
+              </div>
+            </li>
+          </ul>
+        </section>
+      </template>
+    </DataState>
   </div>
 </template>
 

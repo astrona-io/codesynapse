@@ -38,56 +38,56 @@ const factText = (f: MemoryFact) => `${label(f.subject)} ${f.predicate} ${label(
       :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Agent memory' }]"
     />
 
-    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
-    <template v-else-if="g">
-      <form class="row" @submit.prevent="applied = query.trim()">
-        <input v-model="query" class="grow" placeholder="Search entities, e.g. payments team" aria-label="Search memory">
-        <button type="submit">Search</button>
-        <button v-if="applied" type="button" class="secondary" @click="query = ''; applied = ''">Clear</button>
-      </form>
-      <p v-if="failed" class="notice notice--danger" role="alert">{{ failed }}</p>
+    <DataState :error="error" :pending="!g" :empty="!g">
+      <template v-if="g">
+        <form class="row" @submit.prevent="applied = query.trim()">
+          <input v-model="query" class="grow" placeholder="Search entities, e.g. payments team" aria-label="Search memory">
+          <button type="submit">Search</button>
+          <button v-if="applied" type="button" class="secondary" @click="query = ''; applied = ''">Clear</button>
+        </form>
+        <p v-if="failed" class="notice notice--danger" role="alert">{{ failed }}</p>
 
-      <section v-if="g.facts.length" class="panel">
-        <p class="eyebrow">Facts <span class="muted">· {{ fmtInt(g.facts.length) }}</span></p>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Subject</th><th>Relation</th><th>Object</th><th>Saved by</th><th class="num">Seen</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead>
-            <tbody>
-              <tr v-for="f in g.facts" :key="f.id">
-                <td>{{ label(f.subject) }} <div class="mono muted small">{{ type(f.subject) }}</div></td>
-                <td class="mono pred">{{ f.predicate }}</td>
-                <td>{{ label(f.object) }} <div class="mono muted small">{{ type(f.object) }}</div></td>
-                <td class="mono small">{{ f.source }}</td>
-                <td class="num" :title="`saved ${plural(f.confirmations, 'time')}`">{{ fmtInt(f.confirmations) }}</td>
-                <td class="muted small" :title="f.updated_at">{{ relTime(f.updated_at) }}</td>
-                <td><button class="danger tiny" :disabled="busy === f.id" :aria-label="`Delete the fact ${factText(f)}`" @click="remove('fact', f.id, factText(f))">Delete</button></td>
-              </tr>
-            </tbody>
-          </table>
+        <section v-if="g.facts.length" class="panel">
+          <p class="eyebrow">Facts <span class="muted">· {{ fmtInt(g.facts.length) }}</span></p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Subject</th><th>Relation</th><th>Object</th><th>Saved by</th><th class="num">Seen</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead>
+              <tbody>
+                <tr v-for="f in g.facts" :key="f.id">
+                  <td>{{ label(f.subject) }} <div class="mono muted small">{{ type(f.subject) }}</div></td>
+                  <td class="mono pred">{{ f.predicate }}</td>
+                  <td>{{ label(f.object) }} <div class="mono muted small">{{ type(f.object) }}</div></td>
+                  <td class="mono small">{{ f.source }}</td>
+                  <td class="num" :title="`saved ${plural(f.confirmations, 'time')}`">{{ fmtInt(f.confirmations) }}</td>
+                  <td class="muted small" :title="f.updated_at">{{ relTime(f.updated_at) }}</td>
+                  <td><button class="danger tiny" :disabled="busy === f.id" :aria-label="`Delete the fact ${factText(f)}`" @click="remove('fact', f.id, factText(f))">Delete</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section v-if="g.entities.length" class="panel">
+          <p class="eyebrow">Entities <span class="muted">· {{ fmtInt(g.entities.length) }}</span></p>
+          <ul class="entities">
+            <li v-for="e in g.entities" :key="e.id">
+              <span>{{ e.name }}</span> <span class="badge badge--violet">{{ e.type }}</span>
+              <span class="muted small">{{ relTime(e.updated_at) }}</span>
+              <button class="danger tiny" :disabled="busy === e.id" :aria-label="`Delete ${e.name}`" @click="remove('entity', e.id, e.name)">Delete</button>
+            </li>
+          </ul>
+        </section>
+
+        <div v-if="!g.entities.length && !g.facts.length" class="empty">
+          <template v-if="applied"><strong>No match</strong>Nothing saved matches “{{ applied }}”.</template>
+          <template v-else>
+            <strong>Nothing saved yet</strong>
+            Agents save facts with the <code>upsert_graph_triples</code> MCP tool. It is on by default; ask your agent to use the <code>context-offload</code> prompt. To turn it off, set <code>CODESYNAPSE_ALLOW_MEMORY=false</code> for the MCP service (or run it with <code>--allow-memory=false</code>).
+          </template>
         </div>
-      </section>
-
-      <section v-if="g.entities.length" class="panel">
-        <p class="eyebrow">Entities <span class="muted">· {{ fmtInt(g.entities.length) }}</span></p>
-        <ul class="entities">
-          <li v-for="e in g.entities" :key="e.id">
-            <span>{{ e.name }}</span> <span class="badge badge--violet">{{ e.type }}</span>
-            <span class="muted small">{{ relTime(e.updated_at) }}</span>
-            <button class="danger tiny" :disabled="busy === e.id" :aria-label="`Delete ${e.name}`" @click="remove('entity', e.id, e.name)">Delete</button>
-          </li>
-        </ul>
-      </section>
-
-      <div v-if="!g.entities.length && !g.facts.length" class="empty">
-        <template v-if="applied"><strong>No match</strong>Nothing saved matches “{{ applied }}”.</template>
-        <template v-else>
-          <strong>Nothing saved yet</strong>
-          Agents save facts with the <code>upsert_graph_triples</code> MCP tool. It is on by default; ask your agent to use the <code>context-offload</code> prompt. To turn it off, set <code>CODESYNAPSE_ALLOW_MEMORY=false</code> for the MCP service (or run it with <code>--allow-memory=false</code>).
-        </template>
-      </div>
-      <p class="muted small">{{ g.notice }}</p>
-    </template>
-    <p v-else class="muted" role="status">Loading…</p>
+        <p class="muted small">{{ g.notice }}</p>
+      </template>
+    </DataState>
   </div>
 </template>
 

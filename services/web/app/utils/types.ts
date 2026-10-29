@@ -36,6 +36,9 @@ export interface GraphNodeData {
   retracted?: string
 }
 export interface NodeRef { id: string; kind: string; name: string; location?: string; summary?: string; depth?: number }
+// One entry of GET /repos/{repo}/outline: what a file holds, with line ranges.
+export interface OutlineEntry { id: string; kind: string; name: string; lines: string; signature?: string; summary?: string; level?: number }
+export interface FileOutline { file: string; entries: OutlineEntry[] | null }
 
 export interface SymbolLocation { neighbour_count?: number; neighbours_omitted?: number; neighbourhood?: string; node_id: string; name: string; file?: string; signature?: string; revision?: string; fingerprint?: string; start_line?: number; end_line?: number }
 export interface SymbolIdentity { id: string; kind: string; language?: string; active: boolean; current: SymbolLocation; history: SymbolLocation[]; history_omitted: number; match: string; candidates: string[] | null; candidates_omitted: number }
@@ -360,6 +363,11 @@ export interface OrgGateway {
   local_exclude: string[]
   installation_exclude: string[]
   available: boolean
+  // The local model shortens prose people type before a request goes to
+  // the cloud; on unless an owner or admin turned it off.
+  shorten_prompts: boolean
+  // A local model is routed to "compress" and the installation allows it.
+  shorten_available: boolean
 }
 
 // The opt-in gateway prompt log (off by default; owners and admins only).
@@ -741,7 +749,7 @@ export interface ModelStats {
   // Cloud spend and the dollars prompt compression saved; null when a price is missing.
   spent_dollars?: number | null; compression_saved_dollars?: number | null
   // Whether CodeSynapse's own AI tasks get shortened prompts, and why not:
-  // disabled, no_local_model or no_ai. Gateway traffic is never shortened.
+  // disabled, no_local_model or no_ai. The gateway shortens typed prompts unless an organisation turned it off.
   compression_enabled?: boolean; compression_off?: 'disabled' | 'no_local_model' | 'no_ai' | 'no_cloud_task'
   gateway?: GatewayStat
   reference_price?: ReferencePrice

@@ -73,49 +73,47 @@ const FIELD_LABEL: Record<string, string> = { reason: 'Reason', modifications: '
       <label><input v-model="reviewOnly" type="checkbox"> Only matches needing review</label>
       <NuxtLink v-if="selected" :to="`${base}/identities`">All identities</NuxtLink>
     </div>
-    <p v-if="pending" role="status">Loading identities…</p>
-    <p v-else-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
-    <template v-else-if="page">
-      <p v-if="!page.available" class="panel">Identity analysis is not available for this index. Sync the repository to initialise it.</p>
-      <template v-else>
-        <p class="small muted">Indexed {{ when(page.indexed_at) }} · revision {{ page.revision || 'unavailable' }}. This describes the indexed source; sync after changes.</p>
-        <p v-if="!page.symbols.length" class="panel">No matching symbol identities.</p>
-        <section v-for="symbol in page.symbols" :key="symbol.id" class="panel stack">
-          <div class="row">
-            <h2 class="mono wrap">{{ symbol.current.name }}</h2>
-            <span class="tag">{{ symbol.active ? 'Current' : 'Historical · removed' }}</span>
-            <NuxtLink :to="idLink(symbol.id)" class="mono small wrap">{{ symbol.id }}</NuxtLink>
-          </div>
-          <p class="mono small wrap">{{ symbol.current.file || 'Package' }}<template v-if="symbol.current.start_line">:{{ symbol.current.start_line }}–{{ symbol.current.end_line }}</template></p>
-          <p class="small">{{ symbol.match }}</p>
-          <p v-if="symbol.current.neighbour_count" class="small muted">{{ plural(symbol.current.neighbour_count ?? 0, 'call neighbour') }}<template v-if="symbol.current.neighbours_omitted"> · incomplete evidence</template></p>
-          <NuxtLink v-if="symbol.active" :to="{ path: `${base}/explore`, query: { id: symbol.id } }">Explore current code and callers</NuxtLink>
-          <div v-if="symbol.candidates?.length || symbol.candidates_omitted">
-            <strong>Review required</strong>
-            <p>These are possible prior identities or copies. No identity was transferred and no lineage is verified.</p>
-            <ul><li v-for="id in symbol.candidates" :key="id"><NuxtLink :to="idLink(id)" class="mono wrap">{{ id }}</NuxtLink> <button v-if="symbol.active" type="button" class="secondary" @click="identityReview.from = id; identityReview.to = symbol.id">Review this match</button></li></ul>
-            <p v-if="symbol.candidates_omitted">Up to {{ fmtInt(symbol.candidates_omitted) }} additional candidates were not examined or displayed.</p>
-          </div>
-          <details v-if="symbol.history?.length">
-            <summary>Earlier occurrences ({{ fmtInt(symbol.history.length) }})</summary>
-            <ul><li v-for="(old, i) in symbol.history" :key="i" class="small mono wrap">{{ old.name }} · {{ old.file }} · {{ old.revision || 'revision unavailable' }}</li></ul>
-            <p v-if="symbol.history_omitted">{{ fmtInt(symbol.history_omitted) }} older occurrences omitted by the retention bound.</p>
-          </details>
-        </section>
-        <nav class="row" aria-label="Identity pages">
-          <button type="button" class="secondary" :disabled="offset === 0" @click="offset = Math.max(0, offset - limit)">Previous</button>
-          <span>{{ plural(page.total, 'matching identity', 'matching identities') }}</span>
-          <button type="button" class="secondary" :disabled="offset + limit >= page.total" @click="offset += limit">Next</button>
-        </nav>
+    <DataState :error="error" :pending="pending" :empty="!page" loading="Loading identities…">
+      <template v-if="page">
+        <p v-if="!page.available" class="panel">Identity analysis is not available for this index. Sync the repository to initialise it.</p>
+        <template v-else>
+          <p class="small muted">Indexed {{ when(page.indexed_at) }} · revision {{ page.revision || 'unavailable' }}. This describes the indexed source; sync after changes.</p>
+          <p v-if="!page.symbols.length" class="panel">No matching symbol identities.</p>
+          <section v-for="symbol in page.symbols" :key="symbol.id" class="panel stack">
+            <div class="row">
+              <h2 class="mono wrap">{{ symbol.current.name }}</h2>
+              <span class="tag">{{ symbol.active ? 'Current' : 'Historical · removed' }}</span>
+              <NuxtLink :to="idLink(symbol.id)" class="mono small wrap">{{ symbol.id }}</NuxtLink>
+            </div>
+            <p class="mono small wrap">{{ symbol.current.file || 'Package' }}<template v-if="symbol.current.start_line">:{{ symbol.current.start_line }}–{{ symbol.current.end_line }}</template></p>
+            <p class="small">{{ symbol.match }}</p>
+            <p v-if="symbol.current.neighbour_count" class="small muted">{{ plural(symbol.current.neighbour_count ?? 0, 'call neighbour') }}<template v-if="symbol.current.neighbours_omitted"> · incomplete evidence</template></p>
+            <NuxtLink v-if="symbol.active" :to="{ path: `${base}/explore`, query: { id: symbol.id } }">Explore current code and callers</NuxtLink>
+            <div v-if="symbol.candidates?.length || symbol.candidates_omitted">
+              <strong>Review required</strong>
+              <p>These are possible prior identities or copies. No identity was transferred and no lineage is verified.</p>
+              <ul><li v-for="id in symbol.candidates" :key="id"><NuxtLink :to="idLink(id)" class="mono wrap">{{ id }}</NuxtLink> <button v-if="symbol.active" type="button" class="secondary" @click="identityReview.from = id; identityReview.to = symbol.id">Review this match</button></li></ul>
+              <p v-if="symbol.candidates_omitted">Up to {{ fmtInt(symbol.candidates_omitted) }} additional candidates were not examined or displayed.</p>
+            </div>
+            <details v-if="symbol.history?.length">
+              <summary>Earlier occurrences ({{ fmtInt(symbol.history.length) }})</summary>
+              <ul><li v-for="(old, i) in symbol.history" :key="i" class="small mono wrap">{{ old.name }} · {{ old.file }} · {{ old.revision || 'revision unavailable' }}</li></ul>
+              <p v-if="symbol.history_omitted">{{ fmtInt(symbol.history_omitted) }} older occurrences omitted by the retention bound.</p>
+            </details>
+          </section>
+          <nav class="row" aria-label="Identity pages">
+            <button type="button" class="secondary" :disabled="offset === 0" @click="offset = Math.max(0, offset - limit)">Previous</button>
+            <span>{{ plural(page.total, 'matching identity', 'matching identities') }}</span>
+            <button type="button" class="secondary" :disabled="offset + limit >= page.total" @click="offset += limit">Next</button>
+          </nav>
+        </template>
       </template>
-    </template>
+    </DataState>
 
     <section class="panel stack">
       <h2>Human identity reviews</h2>
       <p class="small muted">Reviews belong to the selected organisation. A same-symbol review lets the prior permanent ID resolve to current code here. Copy and distinct reviews keep the identities separate. Earlier reviews remain in history. A copy classification needs a separate reuse record for licence and validation details.</p>
-      <p v-if="reviewsError" class="error" role="alert">{{ apiErrorMessage(reviewsError) }}</p>
-      <p v-else-if="!reviews" role="status">Loading reviews…</p>
-      <p v-else-if="!reviews.reviews.length">No identity reviews in this scope.</p>
+      <DataState :error="reviewsError" :pending="!reviews" :empty="!reviews?.reviews.length" loading="Loading reviews…" text="No identity reviews in this scope." compact />
       <article v-for="review in reviews?.reviews" :key="review.item.id">
         <h3>{{ review.item.identity_review.relation }} · {{ review.state }}</h3>
         <p class="small mono wrap">{{ review.item.identity_review.from }} → {{ review.item.identity_review.to }}</p>
@@ -143,9 +141,7 @@ const FIELD_LABEL: Record<string, string> = { reason: 'Reason', modifications: '
     <section class="panel stack">
       <h2>Annotations and recorded reuse</h2>
       <p class="muted small">Attributed evidence from people and agents. Licence, compatibility and validation text records what the author checked; it does not independently verify those claims. Changes are never propagated automatically.</p>
-      <p v-if="recordError" class="error" role="alert">{{ apiErrorMessage(recordError) }}</p>
-      <p v-else-if="!records" role="status">Loading records…</p>
-      <p v-else-if="!records.records.length">No recorded annotations or reuse in this scope.</p>
+      <DataState :error="recordError" :pending="!records" :empty="!records?.records.length" loading="Loading records…" text="No recorded annotations or reuse in this scope." compact />
       <p v-if="records?.storage_truncated">The storage query reached its limit; this list may be incomplete.</p>
       <p v-if="records?.sources_restricted" role="status">Some reuse records are unavailable because their sources are outside your current access.</p>
       <article v-for="record in records?.records" :key="record.item.id" class="stack">

@@ -41,10 +41,8 @@ const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString([], { 
     <PageHeader eyebrow="Repository" title="Ingestion reports" lede="Exact file outcomes for each run, with exclusions, discovery limits and the evidence behind context estimates." :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Ingestion reports' }]">
       <button @click="reload">Refresh</button>
     </PageHeader>
-    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
+    <DataState :error="error" :pending="!data" :empty="!data?.latest_attempt" loading="Loading reports…" title="No ingestion report yet" text="Reports are recorded for new ingestion runs." />
     <p v-if="detailError" class="notice notice--danger" role="alert">{{ detailError }}</p>
-    <p v-else-if="!data" class="muted" role="status">Loading reports…</p>
-    <p v-if="data && !data.latest_attempt" class="empty">No ingestion report yet. Reports are recorded for new ingestion runs.</p>
     <template v-if="data?.latest_attempt">
       <section class="panel stack">
         <h2>Latest attempt and last successful run</h2>

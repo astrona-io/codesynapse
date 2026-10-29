@@ -20,33 +20,29 @@ const rows = computed(() =>
   <div class="stack">
     <PageHeader eyebrow="Architecture" title="Package imports" lede="In-repository import graph and which packages everything else depends on."
       :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Packages' }]" />
-    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
-    <p v-else-if="!data" class="muted" role="status">Loading packages…</p>
-    <div v-else-if="!data.nodes.length" class="empty">
-      <strong>No packages indexed</strong>
-      This repository has no packages in its graph yet. Sync it, or check that it holds code in a supported language.
-    </div>
-    <template v-else>
-      <div class="panel">
-        <h2>Package imports <span class="muted">· {{ plural(data.nodes.length, 'package') }}, {{ plural(data.edges.length, 'in-repo import') }}</span></h2>
-        <GraphCanvas :nodes="data.nodes" :edges="data.edges" :height="620" />
-      </div>
-      <div class="panel">
-        <h2>Packages by importers</h2>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Package</th><th>Summary</th><th class="num">Imported by</th></tr></thead>
-            <tbody>
-              <tr v-for="p in rows" :key="p.id">
-                <td class="mono wrap">{{ p.name }}</td>
-                <td class="muted">{{ p.summary }}</td>
-                <td class="num">{{ fmtInt(fanIn.get(p.id) ?? 0) }}</td>
-              </tr>
-            </tbody>
-          </table>
+    <DataState :error="error" :pending="!data" :empty="!data?.nodes.length" loading="Loading packages…" title="No packages indexed" text="This repository has no packages in its graph yet. Sync it, or check that it holds code in a supported language.">
+      <template v-if="data">
+        <div class="panel">
+          <h2>Package imports <span class="muted">· {{ plural(data.nodes.length, 'package') }}, {{ plural(data.edges.length, 'in-repo import') }}</span></h2>
+          <GraphCanvas :nodes="data.nodes" :edges="data.edges" :height="620" />
         </div>
-      </div>
-    </template>
+        <div class="panel">
+          <h2>Packages by importers</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Package</th><th>Summary</th><th class="num">Imported by</th></tr></thead>
+              <tbody>
+                <tr v-for="p in rows" :key="p.id">
+                  <td class="mono wrap">{{ p.name }}</td>
+                  <td class="muted">{{ p.summary }}</td>
+                  <td class="num">{{ fmtInt(fanIn.get(p.id) ?? 0) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+    </DataState>
   </div>
 </template>
 
