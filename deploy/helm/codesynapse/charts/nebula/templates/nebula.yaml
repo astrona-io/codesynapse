@@ -36,11 +36,11 @@ spec:
           # 127.0.0.1 is sent by the kubelet to the node's loopback instead,
           # never connects, and had the pod restarted for good.
           startupProbe:
-            exec: {command: [curl, -sf, -o, /dev/null, "http://127.0.0.1:19559/status"]}
+            exec: {command: [/usr/local/bin/nebula-probe, "127.0.0.1:19559"]}
             periodSeconds: 3
             failureThreshold: 60
           livenessProbe:
-            exec: {command: [curl, -sf, -o, /dev/null, "http://127.0.0.1:19559/status"]}
+            exec: {command: [/usr/local/bin/nebula-probe, "127.0.0.1:19559"]}
             periodSeconds: 20
             failureThreshold: 6
           resources:
@@ -76,11 +76,11 @@ spec:
             # Status port; it listens on loopback only.
             - {name: graphd-status, containerPort: 19669}
           startupProbe:
-            exec: {command: [curl, -sf, -o, /dev/null, "http://127.0.0.1:19669/status"]}
+            exec: {command: [/usr/local/bin/nebula-probe, "127.0.0.1:19669"]}
             periodSeconds: 3
             failureThreshold: 60
           livenessProbe:
-            exec: {command: [curl, -sf, -o, /dev/null, "http://127.0.0.1:19669/status"]}
+            exec: {command: [/usr/local/bin/nebula-probe, "127.0.0.1:19669"]}
             periodSeconds: 20
             failureThreshold: 6
           readinessProbe:

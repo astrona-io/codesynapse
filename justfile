@@ -182,10 +182,10 @@ engine := env("CONTAINER_ENGINE", `if command -v docker >/dev/null 2>&1; then ec
 # .github/scripts/check-test-images.sh (part of `just checks`) keeps recipes, Compose and the chart in step.
 pg_image := `sh .github/scripts/compose-image.sh codesynapse-postgres`
 milvus_image := `sh .github/scripts/compose-image.sh milvus`
-nebula_metad_image := `sh .github/scripts/compose-image.sh nebula-metad`
-nebula_storaged_image := `sh .github/scripts/compose-image.sh nebula-storaged`
-nebula_graphd_image := `sh .github/scripts/compose-image.sh nebula-graphd`
-nebula_console_image := `sh .github/scripts/compose-image.sh nebula-console`
+nebula_metad_image := `sh .github/scripts/compose-image.sh codesynapse-nebula-metad`
+nebula_storaged_image := `sh .github/scripts/compose-image.sh codesynapse-nebula-storaged`
+nebula_graphd_image := `sh .github/scripts/compose-image.sh codesynapse-nebula-graphd`
+nebula_console_image := `sh .github/scripts/compose-image.sh codesynapse-nebula-console`
 victoriametrics_image := `sh .github/scripts/compose-image.sh victoria-metrics`
 
 # Build the api, worker, mcp and web images, tagged codesynapse-<svc>:<tag> and <registry>/codesynapse-<svc>:<tag>. PLATFORM=linux/amd64 for a cluster of another architecture.

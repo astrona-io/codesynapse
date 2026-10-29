@@ -7,7 +7,7 @@ cd "$(dirname "$0")/../.."
 fail=0
 
 # 1. No store image literal in the justfile.
-if grep -nE '(postgres|milvus|victoria-metrics|vesoft/nebula-[a-z]*):[v0-9]' justfile; then
+if grep -nE '(postgres|milvus|victoria-metrics|nebula-[a-z]*):[v0-9]' justfile; then
     echo "justfile: a store image is spelled out; use compose-image.sh so tests follow docker-compose.yml" >&2
     fail=1
 fi
@@ -35,7 +35,7 @@ if [ "$want" != "$got" ]; then
 fi
 # NebulaGraph is four images in one pod: metad, storaged, graphd and the console.
 for part in metad storaged graphd console; do
-    want=$(sh .github/scripts/compose-image.sh "nebula-$part")
+    want=$(sh .github/scripts/compose-image.sh "codesynapse-nebula-$part")
     got=$(sed -n "s/^  $part:[[:space:]]*\(.*\)\$/\1/p" deploy/helm/codesynapse/charts/nebula/values.yaml | head -n 1)
     if [ "$want" != "$got" ]; then
         echo "charts/nebula/values.yaml: $part image is '$got', docker-compose.yml ships '$want'" >&2
