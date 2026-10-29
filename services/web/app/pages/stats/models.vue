@@ -75,6 +75,16 @@ const compressionOffHint = computed(() => compressionUnused.value
 // Gateway answers the local model gave, priced at the reference model on the server; null when a local answer reported no usage.
 const gw = computed(() => m.value?.gateway)
 const gwSaved = computed(() => gw.value?.saved_dollars ?? null)
+// Why the local model did not answer, in the gateway's fixed reasons.
+const FALL_LABEL: Record<string, string> = {
+  queue_timeout: 'waited too long for a slot', answer_timeout: 'answered too slowly', cancelled: 'client gave up',
+  model_error: 'model error', bad_status: 'error status', empty_answer: 'empty answer', truncated: 'cut off', bad_answer: 'unreadable answer',
+  not_eligible: 'not eligible', too_large: 'too large', has_thinking: 'needs thinking', has_image: 'has an image or document',
+  no_local_model: 'no local model', excluded: 'excluded', other: 'other',
+}
+const gwReasons = computed(() => Object.entries(gw.value?.fallthrough_reasons ?? {}).sort((p, q) => q[1] - p[1]))
+const gwReasonText = (n: number) => gwReasons.value.slice(0, n).map(([k, v]) => `${fmtCompact(v)} ${FALL_LABEL[k] ?? k}`).join(' · ')
+const secs = (v: number | null | undefined) => (v == null ? '–' : v < 10 ? `${v.toFixed(1)} s` : `${Math.round(v)} s`)
 const spent = computed(() => m.value?.spent_dollars ?? null)
 const saved = computed(() => totalSaved(price.value, { input: localIn.value, cached: localCached.value, output: localOut.value }, [graphSaved.value, compressionSaved.value, gwSaved.value]))
 // Where a price comes from, shown as its host and path.
@@ -155,6 +165,32 @@ const modelWindow = computed(() => (days.value > 30 ? 'the last 30 days (the met
         <div class="grid kpis">
           <StatTile label="Gateway requests" :value="fmtCompact(gw.requests)" :hint="`${fmtCompact(gw.local)} local · ${fmtCompact(gw.cloud)} cloud · ${fmtCompact(gw.rejected)} refused${gw.failed ? ` · ${fmtCompact(gw.failed)} failed` : ''}`" />
           <StatTile label="Answered locally" :value="`${gw.local_share_pct}%`" hint="of gateway requests, by the local model" />
+          <StatTile
+            v-if="gw.timeouts !== undefined" label="Local model timeouts" :value="fmtCompact(gw.timeouts)"
+            :tone="gw.timeouts ? 'warning' : undefined"
+            :hint="`${gw.timeout_share_pct ?? 0}% of requests · ${fmtCompact(gw.fallthrough_reasons?.queue_timeout ?? 0)} queue · ${fmtCompact(gw.fallthrough_reasons?.answer_timeout ?? 0)} answer`"
+            tip="requests that went to the cloud because the local model was too slow: they waited too long for its queue slot (queue) or for its answer (answer); a share above a few percent means the local model is overloaded or too slow for its traffic"
+          />
+          <StatTile
+            v-if="gw.fallthroughs !== undefined" label="Not answered locally" :value="fmtCompact(gw.fallthroughs)"
+            :hint="gwReasonText(2)"
+            :tip="gw.fallthroughs ? `by reason: ${gwReasonText(gwReasons.length)}. Requests it does not take (too large, thinking, images, not eligible) are expected; timeouts and errors are the local model's own` : 'the local model answered every request offered to it'"
+          />
+          <StatTile
+            v-if="gw.local_avg_seconds !== undefined" label="Response time, local" :value="secs(gw.local_avg_seconds)"
+            :hint="`p95 ${secs(gw.local_p95_seconds)}`"
+            tip="average time from request to last byte for requests the local model answered, and the 95th percentile"
+          />
+          <StatTile
+            v-if="gw.cloud_avg_seconds !== undefined" label="Response time, cloud" :value="secs(gw.cloud_avg_seconds)"
+            :hint="`p95 ${secs(gw.cloud_p95_seconds)}`"
+            tip="average time from request to last byte for requests the cloud answered, including any time first spent on the local model, and the 95th percentile"
+          />
+          <StatTile
+            v-if="gw.queue_avg_seconds !== undefined" label="Queue wait, local" :value="secs(gw.queue_avg_seconds)"
+            :hint="`p95 ${secs(gw.queue_p95_seconds)}`"
+            :tip="`time requests waited for the local model's slot before it started${gw.local_answer_avg_seconds != null ? `; its answers then took ${secs(gw.local_answer_avg_seconds)} on average` : ''}`"
+          />
           <StatTile label="Bytes in / out" :value="`${fmtCompact(gw.bytes_in)} / ${fmtCompact(gw.bytes_out)}`" tip="request and response sizes through the gateway" />
           <StatTile label="Saved by local answers" :value="gwSaved === null ? 'unknown' : money(gwSaved)"
             :hint="gwSaved === null ? `${fmtCompact(gw.local_unmetered)} answers without usage` : `${fmtCompact(gw.local_input_tokens)} read · ${fmtCompact(gw.local_output_tokens)} written`"

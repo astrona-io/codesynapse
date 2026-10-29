@@ -29,11 +29,11 @@ type OpenAI struct {
 func (o *OpenAI) ChatHandler() http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		w := &countWriter{ResponseWriter: rw}
+		w := &countWriter{ResponseWriter: rw, start: start}
 		meta := Meta{Path: "/v1/chat/completions", Route: "rejected"}
 		done := func(ctx context.Context, status int) {
 			if o.Done != nil {
-				meta.Out = w.n
+				meta.Out, meta.FirstByte = w.n, w.first
 				o.Done(ctx, meta, status, time.Since(start))
 			}
 		}
@@ -67,14 +67,19 @@ func (o *OpenAI) ChatHandler() http.HandlerFunc {
 			done(r.Context(), http.StatusBadRequest)
 			return
 		}
-		status, tail := o.forward(r.Context(), w, l, out)
+		status, tail := o.forward(r.Context(), w, l, out, &meta)
 		if status == 0 {
 			return // the agent gave up while waiting; nothing was answered
 		}
-		if status < 400 {
-			meta.Route = "local"
+		// Only the local model answers here, so its failures stay on the local
+		// route: the reason says why it did not answer, with no cloud after it.
+		meta.Route = "local"
+		switch {
+		case status < 400:
 			meta.InTokens, meta.OutTokens, meta.CachedTokens = reportedUsage(tail)
 			meta.Metered = meta.InTokens+meta.OutTokens > 0
+		case meta.Fallthrough == "":
+			meta.Fallthrough = FallBadStatus
 		}
 		done(r.Context(), status)
 	}
@@ -119,17 +124,24 @@ func (o *OpenAI) local() *Local {
 
 // forward streams the local answer and returns its status (0 when nothing
 // was written) with the end of the answer.
-func (o *OpenAI) forward(ctx context.Context, w http.ResponseWriter, l *Local, body []byte) (int, []byte) {
+func (o *OpenAI) forward(ctx context.Context, w http.ResponseWriter, l *Local, body []byte, meta *Meta) (int, []byte) {
+	meta.Asked = true
 	release := func() {}
 	if l.Acquire != nil {
+		queued := time.Now()
 		var err error
-		if release, err = l.Acquire(ctx); err != nil {
+		release, err = l.Acquire(ctx)
+		meta.QueueWait = time.Since(queued)
+		if err != nil {
 			return 0, nil // the agent gave up while waiting
 		}
 	}
 	defer release()
+	started := time.Now()
+	defer func() { meta.LocalAnswer = time.Since(started) }()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(l.BaseURL, "/")+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
+		meta.Fallthrough = FallModelError
 		openAIProblem(w, http.StatusBadGateway, "the local model could not be reached")
 		return http.StatusBadGateway, nil
 	}
@@ -139,6 +151,7 @@ func (o *OpenAI) forward(ctx context.Context, w http.ResponseWriter, l *Local, b
 	}
 	resp, err := l.client().Do(req)
 	if err != nil {
+		meta.Fallthrough = failure(ctx, err)
 		logx.FromContext(ctx).Warn("gateway local model failed", "error", err)
 		openAIProblem(w, http.StatusBadGateway, "the local model could not be reached")
 		return http.StatusBadGateway, nil
@@ -168,6 +181,7 @@ func (o *OpenAI) forward(ctx context.Context, w http.ResponseWriter, l *Local, b
 		}
 		if rerr != nil {
 			if !errors.Is(rerr, io.EOF) {
+				meta.Fallthrough = failure(ctx, rerr)
 				logx.FromContext(ctx).Warn("gateway local stream ended early", "error", rerr)
 			}
 			return resp.StatusCode, tail

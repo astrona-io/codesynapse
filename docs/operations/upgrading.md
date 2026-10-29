@@ -35,6 +35,12 @@ Take a backup. The parts that matter:
 
 Resource names assume the release is called `codesynapse`.
 
+## NebulaGraph images moved to ghcr.io
+
+NebulaGraph now runs from `ghcr.io/astrona-io/codesynapse-nebula-{metad,storaged,graphd,console}:v3.8.0`. These images contain upstream's v3.8.0 binaries unchanged, on a distroless base instead of CentOS 7. That removes about 1,700 scanner findings per image. The data format, flags and ports are the same, so existing volumes start as they are and nothing needs migrating.
+
+The server images have no shell and no `curl`. The chart's probes and the compose health checks now run `/usr/local/bin/nebula-probe HOST:PORT`. If you pinned `nebula.images` to the `vesoft/*` images, remove that override, or the probes fail. On compose, `just up` pulls the new images.
+
 ## Fix branches moved to their own worker
 
 Fix branches (`features.allowPush`) are pushed by a separate worker, so the worker that reads untrusted repositories never holds the right to push. `worker.roles` is now `ingest,ai`. If you pushed fix branches before, set `fixWorker.enabled=true` along with `features.allowPush=true`; until then a fix job waits for a worker that can run it. In compose, `fix-worker` is a new service and `worker` no longer takes `CODESYNAPSE_WORKER_ROLES` from `.env`. Neither worker holds the API token or the administrator password any more.

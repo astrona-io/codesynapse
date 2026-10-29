@@ -39,6 +39,9 @@ const (
 	StatMCPWorkflow = "mcp_workflow" //nolint:gosec // a metric name, not a credential
 	StatMCPTools    = "mcp_tools"
 	StatMCPClients  = "mcp_clients"
+	// Agent gateway traffic, read from VictoriaMetrics by the API
+	// (PlatformStatSource).
+	StatGateway = "gateway"
 )
 
 // Limits and retention of the daily rollup.
@@ -112,6 +115,14 @@ var statMetrics = map[string]statMetric{
 	StatMCPTools: {dims: toolDims(), perOrg: true, orgOnly: true},
 	// Sessions and calls by client family ("claude.sessions").
 	StatMCPClients: {dims: clientDims(), perOrg: true, orgOnly: true},
+	// Agent gateway requests of the day by route, the ones the local model
+	// did not answer (fallthroughs) and its two timeouts, and the sums
+	// behind the average response times and queue wait: *_ms is the summed
+	// time in milliseconds, *_n how many requests it covers. measured is 1
+	// on the platform row when the metrics store answered, 0 when the day
+	// was written without it.
+	StatGateway: {dims: []string{"requests", "local", "cloud", "rejected", "failed", "fallthroughs", "queue_timeout", "answer_timeout",
+		"local_ms", "local_n", "cloud_ms", "cloud_n", "queue_ms", "queue_n", "measured"}, perOrg: true},
 }
 
 // StatToolOther is the mcp_tools name of a tool outside the fixed list.

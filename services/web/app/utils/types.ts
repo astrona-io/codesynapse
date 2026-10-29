@@ -698,6 +698,13 @@ export interface GatewayStat {
   // The part of local_input_tokens the runtime's prompt cache served; 0 when it reports none (Ollama).
   local_cached_tokens?: number
   local_unmetered: number; saved_dollars: number | null
+  // Requests the local model did not answer, by the gateway's fixed reasons;
+  // timeouts are queue_timeout plus answer_timeout. Absent from older APIs.
+  fallthroughs?: number; fallthrough_reasons?: Record<string, number>; timeouts?: number; timeout_share_pct?: number
+  // Seconds; null when that route answered nothing in the window.
+  local_avg_seconds?: number | null; local_p95_seconds?: number | null
+  cloud_avg_seconds?: number | null; cloud_p95_seconds?: number | null
+  queue_avg_seconds?: number | null; queue_p95_seconds?: number | null; local_answer_avg_seconds?: number | null
 }
 export interface ModelStats {
   range: string; models: ModelStat[]

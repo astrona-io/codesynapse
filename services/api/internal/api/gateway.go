@@ -331,8 +331,13 @@ func recordGateway(ctx context.Context, m gateway.Meta, status int, took time.Du
 	telemetry.GatewayBytes.AddContext(ctx, float64(m.Bytes), tenant, route, "in")
 	telemetry.GatewayBytes.AddContext(ctx, float64(m.Out), tenant, route, "out")
 	telemetry.RecordGatewayDuration(ctx, route, took)
-	telemetry.RecordGatewayFallthrough(ctx, m.Fallthrough)
-	if route != "local" {
+	telemetry.RecordGatewayFallthrough(ctx, m.Fallthrough, route)
+	t := telemetry.GatewayTimings{Asked: m.Asked, Queue: m.QueueWait, Answer: m.LocalAnswer, Answered: route == "local" && m.Fallthrough == "", Route: route}
+	if m.Stream {
+		t.FirstByte = m.FirstByte
+	}
+	telemetry.RecordGatewayTimings(ctx, t)
+	if route != "local" || m.Fallthrough != "" || class != "2xx" {
 		return
 	}
 	if !m.Metered {

@@ -212,3 +212,41 @@ func TestPhaseFivePanels(t *testing.T) {
 	}
 	assert.Contains(t, seriesPanels["tool_errors"].Help, "refused", "the help says refusals are counted apart")
 }
+
+// The gateway panels are fixed MetricsQL: the organisation panels take their
+// tenant from extra_filters (TestSeriesScopedByTenant), and the platform
+// twins run the same expressions across tenants for platform admins only.
+func TestGatewayPanels(t *testing.T) {
+	for _, tc := range []struct {
+		panel    string
+		contains []string
+		by       string
+	}{
+		{"gateway_latency", []string{"histogram_quantile(0.95", "gateway_request_duration_seconds_bucket"}, "route"},
+		{"gateway_latency_avg", []string{"gateway_request_duration_seconds_sum", "gateway_request_duration_seconds_count[$w])) > 0)"}, "route"},
+		{"gateway_fallthrough", []string{"gateway_fallthrough_total"}, "reason"},
+		{"gateway_timeouts", []string{`reason=~"queue_timeout|answer_timeout"`}, "reason"},
+		{"gateway_queue_wait", []string{"gateway_queue_wait_seconds_sum", "gateway_queue_wait_seconds_bucket"}, ""},
+	} {
+		t.Run(tc.panel, func(t *testing.T) {
+			p, ok := seriesPanels[tc.panel]
+			require.True(t, ok)
+			assert.False(t, p.platform, "organisation panels stay scoped to the caller")
+			var all string
+			for _, q := range p.queries {
+				assert.Equal(t, q.by, tc.by)
+				assert.False(t, strings.Contains(q.expr, "tenant_id"), "the tenant comes from extra_filters, never the query")
+				all += q.expr
+			}
+			for _, c := range tc.contains {
+				assert.Contains(t, all, c)
+			}
+		})
+	}
+	for _, name := range []string{"gateway_latency", "gateway_latency_avg", "gateway_fallthrough"} {
+		a, ok := adminPanels[name]
+		require.True(t, ok, name)
+		assert.Equal(t, a.queries[0].expr, seriesPanels[name].queries[0].expr, "the platform panel shows the same series across tenants")
+		assert.True(t, a.groups != "", "values few organisations use are folded")
+	}
+}
