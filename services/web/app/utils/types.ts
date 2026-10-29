@@ -33,6 +33,7 @@ export interface GraphNodeData {
   latest?: string
   deprecated?: string
   behind?: number
+  retracted?: string
 }
 export interface NodeRef { id: string; kind: string; name: string; location?: string; summary?: string; depth?: number }
 // One entry of GET /repos/{repo}/outline: what a file holds, with line ranges.
@@ -143,8 +144,9 @@ export interface SecurityReport {
   finding_counts: Record<string, number>; vuln_counts: Record<string, number>
   findings: SecFinding[]; vulnerabilities: SecVuln[]
   suppressed?: SecFinding[]; suppressed_counts?: Record<string, number>
-  modules: { total: number; direct: number; indirect: number; vulnerable: number; stdlib?: string; deprecated?: number; behind?: number }
+  modules: { total: number; direct: number; indirect: number; vulnerable: number; stdlib?: string; deprecated?: number; behind?: number; retracted?: number }
   deprecated?: { module: string; ecosystem?: string; version: string; latest?: string; reason: string; direct: boolean }[]
+  retracted?: { module: string; ecosystem?: string; version: string; latest?: string; reason: string; direct: boolean }[]
   rules: { rule: string; title: string; severity: string; count: number }[]
   owners?: { owner: string; findings: number; counts: Record<string, number> }[]
   sensitive_functions?: NodeRef[]
@@ -237,7 +239,7 @@ export interface LicenseReport {
 
 export interface DependencyPackage {
   ecosystem: string; name: string; version?: string; license: string
-  direct: boolean; dev?: boolean; via?: string; roots?: number; latest?: string; deprecated?: string; behind?: number
+  direct: boolean; dev?: boolean; via?: string; roots?: number; latest?: string; deprecated?: string; behind?: number; retracted?: string
 }
 export interface DependencyList { packages: DependencyPackage[]; by_ecosystem: { ecosystem: string; count: number }[]; truncated?: boolean }
 

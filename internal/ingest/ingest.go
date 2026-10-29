@@ -66,10 +66,14 @@ type Options struct {
 	// OSV overrides the vulnerability client (tests, mirrors).
 	OSV *vuln.Client
 	// LicenseLookup asks deps.dev for dependency licences that are not found
-	// on disk. Sends ecosystem, package name and version.
+	// on disk, and the Go module proxy for retracted Go module versions.
+	// Sends ecosystem, package name and version.
 	LicenseLookup bool
 	// DepsDev overrides the licence lookup client (tests, mirrors).
 	DepsDev *license.DepsDev
+	// GoProxy overrides the module proxy asked for retractions (tests,
+	// mirrors).
+	GoProxy *hygiene.GoProxy
 	// Branch is recorded on the Repository node; when empty the checked-out
 	// branch is used.
 	Branch string
@@ -427,13 +431,14 @@ func resolveLicenses(ctx context.Context, opts Options, root string, mods []vuln
 	}
 	logx.FromContext(ctx).Info("licences resolved", "dependencies", len(mods), "found", len(found), "online", opts.LicenseLookup)
 	if opts.LicenseLookup {
-		checkHygiene(ctx, cmp.Or(opts.DepsDev, &license.DepsDev{}), mods)
+		checkHygiene(ctx, cmp.Or(opts.DepsDev, &license.DepsDev{}), cmp.Or(opts.GoProxy, &hygiene.GoProxy{}), mods)
 	}
 }
 
 // checkHygiene fills in which dependencies are deprecated or behind their
-// latest release, from deps.dev (switched on with the licence lookup).
-func checkHygiene(ctx context.Context, c *license.DepsDev, mods []vuln.Module) {
+// latest release, from deps.dev, and which Go module versions are retracted,
+// from the module proxy (both switched on with the licence lookup).
+func checkHygiene(ctx context.Context, c *license.DepsDev, proxy *hygiene.GoProxy, mods []vuln.Module) {
 	deps := make([]license.Dep, 0, len(mods))
 	for _, m := range mods {
 		if m.Version != "" && m.Path != vuln.StdlibPath {
@@ -441,9 +446,11 @@ func checkHygiene(ctx context.Context, c *license.DepsDev, mods []vuln.Module) {
 		}
 	}
 	found := hygiene.Check(ctx, c, deps)
+	retracted := hygiene.Retracted(ctx, proxy, deps)
 	deprecated, behind := 0, 0
 	for i, m := range mods {
 		d := license.Dep{Ecosystem: cmp.Or(m.Ecosystem, vuln.EcosystemGo), Name: m.BuildPath(), Version: m.Version}
+		mods[i].Retracted = retracted[d.Key()]
 		if s, ok := found[d.Key()]; ok {
 			mods[i].Latest, mods[i].Deprecated, mods[i].Behind = s.Latest, s.Deprecated, s.Behind
 			if s.Deprecated != "" {
@@ -454,7 +461,7 @@ func checkHygiene(ctx context.Context, c *license.DepsDev, mods []vuln.Module) {
 			}
 		}
 	}
-	logx.FromContext(ctx).Info("dependency hygiene checked", "dependencies", len(deps), "found", len(found), "deprecated", deprecated, "behind", behind)
+	logx.FromContext(ctx).Info("dependency hygiene checked", "dependencies", len(deps), "found", len(found), "deprecated", deprecated, "behind", behind, "retracted", len(retracted))
 }
 
 // Licenses checks the dependency licences of the repository at root without

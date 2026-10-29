@@ -245,6 +245,10 @@ type Node struct {
 	Latest     string `json:"latest,omitempty"`
 	Deprecated string `json:"deprecated,omitempty"`
 	Behind     int    `json:"behind,omitempty"`
+	// Retracted marks a Go Module version its author retracted (a retract
+	// directive in the go.mod of the module's latest version, from the Go
+	// module proxy): the redacted rationale, or "retracted" without one.
+	Retracted string `json:"retracted,omitempty"`
 	// Liveness is live, test-only or unreachable for functions and methods,
 	// and used or unused for Modules (see package cleanup).
 	Liveness string `json:"liveness,omitempty"`
