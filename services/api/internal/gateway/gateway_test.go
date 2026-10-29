@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"net/http"
@@ -213,10 +214,40 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 }
 
 func TestReportedUsage(t *testing.T) {
-	in, out := reportedUsage([]byte(`data: {"usage":{"prompt_tokens":12,"completion_tokens":34}}`))
-	assert.Equal(t, []int{in, out}, []int{12, 34})
-	in, out = reportedUsage([]byte("data: [DONE]"))
-	assert.Equal(t, []int{in, out}, []int{0, 0})
+	for _, tc := range []struct {
+		name, tail string
+		want       []int
+	}{
+		{"no cache reported (Ollama)", `data: {"usage":{"prompt_tokens":12,"completion_tokens":34}}`, []int{12, 34, 0}},
+		{"cached_tokens (vLLM, LM Studio)", `data: {"usage":{"prompt_tokens":120,"completion_tokens":4,"prompt_tokens_details":{"cached_tokens":96}}}`, []int{120, 4, 96}},
+		{"cache_n (llama.cpp)", `data: {"usage":{"prompt_tokens":50,"completion_tokens":5},"timings":{"cache_n":40,"prompt_n":10}}`, []int{50, 5, 40}},
+		{"cached_tokens wins over cache_n", `data: {"usage":{"prompt_tokens":50,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":30}},"timings":{"cache_n":40}}`, []int{50, 5, 30}},
+		{"never more than the prompt", `data: {"usage":{"prompt_tokens":10,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":99}}}`, []int{10, 1, 10}},
+		{"nothing", "data: [DONE]", []int{0, 0, 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in, out, cached := reportedUsage([]byte(tc.tail))
+			assert.Equal(t, []int{in, out, cached}, tc.want)
+		})
+	}
+}
+
+func TestReadChunkCache(t *testing.T) {
+	for _, tc := range []struct {
+		name, line string
+		cached     int
+	}{
+		{"none reported (Ollama)", `data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":1}}`, 0},
+		{"cached_tokens", `data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":6}}}`, 6},
+		{"llama.cpp cache_n", `data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":1},"timings":{"cache_n":7}}`, 7},
+		{"clamped to the prompt", `data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":1},"timings":{"cache_n":70}}`, 9},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, ok := readChunk(bufio.NewScanner(strings.NewReader(tc.line + "\n")))
+			require.True(t, ok)
+			assert.Equal(t, c.Cached, tc.cached)
+		})
+	}
 }
 
 func TestOpenAIChatQueuesAndUsesLocalModel(t *testing.T) {

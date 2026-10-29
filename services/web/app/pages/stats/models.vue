@@ -37,9 +37,19 @@ const offCloud = computed(() => (poolTotal.value ? Math.round((100 * (graphAvoid
 const price = computed(() => m.value?.reference_price)
 const localCached = computed(() => Math.min(sum(localModels.value, (x) => x.cached_tokens ?? 0), localIn.value))
 // The graph answers' part is valued on the server, once, at the price the
-// avoided context would have entered at (stats_share.go); null is unknown and
-// stays out of the total. The provider's own prompt-cache saving is never ours.
-const graphSaved = computed(() => a.value?.saved?.dollars ?? null)
+// avoided context would have entered at (stats_share.go): total_dollars adds
+// the agents that cannot tell repeats apart, at the input price; null is
+// unknown and stays out of the total. The provider's own prompt-cache saving
+// is never ours.
+const graphSaved = computed(() => a.value?.saved?.total_dollars ?? a.value?.saved?.dollars ?? null)
+const graphHint = computed(() => {
+  const sv = a.value?.saved
+  if (graphSaved.value === null || !sv) return 'the reference model has no input price; not in the total'
+  const unaware = sv.unaware_graph_tokens ?? 0
+  const parts = sv.tokens > 0 || unaware === 0 ? [`${fmtCompact(sv.tokens)} tokens never read, each once at the ${sv.price === 'cache_write' ? 'cache-write' : 'input'} price`] : []
+  if (unaware > 0) parts.push(`${fmtCompact(unaware)} tokens never read by agents that cannot tell repeated answers apart${sv.unaware_dollars != null ? ` (${money(sv.unaware_dollars)})` : ''}, at the input price; left out of the share`)
+  return parts.join('; ')
+})
 // Split by what the tokens would have been billed as: fresh input, cache
 // reads (at the cache price, else the input price) and output.
 const savedParts = computed(() => {
@@ -127,13 +137,13 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
           :value="!compressionOn ? 'off' : compressionSaved === null ? 'unknown' : money(compressionSaved)"
           :hint="!compressionOn ? compressionOffHint : compressionSaved === null ? 'a cloud model has no price set; not in the total' : 'CodeSynapse\'s own AI tasks: prose a local model shortened before it went to the cloud, at the input price; gateway traffic is passed on unchanged'"
         />
-        <StatTile
-          v-if="savedParts" label="Saved by graph answers"
-          :value="graphSaved === null ? 'unknown' : money(graphSaved)"
-          :hint="graphSaved === null ? 'agents that cannot tell repeated answers apart, or no price for the avoided context; not in the total' : `${fmtCompact(a?.saved?.tokens ?? 0)} tokens never read, each once at the ${a?.saved?.price === 'cache_write' ? 'cache-write' : 'input'} price`"
-        />
+        <StatTile v-if="savedParts" label="Saved by graph answers" :value="graphSaved === null ? 'unknown' : money(graphSaved)" :hint="graphHint" />
         <StatTile v-if="savedParts" label="Saved on input" :value="money(savedParts.input)" :hint="`${fmtCompact(Math.max(0, localIn - localCached))} tokens read by local models instead`" />
-        <StatTile v-if="savedParts" label="Saved on cached input" :value="money(savedParts.cached)" :hint="`${fmtCompact(localCached)} tokens from the prompt cache`" />
+        <StatTile
+          v-if="savedParts" label="Saved on cached input"
+          :value="localCached ? money(savedParts.cached) : 'none reported'"
+          :hint="localCached ? `${fmtCompact(localCached)} tokens the local models' prompt cache served, at the cache-read price; agents' own prompt cache is never counted` : 'the local runtime reported no prompt-cache hits (Ollama does not report them); agents\' own prompt cache is never counted'"
+        />
         <StatTile v-if="savedParts" label="Saved on output" :value="money(savedParts.output)" :hint="`${fmtCompact(localOut)} tokens written locally`" />
       </div>
       <template v-if="gw && gw.requests > 0">
@@ -142,7 +152,7 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
           <StatTile label="Gateway requests" :value="fmtCompact(gw.requests)" :hint="`${fmtCompact(gw.local)} local · ${fmtCompact(gw.cloud)} cloud · ${fmtCompact(gw.rejected)} refused${gw.failed ? ` · ${fmtCompact(gw.failed)} failed` : ''}`" />
           <StatTile label="Answered locally" :value="`${gw.local_share_pct}%`" hint="of gateway requests, by the local model" />
           <StatTile label="Bytes in / out" :value="`${fmtCompact(gw.bytes_in)} / ${fmtCompact(gw.bytes_out)}`" hint="request and response sizes through the gateway" />
-          <StatTile label="Saved by local answers" :value="gwSaved === null ? 'unknown' : money(gwSaved)" :hint="gwSaved === null ? `${fmtCompact(gw.local_unmetered)} local answers reported no token usage; not in the total` : `${fmtCompact(gw.local_input_tokens)} read · ${fmtCompact(gw.local_output_tokens)} written locally, at the reference prices`" />
+          <StatTile label="Saved by local answers" :value="gwSaved === null ? 'unknown' : money(gwSaved)" :hint="gwSaved === null ? `${fmtCompact(gw.local_unmetered)} local answers reported no token usage; not in the total` : `${fmtCompact(gw.local_input_tokens)} read${gw.local_cached_tokens ? ` (${fmtCompact(gw.local_cached_tokens)} from its prompt cache)` : ''} · ${fmtCompact(gw.local_output_tokens)} written locally, at the reference prices`" />
         </div>
       </template>
       <DonutChart
@@ -154,7 +164,7 @@ const windowLabel = computed(() => (days.value > 30 ? 'last 30 days (the metrics
 
     <p v-if="price" class="muted small source">
       The total saved values local work and unread tokens at {{ price.model }}'s prices: ${{ price.input_per_mtok }} in<template v-if="price.cached_input_per_mtok">, ${{ price.cached_input_per_mtok }} cached</template> and ${{ price.output_per_mtok }} out per million tokens.
-      <template v-if="price.estimate">This is a built-in estimate; add prices to a cloud provider in config/llm.yaml (or <code>price_feed: openrouter</code>) for your own.</template>
+      <template v-if="price.estimate">This is a built-in estimate<template v-if="price.source"> from <a :href="price.source" target="_blank" rel="noopener noreferrer">{{ sourceLabel(price.source) }}</a><template v-if="price.checked">, checked {{ price.checked }}</template></template>; add prices to a cloud provider in config/llm.yaml (or <code>price_feed: openrouter</code>) for your own.</template>
       <template v-else-if="price.source">Source: <a :href="price.source" target="_blank" rel="noopener noreferrer">{{ sourceLabel(price.source) }}</a><template v-if="price.checked">, checked {{ price.checked }}</template>.</template>
       <template v-else>No source given: add <code>price_source</code> and <code>price_checked</code> to that provider in config/llm.yaml, or <code>price_feed: openrouter</code>.</template>
     </p>

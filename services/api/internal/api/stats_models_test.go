@@ -165,3 +165,22 @@ func TestAgentStatsCountsAskLocal(t *testing.T) {
 	assert.Equal(t, a.Daily[len(a.Daily)-1].AvoidedTokens, 9700)
 	assert.Equal(t, a.ContextTotalTokens, 10200, "the draft the agent got joins its context")
 }
+
+func TestGatewaySaved(t *testing.T) {
+	ref := PriceReference{InputPerMTok: 4, OutputPerMTok: 20, CachedInputPerMTok: 0.2}
+	for _, tc := range []struct {
+		name string
+		gw   GatewayStat
+		ref  PriceReference
+		want float64
+	}{
+		{"no cache reported", GatewayStat{LocalInputTokens: 1_000_000, LocalOutputTokens: 100_000}, ref, 6},
+		{"cached input at the cache-read price", GatewayStat{LocalInputTokens: 1_000_000, LocalOutputTokens: 100_000, LocalCachedTokens: 500_000}, ref, 4.1},
+		{"no cache-read price: input price", GatewayStat{LocalInputTokens: 1_000_000, LocalCachedTokens: 500_000}, PriceReference{InputPerMTok: 4}, 4},
+		{"cached never above input", GatewayStat{LocalInputTokens: 100_000, LocalCachedTokens: 900_000}, ref, 0.02},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, gatewaySaved(tc.gw, tc.ref), tc.want)
+		})
+	}
+}

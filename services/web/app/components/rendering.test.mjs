@@ -161,7 +161,7 @@ test('models and savings split the token pool without counting ask_local twice',
     useStatistics: () => ({
       days: ref(30), error: ref(null), pending: ref(false),
       s: ref({ agents: { tokens: { total: 100000 }, work_tokens: 100000, avoided_tokens: 50000, local_avoided_tokens: 20000,
-        saved: { tokens: 30000, price: 'input', per_mtok: 10, dollars: 0.3, resend_tokens: 0, upper_dollars: null, unaware_tokens: 0 } } }),
+        saved: { tokens: 30000, price: 'input', per_mtok: 10, dollars: 0.3, resend_tokens: 0, upper_dollars: null, unaware_tokens: 0, unaware_graph_tokens: 0, unaware_dollars: 0, total_dollars: 0.3 } } }),
     }),
     useApiGet: () => ({ data: ref(models), error: ref(null) }),
     seriesRangeFor: () => '30d',
@@ -174,6 +174,7 @@ test('models and savings split the token pool without counting ask_local twice',
   assert.match(html, /Handled by local models 65000 60000 read · 5000 written/)
   assert.match(html, /Total saved \(est\.\) \$1\.75 at claude-opus-5-5 prices, estimated/, '60k × $10 + 5k × $20 per million, $0.30 for graph answers from the server, plus $0.50 from shorter prompts and $0.25 from gateway answers')
   assert.match(html, /Saved by graph answers \$0\.30 30000 tokens never read, each once at the input price/)
+  assert.match(html, /Saved on cached input none reported the local runtime reported no prompt-cache hits/)
   assert.match(html, /Spent on cloud models \(est\.\) \$0\.25 /)
   assert.match(html, /Saved by shorter prompts \$0\.50 CodeSynapse&#39;s own AI tasks/)
   assert.match(html, /gateway traffic is passed on unchanged/)
@@ -199,4 +200,30 @@ test('shorter prompts tile says why it is off instead of showing $0', async (t) 
   }, {})
   assert.match(html, /Saved by shorter prompts off no local model to shorten with; covers CodeSynapse&#39;s own AI tasks, not gateway traffic/)
   assert.doesNotMatch(html, /Saved by shorter prompts \$0\.00/)
+})
+
+test('graph answers of agents without repeat reports are valued, and local cache hits are shown', async (t) => {
+  const models = {
+    range: '30d',
+    reference_price: { provider: 'built-in', model: 'Claude Opus 5.5 (list price estimate)', input_per_mtok: 4, output_per_mtok: 20, cached_input_per_mtok: 0.2, cache_write_per_mtok: 5, caches_by_default: true, estimate: true, source: 'https://platform.claude.com/docs/en/about-claude/pricing', checked: '2026-10-29' },
+    spent_dollars: 0, compression_saved_dollars: 0, compression_enabled: true,
+    models: [{ provider: 'local', model: 'q', local: true, configured: true, requests: 1, failures: 0, input_tokens: 1000000, output_tokens: 0, cached_tokens: 500000, avg_prompt_tokens: 0,
+      read_tokens_per_second: null, write_tokens_per_second: null, context_p50: null, context_p95: null, tasks: [] }],
+  }
+  const html = await renderComponent(t, '../pages/stats/models.vue', {
+    useStatistics: () => ({
+      days: ref(30), error: ref(null), pending: ref(false),
+      s: ref({ agents: { tokens: { total: 0 }, avoided_tokens: 2500000, avoided_unaware_tokens: 2500000,
+        saved: { tokens: 0, price: 'cache_write', per_mtok: 5, dollars: 0, resend_tokens: 0, upper_dollars: 0, unaware_tokens: 2500000, unaware_graph_tokens: 2500000, unaware_per_mtok: 4, unaware_dollars: 10, total_dollars: 10 } } }),
+    }),
+    useApiGet: () => ({ data: ref(models), error: ref(null) }),
+    seriesRangeFor: () => '30d',
+    fmtCompact: (n) => String(n),
+    fmtInt: (n) => String(n),
+    apiErrorMessage: (e) => String(e),
+  }, {})
+  assert.match(html, /Saved by graph answers \$10\.00 2500000 tokens never read by agents that cannot tell repeated answers apart \(\$10\.00\), at the input price; left out of the share/)
+  assert.match(html, /Saved on cached input \$0\.10 500000 tokens the local models&#39; prompt cache served/)
+  assert.match(html, /Total saved \(est\.\) \$12\.10 /, '500k × $4 + 500k × $0.20 + $10 for graph answers')
+  assert.match(html, /built-in estimate(<!--\[-->)? from <a [^>]*>platform\.claude\.com\/docs\/en\/about-claude\/pricing<\/a>(<!--\[-->)?, checked 2026-10-29/)
 })

@@ -261,7 +261,14 @@ export interface WorkspaceStats {
     // Shown apart and labelled; never a tile, export or summary figure.
     share_upper_pct?: number | null; share_raw_pct?: number | null
     avoided_resend_tokens?: number; avoided_unaware_tokens?: number; avoided_repeat_ranges?: number
-    saved?: { tokens: number; price: 'cache_write' | 'input'; per_mtok: number; dollars: number | null; resend_tokens: number; upper_dollars: number | null; unaware_tokens: number }
+    avoided_unaware_local_tokens?: number
+    // Graph answers valued at the reference model. dollars covers the share's
+    // tokens; unaware_* the agents that cannot tell repeats apart, at the
+    // input price and outside the share; total_dollars is what totals add.
+    saved?: {
+      tokens: number; price: 'cache_write' | 'input'; per_mtok: number; dollars: number | null; resend_tokens: number; upper_dollars: number | null; unaware_tokens: number
+      unaware_graph_tokens?: number; unaware_per_mtok?: number; unaware_dollars?: number | null; total_dollars?: number | null
+    }
     sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; avoided_method: string
     // ask_local: tokens local models read, and its part of avoided_tokens.
     local_read_tokens?: number; local_avoided_tokens?: number; local_briefs?: number; local_drafts?: number
@@ -667,6 +674,8 @@ export interface ModelStat {
 export interface GatewayStat {
   requests: number; local: number; cloud: number; rejected: number; failed: number; local_share_pct: number
   bytes_in: number; bytes_out: number; local_input_tokens: number; local_output_tokens: number
+  // The part of local_input_tokens the runtime's prompt cache served; 0 when it reports none (Ollama).
+  local_cached_tokens?: number
   local_unmetered: number; saved_dollars: number | null
 }
 export interface ModelStats {
