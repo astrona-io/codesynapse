@@ -200,23 +200,26 @@ Keep the archive on once it is set. PostgreSQL then no longer holds the oldest e
 
 ### Reading platform figures
 
-The platform reads need a platform administrator's signed-in browser session: `GET /api/v1/admin/users`, `/admin/orgs`, `/admin/health`, the `/admin/stats/*` routes and the cross-tenant panels of `/api/v1/stats/series` (`tenants` and every `platform_*` panel). An API key or the installation token gets 403, even when it belongs to a platform administrator. Root may read them; a suspended administrator is refused.
+The platform reads need a platform administrator's signed-in browser session: `GET /api/v1/admin/users`, `/admin/orgs`, `/admin/health`, the `/admin/stats/*` routes and the cross-tenant `platform_*` health panels of `/api/v1/stats/series`. An API key or the installation token gets 403, even when it belongs to a platform administrator. Root may read them; a suspended administrator is refused.
 
 !!! warning "Scripts that read the admin lists with an API key stop working"
     Before this change `GET /api/v1/admin/users`, `/admin/orgs` and `/admin/health` answered an API key of a platform administrator. They now answer 403. Sign in through the dashboard instead, or use the audit export, which is unchanged.
 
 Every view is written to the audit log before any figure is read: `admin.users.view`, `admin.orgs.view`, `admin.health.view`, `admin.stats.view` (with the section, range, organisation and panel), and `admin.stats.export` (with the format as well). A batch of series panels is one view. When the audit entry cannot be written, the request answers 503 and shows no figures.
 
-Administration → Statistics shows the figures (`docs/PLATFORM_STATS_PLAN.md`, phase 1):
+Administration → Statistics shows the figures (`docs/PLATFORM_STATS_PLAN.md`, phases 1 and 3):
 
 | Route | Answers |
 |---|---|
 | `GET /api/v1/admin/stats/summary?range=` | Tiles: organisations, people, active people, memberships, seats, runtime sessions, API keys, browser sessions. Graphs, jobs, cost and alerts are `null` until later phases. |
 | `GET /api/v1/admin/stats/tenants?range=&org=&sort=&page=` | Platform totals and one row per organisation: members by role, seats, active members, teams, repository entries, single sign-on, watches. |
 | `GET /api/v1/admin/stats/sessions?range=&org=&sort=&page=` | Browser sessions, runtime sessions (agent, dashboard, gateway) and API keys (active, used, expiring within 14 days), per organisation. |
-| `GET /api/v1/admin/stats/export?section=summary\|tenants\|sessions&range=&org=&format=csv\|json` | The whole section, at most 10,000 rows. CSV cells are formula-neutralised. |
+| `GET /api/v1/admin/stats/usage?range=&org=&sort=&page=` | Agent sessions, tool calls and errors, tokens served and avoided, the token share, workflow counts and unindexed checkouts per organisation, with the tools and clients used. A tool or client fewer than three organisations use is counted as "other" unless `org` is set. |
+| `GET /api/v1/admin/stats/series?panel=&range=&org=` | One usage chart from VictoriaMetrics (`range` up to `30d`). Series per organisation carry its name; a deleted one reads "deleted organisation". |
+| `GET /api/v1/admin/stats/series/batch?panels=&range=&org=` | Up to 20 of those charts in one request and one audit event. |
+| `GET /api/v1/admin/stats/export?section=summary\|tenants\|sessions\|usage&range=&org=&format=csv\|json` | The whole section, at most 10,000 rows. CSV cells are formula-neutralised. |
 
-`range` is `1h`, `6h`, `24h`, `7d`, `30d`, `90d` or `365d`; anything else answers 400. `org` is an organisation ID and must exist; it filters the rows, never the totals. Tables have 50 rows per page. The figures are counts only: organisation names and slugs appear, repository names, graph IDs, paths, e-mail addresses and user, key or session IDs never do. Root is never counted. A person counts once in the platform totals and once in each organisation they belong to. Seats are active members other than guests. Active people signed in, opened a browser or runtime session, or used an API key in the window.
+`range` is `1h`, `6h`, `24h`, `7d`, `30d`, `90d` or `365d`; anything else answers 400. `org` is an organisation ID and must exist; it filters the rows, never the totals. Tables have 50 rows per page. The former panels `tenants`, `platform_llm_cost`, `platform_tool_latency` and `platform_db_latency` of `/api/v1/stats/series` were removed and answer 404; their figures are the admin panels `org_sessions`, `llm_cost`, `tool_latency` and `db_latency`. The figures are counts only: organisation names and slugs appear, repository names, graph IDs, paths, e-mail addresses and user, key or session IDs never do. Root is never counted. A person counts once in the platform totals and once in each organisation they belong to. Seats are active members other than guests. Active people signed in, opened a browser or runtime session, or used an API key in the window.
 
 The process holding the `api-loops` lease writes daily platform statistics to `platform_stats_daily` shortly after midnight UTC: counts of organisations, users other than root, active users, memberships, seats, repository entries, graphs, finished jobs, sessions and API keys, per day and, for some, per organisation ID. Rows hold counts and opaque organisation IDs only, never names, e-mail addresses, repository names or the IDs of users, keys or sessions. A deleted organisation's rows stay. Rows are kept 400 days, independently of the audit retention, and older ones are pruned by the same loop. They feed the 90-day and 365-day ranges of the platform statistics. See [platform statistics](../PLATFORM_STATS_PLAN.md).
 

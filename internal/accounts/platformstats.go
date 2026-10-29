@@ -46,6 +46,7 @@ var statsSections = map[string]string{
 	"summary":  "admin.stats.view",
 	"tenants":  "admin.stats.view",
 	"sessions": "admin.stats.view",
+	"usage":    "admin.stats.view",
 }
 
 // StatsRequest names what a platform administrator asks for. Every field is

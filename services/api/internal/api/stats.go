@@ -420,8 +420,14 @@ func visibleUsage(sc scope, buckets []usage.Bucket) []usage.Bucket {
 // agentUsage compares what agents' calls returned with what reading the
 // files would have cost, using each repository's benchmark ratio.
 func agentUsage(buckets []usage.Bucket, repos []RepoSummary, days int, now time.Time) AgentStats {
-	// Tokens a file-reading agent needs per graph token, per repository,
-	// from the benchmark measured at ingest.
+	ratio, workspaceRatio := benchmarkRatios(repos)
+	return agentStats(buckets, days, now, ratio, workspaceRatio)
+}
+
+// benchmarkRatios are the tokens a file-reading agent needs per graph
+// token, per repository, from the benchmark measured at ingest, and the
+// ratio over all of them for calls that named no repository.
+func benchmarkRatios(repos []RepoSummary) (map[string]float64, float64) {
 	ratio := map[string]float64{}
 	var g, b int
 	for _, rs := range repos {
@@ -434,7 +440,7 @@ func agentUsage(buckets []usage.Bucket, repos []RepoSummary, days int, now time.
 	if g > 0 {
 		workspaceRatio = float64(b) / float64(g)
 	}
-	return agentStats(buckets, days, now, ratio, workspaceRatio)
+	return ratio, workspaceRatio
 }
 
 func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[string]float64, workspaceRatio float64) AgentStats {

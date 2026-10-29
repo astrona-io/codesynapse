@@ -208,8 +208,8 @@ var statsRoles = []accounts.Role{accounts.Owner, accounts.Admin, accounts.Member
 func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 	req := statsRequest(r, r.URL.Query().Get("section"))
 	req.Format = r.URL.Query().Get("format")
-	if !slices.Contains([]string{"summary", "tenants", "sessions"}, req.Section) {
-		s.problem(w, http.StatusBadRequest, errors.New("section must be summary, tenants or sessions"))
+	if !slices.Contains([]string{"summary", "tenants", "sessions", "usage"}, req.Section) {
+		s.problem(w, http.StatusBadRequest, errors.New("section must be summary, tenants, sessions or usage"))
 		return
 	}
 	if req.Format != "csv" && req.Format != "json" {
@@ -285,6 +285,13 @@ func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 			rows = append(rows, []string{csvSafe(o.Slug), csvSafe(o.Name), strconv.Itoa(e.Active), strconv.Itoa(e.Created), strconv.Itoa(e.Revoked),
 				strconv.Itoa(e.Dashboard), strconv.Itoa(e.Gateway), strconv.Itoa(e.Runtime), strconv.Itoa(k.Active), countCell(k.Used, noUsed), strconv.Itoa(k.Expiring)})
 		}
+	case "usage":
+		d, err := s.usageStats(ctx, q)
+		if err != nil {
+			s.statsError(w, err)
+			return
+		}
+		body, header, rows = usageExport(d)
 	}
 	name := "codesynapse-" + req.Section + "-" + req.Range + "." + req.Format
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)

@@ -76,11 +76,14 @@ func TestSeriesScopedByTenant(t *testing.T) {
 	assert.Equal(t, p.Series[0].Total, 3.0)
 	assert.True(t, p.Series[0].Values[len(p.Times)-1] != nil && *p.Series[0].Values[len(p.Times)-1] == 0, "count panels fill quiet steps with 0")
 
-	assert.Equal(t, bob.do("GET", "/api/v1/stats/series?panel=tenants&range=1h", "", nil), 403, "cross-tenant panels are for platform admins")
-	assert.Equal(t, bob.do("GET", "/api/v1/stats/series?panel=nope", "", nil), 400)
+	for _, gone := range []string{"tenants", "platform_llm_cost", "platform_tool_latency", "platform_db_latency", "nope"} {
+		assert.Equal(t, bob.do("GET", "/api/v1/stats/series?panel="+gone, "", nil), 404, gone)
+		assert.Equal(t, admin.do("GET", "/api/v1/stats/series?panel="+gone, "", nil), 404, "cross-tenant panels moved to /admin/stats/series: "+gone)
+	}
 	assert.Equal(t, bob.do("GET", "/api/v1/stats/series?panel=tool_calls&range=2y", "", nil), 400)
 
-	require.Equal(t, admin.do("GET", "/api/v1/stats/series?panel=tenants&range=7d", "", &p), 200)
+	assert.Equal(t, bob.do("GET", "/api/v1/admin/stats/series?panel=org_tool_calls&range=7d", "", nil), 403, "cross-tenant panels are for platform admins")
+	require.Equal(t, admin.do("GET", "/api/v1/admin/stats/series?panel=org_tool_calls&range=7d", "", &p), 200)
 	filter, query = vm.last()
 	assert.Equal(t, filter, "", "platform admins see every tenant")
 	assert.Contains(t, query, "[1h]")
@@ -88,7 +91,7 @@ func TestSeriesScopedByTenant(t *testing.T) {
 	require.Equal(t, admin.do("GET", "/api/v1/stats/series?panel=llm_cost", "", &p), 200)
 	filter, _ = vm.last()
 	assert.Equal(t, filter, `{tenant_id=~"`+adminSigned.Org.ID+`"}`, "ordinary panels never elevate platform users")
-	platformPanels := []string{"platform_llm_cost", "platform_tool_latency", "platform_db_latency"}
+	var platformPanels []string
 	for name := range platformHealthPanels {
 		platformPanels = append(platformPanels, name)
 	}
@@ -117,15 +120,15 @@ func TestSeriesScopedByTenant(t *testing.T) {
 	var batch struct {
 		Panels map[string]SeriesBatchItem
 	}
-	require.Equal(t, bob.do("GET", "/api/v1/stats/series/batch?panels=tool_calls,llm_cost,tool_calls,tenants,nope&range=1h", "", &batch), 200)
+	require.Equal(t, bob.do("GET", "/api/v1/stats/series/batch?panels=tool_calls,llm_cost,tool_calls,platform_api_requests,nope&range=1h", "", &batch), 200)
 	require.Len(t, batch.Panels, 4, "duplicates count once")
 	assert.Equal(t, batch.Panels["tool_calls"].Status, 200)
 	require.NoError(t, json.Unmarshal(batch.Panels["tool_calls"].Body, &p))
 	assert.Equal(t, p.Series[0].Total, 3.0)
 	assert.Equal(t, len(p.Times), 60, "the range applies to every panel")
 	assert.Equal(t, batch.Panels["llm_cost"].Status, 200)
-	assert.Equal(t, batch.Panels["tenants"].Status, 403, "cross-tenant panels stay refused")
-	assert.Equal(t, batch.Panels["nope"].Status, 400)
+	assert.Equal(t, batch.Panels["platform_api_requests"].Status, 403, "cross-tenant panels stay refused")
+	assert.Equal(t, batch.Panels["nope"].Status, 404)
 	filter, _ = vm.last()
 	assert.Equal(t, filter, `{tenant_id=~"`+signed.Org.ID+`"}`)
 	assert.Equal(t, bob.do("GET", "/api/v1/stats/series/batch?panels=", "", nil), 400)
