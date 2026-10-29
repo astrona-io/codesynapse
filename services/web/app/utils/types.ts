@@ -463,9 +463,13 @@ export interface AdminUser extends AccountUser { disabled_at?: string; orgs: { s
 export interface HealthCheck { ok: boolean; detail: string; seconds: number }
 
 // Platform statistics (GET /api/v1/admin/stats/*): aggregates only, root
-// never counted. Tiles a later phase fills are null until then.
+// never counted. Tiles a later phase fills are null until then. 90d and
+// 365d sum their window figures from the daily rollup and say so in rollup.
+export type StatsRange = SeriesRange | '90d' | '365d'
+export interface StatsRollup { days: number; written: number; latest?: string; active_window: string; unavailable: string[] }
 export interface StatsSummary {
-  range: SeriesRange
+  range: StatsRange
+  rollup?: StatsRollup
   orgs: number; orgs_created: number; users: number; users_created: number; active_users: number
   memberships: number; seats: number; seated_people: number
   execution_active: number; execution_created: number; keys_active: number; browser_active: number
@@ -487,7 +491,7 @@ export interface ExecutionCounts { active: number; created: number; revoked: num
 export interface KeyCounts { active: number; used: number; expiring: number }
 export interface SessionTotals { browser_active: number; browser_created: number; execution: ExecutionCounts; keys: KeyCounts }
 export interface OrgSessionRow { org_id: string; slug: string; name: string; execution: ExecutionCounts; keys: KeyCounts }
-export interface StatsTable<T, R> { range: SeriesRange; totals: T; rows: R[]; page: number; pages: number; total: number }
+export interface StatsTable<T, R> { range: StatsRange; totals: T; rows: R[]; page: number; pages: number; total: number; rollup?: StatsRollup }
 export interface AdminHealth {
   version: string; checked: string
   graph: HealthCheck; accounts: HealthCheck; metrics: HealthCheck; audit: HealthCheck

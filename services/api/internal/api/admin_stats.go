@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
@@ -65,10 +66,17 @@ type StatsSummary struct {
 	JobsFailed   *int     `json:"jobs_failed"`
 	Cost         *float64 `json:"cost"`
 	AlertsFiring *int     `json:"alerts_firing"`
+
+	// Rollup is set for 90d and 365d, whose window figures come from the
+	// daily rollup.
+	Rollup *StatsRollup `json:"rollup,omitempty"`
 }
 
 func (s *Server) statsSummary(ctx context.Context, rng string, q accounts.StatsQuery) (StatsSummary, error) {
 	q.OrgID = "" // the tiles are the platform's
+	if q.Daily != "" {
+		return s.dailySummary(ctx, rng, q)
+	}
 	t, err := s.cfg.Accounts.St.TenantStats(ctx, q)
 	if err != nil {
 		return StatsSummary{}, err
@@ -77,13 +85,35 @@ func (s *Server) statsSummary(ctx context.Context, rng string, q accounts.StatsQ
 	if err != nil {
 		return StatsSummary{}, err
 	}
+	return summaryOf(rng, t, ss), nil
+}
+
+func summaryOf(rng string, t accounts.TenantStats, ss accounts.SessionStats) StatsSummary {
 	return StatsSummary{
 		Range: rng, Orgs: t.Totals.Orgs, OrgsCreated: t.Totals.OrgsCreated,
 		Users: t.Totals.Users, UsersCreated: t.Totals.UsersCreated, ActiveUsers: t.Totals.ActiveUsers,
 		Memberships: t.Totals.Memberships, Seats: t.Totals.Seats, SeatedPeople: t.Totals.SeatedPeople,
 		ExecutionActive: ss.Totals.Execution.Active, ExecutionCreated: ss.Totals.Execution.Created,
 		KeysActive: ss.Totals.Keys.Active, BrowserActive: ss.Totals.BrowserActive,
-	}, nil
+	}
+}
+
+// tenantStats and sessionStats read a section: the live tables for the
+// short ranges, the live state plus the daily rollup for 90d and 365d.
+func (s *Server) tenantStats(ctx context.Context, q accounts.StatsQuery) (accounts.TenantStats, *StatsRollup, error) {
+	if q.Daily != "" {
+		return s.dailyTenants(ctx, q)
+	}
+	t, err := s.cfg.Accounts.St.TenantStats(ctx, q)
+	return t, nil, err
+}
+
+func (s *Server) sessionStats(ctx context.Context, q accounts.StatsQuery) (accounts.SessionStats, *StatsRollup, error) {
+	if q.Daily != "" {
+		return s.dailySessions(ctx, q, true)
+	}
+	ss, err := s.cfg.Accounts.St.SessionStats(ctx, q)
+	return ss, nil, err
 }
 
 func (s *Server) handleStatsSummary(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +125,7 @@ func (s *Server) handleStatsSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := s.statsSummary(r.Context(), req.Range, q)
 	if err != nil {
-		s.problem(w, 500, err)
+		s.statsError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -131,12 +161,14 @@ type StatsTable[Totals, Row any] struct {
 	Page   int    `json:"page"`
 	Pages  int    `json:"pages"`
 	Total  int    `json:"total"`
+	// Rollup is set for 90d and 365d.
+	Rollup *StatsRollup `json:"rollup,omitempty"`
 }
 
-func page[Totals, Row any](r *http.Request, rng string, totals Totals, rows []Row) StatsTable[Totals, Row] {
+func page[Totals, Row any](r *http.Request, rng string, totals Totals, rows []Row, rollup *StatsRollup) StatsTable[Totals, Row] {
 	n := intParam(r, "page", 1)
 	got, pages := accounts.StatsPage(rows, n)
-	return StatsTable[Totals, Row]{Range: rng, Totals: totals, Rows: got, Page: min(max(n, 1), pages), Pages: pages, Total: len(rows)}
+	return StatsTable[Totals, Row]{Range: rng, Totals: totals, Rows: got, Page: min(max(n, 1), pages), Pages: pages, Total: len(rows), Rollup: rollup}
 }
 
 func (s *Server) handleStatsTenants(w http.ResponseWriter, r *http.Request) {
@@ -145,13 +177,13 @@ func (s *Server) handleStatsTenants(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	t, err := s.cfg.Accounts.St.TenantStats(r.Context(), q)
+	t, rollup, err := s.tenantStats(r.Context(), q)
 	if err != nil {
-		s.problem(w, 500, err)
+		s.statsError(w, err)
 		return
 	}
 	sortRows(t.Orgs, tenantSorts[r.URL.Query().Get("sort")])
-	writeJSON(w, http.StatusOK, page(r, req.Range, t.Totals, t.Orgs))
+	writeJSON(w, http.StatusOK, page(r, req.Range, t.Totals, t.Orgs, rollup))
 }
 
 func (s *Server) handleStatsSessions(w http.ResponseWriter, r *http.Request) {
@@ -160,13 +192,13 @@ func (s *Server) handleStatsSessions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ss, err := s.cfg.Accounts.St.SessionStats(r.Context(), q)
+	ss, rollup, err := s.sessionStats(r.Context(), q)
 	if err != nil {
-		s.problem(w, 500, err)
+		s.statsError(w, err)
 		return
 	}
 	sortRows(ss.Orgs, sessionSorts[r.URL.Query().Get("sort")])
-	writeJSON(w, http.StatusOK, page(r, req.Range, ss.Totals, ss.Orgs))
+	writeJSON(w, http.StatusOK, page(r, req.Range, ss.Totals, ss.Orgs, rollup))
 }
 
 var statsRoles = []accounts.Role{accounts.Owner, accounts.Admin, accounts.Member, accounts.Viewer, accounts.Guest}
@@ -201,7 +233,7 @@ func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 	case "summary":
 		sum, err := s.statsSummary(ctx, req.Range, q)
 		if err != nil {
-			s.problem(w, 500, err)
+			s.statsError(w, err)
 			return
 		}
 		body = sum
@@ -214,13 +246,17 @@ func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 			{"execution_active", sum.ExecutionActive}, {"execution_created", sum.ExecutionCreated}, {"keys_active", sum.KeysActive}, {"browser_active", sum.BrowserActive}} {
 			rows = append(rows, []string{f.name, strconv.Itoa(f.v)})
 		}
+		if sum.Rollup != nil {
+			rows = append(rows, []string{"days", strconv.Itoa(sum.Rollup.Days)}, []string{"days_written", strconv.Itoa(sum.Rollup.Written)})
+		}
 	case "tenants":
-		t, err := s.cfg.Accounts.St.TenantStats(ctx, q)
+		t, rollup, err := s.tenantStats(ctx, q)
 		if err != nil {
-			s.problem(w, 500, err)
+			s.statsError(w, err)
 			return
 		}
-		body = t
+		body = withRollup[accounts.TenantStats]{t, rollup}
+		noActive := rollup != nil
 		header = []string{"slug", "name", "created_at", "members"}
 		for _, role := range statsRoles {
 			header = append(header, string(role)+"s")
@@ -231,22 +267,23 @@ func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 			for _, role := range statsRoles {
 				row = append(row, strconv.Itoa(o.Roles[string(role)]))
 			}
-			row = append(row, strconv.Itoa(o.Seats), strconv.Itoa(o.ActiveMembers), strconv.Itoa(o.Teams), strconv.Itoa(o.Entries),
+			row = append(row, strconv.Itoa(o.Seats), countCell(o.ActiveMembers, noActive), strconv.Itoa(o.Teams), strconv.Itoa(o.Entries),
 				strconv.Itoa(o.PersonalEntries), strconv.Itoa(o.PrivateEntries), strconv.Itoa(o.LostEntries), strconv.FormatBool(o.SSO), strconv.Itoa(o.Watches))
 			rows = append(rows, row)
 		}
 	case "sessions":
-		ss, err := s.cfg.Accounts.St.SessionStats(ctx, q)
+		ss, rollup, err := s.sessionStats(ctx, q)
 		if err != nil {
-			s.problem(w, 500, err)
+			s.statsError(w, err)
 			return
 		}
-		body = ss
+		body = withRollup[accounts.SessionStats]{ss, rollup}
+		noUsed := rollup != nil
 		header = []string{"slug", "name", "execution_active", "execution_created", "execution_revoked", "dashboard", "gateway", "runtime", "keys_active", "keys_used", "keys_expiring"}
 		for _, o := range ss.Orgs {
 			e, k := o.Execution, o.Keys
 			rows = append(rows, []string{csvSafe(o.Slug), csvSafe(o.Name), strconv.Itoa(e.Active), strconv.Itoa(e.Created), strconv.Itoa(e.Revoked),
-				strconv.Itoa(e.Dashboard), strconv.Itoa(e.Gateway), strconv.Itoa(e.Runtime), strconv.Itoa(k.Active), strconv.Itoa(k.Used), strconv.Itoa(k.Expiring)})
+				strconv.Itoa(e.Dashboard), strconv.Itoa(e.Gateway), strconv.Itoa(e.Runtime), strconv.Itoa(k.Active), countCell(k.Used, noUsed), strconv.Itoa(k.Expiring)})
 		}
 	}
 	name := "codesynapse-" + req.Section + "-" + req.Range + "." + req.Format
@@ -262,6 +299,35 @@ func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 		_ = cw.Write(row) //nolint:errcheck // as above
 	}
 	cw.Flush()
+}
+
+// withRollup is a section export: the section, and for 90d and 365d where
+// its window figures came from.
+type withRollup[T any] struct {
+	Section T
+	Rollup  *StatsRollup
+}
+
+// MarshalJSON keeps the section's own fields at the top level, so a short
+// range exports exactly as before.
+func (v withRollup[T]) MarshalJSON() ([]byte, error) {
+	b, err := json.Marshal(v.Section)
+	if err != nil || v.Rollup == nil {
+		return b, err
+	}
+	r, err := json.Marshal(v.Rollup)
+	if err != nil {
+		return nil, err
+	}
+	return append(append(append(b[:len(b)-1], `,"rollup":`...), r...), '}'), nil
+}
+
+// countCell writes a count, or nothing for a figure the range cannot answer.
+func countCell(n int, unavailable bool) string {
+	if unavailable {
+		return ""
+	}
+	return strconv.Itoa(n)
 }
 
 // platformAuditedKey marks a batch whose platform panels were already

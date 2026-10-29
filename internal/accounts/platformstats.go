@@ -52,7 +52,7 @@ var statsSections = map[string]string{
 // checked against an allowlist or PostgreSQL before it reaches the audit log.
 type StatsRequest struct {
 	Section string
-	Range   string // 1h, 6h, 24h, 7d or 30d; empty for the admin lists
+	Range   string // 1h, 6h, 24h, 7d, 30d, 90d or 365d; empty for the admin lists
 	OrgID   string // optional organisation filter
 	Format  string // csv or json for an export; empty for a view
 	Panel   string // the series panel, for section "series"
@@ -63,6 +63,10 @@ type StatsQuery struct {
 	Since time.Time
 	Now   time.Time
 	OrgID string
+	// Daily names a 90d or 365d range, whose window figures come from the
+	// daily rollup (PlatformStatsHistory) rather than from the live tables;
+	// Since is then the first day of that range.
+	Daily string
 }
 
 // PlatformStats allows a platform statistics view and records it before any
@@ -80,11 +84,13 @@ func (s *Service) PlatformStats(ctx context.Context, p Principal, r StatsRequest
 	}
 	q := StatsQuery{Now: s.now()}
 	if r.Range != "" {
-		d, ok := statsRanges[r.Range]
-		if !ok {
-			return StatsQuery{}, fmt.Errorf("range must be 1h, 6h, 24h, 7d or 30d: %w", ErrInvalidInput)
+		if from, _, ok := DailyStatRange(r.Range, q.Now); ok {
+			q.Since, q.Daily = from, r.Range
+		} else if d, ok := statsRanges[r.Range]; ok {
+			q.Since = q.Now.Add(-d)
+		} else {
+			return StatsQuery{}, fmt.Errorf("range must be 1h, 6h, 24h, 7d, 30d, 90d or 365d: %w", ErrInvalidInput)
 		}
-		q.Since = q.Now.Add(-d)
 	}
 	switch r.Format {
 	case "":
