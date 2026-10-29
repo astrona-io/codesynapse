@@ -214,7 +214,7 @@ func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, ok := seriesRanges[req.Range]; req.Section == "models" && !ok {
-		s.problem(w, http.StatusBadRequest, modelsRangeError)
+		s.problem(w, http.StatusBadRequest, errModelsRange)
 		return
 	}
 	if req.Format != "csv" && req.Format != "json" {

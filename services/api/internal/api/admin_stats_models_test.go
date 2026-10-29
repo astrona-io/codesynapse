@@ -139,7 +139,7 @@ func TestModelsSection(t *testing.T) {
 		assert.True(t, m.TTFTP95Seconds == nil, "a folded row has no quantile")
 		u := rows["other/other"]
 		assert.Equal(t, []any{u.Kind, u.Requests, u.UnknownUsageCalls, u.CostBasis}, []any{modelUnknown, 1.0, 1.0, costUnknown})
-		body, err := json.Marshal(d)
+		body, err := json.Marshal([]any{d.totals, d.rows})
 		require.NoError(t, err)
 		out, err := json.Marshal(d.models)
 		require.NoError(t, err)
@@ -202,7 +202,7 @@ func TestModelsSection(t *testing.T) {
 
 	t.Run("long ranges and missing metrics", func(t *testing.T) {
 		_, err := s.modelStats(context.Background(), "90d", accounts.StatsQuery{Now: time.Now()})
-		assert.ErrorIs(t, err, modelsRangeError)
+		assert.ErrorIs(t, err, errModelsRange)
 		off := &Server{cfg: Config{Accounts: acc}}
 		_, err = off.modelStats(context.Background(), "7d", accounts.StatsQuery{Now: time.Now()})
 		assert.ErrorIs(t, err, errNoMetrics)

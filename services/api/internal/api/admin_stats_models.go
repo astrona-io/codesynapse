@@ -32,9 +32,9 @@ import (
 // A model is named only when telemetry.ModelAllowed says the server's own
 // configuration registered it; any other identity folds into "other".
 
-// modelsRangeError is the answer to a range the models section has no
+// errModelsRange is the answer to a range the models section has no
 // series for: VictoriaMetrics keeps 30 days.
-var modelsRangeError = errors.New("range must be 1h, 6h, 24h, 7d or 30d: model series are kept for 30 days")
+var errModelsRange = errors.New("range must be 1h, 6h, 24h, 7d or 30d: model series are kept for 30 days")
 
 // Model kinds: local and cloud come from the provider configuration
 // (ProviderConfig.Local); unknown is a provider this process does not
@@ -193,7 +193,7 @@ func (s *Server) handleStatsModels(w http.ResponseWriter, r *http.Request) {
 	}
 	req := statsRequest(r, "models")
 	if _, ok := seriesRanges[req.Range]; !ok {
-		s.problem(w, http.StatusBadRequest, modelsRangeError)
+		s.problem(w, http.StatusBadRequest, errModelsRange)
 		return
 	}
 	q, ok := s.platformView(w, r, req)
@@ -236,7 +236,7 @@ func (s *Server) modelStats(ctx context.Context, rng string, q accounts.StatsQue
 	}
 	sr, ok := seriesRanges[rng]
 	if !ok {
-		return modelsData{}, modelsRangeError
+		return modelsData{}, errModelsRange
 	}
 	var tenants []string // nil: every tenant
 	if q.OrgID != "" {
