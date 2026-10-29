@@ -11,7 +11,10 @@ const ranges: { id: StatsRange; label: string }[] = [
 ]
 const range = ref<StatsRange>('24h')
 const org = ref('')
-const tab = ref<'tenants' | 'sessions' | 'usage'>('tenants')
+const tab = ref<'tenants' | 'sessions' | 'usage' | 'storage' | 'alerts'>('tenants')
+// Storage and alerts load in their own components, only while shown.
+const sectionTick = ref(0)
+const tabled = computed(() => tab.value === 'tenants' || tab.value === 'sessions' || tab.value === 'usage')
 const page = ref(1)
 const tenantSort = ref('name')
 const sessionSort = ref('name')
@@ -42,7 +45,7 @@ watch(tab, (t) => {
   if (t === 'sessions' && !sessions.value) loadSessions()
   if (t === 'usage' && !usage.value) { loadUsage(); loadCharts() }
 })
-const error = computed(() => summaryError.value ?? (tab.value === 'tenants' ? tenantsError.value : tab.value === 'sessions' ? sessionsError.value : usageError.value))
+const error = computed(() => summaryError.value ?? (tab.value === 'tenants' ? tenantsError.value : tab.value === 'sessions' ? sessionsError.value : tab.value === 'usage' ? usageError.value : null))
 
 const auto = ref(false)
 let timer: ReturnType<typeof setInterval> | undefined
@@ -50,7 +53,8 @@ function refreshAll() {
   refreshSummary()
   if (tab.value === 'tenants') refreshTenants()
   else if (tab.value === 'sessions') refreshSessions()
-  else { refreshUsage(); refreshCharts() }
+  else if (tab.value === 'usage') { refreshUsage(); refreshCharts() }
+  else sectionTick.value++
 }
 watch(auto, (on) => {
   clearInterval(timer)
@@ -59,7 +63,7 @@ watch(auto, (on) => {
 onBeforeUnmount(() => clearInterval(timer))
 
 const exportHref = (format: 'csv' | 'json') => apiPath(`admin/stats/export?section=${tab.value}&${filter.value}&format=${format}`)
-const table = computed(() => (tab.value === 'tenants' ? tenants.value : tab.value === 'sessions' ? sessions.value : usage.value))
+const table = computed(() => (tab.value === 'tenants' ? tenants.value : tab.value === 'sessions' ? sessions.value : tab.value === 'usage' ? usage.value : null))
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? '–' : `${v}%`)
 const shareHint = computed(() => {
   const t = usage.value?.totals
@@ -124,6 +128,8 @@ const activeHint = computed(() => {
       <StatTile label="API keys" :value="n(summary.keys_active)" :hint="`${summary.browser_active} browser sessions open`" />
       <StatTile label="Indexed graphs" :value="n(summary.graphs)" hint="not measured yet" />
       <StatTile label="Jobs waiting" :value="n(summary.jobs_waiting)" hint="not measured yet" />
+      <StatTile label="Alerts firing" :value="n(summary.alerts_firing)" :hint="summary.alerts_firing === null ? 'alerts off or not answering' : 'now, from vmalert'"
+        :tone="summary.alerts_firing ? 'warning' : undefined" />
     </div>
     <section class="panel">
       <div class="panel__header">
@@ -131,15 +137,17 @@ const activeHint = computed(() => {
           <button type="button" :aria-pressed="tab === 'tenants'" @click="tab = 'tenants'">Tenants</button>
           <button type="button" :aria-pressed="tab === 'sessions'" @click="tab = 'sessions'">Sessions</button>
           <button type="button" :aria-pressed="tab === 'usage'" @click="tab = 'usage'">Usage</button>
+          <button type="button" :aria-pressed="tab === 'storage'" @click="tab = 'storage'">Storage</button>
+          <button type="button" :aria-pressed="tab === 'alerts'" @click="tab = 'alerts'">Alerts</button>
         </div>
-        <div class="row">
+        <div v-if="tabled" class="row">
           <select v-if="tab === 'tenants'" v-model="tenantSort" class="inline" aria-label="Sort tenants">
             <option value="name">By name</option><option value="members">Most members</option><option value="seats">Most seats</option><option value="active">Most active</option><option value="entries">Most repositories</option>
           </select>
           <select v-else-if="tab === 'sessions'" v-model="sessionSort" class="inline" aria-label="Sort sessions">
             <option value="name">By name</option><option value="execution">Most runtime sessions</option><option value="keys">Most API keys</option>
           </select>
-          <select v-else v-model="usageSort" class="inline" aria-label="Sort usage">
+          <select v-else-if="tab === 'usage'" v-model="usageSort" class="inline" aria-label="Sort usage">
             <option value="name">By name</option><option value="sessions">Most sessions</option><option value="calls">Most calls</option><option value="errors">Most errors</option><option value="tokens">Most tokens</option><option value="avoided">Most avoided</option>
           </select>
           <a :href="exportHref('csv')" download class="chip">CSV</a>
@@ -241,6 +249,8 @@ const activeHint = computed(() => {
         </div>
         <p class="muted small">Tools and clients that fewer than three organisations use are counted as other, unless one organisation is selected.</p>
       </template>
+      <StatsStorage v-if="tab === 'storage'" :range="range" :tick="sectionTick" />
+      <StatsAlerts v-if="tab === 'alerts'" :tick="sectionTick" />
       <div v-if="table && table.pages > 1" class="row pager">
         <button class="secondary tiny" :disabled="page <= 1" @click="page--">Previous</button>
         <span class="muted small">Page {{ table.page }} of {{ table.pages }} · {{ table.total }} organisations</span>

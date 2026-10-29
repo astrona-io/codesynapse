@@ -140,8 +140,10 @@ services:
   # "alerting" profile is on: COMPOSE_PROFILES=alerting just up. Evaluates
   # deploy/alerts/*.yaml against VictoriaMetrics and sends to the
   # Alertmanager-compatible receiver in ALERTMANAGER_URL (.env). Credentials
-  # reach it as environment (-envflag.enable), never as arguments, and it
-  # listens on loopback inside its container only.
+  # reach it as environment (-envflag.enable), never as arguments. It is
+  # never published to the host; on the compose network the API reads its
+  # alerts for the platform Statistics page when CODESYNAPSE_ALERTS_URL is
+  # http://vmalert:8880 (.env).
   vmalert:
     image: quay.io/victoriametrics/vmalert:v1.155.0
     profiles: [alerting]
@@ -153,7 +155,7 @@ services:
       - -datasource.basicAuth.username=codesynapse
       - -external.url=${CODESYNAPSE_PUBLIC_URL:-http://localhost:3000}
       - -external.alert.source=stats
-      - -httpListenAddr=127.0.0.1:8880
+      - -httpListenAddr=:8880
     environment:
       datasource_basicAuth_password: ${METRICS_PASSWORD:?run "just init" to add METRICS_PASSWORD to .env}
       # Empty values send no credentials. Set a user and password, or a
@@ -246,6 +248,9 @@ services:
       CODESYNAPSE_METRICS_URL: http://victoriametrics:8428
       CODESYNAPSE_METRICS_USER: codesynapse
       CODESYNAPSE_METRICS_PASSWORD: ${METRICS_PASSWORD}
+      # The vmalert the Statistics page reads alerts from (alerting profile):
+      # http://vmalert:8880. Empty shows alerts as off.
+      CODESYNAPSE_ALERTS_URL: ${CODESYNAPSE_ALERTS_URL:-}
       CODESYNAPSE_TRACES_URL: http://victoriatraces:10428/insert/opentelemetry/v1/traces
       CODESYNAPSE_TRACES_USER: codesynapse
       CODESYNAPSE_TRACES_PASSWORD: ${METRICS_PASSWORD}
