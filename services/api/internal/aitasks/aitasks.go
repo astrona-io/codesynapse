@@ -19,7 +19,9 @@ import (
 	"github.com/astrona-io/codesynapse/internal/cleanupplan"
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/logx"
 	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/prose"
 	"github.com/astrona-io/codesynapse/internal/query"
 	"github.com/astrona-io/codesynapse/internal/review"
 	"github.com/astrona-io/codesynapse/internal/reviews"
@@ -104,6 +106,9 @@ func (r Runner) Run(ctx context.Context, task string, in Input) (string, error) 
 	if err != nil {
 		return "", err
 	}
+	if styled[task] {
+		lintAnswer(ctx, task, rv.Summary)
+	}
 	if in.Title != "" {
 		rv.Title = in.Title
 	}
@@ -149,6 +154,16 @@ func limitsFor(cfg llm.ProviderConfig) limits {
 		padLines:    clamp(in/8000, 6, 20),
 		briefItems:  clamp(in/2000, 5, 50),
 	}
+}
+
+// styled are the tasks whose system prompt ends with prose.Style.
+var styled = map[string]bool{"briefing": true, "pr-summary": true, "cleanup-briefing": true}
+
+// lintAnswer logs how many greetings and filler phrases an answer had. It
+// measures only: the answer is kept as it is, and no text is logged.
+func lintAnswer(ctx context.Context, task, text string) {
+	filler, greeting := prose.Counts(text)
+	logx.FromContext(ctx).Info("ai task prose lint", "task", task, "filler", filler, "greetings", greeting)
 }
 
 func clamp(v, lo, hi int) int { return max(lo, min(v, hi)) }
@@ -398,7 +413,7 @@ func (r Runner) codeReview(ctx context.Context, provider string, in Input, src s
 
 // --- briefing -------------------------------------------------------------
 
-const briefingSystem = `You write concise technical briefings for engineers joining a codebase. Use only the facts given. Write Markdown with these sections: "What this is", "Architecture", "Quality and risk", "Recommended next steps" (a numbered list of at most five concrete actions). At most 450 words.`
+const briefingSystem = `You write concise technical briefings for engineers joining a codebase. Use only the facts given. Write Markdown with these sections: "What this is", "Architecture", "Quality and risk", "Recommended next steps" (a numbered list of at most five concrete actions). At most 450 words.` + "\n\n" + prose.Style
 
 func (r Runner) briefing(ctx context.Context, provider string, in Input, lim limits) (reviews.Review, error) {
 	ov, err := query.Service{R: r.St}.Overview(ctx, in.Repo)
@@ -459,7 +474,7 @@ func (r Runner) briefing(ctx context.Context, provider string, in Input, lim lim
 
 // --- local-only summaries -------------------------------------------------
 
-const prSummarySystem = `You summarise a code change for a reviewer. Use only the facts given: changed symbols with their risk, who calls them, which tests reach them, and security findings. Write Markdown with the sections "What changed" (two to four sentences), "Risk" (the riskiest changes and why) and "Before merging" (a short checklist). Do not invent symbols or behaviour. At most 300 words.`
+const prSummarySystem = `You summarise a code change for a reviewer. Use only the facts given: changed symbols with their risk, who calls them, which tests reach them, and security findings. Write Markdown with the sections "What changed" (two to four sentences), "Risk" (the riskiest changes and why) and "Before merging" (a short checklist). Do not invent symbols or behaviour. At most 300 words.` + "\n\n" + prose.Style
 
 func (r Runner) prSummary(ctx context.Context, provider string, in Input, lim limits) (reviews.Review, error) {
 	if len(in.Diff) == 0 {
@@ -510,7 +525,7 @@ func (r Runner) prSummary(ctx context.Context, provider string, in Input, lim li
 	return reviews.Review{Kind: reviews.KindReport, Title: "Change summary: " + in.Repo, Summary: llm.CleanText(resp.Text), Verdict: reviews.Comment, Author: author(provider, resp)}, nil
 }
 
-const cleanupBriefingSystem = `You turn a ranked cleanup plan into a short plain-language briefing for the team. Use only the steps given; they are already ordered by priority. Write Markdown with "Do first" (up to three steps with the reason), "Safe and quick" (steps marked safety high and effort 1) and "Leave for later". Name the targets exactly as given. Do not add steps. At most 350 words.`
+const cleanupBriefingSystem = `You turn a ranked cleanup plan into a short plain-language briefing for the team. Use only the steps given; they are already ordered by priority. Write Markdown with "Do first" (up to three steps with the reason), "Safe and quick" (steps marked safety high and effort 1) and "Leave for later". Name the targets exactly as given. Do not add steps. At most 350 words.` + "\n\n" + prose.Style
 
 func (r Runner) cleanupBriefing(ctx context.Context, provider string, in Input, lim limits) (reviews.Review, error) {
 	plan, err := cleanupplan.Assemble(ctx, r.St, in.Repo)

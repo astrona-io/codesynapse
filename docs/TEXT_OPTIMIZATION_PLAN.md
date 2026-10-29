@@ -1,6 +1,6 @@
 # Text optimisation and external sources
 
-Status: proposed (2026-10-29). Nothing here is implemented yet. It takes the project owner's "Text Optimization & External Source Engine" specification and fits it to what CodeSynapse already has and to the rules in `AGENTS.md`; where the two differ, this page says so and why.
+Status: proposed (2026-10-29). Phase 5 (documentation prompts and the filler lint) is implemented; the other phases are not yet. It takes the project owner's "Text Optimization & External Source Engine" specification and fits it to what CodeSynapse already has and to the rules in `AGENTS.md`; where the two differ, this page says so and why.
 
 !!! tip "In plain words"
     Coding assistants spend many tokens reading web pages: API references, library docs, changelogs. Most of each page is menus, scripts and footers, and the same page is often read again in the next session. This plan has CodeSynapse fetch such pages on the developer's machine, strip them down, keep a copy until the page changes, and only hand the assistant the part that answers its question. It also tightens the prompts CodeSynapse's own models use to write documentation, and counts the tokens and money saved.
@@ -65,6 +65,8 @@ Applies to CodeSynapse's own generation tasks (briefings, PR summaries, cleanup 
 - Constant, so provider prompt caches still match (`AGENTS.md`: system prompts stay constant).
 - A check in the task tests that generated text with filler phrases or greetings fails a lint, so the rule is enforced by tests, not by hope.
 - Auto-generated docs pages keep the draft status until a person verifies them.
+
+**As built (phase 5).** `internal/prose` holds the constant `prose.Style` block, appended to the system prompts of `briefing`, `pr-summary` and `cleanup-briefing`, and its no-filler part `prose.NoFiller`, appended to `code-annotation` (symbol summaries), whose JSON answer has no room for tables or examples; the review and triage tasks answer in JSON and are unchanged. The lint (`prose.Lint`, a bounded phrase list matched case-insensitively at word boundaries, fuzzed) fails fixtures and golden outputs in the task tests (`services/api/internal/aitasks/testdata`) and, at run time, only logs per-task counts (`ai task prose lint`, no text); model output is never rejected or rewritten for it. Tests check that every system prompt is a package constant carrying the block once. The generated documentation that has a status is the architecture proposal, which is always its type's draft word and cannot be set otherwise (`TestProposalStaysDraft`); symbol annotations have no status and are shown as attributed model output.
 
 ## Pillar D: measurement
 

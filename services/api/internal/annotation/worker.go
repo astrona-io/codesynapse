@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/logx"
+	"github.com/astrona-io/codesynapse/internal/prose"
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/services/api/internal/llm"
@@ -281,6 +283,7 @@ func (w *Worker) evaluate(ctx context.Context, j Job, batch Batch, authorize fun
 	if err != nil {
 		return result, err
 	}
+	lintSummaries(ctx, result.Items)
 	if err := check(); err != nil {
 		return result, err
 	}
@@ -289,6 +292,17 @@ func (w *Worker) evaluate(ctx context.Context, j Job, batch Batch, authorize fun
 		return result, err
 	}
 	return result, nil
+}
+
+// lintSummaries logs how many greetings and filler phrases the summaries had.
+// It measures only: summaries are kept as they are, and no text is logged.
+func lintSummaries(ctx context.Context, items []Item) {
+	var filler, greeting int
+	for _, it := range items {
+		f, g := prose.Counts(it.Summary)
+		filler, greeting = filler+f, greeting+g
+	}
+	logx.FromContext(ctx).Info("ai task prose lint", "task", Task, "filler", filler, "greetings", greeting)
 }
 
 func finish(ctx context.Context, p *pending, state, message string) {
