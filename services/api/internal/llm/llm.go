@@ -169,6 +169,14 @@ type ProviderConfig struct {
 	// Gateway lets the agent gateway (docs/GATEWAY_PLAN.md) answer small
 	// requests from this provider. Local providers only; off by default.
 	Gateway bool `yaml:"gateway" json:"gateway,omitempty"`
+	// GatewayExclude lists model names, or prefixes ending in "*", whose
+	// requests the gateway never offers to this provider, for every
+	// organisation; each organisation can add its own (docs/operations/gateway.md).
+	GatewayExclude []string `yaml:"gateway_exclude" json:"gateway_exclude,omitempty"`
+	// GatewayWaitSeconds is how long a gateway request waits for a free slot
+	// on this provider before it goes to the cloud: 1 to 300, default 60.
+	// The answer itself is bounded by TimeoutSeconds.
+	GatewayWaitSeconds int `yaml:"gateway_wait_seconds" json:"gateway_wait_seconds,omitempty"`
 	// Effort is the Anthropic output effort (low, medium, high, xhigh, max).
 	// OpenAI-compatible servers get it as reasoning_effort; "none" turns off
 	// thinking on Ollama, which ignores chat_template_kwargs.
@@ -304,6 +312,9 @@ func (c *Config) normalise(getenv func(string) string) error {
 			return fmt.Errorf("provider %q: %w", p.Name, err)
 		}
 		if err := validatePriceSource(*p); err != nil {
+			return fmt.Errorf("provider %q: %w", p.Name, err)
+		}
+		if err := validateGateway(p); err != nil {
 			return fmt.Errorf("provider %q: %w", p.Name, err)
 		}
 		for _, price := range []float64{p.PriceInputPerMTok, p.PriceCachedInputPerMTok, p.PriceCacheWritePerMTok, p.PriceOutputPerMTok} {

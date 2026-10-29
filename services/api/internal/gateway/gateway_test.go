@@ -188,14 +188,14 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 		local  func(context.Context) (func(), error)
 		reason string
 	}{
-		"main model":             {`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallNotEligible},
-		"server tool":            {`{"model":"claude-haiku-5-5","tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallNotEligible},
-		"has image":              {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"image"}]}]}`, 200, nil, FallHasImage},
-		"has document":           {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"document"}]}]}`, 200, nil, FallHasImage},
-		"image in a tool result": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":[{"type":"image"}]}]}]}`, 200, nil, FallHasImage},
-		"thinking asked":         {`{"model":"claude-haiku-5-5","thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallHasThinking},
-		"thinking sent back":     {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"x"}]}]}`, 200, nil, FallHasThinking},
-		"local errors":           {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 500, nil, FallBadStatus},
+		"main model, local first off": {`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallNotEligible},
+		"server tool":                 {`{"model":"claude-haiku-5-5","tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallNotEligible},
+		"has image":                   {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"image"}]}]}`, 200, nil, FallHasImage},
+		"has document":                {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"document"}]}]}`, 200, nil, FallHasImage},
+		"image in a tool result":      {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":[{"type":"image"}]}]}]}`, 200, nil, FallHasImage},
+		"thinking asked":              {`{"model":"claude-haiku-5-5","thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallHasThinking},
+		"thinking sent back":          {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"x"}]}]}`, 200, nil, FallHasThinking},
+		"local errors":                {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 500, nil, FallBadStatus},
 		"queue timeout": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 200,
 			func(ctx context.Context) (func(), error) { <-ctx.Done(); return nil, ctx.Err() }, FallQueueTimeout},
 		"queue broke": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 200,
@@ -215,6 +215,7 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 			g.Done = func(_ context.Context, m Meta, _ int, _ time.Duration) { meta = m }
 			rec := httptest.NewRecorder()
 			r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(tc.body))
+			r = r.WithContext(WithLocalFirst(r.Context(), false))
 			r.Header.Set("X-Api-Key", "k")
 			g.Handler("/v1/messages")(rec, r)
 			assert.Equal(t, rec.Body.String(), "cloud")

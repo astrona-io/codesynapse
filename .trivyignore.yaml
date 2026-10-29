@@ -1,5 +1,17 @@
 # Trivy findings reviewed and accepted (`just scan`, `just scan-image`). Each
 # needs a statement; scope it with paths when it holds for one file only.
+vulnerabilities:
+  # The advisory covers the whole x/crypto module because its openpgp package
+  # is unmaintained; there is no fixed version. Our binaries link only
+  # x/crypto/argon2 and x/crypto/blake2b (`go list -deps ./...`), never openpgp.
+  - id: GO-2026-5932
+    paths:
+      - usr/local/bin/codesynapse
+      - usr/local/bin/codesynapse-api
+      - usr/local/bin/codesynapse-mcp
+    statement: >-
+      golang.org/x/crypto/openpgp is not compiled into our binaries; only
+      argon2 and blake2b are imported from x/crypto.
 misconfigurations:
   # KSV-0109 flags CODESYNAPSE_GIT_TOKEN_HOST in the ConfigMap because its name
   # contains "TOKEN". It is a host name; tokens come from a Secret.

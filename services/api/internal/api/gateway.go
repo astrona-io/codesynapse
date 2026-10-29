@@ -12,6 +12,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/modelpattern"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/services/api/internal/gateway"
 )
@@ -64,6 +65,9 @@ func (s *Server) auditGateway(ctx context.Context, m gateway.Meta, status int, t
 		Action: "gateway.request", Target: m.Path, Status: status, Outcome: accounts.Success, Via: "anonymous",
 		Detail: fmt.Sprintf("route=%s model=%s stream=%t tools=%t bytes=%d ms=%d", m.Route, model, m.Stream, m.Tools, m.Bytes, took.Milliseconds()),
 	}
+	if m.Fallthrough != "" {
+		e.Detail += " reason=" + telemetry.GatewayReason(m.Fallthrough)
+	}
 	if status >= 400 {
 		e.Outcome = accounts.Failure
 	}
@@ -114,7 +118,7 @@ func (s *Server) gatewayRoutes() {
 		if !ok {
 			return nil
 		}
-		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire, ContextWindow: t.ContextWindow}
+		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire, ContextWindow: t.ContextWindow, Exclude: t.Exclude, Wait: t.Wait}
 	}
 	g.Done = s.auditGateway
 	var open keyLimit
@@ -171,6 +175,11 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 		s.accountError(w, err)
 		return r, false
 	}
+	exclude, err := s.cfg.Accounts.GatewayLocalExclude(r.Context(), m.Org.ID)
+	if err != nil {
+		s.accountError(w, err)
+		return r, false
+	}
 	id, err := s.cfg.Accounts.GatewayExecutionSession(r.Context(), p, m.Org.ID)
 	if err != nil {
 		s.problem(w, http.StatusForbidden, errors.New("this key cannot use the gateway"))
@@ -181,13 +190,14 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 		s.problem(w, http.StatusForbidden, err)
 		return r, false
 	}
-	return r.WithContext(gateway.WithLocalFirst(ctx, first)), true
+	return r.WithContext(gateway.WithExclude(gateway.WithLocalFirst(ctx, first), exclude)), true
 }
 
 // handleOrgGateway reads (any member) or sets (owner or admin, signed-in
 // session only) whether the organisation uses the agent gateway (on unless
-// switched off) and whether the local model answers first (on unless switched
-// off). A PUT changes only the fields it sends. "available" says whether the
+// switched off), whether the local model answers first (on unless switched
+// off) and which models it never answers (local_exclude, empty unless set).
+// A PUT changes only the fields it sends. "available" says whether the
 // operator turned the gateway on for the installation.
 func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 	least := accounts.Member
@@ -200,16 +210,26 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPut {
 		var req struct {
-			Enabled    *bool `json:"enabled"`
-			LocalFirst *bool `json:"local_first"`
+			Enabled      *bool     `json:"enabled"`
+			LocalFirst   *bool     `json:"local_first"`
+			LocalExclude *[]string `json:"local_exclude"`
 		}
 		if err := decodeJSON(w, r, &req); err != nil {
 			s.problem(w, http.StatusBadRequest, err)
 			return
 		}
-		if req.Enabled == nil && req.LocalFirst == nil {
-			s.problem(w, http.StatusBadRequest, errors.New("send enabled, local_first or both"))
+		if req.Enabled == nil && req.LocalFirst == nil && req.LocalExclude == nil {
+			s.problem(w, http.StatusBadRequest, errors.New("send enabled, local_first, local_exclude or several"))
 			return
+		}
+		// Refuse a bad list before anything changes, so a PUT is all or nothing.
+		var exclude []string
+		if req.LocalExclude != nil {
+			var err error
+			if exclude, err = modelpattern.Normalize(*req.LocalExclude); err != nil {
+				s.problem(w, http.StatusBadRequest, fmt.Errorf("local_exclude: %w", err))
+				return
+			}
 		}
 		if req.Enabled != nil {
 			if err := s.cfg.Accounts.SetGateway(r.Context(), p, o.ID, *req.Enabled); err != nil {
@@ -223,13 +243,33 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if req.LocalExclude != nil {
+			if err := s.cfg.Accounts.SetGatewayLocalExclude(r.Context(), p, o.ID, exclude); err != nil {
+				s.accountError(w, err)
+				return
+			}
+		}
 	}
 	set, err := s.cfg.Accounts.GatewaySetting(r.Context(), p, o.ID)
 	if err != nil {
 		s.accountError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": set.Enabled, "local_first": set.LocalFirst, "available": s.cfg.Gateway})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled": set.Enabled, "local_first": set.LocalFirst, "local_exclude": set.LocalExclude,
+		"installation_exclude": s.gatewayInstallExclude(), "available": s.cfg.Gateway,
+	})
+}
+
+// gatewayInstallExclude is the operator's gateway_exclude list, which applies
+// to every organisation beside its own; empty without a gateway model.
+func (s *Server) gatewayInstallExclude() []string {
+	if s.cfg.LLM != nil {
+		if t, ok := s.cfg.LLM.GatewayTarget(); ok && t.Exclude != nil {
+			return t.Exclude
+		}
+	}
+	return []string{}
 }
 
 // recordGateway counts one gateway request. Only the route, the status class,

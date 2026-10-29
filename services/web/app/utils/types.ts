@@ -348,11 +348,15 @@ export interface AccountUser {
 export type SetupState = 'pending' | 'complete' | 'ambiguous'
 export interface SetupInput { org_name?: string; org_id?: string; email: string; username?: string; name: string; password: string }
 // Whether keys of the organisation may use the agent gateway, whether the local
-// model is offered every request first, and whether the server switch
+// model is offered every request first, which models it never answers (the
+// organisation's list and the operator's gateway_exclude, both lower-case
+// names or prefixes ending in *), and whether the server switch
 // (CODESYNAPSE_GATEWAY) is on at all.
 export interface OrgGateway {
   enabled: boolean
   local_first: boolean
+  local_exclude: string[]
+  installation_exclude: string[]
   available: boolean
 }
 

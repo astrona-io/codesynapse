@@ -16,6 +16,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 	"github.com/astrona-io/codesynapse/services/api/internal/gateway"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
 func TestGatewayForwardsWithKeyAndBindsSession(t *testing.T) {
@@ -189,29 +190,129 @@ func TestGatewayLocalFirstSetting(t *testing.T) {
 	f := newRuntimeFixture(t, Config{Gateway: true})
 	path := "/api/v1/accounts/orgs/" + f.org.Slug + "/gateway"
 	type setting struct {
-		Enabled    bool `json:"enabled"`
-		LocalFirst bool `json:"local_first"`
+		Enabled      bool     `json:"enabled"`
+		LocalFirst   bool     `json:"local_first"`
+		LocalExclude []string `json:"local_exclude"`
 	}
 	var got setting
 	require.Equal(t, f.client.do("GET", path, "", &got), 200)
-	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true}, "both on by default")
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true, LocalExclude: []string{}}, "both on by default, nothing excluded")
 	assert.Equal(t, f.client.do("PUT", path, `{"local_first":false}`, nil), 403, "API keys cannot change it")
 
 	owner := newClient(t, f.client.ts)
 	require.Equal(t, owner.do("POST", "/api/v1/auth/login", `{"email":"runtime@example.com","password":"`+pw+`"}`, nil), 200)
 	assert.Equal(t, owner.do("PUT", path, `{}`, nil), 400, "nothing to change")
 	require.Equal(t, owner.do("PUT", path, `{"local_first":false}`, &got), 200)
-	assert.Equal(t, got, setting{Enabled: true, LocalFirst: false}, "enabled is left alone")
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: false, LocalExclude: []string{}}, "enabled is left alone")
 	require.Equal(t, owner.do("PUT", path, `{"enabled":false}`, &got), 200)
-	assert.Equal(t, got, setting{Enabled: false, LocalFirst: false}, "older clients send only enabled")
+	assert.Equal(t, got, setting{Enabled: false, LocalFirst: false, LocalExclude: []string{}}, "older clients send only enabled")
 	require.Equal(t, owner.do("PUT", path, `{"enabled":true,"local_first":true}`, &got), 200)
-	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true})
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true, LocalExclude: []string{}})
+
+	// The exclude list: validated before anything changes, normalized, and
+	// left alone by PUTs that do not send it.
+	for _, bad := range []string{
+		`{"local_exclude":["claude opus"]}`, `{"local_exclude":["*"]}`, `{"local_exclude":["a*b"]}`,
+		`{"local_exclude":["` + strings.Repeat("a", 65) + `"]}`, `{"local_exclude":"gpt-5"}`,
+		`{"local_first":false,"local_exclude":["anthropic/claude"]}`,
+	} {
+		assert.Equal(t, owner.do("PUT", path, bad, nil), 400, bad)
+	}
+	var many []string
+	for i := range 33 {
+		many = append(many, `"m`+strings.Repeat("x", i+1)+`"`)
+	}
+	assert.Equal(t, owner.do("PUT", path, `{"local_exclude":[`+strings.Join(many, ",")+`]}`, nil), 400, "at most 32 entries")
+	require.Equal(t, owner.do("GET", path, "", &got), 200)
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true, LocalExclude: []string{}}, "a refused PUT changes nothing")
+	assert.Equal(t, f.client.do("PUT", path, `{"local_exclude":["gpt-5"]}`, nil), 403, "API keys cannot change it")
+
+	require.Equal(t, owner.do("PUT", path, `{"local_exclude":["GPT-5","claude-opus-*","gpt-5"]}`, &got), 200)
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true, LocalExclude: []string{"claude-opus-*", "gpt-5"}})
+	require.Equal(t, owner.do("PUT", path, `{"local_first":false}`, &got), 200)
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: false, LocalExclude: []string{"claude-opus-*", "gpt-5"}}, "the list is left alone")
+	require.Equal(t, owner.do("PUT", path, `{"local_exclude":[]}`, &got), 200)
+	assert.Equal(t, got.LocalExclude, []string{}, "an empty list clears it")
+}
+
+// TestGatewayExcludeRouting runs requests through the whole gateway: every
+// model goes to the local model by default, and the organisation's and the
+// installation's exclude lists send matching models to the cloud with the
+// reason "excluded", also when local first is off.
+func TestGatewayExcludeRouting(t *testing.T) {
+	const answer = "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+	loc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, answer) }))
+	defer loc.Close()
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, `{"cloud":true}`) }))
+	defer up.Close()
+	reg := llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{{
+		Name: "local", Kind: llm.KindOpenAI, BaseURL: strings.Replace(loc.URL, "127.0.0.1", "localhost", 1) + "/v1", Model: "qwen",
+		Gateway: true, GatewayExclude: []string{"gpt-5"},
+	}}, Default: "local"})
+	f := newRuntimeFixture(t, Config{Gateway: true, GatewayUpstream: up.URL, LLM: reg})
+	key := strings.TrimPrefix(f.client.auth, "Bearer ")
+	route := func(model string) string {
+		req, err := http.NewRequest(http.MethodPost, f.client.ts.URL+"/v1/messages", strings.NewReader(`{"model":"`+model+`","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}`)) //nolint:noctx // test
+		require.NoError(t, err)
+		req.Header.Set(gateway.KeyHeader, key)
+		req.Header.Set("X-Api-Key", "sk-ant-own")
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_, _ = io.Copy(io.Discard, res.Body)
+		_ = res.Body.Close()
+		require.Equal(t, res.StatusCode, 200)
+		if r := res.Header.Get(gateway.RouteHeader); r != "" {
+			return r
+		}
+		return "cloud"
+	}
+	set := func(first bool, exclude ...string) {
+		require.NoError(t, f.accounts.St.SetGatewayLocalFirst(t.Context(), f.org.ID, first))
+		require.NoError(t, f.accounts.St.SetGatewayLocalExclude(t.Context(), f.org.ID, exclude))
+	}
+	cases := []struct {
+		name    string
+		first   bool
+		exclude []string
+		model   string
+		want    string
+	}{
+		{"every model local by default", true, nil, "claude-opus-5-5", "local"},
+		{"small model local by default", true, nil, "claude-haiku-5-5", "local"},
+		{"excluded exact", true, []string{"claude-opus-5-5"}, "claude-opus-5-5", "cloud"},
+		{"excluded prefix", true, []string{"claude-opus-*"}, "claude-opus-4-1", "cloud"},
+		{"prefix leaves others local", true, []string{"claude-opus-*"}, "claude-sonnet-5-5", "local"},
+		{"installation list", true, nil, "gpt-5", "cloud"},
+		{"local first off keeps the small model", false, nil, "claude-haiku-5-5", "local"},
+		{"exclusion wins with local first off", false, []string{"claude-haiku-*"}, "claude-haiku-5-5", "cloud"},
+	}
+	for _, tc := range cases {
+		set(tc.first, tc.exclude...)
+		assert.Equal(t, route(tc.model), tc.want, tc.name)
+	}
+
+	var rows []accounts.Event
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		var err error
+		rows, err = f.accounts.St.ListEvents(t.Context(), accounts.EventFilter{OrgID: f.org.ID, Action: "gateway.request", Limit: 20})
+		require.NoError(t, err)
+		if len(rows) == len(cases) {
+			break
+		}
+	}
+	excluded := 0
+	for _, e := range rows {
+		if strings.Contains(e.Detail, "reason=excluded") {
+			excluded++
+		}
+	}
+	assert.Equal(t, excluded, 4, "each excluded request is audited with its reason")
 }
 
 func TestRecordGatewayTimeAndFallthrough(t *testing.T) {
 	ctx := telemetry.WithTenant(context.Background(), "abababababababababababab")
 	reasons := []string{
-		gateway.FallNotEligible, gateway.FallTooLarge, gateway.FallHasThinking, gateway.FallHasImage,
+		gateway.FallExcluded, gateway.FallNotEligible, gateway.FallTooLarge, gateway.FallHasThinking, gateway.FallHasImage,
 		gateway.FallQueueTimeout, gateway.FallCancelled, gateway.FallTimeout, gateway.FallModelError,
 		gateway.FallBadStatus, gateway.FallEmptyAnswer, gateway.FallTruncated, gateway.FallBadAnswer,
 		gateway.FallNoLocalModel,

@@ -3,6 +3,7 @@ package memstore
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 )
@@ -52,5 +53,29 @@ func (s *Store) SetGatewayLocalFirst(_ context.Context, orgID string, on bool) e
 		s.localFirst = map[string]bool{}
 	}
 	s.localFirst[orgID] = on
+	return nil
+}
+
+// GatewayLocalExclude implements accounts.Store.
+func (s *Store) GatewayLocalExclude(_ context.Context, orgID string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if list, chose := s.localExclude[orgID]; chose {
+		return slices.Clone(list), nil
+	}
+	return []string{}, nil // never chose: nothing excluded
+}
+
+// SetGatewayLocalExclude implements accounts.Store.
+func (s *Store) SetGatewayLocalExclude(_ context.Context, orgID string, patterns []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.orgs[orgID]; !ok {
+		return fmt.Errorf("organisation: %w", accounts.ErrNotFound)
+	}
+	if s.localExclude == nil {
+		s.localExclude = map[string][]string{}
+	}
+	s.localExclude[orgID] = append([]string{}, patterns...)
 	return nil
 }

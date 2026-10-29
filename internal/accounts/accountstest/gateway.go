@@ -83,7 +83,7 @@ func RunGateway(t *testing.T, st accounts.Store) {
 	assert.True(t, on, "turning local first off leaves the gateway on")
 	set, err = svc.GatewaySetting(ctx, owner, "gw-org-b")
 	require.NoError(t, err)
-	assert.Equal(t, set, accounts.GatewaySettings{Enabled: true, LocalFirst: false})
+	assert.Equal(t, set, accounts.GatewaySettings{Enabled: true, LocalFirst: false, LocalExclude: []string{}})
 	first, err = svc.GatewayLocalFirst(ctx, "gw-org-a")
 	require.NoError(t, err)
 	assert.True(t, first, "the choice is per organisation")
@@ -98,5 +98,48 @@ func RunGateway(t *testing.T, st accounts.Store) {
 	require.NoError(t, err)
 	assert.True(t, first)
 	err = svc.SetGatewayLocalFirst(ctx, owner, "gw-org-missing", false)
+	assert.True(t, errors.Is(err, accounts.ErrForbidden) || errors.Is(err, accounts.ErrNotFound), "unknown organisation")
+
+	// Local exclude: empty by default, also for rows written for other fields.
+	for _, org := range []string{"gw-org-a", "gw-org-b"} {
+		list, err := svc.GatewayLocalExclude(ctx, org)
+		require.NoError(t, err)
+		assert.Equal(t, list, []string{}, "nothing excluded until someone sets it")
+	}
+	assert.True(t, errors.Is(svc.SetGatewayLocalExclude(ctx, member, "gw-org-a", []string{"gpt-5"}), accounts.ErrForbidden), "members cannot change it")
+	assert.True(t, errors.Is(svc.SetGatewayLocalExclude(ctx, key, "gw-org-a", []string{"gpt-5"}), accounts.ErrForbidden), "API keys cannot change it")
+	assert.True(t, errors.Is(svc.SetGatewayLocalExclude(ctx, owner, "gw-org-a", []string{"gpt 5"}), accounts.ErrInvalidInput), "invalid entries are refused")
+	assert.True(t, errors.Is(svc.SetGatewayLocalExclude(ctx, owner, "gw-org-a", []string{"*"}), accounts.ErrInvalidInput), "a lone star is refused")
+
+	require.NoError(t, svc.SetGatewayLocalExclude(ctx, owner, "gw-org-a", []string{"GPT-5", "claude-opus-*", "gpt-5"}))
+	list, err := svc.GatewayLocalExclude(ctx, "gw-org-a")
+	require.NoError(t, err)
+	assert.Equal(t, list, []string{"claude-opus-*", "gpt-5"}, "lower-cased, deduplicated and sorted")
+	list, err = svc.GatewayLocalExclude(ctx, "gw-org-b")
+	require.NoError(t, err)
+	assert.Equal(t, list, []string{}, "the list is per organisation")
+	set, err = svc.GatewaySetting(ctx, member, "gw-org-a")
+	require.NoError(t, err)
+	assert.Equal(t, set, accounts.GatewaySettings{Enabled: true, LocalFirst: true, LocalExclude: []string{"claude-opus-*", "gpt-5"}})
+	first, err = svc.GatewayLocalFirst(ctx, "gw-org-a")
+	require.NoError(t, err)
+	assert.True(t, first, "setting the list leaves local first alone")
+
+	// A first row written for the list keeps the other defaults.
+	require.NoError(t, svc.SetGatewayLocalExclude(ctx, owner, "gw-org-b", []string{"o3"}))
+	set, err = svc.GatewaySetting(ctx, owner, "gw-org-b")
+	require.NoError(t, err)
+	assert.Equal(t, set, accounts.GatewaySettings{Enabled: true, LocalFirst: true, LocalExclude: []string{"o3"}})
+
+	rows, err = st.ListEvents(ctx, accounts.EventFilter{OrgID: "gw-org-a", Action: "org.gateway.local_exclude.set", Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "the change is audited; refused changes write nothing")
+	assert.Equal(t, rows[0].Detail, "local_exclude=claude-opus-*,gpt-5")
+
+	require.NoError(t, svc.SetGatewayLocalExclude(ctx, owner, "gw-org-a", nil))
+	list, err = svc.GatewayLocalExclude(ctx, "gw-org-a")
+	require.NoError(t, err)
+	assert.Equal(t, list, []string{}, "an empty list clears it")
+	err = svc.SetGatewayLocalExclude(ctx, owner, "gw-org-missing", []string{"o3"})
 	assert.True(t, errors.Is(err, accounts.ErrForbidden) || errors.Is(err, accounts.ErrNotFound), "unknown organisation")
 }
