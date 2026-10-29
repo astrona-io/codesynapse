@@ -18,7 +18,16 @@ const ACTIONS = [
   { id: 'mcp.', label: 'Agent (MCP) requests' }, { id: 'mcp.tools.call', label: 'Agent tool calls' }, { id: 'sso.', label: 'Single sign-on' },
 ]
 const since = computed(() => new Date(Date.now() - days.value * 864e5).toISOString().replace(/\.\d+Z$/, 'Z'))
+// ?entry=N opens one entry (the prompt log links to its gateway.request entry).
+const route = useRoute()
+const open = ref<number | null>(null)
+const entry = computed(() => {
+  const n = Number(route.query.entry)
+  return Number.isInteger(n) && n > 0 ? n : 0
+})
+watch(entry, (n) => { if (n) open.value = n }, { immediate: true })
 const query = computed(() => {
+  if (entry.value) return new URLSearchParams({ limit: '1', order: 'asc', after_id: String(entry.value - 1) }).toString()
   const p = new URLSearchParams({ limit: '200', since: since.value })
   if (action.value) p.set('action', action.value)
   if (actor.value.trim()) p.set('actor', actor.value.trim())
@@ -49,7 +58,6 @@ function only(kind: keyof typeof narrowers, value?: string) {
   narrowers[kind].value = value
   action.value = 'mcp.'
 }
-const open = ref<number | null>(null)
 const toggle = (eid: number) => { open.value = open.value === eid ? null : eid }
 // Several logs can share a page (organisation and platform), so ids are unique.
 const uid = useId()
@@ -78,6 +86,7 @@ const uid = useId()
         <div class="field export"><span class="label">Export</span><div class="row"><a class="btn btn--ghost" :href="exportUrl('csv')">CSV</a><a class="btn btn--ghost" :href="exportUrl('jsonl')">JSON Lines</a></div></div>
       </div>
     </section>
+    <p v-if="entry" class="notice">Showing entry #{{ entry }} only. <NuxtLink :to="{ query: {} }">Show the whole log</NuxtLink></p>
     <DataState v-if="error" :error="error" />
     <section class="panel" :class="{ refreshing: pending }" :aria-busy="pending">
       <DataState :pending="pending" :empty="!events.length" title="No entries" text="Nothing matches these filters in this period.">

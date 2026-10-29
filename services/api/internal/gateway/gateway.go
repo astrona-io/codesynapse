@@ -1,7 +1,10 @@
 // Package gateway is the pass-through between an agent and a model API. It
 // holds each request in a queue, decides where it goes, and streams the answer
-// back untouched. It never shortens a prompt (tool payloads must stay exact),
-// never stores or logs the caller's credential, and never records prompt text.
+// back untouched. It never shortens a prompt (tool payloads must stay exact)
+// and never stores or logs the caller's credential. It hands the audit entry
+// only digests and sizes of the newest user text; the text itself and a
+// local answer leave the package only for an organisation that keeps a prompt
+// log (promptlog.go).
 package gateway
 
 import (
@@ -44,7 +47,9 @@ var forwardResponse = []string{
 	"Anthropic-Ratelimit-Tokens-Remaining", "Anthropic-Organization-Id",
 }
 
-// Meta is what the gateway may record about a call: never text.
+// Meta is what the gateway may record about a call. Prompt, Forwarded and
+// Answer are set only for an organisation that keeps a prompt log
+// (WithPromptCapture) and may go nowhere but that log.
 type Meta struct {
 	Path   string
 	Model  string
@@ -66,6 +71,15 @@ type Meta struct {
 	// the cloud: one of the Fall* reasons, empty when the local model
 	// answered or was never asked.
 	Fallthrough string
+	// PromptSHA256 and PromptBytes describe the newest user text the agent
+	// sent; ForwardedSHA256 and ForwardedBytes the text that went to the
+	// cloud when the gateway changed it (TextChanged).
+	PromptSHA256, ForwardedSHA256 string
+	PromptBytes, ForwardedBytes   int
+	TextChanged                   bool
+	// Prompt, Forwarded and Answer (the local model's text) are the texts
+	// themselves, cut to accounts.PromptLogCapture, only when capturing.
+	Prompt, Forwarded, Answer string
 	// Asked says the request reached the local model's queue; QueueWait is
 	// how long it waited there and LocalAnswer how long the local model
 	// then took to answer or to fail.
@@ -145,18 +159,28 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			return
 		}
 		meta := inspect(upstreamPath, body)
+		sent := body
+		if upstreamPath == "/v1/messages" {
+			meta.notePrompt(r.Context(), anthropicUserText(body))
+		}
 		local := g.local()
 		if local == nil && g.Local != nil && upstreamPath == "/v1/messages" {
 			// A gateway meant to answer locally has no local model right now.
 			meta.Fallthrough = FallNoLocalModel
 		}
 		if local != nil && upstreamPath == "/v1/messages" {
-			rec := &statusWriter{ResponseWriter: w}
+			var out http.ResponseWriter = w
+			capture := capturing(r.Context(), w)
+			if capture != nil {
+				out = capture
+			}
+			rec := &statusWriter{ResponseWriter: out}
 			u, reason, ok := local.serve(r.Context(), rec, body)
 			meta.Asked, meta.QueueWait, meta.LocalAnswer = u.Asked, u.Wait, u.Answer
 			if ok {
 				meta.Route = "local"
 				meta.InTokens, meta.OutTokens, meta.CachedTokens, meta.Metered = u.In, u.Out, u.Cached, u.In+u.Out > 0
+				meta.noteAnswer(capture, anthropicAnswerText)
 				done(r.Context(), meta, http.StatusOK)
 				return
 			}
@@ -169,6 +193,7 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			done(r.Context(), meta, http.StatusUnauthorized)
 			return
 		}
+		meta.noteForwarded(r.Context(), sent, body)
 		status, err := g.forward(r.Context(), w, r, upstreamPath, body)
 		if err != nil {
 			logx.FromContext(r.Context()).Warn("gateway forward failed", "error", err)

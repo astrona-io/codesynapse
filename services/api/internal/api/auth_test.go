@@ -265,6 +265,9 @@ func TestDeniedLimitPerServer(t *testing.T) {
 func TestCSVSafe(t *testing.T) {
 	assert.Equal(t, csvSafe("=HYPERLINK(\"x\")"), "'=HYPERLINK(\"x\")")
 	assert.Equal(t, csvSafe("normal"), "normal")
+	for in, want := range map[string]string{"+1": "'+1", "-1": "'-1", "@x": "'@x", "\tx": "'\tx", "\rx": "'\rx", "": ""} {
+		assert.Equal(t, csvSafe(in), want)
+	}
 }
 
 func TestSingleTenantUnchanged(t *testing.T) {

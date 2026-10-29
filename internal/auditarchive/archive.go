@@ -37,7 +37,9 @@ const (
 	maxLineBytes   = 1 << 20
 )
 
-var keyPattern = regexp.MustCompile(`^[0-9]{20}-[0-9]{20}\.jsonl\.gz$`)
+// Prompt log files (promptlog.go) carry a prefix; row IDs are unique across
+// organisations, so the names never collide.
+var keyPattern = regexp.MustCompile(`^(promptlog-)?[0-9]{20}-[0-9]{20}\.jsonl\.gz$`)
 
 func segmentKey(first, last int64) string { return fmt.Sprintf("%020d-%020d.jsonl.gz", first, last) }
 
@@ -48,8 +50,9 @@ func checkKey(key string) error {
 	return nil
 }
 
-// encode writes entries as gzip JSON lines, oldest first.
-func encode(events []accounts.Event) ([]byte, error) {
+// encode writes entries (audit events or prompt log rows) as gzip JSON
+// lines, oldest first.
+func encode[T any](events []T) ([]byte, error) {
 	var b bytes.Buffer
 	zw := gzip.NewWriter(&b)
 	enc := json.NewEncoder(zw)
@@ -66,18 +69,22 @@ func encode(events []accounts.Event) ([]byte, error) {
 
 // decode reads a segment file back, bounded in lines, line length and size.
 func decode(body []byte) ([]accounts.Event, error) {
+	return decodeLines[accounts.Event](body, SegmentEntries, maxLineBytes)
+}
+
+func decodeLines[T any](body []byte, most, maxLine int) ([]T, error) {
 	zr, err := gzip.NewReader(bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	sc := bufio.NewScanner(io.LimitReader(zr, maxPlainBytes))
-	sc.Buffer(make([]byte, 64<<10), maxLineBytes)
-	var out []accounts.Event
+	sc.Buffer(make([]byte, 64<<10), maxLine)
+	var out []T
 	for sc.Scan() {
-		if len(out) == SegmentEntries {
+		if len(out) == most {
 			return nil, errors.New("segment file holds more entries than a segment can")
 		}
-		var e accounts.Event
+		var e T
 		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
 			return nil, err
 		}

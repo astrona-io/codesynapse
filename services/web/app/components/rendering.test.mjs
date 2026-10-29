@@ -56,10 +56,25 @@ async function renderComponent(t, file, globals, props = {}) {
 
 test('empty audit responses render an empty state when events is null', async (t) => {
   const html = await renderComponent(t, './AuditLog.vue', {
+    useRoute: () => ({ query: {} }),
     useApiGet: () => ({ data: ref({ events: null }), error: ref(null), pending: ref(false) }),
     apiPath: (p) => p,
   }, { base: 'admin/audit' })
   assert.match(html, /No entries/)
+})
+
+test('an audit link from the prompt log asks for that one entry', async (t) => {
+  const paths = []
+  const html = await renderComponent(t, './AuditLog.vue', {
+    useRoute: () => ({ query: { entry: '42' } }),
+    useApiGet: (path) => {
+      paths.push(path())
+      return { data: ref({ events: [] }), error: ref(null), pending: ref(false) }
+    },
+    apiPath: (p) => p,
+  }, { base: 'accounts/orgs/acme/audit' })
+  assert.match(html, /Showing entry #42 only/)
+  assert.ok(paths.includes('accounts/orgs/acme/audit?limit=1&order=asc&after_id=41'), paths.join(' '))
 })
 
 test('a failed graph does not hide a valid symbol card or crash on null relation lists', async (t) => {
