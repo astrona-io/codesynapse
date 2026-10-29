@@ -14,7 +14,11 @@ RUN apk add --no-cache git \
     && git clone --quiet https://github.com/tianon/gosu /src \
     && git -C /src checkout --quiet "$GOSU_COMMIT"
 WORKDIR /src
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-d -s -w" -o /gosu . \
+# gosu's go.mod pins golang.org/x/sys v0.1.0 (CVE-2026-39824).
+ARG X_SYS=v0.49.0
+RUN go get golang.org/x/sys@"$X_SYS" \
+    && go mod tidy \
+    && CGO_ENABLED=0 go build -trimpath -ldflags "-d -s -w" -o /gosu . \
     && /gosu --version
 
 FROM ${PG_IMAGE}

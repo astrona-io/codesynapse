@@ -1,17 +1,20 @@
 name: Store images
 
-# The PostgreSQL image of the chart and docker-compose (deploy/postgres): the
-# official image with what scans (Artifact Hub, Trivy) keeps reporting fixed,
-# with gosu rebuilt on our Go version.
+# The store images of the chart and docker-compose, built where upstream's
+# leave findings that scans (Artifact Hub, Trivy) keep reporting:
+#   deploy/postgres  the official image with gosu rebuilt on our Go version
+#   deploy/nebula    NebulaGraph's binaries on distroless instead of CentOS 7,
+#                    and the console built from source with our Go version
 # Pull requests build and scan only. A merge to main and a weekly rebuild
 # publish a floating tag (the official image moves the same way) and sign it,
 # so base-image fixes reach us within a week without a release.
-#   :18-alpine                    moves with each rebuild
+#   :18-alpine, :v3.8.0         move with each rebuild
 #   :<same>-YYYYMMDD            that rebuild
 on:
   pull_request:
     paths:
       - 'deploy/postgres/**'
+      - 'deploy/nebula/**'
       - '.trivyignore.yaml'
       - 'justfile'
       - '.github/workflows/store-images.yml'
@@ -19,6 +22,7 @@ on:
     branches: [main]
     paths:
       - 'deploy/postgres/**'
+      - 'deploy/nebula/**'
       - '.github/workflows/store-images.yml'
   schedule:
     - cron: '17 4 * * 1'
@@ -39,7 +43,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {image: postgres, tag: 18-alpine, gate: 'os,library'}
+          - {image: postgres, dir: postgres, target: '', tag: 18-alpine, gate: 'os,library'}
+          - {image: nebula-metad, dir: nebula, target: metad, tag: v3.8.0, gate: 'os,library'}
+          - {image: nebula-storaged, dir: nebula, target: storaged, tag: v3.8.0, gate: 'os,library'}
+          - {image: nebula-graphd, dir: nebula, target: graphd, tag: v3.8.0, gate: 'os,library'}
+          - {image: nebula-console, dir: nebula, target: console, tag: v3.8.0, gate: 'os,library'}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -49,8 +57,9 @@ jobs:
       - name: Build (amd64)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: deploy/${{ matrix.image }}
-          file: deploy/${{ matrix.image }}/Dockerfile
+          context: deploy/${{ matrix.dir }}
+          file: deploy/${{ matrix.dir }}/Dockerfile
+          target: ${{ matrix.target }}
           platforms: linux/amd64
           load: true
           tags: codesynapse-${{ matrix.image }}:scan
@@ -72,7 +81,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {image: postgres, tag: 18-alpine, gate: 'os,library'}
+          - {image: postgres, dir: postgres, target: '', tag: 18-alpine, gate: 'os,library'}
+          - {image: nebula-metad, dir: nebula, target: metad, tag: v3.8.0, gate: 'os,library'}
+          - {image: nebula-storaged, dir: nebula, target: storaged, tag: v3.8.0, gate: 'os,library'}
+          - {image: nebula-graphd, dir: nebula, target: graphd, tag: v3.8.0, gate: 'os,library'}
+          - {image: nebula-console, dir: nebula, target: console, tag: v3.8.0, gate: 'os,library'}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -96,8 +109,9 @@ jobs:
         name: Build and push (amd64, arm64)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: deploy/${{ matrix.image }}
-          file: deploy/${{ matrix.image }}/Dockerfile
+          context: deploy/${{ matrix.dir }}
+          file: deploy/${{ matrix.dir }}/Dockerfile
+          target: ${{ matrix.target }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
