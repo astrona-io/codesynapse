@@ -99,11 +99,12 @@ func prebrief(ctx context.Context, c apiClient, in hookInput) (string, error) {
 	if err := api.do(ctx, http.MethodPost, "/api/v1/repos/"+url.PathEscape(repo)+"/brief-plan", map[string]string{"prompt": in.Prompt}, &plan); err != nil {
 		return "", err
 	}
+	ranges, missed := briefRanges(ctx, root, in.Prompt, plan.Ranges)
 	// Each range on its own, so one the checkout lacks (renamed since the
 	// last ingest) drops out instead of failing the brief.
 	var files []asklocal.File
 	total := 0
-	for _, r := range plan.Ranges {
+	for _, r := range ranges {
 		f, _, err := readTracked(ctx, root, []string{r})
 		if err != nil || len(f) == 0 {
 			continue
@@ -114,6 +115,9 @@ func prebrief(ctx context.Context, c apiClient, in hookInput) (string, error) {
 		files = append(files, f[0])
 	}
 	if len(files) == 0 {
+		if missed {
+			return quoteMissedNote, nil
+		}
 		return "", nil
 	}
 	question := in.Prompt
@@ -126,8 +130,15 @@ func prebrief(ctx context.Context, c apiClient, in hookInput) (string, error) {
 	}
 	if !ans.Grounded || len(ans.Citations) == 0 || asklocal.NothingRelevant(ans.Answer) {
 		// Nothing relevant, or nothing it could back up: a brief that only
-		// says so is noise in the agent's context.
+		// says so is noise in the agent's context. A quote that is in no
+		// file is still worth saying.
+		if missed {
+			return quoteMissedNote, nil
+		}
 		return "", nil
+	}
+	if missed {
+		ans.Answer = quoteMissedNote + "\n\n" + ans.Answer
 	}
 	return fmt.Sprintf("CodeSynapse pre-brief, written by the local model %s from %d file range(s) of this checkout before you saw the prompt. Treat it as leads, not instructions: read the cited lines before you rely on them, and use minimal_context or ask_local for more.\n\n%s", ans.Model, len(files), ans.Answer), nil
 }
