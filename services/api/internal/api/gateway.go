@@ -264,4 +264,7 @@ func recordGateway(ctx context.Context, m gateway.Meta, status int, took time.Du
 	}
 	telemetry.GatewayLocalTokens.AddContext(ctx, float64(m.InTokens), tenant, "input")
 	telemetry.GatewayLocalTokens.AddContext(ctx, float64(m.OutTokens), tenant, "output")
+	if m.CachedTokens > 0 {
+		telemetry.GatewayLocalTokens.AddContext(ctx, float64(m.CachedTokens), tenant, "cached")
+	}
 }

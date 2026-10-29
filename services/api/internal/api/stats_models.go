@@ -99,15 +99,28 @@ type GatewayStat struct {
 	BytesIn       float64 `json:"bytes_in"`
 	BytesOut      float64 `json:"bytes_out"`
 	// LocalInputTokens and LocalOutputTokens are what the local model
-	// reported for the requests it answered.
+	// reported for the requests it answered. LocalCachedTokens is the part
+	// of the input its prompt cache served; runtimes that report no cache
+	// use (Ollama) leave it zero.
 	LocalInputTokens  float64 `json:"local_input_tokens"`
 	LocalOutputTokens float64 `json:"local_output_tokens"`
+	LocalCachedTokens float64 `json:"local_cached_tokens"`
 	// LocalUnmetered counts local answers whose server reported no usage.
 	LocalUnmetered float64 `json:"local_unmetered"`
 	// SavedDollars is what the reference cloud model would have charged for
-	// the locally answered tokens; nil when any local answer was unmetered
-	// (unknown, never zero).
+	// the locally answered tokens, cached input at its cache-read price; nil
+	// when any local answer was unmetered (unknown, never zero).
 	SavedDollars *float64 `json:"saved_dollars"`
+}
+
+// gatewaySaved prices the locally answered tokens at the reference model:
+// fresh input at the input price, the part the local prompt cache served at
+// the cache-read price (the input price when it has none) and output at the
+// output price.
+func gatewaySaved(gw GatewayStat, ref PriceReference) float64 {
+	cached := min(gw.LocalCachedTokens, gw.LocalInputTokens)
+	cachedPrice := cmp.Or(ref.CachedInputPerMTok, ref.InputPerMTok)
+	return round4(((gw.LocalInputTokens-cached)*ref.InputPerMTok + cached*cachedPrice + gw.LocalOutputTokens*ref.OutputPerMTok) / 1e6)
 }
 
 // bytesPerToken turns compressed prompt bytes into a token estimate.
@@ -136,13 +149,15 @@ type PriceReference struct {
 	Checked string `json:"checked,omitempty"`
 }
 
-// defaultReference values saved work when no cloud provider has prices: an
-// Opus-class list price (US dollars per million tokens), so the page can show
-// a rough dollar figure. It is marked Estimate and replaced by any
-// configured provider's prices.
+// defaultReference values saved work when no cloud provider has prices:
+// Claude Opus 5.5's list price (US dollars per million tokens; cache reads
+// at 0.05x input, five-minute cache writes at 1.25x), so the page can show a
+// rough dollar figure. It is marked Estimate and replaced by any configured
+// provider's prices.
 var defaultReference = PriceReference{
 	Provider: "built-in", Model: "Claude Opus 5.5 (list price estimate)",
-	InputPerMTok: 5, OutputPerMTok: 25, CachedInputPerMTok: 0.5, CacheWritePerMTok: 6.25, CachesByDefault: true, Estimate: true,
+	InputPerMTok: 4, OutputPerMTok: 20, CachedInputPerMTok: 0.2, CacheWritePerMTok: 5, CachesByDefault: true, Estimate: true,
+	Source: "https://platform.claude.com/docs/en/about-claude/pricing", Checked: "2026-10-29",
 }
 
 // priceReference is the first configured cloud provider with input and
@@ -317,10 +332,13 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 			}
 		}},
 		{gatewayQueries.tokens, func(l map[string]string, v float64) {
-			if l["kind"] == "input" {
+			switch l["kind"] {
+			case "input":
 				gw.LocalInputTokens += v
-			} else {
+			case "output":
 				gw.LocalOutputTokens += v
+			case "cached":
+				gw.LocalCachedTokens += v
 			}
 		}},
 		{gatewayQueries.unmetered, func(_ map[string]string, v float64) { gw.LocalUnmetered += v }},
@@ -362,7 +380,7 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Spent, out.CompressionSaved = s.moneyTotals(out.Models)
 	out.CompressionEnabled, out.CompressionOff = compressionState(s.cfg.LLM)
-	for _, f := range []*float64{&gw.Requests, &gw.Local, &gw.Cloud, &gw.Rejected, &gw.Failed, &gw.LocalUnmetered, &gw.LocalInputTokens, &gw.LocalOutputTokens, &gw.BytesIn, &gw.BytesOut} {
+	for _, f := range []*float64{&gw.Requests, &gw.Local, &gw.Cloud, &gw.Rejected, &gw.Failed, &gw.LocalUnmetered, &gw.LocalInputTokens, &gw.LocalOutputTokens, &gw.LocalCachedTokens, &gw.BytesIn, &gw.BytesOut} {
 		*f = math.Round(*f)
 	}
 	if gw.Requests > 0 {
@@ -371,7 +389,7 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 	// The requested Claude model is client text and not a metric label, so
 	// the local tokens are priced at the reference model.
 	if gw.LocalUnmetered == 0 {
-		gw.SavedDollars = ptr(round4(gw.LocalInputTokens*out.Reference.InputPerMTok/1e6 + gw.LocalOutputTokens*out.Reference.OutputPerMTok/1e6))
+		gw.SavedDollars = ptr(gatewaySaved(gw, *out.Reference))
 	}
 	out.Gateway = gw
 	slices.SortFunc(out.Models, func(a, b ModelStat) int {

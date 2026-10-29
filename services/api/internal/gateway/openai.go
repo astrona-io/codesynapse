@@ -73,7 +73,7 @@ func (o *OpenAI) ChatHandler() http.HandlerFunc {
 		}
 		if status < 400 {
 			meta.Route = "local"
-			meta.InTokens, meta.OutTokens = reportedUsage(tail)
+			meta.InTokens, meta.OutTokens, meta.CachedTokens = reportedUsage(tail)
 			meta.Metered = meta.InTokens+meta.OutTokens > 0
 		}
 		done(r.Context(), status)
@@ -83,14 +83,18 @@ func (o *OpenAI) ChatHandler() http.HandlerFunc {
 var (
 	promptTokens     = regexp.MustCompile(`"prompt_tokens"\s*:\s*(\d+)`)
 	completionTokens = regexp.MustCompile(`"completion_tokens"\s*:\s*(\d+)`)
+	cachedTokens     = regexp.MustCompile(`"cached_tokens"\s*:\s*(\d+)`)
+	cacheN           = regexp.MustCompile(`"cache_n"\s*:\s*(\d+)`)
 )
 
 // usageTail is how much of the end of an answer is searched for the usage the
 // local server reports.
 const usageTail = 4 << 10
 
-// reportedUsage reads the last token counts in the end of an answer.
-func reportedUsage(tail []byte) (in, out int) {
+// reportedUsage reads the last token counts in the end of an answer: the
+// prompt and completion tokens and the part of the prompt the runtime's
+// cache served (cached_tokens, else llama.cpp's cache_n).
+func reportedUsage(tail []byte) (in, out, cached int) {
 	last := func(re *regexp.Regexp) int {
 		m := re.FindAllSubmatch(tail, -1)
 		if len(m) == 0 {
@@ -99,7 +103,11 @@ func reportedUsage(tail []byte) (in, out int) {
 		n, _ := strconv.Atoi(string(m[len(m)-1][1]))
 		return n
 	}
-	return last(promptTokens), last(completionTokens)
+	in, out, cached = last(promptTokens), last(completionTokens), last(cachedTokens)
+	if cached == 0 {
+		cached = last(cacheN)
+	}
+	return in, out, clampCached(cached, in)
 }
 
 func (o *OpenAI) local() *Local {

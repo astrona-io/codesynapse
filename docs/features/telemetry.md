@@ -16,7 +16,7 @@ Both appear on the **Statistics** page. Every number belongs to one organisation
 |---|---|
 | Agent tools | sessions, tool calls, failures and refusals (a call the server turned down is counted apart from one that failed), calls answered on your own machine by the Claude Code bridge, tool latency, tokens served to agents, MCP traffic in bytes |
 | AI models | requests and failures per provider and model, and why requests failed (timeout, rate limit, refused or other error), input, output and cached tokens, estimated cost and cache savings, time to first token, read and write speed, how much of the context window requests used |
-| Agent gateway | requests answered by the local model or the cloud, response time per route, why a request left the local model, bytes, local tokens |
+| Agent gateway | requests answered by the local model or the cloud, response time per route, why a request left the local model, bytes, local tokens (input, output and the part the local prompt cache served) |
 | Databases | latency (median, 95th and 99th percentile), requests, errors and timeouts, graph rows and vector matches |
 | Agent memory | stored facts, saves, recalls, offloaded turns and tokens |
 | Assistant hooks | lifecycle events and observed byte counts from Codex and Cursor |
@@ -35,9 +35,10 @@ Agents re-send their whole context every turn, and most of it comes back from th
 
 - **Work tokens** are the agent's fresh input, cache writes and output.
 - **Share of agent work avoided** is avoided tokens ÷ (work tokens + avoided tokens). It reads "unknown", not 0, when a turn did not report its cache fields.
-- Answers about lines the session already had count for nothing, and agents whose hooks cannot tell those apart yet (older CLIs) are left out of the share and the saved cost.
+- Answers about lines the session already had count for nothing, and agents whose hooks cannot tell those apart yet (older CLIs) are left out of the share. Their avoided tokens are still valued in the saved cost, at the input price, and the tile says how many there were.
 - An **upper figure** also counts the avoided context the agent would have re-sent from its cache. It is shown apart, labelled, and never used in tiles or totals.
 - The saved cost values each avoided token once, at the cache-write price for providers that cache by default and the input price otherwise. The provider's own prompt-cache saving on CodeSynapse's model calls is shown apart and never added to it.
+- Local models' prompt-cache hits are counted when the runtime reports them (vLLM, LM Studio, llama.cpp) and valued at the cloud model's cache-read price. Ollama does not report them, and the page says so instead of showing $0.
 
 ## What is never measured
 

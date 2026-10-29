@@ -59,7 +59,7 @@ var (
 var (
 	GatewayRequests    = Default.ScopedCounter("gateway_requests_total", "Gateway requests by route (local, cloud, rejected) and status class (2xx, 4xx, 5xx, other).", "tenant_id", "route", "class")
 	GatewayBytes       = Default.ScopedCounter("gateway_bytes_total", "Gateway request and response bytes by route and direction (in, out).", "tenant_id", "route", "direction")
-	GatewayLocalTokens = Default.ScopedCounter("gateway_local_tokens_total", "Tokens the local model reported for gateway answers, by kind (input, output).", "tenant_id", "kind")
+	GatewayLocalTokens = Default.ScopedCounter("gateway_local_tokens_total", "Tokens the local model reported for gateway answers, by kind (input, output, and cached: the part of input the runtime's prompt cache served).", "tenant_id", "kind")
 	// GatewayLocalUnmetered counts local answers whose server reported no usage.
 	GatewayLocalUnmetered = Default.ScopedCounter("gateway_local_unmetered_total", "Gateway answers from the local model that reported no token usage.", "tenant_id")
 )

@@ -129,7 +129,7 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
           Upper figure: also counts the avoided context the agent would have re-sent from its prompt cache: {{ a.share_upper_pct }}%.
         </p>
         <p v-if="(a.avoided_unaware_tokens ?? 0) > 0" class="muted small">
-          {{ fmtCompact(a.avoided_unaware_tokens ?? 0) }} of the tokens avoided came from agents that cannot yet tell repeated answers apart; they are left out of the share and the saved cost.
+          {{ fmtCompact(a.avoided_unaware_tokens ?? 0) }} of the tokens avoided came from agents that cannot yet tell repeated answers apart; they are left out of the share, and the saved cost values them apart at the input price.
         </p>
         <p class="muted small">Savings compare graph answers with reading repository files. They estimate reduced context, not measured model output or billing savings.</p>
         <details class="method">
