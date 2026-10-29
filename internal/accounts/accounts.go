@@ -454,6 +454,11 @@ type Store interface {
 	// never chose).
 	GatewayShortenPrompts(ctx context.Context, orgID string) (bool, error)
 	SetGatewayShortenPrompts(ctx context.Context, orgID string, on bool) error
+	// GatewayLocalExclude lists the model patterns the gateway never offers
+	// to the local model (empty, never nil, when the organisation never
+	// chose); SetGatewayLocalExclude replaces the list.
+	GatewayLocalExclude(ctx context.Context, orgID string) ([]string, error)
+	SetGatewayLocalExclude(ctx context.Context, orgID string, patterns []string) error
 	// ImageScan reads the image findings of a repository namespace; ok is
 	// false when none were uploaded. SetImageScan replaces them and
 	// DeleteImageScan removes them.

@@ -3,6 +3,9 @@ package accounts
 import (
 	"context"
 	"fmt"
+	"strings"
+
+	"github.com/astrona-io/codesynapse/internal/modelpattern"
 )
 
 // The agent gateway sends an organisation's agent model traffic through
@@ -24,10 +27,19 @@ func (s *Service) GatewayLocalFirst(ctx context.Context, orgID string) (bool, er
 	return s.St.GatewayLocalFirst(ctx, orgID)
 }
 
+// GatewayLocalExclude lists the model patterns the organisation keeps away
+// from the local model. Like GatewayEnabled it checks no caller.
+func (s *Service) GatewayLocalExclude(ctx context.Context, orgID string) ([]string, error) {
+	return s.St.GatewayLocalExclude(ctx, orgID)
+}
+
 // GatewaySettings is an organisation's gateway choice.
 type GatewaySettings struct {
-	Enabled        bool
-	LocalFirst     bool
+	Enabled    bool
+	LocalFirst bool
+	// LocalExclude are model names or prefixes ending in "*" that are never
+	// answered locally, whatever LocalFirst says.
+	LocalExclude   []string
 	ShortenPrompts bool
 }
 
@@ -44,8 +56,12 @@ func (s *Service) GatewaySetting(ctx context.Context, p Principal, orgID string)
 	if err != nil {
 		return GatewaySettings{}, err
 	}
+	exclude, err := s.St.GatewayLocalExclude(ctx, orgID)
+	if err != nil {
+		return GatewaySettings{}, err
+	}
 	shorten, err := s.St.GatewayShortenPrompts(ctx, orgID)
-	return GatewaySettings{Enabled: on, LocalFirst: first, ShortenPrompts: shorten}, err
+	return GatewaySettings{Enabled: on, LocalFirst: first, LocalExclude: exclude, ShortenPrompts: shorten}, err
 }
 
 // GatewayShortenPrompts says whether the organisation's gateway has the local
@@ -71,6 +87,29 @@ func (s *Service) SetGatewayShortenPrompts(ctx context.Context, p Principal, org
 		return err
 	}
 	return s.St.SetGatewayShortenPrompts(ctx, orgID, on)
+}
+
+// SetGatewayLocalExclude replaces the organisation's list of model patterns
+// that never go to the local model. The list is normalized (modelpattern);
+// an entry it refuses fails the whole change with ErrInvalidInput. Same
+// rules as SetGateway.
+func (s *Service) SetGatewayLocalExclude(ctx context.Context, p Principal, orgID string, patterns []string) error {
+	list, err := modelpattern.Normalize(patterns)
+	if err != nil {
+		return fmt.Errorf("%w: local_exclude: %w", ErrInvalidInput, err)
+	}
+	if err := signedIn(p); err != nil {
+		return err
+	}
+	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+		return err
+	}
+	e := actorEvent(p, "org.gateway.local_exclude.set", orgID, orgID)
+	e.Detail = "local_exclude=" + strings.Join(list, ",")
+	if _, err := s.Record(ctx, e); err != nil {
+		return err
+	}
+	return s.St.SetGatewayLocalExclude(ctx, orgID, list)
 }
 
 // SetGatewayLocalFirst chooses whether every model's requests go to the

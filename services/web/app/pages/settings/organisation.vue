@@ -12,7 +12,7 @@ const policySaved = ref(false)
 const { data: gateway, refresh: refreshGateway } = useApiGet<OrgGateway>(() => `accounts/orgs/${org.value?.slug ?? '-'}/gateway`)
 const gatewaySaved = ref(false)
 const gatewayError = ref('')
-async function setGateway(change: { enabled?: boolean; local_first?: boolean; shorten_prompts?: boolean }) {
+async function setGateway(change: { enabled?: boolean; local_first?: boolean; local_exclude?: string[]; shorten_prompts?: boolean }) {
   gatewayError.value = ''
   gatewaySaved.value = false
   try {
@@ -23,6 +23,19 @@ async function setGateway(change: { enabled?: boolean; local_first?: boolean; sh
   }
   await refreshGateway()
 }
+// The exclude list is edited one model per line. The checks mirror the API's
+// (internal/modelpattern), which decides; these only explain a refusal early.
+const excludeText = ref('')
+watch(gateway, (value) => { excludeText.value = (value?.local_exclude ?? []).join('\n') }, { immediate: true })
+const excludePattern = /^[a-z0-9.:_-]+\*?$/
+const excludeLines = computed(() => [...new Set(excludeText.value.split('\n').map(l => l.trim().toLowerCase()).filter(Boolean))].sort())
+const excludeProblem = computed(() => {
+  const bad = excludeLines.value.find(l => l.length > 64 || !excludePattern.test(l))
+  if (bad) return `“${bad.slice(0, 64)}” is not a model name or a prefix ending in *. Use a–z, 0–9, “.”, “:”, “_” and “-”, at most 64 characters.`
+  if (excludeLines.value.length > 32) return `At most 32 models can be excluded; this list has ${excludeLines.value.length}.`
+  return ''
+})
+const excludeChanged = computed(() => excludeLines.value.join('\n') !== (gateway.value?.local_exclude ?? []).join('\n'))
 const { data: memberRepos, refresh: refreshMemberRepos } = useApiGet<{ enabled: boolean }>(() => `accounts/orgs/${org.value?.slug ?? '-'}/member-repos`)
 const memberReposSaved = ref(false)
 const memberReposError = ref('')
@@ -196,10 +209,18 @@ watch(() => org.value?.slug, () => {
         <label class="check"><input type="checkbox" :checked="gateway?.enabled ?? true" :disabled="!gateway" @change="setGateway({ enabled: ($event.target as HTMLInputElement).checked })"> Let keys of this organisation use the gateway</label>
         <label class="check"><input type="checkbox" :checked="gateway?.local_first ?? true" :disabled="!gateway?.enabled" @change="setGateway({ local_first: ($event.target as HTMLInputElement).checked })"> Answer with the local model first</label>
         <p class="muted small">Turn this off if the local model is too small for your agents’ main model; quick requests still go to it.</p>
+        <form class="field exclude" @submit.prevent="setGateway({ local_exclude: excludeLines })">
+          <label for="gateway-exclude">Never answer these models locally</label>
+          <textarea id="gateway-exclude" v-model="excludeText" rows="4" spellcheck="false" autocomplete="off" placeholder="claude-opus-*" :disabled="!gateway?.enabled" :aria-invalid="excludeProblem ? 'true' : undefined" aria-describedby="gateway-exclude-hint" />
+          <span id="gateway-exclude-hint" class="hint">One model per line: an exact name, or a prefix ending in * (claude-opus-*). Requests for these models always go to the cloud, also when the local model answers first. Up to 32.</span>
+          <p v-if="excludeProblem" class="notice notice--danger" role="alert">{{ excludeProblem }}</p>
+          <button type="submit" class="secondary align-start" :disabled="!gateway?.enabled || !!excludeProblem || !excludeChanged">Save list</button>
+        </form>
         <label class="check"><input type="checkbox" :checked="gateway?.shorten_prompts ?? false" :disabled="!gateway?.enabled" @change="setGateway({ shorten_prompts: ($event.target as HTMLInputElement).checked })"> Shorten typed prompts before they go to the cloud</label>
         <p class="muted small">The local model rewrites the prose people type into a shorter version that keeps every name, number and path. Code, tool results, files and the agent’s own instructions are sent as they are. A rewrite is made once and reused for the rest of the chat, so the provider’s prompt cache keeps working.</p>
       </template>
-      <p v-else>{{ gateway?.enabled ? 'On' : 'Off' }}{{ gateway?.enabled ? (gateway.local_first ? ', local model first' : ', local model for quick requests only') : '' }}{{ gateway?.enabled && gateway.shorten_prompts ? ', typed prompts shortened' : '' }}. Ask an owner or admin to change it.</p>
+      <p v-else>{{ gateway?.enabled ? 'On' : 'Off' }}{{ gateway?.enabled ? (gateway.local_first ? ', local model first' : ', local model for quick requests only') : '' }}{{ gateway?.enabled && gateway.shorten_prompts ? ', typed prompts shortened' : '' }}{{ gateway?.local_exclude?.length ? `; never locally: ${gateway.local_exclude.join(', ')}` : '' }}. Ask an owner or admin to change it.</p>
+      <p v-if="gateway?.installation_exclude?.length" class="muted small">The operator also keeps these models away from the local model for every organisation: <code>{{ gateway.installation_exclude.join(', ') }}</code>.</p>
       <p v-if="gateway?.shorten_prompts && !gateway.shorten_available" class="notice">Prompts are not shortened yet: no local model is routed to <code>compress</code>, or the operator set <code>compress_prompts: false</code>. Requests go out as typed.</p>
       <p v-if="gatewaySaved" class="notice notice--ok" role="status">Gateway setting saved.</p>
       <p v-if="gatewayError" class="notice notice--danger" role="alert">{{ gatewayError }}</p>
@@ -272,6 +293,9 @@ watch(() => org.value?.slug, () => {
 <style scoped>
 .grow { flex: 1; min-width: 220px; }
 .align-end { align-self: flex-end; }
+.align-start { align-self: flex-start; }
+.exclude { margin-top: 12px; max-width: 520px; }
+.exclude textarea { min-height: 96px; }
 .wrap { overflow-wrap: anywhere; }
 .role { width: auto; min-height: 30px; padding: 3px 8px; }
 .roles { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0 0; }

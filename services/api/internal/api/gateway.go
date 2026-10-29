@@ -12,6 +12,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/modelpattern"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/services/api/internal/gateway"
 )
@@ -73,6 +74,9 @@ func (s *Server) auditGateway(ctx context.Context, m gateway.Meta, status int, t
 	if m.Saved > 0 && s.cfg.LLM != nil {
 		s.cfg.LLM.RecordGatewayCompressed(ctx, m.Model, m.Saved)
 	}
+	if m.Fallthrough != "" {
+		e.Detail += " reason=" + telemetry.GatewayReason(m.Fallthrough)
+	}
 	if status >= 400 {
 		e.Outcome = accounts.Failure
 	}
@@ -123,7 +127,7 @@ func (s *Server) gatewayRoutes() {
 		if !ok {
 			return nil
 		}
-		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire, ContextWindow: t.ContextWindow}
+		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire, ContextWindow: t.ContextWindow, Exclude: t.Exclude, Wait: t.Wait}
 	}
 	// Shortening uses the local "compress" task only; compress_prompts: false
 	// in config/llm.yaml turns it off for the installation.
@@ -191,6 +195,11 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 		s.accountError(w, err)
 		return r, false
 	}
+	exclude, err := s.cfg.Accounts.GatewayLocalExclude(r.Context(), m.Org.ID)
+	if err != nil {
+		s.accountError(w, err)
+		return r, false
+	}
 	shorten, err := s.cfg.Accounts.GatewayShortenPrompts(r.Context(), m.Org.ID)
 	if err != nil {
 		s.accountError(w, err)
@@ -206,13 +215,15 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 		s.problem(w, http.StatusForbidden, err)
 		return r, false
 	}
-	return r.WithContext(gateway.WithShortenPrompts(gateway.WithLocalFirst(ctx, first), shorten)), true
+	ctx = gateway.WithExclude(gateway.WithLocalFirst(ctx, first), exclude)
+	return r.WithContext(gateway.WithShortenPrompts(ctx, shorten)), true
 }
 
 // handleOrgGateway reads (any member) or sets (owner or admin, signed-in
 // session only) whether the organisation uses the agent gateway (on unless
 // switched off), whether the local model answers first (on unless switched
-// off) and whether it shortens typed prose bound for the cloud (off unless
+// off), which models it never answers (local_exclude, empty unless set)
+// and whether it shortens typed prose bound for the cloud (off unless
 // switched on). A PUT changes only the fields it sends. "available" says
 // whether the operator turned the gateway on for the installation, and
 // "shorten_available" whether a local model can shorten prompts at all.
@@ -227,21 +238,25 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPut {
 		var req struct {
-			Enabled        *bool `json:"enabled"`
-			LocalFirst     *bool `json:"local_first"`
-			ShortenPrompts *bool `json:"shorten_prompts"`
+			Enabled        *bool     `json:"enabled"`
+			LocalFirst     *bool     `json:"local_first"`
+			LocalExclude   *[]string `json:"local_exclude"`
+			ShortenPrompts *bool     `json:"shorten_prompts"`
 		}
 		if err := decodeJSON(w, r, &req); err != nil {
 			s.problem(w, http.StatusBadRequest, err)
 			return
 		}
-		if req.Enabled == nil && req.LocalFirst == nil && req.ShortenPrompts == nil {
-			s.problem(w, http.StatusBadRequest, errors.New("send enabled, local_first, shorten_prompts or several"))
+		if req.Enabled == nil && req.LocalFirst == nil && req.LocalExclude == nil && req.ShortenPrompts == nil {
+			s.problem(w, http.StatusBadRequest, errors.New("send enabled, local_first, local_exclude, shorten_prompts or several"))
 			return
 		}
-		if req.ShortenPrompts != nil {
-			if err := s.cfg.Accounts.SetGatewayShortenPrompts(r.Context(), p, o.ID, *req.ShortenPrompts); err != nil {
-				s.accountError(w, err)
+		// Refuse a bad list before anything changes, so a PUT is all or nothing.
+		var exclude []string
+		if req.LocalExclude != nil {
+			var err error
+			if exclude, err = modelpattern.Normalize(*req.LocalExclude); err != nil {
+				s.problem(w, http.StatusBadRequest, fmt.Errorf("local_exclude: %w", err))
 				return
 			}
 		}
@@ -257,6 +272,18 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if req.LocalExclude != nil {
+			if err := s.cfg.Accounts.SetGatewayLocalExclude(r.Context(), p, o.ID, exclude); err != nil {
+				s.accountError(w, err)
+				return
+			}
+		}
+		if req.ShortenPrompts != nil {
+			if err := s.cfg.Accounts.SetGatewayShortenPrompts(r.Context(), p, o.ID, *req.ShortenPrompts); err != nil {
+				s.accountError(w, err)
+				return
+			}
+		}
 	}
 	set, err := s.cfg.Accounts.GatewaySetting(r.Context(), p, o.ID)
 	if err != nil {
@@ -264,8 +291,22 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	shortenReady := s.cfg.LLM != nil && s.cfg.LLM.CanShorten()
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": set.Enabled, "local_first": set.LocalFirst, "shorten_prompts": set.ShortenPrompts,
-		"available": s.cfg.Gateway, "shorten_available": shortenReady})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled": set.Enabled, "local_first": set.LocalFirst, "local_exclude": set.LocalExclude,
+		"shorten_prompts": set.ShortenPrompts, "installation_exclude": s.gatewayInstallExclude(),
+		"available": s.cfg.Gateway, "shorten_available": shortenReady,
+	})
+}
+
+// gatewayInstallExclude is the operator's gateway_exclude list, which applies
+// to every organisation beside its own; empty without a gateway model.
+func (s *Server) gatewayInstallExclude() []string {
+	if s.cfg.LLM != nil {
+		if t, ok := s.cfg.LLM.GatewayTarget(); ok && t.Exclude != nil {
+			return t.Exclude
+		}
+	}
+	return []string{}
 }
 
 // recordGateway counts one gateway request. Only the route, the status class,
