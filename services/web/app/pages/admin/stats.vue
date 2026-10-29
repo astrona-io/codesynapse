@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import type { AdminOrg, OrgSessionRow, OrgTenantRow, SeriesRange, SessionTotals, StatsSummary, StatsTable, TenantTotals } from '~/utils/types'
+import type { AdminOrg, OrgSessionRow, OrgTenantRow, SessionTotals, StatsRange, StatsSummary, StatsTable, TenantTotals } from '~/utils/types'
 
 // Platform statistics: counts across every organisation, aggregates only.
 // Every load is recorded in the audit log, so nothing refreshes unless the
-// administrator turns it on, and then at most once a minute.
-const ranges: { id: SeriesRange; label: string }[] = [
+// administrator turns it on, and then at most once a minute. 90 days and
+// 1 year come from the daily rollup: complete UTC days up to yesterday.
+const ranges: { id: StatsRange; label: string }[] = [
   { id: '1h', label: '1 hour' }, { id: '6h', label: '6 hours' }, { id: '24h', label: '24 hours' }, { id: '7d', label: '7 days' }, { id: '30d', label: '30 days' },
+  { id: '90d', label: '90 days' }, { id: '365d', label: '1 year' },
 ]
-const range = ref<SeriesRange>('24h')
+const range = ref<StatsRange>('24h')
 const org = ref('')
 const tab = ref<'tenants' | 'sessions'>('tenants')
 const page = ref(1)
@@ -42,6 +44,17 @@ const exportHref = (format: 'csv' | 'json') => apiPath(`admin/stats/export?secti
 const table = computed(() => (tab.value === 'tenants' ? tenants.value : sessions.value))
 const n = (v: number | null | undefined) => (v === null || v === undefined ? '–' : fmtCompact(v))
 const roles = (r: Record<string, number>) => Object.entries(r).map(([k, v]) => `${v} ${k}`).join(' · ') || '–'
+
+// A long range names figures the daily rollup cannot answer (distinct
+// people or keys over the window); those read "–", not 0.
+const rollup = computed(() => table.value?.rollup ?? summary.value?.rollup)
+const missing = (figure: string) => table.value?.rollup?.unavailable.includes(figure) ?? false
+const day = (iso: string) => new Date(iso).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })
+const activeHint = computed(() => {
+  const r = summary.value?.rollup
+  if (!r) return 'signed in, opened a session or used a key'
+  return r.latest ? `in the 30 days to ${day(r.latest)}` : 'no daily figures recorded yet'
+})
 </script>
 
 <template>
@@ -59,13 +72,19 @@ const roles = (r: Record<string, number>) => Object.entries(r).map(([k, v]) => `
         <label class="small auto"><input v-model="auto" type="checkbox"> Refresh every minute</label>
         <button class="secondary tiny" :disabled="pending" @click="refreshAll()">{{ pending ? 'Loading…' : 'Refresh' }}</button>
       </div>
+      <p v-if="rollup" class="notice">
+        <span>
+          Daily figures: {{ rollup.written }} of {{ rollup.days }} days recorded<template v-if="rollup.latest">, up to {{ day(rollup.latest) }} (UTC)</template>.
+          New and ended counts are summed over those days; totals and what is open are as of now.
+        </span>
+      </p>
       <p class="muted small">Counts only: no repository names, addresses or IDs. Root is never counted, a person counts once on the platform and once per organisation, and seats are active members other than guests. Each view is recorded in the audit log.</p>
     </section>
     <p v-if="error" class="notice notice--danger">{{ apiErrorMessage(error) }}</p>
     <div v-if="summary" class="grid cols-4">
       <StatTile label="Organisations" :value="n(summary.orgs)" :hint="`${summary.orgs_created} new in this window`" />
       <StatTile label="People" :value="n(summary.users)" :hint="`${summary.users_created} new · ${summary.memberships} memberships`" />
-      <StatTile label="Active people" :value="n(summary.active_users)" hint="signed in, opened a session or used a key" />
+      <StatTile label="Active people" :value="n(summary.active_users)" :hint="activeHint" />
       <StatTile label="Seats" :value="n(summary.seats)" :hint="`held by ${summary.seated_people} people`" />
       <StatTile label="Runtime sessions" :value="n(summary.execution_active)" :hint="`${summary.execution_created} started in this window`" />
       <StatTile label="API keys" :value="n(summary.keys_active)" :hint="`${summary.browser_active} browser sessions open`" />
@@ -94,7 +113,7 @@ const roles = (r: Record<string, number>) => Object.entries(r).map(([k, v]) => `
           {{ tenants.totals.orgs_without_members }} organisations without members · {{ tenants.totals.orgs_with_sso }} with single sign-on ·
           {{ tenants.totals.multi_org_users }} people in more than one · {{ tenants.totals.guest_only_users }} guests only · {{ tenants.totals.users_suspended }} suspended ·
           {{ tenants.totals.entries }} repository entries ({{ tenants.totals.personal_entries }} personal, {{ tenants.totals.lost_entries }} without access) over {{ tenants.totals.graphs }} graphs ·
-          {{ tenants.totals.watches }} watches added {{ tenants.totals.watch_adds }}
+          {{ tenants.totals.watches }} watches<template v-if="!missing('watch_adds')"> added {{ tenants.totals.watch_adds }}</template>
         </p>
         <div class="table-wrap">
           <table>
@@ -105,7 +124,7 @@ const roles = (r: Record<string, number>) => Object.entries(r).map(([k, v]) => `
                 <td class="num">{{ o.members }}</td>
                 <td class="small muted">{{ roles(o.roles) }}</td>
                 <td class="num">{{ o.seats }}</td>
-                <td class="num">{{ o.active_members }}</td>
+                <td class="num">{{ missing('active_members') ? '–' : o.active_members }}</td>
                 <td class="num">{{ o.teams }}</td>
                 <td class="num">{{ o.entries }}<span v-if="o.lost_entries" class="badge badge--amber">{{ o.lost_entries }} without access</span></td>
                 <td>{{ o.sso ? 'On' : '–' }}</td>
@@ -131,7 +150,7 @@ const roles = (r: Record<string, number>) => Object.entries(r).map(([k, v]) => `
                 <td class="num">{{ o.execution.created }}</td>
                 <td class="num">{{ o.execution.revoked }}</td>
                 <td class="num">{{ o.keys.active }}</td>
-                <td class="num">{{ o.keys.used }}</td>
+                <td class="num">{{ missing('keys_used') ? '–' : o.keys.used }}</td>
                 <td class="num">{{ o.keys.expiring }}</td>
               </tr>
             </tbody>
