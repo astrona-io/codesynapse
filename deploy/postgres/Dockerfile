@@ -15,6 +15,7 @@ RUN apk add --no-cache git \
     && git -C /src checkout --quiet "$GOSU_COMMIT"
 WORKDIR /src
 # gosu's go.mod pins golang.org/x/sys v0.1.0 (CVE-2026-39824).
+# renovate: datasource=go depName=golang.org/x/sys
 ARG X_SYS=v0.49.0
 RUN go get golang.org/x/sys@"$X_SYS" \
     && go mod tidy \
