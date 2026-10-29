@@ -5,6 +5,15 @@ repo_url: https://github.com/astrona-io/codesynapse
 docs_dir: docs
 site_dir: site
 
+# Build-time code, not pages.
+exclude_docs: |
+  /hooks/
+
+# Every page is a draft until a person verified it (front matter
+# `verified: true`); see docs/hooks/doc_status.py.
+hooks:
+  - docs/hooks/doc_status.py
+
 theme:
   name: material
   logo: assets/logo.svg
@@ -35,6 +44,10 @@ theme:
       toggle:
         icon: material/weather-sunny
         name: Light mode
+
+extra:
+  status:
+    draft: Draft, not yet reviewed
 
 extra_css:
   - stylesheets/extra.css
