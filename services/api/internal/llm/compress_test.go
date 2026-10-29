@@ -145,6 +145,7 @@ func TestShortenProse(t *testing.T) {
 		{name: "code", text: prose + "\n```go\nfunc Load() {}\n```", answer: short},
 		{name: "secret", text: prose + " The config has password=supersecret1 in it.", answer: short},
 		{name: "too short", text: "fix `Load` please, 42", answer: "`Load` 42"},
+		{name: "negation dropped", text: prose + " Please never change the tests.", answer: short + " Change tests."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -195,4 +196,29 @@ func TestCanShortenWithOnlyLocalTasks(t *testing.T) {
 	assert.Equal(t, r.CompressionStatus(), CompressionNoCloudTask)
 	assert.True(t, r.CanShorten())
 	assert.False(t, NewRegistry(Config{Providers: []ProviderConfig{local}, Default: "local", CompressPrompts: new(false)}).CanShorten())
+}
+
+// keepsFacts refuses a caveman rewrite that lost or changed anything a
+// reader acts on, and accepts one that only dropped words.
+func TestKeepsFacts(t *testing.T) {
+	for name, tc := range map[string]struct {
+		orig, short string
+		want        bool
+	}{
+		"terse":            {"Could you please have a look at the `Load` function, it returns 42 entries.", "`Load` returns 42 entries.", true},
+		"contraction":      {"Please do not touch the tests.", "Don't touch tests.", true},
+		"negation dropped": {"Please do not touch the tests.", "Touch tests.", false},
+		"never dropped":    {"We never push to main directly.", "Push to main directly.", false},
+		"only dropped":     {"Change only the parser, nothing else.", "Change parser, nothing else.", false},
+		"except dropped":   {"Run every test except the slow ones.", "Run every test, skip slow ones.", false},
+		"number changed":   {"Set the limit to 40 requests.", "Limit 50 requests.", false},
+		"path changed":     {"The bug is in internal/gitx/run.go somewhere.", "Bug in gitx/run.go.", false},
+		"path kept":        {"The bug is in internal/gitx/run.go somewhere.", "Bug: internal/gitx/run.go.", true},
+		"identifier lost":  {"The loadConfig helper returns an error.", "Helper returns error.", false},
+		"snake case lost":  {"Read the max_tokens field first.", "Read tokens field first.", false},
+		"quote changed":    {`The error says "file not found" every time.`, `Error: "not found" every time.`, false},
+		"quote kept":       {`The error says "file not found" every time.`, `Error "file not found", every time.`, true},
+	} {
+		t.Run(name, func(t *testing.T) { assert.Equal(t, keepsFacts(tc.orig, tc.short), tc.want) })
+	}
 }

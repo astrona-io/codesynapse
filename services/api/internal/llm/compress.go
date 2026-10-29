@@ -13,7 +13,7 @@ import (
 
 // compressSystem is constant on purpose: it is the prompt prefix of the local
 // model, and nothing per request may enter it.
-const compressSystem = `You shorten text for another language model. Rewrite the text in terse telegraphic style: drop articles, filler, pleasantries and hedging; keep short sentences or fragments. Keep every number, identifier, file path, version, name and backtick-quoted span exactly as written. Do not add facts, opinions or explanations. Do not translate. Answer with the rewritten text only.`
+const compressSystem = `You shorten text for another language model, caveman style. Drop articles, filler, pleasantries, politeness, hedging and repetition; use fragments where the meaning stays clear. Keep every name, identifier, file path, version, number and quoted or backtick-quoted span exactly as written. Keep every negation and limit (not, never, no, only, except, without) and what it applies to. Do not add facts, opinions or explanations. Do not translate. Answer with the rewritten text only.`
 
 // terseSuffix is appended to the system prompt of every compressed call so the
 // cloud model answers briefly. It is constant, so a provider's prompt cache
@@ -31,8 +31,18 @@ const (
 
 var (
 	backtickSpan = regexp.MustCompile("`[^`\n]+`")
+	quotedSpan   = regexp.MustCompile(`"[^"\n]+"`)
 	numberToken  = regexp.MustCompile(`[0-9][0-9.]*`)
+	// pathToken and identToken find file paths, dotted or snake_case names
+	// and camelCase identifiers, which must survive a rewrite as written.
+	pathToken  = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_-]*(?:[./][A-Za-z0-9_-]+)+|[A-Za-z0-9]+_[A-Za-z0-9_]+`)
+	identToken = regexp.MustCompile(`\b[a-z]+[A-Z][A-Za-z0-9]*\b|\b[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*\b`)
+	wordToken  = regexp.MustCompile(`[a-z]+`)
 )
+
+// negations are the words whose loss flips or widens a statement. A rewrite
+// must keep at least as many of each as the original had.
+var negations = []string{"not", "never", "no", "only", "except", "without", "nor"}
 
 // compressible reports whether a paragraph is prose. Code, diffs, JSON,
 // tables and lists are left to the cloud model byte for byte.
@@ -59,17 +69,34 @@ func compressible(p string) bool {
 // keepsFacts checks that the rewrite still holds every number and quoted span
 // of the original. A small model that drops one is not trusted.
 func keepsFacts(orig, short string) bool {
-	for _, tok := range backtickSpan.FindAllString(orig, -1) {
-		if !strings.Contains(short, tok) {
-			return false
+	for _, re := range []*regexp.Regexp{backtickSpan, quotedSpan, numberToken, pathToken, identToken} {
+		for _, tok := range re.FindAllString(orig, -1) {
+			if !strings.Contains(short, tok) {
+				return false
+			}
 		}
 	}
-	for _, tok := range numberToken.FindAllString(orig, -1) {
-		if !strings.Contains(short, tok) {
+	have, want := negationCounts(short), negationCounts(orig)
+	for _, w := range negations {
+		if have[w] < want[w] {
 			return false
 		}
 	}
 	return true
+}
+
+// negationCounts counts the negation words of s, reading "n't" and "cannot"
+// as "not" so a contraction is not taken for a lost negation.
+func negationCounts(s string) map[string]int {
+	s = strings.ToLower(s)
+	s = strings.NewReplacer("n't", " not", "n’t", " not", "cannot", "can not").Replace(s)
+	n := map[string]int{}
+	for _, w := range wordToken.FindAllString(s, -1) {
+		if slices.Contains(negations, w) {
+			n[w]++
+		}
+	}
+	return n
 }
 
 // Compression states, as CompressionStatus reports them.

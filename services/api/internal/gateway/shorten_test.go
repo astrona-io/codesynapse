@@ -3,10 +3,12 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -227,10 +229,10 @@ func TestShortenMemoIsBounded(t *testing.T) {
 	s.memo.mu.Unlock()
 }
 
-func TestHandlerShortensOnlyWhenTurnedOn(t *testing.T) {
+func TestHandlerShortensUnlessTurnedOff(t *testing.T) {
 	in := string(body(t, msg{"user", prose}))
-	for _, on := range []bool{false, true} {
-		t.Run(map[bool]string{false: "off by default", true: "on"}[on], func(t *testing.T) {
+	for _, off := range []bool{false, true} {
+		t.Run(map[bool]string{false: "on by default", true: "turned off"}[off], func(t *testing.T) {
 			var got string
 			up := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 				b, _ := io.ReadAll(r.Body)
@@ -244,13 +246,13 @@ func TestHandlerShortensOnlyWhenTurnedOn(t *testing.T) {
 			g.Shorten = fakeShortener(&calls)
 			g.Done = func(_ context.Context, m Meta, _ int, _ time.Duration) { meta = m }
 			ctx := sessionCtx(t, "sess")
-			if on {
-				ctx = WithShortenPrompts(ctx, true)
+			if off {
+				ctx = WithShortenPrompts(ctx, false)
 			}
 			r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/messages", strings.NewReader(in))
 			r.Header.Set("X-Api-Key", "sk-ant-x")
 			g.Handler("/v1/messages")(httptest.NewRecorder(), r)
-			if !on {
+			if off {
 				assert.Equal(t, got, in)
 				assert.False(t, meta.Shortened)
 				assert.Equal(t, calls.Load(), int32(0))
@@ -261,6 +263,193 @@ func TestHandlerShortensOnlyWhenTurnedOn(t *testing.T) {
 			assert.Equal(t, meta.Saved, meta.Removed)
 			assert.Equal(t, meta.Bytes, len(in), "the size the agent sent")
 			assert.True(t, json.Valid([]byte(got)))
+		})
+	}
+}
+
+// gatewayBody is a request for model with the typed prose as its only text,
+// plus extra top-level fields; content replaces the user's content when set.
+func gatewayBody(t *testing.T, model string, content any, extra map[string]any) string {
+	t.Helper()
+	if content == nil {
+		content = prose
+	}
+	v := map[string]any{"model": model, "max_tokens": 100, "system": "Be brief.", "messages": []msg{{"user", content}}}
+	for k, x := range extra {
+		v[k] = x
+	}
+	b, err := json.Marshal(v)
+	require.NoError(t, err)
+	return string(b)
+}
+
+// TestFallthroughIsShortened covers every reason the local model can leave a
+// request to the cloud: the local model is offered the text as typed, and
+// the cloud leg that follows gets the shortened text. FallCancelled is left
+// out: the agent is gone, so there is no cloud leg either.
+func TestFallthroughIsShortened(t *testing.T) {
+	const opus, haiku = "claude-opus-5-5", "claude-haiku-5-5"
+	badTool := `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"nope","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}` + "\n\ndata: [DONE]\n\n"
+	weather := []any{map[string]any{"name": "weather", "input_schema": map[string]any{"type": "object"}}}
+	cases := map[string]struct {
+		model   string
+		content any
+		extra   map[string]any
+		first   *bool
+		window  int
+		status  int
+		answer  string
+		slow    bool
+		acquire func(context.Context) (func(), error)
+		none    bool // no local model
+		reason  string
+	}{
+		"not eligible":   {model: opus, first: ptr(false), reason: FallNotEligible},
+		"too large":      {model: opus, window: 50, reason: FallTooLarge},
+		"has thinking":   {model: haiku, extra: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 1024}}, reason: FallHasThinking},
+		"has image":      {model: haiku, content: []any{textBlock(prose), map[string]any{"type": "image"}}, reason: FallHasImage},
+		"queue timeout":  {model: haiku, acquire: func(ctx context.Context) (func(), error) { <-ctx.Done(); return nil, ctx.Err() }, reason: FallQueueTimeout},
+		"model error":    {model: haiku, acquire: func(context.Context) (func(), error) { return nil, errors.New("closed") }, reason: FallModelError},
+		"answer timeout": {model: haiku, slow: true, reason: FallTimeout},
+		"bad status":     {model: haiku, status: http.StatusInternalServerError, reason: FallBadStatus},
+		"empty answer":   {model: opus, answer: emptyAnswer, reason: FallEmptyAnswer},
+		"truncated":      {model: opus, answer: truncatedAnswer, reason: FallTruncated},
+		"bad answer":     {model: haiku, extra: map[string]any{"tools": weather}, answer: badTool, reason: FallBadAnswer},
+		"no local model": {model: haiku, none: true, reason: FallNoLocalModel},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			in := gatewayBody(t, tc.model, tc.content, tc.extra)
+			var mu sync.Mutex
+			var localGot string
+			loc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				b, _ := io.ReadAll(r.Body)
+				mu.Lock()
+				localGot = string(b)
+				mu.Unlock()
+				if tc.slow {
+					select {
+					case <-r.Context().Done():
+					case <-time.After(2 * time.Second):
+					}
+					return
+				}
+				if tc.status != 0 {
+					w.WriteHeader(tc.status)
+					return
+				}
+				_, _ = io.WriteString(w, tc.answer)
+			}))
+			defer loc.Close()
+			var cloudGot string
+			cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				b, _ := io.ReadAll(r.Body)
+				cloudGot = string(b)
+				_, _ = io.WriteString(w, "cloud")
+			}))
+			defer cloud.Close()
+			var calls atomic.Int32
+			g := NewAnthropic()
+			g.Upstream = cloud.URL
+			g.Shorten = fakeShortener(&calls)
+			l := &Local{BaseURL: loc.URL + "/v1", Model: "qwen", ContextWindow: tc.window, Acquire: tc.acquire, Wait: 20 * time.Millisecond}
+			if tc.slow {
+				l.Client = &http.Client{Timeout: 30 * time.Millisecond}
+			}
+			g.Local = func() *Local {
+				if tc.none {
+					return nil
+				}
+				return l
+			}
+			var meta Meta
+			g.Done = func(_ context.Context, m Meta, _ int, _ time.Duration) { meta = m }
+			ctx := sessionCtx(t, "sess")
+			if tc.first != nil {
+				ctx = WithLocalFirst(ctx, *tc.first)
+			}
+			rec := httptest.NewRecorder()
+			r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/messages", strings.NewReader(in))
+			r.Header.Set("X-Api-Key", "sk-ant-x")
+			g.Handler("/v1/messages")(rec, r)
+			assert.Equal(t, rec.Body.String(), "cloud")
+			assert.Equal(t, meta.Fallthrough, tc.reason)
+			assert.True(t, meta.Shortened, "the cloud leg is shortened")
+			assert.True(t, meta.Removed > 0)
+			assert.Equal(t, len(in)-len(cloudGot), meta.Removed)
+			assert.Contains(t, cloudGot, "short: ")
+			assert.True(t, json.Valid([]byte(cloudGot)))
+			mu.Lock()
+			defer mu.Unlock()
+			if localGot != "" {
+				assert.Contains(t, localGot, strings.TrimSpace(prose), "the local model gets the text as typed")
+				assert.False(t, strings.Contains(localGot, "short: "))
+			}
+		})
+	}
+}
+
+// TestExcludedModelIsNotShortened: a model on an exclude list goes to the
+// cloud as the agent sent it, whatever else would have kept it from the
+// local model.
+func TestExcludedModelIsNotShortened(t *testing.T) {
+	cases := map[string]struct {
+		install, org []string
+		large        bool
+		none         bool
+		reason       string
+	}{
+		"organisation list":           {org: []string{"claude-opus-*"}, reason: FallExcluded},
+		"installation list":           {install: []string{"claude-opus-5-5"}, reason: FallExcluded},
+		"too large and excluded":      {org: []string{"claude-opus-*"}, large: true, reason: FallTooLarge},
+		"no local model and excluded": {org: []string{"claude-opus-5-5"}, none: true, reason: FallNoLocalModel},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var extra map[string]any
+			if tc.large {
+				// Over the local bound, so the request is refused before the
+				// exclude lists are read.
+				extra = map[string]any{"metadata": map[string]any{"pad": strings.Repeat("a", maxLocalBody)}}
+			}
+			in := gatewayBody(t, "claude-opus-5-5", nil, extra)
+			var asked atomic.Bool
+			loc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				asked.Store(true)
+				_, _ = io.WriteString(w, completeAnswer)
+			}))
+			defer loc.Close()
+			var cloudGot string
+			cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				b, _ := io.ReadAll(r.Body)
+				cloudGot = string(b)
+				_, _ = io.WriteString(w, "cloud")
+			}))
+			defer cloud.Close()
+			var calls atomic.Int32
+			g := NewAnthropic()
+			g.Upstream = cloud.URL
+			g.Shorten = fakeShortener(&calls)
+			l := &Local{BaseURL: loc.URL + "/v1", Model: "qwen", Exclude: tc.install}
+			g.Local = func() *Local {
+				if tc.none {
+					return nil
+				}
+				return l
+			}
+			var meta Meta
+			g.Done = func(_ context.Context, m Meta, _ int, _ time.Duration) { meta = m }
+			ctx := WithShortenPrompts(WithExclude(sessionCtx(t, "sess"), tc.org), true)
+			rec := httptest.NewRecorder()
+			r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/messages", strings.NewReader(in))
+			r.Header.Set("X-Api-Key", "sk-ant-x")
+			g.Handler("/v1/messages")(rec, r)
+			assert.Equal(t, rec.Body.String(), "cloud")
+			assert.Equal(t, meta.Fallthrough, tc.reason)
+			assert.False(t, asked.Load(), "no local answer")
+			assert.Equal(t, cloudGot, in, "sent as the agent sent it")
+			assert.False(t, meta.Shortened)
+			assert.Equal(t, calls.Load(), int32(0), "the shortener is never asked")
 		})
 	}
 }

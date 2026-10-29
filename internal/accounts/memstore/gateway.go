@@ -60,7 +60,10 @@ func (s *Store) SetGatewayLocalFirst(_ context.Context, orgID string, on bool) e
 func (s *Store) GatewayShortenPrompts(_ context.Context, orgID string) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.shorten[orgID], nil // never chose: off
+	if on, chose := s.shorten[orgID]; chose {
+		return on, nil
+	}
+	return true, nil // never chose: on
 }
 
 // SetGatewayShortenPrompts implements accounts.Store.

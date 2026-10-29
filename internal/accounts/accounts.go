@@ -450,7 +450,7 @@ type Store interface {
 	GatewayLocalFirst(ctx context.Context, orgID string) (bool, error)
 	SetGatewayLocalFirst(ctx context.Context, orgID string, on bool) error
 	// GatewayShortenPrompts says whether the gateway has the local model
-	// shorten prose people type before it goes to the cloud (false when it
+	// shorten prose people type before it goes to the cloud (true when it
 	// never chose).
 	GatewayShortenPrompts(ctx context.Context, orgID string) (bool, error)
 	SetGatewayShortenPrompts(ctx context.Context, orgID string, on bool) error

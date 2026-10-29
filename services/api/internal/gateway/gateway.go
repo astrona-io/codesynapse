@@ -1,8 +1,8 @@
 // Package gateway is the pass-through between an agent and a model API. It
 // holds each request in a queue, decides where it goes, and streams the answer
 // back untouched. Tool payloads, system prompts and code always pass byte for
-// byte; only prose a person typed may be shortened on the cloud leg, when the
-// organisation turned that on (shorten.go). It never stores or logs the
+// byte; only prose a person typed may be shortened on the cloud leg, unless
+// the organisation turned that off (shorten.go). It never stores or logs the
 // caller's credential, and never records prompt text.
 package gateway
 
@@ -119,8 +119,8 @@ type Anthropic struct {
 	// cannot take in time or answer whole, go to the cloud.
 	Local func() *Local
 	// Shorten, when set, shortens the user's typed prose of /v1/messages
-	// requests that go to the cloud, for organisations that turned it on
-	// (WithShortenPrompts).
+	// requests that go to the cloud, unless the organisation turned it off
+	// (WithShortenPrompts) or the model is on an exclude list.
 	Shorten *Shortener
 	// Done is called once per request with what happened; it must not retain
 	// anything but the values it is given.
@@ -180,7 +180,11 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			done(r.Context(), meta, http.StatusUnauthorized)
 			return
 		}
-		if upstreamPath == "/v1/messages" && g.Shorten != nil && shortenOn(r.Context()) {
+		// Every cloud leg is shortened, also when the local model was asked
+		// and did not answer (the local model itself got the text as typed).
+		// A model on an exclude list goes out untouched.
+		if upstreamPath == "/v1/messages" && g.Shorten != nil && shortenOn(r.Context()) &&
+			meta.Fallthrough != FallExcluded && !excludedModel(r.Context(), local, body) {
 			var sh Shortened
 			body, sh = g.Shorten.Apply(r.Context(), body)
 			meta.Shortened, meta.Removed, meta.Saved = sh.Changed, sh.Removed, sh.New
@@ -195,6 +199,21 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 		}
 		done(r.Context(), meta, status)
 	}
+}
+
+// excludedModel says whether the requested model is on the installation's
+// (through local) or the organisation's exclude list. It reads the whole
+// model name, since translate may have refused the request (too_large)
+// before it checked the lists.
+func excludedModel(ctx context.Context, local *Local, body []byte) bool {
+	var v struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(body, &v)
+	if local != nil {
+		return local.excluded(ctx, v.Model)
+	}
+	return (&Local{}).excluded(ctx, v.Model)
 }
 
 func (g *Anthropic) local() *Local {

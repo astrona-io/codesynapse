@@ -68,7 +68,7 @@ func (s *Store) GatewayShortenPrompts(ctx context.Context, orgID string) (bool, 
 	var on bool
 	err := s.db.QueryRow(ctx, "SELECT shorten_prompts FROM org_gateway WHERE org_id = $1", orgID).Scan(&on)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil // never chose: off, it alters the person's words
+		return true, nil // never chose: on, like the column default
 	}
 	return on, err
 }

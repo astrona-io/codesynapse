@@ -185,7 +185,7 @@ test('models and savings split the token pool without counting ask_local twice',
   assert.match(html, /Saved on cached input none reported +<i>the local runtime reported no prompt-cache hits/)
   assert.match(html, /Spent on cloud models \(est\.\) \$0\.25 /)
   assert.match(html, /Saved by shorter prompts \$0\.50 +<i>CodeSynapse&#39;s own AI tasks/)
-  assert.match(html, /prompts typed through the gateway where an organisation turned shortening on/)
+  assert.match(html, /prompts typed through the gateway unless an organisation turned shortening off/)
   assert.match(html, /Gateway requests 10 6 local · 3 cloud · 1 refused · 1 failed/)
   assert.match(html, /Answered locally 60% /)
   assert.match(html, /Saved by local answers \$0\.25 /)
@@ -247,7 +247,7 @@ test('shorter prompts tile says why it is off instead of showing $0', async (t) 
     fmtInt: (n) => String(n),
     apiErrorMessage: (e) => String(e),
   }, {})
-  assert.match(html, /Saved by shorter prompts off +<i>no local model to shorten with; covers CodeSynapse&#39;s own AI tasks and, where an organisation turned it on, prompts typed through the gateway/)
+  assert.match(html, /Saved by shorter prompts off +<i>no local model to shorten with; covers CodeSynapse&#39;s own AI tasks and, unless an organisation turned it off, prompts typed through the gateway/)
   assert.doesNotMatch(html, /Saved by shorter prompts \$0\.00/)
 })
 

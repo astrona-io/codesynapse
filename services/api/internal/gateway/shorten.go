@@ -18,7 +18,10 @@ import (
 // typed into a /v1/messages request before it goes to Anthropic. Only text
 // blocks of user messages are touched; tool_use, tool_result, images, the
 // system prompt, tagged blocks (<system-reminder> and the like) and code are
-// passed on byte for byte.
+// passed on byte for byte. It is on unless the organisation turned it off,
+// covers every cloud leg (also a request the local model was offered and did
+// not answer; that model gets the text as typed) and never touches a model on
+// an exclude list.
 //
 // Claude Code sends the whole conversation with every request, and the
 // provider's prompt cache matches the bytes of that prefix. So a rewrite is
@@ -50,10 +53,10 @@ func WithShortenPrompts(ctx context.Context, on bool) context.Context {
 	return context.WithValue(ctx, shortenKey{}, on)
 }
 
-// shortenOn is false unless the organisation turned shortening on.
+// shortenOn is true unless the organisation turned shortening off.
 func shortenOn(ctx context.Context) bool {
-	on, _ := ctx.Value(shortenKey{}).(bool)
-	return on
+	on, chose := ctx.Value(shortenKey{}).(bool)
+	return on || !chose
 }
 
 // Shortened is what Apply did to one request: sizes only, never text.

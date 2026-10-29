@@ -65,15 +65,15 @@ func (s *Service) GatewaySetting(ctx context.Context, p Principal, orgID string)
 }
 
 // GatewayShortenPrompts says whether the organisation's gateway has the local
-// model shorten prose people type before a request goes to the cloud (off
-// unless someone turned it on). Like GatewayEnabled it checks no caller.
+// model shorten prose people type before a request goes to the cloud (on
+// unless an owner or admin turned it off). Like GatewayEnabled it checks no
+// caller.
 func (s *Service) GatewayShortenPrompts(ctx context.Context, orgID string) (bool, error) {
 	return s.St.GatewayShortenPrompts(ctx, orgID)
 }
 
 // SetGatewayShortenPrompts turns prompt shortening on the cloud leg on or
-// off. It alters the words people typed, so it is off by default. Same rules
-// as SetGateway.
+// off (on by default). Same rules as SetGateway.
 func (s *Service) SetGatewayShortenPrompts(ctx context.Context, p Principal, orgID string, on bool) error {
 	if err := signedIn(p); err != nil {
 		return err

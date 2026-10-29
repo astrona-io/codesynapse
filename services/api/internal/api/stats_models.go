@@ -83,7 +83,7 @@ type ModelStats struct {
 	// not ("disabled", "no_local_model", "no_ai", or "no_cloud_task" when
 	// every task runs on a local model and the window holds no shortened
 	// prompt, so there is nothing to shorten). The gateway shortens
-	// people's prompts only for organisations that turned it on.
+	// people's prompts unless an organisation turned it off.
 	CompressionEnabled bool   `json:"compression_enabled"`
 	CompressionOff     string `json:"compression_off,omitempty"`
 	// Gateway counts the model requests agents sent through the gateway.
