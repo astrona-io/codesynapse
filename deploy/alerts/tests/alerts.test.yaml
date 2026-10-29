@@ -5,6 +5,8 @@ rule_files:
   - ../telemetry.yaml
   - ../stores.yaml
   - ../jobs.yaml
+  - ../outbound.yaml
+  - ../security.yaml
   - ../web.yaml
 evaluation_interval: 1m
 
@@ -256,6 +258,139 @@ tests:
             exp_annotations:
               summary: "No API replica runs the scheduler"
               description: "For 10 minutes no API replica has held the scheduler lease, so scheduled syncs, watches and audit sealing do not run."
+              dashboard: "https://codesynapse.example.com/admin"
+
+  - name: remote git calls failing, per operation
+    interval: 1m
+    input_series:
+      # Half of a tenant's clones fail: fires, without the tenant.
+      - series: 'codesynapse_git_operations_total{operation="clone",outcome="error",tenant_id="t1"}'
+        values: '0+1x40'
+      - series: 'codesynapse_git_operations_total{operation="clone",outcome="ok",tenant_id="t1"}'
+        values: '0+1x40'
+      # A few fetches time out on a quiet installation: below the minimum.
+      - series: 'platform_codesynapse_git_operations_total{operation="fetch",outcome="timeout"}'
+        values: '0+1x5 5x35'
+      # Refused access is about one repository, not the host.
+      - series: 'platform_codesynapse_git_operations_total{operation="ls_remote",outcome="no_access"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 35m
+        groupname: codesynapse-outbound
+        alertname: CodeSynapseGitFailing
+        exp_alerts:
+          - exp_labels: {severity: warning, component: git, operation: clone}
+            exp_annotations:
+              summary: "Remote git clone calls are failing"
+              description: "50% of git clone calls failed or timed out in the last 30 minutes. Check the git hosts' status and the workers' network."
+              dashboard: "https://codesynapse.example.com/stats/sync"
+
+  - name: external lookups rate limited for 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'codesynapse_lookups_total{service="osv",outcome="rate_limited",tenant_id="t1"}'
+        values: '0+1x40'
+      # Rate limited once, long ago: quiet now.
+      - series: 'platform_codesynapse_lookups_total{service="depsdev",outcome="rate_limited"}'
+        values: '0x5 1x35'
+    alert_rule_test:
+      - eval_time: 10m
+        groupname: codesynapse-outbound
+        alertname: CodeSynapseLookupsRateLimited
+        exp_alerts: []
+      - eval_time: 30m
+        groupname: codesynapse-outbound
+        alertname: CodeSynapseLookupsRateLimited
+        exp_alerts:
+          - exp_labels: {severity: warning, component: lookups, service: osv}
+            exp_annotations:
+              summary: "osv is rate limiting lookups"
+              description: "10 osv requests were rate limited in the last 10 minutes, for 15 minutes in a row. Lookups retry at the next sync; a git host token raises its limit."
+              dashboard: "https://codesynapse.example.com/stats/activity"
+
+  - name: sign-in burst, per method
+    interval: 1m
+    input_series:
+      - series: 'platform_codesynapse_auth_attempts_total{method="password",outcome="bad_credentials"}'
+        values: '0+5x20'
+      - series: 'platform_codesynapse_auth_attempts_total{method="api_key",outcome="bad_credentials"}'
+        values: '0+1x20'
+      # Successful sign-ins never count.
+      - series: 'codesynapse_auth_attempts_total{method="session",outcome="ok",tenant_id="t1"}'
+        values: '0+100x20'
+    alert_rule_test:
+      - eval_time: 15m
+        groupname: codesynapse-security
+        alertname: CodeSynapseSignInBurst
+        exp_alerts:
+          - exp_labels: {severity: warning, component: auth, method: password}
+            exp_annotations:
+              summary: "Many failed password sign-ins"
+              description: "50 password checks failed or were rate limited in the last 10 minutes. The audit log names the accounts and client addresses."
+              dashboard: "https://codesynapse.example.com/admin"
+
+  - name: audit write failing
+    interval: 1m
+    input_series:
+      - series: 'codesynapse_audit_writes_total{source="mcp",outcome="error",tenant_id="t1"}'
+        values: '0x5 1x20'
+      - series: 'codesynapse_audit_writes_total{source="api",outcome="ok",tenant_id="t1"}'
+        values: '0+10x25'
+    alert_rule_test:
+      - eval_time: 3m
+        groupname: codesynapse-security
+        alertname: CodeSynapseAuditWriteFailing
+        exp_alerts: []
+      - eval_time: 10m
+        groupname: codesynapse-security
+        alertname: CodeSynapseAuditWriteFailing
+        exp_alerts:
+          - exp_labels: {severity: critical, component: audit, source: mcp}
+            exp_annotations:
+              summary: "Audit log writes from mcp are failing"
+              description: "1 audit entries from mcp could not be written in the last 10 minutes, so those requests were refused. Check PostgreSQL."
+              dashboard: "https://codesynapse.example.com/admin"
+
+  - name: audit seal failing
+    interval: 1m
+    input_series:
+      - series: 'platform_codesynapse_audit_seals_total{outcome="error"}'
+        values: '0x5 1x10'
+      - series: 'platform_codesynapse_audit_seals_total{outcome="ok"}'
+        values: '0+1x15'
+    alert_rule_test:
+      - eval_time: 3m
+        groupname: codesynapse-security
+        alertname: CodeSynapseAuditSealFailing
+        exp_alerts: []
+      - eval_time: 10m
+        groupname: codesynapse-security
+        alertname: CodeSynapseAuditSealFailing
+        exp_alerts:
+          - exp_labels: {severity: warning, component: audit}
+            exp_annotations:
+              summary: "Audit log archiving failed"
+              description: "Sealing the audit log into the archive failed 1 times in the last 25 hours. Old entries stay in PostgreSQL until it succeeds. Check the archive directory or bucket."
+              dashboard: "https://codesynapse.example.com/admin"
+
+  - name: audit log sealed but not archived, two runs
+    interval: 1h
+    input_series:
+      - series: 'platform_codesynapse_audit_seals_total{outcome="no_archive"}'
+        values: '0 1 2'
+    alert_rule_test:
+      - eval_time: 1h
+        groupname: codesynapse-security
+        alertname: CodeSynapseAuditNotArchived
+        exp_alerts: []
+      - eval_time: 2h
+        groupname: codesynapse-security
+        alertname: CodeSynapseAuditNotArchived
+        exp_alerts:
+          - exp_labels: {severity: warning, component: audit}
+            exp_annotations:
+              summary: "The audit log has sealed files but no archive"
+              description: "Retention found sealed audit files but no archive in two runs, so old entries are not pruned. Set CODESYNAPSE_AUDIT_ARCHIVE_DIR or the archive bucket again."
               dashboard: "https://codesynapse.example.com/admin"
 
   - name: dashboard cannot reach the API

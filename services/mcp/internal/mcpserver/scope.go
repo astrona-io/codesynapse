@@ -52,6 +52,8 @@ func callerFrom(ctx context.Context) *Caller {
 func callerMiddleware(access Access, stdioToken string) mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			// Audit entries written while serving this request count for MCP.
+			ctx = telemetry.WithAuditSource(ctx, telemetry.AuditMCP)
 			if access != nil {
 				token := stdioToken
 				if extra := req.GetExtra(); extra != nil && extra.TokenInfo != nil {

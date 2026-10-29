@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // Seal moves every entry older than before into archive files, oldest
@@ -17,8 +18,8 @@ import (
 // compared before the database forgets the entries; the database then
 // checks they are still the oldest and unchanged (accounts.ErrAuditConflict).
 // retention sets how long the files are locked.
-func Seal(ctx context.Context, st accounts.Store, arch Archive, before time.Time, retention time.Duration, now time.Time) ([]accounts.AuditSegment, error) {
-	var out []accounts.AuditSegment
+func Seal(ctx context.Context, st accounts.Store, arch Archive, before time.Time, retention time.Duration, now time.Time) (out []accounts.AuditSegment, err error) {
+	defer func() { telemetry.RecordAuditSeal(ctx, sealOutcome(out, err)) }()
 	for {
 		events, err := oldest(ctx, st, before)
 		if err != nil || len(events) == 0 {
@@ -167,4 +168,17 @@ func checkFile(ctx context.Context, arch Archive, seg accounts.AuditSegment) err
 		return errors.New("archive " + err.Error())
 	}
 	return nil
+}
+
+// sealOutcome is the outcome of one sealing run for
+// platform_codesynapse_audit_seals_total. A run that sealed some files and
+// then failed counts as an error: entries are left over.
+func sealOutcome(sealed []accounts.AuditSegment, err error) string {
+	switch {
+	case err != nil:
+		return telemetry.SealError
+	case len(sealed) == 0:
+		return telemetry.SealNothing
+	}
+	return telemetry.SealOK
 }
