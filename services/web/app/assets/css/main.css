@@ -268,6 +268,9 @@ ul { margin: 0; padding-left: 18px; }
 
 /* Stat tiles: one quiet style; colour only when a value means something. */
 .stat-card { gap: 4px; padding: 18px 20px; background: var(--panel-2); border-color: transparent; }
+/* Tiles in one grid share label, value and hint rows, so a label that wraps
+   to two lines does not push its value below its neighbours'. */
+.grid > .stat-card { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 4px; align-content: start; }
 .stat__value { font-family: var(--font-display); font-size: 34px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--ink); }
 .stat__hint { font-size: 12.5px; color: var(--muted); }
 
