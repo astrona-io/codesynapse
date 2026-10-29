@@ -3,12 +3,14 @@
 # One pod runs metad, storaged and graphd together (a single instance, like
 # the other in-chart stores); for a cluster run NebulaGraph yourself and set
 # nebula.externalAddrs.
+# Upstream's binaries on distroless (deploy/nebula): the servers have no shell
+# or curl, so the probes run /usr/local/bin/nebula-probe.
 images:
-  metad: docker.io/vesoft/nebula-metad:v3.8.0
-  storaged: docker.io/vesoft/nebula-storaged:v3.8.0
-  graphd: docker.io/vesoft/nebula-graphd:v3.8.0
+  metad: ghcr.io/astrona-io/codesynapse-nebula-metad:v3.8.0
+  storaged: ghcr.io/astrona-io/codesynapse-nebula-storaged:v3.8.0
+  graphd: ghcr.io/astrona-io/codesynapse-nebula-graphd:v3.8.0
   # Registers the storage host and replaces the first root password.
-  console: docker.io/vesoft/nebula-console:v3.8.0
+  console: ghcr.io/astrona-io/codesynapse-nebula-console:v3.8.0
 size: 20Gi
 storageClass: ""
 resources:
