@@ -34,6 +34,27 @@ func (s *Store) GatewayLocalFirst(ctx context.Context, orgID string) (bool, erro
 	return on, err
 }
 
+// GatewayLocalExclude implements accounts.Store.
+func (s *Store) GatewayLocalExclude(ctx context.Context, orgID string) ([]string, error) {
+	var list []string
+	err := s.db.QueryRow(ctx, "SELECT local_exclude FROM org_gateway WHERE org_id = $1", orgID).Scan(&list)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && list == nil) {
+		return []string{}, nil // never chose: nothing excluded
+	}
+	return list, err
+}
+
+// SetGatewayLocalExclude implements accounts.Store. A new row takes the
+// column defaults, so the gateway and local first stay on.
+func (s *Store) SetGatewayLocalExclude(ctx context.Context, orgID string, patterns []string) error {
+	if patterns == nil {
+		patterns = []string{}
+	}
+	tag, err := s.db.Exec(ctx, `INSERT INTO org_gateway (org_id, local_exclude) SELECT id, $2 FROM orgs WHERE id = $1
+ON CONFLICT (org_id) DO UPDATE SET local_exclude = EXCLUDED.local_exclude, updated_at = now()`, orgID, patterns)
+	return affected(tag, err, "organisation")
+}
+
 // SetGatewayLocalFirst implements accounts.Store. A new row takes the
 // column defaults, so the gateway itself stays on.
 func (s *Store) SetGatewayLocalFirst(ctx context.Context, orgID string, on bool) error {

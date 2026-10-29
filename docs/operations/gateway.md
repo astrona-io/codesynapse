@@ -10,9 +10,11 @@ Coding assistants send many small background requests, such as naming a chat or 
 1. **Answers locally first.** Every request is offered to the local model when it uses no thinking and no images (tools are fine) and fits the local model's context: the body size divided by four plus `max_tokens` must be at most the provider's `context_window`, and the body at most 4 MiB. When `context_window` is not known, the old limit of 256 KiB applies. When the request offers tools, the local model may call them and read their results; the call is checked first, and if the model gets it wrong (a tool that was not offered, broken arguments) the cloud answers instead. Tool data stays on your side. Nothing is sent to the cloud.
 2. **Checks the answer for the main model.** A request for a larger model than haiku is buffered: if the local answer is empty, stopped at `max_tokens` or broke off, the cloud answers instead. Haiku requests keep streaming as they are written.
 3. **Passes everything else on.** Other requests go to `api.anthropic.com` and nowhere else. The assistant's own Anthropic credential is used for that one request and is never stored.
-4. **Falls back safely.** If the local model is busy for more than 20 seconds, fails, or answers with an error, nothing has been written yet and the request goes to the cloud instead.
+4. **Falls back safely.** If no local slot is free within 60 seconds (`gateway_wait_seconds`), or the local model fails or answers with an error, nothing has been written yet and the request goes to the cloud instead. The wait covers only the queue for a free slot; once the local model has started, the provider's `timeout_seconds` bounds the answer.
 
-An organisation whose local model is too small for its agents' main model turns **Answer with the local model first** off; then only haiku-class requests go to it, as before.
+**Every model is offered to the local model by default**, the main model (opus, sonnet) as well as haiku: local first is on for every organisation that has not switched it off, with no setup. An organisation whose local model is too small for its agents' main model turns **Answer with the local model first** off; then only haiku-class requests go to it.
+
+To keep particular models away from the local model while the rest still go to it, give an **exclude list** (next section). A request for an excluded model always goes to the cloud, whether local first is on or off; the exclusion wins.
 
 Each answer carries a header, `X-CodeSynapse-Route: local` or `X-CodeSynapse-Route: cloud`, so you can see where it came from.
 
@@ -29,6 +31,31 @@ The gateway is on by default, and it needs accounts (a PostgreSQL database). Two
 
 The same panel has **Answer with the local model first** (on by default; `local_first` on `PUT /api/v1/accounts/orgs/{org}/gateway`, which changes only the fields it is sent). Both switches are audited, as `org.gateway.set` and `org.gateway.local_first.set`. Neither can be changed with an API key. If the operator switched the gateway off, the Settings page says so, and requests are refused even when the organisation switch is on.
 
+## Keep some models away from the local model
+
+**Settings → Organisation → Agent gateway → Never answer these models locally** takes one model per line:
+
+- an exact model name, such as `claude-opus-5-5`, or
+- a prefix ending in `*`, such as `claude-opus-*`, which matches every model whose name starts with `claude-opus-`.
+
+Entries use `a-z`, `0-9`, `.`, `:`, `_` and `-`, at most 64 characters each, at most 32 entries. They are lower-cased, duplicates are dropped and the list is sorted; matching ignores case. A lone `*` is refused: to keep every model off the local model, turn local first off or remove `gateway: true` from the provider. An invalid entry refuses the whole change with `400` and nothing is saved.
+
+Owners and admins change it from a signed-in session, never with an API key; each change is audited as `org.gateway.local_exclude.set` before it is written. Through the API:
+
+```sh
+curl -X PUT https://codesynapse.example.com/api/v1/accounts/orgs/<org>/gateway \
+  -H 'Content-Type: application/json' -b cs_session=... \
+  -d '{"local_exclude": ["claude-opus-*", "gpt-5"]}'
+```
+
+The PUT changes only the fields it is sent; `"local_exclude": []` clears the list. `GET` on the same path returns `local_exclude` and the operator's `installation_exclude`. The list is read on every gateway request, so a change applies to the next request.
+
+An excluded request goes to the cloud with the fall-through reason `excluded`: that reason is counted in `gateway_fallthrough_total{reason="excluded"}` and written to the request's audit entry as `reason=excluded`. The model name is never a metric label; the audit entry already names the cleaned model.
+
+The operator can add an installation-wide list with `gateway_exclude` on the gateway provider (next section). It applies to every organisation, beside the organisation's own list, and the Settings panel shows it.
+
+The OpenAI-compatible paths (below) are local only and have no cloud to send a request to, so the exclude list does not apply to them.
+
 ## Set up the local model
 
 Local answering needs a local provider that you opt in explicitly. In `config/llm.yaml` give that provider `gateway: true` and an explicit `model`:
@@ -36,7 +63,12 @@ Local answering needs a local provider that you opt in explicitly. In `config/ll
 ```yaml
     gateway: true   # answer gateway requests, tools included, from this local model
     context_window: 131072   # how much fits; requests that do not go to the cloud
+    # gateway_exclude: [claude-opus-*]   # models never answered locally, for every organisation
+    # gateway_wait_seconds: 60           # wait for a free local slot (1-300) before the cloud takes over
+    # timeout_seconds: 600               # how long one local answer may take once it has started
 ```
+
+`gateway_exclude` follows the same rules as the organisation's list and is merged with it; an invalid entry stops the API at start-up with an error naming the provider. `gateway_wait_seconds` is how long a request waits in the provider's queue for a free slot; it does not limit the answer, which `timeout_seconds` bounds.
 
 See `config/llm.example.yaml` for the full provider block and [Local models](local-models.md) for choosing a model. Without such a provider the gateway still works, but every request goes to the cloud as a plain pass-through.
 
