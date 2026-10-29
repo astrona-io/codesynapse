@@ -616,6 +616,13 @@ export interface OrgUsageRow extends UsageFigures { org_id: string; slug: string
 export interface UsageCount { name: string; calls: number; errors: number; sessions: number }
 export interface UsageSection extends StatsTable<UsageFigures, OrgUsageRow> { from: string; to: string; tools: UsageCount[]; clients: UsageCount[] }
 export interface StatsTable<T, R> { range: StatsRange; totals: T; rows: R[]; page: number; pages: number; total: number; rollup?: StatsRollup }
+// Storage and alerts sections of the platform statistics (phase 6). A null
+// figure is one the store does not report.
+export interface StoreSizeRow { db_system: string; kind: string; rows: number | null; bytes: number | null; rows_change: number | null; bytes_change: number | null }
+export interface StatsStorage { range: StatsRange; available: boolean; reason?: string; sampled_at: string | null; stores: StoreSizeRow[] }
+export interface AlertItem { name: string; state: string; severity: string; value: string; active_at: string }
+export interface AlertRuleItem { name: string; group: string; state: string; severity: string; health: string; failing: boolean; last_evaluation: string }
+export interface StatsAlerts { configured: boolean; reachable: boolean; firing: number; pending: number; alerts: AlertItem[]; rules: AlertRuleItem[] }
 export interface AdminHealth {
   version: string; checked: string
   graph: HealthCheck; accounts: HealthCheck; metrics: HealthCheck; audit: HealthCheck
