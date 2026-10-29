@@ -80,7 +80,9 @@ type ModelStats struct {
 	CompressionSaved *float64 `json:"compression_saved_dollars"`
 	// CompressionEnabled says whether prompts of CodeSynapse's own AI tasks
 	// are shortened before they go to a cloud model; CompressionOff says why
-	// not ("disabled", "no_local_model", "no_ai"). The gateway shortens
+	// not ("disabled", "no_local_model", "no_ai", or "no_cloud_task" when
+	// every task runs on a local model and the window holds no shortened
+	// prompt, so there is nothing to shorten). The gateway shortens
 	// people's prompts only for organisations that turned it on.
 	CompressionEnabled bool   `json:"compression_enabled"`
 	CompressionOff     string `json:"compression_off,omitempty"`
@@ -385,7 +387,7 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		out.Models = append(out.Models, *m)
 	}
 	out.Spent, out.CompressionSaved = s.moneyTotals(all)
-	out.CompressionEnabled, out.CompressionOff = compressionState(s.cfg.LLM)
+	out.CompressionEnabled, out.CompressionOff = compressionState(s.cfg.LLM, all)
 	for _, f := range []*float64{&gw.Requests, &gw.Local, &gw.Cloud, &gw.Rejected, &gw.Failed, &gw.LocalUnmetered, &gw.LocalInputTokens, &gw.LocalOutputTokens, &gw.LocalCachedTokens, &gw.BytesIn, &gw.BytesOut} {
 		*f = math.Round(*f)
 	}
@@ -441,12 +443,18 @@ func deref(p *float64) float64 {
 
 // compressionState says whether prompt shortening runs and, when it does
 // not, why: "no_ai" without any AI configuration, otherwise the registry's
-// reason.
-func compressionState(reg *llm.Registry) (bool, string) {
+// reason. Routing that is all local now still counts as on when the window
+// holds shortened prompts (an earlier route or a one-off override to a cloud
+// model), so the tile shows those savings instead of "not used".
+func compressionState(reg *llm.Registry, models []ModelStat) (bool, string) {
 	if reg == nil {
 		return false, "no_ai"
 	}
-	if st := reg.CompressionStatus(); st != llm.CompressionOn {
+	st := reg.CompressionStatus()
+	if st == llm.CompressionNoCloudTask && slices.ContainsFunc(models, func(m ModelStat) bool { return m.CompressedBytes > 0 }) {
+		st = llm.CompressionOn
+	}
+	if st != llm.CompressionOn {
 		return false, st
 	}
 	return true, ""

@@ -37,6 +37,13 @@
         "major"
       ],
       "dependencyDashboardApproval": true
+    },
+    {
+      "description": "The four NebulaGraph images are one release: bump them together",
+      "matchPackageNames": [
+        "/(^|/)(codesynapse-)?nebula-(metad|storaged|graphd|console)$/"
+      ],
+      "groupName": "NebulaGraph"
     }
   ],
   "customManagers": [
@@ -75,15 +82,28 @@
       "datasourceTemplate": "pypi"
     },
     {
-      "description": "Store images of the Helm chart's subcharts",
+      "description": "Store images of the Helm chart: the top-level image of each subchart, the NebulaGraph images map, and vmalert (alerting.image) in the parent chart",
       "customType": "regex",
       "managerFilePatterns": [
-        "/^deploy/helm/codesynapse/charts/[^/]+/values\\.yaml$/"
+        "/^deploy/helm/codesynapse/charts/[^/]+/values\\.yaml$/",
+        "/^deploy/helm/codesynapse/values\\.yaml$/"
       ],
       "matchStrings": [
-        "image: (?<depName>[^:\\s]+):(?<currentValue>[^\\s]+)"
+        "(?:^|\\n)image: (?<depName>[^:\\s]+):(?<currentValue>[^\\s]+)",
+        "\\n  (?:metad|storaged|graphd|console): (?<depName>[^:\\s]+):(?<currentValue>[^\\s]+)",
+        "\\n  image: (?<depName>[^:\\s]+/vmalert):(?<currentValue>[^\\s]+)"
       ],
       "datasourceTemplate": "docker"
+    },
+    {
+      "description": "Versions pinned in Dockerfile ARGs, marked with a `# renovate: datasource=... depName=...` comment on the line above (golang.org/x modules patched into the store images)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)Dockerfile$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s*\\nARG [A-Z0-9_]+=(?<currentValue>[^\\s]+)"
+      ]
     },
     {
       "description": "golangci-lint version in CI",

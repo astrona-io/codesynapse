@@ -14,7 +14,6 @@ import (
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/services/api/internal/gateway"
-	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
 // maxGatewayInFlight caps the requests one key may have open at once, so a
@@ -129,7 +128,7 @@ func (s *Server) gatewayRoutes() {
 	// Shortening uses the local "compress" task only; compress_prompts: false
 	// in config/llm.yaml turns it off for the installation.
 	g.Shorten = &gateway.Shortener{
-		Ready: func() bool { return s.cfg.LLM != nil && s.cfg.LLM.CompressionStatus() == llm.CompressionOn },
+		Ready: func() bool { return s.cfg.LLM != nil && s.cfg.LLM.CanShorten() },
 		Rewrite: func(ctx context.Context, text string) (string, bool) {
 			if s.cfg.LLM == nil {
 				return "", false
@@ -264,7 +263,7 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	shortenReady, _ := compressionState(s.cfg.LLM)
+	shortenReady := s.cfg.LLM != nil && s.cfg.LLM.CanShorten()
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": set.Enabled, "local_first": set.LocalFirst, "shorten_prompts": set.ShortenPrompts,
 		"available": s.cfg.Gateway, "shorten_available": shortenReady})
 }

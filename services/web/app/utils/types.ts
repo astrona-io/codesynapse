@@ -700,8 +700,8 @@ export interface ModelStats {
   // Cloud spend and the dollars prompt compression saved; null when a price is missing.
   spent_dollars?: number | null; compression_saved_dollars?: number | null
   // Whether CodeSynapse's own AI tasks get shortened prompts, and why not:
-  // disabled, no_local_model or no_ai. Gateway traffic is never shortened.
-  compression_enabled?: boolean; compression_off?: 'disabled' | 'no_local_model' | 'no_ai'
+  // disabled, no_local_model or no_ai. The gateway shortens typed prompts only where an organisation turned it on.
+  compression_enabled?: boolean; compression_off?: 'disabled' | 'no_local_model' | 'no_ai' | 'no_cloud_task'
   gateway?: GatewayStat
   reference_price?: ReferencePrice
 }
