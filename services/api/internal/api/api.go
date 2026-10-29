@@ -362,6 +362,7 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/stats/series", governance(anyone), s.handleSeries)
 	s.route("GET /api/v1/stats/series/batch", governance(anyone), s.handleSeriesBatch)
 	s.route("GET /api/v1/stats/models", governance(anyone), s.handleModelStats)
+	s.route("GET /api/v1/stats/queue", governance(anyone), s.handleQueuePeak)
 	s.route("GET /api/v1/stats/savings", visibleOnly, s.handleSavingsSeries)
 	s.route("DELETE /api/v1/repos/{repo}", repoRole(accounts.Admin), s.handleDeleteRepo)
 	s.route("GET /api/v1/repos/{repo}/overview", repoRole(accounts.Viewer), s.handleOverview)

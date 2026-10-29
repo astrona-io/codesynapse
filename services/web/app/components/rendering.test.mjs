@@ -360,3 +360,27 @@ test('a stat tile keeps its explanation behind an info button that describes its
   assert.match(term, /aria-label="More about this"/)
   assert.match(term, />Changed often and complex<\/span>/, 'glossary terms still resolve')
 })
+
+test('the queue heatmap marks empty slots apart from slots without requests and bins waits at the verdict thresholds', async (t) => {
+  const cells = Array.from({ length: 7 * 96 }, () => null)
+  cells[36] = { requests: 12, avg: 0.4, p95: 0.8, share: 0.05 } // Mon 09:00
+  cells[37] = { requests: 9, avg: 6, p95: 14, share: 0.6 } // Mon 09:15
+  cells[96 + 40] = { requests: 0, avg: null, p95: null, share: null } // Tue 10:00
+  const html = await renderComponent(t, './QueueHeatmap.vue', {}, { cells, metric: 'p95', timezone: 'Europe/Copenhagen', waitNoticeable: 3, waitHigh: 10 })
+  const fill = (i) => html.match(new RegExp(`data-cell="${i}"[^>]*fill="([^"]+)"`))?.[1]
+  assert.equal((html.match(/<rect /g) ?? []).length, 7 * 96, 'one cell per weekday and 15-minute slot')
+  assert.equal(fill(36), 'var(--seq-1)', 'under a second is the lightest step')
+  assert.equal(fill(37), 'var(--seq-4)', '10 to 30 s is the step above the high threshold')
+  assert.equal(fill(96 + 40), 'var(--seq-zero)', 'measured without requests')
+  assert.equal(fill(0), 'var(--seq-empty)', 'no measurements is its own neutral')
+  assert.match(html, /<title>Mon 09:15–09:30: 9 requests · avg wait 6.0 s · p95 14 s · 60% found it full<\/title>/)
+  assert.match(html, /<title>Tue 10:00–10:15: no requests<\/title>/)
+  assert.match(html, /<title>Mon 00:00–00:15: no measurements<\/title>/)
+  assert.match(html, /Times in Europe\/Copenhagen/)
+  assert.match(html, />Mon<\/text>.*>Sun<\/text>/s, 'Monday is the first row')
+  assert.match(html, /3\.0 s–10 s/, 'the legend names the bins')
+
+  const requests = await renderComponent(t, './QueueHeatmap.vue', {}, { cells, metric: 'requests', timezone: 'UTC' })
+  const rfill = (i) => requests.match(new RegExp(`data-cell="${i}"[^>]*fill="([^"]+)"`))?.[1]
+  assert.equal(rfill(36), 'var(--seq-5)', 'the busiest slot is the darkest step')
+})
