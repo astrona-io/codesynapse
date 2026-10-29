@@ -16,10 +16,9 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
 
-	"github.com/astrona-io/codesynapse/internal/gitx"
+	"github.com/astrona-io/codesynapse/internal/netguard"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
@@ -229,16 +228,7 @@ func (c Client) http() *http.Client {
 	}
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	if !c.AllowPrivate {
-		dialer.Control = func(_, address string, _ syscall.RawConn) error {
-			host, _, err := net.SplitHostPort(address)
-			if err != nil {
-				return err
-			}
-			if ip := net.ParseIP(host); ip == nil || gitx.InternalIP(ip) {
-				return ErrInternalAddress
-			}
-			return nil
-		}
+		dialer.Control = netguard.Control(ErrInternalAddress)
 	}
 	return &http.Client{
 		Timeout:   30 * time.Second,
