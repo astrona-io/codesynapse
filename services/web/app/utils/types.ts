@@ -337,6 +337,57 @@ export type GatewaySeriesPanel =
   | 'gateway_latency_local' | 'gateway_latency_cloud' | 'gateway_latency_avg'
   | 'gateway_queue_wait' | 'gateway_timeouts'
 
+// Model queue peak hours (GET /api/v1/stats/queue, /admin/stats/queue).
+// cells has 7 × 96 entries, Monday first, 15-minute slots in the viewer's
+// timezone; null is a slot without measurements, requests 0 one without
+// requests (and without wait figures).
+export interface QueueCell {
+  requests: number
+  avg?: number | null
+  p95?: number | null
+  share?: number | null
+}
+export type QueueMetric = 'p95' | 'avg' | 'requests' | 'share'
+export interface QueueVerdict {
+  level: 'unknown' | 'fine' | 'noticeable' | 'add_endpoint'
+  text: string
+  weekday: number
+  first_slot: number
+  last_slot: number
+  p95?: number | null
+  share?: number | null
+}
+export interface QueueProvider {
+  name: string
+  // slots: max_concurrent per process (0 unlimited); capacity: slots over
+  // every reporting process, platform view only. running and waiting are
+  // null when nothing reported in the last minutes.
+  slots: number
+  capacity?: number | null
+  running: number | null
+  waiting: number | null
+  requests: number
+  cells: (QueueCell | null)[]
+  verdict: QueueVerdict
+}
+export interface QueueThresholds {
+  min_requests: number
+  peak_min_requests: number
+  wait_high_seconds: number
+  share_high: number
+  wait_noticeable_seconds: number
+  share_noticeable: number
+  free_slot_seconds: number
+}
+export interface QueuePeak {
+  scope: 'org' | 'platform'
+  weeks: 1 | 4 | 12
+  timezone: string
+  slot_minutes: number
+  providers: QueueProvider[]
+  thresholds: QueueThresholds
+}
+
 // Accounts (GET /api/v1/auth/status, /me and the settings endpoints).
 export interface AuthStatus {
   mode: 'single' | 'accounts'
