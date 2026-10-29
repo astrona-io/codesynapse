@@ -714,6 +714,10 @@ func record(ctx context.Context, name string, cfg ProviderConfig, resp Response,
 	}
 	if resp.FirstToken > 0 {
 		telemetry.LLMTTFT.ObserveContext(ctx, resp.FirstToken.Seconds(), tenant, name, cfg.Model)
+		telemetry.RecordAnswerStart(ctx, task, telemetry.StartFirstToken, resp.FirstToken)
+	} else if err == nil {
+		// Not streamed: the whole answer is the first thing the caller sees.
+		telemetry.RecordAnswerStart(ctx, task, telemetry.StartFullAnswer, resp.Duration)
 	}
 	if err == nil && resp.UsageKnown && resp.FirstToken > 0 && resp.Duration > resp.FirstToken {
 		telemetry.LLMReadSeconds.AddContext(ctx, resp.FirstToken.Seconds(), tenant, name, cfg.Model)
@@ -782,7 +786,11 @@ func (r *Registry) Embed(ctx context.Context, name string, inputs []string) ([][
 	}
 	// Embeddings share the provider's queue with completions, so a local
 	// model never runs both at once; queueing does not eat the timeout.
-	release, err := r.slots[name].acquire(ctx)
+	qctx := ctx
+	if taskOf(ctx) == "other" {
+		qctx = WithTask(ctx, "embeddings")
+	}
+	release, err := r.slots[name].acquire(qctx)
 	if err != nil {
 		return nil, err
 	}

@@ -60,9 +60,12 @@ func (r *Registry) GatewayTarget() (GatewayTarget, bool) {
 		if p.GatewayWaitSeconds > 0 {
 			wait = time.Duration(p.GatewayWaitSeconds) * time.Second
 		}
+		queue := r.slots[p.Name]
 		return GatewayTarget{
 			BaseURL: p.BaseURL, Model: p.Model, APIKey: p.apiKey, ContextWindow: p.ContextWindow,
-			Exclude: p.GatewayExclude, Wait: wait, Acquire: r.slots[p.Name].acquire,
+			Exclude: p.GatewayExclude, Wait: wait, Acquire: func(ctx context.Context) (func(), error) {
+				return queue.acquire(WithTask(ctx, gatewayTask))
+			},
 		}, true
 	}
 	return GatewayTarget{}, false
