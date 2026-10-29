@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/astrona-io/codesynapse/internal/hygiene"
 	"github.com/astrona-io/codesynapse/internal/imagescan"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
@@ -102,8 +103,12 @@ type Report struct {
 	// Retracted lists Go module versions their authors retracted, direct
 	// ones first; Reason is the retraction rationale.
 	Retracted []DeprecatedModule `json:"retracted,omitempty"`
-	Modules   ModuleStats        `json:"modules"`
-	Rules     []RuleCount        `json:"rules"`
+	// LowScorecard lists dependencies whose source project scores below
+	// hygiene.LowScorecard on OpenSSF Scorecard, lowest first. It is a
+	// hygiene note, never a vulnerability, and does not change the grade.
+	LowScorecard []ScorecardModule `json:"low_scorecard,omitempty"`
+	Modules      ModuleStats       `json:"modules"`
+	Rules        []RuleCount       `json:"rules"`
 	// OwnerCounts are the listed findings per CODEOWNERS owner, most
 	// severe work first; empty without a CODEOWNERS file.
 	OwnerCounts []OwnerCount `json:"owners,omitempty"`
@@ -145,6 +150,23 @@ type ModuleStats struct {
 	// Retracted counts Go module versions the module proxy reports
 	// retracted (only with deps.dev lookups on).
 	Retracted int `json:"retracted,omitempty"`
+	// LowScorecard counts modules whose source project scores below
+	// hygiene.LowScorecard on OpenSSF Scorecard (only with deps.dev
+	// lookups on).
+	LowScorecard int `json:"low_scorecard,omitempty"`
+}
+
+// ScorecardModule is a dependency with the OpenSSF Scorecard of its source
+// project: the overall score, the day it was produced and up to three of
+// the lowest checks as "Name:score".
+type ScorecardModule struct {
+	Module    string   `json:"module"`
+	Ecosystem string   `json:"ecosystem,omitempty"`
+	Version   string   `json:"version"`
+	Score     float64  `json:"score"`
+	Date      string   `json:"date"`
+	Checks    []string `json:"checks,omitempty"`
+	Direct    bool     `json:"direct"`
 }
 
 // DeprecatedModule is a dependency whose version its publisher deprecated
@@ -361,6 +383,11 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 			rep.Retracted = append(rep.Retracted, DeprecatedModule{Module: m.Node.Name, Ecosystem: m.Node.Ecosystem, Version: m.Node.Version,
 				Latest: m.Node.Latest, Reason: m.Node.Retracted, Direct: !m.Node.Indirect})
 		}
+		if m.Node.ScorecardDate != "" && m.Node.Scorecard < hygiene.LowScorecard {
+			rep.Modules.LowScorecard++
+			rep.LowScorecard = append(rep.LowScorecard, ScorecardModule{Module: m.Node.Name, Ecosystem: m.Node.Ecosystem, Version: m.Node.Version,
+				Score: m.Node.Scorecard, Date: m.Node.ScorecardDate, Checks: m.Node.ScorecardChecks, Direct: !m.Node.Indirect})
+		}
 	}
 	directFirst := func(a, b DeprecatedModule) int {
 		if a.Direct != b.Direct {
@@ -370,6 +397,9 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 	}
 	slices.SortStableFunc(rep.Deprecated, directFirst)
 	slices.SortStableFunc(rep.Retracted, directFirst)
+	slices.SortStableFunc(rep.LowScorecard, func(a, b ScorecardModule) int {
+		return cmp.Or(cmp.Compare(a.Score, b.Score), directFirst(DeprecatedModule{Module: a.Module, Direct: a.Direct}, DeprecatedModule{Module: b.Module, Direct: b.Direct}))
+	})
 	rep.Modules.Vulnerable = len(vulnerableMods)
 	// The list stops at MaxLimit; the node count does not. Modules beyond the
 	// list are counted as indirect, which large lockfiles mostly are.
@@ -575,6 +605,15 @@ func WriteMarkdown(w io.Writer, r Report) error {
 	}
 	moduleTable(&b, "Deprecated dependencies", "Reason", r.Deprecated)
 	moduleTable(&b, "Retracted Go module versions", "Rationale", r.Retracted)
+	if len(r.LowScorecard) > 0 {
+		fmt.Fprintf(&b, "## Low OpenSSF Scorecard\n\nA hygiene note, not a vulnerability: the source projects of these dependencies score below %.1f of 10 on [OpenSSF Scorecard](https://scorecard.dev) (from deps.dev).\n\n", hygiene.LowScorecard)
+		b.WriteString("| Module | Version | Score | Direct | Lowest checks | Scored on |\n|---|---|---|---|---|---|\n")
+		for _, s := range r.LowScorecard {
+			checks := strings.Join(s.Checks, ", ")
+			fmt.Fprintf(&b, "| `%s` | %s | %.1f | %s | %s | %s |\n", s.Module, s.Version, s.Score, yesNo(s.Direct), cmp.Or(checks, "–"), s.Date)
+		}
+		b.WriteString("\n")
+	}
 	if len(r.OwnerCounts) > 0 {
 		b.WriteString("## Findings by owner (CODEOWNERS)\n\n| Owner | Findings | By severity |\n|---|---|---|\n")
 		for _, o := range r.OwnerCounts {

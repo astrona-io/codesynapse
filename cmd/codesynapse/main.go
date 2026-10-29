@@ -86,7 +86,7 @@ func (o *ingestOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.IntVar(&o.commitLimit, "commits", 500, "Number of recent commits to index (0 disables history)")
 	f.BoolVar(&o.allowNetwork, "allow-network", false, "Allow `go list` to download modules (off by default for untrusted repos)")
 	f.BoolVar(&o.vulns, "vulns", false, "Check dependencies against osv.dev (sends module paths and versions)")
-	f.BoolVar(&o.licenses, "license-lookup", false, "Ask deps.dev for dependency licences not found on disk, which dependencies are deprecated or behind their latest release, and the Go module proxy for retracted Go module versions (sends package names and versions)")
+	f.BoolVar(&o.licenses, "license-lookup", false, "Ask deps.dev for dependency licences not found on disk, which dependencies are deprecated or behind their latest release and the OpenSSF Scorecard of their source projects, and the Go module proxy for retracted Go module versions (sends package names and versions)")
 	f.BoolVar(&o.dataflow, "dataflow", false, "Resolve Go calls through function values with SSA and VTA (slower; edges marked dataflow)")
 	f.BoolVar(&o.watch, "watch", false, "Keep running and re-index when the git working tree changes (edits, commits, checkouts)")
 	f.DurationVar(&o.interval, "watch-interval", 2*time.Second, "How often --watch looks at the working tree; a change is indexed once it held for one interval")
