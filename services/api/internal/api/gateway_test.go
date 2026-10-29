@@ -189,13 +189,15 @@ func TestGatewayLocalFirstSetting(t *testing.T) {
 	f := newRuntimeFixture(t, Config{Gateway: true})
 	path := "/api/v1/accounts/orgs/" + f.org.Slug + "/gateway"
 	type setting struct {
-		Enabled    bool `json:"enabled"`
-		LocalFirst bool `json:"local_first"`
+		Enabled        bool `json:"enabled"`
+		LocalFirst     bool `json:"local_first"`
+		ShortenPrompts bool `json:"shorten_prompts"`
 	}
 	var got setting
 	require.Equal(t, f.client.do("GET", path, "", &got), 200)
-	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true}, "both on by default")
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true}, "both on by default, shortening off")
 	assert.Equal(t, f.client.do("PUT", path, `{"local_first":false}`, nil), 403, "API keys cannot change it")
+	assert.Equal(t, f.client.do("PUT", path, `{"shorten_prompts":true}`, nil), 403, "API keys cannot turn shortening on")
 
 	owner := newClient(t, f.client.ts)
 	require.Equal(t, owner.do("POST", "/api/v1/auth/login", `{"email":"runtime@example.com","password":"`+pw+`"}`, nil), 200)
@@ -206,6 +208,11 @@ func TestGatewayLocalFirstSetting(t *testing.T) {
 	assert.Equal(t, got, setting{Enabled: false, LocalFirst: false}, "older clients send only enabled")
 	require.Equal(t, owner.do("PUT", path, `{"enabled":true,"local_first":true}`, &got), 200)
 	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true})
+	require.Equal(t, owner.do("PUT", path, `{"shorten_prompts":true}`, &got), 200)
+	assert.Equal(t, got, setting{Enabled: true, LocalFirst: true, ShortenPrompts: true})
+	rows, err := f.accounts.St.ListEvents(t.Context(), accounts.EventFilter{OrgID: f.org.ID, Action: "org.gateway.shorten_prompts.set", Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "the change is audited")
 }
 
 func TestRecordGatewayTimeAndFallthrough(t *testing.T) {

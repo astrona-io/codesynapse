@@ -12,7 +12,7 @@ const policySaved = ref(false)
 const { data: gateway, refresh: refreshGateway } = useApiGet<OrgGateway>(() => `accounts/orgs/${org.value?.slug ?? '-'}/gateway`)
 const gatewaySaved = ref(false)
 const gatewayError = ref('')
-async function setGateway(change: { enabled?: boolean; local_first?: boolean }) {
+async function setGateway(change: { enabled?: boolean; local_first?: boolean; shorten_prompts?: boolean }) {
   gatewayError.value = ''
   gatewaySaved.value = false
   try {
@@ -196,8 +196,11 @@ watch(() => org.value?.slug, () => {
         <label class="check"><input type="checkbox" :checked="gateway?.enabled ?? true" :disabled="!gateway" @change="setGateway({ enabled: ($event.target as HTMLInputElement).checked })"> Let keys of this organisation use the gateway</label>
         <label class="check"><input type="checkbox" :checked="gateway?.local_first ?? true" :disabled="!gateway?.enabled" @change="setGateway({ local_first: ($event.target as HTMLInputElement).checked })"> Answer with the local model first</label>
         <p class="muted small">Turn this off if the local model is too small for your agents’ main model; quick requests still go to it.</p>
+        <label class="check"><input type="checkbox" :checked="gateway?.shorten_prompts ?? false" :disabled="!gateway?.enabled" @change="setGateway({ shorten_prompts: ($event.target as HTMLInputElement).checked })"> Shorten typed prompts before they go to the cloud</label>
+        <p class="muted small">The local model rewrites the prose people type into a shorter version that keeps every name, number and path. Code, tool results, files and the agent’s own instructions are sent as they are. A rewrite is made once and reused for the rest of the chat, so the provider’s prompt cache keeps working.</p>
       </template>
-      <p v-else>{{ gateway?.enabled ? 'On' : 'Off' }}{{ gateway?.enabled ? (gateway.local_first ? ', local model first' : ', local model for quick requests only') : '' }}. Ask an owner or admin to change it.</p>
+      <p v-else>{{ gateway?.enabled ? 'On' : 'Off' }}{{ gateway?.enabled ? (gateway.local_first ? ', local model first' : ', local model for quick requests only') : '' }}{{ gateway?.enabled && gateway.shorten_prompts ? ', typed prompts shortened' : '' }}. Ask an owner or admin to change it.</p>
+      <p v-if="gateway?.shorten_prompts && !gateway.shorten_available" class="notice">Prompts are not shortened yet: no local model is routed to <code>compress</code>, or the operator set <code>compress_prompts: false</code>. Requests go out as typed.</p>
       <p v-if="gatewaySaved" class="notice notice--ok" role="status">Gateway setting saved.</p>
       <p v-if="gatewayError" class="notice notice--danger" role="alert">{{ gatewayError }}</p>
     </section>

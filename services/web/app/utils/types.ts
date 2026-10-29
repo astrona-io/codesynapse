@@ -354,6 +354,11 @@ export interface OrgGateway {
   enabled: boolean
   local_first: boolean
   available: boolean
+  // The local model shortens prose people type before a request goes to
+  // the cloud; off until an owner or admin turns it on.
+  shorten_prompts: boolean
+  // A local model is routed to "compress" and the installation allows it.
+  shorten_available: boolean
 }
 
 export interface AccountOrg {

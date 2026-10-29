@@ -23,7 +23,7 @@ The specification describes a new pipeline; about half of it is in place and is 
 | Middleware in a local MCP bridge | `codesynapse mcp bridge` answers local tools (`ask_local`, git tools, worktree answers) and reports each one to `POST /api/v1/usage/local` | A local `fetch_source` tool in the same bridge |
 | Tier 2 local model | Local-only tasks (`llm.LocalTasks`: `local-answer`, `local-draft`, `compress`), refused on cloud providers, no cloud fallback | A `source-extract` local task |
 | Prompt compression before the cloud | `services/api/internal/llm/compress.go`: a local model shortens prose of CodeSynapse's own AI tasks; constant `terseSuffix` | Documentation templates (pillar C) |
-| Agent traffic through a local model | Agent gateway (`services/api/internal/api/gateway.go`), audited, counted | Nothing: gateway traffic stays unchanged |
+| Agent traffic through a local model | Agent gateway (`services/api/internal/api/gateway.go`), audited, counted | Nothing more: only prose people type is shortened, per organisation and off by default (`gateway/shorten.go`); tool payloads stay byte exact |
 | Token and cost ledger | Statistics → Models & savings, `stats_savings.go`, `pricing.go` with `price_source` | A "sources" savings line |
 | OpenTelemetry | `internal/telemetry` (bounded instruments, OTLP export, trace rules) | New instruments under the same label rules |
 | Storage | PostgreSQL accounts store; Milvus for vectors | Bridge-local cache files; a shared cache only after a decision (below) |
@@ -59,7 +59,7 @@ The specification describes a new pipeline; about half of it is in place and is 
 
 ## Pillar C: documentation prompts
 
-Applies to CodeSynapse's own generation tasks (briefings, PR summaries, cleanup briefings, the auto-generated docs pages), never to agent prompts passing through the gateway.
+Applies to CodeSynapse's own generation tasks (briefings, PR summaries, cleanup briefings, the auto-generated docs pages), never to agent prompts passing through the gateway (those are only shortened, not templated, when an organisation turns on prompt shortening).
 
 - A constant style block appended to those tasks' system prompts: no greetings or sign-offs; one-sentence description, then a table of parameters and return values, then one minimal example; imperative phrasing ("Returns the user", not "This function will return the user"); no filler ("Note that", "In order to", "As you can see").
 - Constant, so provider prompt caches still match (`AGENTS.md`: system prompts stay constant).

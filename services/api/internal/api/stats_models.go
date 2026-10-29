@@ -80,8 +80,8 @@ type ModelStats struct {
 	CompressionSaved *float64 `json:"compression_saved_dollars"`
 	// CompressionEnabled says whether prompts of CodeSynapse's own AI tasks
 	// are shortened before they go to a cloud model; CompressionOff says why
-	// not ("disabled", "no_local_model", "no_ai"). Gateway traffic is never
-	// shortened.
+	// not ("disabled", "no_local_model", "no_ai"). The gateway shortens
+	// people's prompts only for organisations that turned it on.
 	CompressionEnabled bool   `json:"compression_enabled"`
 	CompressionOff     string `json:"compression_off,omitempty"`
 	// Gateway counts the model requests agents sent through the gateway.
@@ -364,14 +364,19 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 	}
 	ref := s.priceReference()
 	out := ModelStats{Range: rng, Models: []ModelStat{}, Reference: &ref}
+	// all keeps the rows without requests for the money totals: prompt bytes
+	// the gateway shortened for a cloud model are counted on a model
+	// CodeSynapse itself may never have called.
+	all := make([]ModelStat, 0, len(models))
 	for _, m := range models {
-		if m.Requests == 0 && m.InputTokens == 0 {
-			continue
-		}
 		if s.cfg.LLM != nil {
 			if cfg, ok := s.cfg.LLM.Config(m.Provider); ok {
 				m.Configured, m.Local, m.ContextWindow = true, cfg.Local(), cfg.ContextWindow
 			}
+		}
+		all = append(all, *m)
+		if m.Requests == 0 && m.InputTokens == 0 {
+			continue
 		}
 		if m.Requests > 0 {
 			m.AvgPromptTokens = math.Round(m.InputTokens / m.Requests)
@@ -379,7 +384,7 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		slices.SortFunc(m.Tasks, func(a, b ModelTask) int { return cmp.Compare(b.Requests, a.Requests) })
 		out.Models = append(out.Models, *m)
 	}
-	out.Spent, out.CompressionSaved = s.moneyTotals(out.Models)
+	out.Spent, out.CompressionSaved = s.moneyTotals(all)
 	out.CompressionEnabled, out.CompressionOff = compressionState(s.cfg.LLM)
 	for _, f := range []*float64{&gw.Requests, &gw.Local, &gw.Cloud, &gw.Rejected, &gw.Failed, &gw.LocalUnmetered, &gw.LocalInputTokens, &gw.LocalOutputTokens, &gw.LocalCachedTokens, &gw.BytesIn, &gw.BytesOut} {
 		*f = math.Round(*f)
@@ -463,6 +468,11 @@ func (s *Server) moneyTotals(models []ModelStat) (spent, compression *float64) {
 			if cfg, ok := s.cfg.LLM.Config(m.Provider); ok && cfg.PriceInputPerMTok > 0 && cfg.PriceOutputPerMTok > 0 {
 				priced, inPrice = true, cfg.PriceInputPerMTok
 			}
+		}
+		if !priced && !m.Configured && m.Provider == llm.GatewayProvider {
+			// Prompts the gateway shortened for a cloud model no provider
+			// names: priced like the other figures, at the reference rate.
+			priced, inPrice = true, s.priceReference().InputPerMTok
 		}
 		if m.InputTokens+m.OutputTokens > 0 {
 			if m.CostDollars == nil {

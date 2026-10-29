@@ -120,3 +120,62 @@ func TestCompressible(t *testing.T) {
 		t.Run(name, func(t *testing.T) { assert.Equal(t, compressible(tc.in), tc.want) })
 	}
 }
+
+func TestShortenProse(t *testing.T) {
+	prose := strings.Repeat("Could you please look at the function `Load` because it really returns 42 entries instead of 40. ", 6)
+	short := "`Load` returns 42 entries, not 40."
+	cases := []struct {
+		name   string
+		on     *bool
+		text   string
+		answer string
+		ok     bool
+	}{
+		{name: "shortened", text: prose, answer: short, ok: true},
+		{name: "fact lost", text: prose, answer: "Load is wrong."},
+		{name: "not shorter", text: prose, answer: prose},
+		{name: "turned off", on: new(false), text: prose, answer: short},
+		{name: "code", text: prose + "\n```go\nfunc Load() {}\n```", answer: short},
+		{name: "secret", text: prose + " The config has password=supersecret1 in it.", answer: short},
+		{name: "too short", text: "fix `Load` please, 42", answer: "`Load` 42"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			local := &stubProvider{text: func(Request) string { return tc.answer }}
+			r, cloud, ctx := compressRegistry(t, tc.on, local)
+			got, ok := r.ShortenProse(ctx, tc.text)
+			assert.Equal(t, ok, tc.ok)
+			if tc.ok {
+				assert.Equal(t, got, short)
+			} else {
+				assert.Equal(t, got, "")
+			}
+			assert.Equal(t, len(cloud.got), 0, "the cloud model is never asked")
+			if len(local.got) > 0 {
+				assert.Equal(t, local.got[0].System, compressSystem)
+			}
+		})
+	}
+}
+
+func TestShortenProseWithoutLocalModel(t *testing.T) {
+	r := NewRegistry(Config{Providers: []ProviderConfig{{Name: "cloud", Kind: KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "m", MaxOutputTokens: 100, MaxInputTokens: 100000}}, Default: "cloud"})
+	cloud := &stubProvider{text: func(Request) string { return "short" }}
+	r.impl["cloud"] = cloud
+	_, ok := r.ShortenProse(t.Context(), strings.Repeat("Plain prose sentence number one hundred. ", 20))
+	assert.False(t, ok)
+	assert.Equal(t, len(cloud.got), 0)
+}
+
+func TestRecordGatewayCompressed(t *testing.T) {
+	r := NewRegistry(Config{Providers: []ProviderConfig{
+		{Name: "claude", Kind: KindAnthropic, Model: "claude-opus-5-5", MaxOutputTokens: 100, MaxInputTokens: 100000},
+		{Name: "local", Kind: KindOpenAI, BaseURL: "http://127.0.0.1:11434/v1", Model: "m", MaxOutputTokens: 100, MaxInputTokens: 100000},
+	}, Default: "claude"})
+	r.RecordGatewayCompressed(t.Context(), "claude-opus-5-5", 120)
+	assert.Equal(t, r.Usage("claude").CompressedBytes, 120, "a configured model gets the bytes")
+	r.RecordGatewayCompressed(t.Context(), "claude-other", 80)
+	r.RecordGatewayCompressed(t.Context(), "claude-opus-5-5", 0)
+	assert.Equal(t, r.Usage("claude").CompressedBytes, 120, "another model goes to the gateway provider")
+	assert.Equal(t, r.Usage(GatewayProvider), Usage{})
+}

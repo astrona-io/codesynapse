@@ -54,3 +54,24 @@ func (s *Store) SetGatewayLocalFirst(_ context.Context, orgID string, on bool) e
 	s.localFirst[orgID] = on
 	return nil
 }
+
+// GatewayShortenPrompts implements accounts.Store.
+func (s *Store) GatewayShortenPrompts(_ context.Context, orgID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.shorten[orgID], nil // never chose: off
+}
+
+// SetGatewayShortenPrompts implements accounts.Store.
+func (s *Store) SetGatewayShortenPrompts(_ context.Context, orgID string, on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.orgs[orgID]; !ok {
+		return fmt.Errorf("organisation: %w", accounts.ErrNotFound)
+	}
+	if s.shorten == nil {
+		s.shorten = map[string]bool{}
+	}
+	s.shorten[orgID] = on
+	return nil
+}

@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/astrona-io/codesynapse/internal/logx"
+	"github.com/astrona-io/codesynapse/internal/redact"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // compressSystem is constant on purpose: it is the prompt prefix of the local
@@ -133,13 +135,8 @@ func (r *Registry) compressCloud(ctx context.Context, name string, req Request) 
 			continue
 		}
 		calls++
-		resp, err := r.Complete(WithTask(ctx, "compress"), local, Request{System: compressSystem, User: p})
-		if err != nil {
-			logx.FromContext(ctx).Debug("prompt compression skipped", "error", err)
-			continue
-		}
-		short := strings.TrimSpace(resp.Text)
-		if short == "" || float64(len(short)) > compressGain*float64(len(p)) || !keepsFacts(p, short) {
+		short, ok := r.shorten(ctx, local, p)
+		if !ok {
 			continue
 		}
 		saved += len(p) - len(short)
@@ -149,4 +146,74 @@ func (r *Registry) compressCloud(ctx context.Context, name string, req Request) 
 		req.User = strings.Join(paras, "\n\n")
 	}
 	return req, saved
+}
+
+// shorten asks the local model to rewrite one paragraph. ok is false, and the
+// original must be used, when the call failed or the rewrite is empty, did not
+// shrink enough or lost a number or backticked name.
+func (r *Registry) shorten(ctx context.Context, local, p string) (string, bool) {
+	resp, err := r.Complete(WithTask(ctx, "compress"), local, Request{System: compressSystem, User: p})
+	if err != nil {
+		logx.FromContext(ctx).Debug("prompt compression skipped", "error", err)
+		return "", false
+	}
+	short := strings.TrimSpace(resp.Text)
+	if short == "" || float64(len(short)) > compressGain*float64(len(p)) || !keepsFacts(p, short) {
+		return "", false
+	}
+	return short, true
+}
+
+// ShortenProse has the local "compress" model shorten one block of prose a
+// person typed, for the agent gateway's cloud leg. The block is taken whole
+// or not at all: it must pass compressible (no code, diffs, lists, JSON or
+// tags) and hold nothing redact.Free would change, so a rewrite never puts a
+// placeholder where a secret or personal detail was. ok is false, and the
+// caller sends the original, when shortening is off, no local model is
+// routed to "compress", or the rewrite fails the checks of shorten.
+func (r *Registry) ShortenProse(ctx context.Context, text string) (string, bool) {
+	if !compressible(text) || redact.Free(text) != text {
+		return "", false
+	}
+	local, status := r.compressor()
+	if status != CompressionOn {
+		return "", false
+	}
+	return r.shorten(ctx, local, text)
+}
+
+// Prompt bytes the gateway removed for a cloud model the configuration does
+// not name are counted under this provider and model: the requested model is
+// client text and never a metric label. Statistics prices them at the
+// reference model.
+const (
+	GatewayProvider = "gateway-cloud"
+	GatewayModel    = "anthropic"
+)
+
+func init() { telemetry.AllowModels(GatewayProvider, GatewayModel) }
+
+// RecordGatewayCompressed counts prompt bytes the gateway removed before a
+// request went to the cloud. They are attributed to the configured cloud
+// Anthropic provider whose model is the one requested, so Statistics prices
+// them at its input price, and otherwise to GatewayProvider. model is only
+// compared, never recorded.
+func (r *Registry) RecordGatewayCompressed(ctx context.Context, model string, n int) {
+	if n <= 0 {
+		return
+	}
+	provider, label := GatewayProvider, GatewayModel
+	r.mu.Lock()
+	for _, p := range r.cfg.Providers {
+		if p.Kind == KindAnthropic && !p.Local() && p.Model != "" && p.Model == model {
+			provider, label = p.Name, p.Model
+			if u := r.usage[p.Name]; u != nil {
+				u.CompressedBytes += n
+			}
+			break
+		}
+	}
+	r.mu.Unlock()
+	ctx = telemetry.WithModel(ctx, provider, label)
+	telemetry.LLMCompressed.AddContext(ctx, float64(n), telemetry.Tenant(ctx), provider, label)
 }

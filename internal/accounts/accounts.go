@@ -449,6 +449,11 @@ type Store interface {
 	// requests to the local model first (true when it never chose).
 	GatewayLocalFirst(ctx context.Context, orgID string) (bool, error)
 	SetGatewayLocalFirst(ctx context.Context, orgID string, on bool) error
+	// GatewayShortenPrompts says whether the gateway has the local model
+	// shorten prose people type before it goes to the cloud (false when it
+	// never chose).
+	GatewayShortenPrompts(ctx context.Context, orgID string) (bool, error)
+	SetGatewayShortenPrompts(ctx context.Context, orgID string, on bool) error
 	// ImageScan reads the image findings of a repository namespace; ok is
 	// false when none were uploaded. SetImageScan replaces them and
 	// DeleteImageScan removes them.

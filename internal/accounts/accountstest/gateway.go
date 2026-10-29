@@ -99,4 +99,34 @@ func RunGateway(t *testing.T, st accounts.Store) {
 	assert.True(t, first)
 	err = svc.SetGatewayLocalFirst(ctx, owner, "gw-org-missing", false)
 	assert.True(t, errors.Is(err, accounts.ErrForbidden) || errors.Is(err, accounts.ErrNotFound), "unknown organisation")
+
+	// Prompt shortening: off by default, also for rows written for the
+	// other settings, since it alters the words people typed.
+	for _, org := range []string{"gw-org-a", "gw-org-b"} {
+		short, err := svc.GatewayShortenPrompts(ctx, org)
+		require.NoError(t, err)
+		assert.False(t, short, "off until an organisation turns it on")
+	}
+	assert.True(t, errors.Is(svc.SetGatewayShortenPrompts(ctx, member, "gw-org-a", true), accounts.ErrForbidden), "members cannot change it")
+	assert.True(t, errors.Is(svc.SetGatewayShortenPrompts(ctx, key, "gw-org-a", true), accounts.ErrForbidden), "API keys cannot change it")
+	require.NoError(t, svc.SetGatewayShortenPrompts(ctx, owner, "gw-org-a", true))
+	set, err = svc.GatewaySetting(ctx, member, "gw-org-a")
+	require.NoError(t, err)
+	assert.Equal(t, set, accounts.GatewaySettings{Enabled: true, LocalFirst: true, ShortenPrompts: true})
+	short, err := svc.GatewayShortenPrompts(ctx, "gw-org-b")
+	require.NoError(t, err)
+	assert.False(t, short, "the choice is per organisation")
+	rows, err = st.ListEvents(ctx, accounts.EventFilter{OrgID: "gw-org-a", Action: "org.gateway.shorten_prompts.set", Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "the change is audited")
+	assert.Equal(t, rows[0].Detail, "shorten_prompts=true")
+	require.NoError(t, svc.SetGatewayShortenPrompts(ctx, owner, "gw-org-a", false))
+	short, err = svc.GatewayShortenPrompts(ctx, "gw-org-a")
+	require.NoError(t, err)
+	assert.False(t, short)
+	on, err = svc.GatewayEnabled(ctx, "gw-org-a")
+	require.NoError(t, err)
+	assert.True(t, on, "shortening leaves the gateway on")
+	err = svc.SetGatewayShortenPrompts(ctx, owner, "gw-org-missing", true)
+	assert.True(t, errors.Is(err, accounts.ErrForbidden) || errors.Is(err, accounts.ErrNotFound), "unknown organisation")
 }

@@ -67,7 +67,7 @@ const COMPRESSION_OFF: Record<string, string> = {
   no_local_model: 'no local model to shorten with',
   no_ai: 'no AI providers configured',
 }
-const compressionOffHint = computed(() => `${COMPRESSION_OFF[m.value?.compression_off ?? ''] ?? 'not running'}; covers CodeSynapse's own AI tasks, not gateway traffic`)
+const compressionOffHint = computed(() => `${COMPRESSION_OFF[m.value?.compression_off ?? ''] ?? 'not running'}; covers CodeSynapse's own AI tasks and, where an organisation turned it on, prompts typed through the gateway`)
 // Gateway answers the local model gave, priced at the reference model on the server; null when a local answer reported no usage.
 const gw = computed(() => m.value?.gateway)
 const gwSaved = computed(() => gw.value?.saved_dollars ?? null)
@@ -134,7 +134,7 @@ const modelWindow = computed(() => (days.value > 30 ? 'the last 30 days (the met
         <StatTile
           v-if="savedParts" label="Saved by shorter prompts"
           :value="!compressionOn ? 'off' : compressionSaved === null ? 'unknown' : money(compressionSaved)"
-          :tip="!compressionOn ? compressionOffHint : compressionSaved === null ? 'a cloud model has no price set; not in the total' : 'CodeSynapse\'s own AI tasks: prose a local model shortened before it went to the cloud, at the input price; gateway traffic is passed on unchanged'"
+          :tip="!compressionOn ? compressionOffHint : compressionSaved === null ? 'a cloud model has no price set; not in the total' : 'CodeSynapse\'s own AI tasks, and prompts typed through the gateway where an organisation turned shortening on: prose a local model shortened before it went to the cloud, at the input price (each gateway rewrite counted once)'"
         />
         <StatTile v-if="savedParts" label="Saved by graph answers" :value="graphSaved === null ? 'unknown' : money(graphSaved)" :hint="graphShort" :tip="graphHint" />
         <StatTile v-if="savedParts" label="Saved on input" :value="money(savedParts.input)" :hint="`${fmtCompact(Math.max(0, localIn - localCached))} tokens read by local models instead`" />

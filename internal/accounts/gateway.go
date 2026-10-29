@@ -26,8 +26,9 @@ func (s *Service) GatewayLocalFirst(ctx context.Context, orgID string) (bool, er
 
 // GatewaySettings is an organisation's gateway choice.
 type GatewaySettings struct {
-	Enabled    bool
-	LocalFirst bool
+	Enabled        bool
+	LocalFirst     bool
+	ShortenPrompts bool
 }
 
 // GatewaySetting returns the settings for a member of the organisation.
@@ -40,7 +41,36 @@ func (s *Service) GatewaySetting(ctx context.Context, p Principal, orgID string)
 		return GatewaySettings{}, err
 	}
 	first, err := s.St.GatewayLocalFirst(ctx, orgID)
-	return GatewaySettings{Enabled: on, LocalFirst: first}, err
+	if err != nil {
+		return GatewaySettings{}, err
+	}
+	shorten, err := s.St.GatewayShortenPrompts(ctx, orgID)
+	return GatewaySettings{Enabled: on, LocalFirst: first, ShortenPrompts: shorten}, err
+}
+
+// GatewayShortenPrompts says whether the organisation's gateway has the local
+// model shorten prose people type before a request goes to the cloud (off
+// unless someone turned it on). Like GatewayEnabled it checks no caller.
+func (s *Service) GatewayShortenPrompts(ctx context.Context, orgID string) (bool, error) {
+	return s.St.GatewayShortenPrompts(ctx, orgID)
+}
+
+// SetGatewayShortenPrompts turns prompt shortening on the cloud leg on or
+// off. It alters the words people typed, so it is off by default. Same rules
+// as SetGateway.
+func (s *Service) SetGatewayShortenPrompts(ctx context.Context, p Principal, orgID string, on bool) error {
+	if err := signedIn(p); err != nil {
+		return err
+	}
+	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+		return err
+	}
+	e := actorEvent(p, "org.gateway.shorten_prompts.set", orgID, orgID)
+	e.Detail = fmt.Sprintf("shorten_prompts=%t", on)
+	if _, err := s.Record(ctx, e); err != nil {
+		return err
+	}
+	return s.St.SetGatewayShortenPrompts(ctx, orgID, on)
 }
 
 // SetGatewayLocalFirst chooses whether every model's requests go to the

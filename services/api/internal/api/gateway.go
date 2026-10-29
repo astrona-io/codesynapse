@@ -14,6 +14,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/services/api/internal/gateway"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
 // maxGatewayInFlight caps the requests one key may have open at once, so a
@@ -63,6 +64,15 @@ func (s *Server) auditGateway(ctx context.Context, m gateway.Meta, status int, t
 	e := accounts.Event{
 		Action: "gateway.request", Target: m.Path, Status: status, Outcome: accounts.Success, Via: "anonymous",
 		Detail: fmt.Sprintf("route=%s model=%s stream=%t tools=%t bytes=%d ms=%d", m.Route, model, m.Stream, m.Tools, m.Bytes, took.Milliseconds()),
+	}
+	if m.Shortened {
+		e.Detail += fmt.Sprintf(" shortened=true removed=%d", m.Removed)
+	}
+	// Bytes a rewrite made for this request removed count as prompt
+	// compression of the requested model; the name is only compared with
+	// the configured providers, never recorded.
+	if m.Saved > 0 && s.cfg.LLM != nil {
+		s.cfg.LLM.RecordGatewayCompressed(ctx, m.Model, m.Saved)
 	}
 	if status >= 400 {
 		e.Outcome = accounts.Failure
@@ -115,6 +125,17 @@ func (s *Server) gatewayRoutes() {
 			return nil
 		}
 		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire, ContextWindow: t.ContextWindow}
+	}
+	// Shortening uses the local "compress" task only; compress_prompts: false
+	// in config/llm.yaml turns it off for the installation.
+	g.Shorten = &gateway.Shortener{
+		Ready: func() bool { return s.cfg.LLM != nil && s.cfg.LLM.CompressionStatus() == llm.CompressionOn },
+		Rewrite: func(ctx context.Context, text string) (string, bool) {
+			if s.cfg.LLM == nil {
+				return "", false
+			}
+			return s.cfg.LLM.ShortenProse(ctx, text)
+		},
 	}
 	g.Done = s.auditGateway
 	var open keyLimit
@@ -171,6 +192,11 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 		s.accountError(w, err)
 		return r, false
 	}
+	shorten, err := s.cfg.Accounts.GatewayShortenPrompts(r.Context(), m.Org.ID)
+	if err != nil {
+		s.accountError(w, err)
+		return r, false
+	}
 	id, err := s.cfg.Accounts.GatewayExecutionSession(r.Context(), p, m.Org.ID)
 	if err != nil {
 		s.problem(w, http.StatusForbidden, errors.New("this key cannot use the gateway"))
@@ -181,14 +207,16 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 		s.problem(w, http.StatusForbidden, err)
 		return r, false
 	}
-	return r.WithContext(gateway.WithLocalFirst(ctx, first)), true
+	return r.WithContext(gateway.WithShortenPrompts(gateway.WithLocalFirst(ctx, first), shorten)), true
 }
 
 // handleOrgGateway reads (any member) or sets (owner or admin, signed-in
 // session only) whether the organisation uses the agent gateway (on unless
-// switched off) and whether the local model answers first (on unless switched
-// off). A PUT changes only the fields it sends. "available" says whether the
-// operator turned the gateway on for the installation.
+// switched off), whether the local model answers first (on unless switched
+// off) and whether it shortens typed prose bound for the cloud (off unless
+// switched on). A PUT changes only the fields it sends. "available" says
+// whether the operator turned the gateway on for the installation, and
+// "shorten_available" whether a local model can shorten prompts at all.
 func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 	least := accounts.Member
 	if r.Method == http.MethodPut {
@@ -200,16 +228,23 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPut {
 		var req struct {
-			Enabled    *bool `json:"enabled"`
-			LocalFirst *bool `json:"local_first"`
+			Enabled        *bool `json:"enabled"`
+			LocalFirst     *bool `json:"local_first"`
+			ShortenPrompts *bool `json:"shorten_prompts"`
 		}
 		if err := decodeJSON(w, r, &req); err != nil {
 			s.problem(w, http.StatusBadRequest, err)
 			return
 		}
-		if req.Enabled == nil && req.LocalFirst == nil {
-			s.problem(w, http.StatusBadRequest, errors.New("send enabled, local_first or both"))
+		if req.Enabled == nil && req.LocalFirst == nil && req.ShortenPrompts == nil {
+			s.problem(w, http.StatusBadRequest, errors.New("send enabled, local_first, shorten_prompts or several"))
 			return
+		}
+		if req.ShortenPrompts != nil {
+			if err := s.cfg.Accounts.SetGatewayShortenPrompts(r.Context(), p, o.ID, *req.ShortenPrompts); err != nil {
+				s.accountError(w, err)
+				return
+			}
 		}
 		if req.Enabled != nil {
 			if err := s.cfg.Accounts.SetGateway(r.Context(), p, o.ID, *req.Enabled); err != nil {
@@ -229,7 +264,9 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": set.Enabled, "local_first": set.LocalFirst, "available": s.cfg.Gateway})
+	shortenReady, _ := compressionState(s.cfg.LLM)
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": set.Enabled, "local_first": set.LocalFirst, "shorten_prompts": set.ShortenPrompts,
+		"available": s.cfg.Gateway, "shorten_available": shortenReady})
 }
 
 // recordGateway counts one gateway request. Only the route, the status class,

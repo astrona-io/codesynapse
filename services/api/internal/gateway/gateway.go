@@ -1,7 +1,9 @@
 // Package gateway is the pass-through between an agent and a model API. It
 // holds each request in a queue, decides where it goes, and streams the answer
-// back untouched. It never shortens a prompt (tool payloads must stay exact),
-// never stores or logs the caller's credential, and never records prompt text.
+// back untouched. Tool payloads, system prompts and code always pass byte for
+// byte; only prose a person typed may be shortened on the cloud leg, when the
+// organisation turned that on (shorten.go). It never stores or logs the
+// caller's credential, and never records prompt text.
 package gateway
 
 import (
@@ -66,6 +68,11 @@ type Meta struct {
 	// the cloud: one of the Fall* reasons, empty when the local model
 	// answered or was never asked.
 	Fallthrough string
+	// Shortened says the local model shortened prose of a cloud request;
+	// Removed is the bytes taken out of this request and Saved the part a
+	// rewrite made for this request removed (Shortened in shorten.go).
+	Shortened      bool
+	Removed, Saved int
 }
 
 // countWriter counts the bytes of the response.
@@ -97,6 +104,10 @@ type Anthropic struct {
 	// /v1/messages it accepts (see Local.Eligible); the rest, and any it
 	// cannot take in time or answer whole, go to the cloud.
 	Local func() *Local
+	// Shorten, when set, shortens the user's typed prose of /v1/messages
+	// requests that go to the cloud, for organisations that turned it on
+	// (WithShortenPrompts).
+	Shorten *Shortener
 	// Done is called once per request with what happened; it must not retain
 	// anything but the values it is given.
 	Done func(ctx context.Context, m Meta, status int, took time.Duration)
@@ -148,6 +159,11 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			meta.Route = "rejected"
 			done(r.Context(), meta, http.StatusUnauthorized)
 			return
+		}
+		if upstreamPath == "/v1/messages" && g.Shorten != nil && shortenOn(r.Context()) {
+			var sh Shortened
+			body, sh = g.Shorten.Apply(r.Context(), body)
+			meta.Shortened, meta.Removed, meta.Saved = sh.Changed, sh.Removed, sh.New
 		}
 		status, err := g.forward(r.Context(), w, r, upstreamPath, body)
 		if err != nil {
