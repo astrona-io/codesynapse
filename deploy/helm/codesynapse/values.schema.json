@@ -171,7 +171,7 @@
           "type": "boolean"
         },
         "licenseLookup": {
-          "description": "Ask deps.dev for licences not found on disk and for deprecated or outdated dependencies (sends package names and versions).",
+          "description": "Ask deps.dev for licences not found on disk and for deprecated or outdated dependencies, and proxy.golang.org for retracted Go module versions (sends package names and versions).",
           "type": "boolean"
         },
         "allowNetwork": {

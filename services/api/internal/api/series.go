@@ -58,6 +58,22 @@ const (
 	gatewayReasons = `sum by (reason) (increase(gateway_fallthrough_total[$w]))`
 )
 
+// gatewayQuantilesHelp says where the quantile lines come from: the
+// histogram's buckets (telemetry's latency buckets), so every value is an
+// estimate interpolated inside the bucket it falls in.
+const gatewayQuantilesHelp = " Quantiles are estimated from histogram buckets (bounds at 5, 10, 25, 50, 100, 250 and 500 ms, then 1, 2.5, 5, 10, 30, 60, 120 and 300 s), so a value is only as precise as the bucket it falls in."
+
+// gatewayQuantiles are the p50, p75, p95 and p99 response time of one
+// gateway route. route is a constant of this package (local, cloud), never
+// request input.
+func gatewayQuantiles(route string) []seriesQuery {
+	var qs []seriesQuery
+	for _, q := range []struct{ name, phi string }{{"p50", "0.5"}, {"p75", "0.75"}, {"p95", "0.95"}, {"p99", "0.99"}} {
+		qs = append(qs, seriesQuery{name: q.name, expr: `histogram_quantile(` + q.phi + `, sum by (le) (increase(gateway_request_duration_seconds_bucket{route="` + route + `"}[$w])))`})
+	}
+	return qs
+}
+
 // OTLP can split related gauges across HTTP batches. Only observations whose
 // count and freshness samples came from the same export are eligible.
 const memoryObserved = `agent_memory_facts_observed_at_seconds and (timestamp(agent_memory_facts_count) == timestamp(agent_memory_facts_observed_at_seconds))`
@@ -219,6 +235,14 @@ var seriesPanels = map[string]seriesPanel{
 		Help:    "95th percentile time to answer a gateway request, by route: local model, cloud, or rejected before any model saw it.",
 		Empty:   "No gateway request in this window.",
 		queries: []seriesQuery{{expr: gatewayP95, by: "route"}}},
+	"gateway_latency_local": {Title: "Response time, local model", Unit: "seconds", Kind: "gauge",
+		Help:    "Time from request to last byte for gateway requests the local model answered: median (p50), p75, p95 and p99." + gatewayQuantilesHelp,
+		Empty:   "The local model answered no gateway request in this window.",
+		queries: gatewayQuantiles("local")},
+	"gateway_latency_cloud": {Title: "Response time, cloud", Unit: "seconds", Kind: "gauge",
+		Help:    "Time from request to last byte for gateway requests the cloud answered, including any time first spent on the local model: median (p50), p75, p95 and p99." + gatewayQuantilesHelp,
+		Empty:   "The cloud answered no gateway request in this window.",
+		queries: gatewayQuantiles("cloud")},
 	"gateway_latency_avg": {Title: "Gateway response time (average)", Unit: "seconds", Kind: "gauge",
 		Help:    "Average time to answer a gateway request, by route: local model, cloud, or rejected before any model saw it.",
 		Empty:   "No gateway request in this window.",

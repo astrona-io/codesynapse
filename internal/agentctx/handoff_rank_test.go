@@ -100,3 +100,17 @@ func TestKeywordsKeepNamedIdentifiersUnderTheCap(t *testing.T) {
 	assert.Equal(t, keywords("hook counter agentStats")[0], "hook", "under the cap the task's order stays")
 	assert.Contains(t, keywords("Handler Do main Usage"), "Handler", "a task of plain names keeps them")
 }
+
+// NamesCode decides whether the brief plan trusts minimal_context's "exact"
+// matches (PLAN item 18, case i): a prompt in plain words names no code.
+func TestNamesCode(t *testing.T) {
+	for task, want := range map[string]bool{
+		"The agent gateway should route local first: only Haiku-class requests qualify": false,
+		"keep the exclude list, and all cloud models should default to local":           false,
+		"make ReplaceRepo retry":                 true,
+		"update docs/hooks/doc_status.py":        true,
+		"call agentctx.NamesCode before ranking": true,
+	} {
+		assert.Equal(t, NamesCode(task), want, task)
+	}
+}

@@ -49,6 +49,7 @@ func RecordGit(ctx context.Context, operation, outcome string, d time.Duration) 
 const (
 	LookupOSV          = "osv"
 	LookupDepsDev      = "depsdev"
+	LookupGoProxy      = "goproxy"
 	LookupForgeGitHub  = "forge_github"
 	LookupForgeGitLab  = "forge_gitlab"
 	LookupForgeForgejo = "forge_forgejo"
@@ -59,7 +60,7 @@ const (
 	LookupRateLimited = "rate_limited"
 )
 
-var lookupServices = map[string]bool{LookupOSV: true, LookupDepsDev: true, LookupForgeGitHub: true, LookupForgeGitLab: true, LookupForgeForgejo: true}
+var lookupServices = map[string]bool{LookupOSV: true, LookupDepsDev: true, LookupGoProxy: true, LookupForgeGitHub: true, LookupForgeGitLab: true, LookupForgeForgejo: true}
 
 var lookupOutcomes = map[string]bool{LookupOK: true, LookupError: true, LookupTimeout: true, LookupRateLimited: true}
 
