@@ -77,7 +77,7 @@ func TestPlatformStats(t *testing.T) {
 			User accounts.User
 			Org  accounts.Org
 		}
-		require.Equal(t, c.do("POST", "/api/v1/auth/signup", `{"email":"`+email+`","name":"N","password":"`+pw+`"}`, &signed), 201)
+		require.Equal(t, c.signUp(`{"email":"`+email+`","name":"N","password":"`+pw+`"}`, &signed), 202)
 		return c, signed.User, signed.Org
 	}
 	// Pat is in three organisations and holds the repository.

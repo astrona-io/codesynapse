@@ -121,7 +121,7 @@ func TestRootGovernance(t *testing.T) {
 		User accounts.User
 		Org  accounts.Org
 	}
-	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 201)
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 202)
 	root := rootClient(t, ts)
 
 	var me struct {
@@ -142,7 +142,7 @@ func TestRootGovernance(t *testing.T) {
 	// nothing.
 	carol := newClient(t, ts)
 	var carolSigned struct{ User accounts.User }
-	require.Equal(t, carol.do("POST", "/api/v1/auth/signup", `{"email":"carol@example.com","name":"Carol","password":"`+pw+`"}`, &carolSigned), 201)
+	require.Equal(t, carol.signUp(`{"email":"carol@example.com","name":"Carol","password":"`+pw+`"}`, &carolSigned), 202)
 	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+signed.Org.Slug+"/members", `{"email":"carol@example.com","role":"viewer"}`, nil), 200)
 	assert.Equal(t, root.do("POST", "/api/v1/admin/orgs/"+signed.Org.ID+"/owner", `{"user_id":"`+carolSigned.User.ID+`"}`, nil), 204)
 	role, err := acc.St.MemberRole(ctx, signed.Org.ID, carolSigned.User.ID)

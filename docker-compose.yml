@@ -298,7 +298,8 @@ services:
       CODESYNAPSE_ALLOW_NETWORK: ${CODESYNAPSE_ALLOW_NETWORK:-false}
       # Check go.mod dependencies against osv.dev (sends module paths + versions only).
       CODESYNAPSE_VULN_SCAN: ${CODESYNAPSE_VULN_SCAN:-true}
-      # Dependency licences not found on disk are looked up on deps.dev
+      # Dependency licences not found on disk, deprecations and latest versions
+      # are looked up on deps.dev, Go retractions on proxy.golang.org
       # (package names and versions only).
       CODESYNAPSE_LICENSE_LOOKUP: ${CODESYNAPSE_LICENSE_LOOKUP:-true}
       # Resolve Go calls through function values with SSA/VTA (slower ingest).

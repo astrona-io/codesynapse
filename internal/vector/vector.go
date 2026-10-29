@@ -61,6 +61,44 @@ type Prober interface {
 	Has(ctx context.Context, model, tenant, namespace string, ids []string) (map[string]bool, error)
 }
 
+// Sweeper pages through and removes the stored items of one tenant, under
+// every model, so a caller can clear what no longer belongs (symbol vectors
+// of a repository that changed or went). Session items are never touched.
+// Flat and the Milvus index implement it.
+type Sweeper interface {
+	// Scan returns up to limit (at most MaxScan) items of tenant with an ID
+	// above after, in ID order, without vectors. A non-empty namespace
+	// limits it to that namespace. An item stored under several models is
+	// listed once.
+	Scan(ctx context.Context, tenant, namespace, after string, limit int) ([]Item, error)
+	// DeleteIn removes the given IDs of tenant's namespace under every model;
+	// items of the same ID in another tenant or namespace stay.
+	DeleteIn(ctx context.Context, tenant, namespace string, ids []string) error
+	// DeleteNamespace removes every item of tenant's namespace under every
+	// model.
+	DeleteNamespace(ctx context.Context, tenant, namespace string) error
+}
+
+// MaxScan bounds one Sweeper.Scan page.
+const MaxScan = 1000
+
+// ErrNoNamespace rejects a delete without a namespace.
+var ErrNoNamespace = errors.New("vector: namespace is required")
+
+// CheckScope validates the tenant and namespace of a Sweeper delete.
+func CheckScope(tenant, namespace string) error {
+	if tenant == "" {
+		return ErrNoTenant
+	}
+	if namespace == "" {
+		return ErrNoNamespace
+	}
+	return nil
+}
+
+// ScanLimit bounds a Scan limit to 1..MaxScan.
+func ScanLimit(limit int) int { return max(1, min(limit, MaxScan)) }
+
 // A search returns MinK to MaxK hits (DefaultK when unset): recall should
 // add a few strong entities, not a long tail that floods the context. Fewer
 // than three gives the graph expansion too little to work from.
@@ -136,8 +174,9 @@ type flatItem struct {
 }
 
 var (
-	_ Index  = (*Flat)(nil)
-	_ Prober = (*Flat)(nil)
+	_ Index   = (*Flat)(nil)
+	_ Prober  = (*Flat)(nil)
+	_ Sweeper = (*Flat)(nil)
 )
 
 // NewFlat returns an empty index.
@@ -200,6 +239,53 @@ func (f *Flat) Delete(_ context.Context, ids []string) error {
 	defer f.mu.Unlock()
 	for _, id := range ids {
 		delete(f.items, id)
+	}
+	return nil
+}
+
+// Scan implements Sweeper.
+func (f *Flat) Scan(_ context.Context, tenant, namespace, after string, limit int) ([]Item, error) {
+	if tenant == "" {
+		return nil, ErrNoTenant
+	}
+	f.mu.RLock()
+	var out []Item
+	for _, it := range f.items {
+		if it.SessionID == "" && it.Tenant == tenant && (namespace == "" || it.Namespace == namespace) && it.ID > after {
+			out = append(out, Item{ID: it.ID, Tenant: it.Tenant, Namespace: it.Namespace})
+		}
+	}
+	f.mu.RUnlock()
+	slices.SortFunc(out, func(a, b Item) int { return cmp.Compare(a.ID, b.ID) })
+	return out[:min(len(out), ScanLimit(limit))], nil
+}
+
+// DeleteIn implements Sweeper.
+func (f *Flat) DeleteIn(_ context.Context, tenant, namespace string, ids []string) error {
+	if err := CheckScope(tenant, namespace); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, id := range ids {
+		if it, ok := f.items[id]; ok && it.SessionID == "" && it.Tenant == tenant && it.Namespace == namespace {
+			delete(f.items, id)
+		}
+	}
+	return nil
+}
+
+// DeleteNamespace implements Sweeper.
+func (f *Flat) DeleteNamespace(_ context.Context, tenant, namespace string) error {
+	if err := CheckScope(tenant, namespace); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for id, it := range f.items {
+		if it.SessionID == "" && it.Tenant == tenant && it.Namespace == namespace {
+			delete(f.items, id)
+		}
 	}
 	return nil
 }

@@ -162,8 +162,18 @@ func (s *Service) SignUpWith(ctx context.Context, in SignUpInput) (User, Org, er
 	} else if setup.State == SetupPending && n == 1 {
 		return User{}, Org{}, ErrSetupRequired
 	}
-	if err := s.St.CreateUser(ctx, u); err != nil {
+	// The username first: a taken one is reported whatever the email is, so
+	// the answer never depends on whether the email has an account.
+	if taken, err := s.usernameTaken(ctx, u.Username); err != nil {
 		return User{}, Org{}, err
+	} else if taken {
+		return User{}, Org{}, ErrUsernameTaken
+	}
+	if err := s.St.CreateUser(ctx, u); err != nil {
+		if !errors.Is(err, ErrExists) {
+			return User{}, Org{}, err
+		}
+		return User{}, Org{}, s.signUpConflict(ctx, u)
 	}
 	org, err := s.createOrg(ctx, u.ID, u.Name+"'s organisation", "")
 	if err != nil {
@@ -171,6 +181,32 @@ func (s *Service) SignUpWith(ctx context.Context, in SignUpInput) (User, Org, er
 	}
 	s.audit(ctx, Event{UserID: u.ID, ActorEmail: u.Email, Via: "anonymous", OrgID: org.ID, Action: "user.signup", Target: u.Email})
 	return u, org, nil
+}
+
+// usernameTaken reports whether another account has the username.
+func (s *Service) usernameTaken(ctx context.Context, username string) (bool, error) {
+	if username == "" {
+		return false, nil
+	}
+	_, err := s.St.UserByUsername(ctx, username)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// signUpConflict classifies a refused CreateUser. A username taken since the
+// check above still reads as a taken username; anything else is the email.
+// The real outcome is audited here, because the API answers a taken email
+// like a sign-up that worked.
+func (s *Service) signUpConflict(ctx context.Context, u User) error {
+	if taken, err := s.usernameTaken(ctx, u.Username); err != nil {
+		return err
+	} else if taken {
+		return ErrUsernameTaken
+	}
+	s.audit(ctx, Event{Via: "anonymous", Action: "user.signup", Target: u.Email, Outcome: Failure, Detail: "email already registered"})
+	return ErrEmailTaken
 }
 
 // Login checks credentials and returns a new session token. login is an

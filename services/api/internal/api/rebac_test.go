@@ -36,7 +36,7 @@ func TestReBACOverHTTP(t *testing.T) {
 	t.Cleanup(ts.Close)
 	signup := func(email string) *client {
 		c := newClient(t, ts)
-		require.Equal(t, c.do("POST", "/api/v1/auth/signup", `{"email":"`+email+`","name":"`+email+`","password":"`+pw+`"}`, nil), 201)
+		require.Equal(t, c.signUp(`{"email":"`+email+`","name":"`+email+`","password":"`+pw+`"}`, nil), 202)
 		return c
 	}
 	bob := signup("bob@example.com")

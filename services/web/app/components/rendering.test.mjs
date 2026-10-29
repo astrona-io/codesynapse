@@ -47,7 +47,8 @@ async function renderComponent(t, file, globals, props = {}) {
   app.component('GraphCanvas', { template: '<div />' })
   app.component('StatTile', { props: ['label', 'value', 'hint', 'tip', 'tone'], template: '<div :data-tone="tone">{{ label }} {{ value }} {{ hint }} <i>{{ tip }}</i></div>' })
   app.component('ColumnChart', { template: '<div />' })
-  app.component('RankList', { template: '<div />' })
+  app.component('RankList', { props: ['rows'], template: '<ul class="rank"><li v-for="r in rows ?? []" :key="r.label">{{ r.label }} {{ r.value }}</li></ul>' })
+  app.component('SeriesCard', { props: ['panel', 'yMax'], template: '<figure :data-panel="panel" :data-ymax="yMax" />' })
   app.component('InfoTip', { props: ['text', 'term', 'label'], template: '<i class="info">{{ text }}</i>' })
   app.component('NuxtLink', { template: '<a><slot /></a>' })
   app.component('DataState', await compileComponent(t, './DataState.vue'))
@@ -266,30 +267,44 @@ test('models and savings split the token pool without counting ask_local twice',
   assert.match(html, /Spent on cloud models \(est\.\) \$0\.25 /)
   assert.match(html, /Saved by shorter prompts \$0\.50 +<i>CodeSynapse&#39;s own AI tasks/)
   assert.match(html, /prompts typed through the gateway unless an organisation turned shortening off/)
-  assert.match(html, /Gateway requests 10 6 local · 3 cloud · 1 refused · 1 failed/)
-  assert.match(html, /Answered locally 60% /)
-  assert.match(html, /Saved by local answers \$0\.25 /)
+  assert.match(html, /Saved by gateway answers \$0\.25 /)
+  assert.match(html, /Statistics → Gateway/)
+  assert.doesNotMatch(html, /Gateway requests \d|Local model timeouts/, 'the gateway tiles moved to their own page')
 })
 
-test('gateway tiles show timeouts, fall-through reasons and response times local vs cloud', async (t) => {
+test('gateway page: tiles, quantile charts on one scale and reasons as bars', async (t) => {
   const gateway = {
-    requests: 40, local: 30, cloud: 10, rejected: 0, failed: 0, local_share_pct: 75, bytes_in: 1, bytes_out: 1,
+    requests: 40, local: 30, cloud: 10, rejected: 0, failed: 1, local_share_pct: 75, bytes_in: 1, bytes_out: 1,
     local_input_tokens: 0, local_output_tokens: 0, local_unmetered: 0, saved_dollars: 0,
     fallthroughs: 8, fallthrough_reasons: { queue_timeout: 3, answer_timeout: 1, too_large: 4 }, timeouts: 4, timeout_share_pct: 10,
     local_avg_seconds: 2, local_p95_seconds: 4.5, cloud_avg_seconds: 12.4, cloud_p95_seconds: null,
     queue_avg_seconds: 0.25, queue_p95_seconds: 19.5, local_answer_avg_seconds: 1.5,
   }
-  const render = (gw) => renderComponent(t, '../pages/stats/models.vue', {
-    useStatistics: () => ({ days: ref(30), error: ref(null), pending: ref(false), s: ref({ agents: { tokens: { total: 0 } } }) }),
-    useApiGet: (url) => ({ data: ref(url().startsWith('stats/savings') ? null : { range: '30d', models: [], gateway: gw }), error: ref(null), pending: ref(false) }),
-    localSaved, totalSaved, windowLabel,
-    seriesRangeFor: () => '30d',
-    seriesRangeLabel: () => 'Last 30 days',
+  const line = (name, values) => ({ name, values, total: Math.max(...values) })
+  const panels = {
+    gateway_latency_local: { status: 200, data: { series: [line('p50', [0.2, 0.4]), line('p99', [1.5, 3])] } },
+    gateway_latency_cloud: { status: 200, data: { series: [line('p50', [1, 2]), line('p99', [6, 9])] } },
+  }
+  const render = (gw) => renderComponent(t, '../pages/stats/gateway.vue', {
+    useStatistics: () => ({ days: ref(7), error: ref(null), pending: ref(false), s: ref(null) }),
+    useApiGet: () => ({ data: ref({ range: '7d', models: [], gateway: gw }), error: ref(null), pending: ref(false) }),
+    useSeriesBatch: () => ({ panels: ref(panels), pending: ref(false), refresh: () => {} }),
+    windowLabel,
+    seriesRangeFor: () => '7d',
+    seriesRangeLabel: () => 'Last 7 days',
     fmtCompact: (n) => String(n),
-    fmtInt: (n) => String(n),
     apiErrorMessage: (e) => String(e),
   }, {})
   const html = await render(gateway)
+  assert.match(html, /Gateway requests 40 30 local · 10 cloud · 0 refused · 1 failed/)
+  assert.match(html, /Answered locally 75% /)
+  for (const p of ['gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_queue_wait', 'gateway_timeouts']) {
+    assert.match(html, new RegExp(`data-panel="${p}"`), `${p} is drawn`)
+  }
+  assert.match(html, /data-panel="gateway_latency_local" data-ymax="9"/, 'local shares the cloud chart\'s top')
+  assert.match(html, /data-panel="gateway_latency_cloud" data-ymax="9"/)
+  assert.match(html, /estimates from histogram buckets/)
+  assert.match(html, /<li>too large 4<\/li><li>waited too long for a slot 3<\/li><li>answered too slowly 1<\/li>/, 'reasons are bars, largest first')
   assert.match(html, /<div data-tone="warning">Local model timeouts 4 10% of requests · 3 queue · 1 answer <i>requests that went to the cloud because the local model was too slow/)
   assert.match(html, /Not answered locally 8 4 too large · 3 waited too long for a slot <i>by reason: 4 too large · 3 waited too long for a slot · 1 answered too slowly\./)
   assert.match(html, /Response time, local 2\.0 s p95 4\.5 s /)
@@ -306,7 +321,7 @@ test('gateway tiles show timeouts, fall-through reasons and response times local
     for (const k of ['fallthroughs', 'fallthrough_reasons', 'timeouts', 'timeout_share_pct', 'local_avg_seconds', 'local_p95_seconds', 'cloud_avg_seconds', 'cloud_p95_seconds', 'queue_avg_seconds', 'queue_p95_seconds', 'local_answer_avg_seconds']) delete old[k]
     const html = await render(old)
     assert.match(html, /Answered locally 75% /)
-    assert.doesNotMatch(html, /Local model timeouts|Response time|Queue wait/)
+    assert.doesNotMatch(html, /Local model timeouts|Response time, (local|cloud)|Queue wait, local/)
   })
 })
 
@@ -424,4 +439,28 @@ test('a stat tile keeps its explanation behind an info button that describes its
   const term = await render(InfoTip, { term: 'hotspot' })
   assert.match(term, /aria-label="More about this"/)
   assert.match(term, />Changed often and complex<\/span>/, 'glossary terms still resolve')
+})
+
+test('the queue heatmap marks empty slots apart from slots without requests and bins waits at the verdict thresholds', async (t) => {
+  const cells = Array.from({ length: 7 * 96 }, () => null)
+  cells[36] = { requests: 12, avg: 0.4, p95: 0.8, share: 0.05 } // Mon 09:00
+  cells[37] = { requests: 9, avg: 6, p95: 14, share: 0.6 } // Mon 09:15
+  cells[96 + 40] = { requests: 0, avg: null, p95: null, share: null } // Tue 10:00
+  const html = await renderComponent(t, './QueueHeatmap.vue', {}, { cells, metric: 'p95', timezone: 'Europe/Copenhagen', waitNoticeable: 3, waitHigh: 10 })
+  const fill = (i) => html.match(new RegExp(`data-cell="${i}"[^>]*fill="([^"]+)"`))?.[1]
+  assert.equal((html.match(/<rect /g) ?? []).length, 7 * 96, 'one cell per weekday and 15-minute slot')
+  assert.equal(fill(36), 'var(--seq-1)', 'under a second is the lightest step')
+  assert.equal(fill(37), 'var(--seq-4)', '10 to 30 s is the step above the high threshold')
+  assert.equal(fill(96 + 40), 'var(--seq-zero)', 'measured without requests')
+  assert.equal(fill(0), 'var(--seq-empty)', 'no measurements is its own neutral')
+  assert.match(html, /<title>Mon 09:15–09:30: 9 requests · avg wait 6.0 s · p95 14 s · 60% found it full<\/title>/)
+  assert.match(html, /<title>Tue 10:00–10:15: no requests<\/title>/)
+  assert.match(html, /<title>Mon 00:00–00:15: no measurements<\/title>/)
+  assert.match(html, /Times in Europe\/Copenhagen/)
+  assert.match(html, />Mon<\/text>.*>Sun<\/text>/s, 'Monday is the first row')
+  assert.match(html, /3\.0 s–10 s/, 'the legend names the bins')
+
+  const requests = await renderComponent(t, './QueueHeatmap.vue', {}, { cells, metric: 'requests', timezone: 'UTC' })
+  const rfill = (i) => requests.match(new RegExp(`data-cell="${i}"[^>]*fill="([^"]+)"`))?.[1]
+  assert.equal(rfill(36), 'var(--seq-5)', 'the busiest slot is the darkest step')
 })

@@ -73,6 +73,9 @@ type Module struct {
 	Latest     string `json:"latest,omitempty"`
 	Deprecated string `json:"deprecated,omitempty"`
 	Behind     int    `json:"behind,omitempty"`
+	// Retracted comes from the Go module proxy during ingest; see
+	// model.Node.
+	Retracted string `json:"retracted,omitempty"`
 }
 
 // Replacement is the target of a go.mod replace directive.

@@ -33,6 +33,7 @@ export interface GraphNodeData {
   latest?: string
   deprecated?: string
   behind?: number
+  retracted?: string
 }
 export interface NodeRef { id: string; kind: string; name: string; location?: string; summary?: string; depth?: number }
 // One entry of GET /repos/{repo}/outline: what a file holds, with line ranges.
@@ -143,8 +144,9 @@ export interface SecurityReport {
   finding_counts: Record<string, number>; vuln_counts: Record<string, number>
   findings: SecFinding[]; vulnerabilities: SecVuln[]
   suppressed?: SecFinding[]; suppressed_counts?: Record<string, number>
-  modules: { total: number; direct: number; indirect: number; vulnerable: number; stdlib?: string; deprecated?: number; behind?: number }
+  modules: { total: number; direct: number; indirect: number; vulnerable: number; stdlib?: string; deprecated?: number; behind?: number; retracted?: number }
   deprecated?: { module: string; ecosystem?: string; version: string; latest?: string; reason: string; direct: boolean }[]
+  retracted?: { module: string; ecosystem?: string; version: string; latest?: string; reason: string; direct: boolean }[]
   rules: { rule: string; title: string; severity: string; count: number }[]
   owners?: { owner: string; findings: number; counts: Record<string, number> }[]
   sensitive_functions?: NodeRef[]
@@ -237,7 +239,7 @@ export interface LicenseReport {
 
 export interface DependencyPackage {
   ecosystem: string; name: string; version?: string; license: string
-  direct: boolean; dev?: boolean; via?: string; roots?: number; latest?: string; deprecated?: string; behind?: number
+  direct: boolean; dev?: boolean; via?: string; roots?: number; latest?: string; deprecated?: string; behind?: number; retracted?: string
 }
 export interface DependencyList { packages: DependencyPackage[]; by_ecosystem: { ecosystem: string; count: number }[]; truncated?: boolean }
 
@@ -326,6 +328,64 @@ export interface SeriesPanel {
   step_seconds: number
   times: number[]
   series: SeriesLine[]
+}
+// The time-series panels of Statistics → Gateway. The two response-time
+// panels carry four lines each, named p50, p75, p95 and p99 (quantiles
+// estimated from histogram buckets); the platform statistics have
+// cross-tenant twins of both under /admin/stats/series.
+export type GatewaySeriesPanel =
+  | 'gateway_latency_local' | 'gateway_latency_cloud' | 'gateway_latency_avg'
+  | 'gateway_queue_wait' | 'gateway_timeouts'
+
+// Model queue peak hours (GET /api/v1/stats/queue, /admin/stats/queue).
+// cells has 7 × 96 entries, Monday first, 15-minute slots in the viewer's
+// timezone; null is a slot without measurements, requests 0 one without
+// requests (and without wait figures).
+export interface QueueCell {
+  requests: number
+  avg?: number | null
+  p95?: number | null
+  share?: number | null
+}
+export type QueueMetric = 'p95' | 'avg' | 'requests' | 'share'
+export interface QueueVerdict {
+  level: 'unknown' | 'fine' | 'noticeable' | 'add_endpoint'
+  text: string
+  weekday: number
+  first_slot: number
+  last_slot: number
+  p95?: number | null
+  share?: number | null
+}
+export interface QueueProvider {
+  name: string
+  // slots: max_concurrent per process (0 unlimited); capacity: slots over
+  // every reporting process, platform view only. running and waiting are
+  // null when nothing reported in the last minutes.
+  slots: number
+  capacity?: number | null
+  running: number | null
+  waiting: number | null
+  requests: number
+  cells: (QueueCell | null)[]
+  verdict: QueueVerdict
+}
+export interface QueueThresholds {
+  min_requests: number
+  peak_min_requests: number
+  wait_high_seconds: number
+  share_high: number
+  wait_noticeable_seconds: number
+  share_noticeable: number
+  free_slot_seconds: number
+}
+export interface QueuePeak {
+  scope: 'org' | 'platform'
+  weeks: 1 | 4 | 12
+  timezone: string
+  slot_minutes: number
+  providers: QueueProvider[]
+  thresholds: QueueThresholds
 }
 
 // Accounts (GET /api/v1/auth/status, /me and the settings endpoints).

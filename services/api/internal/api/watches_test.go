@@ -38,7 +38,7 @@ func TestOrgWatchAddsNewPublicRepositories(t *testing.T) {
 
 	bob := newClient(t, ts)
 	var signed struct{ User accounts.User }
-	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 201)
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 202)
 	var org accounts.Org
 	require.Equal(t, bob.do("POST", "/api/v1/accounts/orgs", `{"name":"Platform Team"}`, &org), 201)
 	in := []string{OrgHeader, org.Slug}
@@ -122,7 +122,7 @@ func TestOrgWatchAddsNewPublicRepositories(t *testing.T) {
 	agent.auth = "Bearer " + key.Key
 	assert.Equal(t, agent.do("POST", "/api/v1/watches", body, nil), 403, "a person sets a watch, an API key does not")
 	eve := newClient(t, ts)
-	require.Equal(t, eve.do("POST", "/api/v1/auth/signup", `{"email":"eve@example.com","name":"Eve","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, eve.signUp(`{"email":"eve@example.com","name":"Eve","password":"`+pw+`"}`, nil), 202)
 	code, _ = list(eve, in...)
 	assert.Equal(t, code, 404, "other organisations cannot see it")
 	assert.Equal(t, eve.do("DELETE", "/api/v1/watches/127.0.0.1/acme", "", nil, in...), 404)

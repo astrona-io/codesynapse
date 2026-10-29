@@ -1,7 +1,9 @@
 // Package hygiene tells which dependencies are deprecated or behind their
 // latest release (security roadmap item 8), from deps.dev: one request per
-// package, carrying only the ecosystem and the package name. It runs only
-// when deps.dev lookups are switched on, like licence lookups.
+// package, carrying only the ecosystem and the package name. Go module
+// versions are also checked for retractions on the Go module proxy
+// (retract.go), carrying only module paths and versions. It runs only when
+// deps.dev lookups are switched on, like licence lookups.
 package hygiene
 
 import (
@@ -42,36 +44,21 @@ func Check(ctx context.Context, c *license.DepsDev, deps []license.Dep) map[stri
 		}
 		byPackage[k] = append(byPackage[k], d)
 	}
-	order = order[:min(len(order), maxPackages)]
 	var mu sync.Mutex
 	out := map[string]Status{}
-	work := make(chan [2]string)
-	var wg sync.WaitGroup
-	for range workers {
-		wg.Go(func() {
-			for k := range work {
-				versions, err := c.Versions(ctx, k[0], k[1])
-				if err != nil || len(versions) == 0 {
-					continue
-				}
-				for _, d := range byPackage[k] {
-					if s, ok := StatusOf(versions, d.Version); ok {
-						mu.Lock()
-						out[d.Key()] = s
-						mu.Unlock()
-					}
-				}
-			}
-		})
-	}
-	for _, k := range order {
-		if ctx.Err() != nil {
-			break
+	each(ctx, order, func(k [2]string) {
+		versions, err := c.Versions(ctx, k[0], k[1])
+		if err != nil || len(versions) == 0 {
+			return
 		}
-		work <- k
-	}
-	close(work)
-	wg.Wait()
+		for _, d := range byPackage[k] {
+			if s, ok := StatusOf(versions, d.Version); ok {
+				mu.Lock()
+				out[d.Key()] = s
+				mu.Unlock()
+			}
+		}
+	})
 	return out
 }
 

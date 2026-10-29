@@ -20,7 +20,7 @@ func TestAuthAndAuditMetrics(t *testing.T) {
 		User accounts.User
 		Org  accounts.Org
 	}
-	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 201)
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 202)
 	var made struct {
 		Key string
 	}

@@ -42,7 +42,7 @@ func newSSOFixture(t *testing.T) ssoFixture {
 	t.Cleanup(ts.Close)
 	owner := newClient(t, ts)
 	var signed struct{ Org accounts.Org }
-	require.Equal(t, owner.do("POST", "/api/v1/auth/signup", `{"email":"owner@corp.example","name":"Owner","password":"`+pw+`"}`, &signed), 201)
+	require.Equal(t, owner.signUp(`{"email":"owner@corp.example","name":"Owner","password":"`+pw+`"}`, &signed), 202)
 	var team accounts.Team
 	require.Equal(t, owner.do("POST", "/api/v1/accounts/orgs/"+signed.Org.Slug+"/teams", `{"name":"Developers"}`, &team), 201)
 	return ssoFixture{ts: ts, acc: acc, idp: idp, owner: owner, org: signed.Org, team: team.ID}
@@ -84,7 +84,7 @@ func TestSSOConfiguration(t *testing.T) {
 
 	stranger := newClient(t, f.ts)
 	f.acc.SignupOpen = true
-	require.Equal(t, stranger.do("POST", "/api/v1/auth/signup", `{"email":"stranger@x.org","name":"S","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, stranger.signUp(`{"email":"stranger@x.org","name":"S","password":"`+pw+`"}`, nil), 202)
 	assert.Equal(t, stranger.do("GET", "/api/v1/accounts/orgs/"+f.org.Slug+"/sso", "", nil), 404, "other organisations' providers are invisible")
 }
 
@@ -162,7 +162,7 @@ func TestSSOLinking(t *testing.T) {
 
 	// An account outside the organisation is never taken over.
 	bob := newClient(t, f.ts)
-	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@corp.example","name":"Bob","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, bob.signUp(`{"email":"bob@corp.example","name":"Bob","password":"`+pw+`"}`, nil), 202)
 	status, _ := f.signIn(t, newClient(t, f.ts), map[string]any{"sub": "bob-1", "email": "bob@corp.example", "email_verified": true, "groups": []any{"cs-admins"}})
 	assert.Equal(t, status, 409)
 	bobUser, err := f.acc.St.UserByEmail(ctx, "bob@corp.example")
@@ -173,7 +173,7 @@ func TestSSOLinking(t *testing.T) {
 	// A member the owner added links on a verified email and keeps the
 	// owner's role.
 	carol := newClient(t, f.ts)
-	require.Equal(t, carol.do("POST", "/api/v1/auth/signup", `{"email":"carol@corp.example","name":"Carol","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, carol.signUp(`{"email":"carol@corp.example","name":"Carol","password":"`+pw+`"}`, nil), 202)
 	require.Equal(t, f.owner.do("PUT", "/api/v1/accounts/orgs/"+f.org.Slug+"/members", `{"email":"carol@corp.example","role":"viewer"}`, nil), 200)
 	status, _ = f.signIn(t, newClient(t, f.ts), map[string]any{"sub": "carol-1", "email": "carol@corp.example", "email_verified": true, "groups": []any{"cs-admins"}})
 	require.Equal(t, status, 200)

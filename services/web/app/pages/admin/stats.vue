@@ -35,7 +35,7 @@ const { data: usage, error: usageError, refresh: refreshUsage, execute: loadUsag
 // 1 year show the last 30. Tools and clients fewer than three organisations
 // use are "other" unless one organisation is selected.
 const usagePanels = ['sessions', 'mcp_calls', 'mcp_errors', 'mcp_tokens', 'local_answers', 'tool_latency', 'tool_latency_by_tool',
-  'org_tool_calls', 'org_sessions', 'org_tokens', 'api_routes', 'api_failures', 'api_route_latency', 'gateway_requests', 'gateway_latency_avg', 'gateway_latency', 'gateway_fallthrough', 'llm_cost', 'db_latency']
+  'org_tool_calls', 'org_sessions', 'org_tokens', 'api_routes', 'api_failures', 'api_route_latency', 'gateway_requests', 'gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_fallthrough', 'llm_cost', 'db_latency']
 const live = computed(() => range.value !== '90d' && range.value !== '365d')
 const seriesRange = computed<SeriesRange>(() => (live.value ? range.value as SeriesRange : '30d'))
 const { panels: charts, pending: chartsPending, refresh: refreshCharts, execute: loadCharts } = useSeriesBatch(usagePanels, seriesRange, undefined,

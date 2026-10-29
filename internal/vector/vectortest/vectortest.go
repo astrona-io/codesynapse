@@ -13,6 +13,7 @@ import (
 // Run exercises idx; it must start empty.
 func Run(t *testing.T, idx vector.Index) {
 	t.Run("session", func(t *testing.T) { RunSession(t, idx) })
+	t.Run("sweep", func(t *testing.T) { RunSweep(t, idx) })
 	ctx := context.Background()
 	const model = "test-embed"
 	items := []vector.Item{
@@ -84,5 +85,83 @@ func Run(t *testing.T, idx vector.Index) {
 		hits, err = idx.Search(ctx, model, "org-a", "org-a|repo", []float32{1, 0, 0}, 10)
 		require.NoError(t, err)
 		assert.Len(t, hits, 0)
+	})
+}
+
+// RunSweep checks vector.Sweeper: paging in ID order across models, and
+// deletes that never leave their tenant and namespace. It uses its own
+// tenants and removes what it wrote.
+func RunSweep(t *testing.T, idx vector.Index) {
+	ctx := context.Background()
+	sw, ok := idx.(vector.Sweeper)
+	require.True(t, ok, "an index can page through and remove a tenant's items")
+	const tenant, other = "sweep-a", "sweep-b"
+	vec := []float32{1, 0, 0}
+	require.NoError(t, idx.Upsert(ctx, "sweep-model", []vector.Item{
+		{ID: "s-1", Tenant: tenant, Namespace: "repo-1", Vector: vec},
+		{ID: "s-2", Tenant: tenant, Namespace: "repo-1", Vector: vec},
+		{ID: "s-3", Tenant: tenant, Namespace: "repo-2", Vector: vec},
+		{ID: "s-4", Tenant: other, Namespace: "repo-1", Vector: vec},
+	}))
+	// Another model and vector length: a second collection in Milvus.
+	require.NoError(t, idx.Upsert(ctx, "sweep-model-2", []vector.Item{
+		{ID: "s-5", Tenant: tenant, Namespace: "repo-1", Vector: []float32{0, 1}},
+	}))
+	t.Cleanup(func() {
+		assert.NoError(t, idx.Delete(ctx, []string{"s-1", "s-2", "s-3", "s-4", "s-5"}))
+	})
+	ids := func(items []vector.Item) []string {
+		out := make([]string, len(items))
+		for i, it := range items {
+			out[i] = it.ID
+		}
+		return out
+	}
+
+	t.Run("scan pages in ID order within the tenant", func(t *testing.T) {
+		page, err := sw.Scan(ctx, tenant, "", "", 2)
+		require.NoError(t, err)
+		assert.Equal(t, ids(page), []string{"s-1", "s-2"})
+		page, err = sw.Scan(ctx, tenant, "", "s-2", 10)
+		require.NoError(t, err)
+		assert.Equal(t, ids(page), []string{"s-3", "s-5"}, "every model, never another tenant")
+		for _, it := range page {
+			assert.Equal(t, it.Tenant, tenant)
+			assert.Len(t, it.Vector, 0)
+		}
+		assert.Equal(t, page[0].Namespace, "repo-2")
+		page, err = sw.Scan(ctx, tenant, "repo-1", "", 10)
+		require.NoError(t, err)
+		assert.Equal(t, ids(page), []string{"s-1", "s-2", "s-5"})
+		_, err = sw.Scan(ctx, "", "repo-1", "", 10)
+		assert.Error(t, err)
+	})
+
+	t.Run("delete in stays in its tenant and namespace", func(t *testing.T) {
+		require.NoError(t, sw.DeleteIn(ctx, tenant, "repo-2", []string{"s-1", "s-4"}))
+		page, err := sw.Scan(ctx, tenant, "", "", 10)
+		require.NoError(t, err)
+		assert.Equal(t, ids(page), []string{"s-1", "s-2", "s-3", "s-5"}, "s-1 is in repo-1")
+		require.NoError(t, sw.DeleteIn(ctx, tenant, "repo-1", []string{"s-1", "s-4", "s-5"}))
+		page, err = sw.Scan(ctx, tenant, "", "", 10)
+		require.NoError(t, err)
+		assert.Equal(t, ids(page), []string{"s-2", "s-3"})
+		page, err = sw.Scan(ctx, other, "", "", 10)
+		require.NoError(t, err)
+		assert.Equal(t, ids(page), []string{"s-4"}, "same namespace, other tenant")
+		assert.Error(t, sw.DeleteIn(ctx, "", "repo-1", []string{"s-2"}))
+		assert.Error(t, sw.DeleteIn(ctx, tenant, "", []string{"s-2"}))
+	})
+
+	t.Run("delete namespace", func(t *testing.T) {
+		require.NoError(t, sw.DeleteNamespace(ctx, tenant, "repo-1"))
+		page, err := sw.Scan(ctx, tenant, "", "", 10)
+		require.NoError(t, err)
+		assert.Equal(t, ids(page), []string{"s-3"})
+		page, err = sw.Scan(ctx, other, "repo-1", "", 10)
+		require.NoError(t, err)
+		assert.Equal(t, ids(page), []string{"s-4"})
+		assert.Error(t, sw.DeleteNamespace(ctx, tenant, ""))
+		assert.Error(t, sw.DeleteNamespace(ctx, "", "repo-1"))
 	})
 }
