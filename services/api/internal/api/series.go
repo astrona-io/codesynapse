@@ -158,7 +158,7 @@ var seriesPanels = map[string]seriesPanel{
 		Empty:   "No tool call was refused in this window.",
 		queries: []seriesQuery{{expr: `sum by (mcp_tool) (increase(mcp_tool_calls_total{outcome="refused"}[$w]))`, by: "mcp_tool"}}},
 	"local_answers": {Title: "Answered on the developer's machine", Unit: "calls", Kind: "count",
-		Help:    "Calls the Claude Code bridge answered locally (git and GitHub tools, ask_local, local_draft, and code tools while the checkout has unsynced changes), by tool. Refused reports went to the server instead.",
+		Help:    "Calls the Claude Code bridge answered locally (git and GitHub tools, ask_local, local_draft, fetch_source, and code tools while the checkout has unsynced changes), by tool. Refused reports went to the server instead.",
 		Empty:   "No call was answered locally in this window.",
 		queries: []seriesQuery{{expr: `sum by (mcp_tool) (increase(mcp_local_answers_total{outcome="recorded"}[$w]))`, by: "mcp_tool"}}},
 	"sessions": {Title: "Agent sessions", Unit: "sessions", Kind: "count",

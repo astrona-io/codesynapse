@@ -43,6 +43,7 @@ export function fmtUnit(v: number | null | undefined, unit: string): string {
   if (unit === '%') return `${v.toFixed(1)}%`
   if (unit === 'bytes' || unit === 'bytes/s') {
     const suffix = unit === 'bytes/s' ? '/s' : ''
+    if (Math.abs(v) >= 1024 ** 3) return `${(v / 1024 ** 3).toFixed(1)} GiB${suffix}`
     if (Math.abs(v) >= 1024 * 1024) return `${(v / (1024 * 1024)).toFixed(1)} MiB${suffix}`
     if (Math.abs(v) >= 1024) return `${(v / 1024).toFixed(1)} KiB${suffix}`
     return `${Math.round(v)} B${suffix}`

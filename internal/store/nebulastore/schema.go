@@ -117,7 +117,10 @@ var schemaItems = func() []schemaItem {
 	}
 	items := []schemaItem{
 		// The lease a publisher holds on a repository (replace.go).
-		{name: "ingest_head", cols: slices.Concat(texts("repo", "stage_run"), longs("stage_expires"))},
+		// Every lease write sets stage_expires; the index lets the size
+		// sampler see whether any lease is held (sizes.go).
+		{name: "ingest_head", cols: slices.Concat(texts("repo", "stage_run"), counters("stage_expires")),
+			indexes: []index{{"ingest_head_by_expires", []indexCol{{"stage_expires", 0}}}}},
 		{name: "node", cols: node, indexes: []index{
 			{"node_by_repo", []indexCol{{"repo", 64}}},
 			{"node_by_kind", []indexCol{{"kind", 24}}},

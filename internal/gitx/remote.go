@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/netguard"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
@@ -75,12 +76,9 @@ type RemoteOptions struct {
 	}
 }
 
-// InternalIP reports whether ip is loopback, private, link-local or
-// unspecified: the addresses remotes and forge API calls may not reach
-// unless private hosts are allowed.
-func InternalIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
-}
+// InternalIP reports whether ip is one remotes may not reach unless private
+// hosts are allowed (netguard.Internal).
+func InternalIP(ip net.IP) bool { return netguard.Internal(ip) }
 
 // ValidateRemote accepts https URLs without embedded credentials whose host
 // does not resolve to an internal address (unless AllowPrivate). It returns
