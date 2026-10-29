@@ -50,7 +50,7 @@ func TestJobsAndIngestSections(t *testing.T) {
 			User accounts.User
 			Org  accounts.Org
 		}
-		require.Equal(t, c.do("POST", "/api/v1/auth/signup", `{"email":"`+email+`","name":"`+name+`","password":"`+pw+`"}`, &signed), 201)
+		require.Equal(t, c.signUp(`{"email":"`+email+`","name":"`+name+`","password":"`+pw+`"}`, &signed), 202)
 		return c, signed.User, signed.Org
 	}
 	const gone = "0123456789abcdef01234567"
