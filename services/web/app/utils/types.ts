@@ -35,6 +35,9 @@ export interface GraphNodeData {
   behind?: number
 }
 export interface NodeRef { id: string; kind: string; name: string; location?: string; summary?: string; depth?: number }
+// One entry of GET /repos/{repo}/outline: what a file holds, with line ranges.
+export interface OutlineEntry { id: string; kind: string; name: string; lines: string; signature?: string; summary?: string; level?: number }
+export interface FileOutline { file: string; entries: OutlineEntry[] | null }
 
 export interface SymbolLocation { neighbour_count?: number; neighbours_omitted?: number; neighbourhood?: string; node_id: string; name: string; file?: string; signature?: string; revision?: string; fingerprint?: string; start_line?: number; end_line?: number }
 export interface SymbolIdentity { id: string; kind: string; language?: string; active: boolean; current: SymbolLocation; history: SymbolLocation[]; history_omitted: number; match: string; candidates: string[] | null; candidates_omitted: number }

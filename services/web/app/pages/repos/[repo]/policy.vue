@@ -54,10 +54,9 @@ async function revoke() {
 <template>
   <div class="stack">
     <PageHeader eyebrow="Repository settings" title="Indexing policy & annotations" lede="Review repository requests before they change scanner coverage or run a local annotation model." :crumbs="[{ label: 'Repositories', to: '/' }, { label: repo, to: `/repos/${encodeURIComponent(repo)}` }, { label: 'Indexing policy' }]" />
-    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
+    <DataState :error="error" :pending="!data" :empty="!data" loading="Loading policy…" />
     <p v-if="failure" class="notice notice--danger" role="alert">{{ failure }}</p>
     <p v-if="message" class="notice notice--ok" role="status">{{ message }}</p>
-    <p v-if="!data && !error" class="muted" role="status">Loading policy…</p>
     <section v-if="data" class="panel stack">
       <h2>Last successful ingest</h2>
       <p v-if="!data.indexed.present" class="muted">No repository configuration was indexed. Default scanner settings apply; annotation is disabled.</p>
@@ -93,9 +92,7 @@ async function revoke() {
       <div class="row"><h2>Current annotations</h2><button class="btn--ghost" @click="refreshAnnotations()">Refresh</button></div>
       <p class="muted">Approved jobs run after ingestion using a local model. Start or cancel them through the API or an agent.</p>
       <p v-if="annotations?.notice" class="small muted">{{ annotations.notice }}</p>
-      <p v-if="annotationsError" class="notice notice--danger" role="alert">{{ apiErrorMessage(annotationsError) }}</p>
-      <p v-else-if="!annotations" class="muted" role="status">Loading annotations…</p>
-      <p v-else-if="!annotations.annotations.length" class="muted">No annotations match the current ingest revision.</p>
+      <DataState :error="annotationsError" :pending="!annotations" :empty="!annotations?.annotations.length" loading="Loading annotations…" text="No annotations match the current ingest revision." compact />
       <article v-for="item in annotations?.annotations" :key="item.symbol_id" class="stack">
         <code>{{ item.symbol_id }}</code><p>{{ item.summary }}</p><p class="small muted">{{ item.taxonomy.join(' · ') }}</p>
       </article>

@@ -82,24 +82,24 @@ const resultOf = (n: string) => tests.value[n]
     <PageHeader eyebrow="Workspace" title="AI models"
       lede="Language models CodeSynapse uses to triage findings, review code and write briefings. Local models (MLX, Ollama, vLLM) keep code on your machine; cloud models only get what you allow." />
 
-    <p v-if="loadError" class="notice notice--danger" role="alert">{{ plainError(loadError) }}</p>
-    <p v-else-if="!data" class="muted small" role="status">Loading models…</p>
-    <div v-else-if="!data.providers.length && !operator" class="panel how">
-      <p class="eyebrow eyebrow--green">No model configured</p>
-      <h2>No language model is connected yet</h2>
-      <p class="muted">Whoever runs CodeSynapse connects models for the whole installation. Ask them to add a local or cloud model; until then, reviews, briefings and security analysis by a model are not available.</p>
-    </div>
-    <div v-else-if="!data.providers.length" class="panel how">
-      <p class="eyebrow eyebrow--green">No model configured</p>
-      <h2>Connect a local or cloud model</h2>
-      <p class="muted">With nothing configured, CodeSynapse uses a local model server it finds when the API starts: Ollama on port 11434 or LM Studio on 1234. Start one, pull a model (<code>ollama pull qwen3.8:27b</code>) and restart the API. To choose yourself:</p>
-      <ol class="steps">
-        <li>Copy <code>config/llm.example.yaml</code> to <code>config/llm.yaml</code> in the project folder.</li>
-        <li>Point <code>base_url</code> at your server. For a model server on this Mac use <code>http://host.docker.internal:&lt;port&gt;/v1</code> — for example MLX on 9080 or Ollama on 11434.</li>
-        <li>For a cloud provider, put its key in <code>.env</code> and name that variable in <code>api_key_env</code>.</li>
-        <li>Restart the API: <code>docker compose up -d api</code> (or <code>podman compose</code>).</li>
-      </ol>
-    </div>
+    <DataState :error="loadError ? plainError(loadError) : ''" :pending="!data" :empty="!data" loading="Loading models…">
+      <div v-if="data && !data.providers.length && !operator" class="panel how">
+        <p class="eyebrow eyebrow--green">No model configured</p>
+        <h2>No language model is connected yet</h2>
+        <p class="muted">Whoever runs CodeSynapse connects models for the whole installation. Ask them to add a local or cloud model; until then, reviews, briefings and security analysis by a model are not available.</p>
+      </div>
+      <div v-else-if="data && !data.providers.length" class="panel how">
+        <p class="eyebrow eyebrow--green">No model configured</p>
+        <h2>Connect a local or cloud model</h2>
+        <p class="muted">With nothing configured, CodeSynapse uses a local model server it finds when the API starts: Ollama on port 11434 or LM Studio on 1234. Start one, pull a model (<code>ollama pull qwen3.8:27b</code>) and restart the API. To choose yourself:</p>
+        <ol class="steps">
+          <li>Copy <code>config/llm.example.yaml</code> to <code>config/llm.yaml</code> in the project folder.</li>
+          <li>Point <code>base_url</code> at your server. For a model server on this Mac use <code>http://host.docker.internal:&lt;port&gt;/v1</code> — for example MLX on 9080 or Ollama on 11434.</li>
+          <li>For a cloud provider, put its key in <code>.env</code> and name that variable in <code>api_key_env</code>.</li>
+          <li>Restart the API: <code>docker compose up -d api</code> (or <code>podman compose</code>).</li>
+        </ol>
+      </div>
+    </DataState>
 
     <section v-if="data?.providers.length" class="panel routing">
       <div class="panel__header">

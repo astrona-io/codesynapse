@@ -126,8 +126,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
       <span class="pill"><span class="dot" :class="running ? 'dot--warn' : 'dot--ok'" />{{ running ? 'Indexing…' : `${plural(ov?.repos.length ?? 0, 'repository', 'repositories')} indexed` }}</span>
     </PageHeader>
 
-    <p v-if="ovError" class="notice notice--danger" role="alert">{{ plainError(ovError) }}</p>
-    <p v-else-if="!ov" class="muted small" role="status">Loading repositories…</p>
+    <DataState :error="ovError ? plainError(ovError) : ''" :pending="!ov" :empty="!ov" loading="Loading repositories…" />
     <section v-if="ov?.repos.length" class="panel repo-panel">
       <ul class="repo-list">
         <li v-for="r in visibleRepos" :key="r.name" class="repo-row">
