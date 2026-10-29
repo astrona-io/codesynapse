@@ -244,19 +244,19 @@ func (s *Server) handleVerifyAudit(w http.ResponseWriter, r *http.Request) {
 	}
 	// deep=true also reads every archive file back and checks its
 	// checksum and entries; without it only the stored hashes are linked.
-	var v accounts.Verification
-	var err error
-	if r.URL.Query().Get("deep") == "true" && s.cfg.AuditArchive != nil {
-		v, err = auditarchive.DeepVerify(r.Context(), s.cfg.Accounts.St, s.cfg.AuditArchive)
-	} else {
-		v, err = accounts.VerifyAudit(r.Context(), s.cfg.Accounts.St)
-	}
+	// The result is stored like a scheduled run, so the statistics show it.
+	deep := r.URL.Query().Get("deep") == "true" && s.cfg.AuditArchive != nil
+	v, err := s.runAuditVerification(r.Context(), accounts.VerifyOnDemand, deep)
 	if err != nil {
 		s.problem(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, v)
+	writeJSON(w, 200, v.Verification)
 }
+
+// deepVerifyAudit reads the archive files back; a variable so tests can
+// count calls.
+var deepVerifyAudit = auditarchive.DeepVerify
 
 // exportAudit writes entries as JSON (default), JSON Lines or CSV. Query:
 // since, until (RFC 3339), after_id (cursor), limit (max 10000), action

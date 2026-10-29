@@ -118,6 +118,7 @@ func TestBootstrapContract(t *testing.T) {
 	accountstest.RunPlatformStats(t, fresh)
 	accountstest.RunPlatformStatsDaily(t, fresh)
 	accountstest.RunPromptLog(t, fresh)
+	accountstest.RunAuditStats(t, fresh)
 	accountstest.RunBootstrap(t, func(t *testing.T) accounts.Store {
 		st, err := Open(ctx, url)
 		require.NoError(t, err)

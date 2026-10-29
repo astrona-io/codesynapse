@@ -192,6 +192,8 @@ Set one of the two, never both. Only the API process that holds the `api-loops` 
 
 Keep the archive on once it is set. PostgreSQL then no longer holds the oldest entries, so the daily pruning without an archive stops and logs a warning instead of deleting anything.
 
+The process holding the `api-loops` lease verifies the chain once a day and stores the result in `audit_verifications` (kept 400 days); a check through `GET /api/v1/admin/audit/verify` is stored as well. The platform statistics show the latest stored result and never walk the chain themselves. A run that could not finish is stored with a fixed reason, never the error text.
+
 `GET /api/v1/admin/audit/verify` checks the rows in PostgreSQL and the links between the files through the stored hashes; it reports `segments` and `sealed` (entries in files). Add `?deep=true` to read every file back as well: its checksum, every entry's hash and every link. `archives` then counts the files read. A missing or changed file fails the check and names its segment. When older entries were pruned without an archive, `first_id` says where the check started.
 
 ### Gateway requests and the prompt log
@@ -213,17 +215,19 @@ The platform reads need a platform administrator's signed-in browser session: `G
 
 Every view is written to the audit log before any figure is read: `admin.users.view`, `admin.orgs.view`, `admin.health.view`, `admin.stats.view` (with the section, range, organisation and panel), and `admin.stats.export` (with the format as well). A batch of series panels is one view. When the audit entry cannot be written, the request answers 503 and shows no figures.
 
-Administration → Statistics shows the figures (`docs/PLATFORM_STATS_PLAN.md`, phases 1 and 3):
+Administration → Statistics shows the figures (`docs/PLATFORM_STATS_PLAN.md`, phases 1, 3 and 7):
 
 | Route | Answers |
 |---|---|
-| `GET /api/v1/admin/stats/summary?range=` | Tiles: organisations, people, active people, memberships, seats, runtime sessions, API keys, browser sessions. Graphs, jobs, cost and alerts are `null` until later phases. |
+| `GET /api/v1/admin/stats/summary?range=` | Tiles: organisations, people, active people, memberships, seats, runtime sessions, API keys, browser sessions and the audit chain status (the stored result of the last verification). Graphs, jobs, cost and alerts are `null` until later phases. |
 | `GET /api/v1/admin/stats/tenants?range=&org=&sort=&page=` | Platform totals and one row per organisation: members by role, seats, active members, teams, repository entries, single sign-on, watches. |
 | `GET /api/v1/admin/stats/sessions?range=&org=&sort=&page=` | Browser sessions, runtime sessions (agent, dashboard, gateway) and API keys (active, used, expiring within 14 days), per organisation. |
 | `GET /api/v1/admin/stats/usage?range=&org=&sort=&page=` | Agent sessions, tool calls and errors, tokens served and avoided, the token share, workflow counts and unindexed checkouts per organisation, with the tools and clients used. A tool or client fewer than three organisations use is counted as "other" unless `org` is set. |
+| `GET /api/v1/admin/stats/security?range=&org=&sort=&page=` | Counts from each graph's latest snapshot: grades, open findings and vulnerable dependencies by severity, those called from code, graphs graded worse in the window and suppressed findings, per organisation. The platform counts a graph once. Rule IDs come from the rule catalogue and appear at the platform level only, top 10 plus "other"; a rule fewer than three organisations have findings of is "other". Never a finding, path, symbol or repository name. |
+| `GET /api/v1/admin/stats/audit?range=` | Platform only (`org` answers 400): audit entries by action family and outcome, failed sign-ins by cause, security actions, the archive, and the stored chain verifications. |
 | `GET /api/v1/admin/stats/series?panel=&range=&org=` | One usage chart from VictoriaMetrics (`range` up to `30d`). Series per organisation carry its name; a deleted one reads "deleted organisation". |
 | `GET /api/v1/admin/stats/series/batch?panels=&range=&org=` | Up to 20 of those charts in one request and one audit event. |
-| `GET /api/v1/admin/stats/export?section=summary\|tenants\|sessions\|usage&range=&org=&format=csv\|json` | The whole section, at most 10,000 rows. CSV cells are formula-neutralised. |
+| `GET /api/v1/admin/stats/export?section=summary\|tenants\|sessions\|usage\|security\|audit&range=&org=&format=csv\|json` | The whole section, at most 10,000 rows. CSV cells are formula-neutralised. |
 
 `range` is `1h`, `6h`, `24h`, `7d`, `30d`, `90d` or `365d`; anything else answers 400. `org` is an organisation ID and must exist; it filters the rows, never the totals. Tables have 50 rows per page. The former panels `tenants`, `platform_llm_cost`, `platform_tool_latency` and `platform_db_latency` of `/api/v1/stats/series` were removed and answer 404; their figures are the admin panels `org_sessions`, `llm_cost`, `tool_latency` and `db_latency`. The figures are counts only: organisation names and slugs appear, repository names, graph IDs, paths, e-mail addresses and user, key or session IDs never do. Root is never counted. A person counts once in the platform totals and once in each organisation they belong to. Seats are active members other than guests. Active people signed in, opened a browser or runtime session, or used an API key in the window.
 

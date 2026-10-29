@@ -11,7 +11,7 @@ const ranges: { id: StatsRange; label: string }[] = [
 ]
 const range = ref<StatsRange>('24h')
 const org = ref('')
-const tab = ref<'tenants' | 'sessions' | 'usage'>('tenants')
+const tab = ref<'tenants' | 'sessions' | 'usage' | 'security' | 'audit'>('tenants')
 const page = ref(1)
 const tenantSort = ref('name')
 const sessionSort = ref('name')
@@ -38,11 +38,16 @@ const seriesRange = computed<SeriesRange>(() => (live.value ? range.value as Ser
 const { panels: charts, pending: chartsPending, refresh: refreshCharts, execute: loadCharts } = useSeriesBatch(usagePanels, seriesRange, undefined,
   { base: 'admin/stats/series/batch', org, immediate: false })
 const chartsOff = ref(false)
+// Security and audit load and refresh themselves (AdminSecurityStats,
+// AdminAuditStats) when their tab opens.
+const securityTab = ref<{ refresh: () => void; error: unknown } | null>(null)
+const auditTab = ref<{ refresh: () => void; error: unknown } | null>(null)
 watch(tab, (t) => {
   if (t === 'sessions' && !sessions.value) loadSessions()
   if (t === 'usage' && !usage.value) { loadUsage(); loadCharts() }
 })
-const error = computed(() => summaryError.value ?? (tab.value === 'tenants' ? tenantsError.value : tab.value === 'sessions' ? sessionsError.value : usageError.value))
+const error = computed(() => summaryError.value ?? (tab.value === 'tenants' ? tenantsError.value : tab.value === 'sessions' ? sessionsError.value
+  : tab.value === 'security' ? securityTab.value?.error : tab.value === 'audit' ? auditTab.value?.error : usageError.value))
 
 const auto = ref(false)
 let timer: ReturnType<typeof setInterval> | undefined
@@ -50,6 +55,8 @@ function refreshAll() {
   refreshSummary()
   if (tab.value === 'tenants') refreshTenants()
   else if (tab.value === 'sessions') refreshSessions()
+  else if (tab.value === 'security') securityTab.value?.refresh()
+  else if (tab.value === 'audit') auditTab.value?.refresh()
   else { refreshUsage(); refreshCharts() }
 }
 watch(auto, (on) => {
@@ -58,8 +65,8 @@ watch(auto, (on) => {
 })
 onBeforeUnmount(() => clearInterval(timer))
 
-const exportHref = (format: 'csv' | 'json') => apiPath(`admin/stats/export?section=${tab.value}&${filter.value}&format=${format}`)
-const table = computed(() => (tab.value === 'tenants' ? tenants.value : tab.value === 'sessions' ? sessions.value : usage.value))
+const exportHref = (format: 'csv' | 'json') => apiPath(`admin/stats/export?section=${tab.value}&${tab.value === 'audit' ? `range=${range.value}` : filter.value}&format=${format}`)
+const table = computed(() => (tab.value === 'tenants' ? tenants.value : tab.value === 'sessions' ? sessions.value : tab.value === 'usage' ? usage.value : null))
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? '–' : `${v}%`)
 const shareHint = computed(() => {
   const t = usage.value?.totals
@@ -124,6 +131,9 @@ const activeHint = computed(() => {
       <StatTile label="API keys" :value="n(summary.keys_active)" :hint="`${summary.browser_active} browser sessions open`" />
       <StatTile label="Indexed graphs" :value="n(summary.graphs)" hint="not measured yet" />
       <StatTile label="Jobs waiting" :value="n(summary.jobs_waiting)" hint="not measured yet" />
+      <StatTile label="Audit chain" :value="!summary.chain ? 'Not verified yet' : summary.chain.run_error ? 'Could not finish' : summary.chain.ok ? 'Intact' : 'Broken'"
+        :hint="summary.chain ? `checked ${new Date(summary.chain.at).toLocaleString()}` : 'checked daily'" :tone="summary.chain?.ok ? undefined : 'warning'"
+        tip="The stored result of the last audit chain verification; opening this page does not walk the chain." />
     </div>
     <section class="panel">
       <div class="panel__header">
@@ -131,6 +141,8 @@ const activeHint = computed(() => {
           <button type="button" :aria-pressed="tab === 'tenants'" @click="tab = 'tenants'">Tenants</button>
           <button type="button" :aria-pressed="tab === 'sessions'" @click="tab = 'sessions'">Sessions</button>
           <button type="button" :aria-pressed="tab === 'usage'" @click="tab = 'usage'">Usage</button>
+          <button type="button" :aria-pressed="tab === 'security'" @click="tab = 'security'">Security</button>
+          <button type="button" :aria-pressed="tab === 'audit'" @click="tab = 'audit'">Audit</button>
         </div>
         <div class="row">
           <select v-if="tab === 'tenants'" v-model="tenantSort" class="inline" aria-label="Sort tenants">
@@ -139,7 +151,7 @@ const activeHint = computed(() => {
           <select v-else-if="tab === 'sessions'" v-model="sessionSort" class="inline" aria-label="Sort sessions">
             <option value="name">By name</option><option value="execution">Most runtime sessions</option><option value="keys">Most API keys</option>
           </select>
-          <select v-else v-model="usageSort" class="inline" aria-label="Sort usage">
+          <select v-else-if="tab === 'usage'" v-model="usageSort" class="inline" aria-label="Sort usage">
             <option value="name">By name</option><option value="sessions">Most sessions</option><option value="calls">Most calls</option><option value="errors">Most errors</option><option value="tokens">Most tokens</option><option value="avoided">Most avoided</option>
           </select>
           <a :href="exportHref('csv')" download class="chip">CSV</a>
@@ -240,6 +252,11 @@ const activeHint = computed(() => {
           </div>
         </div>
         <p class="muted small">Tools and clients that fewer than three organisations use are counted as other, unless one organisation is selected.</p>
+      </template>
+      <AdminSecurityStats v-if="tab === 'security'" ref="securityTab" v-model:page="page" :filter="filter" />
+      <template v-if="tab === 'audit'">
+        <p v-if="org" class="muted small">The audit log is counted for the whole platform; the organisation filter does not apply.</p>
+        <AdminAuditStats ref="auditTab" :range="range" />
       </template>
       <div v-if="table && table.pages > 1" class="row pager">
         <button class="secondary tiny" :disabled="page <= 1" @click="page--">Previous</button>
