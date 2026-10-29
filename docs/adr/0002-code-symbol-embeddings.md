@@ -42,6 +42,7 @@ Embed, with these limits:
 - `minimal_context` finds the files of a task far more often (hit@10 0.53 to 0.76 in the eval) without larger answers.
 - Ingest needs an embedding call per changed symbol when a local model is configured; unchanged symbols keep their vectors (keyed by content hash).
 - The store grows by one vector per symbol; Milvus holds them in production, an exact in-process index serves small installs and tests.
+- Vectors follow the published graph. After an ingest's embedding pass, the vectors of symbols and descriptions the graph no longer has are removed (`semantic.Store.Prune`), unless a newer graph was published meanwhile. Deleting a graph (the last organisation link, `reapIfGone`, a single-tenant delete) removes its vectors (`Forget`), and a sweep under the `api-loops` lease every six hours removes the vectors of graphs that no longer exist, for deletes whose vector removal failed. All three page through the index (`vector.Sweeper`) in bounded pages and runs, and every delete names the code-graph tenant and one graph, with values only in Milvus `exprParams`.
 - ADR 0001's statement about code symbols is amended by this record; its decisions on memory and the other data stand.
 
 ## When to revisit

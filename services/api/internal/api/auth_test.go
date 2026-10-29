@@ -102,14 +102,14 @@ func TestAccountsFlow(t *testing.T) {
 		User accounts.User
 		Org  accounts.Org
 	}
-	require.Equal(t, root.do("POST", "/api/v1/auth/signup", `{"email":"root@example.com","name":"Root","password":"`+pw+`"}`, &signed), 201)
+	require.Equal(t, root.signUp(`{"email":"root@example.com","name":"Root","password":"`+pw+`"}`, &signed), 202)
 	assert.True(t, signed.User.BootstrapRoot && signed.User.PlatformAdmin)
 	assert.Equal(t, signed.Org.ID, "", "root gets no organisation")
 	var rootMe struct {
 		Restricted bool
 		Setup      string
 	}
-	require.Equal(t, root.do("GET", "/api/v1/me", "", &rootMe), 200, "signing up logs in (cookie)")
+	require.Equal(t, root.do("GET", "/api/v1/me", "", &rootMe), 200, "signed in after signing up")
 	assert.True(t, rootMe.Restricted)
 	assert.Equal(t, rootMe.Setup, accounts.SetupPending)
 	var refused map[string]any
@@ -117,7 +117,7 @@ func TestAccountsFlow(t *testing.T) {
 	assert.Equal(t, refused["detail"], any(accounts.ErrRootAccount.Error()))
 	assert.Equal(t, root.do("POST", "/api/v1/accounts/orgs", `{"name":"Root's"}`, nil), 403)
 	assert.Equal(t, root.do("GET", "/api/v1/admin/health", "", nil), 200, "governance stays open")
-	assert.Equal(t, anon.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 403, "sign-up is closed")
+	assert.Equal(t, anon.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 403, "sign-up is closed")
 	assert.Equal(t, root.do("POST", "/api/v1/auth/setup", `{"org_name":"Acme","email":"ada@example.com","name":"Ada","password":"short"}`, nil), 400)
 	var done map[string]any
 	require.Equal(t, root.do("POST", "/api/v1/auth/setup", `{"org_name":"Acme","email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, &done), 200)
@@ -141,11 +141,11 @@ func TestAccountsFlow(t *testing.T) {
 	assert.False(t, me.User.PlatformAdmin)
 	signed.Org = me.Memberships[0].Org
 	assert.Equal(t, ada.do("GET", "/api/v1/repos", "", nil), 200)
-	assert.Equal(t, anon.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 403, "sign-up stays closed unless opened")
+	assert.Equal(t, anon.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 403, "sign-up stays closed unless opened")
 
 	acc.SignupOpen = true
 	bob := newClient(t, ts)
-	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 202)
 	var bobRepos struct{ Repos []map[string]any }
 	require.Equal(t, bob.do("GET", "/api/v1/repos", "", &bobRepos), 200)
 	assert.Equal(t, len(bobRepos.Repos), 0, "ordinary users see only their organisations' repositories (none yet)")
@@ -184,7 +184,7 @@ func TestAuditTrail(t *testing.T) {
 	ts, acc := accountsServer(t)
 	acc.SignupOpen = true
 	ada := newClient(t, ts)
-	require.Equal(t, ada.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil, "User-Agent", "audit-test/1"), 201)
+	require.Equal(t, ada.signUp(`{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil, "User-Agent", "audit-test/1"), 202)
 	assert.Equal(t, ada.do("PUT", "/api/v1/repos/"+storetest.Repo+"/schedule", `{"bogus":true}`, nil), 404, "an inaccessible repository")
 	anon := newClient(t, ts)
 	assert.Equal(t, anon.do("DELETE", "/api/v1/repos/"+storetest.Repo, "", nil), 401, "a refused request")

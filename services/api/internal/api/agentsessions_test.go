@@ -17,7 +17,7 @@ func TestAgentSessions(t *testing.T) {
 	ctx := context.Background()
 	signup := func(email, name string) (*client, accounts.User) {
 		c := newClient(t, ts)
-		require.Equal(t, c.do("POST", "/api/v1/auth/signup", `{"email":"`+email+`","name":"`+name+`","password":"`+pw+`"}`, nil), 201)
+		require.Equal(t, c.signUp(`{"email":"`+email+`","name":"`+name+`","password":"`+pw+`"}`, nil), 202)
 		var me struct{ User accounts.User }
 		require.Equal(t, c.do("GET", "/api/v1/me", "", &me), 200)
 		return c, me.User

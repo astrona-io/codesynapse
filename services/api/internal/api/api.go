@@ -138,7 +138,8 @@ type Config struct {
 
 // Server is the API handler.
 type Server struct {
-	watching    atomic.Bool // an organisation watch scan is running
+	signupFloor time.Duration // minimum sign-up answer time (auth.go)
+	watching    atomic.Bool   // an organisation watch scan is running
 	annotations *annotation.Worker
 	cfg         Config
 	st          store.Store
@@ -165,7 +166,7 @@ type Server struct {
 
 // New builds the API. Jobs run on ctx and stop when it is cancelled.
 func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, logger: logger, mux: http.NewServeMux()}
+	s := &Server{cfg: cfg, st: st, logger: logger, mux: http.NewServeMux(), signupFloor: defaultSignupFloor}
 	s.jobs = NewJobs(ctx, st, logger, cfg.CommitLimit, cfg.AllowNetwork, cfg.VulnScan)
 	kinds, err := kindsFor(cfg.JobRoles)
 	if err != nil {
@@ -235,7 +236,7 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	if !cfg.Worker {
 		// One API process at a time runs these (singleton.go); workers only
 		// run jobs (docs/SAAS.md, 5e).
-		loops := []func(context.Context){s.recoverFixes, func(ctx context.Context) { s.runScheduler(ctx, logger) }}
+		loops := []func(context.Context){s.recoverFixes, func(ctx context.Context) { s.runScheduler(ctx, logger) }, s.sweepVectors}
 		if cfg.Accounts != nil {
 			loops = append(loops, s.pruneAudit, s.projectAccess, s.pruneExecutionMemory, s.recoverIngestReports, s.reportJobQueue, s.rollupPlatformStats, s.prunePromptLog, s.verifyAuditChain)
 		}
@@ -605,6 +606,7 @@ func (s *Server) deleteRepo(ctx context.Context, repo string, files bool) (int, 
 	if err := s.st.DeleteRepo(ctx, repo); err != nil {
 		return 500, err
 	}
+	s.forgetVectors(ctx, repo)
 	if err := s.st.DeleteSnapshots(ctx, repo); err != nil {
 		s.logger.Warn("removing history", "repo", repo, "error", err)
 	}

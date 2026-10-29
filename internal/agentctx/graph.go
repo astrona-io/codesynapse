@@ -372,6 +372,19 @@ func identLike(w string) bool {
 	return false
 }
 
+// NamesCode reports whether a task names code exactly (CamelCase, a dotted
+// or slashed path, snake_case, a call). Its plain words are then prose, and
+// an "exact" match of minimal_context is a match on a name the task wrote as
+// code rather than on a plain word.
+func NamesCode(task string) bool {
+	for _, word := range identRe.FindAllString(task, -1) {
+		if identLike(strings.TrimRight(strings.Trim(word, "./"), ":-")) {
+			return true
+		}
+	}
+	return false
+}
+
 // keywords extracts identifier-like terms, splitting CamelCase and
 // snake_case so "ReplaceRepo" also searches "replace" and "repo".
 func keywords(task string) []string {
@@ -514,13 +527,7 @@ func (s Service) MinimalContext(ctx context.Context, repo, task string, files []
 	// exact match and with less weight, so "only" or "hook" in the task does
 	// not put AuditLog.only above the identifiers it names. A task of plain
 	// words alone ("Handler") keeps them as names.
-	named := false
-	for _, word := range identRe.FindAllString(task, -1) {
-		if identLike(strings.TrimRight(strings.Trim(word, "./"), ":-")) {
-			named = true
-			break
-		}
-	}
+	named := NamesCode(task)
 	exactTerms := map[string]bool{}
 	prose := map[string]bool{}
 	for _, word := range identRe.FindAllString(task, -1) {

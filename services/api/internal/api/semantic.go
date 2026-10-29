@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/semantic"
+	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
@@ -68,6 +70,112 @@ func (s *Server) embedIngest(ctx context.Context, repo string, g *model.Graph, a
 		return
 	}
 	s.logger.Info("symbols embedded", "symbols", st.Symbols, "embedded", st.Embedded, "skipped", st.Skipped)
+	s.pruneVectors(ctx, vs, repo, g)
+}
+
+// Bounds of vector cleaning: one prune, delete or sweep run, and how often
+// the sweep runs and how far it reads each time.
+const (
+	vectorCleanTimeout = 2 * time.Minute
+	vectorSweepEvery   = 6 * time.Hour
+	vectorSweepPages   = 20
+)
+
+// pruneVectors removes the vectors of symbols and descriptions g no longer
+// has, once g's vectors are all there. It leaves them when another ingest
+// published a newer graph in the meantime: that ingest prunes against its own.
+func (s *Server) pruneVectors(ctx context.Context, vs semantic.Store, repo string, g *model.Graph) {
+	id := model.NodeID(repo, model.KindRepository, repo)
+	want, ok := g.Node(id)
+	if !ok {
+		return
+	}
+	if live, err := s.st.Node(ctx, id); err != nil || live.Head != want.Head || live.Time != want.Time {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, vectorCleanTimeout)
+	defer cancel()
+	st, err := vs.Prune(ctx, repo, g.Nodes())
+	if err != nil {
+		if !errors.Is(err, semantic.ErrNoSweeper) {
+			s.logger.Warn("removing stale symbol vectors", "error", err, "removed", st.Removed)
+		}
+		return
+	}
+	if st.Removed > 0 || !st.Complete {
+		s.logger.Info("stale symbol vectors removed", "scanned", st.Scanned, "removed", st.Removed, "complete", st.Complete)
+	}
+}
+
+// codeVectors is the symbol vector index for cleaning, which needs no
+// embedding model: vectors stay after a model is unconfigured.
+func (s *Server) codeVectors() (semantic.Store, bool) {
+	ix, ok := s.st.(semantic.Indexer)
+	if !ok || ix.CodeVectors() == nil {
+		return semantic.Store{}, false
+	}
+	return semantic.Store{Idx: ix.CodeVectors()}, true
+}
+
+// forgetVectors removes a deleted graph's symbol vectors. A failure is
+// logged; sweepVectors removes them later.
+func (s *Server) forgetVectors(ctx context.Context, repo string) {
+	vs, ok := s.codeVectors()
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), vectorCleanTimeout)
+	defer cancel()
+	if err := vs.Forget(ctx, repo); err != nil && !errors.Is(err, semantic.ErrNoSweeper) {
+		s.logger.Warn("removing the symbol vectors of a deleted repository; the sweep retries", "error", err)
+	}
+}
+
+// sweepVectors removes, every few hours under the api-loops lease, the
+// symbol vectors of graphs that no longer exist: deletes whose vector
+// removal failed, and graphs deleted before vectors went with them. Each
+// run reads a bounded number of pages and the next run carries on.
+func (s *Server) sweepVectors(ctx context.Context) {
+	vs, ok := s.codeVectors()
+	if !ok {
+		return
+	}
+	t := time.NewTicker(vectorSweepEvery)
+	defer t.Stop()
+	next := ""
+	for {
+		next = s.sweepVectorsOnce(ctx, vs, next)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (s *Server) sweepVectorsOnce(ctx context.Context, vs semantic.Store, after string) string {
+	ctx, cancel := context.WithTimeout(ctx, vectorCleanTimeout)
+	defer cancel()
+	st, err := vs.Sweep(ctx, after, vectorSweepPages, s.graphExists)
+	if err != nil {
+		if !errors.Is(err, semantic.ErrNoSweeper) && ctx.Err() == nil {
+			s.logger.Warn("sweeping symbol vectors", "error", err, "graphs", st.Graphs)
+		}
+		return st.Next
+	}
+	if st.Graphs > 0 {
+		s.logger.Info("symbol vectors of deleted repositories removed", "graphs", st.Graphs, "scanned", st.Scanned)
+	}
+	return st.Next
+}
+
+// graphExists reports whether graph is a published repository graph.
+func (s *Server) graphExists(ctx context.Context, graph string) (bool, error) {
+	_, err := s.st.Node(ctx, model.NodeID(graph, model.KindRepository, graph))
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // afterIngest runs every post-ingest step.

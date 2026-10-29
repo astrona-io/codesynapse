@@ -74,6 +74,7 @@ func To(n model.Node) map[string]any {
 	setBool("indirect", n.Indirect)
 	setStr("latest", n.Latest)
 	setStr("deprecated", n.Deprecated)
+	setStr("retracted", n.Retracted)
 	setInt("behind", n.Behind)
 	setStr("liveness", n.Liveness)
 	setStr("cleanup", n.Cleanup)
@@ -112,7 +113,7 @@ func From(p map[string]any) model.Node {
 		LOC: i("loc"), Level: i("level"), Churn: i("churn"),
 		Exported: b("exported"), IsTest: b("is_test"),
 		Severity: s("severity"), Rule: s("rule"), Ignore: s("ignore"), Version: s("version"), FixedVersion: s("fixed_version"),
-		Reachability: s("reachability"), CodeAbsent: b("code_absent"), URL: s("url"), Indirect: b("indirect"), Latest: s("latest"), Deprecated: s("deprecated"), Behind: i("behind"),
+		Reachability: s("reachability"), CodeAbsent: b("code_absent"), URL: s("url"), Indirect: b("indirect"), Latest: s("latest"), Deprecated: s("deprecated"), Behind: i("behind"), Retracted: s("retracted"),
 		Liveness: s("liveness"), Cleanup: s("cleanup"), Licenses: s("licenses"), Coverage: s("coverage"), Language: s("language"), Ecosystem: s("ecosystem"),
 		License: s("license"), LicenseSource: s("license_source"), Dev: b("dev"),
 		CWE: Strs(p["cwe"]), Aliases: Strs(p["aliases"]),

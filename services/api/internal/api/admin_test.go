@@ -21,7 +21,7 @@ func TestPlatformAdministration(t *testing.T) {
 		User accounts.User
 		Org  accounts.Org
 	}
-	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 201)
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 202)
 	require.Equal(t, bob.do("POST", "/api/v1/me/keys", `{"org":"`+signed.Org.Slug+`","name":"laptop"}`, nil), 201)
 
 	for _, path := range []string{"/api/v1/admin/users", "/api/v1/admin/orgs", "/api/v1/admin/health"} {

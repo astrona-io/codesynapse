@@ -27,13 +27,21 @@ func TestVictoriaMetricsDashboardPanels(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	var body bytes.Buffer
 	enc := json.NewEncoder(&body)
-	add := func(name, tenant, replica string, values []float64, times []int64) {
+	addLabels := func(name, tenant, replica string, values []float64, times []int64, extra ...string) {
 		t.Helper()
+		labels := map[string]string{"__name__": name, "tenant_id": tenant, "instance": replica, "mcp_tool": "none", "llm_provider": "none", "llm_model": "none"}
+		for i := 0; i+1 < len(extra); i += 2 {
+			labels[extra[i]] = extra[i+1]
+		}
 		require.NoError(t, enc.Encode(struct {
 			Metric map[string]string `json:"metric"`
 			Values []float64         `json:"values"`
 			Times  []int64           `json:"timestamps"`
-		}{map[string]string{"__name__": name, "tenant_id": tenant, "instance": replica, "mcp_tool": "none", "llm_provider": "none", "llm_model": "none"}, values, times}))
+		}{labels, values, times}))
+	}
+	add := func(name, tenant, replica string, values []float64, times []int64) {
+		t.Helper()
+		addLabels(name, tenant, replica, values, times)
 	}
 	gauge := func(tenant, replica string, count float64, age time.Duration) {
 		at := now.Add(-age)
@@ -65,6 +73,19 @@ func TestVictoriaMetricsDashboardPanels(t *testing.T) {
 	counter("cloud_bytes_sent_total", d, 100)
 	counter("llm_cost_estimated_dollars", a, 0.000004)
 	counter("llm_cost_estimated_dollars", b, 9)
+	// Gateway response time buckets: tenant a's local answers all took at
+	// most 1 s, tenant b's between 1 and 2.5 s. The quantile panel scoped to
+	// a must not see b's buckets.
+	bucket := func(tenant, route, le string, n float64) {
+		addLabels("gateway_request_duration_seconds_bucket", tenant, "one", []float64{0, n}, []int64{now.Add(-2 * time.Minute).UnixMilli(), now.Add(-20 * time.Second).UnixMilli()}, "route", route, "le", le)
+	}
+	for _, le := range []string{"1", "2.5", "+Inf"} {
+		bucket(a, "local", le, 10)
+		bucket(b, "cloud", le, 10)
+	}
+	for le, n := range map[string]float64{"1": 0, "2.5": 10, "+Inf": 10} {
+		bucket(b, "local", le, n)
+	}
 	user, pass := os.Getenv("CODESYNAPSE_TEST_METRICS_USER"), os.Getenv("CODESYNAPSE_TEST_METRICS_PASSWORD")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+"/api/v1/import", &body)
 	require.NoError(t, err)
@@ -111,6 +132,23 @@ func TestVictoriaMetricsDashboardPanels(t *testing.T) {
 			assert.Equal(t, got[0].Points[0].V, tc.want)
 		})
 	}
+	for _, tc := range []struct {
+		name    string
+		tenants []string
+		lo, hi  float64
+	}{
+		{"own buckets only", []string{a}, 0, 1},
+		{"the other tenant's buckets", []string{b}, 1, 2.5},
+	} {
+		t.Run("gateway p50 "+tc.name, func(t *testing.T) {
+			got := query("gateway_latency_local", tc.tenants)
+			require.Len(t, got, 1)
+			require.Len(t, got[0].Points, 1)
+			v := got[0].Points[0].V
+			assert.True(t, v > tc.lo && v <= tc.hi, "p50 from the tenant's own buckets")
+		})
+	}
+	assert.Len(t, query("gateway_latency_cloud", []string{a}), 0, "a route the tenant never used is absent")
 	assert.Len(t, query("memory_facts", []string{c}), 0, "stale gauges are absent")
 	assert.Len(t, query("memory_facts", []string{e}), 0, "a fresh timestamp must not refresh a count whose export failed")
 	assert.Len(t, query("memory_facts", []string{f}), 0, "a new count without its matching freshness sample is incomplete")

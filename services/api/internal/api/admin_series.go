@@ -56,6 +56,13 @@ func orgsUsing(metric string) string {
 // gatewayRouteOrgs counts the organisations behind each gateway route.
 const gatewayRouteOrgs = `count by (route) (sum by (route, tenant_id) (increase(gateway_request_duration_seconds_count[$w])) > 0)`
 
+// gatewayOneRouteOrgs counts the organisations behind one route's quantile
+// panel, which is a single group: its lines are quantiles, not label values.
+// route is a constant of this package, never request input.
+func gatewayOneRouteOrgs(route string) string {
+	return `count(sum by (tenant_id) (increase(gateway_request_duration_seconds_count{route="` + route + `"}[$w])) > 0)`
+}
+
 var adminPanels = map[string]adminPanel{
 	"org_tool_calls": {byTenant: true, seriesPanel: seriesPanel{Title: "Tool calls by organisation", Unit: "calls", Kind: "count",
 		Help:    "MCP tool and prompt calls per step, by organisation.",
@@ -110,6 +117,14 @@ var adminPanels = map[string]adminPanel{
 		Help:    "95th percentile time to answer a gateway request, by route, every organisation.",
 		Empty:   "No gateway request in this window.",
 		queries: []seriesQuery{{expr: gatewayP95, by: "route"}}}},
+	"gateway_latency_local": {groups: gatewayOneRouteOrgs("local"), seriesPanel: seriesPanel{Title: "Gateway response time, local model", Unit: "seconds", Kind: "gauge",
+		Help:    "p50, p75, p95 and p99 time to answer gateway requests the local model answered, every organisation. Shown only when at least three organisations had such requests in the range." + gatewayQuantilesHelp,
+		Empty:   "No local gateway answer in this window, or fewer than three organisations had one.",
+		queries: gatewayQuantiles("local")}},
+	"gateway_latency_cloud": {groups: gatewayOneRouteOrgs("cloud"), seriesPanel: seriesPanel{Title: "Gateway response time, cloud", Unit: "seconds", Kind: "gauge",
+		Help:    "p50, p75, p95 and p99 time to answer gateway requests the cloud answered, every organisation. Shown only when at least three organisations had such requests in the range." + gatewayQuantilesHelp,
+		Empty:   "No cloud gateway answer in this window, or fewer than three organisations had one.",
+		queries: gatewayQuantiles("cloud")}},
 	"gateway_latency_avg": {groups: gatewayRouteOrgs, seriesPanel: seriesPanel{Title: "Gateway response time (average)", Unit: "seconds", Kind: "gauge",
 		Help:    "Average time to answer a gateway request, by route, every organisation.",
 		Empty:   "No gateway request in this window.",
@@ -245,7 +260,11 @@ func (s *Server) adminPanelData(ctx context.Context, name, rng, orgID string) (S
 		if err != nil {
 			return SeriesPanel{}, err
 		}
-		out.Series, small = foldSmallGroups(out.Series, used, p.Kind, len(out.Times))
+		if p.queries[0].by == "" {
+			out.Series = hideSmallPanel(out.Series, used)
+		} else {
+			out.Series, small = foldSmallGroups(out.Series, used, p.Kind, len(out.Times))
+		}
 	}
 	out.Series = addOther(foldSeries(out.Series, p.Kind, len(out.Times)), small)
 	return out, nil
@@ -293,6 +312,17 @@ func foldSmallGroups(lines []SeriesLine, used map[string]int, kind string, n int
 	}
 	other := sumLines("other", small, n)
 	return keep, &other
+}
+
+// hideSmallPanel applies the small-group rule to a panel whose lines are
+// named, not label values (one route's quantiles): its groups query counts
+// the organisations behind the whole panel, and with fewer than
+// minGroupOrgs the panel shows nothing.
+func hideSmallPanel(lines []SeriesLine, used map[string]int) []SeriesLine {
+	if used[""] < minGroupOrgs {
+		return []SeriesLine{}
+	}
+	return lines
 }
 
 // addOther adds the small groups to the top-N fold's "other" line.

@@ -99,8 +99,11 @@ type Report struct {
 	Vulnerabilities []Vulnerability `json:"vulnerabilities"`
 	// Deprecated lists deprecated dependencies, direct ones first.
 	Deprecated []DeprecatedModule `json:"deprecated,omitempty"`
-	Modules    ModuleStats        `json:"modules"`
-	Rules      []RuleCount        `json:"rules"`
+	// Retracted lists Go module versions their authors retracted, direct
+	// ones first; Reason is the retraction rationale.
+	Retracted []DeprecatedModule `json:"retracted,omitempty"`
+	Modules   ModuleStats        `json:"modules"`
+	Rules     []RuleCount        `json:"rules"`
 	// OwnerCounts are the listed findings per CODEOWNERS owner, most
 	// severe work first; empty without a CODEOWNERS file.
 	OwnerCounts []OwnerCount `json:"owners,omitempty"`
@@ -139,9 +142,13 @@ type ModuleStats struct {
 	// behind their latest release (only with deps.dev lookups on).
 	Deprecated int `json:"deprecated,omitempty"`
 	Behind     int `json:"behind,omitempty"`
+	// Retracted counts Go module versions the module proxy reports
+	// retracted (only with deps.dev lookups on).
+	Retracted int `json:"retracted,omitempty"`
 }
 
-// DeprecatedModule is a dependency whose version its publisher deprecated.
+// DeprecatedModule is a dependency whose version its publisher deprecated
+// or, in Report.Retracted, retracted.
 type DeprecatedModule struct {
 	Module    string `json:"module"`
 	Ecosystem string `json:"ecosystem,omitempty"`
@@ -349,13 +356,20 @@ func Build(ctx context.Context, r store.Reader, repo string, opts Options) (Repo
 			rep.Deprecated = append(rep.Deprecated, DeprecatedModule{Module: m.Node.Name, Ecosystem: m.Node.Ecosystem, Version: m.Node.Version,
 				Latest: m.Node.Latest, Reason: m.Node.Deprecated, Direct: !m.Node.Indirect})
 		}
+		if m.Node.Retracted != "" {
+			rep.Modules.Retracted++
+			rep.Retracted = append(rep.Retracted, DeprecatedModule{Module: m.Node.Name, Ecosystem: m.Node.Ecosystem, Version: m.Node.Version,
+				Latest: m.Node.Latest, Reason: m.Node.Retracted, Direct: !m.Node.Indirect})
+		}
 	}
-	slices.SortStableFunc(rep.Deprecated, func(a, b DeprecatedModule) int {
+	directFirst := func(a, b DeprecatedModule) int {
 		if a.Direct != b.Direct {
 			return map[bool]int{true: -1, false: 1}[a.Direct]
 		}
 		return cmp.Compare(a.Module, b.Module)
-	})
+	}
+	slices.SortStableFunc(rep.Deprecated, directFirst)
+	slices.SortStableFunc(rep.Retracted, directFirst)
 	rep.Modules.Vulnerable = len(vulnerableMods)
 	// The list stops at MaxLimit; the node count does not. Modules beyond the
 	// list are counted as indirect, which large lockfiles mostly are.
@@ -559,14 +573,8 @@ func WriteMarkdown(w io.Writer, r Report) error {
 		}
 		b.WriteString("\n")
 	}
-	if len(r.Deprecated) > 0 {
-		b.WriteString("## Deprecated dependencies\n\n| Module | Version | Latest | Direct | Reason |\n|---|---|---|---|---|\n")
-		escape := strings.NewReplacer("|", "\\|", "\n", " ")
-		for _, d := range r.Deprecated {
-			fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %s |\n", d.Module, d.Version, cmp.Or(d.Latest, "?"), yesNo(d.Direct), escape.Replace(d.Reason))
-		}
-		b.WriteString("\n")
-	}
+	moduleTable(&b, "Deprecated dependencies", "Reason", r.Deprecated)
+	moduleTable(&b, "Retracted Go module versions", "Rationale", r.Retracted)
 	if len(r.OwnerCounts) > 0 {
 		b.WriteString("## Findings by owner (CODEOWNERS)\n\n| Owner | Findings | By severity |\n|---|---|---|\n")
 		for _, o := range r.OwnerCounts {
@@ -679,4 +687,18 @@ func short(h string) string {
 		return h[:10]
 	}
 	return h
+}
+
+// moduleTable writes a section listing deprecated or retracted modules;
+// nothing when mods is empty.
+func moduleTable(b *strings.Builder, title, reason string, mods []DeprecatedModule) {
+	if len(mods) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "## %s\n\n| Module | Version | Latest | Direct | %s |\n|---|---|---|---|---|\n", title, reason)
+	escape := strings.NewReplacer("|", "\\|", "\n", " ")
+	for _, d := range mods {
+		fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s |\n", d.Module, d.Version, cmp.Or(d.Latest, "?"), yesNo(d.Direct), escape.Replace(d.Reason))
+	}
+	b.WriteString("\n")
 }

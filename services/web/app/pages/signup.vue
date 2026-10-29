@@ -10,13 +10,17 @@ const username = ref(setup.value ? 'admin' : '')
 const password = ref('')
 const error = ref('')
 const busy = ref(false)
-// A taken email and a taken username read the same, so the page does not
-// confirm which addresses have an account.
+// The API answers a sign-up the same way whether or not the email already
+// has an account, so the page cannot tell either. A 409 is a taken username,
+// which is checked before the email.
 const SIGNUP_ERRORS = {
   403: 'Sign-up is closed on this installation. Ask an administrator to add you.',
-  409: 'We could not create an account with these details. If you already have one, sign in instead; otherwise try another username.',
+  409: 'That username is taken. Pick another one or leave it empty.',
   429: 'Too many attempts. Wait a minute and try again.',
 }
+// Signing in after the sign-up works only for an account just created with
+// this password; anything else reads the same for a registered email.
+const SIGNIN_AFTER_SIGNUP = 'We could not sign you in with these details. If you already have an account with this email, sign in with its password.'
 const errorEl = ref<HTMLElement | null>(null)
 watch(error, async (e) => {
   if (!e) return
@@ -29,10 +33,17 @@ async function submit() {
   error.value = ''
   try {
     await $fetch('/api/cg/auth/signup', { method: 'POST', body: { name: name.value, email: email.value, username: username.value.trim(), password: password.value } })
+  } catch (e) {
+    error.value = plainError(e, SIGNUP_ERRORS)
+    busy.value = false
+    return
+  }
+  try {
+    await $fetch('/api/cg/auth/login', { method: 'POST', body: { login: email.value, password: password.value } })
     await session.load()
     await navigateTo(setup.value ? '/setup' : '/overview')
   } catch (e) {
-    error.value = plainError(e, SIGNUP_ERRORS)
+    error.value = plainError(e, { 401: SIGNIN_AFTER_SIGNUP, 429: SIGNUP_ERRORS[429] })
   } finally {
     busy.value = false
   }

@@ -7,7 +7,8 @@ import type { BatchedPanel } from '~/composables/useSeriesBatch'
 // user (403), so the page can explain once instead of per chart.
 // A page that loads its panels together (useSeriesBatch) passes batched;
 // a card on its own fetches its panel.
-const props = defineProps<{ panel: string; range: SeriesRange; tick?: number; repo?: string; batched?: BatchedPanel | null; batchPending?: boolean }>()
+// yMax shares one y scale between cards shown side by side.
+const props = defineProps<{ panel: string; range: SeriesRange; tick?: number; repo?: string; batched?: BatchedPanel | null; batchPending?: boolean; yMax?: number }>()
 const emit = defineEmits<{ unavailable: [status: number] }>()
 const own = props.batched === undefined
   ? useApiGet<SeriesPanel>(() => `stats/series?panel=${props.panel}&range=${props.range}${props.repo ? `&repo=${encodeURIComponent(props.repo)}` : ""}`)
@@ -44,7 +45,7 @@ const headline = computed(() => {
     <DataState v-if="error && error.statusCode !== 409 && error.statusCode !== 403" :error="error.message" compact />
     <DataState v-else-if="pending && !data" pending empty compact />
     <template v-else-if="data">
-      <LineChart v-if="!empty" :times="data.times" :series="data.series" :title="data.title" :unit="data.unit" :step-seconds="data.step_seconds" />
+      <LineChart v-if="!empty" :times="data.times" :series="data.series" :title="data.title" :unit="data.unit" :step-seconds="data.step_seconds" :y-max="yMax ?? 0" />
       <p v-else class="muted small empty-chart">{{ data.empty }}</p>
       <p class="muted small">{{ data.help }}</p>
     </template>
