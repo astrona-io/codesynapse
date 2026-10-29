@@ -40,7 +40,7 @@ func statsServer(t *testing.T) (*Server, accounts.Store, *memory.Store, *client,
 			User accounts.User
 			Org  accounts.Org
 		}
-		require.Equal(t, c.do("POST", "/api/v1/auth/signup", `{"email":"`+email+`","name":"N","password":"`+pw+`"}`, &signed), 201)
+		require.Equal(t, c.signUp(`{"email":"`+email+`","name":"N","password":"`+pw+`"}`, &signed), 202)
 		return c, signed.User, signed.Org
 	}
 	ada, adaUser, adaOrg := signup("ada@example.com")
