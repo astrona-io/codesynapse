@@ -235,6 +235,9 @@ func (s *Server) accountRoutes() {
 	s.account("GET /api/v1/admin/stats/summary", governanceRoute, s.handleStatsSummary)
 	s.account("GET /api/v1/admin/stats/tenants", governanceRoute, s.handleStatsTenants)
 	s.account("GET /api/v1/admin/stats/sessions", governanceRoute, s.handleStatsSessions)
+	s.account("GET /api/v1/admin/stats/usage", governanceRoute, s.handleStatsUsage)
+	s.account("GET /api/v1/admin/stats/series", governanceRoute, s.handleAdminSeries)
+	s.account("GET /api/v1/admin/stats/series/batch", governanceRoute, s.handleAdminSeriesBatch)
 	s.account("GET /api/v1/admin/stats/export", governanceRoute, s.handleStatsExport)
 	s.account("POST /api/v1/admin/orgs/{id}/owner", governanceRoute, s.handleRecoverOwner)
 }

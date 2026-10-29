@@ -7,6 +7,9 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/astrona-io/codesynapse/internal/toolsets"
+	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
 // Daily platform statistics (docs/PLATFORM_STATS_PLAN.md, "Daily rollup").
@@ -30,6 +33,12 @@ const (
 	StatBrowserSessions   = "browser_sessions"
 	StatExecutionSessions = "execution_sessions"
 	StatAPIKeys           = "api_keys"
+	// MCP usage (phase 3), written from the usage buckets of the graph
+	// store by the API (PlatformStatSource).
+	StatMCPUsage    = "mcp_usage"
+	StatMCPWorkflow = "mcp_workflow" //nolint:gosec // a metric name, not a credential
+	StatMCPTools    = "mcp_tools"
+	StatMCPClients  = "mcp_clients"
 )
 
 // Limits and retention of the daily rollup.
@@ -51,10 +60,13 @@ var StatJobKinds = []string{"sync", "clone", "switch", "ai", "ai-auto", "fix", "
 var statJobOutcomes = []string{"succeeded", "failed"}
 
 // statMetric describes one metric: its dimensions and whether it also has
-// rows per organisation.
+// rows per organisation. An orgOnly metric has no platform rows: its
+// platform figure is the sum of the organisations', and the rows per
+// organisation are what the three-organisation rule counts.
 type statMetric struct {
-	dims   []string
-	perOrg bool
+	dims    []string
+	perOrg  bool
+	orgOnly bool
 }
 
 var statMetrics = map[string]statMetric{
@@ -87,6 +99,56 @@ var statMetrics = map[string]statMetric{
 	// API keys active at the end of the day, used that day, and active
 	// ones expiring within 14 days.
 	StatAPIKeys: {dims: []string{"active", "used", "expiring_14d"}, perOrg: true},
+	// MCP sessions, calls, errors and tokens of the day. The share_*
+	// dimensions are the numerators of the token share (avoided, work, cache
+	// reads, re-sent) of the organisation-days whose share is known, so a long
+	// range adds them up; share_known and share_unknown count those days.
+	StatMCPUsage: {dims: []string{"sessions", "calls", "errors", "response_tokens", "avoided_tokens",
+		"share_avoided", "share_work", "share_cache_read", "share_resend", "share_known", "share_unknown"}, perOrg: true},
+	// The hooks' workflow counts.
+	StatMCPWorkflow: {dims: []string{"first_codesynapse", "first_native", "reads_turned_back", "files_edited", "files_edited_found", "bash"}, perOrg: true},
+	// Calls and errors by MCP tool ("search.calls"): the fixed tool list,
+	// anything else "other".
+	StatMCPTools: {dims: toolDims(), perOrg: true, orgOnly: true},
+	// Sessions and calls by client family ("claude.sessions").
+	StatMCPClients: {dims: clientDims(), perOrg: true, orgOnly: true},
+}
+
+// StatToolOther is the mcp_tools name of a tool outside the fixed list.
+const StatToolOther = "other"
+
+// StatTools are the tools the rollup names, sorted, then "other".
+func StatTools() []string {
+	out := []string{}
+	for _, tools := range toolsets.Sets {
+		out = append(out, tools...)
+	}
+	slices.Sort(out)
+	return append(slices.Compact(out), StatToolOther)
+}
+
+// StatTool is the mcp_tools name of a tool.
+func StatTool(tool string) string {
+	if toolsets.Known(tool) {
+		return tool
+	}
+	return StatToolOther
+}
+
+func toolDims() []string {
+	out := []string{}
+	for _, t := range StatTools() {
+		out = append(out, t+".calls", t+".errors")
+	}
+	return out
+}
+
+func clientDims() []string {
+	out := []string{}
+	for _, f := range usage.ClientFamilies {
+		out = append(out, f+".calls", f+".sessions")
+	}
+	return out
 }
 
 func jobDims() []string {
@@ -147,6 +209,9 @@ type PlatformStatQuery struct {
 	// selects the platform totals; PerOrg selects every organisation's.
 	OrgID  string
 	PerOrg bool
+	// Sum returns one row per metric, dimension and organisation with the
+	// values added up over the days; its Day is From.
+	Sum bool
 	// Limit is capped at MaxPlatformStatRows; zero means that cap.
 	Limit int
 }
@@ -168,7 +233,10 @@ func ValidPlatformStat(metric, dimension, orgID string) bool {
 	if !ok || !slices.Contains(m.dims, dimension) {
 		return false
 	}
-	return orgID == "" || (m.perOrg && policyText(orgID, 128))
+	if orgID == "" {
+		return !m.orgOnly
+	}
+	return m.perOrg && policyText(orgID, 128)
 }
 
 // PreparePlatformStats validates the rows of one day and returns them
@@ -251,6 +319,15 @@ func NewPlatformStatSet(day time.Time) *PlatformStatSet {
 	return &PlatformStatSet{day: day, platform: map[[2]string]int64{}, orgs: map[[3]string]int64{}}
 }
 
+// Add adds a row of another set: a platform total or an organisation's.
+func (s *PlatformStatSet) Add(r PlatformStat) {
+	if r.OrgID == "" {
+		s.Total(r.Metric, r.Dimension, r.Value)
+		return
+	}
+	s.Org(r.OrgID, r.Metric, r.Dimension, r.Value)
+}
+
 // Total adds n to a platform total.
 func (s *PlatformStatSet) Total(metric, dimension string, n int64) {
 	s.platform[[2]string{metric, dimension}] += n
@@ -274,6 +351,9 @@ func (s *PlatformStatSet) Both(orgID, metric, dimension string, n int64) {
 func (s *PlatformStatSet) Rows() []PlatformStat {
 	out := []PlatformStat{}
 	for _, m := range PlatformStatMetrics() {
+		if statMetrics[m].orgOnly {
+			continue
+		}
 		for _, d := range statMetrics[m].dims {
 			out = append(out, PlatformStat{Day: s.day, Metric: m, Dimension: d, Value: s.platform[[2]string{m, d}]})
 		}
@@ -290,12 +370,17 @@ func (s *PlatformStatSet) Rows() []PlatformStat {
 // StatActiveWindows are the active-user windows in days, by dimension.
 var StatActiveWindows = map[string]int{"1d": 1, "7d": 7, "30d": 30}
 
+// PlatformStatSource adds a day's counts kept outside the accounts store
+// (the MCP usage buckets of the graph store) to the rows of that day.
+type PlatformStatSource func(ctx context.Context, day time.Time, set *PlatformStatSet) error
+
 // RollupPlatformStats writes the rows of the day before now's UTC day unless
 // that day is already written, then prunes rows past the retention. written
 // reports whether this call wrote the day. A retry or a second writer finds
 // the day written and changes nothing; writing the same rows twice leaves
-// the same rows.
-func (s *Service) RollupPlatformStats(ctx context.Context) (written bool, err error) {
+// the same rows. A source that fails fails the day, which is then retried
+// whole: a day is never written without its usage.
+func (s *Service) RollupPlatformStats(ctx context.Context, sources ...PlatformStatSource) (written bool, err error) {
 	now := s.now()
 	day := StatDay(now).AddDate(0, 0, -1)
 	done, err := s.St.HasPlatformStats(ctx, day)
@@ -306,6 +391,18 @@ func (s *Service) RollupPlatformStats(ctx context.Context) (written bool, err er
 		rows, err := s.St.CountPlatformStats(ctx, day)
 		if err != nil {
 			return false, fmt.Errorf("counting the platform statistics of %s: %w", day.Format(time.DateOnly), err)
+		}
+		if len(sources) > 0 {
+			set := NewPlatformStatSet(day)
+			for _, r := range rows {
+				set.Add(r)
+			}
+			for _, src := range sources {
+				if err := src(ctx, day, set); err != nil {
+					return false, fmt.Errorf("counting the platform statistics of %s: %w", day.Format(time.DateOnly), err)
+				}
+			}
+			rows = set.Rows()
 		}
 		if err := s.St.PutPlatformStats(ctx, day, rows); err != nil {
 			return false, fmt.Errorf("writing the platform statistics of %s: %w", day.Format(time.DateOnly), err)
@@ -334,12 +431,37 @@ func DailyStatRange(name string, now time.Time) (from, to time.Time, ok bool) {
 	return to.AddDate(0, 0, -n), to, true
 }
 
+// SumPlatformStats adds rows up over their days, in the order of every read:
+// the Sum of a query, for stores that read rows one by one.
+func SumPlatformStats(q PlatformStatQuery, rows []PlatformStat) []PlatformStat {
+	sums := map[[3]string]int64{}
+	for _, r := range rows {
+		sums[[3]string{r.Metric, r.Dimension, r.OrgID}] += r.Value
+	}
+	out := make([]PlatformStat, 0, len(sums))
+	for k, v := range sums {
+		out = append(out, PlatformStat{Day: q.From, Metric: k[0], Dimension: k[1], OrgID: k[2], Value: v})
+	}
+	SortPlatformStats(out)
+	return out
+}
+
 // PlatformStatsHistory reads the daily rollup for a 90d or 365d range for a
 // platform administrator in a signed-in session. It does not audit: the
 // statistics handler calls PlatformStats first, which writes the view event.
 // orgID selects one organisation's rows (a deleted organisation's included),
 // perOrg every organisation's, neither the platform totals.
 func (s *Service) PlatformStatsHistory(ctx context.Context, p Principal, rangeName string, metrics []string, orgID string, perOrg bool) ([]PlatformStat, error) {
+	return s.platformStatsHistory(ctx, p, PlatformStatQuery{Metrics: metrics, OrgID: orgID, PerOrg: perOrg}, rangeName)
+}
+
+// PlatformStatsTotals is PlatformStatsHistory summed over the days of the
+// range: one row per metric, dimension and organisation.
+func (s *Service) PlatformStatsTotals(ctx context.Context, p Principal, rangeName string, metrics []string, orgID string, perOrg bool) ([]PlatformStat, error) {
+	return s.platformStatsHistory(ctx, p, PlatformStatQuery{Metrics: metrics, OrgID: orgID, PerOrg: perOrg, Sum: true}, rangeName)
+}
+
+func (s *Service) platformStatsHistory(ctx context.Context, p Principal, q PlatformStatQuery, rangeName string) ([]PlatformStat, error) {
 	if err := s.requirePlatform(ctx, p); err != nil {
 		return nil, err
 	}
@@ -347,5 +469,6 @@ func (s *Service) PlatformStatsHistory(ctx context.Context, p Principal, rangeNa
 	if !ok {
 		return nil, ErrInvalidInput
 	}
-	return s.St.ListPlatformStats(ctx, PlatformStatQuery{From: from, To: to, Metrics: metrics, OrgID: orgID, PerOrg: perOrg})
+	q.From, q.To = from, to
+	return s.St.ListPlatformStats(ctx, q)
 }

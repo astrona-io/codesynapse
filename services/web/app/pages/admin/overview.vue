@@ -78,21 +78,12 @@ async function assign(graph: string) {
       </section>
       <section class="panel">
         <div class="panel__header">
-          <h2>Usage across organisations</h2>
-          <div class="row"><button v-for="r in (['24h', '7d', '30d'] as SeriesRange[])" :key="r" class="chip" :class="{ active: range === r }" @click="range = r">{{ r === '24h' ? '24 hours' : r === '7d' ? '7 days' : '30 days' }}</button></div>
+          <h2>Platform health</h2>
+          <div v-if="h.metrics.ok" class="row"><button v-for="r in (['24h', '7d', '30d'] as SeriesRange[])" :key="r" class="chip" :class="{ active: range === r }" @click="range = r">{{ r === '24h' ? '24 hours' : r === '7d' ? '7 days' : '30 days' }}</button></div>
         </div>
-        <p v-if="!h.metrics.ok" class="muted">{{ off(h.metrics) ? 'Live statistics are off. Set CODESYNAPSE_METRICS_URL to VictoriaMetrics to see usage per organisation by the minute and hour.' : 'Live statistics are not answering right now; see System health above.' }}</p>
-        <div v-else class="grid cols-2">
-          <SeriesCard panel="tenants" :range="range" :tick="0" />
-          <SeriesCard panel="platform_llm_cost" :range="range" :tick="0" />
-          <SeriesCard panel="platform_tool_latency" :range="range" :tick="0" />
-          <SeriesCard panel="platform_db_latency" :range="range" :tick="0" />
-        </div>
-      </section>
-      <section v-if="h.metrics.ok" class="panel">
-        <h2>Platform health</h2>
-        <p class="muted small">Requests, jobs, leases, memory, CPU, connection pools and the statistics pipeline itself, per service. The range above applies.</p>
-        <div class="grid cols-2">
+        <p v-if="!h.metrics.ok" class="muted">{{ off(h.metrics) ? 'Live statistics are off. Set CODESYNAPSE_METRICS_URL to VictoriaMetrics to see platform health by the minute and hour.' : 'Live statistics are not answering right now; see System health above.' }}</p>
+        <p v-else class="muted small">Requests, jobs, leases, memory, CPU, connection pools and the statistics pipeline itself, per service. Usage across organisations is on the Statistics page.</p>
+        <div v-if="h.metrics.ok" class="grid cols-2">
           <SeriesCard v-for="p in healthPanels" :key="p" :panel="p" :range="range" :tick="0" :batched="health[p] ?? null" :batch-pending="healthPending" />
         </div>
       </section>

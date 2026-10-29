@@ -1,6 +1,6 @@
 # Platform statistics for administrators
 
-Status: proposed. Phases 1 (access, tenants, sessions), 2 (realistic token savings) and 8 (the daily rollup, and the 90d and 365d ranges of the summary, tenants and sessions sections) are implemented; the rest is not, and the other sections that read the rollup come with their phases. It builds on [platform administration](operations/accounts-access.md#platform-administration), [root separation](ROOT_BOOTSTRAP_PLAN.md), [repository permissions](ACCESS_CONTROL_PLAN.md), [telemetry](TELEMETRY_PLAN.md) and its [metrics coverage plan](TELEMETRY_PLAN.md#metrics-coverage-plan), and [ingestion transparency](INGEST_TRANSPARENCY_PLAN.md).
+Status: proposed. Phases 1 (access, tenants, sessions), 2 (realistic token savings), 3 (usage and traffic) and 8 (the daily rollup, and the 90d and 365d ranges of the summary, tenants and sessions sections) are implemented; the rest is not, and the other sections that read the rollup come with their phases. It builds on [platform administration](operations/accounts-access.md#platform-administration), [root separation](ROOT_BOOTSTRAP_PLAN.md), [repository permissions](ACCESS_CONTROL_PLAN.md), [telemetry](TELEMETRY_PLAN.md) and its [metrics coverage plan](TELEMETRY_PLAN.md#metrics-coverage-plan), and [ingestion transparency](INGEST_TRANSPARENCY_PLAN.md).
 
 !!! tip "In plain words"
     Platform administrators run the installation. Today they see a health check, a list of organisations and users, the audit log and four charts. This plan adds a Statistics area under Administration: how the platform grows, how it is used, how jobs, indexing, models and stores behave, and what security and audit look like across all organisations. It shows counts and timings only. It never shows code, repository names, paths, prompts or e-mail addresses in cross-tenant figures.
@@ -20,7 +20,7 @@ The plan extends these pieces. It does not replace them.
 
 | Piece | Where | What it gives | Limits for this plan |
 |---|---|---|---|
-| Admin overview | `services/web/app/pages/admin/overview.vue`, `GET /api/v1/admin/health` (`admin.go`) | Store checks, user, admin, suspended, organisation and graph counts, audit chain check, job totals, unowned graphs; four platform charts (`tenants`, `platform_llm_cost`, `platform_tool_latency`, `platform_db_latency`) | Totals only, no trends, no per-organisation table; charts show opaque tenant IDs |
+| Admin overview | `services/web/app/pages/admin/overview.vue`, `GET /api/v1/admin/health` (`admin.go`) | Store checks, user, admin, suspended, organisation and graph counts, audit chain check, job totals, unowned graphs; platform health charts; the four former platform usage charts moved to Statistics → Usage in phase 3 | Totals only, no trends, no per-organisation table |
 | Admin organisations and users | `GET /api/v1/admin/orgs`, `GET /api/v1/admin/users` | Members, roles, repositories, lost access, teams; memberships, active keys, last key use | Lists of up to 1,000, no activity or growth |
 | Audit log | `GET /api/v1/admin/audit`, `.../verify`, export (`audit.go`) | Every changing request and security event, hash chained | Rows, not rates |
 | Series panels | `GET /api/v1/stats/series` and `/batch` (`series.go`), `GET /api/v1/stats/models` (`stats_models.go`) | Fixed MetricsQL panels, five ranges (1h to 30d), tenant scope as `extra_filters`; `platform: true` panels cross tenants | Platform panels accept API keys; tenant series are labelled by opaque ID |
@@ -319,7 +319,16 @@ All routes are account routes of class `governanceRoute`, each calling `Platform
 | `GET /api/v1/admin/stats/series/batch` | Several panels in one request and one audit event, as `/stats/series/batch` |
 | `GET /api/v1/admin/stats/export?section=&range=&format=csv\|json` | A section as a file. CSV cells are formula-neutralised as in the audit export. Audited as `admin.stats.export` |
 
-The existing `platform: true` panels on `/api/v1/stats/series` (`tenants`, `platform_llm_cost`, `platform_tool_latency`, `platform_db_latency`) move to `adminPanels`. Until they are removed in phase 3, the old names refuse API keys and are audited on view, as decided above.
+The former `platform: true` usage panels on `/api/v1/stats/series` (`tenants`, `platform_llm_cost`, `platform_tool_latency`, `platform_db_latency`) moved to `adminPanels` in phase 3 (`org_sessions`, `llm_cost`, `tool_latency`, `db_latency`); the old names answer 404. The `platform_*` health panels of the admin overview stay on `/api/v1/stats/series`.
+
+As built (phase 3):
+
+- `adminPanels` (`services/api/internal/api/admin_series.go`): `sessions`, `mcp_calls`, `mcp_errors`, `mcp_tokens`, `local_answers`, `tool_latency`, `tool_latency_by_tool`, `org_tool_calls`, `org_sessions`, `org_tokens`, `api_routes`, `api_failures`, `api_route_latency`, `gateway_requests`, `llm_cost`, `db_latency`. Their only placeholder is `$w`; `org` becomes a VictoriaMetrics extra filter, never query text.
+- Panels grouped by tool or client fold a group that fewer than three organisations use into "other" with a second query that counts the organisations per group; with one organisation selected nothing folds. Then the usual top-N fold of `/stats/series` applies.
+- Panels grouped by `tenant_id` answer with organisation names; an ID with no organisation reads "deleted organisation".
+- The `usage` section adds MCP usage buckets per organisation: sessions, calls, errors, tokens served and avoided, the token share, the workflow counts and unindexed checkouts, with tool and client breakdowns. Clients are a fixed list of known families; any other name is "other".
+- 90d and 365d read the daily rollup, which keeps tool and client rows per organisation. The share there counts only organisation-days with token counts (`share_basis: known_only`, with `share_days` and `share_unknown_days`); unindexed checkouts are not kept per day and read `null`. VictoriaMetrics keeps 30 days, so the charts show the last 30 for those ranges.
+- The upper share figure is in the JSON beside the main one, never in tiles, exports or the summary.
 
 ## Dashboard
 

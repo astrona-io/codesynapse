@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AdminOrg, OrgSessionRow, OrgTenantRow, SessionTotals, StatsRange, StatsSummary, StatsTable, TenantTotals } from '~/utils/types'
+import type { AdminOrg, OrgSessionRow, OrgTenantRow, SeriesRange, SessionTotals, StatsRange, StatsSummary, StatsTable, TenantTotals, UsageSection } from '~/utils/types'
 
 // Platform statistics: counts across every organisation, aggregates only.
 // Every load is recorded in the audit log, so nothing refreshes unless the
@@ -11,10 +11,11 @@ const ranges: { id: StatsRange; label: string }[] = [
 ]
 const range = ref<StatsRange>('24h')
 const org = ref('')
-const tab = ref<'tenants' | 'sessions'>('tenants')
+const tab = ref<'tenants' | 'sessions' | 'usage'>('tenants')
 const page = ref(1)
 const tenantSort = ref('name')
 const sessionSort = ref('name')
+const usageSort = ref('name')
 watch([range, org, tab], () => { page.value = 1 })
 
 const filter = computed(() => `range=${range.value}${org.value ? `&org=${encodeURIComponent(org.value)}` : ''}`)
@@ -24,15 +25,32 @@ const { data: tenants, error: tenantsError, refresh: refreshTenants } = useApiGe
   () => `admin/stats/tenants?${filter.value}&sort=${tenantSort.value}&page=${page.value}`, { immediate: true })
 const { data: sessions, error: sessionsError, refresh: refreshSessions, execute: loadSessions } = useApiGet<StatsTable<SessionTotals, OrgSessionRow>>(
   () => `admin/stats/sessions?${filter.value}&sort=${sessionSort.value}&page=${page.value}`, { immediate: false })
-watch(tab, (t) => { if (t === 'sessions' && !sessions.value) loadSessions() })
-const error = computed(() => summaryError.value ?? (tab.value === 'tenants' ? tenantsError.value : sessionsError.value))
+const { data: usage, error: usageError, refresh: refreshUsage, execute: loadUsage } = useApiGet<UsageSection>(
+  () => `admin/stats/usage?${filter.value}&sort=${usageSort.value}&page=${page.value}`, { immediate: false })
+
+// Usage charts come from VictoriaMetrics, which keeps 30 days: 90 days and
+// 1 year show the last 30. Tools and clients fewer than three organisations
+// use are "other" unless one organisation is selected.
+const usagePanels = ['sessions', 'mcp_calls', 'mcp_errors', 'mcp_tokens', 'local_answers', 'tool_latency', 'tool_latency_by_tool',
+  'org_tool_calls', 'org_sessions', 'org_tokens', 'api_routes', 'api_failures', 'api_route_latency', 'gateway_requests', 'llm_cost', 'db_latency']
+const live = computed(() => range.value !== '90d' && range.value !== '365d')
+const seriesRange = computed<SeriesRange>(() => (live.value ? range.value as SeriesRange : '30d'))
+const { panels: charts, pending: chartsPending, refresh: refreshCharts, execute: loadCharts } = useSeriesBatch(usagePanels, seriesRange, undefined,
+  { base: 'admin/stats/series/batch', org, immediate: false })
+const chartsOff = ref(false)
+watch(tab, (t) => {
+  if (t === 'sessions' && !sessions.value) loadSessions()
+  if (t === 'usage' && !usage.value) { loadUsage(); loadCharts() }
+})
+const error = computed(() => summaryError.value ?? (tab.value === 'tenants' ? tenantsError.value : tab.value === 'sessions' ? sessionsError.value : usageError.value))
 
 const auto = ref(false)
 let timer: ReturnType<typeof setInterval> | undefined
 function refreshAll() {
   refreshSummary()
   if (tab.value === 'tenants') refreshTenants()
-  else refreshSessions()
+  else if (tab.value === 'sessions') refreshSessions()
+  else { refreshUsage(); refreshCharts() }
 }
 watch(auto, (on) => {
   clearInterval(timer)
@@ -41,7 +59,23 @@ watch(auto, (on) => {
 onBeforeUnmount(() => clearInterval(timer))
 
 const exportHref = (format: 'csv' | 'json') => apiPath(`admin/stats/export?section=${tab.value}&${filter.value}&format=${format}`)
-const table = computed(() => (tab.value === 'tenants' ? tenants.value : sessions.value))
+const table = computed(() => (tab.value === 'tenants' ? tenants.value : tab.value === 'sessions' ? sessions.value : usage.value))
+const pct = (v: number | null | undefined) => (v === null || v === undefined ? '–' : `${v}%`)
+const shareHint = computed(() => {
+  const t = usage.value?.totals
+  if (!t?.share_known) return 'not measured in this window'
+  return t.share_basis === 'known_only' ? 'of work tokens · some left out' : 'of work tokens'
+})
+const shareTip = 'The share of the agents\' work tokens that CodeSynapse answers saved, from the token counts the hooks report. '
+  + 'Organisations (or, for 90 days and 1 year, organisation-days) without token counts are left out rather than counted as zero.'
+
+// The upper figure (repeats counted) stays beside the main one in the text
+// below the tiles, never in a tile or an export.
+const upperShare = computed(() => {
+  const t = usage.value?.totals
+  const u = t?.share_upper_pct
+  return u !== null && u !== undefined && u > (t?.share_avoided_pct ?? 0) ? u : null
+})
 const n = (v: number | null | undefined) => (v === null || v === undefined ? '–' : fmtCompact(v))
 const roles = (r: Record<string, number>) => Object.entries(r).map(([k, v]) => `${v} ${k}`).join(' · ') || '–'
 
@@ -96,13 +130,17 @@ const activeHint = computed(() => {
         <div class="segmented" role="group" aria-label="Table">
           <button type="button" :aria-pressed="tab === 'tenants'" @click="tab = 'tenants'">Tenants</button>
           <button type="button" :aria-pressed="tab === 'sessions'" @click="tab = 'sessions'">Sessions</button>
+          <button type="button" :aria-pressed="tab === 'usage'" @click="tab = 'usage'">Usage</button>
         </div>
         <div class="row">
           <select v-if="tab === 'tenants'" v-model="tenantSort" class="inline" aria-label="Sort tenants">
             <option value="name">By name</option><option value="members">Most members</option><option value="seats">Most seats</option><option value="active">Most active</option><option value="entries">Most repositories</option>
           </select>
-          <select v-else v-model="sessionSort" class="inline" aria-label="Sort sessions">
+          <select v-else-if="tab === 'sessions'" v-model="sessionSort" class="inline" aria-label="Sort sessions">
             <option value="name">By name</option><option value="execution">Most runtime sessions</option><option value="keys">Most API keys</option>
+          </select>
+          <select v-else v-model="usageSort" class="inline" aria-label="Sort usage">
+            <option value="name">By name</option><option value="sessions">Most sessions</option><option value="calls">Most calls</option><option value="errors">Most errors</option><option value="tokens">Most tokens</option><option value="avoided">Most avoided</option>
           </select>
           <a :href="exportHref('csv')" download class="chip">CSV</a>
           <a :href="exportHref('json')" download class="chip">JSON</a>
@@ -157,10 +195,63 @@ const activeHint = computed(() => {
           </table>
         </div>
       </template>
+      <template v-if="tab === 'usage' && usage">
+        <div class="grid cols-4 usage-tiles">
+          <StatTile label="Agent sessions" :value="n(usage.totals.sessions)" :hint="`${usage.from} to ${usage.to} (UTC)`" />
+          <StatTile label="Tool calls" :value="n(usage.totals.calls)" :hint="`${fmtCompact(usage.totals.errors)} failed`" />
+          <StatTile label="Tokens avoided" :value="pct(usage.totals.share_avoided_pct)" :hint="shareHint" :tip="shareTip" />
+          <StatTile label="Unindexed checkouts" :value="n(usage.totals.unindexed_checkouts)" :hint="usage.totals.unindexed_checkouts === null ? 'live ranges only' : 'without an index'"
+            tip="Distinct checkouts agents worked in that CodeSynapse has not indexed. Not kept per day, so 90 days and 1 year show none." />
+        </div>
+        <p class="muted small">
+          {{ fmtCompact(usage.totals.response_tokens) }} tokens served · {{ fmtCompact(usage.totals.avoided_tokens) }} avoided<template v-if="upperShare !== null">
+          ({{ pct(usage.totals.share_avoided_pct) }} of work tokens, up to {{ pct(upperShare) }} counting repeated context)</template> ·
+          sessions starting with CodeSynapse {{ usage.totals.first_codesynapse }}, with file reads {{ usage.totals.first_native }} ·
+          {{ usage.totals.reads_turned_back }} whole-file reads turned back · {{ usage.totals.files_edited_found }} of {{ usage.totals.files_edited }} edited files named by an answer ·
+          {{ usage.totals.bash }} shell commands with a smaller answer
+          <template v-if="usage.totals.share_days !== undefined"> · token share from {{ usage.totals.share_days }} organisation-days<template v-if="usage.totals.share_unknown_days">, {{ usage.totals.share_unknown_days }} without token counts left out</template></template>
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Organisation</th><th class="num">Sessions</th><th class="num">Calls</th><th class="num">Failed</th><th class="num">Tokens served</th><th class="num">Avoided</th><th class="num">Share</th><th class="num">Unindexed</th></tr></thead>
+            <tbody>
+              <tr v-for="o in usage.rows" :key="o.org_id">
+                <td>{{ o.name }} <span v-if="!o.deleted" class="muted mono small">{{ o.slug }}</span></td>
+                <td class="num">{{ o.sessions }}</td>
+                <td class="num">{{ o.calls }}</td>
+                <td class="num">{{ o.errors }}</td>
+                <td class="num">{{ fmtCompact(o.response_tokens) }}</td>
+                <td class="num">{{ fmtCompact(o.avoided_tokens) }}</td>
+                <td class="num">{{ pct(o.share_avoided_pct) }}</td>
+                <td class="num">{{ n(o.unindexed_checkouts) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="grid cols-2 breakdowns">
+          <div v-for="b in [{ title: 'Tools', rows: usage.tools, second: 'Failed' }, { title: 'Clients', rows: usage.clients, second: 'Sessions' }]" :key="b.title" class="table-wrap">
+            <table>
+              <thead><tr><th>{{ b.title }}</th><th class="num">Calls</th><th class="num">{{ b.second }}</th></tr></thead>
+              <tbody>
+                <tr v-for="c in b.rows" :key="c.name"><td class="mono small">{{ c.name }}</td><td class="num">{{ c.calls }}</td><td class="num">{{ b.title === 'Tools' ? c.errors : c.sessions }}</td></tr>
+                <tr v-if="!b.rows.length"><td colspan="3" class="muted small">Nothing in this window.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p class="muted small">Tools and clients that fewer than three organisations use are counted as other, unless one organisation is selected.</p>
+      </template>
       <div v-if="table && table.pages > 1" class="row pager">
         <button class="secondary tiny" :disabled="page <= 1" @click="page--">Previous</button>
         <span class="muted small">Page {{ table.page }} of {{ table.pages }} · {{ table.total }} organisations</span>
         <button class="secondary tiny" :disabled="page >= table.pages" @click="page++">Next</button>
+      </div>
+    </section>
+    <section v-if="tab === 'usage' && !chartsOff" class="panel">
+      <h2>Over time</h2>
+      <p class="muted small">From live statistics<template v-if="!live">, which keep 30 days: the charts show the last 30</template>. Organisations deleted since read "deleted organisation".</p>
+      <div class="grid cols-2">
+        <SeriesCard v-for="p in usagePanels" :key="p" :panel="p" :range="seriesRange" :tick="0" :batched="charts[p] ?? null" :batch-pending="chartsPending" @unavailable="chartsOff = true" />
       </div>
     </section>
   </div>
@@ -171,4 +262,6 @@ const activeHint = computed(() => {
 .auto { display: inline-flex; align-items: center; gap: 6px; }
 .pager { gap: 10px; justify-content: flex-end; margin-top: 10px; }
 td .badge { margin-left: 6px; }
+.usage-tiles { margin-bottom: 10px; }
+.breakdowns { margin-top: 14px; }
 </style>

@@ -498,6 +498,18 @@ export interface ExecutionCounts { active: number; created: number; revoked: num
 export interface KeyCounts { active: number; used: number; expiring: number }
 export interface SessionTotals { browser_active: number; browser_created: number; execution: ExecutionCounts; keys: KeyCounts }
 export interface OrgSessionRow { org_id: string; slug: string; name: string; execution: ExecutionCounts; keys: KeyCounts }
+// Usage section of the platform statistics. The upper share figure is shown
+// only beside the main one, never alone (tiles, exports).
+export interface UsageFigures {
+  sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; work_tokens: number
+  share_avoided_pct: number | null; share_upper_pct?: number | null; share_known: boolean; share_basis: string
+  share_days?: number; share_unknown_days?: number
+  first_codesynapse: number; first_native: number; reads_turned_back: number; files_edited: number; files_edited_found: number; bash: number
+  unindexed_checkouts: number | null
+}
+export interface OrgUsageRow extends UsageFigures { org_id: string; slug: string; name: string; deleted: boolean }
+export interface UsageCount { name: string; calls: number; errors: number; sessions: number }
+export interface UsageSection extends StatsTable<UsageFigures, OrgUsageRow> { from: string; to: string; tools: UsageCount[]; clients: UsageCount[] }
 export interface StatsTable<T, R> { range: StatsRange; totals: T; rows: R[]; page: number; pages: number; total: number; rollup?: StatsRollup }
 export interface AdminHealth {
   version: string; checked: string

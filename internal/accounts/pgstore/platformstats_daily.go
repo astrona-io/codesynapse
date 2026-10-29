@@ -244,16 +244,27 @@ func (s *Store) HasPlatformStats(ctx context.Context, day time.Time) (bool, erro
 	return ok, err
 }
 
+const platformStatsWhere = `WHERE day >= $1 AND day < $2 AND (coalesce(cardinality($3::text[]), 0) = 0 OR metric = ANY ($3::text[]))
+ AND (CASE WHEN $4 THEN org_id <> '' ELSE org_id = $5 END)`
+
+const listPlatformStatsSQL = `SELECT day, metric, dimension, org_id, value FROM platform_stats_daily ` + platformStatsWhere + `
+ORDER BY day, metric COLLATE "C", dimension COLLATE "C", org_id COLLATE "C" LIMIT $6`
+
+// The sum keeps the read's order; $1 stands in for the day.
+const sumPlatformStatsSQL = `SELECT $1::date, metric, dimension, org_id, sum(value)::bigint FROM platform_stats_daily ` + platformStatsWhere + `
+GROUP BY metric, dimension, org_id ORDER BY metric COLLATE "C", dimension COLLATE "C", org_id COLLATE "C" LIMIT $6`
+
 // ListPlatformStats implements accounts.Store.
 func (s *Store) ListPlatformStats(ctx context.Context, q accounts.PlatformStatQuery) ([]accounts.PlatformStat, error) {
 	q, err := accounts.PreparePlatformStatQuery(q)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, `SELECT day, metric, dimension, org_id, value FROM platform_stats_daily
-WHERE day >= $1 AND day < $2 AND (coalesce(cardinality($3::text[]), 0) = 0 OR metric = ANY ($3::text[]))
- AND (CASE WHEN $4 THEN org_id <> '' ELSE org_id = $5 END)
-ORDER BY day, metric COLLATE "C", dimension COLLATE "C", org_id COLLATE "C" LIMIT $6`, q.From, q.To, q.Metrics, q.PerOrg, q.OrgID, q.Limit)
+	sql := listPlatformStatsSQL
+	if q.Sum {
+		sql = sumPlatformStatsSQL
+	}
+	rows, err := s.db.Query(ctx, sql, q.From, q.To, q.Metrics, q.PerOrg, q.OrgID, q.Limit)
 	if err != nil {
 		return nil, err
 	}

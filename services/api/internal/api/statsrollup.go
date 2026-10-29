@@ -21,7 +21,7 @@ const statsRollupRetry = 10 * time.Minute
 func (s *Server) rollupPlatformStats(ctx context.Context) {
 	for {
 		wait := nextStatsRollup(time.Now())
-		if written, err := s.cfg.Accounts.RollupPlatformStats(ctx); err != nil {
+		if written, err := s.cfg.Accounts.RollupPlatformStats(ctx, s.usageStatSource); err != nil {
 			if ctx.Err() != nil {
 				return
 			}

@@ -48,8 +48,13 @@ var statsReads = []string{
 	"/api/v1/admin/users",
 	"/api/v1/admin/orgs",
 	"/api/v1/admin/health",
-	"/api/v1/stats/series?panel=tenants&range=1h",
 	"/api/v1/stats/series?panel=platform_api_requests&range=1h",
+	"/api/v1/admin/stats/series?panel=org_tool_calls&range=1h",
+	"/api/v1/admin/stats/series?panel=mcp_calls&range=24h",
+	"/api/v1/admin/stats/series/batch?panels=sessions,api_routes,gateway_requests&range=7d",
+	"/api/v1/admin/stats/usage?range=24h",
+	"/api/v1/admin/stats/usage?range=90d",
+	"/api/v1/admin/stats/export?section=usage&range=7d&format=csv",
 }
 
 func TestPlatformStats(t *testing.T) {
@@ -129,14 +134,22 @@ func TestPlatformStats(t *testing.T) {
 		before, err := st.ListEvents(ctx, accounts.EventFilter{Action: "admin.stats.view", Limit: 1000})
 		require.NoError(t, err)
 		var batch struct{ Panels map[string]SeriesBatchItem }
-		require.Equal(t, ada.do("GET", "/api/v1/stats/series/batch?panels=tenants,platform_api_requests,tool_calls&range=1h", "", &batch), 200)
-		assert.Equal(t, batch.Panels["tenants"].Status, 200)
+		require.Equal(t, ada.do("GET", "/api/v1/stats/series/batch?panels=platform_api_requests,platform_heap,tool_calls&range=1h", "", &batch), 200)
 		assert.Equal(t, batch.Panels["platform_api_requests"].Status, 200)
 		after, err := st.ListEvents(ctx, accounts.EventFilter{Action: "admin.stats.view", Limit: 1000})
 		require.NoError(t, err)
 		assert.Equal(t, len(after), len(before)+1, "one batch is one view")
-		require.Equal(t, pat.do("GET", "/api/v1/stats/series/batch?panels=tenants,tool_calls&range=1h", "", &batch), 200)
-		assert.Equal(t, batch.Panels["tenants"].Status, 403)
+		batch.Panels = nil
+		require.Equal(t, ada.do("GET", "/api/v1/admin/stats/series/batch?panels=org_tool_calls,mcp_calls,mcp_calls,api_routes,tenants&range=1h", "", &batch), 200)
+		require.Len(t, batch.Panels, 4, "duplicates count once")
+		assert.Equal(t, batch.Panels["org_tool_calls"].Status, 200)
+		assert.Equal(t, batch.Panels["api_routes"].Status, 200)
+		assert.Equal(t, batch.Panels["tenants"].Status, 404, "unknown admin panel")
+		again, err := st.ListEvents(ctx, accounts.EventFilter{Action: "admin.stats.view", Limit: 1000})
+		require.NoError(t, err)
+		assert.Equal(t, len(again), len(after)+1, "one admin batch is one view")
+		require.Equal(t, pat.do("GET", "/api/v1/stats/series/batch?panels=platform_api_requests,tool_calls&range=1h", "", &batch), 200)
+		assert.Equal(t, batch.Panels["platform_api_requests"].Status, 403)
 		assert.Equal(t, batch.Panels["tool_calls"].Status, 200)
 	})
 
@@ -273,7 +286,10 @@ func TestPlatformStats(t *testing.T) {
 			"/api/v1/admin/stats/tenants?range=90",
 			"/api/v1/admin/stats/sessions?range=1y",
 			"/api/v1/admin/stats/export?section=tenants&range=730d&format=csv",
-			"/api/v1/stats/series?panel=tenants&range=90d",
+			"/api/v1/admin/stats/series?panel=mcp_calls&range=90d",
+			"/api/v1/admin/stats/series/batch?panels=mcp_calls&range=2y",
+			"/api/v1/admin/stats/series/batch?panels=&range=1h",
+			"/api/v1/admin/stats/usage?range=180d",
 		} {
 			assert.Equal(t, ada.do("GET", path, "", nil), 400, path)
 		}
