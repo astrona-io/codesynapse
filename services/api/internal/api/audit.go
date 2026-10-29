@@ -16,6 +16,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/auditarchive"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // requestIDRe accepts client-supplied request IDs that are safe to log.
@@ -79,7 +80,13 @@ func (s *Server) auditRequest(r *http.Request, pattern string, status int) {
 	if p, ok := principal(r.Context()); ok {
 		e.UserID, e.ActorEmail, e.Via, e.KeyID, e.OrgID = p.User.ID, p.User.Email, p.Via, p.KeyID, p.OrgID
 	}
-	s.record(r.Context(), e)
+	ctx := r.Context()
+	// The guard reports the tenant it authorised on a derived context; the
+	// request-level entry counts for that tenant too.
+	if slot, ok := ctx.Value(tenantSlot{}).(*string); ok && *slot != "" && *slot != telemetry.NoTenant {
+		ctx = telemetry.WithTenant(ctx, *slot)
+	}
+	s.record(ctx, e)
 }
 
 // deniedLimiter bounds how many refused requests per client address reach
@@ -172,6 +179,11 @@ func (s *Server) applyAuditRetention(ctx context.Context, now time.Time) {
 		// file and the entries still held, so it waits for the archive.
 		if segs, err := st.AuditSegments(ctx); err != nil || len(segs) > 0 {
 			s.logger.Warn("audit log has archived segments but no archive is configured; not pruning", "error", err)
+			if err != nil {
+				telemetry.RecordAuditSeal(ctx, telemetry.SealError)
+			} else {
+				telemetry.RecordAuditSeal(ctx, telemetry.SealNoArchive)
+			}
 			return
 		}
 		if n, err := st.PruneEvents(ctx, expireBefore); err != nil {

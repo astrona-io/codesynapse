@@ -15,6 +15,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // SessionCookie holds the session token; HTTP-only, so scripts never see it.
@@ -56,11 +57,15 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (*http.Req
 	}
 	var p accounts.Principal
 	var err error
+	// method stays empty when no credential was sent: that is not an attempt.
+	method := ""
 	authz := r.Header.Get("Authorization")
 	switch {
 	case strings.HasPrefix(authz, "Bearer "+accounts.KeyPrefix):
+		method = telemetry.AuthAPIKey
 		p, err = s.cfg.Accounts.AuthenticateKey(r.Context(), strings.TrimPrefix(authz, "Bearer "))
 	case strings.HasPrefix(authz, "Bearer "):
+		method = telemetry.AuthAPIKey
 		tok := strings.TrimPrefix(authz, "Bearer ")
 		if s.cfg.ServiceToken == "" || subtle.ConstantTimeCompare([]byte(tok), []byte(s.cfg.ServiceToken)) != 1 {
 			err = accounts.ErrUnauthorized
@@ -77,7 +82,11 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (*http.Req
 			s.problem(w, http.StatusForbidden, errors.New("cross-origin request refused"))
 			return r, false
 		}
+		method = telemetry.AuthSession
 		p, err = s.cfg.Accounts.Authenticate(r.Context(), c.Value)
+	}
+	if method != "" {
+		accounts.RecordAuth(r.Context(), method, p.OrgID, err)
 	}
 	if err != nil {
 		status := http.StatusUnauthorized
@@ -293,6 +302,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tok, u, err := s.cfg.Accounts.Login(r.Context(), cmp.Or(c.Login, c.Email), c.Password, s.clientAddr(r))
+	accounts.RecordAuth(r.Context(), telemetry.AuthPassword, "", err)
 	if err != nil {
 		s.accountError(w, err)
 		return

@@ -23,7 +23,8 @@ Both appear on the **Statistics** page. Every number belongs to one organisation
 | Indexing | files scanned, indexed and skipped per repository, annotation jobs; indexing runs and time, time per phase (fetching, extraction, storing the graph) and extraction time per language |
 | Background jobs | finished jobs by outcome, failures by kind, how long jobs waited for a worker and how long they ran (Statistics → Sync) |
 | Platform statistics (platform administrators) | organisations, people, active people, memberships by role, seats, teams, repository entries, single sign-on, watches, browser and runtime sessions and API keys, across every organisation (Administration → Statistics). Counted in PostgreSQL, not in the metrics store, and every view is audited. |
-| Platform health (platform administrators) | API requests and latency, the job queue, which replica runs the scheduler and lease losses, goroutines, heap, CPU and garbage-collection pauses per service, database connection pool use and waits, dropped series and log lines, failed metric exports |
+| Outside services | remote clones, fetches, access checks and pushes by outcome and time (Statistics → Sync); vulnerability, licence and organisation-listing lookups by outcome and latency, and how long audit-log writes take (Statistics → Activity) |
+| Platform health (platform administrators) | API requests and latency, the job queue, which replica runs the scheduler and lease losses, goroutines, heap, CPU and garbage-collection pauses per service, database connection pool use and waits, dropped series and log lines, failed metric exports, sign-in attempts by method and outcome, failed audit-log writes and archiving runs |
 | Web server (platform administrators) | requests the dashboard server answers by status, its latency, and dashboard calls that never reached the API (unreachable, timed out or refused), all labelled by page or route pattern, never the address you opened |
 
 Some numbers are estimates and are labelled so: cost depends on the prices you configured, and a call without reported usage or a known price shows as a gap, never as zero.
@@ -44,16 +45,16 @@ No metric holds prompts, answers, source code, file paths, repository names, bra
 
 ## Alerts for operators
 
-Whoever runs the installation can turn on alerts: an optional vmalert checks rules against these numbers every minute and sends what fires to an Alertmanager-compatible receiver they run. The first rules cover slow or failing databases, jobs no worker picks up, a dashboard that cannot reach the API, and metrics or logs being lost. Alerts add up organisations and never name repositories, files or people. [Alerting](../operations/alerting.md) explains how to turn it on.
+Whoever runs the installation can turn on alerts: an optional vmalert checks rules against these numbers every minute and sends what fires to an Alertmanager-compatible receiver they run. The rules cover slow or failing databases, jobs no worker picks up, a dashboard that cannot reach the API, metrics or logs being lost, failing remote clones and fetches, rate-limited lookups, bursts of failed sign-ins, and failing audit-log writes or archiving. Alerts add up organisations and never name repositories, files or people. [Alerting](../operations/alerting.md) explains how to turn it on.
 
 ## What is planned
 
 Some parts of CodeSynapse have no live numbers yet. The [metrics coverage plan](../TELEMETRY_PLAN.md#metrics-coverage-plan) lists them and the order in which they will be added:
 
 1. **Platform health** for operators (done): see the table above and Administration → Overview.
-2. **More operator alerts**: failing audit-log writes, once those writes are counted.
+2. **More operator alerts** (done): each later step adds the alerts for its numbers.
 3. **Background jobs and indexing** (available now, see the table above).
-4. **Outside services and security events**: git clone and fetch, vulnerability and licence lookups, sign-in attempts and rate limits, and audit-log writes.
+4. **Outside services and security events** (available now, see the table above).
 5. **Sharper existing numbers** (available now, see the table above): refused tool calls apart from errors, model timeouts and rate limits, gateway latency and why a request left the local model, and tool calls answered on your own machine by the Claude Code bridge. A refused tool call is no longer shown as an error, and the model failure panels count timeouts, rate limits and refusals as failures.
 6. **The web server** (available now, see the table above).
 

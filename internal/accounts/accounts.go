@@ -597,6 +597,19 @@ type Store interface {
 	SealAuditSegment(ctx context.Context, seg AuditSegment) (AuditSegment, error)
 	// AuditSegments lists the sealed segments oldest first (at most MaxAuditSegments).
 	AuditSegments(ctx context.Context) ([]AuditSegment, error)
+	// Daily platform statistics (platformstats_daily.go). CountPlatformStats
+	// counts a UTC day from the accounts tables; root is never counted.
+	// PutPlatformStats replaces that day's rows with rows in one
+	// transaction, refusing any outside the fixed lists, so writing the same
+	// rows twice changes nothing. HasPlatformStats reports whether a day is
+	// written. ListPlatformStats is bounded by PreparePlatformStatQuery.
+	// PrunePlatformStats deletes days before before.
+	CountPlatformStats(ctx context.Context, day time.Time) ([]PlatformStat, error)
+	PutPlatformStats(ctx context.Context, day time.Time, rows []PlatformStat) error
+	HasPlatformStats(ctx context.Context, day time.Time) (bool, error)
+	ListPlatformStats(ctx context.Context, q PlatformStatQuery) ([]PlatformStat, error)
+	PrunePlatformStats(ctx context.Context, before time.Time) (int, error)
+
 	// DropAuditSegment removes the oldest segment once its retention ended;
 	// the next segment's PrevHash becomes the chain's anchor, as the first
 	// remaining entry's does after PruneEvents (ErrNotFound if id is not

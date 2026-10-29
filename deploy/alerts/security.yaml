@@ -1,0 +1,55 @@
+# Sign-in and the audit log (docs/TELEMETRY_PLAN.md, phase 4). Failed sign-ins
+# have no trusted tenant, so they are platform series; rules group only by the
+# fixed method and source labels, never by organisation or account.
+groups:
+  - name: codesynapse-security
+    interval: 1m
+    rules:
+      # Many bad credentials or rate-limited attempts in a short time: someone
+      # may be guessing passwords or keys. The login limit already slows each
+      # account; this tells the operator it is happening.
+      - alert: CodeSynapseSignInBurst
+        expr: sum by (method) (increase({__name__=~"(platform_)?codesynapse_auth_attempts_total", outcome=~"bad_credentials|rate_limited"}[10m])) > 30
+        labels:
+          severity: warning
+          component: auth
+        annotations:
+          summary: "Many failed {{ $labels.method }} sign-ins"
+          description: "{{ $value | humanize }} {{ $labels.method }} checks failed or were rate limited in the last 10 minutes. The audit log names the accounts and client addresses."
+          dashboard: "{{ $externalURL }}/admin"
+
+      # A failed audit write refuses the change or withholds the MCP result,
+      # so any failure means requests are failing.
+      - alert: CodeSynapseAuditWriteFailing
+        expr: sum by (source) (increase({__name__=~"(platform_)?codesynapse_audit_writes_total", outcome="error"}[10m])) > 0
+        labels:
+          severity: critical
+          component: audit
+        annotations:
+          summary: "Audit log writes from {{ $labels.source }} are failing"
+          description: "{{ $value | humanize }} audit entries from {{ $labels.source }} could not be written in the last 10 minutes, so those requests were refused. Check PostgreSQL."
+          dashboard: "{{ $externalURL }}/admin"
+
+      # Sealing runs once a day under the scheduler lease; the window covers
+      # one run and a little slack.
+      - alert: CodeSynapseAuditSealFailing
+        expr: sum(increase(platform_codesynapse_audit_seals_total{outcome="error"}[25h])) > 0
+        labels:
+          severity: warning
+          component: audit
+        annotations:
+          summary: "Audit log archiving failed"
+          description: "Sealing the audit log into the archive failed {{ $value | humanize }} times in the last 25 hours. Old entries stay in PostgreSQL until it succeeds. Check the archive directory or bucket."
+          dashboard: "{{ $externalURL }}/admin"
+
+      # Sealed files exist but no archive is configured: pruning stops so the
+      # chain is not broken, and the audit table keeps growing.
+      - alert: CodeSynapseAuditNotArchived
+        expr: sum(increase(platform_codesynapse_audit_seals_total{outcome="no_archive"}[49h])) >= 2
+        labels:
+          severity: warning
+          component: audit
+        annotations:
+          summary: "The audit log has sealed files but no archive"
+          description: "Retention found sealed audit files but no archive in two runs, so old entries are not pruned. Set CODESYNAPSE_AUDIT_ARCHIVE_DIR or the archive bucket again."
+          dashboard: "{{ $externalURL }}/admin"

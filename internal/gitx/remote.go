@@ -11,8 +11,10 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // HistoryDepth is how many commits clones and fetches keep. Enough for
@@ -166,20 +168,56 @@ func runRemote(ctx context.Context, dir, remote string, auth Auth, args ...strin
 	if err != nil {
 		return nil, err
 	}
+	start := time.Now()
+	out, err := runCmd(cmd, args[0])
+	recordRemote(ctx, args[0], time.Since(start), err)
+	return out, err
+}
+
+func runCmd(cmd *exec.Cmd, op string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
 		// stderr can echo the URL; it never contains the token (header only).
 		msg := strings.TrimSpace(stderr.String())
 		if deniedRe.MatchString(msg) {
-			return nil, fmt.Errorf("git %s: %w: %s", args[0], ErrNoAccess, msg)
+			return nil, fmt.Errorf("git %s: %w: %s", op, ErrNoAccess, msg)
 		}
 		if redirectRe.MatchString(msg) {
-			return nil, fmt.Errorf("git %s: %w", args[0], ErrRedirected)
+			return nil, fmt.Errorf("git %s: %w", op, ErrRedirected)
 		}
-		return nil, fmt.Errorf("git %s: %w: %s", args[0], err, msg)
+		return nil, fmt.Errorf("git %s: %w: %s", op, err, msg)
 	}
 	return stdout.Bytes(), nil
+}
+
+// remoteOps maps git subcommands to their operation label.
+var remoteOps = map[string]string{"clone": telemetry.GitClone, "fetch": telemetry.GitFetch, "ls-remote": telemetry.GitLsRemote, "push": telemetry.GitPush}
+
+// recordRemote counts one remote call for the tenant ctx carries. A call the
+// caller cancelled is not counted: the remote did not fail.
+func recordRemote(ctx context.Context, sub string, d time.Duration, err error) {
+	if outcome := remoteOutcome(ctx, err); outcome != "" {
+		telemetry.RecordGit(ctx, remoteOps[sub], outcome, d)
+	}
+}
+
+// remoteOutcome reads the outcome from the sentinel errors and the context,
+// never from git's message.
+func remoteOutcome(ctx context.Context, err error) string {
+	switch {
+	case err == nil:
+		return telemetry.GitOK
+	case errors.Is(err, ErrNoAccess):
+		return telemetry.GitNoAccess
+	case errors.Is(err, ErrRedirected):
+		return telemetry.GitRedirected
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return telemetry.GitTimeout
+	case ctx.Err() != nil:
+		return ""
+	}
+	return telemetry.GitError
 }
 
 // testEnv is set by this package's tests only (to trust a local test CA);

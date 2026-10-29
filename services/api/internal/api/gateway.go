@@ -88,6 +88,7 @@ func (s *Server) authenticateGateway(w http.ResponseWriter, r *http.Request) (*h
 		return r, false
 	}
 	p, err := s.cfg.Accounts.AuthenticateKey(r.Context(), key)
+	accounts.RecordAuth(r.Context(), telemetry.AuthAPIKey, p.OrgID, err)
 	if err != nil {
 		s.problem(w, http.StatusUnauthorized, errors.New("the gateway key is not valid"))
 		return r, false

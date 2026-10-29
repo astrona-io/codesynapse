@@ -19,6 +19,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/accounts/memstore"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
@@ -297,4 +298,19 @@ func FuzzDecode(f *testing.F) {
 	f.Fuzz(func(_ *testing.T, b []byte) {
 		_, _ = decode(b) //nolint:errcheck // must not panic or run away
 	})
+}
+
+func TestSealCountsRuns(t *testing.T) {
+	assert.Equal(t, sealOutcome(nil, nil), telemetry.SealNothing)
+	assert.Equal(t, sealOutcome([]accounts.AuditSegment{{Count: 1}}, nil), telemetry.SealOK)
+	assert.Equal(t, sealOutcome([]accounts.AuditSegment{{Count: 1}}, errors.New("put failed")), telemetry.SealError)
+
+	ctx := context.Background()
+	arch, err := NewDir(t.TempDir())
+	require.NoError(t, err)
+	_, err = Seal(ctx, memstore.New(), arch, time.Now(), time.Hour, time.Now())
+	require.NoError(t, err)
+	var b strings.Builder
+	require.NoError(t, telemetry.Default.WriteText(&b))
+	assert.Contains(t, b.String(), `platform_codesynapse_audit_seals_total{outcome="nothing_to_seal"}`)
 }
