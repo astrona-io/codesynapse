@@ -49,6 +49,9 @@ func RunPlatformStatsDaily(t *testing.T, newStore func(*testing.T) accounts.Stor
 		}
 		for _, m := range accounts.PlatformStatMetrics() {
 			for _, d := range accounts.PlatformStatDimensions(m) {
+				if !accounts.ValidPlatformStat(m, d, "") {
+					continue // organisation rows only
+				}
 				_, ok := got[m+"/"+d]
 				assert.True(t, ok, "every platform row is written, zeros included: "+m+"/"+d)
 			}
@@ -199,6 +202,58 @@ func RunPlatformStatsDaily(t *testing.T, newStore func(*testing.T) accounts.Stor
 		n, err := st.PrunePlatformStats(ctx, kept)
 		require.NoError(t, err)
 		assert.Equal(t, n, 0)
+	})
+
+	t.Run("sources and sums", func(t *testing.T) {
+		st := newStore(t)
+		ctx := t.Context()
+		require.NoError(t, st.Migrate(ctx))
+		svc := accounts.NewService(st, false)
+		first := day.AddDate(0, 0, -1)
+		usage := func(_ context.Context, d time.Time, set *accounts.PlatformStatSet) error {
+			set.Both("org-1", accounts.StatMCPUsage, "calls", 5)
+			set.Org("org-1", accounts.StatMCPTools, "search.calls", 4)
+			set.Org("org-2", accounts.StatMCPTools, "search.calls", 1)
+			set.Org("org-2", accounts.StatMCPClients, "claude.sessions", int64(d.Day()))
+			return nil
+		}
+		for _, d := range []time.Time{first, day} {
+			svc.Now = func() time.Time { return d.AddDate(0, 0, 1).Add(time.Minute) }
+			written, err := svc.RollupPlatformStats(ctx, usage)
+			require.NoError(t, err)
+			assert.True(t, written)
+		}
+		v := statValues(t, st, day, "")
+		assert.Equal(t, v[accounts.StatMCPUsage+"/calls"], int64(5))
+		_, ok := v[accounts.StatMCPTools+"/search.calls"]
+		assert.False(t, ok, "tools and clients have organisation rows only")
+		assert.Equal(t, statValues(t, st, day, "org-2")[accounts.StatMCPTools+"/search.calls"], int64(1))
+
+		sums, err := st.ListPlatformStats(ctx, accounts.PlatformStatQuery{From: first, To: day.AddDate(0, 0, 1),
+			Metrics: []string{accounts.StatMCPTools, accounts.StatMCPClients}, PerOrg: true, Sum: true})
+		require.NoError(t, err)
+		require.Len(t, sums, 3)
+		want := []accounts.PlatformStat{
+			{Day: first, Metric: accounts.StatMCPClients, Dimension: "claude.sessions", OrgID: "org-2", Value: int64(first.Day() + day.Day())},
+			{Day: first, Metric: accounts.StatMCPTools, Dimension: "search.calls", OrgID: "org-1", Value: 8},
+			{Day: first, Metric: accounts.StatMCPTools, Dimension: "search.calls", OrgID: "org-2", Value: 2},
+		}
+		for i, r := range sums {
+			assert.True(t, r.Day.Equal(first), "a sum's day is the first of the read")
+			r.Day = want[i].Day
+			assert.Equal(t, r, want[i])
+		}
+
+		// A source that fails leaves the day unwritten, to be retried whole.
+		next := day.AddDate(0, 0, 1)
+		svc.Now = func() time.Time { return next.AddDate(0, 0, 1).Add(time.Minute) }
+		_, err = svc.RollupPlatformStats(ctx, func(context.Context, time.Time, *accounts.PlatformStatSet) error {
+			return errors.New("graph store down")
+		})
+		require.Error(t, err)
+		has, err := st.HasPlatformStats(ctx, next)
+		require.NoError(t, err)
+		assert.False(t, has)
 	})
 }
 

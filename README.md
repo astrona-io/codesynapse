@@ -129,6 +129,16 @@ Read [AGENTS.md](AGENTS.md) before changing code. It has the conventions and the
 
 Read the [documentation site](https://codesynapse.astrona.io/), published with each stable release. The source is in [`docs/`](docs/index.md); `just docs` serves it locally.
 
+Every docs page shows a **Draft** badge, and a pencil in the navigation, until a maintainer has read it and checked it against the code. To mark a page verified, add this front matter at the top of its Markdown file:
+
+```markdown
+---
+verified: true
+---
+```
+
+Leave it out, and new or regenerated pages stay drafts. The key is `verified`, not `status`, because the architecture catalog reads `status:` as an ADR's decision status. Any value other than `true` or `false`, or `status: draft`/`status: verified`, fails `just docs-build` (`docs/hooks/doc_status.py`).
+
 ## Contributing
 
 Issues and pull requests are welcome. Run `just ci` before you open a PR, use [conventional commits](https://www.conventionalcommits.org/), and pin new GitHub actions by commit SHA.

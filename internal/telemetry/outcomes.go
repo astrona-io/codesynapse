@@ -45,7 +45,7 @@ var gatewayRoutes = map[string]bool{"local": true, "cloud": true, "rejected": tr
 // gatewayReasons mirror the gateway's Fall* constants
 // (services/api/internal/gateway/local.go); anything else is "other".
 var gatewayReasons = map[string]bool{
-	"not_eligible": true, "too_large": true, "busy": true,
+	"excluded": true, "not_eligible": true, "too_large": true, "busy": true,
 	"unavailable": true, "no_first_chunk": true, "bad_answer": true,
 }
 

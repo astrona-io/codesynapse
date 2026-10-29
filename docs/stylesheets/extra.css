@@ -136,3 +136,36 @@
 }
 .md-typeset .grid.cards > ul > li:hover { border-color: var(--cs-accent); box-shadow: none; }
 [data-md-color-scheme='slate'] .md-typeset .grid.cards > ul > li { background: #1b1530; border-color: #8e84b5; }
+
+/* Draft status (docs/hooks/doc_status.py): a page nobody has verified yet.
+   The badge sits under the title; the pencil marks it in the navigation. */
+:root {
+  --md-status--draft: url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M14.06 9l.94.94L5.92 19H5v-.92L14.06 9m3.6-6c-.25 0-.51.1-.7.29l-1.83 1.83 3.75 3.75 1.83-1.83c.39-.39.39-1.04 0-1.41l-2.34-2.34c-.2-.2-.45-.29-.71-.29m-3.6 3.19L3 17.25V21h3.75L17.81 9.94l-3.75-3.75z'/></svg>");
+}
+.md-status--draft::after {
+  -webkit-mask-image: var(--md-status--draft);
+  mask-image: var(--md-status--draft);
+}
+.md-typeset .cs-doc-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  margin: -0.4em 0 1.2em;
+  padding: 0.3em 0.9em 0.3em 0.3em;
+  border: 2px solid var(--cs-ink);
+  border-radius: 999px;
+  background: rgba(255, 216, 77, 0.3);
+  font-size: 0.7rem;
+  color: var(--md-default-fg-color);
+}
+.md-typeset .cs-doc-status__label {
+  padding: 0.1em 0.7em;
+  border-radius: 999px;
+  background: var(--cs-ink);
+  color: #ffffff;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+[data-md-color-scheme='slate'] .md-typeset .cs-doc-status { border-color: #8e84b5; background: rgba(255, 216, 77, 0.14); }
+[data-md-color-scheme='slate'] .md-typeset .cs-doc-status__label { background: #f5f1ff; color: #1b1530; }

@@ -17,9 +17,16 @@ FROM docker.io/vesoft/nebula-graphd:v3.8.0@sha256:1040573cc684ea6cc5e673b667422e
 # Static Go builds run on the build machine and cross-compile.
 FROM --platform=$BUILDPLATFORM docker.io/library/golang:${GO_VERSION}-alpine AS build
 ARG TARGETOS=linux TARGETARCH
-# The console's go.mod pins golang.org/x modules from 2023; these match ours.
+# nebula-console v3.8.0.
 ARG CONSOLE_COMMIT=a103b926bda8ff6ab326df79277b6facb72a8358
-ARG X_NET=v0.62.0 X_SYS=v0.49.0 X_TEXT=v0.43.0
+# Its go.mod pins golang.org/x modules from 2023; these match ours (Renovate
+# keeps them current through the comments).
+# renovate: datasource=go depName=golang.org/x/net
+ARG X_NET=v0.62.0
+# renovate: datasource=go depName=golang.org/x/sys
+ARG X_SYS=v0.49.0
+# renovate: datasource=go depName=golang.org/x/text
+ARG X_TEXT=v0.43.0
 RUN apk add --no-cache git \
     && git clone --quiet https://github.com/vesoft-inc/nebula-console /console \
     && git -C /console checkout --quiet "$CONSOLE_COMMIT"

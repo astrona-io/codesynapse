@@ -390,4 +390,6 @@ Next for telemetry: the [metrics coverage plan](TELEMETRY_PLAN.md#metrics-covera
 
 Next for administrators: the [platform statistics plan](PLATFORM_STATS_PLAN.md) (proposed) adds a Statistics area under Administration for platform admins in a signed-in session: growth, usage, jobs and indexing, ingest, models and cost, storage, security posture, audit, sessions and alerts across organisations. Counts and timings only, every view audited, built in eight phases on the telemetry above. Its token-savings share leaves out provider prompt-cache reads, on both the admin view and the organisation Statistics pages.
 
+Next for retrieval: the [text optimisation plan](TEXT_OPTIMIZATION_PLAN.md) (proposed) caches external sources (web pages, API references) in the bridge with ETag revalidation, reduces them on the developer's machine (CPU passes first, a local model only for large pages), keeps CodeSynapse's own documentation prompts terse, and counts the tokens and money saved under the existing telemetry rules.
+
 Development and production Kubernetes manifests are deferred to the final deployment phase, after the application phases and SSO. Prepared deployment work remains on `feat/k8s-production` for later review and revalidation; it is not part of the active development phase.

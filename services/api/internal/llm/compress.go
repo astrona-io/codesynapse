@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/astrona-io/codesynapse/internal/logx"
@@ -77,13 +78,42 @@ const (
 	// CompressionNoLocalModel: no local model is configured for the
 	// "compress" task, so nothing is shortened.
 	CompressionNoLocalModel = "no_local_model"
+	// CompressionNoCloudTask: shortening is on, but every task and the
+	// default run on local models, so no prompt goes to the cloud and
+	// nothing is shortened. A one-off provider override to a cloud model is
+	// still shortened.
+	CompressionNoCloudTask = "no_cloud_task"
 )
 
 // CompressionStatus says whether prompts bound for cloud providers are
 // shortened, and why not when they are not.
 func (r *Registry) CompressionStatus() string {
-	_, status := r.compressor()
-	return status
+	if _, status := r.compressor(); status != CompressionOn {
+		return status
+	}
+	if !r.routesToCloud() {
+		return CompressionNoCloudTask
+	}
+	return CompressionOn
+}
+
+// routesToCloud reports whether a task whose prompts can be shortened
+// resolves to a non-local provider. Local-only tasks never do, and
+// embeddings are not completions.
+func (r *Registry) routesToCloud() bool {
+	for _, task := range Tasks {
+		if task == "embeddings" || slices.Contains(LocalTasks, task) {
+			continue
+		}
+		name, err := r.ProviderFor(task, "")
+		if err != nil {
+			continue
+		}
+		if cfg, ok := r.Config(name); ok && !cfg.Local() {
+			return true
+		}
+	}
+	return false
 }
 
 // compressor resolves the provider for the "compress" task. The task is in

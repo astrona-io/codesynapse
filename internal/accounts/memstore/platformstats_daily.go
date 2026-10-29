@@ -290,6 +290,9 @@ func (s *Store) ListPlatformStats(_ context.Context, q accounts.PlatformStatQuer
 	}
 	t.mu.Unlock()
 	accounts.SortPlatformStats(out)
+	if q.Sum {
+		out = accounts.SumPlatformStats(q, out)
+	}
 	if len(out) > q.Limit {
 		out = out[:q.Limit]
 	}

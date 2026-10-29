@@ -348,11 +348,15 @@ export interface AccountUser {
 export type SetupState = 'pending' | 'complete' | 'ambiguous'
 export interface SetupInput { org_name?: string; org_id?: string; email: string; username?: string; name: string; password: string }
 // Whether keys of the organisation may use the agent gateway, whether the local
-// model is offered every request first, and whether the server switch
+// model is offered every request first, which models it never answers (the
+// organisation's list and the operator's gateway_exclude, both lower-case
+// names or prefixes ending in *), and whether the server switch
 // (CODESYNAPSE_GATEWAY) is on at all.
 export interface OrgGateway {
   enabled: boolean
   local_first: boolean
+  local_exclude: string[]
+  installation_exclude: string[]
   available: boolean
 }
 
@@ -498,6 +502,18 @@ export interface ExecutionCounts { active: number; created: number; revoked: num
 export interface KeyCounts { active: number; used: number; expiring: number }
 export interface SessionTotals { browser_active: number; browser_created: number; execution: ExecutionCounts; keys: KeyCounts }
 export interface OrgSessionRow { org_id: string; slug: string; name: string; execution: ExecutionCounts; keys: KeyCounts }
+// Usage section of the platform statistics. The upper share figure is shown
+// only beside the main one, never alone (tiles, exports).
+export interface UsageFigures {
+  sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; work_tokens: number
+  share_avoided_pct: number | null; share_upper_pct?: number | null; share_known: boolean; share_basis: string
+  share_days?: number; share_unknown_days?: number
+  first_codesynapse: number; first_native: number; reads_turned_back: number; files_edited: number; files_edited_found: number; bash: number
+  unindexed_checkouts: number | null
+}
+export interface OrgUsageRow extends UsageFigures { org_id: string; slug: string; name: string; deleted: boolean }
+export interface UsageCount { name: string; calls: number; errors: number; sessions: number }
+export interface UsageSection extends StatsTable<UsageFigures, OrgUsageRow> { from: string; to: string; tools: UsageCount[]; clients: UsageCount[] }
 export interface StatsTable<T, R> { range: StatsRange; totals: T; rows: R[]; page: number; pages: number; total: number; rollup?: StatsRollup }
 export interface AdminHealth {
   version: string; checked: string
@@ -684,7 +700,7 @@ export interface ModelStats {
   spent_dollars?: number | null; compression_saved_dollars?: number | null
   // Whether CodeSynapse's own AI tasks get shortened prompts, and why not:
   // disabled, no_local_model or no_ai. Gateway traffic is never shortened.
-  compression_enabled?: boolean; compression_off?: 'disabled' | 'no_local_model' | 'no_ai'
+  compression_enabled?: boolean; compression_off?: 'disabled' | 'no_local_model' | 'no_ai' | 'no_cloud_task'
   gateway?: GatewayStat
   reference_price?: ReferencePrice
 }

@@ -449,6 +449,11 @@ type Store interface {
 	// requests to the local model first (true when it never chose).
 	GatewayLocalFirst(ctx context.Context, orgID string) (bool, error)
 	SetGatewayLocalFirst(ctx context.Context, orgID string, on bool) error
+	// GatewayLocalExclude lists the model patterns the gateway never offers
+	// to the local model (empty, never nil, when the organisation never
+	// chose); SetGatewayLocalExclude replaces the list.
+	GatewayLocalExclude(ctx context.Context, orgID string) ([]string, error)
+	SetGatewayLocalExclude(ctx context.Context, orgID string, patterns []string) error
 	// ImageScan reads the image findings of a repository namespace; ok is
 	// false when none were uploaded. SetImageScan replaces them and
 	// DeleteImageScan removes them.

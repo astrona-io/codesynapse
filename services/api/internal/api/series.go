@@ -2,6 +2,7 @@ package api
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"math"
 	"net/http"
@@ -253,9 +254,6 @@ var seriesPanels = map[string]seriesPanel{
 		Help:    "Current unique stored facts per organisation. Replicas are deduplicated; observations older than 90 seconds are omitted. Deletion and deduplication can lower the count.",
 		Empty:   "No fresh durable-memory count is available in this window.",
 		queries: []seriesQuery{{name: "stored facts", expr: `sum(max by (tenant_id) (agent_memory_facts_count and ((` + memoryObserved + `) == on (tenant_id) group_left max by (tenant_id) (` + memoryObserved + `)) and ((` + memoryObserved + `) > (time() - 90))))`}}},
-	"tenants": {Title: "Tool calls by organisation", Unit: "calls", Kind: "count", platform: true,
-		Help:    "Cross-tenant activity (platform admins only).",
-		queries: []seriesQuery{{expr: `sum by (tenant_id) (increase(mcp_tool_calls_total[$w]))`, by: "tenant_id"}}},
 }
 
 // platformHealthPanels show the process and platform state of the
@@ -346,11 +344,6 @@ func init() {
 		panel.platform = true
 		seriesPanels[name] = panel
 	}
-	for _, name := range []string{"llm_cost", "tool_latency", "db_latency"} {
-		panel := seriesPanels[name]
-		panel.platform = true
-		seriesPanels["platform_"+name] = panel
-	}
 }
 
 // maxNamedSeries matches the chart palette (four hues, never cycled): the
@@ -386,11 +379,10 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 	name, rng := r.URL.Query().Get("panel"), cmp.Or(r.URL.Query().Get("range"), "24h")
 	p, ok := seriesPanels[name]
 	if !ok {
-		s.problem(w, http.StatusBadRequest, errors.New("unknown panel"))
+		s.problem(w, http.StatusNotFound, errors.New("unknown panel"))
 		return
 	}
-	sr, ok := seriesRanges[rng]
-	if !ok {
+	if _, ok := seriesRanges[rng]; !ok {
 		s.problem(w, http.StatusBadRequest, errors.New("range must be 1h, 6h, 24h, 7d or 30d"))
 		return
 	}
@@ -431,6 +423,20 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 		repositoryID = runs[0].RepositoryID
 		tenants = []string{reach.OrgID}
 	}
+	out, err := s.runPanel(r.Context(), name, rng, p, tenants, repositoryID)
+	if err != nil {
+		s.problem(w, http.StatusBadGateway, err)
+		return
+	}
+	out.Series = foldSeries(out.Series, p.Kind, len(out.Times))
+	writeJSON(w, http.StatusOK, out)
+}
+
+// runPanel runs a panel's queries over a range, its lines unfolded and
+// aligned on the same steps. tenants nil means every tenant; repositoryID
+// is set for repository panels.
+func (s *Server) runPanel(ctx context.Context, name, rng string, p seriesPanel, tenants []string, repositoryID string) (SeriesPanel, error) {
+	sr := seriesRanges[rng]
 	// The last step is the current one, still filling: recent activity
 	// shows at once instead of when the step completes.
 	end := time.Now().Truncate(sr.step).Add(sr.step)
@@ -451,13 +457,12 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 		var res []telemetry.Series
 		var err error
 		if p.repository {
-			res, err = s.cfg.Metrics.QueryRangeForRepo(r.Context(), strings.ReplaceAll(q.expr, "$w", sr.window), start.Add(sr.step), end, sr.step, tenants, repositoryID)
+			res, err = s.cfg.Metrics.QueryRangeForRepo(ctx, strings.ReplaceAll(q.expr, "$w", sr.window), start.Add(sr.step), end, sr.step, tenants, repositoryID)
 		} else {
-			res, err = s.cfg.Metrics.QueryRange(r.Context(), strings.ReplaceAll(q.expr, "$w", sr.window), start.Add(sr.step), end, sr.step, tenants)
+			res, err = s.cfg.Metrics.QueryRange(ctx, strings.ReplaceAll(q.expr, "$w", sr.window), start.Add(sr.step), end, sr.step, tenants)
 		}
 		if err != nil {
-			s.problem(w, http.StatusBadGateway, err)
-			return
+			return SeriesPanel{}, err
 		}
 		for _, ts := range res {
 			line := SeriesLine{Name: cmp.Or(q.name, ts.Labels[q.by], "none"), Values: make([]*float64, len(out.Times))}
@@ -485,8 +490,7 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 			out.Series = append(out.Series, line)
 		}
 	}
-	out.Series = foldSeries(out.Series, p.Kind, len(out.Times))
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }
 
 // foldSeries keeps the largest series, ordered by name so a series keeps
