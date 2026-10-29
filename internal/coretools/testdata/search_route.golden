@@ -1,0 +1,10 @@
+{
+  "results": [
+    {
+      "id": "Route|GET /items (~/api)",
+      "kind": "Route",
+      "name": "http GET /items",
+      "location": "api/api.go:8"
+    }
+  ]
+}

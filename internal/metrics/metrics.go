@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/astrona-io/codesynapse/internal/agentctx"
 	repoconfig "github.com/astrona-io/codesynapse/internal/config"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
@@ -114,7 +115,8 @@ type Package struct {
 
 // Benchmark estimates tokens saved by asking the graph instead of reading
 // files. For each sampled function, the graph answer is its real
-// symbol_card JSON; the baseline is the set of files an agent would open to
+// symbol_card JSON with compact IDs, as the agent tools answer;
+// the baseline is the set of files an agent would open to
 // learn the same things: the defining file plus the files of direct callers,
 // callees and reaching tests. Tokens are estimated as bytes/4.
 type Benchmark struct {
@@ -127,11 +129,15 @@ type Benchmark struct {
 	// MedianReductionPct is the median per-question token reduction, and
 	// TotalReductionPct the reduction over the whole sample, both in percent:
 	// 95 means the graph answer needs 5% of the tokens reading files would.
-	MedianReductionPct float64         `json:"median_reduction_pct"`
-	TotalReductionPct  float64         `json:"total_reduction_pct"`
-	TotalGraph         int             `json:"total_graph_tokens"`
-	TotalBaseline      int             `json:"total_baseline_tokens"`
-	Examples           []BenchmarkCase `json:"examples"`
+	MedianReductionPct float64 `json:"median_reduction_pct"`
+	TotalReductionPct  float64 `json:"total_reduction_pct"`
+	TotalGraph         int     `json:"total_graph_tokens"`
+	TotalBaseline      int     `json:"total_baseline_tokens"`
+	// FullIDTokens is TotalGraph with node IDs written out in full
+	// (repository and module path in every one), as answers gave them
+	// before compact IDs: the difference is what compact IDs save.
+	FullIDTokens int             `json:"full_id_tokens,omitempty"`
+	Examples     []BenchmarkCase `json:"examples"`
 }
 
 // BenchmarkCase is one sampled function.
@@ -507,7 +513,7 @@ func (x *index) packages(reached map[string]bool) []Package {
 // benchmark samples functions deterministically and compares real
 // symbol_card output with the files an agent would otherwise read.
 func benchmark(ctx context.Context, repo string, g *model.Graph, x *index, samples int) (Benchmark, error) {
-	b := Benchmark{PolicyDigest: repoconfig.FromContext(ctx).Digest(), Method: "graph = symbol_card JSON; baseline = defining file + files of direct callers, callees and reaching tests; tokens ≈ bytes/4"}
+	b := Benchmark{PolicyDigest: repoconfig.FromContext(ctx).Digest(), Method: "graph = symbol_card JSON with compact IDs; baseline = defining file + files of direct callers, callees and reaching tests; tokens ≈ bytes/4"}
 	if b.PolicyDigest == "" {
 		if node, ok := g.Node(model.NodeID(repo, model.KindRepository, repo)); ok && node.Meta != "" {
 			var metadata struct {
@@ -544,6 +550,10 @@ func benchmark(ctx context.Context, repo string, g *model.Graph, x *index, sampl
 		return b, err
 	}
 	svc := query.Service{R: mem}
+	module := ""
+	if node, ok := g.Node(model.NodeID(repo, model.KindRepository, repo)); ok {
+		module = model.GoModuleOf(*node)
+	}
 
 	var graphTok, baseTok []int
 	var cases []BenchmarkCase
@@ -553,10 +563,15 @@ func benchmark(ctx context.Context, repo string, g *model.Graph, x *index, sampl
 		if err != nil {
 			return b, err
 		}
-		raw, err := json.Marshal(card)
+		full, err := json.Marshal(card)
 		if err != nil {
 			return b, err
 		}
+		raw, err := agentctx.CompactAnswer(full, repo, module)
+		if err != nil {
+			return b, err
+		}
+		b.FullIDTokens += tokens(len(full))
 		files := map[string]bool{n.File: true}
 		for _, refs := range [][]query.Ref{card.Callers, card.Callees, card.Tests} {
 			for _, r := range refs {

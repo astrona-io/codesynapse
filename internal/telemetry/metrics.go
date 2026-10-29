@@ -54,6 +54,31 @@ var (
 	LLMContextUsed = Default.ScopedHistogram("llm_context_used_ratio", "Share of the model's context window one request used.", contextShare, "tenant_id", "llm_provider", "llm_model", "task")
 )
 
+// Model queue: requests wait for one of a provider's max_concurrent slots in
+// each process (one for a local model). The wait and the time until the
+// model starts answering show whether another endpoint would help; task is
+// one of llm.Tasks, "gateway" or "other", outcome and basis fixed sets.
+var (
+	// The first bound counts requests that found a free slot at once, so
+	// the share that queued at all is 1 - bucket(le=0.005)/count.
+	queueSlot = []float64{0.005, 0.05, 0.25, 1, 2.5, 5, 10, 20, 30, 60, 120, 300}
+	// LLMQueueWait is every wait for a slot, also the ones that ended
+	// before a slot came free.
+	LLMQueueWait = Default.ScopedHistogram("llm_queue_wait_seconds", "Time model requests waited for a queue slot of their provider, by task and outcome (acquired, cancelled, timeout).", queueSlot, "task", "outcome").TenantShare(llmQueueShare)
+	// LLMAnswerStart starts at the slot: the first streamed token where the
+	// provider streams (basis first_token), else the whole answer (basis
+	// full_answer), so the two are never mixed in one quantile.
+	LLMAnswerStart = Default.ScopedHistogram("llm_answer_start_seconds", "Time from a model request's queue slot until the model started answering, by task and basis (first_token for streamed answers, full_answer otherwise).", answerStart, "task", "basis").TenantShare(llmQueueShare)
+	answerStart    = []float64{0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 300}
+	// Running and waiting requests per tenant and provider in this process.
+	// Each process has its own slots, so the sum over processes and tenants
+	// is the endpoint's load against the summed capacity.
+	LLMQueueRunning = Default.ScopedGauge("llm_queue_running", "Model requests holding a queue slot of their provider now.")
+	LLMQueueWaiting = Default.ScopedGauge("llm_queue_waiting", "Model requests waiting for a queue slot of their provider now.")
+	// LLMQueueCapacity is the configuration, the same for every tenant.
+	LLMQueueCapacity = Default.Gauge("platform_llm_queue_capacity", "Queue slots (max_concurrent) a provider has in this process.", "llm_provider")
+)
+
 // Agent gateway: model requests agents send through CodeSynapse. The model
 // the agent asked for is client text, so it is never a label; the route says
 // where the request was answered (local, cloud, or rejected before any model).
@@ -338,6 +363,8 @@ const (
 	toolShare    = 48
 	routeShare   = 64
 	gatewayShare = 12
+	// A few tasks and outcomes per provider an organisation uses.
+	llmQueueShare = 24
 )
 
 // ---- end sharper existing families ----

@@ -23,6 +23,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/agentcfg"
 	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/fetchsource"
 )
 
 // `codesynapse mcp bridge` lets a client that cannot put its chat identity in
@@ -207,6 +208,10 @@ type bridge struct {
 	repoTools map[string]bool
 	repoOnce  sync.Once
 	repoName  string
+
+	// fetcher answers fetch_source (fetchsource.go), made on first use.
+	fetchOnce sync.Once
+	fetcher   *fetchsource.Fetcher
 }
 
 type rpcMessage struct {
@@ -261,7 +266,7 @@ func (b *bridge) run(ctx context.Context, in io.Reader) error {
 			case <-ctx.Done():
 				return
 			}
-			if m.Method == "tools/call" && (b.answerGit(ctx, msg, m) || b.answerAskLocal(ctx, msg, m) || b.answerLocally(ctx, msg, m)) {
+			if m.Method == "tools/call" && (b.answerGit(ctx, msg, m) || b.answerAskLocal(ctx, msg, m) || b.answerFetchSource(ctx, msg, m) || b.answerLocally(ctx, msg, m)) {
 				return
 			}
 			msg := b.withRepo(ctx, msg, m)
