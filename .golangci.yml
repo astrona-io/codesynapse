@@ -3,6 +3,7 @@ linters:
   enable:
     - bodyclose
     - contextcheck
+    - depguard
     - errorlint
     - gosec
     - misspell
@@ -12,6 +13,16 @@ linters:
     - unconvert
     - unparam
   settings:
+    depguard:
+      rules:
+        unmaintained:
+          list-mode: lax
+          files: ["$all"]
+          deny:
+            # .trivyignore.yaml accepts GO-2026-5932 (x/crypto) only because
+            # this package is never imported.
+            - pkg: golang.org/x/crypto/openpgp
+              desc: unmaintained and unsafe (GO-2026-5932)
     gosec:
       excludes:
         - G104 # covered by errcheck
