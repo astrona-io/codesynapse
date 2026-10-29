@@ -71,6 +71,7 @@ var toolPolicies = map[string]toolPolicy{
 	"gh_run_list":            {accounts.Viewer, "list"},
 	"ask_local":              {accounts.Viewer, "list"},
 	"local_draft":            {accounts.Viewer, "list"},
+	"fetch_source":           {accounts.Viewer, "list"},
 	"security_report":        {accounts.Viewer, "repository"},
 	"repo_metrics":           {accounts.Viewer, "repository"},
 	"list_reviews":           {accounts.Viewer, "repository"},

@@ -11,7 +11,7 @@ Alerts are for whoever runs the installation. Warnings for people in an organisa
 - What fires goes to one Alertmanager-compatible receiver (Alertmanager itself, or anything that accepts its API). Grouping, silences, routing to chat or paging stay in that receiver.
 - Every alert carries `severity` (`warning` or `critical`) and `component` (`telemetry`, `stores` or `jobs`) and links to the dashboard's Statistics page (`/stats` on your public URL). The Helm chart also adds `environment`.
 - The receiver's address and credentials come only from the environment (Compose) or a Kubernetes Secret (Helm). They are never command-line flags or chart values, and vmalert's own log shows them as `secret`.
-- Nothing connects to vmalert. In Compose it listens inside its container only; in Kubernetes a NetworkPolicy refuses every connection to it.
+- Only the API connects to vmalert, and only to read what fires for the dashboard (see [below](#see-alerts-in-the-dashboard)). In Compose it listens on port 8880 of the internal network, which is never published to the host; in Kubernetes a NetworkPolicy admits API pods on that port and refuses everything else.
 
 ## Turn it on with Docker Compose
 
@@ -59,6 +59,17 @@ Alerts are for whoever runs the installation. Warnings for people in an organisa
     ```
 
 The chart refuses to render alerting without a metrics store (`victoriametrics.enabled`, or `victoriametrics.externalURL` for one you run). vmalert reads it with `METRICS_PASSWORD` from the chart's Secret, like the services. It runs as one replica: a second would send every alert twice.
+
+## See alerts in the dashboard
+
+Platform administrators see what vmalert evaluates under Administration → Statistics → Alerts: alerts firing and pending with their value and since when, and every alerting rule with its group, health and last evaluation. The API reads vmalert's `/api/v1/alerts` and `/api/v1/rules` when the page asks and passes on only names, states, severity, value and times; other labels and annotations stay in vmalert.
+
+The API finds vmalert through `CODESYNAPSE_ALERTS_URL`, read from the environment only. It must be https to any host, or http to an internal service name (`vmalert`, `name.namespace.svc`, `name.namespace.svc.cluster.local`), with no credentials, path, query or fragment; the API refuses to start otherwise. It follows no redirects, reads at most 1 MiB and gives up after 5 seconds.
+
+- **Compose:** set `CODESYNAPSE_ALERTS_URL=http://vmalert:8880` in `.env` beside the `alerting` profile.
+- **Helm:** with `alerting.enabled` the chart sets it to the in-chart vmalert Service. For a vmalert you run yourself, set `alerting.externalURL` (for example `http://vmalert.monitoring.svc:8880`) and keep `alerting.enabled` off.
+
+Unset, the tab says alerts are off and nothing else changes.
 
 ## The rules
 

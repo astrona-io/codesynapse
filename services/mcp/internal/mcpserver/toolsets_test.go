@@ -61,7 +61,7 @@ func TestEveryToolInOneToolset(t *testing.T) {
 		assert.True(t, toolsetOf(name) != "", "%s belongs to a toolset", name)
 	}
 	assert.Equal(t, len(seen), len(tools), "the sets list exactly the tools a full server registers")
-	assert.Len(t, Toolsets[ToolsetCore], 13)
+	assert.Len(t, Toolsets[ToolsetCore], 14)
 }
 
 func TestToolsetSelection(t *testing.T) {

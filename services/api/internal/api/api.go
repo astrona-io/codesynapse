@@ -79,6 +79,9 @@ type Config struct {
 	// VictoriaMetrics).
 	Metrics       *telemetry.Querier
 	IngestMetrics *telemetry.IngestExporter
+	// Alerts reads the internal vmalert for the platform Statistics page
+	// (nil without CODESYNAPSE_ALERTS_URL).
+	Alerts *telemetry.AlertsClient
 	// TrustedProxies may report the client address in X-Forwarded-For
 	// (the web app); everyone else is identified by the connection.
 	TrustedProxies []netip.Prefix
@@ -238,7 +241,7 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 		// run jobs (docs/SAAS.md, 5e).
 		loops := []func(context.Context){s.recoverFixes, func(ctx context.Context) { s.runScheduler(ctx, logger) }, s.sweepVectors}
 		if cfg.Accounts != nil {
-			loops = append(loops, s.pruneAudit, s.projectAccess, s.pruneExecutionMemory, s.recoverIngestReports, s.reportJobQueue, s.rollupPlatformStats, s.prunePromptLog)
+			loops = append(loops, s.pruneAudit, s.projectAccess, s.pruneExecutionMemory, s.recoverIngestReports, s.reportJobQueue, s.rollupPlatformStats, s.prunePromptLog, s.sampleStores)
 		}
 		s.singleton(ctx, loops...)
 	}

@@ -225,6 +225,12 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 			return err
 		}
 	}
+	var alerts *telemetry.AlertsClient
+	if !o.worker {
+		if alerts, err = telemetry.NewAlertsClient(os.Getenv(app.EnvAlertsURL)); err != nil {
+			return fmt.Errorf("%s: %w", app.EnvAlertsURL, err)
+		}
+	}
 	var roles []string // all: this process runs every job
 	switch {
 	case o.worker:
@@ -238,7 +244,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		AllowPush: pushAllowed(app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true", o.worker, roles, o.EC.Logger),
 		Accounts:  acc, ServiceToken: os.Getenv(EnvToken), SecureCookies: app.Getenv("CODESYNAPSE_COOKIE_SECURE", "true") == "true",
 		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour, AuditHot: time.Duration(hotDays()) * 24 * time.Hour, AuditArchive: auditArchive,
-		Metrics: metricsQuerier(), IngestMetrics: ingestMetrics,
+		Metrics: metricsQuerier(), IngestMetrics: ingestMetrics, Alerts: alerts,
 		TrustedProxies: trusted, PublicMCPURL: app.Getenv("CODESYNAPSE_PUBLIC_MCP_URL", "http://localhost:8090/mcp"),
 		PublicAPIURL:   app.Getenv("CODESYNAPSE_PUBLIC_API_URL", ""),
 		AgentRulesFile: os.Getenv("CODESYNAPSE_AGENT_RULES_FILE"),

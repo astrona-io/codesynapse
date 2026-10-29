@@ -128,6 +128,7 @@ func (s *Server) handleStatsSummary(w http.ResponseWriter, r *http.Request) {
 		s.statsError(w, err)
 		return
 	}
+	out.AlertsFiring = s.alertsFiring(r.Context())
 	writeJSON(w, http.StatusOK, out)
 }
 
