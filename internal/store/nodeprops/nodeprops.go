@@ -10,7 +10,7 @@ import (
 )
 
 // Lists are the properties holding string lists.
-var Lists = []string{"cwe", "aliases", "security_tags"}
+var Lists = []string{"cwe", "aliases", "security_tags", "scorecard_checks"}
 
 // To converts a node to properties. Zero values are omitted so nodes stay
 // small; From restores them as zero values.
@@ -76,6 +76,11 @@ func To(n model.Node) map[string]any {
 	setStr("deprecated", n.Deprecated)
 	setStr("retracted", n.Retracted)
 	setInt("behind", n.Behind)
+	if n.ScorecardDate != "" {
+		// Set with its date even at 0, which is a score.
+		p["scorecard"] = n.Scorecard
+		p["scorecard_date"] = n.ScorecardDate
+	}
 	setStr("liveness", n.Liveness)
 	setStr("cleanup", n.Cleanup)
 	setStr("licenses", n.Licenses)
@@ -93,6 +98,9 @@ func To(n model.Node) map[string]any {
 	}
 	if len(n.SecurityTags) > 0 {
 		p["security_tags"] = n.SecurityTags
+	}
+	if len(n.ScorecardChecks) > 0 {
+		p["scorecard_checks"] = n.ScorecardChecks
 	}
 	return p
 }
@@ -119,7 +127,27 @@ func From(p map[string]any) model.Node {
 		CWE: Strs(p["cwe"]), Aliases: Strs(p["aliases"]),
 	}
 	n.SecurityTags = Strs(p["security_tags"])
+	n.Scorecard, n.ScorecardDate, n.ScorecardChecks = Float(p["scorecard"]), s("scorecard_date"), Strs(p["scorecard_checks"])
 	return n
+}
+
+// Float reads a floating-point property in any of the forms the drivers
+// return.
+func Float(v any) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case float32:
+		return float64(n)
+	case int64:
+		return float64(n)
+	case int:
+		return float64(n)
+	case json.Number:
+		f, _ := n.Float64()
+		return f
+	}
+	return 0
 }
 
 // Int reads an integer property in any of the forms the drivers return.

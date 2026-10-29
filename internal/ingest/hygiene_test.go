@@ -95,3 +95,51 @@ func TestGoRetractions(t *testing.T) {
 		assert.Equal(t, lib.Retracted, "Corrupts the index.")
 	}
 }
+
+// TestDependencyScorecard: with lookups on, a Module node carries the
+// OpenSSF Scorecard of the source project deps.dev names for its version.
+func TestDependencyScorecard(t *testing.T) {
+	root := t.TempDir()
+	lock := `{"name":"app","lockfileVersion":3,"packages":{
+		"":{"name":"app","dependencies":{"left-pad":"^1.3.0","plain":"^1.0.0"}},
+		"node_modules/left-pad":{"version":"1.3.0","license":"WTFPL"},
+		"node_modules/plain":{"version":"1.0.0","license":"MIT"}}}`
+	require.NoError(t, os.WriteFile(filepath.Join(root, "package-lock.json"), []byte(lock), 0o600))
+	var mu sync.Mutex
+	asked := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked++
+		mu.Unlock()
+		switch r.URL.EscapedPath() {
+		case "/v3/systems/NPM/packages/left-pad/versions/1.3.0":
+			_, _ = w.Write([]byte(`{"relatedProjects":[{"projectKey":{"id":"github.com/left-pad/left-pad"},"relationType":"SOURCE_REPO"}]}`))
+		case "/v3/projects/github.com%2Fleft-pad%2Fleft-pad":
+			_, _ = w.Write([]byte(`{"scorecard":{"date":"2026-10-20T00:00:00Z","overallScore":2.34,
+				"checks":[{"name":"Maintained","score":0},{"name":"Code-Review","score":1},{"name":"License","score":10},{"name":"Fuzzing","score":0}]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	for _, online := range []bool{false, true} {
+		g, err := Run(context.Background(), Options{Repo: "r", Root: root, LicenseLookup: online, DepsDev: &license.DepsDev{BaseURL: srv.URL}})
+		require.NoError(t, err)
+		n, ok := g.Node(model.NodeID("r", model.KindModule, "npm:left-pad"))
+		require.True(t, ok)
+		plain, ok := g.Node(model.NodeID("r", model.KindModule, "npm:plain"))
+		require.True(t, ok)
+		assert.Equal(t, plain.ScorecardDate, "", "no project, no score")
+		if !online {
+			assert.Equal(t, n.ScorecardDate, "")
+			mu.Lock()
+			assert.Equal(t, asked, 0, "nothing is asked without the lookup")
+			mu.Unlock()
+			continue
+		}
+		assert.Equal(t, n.Scorecard, 2.3)
+		assert.Equal(t, n.ScorecardDate, "2026-10-20")
+		assert.Equal(t, n.ScorecardChecks, []string{"Fuzzing:0", "Maintained:0", "Code-Review:1"})
+	}
+}
