@@ -22,6 +22,7 @@ watch(() => route.path, (path) => { if (path === '/settings') navigateTo('/setti
           <NuxtLink to="/settings/git-tokens">Git tokens</NuxtLink>
           <NuxtLink v-if="session.can('admin')" to="/settings/sso">Single sign-on</NuxtLink>
           <NuxtLink v-if="session.can('admin')" to="/settings/audit">Audit log</NuxtLink>
+          <NuxtLink v-if="session.can('admin')" to="/settings/prompt-log">Prompt log</NuxtLink>
         </template>
       </nav>
       <NuxtPage />

@@ -30,6 +30,7 @@ func TestContract(t *testing.T) {
 	accountstest.RunSSOStore(t, func(*testing.T) accounts.Store { return New() })
 	accountstest.RunJobs(t, func(*testing.T) accounts.Store { return New() })
 	accountstest.RunPlatformStatsDaily(t, func(*testing.T) accounts.Store { return New() })
+	accountstest.RunPromptLog(t, func(*testing.T) accounts.Store { return New() })
 	accountstest.RunSchedules(t, func(*testing.T) accounts.Store { return New() })
 	accountstest.RunWatches(t, func(*testing.T) accounts.Store { return New() })
 	accountstest.RunProfile(t, func(*testing.T) accounts.Store { return New() })

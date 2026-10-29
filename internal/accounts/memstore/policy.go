@@ -207,6 +207,7 @@ func (s *Store) snapshot() *Store {
 	tx.jobs = s.jobTable() // shared, not transactional
 	tx.sched = s.scheduleTable()
 	tx.daily = s.dailyTable()
+	tx.prompts = s.promptTable()
 	for key, annotations := range tx.annotations {
 		tx.annotations[key] = maps.Clone(annotations)
 	}

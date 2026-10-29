@@ -141,6 +141,45 @@ The reasons a request was not answered locally are a fixed list:
 
 On the OpenAI-compatible paths there is no cloud behind the local model, so their failures count with route `local`. Only the reason, the route and the timings are recorded; never the prompt or the answer.
 
+## What the audit log records
+
+Every gateway request becomes one `gateway.request` entry in the hash-chained audit log. Its detail holds the route (`local`, `cloud` or `rejected`), the model, whether the request streamed or carried tools, the body size, the time taken and `shortened=true|false`. When the request carries user text, the entry also holds `prompt_bytes` and `prompt_sha256`: the size and SHA-256 of the newest user text as the assistant sent it. When the gateway shortened that text, `fwd_bytes` and `fwd_sha256` describe the text it forwarded. A request the local model could not answer adds `reason=<reason>`, one of the reasons listed under [Seeing how well the local model keeps up](#seeing-how-well-the-local-model-keeps-up). The audit log never holds the text itself.
+
+## Prompt log (opt-in, off by default)
+
+An organisation can choose to keep the text as well, in a prompt log kept apart from the audit log. Turn it on in **Settings → Prompt log**, or from a signed-in owner or admin session:
+
+```sh
+PUT /api/v1/accounts/orgs/{org}/gateway/prompt-log/settings
+{"enabled": true, "retention_days": 30}
+```
+
+Each row holds the audit entry it belongs to, the time, the person, the API key ID, the runtime session, the model and the route, plus:
+
+- the original prompt (the newest user text);
+- the shortened text, when the gateway shortened it;
+- the local model's answer, only when the local model answered.
+
+Each text passes the secret and personal data redaction and is cut at 64 KiB. Tool results, file contents and system prompts are never kept. Every row carries the same `prompt_sha256` as its audit entry, so it can be checked against the chain.
+
+| Setting | Default | Range |
+|---|---|---|
+| `enabled` | `false` | |
+| `retention_days` | 30 | 1 to 400 |
+
+Rows past the retention are deleted every hour by the API process that holds the `api-loops` lease. With an audit archive set (`CODESYNAPSE_AUDIT_ARCHIVE_DIR` or the S3 settings), rows older than `CODESYNAPSE_AUDIT_HOT_DAYS` are first sealed into `promptlog-<first>-<last>.jsonl.gz` files, one organisation per file. The file's SHA-256 is recorded before the rows leave PostgreSQL, and the file is deleted when the organisation's retention has passed.
+
+Who can do what:
+
+| Action | Endpoint | Who | Audit action |
+|---|---|---|---|
+| See the setting | `GET …/gateway/prompt-log/settings` | any member | |
+| Change it | `PUT …/gateway/prompt-log/settings` | owner or admin, signed-in session | `org.gateway.prompt_log.set`, written before the change |
+| Read the log (filters: `user`, `session`, `model`, `route`, `shortened`, `fallthrough`, `since`, `until`) | `GET …/gateway/prompt-log` | owner or admin, signed-in session | `gateway.prompt_log.read` |
+| Export it as JSON Lines or CSV (`format=jsonl|csv`, `since` required, at most 20,000 rows per call; `X-CodeSynapse-Next-After-Id` names where to go on) | `GET …/gateway/prompt-log/export` | owner or admin, signed-in session | `gateway.prompt_log.export` |
+
+API keys are refused (403). Another organisation's members get 404. CSV cells that start with `=`, `+`, `-`, `@`, a tab or a carriage return are prefixed with `'`. No other endpoint returns the texts, and they never reach the service logs, metrics or traces.
+
 ## Safety rules
 
 - A gateway key is required, and each key gets its own audited runtime session.

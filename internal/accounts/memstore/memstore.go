@@ -62,6 +62,8 @@ type Store struct {
 	schedOnce      sync.Once
 	daily          *dailyTable
 	dailyOnce      sync.Once
+	prompts        *promptTable
+	promptsOnce    sync.Once
 }
 
 type member struct {

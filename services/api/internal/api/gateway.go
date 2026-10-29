@@ -51,7 +51,10 @@ func (l *keyLimit) take(key string) (release func(), ok bool) {
 var modelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$`)
 
 // auditGateway records what a gateway call was, never what it said: route,
-// model name, sizes and timing.
+// model name, sizes, timing and SHA-256 digests of the newest user text and
+// of the text forwarded when the gateway shortened it. When the organisation
+// keeps a prompt log, the texts go to that separate table, linked to this
+// entry by its ID and the same digests.
 func (s *Server) auditGateway(ctx context.Context, m gateway.Meta, status int, took time.Duration) {
 	recordGateway(ctx, m, status, took)
 	model := m.Model
@@ -63,7 +66,7 @@ func (s *Server) auditGateway(ctx context.Context, m gateway.Meta, status int, t
 	}
 	e := accounts.Event{
 		Action: "gateway.request", Target: m.Path, Status: status, Outcome: accounts.Success, Via: "anonymous",
-		Detail: fmt.Sprintf("route=%s model=%s stream=%t tools=%t bytes=%d ms=%d", m.Route, model, m.Stream, m.Tools, m.Bytes, took.Milliseconds()),
+		Detail: gatewayDetail(m, model, took),
 	}
 	if m.Shortened {
 		e.Detail += fmt.Sprintf(" shortened=true removed=%d", m.Removed)
@@ -80,10 +83,50 @@ func (s *Server) auditGateway(ctx context.Context, m gateway.Meta, status int, t
 	if status >= 400 {
 		e.Outcome = accounts.Failure
 	}
-	if p, ok := principal(ctx); ok {
+	p, ok := principal(ctx)
+	if ok {
 		e.UserID, e.ActorEmail, e.Via, e.KeyID, e.OrgID = p.User.ID, p.User.Email, p.Via, p.KeyID, p.OrgID
 	}
-	s.record(ctx, e)
+	if s.cfg.Accounts == nil || !gateway.PromptCapture(ctx) || !ok {
+		s.record(ctx, e)
+		return
+	}
+	stored, err := s.cfg.Accounts.Record(ctx, e)
+	if err != nil {
+		// No chain entry, no prompt log row: a row always matches one.
+		s.logger.Error("audit log write failed", "action", e.Action, "error", err)
+		return
+	}
+	id, _ := execution.From(ctx)
+	reason := ""
+	if m.Fallthrough != "" {
+		reason = telemetry.GatewayReason(m.Fallthrough)
+	}
+	row := accounts.PromptLogEntry{
+		OrgID: p.OrgID, At: stored.At, AuditID: stored.ID, UserID: p.User.ID, KeyID: p.KeyID,
+		SessionID: id.SessionID, Path: m.Path, Model: model, Route: m.Route, Status: status,
+		DurationMS: took.Milliseconds(), Shortened: m.TextChanged, Fallthrough: reason,
+		PromptSHA256: m.PromptSHA256, PromptBytes: m.PromptBytes, ForwardedSHA256: m.ForwardedSHA256, ForwardedBytes: m.ForwardedBytes,
+		Prompt: m.Prompt, Forwarded: m.Forwarded, Answer: m.Answer,
+	}
+	if _, err := s.cfg.Accounts.RecordPromptLog(ctx, row); err != nil {
+		// Only the entry it belongs to is logged; the texts never reach a log.
+		s.logger.Error("prompt log write failed", "audit_id", stored.ID)
+	}
+}
+
+// gatewayDetail is the audit detail of a gateway request: no text, only
+// digests and sizes, so a kept prompt can be checked against the chain.
+func gatewayDetail(m gateway.Meta, model string, took time.Duration) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "route=%s model=%s stream=%t tools=%t bytes=%d ms=%d shortened=%t", m.Route, model, m.Stream, m.Tools, m.Bytes, took.Milliseconds(), m.TextChanged)
+	if m.PromptSHA256 != "" {
+		fmt.Fprintf(&b, " prompt_bytes=%d prompt_sha256=%s", m.PromptBytes, m.PromptSHA256)
+	}
+	if m.TextChanged && m.ForwardedSHA256 != "" {
+		fmt.Fprintf(&b, " fwd_bytes=%d fwd_sha256=%s", m.ForwardedBytes, m.ForwardedSHA256)
+	}
+	return b.String()
 }
 
 // authenticateGateway reads the CodeSynapse key from its own header and
@@ -215,16 +258,21 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 		s.problem(w, http.StatusForbidden, err)
 		return r, false
 	}
+	keep, err := s.cfg.Accounts.PromptLogEnabled(r.Context(), m.Org.ID)
+	if err != nil {
+		s.accountError(w, err)
+		return r, false
+	}
 	ctx = gateway.WithExclude(gateway.WithLocalFirst(ctx, first), exclude)
-	return r.WithContext(gateway.WithShortenPrompts(ctx, shorten)), true
+	return r.WithContext(gateway.WithShortenPrompts(gateway.WithPromptCapture(ctx, keep), shorten)), true
 }
 
 // handleOrgGateway reads (any member) or sets (owner or admin, signed-in
 // session only) whether the organisation uses the agent gateway (on unless
 // switched off), whether the local model answers first (on unless switched
 // off), which models it never answers (local_exclude, empty unless set)
-// and whether it shortens typed prose bound for the cloud (off unless
-// switched on). A PUT changes only the fields it sends. "available" says
+// and whether it shortens typed prose bound for the cloud (on unless
+// switched off). A PUT changes only the fields it sends. "available" says
 // whether the operator turned the gateway on for the installation, and
 // "shorten_available" whether a local model can shorten prompts at all.
 func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {

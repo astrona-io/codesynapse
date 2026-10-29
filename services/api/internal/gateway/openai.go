@@ -58,6 +58,7 @@ func (o *OpenAI) ChatHandler() http.HandlerFunc {
 		}
 		_ = json.Unmarshal(req["stream"], &meta.Stream)
 		meta.Tools = len(req["tools"]) > 2
+		meta.notePrompt(r.Context(), openAIUserText(req["messages"]))
 		// The agent names whatever model it has configured; the local one answers.
 		model, _ := json.Marshal(l.Model)
 		req["model"] = model
@@ -67,7 +68,12 @@ func (o *OpenAI) ChatHandler() http.HandlerFunc {
 			done(r.Context(), http.StatusBadRequest)
 			return
 		}
-		status, tail := o.forward(r.Context(), w, l, out, &meta)
+		var answer http.ResponseWriter = w
+		capture := capturing(r.Context(), w)
+		if capture != nil {
+			answer = capture
+		}
+		status, tail := o.forward(r.Context(), answer, l, out, &meta)
 		if status == 0 {
 			return // the agent gave up while waiting; nothing was answered
 		}
@@ -78,6 +84,7 @@ func (o *OpenAI) ChatHandler() http.HandlerFunc {
 		case status < 400:
 			meta.InTokens, meta.OutTokens, meta.CachedTokens = reportedUsage(tail)
 			meta.Metered = meta.InTokens+meta.OutTokens > 0
+			meta.noteAnswer(capture, openAIAnswerText)
 		case meta.Fallthrough == "":
 			meta.Fallthrough = FallBadStatus
 		}
