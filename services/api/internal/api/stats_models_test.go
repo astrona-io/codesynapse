@@ -92,7 +92,7 @@ func TestModelStats(t *testing.T) {
 	assert.Equal(t, *out.Spent, 0.0123)
 	assert.Equal(t, *out.CompressionSaved, 0.03, "10000 tokens at $3 per million")
 	assert.Equal(t, c.CompressedBytes, 40000.0)
-	assert.True(t, out.CompressionEnabled, "a local model is configured, so shortening is on by default")
+	assert.True(t, out.CompressionEnabled, "every task routes locally now, but the window holds shortened prompts")
 	assert.Equal(t, out.CompressionOff, "")
 	assert.True(t, c.ReadTPS == nil, "no streamed answers, no speed")
 	gw := out.Gateway
@@ -128,18 +128,22 @@ func TestMoneyTotalsUnknownWithoutPrices(t *testing.T) {
 func TestCompressionState(t *testing.T) {
 	cloud := llm.ProviderConfig{Name: "cloud", Kind: llm.KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "big"}
 	local := llm.ProviderConfig{Name: "local", Kind: llm.KindOpenAI, BaseURL: "http://127.0.0.1:11434/v1", Model: "qwen"}
+	shortened := []ModelStat{{Provider: "cloud", Model: "big", CompressedBytes: 400}}
 	for name, tc := range map[string]struct {
 		reg    *llm.Registry
+		models []ModelStat
 		on     bool
 		reason string
 	}{
-		"no AI":          {nil, false, "no_ai"},
-		"cloud only":     {llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{cloud}, Default: "cloud"}), false, llm.CompressionNoLocalModel},
-		"turned off":     {llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{cloud, local}, Default: "cloud", CompressPrompts: new(false)}), false, llm.CompressionDisabled},
-		"local model on": {llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{cloud, local}, Default: "cloud"}), true, ""},
+		"no AI":                            {nil, nil, false, "no_ai"},
+		"cloud only":                       {llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{cloud}, Default: "cloud"}), nil, false, llm.CompressionNoLocalModel},
+		"turned off":                       {llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{cloud, local}, Default: "cloud", CompressPrompts: new(false)}), shortened, false, llm.CompressionDisabled},
+		"all local":                        {llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{cloud, local}, Default: "local"}), nil, false, llm.CompressionNoCloudTask},
+		"all local now, shortened earlier": {llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{cloud, local}, Default: "local"}), shortened, true, ""},
+		"local model on":                   {llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{cloud, local}, Default: "cloud"}), nil, true, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			on, reason := compressionState(tc.reg)
+			on, reason := compressionState(tc.reg, tc.models)
 			assert.Equal(t, on, tc.on)
 			assert.Equal(t, reason, tc.reason)
 		})
