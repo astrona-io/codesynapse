@@ -112,6 +112,7 @@ func TestBootstrapContract(t *testing.T) {
 	accountstest.RunJobs(t, fresh)
 	accountstest.RunSchedules(t, fresh)
 	accountstest.RunWatches(t, fresh)
+	accountstest.RunInvitations(t, fresh)
 	accountstest.RunProfile(t, fresh)
 	accountstest.RunUsername(t, fresh)
 	accountstest.RunInitialAdmin(t, fresh)

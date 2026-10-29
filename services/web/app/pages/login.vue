@@ -89,7 +89,7 @@ async function submit() {
       <button type="submit" class="secondary" :disabled="ssoBusy || !ssoOrg.trim()">{{ ssoBusy ? 'Opening your identity provider…' : 'Continue' }}</button>
     </form>
   </details>
-  <p v-if="session.status.value?.signup_open" class="muted small">No account yet? <NuxtLink to="/signup">Create one</NuxtLink></p>
+  <p v-if="session.status.value?.signup_open" class="muted small">No account yet? <NuxtLink :to="{ path: '/signup', query: route.query.next ? { next } : {} }">Create one</NuxtLink></p>
   <p v-else class="muted small">No account yet? Ask an administrator of your installation to add you.</p>
 </template>
 

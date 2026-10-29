@@ -292,10 +292,8 @@ func platformStatsFixture(ctx context.Context, t *testing.T, st accounts.Store) 
 	require.Len(t, ms, 1)
 	setupOrg := ms[0].Org.ID
 	ada := accounts.Principal{User: adaUser, Via: "session"}
-	_, err = svc.AddMember(ctx, ada, adaOrg.ID, bobUser.Email, accounts.Member)
-	require.NoError(t, err)
-	_, err = svc.AddMember(ctx, accounts.Principal{User: owner, Via: "session"}, setupOrg, bobUser.Email, accounts.Guest)
-	require.NoError(t, err)
+	require.NoError(t, Join(ctx, t, svc, ada, adaOrg.ID, bobUser, accounts.Member))
+	require.NoError(t, Join(ctx, t, svc, accounts.Principal{User: owner, Via: "session"}, setupOrg, bobUser, accounts.Guest))
 	empty, err := svc.CreateOrg(ctx, ada, "Stats empty", "")
 	require.NoError(t, err)
 	require.NoError(t, st.RemoveMember(ctx, empty.ID, adaUser.ID))

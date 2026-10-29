@@ -87,7 +87,7 @@ func TestPlatformContentIsolation(t *testing.T) {
 			assert.Equal(t, c.do("GET", "/api/v1/admin/health", "", nil), c.health, "platform reads need an administrator's session")
 		})
 	}
-	require.Equal(t, owner.do("PUT", "/api/v1/accounts/orgs/"+signed.Org.Slug+"/members", `{"email":"admin@example.com","role":"viewer"}`, nil), 200)
+	invite(t, owner, signed.Org.Slug, admin, "admin@example.com", "viewer")
 	assert.Equal(t, admin.do("GET", reportPath, "", nil), 404, "membership alone does not permit the report")
 	require.Equal(t, owner.do("PUT", "/api/v1/accounts/orgs/"+signed.Org.Slug+"/repo-policy", `{"default_repo_access":"READ_ONLY"}`, nil), 200)
 	assert.Equal(t, admin.do("GET", "/api/v1/repos/"+storetest.Repo+"/overview", "", nil, OrgHeader, signed.Org.Slug), 200)

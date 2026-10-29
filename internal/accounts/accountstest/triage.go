@@ -90,8 +90,7 @@ func RunFindingTriage(t *testing.T, st accounts.Store) {
 	viewer, _, err := svc.SignUp(ctx, "triage-viewer@example.com", "Triage viewer", pw)
 	require.NoError(t, err)
 	for _, u := range []accounts.User{admin, editor, viewer} {
-		_, err = svc.AddMember(ctx, p, org.ID, u.Email, accounts.Member)
-		require.NoError(t, err)
+		require.NoError(t, Join(ctx, t, svc, p, org.ID, u, accounts.Member))
 	}
 	_, err = svc.SetRepoGrant(ctx, p, org.ID, graph, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: admin.ID}, accounts.Admin)
 	require.NoError(t, err)

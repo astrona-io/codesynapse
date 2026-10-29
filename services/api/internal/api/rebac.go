@@ -167,12 +167,13 @@ type grantRequest struct {
 	Role accounts.Role `json:"role"`
 }
 
-// subject resolves a grant's subject.
-func (s *Server) subject(r *http.Request, user, team string) (accounts.Tuple, error) {
+// subject resolves a grant's subject. A user is looked up among orgID's
+// members only, so an unknown email and an outsider's answer the same.
+func (s *Server) subject(r *http.Request, orgID, user, team string) (accounts.Tuple, error) {
 	ctx := r.Context()
 	switch {
 	case user != "" && team == "":
-		u, err := s.cfg.Accounts.St.UserByEmail(ctx, accounts.NormalizeEmail(user))
+		u, err := s.cfg.Accounts.MemberByEmail(ctx, orgID, user)
 		if err != nil {
 			return accounts.Tuple{}, err
 		}
@@ -270,7 +271,7 @@ func (s *Server) handleRecoverRepoAdmin(w http.ResponseWriter, r *http.Request) 
 		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
-	u, err := s.cfg.Accounts.St.UserByEmail(r.Context(), accounts.NormalizeEmail(req.User))
+	u, err := s.cfg.Accounts.MemberByEmail(r.Context(), o.ID, req.User)
 	if err == nil {
 		err = s.cfg.Accounts.RecoverRepoAdmin(r.Context(), p, o.ID, r.PathValue("repo"), u.ID)
 	}
@@ -291,10 +292,14 @@ func (s *Server) handleSetRepoGrant(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	sub, err := s.subject(r, req.User, req.Team)
+	if err := s.cfg.Accounts.CanGrant(r.Context(), p, o.ID, r.PathValue("repo")); err != nil {
+		s.accountError(w, err)
+		return
+	}
+	sub, err := s.subject(r, o.ID, req.User, req.Team)
 	if err != nil {
 		if errors.Is(err, accounts.ErrNotFound) {
-			s.problem(w, http.StatusNotFound, errors.New("no account or team by that name"))
+			s.problem(w, http.StatusNotFound, errors.New("no member or team by that name"))
 			return
 		}
 		s.problem(w, 400, err)

@@ -425,6 +425,30 @@ export interface Membership {
   role: Role
   added_at: string
 }
+// A pending invitation to an organisation. The accept token is shown once,
+// when it is created (InvitationCreated), and never listed.
+export interface Invitation {
+  id: string
+  org_id: string
+  email: string
+  role: Role
+  invited_by: string
+  created_at: string
+  expires_at: string
+}
+export interface InvitationCreated {
+  invitation: Invitation
+  token: string
+  accept_path: string
+}
+// What the accept page shows before joining. for_you says the signed-in
+// account's email is the invited one.
+export interface InvitationPreview {
+  org: AccountOrg
+  role: Role
+  expires_at: string
+  for_you: boolean
+}
 export interface Me {
   user: AccountUser
   via: 'session' | 'key' | 'service'

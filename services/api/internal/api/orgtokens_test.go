@@ -86,7 +86,7 @@ func TestPrivateRepositoriesWithOrgTokens(t *testing.T) {
 	var team, other accounts.Org
 	require.Equal(t, bob.do("POST", "/api/v1/accounts/orgs", `{"name":"Team"}`, &team), 201)
 	require.Equal(t, dave.do("POST", "/api/v1/accounts/orgs", `{"name":"Other"}`, &other), 201)
-	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+team.Slug+"/members", `{"email":"carol@example.com","role":"member"}`, nil), 200)
+	invite(t, bob, team.Slug, carol, "carol@example.com", "member")
 	inTeam := []string{OrgHeader, team.Slug}
 	inOther := []string{OrgHeader, other.Slug}
 	register := func(c *client, url, name string, org []string) (int, string) {

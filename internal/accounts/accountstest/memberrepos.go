@@ -32,8 +32,7 @@ func RunMemberRepos(t *testing.T, st accounts.Store) {
 	org, err := svc.CreateOrg(ctx, ownerP, "Space Acme", "")
 	require.NoError(t, err)
 	for _, u := range []accounts.User{member, other} {
-		_, err := svc.AddMember(ctx, ownerP, org.ID, u.Email, accounts.Member)
-		require.NoError(t, err)
+		require.NoError(t, Join(ctx, t, svc, ownerP, org.ID, u, accounts.Member))
 	}
 
 	on, err := svc.MemberReposSetting(ctx, memberP, org.ID)
