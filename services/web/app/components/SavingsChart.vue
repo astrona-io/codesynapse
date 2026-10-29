@@ -133,6 +133,22 @@ const STEP_NOTE: Record<SavingsSeries['step'], string> = {
   day: 'One column per day (UTC).',
   week: 'One column per week, Monday to Sunday (UTC); the first and last weeks can be partial.',
 }
+// The caption keeps the grouping and the figures; why goes behind the "i".
+const STEP_SHORT: Record<SavingsSeries['step'], string> = {
+  hour: 'Hourly, your local time',
+  '6h': 'Every 6 hours, labels in your local time',
+  day: 'Daily (UTC)',
+  week: 'Weekly, Mon–Sun (UTC)',
+}
+const about = computed(() => [
+  STEP_NOTE[props.series.step],
+  'Never read: tokens agents did not have to read because a graph answer replaced the files. Local models: tokens read and written by models on your own network instead of a cloud model.',
+  props.price ? `Money is an estimate at ${props.price.model} prices, with the same formula as the tiles above, so the columns add up to them.` : 'Without a reference price there is no money view.',
+  !props.series.metrics
+    ? `Local model work needs live metrics, so only graph answers show${subDay.value ? ', and they cannot be placed below a day' : ''}.`
+    : props.series.days > 30 ? 'The metrics store keeps 30 days: local model work before that is not shown.' : '',
+  props.series.unplaced_never_read_tokens > 0 ? 'Graph answers are spread over a day by the hours agents used the graph; a day without that measurement stays in the totals but in no column.' : '',
+].filter(Boolean).join(' '))
 
 const hover = ref(-1)
 const tip = computed(() => (hover.value >= 0 ? rows.value[hover.value] : undefined))
@@ -179,10 +195,8 @@ const unknown = (v: number | null) => (v === null ? 'unknown' : money(v))
       </div>
     </div>
     <figcaption class="muted small">
-      {{ STEP_NOTE[series.step] }}
-      <template v-if="!series.metrics"> Local model work needs live metrics, so only graph answers show<template v-if="subDay">, and they cannot be placed below a day</template>.</template>
-      <template v-else-if="series.days > 30"> The metrics store keeps 30 days: local model work before that is not shown.</template>
-      <template v-if="series.unplaced_never_read_tokens > 0"> {{ fmtCompact(series.unplaced_never_read_tokens) }} tokens never read<template v-if="price"> ({{ money(series.unplaced_graph_saved_dollars) }})</template> fell on days without an hourly measurement: they are in the totals above, in no column.</template>
+      {{ STEP_SHORT[series.step] }}<template v-if="!series.metrics"> · graph answers only</template><template v-if="series.unplaced_never_read_tokens > 0"> · {{ fmtCompact(series.unplaced_never_read_tokens) }} tokens never read<template v-if="price"> ({{ money(series.unplaced_graph_saved_dollars) }})</template> in no column</template>
+      <InfoTip :text="about" label="About this chart" />
     </figcaption>
     <details class="table-view">
       <summary>Table</summary>

@@ -59,7 +59,7 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
         <StatTile label="Sessions" :value="fmtCompact(a.sessions)" :hint="`${a.clients.length} client(s)`" />
         <StatTile label="Tool calls" :value="fmtCompact(a.calls)" :hint="`${errorRate} errors · ${a.avg_latency_ms} ms avg`" />
         <StatTile label="Tokens served" :value="fmtCompact(a.response_tokens)" :hint="a.calls ? `${fmtInt(Math.round(a.response_tokens / a.calls))} per call` : 'no calls yet'" />
-        <StatTile label="Tokens avoided (est.)" :value="fmtCompact(a.avoided_tokens)" hint="vs reading the files instead" />
+        <StatTile label="Tokens avoided (est.)" :value="fmtCompact(a.avoided_tokens)" tip="vs reading the files instead" />
       </div>
     </section>
 
@@ -101,10 +101,10 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
         <p class="eyebrow">Model tokens</p><h2>Reported by hooks</h2>
         <template v-if="tokens.total > 0 || tokens.turns > 0">
           <div class="grid kpis two">
-            <StatTile label="Input tokens" :value="fmtCompact(tokens.input)" :hint="`${tokens.input_pct}% of reported tokens · includes cached input`" />
+            <StatTile label="Input tokens" :value="fmtCompact(tokens.input)" :hint="`${tokens.input_pct}% of reported tokens`" tip="includes cached input" />
             <StatTile label="Output tokens" :value="fmtCompact(tokens.output)" :hint="`${tokens.output_pct}% of reported tokens`" />
-            <StatTile label="Total model tokens" :value="fmtCompact(tokens.total)" hint="reported input + output" />
-            <StatTile label="Work tokens" :value="fmtCompact(a.work_tokens ?? 0)" hint="fresh input + cache writes + output; prompt-cache reads left out" />
+            <StatTile label="Total model tokens" :value="fmtCompact(tokens.total)" tip="reported input + output" />
+            <StatTile label="Work tokens" :value="fmtCompact(a.work_tokens ?? 0)" tip="fresh input + cache writes + output; prompt-cache reads left out" />
           </div>
           <div class="token-split" role="img" :aria-label="`Input ${tokens.input_pct}%, output ${tokens.output_pct}%`">
             <span :style="{ width: `${tokens.input_pct}%` }" />
@@ -117,10 +117,10 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
       <section class="panel">
         <p class="eyebrow">Context</p><h2>Savings estimate</h2>
         <div class="grid kpis two">
-          <StatTile label="Share of agent work avoided" :value="shareKnown ? `${a.share_avoided_pct}%` : 'unknown'" :hint="shareKnown ? 'avoided ÷ (work tokens + avoided)' : shareWhy" />
-          <StatTile label="Tokens saved (est.)" :value="fmtCompact(a.avoided_tokens)" hint="file-reading context avoided" />
-          <StatTile label="Context total (est.)" :value="fmtCompact(contextTotal)" hint="MCP tokens served + estimated saved" />
-          <StatTile label="Smaller than reading the files" :value="contextTotal ? `${contextSavedPct}%` : '–'" hint="saved ÷ (served + saved); not a share of the agent's tokens" />
+          <StatTile label="Share of agent work avoided" :value="shareKnown ? `${a.share_avoided_pct}%` : 'unknown'" :tip="shareKnown ? 'avoided ÷ (work tokens + avoided)' : shareWhy" />
+          <StatTile label="Tokens saved (est.)" :value="fmtCompact(a.avoided_tokens)" tip="file-reading context avoided" />
+          <StatTile label="Context total (est.)" :value="fmtCompact(contextTotal)" tip="MCP tokens served + estimated saved" />
+          <StatTile label="Smaller than reading the files" :value="contextTotal ? `${contextSavedPct}%` : '–'" tip="saved ÷ (served + saved); not a share of the agent's tokens" />
         </div>
         <div v-if="shareKnown" class="token-split saved" role="img" :aria-label="`${a.share_avoided_pct}% of the agent's work avoided`">
           <span :style="{ width: `${a.share_avoided_pct}%` }" />
@@ -150,8 +150,8 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
       <div v-if="edits.edits + edits.writes" class="grid kpis">
         <StatTile label="Targeted edits" :value="fmtCompact(edits.edits)" hint="Edit and patch attempts" />
         <StatTile label="Full file writes" :value="fmtCompact(edits.writes)" hint="new files and full replacements" />
-        <StatTile label="Failed attempts" :value="fmtCompact(edits.failed)" hint="earn no estimated savings" />
-        <StatTile label="Output avoided (est.)" :value="edits.baseline_bytes ? fmtCompact(edits.estimated_output_saved) : '–'" :hint="edits.baseline_bytes ? `${edits.avoided_pct}% versus eligible full-file rewrites` : 'no comparable file size reported'" />
+        <StatTile label="Failed attempts" :value="fmtCompact(edits.failed)" tip="earn no estimated savings" />
+        <StatTile label="Output avoided (est.)" :value="edits.baseline_bytes ? fmtCompact(edits.estimated_output_saved) : '–'" :hint="edits.baseline_bytes ? `${edits.avoided_pct}% versus eligible full-file rewrites` : ''" :tip="edits.baseline_bytes ? '' : 'no comparable file size reported'" />
       </div>
       <div v-else class="empty">The updated edit hooks report patch and full-write sizes without storing code.</div>
       <p class="muted small">For successful edits with a known file size, compare old + new text bytes with rewriting the file; divide avoided bytes by 4 to estimate tokens. Failed edits and patches without a comparable file earn no savings. This hypothetical estimate is separate from measured output and context savings.</p>
@@ -165,8 +165,8 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
           <template v-if="a.workflow.first_codesynapse + a.workflow.first_native">
             <div class="grid kpis two">
               <StatTile label="Began with CodeSynapse" :value="`${a.workflow.first_share_pct}%`" :hint="`${fmtInt(a.workflow.first_codesynapse)} of ${fmtInt(a.workflow.first_codesynapse + a.workflow.first_native)} sessions that looked at code`" />
-              <StatTile label="Began with Read or Grep" :value="fmtInt(a.workflow.first_native)" hint="sessions whose first lookup skipped CodeSynapse" />
-              <StatTile label="Whole-file reads turned back" :value="fmtInt(a.workflow.reads_turned_back)" hint="large files the agent was sent to the outline of" />
+              <StatTile label="Began with Read or Grep" :value="fmtInt(a.workflow.first_native)" tip="sessions whose first lookup skipped CodeSynapse" />
+              <StatTile label="Whole-file reads turned back" :value="fmtInt(a.workflow.reads_turned_back)" tip="large files the agent was sent to the outline of" />
             </div>
             <p class="muted small">Counted by the plugin's hooks as numbers only, never paths or prompts. A low first share means the ruleset is not reaching agents or its wording is not working: it is served from the API (<code>/api/v1/agent-rules</code>) and can be changed with <code>CODESYNAPSE_AGENT_RULES_FILE</code>, then watch this figure.</p>
           </template>
@@ -196,8 +196,8 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
       <p class="muted small">Reviews, security triage, briefings and memory extraction CodeSynapse ran on {{ local.models.join(', ') }}. {{ modelsReady ? `${seriesRangeLabel(modelRange)}, every process.` : 'Since the API started; live metrics are off.' }}</p>
       <div class="grid kpis">
         <StatTile label="Local requests" :value="fmtCompact(local.requests)" :hint="local.failures ? `${local.failures} failed` : 'no failures'" />
-        <StatTile label="Tokens processed locally" :value="fmtCompact(local.tokens)" hint="input + output, no cloud bill" />
-        <StatTile label="Share of AI requests" :value="local.sharePct === null ? '–' : `${local.sharePct}%`" hint="local ÷ all AI providers" />
+        <StatTile label="Tokens processed locally" :value="fmtCompact(local.tokens)" tip="input + output, no cloud bill" />
+        <StatTile label="Share of AI requests" :value="local.sharePct === null ? '–' : `${local.sharePct}%`" tip="local ÷ all AI providers" />
       </div>
     </section>
   </div>

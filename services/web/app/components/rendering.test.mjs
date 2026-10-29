@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { stripTypeScriptTypes } from 'node:module'
 import { test } from 'node:test'
-import { createSSRApp, computed, ref, watch } from 'vue'
+import { createSSRApp, computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { parse, compileScript } from 'vue/compiler-sfc'
 import { localSaved, totalSaved } from '../utils/savings.ts'
@@ -45,9 +45,10 @@ async function renderComponent(t, file, globals, props = {}) {
   Object.assign(app.config.globalProperties, globals)
   app.component('PageHeader', { template: '<header />' })
   app.component('GraphCanvas', { template: '<div />' })
-  app.component('StatTile', { props: ['label', 'value', 'hint'], template: '<div>{{ label }} {{ value }} {{ hint }}</div>' })
+  app.component('StatTile', { props: ['label', 'value', 'hint', 'tip'], template: '<div>{{ label }} {{ value }} {{ hint }} <i>{{ tip }}</i></div>' })
   app.component('ColumnChart', { template: '<div />' })
   app.component('RankList', { template: '<div />' })
+  app.component('InfoTip', { props: ['text', 'term', 'label'], template: '<i class="info">{{ text }}</i>' })
   app.component('NuxtLink', { template: '<a><slot /></a>' })
   app.component('DataState', await compileComponent(t, './DataState.vue'))
   return renderToString(app)
@@ -118,7 +119,7 @@ test('statistics show the server share of agent work, or why it is unknown', asy
   })
   await t.test('unknown', async (st) => {
     const html = await render(st, { ...base, work_tokens: 150000, share_avoided_pct: null, share_avoided_known: false, share_avoided_basis: 'cache_fields_missing', share_upper_pct: null })
-    assert.match(html, /Share of agent work avoided unknown some turns did not report their prompt-cache fields/)
+    assert.match(html, /Share of agent work avoided unknown +<i>some turns did not report their prompt-cache fields/)
     assert.doesNotMatch(html, /Upper figure/)
   })
 })
@@ -179,11 +180,11 @@ test('models and savings split the token pool without counting ask_local twice',
   assert.match(html, /Kept off cloud models 48% /, '30k never read + 65k local of a 200k pool')
   assert.match(html, /Tokens never read 50000 /)
   assert.match(html, /Handled by local models 65000 60000 read · 5000 written/)
-  assert.match(html, /Total saved \(est\.\) \$1\.75 at claude-opus-5-5 prices, estimated/, '60k × $10 + 5k × $20 per million, $0.30 for graph answers from the server, plus $0.50 from shorter prompts and $0.25 from gateway answers')
-  assert.match(html, /Saved by graph answers \$0\.30 30000 tokens never read, each once at the input price/)
-  assert.match(html, /Saved on cached input none reported the local runtime reported no prompt-cache hits/)
+  assert.match(html, /Total saved \(est\.\) \$1\.75 at claude-opus-5-5 prices <i>estimated<\/i>/, '60k × $10 + 5k × $20 per million, $0.30 for graph answers from the server, plus $0.50 from shorter prompts and $0.25 from gateway answers')
+  assert.match(html, /Saved by graph answers \$0\.30 30000 tokens never read <i>30000 tokens never read, each once at the input price/)
+  assert.match(html, /Saved on cached input none reported +<i>the local runtime reported no prompt-cache hits/)
   assert.match(html, /Spent on cloud models \(est\.\) \$0\.25 /)
-  assert.match(html, /Saved by shorter prompts \$0\.50 CodeSynapse&#39;s own AI tasks/)
+  assert.match(html, /Saved by shorter prompts \$0\.50 +<i>CodeSynapse&#39;s own AI tasks/)
   assert.match(html, /gateway traffic is passed on unchanged/)
   assert.match(html, /Gateway requests 10 6 local · 3 cloud · 1 refused · 1 failed/)
   assert.match(html, /Answered locally 60% /)
@@ -207,7 +208,7 @@ test('shorter prompts tile says why it is off instead of showing $0', async (t) 
     fmtInt: (n) => String(n),
     apiErrorMessage: (e) => String(e),
   }, {})
-  assert.match(html, /Saved by shorter prompts off no local model to shorten with; covers CodeSynapse&#39;s own AI tasks, not gateway traffic/)
+  assert.match(html, /Saved by shorter prompts off +<i>no local model to shorten with; covers CodeSynapse&#39;s own AI tasks, not gateway traffic/)
   assert.doesNotMatch(html, /Saved by shorter prompts \$0\.00/)
 })
 
@@ -233,14 +234,14 @@ test('graph answers of agents without repeat reports are valued, and local cache
     fmtInt: (n) => String(n),
     apiErrorMessage: (e) => String(e),
   }, {})
-  assert.match(html, /Saved by graph answers \$10\.00 2500000 tokens never read by agents that cannot tell repeated answers apart \(\$10\.00\), at the input price; left out of the share/)
-  assert.match(html, /Saved on cached input \$0\.10 500000 tokens the local models&#39; prompt cache served/)
+  assert.match(html, /Saved by graph answers \$10\.00 2500000 tokens never read <i>2500000 tokens never read by agents that cannot tell repeated answers apart \(\$10\.00\), at the input price; left out of the share/)
+  assert.match(html, /Saved on cached input \$0\.10 500000 tokens from the local prompt cache <i>500000 tokens the local models&#39; prompt cache served/)
   assert.match(html, /Total saved \(est\.\) \$12\.10 /, '500k × $4 + 500k × $0.20 + $10 for graph answers')
   assert.match(html, /built-in estimate(<!--\[-->)? from <a [^>]*>platform\.claude\.com\/docs\/en\/about-claude\/pricing<\/a>(<!--\[-->)?, checked 2026-10-29/)
 })
 
 test('savings chart totals its columns, values money with the tiles\' formula and skips future buckets', async (t) => {
-  const { onMounted, onBeforeUnmount } = await import('vue')
+  const { onMounted } = await import('vue')
   const day = 86400
   const start = Math.floor(Date.now() / 1000 / day) * day - day
   const bucket = (s, never, input, cached, output, graph, prompts, gateway) => ({ start: s, end: s + day, never_read_tokens: never, graph_saved_dollars: graph,
@@ -256,10 +257,52 @@ test('savings chart totals its columns, values money with the tiles\' formula an
   }, { series, price })
   assert.match(html, /Never read \(graph answers\) <strong>1000000<\/strong>/, 'the future bucket is left out of the totals')
   assert.match(html, /Local models <strong>1100000<\/strong>/)
-  assert.match(html, /One column per day \(UTC\)\./)
+  assert.match(html, /Daily \(UTC\)/)
+  assert.match(html, /<i class="info">One column per day \(UTC\)\. .*same formula as the tiles/, 'the long explanation sits behind the info icon')
   // 500k × $4 + 500k × $0.20 + 100k × $20 per million, plus $4 for graph answers and $0.50 for shorter prompts.
   assert.match(html, /<td class="num">\$8\.60<\/td>(<!--\]-->)?<\/tr>/)
   const utcDay = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(start * 1000))
   assert.ok(html.includes(`<td class="mono">${utcDay}</td>`), 'day columns are named by their UTC date')
   assert.equal((html.match(/<tr><td class="mono">/g) ?? []).length, 2, 'future buckets get no table row')
+})
+
+test('a stat tile keeps its explanation behind an info button that describes itself', async (t) => {
+  const globals = { computed, ref, watch, useId, nextTick, onBeforeUnmount, GLOSSARY: { hotspot: 'Changed often and complex' } }
+  for (const [key, value] of Object.entries(globals)) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key)
+    Object.defineProperty(globalThis, key, { value, configurable: true })
+    t.after(() => {
+      if (previous) Object.defineProperty(globalThis, key, previous)
+      else delete globalThis[key]
+    })
+  }
+  const InfoTip = await compileComponent(t, './InfoTip.vue')
+  const StatTile = await compileComponent(t, './StatTile.vue')
+  const render = (component, props) => {
+    const app = createSSRApp(component, props)
+    app.component('InfoTip', InfoTip)
+    return renderToString(app)
+  }
+
+  const html = await render(StatTile, {
+    label: 'Spent on cloud models', value: '$0.25', hint: '616K read', tip: 'reported usage at the configured prices',
+  })
+  assert.match(html, /<p class="stat__hint"[^>]*>616K read<\/p>/, 'the short data line stays visible')
+  const button = html.match(/<button[^>]*>/)?.[0] ?? ''
+  assert.match(button, /type="button"/)
+  assert.match(button, /aria-label="About Spent on cloud models"/)
+  const describedBy = button.match(/aria-describedby="([^"]+)"/)?.[1]
+  assert.ok(describedBy, 'the button names its description')
+  const bubble = html.match(new RegExp(`<span[^>]*id="${describedBy}"[^>]*>([^<]*)</span>`))
+  assert.ok(bubble, 'the description is in the page, not only on hover')
+  assert.match(bubble[0], /role="tooltip"/)
+  assert.match(bubble[0], /display:none/, 'closed until hover, focus or a tap')
+  assert.equal(bubble[1], 'reported usage at the configured prices')
+
+  const plain = await render(StatTile, { label: 'Sessions', value: '3', hint: '2 client(s)' })
+  assert.doesNotMatch(plain, /<button/, 'no icon without a tip')
+
+  const term = await render(InfoTip, { term: 'hotspot' })
+  assert.match(term, /aria-label="More about this"/)
+  assert.match(term, />Changed often and complex<\/span>/, 'glossary terms still resolve')
 })
