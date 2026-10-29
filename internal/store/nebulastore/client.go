@@ -34,6 +34,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"regexp"
 	"strconv"
 	"strings"
@@ -41,6 +42,7 @@ import (
 	"time"
 
 	nebula "github.com/vesoft-inc/nebula-go/v3"
+	graphcodes "github.com/vesoft-inc/nebula-go/v3/nebula"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -268,6 +270,45 @@ type Error struct {
 
 func (e *Error) Error() string { return fmt.Sprintf("nebula: %s (code %d)", e.Message, e.Code) }
 
+// refusedRetryLater are the storage answers graphd passes on (as -1005
+// E_EXECUTION_ERROR) for a write the storage service refused before applying
+// it: another request holds the same vertex or edge key in its memory lock, a
+// partition is moving leaders, a snapshot blocks writes, or the raft buffer
+// is full. Nothing of the statement took effect, so sending it again is safe,
+// even for the increments of the usage buckets. "Term of part ... out of
+// date" is left out on purpose: the write may have reached the log.
+var refusedRetryLater = []string{
+	"More than one request trying to add/update/delete one edge/vertex at the same time",
+	"Please retry later", // leader changed, snapshot, raft buffer full; the term case is excluded below
+	"E_DATA_CONFLICT_ERROR",
+	"E_LEADER_CHANGED",
+}
+
+// retriable reports whether a write failed only because the storage service
+// refused it for now (see refusedRetryLater).
+func retriable(err error) bool {
+	var ne *Error
+	if !errors.As(err, &ne) {
+		return false
+	}
+	switch ne.Code {
+	case int(graphcodes.ErrorCode_E_DATA_CONFLICT_ERROR), int(graphcodes.ErrorCode_E_LEADER_CHANGED):
+		return true
+	case int(nebula.ErrorCode_E_EXECUTION_ERROR):
+	default:
+		return false
+	}
+	if strings.Contains(ne.Message, "out of date") {
+		return false
+	}
+	for _, m := range refusedRetryLater {
+		if strings.Contains(ne.Message, m) {
+			return true
+		}
+	}
+	return false
+}
+
 func firstLine(s string) string {
 	s, _, _ = strings.Cut(s, "\n")
 	return s[:min(len(s), 300)]
@@ -283,11 +324,35 @@ func (s *Store) read(ctx context.Context, stmt string, params map[string]any) ([
 	return s.timed(ctx, "read", stmt, params)
 }
 
-// write runs a constant write statement with parameters.
+// writeTries bounds how often write sends a statement the storage service
+// refused for now (retriable).
+const writeTries = 5
+
+// write runs a constant write statement with parameters. Writers of one key
+// meet in the storage service's memory lock (two replicas taking the same
+// lease, a projection rebuild racing another), which refuses the later one
+// instead of queueing it; write waits a little, with jitter so the writers
+// do not collide again, and sends it once more.
 func (s *Store) write(ctx context.Context, stmt string, params map[string]any) ([]Row, error) {
 	ctx, cancel := context.WithTimeout(ctx, 4*s.timeout)
 	defer cancel()
-	return s.timed(ctx, "write", stmt, params)
+	for try := 1; ; try++ {
+		rows, err := s.timed(ctx, "write", stmt, params)
+		if err == nil || try == writeTries || !retriable(err) {
+			return rows, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(retryWait(try)):
+		}
+	}
+}
+
+// retryWait grows with each try and adds up to as much again at random.
+func retryWait(try int) time.Duration {
+	base := time.Duration(try) * 20 * time.Millisecond
+	return base + rand.N(base) //nolint:gosec // jitter between writers, not a secret
 }
 
 // timed records the round trip and, for reads, how many rows came back.
