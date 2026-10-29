@@ -259,11 +259,11 @@ func TestQueuePeakIsScopedAndFixed(t *testing.T) {
 
 	admin := newClient(t, ts)
 	var adminSigned struct{ User accounts.User }
-	require.Equal(t, admin.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, &adminSigned), 201)
+	require.Equal(t, admin.signUp(`{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, &adminSigned), http.StatusAccepted)
 	require.NoError(t, acc.SetPlatformAdmin(ctx, rootSession(t, acc), adminSigned.User.ID, true))
 	bob := newClient(t, ts)
 	var signed struct{ Org accounts.Org }
-	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 201)
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), http.StatusAccepted)
 
 	var peak QueuePeak
 	require.Equal(t, bob.do("GET", "/api/v1/stats/queue?weeks=12&tz=Europe/Copenhagen&tenant_id=other", "", &peak), 200)
