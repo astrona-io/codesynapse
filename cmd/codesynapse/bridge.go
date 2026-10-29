@@ -129,7 +129,7 @@ func (o *mcpBridgeOptions) Run(ctx context.Context, _ *app.Env) error {
 	}
 	// Keep the registered session in the context: reports of local answers
 	// (reportLocal) carry it, so the audit entry names the chat.
-	ctx, err := c.executionContext(ctx, session, session)
+	ctx, err := registerBridgeSession(ctx, c, session, bridgeRegisterWait)
 	if err != nil {
 		return err
 	}
@@ -141,6 +141,37 @@ func (o *mcpBridgeOptions) Run(ctx context.Context, _ *app.Env) error {
 		}
 	}
 	return b.run(ctx, o.EC.Stdin)
+}
+
+// bridgeRegisterWait is how long the bridge keeps trying to reach the API
+// before it gives up. Claude Code waits 30 s for a server to connect and
+// remembers a failure for the rest of the chat, so an API that is restarting
+// when the chat starts would otherwise cost the whole chat its tools.
+var bridgeRegisterWait = 20 * time.Second
+
+// registerBridgeSession registers the chat's runtime session, retrying while
+// the API cannot be reached. An answer from the API (a refused key or
+// session) is final and returned at once.
+func registerBridgeSession(ctx context.Context, c apiClient, session string, wait time.Duration) (context.Context, error) {
+	deadline := time.Now().Add(wait)
+	delay := 250 * time.Millisecond
+	for {
+		rctx, err := c.executionContext(ctx, session, session)
+		if err == nil {
+			return rctx, nil
+		}
+		var status *statusError
+		if errors.As(err, &status) || errors.Is(err, execution.ErrMissing) || errors.Is(err, execution.ErrConflict) ||
+			ctx.Err() != nil || time.Now().Add(delay).After(deadline) {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, 2*time.Second)
+	}
 }
 
 type bridge struct {
