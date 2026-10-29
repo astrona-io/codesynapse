@@ -356,6 +356,39 @@ export interface OrgGateway {
   available: boolean
 }
 
+// The opt-in gateway prompt log (off by default; owners and admins only).
+export interface PromptLogSetting {
+  enabled: boolean
+  retention_days: number
+  min_days: number
+  max_days: number
+  archive: boolean
+}
+
+export interface PromptLogEntry {
+  id: number
+  org_id: string
+  at: string
+  audit_id?: number
+  user_id?: string
+  key_id?: string
+  session_id?: string
+  path: string
+  model?: string
+  route: 'local' | 'cloud' | 'rejected'
+  status: number
+  duration_ms: number
+  shortened: boolean
+  fallthrough?: string
+  prompt_sha256?: string
+  prompt_bytes: number
+  forwarded_sha256?: string
+  forwarded_bytes: number
+  prompt?: string
+  forwarded?: string
+  answer?: string
+}
+
 export interface AccountOrg {
   id: string
   slug: string

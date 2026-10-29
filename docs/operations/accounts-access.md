@@ -194,6 +194,12 @@ Keep the archive on once it is set. PostgreSQL then no longer holds the oldest e
 
 `GET /api/v1/admin/audit/verify` checks the rows in PostgreSQL and the links between the files through the stored hashes; it reports `segments` and `sealed` (entries in files). Add `?deep=true` to read every file back as well: its checksum, every entry's hash and every link. `archives` then counts the files read. A missing or changed file fails the check and names its segment. When older entries were pruned without an archive, `first_id` says where the check started.
 
+### Gateway requests and the prompt log
+
+Each gateway request is a `gateway.request` entry. Besides route, model, size and timing it records `prompt_sha256` and `prompt_bytes` for the newest user text, `fwd_sha256` and `fwd_bytes` when the gateway shortened it, `shortened=true|false` and the fall-through reason. It never records the text.
+
+An organisation can opt in to keeping the text in a separate prompt log (see [Agent gateway](gateway.md#prompt-log-opt-in-off-by-default)). Changing the setting is audited as `org.gateway.prompt_log.set` before the write, each read as `gateway.prompt_log.read` and each export as `gateway.prompt_log.export`. Only owners and admins in a signed-in session can do these. The prompt log is not part of the hash chain; each row names its `gateway.request` entry and holds the same digest.
+
 ## Platform administration
 
 `/api/v1/admin/*` is for platform admins only. Suspending an account ends its sessions and refuses its logins and keys on the next request. The service keeps at least one active platform admin (`ErrLastAdmin`) and refuses suspending yourself. Suspension and the admin flag need a signed-in session, never an API key.

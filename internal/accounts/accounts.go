@@ -615,6 +615,9 @@ type Store interface {
 	// remaining entry's does after PruneEvents (ErrNotFound if id is not
 	// the oldest).
 	DropAuditSegment(ctx context.Context, id int64) error
+
+	// The opt-in gateway prompt log (promptlog.go), kept apart from events.
+	PromptLogStore
 }
 
 // JobWaker is implemented by stores that can tell a worker a job was

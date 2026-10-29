@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -329,9 +330,10 @@ func (s *Server) exportAudit(w http.ResponseWriter, r *http.Request, orgID strin
 	}
 }
 
-// csvSafe defuses spreadsheet formulas in free text (CSV injection).
+// csvSafe defuses spreadsheet formulas in free text (CSV injection),
+// including the tab and carriage return some spreadsheets also read as one.
 func csvSafe(s string) string {
-	if s != "" && (s[0] == '=' || s[0] == '+' || s[0] == '-' || s[0] == '@') {
+	if s != "" && strings.ContainsRune("=+-@\t\r", rune(s[0])) {
 		return "'" + s
 	}
 	return s
