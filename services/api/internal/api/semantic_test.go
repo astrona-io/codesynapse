@@ -67,7 +67,7 @@ func TestSemanticRanksAfterIngest(t *testing.T) {
 	api.embedIngest(id, storetest.Repo, g, nil)
 
 	c := newClient(t, ts)
-	require.Equal(t, c.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, c.signUp(`{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil), 202)
 	var org accounts.Org
 	require.Equal(t, c.do("POST", "/api/v1/accounts/orgs", `{"name":"Acme"}`, &org), 201)
 	u, err := acc.St.UserByEmail(ctx, "ada@example.com")
@@ -96,7 +96,7 @@ func TestSemanticOffWithoutEmbeddingModel(t *testing.T) {
 	ts := httptest.NewServer(New(ctx, Config{Accounts: acc}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
 	t.Cleanup(ts.Close)
 	c := newClient(t, ts)
-	require.Equal(t, c.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, c.signUp(`{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil), 202)
 	var org accounts.Org
 	require.Equal(t, c.do("POST", "/api/v1/accounts/orgs", `{"name":"Acme"}`, &org), 201)
 	u, err := acc.St.UserByEmail(ctx, "ada@example.com")

@@ -31,7 +31,7 @@ func TestPlatformContentIsolation(t *testing.T) {
 	t.Cleanup(ts.Close)
 	admin, owner := newClient(t, ts), newClient(t, ts)
 	var adminUser struct{ User accounts.User }
-	require.Equal(t, admin.do("POST", "/api/v1/auth/signup", `{"email":"admin@example.com","name":"Admin","password":"`+pw+`"}`, &adminUser), 201)
+	require.Equal(t, admin.signUp(`{"email":"admin@example.com","name":"Admin","password":"`+pw+`"}`, &adminUser), 202)
 	// A standard account with platform administration keeps business work
 	// but sees no tenant content without membership.
 	require.NoError(t, acc.SetPlatformAdmin(ctx, root, adminUser.User.ID, true))
@@ -39,7 +39,7 @@ func TestPlatformContentIsolation(t *testing.T) {
 		User accounts.User
 		Org  accounts.Org
 	}
-	require.Equal(t, owner.do("POST", "/api/v1/auth/signup", `{"email":"owner@example.com","name":"Owner","password":"`+pw+`"}`, &signed), 201)
+	require.Equal(t, owner.signUp(`{"email":"owner@example.com","name":"Owner","password":"`+pw+`"}`, &signed), 202)
 	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: signed.Org.ID, Graph: storetest.Repo, AddedBy: signed.User.ID, AddedAt: time.Now()}))
 	reportPath := "/api/v1/accounts/orgs/" + signed.Org.Slug + "/access-changes"
 	var report accounts.AccessChange
@@ -146,7 +146,7 @@ func TestMalformedRepositoryPolicyDoesNotBlockOwnerRecovery(t *testing.T) {
 		User accounts.User
 		Org  accounts.Org
 	}
-	require.Equal(t, owner.do("POST", "/api/v1/auth/signup", `{"email":"owner@example.com","name":"Owner","password":"`+pw+`"}`, &signed), 201)
+	require.Equal(t, owner.signUp(`{"email":"owner@example.com","name":"Owner","password":"`+pw+`"}`, &signed), 202)
 	ctx := context.Background()
 	require.NoError(t, acc.SetPlatformAdmin(ctx, rootSession(t, acc), signed.User.ID, true))
 	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: signed.Org.ID, Graph: storetest.Repo, AddedBy: signed.User.ID, AddedAt: time.Now()}))

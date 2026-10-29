@@ -29,7 +29,11 @@ func RunUsername(t *testing.T, newStore func(*testing.T) accounts.Store) {
 			assert.True(t, errors.Is(err, accounts.ErrInvalidInput), "username %q is refused", bad)
 		}
 		_, _, err = svc.SignUpWith(ctx, accounts.SignUpInput{Email: "other@example.com", Username: "ADA.l", Name: "Other", Password: pw})
-		assert.True(t, errors.Is(err, accounts.ErrExists), "usernames are unique, ignoring case")
+		assert.True(t, errors.Is(err, accounts.ErrUsernameTaken), "usernames are unique, ignoring case")
+		// A taken username is reported before the email, so the answer is the
+		// same whether or not the email has an account.
+		_, _, err = svc.SignUpWith(ctx, accounts.SignUpInput{Email: "ada@example.com", Username: "ada.l", Name: "Other", Password: pw})
+		assert.True(t, errors.Is(err, accounts.ErrUsernameTaken), "a taken username wins over a taken email")
 
 		for _, login := range []string{"ada@example.com", "ADA@example.com", "ada.l", " Ada.L "} {
 			_, u, err := svc.Login(ctx, login, pw, "test")

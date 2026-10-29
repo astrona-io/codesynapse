@@ -7,6 +7,7 @@ package accounts
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/ingestreport"
@@ -317,6 +318,14 @@ var (
 	ErrLastRepoAdmin = errors.New("a repository needs at least one active administrator")
 	ErrNotFound      = errors.New("not found")
 	ErrExists        = errors.New("already exists")
+	// ErrEmailTaken is a sign-up with a registered email. It is ErrExists
+	// for callers in the service, but the API answers it exactly like a
+	// sign-up that worked, so sign-up does not reveal which emails have
+	// accounts.
+	ErrEmailTaken = fmt.Errorf("email %w", ErrExists)
+	// ErrUsernameTaken is a sign-up with a taken username. It is checked
+	// before the email, so it says nothing about the email.
+	ErrUsernameTaken = fmt.Errorf("username %w", ErrExists)
 	ErrUnauthorized  = errors.New("invalid credentials")
 	ErrForbidden     = errors.New("not allowed")
 	ErrSignupClosed  = errors.New("sign-up is closed; ask an administrator for an account")

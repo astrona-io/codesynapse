@@ -276,6 +276,17 @@ type credentials struct {
 	Password string `json:"password"`
 }
 
+// SignupAccepted is the one answer to a sign-up that passed validation,
+// whether it created an account or the email already had one: the response
+// never says which addresses are registered. The page then signs in with the
+// same details, which works only for the account just created.
+const SignupAccepted = "If this email can be used, your account is ready. Sign in with your email and password."
+
+// defaultSignupFloor is how long every sign-up answer takes at least, so a
+// created account (organisation and audit writes) and a registered email
+// take the same time. It is well above one password hash and the writes.
+var defaultSignupFloor = 500 * time.Millisecond
+
 func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
 	if !s.accountsOn(w) {
 		return
@@ -285,18 +296,29 @@ func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	u, org, err := s.cfg.Accounts.SignUpWith(r.Context(), accounts.SignUpInput{Email: c.Email, Username: c.Username, Name: c.Name, Password: c.Password})
+	start := time.Now()
+	_, _, err := s.cfg.Accounts.SignUpWith(r.Context(), accounts.SignUpInput{Email: c.Email, Username: c.Username, Name: c.Name, Password: c.Password})
+	if errors.Is(err, accounts.ErrEmailTaken) {
+		// Audited as refused by the service; the caller sees a sign-up that worked.
+		err = nil
+	}
+	s.waitSince(r.Context(), start, s.signupFloor)
 	if err != nil {
 		s.accountError(w, err)
 		return
 	}
-	tok, _, err := s.cfg.Accounts.Login(r.Context(), u.Email, c.Password, s.clientAddr(r))
-	if err != nil {
-		s.accountError(w, err)
-		return
+	// No session: one here would tell a new account from a registered email.
+	writeJSON(w, http.StatusAccepted, map[string]string{"message": SignupAccepted})
+}
+
+// waitSince sleeps until floor has passed since start, or ctx ends.
+func (s *Server) waitSince(ctx context.Context, start time.Time, floor time.Duration) {
+	t := time.NewTimer(time.Until(start.Add(floor)))
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-ctx.Done():
 	}
-	s.setSession(w, tok)
-	writeJSON(w, http.StatusCreated, map[string]any{"user": u, "org": org})
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {

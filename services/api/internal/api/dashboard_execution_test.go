@@ -16,7 +16,7 @@ func TestDashboardExecutionBinding(t *testing.T) {
 	acc.Now = func() time.Time { return now }
 	acc.SignupOpen = true
 	bob := newClient(t, ts)
-	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 202)
 	var org accounts.Org
 	require.Equal(t, bob.do("POST", "/api/v1/accounts/orgs", `{"name":"Platform Team"}`, &org), 201)
 

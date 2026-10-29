@@ -23,7 +23,7 @@ func TestProfileEndpoints(t *testing.T) {
 	ts := httptest.NewServer(New(ctx, Config{Accounts: acc}, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil))))
 	t.Cleanup(ts.Close)
 	ada := newClient(t, ts)
-	require.Equal(t, ada.do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, ada.signUp(`{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil), 202)
 
 	var u accounts.User
 	require.Equal(t, ada.do("PATCH", "/api/v1/me", `{"name":"Ada Lovelace"}`, &u), 200)
