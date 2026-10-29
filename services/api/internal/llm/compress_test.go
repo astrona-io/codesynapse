@@ -78,13 +78,20 @@ func TestCompressionStatus(t *testing.T) {
 		cfg  Config
 		want string
 	}{
-		"unset with a local model":          {Config{Providers: []ProviderConfig{cloud, loc}, Default: "cloud"}, CompressionOn},
-		"unset, local model is the default": {Config{Providers: []ProviderConfig{loc}, Default: "local"}, CompressionOn},
-		"unset without a local model":       {Config{Providers: []ProviderConfig{cloud}, Default: "cloud"}, CompressionNoLocalModel},
-		"true without a local model":        {Config{Providers: []ProviderConfig{cloud}, Default: "cloud", CompressPrompts: new(true)}, CompressionNoLocalModel},
-		"compress routed to a cloud model":  {Config{Providers: []ProviderConfig{cloud, loc}, Default: "cloud", Tasks: map[string]string{"compress": "cloud"}}, CompressionNoLocalModel},
-		"false with a local model":          {Config{Providers: []ProviderConfig{cloud, loc}, Default: "cloud", CompressPrompts: new(false)}, CompressionDisabled},
-		"no providers":                      {Config{}, CompressionNoLocalModel},
+		"unset with a local model":        {Config{Providers: []ProviderConfig{cloud, loc}, Default: "cloud"}, CompressionOn},
+		"only local models":               {Config{Providers: []ProviderConfig{loc}, Default: "local"}, CompressionNoCloudTask},
+		"local default, cloud configured": {Config{Providers: []ProviderConfig{cloud, loc}, Default: "local"}, CompressionNoCloudTask},
+		"local default, review to cloud":  {Config{Providers: []ProviderConfig{cloud, loc}, Default: "local", Tasks: map[string]string{"review": "cloud"}}, CompressionOn},
+		"cloud default, every task local": {Config{Providers: []ProviderConfig{cloud, loc}, Default: "cloud", Tasks: map[string]string{
+			"security-triage": "local", "review": "local", "briefing": "local", "fix": "local", "memory": "local", "code-annotation": "local",
+		}}, CompressionNoCloudTask},
+		"only embeddings to cloud":         {Config{Providers: []ProviderConfig{cloud, loc}, Default: "local", Tasks: map[string]string{"embeddings": "cloud"}}, CompressionNoCloudTask},
+		"false with only local models":     {Config{Providers: []ProviderConfig{loc}, Default: "local", CompressPrompts: new(false)}, CompressionDisabled},
+		"unset without a local model":      {Config{Providers: []ProviderConfig{cloud}, Default: "cloud"}, CompressionNoLocalModel},
+		"true without a local model":       {Config{Providers: []ProviderConfig{cloud}, Default: "cloud", CompressPrompts: new(true)}, CompressionNoLocalModel},
+		"compress routed to a cloud model": {Config{Providers: []ProviderConfig{cloud, loc}, Default: "cloud", Tasks: map[string]string{"compress": "cloud"}}, CompressionNoLocalModel},
+		"false with a local model":         {Config{Providers: []ProviderConfig{cloud, loc}, Default: "cloud", CompressPrompts: new(false)}, CompressionDisabled},
+		"no providers":                     {Config{}, CompressionNoLocalModel},
 	} {
 		t.Run(name, func(t *testing.T) {
 			assert.Equal(t, NewRegistry(tc.cfg).CompressionStatus(), tc.want)

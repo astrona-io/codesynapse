@@ -67,7 +67,11 @@ const COMPRESSION_OFF: Record<string, string> = {
   no_local_model: 'no local model to shorten with',
   no_ai: 'no AI providers configured',
 }
-const compressionOffHint = computed(() => `${COMPRESSION_OFF[m.value?.compression_off ?? ''] ?? 'not running'}; covers CodeSynapse's own AI tasks, not gateway traffic`)
+// On, but every task runs on a local model: nothing goes to the cloud to shorten.
+const compressionUnused = computed(() => m.value?.compression_off === 'no_cloud_task')
+const compressionOffHint = computed(() => compressionUnused.value
+  ? 'every task runs on a local model, so there is nothing to shorten; it saves money only for tasks routed to a cloud model'
+  : `${COMPRESSION_OFF[m.value?.compression_off ?? ''] ?? 'not running'}; covers CodeSynapse's own AI tasks, not gateway traffic`)
 // Gateway answers the local model gave, priced at the reference model on the server; null when a local answer reported no usage.
 const gw = computed(() => m.value?.gateway)
 const gwSaved = computed(() => gw.value?.saved_dollars ?? null)
@@ -133,7 +137,7 @@ const modelWindow = computed(() => (days.value > 30 ? 'the last 30 days (the met
         <StatTile label="Spent on cloud models (est.)" :value="spent === null ? 'unknown' : money(spent)" :tip="spent === null ? 'a cloud model has no price set, so its cost is unknown' : 'reported usage at the configured prices'" />
         <StatTile
           v-if="savedParts" label="Saved by shorter prompts"
-          :value="!compressionOn ? 'off' : compressionSaved === null ? 'unknown' : money(compressionSaved)"
+          :value="compressionUnused ? 'not used' : !compressionOn ? 'off' : compressionSaved === null ? 'unknown' : money(compressionSaved)"
           :tip="!compressionOn ? compressionOffHint : compressionSaved === null ? 'a cloud model has no price set; not in the total' : 'CodeSynapse\'s own AI tasks: prose a local model shortened before it went to the cloud, at the input price; gateway traffic is passed on unchanged'"
         />
         <StatTile v-if="savedParts" label="Saved by graph answers" :value="graphSaved === null ? 'unknown' : money(graphSaved)" :hint="graphShort" :tip="graphHint" />
