@@ -87,13 +87,13 @@ func TestAttentionNamesLostAccessToItsOrganisation(t *testing.T) {
 	bootstrapAccounts(t, acc)
 	ts := httptest.NewServer(New(ctx, Config{Accounts: acc}, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
 	t.Cleanup(ts.Close)
-	newClient(t, ts).do("POST", "/api/v1/auth/signup", `{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil)
+	newClient(t, ts).signUp(`{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, nil)
 	bob := newClient(t, ts)
 	var signed struct {
 		Org  accounts.Org
 		User accounts.User
 	}
-	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 201)
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 202)
 	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: signed.Org.ID, AddedBy: signed.User.ID, Graph: "acme/secret", Remote: "https://github.com/acme/secret", Visibility: accounts.Private, AddedAt: time.Now()}))
 	require.NoError(t, acc.St.SetRepositoryAccess(ctx, signed.Org.ID, "acme/secret", accounts.AccessLost, time.Now()))
 
@@ -103,7 +103,7 @@ func TestAttentionNamesLostAccessToItsOrganisation(t *testing.T) {
 	assert.Equal(t, a.Items[0].Kind, "access")
 	assert.Equal(t, a.Items[0].Link, "/settings/git-tokens")
 	carol := newClient(t, ts)
-	require.Equal(t, carol.do("POST", "/api/v1/auth/signup", `{"email":"carol@example.com","name":"Carol","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, carol.signUp(`{"email":"carol@example.com","name":"Carol","password":"`+pw+`"}`, nil), 202)
 	require.Equal(t, carol.do("GET", "/api/v1/attention", "", &a), 200)
 	assert.Len(t, a.Items, 0, "other organisations do not learn about it")
 }
