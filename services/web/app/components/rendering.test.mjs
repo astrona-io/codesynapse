@@ -45,7 +45,7 @@ async function renderComponent(t, file, globals, props = {}) {
   Object.assign(app.config.globalProperties, globals)
   app.component('PageHeader', { template: '<header />' })
   app.component('GraphCanvas', { template: '<div />' })
-  app.component('StatTile', { props: ['label', 'value', 'hint', 'tip'], template: '<div>{{ label }} {{ value }} {{ hint }} <i>{{ tip }}</i></div>' })
+  app.component('StatTile', { props: ['label', 'value', 'hint', 'tip', 'tone'], template: '<div :data-tone="tone">{{ label }} {{ value }} {{ hint }} <i>{{ tip }}</i></div>' })
   app.component('ColumnChart', { template: '<div />' })
   app.component('RankList', { template: '<div />' })
   app.component('InfoTip', { props: ['text', 'term', 'label'], template: '<i class="info">{{ text }}</i>' })
@@ -204,6 +204,45 @@ test('models and savings split the token pool without counting ask_local twice',
   assert.match(html, /Gateway requests 10 6 local · 3 cloud · 1 refused · 1 failed/)
   assert.match(html, /Answered locally 60% /)
   assert.match(html, /Saved by local answers \$0\.25 /)
+})
+
+test('gateway tiles show timeouts, fall-through reasons and response times local vs cloud', async (t) => {
+  const gateway = {
+    requests: 40, local: 30, cloud: 10, rejected: 0, failed: 0, local_share_pct: 75, bytes_in: 1, bytes_out: 1,
+    local_input_tokens: 0, local_output_tokens: 0, local_unmetered: 0, saved_dollars: 0,
+    fallthroughs: 8, fallthrough_reasons: { queue_timeout: 3, answer_timeout: 1, too_large: 4 }, timeouts: 4, timeout_share_pct: 10,
+    local_avg_seconds: 2, local_p95_seconds: 4.5, cloud_avg_seconds: 12.4, cloud_p95_seconds: null,
+    queue_avg_seconds: 0.25, queue_p95_seconds: 19.5, local_answer_avg_seconds: 1.5,
+  }
+  const render = (gw) => renderComponent(t, '../pages/stats/models.vue', {
+    useStatistics: () => ({ days: ref(30), error: ref(null), pending: ref(false), s: ref({ agents: { tokens: { total: 0 } } }) }),
+    useApiGet: (url) => ({ data: ref(url().startsWith('stats/savings') ? null : { range: '30d', models: [], gateway: gw }), error: ref(null), pending: ref(false) }),
+    localSaved, totalSaved, windowLabel,
+    seriesRangeFor: () => '30d',
+    seriesRangeLabel: () => 'Last 30 days',
+    fmtCompact: (n) => String(n),
+    fmtInt: (n) => String(n),
+    apiErrorMessage: (e) => String(e),
+  }, {})
+  const html = await render(gateway)
+  assert.match(html, /<div data-tone="warning">Local model timeouts 4 10% of requests · 3 queue · 1 answer <i>requests that went to the cloud because the local model was too slow/)
+  assert.match(html, /Not answered locally 8 4 too large · 3 waited too long for a slot <i>by reason: 4 too large · 3 waited too long for a slot · 1 answered too slowly\./)
+  assert.match(html, /Response time, local 2\.0 s p95 4\.5 s /)
+  assert.match(html, /Response time, cloud 12 s p95 – /, 'a missing quantile is a dash, never 0')
+  assert.match(html, /Queue wait, local 0\.3 s p95 20 s <i>[^<]*answers then took 1\.5 s on average/)
+
+  await t.test('no timeouts are not highlighted', async () => {
+    const calm = await render({ ...gateway, timeouts: 0, timeout_share_pct: 0, fallthroughs: 0, fallthrough_reasons: {} })
+    assert.match(calm, /<div>Local model timeouts 0 0% of requests/)
+    assert.match(calm, /Not answered locally 0 +<i>the local model answered every request offered to it/)
+  })
+  await t.test('an older API without timings shows no empty tiles', async () => {
+    const old = { ...gateway }
+    for (const k of ['fallthroughs', 'fallthrough_reasons', 'timeouts', 'timeout_share_pct', 'local_avg_seconds', 'local_p95_seconds', 'cloud_avg_seconds', 'cloud_p95_seconds', 'queue_avg_seconds', 'queue_p95_seconds', 'local_answer_avg_seconds']) delete old[k]
+    const html = await render(old)
+    assert.match(html, /Answered locally 75% /)
+    assert.doesNotMatch(html, /Local model timeouts|Response time|Queue wait/)
+  })
 })
 
 test('shorter prompts tile says why it is off instead of showing $0', async (t) => {

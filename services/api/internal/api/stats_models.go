@@ -115,6 +115,27 @@ type GatewayStat struct {
 	// the locally answered tokens, cached input at its cache-read price; nil
 	// when any local answer was unmetered (unknown, never zero).
 	SavedDollars *float64 `json:"saved_dollars"`
+	// Fallthroughs counts the requests the local model did not answer, and
+	// FallthroughReasons splits them by the gateway's fixed reasons.
+	// Timeouts is the part that waited too long for the local model's slot
+	// (queue_timeout) or its answer (answer_timeout); TimeoutSharePct is
+	// that part of all requests.
+	Fallthroughs       float64            `json:"fallthroughs"`
+	FallthroughReasons map[string]float64 `json:"fallthrough_reasons"`
+	Timeouts           float64            `json:"timeouts"`
+	TimeoutSharePct    float64            `json:"timeout_share_pct"`
+	// Response times in seconds, from the request to its last byte, by the
+	// route that answered; nil when the route answered nothing.
+	LocalAvgSeconds *float64 `json:"local_avg_seconds"`
+	LocalP95Seconds *float64 `json:"local_p95_seconds"`
+	CloudAvgSeconds *float64 `json:"cloud_avg_seconds"`
+	CloudP95Seconds *float64 `json:"cloud_p95_seconds"`
+	// QueueAvgSeconds and QueueP95Seconds are the wait for the local
+	// model's slot; LocalAnswerAvgSeconds its own time for the answers it
+	// gave. Nil when nothing was offered to it.
+	QueueAvgSeconds       *float64 `json:"queue_avg_seconds"`
+	QueueP95Seconds       *float64 `json:"queue_p95_seconds"`
+	LocalAnswerAvgSeconds *float64 `json:"local_answer_avg_seconds"`
 }
 
 // gatewaySaved prices the locally answered tokens at the reference model:
@@ -198,11 +219,39 @@ var modelQueries = struct{ requests, input, output, cached, readS, writeS, readT
 // gatewayQueries; $r is the window.
 //
 //nolint:gosec // metric names, not credentials
-var gatewayQueries = struct{ requests, bytes, tokens, unmetered string }{
-	requests:  `sum by (route, class)(increase(gateway_requests_total[$r]))`,
-	bytes:     `sum by (route, direction)(increase(gateway_bytes_total[$r]))`,
-	tokens:    `sum by (kind)(increase(gateway_local_tokens_total[$r]))`,
-	unmetered: `sum(increase(gateway_local_unmetered_total[$r]))`,
+var gatewayQueries = struct {
+	requests, bytes, tokens, unmetered, fallthroughs   string
+	latencySum, latencyCount, latencyP95               string
+	queueSum, queueCount, queueP95, answerSum, answerN string
+}{
+	requests:     `sum by (route, class)(increase(gateway_requests_total[$r]))`,
+	bytes:        `sum by (route, direction)(increase(gateway_bytes_total[$r]))`,
+	tokens:       `sum by (kind)(increase(gateway_local_tokens_total[$r]))`,
+	unmetered:    `sum(increase(gateway_local_unmetered_total[$r]))`,
+	fallthroughs: `sum by (reason)(increase(gateway_fallthrough_total[$r]))`,
+	latencySum:   `sum by (route)(increase(gateway_request_duration_seconds_sum[$r]))`,
+	latencyCount: `sum by (route)(increase(gateway_request_duration_seconds_count[$r]))`,
+	latencyP95:   `histogram_quantile(0.95, sum by (le, route)(increase(gateway_request_duration_seconds_bucket[$r])))`,
+	queueSum:     `sum(increase(gateway_queue_wait_seconds_sum[$r]))`,
+	queueCount:   `sum(increase(gateway_queue_wait_seconds_count[$r]))`,
+	queueP95:     `histogram_quantile(0.95, sum by (le)(increase(gateway_queue_wait_seconds_bucket[$r])))`,
+	answerSum:    `sum(increase(gateway_local_answer_seconds_sum{outcome="answered"}[$r]))`,
+	answerN:      `sum(increase(gateway_local_answer_seconds_count{outcome="answered"}[$r]))`,
+}
+
+// gatewayTimes adds up the sums and counts behind the gateway's averages.
+type gatewayTimes struct {
+	sum, count       map[string]float64
+	queueSum, queueN float64
+	answerSum, answN float64
+}
+
+// avg is sum/count rounded to milliseconds; nil when nothing was counted.
+func avg(sum, count float64) *float64 {
+	if count < 0.5 {
+		return nil
+	}
+	return ptr(round3(sum / count))
 }
 
 func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
@@ -308,7 +357,8 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		{modelQueries.p50, func(l map[string]string, v float64) { stat(l).ContextP50 = ptr(round3(v)) }},
 		{modelQueries.p95, func(l map[string]string, v float64) { stat(l).ContextP95 = ptr(round3(v)) }},
 	}
-	var gw GatewayStat
+	gw := GatewayStat{FallthroughReasons: map[string]float64{}}
+	gt := gatewayTimes{sum: map[string]float64{}, count: map[string]float64{}}
 	steps = append(steps, []struct {
 		expr string
 		add  func(map[string]string, float64)
@@ -345,6 +395,29 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 			}
 		}},
 		{gatewayQueries.unmetered, func(_ map[string]string, v float64) { gw.LocalUnmetered += v }},
+		{gatewayQueries.fallthroughs, func(l map[string]string, v float64) {
+			reason := telemetry.GatewayReason(l["reason"])
+			gw.Fallthroughs += v
+			gw.FallthroughReasons[reason] += v
+			if telemetry.GatewayTimeout(reason) {
+				gw.Timeouts += v
+			}
+		}},
+		{gatewayQueries.latencySum, func(l map[string]string, v float64) { gt.sum[l["route"]] += v }},
+		{gatewayQueries.latencyCount, func(l map[string]string, v float64) { gt.count[l["route"]] += v }},
+		{gatewayQueries.latencyP95, func(l map[string]string, v float64) {
+			switch l["route"] {
+			case "local":
+				gw.LocalP95Seconds = ptr(round3(v))
+			case "cloud":
+				gw.CloudP95Seconds = ptr(round3(v))
+			}
+		}},
+		{gatewayQueries.queueSum, func(_ map[string]string, v float64) { gt.queueSum += v }},
+		{gatewayQueries.queueCount, func(_ map[string]string, v float64) { gt.queueN += v }},
+		{gatewayQueries.queueP95, func(_ map[string]string, v float64) { gw.QueueP95Seconds = ptr(round3(v)) }},
+		{gatewayQueries.answerSum, func(_ map[string]string, v float64) { gt.answerSum += v }},
+		{gatewayQueries.answerN, func(_ map[string]string, v float64) { gt.answN += v }},
 	}...)
 	for _, st := range steps {
 		if err := each(st.expr, st.add); err != nil {
@@ -383,11 +456,30 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Spent, out.CompressionSaved = s.moneyTotals(out.Models)
 	out.CompressionEnabled, out.CompressionOff = compressionState(s.cfg.LLM, out.Models)
-	for _, f := range []*float64{&gw.Requests, &gw.Local, &gw.Cloud, &gw.Rejected, &gw.Failed, &gw.LocalUnmetered, &gw.LocalInputTokens, &gw.LocalOutputTokens, &gw.LocalCachedTokens, &gw.BytesIn, &gw.BytesOut} {
+	for _, f := range []*float64{&gw.Requests, &gw.Local, &gw.Cloud, &gw.Rejected, &gw.Failed, &gw.LocalUnmetered, &gw.LocalInputTokens, &gw.LocalOutputTokens, &gw.LocalCachedTokens, &gw.BytesIn, &gw.BytesOut, &gw.Fallthroughs, &gw.Timeouts} {
 		*f = math.Round(*f)
+	}
+	for reason, v := range gw.FallthroughReasons {
+		if gw.FallthroughReasons[reason] = math.Round(v); gw.FallthroughReasons[reason] == 0 {
+			delete(gw.FallthroughReasons, reason)
+		}
 	}
 	if gw.Requests > 0 {
 		gw.LocalSharePct = round1(gw.Local / gw.Requests * 100)
+		gw.TimeoutSharePct = round1(gw.Timeouts / gw.Requests * 100)
+	}
+	gw.LocalAvgSeconds = avg(gt.sum["local"], gt.count["local"])
+	gw.CloudAvgSeconds = avg(gt.sum["cloud"], gt.count["cloud"])
+	gw.QueueAvgSeconds = avg(gt.queueSum, gt.queueN)
+	gw.LocalAnswerAvgSeconds = avg(gt.answerSum, gt.answN)
+	if gt.count["local"] < 0.5 {
+		gw.LocalP95Seconds = nil
+	}
+	if gt.count["cloud"] < 0.5 {
+		gw.CloudP95Seconds = nil
+	}
+	if gt.queueN < 0.5 {
+		gw.QueueP95Seconds = nil
 	}
 	// The requested Claude model is client text and not a metric label, so
 	// the local tokens are priced at the reference model.

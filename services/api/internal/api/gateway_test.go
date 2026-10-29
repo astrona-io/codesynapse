@@ -311,11 +311,18 @@ func TestGatewayExcludeRouting(t *testing.T) {
 
 func TestRecordGatewayTimeAndFallthrough(t *testing.T) {
 	ctx := telemetry.WithTenant(context.Background(), "abababababababababababab")
-	reasons := []string{gateway.FallExcluded, gateway.FallNotEligible, gateway.FallTooLarge, gateway.FallBusy, gateway.FallUnavailable, gateway.FallNoFirstChunk, gateway.FallBadAnswer}
-	for _, reason := range reasons {
-		recordGateway(ctx, gateway.Meta{Route: "cloud", Fallthrough: reason}, http.StatusOK, 2*time.Second)
+	reasons := []string{
+		gateway.FallExcluded, gateway.FallNotEligible, gateway.FallTooLarge, gateway.FallHasThinking, gateway.FallHasImage,
+		gateway.FallQueueTimeout, gateway.FallCancelled, gateway.FallTimeout, gateway.FallModelError,
+		gateway.FallBadStatus, gateway.FallEmptyAnswer, gateway.FallTruncated, gateway.FallBadAnswer,
+		gateway.FallNoLocalModel,
 	}
-	recordGateway(ctx, gateway.Meta{Route: "local", Metered: true}, http.StatusOK, 40*time.Millisecond)
+	for _, reason := range reasons {
+		recordGateway(ctx, gateway.Meta{Route: "cloud", Fallthrough: reason, Asked: true, QueueWait: time.Second, LocalAnswer: time.Second}, http.StatusOK, 2*time.Second)
+	}
+	recordGateway(ctx, gateway.Meta{Route: "local", Metered: true, Stream: true, Asked: true, LocalAnswer: 30 * time.Millisecond, FirstByte: 20 * time.Millisecond}, http.StatusOK, 40*time.Millisecond)
+	// The OpenAI-compatible endpoint has no cloud behind it: its failures stay local.
+	recordGateway(ctx, gateway.Meta{Route: "local", Fallthrough: gateway.FallBadStatus, Metered: true, InTokens: 999}, http.StatusBadGateway, time.Millisecond)
 	recordGateway(ctx, gateway.Meta{Route: "sideways"}, http.StatusBadRequest, time.Millisecond)
 
 	var out bytes.Buffer
@@ -323,9 +330,20 @@ func TestRecordGatewayTimeAndFallthrough(t *testing.T) {
 	text := out.String()
 	const id = `tenant_id="abababababababababababab"`
 	for _, reason := range reasons {
-		assert.Contains(t, text, `gateway_fallthrough_total{reason="`+reason+`",`+id, "every fall-through point has its own reason")
+		assert.Contains(t, text, `gateway_fallthrough_total{reason="`+reason+`",route="cloud",`+id, "every fall-through point has its own reason")
+		assert.Equal(t, telemetry.GatewayReason(reason), reason, "the telemetry allowlist mirrors the gateway's reasons")
 	}
-	assert.False(t, strings.Contains(text, `gateway_fallthrough_total{reason="other",`+id), "no gateway reason falls outside the fixed set")
+	assert.Contains(t, text, `gateway_fallthrough_total{reason="bad_status",route="local",`+id)
+	assert.False(t, strings.Contains(text, `gateway_fallthrough_total{reason="other",`), "no gateway reason falls outside the fixed set")
+	assert.Contains(t, text, `gateway_queue_wait_seconds_count{`+id)
+	assert.Contains(t, text, `gateway_local_answer_seconds_count{outcome="failed",`+id)
+	assert.Contains(t, text, `gateway_local_answer_seconds_count{outcome="answered",`+id)
+	assert.Contains(t, text, `gateway_first_byte_seconds_count{route="local",`+id)
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "gateway_local_tokens_total{"+id+`,kind="input"`) {
+			assert.False(t, strings.HasSuffix(line, " 999"), "a failed local answer counts no tokens")
+		}
+	}
 	assert.Contains(t, text, `gateway_request_duration_seconds_count{route="cloud",`+id)
 	assert.Contains(t, text, `gateway_request_duration_seconds_count{route="local",`+id)
 	assert.Contains(t, text, `gateway_request_duration_seconds_count{route="rejected",`+id)

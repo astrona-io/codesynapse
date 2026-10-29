@@ -8,7 +8,7 @@ const RANGES: { id: SeriesRange; label: string }[] = [
 ]
 const GROUPS = [
   { title: 'Tokens and model cost', help: 'Provider-reported tokens and configured prices. Missing usage or prices leave a measurement gap.', panels: ['llm_tokens', 'llm_cost', 'llm_savings', 'llm_coverage', 'llm_failure_causes', 'llm_ttft', 'served_tokens'] },
-  { title: 'Model gateway', help: 'Requests agents sent through the gateway: time per route, and why requests offered to the local model went to the cloud. Prompts are never recorded.', panels: ['gateway_latency', 'gateway_fallthrough'] },
+  { title: 'Model gateway', help: 'Requests agents sent through the gateway: time per route (average and 95th percentile), how long requests waited for the local model, how often it timed out, and why requests offered to it went to the cloud. Prompts are never recorded.', panels: ['gateway_latency_avg', 'gateway_latency', 'gateway_timeouts', 'gateway_queue_wait', 'gateway_fallthrough'] },
   { title: 'Network and cloud bandwidth', help: 'Application payload bytes. Avoided cloud traffic needs an equivalent configured fallback; local execution alone has no savings baseline.', panels: ['bandwidth', 'cloud_traffic', 'cloud_savings'] },
   { title: 'External services and the audit log', help: 'Requests to osv.dev, deps.dev and git host APIs carry only package names, versions and organisation names. Every changing request waits for its audit entry.', panels: ['lookups', 'lookup_latency', 'audit_write_latency'] },
   { title: 'Database performance', help: 'Measured request latency, volume and returned rows. Graph rows do not measure internal nodes traversed.', panels: ['db_latency', 'db_latency_tail', 'db_requests', 'db_rows', 'db_errors'] },

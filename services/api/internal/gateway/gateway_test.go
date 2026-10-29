@@ -3,7 +3,10 @@ package gateway
 import (
 	"bufio"
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,6 +55,8 @@ func TestForwardPassesCredentialAndStreams(t *testing.T) {
 	assert.Equal(t, got.Get(KeyHeader), "")
 	assert.Equal(t, got.Get("Cookie"), "")
 	assert.Equal(t, gotBody, `{"model":"m1","stream":true,"tools":[{}]}`)
+	assert.True(t, meta.FirstByte > 0, "the first byte of the stream is timed")
+	meta.FirstByte = 0
 	assert.Equal(t, meta, Meta{Path: "/v1/messages", Model: "m1", Stream: true, Bytes: len(gotBody), Tools: true, Route: "cloud", Out: 13})
 }
 
@@ -185,10 +190,16 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 	}{
 		"main model, local first off": {`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallNotEligible},
 		"server tool":                 {`{"model":"claude-haiku-5-5","tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallNotEligible},
-		"has image":                   {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"image"}]}]}`, 200, nil, FallNotEligible},
-		"local errors":                {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 500, nil, FallUnavailable},
+		"has image":                   {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"image"}]}]}`, 200, nil, FallHasImage},
+		"has document":                {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"document"}]}]}`, 200, nil, FallHasImage},
+		"image in a tool result":      {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":[{"type":"image"}]}]}]}`, 200, nil, FallHasImage},
+		"thinking asked":              {`{"model":"claude-haiku-5-5","thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallHasThinking},
+		"thinking sent back":          {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"thinking","thinking":"x"}]}]}`, 200, nil, FallHasThinking},
+		"local errors":                {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 500, nil, FallBadStatus},
 		"queue timeout": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 200,
-			func(ctx context.Context) (func(), error) { <-ctx.Done(); return nil, ctx.Err() }, FallBusy},
+			func(ctx context.Context) (func(), error) { <-ctx.Done(); return nil, ctx.Err() }, FallQueueTimeout},
+		"queue broke": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`, 200,
+			func(context.Context) (func(), error) { return nil, errors.New("closed") }, FallModelError},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -210,7 +221,73 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 			assert.Equal(t, rec.Body.String(), "cloud")
 			assert.Equal(t, rec.Header().Get(RouteHeader), "cloud")
 			assert.Equal(t, meta.Fallthrough, tc.reason, "why the local model did not answer")
+			if tc.reason == FallQueueTimeout {
+				assert.True(t, meta.Asked, "it reached the queue")
+				assert.True(t, meta.QueueWait >= 20*time.Millisecond, "the wait is measured")
+			}
 		})
+	}
+}
+
+func TestLocalFailuresAreTold(t *testing.T) {
+	body := `{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`
+	slow := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(2 * time.Second):
+		}
+	}))
+	defer slow.Close()
+	gone := httptest.NewServer(http.NotFoundHandler())
+	gone.Close()
+	cases := map[string]struct {
+		local  *Local
+		reason string
+	}{
+		"answer timeout": {&Local{BaseURL: slow.URL, Client: &http.Client{Timeout: 30 * time.Millisecond}}, FallTimeout},
+		"not reachable":  {&Local{BaseURL: gone.URL}, FallModelError},
+		"no local model": {nil, FallNoLocalModel},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "cloud") }))
+			defer cloud.Close()
+			g := NewAnthropic()
+			g.Upstream = cloud.URL
+			g.Local = func() *Local { return tc.local }
+			var meta Meta
+			g.Done = func(_ context.Context, m Meta, _ int, _ time.Duration) { meta = m }
+			rec := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+			r.Header.Set("X-Api-Key", "k")
+			g.Handler("/v1/messages")(rec, r)
+			assert.Equal(t, rec.Body.String(), "cloud")
+			assert.Equal(t, meta.Route, "cloud")
+			assert.Equal(t, meta.Fallthrough, tc.reason)
+			assert.True(t, meta.FirstByte > 0, "the first byte is timed")
+			if tc.local != nil {
+				assert.True(t, meta.Asked && meta.LocalAnswer > 0, "the local model's time is measured")
+			}
+		})
+	}
+}
+
+func TestFailureNamesTimeouts(t *testing.T) {
+	live := context.Background()
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	for name, tc := range map[string]struct {
+		ctx  context.Context
+		err  error
+		want string
+	}{
+		"deadline":        {live, context.DeadlineExceeded, FallTimeout},
+		"wrapped":         {live, fmt.Errorf("read: %w", context.DeadlineExceeded), FallTimeout},
+		"net timeout":     {live, &net.DNSError{IsTimeout: true}, FallTimeout},
+		"refused":         {live, errors.New("connection refused"), FallModelError},
+		"agent went away": {gone, context.Canceled, FallCancelled},
+	} {
+		t.Run(name, func(t *testing.T) { assert.Equal(t, failure(tc.ctx, tc.err), tc.want) })
 	}
 }
 

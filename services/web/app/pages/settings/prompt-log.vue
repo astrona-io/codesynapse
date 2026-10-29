@@ -37,7 +37,7 @@ const routeFilter = ref('')
 const shortened = ref('')
 const fallthrough = ref('')
 const period = ref(7)
-const FALLTHROUGH = ['not_eligible', 'too_large', 'busy', 'unavailable', 'no_first_chunk', 'bad_answer']
+const FALLTHROUGH = ['not_eligible', 'too_large', 'has_thinking', 'has_image', 'excluded', 'no_local_model', 'queue_timeout', 'answer_timeout', 'cancelled', 'model_error', 'bad_status', 'empty_answer', 'truncated', 'bad_answer']
 const since = computed(() => new Date(Date.now() - period.value * 864e5).toISOString().replace(/\.\d+Z$/, 'Z'))
 const filters = computed(() => {
   const p = new URLSearchParams({ since: since.value })

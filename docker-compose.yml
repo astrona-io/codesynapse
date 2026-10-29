@@ -12,20 +12,20 @@ services:
   # Schema changes reach graphd and storaged on their heartbeat: a short
   # interval keeps `ensure schema` quick.
   nebula-metad:
-    image: docker.io/vesoft/nebula-metad:v3.8.0
+    image: ghcr.io/astrona-io/codesynapse-nebula-metad:v3.8.0
     command: ["--meta_server_addrs=nebula-metad:9559", "--local_ip=nebula-metad", "--ws_ip=nebula-metad", "--port=9559", "--data_path=/data/meta", "--log_dir=/logs", "--v=0", "--minloglevel=1", "--heartbeat_interval_secs=2"]
     volumes:
       - nebula-meta:/data/meta
       - nebula-meta-logs:/logs
     security_opt: ["no-new-privileges:true"]
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://nebula-metad:19559/status"]
+      test: ["CMD", "/usr/local/bin/nebula-probe", "nebula-metad:19559"]
       interval: 10s
       timeout: 5s
       retries: 30
 
   nebula-storaged:
-    image: docker.io/vesoft/nebula-storaged:v3.8.0
+    image: ghcr.io/astrona-io/codesynapse-nebula-storaged:v3.8.0
     command: ["--meta_server_addrs=nebula-metad:9559", "--local_ip=nebula-storaged", "--ws_ip=nebula-storaged", "--port=9779", "--data_path=/data/storage", "--log_dir=/logs", "--v=0", "--minloglevel=1", "--heartbeat_interval_secs=2"]
     volumes:
       - nebula-storage:/data/storage
@@ -38,13 +38,13 @@ services:
         condition: service_healthy
 
   nebula-graphd:
-    image: docker.io/vesoft/nebula-graphd:v3.8.0
+    image: ghcr.io/astrona-io/codesynapse-nebula-graphd:v3.8.0
     command: ["--meta_server_addrs=nebula-metad:9559", "--port=9669", "--local_ip=nebula-graphd", "--ws_ip=nebula-graphd", "--log_dir=/logs", "--v=0", "--minloglevel=1", "--enable_authorize=true", "--auth_type=password", "--heartbeat_interval_secs=2"]
     volumes:
       - nebula-graph-logs:/logs
     security_opt: ["no-new-privileges:true"]
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://nebula-graphd:19669/status"]
+      test: ["CMD", "/usr/local/bin/nebula-probe", "nebula-graphd:19669"]
       interval: 10s
       timeout: 5s
       retries: 30
@@ -56,7 +56,7 @@ services:
   # the root user with NEBULA_PASSWORD. Runs once per start; idempotent: a
   # host that is registered and a password that is changed are left alone.
   nebula-init:
-    image: docker.io/vesoft/nebula-console:v3.8.0
+    image: ghcr.io/astrona-io/codesynapse-nebula-console:v3.8.0
     entrypoint: ["sh", "-c"]
     command:
       - |

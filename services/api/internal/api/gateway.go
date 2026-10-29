@@ -50,9 +50,6 @@ func (l *keyLimit) take(key string) (release func(), ok bool) {
 // modelName keeps the audit trail free of anything but a plain model name.
 var modelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$`)
 
-// fallReason keeps the audit trail to plain fall-through reasons.
-var fallReason = regexp.MustCompile(`^[a-z_]{1,32}$`)
-
 // auditGateway records what a gateway call was, never what it said: route,
 // model name, sizes, timing and SHA-256 digests of the newest user text and
 // of the text forwarded when the gateway shortened it. When the organisation
@@ -92,10 +89,14 @@ func (s *Server) auditGateway(ctx context.Context, m gateway.Meta, status int, t
 		return
 	}
 	id, _ := execution.From(ctx)
+	reason := ""
+	if m.Fallthrough != "" {
+		reason = telemetry.GatewayReason(m.Fallthrough)
+	}
 	row := accounts.PromptLogEntry{
 		OrgID: p.OrgID, At: stored.At, AuditID: stored.ID, UserID: p.User.ID, KeyID: p.KeyID,
 		SessionID: id.SessionID, Path: m.Path, Model: model, Route: m.Route, Status: status,
-		DurationMS: took.Milliseconds(), Shortened: m.TextChanged, Fallthrough: m.Fallthrough,
+		DurationMS: took.Milliseconds(), Shortened: m.TextChanged, Fallthrough: reason,
 		PromptSHA256: m.PromptSHA256, PromptBytes: m.PromptBytes, ForwardedSHA256: m.ForwardedSHA256, ForwardedBytes: m.ForwardedBytes,
 		Prompt: m.Prompt, Forwarded: m.Forwarded, Answer: m.Answer,
 	}
@@ -115,13 +116,6 @@ func gatewayDetail(m gateway.Meta, model string, took time.Duration) string {
 	}
 	if m.TextChanged && m.ForwardedSHA256 != "" {
 		fmt.Fprintf(&b, " fwd_bytes=%d fwd_sha256=%s", m.ForwardedBytes, m.ForwardedSHA256)
-	}
-	if m.Fallthrough != "" {
-		reason := m.Fallthrough
-		if !fallReason.MatchString(reason) {
-			reason = "other"
-		}
-		fmt.Fprintf(&b, " fallthrough=%s", reason)
 	}
 	return b.String()
 }
@@ -349,8 +343,13 @@ func recordGateway(ctx context.Context, m gateway.Meta, status int, took time.Du
 	telemetry.GatewayBytes.AddContext(ctx, float64(m.Bytes), tenant, route, "in")
 	telemetry.GatewayBytes.AddContext(ctx, float64(m.Out), tenant, route, "out")
 	telemetry.RecordGatewayDuration(ctx, route, took)
-	telemetry.RecordGatewayFallthrough(ctx, m.Fallthrough)
-	if route != "local" {
+	telemetry.RecordGatewayFallthrough(ctx, m.Fallthrough, route)
+	t := telemetry.GatewayTimings{Asked: m.Asked, Queue: m.QueueWait, Answer: m.LocalAnswer, Answered: route == "local" && m.Fallthrough == "", Route: route}
+	if m.Stream {
+		t.FirstByte = m.FirstByte
+	}
+	telemetry.RecordGatewayTimings(ctx, t)
+	if route != "local" || m.Fallthrough != "" || class != "2xx" {
 		return
 	}
 	if !m.Metered {

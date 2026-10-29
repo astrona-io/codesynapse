@@ -50,6 +50,14 @@ type seriesPanel struct {
 	repository bool
 }
 
+// Gateway queries shared by the organisation and platform panels; only the
+// tenant filter differs.
+const (
+	gatewayP95     = `histogram_quantile(0.95, sum by (le, route) (increase(gateway_request_duration_seconds_bucket[$w])))`
+	gatewayAvg     = `sum by (route) (increase(gateway_request_duration_seconds_sum[$w])) / (sum by (route) (increase(gateway_request_duration_seconds_count[$w])) > 0)`
+	gatewayReasons = `sum by (reason) (increase(gateway_fallthrough_total[$w]))`
+)
+
 // OTLP can split related gauges across HTTP batches. Only observations whose
 // count and freshness samples came from the same export are eligible.
 const memoryObserved = `agent_memory_facts_observed_at_seconds and (timestamp(agent_memory_facts_count) == timestamp(agent_memory_facts_observed_at_seconds))`
@@ -207,14 +215,29 @@ var seriesPanels = map[string]seriesPanel{
 		queries: []seriesQuery{{name: "avoided", expr: `100 * sum(increase(cloud_bytes_saved_total[$w])) / ((sum(increase(cloud_bytes_sent_total[$w])) + sum(increase(cloud_bytes_saved_total[$w]))) > 0)`}}},
 	// Phase 5: the model gateway's time per route and why requests offered
 	// to the local model went to the cloud.
-	"gateway_latency": {Title: "Gateway response time", Unit: "seconds", Kind: "gauge",
+	"gateway_latency": {Title: "Gateway response time (p95)", Unit: "seconds", Kind: "gauge",
 		Help:    "95th percentile time to answer a gateway request, by route: local model, cloud, or rejected before any model saw it.",
 		Empty:   "No gateway request in this window.",
-		queries: []seriesQuery{{expr: `histogram_quantile(0.95, sum by (le, route) (increase(gateway_request_duration_seconds_bucket[$w])))`, by: "route"}}},
-	"gateway_fallthrough": {Title: "Local answers passed to the cloud", Unit: "requests", Kind: "count",
-		Help:    "Gateway requests offered to the local model that went to the cloud, by reason: not eligible, too large, busy, unavailable, no first chunk or a bad answer.",
-		Empty:   "No request fell through to the cloud in this window.",
-		queries: []seriesQuery{{expr: `sum by (reason) (increase(gateway_fallthrough_total[$w]))`, by: "reason"}}},
+		queries: []seriesQuery{{expr: gatewayP95, by: "route"}}},
+	"gateway_latency_avg": {Title: "Gateway response time (average)", Unit: "seconds", Kind: "gauge",
+		Help:    "Average time to answer a gateway request, by route: local model, cloud, or rejected before any model saw it.",
+		Empty:   "No gateway request in this window.",
+		queries: []seriesQuery{{expr: gatewayAvg, by: "route"}}},
+	"gateway_fallthrough": {Title: "Requests the local model did not answer", Unit: "requests", Kind: "count",
+		Help:    "Gateway requests the local model did not answer, by reason. queue_timeout and answer_timeout mean it was too slow; the other reasons are requests it does not take or failed on.",
+		Empty:   "Every request offered to the local model was answered in this window.",
+		queries: []seriesQuery{{expr: gatewayReasons, by: "reason"}}},
+	"gateway_timeouts": {Title: "Local model timeouts", Unit: "requests", Kind: "count",
+		Help:    "Requests that waited too long for the local model's queue slot (queue_timeout) or for its answer (answer_timeout).",
+		Empty:   "No local model timeout in this window.",
+		queries: []seriesQuery{{expr: `sum by (reason) (increase(gateway_fallthrough_total{reason=~"queue_timeout|answer_timeout"}[$w]))`, by: "reason"}}},
+	"gateway_queue_wait": {Title: "Local model queue wait", Unit: "seconds", Kind: "gauge",
+		Help:  "Time gateway requests waited for the local model's queue slot: average and 95th percentile.",
+		Empty: "No request waited for the local model in this window.",
+		queries: []seriesQuery{
+			{name: "average", expr: `sum(increase(gateway_queue_wait_seconds_sum[$w])) / (sum(increase(gateway_queue_wait_seconds_count[$w])) > 0)`},
+			{name: "p95", expr: `histogram_quantile(0.95, sum by (le) (increase(gateway_queue_wait_seconds_bucket[$w])))`},
+		}},
 	"llm_ttft": {Title: "AI time to first token", Unit: "seconds", Kind: "gauge",
 		Help:    "95th percentile wait for the first streamed token, by model.",
 		queries: []seriesQuery{{expr: `histogram_quantile(0.95, sum by (le, llm_model) (increase(llm_time_to_first_token_seconds_bucket[$w])))`, by: "llm_model"}}},
