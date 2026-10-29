@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -226,4 +227,56 @@ func TestBridgeNoteClient(t *testing.T) {
 	require.NoError(t, err)
 	b.headers(req)
 	assert.Equal(t, req.Header.Get(clientHeader), "claude-code-cli")
+}
+
+// An API that is restarting when the chat starts must not cost the chat its
+// tools: Claude Code remembers a bridge that exited for the rest of the chat.
+func TestBridgeRegistrationWaitsForAPI(t *testing.T) {
+	identity := `{"tenant_id":"t","subject_id":"u","session_id":"chat-1","parent_session_id":"chat-1"}`
+	t.Run("retries while the API is unreachable", func(t *testing.T) {
+		var calls atomic.Int32
+		api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if calls.Add(1) <= 2 {
+				// Drop the connection: the client sees a transport error,
+				// as with connection refused during a restart.
+				conn, _, err := w.(http.Hijacker).Hijack()
+				if err == nil {
+					_ = conn.Close()
+				}
+				return
+			}
+			_, _ = io.WriteString(w, identity)
+		}))
+		t.Cleanup(api.Close)
+		c := apiClient{base: api.URL, token: "csk_test", http: api.Client()}
+		ctx, err := registerBridgeSession(t.Context(), c, "chat-1", 10*time.Second)
+		require.NoError(t, err)
+		id, ok := execution.From(ctx)
+		assert.True(t, ok, "the registered session is in the context")
+		assert.Equal(t, id.SessionID, "chat-1")
+		assert.Equal(t, calls.Load(), int32(3))
+	})
+	t.Run("a refusal is final", func(t *testing.T) {
+		var calls atomic.Int32
+		api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls.Add(1)
+			http.Error(w, `{"detail":"invalid key"}`, http.StatusUnauthorized)
+		}))
+		t.Cleanup(api.Close)
+		c := apiClient{base: api.URL, token: "csk_test", http: api.Client()}
+		_, err := registerBridgeSession(t.Context(), c, "chat-1", 10*time.Second)
+		assert.Error(t, err)
+		assert.Equal(t, calls.Load(), int32(1), "a refused key is not retried")
+	})
+	t.Run("gives up after the wait", func(t *testing.T) {
+		api := httptest.NewServer(http.NotFoundHandler())
+		url := api.URL
+		api.Close()
+		c := apiClient{base: url, token: "csk_test", http: &http.Client{}}
+		start := time.Now()
+		_, err := registerBridgeSession(t.Context(), c, "chat-1", time.Second)
+		assert.Error(t, err)
+		assert.True(t, strings.Contains(err.Error(), "register runtime session"), "the error says what failed")
+		assert.True(t, time.Since(start) < 5*time.Second, "the wait is bounded")
+	})
 }

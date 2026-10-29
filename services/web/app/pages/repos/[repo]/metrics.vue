@@ -23,96 +23,96 @@ const short = (p: string) => p.replace(/^.*?\/internal\//, 'internal/').replace(
     </PageHeader>
     <CodeHealthTabs :repo="repo" />
 
-    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
-    <template v-else-if="m">
-      <section class="panel bench">
-        <div class="panel__header">
-          <div><p class="eyebrow eyebrow--green">Token benchmark</p><h2>Context reduced by {{ (m.benchmark.median_reduction_pct ?? 0).toFixed(1) }}% per question <span class="muted">· median</span></h2></div>
-          <span class="badge badge--green">{{ m.benchmark.samples }} sampled functions</span>
-        </div>
-        <div class="grid grid--stats">
-          <StatTile label="Graph answers" :value="fmtInt(m.benchmark.total_graph_tokens)" :hint="`p50 ${fmtInt(m.benchmark.graph_tokens.p50)} · p90 ${fmtInt(m.benchmark.graph_tokens.p90)} tokens`" />
-          <StatTile label="Reading files" :value="fmtInt(m.benchmark.total_baseline_tokens)" :hint="`p50 ${fmtInt(m.benchmark.baseline_tokens.p50)} · p90 ${fmtInt(m.benchmark.baseline_tokens.p90)} tokens`" />
-          <StatTile label="Reduced overall" :value="`${(m.benchmark.total_reduction_pct ?? 0).toFixed(1)}%`" :hint="`${fmtInt(m.benchmark.total_baseline_tokens - m.benchmark.total_graph_tokens)} tokens not spent across the sample`" />
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Symbol</th><th class="num">Files avoided</th><th class="num">Baseline</th><th class="num">Graph</th><th class="num">Reduced by</th></tr></thead>
-            <tbody>
-              <tr v-for="e in m.benchmark.examples" :key="e.symbol">
-                <td class="mono">{{ e.symbol }}</td><td class="num">{{ e.files }}</td>
-                <td class="num">{{ fmtInt(e.baseline_tokens) }}</td><td class="num">{{ fmtInt(e.graph_tokens) }}</td>
-                <td class="num"><strong class="saving">{{ (e.reduction_pct ?? 0).toFixed(1) }}%</strong> <span class="dim">({{ e.savings_x.toFixed(1) }}×)</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p class="muted small">{{ m.benchmark.method }}</p>
-      </section>
-
-      <div class="grid grid--stats">
-        <StatTile label="Code" :value="fmtInt(m.code.loc)" :hint="`LOC · ${plural(m.code.packages, 'package')} · ${plural(m.code.files, 'file')}`" />
-        <StatTile label="Callables" :value="fmtInt(m.code.functions + m.code.methods)" :hint="`${plural(m.code.types, 'type')} · ${plural(m.code.interfaces, 'interface')}`" />
-        <StatTile label="Reached by tests" :value="`${m.tests.reachable_pct}%`" :hint="`${fmtInt(m.tests.reachable)}/${fmtInt(m.tests.total)} · ${fmtInt(m.tests.exported_untested)} exported untested`" />
-        <StatTile label="Doc coverage" :value="`${m.docs.coverage_pct}%`" :hint="`${fmtInt(m.docs.documented)}/${fmtInt(m.docs.exported)} exported · ${plural(m.docs.documents, 'doc')}`" />
-        <StatTile label="Avg complexity" :value="m.code.avg_complexity.toFixed(1)" :hint="`${fmtInt(m.code.complex_over_10)} over 10 · ${fmtInt(m.code.complex_over_20)} over 20`" />
-        <StatTile label="Test / code" :value="m.tests.test_to_code_ratio.toFixed(2)" :hint="`${fmtInt(m.code.test_loc)} test LOC · ${plural(m.tests.test_functions, 'test')}`" />
-        <StatTile label="Call edges" :value="fmtInt(m.code.call_edges)" :hint="`${fmtInt(m.code.security_symbols)} security-sensitive functions`" />
-        <StatTile label="Dead-code candidates" :value="fmtInt(m.dead_code.length)" hint="unexported, no static callers" />
-      </div>
-
-      <div class="grid cols-2">
-        <section v-for="(title, key) in { complexity: 'Cyclomatic complexity', loc: 'Function length (lines)', fan_in: 'Fan-in (callers)', fan_out: 'Fan-out (callees)' }" :key="key" class="panel">
-          <p class="eyebrow">Distribution</p>
-          <h2>{{ title }}</h2>
-          <p class="muted small mono">p50 {{ m.distributions[key]?.p50 }} · p90 {{ m.distributions[key]?.p90 }} · p99 {{ m.distributions[key]?.p99 }} · max {{ m.distributions[key]?.max }} · mean {{ m.distributions[key]?.mean }}</p>
-          <BarList :items="bars(m.distributions[key])" />
-        </section>
-      </div>
-
-      <section class="panel">
-        <div class="panel__header">
-          <div><p class="eyebrow">Architecture</p><h2>Packages <span class="muted">· instability = Ce / (Ca + Ce)</span></h2></div>
-          <div class="row">
-            <button v-for="k in (['loc', 'instability', 'avg_complexity', 'tested_pct'] as const)" :key="k" class="chip" :class="{ active: pkgSort === k }" :aria-pressed="pkgSort === k" @click="pkgSort = k">{{ k.replace('_', ' ') }}</button>
+    <DataState :error="error" :pending="!m" :empty="!m">
+      <template v-if="m">
+        <section class="panel bench">
+          <div class="panel__header">
+            <div><p class="eyebrow eyebrow--green">Token benchmark</p><h2>Context reduced by {{ (m.benchmark.median_reduction_pct ?? 0).toFixed(1) }}% per question <span class="muted">· median</span></h2></div>
+            <span class="badge badge--green">{{ m.benchmark.samples }} sampled functions</span>
           </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Package</th><th class="num">LOC</th><th class="num">Funcs</th><th class="num">Ca</th><th class="num">Ce</th><th>Instability</th><th class="num">Avg cx</th><th class="num">Tested</th><th class="num">Docs</th></tr></thead>
-            <tbody>
-              <tr v-for="p in packages" :key="p.name">
-                <td class="mono">{{ short(p.name) }}</td>
-                <td class="num">{{ fmtInt(p.loc) }}</td><td class="num">{{ p.functions }}</td>
-                <td class="num">{{ p.afferent }}</td><td class="num">{{ p.efferent }}</td>
-                <td><div class="meter"><span :style="{ width: `${p.instability * 100}%` }" /></div><span class="mono dim">{{ p.instability.toFixed(2) }}</span></td>
-                <td class="num">{{ p.avg_complexity.toFixed(1) }}</td>
-                <td class="num" :class="{ error: p.functions && p.tested_pct < 30 }">{{ p.tested_pct }}%</td>
-                <td class="num">{{ p.doc_pct }}%</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+          <div class="grid grid--stats">
+            <StatTile label="Graph answers" :value="fmtInt(m.benchmark.total_graph_tokens)" :hint="`p50 ${fmtInt(m.benchmark.graph_tokens.p50)} · p90 ${fmtInt(m.benchmark.graph_tokens.p90)} tokens`" />
+            <StatTile label="Reading files" :value="fmtInt(m.benchmark.total_baseline_tokens)" :hint="`p50 ${fmtInt(m.benchmark.baseline_tokens.p50)} · p90 ${fmtInt(m.benchmark.baseline_tokens.p90)} tokens`" />
+            <StatTile label="Reduced overall" :value="`${(m.benchmark.total_reduction_pct ?? 0).toFixed(1)}%`" :hint="`${fmtInt(m.benchmark.total_baseline_tokens - m.benchmark.total_graph_tokens)} tokens not spent across the sample`" />
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Symbol</th><th class="num">Files avoided</th><th class="num">Baseline</th><th class="num">Graph</th><th class="num">Reduced by</th></tr></thead>
+              <tbody>
+                <tr v-for="e in m.benchmark.examples" :key="e.symbol">
+                  <td class="mono">{{ e.symbol }}</td><td class="num">{{ e.files }}</td>
+                  <td class="num">{{ fmtInt(e.baseline_tokens) }}</td><td class="num">{{ fmtInt(e.graph_tokens) }}</td>
+                  <td class="num"><strong class="saving">{{ (e.reduction_pct ?? 0).toFixed(1) }}%</strong> <span class="dim">({{ e.savings_x.toFixed(1) }}×)</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="muted small">{{ m.benchmark.method }}</p>
+        </section>
 
-      <div class="grid cols-2">
+        <div class="grid grid--stats">
+          <StatTile label="Code" :value="fmtInt(m.code.loc)" :hint="`LOC · ${plural(m.code.packages, 'package')} · ${plural(m.code.files, 'file')}`" />
+          <StatTile label="Callables" :value="fmtInt(m.code.functions + m.code.methods)" :hint="`${plural(m.code.types, 'type')} · ${plural(m.code.interfaces, 'interface')}`" />
+          <StatTile label="Reached by tests" :value="`${m.tests.reachable_pct}%`" :hint="`${fmtInt(m.tests.reachable)}/${fmtInt(m.tests.total)} · ${fmtInt(m.tests.exported_untested)} exported untested`" />
+          <StatTile label="Doc coverage" :value="`${m.docs.coverage_pct}%`" :hint="`${fmtInt(m.docs.documented)}/${fmtInt(m.docs.exported)} exported · ${plural(m.docs.documents, 'doc')}`" />
+          <StatTile label="Avg complexity" :value="m.code.avg_complexity.toFixed(1)" :hint="`${fmtInt(m.code.complex_over_10)} over 10 · ${fmtInt(m.code.complex_over_20)} over 20`" />
+          <StatTile label="Test / code" :value="m.tests.test_to_code_ratio.toFixed(2)" :hint="`${fmtInt(m.code.test_loc)} test LOC · ${plural(m.tests.test_functions, 'test')}`" />
+          <StatTile label="Call edges" :value="fmtInt(m.code.call_edges)" :hint="`${fmtInt(m.code.security_symbols)} security-sensitive functions`" />
+          <StatTile label="Dead-code candidates" :value="fmtInt(m.dead_code.length)" hint="unexported, no static callers" />
+        </div>
+
+        <div class="grid cols-2">
+          <section v-for="(title, key) in { complexity: 'Cyclomatic complexity', loc: 'Function length (lines)', fan_in: 'Fan-in (callers)', fan_out: 'Fan-out (callees)' }" :key="key" class="panel">
+            <p class="eyebrow">Distribution</p>
+            <h2>{{ title }}</h2>
+            <p class="muted small mono">p50 {{ m.distributions[key]?.p50 }} · p90 {{ m.distributions[key]?.p90 }} · p99 {{ m.distributions[key]?.p99 }} · max {{ m.distributions[key]?.max }} · mean {{ m.distributions[key]?.mean }}</p>
+            <BarList :items="bars(m.distributions[key])" />
+          </section>
+        </div>
+
         <section class="panel">
-          <p class="eyebrow">Test gaps</p><h2>Complex code no test reaches</h2>
-          <div class="table-wrap"><table><tbody>
-            <tr v-for="r in m.tests.untested_complex" :key="r.id"><td><NuxtLink :to="explore(r.id)" class="mono">{{ r.name }}</NuxtLink></td><td class="mono muted">{{ r.location }}</td></tr>
-          </tbody></table></div>
-          <p v-if="!m.tests.untested_complex.length" class="muted">Every function with complexity ≥ 5 is reached by a test.</p>
+          <div class="panel__header">
+            <div><p class="eyebrow">Architecture</p><h2>Packages <span class="muted">· instability = Ce / (Ca + Ce)</span></h2></div>
+            <div class="row">
+              <button v-for="k in (['loc', 'instability', 'avg_complexity', 'tested_pct'] as const)" :key="k" class="chip" :class="{ active: pkgSort === k }" :aria-pressed="pkgSort === k" @click="pkgSort = k">{{ k.replace('_', ' ') }}</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Package</th><th class="num">LOC</th><th class="num">Funcs</th><th class="num">Ca</th><th class="num">Ce</th><th>Instability</th><th class="num">Avg cx</th><th class="num">Tested</th><th class="num">Docs</th></tr></thead>
+              <tbody>
+                <tr v-for="p in packages" :key="p.name">
+                  <td class="mono">{{ short(p.name) }}</td>
+                  <td class="num">{{ fmtInt(p.loc) }}</td><td class="num">{{ p.functions }}</td>
+                  <td class="num">{{ p.afferent }}</td><td class="num">{{ p.efferent }}</td>
+                  <td><div class="meter"><span :style="{ width: `${p.instability * 100}%` }" /></div><span class="mono dim">{{ p.instability.toFixed(2) }}</span></td>
+                  <td class="num">{{ p.avg_complexity.toFixed(1) }}</td>
+                  <td class="num" :class="{ error: p.functions && p.tested_pct < 30 }">{{ p.tested_pct }}%</td>
+                  <td class="num">{{ p.doc_pct }}%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
-        <section class="panel">
-          <p class="eyebrow">Cleanup</p><h2>Dead-code candidates</h2>
-          <p class="muted small">Unexported, no static callers. Functions only used as values (callbacks, handlers) also show up here.</p>
-          <div class="table-wrap"><table><tbody>
-            <tr v-for="r in m.dead_code.slice(0, 25)" :key="r.id"><td><NuxtLink :to="explore(r.id)" class="mono">{{ r.name }}</NuxtLink></td><td class="mono muted">{{ r.location }}</td></tr>
-          </tbody></table></div>
-        </section>
-      </div>
-    </template>
-    <p v-else class="muted" role="status">Loading…</p>
+
+        <div class="grid cols-2">
+          <section class="panel">
+            <p class="eyebrow">Test gaps</p><h2>Complex code no test reaches</h2>
+            <div class="table-wrap"><table><tbody>
+              <tr v-for="r in m.tests.untested_complex" :key="r.id"><td><NuxtLink :to="explore(r.id)" class="mono">{{ r.name }}</NuxtLink></td><td class="mono muted">{{ r.location }}</td></tr>
+            </tbody></table></div>
+            <p v-if="!m.tests.untested_complex.length" class="muted">Every function with complexity ≥ 5 is reached by a test.</p>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">Cleanup</p><h2>Dead-code candidates</h2>
+            <p class="muted small">Unexported, no static callers. Functions only used as values (callbacks, handlers) also show up here.</p>
+            <div class="table-wrap"><table><tbody>
+              <tr v-for="r in m.dead_code.slice(0, 25)" :key="r.id"><td><NuxtLink :to="explore(r.id)" class="mono">{{ r.name }}</NuxtLink></td><td class="mono muted">{{ r.location }}</td></tr>
+            </tbody></table></div>
+          </section>
+        </div>
+      </template>
+    </DataState>
   </div>
 </template>
 

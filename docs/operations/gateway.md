@@ -29,7 +29,7 @@ The gateway is on by default, and it needs accounts (a PostgreSQL database). Two
 | `CODESYNAPSE_GATEWAY=false` | The operator, on the API | Off for the whole installation |
 | **Settings → Organisation → Agent gateway** | An organisation owner or admin, signed in on the dashboard | Off for that organisation only. Its keys get `403` from the gateway |
 
-The same panel has **Answer with the local model first** (on by default; `local_first` on `PUT /api/v1/accounts/orgs/{org}/gateway`, which changes only the fields it is sent). Both switches are audited, as `org.gateway.set` and `org.gateway.local_first.set`. Neither can be changed with an API key. If the operator switched the gateway off, the Settings page says so, and requests are refused even when the organisation switch is on.
+The same panel has **Answer with the local model first** (on by default; `local_first` on `PUT /api/v1/accounts/orgs/{org}/gateway`, which changes only the fields it is sent). It also has **Shorten typed prompts before they go to the cloud** (on by default; `shorten_prompts`, see below). The switches are audited, as `org.gateway.set`, `org.gateway.local_first.set` and `org.gateway.shorten_prompts.set`. None can be changed with an API key. If the operator switched the gateway off, the Settings page says so, and requests are refused even when the organisation switch is on.
 
 ## Keep some models away from the local model
 
@@ -80,6 +80,22 @@ See `config/llm.example.yaml` for the full provider block and [Local models](loc
 The command checks that the gateway answers, backs up `~/.claude/settings.json`, shows you the difference and then sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_CUSTOM_HEADERS` there. To undo it, run `codesynapse mcp install --gateway --remove`. If the gateway cannot be reached when a session starts, you get a warning.
 
 The key travels in the header `X-CodeSynapse-Key`. The headers `Authorization` and `x-api-key` stay your own Anthropic credential.
+
+## Shorter prompts on the way to the cloud
+
+Unless an organisation turns off **Shorten typed prompts before they go to the cloud**, the gateway has the local model rewrite the prose people type into a terse version before a request goes to Anthropic: no articles, filler, politeness or hedging, but every name, path, identifier, number, quote and negation (not, never, no, only, except) kept exactly. Everything else goes out byte for byte: tool calls and their results, images, files, code blocks, the system prompt and the reminders Claude Code adds. A rewrite that drops a name, number, path, quote or negation, or saves less than 10%, is thrown away, and the original is sent.
+
+This applies to every request that goes to the cloud, also one the local model was offered first and did not answer (it timed out, failed, gave an empty or cut-off answer, or could not take the request). The local model always gets the text as typed. A model on the organisation's or the installation's exclude list is never shortened: it goes to the cloud exactly as sent.
+
+To use it:
+
+1. Configure a local model for the `compress` task (the first local provider takes it; see [Local models](local-models.md#queueing-and-shorter-prompts)). Leave `compress_prompts` unset or `true` in `config/llm.yaml`.
+2. Nothing to switch on: it is on for every organisation. To turn it off, an owner or admin, signed in, clears the box under **Settings → Organisation → Agent gateway** (or sends `PUT /api/v1/accounts/orgs/{org}/gateway` with `{"shorten_prompts": false}` from a signed-in session). The change is audited.
+3. Connect Claude Code as described above, so `ANTHROPIC_BASE_URL` points at the gateway and `ANTHROPIC_CUSTOM_HEADERS` carries `X-CodeSynapse-Key`. Nothing else changes on the developer's side.
+
+A prompt is rewritten once, when it is sent, and the same shorter text is reused for the rest of the chat, so the provider's prompt cache keeps matching. After an API restart, earlier prompts go out as typed. Prompts shorter than 400 bytes are left alone, and a request waits at most 8 seconds for the local model. The bytes removed show under Statistics → Models & savings, "Saved by shorter prompts". The audit entry of each request says `shortened=true` and how many bytes, never the text.
+
+The operator turns it off for the whole installation with `compress_prompts: false` in `config/llm.yaml`, or by leaving no local model routed to `compress`.
 
 ## Local agents (OpenAI-compatible)
 

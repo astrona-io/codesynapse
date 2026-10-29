@@ -140,6 +140,17 @@ func TestMoneyTotalsUnknownWithoutPrices(t *testing.T) {
 	assert.True(t, comp != nil && *comp == 0)
 }
 
+// Prompts the gateway shortened for a model no provider names are priced at
+// the reference input rate, even when no request of that row came through
+// CodeSynapse's own registry.
+func TestMoneyTotalsPricesGatewayShortening(t *testing.T) {
+	s := &Server{}
+	spent, comp := s.moneyTotals([]ModelStat{{Provider: llm.GatewayProvider, Model: llm.GatewayModel, CompressedBytes: 4e6}})
+	assert.True(t, spent != nil && *spent == 0)
+	require.True(t, comp != nil)
+	assert.Equal(t, *comp, defaultReference.InputPerMTok)
+}
+
 // The tile says why prompts are not shortened instead of showing $0.
 func TestCompressionState(t *testing.T) {
 	cloud := llm.ProviderConfig{Name: "cloud", Kind: llm.KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "big"}

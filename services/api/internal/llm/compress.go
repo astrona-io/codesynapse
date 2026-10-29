@@ -7,11 +7,13 @@ import (
 	"strings"
 
 	"github.com/astrona-io/codesynapse/internal/logx"
+	"github.com/astrona-io/codesynapse/internal/redact"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // compressSystem is constant on purpose: it is the prompt prefix of the local
 // model, and nothing per request may enter it.
-const compressSystem = `You shorten text for another language model. Rewrite the text in terse telegraphic style: drop articles, filler, pleasantries and hedging; keep short sentences or fragments. Keep every number, identifier, file path, version, name and backtick-quoted span exactly as written. Do not add facts, opinions or explanations. Do not translate. Answer with the rewritten text only.`
+const compressSystem = `You shorten text for another language model, caveman style. Drop articles, filler, pleasantries, politeness, hedging and repetition; use fragments where the meaning stays clear. Keep every name, identifier, file path, version, number and quoted or backtick-quoted span exactly as written. Keep every negation and limit (not, never, no, only, except, without) and what it applies to. Do not add facts, opinions or explanations. Do not translate. Answer with the rewritten text only.`
 
 // terseSuffix is appended to the system prompt of every compressed call so the
 // cloud model answers briefly. It is constant, so a provider's prompt cache
@@ -29,8 +31,18 @@ const (
 
 var (
 	backtickSpan = regexp.MustCompile("`[^`\n]+`")
+	quotedSpan   = regexp.MustCompile(`"[^"\n]+"`)
 	numberToken  = regexp.MustCompile(`[0-9][0-9.]*`)
+	// pathToken and identToken find file paths, dotted or snake_case names
+	// and camelCase identifiers, which must survive a rewrite as written.
+	pathToken  = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_-]*(?:[./][A-Za-z0-9_-]+)+|[A-Za-z0-9]+_[A-Za-z0-9_]+`)
+	identToken = regexp.MustCompile(`\b[a-z]+[A-Z][A-Za-z0-9]*\b|\b[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*\b`)
+	wordToken  = regexp.MustCompile(`[a-z]+`)
 )
+
+// negations are the words whose loss flips or widens a statement. A rewrite
+// must keep at least as many of each as the original had.
+var negations = []string{"not", "never", "no", "only", "except", "without", "nor"}
 
 // compressible reports whether a paragraph is prose. Code, diffs, JSON,
 // tables and lists are left to the cloud model byte for byte.
@@ -57,17 +69,34 @@ func compressible(p string) bool {
 // keepsFacts checks that the rewrite still holds every number and quoted span
 // of the original. A small model that drops one is not trusted.
 func keepsFacts(orig, short string) bool {
-	for _, tok := range backtickSpan.FindAllString(orig, -1) {
-		if !strings.Contains(short, tok) {
-			return false
+	for _, re := range []*regexp.Regexp{backtickSpan, quotedSpan, numberToken, pathToken, identToken} {
+		for _, tok := range re.FindAllString(orig, -1) {
+			if !strings.Contains(short, tok) {
+				return false
+			}
 		}
 	}
-	for _, tok := range numberToken.FindAllString(orig, -1) {
-		if !strings.Contains(short, tok) {
+	have, want := negationCounts(short), negationCounts(orig)
+	for _, w := range negations {
+		if have[w] < want[w] {
 			return false
 		}
 	}
 	return true
+}
+
+// negationCounts counts the negation words of s, reading "n't" and "cannot"
+// as "not" so a contraction is not taken for a lost negation.
+func negationCounts(s string) map[string]int {
+	s = strings.ToLower(s)
+	s = strings.NewReplacer("n't", " not", "n’t", " not", "cannot", "can not").Replace(s)
+	n := map[string]int{}
+	for _, w := range wordToken.FindAllString(s, -1) {
+		if slices.Contains(negations, w) {
+			n[w]++
+		}
+	}
+	return n
 }
 
 // Compression states, as CompressionStatus reports them.
@@ -163,13 +192,8 @@ func (r *Registry) compressCloud(ctx context.Context, name string, req Request) 
 			continue
 		}
 		calls++
-		resp, err := r.Complete(WithTask(ctx, "compress"), local, Request{System: compressSystem, User: p})
-		if err != nil {
-			logx.FromContext(ctx).Debug("prompt compression skipped", "error", err)
-			continue
-		}
-		short := strings.TrimSpace(resp.Text)
-		if short == "" || float64(len(short)) > compressGain*float64(len(p)) || !keepsFacts(p, short) {
+		short, ok := r.shorten(ctx, local, p)
+		if !ok {
 			continue
 		}
 		saved += len(p) - len(short)
@@ -179,4 +203,83 @@ func (r *Registry) compressCloud(ctx context.Context, name string, req Request) 
 		req.User = strings.Join(paras, "\n\n")
 	}
 	return req, saved
+}
+
+// shorten asks the local model to rewrite one paragraph. ok is false, and the
+// original must be used, when the call failed or the rewrite is empty, did not
+// shrink enough or lost a number or backticked name.
+func (r *Registry) shorten(ctx context.Context, local, p string) (string, bool) {
+	resp, err := r.Complete(WithTask(ctx, "compress"), local, Request{System: compressSystem, User: p})
+	if err != nil {
+		logx.FromContext(ctx).Debug("prompt compression skipped", "error", err)
+		return "", false
+	}
+	short := strings.TrimSpace(resp.Text)
+	if short == "" || float64(len(short)) > compressGain*float64(len(p)) || !keepsFacts(p, short) {
+		return "", false
+	}
+	return short, true
+}
+
+// CanShorten says whether ShortenProse can work: shortening is allowed and a
+// local model is routed to "compress". Unlike CompressionStatus it ignores
+// where CodeSynapse's own tasks run, since the gateway's prompts go to the
+// cloud whatever the task routes say.
+func (r *Registry) CanShorten() bool {
+	_, status := r.compressor()
+	return status == CompressionOn
+}
+
+// ShortenProse has the local "compress" model shorten one block of prose a
+// person typed, for the agent gateway's cloud leg. The block is taken whole
+// or not at all: it must pass compressible (no code, diffs, lists, JSON or
+// tags) and hold nothing redact.Free would change, so a rewrite never puts a
+// placeholder where a secret or personal detail was. ok is false, and the
+// caller sends the original, when shortening is off, no local model is
+// routed to "compress", or the rewrite fails the checks of shorten.
+func (r *Registry) ShortenProse(ctx context.Context, text string) (string, bool) {
+	if !compressible(text) || redact.Free(text) != text {
+		return "", false
+	}
+	local, status := r.compressor()
+	if status != CompressionOn {
+		return "", false
+	}
+	return r.shorten(ctx, local, text)
+}
+
+// Prompt bytes the gateway removed for a cloud model the configuration does
+// not name are counted under this provider and model: the requested model is
+// client text and never a metric label. Statistics prices them at the
+// reference model.
+const (
+	GatewayProvider = "gateway-cloud"
+	GatewayModel    = "anthropic"
+)
+
+func init() { telemetry.AllowModels(GatewayProvider, GatewayModel) }
+
+// RecordGatewayCompressed counts prompt bytes the gateway removed before a
+// request went to the cloud. They are attributed to the configured cloud
+// Anthropic provider whose model is the one requested, so Statistics prices
+// them at its input price, and otherwise to GatewayProvider. model is only
+// compared, never recorded.
+func (r *Registry) RecordGatewayCompressed(ctx context.Context, model string, n int) {
+	if n <= 0 {
+		return
+	}
+	provider, label := GatewayProvider, GatewayModel
+	r.mu.Lock()
+	for _, p := range r.cfg.Providers {
+		if p.Kind == KindAnthropic && !p.Local() && p.Model != "" && p.Model == model {
+			provider, label = p.Name, p.Model
+			if u := r.usage[p.Name]; u != nil {
+				u.CompressedBytes += n
+			}
+			break
+		}
+	}
+	r.mu.Unlock()
+	ctx = telemetry.WithModel(ctx, provider, label)
+	telemetry.LLMCompressed.AddContext(ctx, float64(n), telemetry.Tenant(ctx), provider, label)
 }
