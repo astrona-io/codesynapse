@@ -117,6 +117,7 @@ func New(r store.Reader, version string, opts ...Options) *mcp.Server {
 	registerAgentTools(s, h, add)
 	registerGitTools(s, add)
 	registerAskLocal(s, add)
+	registerFetchSource(s, add)
 	registerDiscoveryTools(s, h, add)
 	if len(opts) > 0 {
 		h.curated = opts[0].Curated

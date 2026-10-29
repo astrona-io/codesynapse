@@ -12,6 +12,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/asklocal"
 	"github.com/astrona-io/codesynapse/internal/coretools"
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/fetchsource"
 	"github.com/astrona-io/codesynapse/internal/ghtools"
 	"github.com/astrona-io/codesynapse/internal/gittools"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
@@ -204,7 +205,7 @@ const localAnswerAction = "mcp.local_answer"
 
 // localTools are the tools the bridge may answer on the developer's machine.
 func localTools() []string {
-	return slices.Concat(gittools.Tools, ghtools.Tools, coretools.Local, []string{asklocal.Tool, asklocal.DraftTool})
+	return slices.Concat(gittools.Tools, ghtools.Tools, coretools.Local, []string{asklocal.Tool, asklocal.DraftTool, fetchsource.Tool})
 }
 
 func (in localUsageReport) validate() error {

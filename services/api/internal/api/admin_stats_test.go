@@ -43,6 +43,8 @@ var statsReads = []string{
 	"/api/v1/admin/stats/export?section=sessions&range=6h&format=json",
 	"/api/v1/admin/stats/export?section=summary&range=24h&format=csv",
 	"/api/v1/admin/stats/summary?range=90d",
+	"/api/v1/admin/stats/storage?range=30d",
+	"/api/v1/admin/stats/alerts",
 	"/api/v1/admin/stats/sessions?range=365d",
 	"/api/v1/admin/stats/export?section=tenants&range=365d&format=json",
 	"/api/v1/admin/users",
