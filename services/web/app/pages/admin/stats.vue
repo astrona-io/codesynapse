@@ -11,7 +11,7 @@ const ranges: { id: StatsRange; label: string }[] = [
 ]
 const range = ref<StatsRange>('24h')
 const org = ref('')
-const tab = ref<'tenants' | 'sessions' | 'usage'>('tenants')
+const tab = ref<'tenants' | 'sessions' | 'usage' | 'models'>('tenants')
 const page = ref(1)
 const tenantSort = ref('name')
 const sessionSort = ref('name')
@@ -42,15 +42,18 @@ watch(tab, (t) => {
   if (t === 'sessions' && !sessions.value) loadSessions()
   if (t === 'usage' && !usage.value) { loadUsage(); loadCharts() }
 })
-const error = computed(() => summaryError.value ?? (tab.value === 'tenants' ? tenantsError.value : tab.value === 'sessions' ? sessionsError.value : usageError.value))
+// The models tab loads and reports its own errors.
+const error = computed(() => summaryError.value ?? (tab.value === 'tenants' ? tenantsError.value : tab.value === 'sessions' ? sessionsError.value : tab.value === 'usage' ? usageError.value : undefined))
 
+const modelsTick = ref(0)
 const auto = ref(false)
 let timer: ReturnType<typeof setInterval> | undefined
 function refreshAll() {
   refreshSummary()
   if (tab.value === 'tenants') refreshTenants()
   else if (tab.value === 'sessions') refreshSessions()
-  else { refreshUsage(); refreshCharts() }
+  else if (tab.value === 'usage') { refreshUsage(); refreshCharts() }
+  else modelsTick.value++
 }
 watch(auto, (on) => {
   clearInterval(timer)
@@ -59,7 +62,7 @@ watch(auto, (on) => {
 onBeforeUnmount(() => clearInterval(timer))
 
 const exportHref = (format: 'csv' | 'json') => apiPath(`admin/stats/export?section=${tab.value}&${filter.value}&format=${format}`)
-const table = computed(() => (tab.value === 'tenants' ? tenants.value : tab.value === 'sessions' ? sessions.value : usage.value))
+const table = computed(() => (tab.value === 'tenants' ? tenants.value : tab.value === 'sessions' ? sessions.value : tab.value === 'usage' ? usage.value : undefined))
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? '–' : `${v}%`)
 const shareHint = computed(() => {
   const t = usage.value?.totals
@@ -131,6 +134,7 @@ const activeHint = computed(() => {
           <button type="button" :aria-pressed="tab === 'tenants'" @click="tab = 'tenants'">Tenants</button>
           <button type="button" :aria-pressed="tab === 'sessions'" @click="tab = 'sessions'">Sessions</button>
           <button type="button" :aria-pressed="tab === 'usage'" @click="tab = 'usage'">Usage</button>
+          <button type="button" :aria-pressed="tab === 'models'" @click="tab = 'models'">Models</button>
         </div>
         <div class="row">
           <select v-if="tab === 'tenants'" v-model="tenantSort" class="inline" aria-label="Sort tenants">
@@ -139,13 +143,16 @@ const activeHint = computed(() => {
           <select v-else-if="tab === 'sessions'" v-model="sessionSort" class="inline" aria-label="Sort sessions">
             <option value="name">By name</option><option value="execution">Most runtime sessions</option><option value="keys">Most API keys</option>
           </select>
-          <select v-else v-model="usageSort" class="inline" aria-label="Sort usage">
+          <select v-else-if="tab === 'usage'" v-model="usageSort" class="inline" aria-label="Sort usage">
             <option value="name">By name</option><option value="sessions">Most sessions</option><option value="calls">Most calls</option><option value="errors">Most errors</option><option value="tokens">Most tokens</option><option value="avoided">Most avoided</option>
           </select>
-          <a :href="exportHref('csv')" download class="chip">CSV</a>
-          <a :href="exportHref('json')" download class="chip">JSON</a>
+          <template v-if="tab !== 'models'">
+            <a :href="exportHref('csv')" download class="chip">CSV</a>
+            <a :href="exportHref('json')" download class="chip">JSON</a>
+          </template>
         </div>
       </div>
+      <AdminModels v-if="tab === 'models'" :range="range" :org="org" :tick="modelsTick" />
       <template v-if="tab === 'tenants' && tenants">
         <p class="muted small">
           {{ tenants.totals.orgs_without_members }} organisations without members · {{ tenants.totals.orgs_with_sso }} with single sign-on ·

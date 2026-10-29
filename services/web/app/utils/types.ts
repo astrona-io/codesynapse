@@ -616,6 +616,27 @@ export interface OrgUsageRow extends UsageFigures { org_id: string; slug: string
 export interface UsageCount { name: string; calls: number; errors: number; sessions: number }
 export interface UsageSection extends StatsTable<UsageFigures, OrgUsageRow> { from: string; to: string; tools: UsageCount[]; clients: UsageCount[] }
 export interface StatsTable<T, R> { range: StatsRange; totals: T; rows: R[]; page: number; pages: number; total: number; rollup?: StatsRollup }
+// Models section of the platform statistics. cost_dollars is null when the
+// cost is unknown (cost_basis "unknown"), for local calls ("local") and
+// without calls ("none"); provider_cache_saved_dollars is the provider's
+// prompt-cache saving, never CodeSynapse's.
+export type ModelCostBasis = 'none' | 'local' | 'estimate' | 'partial' | 'unknown'
+export interface ModelFigures {
+  requests: number; failures: number; input_tokens: number; output_tokens: number; cached_tokens: number
+  cost_dollars: number | null; cost_basis: ModelCostBasis; unknown_usage_calls: number; pricing_missing_calls: number
+  local_requests: number; cloud_requests: number; unknown_requests: number
+  local_tokens: number; cloud_tokens: number; unknown_tokens: number; local_share_pct: number | null
+  cloud_bytes: number; provider_cache_saved_dollars: number | null
+}
+export interface ModelTotals extends ModelFigures { embedded_entities: number; offload_turns: number }
+export interface ModelOrgRow extends ModelFigures { org_id: string; slug: string; name: string; deleted: boolean }
+export interface ModelRow extends ModelFigures {
+  provider: string; model: string; kind: 'local' | 'cloud' | 'unknown'; folded: boolean
+  priced: boolean; price_source?: string; price_checked?: string; price_feed?: string
+  ttft_p95_seconds: number | null; request_p95_seconds: number | null
+  tasks: ModelTaskStat[]
+}
+export interface ModelsSection extends StatsTable<ModelTotals, ModelOrgRow> { models: ModelRow[] }
 export interface AdminHealth {
   version: string; checked: string
   graph: HealthCheck; accounts: HealthCheck; metrics: HealthCheck; audit: HealthCheck

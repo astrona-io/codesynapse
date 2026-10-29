@@ -208,8 +208,12 @@ var statsRoles = []accounts.Role{accounts.Owner, accounts.Admin, accounts.Member
 func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 	req := statsRequest(r, r.URL.Query().Get("section"))
 	req.Format = r.URL.Query().Get("format")
-	if !slices.Contains([]string{"summary", "tenants", "sessions", "usage"}, req.Section) {
-		s.problem(w, http.StatusBadRequest, errors.New("section must be summary, tenants, sessions or usage"))
+	if !slices.Contains([]string{"summary", "tenants", "sessions", "usage", "models"}, req.Section) {
+		s.problem(w, http.StatusBadRequest, errors.New("section must be summary, tenants, sessions, usage or models"))
+		return
+	}
+	if _, ok := seriesRanges[req.Range]; req.Section == "models" && !ok {
+		s.problem(w, http.StatusBadRequest, modelsRangeError)
 		return
 	}
 	if req.Format != "csv" && req.Format != "json" {
@@ -292,6 +296,13 @@ func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body, header, rows = usageExport(d)
+	case "models":
+		d, err := s.modelStats(ctx, req.Range, q)
+		if err != nil {
+			s.modelsError(w, err)
+			return
+		}
+		body, header, rows = modelsExport(d)
 	}
 	name := "codesynapse-" + req.Section + "-" + req.Range + "." + req.Format
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)

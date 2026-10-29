@@ -55,6 +55,8 @@ var statsReads = []string{
 	"/api/v1/admin/stats/usage?range=24h",
 	"/api/v1/admin/stats/usage?range=90d",
 	"/api/v1/admin/stats/export?section=usage&range=7d&format=csv",
+	"/api/v1/admin/stats/models?range=24h",
+	"/api/v1/admin/stats/export?section=models&range=7d&format=json",
 }
 
 func TestPlatformStats(t *testing.T) {
