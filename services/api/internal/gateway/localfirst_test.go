@@ -35,9 +35,10 @@ func TestLocalFirst(t *testing.T) {
 		"switched off":                {false, 0, completeAnswer, opus, "cloud", FallNotEligible},
 		"larger than the window":      {true, 50, completeAnswer, opus, "cloud", FallTooLarge},
 		"fits the window":             {true, 8192, completeAnswer, opus, "local", ""},
-		"empty answer":                {true, 0, emptyAnswer, opus, "cloud", FallBadAnswer},
-		"stopped at max tokens":       {true, 0, truncatedAnswer, opus, "cloud", FallBadAnswer},
-		"stream broke off":            {true, 0, brokenOffAnswer, opus, "cloud", FallBadAnswer},
+		"empty answer":                {true, 0, emptyAnswer, opus, "cloud", FallEmptyAnswer},
+		"stopped at max tokens":       {true, 0, truncatedAnswer, opus, "cloud", FallTruncated},
+		"stream broke off":            {true, 0, brokenOffAnswer, opus, "cloud", FallTruncated},
+		"nothing came":                {true, 0, "data: [DONE]\n\n", opus, "cloud", FallEmptyAnswer},
 		"large request, known window": {true, 1 << 20, completeAnswer, `{"model":"claude-opus-5-5","max_tokens":100,"messages":[{"role":"user","content":"` + strings.Repeat("a", 512<<10) + `"}]}`, "local", ""},
 		"large request, no window":    {true, 0, completeAnswer, `{"model":"claude-opus-5-5","max_tokens":100,"messages":[{"role":"user","content":"` + strings.Repeat("a", 512<<10) + `"}]}`, "cloud", FallTooLarge},
 	}

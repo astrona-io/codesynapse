@@ -90,6 +90,41 @@ Agents that speak the OpenAI protocol can use two paths on the API:
 
 They send the gateway key as `Authorization: Bearer csk_...`. These paths are **local only**: there is no cloud fallback, and the `model` field is replaced by the local model's name. A request waits in the local provider's queue while the connection stays open. With no local provider that has `gateway: true`, they answer `503`.
 
+## Seeing how well the local model keeps up
+
+**Statistics → Models** has a Gateway row for the selected window:
+
+| Tile | What it shows |
+|---|---|
+| Gateway requests, Answered locally | All requests by route, and the share the local model answered |
+| Local model timeouts | Requests that went to the cloud because the local model was too slow: they waited too long for its queue slot (`queue_timeout`) or for its answer (`answer_timeout`). The tile is tinted when there is at least one. A share above a few percent means the local model is overloaded or too slow for its traffic |
+| Not answered locally | Every request the local model did not answer, by reason (below) |
+| Response time, local / cloud | Average time from request to last byte by the route that answered, with the 95th percentile. The cloud figure includes any time first spent on the local model |
+| Queue wait, local | How long requests waited for the local model's slot, average and 95th percentile, and how long its own answers took |
+
+**Statistics → Activity → Model gateway** charts the same over time: response time (average and 95th percentile) by route, local model timeouts, queue wait and every fall-through by reason. Platform administrators see the same charts across organisations under **Administration → Statistics**, where a route or reason fewer than three organisations use is folded into "other". Yesterday's totals are also kept for 400 days in the daily platform statistics (`gateway` metric), so they outlive the metrics store.
+
+The reasons a request was not answered locally are a fixed list:
+
+| Reason | Meaning |
+|---|---|
+| `not_eligible` | The organisation answers only haiku-class requests locally, and this one asked for a larger model |
+| `too_large` | The request does not fit the local model's context or the body limit |
+| `has_thinking` | The request asks for thinking or sends thinking back |
+| `has_image` | The request carries an image or a document, also inside a tool result |
+| `excluded` | The model is on the installation's or organisation's exclude list |
+| `no_local_model` | No local provider with `gateway: true` is configured |
+| `queue_timeout` | No local slot was free within `gateway_wait_seconds` |
+| `answer_timeout` | The local model started but did not finish within the provider's `timeout_seconds` |
+| `cancelled` | The assistant gave up on the request before the local model answered |
+| `model_error` | The local model could not be reached or failed |
+| `bad_status` | The local model answered with an error status |
+| `empty_answer` | The local model answered nothing |
+| `truncated` | The answer stopped at `max_tokens` or broke off |
+| `bad_answer` | The answer could not be read, or it called a tool that was not offered or with broken arguments |
+
+On the OpenAI-compatible paths there is no cloud behind the local model, so their failures count with route `local`. Only the reason, the route and the timings are recorded; never the prompt or the answer.
+
 ## Safety rules
 
 - A gateway key is required, and each key gets its own audited runtime session.

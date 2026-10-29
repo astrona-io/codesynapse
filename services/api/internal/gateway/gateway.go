@@ -66,15 +66,29 @@ type Meta struct {
 	// the cloud: one of the Fall* reasons, empty when the local model
 	// answered or was never asked.
 	Fallthrough string
+	// Asked says the request reached the local model's queue; QueueWait is
+	// how long it waited there and LocalAnswer how long the local model
+	// then took to answer or to fail.
+	Asked                  bool
+	QueueWait, LocalAnswer time.Duration
+	// FirstByte is the time from the request to the first byte of the
+	// answer, zero when nothing was written.
+	FirstByte time.Duration
 }
 
-// countWriter counts the bytes of the response.
+// countWriter counts the bytes of the response and notes when the first
+// one was written.
 type countWriter struct {
 	http.ResponseWriter
-	n int
+	n     int
+	start time.Time
+	first time.Duration
 }
 
 func (c *countWriter) Write(b []byte) (int, error) {
+	if c.first == 0 && len(b) > 0 {
+		c.first = max(time.Since(c.start), time.Nanosecond)
+	}
 	n, err := c.ResponseWriter.Write(b)
 	c.n += n
 	return n, err
@@ -111,10 +125,10 @@ func NewAnthropic() *Anthropic {
 func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		w := &countWriter{ResponseWriter: rw}
+		w := &countWriter{ResponseWriter: rw, start: start}
 		done := func(ctx context.Context, m Meta, status int) {
 			if g.Done != nil {
-				m.Out = w.n
+				m.Out, m.FirstByte = w.n, w.first
 				g.Done(ctx, m, status, time.Since(start))
 			}
 		}
@@ -131,9 +145,15 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			return
 		}
 		meta := inspect(upstreamPath, body)
-		if local := g.local(); local != nil && upstreamPath == "/v1/messages" {
+		local := g.local()
+		if local == nil && g.Local != nil && upstreamPath == "/v1/messages" {
+			// A gateway meant to answer locally has no local model right now.
+			meta.Fallthrough = FallNoLocalModel
+		}
+		if local != nil && upstreamPath == "/v1/messages" {
 			rec := &statusWriter{ResponseWriter: w}
 			u, reason, ok := local.serve(r.Context(), rec, body)
+			meta.Asked, meta.QueueWait, meta.LocalAnswer = u.Asked, u.Wait, u.Answer
 			if ok {
 				meta.Route = "local"
 				meta.InTokens, meta.OutTokens, meta.CachedTokens, meta.Metered = u.In, u.Out, u.Cached, u.In+u.Out > 0
