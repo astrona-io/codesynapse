@@ -449,6 +449,11 @@ type Store interface {
 	// requests to the local model first (true when it never chose).
 	GatewayLocalFirst(ctx context.Context, orgID string) (bool, error)
 	SetGatewayLocalFirst(ctx context.Context, orgID string, on bool) error
+	// GatewayShortenPrompts says whether the gateway has the local model
+	// shorten prose people type before it goes to the cloud (true when it
+	// never chose).
+	GatewayShortenPrompts(ctx context.Context, orgID string) (bool, error)
+	SetGatewayShortenPrompts(ctx context.Context, orgID string, on bool) error
 	// GatewayLocalExclude lists the model patterns the gateway never offers
 	// to the local model (empty, never nil, when the organisation never
 	// chose); SetGatewayLocalExclude replaces the list.

@@ -358,6 +358,11 @@ export interface OrgGateway {
   local_exclude: string[]
   installation_exclude: string[]
   available: boolean
+  // The local model shortens prose people type before a request goes to
+  // the cloud; on unless an owner or admin turned it off.
+  shorten_prompts: boolean
+  // A local model is routed to "compress" and the installation allows it.
+  shorten_available: boolean
 }
 
 // The opt-in gateway prompt log (off by default; owners and admins only).
@@ -739,7 +744,7 @@ export interface ModelStats {
   // Cloud spend and the dollars prompt compression saved; null when a price is missing.
   spent_dollars?: number | null; compression_saved_dollars?: number | null
   // Whether CodeSynapse's own AI tasks get shortened prompts, and why not:
-  // disabled, no_local_model or no_ai. Gateway traffic is never shortened.
+  // disabled, no_local_model or no_ai. The gateway shortens typed prompts unless an organisation turned it off.
   compression_enabled?: boolean; compression_off?: 'disabled' | 'no_local_model' | 'no_ai' | 'no_cloud_task'
   gateway?: GatewayStat
   reference_price?: ReferencePrice

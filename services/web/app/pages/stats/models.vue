@@ -71,7 +71,7 @@ const COMPRESSION_OFF: Record<string, string> = {
 const compressionUnused = computed(() => m.value?.compression_off === 'no_cloud_task')
 const compressionOffHint = computed(() => compressionUnused.value
   ? 'every task runs on a local model, so there is nothing to shorten; it saves money only for tasks routed to a cloud model'
-  : `${COMPRESSION_OFF[m.value?.compression_off ?? ''] ?? 'not running'}; covers CodeSynapse's own AI tasks, not gateway traffic`)
+  : `${COMPRESSION_OFF[m.value?.compression_off ?? ''] ?? 'not running'}; covers CodeSynapse's own AI tasks and, unless an organisation turned it off, prompts typed through the gateway`)
 // Gateway answers the local model gave, priced at the reference model on the server; null when a local answer reported no usage.
 const gw = computed(() => m.value?.gateway)
 const gwSaved = computed(() => gw.value?.saved_dollars ?? null)
@@ -148,7 +148,7 @@ const modelWindow = computed(() => (days.value > 30 ? 'the last 30 days (the met
         <StatTile
           v-if="savedParts" label="Saved by shorter prompts"
           :value="compressionUnused ? 'not used' : !compressionOn ? 'off' : compressionSaved === null ? 'unknown' : money(compressionSaved)"
-          :tip="!compressionOn ? compressionOffHint : compressionSaved === null ? 'a cloud model has no price set; not in the total' : 'CodeSynapse\'s own AI tasks: prose a local model shortened before it went to the cloud, at the input price; gateway traffic is passed on unchanged'"
+          :tip="!compressionOn ? compressionOffHint : compressionSaved === null ? 'a cloud model has no price set; not in the total' : 'CodeSynapse\'s own AI tasks, and prompts typed through the gateway unless an organisation turned shortening off: prose a local model shortened before it went to the cloud, at the input price (each gateway rewrite counted once)'"
         />
         <StatTile v-if="savedParts" label="Saved by graph answers" :value="graphSaved === null ? 'unknown' : money(graphSaved)" :hint="graphShort" :tip="graphHint" />
         <StatTile v-if="savedParts" label="Saved on input" :value="money(savedParts.input)" :hint="`${fmtCompact(Math.max(0, localIn - localCached))} tokens read by local models instead`" />

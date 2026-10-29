@@ -1,10 +1,11 @@
 // Package gateway is the pass-through between an agent and a model API. It
 // holds each request in a queue, decides where it goes, and streams the answer
-// back untouched. It never shortens a prompt (tool payloads must stay exact)
-// and never stores or logs the caller's credential. It hands the audit entry
-// only digests and sizes of the newest user text; the text itself and a
-// local answer leave the package only for an organisation that keeps a prompt
-// log (promptlog.go).
+// back untouched. Tool payloads, system prompts and code always pass byte for
+// byte; only prose a person typed may be shortened on the cloud leg, unless
+// the organisation turned that off (shorten.go). It never stores or logs the
+// caller's credential. It hands the audit entry only digests and sizes of
+// the newest user text; the text itself and a local answer leave the
+// package only for an organisation that keeps a prompt log (promptlog.go).
 package gateway
 
 import (
@@ -71,6 +72,11 @@ type Meta struct {
 	// the cloud: one of the Fall* reasons, empty when the local model
 	// answered or was never asked.
 	Fallthrough string
+	// Shortened says the local model shortened prose of a cloud request;
+	// Removed is the bytes taken out of this request and Saved the part a
+	// rewrite made for this request removed (Shortened in shorten.go).
+	Shortened      bool
+	Removed, Saved int
 	// PromptSHA256 and PromptBytes describe the newest user text the agent
 	// sent; ForwardedSHA256 and ForwardedBytes the text that went to the
 	// cloud when the gateway changed it (TextChanged).
@@ -125,6 +131,10 @@ type Anthropic struct {
 	// /v1/messages it accepts (see Local.Eligible); the rest, and any it
 	// cannot take in time or answer whole, go to the cloud.
 	Local func() *Local
+	// Shorten, when set, shortens the user's typed prose of /v1/messages
+	// requests that go to the cloud, unless the organisation turned it off
+	// (WithShortenPrompts) or the model is on an exclude list.
+	Shorten *Shortener
 	// Done is called once per request with what happened; it must not retain
 	// anything but the values it is given.
 	Done func(ctx context.Context, m Meta, status int, took time.Duration)
@@ -193,6 +203,15 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			done(r.Context(), meta, http.StatusUnauthorized)
 			return
 		}
+		// Every cloud leg is shortened, also when the local model was asked
+		// and did not answer (the local model itself got the text as typed).
+		// A model on an exclude list goes out untouched.
+		if upstreamPath == "/v1/messages" && g.Shorten != nil && shortenOn(r.Context()) &&
+			meta.Fallthrough != FallExcluded && !excludedModel(r.Context(), local, body) {
+			var sh Shortened
+			body, sh = g.Shorten.Apply(r.Context(), body)
+			meta.Shortened, meta.Removed, meta.Saved = sh.Changed, sh.Removed, sh.New
+		}
 		meta.noteForwarded(r.Context(), sent, body)
 		status, err := g.forward(r.Context(), w, r, upstreamPath, body)
 		if err != nil {
@@ -204,6 +223,21 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 		}
 		done(r.Context(), meta, status)
 	}
+}
+
+// excludedModel says whether the requested model is on the installation's
+// (through local) or the organisation's exclude list. It reads the whole
+// model name, since translate may have refused the request (too_large)
+// before it checked the lists.
+func excludedModel(ctx context.Context, local *Local, body []byte) bool {
+	var v struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(body, &v)
+	if local != nil {
+		return local.excluded(ctx, v.Model)
+	}
+	return (&Local{}).excluded(ctx, v.Model)
 }
 
 func (g *Anthropic) local() *Local {
