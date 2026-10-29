@@ -12,7 +12,7 @@ const policySaved = ref(false)
 const { data: gateway, refresh: refreshGateway } = useApiGet<OrgGateway>(() => `accounts/orgs/${org.value?.slug ?? '-'}/gateway`)
 const gatewaySaved = ref(false)
 const gatewayError = ref('')
-async function setGateway(change: { enabled?: boolean; local_first?: boolean; local_exclude?: string[] }) {
+async function setGateway(change: { enabled?: boolean; local_first?: boolean; local_exclude?: string[]; shorten_prompts?: boolean }) {
   gatewayError.value = ''
   gatewaySaved.value = false
   try {
@@ -216,9 +216,12 @@ watch(() => org.value?.slug, () => {
           <p v-if="excludeProblem" class="notice notice--danger" role="alert">{{ excludeProblem }}</p>
           <button type="submit" class="secondary align-start" :disabled="!gateway?.enabled || !!excludeProblem || !excludeChanged">Save list</button>
         </form>
+        <label class="check"><input type="checkbox" :checked="gateway?.shorten_prompts ?? true" :disabled="!gateway?.enabled" @change="setGateway({ shorten_prompts: ($event.target as HTMLInputElement).checked })"> Shorten typed prompts before they go to the cloud</label>
+        <p class="muted small">On by default. The local model rewrites the prose people type into a terse version that keeps every name, number, path, quote and negation. Code, tool results, files and the agent’s own instructions are sent as they are, and models on the list above go out untouched. A rewrite is made once and reused for the rest of the chat, so the provider’s prompt cache keeps working.</p>
       </template>
-      <p v-else>{{ gateway?.enabled ? 'On' : 'Off' }}{{ gateway?.enabled ? (gateway.local_first ? ', local model first' : ', local model for quick requests only') : '' }}{{ gateway?.local_exclude?.length ? `; never locally: ${gateway.local_exclude.join(', ')}` : '' }}. Ask an owner or admin to change it.</p>
+      <p v-else>{{ gateway?.enabled ? 'On' : 'Off' }}{{ gateway?.enabled ? (gateway.local_first ? ', local model first' : ', local model for quick requests only') : '' }}{{ gateway?.enabled ? (gateway.shorten_prompts ? ', typed prompts shortened' : ', typed prompts sent as typed') : '' }}{{ gateway?.local_exclude?.length ? `; never locally: ${gateway.local_exclude.join(', ')}` : '' }}. Ask an owner or admin to change it.</p>
       <p v-if="gateway?.installation_exclude?.length" class="muted small">The operator also keeps these models away from the local model for every organisation: <code>{{ gateway.installation_exclude.join(', ') }}</code>.</p>
+      <p v-if="gateway?.shorten_prompts && !gateway.shorten_available" class="notice">Prompts are not shortened yet: no local model is routed to <code>compress</code>, or the operator set <code>compress_prompts: false</code>. Requests go out as typed.</p>
       <p v-if="gatewaySaved" class="notice notice--ok" role="status">Gateway setting saved.</p>
       <p v-if="gatewayError" class="notice notice--danger" role="alert">{{ gatewayError }}</p>
     </section>

@@ -41,42 +41,42 @@ const where = computed(() => session.current.value?.org.name ?? 'your repositori
       <NuxtLink to="/" class="btn btn--ghost">All repositories</NuxtLink>
     </PageHeader>
 
-    <p v-if="error" class="notice notice--danger" role="alert">{{ plainError(error) }}</p>
-    <p v-else-if="!data" class="muted small" role="status">Loading what needs attention…</p>
-    <template v-else>
-      <div v-if="!data.repos" class="empty">
-        <strong>No repositories yet</strong>
-        Add one on <NuxtLink to="/">Repositories</NuxtLink>; this page then shows what to fix first.
-      </div>
-      <template v-else>
-        <div class="grid cols-4">
-          <StatTile label="Urgent" :value="String(urgent)" :hint="urgent ? 'critical and high items below' : 'nothing urgent'" />
-          <StatTile label="Repositories affected" :value="`${affected} of ${data.repos}`" :hint="`${data.clean.length} with nothing to report`" />
-          <StatTile label="Security findings" :value="fmtCompact(data.findings)" :hint="`${fmtCompact(data.vulns)} known vulnerabilities in dependencies`" />
-          <StatTile label="Tokens saved by agents" :value="saved.value" :hint="saved.hint" />
+    <DataState :error="error ? plainError(error) : ''" :pending="!data" :empty="!data" loading="Loading what needs attention…">
+      <template v-if="data">
+        <div v-if="!data.repos" class="empty">
+          <strong>No repositories yet</strong>
+          Add one on <NuxtLink to="/">Repositories</NuxtLink>; this page then shows what to fix first.
         </div>
+        <template v-else>
+          <div class="grid cols-4">
+            <StatTile label="Urgent" :value="String(urgent)" :hint="urgent ? 'critical and high items below' : 'nothing urgent'" />
+            <StatTile label="Repositories affected" :value="`${affected} of ${data.repos}`" :hint="`${data.clean.length} with nothing to report`" />
+            <StatTile label="Security findings" :value="fmtCompact(data.findings)" :hint="`${fmtCompact(data.vulns)} known vulnerabilities in dependencies`" />
+            <StatTile label="Tokens saved by agents" :value="saved.value" :hint="saved.hint" />
+          </div>
 
-        <section class="panel">
-          <div class="panel__header">
-            <h2>Needs attention <span class="muted">{{ items.length }}</span></h2>
-            <div class="row" role="tablist" aria-label="Filter">
-              <button v-for="f in filters" :key="f.id" type="button" class="chip" :class="{ active: filter === f.id }" role="tab" :aria-selected="filter === f.id" @click="filter = f.id">{{ f.label }}</button>
+          <section class="panel">
+            <div class="panel__header">
+              <h2>Needs attention <span class="muted">{{ items.length }}</span></h2>
+              <div class="row" role="tablist" aria-label="Filter">
+                <button v-for="f in filters" :key="f.id" type="button" class="chip" :class="{ active: filter === f.id }" role="tab" :aria-selected="filter === f.id" @click="filter = f.id">{{ f.label }}</button>
+              </div>
             </div>
-          </div>
-          <AttentionList v-if="items.length" :items="items" :limit="12" />
-          <div v-else class="empty"><strong>Nothing here</strong>{{ filter === 'all' ? 'Every repository is in good shape. New findings appear here after each sync.' : 'Nothing to fix in this area.' }}</div>
-        </section>
+            <AttentionList v-if="items.length" :items="items" :limit="12" />
+            <div v-else class="empty"><strong>Nothing here</strong>{{ filter === 'all' ? 'Every repository is in good shape. New findings appear here after each sync.' : 'Nothing to fix in this area.' }}</div>
+          </section>
 
-        <section v-if="data.clean.length" class="panel">
-          <h2>All clear <span class="muted">{{ data.clean.length }}</span></h2>
-          <p class="muted small">Nothing flagged: no critical or high findings, no vulnerable or conflicting dependencies, update automation in place, and indexed recently.</p>
-          <div class="clean">
-            <NuxtLink v-for="r in data.clean" :key="r" :to="`/repos/${encodeURIComponent(r)}`" class="badge badge--green mono">{{ r }}</NuxtLink>
-          </div>
-        </section>
-        <p class="muted small">Updated {{ relTime(data.generated_at) }}<span v-if="pending"> · refreshing…</span>. <NuxtLink to="/help#terms">What do these terms mean?</NuxtLink></p>
+          <section v-if="data.clean.length" class="panel">
+            <h2>All clear <span class="muted">{{ data.clean.length }}</span></h2>
+            <p class="muted small">Nothing flagged: no critical or high findings, no vulnerable or conflicting dependencies, update automation in place, and indexed recently.</p>
+            <div class="clean">
+              <NuxtLink v-for="r in data.clean" :key="r" :to="`/repos/${encodeURIComponent(r)}`" class="badge badge--green mono">{{ r }}</NuxtLink>
+            </div>
+          </section>
+          <p class="muted small">Updated {{ relTime(data.generated_at) }}<span v-if="pending"> · refreshing…</span>. <NuxtLink to="/help#terms">What do these terms mean?</NuxtLink></p>
+        </template>
       </template>
-    </template>
+    </DataState>
   </div>
 </template>
 

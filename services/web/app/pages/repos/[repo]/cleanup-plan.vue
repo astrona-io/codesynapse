@@ -37,58 +37,58 @@ const effortLabel = (e: number) => ({ 1: 'small', 2: 'medium', 3: 'large' }[e] ?
     </PageHeader>
     <CodeHealthTabs :repo="repo" />
 
-    <p v-if="error" class="panel error">{{ apiErrorMessage(error) }}</p>
-    <template v-else-if="plan">
-      <div class="grid grid--stats">
-        <StatTile label="Steps" :value="fmtInt(plan.summary.steps)" hint="ranked below" />
-        <StatTile label="Lines you could remove" :value="`up to ${fmtInt(plan.summary.lines_up_to)}`" hint="steps can overlap" />
-        <StatTile label="Advisories fixed" :value="fmtInt(plan.summary.advisories)" hint="by removing or upgrading" />
-      </div>
-
-      <section class="panel">
-        <div class="panel__header">
-          <h2>Steps <span class="muted">· {{ steps.length }}</span></h2>
-          <div class="row">
-            <button v-for="(g, id) in GROUPS" :key="id" class="chip" :class="{ active: group === id }" :aria-pressed="group === id" @click="group = id as string">{{ g.label }}</button>
-          </div>
+    <DataState :error="error" :pending="!plan" :empty="!plan">
+      <template v-if="plan">
+        <div class="grid grid--stats">
+          <StatTile label="Steps" :value="fmtInt(plan.summary.steps)" hint="ranked below" />
+          <StatTile label="Lines you could remove" :value="`up to ${fmtInt(plan.summary.lines_up_to)}`" hint="steps can overlap" />
+          <StatTile label="Advisories fixed" :value="fmtInt(plan.summary.advisories)" hint="by removing or upgrading" />
         </div>
-        <ol v-if="steps.length" class="steps">
-          <li v-for="(s, i) in steps" :key="s.id" class="step">
-            <header class="row">
-              <span class="rank">{{ i + 1 }}</span>
-              <strong>{{ s.title }}</strong>
-            </header>
-            <div class="row meta">
-              <span class="badge">{{ KIND[s.kind] ?? s.kind }}</span>
-              <span class="badge" :class="safetyClass(s.safety)" :title="s.safety === 'high' ? 'Likely right without a close look; the build and tests confirm it' : s.safety === 'medium' ? 'Check it before you merge it' : 'Needs a person to decide'">{{ s.safety }} safety</span>
-              <span class="badge" title="How much work">{{ effortLabel(s.effort) }} effort</span>
-              <span class="muted small">value {{ s.value }} · priority {{ s.priority }}<template v-if="s.lines"> · {{ s.lines }} lines</template><template v-if="s.advisories"> · {{ s.advisories }} advisories</template></span>
+
+        <section class="panel">
+          <div class="panel__header">
+            <h2>Steps <span class="muted">· {{ steps.length }}</span></h2>
+            <div class="row">
+              <button v-for="(g, id) in GROUPS" :key="id" class="chip" :class="{ active: group === id }" :aria-pressed="group === id" @click="group = id as string">{{ g.label }}</button>
             </div>
-            <p>{{ s.why }}</p>
-            <ul v-if="s.targets.length" class="targets">
-              <li v-for="t in s.targets" :key="t.name + t.location">
-                <NuxtLink v-if="isCode(t.id)" :to="explore(t.id!)" class="mono">{{ t.name }}</NuxtLink>
-                <span v-else class="mono">{{ t.name }}</span>
-                <span v-if="t.location" class="mono muted"> {{ t.location }}</span>
-              </li>
-            </ul>
-            <p class="muted small"><strong>Check:</strong> {{ s.verify }} <NuxtLink v-if="s.link" :to="s.link">{{ s.group ? 'How to merge' : 'More detail' }}</NuxtLink></p>
-          </li>
-        </ol>
-        <div v-else class="empty"><strong>Nothing to do here</strong>No steps for this filter.</div>
-      </section>
+          </div>
+          <ol v-if="steps.length" class="steps">
+            <li v-for="(s, i) in steps" :key="s.id" class="step">
+              <header class="row">
+                <span class="rank">{{ i + 1 }}</span>
+                <strong>{{ s.title }}</strong>
+              </header>
+              <div class="row meta">
+                <span class="badge">{{ KIND[s.kind] ?? s.kind }}</span>
+                <span class="badge" :class="safetyClass(s.safety)" :title="s.safety === 'high' ? 'Likely right without a close look; the build and tests confirm it' : s.safety === 'medium' ? 'Check it before you merge it' : 'Needs a person to decide'">{{ s.safety }} safety</span>
+                <span class="badge" title="How much work">{{ effortLabel(s.effort) }} effort</span>
+                <span class="muted small">value {{ s.value }} · priority {{ s.priority }}<template v-if="s.lines"> · {{ s.lines }} lines</template><template v-if="s.advisories"> · {{ s.advisories }} advisories</template></span>
+              </div>
+              <p>{{ s.why }}</p>
+              <ul v-if="s.targets.length" class="targets">
+                <li v-for="t in s.targets" :key="t.name + t.location">
+                  <NuxtLink v-if="isCode(t.id)" :to="explore(t.id!)" class="mono">{{ t.name }}</NuxtLink>
+                  <span v-else class="mono">{{ t.name }}</span>
+                  <span v-if="t.location" class="mono muted"> {{ t.location }}</span>
+                </li>
+              </ul>
+              <p class="muted small"><strong>Check:</strong> {{ s.verify }} <NuxtLink v-if="s.link" :to="s.link">{{ s.group ? 'How to merge' : 'More detail' }}</NuxtLink></p>
+            </li>
+          </ol>
+          <div v-else class="empty"><strong>Nothing to do here</strong>No steps for this filter.</div>
+        </section>
 
-      <section v-if="plan.notes.length" class="panel">
-        <p class="eyebrow">Left out on purpose</p>
-        <ul><li v-for="n in plan.notes" :key="n">{{ n }}</li></ul>
-      </section>
+        <section v-if="plan.notes.length" class="panel">
+          <p class="eyebrow">Left out on purpose</p>
+          <ul><li v-for="n in plan.notes" :key="n">{{ n }}</li></ul>
+        </section>
 
-      <section class="panel">
-        <p class="eyebrow">How the order is decided</p>
-        <p class="muted small">Priority = value × safety factor ÷ effort divisor. Value (0 to 100) is how much the step is worth: called vulnerabilities and risky dead code score highest, copies and tests lower. Safety factors are 1.0 for high, 0.8 for medium and 0.6 for low; effort divisors are 1.0, 1.5 and 2.0 for small, medium and large. Nothing here edits your code, and the plan is only as current as the last Sync.</p>
-      </section>
-    </template>
-    <p v-else class="muted">Loading…</p>
+        <section class="panel">
+          <p class="eyebrow">How the order is decided</p>
+          <p class="muted small">Priority = value × safety factor ÷ effort divisor. Value (0 to 100) is how much the step is worth: called vulnerabilities and risky dead code score highest, copies and tests lower. Safety factors are 1.0 for high, 0.8 for medium and 0.6 for low; effort divisors are 1.0, 1.5 and 2.0 for small, medium and large. Nothing here edits your code, and the plan is only as current as the last Sync.</p>
+        </section>
+      </template>
+    </DataState>
   </div>
 </template>
 

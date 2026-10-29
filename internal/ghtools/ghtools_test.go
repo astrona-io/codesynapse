@@ -1,6 +1,7 @@
 package ghtools
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -237,11 +238,20 @@ func fakeGHSeq(t *testing.T, outs ...string) (calls func() int) {
 	}
 }
 
+// fastPolling puts Status on a fake clock that moves only when it sleeps, so
+// how long a gh call takes on a busy machine cannot decide whether the grace
+// for checks to appear has passed.
 func fastPolling(t *testing.T) {
 	t.Helper()
-	oldPoll, oldGrace := pollInterval, noChecksGrace
-	pollInterval, noChecksGrace = 5*time.Millisecond, 600*time.Millisecond
-	t.Cleanup(func() { pollInterval, noChecksGrace = oldPoll, oldGrace })
+	oldPoll, oldGrace, oldNow, oldSleep := pollInterval, noChecksGrace, now, sleep
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	pollInterval, noChecksGrace = time.Second, 3*time.Second
+	now = func() time.Time { return clock }
+	sleep = func(ctx context.Context, d time.Duration) error {
+		clock = clock.Add(d)
+		return ctx.Err()
+	}
+	t.Cleanup(func() { pollInterval, noChecksGrace, now, sleep = oldPoll, oldGrace, oldNow, oldSleep })
 }
 
 func prJSON(state string, runs ...string) string {
@@ -277,13 +287,13 @@ func TestStatusWaitStopsAtFirstFailure(t *testing.T) {
 
 func TestStatusWaitTimesOut(t *testing.T) {
 	fastPolling(t)
-	fakeGHSeq(t, prJSON("OPEN", runPending))
-	start := time.Now()
+	calls := fakeGHSeq(t, prJSON("OPEN", runPending))
 	got, err := Status(t.Context(), t.TempDir(), PRStatusIn{WaitSeconds: 1})
 	require.NoError(t, err)
 	assert.True(t, got.TimedOut)
 	assert.False(t, got.Checks.Done)
-	assert.True(t, time.Since(start) < 3*time.Second)
+	assert.Equal(t, got.WaitedSeconds, 1)
+	assert.Equal(t, calls(), 2, "one poll at the start and one at the deadline")
 }
 
 func TestStatusWaitGivesChecksTimeToAppear(t *testing.T) {
@@ -299,6 +309,7 @@ func TestStatusWaitGivesChecksTimeToAppear(t *testing.T) {
 	got, err = Status(t.Context(), t.TempDir(), PRStatusIn{WaitSeconds: 5})
 	require.NoError(t, err)
 	assert.False(t, got.TimedOut)
+	assert.Equal(t, got.WaitedSeconds, 3, "it waited exactly the grace")
 }
 
 func TestStatusWaitRefusesBadValuesAndMergedEndsIt(t *testing.T) {

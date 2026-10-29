@@ -48,7 +48,7 @@ func TestHumanIdentityReviewAPI(t *testing.T) {
 		User accounts.User
 		Org  accounts.Org
 	}
-	require.Equal(t, owner.do("POST", "/api/v1/auth/signup", `{"email":"identity-owner@example.com","name":"Owner","password":"`+pw+`"}`, &signed), 201)
+	require.Equal(t, owner.signUp(`{"email":"identity-owner@example.com","name":"Owner","password":"`+pw+`"}`, &signed), 202)
 	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: signed.Org.ID, Graph: "r", AddedBy: signed.User.ID, AddedAt: time.Now()}))
 	in := curation.IdentityReviewInput{From: report.Symbols[0].ID, To: report.Symbols[1].ID, Relation: "same-symbol", Reason: "Checked source history", Revision: "two"}
 	body, err := json.Marshal(in)

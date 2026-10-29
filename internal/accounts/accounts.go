@@ -7,6 +7,7 @@ package accounts
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/ingestreport"
@@ -317,6 +318,14 @@ var (
 	ErrLastRepoAdmin = errors.New("a repository needs at least one active administrator")
 	ErrNotFound      = errors.New("not found")
 	ErrExists        = errors.New("already exists")
+	// ErrEmailTaken is a sign-up with a registered email. It is ErrExists
+	// for callers in the service, but the API answers it exactly like a
+	// sign-up that worked, so sign-up does not reveal which emails have
+	// accounts.
+	ErrEmailTaken = fmt.Errorf("email %w", ErrExists)
+	// ErrUsernameTaken is a sign-up with a taken username. It is checked
+	// before the email, so it says nothing about the email.
+	ErrUsernameTaken = fmt.Errorf("username %w", ErrExists)
 	ErrUnauthorized  = errors.New("invalid credentials")
 	ErrForbidden     = errors.New("not allowed")
 	ErrSignupClosed  = errors.New("sign-up is closed; ask an administrator for an account")
@@ -449,6 +458,11 @@ type Store interface {
 	// requests to the local model first (true when it never chose).
 	GatewayLocalFirst(ctx context.Context, orgID string) (bool, error)
 	SetGatewayLocalFirst(ctx context.Context, orgID string, on bool) error
+	// GatewayShortenPrompts says whether the gateway has the local model
+	// shorten prose people type before it goes to the cloud (true when it
+	// never chose).
+	GatewayShortenPrompts(ctx context.Context, orgID string) (bool, error)
+	SetGatewayShortenPrompts(ctx context.Context, orgID string, on bool) error
 	// GatewayLocalExclude lists the model patterns the gateway never offers
 	// to the local model (empty, never nil, when the organisation never
 	// chose); SetGatewayLocalExclude replaces the list.

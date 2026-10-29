@@ -19,6 +19,7 @@ const showWindow = computed(() => !route.path.endsWith('/activity') && !route.pa
     <nav class="tabs" aria-label="Statistics">
       <NuxtLink to="/stats/agents">Agents</NuxtLink>
       <NuxtLink to="/stats/models">Models &amp; savings</NuxtLink>
+      <NuxtLink to="/stats/gateway">Gateway</NuxtLink>
       <NuxtLink to="/stats/queue">Model queue</NuxtLink>
       <NuxtLink to="/stats/memory">Agent memory</NuxtLink>
       <NuxtLink to="/stats/activity">Live activity</NuxtLink>

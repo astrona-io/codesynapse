@@ -29,7 +29,7 @@ The gateway is on by default, and it needs accounts (a PostgreSQL database). Two
 | `CODESYNAPSE_GATEWAY=false` | The operator, on the API | Off for the whole installation |
 | **Settings → Organisation → Agent gateway** | An organisation owner or admin, signed in on the dashboard | Off for that organisation only. Its keys get `403` from the gateway |
 
-The same panel has **Answer with the local model first** (on by default; `local_first` on `PUT /api/v1/accounts/orgs/{org}/gateway`, which changes only the fields it is sent). Both switches are audited, as `org.gateway.set` and `org.gateway.local_first.set`. Neither can be changed with an API key. If the operator switched the gateway off, the Settings page says so, and requests are refused even when the organisation switch is on.
+The same panel has **Answer with the local model first** (on by default; `local_first` on `PUT /api/v1/accounts/orgs/{org}/gateway`, which changes only the fields it is sent). It also has **Shorten typed prompts before they go to the cloud** (on by default; `shorten_prompts`, see below). The switches are audited, as `org.gateway.set`, `org.gateway.local_first.set` and `org.gateway.shorten_prompts.set`. None can be changed with an API key. If the operator switched the gateway off, the Settings page says so, and requests are refused even when the organisation switch is on.
 
 ## Keep some models away from the local model
 
@@ -81,6 +81,22 @@ The command checks that the gateway answers, backs up `~/.claude/settings.json`,
 
 The key travels in the header `X-CodeSynapse-Key`. The headers `Authorization` and `x-api-key` stay your own Anthropic credential.
 
+## Shorter prompts on the way to the cloud
+
+Unless an organisation turns off **Shorten typed prompts before they go to the cloud**, the gateway has the local model rewrite the prose people type into a terse version before a request goes to Anthropic: no articles, filler, politeness or hedging, but every name, path, identifier, number, quote and negation (not, never, no, only, except) kept exactly. Everything else goes out byte for byte: tool calls and their results, images, files, code blocks, the system prompt and the reminders Claude Code adds. A rewrite that drops a name, number, path, quote or negation, or saves less than 10%, is thrown away, and the original is sent.
+
+This applies to every request that goes to the cloud, also one the local model was offered first and did not answer (it timed out, failed, gave an empty or cut-off answer, or could not take the request). The local model always gets the text as typed. A model on the organisation's or the installation's exclude list is never shortened: it goes to the cloud exactly as sent.
+
+To use it:
+
+1. Configure a local model for the `compress` task (the first local provider takes it; see [Local models](local-models.md#queueing-and-shorter-prompts)). Leave `compress_prompts` unset or `true` in `config/llm.yaml`.
+2. Nothing to switch on: it is on for every organisation. To turn it off, an owner or admin, signed in, clears the box under **Settings → Organisation → Agent gateway** (or sends `PUT /api/v1/accounts/orgs/{org}/gateway` with `{"shorten_prompts": false}` from a signed-in session). The change is audited.
+3. Connect Claude Code as described above, so `ANTHROPIC_BASE_URL` points at the gateway and `ANTHROPIC_CUSTOM_HEADERS` carries `X-CodeSynapse-Key`. Nothing else changes on the developer's side.
+
+A prompt is rewritten once, when it is sent, and the same shorter text is reused for the rest of the chat, so the provider's prompt cache keeps matching. After an API restart, earlier prompts go out as typed. Prompts shorter than 400 bytes are left alone, and a request waits at most 8 seconds for the local model. The bytes removed show under Statistics → Models & savings, "Saved by shorter prompts". The audit entry of each request says `shortened=true` and how many bytes, never the text.
+
+The operator turns it off for the whole installation with `compress_prompts: false` in `config/llm.yaml`, or by leaving no local model routed to `compress`.
+
 ## Local agents (OpenAI-compatible)
 
 Agents that speak the OpenAI protocol can use two paths on the API:
@@ -92,7 +108,7 @@ They send the gateway key as `Authorization: Bearer csk_...`. These paths are **
 
 ## Seeing how well the local model keeps up
 
-**Statistics → Models** has a Gateway row for the selected window:
+**Statistics → Gateway** shows the gateway on its own page, with the same window chips as the other Statistics pages. Its tiles cover the selected window:
 
 | Tile | What it shows |
 |---|---|
@@ -101,8 +117,17 @@ They send the gateway key as `Authorization: Bearer csk_...`. These paths are **
 | Not answered locally | Every request the local model did not answer, by reason (below) |
 | Response time, local / cloud | Average time from request to last byte by the route that answered, with the 95th percentile. The cloud figure includes any time first spent on the local model |
 | Queue wait, local | How long requests waited for the local model's slot, average and 95th percentile, and how long its own answers took |
+| Bytes in / out | Request and response sizes through the gateway |
 
-**Statistics → Activity → Model gateway** charts the same over time: response time (average and 95th percentile) by route, local model timeouts, queue wait and every fall-through by reason. Platform administrators see the same charts across organisations under **Administration → Statistics**, where a route or reason fewer than three organisations use is folded into "other". Yesterday's totals are also kept for 400 days in the daily platform statistics (`gateway` metric), so they outlive the metrics store.
+What gateway answers saved stays on **Statistics → Models & savings** as "Saved by gateway answers", because it is part of the total saved there.
+
+Below the tiles, the page charts the same over time from the metrics store, which keeps 30 days (a 90-day window shows the last 30):
+
+- **Response time, local model** and **Response time, cloud**: the 50th, 75th, 95th and 99th percentile as lines, one chart per route. The two charts share one y axis by default, so the route whose lines sit lower is the faster one; "Own scale" gives each its own. The percentiles are `histogram_quantile` estimates from the request-duration histogram, whose buckets end at 5, 10, 25, 50, 100, 250 and 500 ms and 1, 2.5, 5, 10, 30, 60, 120 and 300 s, so a value is only as precise as the bucket it falls in.
+- **Gateway response time (average)** by route, **Local model queue wait** and **Local model timeouts**, as lines.
+- **Not answered locally, by reason**: the fall-through reasons for the window, as bars, largest first.
+
+Platform administrators see the response-time percentiles across organisations under **Administration → Statistics**. A route fewer than three organisations used in the window is hidden there, and a reason fewer than three organisations share is folded into "other". Yesterday's totals are also kept for 400 days in the daily platform statistics (`gateway` metric), so they outlive the metrics store.
 
 The reasons a request was not answered locally are a fixed list:
 

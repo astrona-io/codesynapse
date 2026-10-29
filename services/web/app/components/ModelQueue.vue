@@ -97,7 +97,7 @@ const LEVEL: Record<string, string> = { unknown: 'Not enough data', fine: 'One e
 
     <div v-if="!metricsOff" class="grid cols-2">
       <template v-for="panel in PANELS" :key="panel">
-        <SeriesCard v-if="!hiddenPanels.includes(panel)" :panel="panel" :range="range" :batched="charts[panel] ?? null" :batch-pending="chartsPending" @unavailable="unavailable(panel)" />
+        <SeriesCard v-if="!hiddenPanels.includes(panel)" :panel="panel" :range="range" :batched="charts[panel] ?? null" :batch-pending="chartsPending" :y-max="panel === 'queue_saturation' ? 100 : undefined" @unavailable="unavailable(panel)" />
       </template>
     </div>
     <p v-if="weeks === 12 && !metricsOff" class="muted small">The charts show the last 30 days; the peak hours cover all twelve weeks.</p>

@@ -47,7 +47,8 @@ async function renderComponent(t, file, globals, props = {}) {
   app.component('GraphCanvas', { template: '<div />' })
   app.component('StatTile', { props: ['label', 'value', 'hint', 'tip', 'tone'], template: '<div :data-tone="tone">{{ label }} {{ value }} {{ hint }} <i>{{ tip }}</i></div>' })
   app.component('ColumnChart', { template: '<div />' })
-  app.component('RankList', { template: '<div />' })
+  app.component('RankList', { props: ['rows'], template: '<ul class="rank"><li v-for="r in rows ?? []" :key="r.label">{{ r.label }} {{ r.value }}</li></ul>' })
+  app.component('SeriesCard', { props: ['panel', 'yMax'], template: '<figure :data-panel="panel" :data-ymax="yMax" />' })
   app.component('InfoTip', { props: ['text', 'term', 'label'], template: '<i class="info">{{ text }}</i>' })
   app.component('NuxtLink', { template: '<a><slot /></a>' })
   app.component('DataState', await compileComponent(t, './DataState.vue'))
@@ -86,6 +87,7 @@ test('a failed graph does not hide a valid symbol card or crash on null relation
       if (path.includes('/graph?')) throw new Error('Graph timed out')
       return { symbol: { id: 'symbol-1', name: 'Handler', kind: 'Function' }, callers: null, callees: null, tests: null }
     },
+    useApiGet: () => ({ data: ref(null), error: ref(null), pending: ref(false) }),
     apiErrorMessage: (e) => e.message,
     shortName: (n) => n.name,
     location: () => 'app.go:10',
@@ -93,6 +95,70 @@ test('a failed graph does not hide a valid symbol card or crash on null relation
   assert.match(html, /Handler/)
   assert.match(html, /Call neighbourhood unavailable: Graph timed out/)
   assert.match(html, /This symbol is not reached by any test/)
+  assert.doesNotMatch(html, /File outline/)
+})
+
+test('a file picked in the explorer shows its outline, with code entries linking to their card', async (t) => {
+  const paths = []
+  const html = await renderComponent(t, '../pages/repos/[repo]/explore.vue', {
+    useRoute: () => ({ params: { repo: 'acme/app' }, query: { file: 'docs/guide.md' } }),
+    useRouter: () => ({ push() {} }),
+    repoPath: (repo, rest) => `repos/${encodeURIComponent(repo)}/${rest}`,
+    apiGet: async () => { throw new Error('no symbol is selected') },
+    useApiGet: (path) => {
+      paths.push(path())
+      return {
+        data: ref({ file: 'docs/guide.md', entries: [
+          { id: 'sec-1', kind: 'Section', name: 'Install', lines: '1-20', summary: 'How to install.' },
+          { id: 'fn-1', kind: 'Function', name: 'Run', lines: '22-30' },
+        ] }),
+        error: ref(null), pending: ref(false),
+      }
+    },
+    apiErrorMessage: (e) => e.message,
+  })
+  assert.deepEqual(paths, ['repos/acme%2Fapp/outline?file=docs%2Fguide.md'])
+  assert.match(html, /File outline/)
+  assert.match(html, /Install/)
+  assert.match(html, /How to install\./)
+  assert.match(html, /<a href="#" class="mono">Run<\/a>/)
+  assert.doesNotMatch(html, /Search for a symbol, file or doc section/)
+})
+
+test('an explorer file with nothing indexed says so instead of an empty table', async (t) => {
+  const html = await renderComponent(t, '../pages/repos/[repo]/explore.vue', {
+    useRoute: () => ({ params: { repo: 'acme/app' }, query: { file: 'README' } }),
+    useRouter: () => ({ push() {} }),
+    repoPath: (repo, rest) => `repos/${encodeURIComponent(repo)}/${rest}`,
+    apiGet: async () => ({}),
+    useApiGet: () => ({ data: ref({ file: 'README', entries: null }), error: ref(null), pending: ref(false) }),
+    apiErrorMessage: (e) => e.message,
+  })
+  assert.match(html, /Nothing indexed in this file/)
+  assert.doesNotMatch(html, /<table>/)
+})
+
+test('a page on DataState shows the error, the loading line and the empty state it was given', async (t) => {
+  const render = (st, state) => renderComponent(st, '../pages/repos/[repo]/packages.vue', {
+    useRoute: () => ({ params: { repo: 'acme/app' } }),
+    useHead: () => {},
+    repoPath: (repo, rest) => `repos/${encodeURIComponent(repo)}/${rest}`,
+    useApiGet: () => ({ data: ref(state.data ?? null), error: ref(state.error ?? null), pending: ref(false) }),
+    apiErrorMessage: (e) => e.message,
+    plural: (n, w) => `${n} ${w}s`,
+  })
+  await t.test('error', async (st) => {
+    const html = await render(st, { error: new Error('Graph store is down') })
+    assert.match(html, /role="alert">Graph store is down</)
+  })
+  await t.test('loading', async (st) => {
+    assert.match(await render(st, {}), /Loading packages…/)
+  })
+  await t.test('empty', async (st) => {
+    const html = await render(st, { data: { nodes: [], edges: [] } })
+    assert.match(html, /No packages indexed/)
+    assert.match(html, /Sync it, or check that it holds code in a supported language\./)
+  })
 })
 
 test('statistics renders missing token and edit fields from an older API', async (t) => {
@@ -200,31 +266,45 @@ test('models and savings split the token pool without counting ask_local twice',
   assert.match(html, /Saved on cached input none reported +<i>the local runtime reported no prompt-cache hits/)
   assert.match(html, /Spent on cloud models \(est\.\) \$0\.25 /)
   assert.match(html, /Saved by shorter prompts \$0\.50 +<i>CodeSynapse&#39;s own AI tasks/)
-  assert.match(html, /gateway traffic is passed on unchanged/)
-  assert.match(html, /Gateway requests 10 6 local · 3 cloud · 1 refused · 1 failed/)
-  assert.match(html, /Answered locally 60% /)
-  assert.match(html, /Saved by local answers \$0\.25 /)
+  assert.match(html, /prompts typed through the gateway unless an organisation turned shortening off/)
+  assert.match(html, /Saved by gateway answers \$0\.25 /)
+  assert.match(html, /Statistics → Gateway/)
+  assert.doesNotMatch(html, /Gateway requests \d|Local model timeouts/, 'the gateway tiles moved to their own page')
 })
 
-test('gateway tiles show timeouts, fall-through reasons and response times local vs cloud', async (t) => {
+test('gateway page: tiles, quantile charts on one scale and reasons as bars', async (t) => {
   const gateway = {
-    requests: 40, local: 30, cloud: 10, rejected: 0, failed: 0, local_share_pct: 75, bytes_in: 1, bytes_out: 1,
+    requests: 40, local: 30, cloud: 10, rejected: 0, failed: 1, local_share_pct: 75, bytes_in: 1, bytes_out: 1,
     local_input_tokens: 0, local_output_tokens: 0, local_unmetered: 0, saved_dollars: 0,
     fallthroughs: 8, fallthrough_reasons: { queue_timeout: 3, answer_timeout: 1, too_large: 4 }, timeouts: 4, timeout_share_pct: 10,
     local_avg_seconds: 2, local_p95_seconds: 4.5, cloud_avg_seconds: 12.4, cloud_p95_seconds: null,
     queue_avg_seconds: 0.25, queue_p95_seconds: 19.5, local_answer_avg_seconds: 1.5,
   }
-  const render = (gw) => renderComponent(t, '../pages/stats/models.vue', {
-    useStatistics: () => ({ days: ref(30), error: ref(null), pending: ref(false), s: ref({ agents: { tokens: { total: 0 } } }) }),
-    useApiGet: (url) => ({ data: ref(url().startsWith('stats/savings') ? null : { range: '30d', models: [], gateway: gw }), error: ref(null), pending: ref(false) }),
-    localSaved, totalSaved, windowLabel,
-    seriesRangeFor: () => '30d',
-    seriesRangeLabel: () => 'Last 30 days',
+  const line = (name, values) => ({ name, values, total: Math.max(...values) })
+  const panels = {
+    gateway_latency_local: { status: 200, data: { series: [line('p50', [0.2, 0.4]), line('p99', [1.5, 3])] } },
+    gateway_latency_cloud: { status: 200, data: { series: [line('p50', [1, 2]), line('p99', [6, 9])] } },
+  }
+  const render = (gw) => renderComponent(t, '../pages/stats/gateway.vue', {
+    useStatistics: () => ({ days: ref(7), error: ref(null), pending: ref(false), s: ref(null) }),
+    useApiGet: () => ({ data: ref({ range: '7d', models: [], gateway: gw }), error: ref(null), pending: ref(false) }),
+    useSeriesBatch: () => ({ panels: ref(panels), pending: ref(false), refresh: () => {} }),
+    windowLabel,
+    seriesRangeFor: () => '7d',
+    seriesRangeLabel: () => 'Last 7 days',
     fmtCompact: (n) => String(n),
-    fmtInt: (n) => String(n),
     apiErrorMessage: (e) => String(e),
   }, {})
   const html = await render(gateway)
+  assert.match(html, /Gateway requests 40 30 local · 10 cloud · 0 refused · 1 failed/)
+  assert.match(html, /Answered locally 75% /)
+  for (const p of ['gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_queue_wait', 'gateway_timeouts']) {
+    assert.match(html, new RegExp(`data-panel="${p}"`), `${p} is drawn`)
+  }
+  assert.match(html, /data-panel="gateway_latency_local" data-ymax="9"/, 'local shares the cloud chart\'s top')
+  assert.match(html, /data-panel="gateway_latency_cloud" data-ymax="9"/)
+  assert.match(html, /estimates from histogram buckets/)
+  assert.match(html, /<li>too large 4<\/li><li>waited too long for a slot 3<\/li><li>answered too slowly 1<\/li>/, 'reasons are bars, largest first')
   assert.match(html, /<div data-tone="warning">Local model timeouts 4 10% of requests · 3 queue · 1 answer <i>requests that went to the cloud because the local model was too slow/)
   assert.match(html, /Not answered locally 8 4 too large · 3 waited too long for a slot <i>by reason: 4 too large · 3 waited too long for a slot · 1 answered too slowly\./)
   assert.match(html, /Response time, local 2\.0 s p95 4\.5 s /)
@@ -241,7 +321,7 @@ test('gateway tiles show timeouts, fall-through reasons and response times local
     for (const k of ['fallthroughs', 'fallthrough_reasons', 'timeouts', 'timeout_share_pct', 'local_avg_seconds', 'local_p95_seconds', 'cloud_avg_seconds', 'cloud_p95_seconds', 'queue_avg_seconds', 'queue_p95_seconds', 'local_answer_avg_seconds']) delete old[k]
     const html = await render(old)
     assert.match(html, /Answered locally 75% /)
-    assert.doesNotMatch(html, /Local model timeouts|Response time|Queue wait/)
+    assert.doesNotMatch(html, /Local model timeouts|Response time, (local|cloud)|Queue wait, local/)
   })
 })
 
@@ -262,7 +342,7 @@ test('shorter prompts tile says why it is off instead of showing $0', async (t) 
     fmtInt: (n) => String(n),
     apiErrorMessage: (e) => String(e),
   }, {})
-  assert.match(html, /Saved by shorter prompts off +<i>no local model to shorten with; covers CodeSynapse&#39;s own AI tasks, not gateway traffic/)
+  assert.match(html, /Saved by shorter prompts off +<i>no local model to shorten with; covers CodeSynapse&#39;s own AI tasks and, unless an organisation turned it off, prompts typed through the gateway/)
   assert.doesNotMatch(html, /Saved by shorter prompts \$0\.00/)
 })
 

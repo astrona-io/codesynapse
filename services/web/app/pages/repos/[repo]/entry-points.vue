@@ -81,41 +81,41 @@ const at = (e: EntryPoint) => {
       </div>
     </section>
 
-    <p v-if="error" class="notice notice--danger" role="alert">{{ apiErrorMessage(error) }}</p>
-    <p v-else-if="!data" class="muted" role="status">Loading entry points…</p>
-    <template v-else-if="data">
-      <div v-if="!data.entry_points.length" class="empty">
-        <strong>{{ all?.total ? 'Nothing matches' : 'No entry points found' }}</strong>
-        {{ all?.total ? 'Loosen the filters above.' : 'Go net/http, chi, gin, echo, cobra and MCP servers, Flask, FastAPI, click and Typer, and Express, Fastify and Hono registrations are recognised.' }}
-      </div>
-      <ul v-else class="eps" :class="{ refreshing: pending }">
-        <li v-for="e in data.entry_points" :key="e.kind + e.name + e.registered" class="panel ep">
-          <div class="ep__head">
-            <span class="badge">{{ kindLabel(e.kind) }}</span>
-            <span class="ep__name mono">{{ e.name }}</span>
-            <span v-if="!guarded(e)" class="badge badge--amber">No guard seen</span>
-            <span v-if="e.checks_auth" class="badge badge--green">Checks authorization</span>
-          </div>
-          <p class="ep__meta small">
-            <template v-if="e.handler">Handled by <NuxtLink :to="handlerLink(e)" class="mono">{{ e.handler }}</NuxtLink></template>
-            <template v-else-if="e.inline_handler">Inline handler: read it at the registration</template>
-            · registered at <span class="mono path">{{ at(e).file }}:{{ at(e).line }}</span>
-          </p>
-          <div v-if="e.guards?.length" class="row">
-            <span class="label">Guards</span>
-            <span v-for="g in e.guards" :key="g" class="pill mono">{{ g }}</span>
-          </div>
-          <div v-if="e.reaches?.length" class="row">
-            <span class="label">Reaches</span>
-            <span v-for="s in e.reaches" :key="s.tag" class="sev" :class="sinkCls(s)" :title="`via ${s.via}, ${plural(s.depth, 'call')} from the handler`">{{ s.tag }} <span class="via">via {{ s.via }}</span></span>
-          </div>
-        </li>
-      </ul>
-      <details v-if="data.notes.length" class="notes">
-        <summary>What this can and cannot see</summary>
-        <ul><li v-for="n in data.notes" :key="n" class="muted small">{{ n }}</li></ul>
-      </details>
-    </template>
+    <DataState :error="error" :pending="!data" :empty="!data" loading="Loading entry points…">
+      <template v-if="data">
+        <div v-if="!data.entry_points.length" class="empty">
+          <strong>{{ all?.total ? 'Nothing matches' : 'No entry points found' }}</strong>
+          {{ all?.total ? 'Loosen the filters above.' : 'Go net/http, chi, gin, echo, cobra and MCP servers, Flask, FastAPI, click and Typer, and Express, Fastify and Hono registrations are recognised.' }}
+        </div>
+        <ul v-else class="eps" :class="{ refreshing: pending }">
+          <li v-for="e in data.entry_points" :key="e.kind + e.name + e.registered" class="panel ep">
+            <div class="ep__head">
+              <span class="badge">{{ kindLabel(e.kind) }}</span>
+              <span class="ep__name mono">{{ e.name }}</span>
+              <span v-if="!guarded(e)" class="badge badge--amber">No guard seen</span>
+              <span v-if="e.checks_auth" class="badge badge--green">Checks authorization</span>
+            </div>
+            <p class="ep__meta small">
+              <template v-if="e.handler">Handled by <NuxtLink :to="handlerLink(e)" class="mono">{{ e.handler }}</NuxtLink></template>
+              <template v-else-if="e.inline_handler">Inline handler: read it at the registration</template>
+              · registered at <span class="mono path">{{ at(e).file }}:{{ at(e).line }}</span>
+            </p>
+            <div v-if="e.guards?.length" class="row">
+              <span class="label">Guards</span>
+              <span v-for="g in e.guards" :key="g" class="pill mono">{{ g }}</span>
+            </div>
+            <div v-if="e.reaches?.length" class="row">
+              <span class="label">Reaches</span>
+              <span v-for="s in e.reaches" :key="s.tag" class="sev" :class="sinkCls(s)" :title="`via ${s.via}, ${plural(s.depth, 'call')} from the handler`">{{ s.tag }} <span class="via">via {{ s.via }}</span></span>
+            </div>
+          </li>
+        </ul>
+        <details v-if="data.notes.length" class="notes">
+          <summary>What this can and cannot see</summary>
+          <ul><li v-for="n in data.notes" :key="n" class="muted small">{{ n }}</li></ul>
+        </details>
+      </template>
+    </DataState>
   </div>
 </template>
 

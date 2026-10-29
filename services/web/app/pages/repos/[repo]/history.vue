@@ -38,37 +38,37 @@ const when = (iso?: string) => (iso ? new Date(iso).toLocaleString([], { month: 
       <SyncControl :repo="repo" />
     </PageHeader>
 
-    <p v-if="error" class="notice notice--danger">{{ apiErrorMessage(error) }}</p>
-    <template v-else-if="trend">
-      <div v-if="trend.snapshots.length < 2" class="empty">
-        <strong>{{ trend.snapshots.length ? 'One point so far' : 'No history yet' }}</strong>
-        A trend needs two syncs. Press Sync again after the code changes, or wait for the next scheduled sync.
-      </div>
-      <template v-else>
-        <div class="grid cols-2">
-          <section class="panel">
-            <p class="eyebrow">Got worse</p>
-            <h2>Since {{ when(trend.since) }}</h2>
-            <ul v-if="trend.regressions.length" class="plain"><li v-for="c in trend.regressions" :key="c.key">{{ c.detail }}</li></ul>
-            <p v-else class="muted">Nothing got worse by more than the noise.</p>
-          </section>
-          <section class="panel">
-            <p class="eyebrow eyebrow--green">Got better</p>
-            <h2>Since {{ when(trend.since) }}</h2>
-            <ul v-if="trend.improvements.length" class="plain"><li v-for="c in trend.improvements" :key="c.key">{{ c.detail }}</li></ul>
-            <p v-else class="muted">No metric improved by more than the noise.</p>
-          </section>
+    <DataState :error="error" :pending="!trend" :empty="!trend">
+      <template v-if="trend">
+        <div v-if="trend.snapshots.length < 2" class="empty">
+          <strong>{{ trend.snapshots.length ? 'One point so far' : 'No history yet' }}</strong>
+          A trend needs two syncs. Press Sync again after the code changes, or wait for the next scheduled sync.
         </div>
-        <div class="grid cols-2">
-          <section v-for="c in charts" :key="c.title" class="panel">
-            <h2>{{ c.title }}</h2>
-            <LineChart :times="times" :series="c.lines" :title="c.title" unit="" :step-seconds="step" :height="170" />
-          </section>
-        </div>
-        <p class="muted small">{{ trend.snapshots.length }} syncs, from {{ when(trend.snapshots[0]?.at) }} to {{ when(trend.snapshots.at(-1)?.at) }}. Small moves (less than 1 point of duplicate code, 5 unused functions, 2 points of test reach) are not called regressions.</p>
+        <template v-else>
+          <div class="grid cols-2">
+            <section class="panel">
+              <p class="eyebrow">Got worse</p>
+              <h2>Since {{ when(trend.since) }}</h2>
+              <ul v-if="trend.regressions.length" class="plain"><li v-for="c in trend.regressions" :key="c.key">{{ c.detail }}</li></ul>
+              <p v-else class="muted">Nothing got worse by more than the noise.</p>
+            </section>
+            <section class="panel">
+              <p class="eyebrow eyebrow--green">Got better</p>
+              <h2>Since {{ when(trend.since) }}</h2>
+              <ul v-if="trend.improvements.length" class="plain"><li v-for="c in trend.improvements" :key="c.key">{{ c.detail }}</li></ul>
+              <p v-else class="muted">No metric improved by more than the noise.</p>
+            </section>
+          </div>
+          <div class="grid cols-2">
+            <section v-for="c in charts" :key="c.title" class="panel">
+              <h2>{{ c.title }}</h2>
+              <LineChart :times="times" :series="c.lines" :title="c.title" unit="" :step-seconds="step" :height="170" />
+            </section>
+          </div>
+          <p class="muted small">{{ trend.snapshots.length }} syncs, from {{ when(trend.snapshots[0]?.at) }} to {{ when(trend.snapshots.at(-1)?.at) }}. Small moves (less than 1 point of duplicate code, 5 unused functions, 2 points of test reach) are not called regressions.</p>
+        </template>
       </template>
-    </template>
-    <p v-else class="muted">Loading…</p>
+    </DataState>
   </div>
 </template>
 

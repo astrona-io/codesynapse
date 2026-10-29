@@ -87,8 +87,9 @@ type Index struct {
 }
 
 var (
-	_ vector.Index  = (*Index)(nil)
-	_ vector.Prober = (*Index)(nil)
+	_ vector.Index   = (*Index)(nil)
+	_ vector.Prober  = (*Index)(nil)
+	_ vector.Sweeper = (*Index)(nil)
 )
 
 // New checks the URL and that Milvus answers.
@@ -458,6 +459,121 @@ func (x *Index) Delete(ctx context.Context, ids []string) error {
 		}
 		if err := x.call(ctx, "entities/delete", map[string]any{"collectionName": name, "filter": "id in {ids}",
 			"exprParams": map[string]any{"ids": ids}}, nil); err != nil {
+			return fmt.Errorf("deleting from %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// Filters of the Sweeper methods; values travel in exprParams only.
+const (
+	scanFilter      = "tenant_id == {tenant} && id > {after}"
+	scanNSFilter    = "tenant_id == {tenant} && ns == {ns} && id > {after}"
+	deleteInFilter  = hasFilter
+	deleteNSFilter  = searchFilter
+	deleteInBatches = upsertBatch
+)
+
+// Scan implements vector.Sweeper. Each collection of this index answers its
+// first limit IDs above after; the merged answer keeps the first limit.
+func (x *Index) Scan(ctx context.Context, tenant, namespace, after string, limit int) ([]vector.Item, error) {
+	if tenant == "" {
+		return nil, vector.ErrNoTenant
+	}
+	limit = vector.ScanLimit(limit)
+	filter, params := scanFilter, map[string]any{"tenant": tenant, "after": after}
+	if namespace != "" {
+		filter, params["ns"] = scanNSFilter, namespace
+	}
+	names, err := x.names(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]vector.Item{}
+	for _, name := range names {
+		if !strings.HasPrefix(name, x.prefix) {
+			continue
+		}
+		var rows []struct {
+			ID     string `json:"id"`
+			Tenant string `json:"tenant_id"`
+			NS     string `json:"ns"`
+		}
+		body := map[string]any{"collectionName": name, "filter": filter, "limit": limit, "outputFields": []string{"id", "tenant_id", "ns"},
+			"exprParams": params, "consistencyLevel": "Strong"}
+		if err := x.call(ctx, "entities/query", body, &rows); err != nil {
+			if gone(err) {
+				x.forget(name)
+				continue
+			}
+			return nil, err
+		}
+		for _, r := range rows {
+			// The filter decides, but a wrong backend answer still never
+			// reaches the caller.
+			if r.Tenant == tenant && (namespace == "" || r.NS == namespace) && r.ID > after && r.ID != "" {
+				seen[r.ID] = vector.Item{ID: r.ID, Tenant: r.Tenant, Namespace: r.NS}
+			}
+		}
+	}
+	out := make([]vector.Item, 0, len(seen))
+	for _, it := range seen {
+		out = append(out, it)
+	}
+	slices.SortFunc(out, func(a, b vector.Item) int { return strings.Compare(a.ID, b.ID) })
+	return out[:min(len(out), limit)], nil
+}
+
+// DeleteIn implements vector.Sweeper.
+func (x *Index) DeleteIn(ctx context.Context, tenant, namespace string, ids []string) error {
+	if err := vector.CheckScope(tenant, namespace); err != nil {
+		return err
+	}
+	for start := 0; start < len(ids); start += deleteInBatches {
+		batch := ids[start:min(start+deleteInBatches, len(ids))]
+		if err := x.deleteWhere(ctx, deleteInFilter, map[string]any{"tenant": tenant, "ns": namespace, "ids": batch}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DeleteNamespace implements vector.Sweeper.
+func (x *Index) DeleteNamespace(ctx context.Context, tenant, namespace string) error {
+	if err := vector.CheckScope(tenant, namespace); err != nil {
+		return err
+	}
+	return x.deleteWhere(ctx, deleteNSFilter, map[string]any{"tenant": tenant, "ns": namespace})
+}
+
+// deleteWhere deletes the rows matching a constant filter template from every
+// collection of this index.
+func (x *Index) deleteWhere(ctx context.Context, filter string, params map[string]any) error {
+	names, err := x.names(ctx)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		if !strings.HasPrefix(name, x.prefix) {
+			continue
+		}
+		body := map[string]any{"collectionName": name, "filter": filter, "exprParams": params}
+		err := x.call(ctx, "entities/delete", body, nil)
+		if gone(err) {
+			// A released collection must be loaded before a filtered delete;
+			// a dropped one has nothing left to delete.
+			x.forget(name)
+			if has, herr := x.exists(ctx, name); herr != nil || !has {
+				if herr != nil {
+					return herr
+				}
+				continue
+			}
+			if err = x.call(ctx, "collections/load", map[string]any{"collectionName": name}, nil); err == nil {
+				err = x.call(ctx, "entities/delete", body, nil)
+			}
+		}
+		if err != nil {
 			return fmt.Errorf("deleting from %s: %w", name, err)
 		}
 	}

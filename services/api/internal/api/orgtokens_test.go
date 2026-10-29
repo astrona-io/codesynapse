@@ -77,7 +77,7 @@ func TestPrivateRepositoriesWithOrgTokens(t *testing.T) {
 
 	signup := func(email string) *client {
 		c := newClient(t, ts)
-		require.Equal(t, c.do("POST", "/api/v1/auth/signup", `{"email":"`+email+`","name":"`+email+`","password":"`+pw+`"}`, nil), 201)
+		require.Equal(t, c.signUp(`{"email":"`+email+`","name":"`+email+`","password":"`+pw+`"}`, nil), 202)
 		return c
 	}
 	bob := signup("bob@example.com")
@@ -179,7 +179,7 @@ func TestOrgTokensNeedASecretKey(t *testing.T) {
 	acc.SignupOpen = true
 	bob := newClient(t, ts)
 	var signed struct{ Org accounts.Org }
-	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 201)
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), 202)
 	var body string
 	assert.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+signed.Org.Slug+"/git-tokens/github.com", `{"token":"ghp_abcdefghijklmnop"}`, &body), 409)
 	assert.Contains(t, body, "CODESYNAPSE_SECRET_KEY")
@@ -194,7 +194,7 @@ func TestSettingsHideInstallationTokensFromOrganisations(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 	ada, bob := rootClient(t, ts), newClient(t, ts)
-	require.Equal(t, bob.do("POST", "/api/v1/auth/signup", `{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 201)
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 202)
 	var asAdmin, asBob string
 	require.Equal(t, ada.do("GET", "/api/v1/settings", "", &asAdmin), 200)
 	require.Equal(t, bob.do("GET", "/api/v1/settings", "", &asBob), 200)

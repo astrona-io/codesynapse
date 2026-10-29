@@ -14,59 +14,59 @@ const explore = (repo: string, id: string) => ({ path: `/repos/${encodeURICompon
       <NuxtLink to="/overview" class="btn btn--ghost">What needs attention</NuxtLink>
     </PageHeader>
 
-    <p v-if="error" class="notice notice--danger">{{ plainError(error) }}</p>
-    <template v-else-if="data">
-      <div v-if="data.repos < 2" class="empty">
-        <strong>Add a second repository</strong>
-        Shared code is found by comparing repositories. Index at least two, then press Sync.
-      </div>
-      <template v-else>
-        <div class="grid grid--stats">
-          <StatTile label="Repositories compared" :value="data.repos" />
-          <StatTile label="Shared groups" :value="data.groups.length" :hint="`${data.suggestions.length} worth extracting`" />
-          <StatTile label="Redundant lines" :value="fmtInt(data.redundant_loc)" hint="what is left when one copy is kept" />
+    <DataState :error="error ? plainError(error) : ''" :pending="!data" :empty="!data">
+      <template v-if="data">
+        <div v-if="data.repos < 2" class="empty">
+          <strong>Add a second repository</strong>
+          Shared code is found by comparing repositories. Index at least two, then press Sync.
         </div>
-        <p v-if="data.partial?.length" class="notice">Smaller functions of {{ data.partial.join(', ') }} were not compared (report limit).</p>
+        <template v-else>
+          <div class="grid grid--stats">
+            <StatTile label="Repositories compared" :value="data.repos" />
+            <StatTile label="Shared groups" :value="data.groups.length" :hint="`${data.suggestions.length} worth extracting`" />
+            <StatTile label="Redundant lines" :value="fmtInt(data.redundant_loc)" hint="what is left when one copy is kept" />
+          </div>
+          <p v-if="data.partial?.length" class="notice">Smaller functions of {{ data.partial.join(', ') }} were not compared (report limit).</p>
 
-        <section v-if="data.suggestions.length" class="panel">
-          <p class="eyebrow eyebrow--green">Recommended</p><h2>Share this work</h2>
-          <article v-for="s in data.suggestions" :key="s.repos.join()" class="suggestion">
-            <header class="row">
-              <span class="badge" :class="s.kind === 'framework' ? 'badge--violet' : 'badge--green'">{{ s.kind }}</span>
-              <strong class="mono">{{ s.name }}</strong>
-              <span class="muted">{{ s.groups }} functions · {{ s.redundant_loc }} redundant lines</span>
-            </header>
-            <p>{{ s.rationale }}</p>
-            <p class="muted small">Repositories: <span v-for="r in s.repos" :key="r" class="tag">{{ r }}</span></p>
-            <ul class="members">
-              <li v-for="c in s.candidates" :key="c" class="mono">{{ c }}</li>
-            </ul>
-          </article>
-        </section>
-
-        <section class="panel">
-          <p class="eyebrow">Code</p><h2>Shared groups <span class="muted">· {{ data.groups.length }}</span></h2>
-          <div v-if="data.groups.length" class="stack">
-            <article v-for="g in data.groups" :key="g.hash" class="group">
+          <section v-if="data.suggestions.length" class="panel">
+            <p class="eyebrow eyebrow--green">Recommended</p><h2>Share this work</h2>
+            <article v-for="s in data.suggestions" :key="s.repos.join()" class="suggestion">
               <header class="row">
-                <strong>{{ g.copies }} copies of {{ g.loc }} lines</strong>
-                <span v-if="g.kind === 'near'" class="badge badge--violet" title="Copies that were edited after copying; the variants differ a little">edited · ~{{ Math.round(g.similarity * 100) }}% alike</span>
-                <span class="muted">in {{ g.repos.join(', ') }} · {{ g.redundant_loc }} redundant lines</span>
+                <span class="badge" :class="s.kind === 'framework' ? 'badge--violet' : 'badge--green'">{{ s.kind }}</span>
+                <strong class="mono">{{ s.name }}</strong>
+                <span class="muted">{{ s.groups }} functions · {{ s.redundant_loc }} redundant lines</span>
               </header>
+              <p>{{ s.rationale }}</p>
+              <p class="muted small">Repositories: <span v-for="r in s.repos" :key="r" class="tag">{{ r }}</span></p>
               <ul class="members">
-                <li v-for="m in g.members" :key="m.repo + m.id">
-                  <span class="tag">{{ m.repo }}</span>
-                  <NuxtLink :to="explore(m.repo, m.id)" class="mono">{{ m.name }}</NuxtLink>
-                  <span class="mono muted">{{ m.file }}:{{ m.start_line }}-{{ m.end_line }}</span>
-                </li>
+                <li v-for="c in s.candidates" :key="c" class="mono">{{ c }}</li>
               </ul>
             </article>
-          </div>
-          <div v-else class="empty"><strong>Nothing shared</strong>No function appears in two repositories.</div>
-        </section>
+          </section>
+
+          <section class="panel">
+            <p class="eyebrow">Code</p><h2>Shared groups <span class="muted">· {{ data.groups.length }}</span></h2>
+            <div v-if="data.groups.length" class="stack">
+              <article v-for="g in data.groups" :key="g.hash" class="group">
+                <header class="row">
+                  <strong>{{ g.copies }} copies of {{ g.loc }} lines</strong>
+                  <span v-if="g.kind === 'near'" class="badge badge--violet" title="Copies that were edited after copying; the variants differ a little">edited · ~{{ Math.round(g.similarity * 100) }}% alike</span>
+                  <span class="muted">in {{ g.repos.join(', ') }} · {{ g.redundant_loc }} redundant lines</span>
+                </header>
+                <ul class="members">
+                  <li v-for="m in g.members" :key="m.repo + m.id">
+                    <span class="tag">{{ m.repo }}</span>
+                    <NuxtLink :to="explore(m.repo, m.id)" class="mono">{{ m.name }}</NuxtLink>
+                    <span class="mono muted">{{ m.file }}:{{ m.start_line }}-{{ m.end_line }}</span>
+                  </li>
+                </ul>
+              </article>
+            </div>
+            <div v-else class="empty"><strong>Nothing shared</strong>No function appears in two repositories.</div>
+          </section>
+        </template>
       </template>
-    </template>
-    <p v-else class="muted">Loading…</p>
+    </DataState>
   </div>
 </template>
 
