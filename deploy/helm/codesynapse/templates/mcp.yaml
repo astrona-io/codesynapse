@@ -29,7 +29,7 @@ spec:
           ports:
             - {name: http, containerPort: 8090}
           env:
-            {{- include "cs.storeEnv" . | nindent 12 }}
+            {{- include "cs.storeEnv" (list . "mcp") | nindent 12 }}
             {{- include "cs.secretEnv" (list . "CODESYNAPSE_MCP_TOKEN" "CODESYNAPSE_MCP_TOKEN") | nindent 12 }}
             {{- include "cs.secretEnv" (list . "CODESYNAPSE_API_TOKEN" "CODESYNAPSE_API_TOKEN") | nindent 12 }}
             - {name: CODESYNAPSE_API_URL, value: "http://{{ include "cs.name" (list . "api") }}:8080"}

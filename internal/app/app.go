@@ -76,6 +76,10 @@ func (f *GraphFlags) Open(ctx context.Context) (store.Store, error) {
 func (f *GraphFlags) openNebula(ctx context.Context) (store.Store, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	password, err := nebulaPassword()
+	if err != nil {
+		return nil, err
+	}
 	partitions, err := strconv.Atoi(Getenv(EnvNebulaPartition, "0"))
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", EnvNebulaPartition, err)
@@ -93,7 +97,7 @@ func (f *GraphFlags) openNebula(ctx context.Context) (store.Store, error) {
 		vec = mx
 	}
 	s, err := nebulastore.New(ctx, nebulastore.Config{Addrs: strings.Split(f.NebulaAddrs, ","), Space: f.NebulaSpace,
-		User: Getenv(EnvNebulaUser, "root"), Password: os.Getenv(EnvNebulaPassword), Vectors: vec, Partitions: partitions, Replicas: replicas})
+		User: Getenv(EnvNebulaUser, "root"), Password: password, Vectors: vec, Partitions: partitions, Replicas: replicas})
 	if err != nil {
 		if vec != nil {
 			_ = vec.Close(ctx) //nolint:errcheck // the connection error is the one worth returning
@@ -101,6 +105,24 @@ func (f *GraphFlags) openNebula(ctx context.Context) (store.Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// MaxNebulaPassword is the longest password NebulaGraph accepts.
+const MaxNebulaPassword = 24
+
+// ErrNebulaPassword refuses a missing or overlong password: authentication
+// is always on, and retrying cannot fix either.
+var ErrNebulaPassword = errors.New("invalid NebulaGraph password")
+
+func nebulaPassword() (string, error) {
+	p := os.Getenv(EnvNebulaPassword)
+	switch {
+	case p == "":
+		return "", fmt.Errorf("%w: %s is not set", ErrNebulaPassword, EnvNebulaPassword)
+	case len(p) > MaxNebulaPassword:
+		return "", fmt.Errorf("%w: %s is longer than %d characters, NebulaGraph's limit", ErrNebulaPassword, EnvNebulaPassword, MaxNebulaPassword)
+	}
+	return p, nil
 }
 
 // OpenWithRetry retries Open until it succeeds or ctx ends. Services use it
@@ -115,13 +137,46 @@ func (f *GraphFlags) OpenWithRetry(ctx context.Context, onRetry func(error)) (st
 		if err == nil {
 			return s, nil
 		}
-		if ctx.Err() != nil || strings.Contains(err.Error(), "is not set") {
+		if ctx.Err() != nil || errors.Is(err, ErrNebulaPassword) || strings.Contains(err.Error(), "is not set") {
 			return nil, err
 		}
 		onRetry(err)
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, 15*time.Second)
+	}
+}
+
+// SchemaWait is how long a service that does not own the schema waits for
+// the one that does (the API) to create or upgrade it.
+const SchemaWait = 10 * time.Minute
+
+// WaitForSchema checks the schema until it is complete, without changing it.
+// Workers and the MCP service call it instead of EnsureSchema: their database
+// user may not change the schema, and the API service, which owns it, may
+// still be creating it. It gives up after wait with an error that says who
+// creates the schema.
+func WaitForSchema(ctx context.Context, st store.Writer, wait time.Duration, onRetry func(error)) error {
+	deadline := time.Now().Add(wait)
+	delay := time.Second
+	for {
+		err := st.CheckSchema(ctx)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the graph schema is still not ready after %s; the API service creates and upgrades it at start, so check that it runs and its log: %w", wait, err)
+		}
+		onRetry(err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-time.After(delay):
 		}
 		delay = min(delay*2, 15*time.Second)

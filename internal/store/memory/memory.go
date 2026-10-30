@@ -115,6 +115,9 @@ func (s *Store) CodeVectors() vector.Index { return s.codeVectors }
 // EnsureSchema is a no-op.
 func (s *Store) EnsureSchema(context.Context) error { return nil }
 
+// CheckSchema is a no-op: the memory store has no schema.
+func (s *Store) CheckSchema(context.Context) error { return nil }
+
 // System names the store for metrics.
 func (s *Store) System() string { return "memory" }
 

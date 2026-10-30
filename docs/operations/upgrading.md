@@ -20,7 +20,7 @@ Read the release notes first. A release that needs anything beyond `helm upgrade
 - **Database migrations run on start.** The API and the workers (one binary) apply pending PostgreSQL migrations when they start, under an advisory lock, so pods starting together don't race. The MCP server uses the schema as it finds it. So far every migration adds tables, columns and indexes or loosens a constraint, so an older pod keeps working against the newer schema while the rollout finishes. A release that breaks this says so in its notes.
 - **Background loops have one owner.** The scheduler and maintenance loops run in the API that holds the `api-loops` lease. The lease lasts a minute and is renewed every 20 seconds. When that pod stops, another API takes over within a minute. Schedules live in PostgreSQL, so none are lost.
 - **Jobs survive the restart.** Every clone, sync, ingest and AI task is a row in PostgreSQL before it runs. A worker that stops leaves its jobs behind with a two-minute lease. When the lease runs out, a worker with the matching role claims the job and runs it again from the stored parameters, after checking the requester's session and permission again. A pod that is stopped (a rolling upgrade sends SIGTERM) leaves its running and queued jobs the same way, and so does a process that could not reach PostgreSQL to renew its leases for 90 seconds: it stops those jobs before another worker may claim them, so no job runs twice. A job starts at most three times. Fix jobs are the exception: an interrupted fix is marked failed and must be started again by hand, because half-pushed branches shouldn't be repeated automatically.
-- **Graphs are not rebuilt.** Existing graphs stay as they are; the next sync of each repository uses the new extractor. When a release changes the graph schema, `EnsureSchema` adds the new properties on start, and the release notes say whether a re-index is worth it.
+- **Graphs are not rebuilt.** Existing graphs stay as they are; the next sync of each repository uses the new extractor. When a release changes the graph schema, the API adds the new properties on start (`EnsureSchema`), and the release notes say whether a re-index is worth it. Workers and the MCP server never change the schema: they wait up to ten minutes for the API to finish it and then stop with an error that says so.
 
 ## Before you upgrade
 
@@ -34,6 +34,39 @@ Take a backup. The parts that matter:
 | The audit log, for retention outside the cluster | `GET /api/v1/admin/audit?format=jsonl` as a platform admin; `GET /api/v1/admin/audit/verify` checks the hash chain. With an [archive](accounts-access.md#archive), back up its directory or bucket too: older entries are only there (`?deep=true` checks them) |
 
 Resource names assume the release is called `codesynapse`.
+
+## One NebulaGraph user per service
+
+The services no longer sign in to NebulaGraph as `root`. Each has its own user, and only the NebulaGraph init step (the `init` container of the in-chart NebulaGraph, `nebula-init` in compose) holds the root password:
+
+| User | Service | Role on the space | Can |
+|---|---|---|---|
+| `cs_api` | API | DBA | create and upgrade the schema, read and write data |
+| `cs_worker` | ingest, ai and fix workers | USER | read and write data; no schema change |
+| `cs_mcp` | MCP server | USER | read and write data; no schema change |
+
+NebulaGraph roles apply to a whole space. Reviews, agent memory, curated records and usage counters live in the same space as the code graph, and the MCP server writes them, so it needs USER rather than read-only GUEST.
+
+The init step creates the space and the users and grants the roles on every start, so an existing install only needs the new passwords before it upgrades:
+
+- **Kubernetes:** add `NEBULA_API_PASSWORD`, `NEBULA_WORKER_PASSWORD` and `NEBULA_MCP_PASSWORD` (at most 24 characters each, letters, digits and `._~+/=-`) to the Secret, for example `kubectl --context <ctx> -n codesynapse patch secret codesynapse --type merge --patch-file /dev/stdin` with `{"stringData": {...}}` on stdin. `codesynapse install` adds missing keys to an existing Secret by itself. The user names can be changed with `nebula.users`.
+- **Compose:** run `just init`; it adds the three passwords to `.env`.
+
+To rotate a service password, change it in the Secret or `.env` and restart the NebulaGraph pod (or `nebula-init`), then the service.
+
+With your own NebulaGraph (`nebula.enabled=false`), create the space and the users yourself as `root` or another GOD user before you upgrade. Use the names from `nebula.users` and the passwords from the Secret:
+
+```
+CREATE SPACE IF NOT EXISTS codesynapse (partition_num = 10, replica_factor = 3, vid_type = FIXED_STRING(40));
+CREATE USER IF NOT EXISTS cs_api WITH PASSWORD "<NEBULA_API_PASSWORD>";
+CREATE USER IF NOT EXISTS cs_worker WITH PASSWORD "<NEBULA_WORKER_PASSWORD>";
+CREATE USER IF NOT EXISTS cs_mcp WITH PASSWORD "<NEBULA_MCP_PASSWORD>";
+GRANT ROLE DBA ON codesynapse TO cs_api;
+GRANT ROLE USER ON codesynapse TO cs_worker;
+GRANT ROLE USER ON codesynapse TO cs_mcp;
+```
+
+A new space reaches graphd on its next heartbeat, so `GRANT` can fail for a few seconds after `CREATE SPACE`; run it again. `NEBULA_PASSWORD` is not needed in the Secret then.
 
 ## NebulaGraph images moved to ghcr.io
 
@@ -51,7 +84,7 @@ Fix branches (`features.allowPush`) are pushed by a separate worker, so the work
 
 ## Docker compose installs
 
-Run `just init` (it adds missing keys such as `POSTGRES_PASSWORD`, `SECRET_KEY`, `NEBULA_PASSWORD` and `METRICS_PASSWORD` to `.env`), then `just up`.
+Run `just init` (it adds missing keys such as `POSTGRES_PASSWORD`, `SECRET_KEY`, `NEBULA_PASSWORD`, the per-service `NEBULA_*_PASSWORD` keys and `METRICS_PASSWORD` to `.env`), then `just up`.
 
 - **PostgreSQL 17 to 18.** The compose stack runs PostgreSQL 18, which cannot open a data volume written by PostgreSQL 17. If your install predates the upgrade, dump the accounts database with the old image first (`docker compose exec postgres pg_dumpall -U codesynapse > accounts.sql`), remove the `postgres-data` volume, run `just up`, and restore (`docker compose exec -T postgres psql -U codesynapse -d codesynapse < accounts.sql`).
 - **From HugeGraph.** HugeGraph was replaced by NebulaGraph and graphs are not migrated. Run `just init` to add `NEBULA_PASSWORD` (at most 24 characters), `just up`, and sync your repositories again. Reviews, curated records and agent memory were stored in the same graph, so they start empty; export what you need first. Recreate the Milvus volume if the collection was built for an older release (`docker volume rm codesynapse_milvus-data`). The old `hugegraph-data` volume stays until you delete it. In Kubernetes, put `NEBULA_PASSWORD` in the Secret, replace `hugegraph.*` values with `nebula.*` (`nebula.externalAddrs` for your own cluster) and delete the old `*-hugegraph` StatefulSet volume.

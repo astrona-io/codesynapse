@@ -470,7 +470,8 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 		err = checkJob(ctx, opts.Authorize)
 	}
 	if err == nil {
-		err = j.st.EnsureSchema(ctx)
+		// Workers may not change the schema; the API created it at start.
+		err = j.st.CheckSchema(ctx)
 	}
 	if err == nil {
 		err = checkJob(ctx, opts.Authorize)
