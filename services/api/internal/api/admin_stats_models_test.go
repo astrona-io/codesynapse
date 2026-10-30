@@ -226,7 +226,9 @@ func TestModelAndStoreRollupSources(t *testing.T) {
 		day(q.requests): l(org, "rolllocal", "task", "review", "outcome", "ok") + "=4;" +
 			l(org, "rollcloud", "task", "review", "outcome", "error") + "=2;" +
 			l(telemetry.NoTenant, "rollcloud", "task", "other", "outcome", "ok") + "=1",
-		day(q.input):    l(org, "rollcloud", "task", "review") + "=100",
+		day(q.input): l(org, "rollcloud", "task", "review") + "=100",
+		// A value past int64 (a counter glitch) is dropped, not stored.
+		day(q.output):   l(org, "rollcloud", "task", "review") + "=1e30",
 		day(q.cost):     l(org, "rollcloud") + "=0.25",
 		day(q.embedded): `{"tenant_id":"` + org + `"}=3`,
 		storeRollupQueries[accounts.StatStoreRows]: `{"db_system":"postgres","kind":"database"}=42;` +

@@ -166,6 +166,12 @@ func (s *Server) llmStatSource(ctx context.Context, day time.Time, set *accounts
 		return nil
 	}
 	add := func(metric, tenant, dim string, v float64) {
+		// A glitch in the metrics store (+Inf, a counter reset) must not
+		// reach int64: past MaxInt64 the conversion is undefined and the
+		// 90/365-day sums would overflow, like storeStatSource refuses.
+		if math.IsNaN(v) || math.IsInf(v, 0) || v > math.MaxInt64/2 {
+			return
+		}
 		n := int64(math.Round(v))
 		if n <= 0 || !accounts.ValidPlatformStat(metric, dim, "") {
 			return
