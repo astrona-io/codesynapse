@@ -216,6 +216,23 @@ func TestShortenProseYieldsTheLocalModel(t *testing.T) {
 	assert.Equal(t, running, 0, "the slot is free again")
 }
 
+// TestShortenProseSurvivesAPanic: the rewrite runs outside the request, where
+// net/http does not recover panics. One in the provider must not end the
+// process; the caller gets no rewrite and the slot comes free.
+func TestShortenProseSurvivesAPanic(t *testing.T) {
+	local := &stubProvider{text: func(Request) string { panic("provider broke") }}
+	r, _, ctx := compressRegistry(t, nil, local)
+
+	_, err := r.ShortenProse(ctx, shortenProse)
+	assert.True(t, errors.Is(err, ErrNoRewrite), "a panic means no rewrite")
+	for running, _ := r.slots["local"].counts(); running != 0; running, _ = r.slots["local"].counts() {
+		time.Sleep(time.Millisecond)
+	}
+	release, ok := r.slots["local"].tryAcquire(ctx)
+	require.True(t, ok, "the slot is free again")
+	release()
+}
+
 // TestShortenProseIsNotCancelledMidAnswer: a caller that stops waiting does
 // not hang up on the local model (Ollama logs that as HTTP 500); the answer
 // runs to its end and holds the slot until then.

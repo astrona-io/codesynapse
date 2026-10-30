@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -287,6 +288,15 @@ func (r *Registry) ShortenProse(ctx context.Context, text string) (string, error
 	bg := withHeldSlot(context.WithoutCancel(ctx), local)
 	go func() {
 		defer release()
+		// Detached from the request, a panic here is not recovered by
+		// net/http and would end the process: log it (its type only, the
+		// value may carry prompt text) and let the caller send the original.
+		defer func() {
+			if v := recover(); v != nil {
+				logx.FromContext(bg).Error("prompt shortening panicked", "provider", local, "panic_type", fmt.Sprintf("%T", v))
+				done <- result{}
+			}
+		}()
 		short, ok := r.shorten(bg, local, text)
 		done <- result{short, ok}
 	}()
