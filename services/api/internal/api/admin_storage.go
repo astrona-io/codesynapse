@@ -11,7 +11,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
-// Storage and alerts (docs/PLATFORM_STATS_PLAN.md, phase 6). Storage reads
+// Storage and alerts (docs/plans/PLATFORM_STATS_PLAN.md, phase 6). Storage reads
 // the daily store sample (storesample.go) back from VictoriaMetrics, so any
 // API replica answers the same figures; alerts read the internal vmalert.
 

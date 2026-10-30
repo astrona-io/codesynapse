@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Single sign-on (docs/SSO_PLAN.md). Each organisation may connect one
+// Single sign-on (docs/plans/SSO_PLAN.md). Each organisation may connect one
 // OpenID Connect provider. Signing in through it creates the account on
 // first use, links it to the provider's subject, and lets the provider's
 // group claims decide the organisation role and teams. The network side

@@ -75,7 +75,7 @@ All report reads require repository `READ` permission in the selected organisati
 
 - `GET /api/v1/repos/{repo}/ingestion`: latest attempt, last successful report, logical `metrics`, and history. History defaults to 10 entries, capped at 50, with a `before` run cursor.
 - `GET /api/v1/repos/{repo}/ingestion/{run}`: one summary and file outcomes; default 100 files, capped at 500, with `offset` and `next_offset`.
-- MCP `ingestion_report`: read-only latest five summaries and last successful report. It uses the existing authenticated tool policy, runtime session and repository scope. It omits file lists and originating session identity. See [the agent guide](AGENT_GUIDE.md).
+- MCP `ingestion_report`: read-only latest five summaries and last successful report. It uses the existing authenticated tool policy, runtime session and repository scope. It omits file lists and originating session identity. See [the agent guide](../AGENT_GUIDE.md).
 
 The repository **Ingestion reports** page separates the latest attempt from the last successful run. It shows publication state, revision/policy evidence, outcome totals, exclusion reasons, discovery limits, estimate provenance, paginated files/history and processing trends. Annotation status links to **Indexing policy** and remains independent of deterministic file accounting. Local annotation continues to use the phase 4h registry, redaction, revision and permission checks; model output cannot alter file outcomes or counters.
 

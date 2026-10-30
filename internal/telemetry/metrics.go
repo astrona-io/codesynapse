@@ -284,7 +284,7 @@ func ExportFailed(ctx context.Context, exporter string) {
 
 // ---- end platform health ----
 
-// Background jobs and indexing (docs/TELEMETRY_PLAN.md, metrics coverage
+// Background jobs and indexing (docs/plans/TELEMETRY_PLAN.md, metrics coverage
 // plan, phase 3). Record through the helpers in jobs.go, which keep every
 // label inside its fixed set. The tenant is the job's stored organisation.
 var (
@@ -303,7 +303,7 @@ var (
 	IngestExtract      = Default.ScopedCounter("codesynapse_ingest_extract_seconds_total", "Seconds indexing spent in each extractor, by language.", "language")
 )
 
-// Outbound calls, sign-in and the audit log (docs/TELEMETRY_PLAN.md, metrics
+// Outbound calls, sign-in and the audit log (docs/plans/TELEMETRY_PLAN.md, metrics
 // coverage plan, phase 4). Record through the helpers in outbound.go, which
 // keep every label inside its fixed set and drop the tool and model the
 // context may carry, so each tenant holds only the series listed here. Hosts,
@@ -324,7 +324,7 @@ var (
 	AuditSeals = Default.Counter("platform_codesynapse_audit_seals_total", "Audit archive sealing runs by outcome (ok, error, nothing_to_seal, no_archive).", "outcome")
 )
 
-// ---- Sharper existing families (docs/TELEMETRY_PLAN.md, metrics coverage
+// ---- Sharper existing families (docs/plans/TELEMETRY_PLAN.md, metrics coverage
 // plan, phase 5). Record through the helpers in outcomes.go, which keep every
 // label inside its fixed set. ----
 var (

@@ -13,7 +13,7 @@ import (
 	"github.com/astrona-io/codesynapse/rules"
 )
 
-// Daily platform statistics (docs/PLATFORM_STATS_PLAN.md, "Daily rollup").
+// Daily platform statistics (docs/plans/PLATFORM_STATS_PLAN.md, "Daily rollup").
 // The process holding the api-loops lease writes yesterday's counts shortly
 // after midnight UTC, and the 90-day and 365-day statistics ranges read
 // them. A row holds a day, a metric and a dimension from the fixed lists

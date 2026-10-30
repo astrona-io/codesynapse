@@ -19,7 +19,7 @@ For the people who run CodeSynapse for a team.
 
     Root account, organisations, roles, repository permissions and single sign-on.
 
-    [First run and sign-in](first-run.md) · [Accounts and access](accounts-access.md) · [Single sign-on](../SSO_PLAN.md)
+    [First run and sign-in](first-run.md) · [Accounts and access](accounts-access.md) · [Single sign-on](../plans/SSO_PLAN.md)
 
 - **Security**
 

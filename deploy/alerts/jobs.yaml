@@ -1,4 +1,4 @@
-# Background job queue (docs/TELEMETRY_PLAN.md, "Alerting"). The API process
+# Background job queue (docs/plans/TELEMETRY_PLAN.md, "Alerting"). The API process
 # holding the api-loops lease sets both gauges per job kind, without a
 # tenant. A process that just lost the lease may still report for a moment,
 # so each gauge is taken as the maximum over instances, never summed.

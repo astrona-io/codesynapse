@@ -6,7 +6,7 @@
 Status: implemented in SaaS phase 4e, after access isolation (4d). The existing Compose stack supplies VictoriaMetrics for development; this phase adds instrumentation and dashboard coverage. Kubernetes wiring waits for the final deployment phase (6a). The request for OTel supersedes the earlier decision to defer it. The approved OTel v1.47.0 SDK/exporter is the default export path; validation and limits are recorded below.
 Session-scoped tool execution and chat memory must also follow [phase 4g](SESSION_CONTEXT_PLAN.md): immutable runtime identity, inherited parent context and tenant/session/namespace filtering. This requirement does not turn session IDs into metric labels.
 
-Codex and Cursor lifecycle observations also use the existing bounded registry and audit store. The [assistant hook collection contract](operations/assistant-hooks.md#collection-contract) documents every field, native event, identity check, retention rule, delivery limit and exported `agent_hook_*` instrument. Client-reported hook activity stays separate from server-measured MCP and LLM execution.
+Codex and Cursor lifecycle observations also use the existing bounded registry and audit store. The [assistant hook collection contract](../operations/assistant-hooks.md#collection-contract) documents every field, native event, identity check, retention rule, delivery limit and exported `agent_hook_*` instrument. Client-reported hook activity stays separate from server-measured MCP and LLM execution.
 
 ## Attribution and export
 
@@ -359,7 +359,7 @@ Ordered by value for the effort. Each phase is one pull request with its panels,
 
 ### Alerting
 
-Phase 2 adds alerting for operators. It is off by default. Status: shipped (vmalert v1.155.0); how to turn it on is in [Alerting](operations/alerting.md).
+Phase 2 adds alerting for operators. It is off by default. Status: shipped (vmalert v1.155.0); how to turn it on is in [Alerting](../operations/alerting.md).
 
 - **Component.** A `vmalert` service in `docker-compose.yml` behind the `alerting` profile (`COMPOSE_PROFILES=alerting just up`), and `alerting.enabled` in the parent chart (`templates/alerting.yaml`, not a subchart, because it needs the chart's metrics URL, public URL and environment): pinned image, one replica, internal only, no published port, a NetworkPolicy that refuses every connection to it, and `values.schema.json` updated in the same change. The metrics store's policy admits it. It reads from VictoriaMetrics with the existing read credentials (`METRICS_PASSWORD`).
 - **Receiver.** Any Alertmanager-compatible endpoint the operator names. `ALERTMANAGER_URL` (required) and optionally `ALERTMANAGER_USERNAME`/`ALERTMANAGER_PASSWORD` or `ALERTMANAGER_BEARER_TOKEN` come from the environment (Compose) or a Secret (chart, `alerting.existingSecret` or `global.existingSecret`), and reach vmalert as environment (`-envflag.enable`), never as flags. An empty URL stops vmalert at start. CodeSynapse ships no receiver of its own.

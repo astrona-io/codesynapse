@@ -90,7 +90,7 @@ New instruments in `internal/telemetry/metrics.go`, with the tenant attributes e
 | `codesynapse_source_tokens_total` | counter | `stage`: `raw`, `cleaned`, `extracted` |
 | `codesynapse_source_reduce_seconds` | histogram | `tier`: `cpu`, `local_model` |
 
-The hit ratio is computed in the query, not kept as a gauge. Spans carry the tier, result and sizes, never the URL (trace rules in `docs/TELEMETRY_PLAN.md#traces`).
+The hit ratio is computed in the query, not kept as a gauge. Spans carry the tier, result and sizes, never the URL (trace rules in `docs/plans/TELEMETRY_PLAN.md#traces`).
 
 **Money.** Saved tokens = raw − returned. They are priced at the input price of the agent's model from `pricing.go`, with its `price_source`, and shown as their own "External sources" line on Models & savings beside graph answers and the local cache. The specification's output-token term is left out: reducing what an agent reads does not change what it writes by a measurable amount, and a figure we cannot measure is shown as unknown, not estimated.
 

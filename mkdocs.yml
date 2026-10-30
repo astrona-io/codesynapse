@@ -119,8 +119,8 @@ nav:
       - People and access:
           - First run and sign-in: operations/first-run.md
           - Accounts and access: operations/accounts-access.md
-          - Single sign-on: SSO_PLAN.md
-          - Root bootstrap: ROOT_BOOTSTRAP_PLAN.md
+          - Single sign-on: plans/SSO_PLAN.md
+          - Root bootstrap: plans/ROOT_BOOTSTRAP_PLAN.md
       - Security:
           - Security model: operations/security-model.md
       - Coding agents:
@@ -136,14 +136,14 @@ nav:
           - "ADR 0001: search": adr/0001-search.md
           - "ADR 0003: NebulaGraph": adr/0003-nebulagraph.md
       - Identity and access:
-          - Access control plan: ACCESS_CONTROL_PLAN.md
-          - Session context plan: SESSION_CONTEXT_PLAN.md
+          - Access control plan: plans/ACCESS_CONTROL_PLAN.md
+          - Session context plan: plans/SESSION_CONTEXT_PLAN.md
       - Data and retrieval:
-          - Retrieval plan: RETRIEVAL_PLAN.md
-          - Architecture catalog plan: ARCHITECTURE_CATALOG_PLAN.md
-          - Repo config plan: REPO_CONFIG_PLAN.md
-          - Ingest transparency plan: INGEST_TRANSPARENCY_PLAN.md
-          - Text optimisation plan: TEXT_OPTIMIZATION_PLAN.md
-      - Telemetry plan: TELEMETRY_PLAN.md
-      - Platform statistics plan: PLATFORM_STATS_PLAN.md
+          - Retrieval plan: plans/RETRIEVAL_PLAN.md
+          - Architecture catalog plan: plans/ARCHITECTURE_CATALOG_PLAN.md
+          - Repo config plan: plans/REPO_CONFIG_PLAN.md
+          - Ingest transparency plan: plans/INGEST_TRANSPARENCY_PLAN.md
+          - Text optimisation plan: plans/TEXT_OPTIMIZATION_PLAN.md
+      - Telemetry plan: plans/TELEMETRY_PLAN.md
+      - Platform statistics plan: plans/PLATFORM_STATS_PLAN.md
       - Glossary: GLOSSARY.md

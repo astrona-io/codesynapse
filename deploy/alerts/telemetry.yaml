@@ -1,4 +1,4 @@
-# Alerts on the telemetry pipeline itself (docs/TELEMETRY_PLAN.md, "Alerting").
+# Alerts on the telemetry pipeline itself (docs/plans/TELEMETRY_PLAN.md, "Alerting").
 # Every expression reads a metric without a tenant or sums tenants away, and
 # labels and annotations carry only instrument names and fixed label values:
 # never repositories, paths, users, keys, sessions or request content.
@@ -15,7 +15,7 @@ groups:
           component: telemetry
         annotations:
           summary: "{{ $labels.metric }} reached its series cap"
-          description: "{{ $value | humanize }} label combinations of {{ $labels.metric }} were dropped in the last hour, so panels that read it undercount. See \"Cap pressure\" in docs/TELEMETRY_PLAN.md."
+          description: "{{ $value | humanize }} label combinations of {{ $labels.metric }} were dropped in the last hour, so panels that read it undercount. See \"Cap pressure\" in docs/plans/TELEMETRY_PLAN.md."
           dashboard: "{{ $externalURL }}/stats"
 
       # Lines that did not reach the log store are still on stderr, but the

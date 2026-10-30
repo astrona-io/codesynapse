@@ -43,7 +43,7 @@ The web app has sign-in, a first-run setup, Settings for your profile, API keys,
 
 The first account is the installation's root account. A fresh installation creates it at first start as the user `admin` with a random, per-installation password (in `.env` or the `<release>-admin` Secret); you sign in and replace it with your own root account. `codesynapse-api reset-admin` resets it if you are locked out. See [First run and sign-in](first-run.md). Until an organisation connects single sign-on, everyone signs in with the local user database, using their email or an optional username. It administers the platform (settings, health, people, the audit log) and never does organisation work. Its one organisation task is setup, which creates the first organisation and a separate owner account in one step, then signs root out; the owner signs in for everything else. Set `CODESYNAPSE_SIGNUP_OPEN=true` to let others sign up after setup. A sign-up answers `202` with the same message whether or not the email already has an account, sets no session and takes at least half a second, so it does not reveal which emails are registered; the dashboard then signs in with the same details. The audit log records the real outcome (`user.signup`, failure "email already registered"). A taken username is reported (`409`), checked before the email.
 
-On an installation that predates this, the API identifies the root at start-up from its setup history. If that history is missing (for example, pruned by audit retention), platform administrators stay limited to administration until an operator runs `codesynapse-api designate-root --email <root>`. See [root bootstrap](../ROOT_BOOTSTRAP_PLAN.md).
+On an installation that predates this, the API identifies the root at start-up from its setup history. If that history is missing (for example, pruned by audit retention), platform administrators stay limited to administration until an operator runs `codesynapse-api designate-root --email <root>`. See [root bootstrap](../plans/ROOT_BOOTSTRAP_PLAN.md).
 
 ## Inviting members
 
@@ -61,7 +61,7 @@ Memberships that single sign-on manages follow the provider's groups, not invita
 
 ## Single sign-on
 
-An organisation can connect its own OpenID Connect provider (Entra ID, Okta, Keycloak, …). People then sign in through it, get an account on first use, and the provider's groups decide their role and teams. Register `CODESYNAPSE_PUBLIC_URL` + `/sso/callback` as the redirect URI; `SECRET_KEY` must be set. Owners and admins set it up under Settings → Single sign-on and share the sign-in link it shows. See [single sign-on](../SSO_PLAN.md).
+An organisation can connect its own OpenID Connect provider (Entra ID, Okta, Keycloak, …). People then sign in through it, get an account on first use, and the provider's groups decide their role and teams. Register `CODESYNAPSE_PUBLIC_URL` + `/sso/callback` as the redirect URI; `SECRET_KEY` must be set. Owners and admins set it up under Settings → Single sign-on and share the sign-in link it shows. See [single sign-on](../plans/SSO_PLAN.md).
 
 ## Repository permission resolution
 
@@ -90,7 +90,7 @@ flowchart TD
 
 Organisation owner and admin roles manage membership and policy; they do not grant repository permissions. An explicit owner can recover administration through an audited action. `AccessOf` uses bounded bulk reads; overflow or invalid grants fail closed.
 
-Settings → Organisation controls the default and owner recovery; Settings → Teams and each repository's Access page manage grants. Changes are audited. See the [upgrade notes](../ACCESS_CONTROL_PLAN.md#implementation-and-upgrade) before upgrading an existing accounts database.
+Settings → Organisation controls the default and owner recovery; Settings → Teams and each repository's Access page manage grants. Changes are audited. See the [upgrade notes](../plans/ACCESS_CONTROL_PLAN.md#implementation-and-upgrade) before upgrading an existing accounts database.
 
 ### Organisation and personal repositories
 
@@ -151,7 +151,7 @@ Memory uses the `org|graph` namespace; reviews require the exact organisation. C
 
 ## Access projections in the graph
 
-PostgreSQL mutations commit audit and outbox records together. A bounded worker rebuilds the `Organization`, `User`, `Team` and `AccessRepository` projections in the graph store. Missing, conflicting or stale projections can never authorize a request; they only support graph-side queries. Details: [Access control plan](../ACCESS_CONTROL_PLAN.md).
+PostgreSQL mutations commit audit and outbox records together. A bounded worker rebuilds the `Organization`, `User`, `Team` and `AccessRepository` projections in the graph store. Missing, conflicting or stale projections can never authorize a request; they only support graph-side queries. Details: [Access control plan](../plans/ACCESS_CONTROL_PLAN.md).
 
 ## Organisation Git tokens
 
@@ -254,7 +254,7 @@ The platform reads need a platform administrator's signed-in browser session: `G
 
 Every view is written to the audit log before any figure is read: `admin.users.view`, `admin.orgs.view`, `admin.health.view`, `admin.stats.view` (with the section, range, organisation and panel), and `admin.stats.export` (with the format as well). A batch of series panels is one view. When the audit entry cannot be written, the request answers 503 and shows no figures.
 
-Administration → Statistics shows the figures (`docs/PLATFORM_STATS_PLAN.md`, phases 1, 3, 4, 6 and 7):
+Administration → Statistics shows the figures (`docs/plans/PLATFORM_STATS_PLAN.md`, phases 1, 3, 4, 6 and 7):
 
 | Route | Answers |
 |---|---|
@@ -275,7 +275,7 @@ Administration → Statistics shows the figures (`docs/PLATFORM_STATS_PLAN.md`, 
 
 `range` is `1h`, `6h`, `24h`, `7d`, `30d`, `90d` or `365d`; anything else answers 400. `org` is an organisation ID and must exist; it filters the rows, never the totals. Tables have 50 rows per page. The former panels `tenants`, `platform_llm_cost`, `platform_tool_latency` and `platform_db_latency` of `/api/v1/stats/series` were removed and answer 404; their figures are the admin panels `org_sessions`, `llm_cost`, `tool_latency` and `db_latency`. The figures are counts only: organisation names and slugs appear, repository names, graph IDs, paths, e-mail addresses and user, key or session IDs never do. Root is never counted. A person counts once in the platform totals and once in each organisation they belong to. Seats are active members other than guests. Active people signed in, opened a browser or runtime session, or used an API key in the window.
 
-The process holding the `api-loops` lease writes daily platform statistics to `platform_stats_daily` shortly after midnight UTC: counts of organisations, users other than root, active users, memberships, seats, repository entries, graphs, finished jobs, sessions and API keys, per day and, for some, per organisation ID. Rows hold counts and opaque organisation IDs only, never names, e-mail addresses, repository names or the IDs of users, keys or sessions. A deleted organisation's rows stay. Rows are kept 400 days, independently of the audit retention, and older ones are pruned by the same loop. They feed the 90-day and 365-day ranges of the platform statistics. See [platform statistics](../PLATFORM_STATS_PLAN.md).
+The process holding the `api-loops` lease writes daily platform statistics to `platform_stats_daily` shortly after midnight UTC: counts of organisations, users other than root, active users, memberships, seats, repository entries, graphs, finished jobs, sessions and API keys, per day and, for some, per organisation ID. Rows hold counts and opaque organisation IDs only, never names, e-mail addresses, repository names or the IDs of users, keys or sessions. A deleted organisation's rows stay. Rows are kept 400 days, independently of the audit retention, and older ones are pruned by the same loop. They feed the 90-day and 365-day ranges of the platform statistics. See [platform statistics](../plans/PLATFORM_STATS_PLAN.md).
 
 | Range | Window figures (created, started, ended) | State figures (totals, open now) |
 |---|---|---|

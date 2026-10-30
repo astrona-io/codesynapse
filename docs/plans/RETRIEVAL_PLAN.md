@@ -1,6 +1,6 @@
 # Graph and vector context reduction
 
-Status: implemented, SaaS phase 4f. Extends phase 4c and [ADR 0001](adr/0001-search.md); depends on phase 4d authorization and uses phase 4e telemetry. The target domain is CodeSynapse's code intelligence and agent memory. Response budgets, retrieval integrity and reproducible measurements are implemented. Native Milvus BM25/RRF remains conditional: the measured lexical latency does not trigger migration. [Measured results](RETRIEVAL_RESULTS.md) include the overhead on small files and make no production SLA claim.
+Status: implemented, SaaS phase 4f. Extends phase 4c and [ADR 0001](../adr/0001-search.md); depends on phase 4d authorization and uses phase 4e telemetry. The target domain is CodeSynapse's code intelligence and agent memory. Response budgets, retrieval integrity and reproducible measurements are implemented. Native Milvus BM25/RRF remains conditional: the measured lexical latency does not trigger migration. [Measured results](../RETRIEVAL_RESULTS.md) include the overhead on small files and make no production SLA claim.
 Session-scoped tool execution and chat memory must also follow [phase 4g](SESSION_CONTEXT_PLAN.md): immutable runtime identity, inherited parent context and tenant/session/namespace filtering. This requirement does not turn session IDs into metric labels.
 
 ## Domain topology
@@ -97,7 +97,7 @@ Recall returns at most 8 entries, 2 hops, 80 facts and 32 KiB of serialized resu
 
 ## Token and latency benchmark
 
-The implemented fixture and its measured limits are documented in [RETRIEVAL_RESULTS.md](RETRIEVAL_RESULTS.md). The broader workload below remains the acceptance target for a future native-hybrid migration and production SLA; the current report does not claim those measurements.
+The implemented fixture and its measured limits are documented in [RETRIEVAL_RESULTS.md](../RETRIEVAL_RESULTS.md). The broader workload below remains the acceptance target for a future native-hybrid migration and production SLA; the current report does not claim those measurements.
 
 Create a versioned workload of symbol explanation, callers/callees, change impact, exact error/identifier lookup and cross-turn memory recall. Include rare identifiers, mixed-language terms, no-match cases, stale entities and adversarial tenant collisions. Compare the same task and answer quality across raw-file context, current composite graph tools, lexical-only retrieval, dense-only retrieval and Milvus hybrid plus graph hydration.
 

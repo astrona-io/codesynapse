@@ -333,7 +333,7 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 			m.Requests += v
 			t.Requests += v
 			// Every outcome but ok is a failure: error, timeout, rate_limited
-			// and refused (docs/TELEMETRY_PLAN.md, phase 5).
+			// and refused (docs/plans/TELEMETRY_PLAN.md, phase 5).
 			if l["outcome"] != "ok" {
 				m.Failures += v
 				t.Failures += v

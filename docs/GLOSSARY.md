@@ -49,7 +49,7 @@ Plain-English meanings for the words you will meet in CodeSynapse. Each entry sa
 :   An AI model that runs on your own machine (for example through Ollama) instead of a cloud service. Your text does not leave the machine. CodeSynapse uses one for jobs that touch source code or conversations, such as shortening text before it goes to a cloud model.
 
 **Gateway**
-:   An optional front door for your agent's own model traffic. Instead of your agent talking to the model provider directly, it talks to CodeSynapse first. CodeSynapse puts the request in a queue, offers it to your local model first, and forwards it to the cloud model when the local one cannot answer it well. It is on by default; the operator or the organisation can switch it off. See the [gateway plan](GATEWAY_PLAN.md).
+:   An optional front door for your agent's own model traffic. Instead of your agent talking to the model provider directly, it talks to CodeSynapse first. CodeSynapse puts the request in a queue, offers it to your local model first, and forwards it to the cloud model when the local one cannot answer it well. It is on by default; the operator or the organisation can switch it off. See the [gateway plan](plans/GATEWAY_PLAN.md).
 
 **Queue**
 :   A waiting line. A local model can only do so much at once, so requests wait their turn.
@@ -110,7 +110,7 @@ Plain-English meanings for the words you will meet in CodeSynapse. Each entry sa
 :   The first administrator account of an installation. It manages the platform but cannot read any organisation's code.
 
 **Runtime session**
-:   A short-lived identity an agent registers so each of its requests can be traced to a person and a chat. The [session context plan](SESSION_CONTEXT_PLAN.md) has the details.
+:   A short-lived identity an agent registers so each of its requests can be traced to a person and a chat. The [session context plan](plans/SESSION_CONTEXT_PLAN.md) has the details.
 
 **Audit log**
 :   A tamper-evident record of who did what and when. Every change and security event is in it.

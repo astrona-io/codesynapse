@@ -156,7 +156,7 @@ func TestRootGovernance(t *testing.T) {
 
 // TestSingleTenantHasNoRoot: without accounts there is no root account; the
 // installation token is the operator credential and the outer bearer check
-// guards everything (README, docs/ROOT_BOOTSTRAP_PLAN.md).
+// guards everything (README, docs/plans/ROOT_BOOTSTRAP_PLAN.md).
 func TestSingleTenantHasNoRoot(t *testing.T) {
 	ts, _ := newTestServer(t)
 	c := newClient(t, ts)

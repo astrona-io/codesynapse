@@ -14,7 +14,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/history"
 )
 
-// The security section of the platform statistics (docs/PLATFORM_STATS_PLAN.md,
+// The security section of the platform statistics (docs/plans/PLATFORM_STATS_PLAN.md,
 // phase 7): counts from the latest snapshot of every graph an organisation
 // holds, never a finding's text, path, symbol or a repository name. The
 // platform counts each graph once and an organisation each of its entries.

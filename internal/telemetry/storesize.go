@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-// Store sizes (docs/PLATFORM_STATS_PLAN.md, phase 6): rows and bytes per
+// Store sizes (docs/plans/PLATFORM_STATS_PLAN.md, phase 6): rows and bytes per
 // database and kind, sampled once a day by the api-loops holder. They belong
 // to no tenant. db_system is one of the three stores; kind is a NebulaGraph
 // tag or edge type, a fixed PostgreSQL table or "database", or a Milvus

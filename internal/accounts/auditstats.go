@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Audit statistics (docs/PLATFORM_STATS_PLAN.md, phase 7): counts of the
+// Audit statistics (docs/plans/PLATFORM_STATS_PLAN.md, phase 7): counts of the
 // audit log by action family and outcome, failed sign-ins by cause and the
 // security events, and the stored results of chain verification. Counts
 // only: no actor, target, address or detail text leaves this file, except

@@ -266,7 +266,7 @@ export interface WorkspaceStats {
     tokens: { input: number; output: number; cached_input: number; cache_write?: number; turns: number; cache_known_turns?: number; total: number; input_pct: number; output_pct: number }
     context_total_tokens: number; context_saved_pct: number
     // Share of the agent's own work avoided, without prompt-cache reads
-    // (docs/PLATFORM_STATS_PLAN.md). null when unknown; basis says why.
+    // (docs/plans/PLATFORM_STATS_PLAN.md). null when unknown; basis says why.
     work_tokens?: number; share_avoided_tokens?: number; share_local_avoided_tokens?: number
     share_avoided_pct?: number | null; share_avoided_known?: boolean
     share_avoided_basis?: 'work_tokens' | 'no_hook_tokens' | 'cache_fields_missing' | 'repeats_not_reported'
@@ -869,7 +869,7 @@ export interface IngestionOverview {
   history: IngestRun[]; next: string; annotation_notice: string
 }
 
-// Single sign-on (docs/SSO_PLAN.md). The client secret never comes back,
+// Single sign-on (docs/plans/SSO_PLAN.md). The client secret never comes back,
 // only its preview.
 export interface IdentityProvider {
   org_id: string; name: string; issuer: string; client_id: string; secret_preview: string

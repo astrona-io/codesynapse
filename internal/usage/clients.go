@@ -2,7 +2,7 @@ package usage
 
 import "strings"
 
-// Client families (docs/PLATFORM_STATS_PLAN.md, "Usage and traffic"):
+// Client families (docs/plans/PLATFORM_STATS_PLAN.md, "Usage and traffic"):
 // client names are free strings a client reports about itself, so the
 // platform statistics and the daily rollup name only these families. A
 // client that names none of them is "other"; one that sent no name is

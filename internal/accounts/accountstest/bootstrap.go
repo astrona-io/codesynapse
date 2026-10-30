@@ -13,7 +13,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
-// RunBootstrap checks bootstrap-root separation (docs/ROOT_BOOTSTRAP_PLAN.md).
+// RunBootstrap checks bootstrap-root separation (docs/plans/ROOT_BOOTSTRAP_PLAN.md).
 // newStore returns an empty, migrated store for each scenario.
 func RunBootstrap(t *testing.T, newStore func(t *testing.T) accounts.Store) {
 	t.Run("fresh setup", func(t *testing.T) { runFreshSetup(t, newStore(t)) })

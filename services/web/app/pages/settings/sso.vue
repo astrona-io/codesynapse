@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { IdentityProvider, Role, Team } from '~/utils/types'
 
-// The organisation's OpenID Connect provider (docs/SSO_PLAN.md). Owners and
+// The organisation's OpenID Connect provider (docs/plans/SSO_PLAN.md). Owners and
 // admins manage it; the API checks discovery before saving and never returns
 // the client secret.
 const session = useSession()

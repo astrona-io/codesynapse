@@ -12,7 +12,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
-// Single sign-on (docs/SSO_PLAN.md). The dashboard starts a sign-in with
+// Single sign-on (docs/plans/SSO_PLAN.md). The dashboard starts a sign-in with
 // POST /auth/sso/{org}/start, which returns the provider's URL and sets a
 // short-lived HTTP-only binder cookie. The provider sends the browser to the
 // dashboard's /sso/callback page, which posts code and state to

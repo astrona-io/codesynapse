@@ -91,7 +91,7 @@ var seriesPanels = map[string]seriesPanel{
 	"ingest_skips": {Title: "Whole-file exclusions across runs", Unit: "files", Kind: "count", repository: true,
 		Help:    "Whole-file skip decisions from persisted report checkpoints. Kubernetes-only exclusions are stage decisions and do not count as skipped files.",
 		queries: []seriesQuery{{expr: `sum by (skip_reason) (increase(codesynapse_files_skipped_total[$w]))`, by: "skip_reason"}}},
-	// Background jobs and indexing (docs/TELEMETRY_PLAN.md, phase 3), for
+	// Background jobs and indexing (docs/plans/TELEMETRY_PLAN.md, phase 3), for
 	// Statistics → Sync. Outcomes: ok, error, left_behind, cancelled.
 	"jobs_finished": {Title: "Finished jobs", Unit: "jobs", Kind: "count",
 		Help:    "Indexing, sync, AI and fix jobs that ended, by outcome. Left behind means another process resumes the job.",
@@ -128,7 +128,7 @@ var seriesPanels = map[string]seriesPanel{
 		Help:    "Time spent parsing each language while indexing. JavaScript, TypeScript and Vue share one parser, as do Java and Kotlin.",
 		Empty:   "No extraction ran in this window.",
 		queries: []seriesQuery{{expr: `sum by (language) (increase(codesynapse_ingest_extract_seconds_total[$w]))`, by: "language"}}},
-	// Outbound calls and the audit log (docs/TELEMETRY_PLAN.md, phase 4).
+	// Outbound calls and the audit log (docs/plans/TELEMETRY_PLAN.md, phase 4).
 	"git_operations": {Title: "Git operations", Unit: "operations", Kind: "count",
 		Help:    "Clones, fetches, access checks (ls_remote) and pushes to remote repositories, by outcome. No access means the host refused the credentials; redirected means the repository moved.",
 		Empty:   "No remote git call in this window.",
@@ -155,7 +155,7 @@ var seriesPanels = map[string]seriesPanel{
 	"tool_errors": {Title: "Failed tool calls", Unit: "calls", Kind: "count",
 		Help:    "Calls that ran and returned an error, by tool. Calls the server refused are counted under refused tool calls.",
 		queries: []seriesQuery{{expr: `sum by (mcp_tool) (increase(mcp_tool_calls_total{outcome="error"}[$w]))`, by: "mcp_tool"}}},
-	// Phase 5 (docs/TELEMETRY_PLAN.md): refusals and local answers.
+	// Phase 5 (docs/plans/TELEMETRY_PLAN.md): refusals and local answers.
 	"tool_refusals": {Title: "Refused tool calls", Unit: "calls", Kind: "count",
 		Help:    "Calls the server turned down before the tool ran (permission, repository scope or policy), by tool. Names a client invents count as unknown.",
 		Empty:   "No tool call was refused in this window.",

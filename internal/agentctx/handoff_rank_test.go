@@ -50,13 +50,13 @@ func TestMinimalContextNamedIdentifiersOutrankTaskWords(t *testing.T) {
 		below      []string
 	}{{
 		name: "platform stats phase 1",
-		task: "Implement phase 1 of docs/PLATFORM_STATS_PLAN.md: accounts.Service.PlatformStats helper (reuses requirePlatform, only platform administrators) and a Statistics tab under Administration",
+		task: "Implement phase 1 of docs/plans/PLATFORM_STATS_PLAN.md: accounts.Service.PlatformStats helper (reuses requirePlatform, only platform administrators) and a Statistics tab under Administration",
 		want: []string{"accounts.requirePlatform"},
 		never: []string{"coretools.ImplementationsIn", "coretools.Implementations", "(agentctx.Service).Implementations",
 			"(accounts.AuditLog).only", "telemetry.RecordIngestPhase"},
 	}, {
 		name:  "platform stats phase 2",
-		task:  "Implement phase 2 of docs/PLATFORM_STATS_PLAN.md: the hook counter tokens:cache-known-turns, agentStats and PriceReference for the token savings share",
+		task:  "Implement phase 2 of docs/plans/PLATFORM_STATS_PLAN.md: the hook counter tokens:cache-known-turns, agentStats and PriceReference for the token savings share",
 		want:  []string{"api.agentStats", "llm.PriceReference"},
 		never: []string{"coretools.ImplementationsIn", "coretools.Implementations", "telemetry.RecordIngestPhase"},
 		below: []string{"(*ssotest.Provider).token", "(*codesynapse.gitHookOptions).hook"},

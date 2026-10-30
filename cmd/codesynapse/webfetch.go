@@ -8,7 +8,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/fetchsource"
 )
 
-// hook webfetch (PreToolUse on WebFetch, docs/TEXT_OPTIMIZATION_PLAN.md
+// hook webfetch (PreToolUse on WebFetch, docs/plans/TEXT_OPTIMIZATION_PLAN.md
 // phase 6): when fetch_source already holds the page in its local cache, the
 // first WebFetch of it in a session is turned back with a pointer to
 // fetch_source, which answers from that cache without a download. A page

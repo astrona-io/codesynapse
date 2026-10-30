@@ -476,7 +476,7 @@ func (o *designateRootOptions) Validate(context.Context, *app.Env) error {
 }
 
 // Run records the operator's audited decision for an installation whose
-// bootstrap root is ambiguous (docs/ROOT_BOOTSTRAP_PLAN.md).
+// bootstrap root is ambiguous (docs/plans/ROOT_BOOTSTRAP_PLAN.md).
 func (o *designateRootOptions) Run(ctx context.Context, _ *app.Env) error {
 	svc, closeDB, err := openAccounts(ctx, o.EC.Logger)
 	if err != nil {

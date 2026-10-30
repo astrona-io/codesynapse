@@ -2,7 +2,7 @@ package usage
 
 import "strings"
 
-// Repeats and re-sends (docs/PLATFORM_STATS_PLAN.md, token savings without
+// Repeats and re-sends (docs/plans/PLATFORM_STATS_PLAN.md, token savings without
 // the prompt cache). The plugin's hooks report, per tool, the answered line
 // ranges that overlapped a range the session had already been answered or
 // read (RepeatTool), and the answer tokens of the other answers times the

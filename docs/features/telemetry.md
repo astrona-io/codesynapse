@@ -51,7 +51,7 @@ Whoever runs the installation can turn on alerts: an optional vmalert checks rul
 
 ## What is planned
 
-Some parts of CodeSynapse have no live numbers yet. The [metrics coverage plan](../TELEMETRY_PLAN.md#metrics-coverage-plan) lists them and the order in which they will be added:
+Some parts of CodeSynapse have no live numbers yet. The [metrics coverage plan](../plans/TELEMETRY_PLAN.md#metrics-coverage-plan) lists them and the order in which they will be added:
 
 1. **Platform health** for operators (done): see the table above and Administration → Overview.
 2. **More operator alerts** (done): each later step adds the alerts for its numbers.
@@ -66,5 +66,5 @@ Operator alerts are for whoever runs the installation. Warnings for people in an
 
 ## Related
 
-- [Telemetry plan](../TELEMETRY_PLAN.md): every instrument, the dashboard queries, traces, logs and the rules behind them.
+- [Telemetry plan](../plans/TELEMETRY_PLAN.md): every instrument, the dashboard queries, traces, logs and the rules behind them.
 - [Indexing policy and reports](indexing-policy.md): the per-run file report behind the Ingestion page.

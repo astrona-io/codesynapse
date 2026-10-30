@@ -2,7 +2,7 @@ package accounts
 
 import "time"
 
-// Ingest figures of the platform statistics (docs/PLATFORM_STATS_PLAN.md,
+// Ingest figures of the platform statistics (docs/plans/PLATFORM_STATS_PLAN.md,
 // phase 4): counts summed from the ingest runs of a window. They carry an
 // organisation ID and numbers only, never a repository, graph, run ID, path
 // or report text, so they may cross tenants.

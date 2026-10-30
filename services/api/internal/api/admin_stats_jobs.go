@@ -15,7 +15,7 @@ import (
 )
 
 // The jobs and ingest sections of the platform statistics
-// (docs/PLATFORM_STATS_PLAN.md, phase 4). Both are counts per organisation
+// (docs/plans/PLATFORM_STATS_PLAN.md, phase 4). Both are counts per organisation
 // and job kind: they never read a job's repository, parameters or error
 // text, nor an ingest run's graph, run ID or files, so nothing names what a
 // tenant works on. The queue is the platform's (JobQueue); finished jobs

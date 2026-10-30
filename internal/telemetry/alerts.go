@@ -16,7 +16,7 @@ import (
 )
 
 // Alerts reads what the internal vmalert evaluates
-// (docs/PLATFORM_STATS_PLAN.md, phase 6) for the Statistics page. Rule
+// (docs/plans/PLATFORM_STATS_PLAN.md, phase 6) for the Statistics page. Rule
 // labels and annotations can carry anything an operator wrote, so only the
 // rule name, state, the severity label, the value and when it became active
 // are passed on.

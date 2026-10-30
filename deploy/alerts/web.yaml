@@ -1,4 +1,4 @@
-# The web server (docs/TELEMETRY_PLAN.md, "Phase 6"). It has no trusted
+# The web server (docs/plans/TELEMETRY_PLAN.md, "Phase 6"). It has no trusted
 # tenant, so its metrics are platform_* and labelled only by route pattern,
 # method, status class and a fixed proxy outcome; the rule sums them all away.
 groups:

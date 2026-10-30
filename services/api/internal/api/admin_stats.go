@@ -15,7 +15,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
-// Platform statistics (docs/PLATFORM_STATS_PLAN.md, phase 1): aggregates
+// Platform statistics (docs/plans/PLATFORM_STATS_PLAN.md, phase 1): aggregates
 // across every organisation for platform administrators, from PostgreSQL.
 // Every view goes through accounts.Service.PlatformStats, which allows only
 // a platform administrator's signed-in session and writes the audit entry

@@ -1,4 +1,4 @@
-# Calls that leave the installation (docs/TELEMETRY_PLAN.md, phase 4):
+# Calls that leave the installation (docs/plans/TELEMETRY_PLAN.md, phase 4):
 # remote git and external lookups (osv.dev, deps.dev, git host APIs). Tenant
 # and platform (no organisation) series count together and the rules group
 # only by the fixed operation and service labels.

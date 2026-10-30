@@ -8,7 +8,7 @@ const edits = computed(() => a.value?.edits ?? { edits: 0, writes: 0, failed: 0,
 const contextTotal = computed(() => a.value?.context_total_tokens ?? ((a.value?.response_tokens ?? 0) + (a.value?.avoided_tokens ?? 0)))
 const contextSavedPct = computed(() => a.value?.context_saved_pct ?? (contextTotal.value ? Math.round(100 * (a.value?.avoided_tokens ?? 0) / contextTotal.value) : 0))
 // The share of the agent's own work avoided comes from the server; it is
-// never recomputed here (docs/PLATFORM_STATS_PLAN.md).
+// never recomputed here (docs/plans/PLATFORM_STATS_PLAN.md).
 const shareKnown = computed(() => a.value?.share_avoided_known === true && a.value?.share_avoided_pct != null)
 const shareWhy = computed(() => ({
   no_hook_tokens: 'no model usage was reported by agent hooks in this period',

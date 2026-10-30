@@ -243,7 +243,7 @@ func TestBriefPlanForAQuestionInPlainWords(t *testing.T) {
 	// What it was briefed with, and names that only share one word with it.
 	node(model.KindSection, "Limits worth knowing", "docs/operations/chat-memory-setup.md#limits", "docs/operations/chat-memory-setup.md", 184, 191)
 	node(model.KindSection, "SARIF and GitHub code scanning", "docs/features/security.md#sarif", "docs/features/security.md", 120, 141)
-	node(model.KindSection, "Token and latency benchmark", "docs/RETRIEVAL_PLAN.md#benchmark", "docs/RETRIEVAL_PLAN.md", 98, 115)
+	node(model.KindSection, "Token and latency benchmark", "docs/plans/RETRIEVAL_PLAN.md#benchmark", "docs/plans/RETRIEVAL_PLAN.md", 98, 115)
 	node(model.KindPackage, "docs", mod+"internal/ingest/docs", "", 0, 0)
 	node(model.KindFile, "docs.go", "internal/ingest/docs/docs.go", "internal/ingest/docs/docs.go", 0, 0)
 	node(model.KindFunction, "Extract", mod+"internal/ingest/docs.Extract", "internal/ingest/docs/docs.go", 10, 60)
@@ -275,7 +275,7 @@ func TestBriefPlanForAQuestionInPlainWords(t *testing.T) {
 		i := slices.Index(files, f)
 		assert.True(t, i >= 0 && i < 6, f+" is not among the first ranges: "+strings.Join(files, " "))
 	}
-	for _, f := range []string{"docs/operations/chat-memory-setup.md", "docs/features/security.md", "docs/RETRIEVAL_PLAN.md"} {
+	for _, f := range []string{"docs/operations/chat-memory-setup.md", "docs/features/security.md", "docs/plans/RETRIEVAL_PLAN.md"} {
 		assert.False(t, slices.Contains(files, f), f+" is in the plan")
 	}
 	for _, kw := range []string{"see", "know", "but", "look", "like"} {
