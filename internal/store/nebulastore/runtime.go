@@ -36,13 +36,16 @@ const (
 )
 
 // errRuntimeIncomplete reports a document whose chunks do not match its head.
-var errRuntimeIncomplete = errors.New("runtime facts: incomplete document")
+var errRuntimeIncomplete = errors.New("incomplete chunked document")
 
 func runtimeHeadVID(ns string) string { return vid("h", "runtime|"+ns) }
 
 // SetRuntimeFacts implements store.RuntimeStore.
 func (s *Store) SetRuntimeFacts(ctx context.Context, ns string, f runtimefacts.Facts) error {
-	return s.setChunked(ctx, ns, store.RuntimeGraph(ns), f)
+	if err := s.setChunked(ctx, ns, store.RuntimeGraph(ns), f); err != nil {
+		return fmt.Errorf("runtime facts: %w", err)
+	}
+	return nil
 }
 
 // setChunked stores v as the document under ns, which belongs to graphName
@@ -61,7 +64,7 @@ func (s *Store) setChunked(ctx context.Context, ns, graphName string, v any) err
 		return err
 	}
 	if buf.Len() > maxRuntimeBytes {
-		return fmt.Errorf("runtime facts: %d bytes compressed, more than %d: %w", buf.Len(), maxRuntimeBytes, runtimefacts.ErrTooLarge)
+		return fmt.Errorf("%d bytes compressed, more than %d: %w", buf.Len(), maxRuntimeBytes, runtimefacts.ErrTooLarge)
 	}
 	raw := make([]byte, 8)
 	if _, err := rand.Read(raw); err != nil {
@@ -112,7 +115,10 @@ func (s *Store) dropChunks(ctx context.Context, stmt string, params map[string]a
 func (s *Store) RuntimeFacts(ctx context.Context, ns string) (runtimefacts.Facts, error) {
 	var f runtimefacts.Facts
 	if err := s.getChunked(ctx, ns, &f); err != nil {
-		return runtimefacts.Facts{}, err
+		if errors.Is(err, store.ErrNotFound) {
+			return runtimefacts.Facts{}, err
+		}
+		return runtimefacts.Facts{}, fmt.Errorf("runtime facts: %w", err)
 	}
 	return f, nil
 }
@@ -142,18 +148,15 @@ func (s *Store) getChunked(ctx context.Context, ns string, v any) error {
 		p, _ := r["data"].(string)
 		b, err := base64.StdEncoding.DecodeString(p)
 		if err != nil {
-			return fmt.Errorf("runtime facts: %w", err)
+			return err
 		}
 		data = append(data, b...)
 	}
 	zr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("runtime facts: %w", err)
+		return err
 	}
-	if err := json.NewDecoder(io.LimitReader(zr, 16*maxRuntimeBytes)).Decode(v); err != nil {
-		return fmt.Errorf("runtime facts: %w", err)
-	}
-	return nil
+	return json.NewDecoder(io.LimitReader(zr, 16*maxRuntimeBytes)).Decode(v)
 }
 
 // DeleteRuntimeFacts implements store.RuntimeStore.

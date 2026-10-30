@@ -20,7 +20,7 @@ gzip -c gitleaks.sarif | curl --fail-with-body -X PUT \
 - The body is the SARIF log, `application/sarif+json` or `application/json`, plain or gzip. Both the body as sent and the log inside it are capped at 32 MiB.
 - `commit` is the hexadecimal commit the tool scanned. Findings of another commit than the indexed one are marked `stale`.
 - A log may hold several runs (tools). Each tool's upload replaces that tool's earlier findings and keeps the other tools'. Runs of the same tool name, compared without case, are joined.
-- Limits: 20 runs per log and 20 tools per repository, 20,000 results per log and 50,000 findings per repository. Over a limit the request is refused with 413, never cut.
+- Limits: 20 runs per log and 20 tools per repository, 20,000 results, 20,000 rules and 50,000 artifacts per log, and 50,000 findings per repository. Over a limit the request is refused with 413, never cut. The log is read as a stream, one result at a time, so memory follows what is kept, not what the log repeats. Messages are cut to 2 KiB before arguments are filled in and before redaction.
 - The upload is recorded in the audit log like every changing request.
 
 ## What is kept

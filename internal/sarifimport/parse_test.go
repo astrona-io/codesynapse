@@ -140,7 +140,7 @@ func TestSeverity(t *testing.T) {
 }
 
 func TestCleanPath(t *testing.T) {
-	for in, want := range map[string]string{"a/b.go": "a/b.go", "./a/../b.go": "b.go", "../x": "", "/etc/x": "", "a/\x00b": "", ".": "", "C:/x": ""} {
+	for in, want := range map[string]string{"a/b.go": "a/b.go", "./a/../b.go": "b.go", "../x": "", "/etc/x": "", "a/\x00b": "", ".": "", "C:/x": "", "./A:": "", "x/../C:/y": ""} {
 		got, ok := CleanPath(in)
 		assert.Equal(t, got, want, in)
 		assert.Equal(t, ok, want != "", in)
@@ -184,6 +184,14 @@ func FuzzParse(f *testing.F) {
 	f.Add([]byte(sampleLog))
 	f.Add([]byte(`{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"t"}},"results":[{"ruleId":"r","locations":[{"physicalLocation":{"artifactLocation":{"uri":"file:///C:/w/../../x.go"}}}]}]}]}`))
 	f.Add([]byte(`{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"t"}},"results":[{"ruleIndex":-1,"locations":[{"physicalLocation":{"artifactLocation":{"uri":"%2e%2e/x"}}}]}]}]}`))
+	// Seeds for the review findings: repeated parts, huge templates and
+	// nesting, each small here so the fuzzer can grow them.
+	for _, log := range boundLogs(3) {
+		f.Add([]byte(log))
+	}
+	f.Add([]byte(`{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"t","rules":[{"id":"r","shortDescription":{"text":"d"},"messageStrings":{"m":{"text":"{0}{0}{1}{9}{0}"}}}]}},"results":[{"ruleId":"r","message":{"id":"m","arguments":["a {0}","b"]},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"a.go"}}}]}]}]}`))
+	f.Add([]byte(logWith(`"x":[[[[[[{"a":[[[]]]}]]]]]]`)))
+	f.Add([]byte(`{"version":"2.1.0","runs":null,"runs":[{"tool":null,"tool":{"driver":{"name":"t"}},"results":[{"ruleIndex":1.5,"ruleId":7,"locations":null}]}]}`))
 	f.Fuzz(func(t *testing.T, b []byte) {
 		runs, err := Parse(strings.NewReader(string(b)))
 		if err != nil {

@@ -17,6 +17,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	acctmem "github.com/astrona-io/codesynapse/internal/accounts/memstore"
 	agentmem "github.com/astrona-io/codesynapse/internal/memory"
+	"github.com/astrona-io/codesynapse/internal/sarifimport"
 	"github.com/astrona-io/codesynapse/internal/store/memory"
 	"github.com/astrona-io/codesynapse/internal/store/storetest"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
@@ -202,4 +203,41 @@ func TestSARIFUploadIsPerOrganisation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(set.Runs), 1, "kept in the uploading organisation's namespace")
 	assert.Equal(t, set.Runs[0].Tool, "gosec")
+}
+
+// spaces is an endless body of JSON whitespace.
+type spaces struct{}
+
+func (spaces) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = ' '
+	}
+	return len(p), nil
+}
+
+// TestSARIFUploadTooLarge: a body over the limit answers 413, not 400 (the
+// parser keeps http.MaxBytesError in its error).
+func TestSARIFUploadTooLarge(t *testing.T) {
+	ts, _ := newTestServer(t)
+	for _, enc := range []string{"", "gzip"} {
+		t.Run("encoding "+enc, func(t *testing.T) {
+			body := io.MultiReader(strings.NewReader(`{"version":"2.1.0","runs":[`), io.LimitReader(spaces{}, sarifimport.MaxLogBytes+1024))
+			if enc == "gzip" {
+				var buf bytes.Buffer
+				zw := gzip.NewWriter(&buf)
+				_, err := io.Copy(zw, body)
+				require.NoError(t, err)
+				require.NoError(t, zw.Close())
+				body = &buf
+			}
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/repos/"+storetest.Repo+"/sarif?commit=abc1234", body)
+			req.Header.Set("Content-Type", "application/sarif+json")
+			if enc != "" {
+				req.Header.Set("Content-Encoding", enc)
+			}
+			rec := httptest.NewRecorder()
+			ts.Config.Handler.ServeHTTP(rec, req)
+			assert.Equal(t, rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+		})
+	}
 }

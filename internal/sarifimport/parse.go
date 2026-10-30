@@ -73,7 +73,7 @@ type Finding struct {
 	// Fingerprint identifies the finding within its tool's run.
 	Fingerprint string `json:"fingerprint"`
 
-	// abs is an absolute path no base of the log resolved; Map places it.
+	// abs is an absolute path no base of the log resolved; Place places it.
 	abs string
 }
 
@@ -87,118 +87,122 @@ type Run struct {
 	Dropped int `json:"dropped,omitempty"`
 }
 
-// The subset of SARIF 2.1.0 that is read. Everything else, snippets and
-// code flows included, is skipped by the decoder and never held.
-type sarifLog struct {
-	Version string     `json:"version"`
-	Runs    []sarifRun `json:"runs"`
+// The log is read as a stream of JSON tokens, one result, rule or artifact
+// at a time, so what is held grows with what is kept, never with what the
+// log repeats: decoding it into typed structs first let a few KiB of gzip
+// ("results":[{},{},…]) allocate gigabytes. Only the fields below are read;
+// everything else, snippets and code flows included, is skipped token by
+// token, and every string is cut to its limit as soon as it is read.
+
+// rawRule is what is read of a rule.
+type rawRule struct {
+	id, helpURI, short, level string
+	// messages are the rule's message templates (messageStrings).
+	messages map[string]string
+	score    float64
+	scored   bool
 }
 
-type sarifRun struct {
-	Tool struct {
-		Driver struct {
-			Name            string      `json:"name"`
-			Version         string      `json:"version"`
-			SemanticVersion string      `json:"semanticVersion"`
-			Rules           []sarifRule `json:"rules"`
-		} `json:"driver"`
-	} `json:"tool"`
-	OriginalURIBaseIDs map[string]artifactLocation `json:"originalUriBaseIds"`
-	Artifacts          []struct {
-		Location artifactLocation `json:"location"`
-	} `json:"artifacts"`
-	Results []sarifResult `json:"results"`
+// rawResult is what is read of a result, before the rules and artifacts
+// it refers to (which may come later in the run) are known.
+type rawResult struct {
+	ruleID, ruleRefID   string
+	ruleIndex, refIndex *int
+	kind, level         string
+	text, msgID         string
+	args                []string
+	loc                 rawLocation
+	hasLoc              bool
+	suppressed, absent  bool
+	score               float64
+	scored              bool
 }
 
-type sarifRule struct {
-	ID               string          `json:"id"`
-	HelpURI          string          `json:"helpUri"`
-	ShortDescription *text           `json:"shortDescription"`
-	MessageStrings   map[string]text `json:"messageStrings"`
-	Default          *struct {
-		Level string `json:"level"`
-	} `json:"defaultConfiguration"`
-	Properties properties `json:"properties"`
+type rawLocation struct {
+	uri        string
+	index      *int
+	start, end int
 }
 
-type text struct {
-	Text string `json:"text"`
+type rawRun struct {
+	name, version, semver string
+	rules                 []rawRule
+	bases                 []string
+	artifacts             []string
+	results               []rawResult
 }
 
-type properties struct {
-	SecuritySeverity json.RawMessage `json:"security-severity"`
-}
+// Limits of the reader beyond those on what is kept.
+const (
+	// maxRawMessage bounds, in bytes, a message, template or description as
+	// read, before arguments are filled in and it is redacted and cut to
+	// MaxMessage runes.
+	maxRawMessage = 2048
+	// maxMessageStrings bounds the message templates kept per log.
+	maxMessageStrings = 20_000
+	// maxArtifacts bounds the artifacts of one log.
+	maxArtifacts = 50_000
+	// maxBases bounds the originalUriBaseIds kept per run.
+	maxBases = 64
+	// maxDepth bounds the nesting of skipped values: the decoder keeps a
+	// stack entry per open array or object.
+	maxDepth = 64
+	maxShort = 32
+)
 
-type artifactLocation struct {
-	URI       string `json:"uri"`
-	URIBaseID string `json:"uriBaseId"`
-	Index     *int   `json:"index"`
-}
-
-type sarifResult struct {
-	RuleID    string `json:"ruleId"`
-	RuleIndex *int   `json:"ruleIndex"`
-	Rule      *struct {
-		ID    string `json:"id"`
-		Index *int   `json:"index"`
-	} `json:"rule"`
-	Kind    string `json:"kind"`
-	Level   string `json:"level"`
-	Message struct {
-		Text      string   `json:"text"`
-		ID        string   `json:"id"`
-		Arguments []string `json:"arguments"`
-	} `json:"message"`
-	Locations []struct {
-		Physical *struct {
-			Artifact artifactLocation `json:"artifactLocation"`
-			Region   *struct {
-				StartLine int `json:"startLine"`
-				EndLine   int `json:"endLine"`
-			} `json:"region"`
-		} `json:"physicalLocation"`
-	} `json:"locations"`
-	Suppressions []struct {
-		Status string `json:"status"`
-	} `json:"suppressions"`
-	BaselineState string     `json:"baselineState"`
-	Properties    properties `json:"properties"`
+// parser counts across the whole log, so splitting it into runs gains
+// nothing.
+type parser struct {
+	dec                                   *json.Decoder
+	rules, artifacts, results, msgStrings int
 }
 
 // Parse reads a SARIF 2.1.0 log. A run without a tool name is refused:
 // every finding must name the tool that flagged it.
 func Parse(r io.Reader) ([]Run, error) {
 	lr := &io.LimitedReader{R: r, N: MaxLogBytes + 1}
-	var lg sarifLog
-	if err := json.NewDecoder(lr).Decode(&lg); err != nil {
-		if lr.N <= 0 {
-			return nil, ErrTooLarge
+	p := &parser{dec: json.NewDecoder(lr)}
+	p.dec.UseNumber()
+	var version string
+	var runs []rawRun
+	err := p.object(func(k string) error {
+		var err error
+		switch k {
+		case "version":
+			version, err = p.str(maxShort)
+		case "runs":
+			err = p.array(func() error {
+				if len(runs) >= MaxRuns {
+					return ErrTooLarge
+				}
+				run, err := p.run()
+				runs = append(runs, run)
+				return err
+			})
+		default:
+			err = p.skip()
 		}
-		return nil, fmt.Errorf("%w: %v", ErrInvalid, clipErr(err))
-	}
+		return err
+	})
 	if lr.N <= 0 {
 		return nil, ErrTooLarge
 	}
-	if lg.Version != "2.1.0" {
-		return nil, fmt.Errorf("%w: version %q", ErrInvalid, clip(lg.Version, 20))
+	if err != nil {
+		if errors.Is(err, ErrTooLarge) || errors.Is(err, ErrInvalid) {
+			return nil, err
+		}
+		// %w keeps a reader's error, such as http.MaxBytesError, for the caller.
+		return nil, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
-	if len(lg.Runs) == 0 {
+	if version != "2.1.0" {
+		return nil, fmt.Errorf("%w: version %q", ErrInvalid, version)
+	}
+	if len(runs) == 0 {
 		return nil, fmt.Errorf("%w: no runs", ErrInvalid)
 	}
-	if len(lg.Runs) > MaxRuns {
-		return nil, ErrTooLarge
-	}
-	var out []Run
-	total := 0
-	for i, sr := range lg.Runs {
-		if len(sr.Tool.Driver.Rules) > maxRules {
-			return nil, ErrTooLarge
-		}
-		total += len(sr.Results)
-		if total > MaxFindings {
-			return nil, ErrTooLarge
-		}
-		run, err := readRun(sr)
+	out := make([]Run, 0, len(runs))
+	for i, rr := range runs {
+		run, err := readRun(rr)
 		if err != nil {
 			return nil, fmt.Errorf("run %d: %w", i, err)
 		}
@@ -207,22 +211,480 @@ func Parse(r io.Reader) ([]Run, error) {
 	return mergeRuns(out), nil
 }
 
-func readRun(sr sarifRun) (Run, error) {
-	d := sr.Tool.Driver
-	run := Run{Tool: Clean(d.Name, maxNameRunes), Version: Clean(cmp.Or(d.SemanticVersion, d.Version), maxNameRunes)}
+func (p *parser) run() (rawRun, error) {
+	var rr rawRun
+	err := p.object(func(k string) error {
+		switch k {
+		case "tool":
+			return p.object(func(k string) error {
+				if k != "driver" {
+					return p.skip()
+				}
+				return p.driver(&rr)
+			})
+		case "originalUriBaseIds":
+			return p.object(func(string) error {
+				loc, err := p.artifactLocation()
+				if err == nil && loc.uri != "" && len(rr.bases) < maxBases {
+					rr.bases = append(rr.bases, loc.uri)
+				}
+				return err
+			})
+		case "artifacts":
+			return p.array(func() error {
+				if p.artifacts >= maxArtifacts {
+					return ErrTooLarge
+				}
+				p.artifacts++
+				var uri string
+				err := p.object(func(k string) error {
+					if k != "location" {
+						return p.skip()
+					}
+					loc, err := p.artifactLocation()
+					uri = loc.uri
+					return err
+				})
+				rr.artifacts = append(rr.artifacts, uri)
+				return err
+			})
+		case "results":
+			return p.array(func() error {
+				if p.results >= MaxFindings {
+					return ErrTooLarge
+				}
+				p.results++
+				res, err := p.result()
+				rr.results = append(rr.results, res)
+				return err
+			})
+		default:
+			return p.skip()
+		}
+	})
+	return rr, err
+}
+
+func (p *parser) driver(rr *rawRun) error {
+	return p.object(func(k string) error {
+		var err error
+		switch k {
+		case "name":
+			rr.name, err = p.str(4 * maxNameRunes)
+		case "version":
+			rr.version, err = p.str(4 * maxNameRunes)
+		case "semanticVersion":
+			rr.semver, err = p.str(4 * maxNameRunes)
+		case "rules":
+			err = p.array(func() error {
+				if p.rules >= maxRules {
+					return ErrTooLarge
+				}
+				p.rules++
+				rule, err := p.rule()
+				rr.rules = append(rr.rules, rule)
+				return err
+			})
+		default:
+			err = p.skip()
+		}
+		return err
+	})
+}
+
+func (p *parser) rule() (rawRule, error) {
+	var rule rawRule
+	err := p.object(func(k string) error {
+		var err error
+		switch k {
+		case "id":
+			rule.id, err = p.str(4 * maxRuleRunes)
+		case "helpUri":
+			rule.helpURI, err = p.str(maxHelpURI + 1)
+		case "shortDescription":
+			rule.short, err = p.text()
+		case "messageStrings":
+			err = p.object(func(id string) error {
+				if p.msgStrings >= maxMessageStrings {
+					return p.skip()
+				}
+				p.msgStrings++
+				t, err := p.text()
+				if rule.messages == nil {
+					rule.messages = map[string]string{}
+				}
+				if _, dup := rule.messages[id]; !dup {
+					rule.messages[strings.Clone(clip(id, 4*maxRuleRunes))] = t
+				}
+				return err
+			})
+		case "defaultConfiguration":
+			err = p.object(func(k string) error {
+				if k != "level" {
+					return p.skip()
+				}
+				var err error
+				rule.level, err = p.str(maxShort)
+				return err
+			})
+		case "properties":
+			rule.score, rule.scored, err = p.properties()
+		default:
+			err = p.skip()
+		}
+		return err
+	})
+	return rule, err
+}
+
+func (p *parser) result() (rawResult, error) {
+	var res rawResult
+	err := p.object(func(k string) error {
+		var err error
+		switch k {
+		case "ruleId":
+			res.ruleID, err = p.str(4 * maxRuleRunes)
+		case "ruleIndex":
+			res.ruleIndex, err = p.integer()
+		case "rule":
+			err = p.object(func(k string) error {
+				var err error
+				switch k {
+				case "id":
+					res.ruleRefID, err = p.str(4 * maxRuleRunes)
+				case "index":
+					res.refIndex, err = p.integer()
+				default:
+					err = p.skip()
+				}
+				return err
+			})
+		case "kind":
+			res.kind, err = p.str(maxShort)
+		case "level":
+			res.level, err = p.str(maxShort)
+		case "message":
+			err = p.message(&res)
+		case "locations":
+			err = p.array(func() error {
+				if res.hasLoc {
+					return p.skip()
+				}
+				loc, found, err := p.location()
+				res.loc, res.hasLoc = loc, found
+				return err
+			})
+		case "suppressions":
+			err = p.array(func() error {
+				var status string
+				err := p.object(func(k string) error {
+					if k != "status" {
+						return p.skip()
+					}
+					var err error
+					status, err = p.str(maxShort)
+					return err
+				})
+				if status != "rejected" && status != "underReview" {
+					res.suppressed = true
+				}
+				return err
+			})
+		case "baselineState":
+			var state string
+			state, err = p.str(maxShort)
+			res.absent = state == "absent"
+		case "properties":
+			res.score, res.scored, err = p.properties()
+		default:
+			err = p.skip()
+		}
+		return err
+	})
+	return res, err
+}
+
+func (p *parser) message(res *rawResult) error {
+	return p.object(func(k string) error {
+		var err error
+		switch k {
+		case "text":
+			var s string
+			s, err = p.str(maxRawMessage + 1)
+			res.text = clipWords(s, maxRawMessage)
+		case "id":
+			res.msgID, err = p.str(4 * maxRuleRunes)
+		case "arguments":
+			err = p.array(func() error {
+				if len(res.args) >= maxArgs {
+					return p.skip()
+				}
+				a, err := p.str(MaxMessage)
+				res.args = append(res.args, a)
+				return err
+			})
+		default:
+			err = p.skip()
+		}
+		return err
+	})
+}
+
+// location reads one location; found is false when it has no physical one.
+func (p *parser) location() (rawLocation, bool, error) {
+	var loc rawLocation
+	found := false
+	err := p.object(func(k string) error {
+		if k != "physicalLocation" {
+			return p.skip()
+		}
+		present, err := p.objectOK(func(k string) error {
+			switch k {
+			case "artifactLocation":
+				al, err := p.artifactLocation()
+				loc.uri, loc.index = al.uri, al.index
+				return err
+			case "region":
+				return p.object(func(k string) error {
+					var n *int
+					var err error
+					switch k {
+					case "startLine":
+						n, err = p.integer()
+						loc.start = deref(n)
+					case "endLine":
+						n, err = p.integer()
+						loc.end = deref(n)
+					default:
+						err = p.skip()
+					}
+					return err
+				})
+			default:
+				return p.skip()
+			}
+		})
+		found = found || present
+		return err
+	})
+	return loc, found, err
+}
+
+func (p *parser) artifactLocation() (rawLocation, error) {
+	var loc rawLocation
+	err := p.object(func(k string) error {
+		var err error
+		switch k {
+		case "uri":
+			// One byte over the limit, so filePath refuses a longer one.
+			loc.uri, err = p.str(maxPathLen + 1)
+		case "index":
+			loc.index, err = p.integer()
+		default:
+			err = p.skip()
+		}
+		return err
+	})
+	return loc, err
+}
+
+// text reads a multiformatMessageString's text.
+func (p *parser) text() (string, error) {
+	var t string
+	err := p.object(func(k string) error {
+		if k != "text" {
+			return p.skip()
+		}
+		s, err := p.str(maxRawMessage + 1)
+		t = clipWords(s, maxRawMessage)
+		return err
+	})
+	return t, err
+}
+
+// properties reads the "security-severity" property, a number from 0 to
+// 10 given as a string (GitHub's convention) or a number.
+func (p *parser) properties() (score float64, scored bool, err error) {
+	err = p.object(func(k string) error {
+		if k != "security-severity" {
+			return p.skip()
+		}
+		tok, ok, err := p.scalar()
+		if err != nil || !ok {
+			return err
+		}
+		var s string
+		switch v := tok.(type) {
+		case string:
+			s = v
+		case json.Number:
+			s = v.String()
+		}
+		if len(s) == 0 || len(s) > 32 {
+			return nil
+		}
+		v, perr := strconv.ParseFloat(strings.TrimSpace(s), 64)
+		if perr == nil && v >= 0 && v <= 10 {
+			score, scored = v, true
+		}
+		return nil
+	})
+	return score, scored, err
+}
+
+// object reads an object, calling fn with each key; fn reads the value.
+// null reads as an empty object.
+func (p *parser) object(fn func(key string) error) error {
+	_, err := p.objectOK(fn)
+	return err
+}
+
+// objectOK is object that also says whether there was one (not null).
+func (p *parser) objectOK(fn func(key string) error) (bool, error) {
+	tok, err := p.dec.Token()
+	if err != nil {
+		return false, err
+	}
+	if tok == nil {
+		return false, nil
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return false, fmt.Errorf("%w: expected an object", ErrInvalid)
+	}
+	for p.dec.More() {
+		tok, err := p.dec.Token()
+		if err != nil {
+			return true, err
+		}
+		key, ok := tok.(string)
+		if !ok {
+			return true, fmt.Errorf("%w: expected a key", ErrInvalid)
+		}
+		if err := fn(key); err != nil {
+			return true, err
+		}
+	}
+	_, err = p.dec.Token() // }
+	return true, err
+}
+
+// array reads an array, calling fn for each element; fn reads it. null
+// reads as an empty array.
+func (p *parser) array(fn func() error) error {
+	tok, err := p.dec.Token()
+	if err != nil {
+		return err
+	}
+	if tok == nil {
+		return nil
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '[' {
+		return fmt.Errorf("%w: expected an array", ErrInvalid)
+	}
+	for p.dec.More() {
+		if err := fn(); err != nil {
+			return err
+		}
+	}
+	_, err = p.dec.Token() // ]
+	return err
+}
+
+// scalar reads one value: a string, number, bool or null (ok), or an
+// array or object, which it skips (not ok).
+func (p *parser) scalar() (json.Token, bool, error) {
+	tok, err := p.dec.Token()
+	if err != nil {
+		return nil, false, err
+	}
+	if d, isDelim := tok.(json.Delim); isDelim {
+		return nil, false, p.skipOpen(d)
+	}
+	return tok, true, nil
+}
+
+// str reads a string cut to limit bytes; any other value reads as "".
+func (p *parser) str(limit int) (string, error) {
+	tok, ok, err := p.scalar()
+	if err != nil || !ok {
+		return "", err
+	}
+	s, _ := tok.(string)
+	if len(s) > limit {
+		// A copy, so the cut never holds the whole token in memory.
+		s = strings.Clone(clip(s, limit))
+	}
+	return s, nil
+}
+
+// integer reads an integer; any other value reads as absent.
+func (p *parser) integer() (*int, error) {
+	tok, ok, err := p.scalar()
+	if err != nil || !ok {
+		return nil, err
+	}
+	num, isNum := tok.(json.Number)
+	if !isNum || len(num) > 12 {
+		return nil, nil
+	}
+	if n, perr := strconv.Atoi(num.String()); perr == nil {
+		return &n, nil
+	}
+	return nil, nil
+}
+
+// skip reads past one value of any shape without keeping it.
+func (p *parser) skip() error {
+	_, _, err := p.scalar()
+	return err
+}
+
+// skipOpen reads to the end of the array or object opened by d.
+func (p *parser) skipOpen(d json.Delim) error {
+	if d != '{' && d != '[' {
+		return fmt.Errorf("%w: unexpected %v", ErrInvalid, d)
+	}
+	for depth := 1; depth > 0; {
+		tok, err := p.dec.Token()
+		if err != nil {
+			return err
+		}
+		if d, ok := tok.(json.Delim); ok {
+			if d == '{' || d == '[' {
+				depth++
+			} else {
+				depth--
+			}
+			if depth > maxDepth {
+				return fmt.Errorf("%w: nested more than %d deep", ErrInvalid, maxDepth)
+			}
+		}
+	}
+	return nil
+}
+
+func deref(n *int) int {
+	if n == nil {
+		return 0
+	}
+	return *n
+}
+
+func readRun(rr rawRun) (Run, error) {
+	run := Run{Tool: Clean(rr.name, maxNameRunes), Version: Clean(cmp.Or(rr.semver, rr.version), maxNameRunes)}
 	if run.Tool == "" {
 		return Run{}, fmt.Errorf("%w: tool.driver.name is required", ErrInvalid)
 	}
-	rules := map[string]*sarifRule{}
-	for i := range d.Rules {
-		if _, dup := rules[d.Rules[i].ID]; !dup && d.Rules[i].ID != "" {
-			rules[d.Rules[i].ID] = &d.Rules[i]
+	rules := map[string]*rawRule{}
+	for i := range rr.rules {
+		if _, dup := rules[rr.rules[i].id]; !dup && rr.rules[i].id != "" {
+			rules[rr.rules[i].id] = &rr.rules[i]
 		}
 	}
-	bases := baseRoots(sr.OriginalURIBaseIDs)
+	bases := baseRoots(rr.bases)
 	seen := map[string]bool{}
-	for _, res := range sr.Results {
-		f, ok := readResult(res, sr, d.Rules, rules, bases)
+	for _, res := range rr.results {
+		f, ok := readResult(res, rr, rules, bases)
 		if !ok {
 			run.Dropped++
 			continue
@@ -237,64 +699,126 @@ func readRun(sr sarifRun) (Run, error) {
 	return run, nil
 }
 
-func readResult(res sarifResult, sr sarifRun, list []sarifRule, rules map[string]*sarifRule, bases []string) (Finding, bool) {
-	switch res.Kind {
+func readResult(res rawResult, rr rawRun, rules map[string]*rawRule, bases []string) (Finding, bool) {
+	switch res.kind {
 	case "", "fail", "open", "review":
 	default: // pass, notApplicable, informational
 		return Finding{}, false
 	}
-	if res.BaselineState == "absent" {
+	if res.absent {
 		return Finding{}, false
 	}
-	ruleID := res.RuleID
-	if ruleID == "" && res.Rule != nil {
-		ruleID = res.Rule.ID
+	ruleID := cmp.Or(res.ruleID, res.ruleRefID)
+	var rule *rawRule
+	idx := res.ruleIndex
+	if idx == nil {
+		idx = res.refIndex
 	}
-	var rule *sarifRule
-	idx := res.RuleIndex
-	if idx == nil && res.Rule != nil {
-		idx = res.Rule.Index
-	}
-	if idx != nil && *idx >= 0 && *idx < len(list) {
-		rule = &list[*idx]
+	if idx != nil && *idx >= 0 && *idx < len(rr.rules) {
+		rule = &rr.rules[*idx]
 	} else if ruleID != "" {
 		rule = rules[ruleID]
 	}
 	if ruleID == "" && rule != nil {
-		ruleID = rule.ID
+		ruleID = rule.id
 	}
 	f := Finding{RuleID: Clean(ruleID, maxRuleRunes)}
-	if f.RuleID == "" {
+	if f.RuleID == "" || !res.hasLoc {
 		return Finding{}, false
 	}
-	file, abs, start, end, ok := location(res, sr, bases)
+	file, abs, start, end, ok := location(res.loc, rr.artifacts, bases)
 	if !ok {
 		return Finding{}, false
 	}
 	f.File, f.abs, f.StartLine, f.EndLine = file, abs, start, end
 
-	f.Level = res.Level
-	if f.Level == "" && rule != nil && rule.Default != nil {
-		f.Level = rule.Default.Level
+	f.Level = res.level
+	if f.Level == "" && rule != nil {
+		f.Level = rule.level
 	}
 	if !slices.Contains([]string{"error", "warning", "note", "none"}, f.Level) {
 		f.Level = "warning" // SARIF's default
 	}
-	score, scored := securitySeverity(res.Properties)
+	score, scored := res.score, res.scored
 	if !scored && rule != nil {
-		score, scored = securitySeverity(rule.Properties)
+		score, scored = rule.score, rule.scored
 	}
 	f.Severity = Severity(f.Level, score, scored)
 	f.Message = redact.Summary(message(res, rule, f.RuleID), MaxMessage)
 	if rule != nil {
-		f.HelpURI = helpURI(rule.HelpURI)
+		f.HelpURI = helpURI(rule.helpURI)
 	}
-	for _, s := range res.Suppressions {
-		if s.Status != "rejected" && s.Status != "underReview" {
-			f.Suppressed = true
+	f.Suppressed = res.suppressed
+	return f, true
+}
+
+// message is the result's text, else its rule's template with the
+// arguments filled in, else the rule's short description. It is at most
+// maxRawMessage bytes, so redacting it costs little.
+func message(res rawResult, rule *rawRule, ruleID string) string {
+	if res.text != "" {
+		return res.text
+	}
+	if rule != nil {
+		if tmpl, ok := rule.messages[res.msgID]; ok && res.msgID != "" {
+			return fill(tmpl, res.args)
+		}
+		if rule.short != "" {
+			return rule.short
 		}
 	}
-	return f, true
+	return ruleID
+}
+
+// fill puts arguments into a template's {0}…{9} in one pass, stopping once
+// the message passes maxRawMessage bytes; arguments are not filled again.
+func fill(tmpl string, args []string) string {
+	var b strings.Builder
+	for i := 0; i < len(tmpl) && b.Len() <= maxRawMessage; {
+		if tmpl[i] == '{' && i+2 < len(tmpl) && tmpl[i+2] == '}' && tmpl[i+1] >= '0' && tmpl[i+1] <= '9' {
+			if n := int(tmpl[i+1] - '0'); n < len(args) {
+				b.WriteString(args[n])
+				i += 3
+				continue
+			}
+		}
+		b.WriteByte(tmpl[i])
+		i++
+	}
+	return clipWords(b.String(), maxRawMessage)
+}
+
+// clipWords cuts s to at most n bytes, dropping a word the cut would split
+// so a partial secret cannot slip past redaction.
+func clipWords(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	s = clip(s, n)
+	if i := strings.LastIndexAny(s, " \t\r\n"); i > 0 {
+		s = s[:i]
+	}
+	return s
+}
+
+// location is a result's first physical location: the cleaned
+// repository-relative path, or an absolute one for Place.
+func location(loc rawLocation, artifacts []string, bases []string) (file, abs string, start, end int, ok bool) {
+	uri := loc.uri
+	if uri == "" && loc.index != nil && *loc.index >= 0 && *loc.index < len(artifacts) {
+		uri = artifacts[*loc.index]
+	}
+	file, abs, ok = resolve(uri, bases)
+	if !ok {
+		return "", "", 0, 0, false
+	}
+	if loc.start > 0 && loc.start <= maxLine {
+		start, end = loc.start, loc.end
+		if end < start || end > maxLine {
+			end = start
+		}
+	}
+	return file, abs, start, end, true
 }
 
 // Severity maps a SARIF level, or GitHub's numeric security-severity when
@@ -324,69 +848,6 @@ func Severity(level string, score float64, scored bool) string {
 	default:
 		return "info"
 	}
-}
-
-// securitySeverity reads the "security-severity" property, a number from 0
-// to 10 given as a string (GitHub's convention) or a number.
-func securitySeverity(p properties) (float64, bool) {
-	raw := p.SecuritySeverity
-	if len(raw) == 0 || len(raw) > 32 {
-		return 0, false
-	}
-	var s string
-	if err := json.Unmarshal(raw, &s); err != nil {
-		s = string(raw)
-	}
-	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil || v < 0 || v > 10 {
-		return 0, false
-	}
-	return v, true
-}
-
-func message(res sarifResult, rule *sarifRule, ruleID string) string {
-	if res.Message.Text != "" {
-		return res.Message.Text
-	}
-	if rule != nil {
-		if ms, ok := rule.MessageStrings[res.Message.ID]; ok && res.Message.ID != "" {
-			msg := ms.Text
-			for i, a := range res.Message.Arguments[:min(len(res.Message.Arguments), maxArgs)] {
-				msg = strings.ReplaceAll(msg, "{"+strconv.Itoa(i)+"}", clip(a, MaxMessage))
-			}
-			return msg
-		}
-		if rule.ShortDescription != nil && rule.ShortDescription.Text != "" {
-			return rule.ShortDescription.Text
-		}
-	}
-	return ruleID
-}
-
-// location is the first physical location of a result: the cleaned
-// repository-relative path, or an absolute one for Map to place.
-func location(res sarifResult, sr sarifRun, bases []string) (file, abs string, start, end int, ok bool) {
-	for _, loc := range res.Locations {
-		if loc.Physical == nil {
-			continue
-		}
-		al := loc.Physical.Artifact
-		if al.URI == "" && al.Index != nil && *al.Index >= 0 && *al.Index < len(sr.Artifacts) {
-			al = sr.Artifacts[*al.Index].Location
-		}
-		file, abs, ok = resolve(al.URI, bases)
-		if !ok {
-			return "", "", 0, 0, false
-		}
-		if rg := loc.Physical.Region; rg != nil && rg.StartLine > 0 && rg.StartLine <= maxLine {
-			start, end = rg.StartLine, rg.EndLine
-			if end < start || end > maxLine {
-				end = start
-			}
-		}
-		return file, abs, start, end, true
-	}
-	return "", "", 0, 0, false
 }
 
 // resolve turns an artifact URI into a repository-relative path. Relative
@@ -444,10 +905,10 @@ func hasDrive(p string) bool {
 
 // baseRoots are the absolute file roots of originalUriBaseIds, longest
 // first, each ending in "/".
-func baseRoots(m map[string]artifactLocation) []string {
+func baseRoots(uris []string) []string {
 	var out []string
-	for _, al := range m {
-		p, isAbs, ok := filePath(al.URI)
+	for _, uri := range uris {
+		p, isAbs, ok := filePath(uri)
 		if !ok || !isAbs {
 			continue
 		}
@@ -475,7 +936,8 @@ func CleanPath(p string) (string, bool) {
 		}
 	}
 	c := path.Clean(p)
-	if c == "." || c == ".." || strings.HasPrefix(c, "../") {
+	// Cleaning can make a drive ("./C:" becomes "C:").
+	if c == "." || c == ".." || strings.HasPrefix(c, "../") || hasDrive(c) {
 		return "", false
 	}
 	return c, true
@@ -549,5 +1011,3 @@ func clip(s string, n int) string {
 	}
 	return s[:n]
 }
-
-func clipErr(err error) string { return clip(err.Error(), 200) }
