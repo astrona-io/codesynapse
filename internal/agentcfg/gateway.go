@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -89,11 +88,13 @@ func readSettings(file string) (map[string]any, []byte, error) {
 	return doc, data, nil
 }
 
-// writeSettings backs the old file up under a timestamped name, then writes.
+// writeSettings backs the old file up under a timestamped name, then
+// replaces it atomically, so Claude Code never reads half a file. Callers
+// hold the settings lock (withFileLock) around the read and the write.
 func writeSettings(file string, doc map[string]any, old []byte, now time.Time) error {
 	if old != nil {
 		bak := fmt.Sprintf("%s.%s.bak", file, now.UTC().Format("20060102T150405Z"))
-		if err := os.WriteFile(bak, old, 0o600); err != nil {
+		if err := WritePrivate(bak, old); err != nil {
 			return fmt.Errorf("backing up %s: %w", file, err)
 		}
 	}
@@ -101,10 +102,7 @@ func writeSettings(file string, doc map[string]any, old []byte, now time.Time) e
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(file, append(out, '\n'), 0o600) //nolint:gosec // the user's own settings file
+	return WritePrivate(file, append(out, '\n'))
 }
 
 // headerLines splits ANTHROPIC_CUSTOM_HEADERS (one "Name: value" per line).
@@ -169,6 +167,15 @@ func setClaudeGateway(file, base, key, ensure string, now time.Time) (string, er
 		return "", err
 	}
 	base = strings.TrimRight(base, "/")
+	var diff string
+	err := withFileLock(file, func() (err error) {
+		diff, err = setClaudeGatewayLocked(file, base, key, ensure, now)
+		return err
+	})
+	return diff, err
+}
+
+func setClaudeGatewayLocked(file, base, key, ensure string, now time.Time) (string, error) {
 	doc, old, err := readSettings(file)
 	if err != nil {
 		return "", err
@@ -282,21 +289,26 @@ func PointClaudeGateway(file, proxyBase, gatewayBase, to string) (bool, error) {
 	if to != proxyBase && to != gatewayBase {
 		return false, errors.New("the base URL can only switch between the proxy and its gateway")
 	}
-	doc, _, err := readSettings(file)
-	if err != nil {
-		return false, err
-	}
-	env, _ := doc["env"].(map[string]any)
-	hdrs, _ := env[gatewayHeaderKey].(string)
-	if _, ours := otherHeaders(hdrs); !ours {
-		return false, nil
-	}
-	cur, _ := env[gatewayBaseKey].(string)
-	if cur == to || (cur != proxyBase && cur != gatewayBase) {
-		return false, nil
-	}
-	env[gatewayBaseKey] = to
-	return true, writeSettings(file, doc, nil, time.Time{})
+	changed := false
+	err := withFileLock(file, func() error {
+		doc, _, err := readSettings(file)
+		if err != nil {
+			return err
+		}
+		env, _ := doc["env"].(map[string]any)
+		hdrs, _ := env[gatewayHeaderKey].(string)
+		if _, ours := otherHeaders(hdrs); !ours {
+			return nil
+		}
+		cur, _ := env[gatewayBaseKey].(string)
+		if cur == to || (cur != proxyBase && cur != gatewayBase) {
+			return nil
+		}
+		env[gatewayBaseKey] = to
+		changed = true
+		return writeSettings(file, doc, nil, time.Time{})
+	})
+	return changed && err == nil, err
 }
 
 // ClaudeGatewayConfig returns the base URL and key SetClaudeGateway wrote to
@@ -322,6 +334,15 @@ func ClaudeGatewayConfig(file string) (base, key string, ok bool) {
 // RemoveClaudeGateway undoes SetClaudeGateway. The base URL goes only when
 // the CodeSynapse header marks it as ours; other headers stay.
 func RemoveClaudeGateway(file string, now time.Time) (string, error) {
+	var diff string
+	err := withFileLock(file, func() (err error) {
+		diff, err = removeClaudeGatewayLocked(file, now)
+		return err
+	})
+	return diff, err
+}
+
+func removeClaudeGatewayLocked(file string, now time.Time) (string, error) {
 	doc, old, err := readSettings(file)
 	if err != nil {
 		return "", err

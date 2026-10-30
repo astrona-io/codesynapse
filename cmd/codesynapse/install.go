@@ -23,6 +23,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/astrona-io/codesynapse/internal/app"
+	"github.com/astrona-io/codesynapse/internal/gatewayproxy"
 )
 
 // `codesynapse install` and `uninstall` put the Helm chart on a cluster in
@@ -77,6 +78,11 @@ type installOptions struct {
 	// it is the real one, so the tools must be on PATH.
 	run        func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)
 	checkTools bool
+	// keepGateway leaves Claude Code's gateway settings alone on uninstall.
+	// settings and proxyFiles are where they live; tests set them.
+	keepGateway bool
+	settings    string
+	proxyFiles  gatewayproxy.Files
 }
 
 func (o *installOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -93,6 +99,7 @@ func (o *installOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	}
 	if o.uninstall {
 		f.BoolVar(&o.keepData, "keep-data", true, "Keep the Secret and the stores' volumes (set false to delete the namespace with everything in it)")
+		f.BoolVar(&o.keepGateway, "keep-gateway", false, "Leave Claude Code's gateway settings (codesynapse mcp install --gateway) in place")
 		return nil
 	}
 	f.StringVar(&o.chart, "chart", defaultChart, "Chart to install: the published OCI chart, or a path such as deploy/helm/codesynapse")
@@ -107,6 +114,16 @@ func (o *installOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 func (o *installOptions) Complete(context.Context, *app.Env) error {
 	if o.run == nil {
 		o.run, o.checkTools = runTool, true
+	}
+	if o.uninstall && !o.keepGateway && o.settings == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		if o.proxyFiles, err = gatewayproxy.DefaultFiles(); err != nil {
+			return err
+		}
+		o.settings = filepath.Join(home, ".claude", "settings.json")
 	}
 	return nil
 }
@@ -328,6 +345,9 @@ func (o *installOptions) runUninstall(ctx context.Context) error {
 	if !o.keepData {
 		what = "the release and the whole namespace with its data"
 	}
+	if !o.keepGateway && o.settings != "" {
+		what += ", and Claude Code's CodeSynapse gateway settings if any (--keep-gateway keeps them)"
+	}
 	fmt.Fprintf(w, "Removing %s: release %q in context %q, namespace %q.\n", what, o.release, o.context, o.namespace) //nolint:errcheck // terminal
 	if !o.yes && !askYes(w, o.EC.Stdin, "Continue?") {
 		return errors.New("cancelled")
@@ -341,6 +361,18 @@ func (o *installOptions) runUninstall(ctx context.Context) error {
 			return err
 		}
 		fmt.Fprintf(w, "  ✓ namespace %s deleted\n", o.namespace) //nolint:errcheck // terminal
+	}
+	if o.keepGateway || o.settings == "" {
+		return nil
+	}
+	// Claude Code would otherwise keep sending its requests to a gateway, or
+	// a proxy port, that no longer answers.
+	removed, err := removeGatewaySetup(o.settings, o.proxyFiles, w)
+	if err != nil {
+		return fmt.Errorf("taking the gateway settings out of %s: %w", o.settings, err)
+	}
+	if removed {
+		fmt.Fprintln(w, "  ✓ Claude Code's gateway settings removed; start a new Claude Code session") //nolint:errcheck // terminal
 	}
 	return nil
 }

@@ -141,6 +141,19 @@ func TestForwarding(t *testing.T) {
 		{"gateway 403", jsonStatus(http.StatusForbidden), http.StatusForbidden, false},
 		{"gateway json 503", jsonStatus(http.StatusServiceUnavailable), http.StatusServiceUnavailable, false},
 		{"gateway json 502", jsonStatus(http.StatusBadGateway), http.StatusBadGateway, false},
+		// The gateway relays Anthropic's status and type as they are; an
+		// HTML 503 from Anthropic's edge came after the request went
+		// upstream, so it must not be sent again.
+		{"gateway relays html 503", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set(RouteHeader, "cloud")
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, "<html>overloaded</html>")
+		}, http.StatusServiceUnavailable, false},
+		{"gateway's own html 502", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set(RouteHeader, "gateway")
+			w.WriteHeader(http.StatusBadGateway)
+		}, http.StatusBadGateway, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -159,8 +172,8 @@ func TestForwarding(t *testing.T) {
 				assert.Equal(t, direct.calls("/v1/messages"), 0, "no failover")
 				h, _ := gw.last()
 				assert.Equal(t, h.Get("X-CodeSynapse-Key"), testKey, "key kept on the gateway route")
-				assert.Equal(t, resp.Header.Get(RouteHeader), "")
-				assert.Len(t, p.counts.pending(), 0)
+				assert.NotEqual(t, resp.Header.Get(RouteHeader), "direct")
+				assert.Len(t, p.counts.pending(time.Now()), 0)
 				return
 			}
 			assert.Equal(t, direct.calls("/v1/messages"), 1)
@@ -263,7 +276,7 @@ func TestRecoveryReportsCounts(t *testing.T) {
 	assert.Equal(t, rep.Windows[0].Requests, 2)
 	assert.Equal(t, rep.Windows[0].Models["claude-sonnet-4-5"], 2)
 	assert.False(t, rep.Windows[0].End.Before(rep.Windows[0].Start))
-	waitFor(t, func() bool { return len(p.counts.pending()) == 0 })
+	waitFor(t, func() bool { return len(p.counts.pending(time.Now())) == 0 })
 
 	resp, _ := send(t, srv.URL, "Bearer sk-ant-own")
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
@@ -312,9 +325,111 @@ func TestRefusesBrowsers(t *testing.T) {
 			require.NoError(t, err)
 			_ = resp.Body.Close()
 			assert.Equal(t, resp.StatusCode, http.StatusForbidden)
+
+			// Nor may a page read the health proof.
+			req, err = http.NewRequest(http.MethodGet, srv.URL+HealthPath+"?nonce="+strings.Repeat("a", 32), nil)
+			require.NoError(t, err)
+			tc.set(req)
+			resp, err = http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			_ = resp.Body.Close()
+			assert.Equal(t, resp.StatusCode, http.StatusForbidden)
 		})
 	}
 	assert.Equal(t, gw.calls("/v1/messages"), 0)
+}
+
+func TestKeyIsPinned(t *testing.T) {
+	gw := newUpstream(t, ok)
+	other := func(t *testing.T, srv string) int {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPost, srv+"/v1/messages", strings.NewReader(`{}`))
+		require.NoError(t, err)
+		req.Header.Set(keyHeader, "csk_someone_else_0123456789")
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	t.Run("install digest", func(t *testing.T) {
+		p, srv := newTestProxy(t, gw.URL, deadURL(t))
+		p.cfg.KeyHash = HashKey(testKey)
+		assert.Equal(t, other(t, srv.URL), http.StatusForbidden, "a key install did not write is refused")
+		resp, _ := send(t, srv.URL, "Bearer sk-ant-own")
+		assert.Equal(t, resp.StatusCode, http.StatusOK)
+		assert.Equal(t, p.key, testKey)
+	})
+	t.Run("first key", func(t *testing.T) {
+		p, srv := newTestProxy(t, gw.URL, deadURL(t))
+		resp, _ := send(t, srv.URL, "Bearer sk-ant-own")
+		assert.Equal(t, resp.StatusCode, http.StatusOK)
+		assert.Equal(t, other(t, srv.URL), http.StatusForbidden)
+		assert.Equal(t, p.key, testKey, "the first key stays")
+	})
+	assert.Equal(t, gw.calls("/v1/messages"), 2, "refused requests never reach the gateway")
+}
+
+// hangingGateway accepts connections and never reads or answers.
+func hangingGateway(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	var mu sync.Mutex
+	var conns []net.Conn
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	})
+	return "http://" + ln.Addr().String()
+}
+
+func TestHangingGateway(t *testing.T) {
+	t.Run("took the request: fails, not resent", func(t *testing.T) {
+		direct := newUpstream(t, ok)
+		p, srv := newTestProxy(t, hangingGateway(t), direct.URL)
+		p.gw = newClient(time.Second, 100*time.Millisecond)
+		resp, _ := send(t, srv.URL, "Bearer sk-ant-own")
+		assert.Equal(t, resp.StatusCode, http.StatusGatewayTimeout)
+		assert.Equal(t, direct.calls("/v1/messages"), 0, "it may have been acted on")
+		assert.True(t, p.Down(), "later requests go direct")
+		resp, _ = send(t, srv.URL, "Bearer sk-ant-own")
+		assert.Equal(t, resp.StatusCode, http.StatusOK)
+		assert.Equal(t, direct.calls("/v1/messages"), 1)
+	})
+	t.Run("never took it in: goes direct", func(t *testing.T) {
+		direct := newUpstream(t, ok)
+		p, srv := newTestProxy(t, hangingGateway(t), direct.URL)
+		p.gw = newClient(time.Second, time.Minute)
+		p.writeWait = 200 * time.Millisecond
+		// Larger than the socket buffers, so the write blocks.
+		big := `{"model":"m","pad":"` + strings.Repeat("x", 24<<20) + `"}`
+		req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages", strings.NewReader(big))
+		require.NoError(t, err)
+		req.Header.Set(keyHeader, testKey)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+		assert.Equal(t, resp.StatusCode, http.StatusOK)
+		assert.Equal(t, resp.Header.Get(RouteHeader), "direct")
+		assert.Equal(t, direct.calls("/v1/messages"), 1)
+		assert.True(t, p.Down())
+	})
 }
 
 func TestValidateListen(t *testing.T) {

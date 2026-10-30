@@ -8,12 +8,15 @@ package gatewayproxy
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 
 	"github.com/astrona-io/codesynapse/internal/agentcfg"
@@ -23,12 +26,23 @@ import (
 const DefaultPort = 18431
 
 // Config is what `mcp install --gateway` saves for the proxy: the real
-// gateway and the loopback port Claude Code is pointed at. No key: the proxy
-// learns it from the requests Claude Code sends.
+// gateway, the loopback port Claude Code is pointed at and the SHA-256 of
+// the key install wrote into Claude Code's settings. The key itself is not
+// saved: the proxy takes it from the requests Claude Code sends, and only a
+// key with this digest.
 type Config struct {
 	Gateway string `json:"gateway"`
 	Port    int    `json:"port"`
+	KeyHash string `json:"key_sha256,omitempty"`
 }
+
+// HashKey is the digest a Config pins its key by.
+func HashKey(key string) string {
+	h := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(h[:])
+}
+
+var keyHashRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // URL is the base URL Claude Code uses to reach the proxy.
 func (c Config) URL() string { return "http://127.0.0.1:" + strconv.Itoa(c.Port) }
@@ -76,28 +90,7 @@ func readSmall(p string) ([]byte, error) {
 }
 
 // writePrivate replaces p atomically with a 0600 file.
-func writePrivate(p string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(p), ".tmp-"+filepath.Base(p)+"-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name()) //nolint:errcheck // gone after the rename
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), p)
-}
+func writePrivate(p string, data []byte) error { return agentcfg.WritePrivate(p, data) }
 
 // Load reads the saved config and checks it again: the file is the user's
 // to edit, so the gateway URL passes the same rules as at install.
@@ -123,6 +116,9 @@ func (c Config) Validate() error {
 	}
 	if c.Port < 1024 || c.Port > 65535 {
 		return fmt.Errorf("proxy port %d is outside 1024-65535", c.Port)
+	}
+	if c.KeyHash != "" && !keyHashRe.MatchString(c.KeyHash) {
+		return errors.New("the proxy config's key digest is not a SHA-256")
 	}
 	return nil
 }

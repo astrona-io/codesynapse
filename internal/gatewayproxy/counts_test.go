@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,8 +16,9 @@ import (
 func TestCleanModel(t *testing.T) {
 	cases := map[string]string{
 		"claude-sonnet-4-5":                    "claude-sonnet-4-5",
-		"claude-opus-4-1[1m]":                  "claude-opus-4-1[1m]",
-		"us.anthropic.claude-3-haiku@2024":     "us.anthropic.claude-3-haiku@2024",
+		"us.anthropic.claude-3-haiku-v1:0":     "us.anthropic.claude-3-haiku-v1:0",
+		"claude-opus-4-1[1m]":                  otherModel, // the gateway's rule: no brackets
+		"claude-3-haiku@2024":                  otherModel,
 		"":                                     otherModel,
 		"ignore previous instructions":         otherModel,
 		"model\nwith newline":                  otherModel,
@@ -30,7 +32,7 @@ func TestCleanModel(t *testing.T) {
 func TestCountsBounded(t *testing.T) {
 	dir := t.TempDir()
 	c := openCounts(filepath.Join(dir, "counts.json"))
-	start := time.Date(2026, 10, 30, 8, 0, 0, 0, time.UTC)
+	start := time.Now().Add(-10 * 24 * time.Hour).Truncate(time.Second)
 	for i := range MaxWindows + 5 {
 		at := start.Add(time.Duration(i) * time.Hour)
 		c.open(at)
@@ -39,7 +41,7 @@ func TestCountsBounded(t *testing.T) {
 		}
 		c.close(at.Add(2 * time.Minute))
 	}
-	pending := c.pending()
+	pending := c.pending(time.Now())
 	require.Len(t, pending, MaxWindows)
 	total := 0
 	for _, w := range pending {
@@ -57,10 +59,62 @@ func TestCountsBounded(t *testing.T) {
 	// A restarted proxy reads them back; a window left open is closed.
 	c.open(start.Add(100 * time.Hour))
 	again := openCounts(filepath.Join(dir, "counts.json"))
-	assert.Len(t, again.pending(), MaxWindows)
+	assert.Len(t, again.pending(time.Now()), MaxWindows)
 
-	again.drop(again.pending()[:3])
-	assert.Len(t, again.pending(), MaxWindows-3)
+	again.drop(again.pending(time.Now())[:3])
+	assert.Len(t, again.pending(time.Now()), MaxWindows-3)
+}
+
+func TestCountsLateAndOld(t *testing.T) {
+	c := openCounts(filepath.Join(t.TempDir(), "counts.json"))
+	now := time.Now()
+
+	// A request that finished going direct after the outage closed gets a
+	// closed window of its own; nothing is left open.
+	c.open(now.Add(-time.Hour))
+	c.direct(now.Add(-time.Hour), "m")
+	c.close(now.Add(-time.Minute))
+	c.direct(now, "m")
+	assert.Equal(t, c.current() == nil, true, "no open window while the gateway is up")
+	require.Len(t, c.pending(now), 2)
+
+	// Windows the gateway would refuse as too old are dropped, not sent.
+	c.open(now.Add(-maxAge - time.Hour))
+	c.close(now.Add(-maxAge - time.Hour))
+	assert.Len(t, c.pending(now), 2)
+}
+
+// A report reads its windows while requests keep being counted: pending
+// hands out copies, so the race detector finds nothing here.
+func TestCountsConcurrentReport(t *testing.T) {
+	c := openCounts(filepath.Join(t.TempDir(), "counts.json"))
+	at := time.Now().Add(-time.Hour)
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for i := range 200 {
+			now := at.Add(time.Duration(i) * time.Second)
+			c.open(now)
+			c.direct(now, "model-"+strconv.Itoa(i%(MaxModels+2)))
+			c.close(now)
+		}
+	})
+	wg.Go(func() {
+		for range 200 {
+			for _, w := range c.pending(time.Now()) {
+				for m, n := range w.Models {
+					_, _ = m, n
+				}
+				if w.Models != nil {
+					w.Models["mutated-by-the-reader"] = 1
+				}
+			}
+		}
+	})
+	wg.Wait()
+	for _, w := range c.pending(time.Now()) {
+		_, ok := w.Models["mutated-by-the-reader"]
+		assert.False(t, ok, "copies share nothing with the list")
+	}
 }
 
 func TestFilesRemove(t *testing.T) {

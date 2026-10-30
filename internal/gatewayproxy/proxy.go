@@ -3,6 +3,7 @@ package gatewayproxy
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -42,6 +43,14 @@ const (
 	tlsTimeout  = 10 * time.Second
 	probeWait   = 5 * time.Second
 	reportEvery = time.Minute
+	// writeWait is how long the gateway may take to accept the request. A
+	// request it never took in cannot have been acted on, so it goes direct.
+	writeWait = time.Minute
+	// headerWait is how long the gateway may take to answer a request it
+	// took in. A non-streamed answer comes only when the model finished, so
+	// it is long; past it the request fails (it may have been acted on) and
+	// later requests go direct.
+	headerWait = 10 * time.Minute
 )
 
 // directRequest are the only headers sent to Anthropic, as on the gateway's
@@ -82,6 +91,8 @@ type Proxy struct {
 	direct string
 	// tick is how often Run checks idleness and its config.
 	tick time.Duration
+	// writeWait is writeWait; only tests in this package change it.
+	writeWait time.Duration
 
 	gw, out *http.Client
 	counts  *counts
@@ -112,7 +123,7 @@ func New(o Options) (*Proxy, error) {
 	p := &Proxy{
 		cfg: o.Config, files: o.Files, gateway: u, secret: o.Secret,
 		log: o.Logger, idle: o.Idle, cooldown: o.Cooldown,
-		direct: DirectUpstream, tick: time.Minute, ctx: context.Background(),
+		direct: DirectUpstream, tick: time.Minute, writeWait: writeWait, ctx: context.Background(),
 		counts: openCounts(o.Files.countsPath()),
 	}
 	if p.log == nil {
@@ -127,20 +138,21 @@ func New(o Options) (*Proxy, error) {
 	// HTTPS_PROXY/NO_PROXY from the environment apply to both legs, as they
 	// did when Claude Code talked to the gateway and Anthropic itself; a
 	// request can never choose a proxy or an address.
-	p.gw = newClient(30 * time.Second)
-	p.out = newClient(30 * time.Second)
+	p.gw = newClient(30*time.Second, headerWait)
+	p.out = newClient(30*time.Second, 0)
 	p.lastUse.Store(time.Now().UnixNano())
 	return p, nil
 }
 
-func newClient(idle time.Duration) *http.Client {
+func newClient(idle, header time.Duration) *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
-			Proxy:               http.ProxyFromEnvironment,
-			DialContext:         (&net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second}).DialContext,
-			TLSHandshakeTimeout: tlsTimeout,
-			IdleConnTimeout:     idle,
-			ForceAttemptHTTP2:   true,
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second}).DialContext,
+			TLSHandshakeTimeout:   tlsTimeout,
+			IdleConnTimeout:       idle,
+			ResponseHeaderTimeout: header,
+			ForceAttemptHTTP2:     true,
 		},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
@@ -154,6 +166,13 @@ func (p *Proxy) Down() bool {
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" || !loopbackHost(r.Host) {
+		// A web page in the developer's browser can reach 127.0.0.1 too; it
+		// must not plant a key here, use the proxy or read the health proof.
+		// Claude Code sends neither.
+		problem(w, http.StatusForbidden, "the CodeSynapse gateway proxy does not serve browsers")
+		return
+	}
 	if r.URL.Path == HealthPath {
 		p.health(w, r)
 		return
@@ -163,25 +182,18 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.lastUse.Store(time.Now().UnixNano())
 		p.inflight.Add(-1)
 	}()
-	if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" || !loopbackHost(r.Host) {
-		// A web page in the developer's browser can reach 127.0.0.1 too; it
-		// must not plant a key here or use the proxy. Claude Code sends neither.
-		problem(w, http.StatusForbidden, "the CodeSynapse gateway proxy does not serve browsers")
-		return
-	}
 	if !strings.HasPrefix(r.URL.Path, "/v1/") {
 		problem(w, http.StatusNotFound, "the CodeSynapse gateway proxy serves /v1/ only")
+		return
+	}
+	if !p.takeKey(r.Header.Get(keyHeader)) {
+		problem(w, http.StatusForbidden, "this CodeSynapse gateway proxy was set up for another CodeSynapse key; run codesynapse mcp install --gateway again")
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBody))
 	if err != nil {
 		problem(w, http.StatusRequestEntityTooLarge, "request body too large")
 		return
-	}
-	if k := r.Header.Get(keyHeader); strings.HasPrefix(k, keyPrefix) {
-		p.mu.Lock()
-		p.key = k
-		p.mu.Unlock()
 	}
 	if p.Down() {
 		p.sendDirect(w, r, body, "the CodeSynapse gateway is unreachable")
@@ -193,7 +205,34 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case unreachable:
 		p.markDown()
 		p.sendDirect(w, r, body, "the CodeSynapse gateway is unreachable")
+	case hung:
+		// This request was answered with an error; the next ones go direct.
+		p.markDown()
 	}
+}
+
+// takeKey checks the request's CodeSynapse key against the one this proxy
+// holds for probes and reports: the key install pinned by its digest, or
+// else the first one a request brought. A request with another key is
+// refused, so no local program can make the proxy report under its key.
+// A request without one passes; the gateway refuses it itself.
+func (p *Proxy) takeKey(k string) bool {
+	if k == "" {
+		return true
+	}
+	if !strings.HasPrefix(k, keyPrefix) {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	switch {
+	case p.key != "":
+		return subtle.ConstantTimeCompare([]byte(k), []byte(p.key)) == 1
+	case p.cfg.KeyHash != "" && subtle.ConstantTimeCompare([]byte(HashKey(k)), []byte(p.cfg.KeyHash)) != 1:
+		return false
+	}
+	p.key = k
+	return true
 }
 
 // loopbackHost refuses a Host header that names another site, which is how a
@@ -215,6 +254,7 @@ type outcome int
 const (
 	sent        outcome = iota // the gateway answered (any status) or the request failed after it was delivered
 	unreachable                // nothing reached the gateway: safe to send elsewhere
+	hung                       // the gateway took the request and never answered: failed, not resent
 )
 
 // toGateway forwards the request. It returns unreachable only when nothing
@@ -228,7 +268,18 @@ func (p *Proxy) toGateway(w http.ResponseWriter, r *http.Request, body []byte) o
 	u.Path = strings.TrimRight(u.Path, "/") + r.URL.Path
 	u.RawQuery = r.URL.RawQuery
 	var wrote atomic.Bool
-	ctx := httptrace.WithClientTrace(r.Context(), &httptrace.ClientTrace{
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	// A gateway that accepts the connection but never takes the request in
+	// is given up on before anything was written, so the request may still
+	// go direct. Once it was written, only the header timeout applies.
+	stall := time.AfterFunc(p.writeWait, func() {
+		if !wrote.Load() {
+			cancel()
+		}
+	})
+	defer stall.Stop()
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
 		WroteRequest: func(i httptrace.WroteRequestInfo) {
 			if i.Err == nil {
 				wrote.Store(true)
@@ -251,6 +302,12 @@ func (p *Proxy) toGateway(w http.ResponseWriter, r *http.Request, body []byte) o
 			return unreachable
 		}
 		// The gateway may have started on it: never send it twice.
+		var ne net.Error
+		if errors.As(err, &ne) && ne.Timeout() {
+			p.log.Warn("gateway did not answer", "error", errClass(err))
+			problem(w, http.StatusGatewayTimeout, "the CodeSynapse gateway did not answer the request")
+			return hung
+		}
 		problem(w, http.StatusBadGateway, "the CodeSynapse gateway broke off the request")
 		return sent
 	}
@@ -263,11 +320,16 @@ func (p *Proxy) toGateway(w http.ResponseWriter, r *http.Request, body []byte) o
 	return sent
 }
 
-// frontProxyDown is a 502, 503 or 504 that did not come from the gateway: the
-// gateway answers errors as JSON (problem+json or Anthropic's error shape),
-// while a load balancer or ingress in front of a stopped API answers HTML or
-// plain text.
+// frontProxyDown is a 502, 503 or 504 that did not come from the gateway: a
+// load balancer or ingress in front of a stopped API answers HTML or plain
+// text. The gateway marks every answer of its own with RouteHeader, also a
+// status it relays from Anthropic (which may be an HTML 503 from Anthropic's
+// edge after the request was sent upstream): that is never a reason to send
+// the request again.
 func frontProxyDown(resp *http.Response) bool {
+	if resp.Header.Get(RouteHeader) != "" {
+		return false
+	}
 	switch resp.StatusCode {
 	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		return !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "json")
@@ -310,7 +372,6 @@ func (p *Proxy) sendDirect(w http.ResponseWriter, r *http.Request, body []byte, 
 			req.Header[http.CanonicalHeaderKey(h)] = append([]string(nil), v...)
 		}
 	}
-	p.counts.direct(time.Now(), requestModel(body))
 	resp, err := p.out.Do(req) //nolint:gosec // G704: see above
 	if err != nil {
 		if r.Context().Err() == nil {
@@ -320,7 +381,18 @@ func (p *Proxy) sendDirect(w http.ResponseWriter, r *http.Request, body []byte, 
 		return
 	}
 	defer resp.Body.Close() //nolint:errcheck // read side
+	p.countDirect(requestModel(body))
 	stream(w, resp, "direct")
+}
+
+// countDirect counts a request Anthropic answered. It holds p.mu, like
+// markDown and the probe that ends an outage, so the count lands in the
+// window of the outage it belongs to; one that finished after the outage
+// ended gets a closed window of its own (counts.direct), never an open one.
+func (p *Proxy) countDirect(model string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.counts.direct(time.Now(), model)
 }
 
 // requestModel reads only the model name; the body is never kept or logged.
@@ -471,7 +543,7 @@ func (p *Proxy) maybeReport() {
 		p.mu.Unlock()
 		return
 	}
-	pending := p.counts.pending()
+	pending := p.counts.pending(now)
 	if len(pending) == 0 {
 		p.mu.Unlock()
 		return

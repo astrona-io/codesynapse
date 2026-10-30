@@ -64,8 +64,19 @@ func (s PortState) String() string {
 // healthTimeout keeps --ensure fast: the proxy answers from memory.
 const healthTimeout = 800 * time.Millisecond
 
-// Check says whether our proxy listens on 127.0.0.1:port.
+// Check says whether our proxy listens on 127.0.0.1:port. A check that got
+// no answer in time is tried once more before the port counts as another
+// program's: a proxy that is just starting, or a busy machine, is slow.
 func Check(ctx context.Context, port int, secret []byte) PortState {
+	s, answered := checkOnce(ctx, port, secret)
+	if s == PortStranger && !answered && ctx.Err() == nil {
+		s, _ = checkOnce(ctx, port, secret)
+	}
+	return s
+}
+
+// checkOnce reports whether something answered at all besides the state.
+func checkOnce(ctx context.Context, port int, secret []byte) (state PortState, answered bool) {
 	ctx, cancel := context.WithTimeout(ctx, healthTimeout)
 	defer cancel()
 	b := make([]byte, 16)
@@ -74,7 +85,7 @@ func Check(ctx context.Context, port int, secret []byte) PortState {
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+HealthPath+"?nonce="+nonce, nil)
 	if err != nil {
-		return PortStranger
+		return PortStranger, true
 	}
 	client := &http.Client{
 		Transport:     &http.Transport{Proxy: nil, DisableKeepAlives: true},
@@ -83,14 +94,14 @@ func Check(ctx context.Context, port int, secret []byte) PortState {
 	resp, err := client.Do(req)
 	if err != nil {
 		if errors.Is(err, syscall.ECONNREFUSED) {
-			return PortFree
+			return PortFree, true
 		}
-		return PortStranger
+		return PortStranger, false
 	}
 	defer resp.Body.Close() //nolint:errcheck // read side
 	got, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 	if resp.StatusCode == http.StatusOK && hmac.Equal(got, []byte(proof(secret, nonce))) {
-		return PortOurs
+		return PortOurs, true
 	}
-	return PortStranger
+	return PortStranger, true
 }

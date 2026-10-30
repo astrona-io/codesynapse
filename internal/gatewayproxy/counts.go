@@ -3,6 +3,7 @@ package gatewayproxy
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"regexp"
 	"slices"
@@ -16,14 +17,18 @@ import (
 const (
 	MaxWindows      = 32
 	MaxModels       = 8
-	maxCount        = 1_000_000_000
+	maxCount        = 100_000 // the gateway refuses more per window
 	otherModel      = "other"
 	maxModelNameLen = 64
+	// maxAge is how old a window may be when it is reported; the gateway
+	// takes 30 days, so older ones are dropped rather than sent.
+	maxAge = 29 * 24 * time.Hour
 )
 
 // modelName is the shape of a model name worth keeping; anything else
-// (client text that is not a plain name) is counted as "other".
-var modelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,63}$`)
+// (client text that is not a plain name) is counted as "other". It matches
+// the gateway's own rule (services/api/internal/api/gateway.go).
+var modelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$`)
 
 // CleanModel turns a requested model into a name that may be kept and sent.
 func CleanModel(m string) string {
@@ -124,7 +129,10 @@ func (c *counts) openLocked(now time.Time) {
 	c.w = append(c.w, Window{Start: now, End: now, Open: true})
 }
 
-// direct counts one request that went straight to Anthropic.
+// direct counts one request that went straight to Anthropic. It goes into
+// the open window; when the outage already ended (the probe found the
+// gateway while this request was under way), into a closed window of its
+// own, so no window is left open while the gateway is up.
 func (c *counts) direct(now time.Time, model string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -132,6 +140,7 @@ func (c *counts) direct(now time.Time, model string) {
 	if w == nil {
 		c.openLocked(now)
 		w = c.current()
+		w.Open = false
 	}
 	w.End = now
 	w.Requests = min(w.Requests+1, maxCount)
@@ -149,13 +158,21 @@ func (c *counts) close(now time.Time) {
 	}
 }
 
-// pending returns the closed windows, oldest first.
-func (c *counts) pending() []Window {
+// pending returns copies of the closed windows, oldest first, and drops
+// those too old for the gateway to take. The copies share nothing with the
+// list, which keeps changing while a report is under way.
+func (c *counts) pending(now time.Time) []Window {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	n := len(c.w)
+	c.w = slices.DeleteFunc(c.w, func(w Window) bool { return !w.Open && w.Start.Before(now.Add(-maxAge)) })
+	if len(c.w) != n {
+		c.saveLocked()
+	}
 	var out []Window
 	for _, w := range c.w {
 		if !w.Open {
+			w.Models = maps.Clone(w.Models)
 			out = append(out, w)
 		}
 	}

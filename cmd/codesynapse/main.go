@@ -953,12 +953,11 @@ func (o *mcpInstallOptions) runGateway(ctx context.Context, home string) error {
 		return err
 	}
 	if o.remove {
-		diff, err := agentcfg.RemoveClaudeGateway(file, time.Now())
-		if err != nil {
-			return err
+		removed, err := removeGatewaySetup(file, files, o.EC.Stderr)
+		if err == nil && !removed {
+			_, _ = fmt.Fprintln(o.EC.Stderr, "nothing to remove: no CodeSynapse gateway settings in "+file)
 		}
-		_, _ = fmt.Fprintln(o.EC.Stderr, diff)
-		return removeProxyFiles(files, o.EC.Stderr)
+		return err
 	}
 	key := cmp.Or(os.Getenv(agentcfg.GatewayKeyEnv), os.Getenv(agentcfg.TokenEnv))
 	if key == "" {
@@ -985,7 +984,7 @@ func (o *mcpInstallOptions) runGateway(ctx context.Context, home string) error {
 	if strings.Contains(bin, "go-build") {
 		return errors.New("run an installed codesynapse binary (go install ./cmd/codesynapse), not go run: the Claude Code hook starts the proxy from it")
 	}
-	cfg := gatewayproxy.Config{Gateway: strings.TrimRight(o.apiURL, "/"), Port: o.proxyPort}
+	cfg := gatewayproxy.Config{Gateway: strings.TrimRight(o.apiURL, "/"), Port: o.proxyPort, KeyHash: gatewayproxy.HashKey(key)}
 	diff, err := installGatewayProxy(ctx, files, cfg, file, key, agentcfg.ShellQuote(brewStablePath(bin))+" gateway proxy --ensure", startProxy)
 	if err != nil {
 		return err
@@ -1015,6 +1014,30 @@ func installGatewayProxy(ctx context.Context, files gatewayproxy.Files, cfg gate
 		return "", fmt.Errorf("the gateway proxy did not start on 127.0.0.1:%d (log: %s); try --proxy-port, or --failover=false", cfg.Port, files.LogPath())
 	}
 	return agentcfg.SetClaudeGatewayProxy(settings, cfg.URL(), key, ensure, time.Now())
+}
+
+// removeGatewaySetup takes the gateway env and the proxy's ensure hooks out
+// of Claude Code's settings and deletes the proxy's files (a running proxy
+// stops by itself). It says whether there was anything to remove; a
+// settings file that does not exist is left so.
+func removeGatewaySetup(settings string, files gatewayproxy.Files, w io.Writer) (bool, error) {
+	removed := false
+	if _, err := os.Stat(settings); err == nil {
+		diff, err := agentcfg.RemoveClaudeGateway(settings, time.Now())
+		if err != nil {
+			return false, err
+		}
+		if !strings.HasPrefix(diff, "nothing to remove") {
+			removed = true
+			_, _ = fmt.Fprintln(w, diff)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if _, err := files.Load(); !errors.Is(err, gatewayproxy.ErrNotConfigured) {
+		removed = true
+	}
+	return removed, removeProxyFiles(files, w)
 }
 
 // removeProxyFiles deletes the proxy's config, secret and counts; a running

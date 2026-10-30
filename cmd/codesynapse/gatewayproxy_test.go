@@ -173,3 +173,38 @@ func TestEnsureProxy(t *testing.T) {
 		})
 	}
 }
+
+// Uninstalling CodeSynapse takes the gateway setup out of Claude Code, so
+// its requests do not go to a gateway or proxy port that no longer answers.
+func TestUninstallRemovesGatewaySetup(t *testing.T) {
+	for _, keep := range []bool{false, true} {
+		t.Run("keep="+strconv.FormatBool(keep), func(t *testing.T) {
+			files := gatewayproxy.Files{Dir: t.TempDir()}
+			settings := filepath.Join(t.TempDir(), "settings.json")
+			cfg := gatewayproxy.Config{Gateway: "https://gw.example.com", Port: gatewayproxy.DefaultPort, KeyHash: gatewayproxy.HashKey(proxyTestKey)}
+			require.NoError(t, files.Save(cfg))
+			_, err := agentcfg.SetClaudeGatewayProxy(settings, cfg.URL(), proxyTestKey, proxyTestHook, time.Now())
+			require.NoError(t, err)
+
+			f := &fakeTools{answer: func(string) (string, error) { return "", nil }}
+			env, out := installEnv("")
+			o := &installOptions{
+				EC: env, uninstall: true, context: "kind-dev", namespace: "codesynapse", release: "codesynapse",
+				yes: true, keepData: true, timeout: time.Minute, run: f.run,
+				keepGateway: keep, settings: settings, proxyFiles: files,
+			}
+			require.NoError(t, o.Run(context.Background(), env))
+
+			_, _, ok := agentcfg.ClaudeGatewayConfig(settings)
+			assert.Equal(t, ok, keep)
+			raw, err := os.ReadFile(settings) //nolint:gosec // test file
+			require.NoError(t, err)
+			assert.Equal(t, strings.Contains(string(raw), "gateway proxy --ensure"), keep, "the ensure hooks go too")
+			_, err = files.Load()
+			assert.Equal(t, errors.Is(err, gatewayproxy.ErrNotConfigured), !keep)
+			if !keep {
+				assert.Contains(t, out.String(), "gateway settings removed")
+			}
+		})
+	}
+}

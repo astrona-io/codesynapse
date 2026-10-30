@@ -148,7 +148,8 @@ type Server struct {
 	st          store.Store
 	jobs        *Jobs
 	notify      notifyCache
-	denied      deniedLimiter // refused requests stored per address
+	failover    *failoverLimit // reports of the gateway failover proxy (gatewayfailover.go)
+	denied      deniedLimiter  // refused requests stored per address
 	overviews   overviewCache
 	rules       ruleCache
 	aiProbe     aiStatusCache
