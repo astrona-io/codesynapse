@@ -49,7 +49,7 @@ async function renderComponent(t, file, globals, props = {}) {
   app.component('StatTile', { props: ['label', 'value', 'hint', 'tip', 'tone'], template: '<div :data-tone="tone">{{ label }} {{ value }} {{ hint }} <i>{{ tip }}</i></div>' })
   app.component('ColumnChart', { template: '<div />' })
   app.component('RankList', { props: ['rows'], template: '<ul class="rank"><li v-for="r in rows ?? []" :key="r.label">{{ r.label }} {{ r.value }}</li></ul>' })
-  app.component('SeriesCard', { props: ['panel', 'yMax', 'label'], template: '<figure :data-panel="panel" :data-ymax="yMax" :data-label="label ? label(\'count_tokens\') : undefined" />' })
+  app.component('SeriesCard', { props: ['panel', 'yMax', 'label'], template: '<figure :data-panel="panel" :data-ymax="yMax" :data-label="label ? label(\'slot_lost\') : undefined" />' })
   app.component('InfoTip', { props: ['text', 'term', 'label'], template: '<i class="info">{{ text }}</i>' })
   app.component('NuxtLink', { template: '<a><slot /></a>' })
   app.component('DataState', await compileComponent(t, './DataState.vue'))
@@ -310,15 +310,15 @@ test('gateway page: tiles, quantile charts on one scale and reasons as bars', as
   assert.match(html, /<li>too large 4<\/li><li>waited too long for a slot 3<\/li><li>answered too slowly 1<\/li>/, 'reasons are bars, largest first')
   assert.match(html, /<div data-tone="warning">Local model timeouts 4 10% of requests · 3 queue · 1 answer <i>requests that went to the cloud because the local model was too slow/)
   assert.match(html, /Not answered locally 8 4 too large · 3 waited too long for a slot <i>by reason: 4 too large · 3 waited too long for a slot · 1 answered too slowly\./)
-  assert.match(html, /data-panel="gateway_fallthrough"[^>]*data-label="count tokens"/, 'the reason trend names its lines in plain words, new codes included')
+  assert.match(html, /data-panel="gateway_fallthrough"[^>]*data-label="slot lost"/, 'the reason trend names its lines in plain words, new codes included')
   assert.match(html, /6 cloud requests have no recorded reason/)
   assert.match(html, /Response time, local 2\.0 s p95 4\.5 s /)
   assert.match(html, /Response time, cloud 12 s p95 – /, 'a missing quantile is a dash, never 0')
   assert.match(html, /Queue wait, local 0\.3 s p95 20 s <i>[^<]*answers then took 1\.5 s on average/)
 
   await t.test('a reason code the page does not know yet is listed', async () => {
-    const html = await render({ ...gateway, fallthrough_reasons: { count_tokens: 9, too_large: 4 } })
-    assert.match(html, /<li>count tokens 9<\/li><li>too large 4<\/li>/)
+    const html = await render({ ...gateway, fallthrough_reasons: { slot_lost: 9, too_large: 4 } })
+    assert.match(html, /<li>slot lost 9<\/li><li>too large 4<\/li>/)
   })
   await t.test('no timeouts are not highlighted', async () => {
     const calm = await render({ ...gateway, timeouts: 0, timeout_share_pct: 0, fallthroughs: 0, fallthrough_reasons: {} })
