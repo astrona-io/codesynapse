@@ -40,11 +40,20 @@ init:
             printf '\n# NebulaGraph root password (the graph database; at most 24 characters).\nNEBULA_PASSWORD=%s\n' "$(openssl rand -hex 12)" >> .env
             echo "added NEBULA_PASSWORD to .env"
         fi
+        for svc in API WORKER MCP; do
+            if ! grep -q "^NEBULA_${svc}_PASSWORD=" .env; then
+                printf '\n# NebulaGraph password of the %s service user (at most 24 characters).\nNEBULA_%s_PASSWORD=%s\n' "$svc" "$svc" "$(openssl rand -hex 12)" >> .env
+                echo "added NEBULA_${svc}_PASSWORD to .env"
+            fi
+        done
         exit 0
     fi
     sed -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-postgres/$(openssl rand -hex 24)/" \
+        -e "s/change-me-nebula-api/$(openssl rand -hex 12)/" \
+        -e "s/change-me-nebula-worker/$(openssl rand -hex 12)/" \
+        -e "s/change-me-nebula-mcp/$(openssl rand -hex 12)/" \
         -e "s/change-me-nebula/$(openssl rand -hex 12)/" \
         -e "s/change-me-metrics/$(openssl rand -hex 24)/" \
         -e "s/change-me-admin/$(openssl rand -hex 16)/" \
@@ -262,7 +271,7 @@ _kind-secret:
     $k get secret codesynapse >/dev/null 2>&1 || $k create secret generic codesynapse
     # Add any key the Secret lacks, so a cluster set up by an older chart
     # (before NebulaGraph, say) gets the new ones and keeps the rest.
-    for kv in CODESYNAPSE_API_TOKEN:hex24 CODESYNAPSE_MCP_TOKEN:hex24 POSTGRES_PASSWORD:hex24 NEBULA_PASSWORD:hex12 METRICS_PASSWORD:hex24 SECRET_KEY:b64; do
+    for kv in CODESYNAPSE_API_TOKEN:hex24 CODESYNAPSE_MCP_TOKEN:hex24 POSTGRES_PASSWORD:hex24 NEBULA_PASSWORD:hex12 NEBULA_API_PASSWORD:hex12 NEBULA_WORKER_PASSWORD:hex12 NEBULA_MCP_PASSWORD:hex12 METRICS_PASSWORD:hex24 SECRET_KEY:b64; do
         key=${kv%%:*}
         if [ -z "$($k get secret codesynapse -o "jsonpath={.data.$key}")" ]; then
             case ${kv#*:} in hex24) v=$(openssl rand -hex 24) ;; hex12) v=$(openssl rand -hex 12) ;; b64) v=$(openssl rand -base64 32) ;; esac

@@ -24,8 +24,12 @@
 //     destination; the rank is 0 unless a store needs several parallel edges.
 //   - Schema changes reach the Graph service on the next heartbeat, so
 //     EnsureSchema waits until each tag, edge type and index answers.
-//   - Roles are per space (GOD, ADMIN, DBA, USER, GUEST), not per label: the
-//     MCP service connects as a GUEST and sends its writes through the API.
+//   - Roles are per space (GOD, ADMIN, DBA, USER, GUEST), not per tag, and
+//     the code graph shares the space with reviews, memory, curated records
+//     and usage, which the MCP service writes. So each service has its own
+//     user: the API holds DBA and owns the schema (EnsureSchema), workers and
+//     MCP hold USER (data, no DDL) and only check it (CheckSchema), and the
+//     GOD account (root) stays with the init step, which creates the space.
 package nebulastore
 
 import (

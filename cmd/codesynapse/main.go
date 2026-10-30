@@ -151,9 +151,13 @@ func (o *ingestOptions) openStore(ctx context.Context) (store.Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := st.EnsureSchema(ctx); err != nil {
-		st.Close(ctx) //nolint:errcheck,gosec // the schema error is the one to report
-		return nil, err
+	// Change the schema only when it is incomplete, so a user that may write
+	// data but not the schema (NebulaGraph's USER role) can ingest.
+	if err := st.CheckSchema(ctx); err != nil {
+		if err := st.EnsureSchema(ctx); err != nil {
+			st.Close(ctx) //nolint:errcheck,gosec // the schema error is the one to report
+			return nil, err
+		}
 	}
 	o.st = st
 	return st, nil

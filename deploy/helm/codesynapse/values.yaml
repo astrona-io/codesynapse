@@ -5,7 +5,9 @@
 # Shared with the store subcharts.
 global:
   # Required. Keys: CODESYNAPSE_API_TOKEN, CODESYNAPSE_MCP_TOKEN,
-  # NEBULA_PASSWORD, METRICS_PASSWORD, SECRET_KEY, and POSTGRES_PASSWORD
+  # NEBULA_API_PASSWORD, NEBULA_WORKER_PASSWORD, NEBULA_MCP_PASSWORD,
+  # NEBULA_PASSWORD (in-chart NebulaGraph's root; only its init step reads
+  # it), METRICS_PASSWORD, SECRET_KEY, and POSTGRES_PASSWORD
   # (in-chart PostgreSQL) or CODESYNAPSE_DATABASE_URL (external). Optional:
   # CODESYNAPSE_GIT_TOKENS, CODESYNAPSE_GIT_PUSH_TOKENS (only the fix worker
   # gets it), ANTHROPIC_API_KEY, OPENROUTER_API_KEY, and
@@ -203,10 +205,21 @@ postgresql:
   # CODESYNAPSE_DATABASE_URL.
 nebula:
   enabled: true
-  # When disabled: the graphd addresses (host:9669, comma separated). The
-  # root password stays NEBULA_PASSWORD in the Secret; in the chart it is
-  # at most 24 characters (NebulaGraph's limit).
+  # When disabled: the graphd addresses (host:9669, comma separated). You
+  # create the space and the users below yourself (docs/operations/
+  # upgrading.md has the statements); no root password is needed then.
   externalAddrs: ""
+  # One NebulaGraph user per service, each signing in with
+  # NEBULA_<SERVICE>_PASSWORD from the Secret (at most 24 characters,
+  # NebulaGraph's limit). The in-chart init step creates them: api gets DBA
+  # on the space and creates and upgrades the schema; worker and mcp get
+  # USER and can read and write data but change no schema. Roles are per
+  # space, and memory, reviews and usage share the code graph's space, so
+  # the MCP server cannot be read-only.
+  users:
+    api: cs_api
+    worker: cs_worker
+    mcp: cs_mcp
   # The graph space's layout, fixed when CodeSynapse first creates it:
   # partitions spread the graph over storaged hosts, replicas keeps that
   # many copies of each partition (odd, at most the storaged hosts). The

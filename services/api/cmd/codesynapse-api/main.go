@@ -124,7 +124,14 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		return err
 	}
 	defer st.Close(context.Background()) //nolint:errcheck,contextcheck // shutdown
-	if err := st.EnsureSchema(ctx); err != nil {
+	// The API owns the graph schema (its database user is a DBA of the
+	// space); workers only check it, with a user that may not change it.
+	if o.worker {
+		err = app.WaitForSchema(ctx, st, app.SchemaWait, func(err error) { o.EC.Logger.Warn("waiting for the API to create the graph schema", "error", err) })
+	} else {
+		err = st.EnsureSchema(ctx)
+	}
+	if err != nil {
 		return err
 	}
 	llmCfg, err := llm.Load(o.llmConfig, os.Getenv)

@@ -25,16 +25,28 @@
 {{- if .Values.victorialogs.enabled }}http://{{ include "cs.name" (list . "victorialogs") }}:9428{{ else }}{{ .Values.victorialogs.externalURL }}{{ end -}}
 {{- end -}}
 
-{{/* Environment shared by api, worker and mcp: stores and telemetry. */}}
+{{/*
+Environment shared by api, worker and mcp: stores and telemetry. Args: root,
+service ("api", "worker" or "mcp"). Each service signs in to NebulaGraph as
+its own user (nebula.users) with NEBULA_<SERVICE>_PASSWORD; the root password
+stays with the NebulaGraph init step.
+*/}}
 {{- define "cs.storeEnv" -}}
+{{- $svc := index . 1 -}}
+{{- with index . 0 -}}
 - {name: CODESYNAPSE_NEBULA_ADDRS, value: {{ include "cs.nebulaAddrs" . | quote }}}
-- {name: CODESYNAPSE_NEBULA_USER, value: root}
+- {name: CODESYNAPSE_NEBULA_USER, value: {{ index .Values.nebula.users $svc | quote }}}
+{{- with .Values.nebula.users }}
+{{- if or (eq .api .worker) (eq .api .mcp) (eq .worker .mcp) }}
+{{- fail "nebula.users: the api, worker and mcp users must differ, each holds its own role" }}
+{{- end }}
+{{- end }}
 {{- if and .Values.nebula.enabled (gt (int .Values.nebula.space.replicas) 1) }}
 {{- fail "nebula.space.replicas above 1 needs a NebulaGraph cluster: the in-chart one has a single storaged host" }}
 {{- end }}
 - {name: CODESYNAPSE_NEBULA_PARTITIONS, value: {{ .Values.nebula.space.partitions | quote }}}
 - {name: CODESYNAPSE_NEBULA_REPLICAS, value: {{ .Values.nebula.space.replicas | quote }}}
-{{ include "cs.secretEnv" (list . "CODESYNAPSE_NEBULA_PASSWORD" "NEBULA_PASSWORD") }}
+{{ include "cs.secretEnv" (list . "CODESYNAPSE_NEBULA_PASSWORD" (printf "NEBULA_%s_PASSWORD" (upper $svc))) }}
 - {name: CODESYNAPSE_MILVUS_URL, value: {{ include "cs.milvusURL" . | quote }}}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_MILVUS_TOKEN" "MILVUS_TOKEN" true) }}
 - {name: CODESYNAPSE_METRICS_URL, value: {{ include "cs.metricsURL" . | quote }}}
@@ -55,6 +67,7 @@
 {{- else }}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_DATABASE_URL" "CODESYNAPSE_DATABASE_URL") }}
 {{- end }}
+{{- end }}
 {{- end -}}
 
 {{/* GOMEMLIMIT a little under the memory limit, so Go collects before the kernel kills. */}}
@@ -70,12 +83,13 @@
 {{/*
 Environment of a process that runs jobs: the API (it still runs them when no
 worker does) and the workers. Args: root, push ("true" or "false": whether
-this process may push fix branches). Only the fix workers get "true"; the
-ingest and ai workers parse untrusted repositories and never hold it.
+this process may push fix branches), service ("api" or "worker", see
+cs.storeEnv). Only the fix workers get push "true"; the ingest and ai workers
+parse untrusted repositories and never hold it.
 */}}
 {{- define "cs.jobEnv" -}}
 {{- $root := index . 0 -}}
-{{ include "cs.storeEnv" $root }}
+{{ include "cs.storeEnv" (list $root (index . 2)) }}
 {{ include "cs.secretEnv" (list $root "CODESYNAPSE_SECRET_KEY" "SECRET_KEY") }}
 {{ include "cs.secretEnv" (list $root "CODESYNAPSE_GIT_TOKENS" "CODESYNAPSE_GIT_TOKENS" true) }}
 {{ include "cs.secretEnv" (list $root "ANTHROPIC_API_KEY" "ANTHROPIC_API_KEY" true) }}
@@ -106,7 +120,7 @@ only the API uses: the service token (workers serve no HTTP) and the first
 administrator's password. Workers never get either.
 */}}
 {{- define "cs.apiEnv" -}}
-{{ include "cs.jobEnv" (list . .Values.features.allowPush) }}
+{{ include "cs.jobEnv" (list . .Values.features.allowPush "api") }}
 {{ include "cs.secretEnv" (list . "CODESYNAPSE_API_TOKEN" "CODESYNAPSE_API_TOKEN") }}
 {{- with .Values.auditArchive }}
 - {name: CODESYNAPSE_AUDIT_HOT_DAYS, value: {{ .hotDays | quote }}}

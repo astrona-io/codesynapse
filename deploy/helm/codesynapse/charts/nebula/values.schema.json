@@ -21,7 +21,7 @@
         "metad": {"description": "Meta service.", "type": "string", "minLength": 1},
         "storaged": {"description": "Storage service.", "type": "string", "minLength": 1},
         "graphd": {"description": "Query service, the only one the other pods reach.", "type": "string", "minLength": 1},
-        "console": {"description": "Registers the storage host and replaces the first root password at start.", "type": "string", "minLength": 1}
+        "console": {"description": "Registers the storage host, replaces the first root password and creates the space and service users at start.", "type": "string", "minLength": 1}
       }
     },
     "size": {
@@ -51,6 +51,10 @@
     },
     "space": {
       "description": "Set in the codesynapse chart: the graph space's partitions and replicas.",
+      "type": "object"
+    },
+    "users": {
+      "description": "Set in the codesynapse chart: the service users the init step creates and grants roles on the space.",
       "type": "object"
     }
   },

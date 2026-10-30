@@ -10,7 +10,7 @@
       "type": "object",
       "properties": {
         "existingSecret": {
-          "description": "Required at install. The Secret with CODESYNAPSE_API_TOKEN, CODESYNAPSE_MCP_TOKEN, NEBULA_PASSWORD, METRICS_PASSWORD, SECRET_KEY and POSTGRES_PASSWORD (in-chart PostgreSQL) or CODESYNAPSE_DATABASE_URL (external). Optional: CODESYNAPSE_GIT_TOKENS, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, MILVUS_TOKEN.",
+          "description": "Required at install. The Secret with CODESYNAPSE_API_TOKEN, CODESYNAPSE_MCP_TOKEN, NEBULA_API_PASSWORD, NEBULA_WORKER_PASSWORD, NEBULA_MCP_PASSWORD, NEBULA_PASSWORD (in-chart NebulaGraph's root, read only by its init step), METRICS_PASSWORD, SECRET_KEY and POSTGRES_PASSWORD (in-chart PostgreSQL) or CODESYNAPSE_DATABASE_URL (external). Optional: CODESYNAPSE_GIT_TOKENS, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, MILVUS_TOKEN.",
           "type": "string"
         },
         "imagePullSecrets": {
@@ -414,7 +414,18 @@
       ],
       "properties": {
         "externalAddrs": {
-          "description": "When disabled: the graphd addresses (host:9669, comma separated). The root password stays NEBULA_PASSWORD in the Secret; in the chart it is at most 24 characters (NebulaGraph's limit)."
+          "description": "When disabled: the graphd addresses (host:9669, comma separated). Create the space and the users of nebula.users yourself (docs/operations/upgrading.md); no root password is needed then."
+        },
+        "users": {
+          "description": "One NebulaGraph user per service, each signing in with NEBULA_<SERVICE>_PASSWORD from the Secret (at most 24 characters). The in-chart init step creates them: api gets DBA on the space and owns the schema, worker and mcp get USER (data only, no schema changes). The three names must differ and none may be root.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["api", "worker", "mcp"],
+          "properties": {
+            "api": {"description": "The API's user: DBA on the space, creates and upgrades the schema.", "$ref": "#/definitions/nebulaUser"},
+            "worker": {"description": "The workers' user (ingest, ai and fix): USER on the space.", "$ref": "#/definitions/nebulaUser"},
+            "mcp": {"description": "The MCP server's user: USER on the space (it writes reviews, memory, curated records and usage counters).", "$ref": "#/definitions/nebulaUser"}
+          }
         },
         "space": {
           "description": "The graph space's layout, fixed when CodeSynapse first creates it; changing it later does not reshape an existing space.",
@@ -544,6 +555,11 @@
           "$ref": "#/definitions/resources"
         }
       }
+    },
+    "nebulaUser": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{1,15}$",
+      "not": {"enum": ["root"]}
     },
     "store": {
       "description": "A store subchart, on by default. For production, prefer stores you run and back up yourself: set enabled=false and set externalURL. The subchart's values.schema.json lists what else can be set (image, size, storageClass, resources, retention).",

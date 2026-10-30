@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -76,8 +77,16 @@ func TestInstall(t *testing.T) {
 		}
 	}
 	require.True(t, len(secret) > 0)
+	var made struct {
+		StringData map[string]string `json:"stringData"`
+	}
+	require.NoError(t, json.Unmarshal(secret, &made))
 	for _, k := range secretKeys {
-		assert.Contains(t, string(secret), k.name, "every credential is generated")
+		v := made.StringData[k.name]
+		assert.True(t, v != "", "%s is generated", k.name)
+		if strings.HasPrefix(k.name, "NEBULA_") {
+			assert.Equal(t, len(v), 24, "%s fits NebulaGraph's 24-character limit", k.name)
+		}
 	}
 	assert.False(t, strings.Contains(joined, "POSTGRES_PASSWORD"), "credentials travel on stdin, never in arguments")
 	assert.Contains(t, out.String(), "codesynapse status --context kind-dev")
@@ -88,6 +97,48 @@ func TestInstall(t *testing.T) {
 	o2 := &installOptions{EC: env2, context: "kind-dev", namespace: "codesynapse", release: "codesynapse", chart: defaultChart, version: "1.2.0", yes: true, timeout: time.Minute, run: f2.run}
 	require.NoError(t, o2.Run(context.Background(), env2))
 	assert.False(t, strings.Contains(strings.Join(f2.calls, "\n"), "create -f -"), "an existing Secret is never replaced")
+
+	// A Secret from an older CLI gets only the keys it lacks, on stdin.
+	f3 := &fakeTools{answer: func(call string) (string, error) {
+		if strings.Contains(call, "get secret codesynapse") {
+			return "CODESYNAPSE_API_TOKEN\nCODESYNAPSE_MCP_TOKEN\nPOSTGRES_PASSWORD\nNEBULA_PASSWORD\nMETRICS_PASSWORD\nSECRET_KEY\n", nil
+		}
+		return "", nil
+	}}
+	env3, _ := installEnv("")
+	o3 := &installOptions{EC: env3, context: "kind-dev", namespace: "codesynapse", release: "codesynapse", chart: defaultChart, version: "1.2.0", yes: true, timeout: time.Minute, run: f3.run}
+	require.NoError(t, o3.Run(context.Background(), env3))
+	var patch []byte
+	for i, call := range f3.calls {
+		if strings.Contains(call, "patch secret codesynapse --type merge --patch-file /dev/stdin") {
+			patch = f3.stdins[i]
+		}
+	}
+	var added struct {
+		StringData map[string]string `json:"stringData"`
+	}
+	require.NoError(t, json.Unmarshal(patch, &added))
+	assert.Len(t, added.StringData, 3, "only the missing keys")
+	for _, k := range []string{"NEBULA_API_PASSWORD", "NEBULA_WORKER_PASSWORD", "NEBULA_MCP_PASSWORD"} {
+		assert.Equal(t, len(added.StringData[k]), 24, k)
+	}
+	assert.False(t, strings.Contains(strings.Join(f3.calls, "\n"), "create -f -"))
+
+	// A complete Secret is left alone.
+	f4 := &fakeTools{answer: func(call string) (string, error) {
+		if strings.Contains(call, "get secret codesynapse") {
+			names := make([]string, 0, len(secretKeys))
+			for _, k := range secretKeys {
+				names = append(names, k.name)
+			}
+			return strings.Join(names, "\n"), nil
+		}
+		return "", nil
+	}}
+	env4, _ := installEnv("")
+	o4 := &installOptions{EC: env4, context: "kind-dev", namespace: "codesynapse", release: "codesynapse", chart: defaultChart, version: "1.2.0", yes: true, timeout: time.Minute, run: f4.run}
+	require.NoError(t, o4.Run(context.Background(), env4))
+	assert.False(t, strings.Contains(strings.Join(f4.calls, "\n"), "patch secret"), "nothing to add")
 }
 
 func TestInstallRefusals(t *testing.T) {

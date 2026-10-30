@@ -2,6 +2,7 @@ package nebulastore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	nebula "github.com/vesoft-inc/nebula-go/v3"
 
 	"github.com/astrona-io/codesynapse/internal/model"
+	"github.com/astrona-io/codesynapse/internal/store"
 )
 
 // edgeKinds are the model edge kinds stored as edge types. Session facts
@@ -211,12 +213,21 @@ func (s schemaItem) createIndex(ix index) string {
 
 // EnsureSchema implements store.Writer. The space, tags, edge types and
 // indexes are created when missing and columns appended; nothing is dropped.
-// It needs a user that may create spaces (GOD on a fresh install).
+//
+// Creating a space needs NebulaGraph's GOD role (root), so in a deployment
+// the init step creates it and the schema owner holds only DBA on it. A space
+// that exists is not created again, which is what lets a DBA run this; a
+// USER or GUEST is refused at the first tag with an error that says so.
 func (s *Store) EnsureSchema(ctx context.Context) error {
-	create := fmt.Sprintf("CREATE SPACE IF NOT EXISTS %s (partition_num = %d, replica_factor = %d, vid_type = FIXED_STRING(40))",
-		quote(s.cfg.Space), s.cfg.Partitions, s.cfg.Replicas)
-	if err := s.admin(ctx, func(sess *nebula.Session) error { rs, err := sess.Execute(create); return check(rs, err) }); err != nil {
-		return fmt.Errorf("nebula schema: create space: %w", err)
+	if err := s.bind(); errors.Is(err, errNoSpace) {
+		create := fmt.Sprintf("CREATE SPACE IF NOT EXISTS %s (partition_num = %d, replica_factor = %d, vid_type = FIXED_STRING(40))",
+			quote(s.cfg.Space), s.cfg.Partitions, s.cfg.Replicas)
+		if err := s.admin(ctx, func(sess *nebula.Session) error { rs, err := sess.Execute(create); return check(rs, err) }); err != nil {
+			if isPermission(err) {
+				return fmt.Errorf("nebula schema: the space %s does not exist and user %s may not create it (the NebulaGraph init step creates it as root): %w", s.cfg.Space, s.cfg.User, err)
+			}
+			return fmt.Errorf("nebula schema: create space: %w", err)
+		}
 	}
 	deadline := time.Now().Add(s.cfg.SchemaWait)
 	if err := s.until(ctx, deadline, "the space", func() error { return s.bind() }); err != nil {
@@ -224,10 +235,76 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	}
 	for _, item := range schemaItems {
 		if err := s.ensureItem(ctx, item, deadline); err != nil {
+			if isPermission(err) {
+				return fmt.Errorf("nebula schema: user %s may not change the schema of space %s (that needs the DBA role on it; only the schema owner runs this): %w", s.cfg.User, s.cfg.Space, err)
+			}
 			return fmt.Errorf("nebula schema: %s %s: %w", strings.ToLower(item.kind()), item.name, err)
 		}
 	}
 	return nil
+}
+
+// CheckSchema implements store.Writer with reads only (DESCRIBE and SHOW,
+// which every role may run), so a service that does not own the schema can
+// tell a missing or older schema apart before it serves.
+func (s *Store) CheckSchema(ctx context.Context) error {
+	if err := s.bind(); err != nil {
+		if errors.Is(err, errNoSpace) {
+			return fmt.Errorf("%w: the space %s does not exist", store.ErrSchemaMissing, s.cfg.Space)
+		}
+		return err
+	}
+	indexes := map[string]map[string]bool{}
+	for _, item := range schemaItems {
+		rows, err := s.read(ctx, fmt.Sprintf("DESCRIBE %s %s", item.kind(), quote(item.name)), nil)
+		if err != nil {
+			var nerr *Error
+			if errors.As(err, &nerr) && !isPermission(err) {
+				return fmt.Errorf("%w: %s %s: %s", store.ErrSchemaMissing, strings.ToLower(item.kind()), item.name, nerr.Message)
+			}
+			return err
+		}
+		known := map[string]bool{}
+		for _, r := range rows {
+			if f, ok := r["Field"].(string); ok {
+				known[f] = true
+			}
+		}
+		var missing []string
+		for _, c := range item.cols {
+			if !known[c.name] {
+				missing = append(missing, c.name)
+			}
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("%w: %s %s lacks %s", store.ErrSchemaMissing, strings.ToLower(item.kind()), item.name, strings.Join(missing, ", "))
+		}
+		if len(item.indexes) == 0 {
+			continue
+		}
+		have, ok := indexes[item.kind()]
+		if !ok {
+			if have, err = s.indexNames(ctx, item); err != nil {
+				return err
+			}
+			indexes[item.kind()] = have
+		}
+		for _, ix := range item.indexes {
+			if !have[ix.name] {
+				return fmt.Errorf("%w: index %s is missing", store.ErrSchemaMissing, ix.name)
+			}
+		}
+	}
+	return nil
+}
+
+// errBadPermission is NebulaGraph's E_BAD_PERMISSION: the user's role on
+// the space does not allow the statement.
+const errBadPermission = -1008
+
+func isPermission(err error) bool {
+	var nerr *Error
+	return errors.As(err, &nerr) && nerr.Code == errBadPermission
 }
 
 func (s *Store) ensureItem(ctx context.Context, item schemaItem, deadline time.Time) error {
