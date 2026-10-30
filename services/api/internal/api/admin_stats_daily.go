@@ -9,7 +9,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
-// The 90d and 365d ranges of the platform statistics (docs/PLATFORM_STATS_PLAN.md,
+// The 90d and 365d ranges of the platform statistics (docs/plans/PLATFORM_STATS_PLAN.md,
 // "Daily rollup"). State figures (totals, what is active now) stay live;
 // the window figures (created, revoked) are summed over the last complete
 // UTC days of platform_stats_daily, read through PlatformStatsHistory.

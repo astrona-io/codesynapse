@@ -65,7 +65,7 @@ An operator with access to the deployment can reset the root account at any time
 
 On an installation with no accounts, `reset-admin` creates the administrator instead. Forgot an organisation owner's password? Root can run the audited owner-recovery action under Administration.
 
-Upgraded from an installation older than root separation? The root is identified from setup history at start-up. If that history is missing, run `codesynapse-api designate-root --email <root>`. See [root bootstrap](../ROOT_BOOTSTRAP_PLAN.md).
+Upgraded from an installation older than root separation? The root is identified from setup history at start-up. If that history is missing, run `codesynapse-api designate-root --email <root>`. See [root bootstrap](../plans/ROOT_BOOTSTRAP_PLAN.md).
 
 ## Sign in with email or username
 
@@ -117,7 +117,7 @@ Setting up Keycloak or another provider:
 4. Share the sign-in link the page shows.
 5. Self-hosted provider on a private network? Set `CODESYNAPSE_SSO_ALLOW_PRIVATE=true`.
 
-Details and the security rules are in [single sign-on](../SSO_PLAN.md).
+Details and the security rules are in [single sign-on](../plans/SSO_PLAN.md).
 
 ## Settings that matter at first run
 

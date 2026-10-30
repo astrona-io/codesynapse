@@ -91,4 +91,4 @@ People and agents can add to the catalog without editing files, and none of it i
 
 ## Not in this version
 
-Annotations, code identity across renames, reuse records, dependency replacement analysis and the unified search are the next steps of the same plan (`docs/ARCHITECTURE_CATALOG_PLAN.md`).
+Annotations, code identity across renames, reuse records, dependency replacement analysis and the unified search are the next steps of the same plan (`docs/plans/ARCHITECTURE_CATALOG_PLAN.md`).

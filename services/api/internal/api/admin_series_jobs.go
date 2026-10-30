@@ -3,7 +3,7 @@ package api
 import "maps"
 
 // Cross-tenant charts of the jobs and ingest sections
-// (docs/PLATFORM_STATS_PLAN.md, phase 4). Job kinds, outcomes, phases and
+// (docs/plans/PLATFORM_STATS_PLAN.md, phase 4). Job kinds, outcomes, phases and
 // skip reasons are fixed lists the code sets, never tenant data, so they are
 // shown whole; languages count only where at least minGroupOrgs
 // organisations indexed them. The file counters carry a repository label

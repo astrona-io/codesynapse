@@ -166,7 +166,7 @@ type ProviderConfig struct {
 	// rest wait their turn (queue.go). 0 means 1 for a local provider and no
 	// limit for a cloud one. Raise it when the server batches (OLLAMA_NUM_PARALLEL).
 	MaxConcurrent int `yaml:"max_concurrent" json:"max_concurrent,omitempty"`
-	// Gateway lets the agent gateway (docs/GATEWAY_PLAN.md) answer small
+	// Gateway lets the agent gateway (docs/plans/GATEWAY_PLAN.md) answer small
 	// requests from this provider. Local providers only; off by default.
 	Gateway bool `yaml:"gateway" json:"gateway,omitempty"`
 	// GatewayExclude lists model names, or prefixes ending in "*", whose

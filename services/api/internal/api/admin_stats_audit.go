@@ -11,7 +11,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
-// The audit section of the platform statistics (docs/PLATFORM_STATS_PLAN.md,
+// The audit section of the platform statistics (docs/plans/PLATFORM_STATS_PLAN.md,
 // phase 7): entries by action family and outcome, failed sign-ins by cause,
 // the security events, the stored chain verification and the archive. Up
 // to 24 hours is counted live (hourly, on the (at, action) index); longer
@@ -373,7 +373,7 @@ const auditVerifyEvery = 24 * time.Hour
 const auditVerifyRetry = 10 * time.Minute
 
 // verifyAuditChain verifies the audit chain once a day and stores the
-// result (docs/PLATFORM_STATS_PLAN.md, phase 7). It runs under the
+// result (docs/plans/PLATFORM_STATS_PLAN.md, phase 7). It runs under the
 // api-loops lease, so one process verifies; the statistics read the stored
 // result instead of walking the chain on every view.
 func (s *Server) verifyAuditChain(ctx context.Context) {

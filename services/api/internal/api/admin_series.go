@@ -16,7 +16,7 @@ import (
 )
 
 // Cross-tenant charts for platform administrators
-// (docs/PLATFORM_STATS_PLAN.md, phase 3). They are a table of their own,
+// (docs/plans/PLATFORM_STATS_PLAN.md, phase 3). They are a table of their own,
 // served only under /api/v1/admin/stats/series, so no organisation's
 // Statistics page can name one. As in seriesPanels, the client names a panel
 // and a range and the only value put into a query is a window from

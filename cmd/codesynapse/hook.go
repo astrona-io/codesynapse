@@ -109,7 +109,7 @@ type hookState struct {
 	Counts map[string]rangeCounts `json:"counts,omitempty"`
 	Sent   map[string]rangeCounts `json:"sent,omitempty"`
 	// Spans are the line spans Read covered, so an answer naming lines the
-	// agent already had counts as a repeat (docs/PLATFORM_STATS_PLAN.md).
+	// agent already had counts as a repeat (docs/plans/PLATFORM_STATS_PLAN.md).
 	Spans []answerRange `json:"spans,omitempty"`
 	// Live holds, per tool and repository ("tool|repo"), the answer tokens
 	// that stay in the agent's context and are re-sent on every later turn;

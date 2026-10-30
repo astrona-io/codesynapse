@@ -1,5 +1,5 @@
 -- The bootstrap root sets up the installation and keeps governance only
--- (docs/ROOT_BOOTSTRAP_PLAN.md). Unlike platform_admin the classification is
+-- (docs/plans/ROOT_BOOTSTRAP_PLAN.md). Unlike platform_admin the classification is
 -- set once and never removed, and there is at most one root.
 ALTER TABLE users ADD COLUMN bootstrap_root boolean NOT NULL DEFAULT false;
 CREATE UNIQUE INDEX users_one_bootstrap_root ON users (bootstrap_root) WHERE bootstrap_root;

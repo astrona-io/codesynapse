@@ -1,4 +1,4 @@
-// Metrics of the web server (docs/TELEMETRY_PLAN.md, phase 6): requests the
+// Metrics of the web server (docs/plans/TELEMETRY_PLAN.md, phase 6): requests the
 // Nuxt server handles (rendered pages and the /api/cg proxy) and proxy calls
 // that never reached the API. Nothing here has a trusted tenant, so every
 // instrument is a platform_* series. Labels come only from fixed sets

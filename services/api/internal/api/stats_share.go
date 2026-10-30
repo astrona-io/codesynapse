@@ -2,7 +2,7 @@ package api
 
 import "github.com/astrona-io/codesynapse/internal/usage"
 
-// Token savings without the prompt cache (docs/PLATFORM_STATS_PLAN.md):
+// Token savings without the prompt cache (docs/plans/PLATFORM_STATS_PLAN.md):
 // the share of the agent's own work that CodeSynapse answers avoided. W,
 // the work tokens, is fresh input + cache writes + output; cache reads are
 // left out because CodeSynapse neither causes nor removes them. A is the

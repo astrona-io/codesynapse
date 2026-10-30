@@ -15,7 +15,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
-// The usage section of the platform statistics (docs/PLATFORM_STATS_PLAN.md,
+// The usage section of the platform statistics (docs/plans/PLATFORM_STATS_PLAN.md,
 // phase 3): MCP sessions, calls, tokens, the token share and the hooks'
 // workflow counts, per organisation and for the platform. 1h to 30d come
 // from the usage buckets (whole UTC days, so the answer names the days it
@@ -129,7 +129,7 @@ func (s *Server) usageStats(ctx context.Context, q accounts.StatsQuery) (usageDa
 
 // usageExport is the usage section for export: every organisation, without
 // the upper share figure, which is shown only beside the main one on the
-// page (docs/PLATFORM_STATS_PLAN.md).
+// page (docs/plans/PLATFORM_STATS_PLAN.md).
 func usageExport(d usageData) (body any, header []string, rows [][]string) {
 	d.totals.ShareUpperPct = nil
 	for i := range d.rows {

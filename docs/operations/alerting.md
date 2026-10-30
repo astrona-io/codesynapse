@@ -96,7 +96,7 @@ Unset, the tab says alerts are off and nothing else changes.
 
 Store alerts add up every organisation's calls per store, so no organisation appears in them. Git, lookup, sign-in and audit alerts add up every organisation's numbers too. Other alerts read installation-wide numbers. The only labels an alert carries besides `severity`, `component` and `environment` are the store (`db_system`), the job kind, the instrument name, a fixed reason, and the fixed git operation, lookup service, sign-in method or audit source.
 
-More rules follow as the numbers they need are added. The [telemetry plan](../TELEMETRY_PLAN.md#alerting) lists which phase each waits on.
+More rules follow as the numbers they need are added. The [telemetry plan](../plans/TELEMETRY_PLAN.md#alerting) lists which phase each waits on.
 
 ## Change or add a rule
 

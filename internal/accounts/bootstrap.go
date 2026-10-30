@@ -12,7 +12,7 @@ import (
 // recovery) and loses all organisation work: repositories, code, reviews,
 // memory, keys and organisation settings, whatever memberships or grants it
 // holds. Its only tenant change is the setup transaction that hands the
-// installation to a standard owner. See docs/ROOT_BOOTSTRAP_PLAN.md.
+// installation to a standard owner. See docs/plans/ROOT_BOOTSTRAP_PLAN.md.
 
 // Setup states.
 const (

@@ -1,4 +1,4 @@
--- Audit statistics (docs/PLATFORM_STATS_PLAN.md, phase 7). The 24-hour
+-- Audit statistics (docs/plans/PLATFORM_STATS_PLAN.md, phase 7). The 24-hour
 -- figures count events by time and action; the existing indexes are on at
 -- and action apart, so the planner had to read every row of the window.
 CREATE INDEX events_at_action ON events (at, action);

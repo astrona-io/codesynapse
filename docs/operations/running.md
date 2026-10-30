@@ -40,7 +40,7 @@ Right after indexing, the index belongs to no organisation, so nobody can see it
 
 The dashboard sees that an index of the same remote already exists and links it instead of cloning again. It records the first admin grant and applies the usual access checks. A private repository first needs your organisation's Git token to prove you have access. If you add the same address without running `just ingest`, the worker clones and indexes it for you.
 
-There is no database-free MCP server. Every tool call needs accounts and a registered runtime session (see [session context](../SESSION_CONTEXT_PLAN.md#runtime-integration)), which is how CodeSynapse knows who is asking. So even for development, start the stack with `just up` and register an agent with `just mcp`.
+There is no database-free MCP server. Every tool call needs accounts and a registered runtime session (see [session context](../plans/SESSION_CONTEXT_PLAN.md#runtime-integration)), which is how CodeSynapse knows who is asking. So even for development, start the stack with `just up` and register an agent with `just mcp`.
 
 These are the addresses you will use:
 
@@ -52,7 +52,7 @@ These are the addresses you will use:
 
 All ports bind to 127.0.0.1, so only your own machine can reach them.
 
-In the dashboard you can sign in, manage access, browse repositories and start work such as cloning, syncing and model tasks. A signed-in browser gets its own runtime session for that work (see [session context](../SESSION_CONTEXT_PLAN.md#runtime-integration)). Agents and API clients register theirs.
+In the dashboard you can sign in, manage access, browse repositories and start work such as cloning, syncing and model tasks. A signed-in browser gets its own runtime session for that work (see [session context](../plans/SESSION_CONTEXT_PLAN.md#runtime-integration)). Agents and API clients register theirs.
 
 Slow work runs as **jobs**. The API writes each job down, and the `worker` service carries it out. Jobs survive restarts: if a worker stops halfway, another worker picks the job up again, and the requester's access is checked again first.
 
@@ -262,9 +262,9 @@ Metrics use OpenTelemetry cumulative OTLP/HTTP by default. Set `CODESYNAPSE_METR
 
 `CODESYNAPSE_METRICS_EXPORTER=prometheus` selects the legacy Prometheus-text push path for rollback; the default is `otlp`. Restart the services when switching and use one exporter per process. No scrape endpoint is exposed. Failed exports do not block requests, and shutdown flushing has a five-second deadline.
 
-Traces go to [VictoriaTraces](https://docs.victoriametrics.com/victoriatraces/) (Apache-2.0), also in compose. A dashboard click, its job on the worker, the graph store calls and the model calls form one trace. Its ID is the `X-Request-ID` and the audit entry's request ID, and it appears as `trace_id` in log lines. Search traces at http://localhost:10428/select/vmui, using the metrics login (user `codesynapse`, `METRICS_PASSWORD` from `.env`). Spans carry no content: no paths, repository names, people, prompts or code. See [traces](../TELEMETRY_PLAN.md#traces).
+Traces go to [VictoriaTraces](https://docs.victoriametrics.com/victoriatraces/) (Apache-2.0), also in compose. A dashboard click, its job on the worker, the graph store calls and the model calls form one trace. Its ID is the `X-Request-ID` and the audit entry's request ID, and it appears as `trace_id` in log lines. Search traces at http://localhost:10428/select/vmui, using the metrics login (user `codesynapse`, `METRICS_PASSWORD` from `.env`). Spans carry no content: no paths, repository names, people, prompts or code. See [traces](../plans/TELEMETRY_PLAN.md#traces).
 
-Log lines of every service also go to [VictoriaLogs](https://docs.victoriametrics.com/victorialogs/) (Apache-2.0), still written to stderr as before. Search them at http://localhost:9428/select/vmui with the same login, for example `service:codesynapse-api AND trace_id:<id>` for one request. The structured `audit` lines are there too, with actor emails and client addresses, so treat the store like the audit log: keep it internal and give only operators the password. Lines are kept for `LOGS_RETENTION` (default 30 days); the hash-chained audit log in PostgreSQL stays the record. See [logs](../TELEMETRY_PLAN.md#logs).
+Log lines of every service also go to [VictoriaLogs](https://docs.victoriametrics.com/victorialogs/) (Apache-2.0), still written to stderr as before. Search them at http://localhost:9428/select/vmui with the same login, for example `service:codesynapse-api AND trace_id:<id>` for one request. The structured `audit` lines are there too, with actor emails and client addresses, so treat the store like the audit log: keep it internal and give only operators the password. Lines are kept for `LOGS_RETENTION` (default 30 days); the hash-chained audit log in PostgreSQL stays the record. See [logs](../plans/TELEMETRY_PLAN.md#logs).
 
 Alerts for operators are optional: `COMPOSE_PROFILES=alerting just up` adds vmalert, which checks rules in `deploy/alerts` against VictoriaMetrics and sends what fires to the Alertmanager-compatible receiver in `ALERTMANAGER_URL`. See [Alerting](alerting.md).
 

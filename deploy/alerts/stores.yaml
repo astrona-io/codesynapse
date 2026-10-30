@@ -1,4 +1,4 @@
-# Store health (docs/TELEMETRY_PLAN.md, "Alerting"). A store call made for an
+# Store health (docs/plans/TELEMETRY_PLAN.md, "Alerting"). A store call made for an
 # organisation is recorded as db_*; one without a trusted tenant as
 # platform_db_*. Both are read and summed per db_system (nebulagraph, milvus,
 # postgres), so no tenant reaches an alert.

@@ -17,7 +17,7 @@ const statsRollupAt = 5 * time.Minute
 const statsRollupRetry = 10 * time.Minute
 
 // rollupPlatformStats writes yesterday's platform statistics once a day
-// (docs/PLATFORM_STATS_PLAN.md, phase 8). It runs under the api-loops lease;
+// (docs/plans/PLATFORM_STATS_PLAN.md, phase 8). It runs under the api-loops lease;
 // the store write is an upsert of the whole day, so a second writer after a
 // lease change writes the same rows.
 func (s *Server) rollupPlatformStats(ctx context.Context) {

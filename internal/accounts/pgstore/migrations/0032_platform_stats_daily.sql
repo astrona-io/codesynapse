@@ -1,4 +1,4 @@
--- Daily platform statistics (docs/PLATFORM_STATS_PLAN.md, "Daily rollup"):
+-- Daily platform statistics (docs/plans/PLATFORM_STATS_PLAN.md, "Daily rollup"):
 -- counts per UTC day, metric and dimension, per organisation or (org_id
 -- empty) for the platform. The metric and dimension lists live in the code
 -- (accounts.ValidPlatformStat), which refuses anything else; the checks

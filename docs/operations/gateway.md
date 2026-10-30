@@ -195,4 +195,4 @@ API keys are refused (403). Another organisation's members get 404. CSV cells th
 - The cloud leg goes only to `https://api.anthropic.com`, follows no redirects, uses a header allowlist and caps the body at 32 MiB.
 - Source never goes to a cloud model by way of CodeSynapse's own calls. The gateway only relays what your assistant itself sends, with your own credential.
 
-The design and the decisions behind it are in the [gateway plan](../GATEWAY_PLAN.md).
+The design and the decisions behind it are in the [gateway plan](../plans/GATEWAY_PLAN.md).

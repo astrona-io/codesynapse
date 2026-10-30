@@ -27,7 +27,7 @@ tests:
           - exp_labels: {severity: warning, component: telemetry, metric: mcp_tool_duration_seconds}
             exp_annotations:
               summary: "mcp_tool_duration_seconds reached its series cap"
-              description: "23 label combinations of mcp_tool_duration_seconds were dropped in the last hour, so panels that read it undercount. See \"Cap pressure\" in docs/TELEMETRY_PLAN.md."
+              description: "23 label combinations of mcp_tool_duration_seconds were dropped in the last hour, so panels that read it undercount. See \"Cap pressure\" in docs/plans/TELEMETRY_PLAN.md."
               dashboard: "https://codesynapse.example.com/stats"
 
   - name: log lines dropped for 15 minutes

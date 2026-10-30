@@ -8,7 +8,7 @@ import (
 
 // StoreSizer is an accounts store that reports its database size, the
 // largest of a fixed list of tables and the audit log's hot rows and sealed
-// segments (docs/PLATFORM_STATS_PLAN.md, phase 6). The in-memory store has
+// segments (docs/plans/PLATFORM_STATS_PLAN.md, phase 6). The in-memory store has
 // no database and does not implement it.
 type StoreSizer interface {
 	StoreSizes(ctx context.Context) ([]telemetry.StoreSize, error)

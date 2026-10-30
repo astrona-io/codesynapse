@@ -10,7 +10,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
-// Store sizes (docs/PLATFORM_STATS_PLAN.md, phase 6): once a day the
+// Store sizes (docs/plans/PLATFORM_STATS_PLAN.md, phase 6): once a day the
 // api-loops holder counts rows (and bytes, where the database reports
 // them) per kind in NebulaGraph, Milvus and PostgreSQL and publishes them
 // as platform_codesynapse_store_rows and _bytes. NebulaGraph counts with a

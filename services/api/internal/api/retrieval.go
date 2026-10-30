@@ -61,7 +61,7 @@ type retrievalReport struct {
 	// AvoidedRepeatRanges counts, per tool, answered ranges that overlap what
 	// the session was already answered or read. A report that carries the
 	// field (even empty) comes from a client that tells repeats apart, so
-	// its avoided tokens count in the share (docs/PLATFORM_STATS_PLAN.md).
+	// its avoided tokens count in the share (docs/plans/PLATFORM_STATS_PLAN.md).
 	AvoidedRepeatRanges map[string]int `json:"avoided_repeat_ranges"`
 	// ResendTokenTurns is, per tool, answer tokens still in context times
 	// the turns run since; the server turns it into avoided re-sent tokens.

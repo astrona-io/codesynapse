@@ -12,7 +12,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
-// Store sizes (docs/PLATFORM_STATS_PLAN.md, phase 6). NebulaGraph counts
+// Store sizes (docs/plans/PLATFORM_STATS_PLAN.md, phase 6). NebulaGraph counts
 // vertices per tag and edges per type only with its STATS job, which reads
 // every partition. It runs at most once a day (the API gates it) and never
 // while a publication holds a replace lease.

@@ -1,7 +1,7 @@
 // Package fetchsource answers fetch_source: it fetches a web page an agent
 // would otherwise read with its own web tool (API references, library docs,
 // changelogs), turns it into plain text, and keeps it in a cache on the
-// developer's machine until the page changes (docs/TEXT_OPTIMIZATION_PLAN.md,
+// developer's machine until the page changes (docs/plans/TEXT_OPTIMIZATION_PLAN.md,
 // pillar A).
 //
 // It runs only in the bridge on the developer's machine, never on the

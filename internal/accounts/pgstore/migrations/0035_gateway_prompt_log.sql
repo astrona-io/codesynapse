@@ -1,4 +1,4 @@
--- The opt-in gateway prompt log (docs/GATEWAY_PLAN.md, "Prompt log"). Off
+-- The opt-in gateway prompt log (docs/plans/GATEWAY_PLAN.md, "Prompt log"). Off
 -- unless an owner or admin turns it on; kept apart from the hash-chained
 -- events table, which only holds digests of the same texts. Texts are
 -- redacted and capped in the code (accounts.LogText); the checks below bound

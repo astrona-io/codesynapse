@@ -1,4 +1,4 @@
--- Single sign-on (docs/SSO_PLAN.md): one OpenID Connect provider per
+-- Single sign-on (docs/plans/SSO_PLAN.md): one OpenID Connect provider per
 -- organisation, the external identities linked to accounts, short-lived
 -- login states and the memberships a provider manages.
 CREATE TABLE identity_providers (

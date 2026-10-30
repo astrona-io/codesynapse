@@ -1,4 +1,4 @@
-# Sign-in and the audit log (docs/TELEMETRY_PLAN.md, phase 4). Failed sign-ins
+# Sign-in and the audit log (docs/plans/TELEMETRY_PLAN.md, phase 4). Failed sign-ins
 # have no trusted tenant, so they are platform series; rules group only by the
 # fixed method and source labels, never by organisation or account.
 groups:

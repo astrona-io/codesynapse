@@ -184,7 +184,7 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 		roles = []string{}
 	}
 	// Every process reports its roles, so the platform statistics can count
-	// the processes behind each one (docs/PLATFORM_STATS_PLAN.md, phase 4).
+	// the processes behind each one (docs/plans/PLATFORM_STATS_PLAN.md, phase 4).
 	telemetry.SetWorkerRoles(ctx, roles)
 	if cfg.Accounts != nil {
 		// Jobs are rows before they run and survive restarts (jobs_durable.go).

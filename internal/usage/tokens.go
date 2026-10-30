@@ -19,7 +19,7 @@ const (
 // CacheWrite are disjoint subsets of Input, so fresh input is
 // Input - CachedInput - CacheWrite. CacheKnownTurns counts the turns whose
 // usage carried the cache fields: only when it equals Turns can cache reads
-// be told apart from the agent's own work (docs/PLATFORM_STATS_PLAN.md).
+// be told apart from the agent's own work (docs/plans/PLATFORM_STATS_PLAN.md).
 type TokenCounts struct {
 	Input           int `json:"input"`
 	Output          int `json:"output"`

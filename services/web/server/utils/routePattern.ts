@@ -1,4 +1,4 @@
-// Route patterns for the web server's metrics (docs/TELEMETRY_PLAN.md,
+// Route patterns for the web server's metrics (docs/plans/TELEMETRY_PLAN.md,
 // phase 6). A metric label never carries a raw path: repository names,
 // organisation slugs, IDs and anything a visitor typed become a placeholder
 // or "other". Every value returned here comes from a fixed list or from a

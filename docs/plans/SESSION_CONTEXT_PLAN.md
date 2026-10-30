@@ -1,6 +1,6 @@
 # Immutable session identity and inherited context
 
-Status: implemented in SaaS phase 4g. This reference describes the execution boundary and session-memory storage. Client setup is in [the agent guide](AGENT_GUIDE.md).
+Status: implemented in SaaS phase 4g. This reference describes the execution boundary and session-memory storage. Client setup is in [the agent guide](../AGENT_GUIDE.md).
 
 ## Primary session contract
 

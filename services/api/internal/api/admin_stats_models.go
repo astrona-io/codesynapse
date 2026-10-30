@@ -16,7 +16,7 @@ import (
 	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
-// The models section of the platform statistics (docs/PLATFORM_STATS_PLAN.md,
+// The models section of the platform statistics (docs/plans/PLATFORM_STATS_PLAN.md,
 // phase 5): what CodeSynapse's own model calls did across every
 // organisation, the local and cloud split, and what they cost. The queries
 // are fixed MetricsQL with the window as the only value put in; one

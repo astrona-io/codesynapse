@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Platform statistics (docs/PLATFORM_STATS_PLAN.md): counts across every
+// Platform statistics (docs/plans/PLATFORM_STATS_PLAN.md): counts across every
 // organisation for platform administrators. The figures are aggregates
 // only: organisation names and slugs may appear, never repository names,
 // graph IDs, e-mail addresses or user, key or session IDs. Root is never

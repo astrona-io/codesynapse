@@ -9,7 +9,7 @@ import (
 )
 
 // Every route is classified for accounts limited to governance (the
-// bootstrap root, docs/ROOT_BOOTSTRAP_PLAN.md): s.route through its policy,
+// bootstrap root, docs/plans/ROOT_BOOTSTRAP_PLAN.md): s.route through its policy,
 // account routes through s.account. TestEveryRouteIsClassified keeps other
 // registrations out.
 
