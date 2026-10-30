@@ -284,7 +284,8 @@ func present(raw json.RawMessage) bool {
 // can tell a slow model (queue_timeout, answer_timeout) from a broken one.
 const (
 	FallExcluded         = "excluded"          // the model is on the installation's or organisation's exclude list
-	FallNotEligible      = "not_eligible"      // the model is not one the organisation answers locally
+	FallNotEligible      = "not_eligible"      // the installation's Eligible rule does not offer the model locally
+	FallLocalFirstOff    = "local_first_off"   // the organisation switched local first off and the request is not for the small model
 	FallBadRequest       = "bad_request"       // the body is not a request the gateway can read (bad JSON, no messages, unknown role)
 	FallSystemNotText    = "system_not_text"   // the system prompt is not a string or text blocks
 	FallUnsupportedBlock = "unsupported_block" // a message holds a block the local model cannot take (server tool results, unknown types)
@@ -362,18 +363,18 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 	if l.excluded(ctx, in.Model) {
 		return in, nil, FallExcluded
 	}
-	elig := l.Eligible
-	if elig == nil {
-		elig = SmallModel
-		if localFirst(ctx) {
-			elig = func(string) bool { return true }
-		}
-	}
-	if !elig(in.Model) {
-		return in, nil, FallNotEligible
-	}
 	if len(in.Messages) == 0 {
 		return in, nil, FallBadRequest
+	}
+	switch {
+	case l.Eligible != nil:
+		if !l.Eligible(in.Model) {
+			return in, nil, FallNotEligible
+		}
+	case !localFirst(ctx) && !SmallModel(in.Model):
+		// The organisation's choice, not something the local model cannot
+		// do, so it is told apart from not_eligible.
+		return in, nil, FallLocalFirstOff
 	}
 	// With local thinking on, the local model answers without thinking and
 	// leaves Claude's earlier thinking blocks out: they are signed reasoning

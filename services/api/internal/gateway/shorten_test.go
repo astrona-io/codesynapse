@@ -304,7 +304,7 @@ func TestFallthroughIsShortened(t *testing.T) {
 		none    bool // no local model
 		reason  string
 	}{
-		"not eligible":   {model: opus, first: ptr(false), reason: FallNotEligible},
+		"first off":      {model: opus, first: ptr(false), reason: FallLocalFirstOff},
 		"too large":      {model: opus, window: 50, reason: FallTooLarge},
 		"has thinking":   {model: haiku, extra: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 1024}}, reason: FallHasThinking},
 		"has image":      {model: haiku, content: []any{textBlock(prose), map[string]any{"type": "image"}}, reason: FallHasImage},

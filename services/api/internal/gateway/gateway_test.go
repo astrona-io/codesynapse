@@ -57,7 +57,7 @@ func TestForwardPassesCredentialAndStreams(t *testing.T) {
 	assert.Equal(t, gotBody, `{"model":"m1","stream":true,"tools":[{}]}`)
 	assert.True(t, meta.FirstByte > 0, "the first byte of the stream is timed")
 	meta.FirstByte = 0
-	assert.Equal(t, meta, Meta{Path: "/v1/messages", Model: "m1", Stream: true, Bytes: len(gotBody), Tools: true, Route: "cloud", Out: 13})
+	assert.Equal(t, meta, Meta{Path: "/v1/messages", Model: "m1", Stream: true, Bytes: len(gotBody), Tools: true, Route: "cloud", Out: 13, Fallthrough: FallNoLocalModel})
 }
 
 func TestNoCredentialIsRefused(t *testing.T) {
@@ -188,7 +188,7 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 		local  func(context.Context) (func(), error)
 		reason string
 	}{
-		"main model, local first off": {`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallNotEligible},
+		"main model, local first off": {`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallLocalFirstOff},
 		"server tool":                 {`{"model":"claude-haiku-5-5","tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallUnsupportedTool},
 		"has image":                   {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"image"}]}]}`, 200, nil, FallHasImage},
 		"has document":                {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"document"}]}]}`, 200, nil, FallHasImage},
@@ -290,10 +290,12 @@ func TestLocalFailuresAreTold(t *testing.T) {
 	cases := map[string]struct {
 		local  *Local
 		reason string
+		unset  bool // a gateway without a Local function at all
 	}{
-		"answer timeout": {&Local{BaseURL: slow.URL, Client: &http.Client{Timeout: 30 * time.Millisecond}}, FallTimeout},
-		"not reachable":  {&Local{BaseURL: gone.URL}, FallModelError},
-		"no local model": {nil, FallNoLocalModel},
+		"answer timeout":    {&Local{BaseURL: slow.URL, Client: &http.Client{Timeout: 30 * time.Millisecond}}, FallTimeout, false},
+		"not reachable":     {&Local{BaseURL: gone.URL}, FallModelError, false},
+		"no local model":    {nil, FallNoLocalModel, false},
+		"no local function": {nil, FallNoLocalModel, true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -301,7 +303,9 @@ func TestLocalFailuresAreTold(t *testing.T) {
 			defer cloud.Close()
 			g := NewAnthropic()
 			g.Upstream = cloud.URL
-			g.Local = func() *Local { return tc.local }
+			if !tc.unset {
+				g.Local = func() *Local { return tc.local }
+			}
 			var meta Meta
 			g.Done = func(_ context.Context, m Meta, _ int, _ time.Duration) { meta = m }
 			rec := httptest.NewRecorder()

@@ -37,7 +37,7 @@ const FALL_LABEL: Record<string, string> = {
   model_error: 'model error', bad_status: 'error status', empty_answer: 'empty answer', truncated: 'cut off', bad_answer: 'unreadable answer',
   not_eligible: 'not eligible', too_large: 'too large', has_thinking: 'needs thinking', has_image: 'has an image or document',
   bad_request: 'unreadable request', system_not_text: 'system prompt not text', unsupported_block: 'unsupported content', unsupported_tool: 'unsupported tool',
-  no_local_model: 'no local model', excluded: 'excluded', count_tokens: 'token count (cloud only)', other: 'other',
+  no_local_model: 'no local model', local_first_off: 'local first off', excluded: 'excluded', count_tokens: 'token count (cloud only)', other: 'other',
 }
 const gwReasons = computed(() => Object.entries(gw.value?.fallthrough_reasons ?? {}).sort((p, q) => q[1] - p[1]))
 const gwReasonText = (n: number) => gwReasons.value.slice(0, n).map(([k, v]) => `${fmtCompact(v)} ${FALL_LABEL[k] ?? k}`).join(' · ')

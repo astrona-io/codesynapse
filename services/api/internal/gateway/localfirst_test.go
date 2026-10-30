@@ -33,7 +33,7 @@ func TestLocalFirst(t *testing.T) {
 		reason string
 	}{
 		"main model answered locally": {true, 0, completeAnswer, opus, "local", ""},
-		"switched off":                {false, 0, completeAnswer, opus, "cloud", FallNotEligible},
+		"switched off":                {false, 0, completeAnswer, opus, "cloud", FallLocalFirstOff},
 		"larger than the window":      {true, 50, completeAnswer, opus, "cloud", FallTooLarge},
 		"fits the window":             {true, 8192, completeAnswer, opus, "local", ""},
 		"empty answer":                {true, 0, emptyAnswer, opus, "cloud", FallEmptyAnswer},
@@ -139,15 +139,15 @@ func TestLocalExclude(t *testing.T) {
 		"installation list":                   {ptr(true), []string{"gpt-5"}, nil, "gpt-5", "cloud", FallExcluded},
 		"both lists add up":                   {ptr(true), []string{"gpt-5"}, []string{"o3"}, "o3", "cloud", FallExcluded},
 		"local first off, small model":        {ptr(false), nil, nil, "claude-haiku-5-5", "local", ""},
-		"local first off, main model":         {ptr(false), nil, nil, "claude-opus-5-5", "cloud", FallNotEligible},
+		"local first off, main model":         {ptr(false), nil, nil, "claude-opus-5-5", "cloud", FallLocalFirstOff},
 		"exclusion wins with local first off": {ptr(false), nil, []string{"claude-haiku-*"}, "claude-haiku-5-5", "cloud", FallExcluded},
 		"exclusion wins with local first on":  {ptr(true), []string{"claude-haiku-*"}, nil, "claude-haiku-5-5-20261001", "cloud", FallExcluded},
 		"local first off, dated small model":  {ptr(false), nil, nil, "claude-haiku-5-5-20261001", "local", ""},
 		"local first off, bedrock small":      {ptr(false), nil, nil, "us.anthropic.claude-haiku-5-5-20261001-v1:0", "local", ""},
 		"local first off, vertex small":       {ptr(false), nil, nil, "claude-haiku-5-5@20261001", "local", ""},
 		"local first off, older small":        {ptr(false), nil, nil, "claude-3-5-haiku-latest", "local", ""},
-		"local first off, other vendor haiku": {ptr(false), nil, nil, "haiku-7b", "cloud", FallNotEligible},
-		"local first off, other main model":   {ptr(false), nil, nil, "claude-sonnet-5-5[1m]", "cloud", FallNotEligible},
+		"local first off, other vendor haiku": {ptr(false), nil, nil, "haiku-7b", "cloud", FallLocalFirstOff},
+		"local first off, other main model":   {ptr(false), nil, nil, "claude-sonnet-5-5[1m]", "cloud", FallLocalFirstOff},
 		"exclusion of another model only":     {ptr(false), nil, []string{"claude-opus-*"}, "claude-haiku-5-5", "local", ""},
 	}
 	for name, tc := range cases {
