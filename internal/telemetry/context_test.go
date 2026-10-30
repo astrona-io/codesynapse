@@ -9,6 +9,15 @@ import (
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 )
 
+func TestModelAllowed(t *testing.T) {
+	AllowModels("allowed_test_provider", "allowed-model")
+	assert.True(t, ModelAllowed("allowed_test_provider", "allowed-model"))
+	assert.False(t, ModelAllowed("allowed_test_provider", "other-model"), "same provider, another model")
+	assert.False(t, ModelAllowed("unknown_test_provider", "allowed-model"))
+	assert.False(t, ModelAllowed("none", "none"), "unattributed series are never named")
+	assert.False(t, ModelAllowed("", ""))
+}
+
 func TestScopedMetricsUseTrustedContext(t *testing.T) {
 	r := NewRegistry()
 	AllowTools("accepted_test_tool")

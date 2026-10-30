@@ -46,6 +46,18 @@ func configuredModel(provider, model string) modelIdentity {
 	return modelIdentity{"none", "none"}
 }
 
+// ModelAllowed reports whether provider and model were registered with
+// AllowModels in this process. Readers of stored series use it to name only
+// configured models; anything else is shown folded.
+func ModelAllowed(provider, model string) bool {
+	if provider == "" || provider == "none" || model == "" || model == "none" {
+		return false
+	}
+	models.RLock()
+	defer models.RUnlock()
+	return models.allowed[modelIdentity{provider, model}]
+}
+
 // WithModel carries the configured provider and model used by this operation.
 func WithModel(ctx context.Context, provider, model string) context.Context {
 	return context.WithValue(ctx, modelKey{}, configuredModel(provider, model))

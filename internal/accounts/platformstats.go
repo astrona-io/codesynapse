@@ -49,6 +49,7 @@ var statsSections = map[string]string{
 	"usage":    "admin.stats.view",
 	"security": "admin.stats.view",
 	"audit":    "admin.stats.view",
+	"models":   "admin.stats.view",
 	"jobs":     "admin.stats.view",
 	"ingest":   "admin.stats.view",
 	"storage":  "admin.stats.view",

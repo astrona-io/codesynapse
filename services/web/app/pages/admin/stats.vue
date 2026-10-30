@@ -11,11 +11,11 @@ const ranges: { id: StatsRange; label: string }[] = [
 ]
 const range = ref<StatsRange>('24h')
 const org = ref('')
-type Tab = 'tenants' | 'sessions' | 'usage' | 'jobs' | 'ingest' | 'security' | 'audit' | 'storage' | 'alerts'
+type Tab = 'tenants' | 'sessions' | 'usage' | 'jobs' | 'ingest' | 'security' | 'audit' | 'models' | 'storage' | 'alerts'
 const tab = ref<Tab>('tenants')
-// Security, audit, storage and alerts load in their own components, only while shown.
+// Security, audit, models, storage and alerts load in their own components, only while shown.
 const sectionTick = ref(0)
-const tabled = computed(() => tab.value !== 'storage' && tab.value !== 'alerts')
+const tabled = computed(() => tab.value !== 'models' && tab.value !== 'storage' && tab.value !== 'alerts')
 const page = ref(1)
 const tenantSort = ref('name')
 const sessionSort = ref('name')
@@ -177,6 +177,7 @@ const activeHint = computed(() => {
           <button type="button" :aria-pressed="tab === 'audit'" @click="tab = 'audit'">Audit</button>
           <button type="button" :aria-pressed="tab === 'jobs'" @click="tab = 'jobs'">Jobs</button>
           <button type="button" :aria-pressed="tab === 'ingest'" @click="tab = 'ingest'">Indexing</button>
+          <button type="button" :aria-pressed="tab === 'models'" @click="tab = 'models'">Models</button>
           <button type="button" :aria-pressed="tab === 'storage'" @click="tab = 'storage'">Storage</button>
           <button type="button" :aria-pressed="tab === 'alerts'" @click="tab = 'alerts'">Alerts</button>
         </div>
@@ -200,6 +201,7 @@ const activeHint = computed(() => {
           <a :href="exportHref('json')" download class="chip">JSON</a>
         </div>
       </div>
+      <AdminModels v-if="tab === 'models'" :range="range" :org="org" :tick="sectionTick" />
       <template v-if="tab === 'tenants' && tenants">
         <p class="muted small">
           {{ tenants.totals.orgs_without_members }} organisations without members · {{ tenants.totals.orgs_with_sso }} with single sign-on ·
