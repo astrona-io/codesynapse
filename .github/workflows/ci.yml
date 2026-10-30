@@ -33,7 +33,7 @@ jobs:
         with:
           version: v2.15.0
       - name: Tests (race detector)
-        run: go test -race ./...
+        run: go test -race -timeout 20m ./...
 
   eval:
     # docs/PLAN.md, agent workflow roadmap step 1: minimal_context and

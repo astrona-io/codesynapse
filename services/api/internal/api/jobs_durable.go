@@ -25,9 +25,13 @@ import (
 const (
 	jobLease     = 2 * time.Minute
 	jobHeartbeat = 30 * time.Second
-	// jobPoll is how often an idle process looks for work when its store
-	// cannot wake it (accounts.JobWaker); jobPollFallback when it can, for
-	// the jobs no wake announces: those whose lease ran out.
+)
+
+// jobPoll is how often an idle process looks for work when its store cannot
+// wake it (accounts.JobWaker); jobPollFallback when it can, for the jobs no
+// wake announces: those whose lease ran out. Variables only so the package
+// tests can shorten them in TestMain; nothing else changes them.
+var (
 	jobPoll         = 2 * time.Second
 	jobPollFallback = 30 * time.Second
 )

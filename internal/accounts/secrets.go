@@ -10,6 +10,8 @@ import (
 	"math/big"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"testing"
 	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
@@ -45,10 +47,29 @@ func HashPassword(pw string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := argon2.IDKey([]byte(pw), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	t, m := uint32(argonTime), uint32(argonMemory)
+	if fastHashes.Load() {
+		t, m = 1, 64
+	}
+	key := argon2.IDKey([]byte(pw), salt, t, m, argonThreads, argonKeyLen)
 	b64 := base64.RawStdEncoding
-	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, argonMemory, argonTime, argonThreads,
+	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, m, t, argonThreads,
 		b64.EncodeToString(salt), b64.EncodeToString(key)), nil
+}
+
+// fastHashes is set only by UseFastPasswordHashing in test binaries.
+var fastHashes atomic.Bool
+
+// UseFastPasswordHashing makes HashPassword use the cheapest argon2id
+// parameters for the rest of a test binary: suites that create many accounts
+// otherwise spend minutes hashing under the race detector. VerifyPassword
+// reads the parameters from the hash, so checks are unchanged. It panics
+// outside a test binary, so production always uses the constants above.
+func UseFastPasswordHashing() {
+	if !testing.Testing() {
+		panic("accounts: UseFastPasswordHashing outside a test binary")
+	}
+	fastHashes.Store(true)
 }
 
 // VerifyPassword checks pw against a PHC string in constant time.
