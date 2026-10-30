@@ -41,7 +41,7 @@ func cachePage(t *testing.T, dir, raw string) {
 	require.NoError(t, err)
 	u, err := fetchsource.Normalise(raw)
 	require.NoError(t, err)
-	require.NoError(t, c.Put(fetchsource.Key(u), fetchsource.Entry{URL: u.String(), Fetched: time.Now(), TTL: time.Hour, Text: "page"}))
+	require.NoError(t, c.Put(fetchsource.Key(u), fetchsource.Entry{URL: u.String(), Fetched: time.Now(), TTL: time.Hour, Cleaner: fetchsource.CleanerVersion, Text: "page"}))
 }
 
 func webFetch(session, url string) toolHookInput {
@@ -141,4 +141,17 @@ func TestFetchSteerCommand(t *testing.T) {
 	assert.Equal(t, run(`not json`), "")
 	assert.Equal(t, run(``), "")
 	assert.False(t, strings.Contains(logs.String(), "example.com"), "the URL is never logged")
+}
+
+// TestFetchSteerSkipsPagesAnOlderCleanerMade: a page cached before #481 has
+// no cleaner version, and fetch_source downloads it again, so the hook does
+// not claim it answers from the cache.
+func TestFetchSteerSkipsPagesAnOlderCleanerMade(t *testing.T) {
+	dir := steerEnv(t)
+	c, err := fetchsource.OpenCache(dir, 0)
+	require.NoError(t, err)
+	u, err := fetchsource.Normalise(cachedPage)
+	require.NoError(t, err)
+	require.NoError(t, c.Put(fetchsource.Key(u), fetchsource.Entry{URL: u.String(), Fetched: time.Now(), TTL: time.Hour, Text: "page"}))
+	assert.True(t, fetchSteer(webFetch("chat-1", cachedPage)) == nil, "WebFetch goes through")
 }

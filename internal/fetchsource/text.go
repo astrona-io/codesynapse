@@ -10,9 +10,9 @@ import (
 	"golang.org/x/net/html/atom"
 )
 
-// cleanerVersion changes whenever CleanHTML keeps different text; cache
+// CleanerVersion changes whenever CleanHTML keeps different text; cache
 // entries made by another version are fetched again.
-const cleanerVersion = 2
+const CleanerVersion = 2
 
 // Bounds on cleaning. The fetch caps the body at MaxBody already; the
 // input cap holds for direct callers too. maxDepth stops the walk of a

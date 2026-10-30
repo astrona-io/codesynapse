@@ -22,7 +22,7 @@ func TestCached(t *testing.T) {
 	c, err := OpenCache(dir, 0)
 	require.NoError(t, err)
 	assert.False(t, Cached(dir, u), "empty cache")
-	require.NoError(t, c.Put(Key(u), Entry{URL: u.String(), Fetched: time.Now().Add(-48 * time.Hour), TTL: time.Hour, Text: "x"}))
+	require.NoError(t, c.Put(Key(u), Entry{URL: u.String(), Fetched: time.Now().Add(-48 * time.Hour), TTL: time.Hour, Cleaner: CleanerVersion, Text: "x"}))
 
 	same, err := Normalise("https://docs.example.com:443/guide")
 	require.NoError(t, err)
@@ -35,6 +35,14 @@ func TestCached(t *testing.T) {
 
 	// An entry whose file holds another URL (a collision or a planted file)
 	// does not count.
-	require.NoError(t, c.Put(Key(other), Entry{URL: u.String()}))
+	require.NoError(t, c.Put(Key(other), Entry{URL: u.String(), Cleaner: CleanerVersion}))
 	assert.False(t, Cached(dir, other), "entry for another URL")
+
+	// A page an older cleaner made is downloaded again by fetch_source, so
+	// it is not cached for the hook either (#481 cached pages without a
+	// cleaner version).
+	for _, v := range []int{0, CleanerVersion - 1} {
+		require.NoError(t, c.Put(Key(u), Entry{URL: u.String(), Fetched: time.Now(), TTL: time.Hour, Cleaner: v, Text: "x"}))
+		assert.False(t, Cached(dir, u), "entry from cleaner %d", v)
+	}
 }

@@ -32,7 +32,7 @@ type Entry struct {
 	TTL          time.Duration `json:"ttl"`
 	ContentType  string        `json:"content_type"`
 	RawBytes     int           `json:"raw_bytes"`
-	// Cleaner is the cleanerVersion that made Text.
+	// Cleaner is the CleanerVersion that made Text.
 	Cleaner int    `json:"cleaner,omitempty"`
 	Text    string `json:"text"`
 }

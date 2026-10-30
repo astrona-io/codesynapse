@@ -282,7 +282,7 @@ func (f *Fetcher) FetchFor(ctx context.Context, raw, question string) (Out, erro
 	key, now := Key(u), f.now()
 	e, cached := f.cache.Get(key, u.String())
 	// An entry another cleaner made is fetched again, not revalidated.
-	cached = cached && e.Cleaner == cleanerVersion
+	cached = cached && e.Cleaner == CleanerVersion
 	if cached && now.Before(e.Fetched.Add(e.TTL)) {
 		f.cache.Touch(key)
 		return answer(u, e, Hit, question), nil
@@ -335,7 +335,7 @@ func (f *Fetcher) FetchFor(ctx context.Context, raw, question string) (Out, erro
 		return Out{}, fmt.Errorf("%w: the page is larger than %d bytes", ErrUnavailable, MaxBody)
 	}
 	text := Clean(mt, body)
-	e = Entry{Cleaner: cleanerVersion,
+	e = Entry{Cleaner: CleanerVersion,
 		URL: u.String(), ETag: clip(res.Header.Get("ETag"), maxHeader), LastModified: clip(res.Header.Get("Last-Modified"), maxHeader),
 		Fetched: now, TTL: TTL(u.Hostname()), ContentType: mt, RawBytes: len(body), Text: redact.Free(text),
 	}

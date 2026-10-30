@@ -13,16 +13,22 @@ import (
 
 var (
 	// codeToken is something only code has: `quoted`, camelCase or
-	// CamelCase with an inner capital, a capitalised name inside a sentence
-	// ("make Handler validate"), snake_case, a dotted name (not a version:
-	// "v0.0.21" stays prose), a call or a path.
+	// CamelCase with an inner capital, snake_case, a dotted name (not a
+	// version: "v0.0.21" stays prose), a call or a path.
 	codeToken = regexp.MustCompile("`[^`]+`" +
-		`|[A-Za-z0-9,;]\s+[A-Z][a-z0-9]+\b` +
 		`|\b[a-z]+[A-Z][A-Za-z0-9]*|\b[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*` +
 		`|\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+` +
 		`|\b[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*` +
 		`|\b[A-Za-z_][A-Za-z0-9_]*\(\)` +
 		`|\b[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+`)
+	// capitalName is a capitalised word inside a sentence ("make Handler
+	// validate"): often a type, but also a typo'd product name ("new CLI
+	// Realase"), so it counts only when the prompt is not a work instruction.
+	capitalName = regexp.MustCompile(`[A-Za-z0-9,;]\s+[A-Z][a-z0-9]+\b`)
+	// workInstruction tells the assistant how to work rather than what to
+	// change: "remember to rebuild …", "you are allowed to …", "you can merge
+	// … when it passes", "from now on …". Misspellings are how people type.
+	workInstruction = regexp.MustCompile(`(?i)\b(rem(em)?e?ber|from now on|you('re| are| r) allowed|you can|you may|feel free|no need to ask|every ?time you)\b`)
 	// errorText is how a failure shows up in a prompt.
 	errorText = regexp.MustCompile(`(?i)\b(error|errors|panic|panics|fails?|failing|failed|failure|crash(es|ed)?|exception|stack ?trace|nil pointer|undefined|timeout|deadlock|race|[45]\d\d)\b`)
 	// taskVerb asks for work on code, or asks why or how it behaves.
@@ -39,6 +45,10 @@ const briefWords = 20
 // part of the code base, or is long enough to describe one. Short
 // conversational turns ("start more agents", "new release installed, we can
 // continue") are not briefed.
+//
+// A work instruction ("remember to rebuild the apps …, you are allowed to do
+// that every time") is not briefed unless it names code or quotes an error,
+// however long it is.
 func WorthBriefing(prompt string) bool {
 	p := strings.TrimSpace(prompt)
 	switch {
@@ -46,10 +56,26 @@ func WorthBriefing(prompt string) bool {
 		return false
 	case codeToken.MatchString(p), errorText.MatchString(p):
 		return true
-	case taskVerb.MatchString(p) && codeNoun.MatchString(p):
+	case workInstruction.MatchString(p):
+		return false
+	case capitalName.MatchString(p), aimsAtCode(p):
 		return true
 	}
 	return len(strings.Fields(p)) >= briefWords
+}
+
+// aimsAtCode reports whether a task verb and a code noun are two different
+// words: "test" is both, and "so I can test the features" names no code.
+func aimsAtCode(p string) bool {
+	verbs, nouns := taskVerb.FindAllStringIndex(p, -1), codeNoun.FindAllStringIndex(p, -1)
+	for _, v := range verbs {
+		for _, n := range nouns {
+			if v[0] != n[0] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // harnessPrefixes open the turns Claude Code starts on its own rather than
