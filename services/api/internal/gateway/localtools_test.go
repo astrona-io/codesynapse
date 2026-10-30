@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -258,6 +259,40 @@ func TestLocalToolRequestsFallThrough(t *testing.T) {
 			rec, ok := askLocal(t, &Local{BaseURL: srv.URL, Model: "q"}, tc.body)
 			assert.True(t, !ok, "cloud takes it")
 			assert.Equal(t, rec.Body.Len(), 0, "nothing written before the fall-through")
+		})
+	}
+}
+
+// A reasoning model asked for few tokens spends them all on thinking unless
+// the provider's settings reach it, and the answer falls through as truncated.
+func TestLocalSendsReasoningSettings(t *testing.T) {
+	cases := map[string]struct {
+		local Local
+		want  map[string]any
+		not   []string
+	}{
+		"unset":            {not: []string{"reasoning_effort", "chat_template_kwargs"}},
+		"ollama effort":    {local: Local{Effort: "none"}, want: map[string]any{"reasoning_effort": "none"}, not: []string{"chat_template_kwargs"}},
+		"vllm no thinking": {local: Local{DisableThinking: true}, want: map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": false}}, not: []string{"reasoning_effort"}},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			var got string
+			srv := toolServer(t, `data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`+"\n\n"+"data: [DONE]\n\n", &got)
+			defer srv.Close()
+			l := c.local
+			l.BaseURL, l.Model = srv.URL, "q"
+			_, ok := askLocal(t, &l, `{"model":"claude-haiku-5-5","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`)
+			require.True(t, ok)
+			var req map[string]any
+			require.NoError(t, json.Unmarshal([]byte(got), &req))
+			for k, v := range c.want {
+				assert.Equal(t, fmt.Sprint(req[k]), fmt.Sprint(v), k)
+			}
+			for _, k := range c.not {
+				_, has := req[k]
+				assert.True(t, !has, k+" is not sent")
+			}
 		})
 	}
 }

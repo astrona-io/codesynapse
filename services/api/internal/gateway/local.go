@@ -66,6 +66,12 @@ type Local struct {
 	Acquire func(ctx context.Context) (func(), error)
 	// Wait bounds the time in the queue; 0 means defaultWait.
 	Wait time.Duration
+	// Effort is sent as reasoning_effort ("none" turns thinking off on
+	// Ollama) and DisableThinking as chat_template_kwargs (vLLM). Without
+	// them a reasoning model spends max_tokens on thinking and answers
+	// nothing, which the gateway then sends to the cloud as truncated.
+	Effort          string
+	DisableThinking bool
 }
 
 // noRedirects is the client of a Local without one: the local model's address
@@ -309,6 +315,13 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 	}
 	if in.MaxTokens > 0 {
 		req["max_tokens"] = in.MaxTokens
+	}
+	if l.DisableThinking {
+		req["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
+	}
+	// Only when set: vLLM refuses values it does not know.
+	if l.Effort != "" {
+		req["reasoning_effort"] = l.Effort
 	}
 	if in.Temperature != nil {
 		req["temperature"] = *in.Temperature

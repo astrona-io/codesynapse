@@ -31,6 +31,10 @@ type GatewayTarget struct {
 	// Acquire takes the provider's queue slot, so gateway traffic and
 	// CodeSynapse's own calls share one GPU in turn.
 	Acquire func(ctx context.Context) (func(), error)
+	// Effort and DisableThinking are the provider's reasoning settings, so
+	// gateway requests think as little as the provider's own calls do.
+	Effort          string
+	DisableThinking bool
 }
 
 // validateGateway normalizes gateway_exclude and checks gateway_wait_seconds.
@@ -63,7 +67,7 @@ func (r *Registry) GatewayTarget() (GatewayTarget, bool) {
 		queue := r.slots[p.Name]
 		return GatewayTarget{
 			BaseURL: p.BaseURL, Model: p.Model, APIKey: p.apiKey, ContextWindow: p.ContextWindow,
-			Exclude: p.GatewayExclude, Wait: wait, Acquire: func(ctx context.Context) (func(), error) {
+			Exclude: p.GatewayExclude, Wait: wait, Effort: p.Effort, DisableThinking: p.DisableThinking, Acquire: func(ctx context.Context) (func(), error) {
 				return queue.acquire(WithTask(ctx, gatewayTask))
 			},
 		}, true

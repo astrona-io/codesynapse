@@ -124,11 +124,13 @@ func TestGatewayTargetNeedsOptInAndLocal(t *testing.T) {
 	r = NewRegistry(Config{Providers: []ProviderConfig{local}})
 	_, ok = r.GatewayTarget()
 	assert.True(t, !ok, "off unless the provider opts in")
-	local.Gateway = true
+	local.Gateway, local.Effort, local.DisableThinking = true, "none", true
 	r = NewRegistry(Config{Providers: []ProviderConfig{local}})
 	got, ok := r.GatewayTarget()
 	assert.True(t, ok)
 	assert.Equal(t, got.Model, "m")
+	assert.Equal(t, got.Effort, "none", "gateway requests think as little as the provider's own")
+	assert.True(t, got.DisableThinking)
 }
 
 func TestGatewayExcludeAndWait(t *testing.T) {
