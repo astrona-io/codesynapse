@@ -20,10 +20,31 @@ const tz = ref('')
 const base = computed(() => (props.scope === 'platform' ? 'admin/stats/queue' : 'stats/queue'))
 const path = () => `${base.value}?weeks=${weeks.value}&tz=${encodeURIComponent(tz.value)}${props.org ? `&org=${encodeURIComponent(props.org)}` : ''}`
 const { data, error, pending, execute } = useApiGet<QueuePeak>(path, { immediate: false })
+// "Running now" and "Waiting now" follow the services' 15-second reports
+// while the tab is visible, without the "refreshing…" note each time, and
+// catch up as soon as the tab is shown again.
+const LIVE_MS = 15_000
+const live = ref(false)
+const updated = ref<Date | null>(null)
+async function load(background = false) {
+  live.value = background
+  await execute()
+  live.value = false
+  if (!error.value) updated.value = new Date()
+}
+const refreshIfVisible = () => { if (document.visibilityState === 'visible' && !pending.value) load(true) }
+let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
   try { tz.value = Intl.DateTimeFormat().resolvedOptions().timeZone ?? '' } catch { tz.value = '' }
-  execute()
+  load()
+  timer = setInterval(refreshIfVisible, LIVE_MS)
+  document.addEventListener('visibilitychange', refreshIfVisible)
 })
+onBeforeUnmount(() => {
+  clearInterval(timer)
+  document.removeEventListener('visibilitychange', refreshIfVisible)
+})
+const updatedAt = computed(() => updated.value?.toLocaleTimeString() ?? '')
 
 const status = computed(() => (error.value as { statusCode?: number } | null)?.statusCode ?? 0)
 const metricsOff = computed(() => status.value === 409)
@@ -73,7 +94,8 @@ const LEVEL: Record<string, string> = { unknown: 'Not enough data', fine: 'One e
       <div class="segmented" role="group" aria-labelledby="queue-weeks">
         <button v-for="w in WEEKS" :key="w" type="button" :aria-pressed="weeks === w" @click="weeks = w">{{ w === 1 ? '1 week' : `${w} weeks` }}</button>
       </div>
-      <span v-if="pending" class="muted small">refreshing…</span>
+      <span v-if="pending && !live" class="muted small">refreshing…</span>
+      <span v-else-if="updatedAt" class="muted small" aria-live="off">Live: updated {{ updatedAt }}, every 15 seconds</span>
     </div>
 
     <div v-if="metricsOff" class="empty"><strong>Time series are not switched on</strong>They need VictoriaMetrics: the compose stack runs it, other installs set <code>CODESYNAPSE_METRICS_URL</code> on the API and MCP services.</div>

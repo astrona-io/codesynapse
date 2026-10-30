@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { stripTypeScriptTypes } from 'node:module'
 import { test } from 'node:test'
-import { createSSRApp, computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { createSSRApp, computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { parse, compileScript } from 'vue/compiler-sfc'
 import { localSaved, totalSaved } from '../utils/savings.ts'
@@ -26,7 +26,7 @@ async function compileComponent(t, file) {
 }
 
 async function renderComponent(t, file, globals, props = {}) {
-  for (const [key, value] of Object.entries({ computed, ref, watch, useId, ...globals })) {
+  for (const [key, value] of Object.entries({ computed, ref, watch, useId, onMounted, onBeforeUnmount, ...globals })) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, key)
     Object.defineProperty(globalThis, key, { value, configurable: true })
     t.after(() => {
