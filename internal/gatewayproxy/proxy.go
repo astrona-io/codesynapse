@@ -340,6 +340,21 @@ func frontProxyDown(resp *http.Response) bool {
 // directPaths are what Anthropic's API serves and the gateway passes on.
 func directPath(p string) bool { return p == "/v1/messages" || p == "/v1/messages/count_tokens" }
 
+// directURL is the Anthropic URL for a request directPath accepted. It is
+// built from constants only: nothing the caller sent becomes part of it
+// except the choice of path and Claude Code's beta=true flag.
+func (p *Proxy) directURL(r *http.Request) string {
+	path := "/v1/messages"
+	if r.URL.Path == "/v1/messages/count_tokens" {
+		path = "/v1/messages/count_tokens"
+	}
+	u := strings.TrimSuffix(p.direct, "/") + path
+	if r.URL.Query().Get("beta") == "true" {
+		u += "?beta=true"
+	}
+	return u
+}
+
 // sendDirect sends the request to Anthropic with the caller's own credential
 // and counts it.
 func (p *Proxy) sendDirect(w http.ResponseWriter, r *http.Request, body []byte, why string) {
@@ -354,15 +369,7 @@ func (p *Proxy) sendDirect(w http.ResponseWriter, r *http.Request, body []byte, 
 			return
 		}
 	}
-	u, err := url.JoinPath(p.direct, r.URL.Path)
-	if err != nil {
-		problem(w, http.StatusBadGateway, why)
-		return
-	}
-	if r.URL.RawQuery != "" {
-		u += "?" + r.URL.RawQuery
-	}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, u, bytes.NewReader(body)) //nolint:gosec // G704: the fixed Anthropic URL plus the path checked above
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, p.directURL(r), bytes.NewReader(body)) //nolint:gosec // G704: the fixed Anthropic URL plus a constant path
 	if err != nil {
 		problem(w, http.StatusBadGateway, why)
 		return
