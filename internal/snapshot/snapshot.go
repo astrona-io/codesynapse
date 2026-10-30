@@ -16,6 +16,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/security"
 	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/rules"
 )
 
 // Take reads the stored reports of repo. A report an older ingest never
@@ -36,6 +37,14 @@ func Take(ctx context.Context, r store.Reader, repo string) (history.Snapshot, e
 	for _, v := range sec.Vulnerabilities {
 		if v.Reachability == "called" {
 			s.VulnsCalled++
+		}
+	}
+	for _, rc := range sec.Rules {
+		if _, ok := rules.Get(rc.Rule); ok && rc.Count > 0 {
+			if s.Rules == nil {
+				s.Rules = map[string]int{}
+			}
+			s.Rules[rc.Rule] += rc.Count
 		}
 	}
 	s.Modules, s.Direct = sec.Modules.Total, sec.Modules.Direct

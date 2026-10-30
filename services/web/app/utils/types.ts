@@ -286,7 +286,7 @@ export interface WorkspaceStats {
     local_read_tokens?: number; local_avoided_tokens?: number; local_briefs?: number; local_drafts?: number
     unindexed?: { repos: { repo: string; skipped: number }[]; skipped: number; avoided_per_session: number }
     // How sessions began, reported by the Claude Code plugin's hooks.
-    workflow: { first_codesynapse: number; first_native: number; reads_turned_back: number; first_share_pct: number; files_edited: number; files_edited_found: number; edit_recall_pct: number; bash: Record<string, number> | null; bash_total: number }
+    workflow: { first_codesynapse: number; first_native: number; reads_turned_back: number; fetches_steered: number; first_share_pct: number; files_edited: number; files_edited_found: number; edit_recall_pct: number; bash: Record<string, number> | null; bash_total: number }
     avg_latency_ms: number; max_latency_ms: number; daily: UsageDay[]; tools: UsageTool[]
     clients: { client: string; sessions: number; calls: number }[]
     repos: { repo: string; calls: number; response_tokens: number; avoided_tokens: number }[]
@@ -617,6 +617,7 @@ export interface StatsSummary {
   memberships: number; seats: number; seated_people: number
   execution_active: number; execution_created: number; keys_active: number; browser_active: number
   graphs: number | null; jobs_waiting: number | null; jobs_failed: number | null; cost: number | null; alerts_firing: number | null
+  chain: AuditVerification | null
 }
 export interface TenantTotals {
   orgs: number; orgs_created: number; orgs_without_members: number; orgs_with_sso: number
@@ -647,6 +648,29 @@ export interface OrgUsageRow extends UsageFigures { org_id: string; slug: string
 export interface UsageCount { name: string; calls: number; errors: number; sessions: number }
 export interface UsageSection extends StatsTable<UsageFigures, OrgUsageRow> { from: string; to: string; tools: UsageCount[]; clients: UsageCount[] }
 export interface StatsTable<T, R> { range: StatsRange; totals: T; rows: R[]; page: number; pages: number; total: number; rollup?: StatsRollup }
+// Security and audit sections of the platform statistics (phase 7).
+export interface SecurityFigures {
+  graphs: number; grades: Record<string, number>; findings: Record<string, number>; vulns: Record<string, number>
+  vulns_called: number; worse: number; suppressed: Record<string, number>
+}
+export interface OrgSecurityRow extends SecurityFigures { org_id: string; slug: string; name: string }
+export interface SecurityDay { day: string; grades: Record<string, number>; findings: Record<string, number>; worse: number }
+export interface SecuritySection extends StatsTable<SecurityFigures, OrgSecurityRow> {
+  rules: { name: string; findings: number }[] | null; rules_unknown: number; days?: SecurityDay[]
+}
+export interface AuditVerification {
+  id: number; at: string; trigger: 'scheduled' | 'on_demand'; deep: boolean; duration_ms: number; run_error: boolean
+  ok: boolean; checked: number; broken_at?: number; reason?: string; segments?: number; sealed?: number; archives?: number
+}
+export interface AuditSection {
+  range: StatsRange; step: 'hour' | 'day'
+  buckets: { at: string; success: number; failure: number }[]
+  families: { name: string; success: number; failure: number }[]
+  logins: { name: string; n: number }[]; security: { name: string; n: number }[]
+  chain: AuditVerification | null; verifications: AuditVerification[]
+  archive: { configured: boolean; segments: number; sealed: number; last_seal: string | null; oldest_hot: string | null }
+  rollup?: StatsRollup
+}
 export interface JobFigures { finished: number; ok: number; error: number; left_behind: number; cancelled: number }
 export interface OrgJobRow extends JobFigures { org_id: string; slug: string; name: string; deleted: boolean }
 export interface JobQueueRow { kind: string; waiting: number; active: number; oldest_waiting_seconds: number | null }

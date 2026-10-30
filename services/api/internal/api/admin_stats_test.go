@@ -63,6 +63,12 @@ var statsReads = []string{
 	"/api/v1/admin/stats/usage?range=24h",
 	"/api/v1/admin/stats/usage?range=90d",
 	"/api/v1/admin/stats/export?section=usage&range=7d&format=csv",
+	"/api/v1/admin/stats/security?range=24h",
+	"/api/v1/admin/stats/security?range=90d",
+	"/api/v1/admin/stats/audit?range=24h",
+	"/api/v1/admin/stats/audit?range=365d",
+	"/api/v1/admin/stats/export?section=security&range=7d&format=csv",
+	"/api/v1/admin/stats/export?section=audit&range=30d&format=json",
 	"/api/v1/admin/stats/models?range=24h",
 	"/api/v1/admin/stats/export?section=models&range=7d&format=json",
 }

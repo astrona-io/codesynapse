@@ -648,6 +648,9 @@ type Store interface {
 
 	// The opt-in gateway prompt log (promptlog.go), kept apart from events.
 	PromptLogStore
+
+	// Audit and security statistics (auditstats.go).
+	AuditStatsStore
 }
 
 // JobWaker is implemented by stores that can tell a worker a job was

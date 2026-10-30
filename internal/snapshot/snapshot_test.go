@@ -60,6 +60,22 @@ func TestTakeReadsTheStoredReports(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// Only catalogue rule IDs reach the snapshot: they feed cross-tenant counts,
+// and a rule ID from anywhere else could carry repository text.
+func TestTakeKeepsCatalogueRulesOnly(t *testing.T) {
+	ctx := context.Background()
+	g := storetest.Fixture()
+	for i, rule := range []string{"code-injection", "code-injection", "made-up-rule"} {
+		g.AddNode(model.Node{ID: storetest.ID(model.KindFinding, rule+string(rune('a'+i))), Kind: model.KindFinding, Repo: storetest.Repo,
+			Name: "finding", Rule: rule, Severity: "high", File: "app/app.go", StartLine: 3 + i})
+	}
+	s := memory.New()
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, g))
+	snap, err := Take(ctx, s, storetest.Repo)
+	require.NoError(t, err)
+	assert.Equal(t, snap.Rules, map[string]int{"code-injection": 2})
+}
+
 func TestRecordKeepsHistoryAndNeverFails(t *testing.T) {
 	ctx := context.Background()
 	s, g := repoWithReports(t)
