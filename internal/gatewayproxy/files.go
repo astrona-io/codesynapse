@@ -62,6 +62,7 @@ func DefaultFiles() (Files, error) {
 func (f Files) configPath() string { return filepath.Join(f.Dir, "gateway-proxy.json") }
 func (f Files) secretPath() string { return filepath.Join(f.Dir, "gateway-proxy.secret") }
 func (f Files) countsPath() string { return filepath.Join(f.Dir, "gateway-failover.json") }
+func (f Files) directPath() string { return filepath.Join(f.Dir, "gateway-direct") }
 
 // LogPath is where a proxy started in the background writes its log
 // (events only, never requests).
@@ -132,7 +133,27 @@ func (f Files) Save(c Config) error {
 	if err != nil {
 		return err
 	}
-	return writePrivate(f.configPath(), append(b, '\n'))
+	if err := writePrivate(f.configPath(), append(b, '\n')); err != nil {
+		return err
+	}
+	if err := os.Remove(f.directPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// ChooseDirect records that install pointed Claude Code at the gateway
+// without failover on purpose (--failover=false), so doctor leaves that
+// setup alone instead of taking it for one made before failover existed.
+// Save and Remove clear it.
+func (f Files) ChooseDirect() error {
+	return writePrivate(f.directPath(), []byte("failover=false\n"))
+}
+
+// DirectChosen says whether ChooseDirect recorded the choice.
+func (f Files) DirectChosen() bool {
+	_, err := os.Stat(f.directPath())
+	return err == nil
 }
 
 // Secret returns the per-user secret the health endpoint proves it holds,
@@ -163,7 +184,7 @@ func (f Files) Remove() (unreported int, err error) {
 			unreported += x.Requests
 		}
 	}
-	for _, p := range []string{f.configPath(), f.secretPath(), f.countsPath(), f.LogPath()} {
+	for _, p := range []string{f.configPath(), f.secretPath(), f.countsPath(), f.LogPath(), f.directPath()} {
 		if rerr := os.Remove(p); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
 			err = errors.Join(err, rerr)
 		}

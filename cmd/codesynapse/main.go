@@ -974,23 +974,33 @@ func (o *mcpInstallOptions) runGateway(ctx context.Context, home string) error {
 		if err := removeProxyFiles(files, o.EC.Stderr); err != nil {
 			return err
 		}
+		if err := files.ChooseDirect(); err != nil {
+			return err
+		}
 		_, _ = fmt.Fprintf(o.EC.Stderr, "Claude Code now sends its requests through %s, without failover (old file kept as a .bak beside %s):\n%s\nStart a new Claude Code session. Undo with: codesynapse mcp install --gateway --remove\n", o.apiURL, file, diff)
 		return nil
 	}
-	bin, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	if strings.Contains(bin, "go-build") {
-		return errors.New("run an installed codesynapse binary (go install ./cmd/codesynapse), not go run: the Claude Code hook starts the proxy from it")
-	}
 	cfg := gatewayproxy.Config{Gateway: strings.TrimRight(o.apiURL, "/"), Port: o.proxyPort, KeyHash: gatewayproxy.HashKey(key)}
-	diff, err := installGatewayProxy(ctx, files, cfg, file, key, agentcfg.ShellQuote(brewStablePath(bin))+" gateway proxy --ensure", startProxy)
+	diff, err := setUpFailover(ctx, files, cfg, file, key)
 	if err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(o.EC.Stderr, "Claude Code now sends its requests to the failover proxy on %s, which forwards them to %s and, only while that is unreachable, straight to Anthropic with your own credential (old file kept as a .bak beside %s):\n%s\nStart a new Claude Code session. Without failover: --failover=false. Undo with: codesynapse mcp install --gateway --remove\n", cfg.URL(), cfg.Gateway, file, diff)
 	return nil
+}
+
+// setUpFailover points Claude Code at the failover proxy for cfg's gateway,
+// with hooks that start this installed binary. `mcp install --gateway` and
+// `doctor --fix` both run it, after the gateway accepted the key.
+func setUpFailover(ctx context.Context, files gatewayproxy.Files, cfg gatewayproxy.Config, settings, key string) (string, error) {
+	bin, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if strings.Contains(bin, "go-build") {
+		return "", errors.New("run an installed codesynapse binary (go install ./cmd/codesynapse), not go run: the Claude Code hook starts the proxy from it")
+	}
+	return installGatewayProxy(ctx, files, cfg, settings, key, agentcfg.ShellQuote(brewStablePath(bin))+" gateway proxy --ensure", startProxy)
 }
 
 // installGatewayProxy saves the proxy's config, makes sure our proxy runs on
