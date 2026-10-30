@@ -65,6 +65,7 @@ func TestCompute(t *testing.T) {
 	assert.Greater(t, rep.Benchmark.MedianSavingsX, 1.0)
 	assert.Greater(t, rep.Benchmark.MedianReductionPct, 0.0)
 	assert.LessOrEqual(t, rep.Benchmark.TotalReductionPct, 100.0)
+	assert.Greater(t, rep.Benchmark.FullIDTokens, rep.Benchmark.TotalGraph, "compact IDs make the answers smaller")
 	assert.Equal(t, rep.Distributions["complexity"].Count, 4)
 
 	enc, err := Encode(rep)

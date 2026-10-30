@@ -50,6 +50,16 @@
   --s-3: #c75a1c;
   --s-4: #1f9068;
   --s-other: #8a919e;
+  /* Sequential magnitude (heatmaps): one violet hue, light to dark,
+     validated as an ordinal ramp against the surface. "zero" is a measured
+     slot without requests, "empty" a slot with no measurements at all. */
+  --seq-1: #b79cf0;
+  --seq-2: #9877e2;
+  --seq-3: #7752cf;
+  --seq-4: #5733ad;
+  --seq-5: #3a1d7e;
+  --seq-zero: #ece4fc;
+  --seq-empty: #e4e5ea;
 
   /* Graph canvas: node and edge kinds. */
   --k-func: #0e82a8;
@@ -121,6 +131,13 @@
   --s-3: #d9732b;
   --s-4: #3aa685;
   --s-other: #737b88;
+  --seq-1: #5b44a3;
+  --seq-2: #7a5ec6;
+  --seq-3: #9b80e0;
+  --seq-4: #bea7f2;
+  --seq-5: #e0d3fd;
+  --seq-zero: #2a2148;
+  --seq-empty: #2b2933;
   --k-func: #4cc3dc;
   --k-method: #b48af0;
   --k-iface: #e3a33a;
@@ -178,6 +195,13 @@
     --s-3: #d9732b;
     --s-4: #3aa685;
     --s-other: #737b88;
+    --seq-1: #5b44a3;
+    --seq-2: #7a5ec6;
+    --seq-3: #9b80e0;
+    --seq-4: #bea7f2;
+    --seq-5: #e0d3fd;
+    --seq-zero: #2a2148;
+    --seq-empty: #2b2933;
     --k-func: #4cc3dc;
     --k-method: #b48af0;
     --k-iface: #e3a33a;

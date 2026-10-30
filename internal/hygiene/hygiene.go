@@ -2,8 +2,11 @@
 // latest release (security roadmap item 8), from deps.dev: one request per
 // package, carrying only the ecosystem and the package name. Go module
 // versions are also checked for retractions on the Go module proxy
-// (retract.go), carrying only module paths and versions. It runs only when
-// deps.dev lookups are switched on, like licence lookups.
+// (retract.go), carrying only module paths and versions. The OpenSSF
+// Scorecard of each package's source project comes from deps.dev too
+// (scorecard.go), carrying the package version and then only the project
+// ID deps.dev returned. It runs only when deps.dev lookups are switched
+// on, like licence lookups.
 package hygiene
 
 import (

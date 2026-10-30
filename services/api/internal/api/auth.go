@@ -242,8 +242,11 @@ func (s *Server) accountRoutes() {
 	s.account("GET /api/v1/admin/stats/usage", governanceRoute, s.handleStatsUsage)
 	s.account("GET /api/v1/admin/stats/security", governanceRoute, s.handleStatsSecurity)
 	s.account("GET /api/v1/admin/stats/audit", governanceRoute, s.handleStatsAudit)
+	s.account("GET /api/v1/admin/stats/storage", governanceRoute, s.handleStatsStorage)
+	s.account("GET /api/v1/admin/stats/alerts", governanceRoute, s.handleStatsAlerts)
 	s.account("GET /api/v1/admin/stats/series", governanceRoute, s.handleAdminSeries)
 	s.account("GET /api/v1/admin/stats/series/batch", governanceRoute, s.handleAdminSeriesBatch)
+	s.account("GET /api/v1/admin/stats/queue", governanceRoute, s.handleAdminQueuePeak)
 	s.account("GET /api/v1/admin/stats/export", governanceRoute, s.handleStatsExport)
 	s.account("POST /api/v1/admin/orgs/{id}/owner", governanceRoute, s.handleRecoverOwner)
 }

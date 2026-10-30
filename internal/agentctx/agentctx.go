@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/duplicates"
@@ -354,28 +355,40 @@ func (s Service) Resolve(ctx context.Context, repo, symbol string) (model.Node, 
 	if strings.Count(symbol, "|") >= 2 {
 		return s.R.Node(ctx, symbol)
 	}
+	module := s.moduleOf(ctx, repo)
 	// A compact ID ("Function|pkg/path.Name") leaves out the repository the
-	// answer it came from was about, and may write its root module as "~".
+	// answer it came from was about, and may write its root module as "~"
+	// or leave it out ("Function|internal/x.F").
 	if kind, local, ok := strings.Cut(symbol, "|"); ok && model.NodeKind(kind).Valid() && local != "" {
-		if strings.Contains(local, "~") {
-			if root, err := s.R.Node(ctx, model.NodeID(repo, model.KindRepository, repo)); err == nil {
-				local = ExpandModule(local, model.GoModuleOf(root))
+		var n model.Node
+		err := store.ErrNotFound
+		for _, l := range moduleForms(local, module()) {
+			if n, err = s.R.Node(ctx, model.NodeID(repo, model.NodeKind(kind), l)); !errors.Is(err, store.ErrNotFound) {
+				break
 			}
 		}
-		return s.R.Node(ctx, model.NodeID(repo, model.NodeKind(kind), local))
+		return n, err
 	}
 	kinds := []model.NodeKind{model.KindFunction, model.KindMethod, model.KindInterfaceMethod, model.KindType, model.KindPackage}
 	// Qualified node IDs are indexed by every store. Resolve them before a
 	// capped substring search can hide the exact symbol among common names.
-	if strings.ContainsAny(symbol, "./") {
-		for _, kind := range kinds {
-			n, err := s.R.Node(ctx, model.NodeID(repo, kind, symbol))
-			if err == nil {
-				return n, nil
+	// Module-relative forms ("~/internal/x.F", "internal/x.F") are tried
+	// after the ID as given, so a package outside the module wins.
+	if strings.ContainsAny(symbol, "./~") {
+		forms := moduleForms(symbol, module())
+		for _, local := range forms {
+			for _, kind := range kinds {
+				n, err := s.R.Node(ctx, model.NodeID(repo, kind, local))
+				if err == nil {
+					return n, nil
+				}
+				if !errors.Is(err, store.ErrNotFound) {
+					return model.Node{}, err
+				}
 			}
-			if !errors.Is(err, store.ErrNotFound) {
-				return model.Node{}, err
-			}
+		}
+		if hasTilde(symbol) && len(forms) > 1 {
+			symbol = forms[1] // search for what "~" stands for
 		}
 	}
 	needle := symbol
@@ -414,7 +427,45 @@ func (s Service) Resolve(ctx context.Context, repo, symbol string) (model.Node, 
 	if len(pool) == 0 {
 		pool = cands
 	}
-	return model.Node{}, suggestions(symbol, pool, len(exact) > 1)
+	return model.Node{}, suggestions(symbol, pool, len(exact) > 1, repo, module())
+}
+
+// moduleOf looks the repository's root Go module up once, when first
+// needed: most symbols resolve without it.
+func (s Service) moduleOf(ctx context.Context, repo string) func() string {
+	return sync.OnceValue(func() string {
+		root, err := s.R.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
+		if err != nil {
+			return ""
+		}
+		return model.GoModuleOf(root)
+	})
+}
+
+// moduleForms are the node-ID locals a symbol may stand for: as given,
+// then with "~" expanded, then with the module put in front of a
+// module-relative path. A local that already has "~" is tried as given
+// first because other languages' IDs may contain one.
+func moduleForms(local, module string) []string {
+	forms := []string{local}
+	if module == "" {
+		return forms
+	}
+	if hasTilde(local) {
+		return append(forms, ExpandModule(local, module))
+	}
+	lead := ""
+	for _, l := range []string{"(*", "("} {
+		if strings.HasPrefix(local, l) {
+			lead = l
+			break
+		}
+	}
+	rest := local[len(lead):]
+	if strings.Contains(rest, "/") && !strings.HasPrefix(rest, module) {
+		forms = append(forms, lead+module+"/"+rest)
+	}
+	return forms
 }
 
 func (s Service) scopedDuplicate(ctx context.Context, info *duplicates.Info) *duplicates.Info {
@@ -454,16 +505,17 @@ func (e *SuggestionError) Error() string {
 	return fmt.Sprintf("%s %q; retry with one of these qualified_id values: %s", what, e.Query, strings.Join(e.Suggestions, ", "))
 }
 
-func suggestions(q string, pool []model.Node, ambiguous bool) error {
+func suggestions(q string, pool []model.Node, ambiguous bool, repo, module string) error {
 	seen := map[string]int{}
 	for _, n := range pool {
 		seen[n.ShortName()]++
 	}
 	var out []string
 	for _, n := range pool[:min(len(pool), 10)] {
-		// Short IDs that collide (two packages named "store") fall back to the full ID.
+		// Short IDs that collide (two packages named "store") fall back to
+		// the node ID, compact like the answers write it.
 		if seen[n.ShortName()] > 1 {
-			out = append(out, n.ID)
+			out = append(out, CompactID(n.ID, repo, module))
 		} else {
 			out = append(out, n.ShortName())
 		}
@@ -475,38 +527,4 @@ func suggestions(q string, pool []model.Node, ambiguous bool) error {
 func IsSuggestion(err error) bool {
 	var s *SuggestionError
 	return errors.As(err, &s)
-}
-
-// ShortenModule writes module, the repository's root Go module path, as
-// "~" at the start of a node ID's local part: "github.com/acme/app/x.F" is
-// "~/x.F", a method "(*github.com/acme/app/x.T).M" is "(*~/x.T).M", the
-// root package "github.com/acme/app" is "~". A longer module that only
-// starts the same ("github.com/acme/app-tools") is left alone.
-func ShortenModule(local, module string) string {
-	if module == "" {
-		return local
-	}
-	for _, lead := range []string{"(*", "(", ""} {
-		rest, ok := strings.CutPrefix(local, lead+module)
-		if !ok {
-			continue
-		}
-		if rest == "" || strings.ContainsRune("/.)", rune(rest[0])) {
-			return lead + "~" + rest
-		}
-	}
-	return local
-}
-
-// ExpandModule undoes ShortenModule.
-func ExpandModule(local, module string) string {
-	if module == "" {
-		return local
-	}
-	for _, lead := range []string{"(*", "(", ""} {
-		if rest, ok := strings.CutPrefix(local, lead+"~"); ok && (rest == "" || strings.ContainsRune("/.)", rune(rest[0]))) {
-			return lead + module + rest
-		}
-	}
-	return local
 }

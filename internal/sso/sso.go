@@ -15,13 +15,13 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/netguard"
 )
 
 // maxResponse bounds every answer from an identity provider.
@@ -37,16 +37,7 @@ var ErrInternalAddress = errors.New("the identity provider resolves to an intern
 func Client(allowPrivate bool) *http.Client {
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	if !allowPrivate {
-		dialer.Control = func(_, address string, _ syscall.RawConn) error {
-			host, _, err := net.SplitHostPort(address)
-			if err != nil {
-				return err
-			}
-			if ip := net.ParseIP(host); ip == nil || internal(ip) {
-				return ErrInternalAddress
-			}
-			return nil
-		}
+		dialer.Control = netguard.Control(ErrInternalAddress)
 	}
 	transport := &http.Transport{DialContext: dialer.DialContext, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 10 * time.Second, MaxIdleConns: 10, IdleConnTimeout: time.Minute}
 	return &http.Client{
@@ -54,10 +45,6 @@ func Client(allowPrivate bool) *http.Client {
 		Transport:     limited{transport},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-}
-
-func internal(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
 }
 
 // limited caps response bodies.

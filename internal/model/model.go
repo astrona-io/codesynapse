@@ -249,6 +249,14 @@ type Node struct {
 	// directive in the go.mod of the module's latest version, from the Go
 	// module proxy): the redacted rationale, or "retracted" without one.
 	Retracted string `json:"retracted,omitempty"`
+	// Scorecard is the OpenSSF Scorecard overall score (0 to 10) of a
+	// Module's source project from deps.dev; ScorecardDate (YYYY-MM-DD) is
+	// set whenever there is one, so a score of 0 is told from none.
+	// ScorecardChecks are up to three of its lowest checks as "Name:score",
+	// lowest first, with names from the known Scorecard checks only.
+	Scorecard       float64  `json:"scorecard,omitempty"`
+	ScorecardDate   string   `json:"scorecard_date,omitempty"`
+	ScorecardChecks []string `json:"scorecard_checks,omitempty"`
 	// Liveness is live, test-only or unreachable for functions and methods,
 	// and used or unused for Modules (see package cleanup).
 	Liveness string `json:"liveness,omitempty"`

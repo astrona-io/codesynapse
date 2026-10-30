@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/execution"
@@ -97,6 +98,62 @@ func TestRecallOnPrompt(t *testing.T) {
 	t.Setenv("CODESYNAPSE_AUTO_RECALL", "false")
 	assert.Equal(t, runRecall(t, api, `{"session_id":"chat2","hook_event_name":"UserPromptSubmit","prompt":"which database does the API use?"}`), "")
 	assert.Equal(t, lookups.Load(), int32(0), "switched off")
+}
+
+// TestPromptRecallDeadline is the hook Claude Code discarded with "timed out
+// after 8s": every call answered in time on its own, but three in a row did
+// not. The budget covers them together, and running out adds nothing.
+func TestPromptRecallDeadline(t *testing.T) {
+	recallEnv(t)
+	old := promptRecallBudget
+	promptRecallBudget = 300 * time.Millisecond
+	t.Cleanup(func() { promptRecallBudget = old })
+	var lookups atomic.Int32
+	fast := recallAPI(t, &lookups)
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(200 * time.Millisecond): // each call fits the budget, two in a row do not
+		case <-r.Context().Done():
+			return
+		}
+		fast.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(slow.Close)
+
+	var out strings.Builder
+	o := &recallOptions{EC: &app.Env{Stdin: strings.NewReader(`{"session_id":"chat","hook_event_name":"UserPromptSubmit","prompt":"which database does the API use?"}`), Stdout: &out}, repo: "r", apiURL: slow.URL, limit: 40, hook: true}
+	start := time.Now()
+	require.NoError(t, o.Run(t.Context(), o.EC))
+	assert.True(t, time.Since(start) < 2*time.Second, "the budget ends the recall, not the per-call timeouts")
+	assert.False(t, strings.Contains(out.String(), "PostgreSQL"), "a recall out of time adds no facts")
+	assert.False(t, strings.Contains(out.String(), "memory is off"), "and says nothing in the chat")
+}
+
+// TestPromptRecallFitsTheHook keeps the recall budget, plus time to start
+// the binary and answer, under the plugin's UserPromptSubmit timeout.
+func TestPromptRecallFitsTheHook(t *testing.T) {
+	var hooks struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Args    []string `json:"args"`
+				Timeout int      `json:"timeout"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	raw, err := os.ReadFile(filepath.Join("..", "..", "plugins", "codesynapse", "hooks", "hooks.json"))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &hooks))
+	found := false
+	for _, g := range hooks.Hooks[eventPrompt] {
+		for _, h := range g.Hooks {
+			if strings.Join(h.Args, " ") == "memory recall --hook" {
+				found = true
+				assert.True(t, time.Duration(h.Timeout)*time.Second >= promptRecallBudget+3*time.Second,
+					"hook timeout %ds leaves no headroom over the %s budget", h.Timeout, promptRecallBudget)
+			}
+		}
+	}
+	assert.True(t, found, "the prompt recall hook is registered")
 }
 
 func TestRecallOutputEvent(t *testing.T) {

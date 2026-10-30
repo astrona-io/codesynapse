@@ -1,0 +1,28 @@
+{
+  "results": [
+    {
+      "id": "Method|(*~/store.Store).Get",
+      "kind": "Method",
+      "name": "(*store.Store).Get",
+      "location": "store/store.go:10-20"
+    },
+    {
+      "id": "Function|~/api.handleGet",
+      "kind": "Function",
+      "name": "api.handleGet",
+      "location": "api/api.go:12-30"
+    },
+    {
+      "id": "Function|~/store.TestGet",
+      "kind": "Function",
+      "name": "store.TestGet",
+      "location": "store/store_test.go:3-9"
+    },
+    {
+      "id": "Route|GET /items (~/api)",
+      "kind": "Route",
+      "name": "http GET /items",
+      "location": "api/api.go:8"
+    }
+  ]
+}

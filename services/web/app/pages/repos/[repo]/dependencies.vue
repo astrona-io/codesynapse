@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { DependencyList, LicenseReport, SecurityReport, SecVuln } from '~/utils/types'
+import { scorecardBadge, scorecardTitle, type ScorecardScore } from '~/utils/scorecard'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,14 +24,14 @@ const vulnsByModule = computed(() => {
 const verdicts = computed(() => new Map((lic.value?.issues ?? []).map((i) => [`${i.ecosystem}:${i.name}`, i.verdict])))
 const REACH = { called: 'Your code calls it', imported: 'Imported, not called', required: 'Required only' } as const
 
-type Row = { name: string; version: string; ecosystem: string; direct: boolean; dev: boolean; license: string; via: string; roots: number; vulns: SecVuln[]; licence?: { level: string; reason: string }; latest?: string; deprecated?: string; behind?: number; retracted?: string }
+type Row = { name: string; version: string; ecosystem: string; direct: boolean; dev: boolean; license: string; via: string; roots: number; vulns: SecVuln[]; licence?: { level: string; reason: string }; latest?: string; deprecated?: string; behind?: number; retracted?: string; scorecard?: ScorecardScore }
 // Every package (up to the store's dependency limit); vulnerable packages and
 // licence issues missing from it still come from their own reports.
 const rows = computed<Row[]>(() => {
   const out: Row[] = (deps.value?.packages ?? []).map((p) => ({
     name: p.name, version: p.version ?? '', ecosystem: p.ecosystem, direct: p.direct, dev: !!p.dev, license: p.license, via: p.via ?? '', roots: p.roots ?? 0,
     vulns: vulnsByModule.value.get(p.name) ?? [], licence: verdicts.value.get(`${p.ecosystem}:${p.name}`),
-    latest: p.latest, deprecated: p.deprecated, behind: p.behind, retracted: p.retracted,
+    latest: p.latest, deprecated: p.deprecated, behind: p.behind, retracted: p.retracted, scorecard: p.scorecard,
   }))
   const seen = new Set(out.map((r) => r.name))
   for (const [name, vulns] of vulnsByModule.value) {
@@ -124,7 +125,7 @@ const shownCount = computed(() => groups.value.reduce((n, g) => n + g.rows.lengt
               <thead><tr><th>Package</th><th>Version</th><th>Licence</th><th>Vulnerabilities</th></tr></thead>
               <tbody>
                 <tr v-for="r in g.rows" :key="r.ecosystem + r.name">
-                  <td><span class="mono pkg">{{ r.name }}</span><span v-if="!r.direct" class="badge" :title="r.via ? `Via ${r.via}${r.roots > 1 ? ` · ${fmtInt(r.roots)} of your dependencies lead to it` : ''}` : 'Not declared by this repository'">indirect</span><span v-if="r.via" class="muted small"> via {{ r.via }}</span><span v-if="r.dev" class="badge">dev</span><span v-if="r.deprecated" class="badge badge--amber" :title="r.deprecated">deprecated</span><span v-if="r.retracted" class="badge badge--amber" :title="r.retracted">retracted</span></td>
+                  <td><span class="mono pkg">{{ r.name }}</span><span v-if="!r.direct" class="badge" :title="r.via ? `Via ${r.via}${r.roots > 1 ? ` · ${fmtInt(r.roots)} of your dependencies lead to it` : ''}` : 'Not declared by this repository'">indirect</span><span v-if="r.via" class="muted small"> via {{ r.via }}</span><span v-if="r.dev" class="badge">dev</span><span v-if="r.deprecated" class="badge badge--amber" :title="r.deprecated">deprecated</span><span v-if="r.retracted" class="badge badge--amber" :title="r.retracted">retracted</span><span v-if="r.scorecard" :class="scorecardBadge(r.scorecard.score)" :title="scorecardTitle(r.scorecard)">Scorecard {{ r.scorecard.score.toFixed(1) }}</span></td>
                   <td class="mono">{{ r.version || '–' }}<div v-if="r.behind && r.latest" class="muted small" :title="plural(r.behind, 'newer release')">latest {{ r.latest }}</div></td>
                   <td>
                     {{ r.license || 'unknown' }}

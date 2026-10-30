@@ -376,7 +376,9 @@ func (o *recallOptions) recall(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	if prompt {
-		c.http.Timeout = promptRecallTimeout
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, promptRecallBudget)
+		defer cancel()
 	}
 	var err error
 	ctx, err = c.executionContext(ctx, primary, parent)

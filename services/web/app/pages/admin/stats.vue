@@ -11,7 +11,10 @@ const ranges: { id: StatsRange; label: string }[] = [
 ]
 const range = ref<StatsRange>('24h')
 const org = ref('')
-const tab = ref<'tenants' | 'sessions' | 'usage' | 'security' | 'audit'>('tenants')
+const tab = ref<'tenants' | 'sessions' | 'usage' | 'security' | 'audit' | 'storage' | 'alerts'>('tenants')
+// Security, audit, storage and alerts load in their own components, only while shown.
+const sectionTick = ref(0)
+const tabled = computed(() => tab.value === 'tenants' || tab.value === 'sessions' || tab.value === 'usage')
 const page = ref(1)
 const tenantSort = ref('name')
 const sessionSort = ref('name')
@@ -47,7 +50,7 @@ watch(tab, (t) => {
   if (t === 'usage' && !usage.value) { loadUsage(); loadCharts() }
 })
 const error = computed(() => summaryError.value ?? (tab.value === 'tenants' ? tenantsError.value : tab.value === 'sessions' ? sessionsError.value
-  : tab.value === 'security' ? securityTab.value?.error : tab.value === 'audit' ? auditTab.value?.error : usageError.value))
+  : tab.value === 'usage' ? usageError.value : tab.value === 'security' ? securityTab.value?.error : tab.value === 'audit' ? auditTab.value?.error : null))
 
 const auto = ref(false)
 let timer: ReturnType<typeof setInterval> | undefined
@@ -57,7 +60,8 @@ function refreshAll() {
   else if (tab.value === 'sessions') refreshSessions()
   else if (tab.value === 'security') securityTab.value?.refresh()
   else if (tab.value === 'audit') auditTab.value?.refresh()
-  else { refreshUsage(); refreshCharts() }
+  else if (tab.value === 'usage') { refreshUsage(); refreshCharts() }
+  else sectionTick.value++
 }
 watch(auto, (on) => {
   clearInterval(timer)
@@ -134,6 +138,8 @@ const activeHint = computed(() => {
       <StatTile label="Audit chain" :value="!summary.chain ? 'Not verified yet' : summary.chain.run_error ? 'Could not finish' : summary.chain.ok ? 'Intact' : 'Broken'"
         :hint="summary.chain ? `checked ${new Date(summary.chain.at).toLocaleString()}` : 'checked daily'" :tone="summary.chain?.ok ? undefined : 'warning'"
         tip="The stored result of the last audit chain verification; opening this page does not walk the chain." />
+      <StatTile label="Alerts firing" :value="n(summary.alerts_firing)" :hint="summary.alerts_firing === null ? 'alerts off or not answering' : 'now, from vmalert'"
+        :tone="summary.alerts_firing ? 'warning' : undefined" />
     </div>
     <section class="panel">
       <div class="panel__header">
@@ -143,8 +149,10 @@ const activeHint = computed(() => {
           <button type="button" :aria-pressed="tab === 'usage'" @click="tab = 'usage'">Usage</button>
           <button type="button" :aria-pressed="tab === 'security'" @click="tab = 'security'">Security</button>
           <button type="button" :aria-pressed="tab === 'audit'" @click="tab = 'audit'">Audit</button>
+          <button type="button" :aria-pressed="tab === 'storage'" @click="tab = 'storage'">Storage</button>
+          <button type="button" :aria-pressed="tab === 'alerts'" @click="tab = 'alerts'">Alerts</button>
         </div>
-        <div class="row">
+        <div v-if="tabled || tab === 'security' || tab === 'audit'" class="row">
           <select v-if="tab === 'tenants'" v-model="tenantSort" class="inline" aria-label="Sort tenants">
             <option value="name">By name</option><option value="members">Most members</option><option value="seats">Most seats</option><option value="active">Most active</option><option value="entries">Most repositories</option>
           </select>
@@ -258,6 +266,8 @@ const activeHint = computed(() => {
         <p v-if="org" class="muted small">The audit log is counted for the whole platform; the organisation filter does not apply.</p>
         <AdminAuditStats ref="auditTab" :range="range" />
       </template>
+      <StatsStorage v-if="tab === 'storage'" :range="range" :tick="sectionTick" />
+      <StatsAlerts v-if="tab === 'alerts'" :tick="sectionTick" />
       <div v-if="table && table.pages > 1" class="row pager">
         <button class="secondary tiny" :disabled="page <= 1" @click="page--">Previous</button>
         <span class="muted small">Page {{ table.page }} of {{ table.pages }} · {{ table.total }} organisations</span>
