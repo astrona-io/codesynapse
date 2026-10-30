@@ -81,6 +81,9 @@ type Meta struct {
 	// rewrite made for this request removed (Shortened in shorten.go).
 	Shortened      bool
 	Removed, Saved int
+	// ShortenSkip is why the newest block offered for shortening went out
+	// as typed: one of the Skip* reasons of shorten.go, or empty.
+	ShortenSkip string
 	// PromptSHA256 and PromptBytes describe the newest user text the agent
 	// sent; ForwardedSHA256 and ForwardedBytes the text that went to the
 	// cloud when the gateway changed it (TextChanged).
@@ -223,7 +226,7 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			meta.Fallthrough != FallExcluded && !excludedModel(r.Context(), local, body) {
 			var sh Shortened
 			body, sh = g.Shorten.Apply(r.Context(), body)
-			meta.Shortened, meta.Removed, meta.Saved = sh.Changed, sh.Removed, sh.New
+			meta.Shortened, meta.Removed, meta.Saved, meta.ShortenSkip = sh.Changed, sh.Removed, sh.New, sh.Skip
 		}
 		meta.noteForwarded(r.Context(), sent, body)
 		status, err := g.forward(r.Context(), w, r, upstreamPath, body)

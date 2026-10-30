@@ -93,6 +93,16 @@ func TestGatewayAuditsCallsWithoutPrompts(t *testing.T) {
 	assert.NotContains(t, rows[0].Detail, "sk-ant-own")
 }
 
+func TestGatewayDetailNamesShortenSkip(t *testing.T) {
+	for skip, want := range map[string]string{
+		"": "", gateway.SkipBusy: " shorten_skip=local_busy", gateway.SkipTimeout: " shorten_skip=timeout",
+		gateway.SkipNoRewrite: " shorten_skip=no_rewrite", "free text": " shorten_skip=other",
+	} {
+		got := gatewayDetail(gateway.Meta{Route: "cloud", ShortenSkip: skip}, "m", time.Second)
+		assert.True(t, strings.HasSuffix(got, "shortened=false"+want), got)
+	}
+}
+
 func TestGatewayCapsOpenRequestsPerKey(t *testing.T) {
 	release := make(chan struct{})
 	var held atomic.Int32

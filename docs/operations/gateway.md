@@ -124,7 +124,17 @@ To use it:
 2. Nothing to switch on: it is on for every organisation. To turn it off, an owner or admin, signed in, clears the box under **Settings → Organisation → Agent gateway** (or sends `PUT /api/v1/accounts/orgs/{org}/gateway` with `{"shorten_prompts": false}` from a signed-in session). The change is audited.
 3. Connect Claude Code as described above, so `ANTHROPIC_BASE_URL` points at the gateway and `ANTHROPIC_CUSTOM_HEADERS` carries `X-CodeSynapse-Key`. Nothing else changes on the developer's side.
 
-A prompt is rewritten once, when it is sent, and the same shorter text is reused for the rest of the chat, so the provider's prompt cache keeps matching. After an API restart, earlier prompts go out as typed. Prompts shorter than 400 bytes are left alone, and a request waits at most 8 seconds for the local model. The bytes removed show under Statistics → Models & savings, "Saved by shorter prompts". The audit entry of each request says `shortened=true` and how many bytes, never the text.
+A prompt is rewritten once, when it is sent, and the same shorter text is reused for the rest of the chat, so the provider's prompt cache keeps matching. After an API restart, earlier prompts go out as typed. Prompts shorter than 400 bytes are left alone. The bytes removed show under Statistics → Models & savings, "Saved by shorter prompts". The audit entry of each request says `shortened=true` and how many bytes, never the text.
+
+Shortening never slows a local answer. It uses the local model only when the model is idle and no request is waiting for it; otherwise the prompt goes out as typed at once. A request waits at most 8 seconds for a rewrite. A rewrite still running then is not cancelled: it finishes in the background, so Ollama does not log an HTTP 500 for a dropped request, and its result is not used. A prompt that was not shortened stays as typed for the rest of the chat. The audit entry says why with `shorten_skip=`:
+
+| `shorten_skip` | Meaning |
+|---|---|
+| `local_busy` | The local model was answering or had requests waiting. |
+| `timeout` | The rewrite took longer than 8 seconds. |
+| `no_rewrite` | The local call failed, or the rewrite dropped a fact or saved less than 10%. |
+
+Many `local_busy` entries mean the local model has no spare time for shortening; that is expected while it answers requests itself.
 
 The operator turns it off for the whole installation with `compress_prompts: false` in `config/llm.yaml`, or by leaving no local model routed to `compress`.
 
