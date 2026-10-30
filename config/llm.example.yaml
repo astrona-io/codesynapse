@@ -108,6 +108,7 @@ tasks:
   # cleanup-briefing: local-mlx  # the cleanup plan in plain language (local providers only)
   # local-answer: local-mlx      # ask_local: reads files for coding agents to save their tokens (local providers only)
   # local-draft: local-mlx       # local_draft: drafts self-contained code for coding agents to check (local providers only)
+  # source-extract: local-mlx    # fetch_source: keeps the parts of a long web page that answer the agent's question (local providers only)
   # memory: local-ollama     # agent memory: facts extracted from conversation turns (local providers only)
   # embeddings: local-ollama # agent memory: recall by meaning (local, with embedding_model)
   # compress: local-mlx      # shortens prompt prose before it goes to a cloud model (local providers only)
