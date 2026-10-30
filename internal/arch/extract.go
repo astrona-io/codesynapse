@@ -46,6 +46,8 @@ var (
 	numberRe  = regexp.MustCompile(`^(\d{1,6})[-_. ]`)
 	idRe      = regexp.MustCompile(`(?i)\b(adr|rfc)[\s_-]*0*(\d+)\b`)
 	slugBadRe = regexp.MustCompile(`[^A-Za-z0-9._:-]+`)
+	// maxSlug bounds an ID made from a name in a file.
+	maxSlug = 128
 )
 
 type record struct {
@@ -254,8 +256,12 @@ func DefaultID(typ, rel, number string) string {
 }
 
 func slug(id string) string {
-	s := slugBadRe.ReplaceAllString(strings.TrimSpace(id), "-")
-	return strings.Trim(s, "-.")
+	s := strings.Trim(slugBadRe.ReplaceAllString(strings.TrimSpace(id), "-"), "-.")
+	// IDs end up in node IDs and member lists; a name from a file is untrusted.
+	if len(s) > maxSlug {
+		s = strings.Trim(s[:maxSlug], "-.")
+	}
+	return s
 }
 
 func sortedUnique(in []string) []string {

@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -297,4 +298,75 @@ func TestRepositoriesAreFenced(t *testing.T) {
 		assert.True(t, x.Title != "Secret plan")
 	}
 	_ = store.ErrNotFound
+}
+
+func TestContextShowsComponents(t *testing.T) {
+	ctx := context.Background()
+	repo := "r"
+	root := t.TempDir()
+	for rel, text := range records {
+		write(t, root, rel, text)
+	}
+	g := code(repo)
+	top := arch.Topology{
+		Members: []arch.Member{
+			{Role: arch.RoleImageBuild, Name: "api", Node: model.NodeID(repo, model.KindConfig, "Dockerfile"), File: "Dockerfile", Evidence: "build target api of Dockerfile"},
+			{Role: arch.RoleGoMain, Name: "ex.com/app/web", Node: model.NodeID(repo, model.KindPackage, "ex.com/app/web"), File: "web/render.go", Evidence: "go build ./web"},
+			{Role: arch.RoleWorkload, Name: "Deployment/api container api", File: "deploy/api.yaml", Evidence: "image name ends like this component's", Candidate: true},
+		},
+		Env: []arch.EnvKey{{Name: "STORE_URL", ReadBy: []arch.EnvUse{{File: "internal/store/store.go", Line: 7, Via: "ex.com/app/internal/store"}}}},
+	}
+	meta, err := json.Marshal(top)
+	require.NoError(t, err)
+	g.AddNode(model.Node{ID: model.NodeID(repo, model.KindComponent, "api"), Kind: model.KindComponent, Repo: repo, Name: "api", QualifiedName: "api",
+		File: "Dockerfile", Meta: string(meta), Summary: "Image build with 1 go-main"})
+	g.AddNode(model.Node{ID: model.NodeID(repo, model.KindConfig, "deploy/api.yaml"), Kind: model.KindConfig, Repo: repo, Name: "api.yaml", File: "deploy/api.yaml"})
+	d, err := docs.Extract(ctx, repo, root, g)
+	require.NoError(t, err)
+	g.Merge(d)
+	require.NoError(t, arch.Extract(ctx, repo, root, g))
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(ctx, repo, g))
+	svc := Service{R: store.ForRepository(st, repo)}
+
+	tests := []struct {
+		name string
+		task Task
+		why  string // empty: no component expected
+	}{
+		{"a file of a member package", Task{Files: []string{"web/render.go"}}, "groups package ex.com/app/web (go-main)"},
+		{"a manifest", Task{Files: []string{"deploy/api.yaml"}}, "groups deploy/api.yaml (workload)"},
+		{"a file reading a key", Task{Files: []string{"internal/store/store.go"}}, "reads STORE_URL in internal/store/store.go"},
+		{"named by the task", Task{Components: []string{"API"}}, "is named by the task"},
+		{"a word of the query", Task{Query: "deploy the api, now"}, "is named in the task"},
+		{"unrelated", Task{Query: "rename a helper"}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := svc.Context(ctx, repo, tt.task)
+			require.NoError(t, err)
+			if tt.why == "" {
+				assert.Len(t, res.Components, 0)
+				return
+			}
+			require.Len(t, res.Components, 1)
+			c := res.Components[0]
+			assert.Equal(t, c.Name, "api")
+			assert.Equal(t, c.Why[0], tt.why)
+			assert.Equal(t, c.Candidates, 1)
+			assert.Len(t, c.Members, 3)
+			for _, n := range res.Notes {
+				assert.NotContains(t, n, "deploy/api.yaml", "a manifest is in the index")
+			}
+		})
+	}
+
+	// Records for the component count for a task that only touches its code.
+	res, err := svc.Context(ctx, repo, Task{Files: []string{"deploy/api.yaml"}})
+	require.NoError(t, err)
+	var why []string
+	for _, a := range append(res.Binding, res.Informational...) {
+		why = append(why, a.Why...)
+	}
+	assert.Contains(t, why, "applies to component api, which groups deploy/api.yaml (workload)")
 }
