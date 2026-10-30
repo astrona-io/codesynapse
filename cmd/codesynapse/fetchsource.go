@@ -76,7 +76,7 @@ func (b *bridge) fetchSource(ctx context.Context, msg []byte, c toolCall) (map[s
 	}
 	var in fetchsource.In
 	_ = json.Unmarshal(c.Params.Arguments, &in) //nolint:errcheck // Run decoded the same arguments strictly
-	b.extractSource(ctx, msg, in.Question, &ans)
+	extract := b.extractSource(ctx, msg, in.Question, &ans)
 	raw, err := json.Marshal(ans)
 	if err != nil {
 		src.Result = telemetry.SourceError
@@ -85,10 +85,12 @@ func (b *bridge) fetchSource(ctx context.Context, msg []byte, c toolCall) (map[s
 	}
 	// Clamped to what the server accepts: an out-of-range figure answers
 	// 400, which the bridge takes for an older server and stops measuring.
+	// Filled after tier 2, so ExtractedTokens is what the agent receives.
 	src.RawTokens = min(max(ans.RawTokens, 0), maxSourceTokens)
 	src.CleanedTokens = min(max(ans.CleanedTokens, 0), maxSourceTokens)
 	src.ExtractedTokens = min(max(ans.TextTokens, 0), maxSourceTokens)
 	src.ReduceUs = min(max(ans.Reduce.Microseconds(), 0), maxSourceUs)
+	src.ExtractUs = min(max(extract.Microseconds(), 0), maxSourceExtractUs)
 	return map[string]any{
 		"content":           []map[string]any{{"type": "text", "text": string(raw)}},
 		"structuredContent": json.RawMessage(raw),
@@ -96,23 +98,30 @@ func (b *bridge) fetchSource(ctx context.Context, msg []byte, c toolCall) (map[s
 	}, src, false
 }
 
-// maxSourceTokens and maxSourceUs are the server's limits for one report
-// (services/api/internal/api/usage_local.go).
+// maxSourceTokens, maxSourceUs and maxSourceExtractUs are the server's
+// limits for one report (services/api/internal/api/usage_local.go); the
+// last is sourceExtractTimeout.
 const (
-	maxSourceTokens = 1_000_000
-	maxSourceUs     = 60 * 1_000_000
+	maxSourceTokens    = 1_000_000
+	maxSourceUs        = 60 * 1_000_000
+	maxSourceExtractUs = int64(sourceExtractTimeout / time.Microsecond)
 )
 
 // sourceUsage is how one fetch_source call went, for the usage report: the
 // result (hit, revalidated, miss, refused, error) and the page's estimated
-// tokens as served, cleaned and returned, and the time cleaning took. Never
-// the URL, its host, the question or the text.
+// tokens as served, cleaned and returned (returned is after tier 2, so a
+// local model's extract when one replaced the page). ReduceUs is tier 1 only:
+// cleaning and pruning on this machine. ExtractUs is tier 2: the
+// source-extract call, set whenever the local model was asked, whether or
+// not its extract was used. Never the URL, its host, the question or the
+// text.
 type sourceUsage struct {
 	Result          string `json:"result"`
 	RawTokens       int    `json:"raw_tokens"`
 	CleanedTokens   int    `json:"cleaned_tokens"`
 	ExtractedTokens int    `json:"extracted_tokens"`
 	ReduceUs        int64  `json:"reduce_us"`
+	ExtractUs       int64  `json:"extract_us,omitempty"`
 }
 
 // sourceTTLs reads the per-host TTLs from the user's config folder. A file
@@ -155,28 +164,32 @@ func (b *bridge) sourceFetcher() *fetchsource.Fetcher {
 // question when the pruned page is still long. The pruned page stands
 // whenever there is no question, the page is JSON or short, tier 2 is off,
 // the checkout is not indexed, the server has no local model (409) or the
-// extract is not shorter.
-func (b *bridge) extractSource(ctx context.Context, msg []byte, question string, ans *fetchsource.Out) {
+// extract is not shorter. It returns how long the local model was asked
+// for, zero when it was not asked.
+func (b *bridge) extractSource(ctx context.Context, msg []byte, question string, ans *fetchsource.Out) (took time.Duration) {
 	question = strings.TrimSpace(question)
 	if question == "" || ans.ContentType == "application/json" || utf8.RuneCountInString(ans.Text) < fetchsource.ExtractThreshold ||
 		app.Getenv("CODESYNAPSE_SOURCE_EXTRACT", "true") == "false" {
-		return
+		return took
 	}
 	if len(ans.Text) > fetchsource.MaxExtractInput {
 		ans.ExtractNote = fmt.Sprintf("not shortened by a local model: the pruned page is over %d bytes", fetchsource.MaxExtractInput)
-		return
+		return took
 	}
 	if b.checkoutRepo(ctx) == "" {
 		ans.ExtractNote = "not shortened by a local model: this checkout is not indexed in CodeSynapse"
-		return
+		return took
 	}
 	ctx, cancel := context.WithTimeout(ctx, sourceExtractTimeout)
 	defer cancel()
 	var ex fetchsource.Extract
-	if err := b.postLocal(ctx, msg, "source-extract", fetchsource.ExtractRequest{Question: question, Text: ans.Text}, &ex); err != nil {
+	asked := time.Now()
+	err := b.postLocal(ctx, msg, "source-extract", fetchsource.ExtractRequest{Question: question, Text: ans.Text}, &ex)
+	took = time.Since(asked)
+	if err != nil {
 		first, _, _ := strings.Cut(err.Error(), "\n")
 		ans.ExtractNote = capNote("not shortened by a local model: " + first)
-		return
+		return took
 	}
 	// The server checked and redacted the extract; it is checked again here
 	// because the bridge hands it to the agent.
@@ -184,13 +197,14 @@ func (b *bridge) extractSource(ctx context.Context, msg []byte, question string,
 	switch {
 	case !ex.Found || text == "":
 		ans.ExtractNote = "the local model found no answer to the question in the page; the pruned page is returned"
-		return
+		return took
 	case len(text) >= len(ans.Text) || utf8.RuneCountInString(text) > fetchsource.MaxExtract+2:
-		return
+		return took
 	}
 	ans.Text, ans.Extracted, ans.ExtractModel, ans.ExtractDropped = text, true, ex.Model, ex.Dropped
 	ans.TextBytes, ans.TextTokens = len(text), telemetry.EstimateTokens(len(text))
 	if len(ex.Problems) > 0 {
 		ans.ExtractNote = capNote(strings.Join(ex.Problems, "; "))
 	}
+	return took
 }

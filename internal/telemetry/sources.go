@@ -40,25 +40,24 @@ const (
 )
 
 // SourceFetch is one fetch_source answer as the bridge reported it: counts
-// and a time, never the URL, its host or the question.
+// and times, never the URL, its host or the question. Reduce is tier 1
+// (cleaning and pruning, cpu); Extract is tier 2 (the local model's
+// source-extract call, local_model), zero when the model was not asked.
 type SourceFetch struct {
 	Result                                    string
 	RawTokens, CleanedTokens, ExtractedTokens int
-	Tier                                      string
-	Reduce                                    time.Duration
+	Reduce, Extract                           time.Duration
 }
 
 // RecordSourceFetch counts one fetch_source answer under tool and adds the
 // result, tier and sizes to the request's span. An unknown result is not
-// recorded; tokens and the reduce time count only for a page returned.
+// recorded; tokens and the reduce times count only for a page returned. The
+// span's tier is the last one that ran.
 func RecordSourceFetch(ctx context.Context, tool string, f SourceFetch) {
 	switch f.Result {
 	case SourceHit, SourceRevalidated, SourceMiss, SourceRefused, SourceError:
 	default:
 		return
-	}
-	if f.Tier != TierLocalModel {
-		f.Tier = TierCPU
 	}
 	ctx = WithTool(ctx, tool)
 	SourceFetches.IncContext(ctx, f.Result)
@@ -74,8 +73,13 @@ func RecordSourceFetch(ctx context.Context, tool string, f SourceFetch) {
 			SourceTokens.AddContext(ctx, float64(s.tokens), s.stage)
 		}
 	}
-	SourceReduce.ObserveContext(ctx, f.Reduce.Seconds(), f.Tier)
-	trace.SpanFromContext(ctx).SetAttributes(attribute.String("source.tier", f.Tier),
+	SourceReduce.ObserveContext(ctx, f.Reduce.Seconds(), TierCPU)
+	tier := TierCPU
+	if f.Extract > 0 {
+		SourceReduce.ObserveContext(ctx, f.Extract.Seconds(), TierLocalModel)
+		tier = TierLocalModel
+	}
+	trace.SpanFromContext(ctx).SetAttributes(attribute.String("source.tier", tier),
 		attribute.Int("source.raw_tokens", f.RawTokens), attribute.Int("source.cleaned_tokens", f.CleanedTokens),
 		attribute.Int("source.extracted_tokens", f.ExtractedTokens))
 }

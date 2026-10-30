@@ -115,10 +115,12 @@ func TestBridgeExtractsLongPages(t *testing.T) {
 	}
 
 	ans := page(long, "text/html")
-	b.extractSource(context.Background(), nil, "how do I connect", ans)
+	took := b.extractSource(context.Background(), nil, "how do I connect", ans)
 	assert.True(t, ans.Extracted)
+	assert.True(t, took > 0, "the model's time is reported as tier 2")
 	assert.Equal(t, ans.Text, "Use `NewClient`.")
 	assert.Equal(t, ans.TextBytes, len(ans.Text))
+	assert.Equal(t, ans.TextTokens, telemetry.EstimateTokens(len(ans.Text)), "extracted tokens are what the agent gets")
 	assert.Equal(t, ans.ExtractModel, "qwen")
 	assert.Equal(t, ans.ExtractDropped, 1)
 	assert.Contains(t, ans.ExtractNote, "dropped")
@@ -136,7 +138,7 @@ func TestBridgeExtractsLongPages(t *testing.T) {
 		"short page":  {page("# Client\n\nshort", "text/html"), "how"},
 		"json":        {page(long, "application/json"), "how"},
 	} {
-		b.extractSource(context.Background(), nil, tc.question, tc.ans)
+		assert.Equal(t, b.extractSource(context.Background(), nil, tc.question, tc.ans), 0, name)
 		assert.False(t, tc.ans.Extracted, name)
 		assert.Equal(t, tc.ans.ExtractNote, "", name)
 	}

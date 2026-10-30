@@ -362,8 +362,8 @@ var (
 // ever a label; the hit ratio is computed in the query.
 var (
 	// reduceBuckets: cleaning and pruning a page take milliseconds; a local
-	// model's extract (tier 2) takes seconds.
-	reduceBuckets = []float64{0.001, 0.005, 0.02, 0.1, 0.5, 2, 10, 60}
+	// model's extract (tier 2) takes seconds, at most two minutes.
+	reduceBuckets = []float64{0.001, 0.005, 0.02, 0.1, 0.5, 2, 10, 60, 120}
 
 	SourceFetches = Default.ScopedCounter("codesynapse_source_fetches_total", "fetch_source answers by result (hit, revalidated, miss, refused, error).", "result")
 	SourceTokens  = Default.ScopedCounter("codesynapse_source_tokens_total", "Estimated tokens (bytes/4) of the pages fetch_source returned, by stage (raw, cleaned, extracted).", "stage")

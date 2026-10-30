@@ -50,20 +50,24 @@ type localUsageReport struct {
 
 // sourceReport is one fetch_source answer: the result
 // (telemetry.SourceResults), the estimated tokens of the page as served, of
-// its cleaned text and of the text returned, and the microseconds reducing
-// it took on the developer's machine.
+// its cleaned text and of the text returned, the microseconds cleaning and
+// pruning took on the developer's machine (tier 1) and, when a local model
+// was asked for an extract, the microseconds that call took (tier 2).
 type sourceReport struct {
 	Result          string `json:"result"`
 	RawTokens       int    `json:"raw_tokens"`
 	CleanedTokens   int    `json:"cleaned_tokens"`
 	ExtractedTokens int    `json:"extracted_tokens"`
 	ReduceUs        int    `json:"reduce_us"`
+	ExtractUs       int    `json:"extract_us,omitempty"`
 }
 
 const (
 	// maxSourceTokens is fetchsource.MaxBody in tokens, with room.
 	maxSourceTokens = 1_000_000
 	maxSourceUs     = 60 * 1_000_000
+	// maxSourceExtractUs is the bridge's sourceExtractTimeout (cmd/codesynapse).
+	maxSourceExtractUs = 120 * 1_000_000
 )
 
 func (sr *sourceReport) validate() error {
@@ -75,6 +79,8 @@ func (sr *sourceReport) validate() error {
 		return errors.New("source tokens out of range")
 	case sr.ReduceUs < 0 || sr.ReduceUs > maxSourceUs:
 		return errors.New("source reduce_us out of range")
+	case sr.ExtractUs < 0 || sr.ExtractUs > maxSourceExtractUs:
+		return errors.New("source extract_us out of range")
 	}
 	return nil
 }
@@ -250,8 +256,8 @@ func (s *Server) countSource(r *http.Request, in localUsageReport, org string) [
 		return nil
 	}
 	telemetry.RecordSourceFetch(r.Context(), in.Tool, telemetry.SourceFetch{Result: sr.Result, RawTokens: sr.RawTokens,
-		CleanedTokens: sr.CleanedTokens, ExtractedTokens: sr.ExtractedTokens, Tier: telemetry.TierCPU,
-		Reduce: time.Duration(sr.ReduceUs) * time.Microsecond})
+		CleanedTokens: sr.CleanedTokens, ExtractedTokens: sr.ExtractedTokens,
+		Reduce: time.Duration(sr.ReduceUs) * time.Microsecond, Extract: time.Duration(sr.ExtractUs) * time.Microsecond})
 	if !sr.returned() {
 		return nil
 	}

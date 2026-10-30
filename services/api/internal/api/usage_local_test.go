@@ -67,7 +67,8 @@ func TestLocalFetchSourceCountsItsSavings(t *testing.T) {
 	}
 	h := runtimeHeaders("thread-a")
 	require.Equal(t, f.client.do("POST", path, report(`{"result":"miss","raw_tokens":8000,"cleaned_tokens":2000,"extracted_tokens":1500,"reduce_us":4000}`), nil, h...), 204)
-	require.Equal(t, f.client.do("POST", path, report(`{"result":"hit","raw_tokens":8000,"cleaned_tokens":2000,"extracted_tokens":600}`), nil, h...), 204)
+	// A local model's extract (tier 2) may take longer than cleaning may.
+	require.Equal(t, f.client.do("POST", path, report(`{"result":"hit","raw_tokens":8000,"cleaned_tokens":2000,"extracted_tokens":600,"reduce_us":3000,"extract_us":90000000}`), nil, h...), 204)
 	require.Equal(t, f.client.do("POST", path, report(`{"result":"refused"}`), nil, h...), 204)
 	// A page that grew in cleaning saves nothing rather than a negative.
 	require.Equal(t, f.client.do("POST", path, report(`{"result":"revalidated","raw_tokens":100,"cleaned_tokens":120,"extracted_tokens":120}`), nil, h...), 204)
@@ -78,6 +79,7 @@ func TestLocalFetchSourceCountsItsSavings(t *testing.T) {
 		"negative":       report(`{"result":"miss","raw_tokens":-1}`),
 		"too large":      report(`{"result":"miss","raw_tokens":1000001}`),
 		"slow":           report(`{"result":"miss","reduce_us":60000001}`),
+		"slow extract":   report(`{"result":"miss","extract_us":120000001}`),
 		"unknown field":  report(`{"result":"miss","url":"https://example.com/"}`),
 	} {
 		assert.Equal(t, f.client.do("POST", path, body, nil, h...), 400, name)
