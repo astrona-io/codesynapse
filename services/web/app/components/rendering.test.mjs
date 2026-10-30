@@ -7,6 +7,7 @@ import { renderToString } from 'vue/server-renderer'
 import { parse, compileScript } from 'vue/compiler-sfc'
 import { localSaved, totalSaved } from '../utils/savings.ts'
 import { windowLabel } from '../composables/useStatistics.ts'
+import { gatewayReasonLabel, gatewayReasonRows, gatewayRouteLabel } from '../utils/gatewayReasons.ts'
 
 // Nuxt auto-imports these; useId only has to be stable within one render.
 let nextId = 0
@@ -48,7 +49,7 @@ async function renderComponent(t, file, globals, props = {}) {
   app.component('StatTile', { props: ['label', 'value', 'hint', 'tip', 'tone'], template: '<div :data-tone="tone">{{ label }} {{ value }} {{ hint }} <i>{{ tip }}</i></div>' })
   app.component('ColumnChart', { template: '<div />' })
   app.component('RankList', { props: ['rows'], template: '<ul class="rank"><li v-for="r in rows ?? []" :key="r.label">{{ r.label }} {{ r.value }}</li></ul>' })
-  app.component('SeriesCard', { props: ['panel', 'yMax'], template: '<figure :data-panel="panel" :data-ymax="yMax" />' })
+  app.component('SeriesCard', { props: ['panel', 'yMax', 'label'], template: '<figure :data-panel="panel" :data-ymax="yMax" :data-label="label ? label(\'count_tokens\') : undefined" />' })
   app.component('InfoTip', { props: ['text', 'term', 'label'], template: '<i class="info">{{ text }}</i>' })
   app.component('NuxtLink', { template: '<a><slot /></a>' })
   app.component('DataState', await compileComponent(t, './DataState.vue'))
@@ -276,7 +277,7 @@ test('gateway page: tiles, quantile charts on one scale and reasons as bars', as
   const gateway = {
     requests: 40, local: 30, cloud: 10, rejected: 0, failed: 3, failed_by: { cloud_4xx: 2, cloud_5xx: 1 }, local_share_pct: 75, bytes_in: 1, bytes_out: 1,
     local_input_tokens: 0, local_output_tokens: 0, local_unmetered: 0, saved_dollars: 0,
-    fallthroughs: 8, fallthrough_reasons: { queue_timeout: 3, answer_timeout: 1, too_large: 4 }, timeouts: 4, timeout_share_pct: 10,
+    fallthroughs: 8, fallthrough_reasons: { queue_timeout: 3, answer_timeout: 1, too_large: 4 }, timeouts: 4, timeout_share_pct: 10, cloud_without_reason: 6,
     local_avg_seconds: 2, local_p95_seconds: 4.5, cloud_avg_seconds: 12.4, cloud_p95_seconds: null,
     queue_avg_seconds: 0.25, queue_p95_seconds: 19.5, local_answer_avg_seconds: 1.5,
   }
@@ -294,12 +295,13 @@ test('gateway page: tiles, quantile charts on one scale and reasons as bars', as
     seriesRangeLabel: () => 'Last 7 days',
     fmtCompact: (n) => String(n),
     apiErrorMessage: (e) => String(e),
+    gatewayReasonLabel, gatewayReasonRows, gatewayRouteLabel,
   }, {})
   const html = await render(gateway)
   assert.match(html, /Gateway requests 40 30 local · 10 cloud · 0 refused /)
   assert.match(html, /Failed requests 3 2 cloud 4xx · 1 cloud 5xx <i>requests answered with a 4xx or 5xx status\. Cloud ones are the provider&#39;s own answer/, 'failures name the route that answered them')
   assert.match(html, /Answered locally 75% /)
-  for (const p of ['gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_queue_wait', 'gateway_timeouts']) {
+  for (const p of ['gateway_local_share', 'gateway_routes', 'gateway_fallthrough', 'gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_queue_wait', 'gateway_timeouts']) {
     assert.match(html, new RegExp(`data-panel="${p}"`), `${p} is drawn`)
   }
   assert.match(html, /data-panel="gateway_latency_local" data-ymax="9"/, 'local shares the cloud chart\'s top')
@@ -308,10 +310,16 @@ test('gateway page: tiles, quantile charts on one scale and reasons as bars', as
   assert.match(html, /<li>too large 4<\/li><li>waited too long for a slot 3<\/li><li>answered too slowly 1<\/li>/, 'reasons are bars, largest first')
   assert.match(html, /<div data-tone="warning">Local model timeouts 4 10% of requests · 3 queue · 1 answer <i>requests that went to the cloud because the local model was too slow/)
   assert.match(html, /Not answered locally 8 4 too large · 3 waited too long for a slot <i>by reason: 4 too large · 3 waited too long for a slot · 1 answered too slowly\./)
+  assert.match(html, /data-panel="gateway_fallthrough"[^>]*data-label="count tokens"/, 'the reason trend names its lines in plain words, new codes included')
+  assert.match(html, /6 cloud requests have no recorded reason/)
   assert.match(html, /Response time, local 2\.0 s p95 4\.5 s /)
   assert.match(html, /Response time, cloud 12 s p95 – /, 'a missing quantile is a dash, never 0')
   assert.match(html, /Queue wait, local 0\.3 s p95 20 s <i>[^<]*answers then took 1\.5 s on average/)
 
+  await t.test('a reason code the page does not know yet is listed', async () => {
+    const html = await render({ ...gateway, fallthrough_reasons: { count_tokens: 9, too_large: 4 } })
+    assert.match(html, /<li>count tokens 9<\/li><li>too large 4<\/li>/)
+  })
   await t.test('no timeouts are not highlighted', async () => {
     const calm = await render({ ...gateway, timeouts: 0, timeout_share_pct: 0, fallthroughs: 0, fallthrough_reasons: {} })
     assert.match(calm, /<div>Local model timeouts 0 0% of requests/)

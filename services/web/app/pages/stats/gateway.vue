@@ -11,7 +11,7 @@ const { data: m, error: modelsError } = useApiGet<ModelStats>(() => `stats/model
 const gw = computed(() => m.value?.gateway)
 
 const range = computed<SeriesRange>(() => seriesRangeFor(days.value) as SeriesRange)
-const PANELS: GatewaySeriesPanel[] = ['gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_queue_wait', 'gateway_timeouts']
+const PANELS: GatewaySeriesPanel[] = ['gateway_local_share', 'gateway_routes', 'gateway_fallthrough', 'gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_queue_wait', 'gateway_timeouts']
 const { panels: batch, pending: batchPending } = useSeriesBatch(PANELS, range)
 const metricsOff = ref(false)
 const hiddenPanels = ref<string[]>([])
@@ -31,22 +31,16 @@ const quantileMax = computed(() => {
   return Math.max(0, ...vals.map((v) => v ?? 0))
 })
 
-// Why the local model did not answer, in the gateway's fixed reasons.
-const FALL_LABEL: Record<string, string> = {
-  queue_timeout: 'waited too long for a slot', answer_timeout: 'answered too slowly', cancelled: 'client gave up',
-  model_error: 'model error', bad_status: 'error status', empty_answer: 'empty answer', truncated: 'cut off', bad_answer: 'unreadable answer',
-  not_eligible: 'not eligible', too_large: 'too large', has_thinking: 'needs thinking', has_image: 'has an image or document',
-  no_local_model: 'no local model', excluded: 'excluded', other: 'other',
-}
-const gwReasons = computed(() => Object.entries(gw.value?.fallthrough_reasons ?? {}).sort((p, q) => q[1] - p[1]))
-const gwReasonText = (n: number) => gwReasons.value.slice(0, n).map(([k, v]) => `${fmtCompact(v)} ${FALL_LABEL[k] ?? k}`).join(' · ')
+// Why the local model did not answer: whatever reason codes the gateway
+// records, named in plain words (utils/gatewayReasons), new codes included.
+const reasonRows = computed(() => gatewayReasonRows(gw.value?.fallthrough_reasons))
+const gwReasonText = (n: number) => reasonRows.value.slice(0, n).map((r) => `${fmtCompact(r.value)} ${r.label}`).join(' · ')
 // Failed requests by route and status class: cloud ones are the provider's
 // own answers passed through, not the local model.
 const FAIL_LABEL: Record<string, string> = {
   cloud_4xx: 'cloud 4xx', cloud_5xx: 'cloud 5xx', local_4xx: 'local 4xx', local_5xx: 'local 5xx', rejected_4xx: 'refused', rejected_5xx: 'gateway 5xx',
 }
 const failText = computed(() => Object.entries(gw.value?.failed_by ?? {}).sort((p, q) => q[1] - p[1]).map(([k, v]) => `${fmtCompact(v)} ${FAIL_LABEL[k] ?? k}`).join(' · '))
-const reasonRows = computed(() => gwReasons.value.map(([k, v]) => ({ label: FALL_LABEL[k] ?? k, value: v, detail: k })))
 const secs = (v: number | null | undefined) => (v == null ? '–' : v < 10 ? `${v.toFixed(1)} s` : `${Math.round(v)} s`)
 const chartWindow = computed(() => `${seriesRangeLabel(range.value)}${days.value > 30 ? ' (the metrics store keeps 30 days)' : ''}`)
 </script>
@@ -74,7 +68,7 @@ const chartWindow = computed(() => `${seriesRangeLabel(range.value)}${days.value
         <StatTile
           v-if="gw.fallthroughs !== undefined" label="Not answered locally" :value="fmtCompact(gw.fallthroughs)"
           :hint="gwReasonText(2)"
-          :tip="gw.fallthroughs ? `by reason: ${gwReasonText(gwReasons.length)}. Requests it does not take (too large, thinking, images, not eligible) are expected; timeouts and errors are the local model's own` : 'the local model answered every request offered to it'"
+          :tip="gw.fallthroughs ? `by reason: ${gwReasonText(reasonRows.length)}. Requests it does not take (too large, thinking, images, not eligible) are expected; timeouts and errors are the local model's own` : 'the local model answered every request offered to it'"
         />
         <StatTile
           v-if="gw.local_avg_seconds !== undefined" label="Response time, local" :value="secs(gw.local_avg_seconds)"
@@ -98,6 +92,15 @@ const chartWindow = computed(() => `${seriesRangeLabel(range.value)}${days.value
 
     <div v-if="metricsOff" class="empty"><strong>Time series are not switched on</strong>They need VictoriaMetrics: the compose stack runs it, other installs set <code>CODESYNAPSE_METRICS_URL</code> (and <code>CODESYNAPSE_METRICS_PASSWORD</code>) on the API and MCP services.</div>
     <template v-else>
+      <section class="panel">
+        <p class="eyebrow">Local or cloud</p><h2>Which route took the requests, over time</h2>
+        <p class="muted small">{{ chartWindow }}. The share the local model answered per step, and the requests each route took.</p>
+        <div class="grid cols-2">
+          <SeriesCard v-if="show('gateway_local_share')" panel="gateway_local_share" :range="range" :batched="batch.gateway_local_share ?? null" :batch-pending="batchPending" @unavailable="(st) => unavailable('gateway_local_share', st)" />
+          <SeriesCard v-if="show('gateway_routes')" panel="gateway_routes" :range="range" :batched="batch.gateway_routes ?? null" :batch-pending="batchPending" :label="gatewayRouteLabel" @unavailable="(st) => unavailable('gateway_routes', st)" />
+        </div>
+      </section>
+
       <section class="panel">
         <div class="section-head">
           <div>
@@ -126,6 +129,8 @@ const chartWindow = computed(() => `${seriesRangeLabel(range.value)}${days.value
         <h3>Not answered locally, by reason</h3>
         <p class="muted small">Requests in {{ windowLabel(days) }}. Requests it does not take (too large, thinking, images, not eligible) are expected; timeouts and errors are the local model's own.</p>
         <RankList :rows="reasonRows" color="var(--s-1)" empty="The local model answered every request offered to it." />
+        <p v-if="gw?.cloud_without_reason" class="muted small">{{ fmtCompact(gw.cloud_without_reason) }} cloud {{ gw.cloud_without_reason === 1 ? 'request has' : 'requests have' }} no recorded reason: the gateway sent {{ gw.cloud_without_reason === 1 ? 'it' : 'them' }} to the cloud without offering {{ gw.cloud_without_reason === 1 ? 'it' : 'them' }} to the local model.</p>
+        <SeriesCard v-if="show('gateway_fallthrough')" panel="gateway_fallthrough" :range="range" :batched="batch.gateway_fallthrough ?? null" :batch-pending="batchPending" :label="gatewayReasonLabel" @unavailable="(st) => unavailable('gateway_fallthrough', st)" />
       </section>
     </template>
   </div>

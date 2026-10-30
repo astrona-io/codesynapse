@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -225,6 +226,8 @@ func TestGatewayPanels(t *testing.T) {
 		{"gateway_latency", []string{"histogram_quantile(0.95", "gateway_request_duration_seconds_bucket"}, "route"},
 		{"gateway_latency_avg", []string{"gateway_request_duration_seconds_sum", "gateway_request_duration_seconds_count[$w])) > 0)"}, "route"},
 		{"gateway_fallthrough", []string{"gateway_fallthrough_total"}, "reason"},
+		{"gateway_routes", []string{"sum by (route) (increase(gateway_requests_total[$w]))"}, "route"},
+		{"gateway_local_share", []string{`gateway_requests_total{route="local"}`, "gateway_requests_total[$w])) > 0)"}, ""},
 		{"gateway_timeouts", []string{`reason=~"queue_timeout|answer_timeout"`}, "reason"},
 		{"gateway_queue_wait", []string{"gateway_queue_wait_seconds_sum", "gateway_queue_wait_seconds_bucket"}, ""},
 	} {
@@ -285,4 +288,51 @@ func TestGatewayQuantilePanels(t *testing.T) {
 	assert.Equal(t, len(hideSmallPanel(lines, map[string]int{"": minGroupOrgs - 1})), 0, "a route few organisations used is not shown")
 	assert.Equal(t, len(hideSmallPanel(lines, map[string]int{"": minGroupOrgs})), 2)
 	assert.Equal(t, len(hideSmallPanel(lines, map[string]int{})), 0, "no count is no organisation")
+}
+
+// The Gateway view's panels (route trend, local share, reasons) answer
+// each member for their own organisation only: the tenant reaches
+// VictoriaMetrics as extra_filters from the session, never from the
+// request, and a caller without a session gets nothing.
+func TestGatewayViewScopedToCaller(t *testing.T) {
+	vm := &fakeVM{}
+	vmSrv := httptest.NewServer(vm)
+	defer vmSrv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	acc := accounts.NewService(acctmem.New(), true)
+	bootstrapAccounts(t, acc)
+	ts := httptest.NewServer(New(ctx, Config{Accounts: acc, Metrics: &telemetry.Querier{URL: vmSrv.URL}}, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil))))
+	defer ts.Close()
+
+	const panels = "gateway_routes,gateway_local_share,gateway_fallthrough"
+	for _, who := range []string{"ada", "bob"} {
+		c := newClient(t, ts)
+		var signed struct{ Org accounts.Org }
+		require.Equal(t, c.signUp(`{"email":"`+who+`@example.com","name":"`+who+`","password":"`+pw+`"}`, &signed), 202)
+		var batch struct {
+			Panels map[string]SeriesBatchItem
+		}
+		require.Equal(t, c.do("GET", "/api/v1/stats/series/batch?panels="+panels+"&range=7d&tenant_id=other", "", &batch), 200)
+		for _, name := range strings.Split(panels, ",") {
+			assert.Equal(t, batch.Panels[name].Status, 200, who+" "+name)
+		}
+		vm.mu.Lock()
+		filters, queries := slices.Clone(vm.filters), slices.Clone(vm.queries)
+		vm.filters, vm.queries = nil, nil
+		vm.mu.Unlock()
+		// The daily rollup runs in the background across tenants, grouped
+		// by tenant_id; panel queries never name the tenant.
+		seen := 0
+		for i, f := range filters {
+			if strings.Contains(queries[i], "tenant_id") {
+				continue
+			}
+			seen++
+			assert.Equal(t, f, `{tenant_id=~"`+signed.Org.ID+`"}`, who+": every panel is scoped to the caller's organisation: "+queries[i])
+			assert.False(t, strings.Contains(queries[i], "other"), "client parameters never reach MetricsQL")
+		}
+		assert.True(t, seen >= 3, who+": each panel queried")
+	}
+	assert.Equal(t, newClient(t, ts).do("GET", "/api/v1/stats/series?panel=gateway_routes&range=7d", "", nil), 401, "no session, no figures")
 }

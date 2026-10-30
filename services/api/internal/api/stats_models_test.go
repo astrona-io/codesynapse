@@ -41,6 +41,7 @@ func modelVM(t *testing.T, filters *[]string) *httptest.Server {
 		gatewayQueries.tokens:       `{"kind":"input"}=100000;{"kind":"output"}=20000`,
 		gatewayQueries.unmetered:    ``,
 		gatewayQueries.fallthroughs: `{"reason":"queue_timeout"}=2;{"reason":"answer_timeout"}=1;{"reason":"has_image"}=1;{"reason":"made_up"}=1`,
+		gatewayQueries.cloudReasons: `{}=3`,
 		gatewayQueries.latencySum:   `{"route":"local"}=12;{"route":"cloud"}=20`,
 		gatewayQueries.latencyCount: `{"route":"local"}=6;{"route":"cloud"}=4`,
 		gatewayQueries.latencyP95:   `{"route":"local"}=4.5;{"route":"cloud"}=NaN`,
@@ -112,6 +113,7 @@ func TestModelStats(t *testing.T) {
 	assert.Equal(t, *gw.SavedDollars, 0.6, "100k in at $3 and 20k out at $15 per million")
 	assert.Equal(t, []float64{gw.Fallthroughs, gw.Timeouts, gw.TimeoutSharePct}, []float64{5, 3, 25})
 	assert.Equal(t, gw.FallthroughReasons, map[string]float64{"queue_timeout": 2, "answer_timeout": 1, "has_image": 1, "other": 1}, "reasons outside the fixed set are other")
+	assert.Equal(t, gw.CloudWithoutReason, 1.0, "4 cloud requests, 3 with a reason")
 	require.True(t, gw.LocalAvgSeconds != nil && gw.CloudAvgSeconds != nil && gw.LocalP95Seconds != nil)
 	assert.Equal(t, []float64{*gw.LocalAvgSeconds, *gw.CloudAvgSeconds, *gw.LocalP95Seconds}, []float64{2, 5, 4.5})
 	assert.True(t, gw.CloudP95Seconds == nil, "a NaN quantile is left out")
