@@ -164,7 +164,8 @@ The reasons a request was not answered locally are a fixed list:
 
 | Reason | Meaning |
 |---|---|
-| `not_eligible` | The organisation answers only haiku-class requests locally, and this one asked for a larger model |
+| `not_eligible` | The installation's own eligibility rule does not offer this model to the local model |
+| `local_first_off` | The organisation turned `local_first` off, so only haiku-class requests are offered locally, and this one asked for a larger model |
 | `bad_request` | The gateway could not read the request: broken JSON, no messages, a role other than `user` or `assistant`, or content that is neither text nor blocks. The cloud answers it, usually with its own error |
 | `system_not_text` | The system prompt is neither a string nor a list of text blocks |
 | `unsupported_block` | A message holds a block the local model cannot take, such as `server_tool_use`, `web_search_tool_result` or an unknown block type, also inside a tool result. Text, `tool_use`, `tool_result`, `search_result` and `tool_reference` blocks are converted, and `cache_control` and citation settings are dropped |
@@ -173,7 +174,7 @@ The reasons a request was not answered locally are a fixed list:
 | `has_thinking` | The request asks for thinking or sends thinking back, and the organisation turned `local_thinking` off |
 | `has_image` | The request carries an image or a document, also inside a tool result |
 | `excluded` | The model is on the installation's or organisation's exclude list |
-| `no_local_model` | No local provider with `gateway: true` is configured |
+| `no_local_model` | No local provider with `gateway: true` is configured, so the request was not offered locally |
 | `count_tokens` | A token count (`/v1/messages/count_tokens`): always counted by the cloud, never estimated locally |
 | `queue_timeout` | No local slot was free within `gateway_wait_seconds` |
 | `answer_timeout` | The local model started but did not finish within the provider's `timeout_seconds` |

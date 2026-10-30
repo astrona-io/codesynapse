@@ -178,8 +178,9 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			meta.notePrompt(r.Context(), anthropicUserText(body))
 		}
 		local := g.local()
-		if local == nil && g.Local != nil && upstreamPath == "/v1/messages" {
-			// A gateway meant to answer locally has no local model right now.
+		if local == nil && upstreamPath == "/v1/messages" {
+			// No local model to offer the request to, now or at all: every
+			// cloud leg of /v1/messages names why it went there.
 			meta.Fallthrough = FallNoLocalModel
 		}
 		if local != nil && upstreamPath == "/v1/messages" {
