@@ -1,0 +1,72 @@
+{
+  "symbol": {
+    "id": "Method|(*~/store.Store).Get",
+    "qualified_id": "(*store.Store).Get",
+    "kind": "Method",
+    "location": "store/store.go:10-20",
+    "signature": "func (s *Store) Get(key string) (string, error)"
+  },
+  "risk": {
+    "score": 6,
+    "level": "low",
+    "reasons": [
+      "2 direct callers"
+    ]
+  },
+  "counts": {
+    "callers": 2,
+    "callees": 0,
+    "tests": 1,
+    "entry_points": 1,
+    "caller_tests_checked": 1
+  },
+  "callers": [
+    {
+      "qualified_id": "api.handleGet",
+      "kind": "Function",
+      "location": "api/api.go:12-30",
+      "depth": 1,
+      "entry_point": true,
+      "evidence": "unknown"
+    },
+    {
+      "qualified_id": "store.New",
+      "kind": "Function",
+      "location": "store/store.go:22-26",
+      "depth": 1,
+      "evidence": "unknown"
+    }
+  ],
+  "callees": [],
+  "tests": [
+    {
+      "qualified_id": "store.TestGet",
+      "kind": "Function",
+      "location": "store/store_test.go:3-9",
+      "depth": 1,
+      "is_test": true,
+      "evidence": "unknown"
+    }
+  ],
+  "untested_public_callers": [
+    {
+      "qualified_id": "api.handleGet",
+      "kind": "Function",
+      "location": "api/api.go:12-30",
+      "depth": 1,
+      "entry_point": true
+    }
+  ],
+  "reached_from": [
+    {
+      "qualified_id": "http GET /items",
+      "kind": "Route",
+      "location": "api/api.go:8",
+      "depth": 2
+    }
+  ],
+  "churn": {
+    "file": "store/store.go",
+    "commits": 0
+  }
+}
