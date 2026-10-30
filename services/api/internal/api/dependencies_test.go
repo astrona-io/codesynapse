@@ -25,3 +25,9 @@ func TestDependenciesOf(t *testing.T) {
 	assert.Equal(t, got.Packages[1].License, "unknown", "the licence report's name for no licence")
 	assert.Equal(t, got.Packages[3], Package{Ecosystem: "npm", Name: "vue", Version: "1.0.0", License: "MIT", Direct: true})
 }
+
+func TestScorecardOf(t *testing.T) {
+	assert.True(t, scorecardOf(model.Node{Scorecard: 5}) == nil, "no date, no Scorecard")
+	got := scorecardOf(model.Node{Scorecard: 0, ScorecardDate: "2026-10-19", ScorecardChecks: []string{"Code-Review:0", "Made-Up:1", "Maintained:2"}})
+	assert.Equal(t, *got, Scorecard{Score: 0, Date: "2026-10-19", Checks: []ScorecardCheck{{"Code-Review", 0}, {"Maintained", 2}}})
+}

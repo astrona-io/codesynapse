@@ -49,6 +49,7 @@ func Apply(repo string, g *model.Graph, modules []Module, vulns []Vulnerability,
 		g.AddNode(model.Node{ID: id, Kind: model.KindModule, Repo: repo, Name: m.Path, QualifiedName: m.Path, Version: m.Version, Indirect: m.Indirect, Ecosystem: m.ecosystem(),
 			Dev: m.Dev, License: m.License, LicenseSource: m.LicenseSource, Via: m.Via, Roots: m.Roots,
 			Latest: m.Latest, Deprecated: m.Deprecated, Behind: m.Behind, Retracted: m.Retracted,
+			Scorecard: m.Scorecard, ScorecardDate: m.ScorecardDate, ScorecardChecks: m.ScorecardChecks,
 			Summary: redact.Summary(m.replacementNote(), 160)})
 		g.AddEdge(model.Edge{From: repoID, To: id, Kind: model.EdgeDependsOn})
 	}

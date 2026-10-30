@@ -3,6 +3,7 @@ package license
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -82,10 +83,12 @@ func (c *DepsDev) get(ctx context.Context, path string, v any) error {
 		return err
 	}
 	req.Header.Set("User-Agent", "codesynapse")
-	hc := c.HTTP
-	if hc == nil {
-		hc = &http.Client{Timeout: 15 * time.Second}
+	hc := &http.Client{Timeout: 15 * time.Second}
+	if c.HTTP != nil {
+		cp := *c.HTTP
+		hc = &cp
 	}
+	hc.CheckRedirect = noRedirect
 	start := time.Now()
 	res, err := hc.Do(req)
 	telemetry.RecordHTTPLookup(ctx, telemetry.LookupDepsDev, start, res, err)
@@ -98,6 +101,12 @@ func (c *DepsDev) get(ctx context.Context, path string, v any) error {
 	}
 	return json.NewDecoder(io.LimitReader(res.Body, maxResponse)).Decode(v)
 }
+
+var errRedirect = errors.New("redirect refused")
+
+// noRedirect keeps every request on deps.dev: a redirect could hand the
+// package name to another host.
+func noRedirect(*http.Request, []*http.Request) error { return errRedirect }
 
 // Version is one published version of a package on deps.dev.
 type Version struct {
@@ -158,4 +167,76 @@ func (c *DepsDev) one(ctx context.Context, d Dep) (string, error) {
 		}
 	}
 	return strings.Join(parts, " AND "), nil
+}
+
+// SourceProject is the ID deps.dev gives the source repository of one
+// package version ("github.com/owner/repo"), or "" when it names none. The
+// request carries only the ecosystem, package name and version.
+func (c *DepsDev) SourceProject(ctx context.Context, ecosystem, name, version string) (string, error) {
+	sys, ok := systems[ecosystem]
+	if !ok || name == "" || version == "" {
+		return "", nil
+	}
+	var v struct {
+		RelatedProjects []struct {
+			ProjectKey struct {
+				ID string `json:"id"`
+			} `json:"projectKey"`
+			RelationType string `json:"relationType"`
+		} `json:"relatedProjects"`
+	}
+	if err := c.get(ctx, fmt.Sprintf("/v3/systems/%s/packages/%s/versions/%s", sys, escape(name), escape(version)), &v); err != nil {
+		return "", err
+	}
+	for _, p := range v.RelatedProjects {
+		if p.RelationType == "SOURCE_REPO" && p.ProjectKey.ID != "" {
+			return p.ProjectKey.ID, nil
+		}
+	}
+	return "", nil
+}
+
+// Scorecard is the OpenSSF Scorecard deps.dev holds for a project, as the
+// API sent it; package hygiene validates it before anything is kept.
+type Scorecard struct {
+	Date    time.Time
+	Overall float64
+	Checks  []ScorecardCheck
+}
+
+// ScorecardCheck is one Scorecard check: its name and its score from 0 to
+// 10, negative when the check did not run.
+type ScorecardCheck struct {
+	Name  string
+	Score float64
+}
+
+// Scorecard returns the OpenSSF Scorecard of the project with the given ID
+// (as SourceProject returned it), or nil when deps.dev has none. The
+// request carries only the project ID.
+func (c *DepsDev) Scorecard(ctx context.Context, projectID string) (*Scorecard, error) {
+	if projectID == "" {
+		return nil, nil
+	}
+	var v struct {
+		Scorecard *struct {
+			Date   time.Time `json:"date"`
+			Checks []struct {
+				Name  string  `json:"name"`
+				Score float64 `json:"score"`
+			} `json:"checks"`
+			OverallScore float64 `json:"overallScore"`
+		} `json:"scorecard"`
+	}
+	if err := c.get(ctx, "/v3/projects/"+escape(projectID), &v); err != nil {
+		return nil, err
+	}
+	if v.Scorecard == nil {
+		return nil, nil
+	}
+	out := &Scorecard{Date: v.Scorecard.Date, Overall: v.Scorecard.OverallScore}
+	for _, ch := range v.Scorecard.Checks {
+		out.Checks = append(out.Checks, ScorecardCheck{Name: ch.Name, Score: ch.Score})
+	}
+	return out, nil
 }
