@@ -50,7 +50,7 @@ var gatewayReasons = map[string]bool{
 	"excluded": true, "queue_timeout": true, "cancelled": true, "answer_timeout": true,
 	"model_error": true, "bad_status": true, "empty_answer": true, "truncated": true,
 	"bad_answer": true, "no_local_model": true, "bad_request": true, "system_not_text": true,
-	"unsupported_block": true, "unsupported_tool": true,
+	"unsupported_block": true, "unsupported_tool": true, "count_tokens": true,
 }
 
 // GatewayReasons is the fixed set of fall-through reasons, sorted, for the
