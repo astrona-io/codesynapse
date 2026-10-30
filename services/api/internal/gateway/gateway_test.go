@@ -368,7 +368,7 @@ func TestReadChunkCache(t *testing.T) {
 		{"clamped to the prompt", `data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":1},"timings":{"cache_n":70}}`, 9},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c, ok := readChunk(bufio.NewScanner(strings.NewReader(tc.line + "\n")))
+			c, ok := (&streamReader{sc: bufio.NewScanner(strings.NewReader(tc.line + "\n"))}).next()
 			require.True(t, ok)
 			assert.Equal(t, c.Cached, tc.cached)
 		})

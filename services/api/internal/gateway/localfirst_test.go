@@ -38,7 +38,7 @@ func TestLocalFirst(t *testing.T) {
 		"fits the window":             {true, 8192, completeAnswer, opus, "local", ""},
 		"empty answer":                {true, 0, emptyAnswer, opus, "cloud", FallEmptyAnswer},
 		"stopped at max tokens":       {true, 0, truncatedAnswer, opus, "cloud", FallTruncated},
-		"stream broke off":            {true, 0, brokenOffAnswer, opus, "cloud", FallTruncated},
+		"stream broke off":            {true, 0, brokenOffAnswer, opus, "cloud", FallModelError},
 		"nothing came":                {true, 0, "data: [DONE]\n\n", opus, "cloud", FallEmptyAnswer},
 		"large request, known window": {true, 1 << 20, completeAnswer, `{"model":"claude-opus-5-5","max_tokens":100,"messages":[{"role":"user","content":"` + strings.Repeat("a", 512<<10) + `"}]}`, "local", ""},
 		"large request, no window":    {true, 0, completeAnswer, `{"model":"claude-opus-5-5","max_tokens":100,"messages":[{"role":"user","content":"` + strings.Repeat("a", 512<<10) + `"}]}`, "cloud", FallTooLarge},
@@ -89,7 +89,7 @@ func TestLocalFirstShortLimit(t *testing.T) {
 		"one token":            {truncatedAnswer, body(1), "local", ""},
 		"at the short limit":   {truncatedAnswer, body(shortAnswer), "local", ""},
 		"above the limit":      {truncatedAnswer, body(shortAnswer + 1), "cloud", FallTruncated},
-		"stream broke off":     {brokenOffAnswer, body(1), "cloud", FallTruncated},
+		"stream broke off":     {brokenOffAnswer, body(1), "cloud", FallModelError},
 		"cut off with nothing": {"data: {\"choices\":[{\"delta\":{\"content\":\" \"},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n", body(1), "cloud", FallTruncated},
 	}
 	for name, tc := range cases {
