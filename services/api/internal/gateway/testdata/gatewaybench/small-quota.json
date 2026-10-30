@@ -1,0 +1,13 @@
+{
+ "max_tokens": 1,
+ "messages": [
+  {
+   "content": "quota",
+   "role": "user"
+  }
+ ],
+ "metadata": {
+  "user_id": "bench-user"
+ },
+ "model": "claude-haiku-4-5"
+}

@@ -1,0 +1,967 @@
+{
+ "max_tokens": 32000,
+ "messages": [
+  {
+   "content": [
+    {
+     "text": "\u003csystem-reminder\u003e\nAs you answer the user's questions, you can use the following context:\n# projectInstructions\nContents of /work/lumen/NOTES.md (project instructions, checked into the codebase):\n\nLumen is a small inventory service. Handlers live in api/, storage in store/, domain rules in stock/. Run `make test` before you finish. Errors are wrapped with context; never log customer addresses. Tests are table-driven and use the helpers in internal/check.\n\nIMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n\u003c/system-reminder\u003e",
+     "type": "text"
+    },
+    {
+     "text": "The stock reservation endpoint returns 500 when two orders reserve the last item at the same time. Find out why and fix it so the second order gets a 409 with a clear message. Keep the change small and add a test.",
+     "type": "text"
+    }
+   ],
+   "role": "user"
+  },
+  {
+   "content": [
+    {
+     "signature": "U2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2g",
+     "thinking": "The 500 suggests an unhandled error from the store when the quantity would go negative. I should find where reservations are written.",
+     "type": "thinking"
+    },
+    {
+     "text": "I'll look for where reservations are stored.",
+     "type": "text"
+    },
+    {
+     "id": "toolu_bench_01",
+     "input": {
+      "-n": true,
+      "output_mode": "content",
+      "path": "/work/lumen",
+      "pattern": "func .*Reserve"
+     },
+     "name": "Grep",
+     "type": "tool_use"
+    }
+   ],
+   "role": "assistant"
+  },
+  {
+   "content": [
+    {
+     "content": "/work/lumen/stock/reserve.go:41:func (s *Service) Reserve(ctx context.Context, sku string, qty int) (Reservation, error) {\n/work/lumen/store/pg.go:118:func (db *DB) ReserveStock(ctx context.Context, sku string, qty int) (int, error) {\n/work/lumen/api/reserve.go:22:func (h *Handler) Reserve(w http.ResponseWriter, r *http.Request) {",
+     "tool_use_id": "toolu_bench_01",
+     "type": "tool_result"
+    }
+   ],
+   "role": "user"
+  },
+  {
+   "content": [
+    {
+     "text": "Let me read the service and the store method.",
+     "type": "text"
+    },
+    {
+     "id": "toolu_bench_02",
+     "input": {
+      "file_path": "/work/lumen/stock/reserve.go"
+     },
+     "name": "Read",
+     "type": "tool_use"
+    },
+    {
+     "id": "toolu_bench_03",
+     "input": {
+      "file_path": "/work/lumen/store/pg.go",
+      "limit": 60,
+      "offset": 100
+     },
+     "name": "Read",
+     "type": "tool_use"
+    }
+   ],
+   "role": "assistant"
+  },
+  {
+   "content": [
+    {
+     "content": "     1\tpackage stock\n     2\t\n     3\timport (\n     4\t\t\"context\"\n     5\t\t\"fmt\"\n     6\t\t\"time\"\n     7\t\n     8\t\t\"lumen/store\"\n     9\t)\n    10\t\n    11\t// ErrOutOfStock means the item cannot cover the requested quantity.\n    12\tvar ErrOutOfStock = fmt.Errorf(\"not enough stock\")\n    13\t\n    14\t// Reservation holds items for an order until it is paid or expires.\n    15\ttype Reservation struct {\n    16\t\tSKU     string\n    17\t\tQty     int\n    18\t\tLeft    int\n    19\t\tExpires time.Time\n    20\t}\n    21\t\n    22\t// Service applies the stock rules.\n    23\ttype Service struct {\n    24\t\tdb  *store.DB\n    25\t\tttl time.Duration\n    26\t}\n    27\t\n    28\t// New returns a Service whose reservations expire after ttl.\n    29\tfunc New(db *store.DB, ttl time.Duration) *Service {\n    30\t\treturn \u0026Service{db: db, ttl: ttl}\n    31\t}\n    32\t\n    33\t// Reserve takes qty items of sku out of the free stock.\n    34\tfunc (s *Service) Reserve(ctx context.Context, sku string, qty int) (Reservation, error) {\n    35\t\tif qty \u003c= 0 {\n    36\t\t\treturn Reservation{}, fmt.Errorf(\"reserve %s: quantity must be positive\", sku)\n    37\t\t}\n    38\t\tleft, err := s.db.ReserveStock(ctx, sku, qty)\n    39\t\tif err != nil {\n    40\t\t\treturn Reservation{}, fmt.Errorf(\"reserve %s: %w\", sku, err)\n    41\t\t}\n    42\t\treturn Reservation{SKU: sku, Qty: qty, Left: left, Expires: time.Now().Add(s.ttl)}, nil\n    43\t}\n    44\t\n    45\t// Release returns a reservation's items to the free stock.\n    46\tfunc (s *Service) Release(ctx context.Context, r Reservation) error {\n    47\t\tif err := s.db.ReleaseStock(ctx, r.SKU, r.Qty); err != nil {\n    48\t\t\treturn fmt.Errorf(\"release %s: %w\", r.SKU, err)\n    49\t\t}\n    50\t\treturn nil\n    51\t}\n",
+     "tool_use_id": "toolu_bench_02",
+     "type": "tool_result"
+    },
+    {
+     "content": "   100\t// ReserveStock subtracts qty from the free quantity and returns what is left.\n   101\t// The quantity column has CHECK (quantity \u003e= 0), so a reservation that would\n   102\t// oversell fails in the database rather than here.\n   103\tfunc (db *DB) ReserveStock(ctx context.Context, sku string, qty int) (int, error) {\n   104\t\tvar left int\n   105\t\terr := db.pool.QueryRow(ctx,\n   106\t\t\t\"UPDATE stock SET quantity = quantity - $2 WHERE sku = $1 RETURNING quantity\",\n   107\t\t\tsku, qty).Scan(\u0026left)\n   108\t\tif err != nil {\n   109\t\t\treturn 0, fmt.Errorf(\"update stock: %w\", err)\n   110\t\t}\n   111\t\treturn left, nil\n   112\t}\n   113\t\n   114\t// ReleaseStock adds qty back to the free quantity.\n   115\tfunc (db *DB) ReleaseStock(ctx context.Context, sku string, qty int) error {\n   116\t\t_, err := db.pool.Exec(ctx, \"UPDATE stock SET quantity = quantity + $2 WHERE sku = $1\", sku, qty)\n   117\t\tif err != nil {\n   118\t\t\treturn fmt.Errorf(\"release stock: %w\", err)\n   119\t\t}\n   120\t\treturn nil\n   121\t}\n",
+     "tool_use_id": "toolu_bench_03",
+     "type": "tool_result"
+    }
+   ],
+   "role": "user"
+  },
+  {
+   "content": [
+    {
+     "signature": "U2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2gU2lnbmF0dXJlQmVuY2g",
+     "thinking": "I'll add ErrCheck to the store, map it in the service, map ErrOutOfStock to 409 in the handler and add a table case.",
+     "type": "thinking"
+    },
+    {
+     "id": "toolu_bench_06",
+     "input": {
+      "file_path": "/work/lumen/stock/reserve.go",
+      "new_string": "\tif errors.Is(err, store.ErrCheck) {\n\t\treturn Reservation{}, ErrOutOfStock\n\t}\n\tif err != nil {\n\t\treturn Reservation{}, fmt.Errorf(\"reserve %s: %w\", sku, err)\n\t}",
+      "old_string": "\tif err != nil {\n\t\treturn Reservation{}, fmt.Errorf(\"reserve %s: %w\", sku, err)\n\t}"
+     },
+     "name": "Edit",
+     "type": "tool_use"
+    }
+   ],
+   "role": "assistant"
+  },
+  {
+   "content": [
+    {
+     "content": "The file /work/lumen/stock/reserve.go has been updated.",
+     "tool_use_id": "toolu_bench_06",
+     "type": "tool_result"
+    }
+   ],
+   "role": "user"
+  },
+  {
+   "content": [
+    {
+     "id": "toolu_bench_07",
+     "input": {
+      "command": "cd /work/lumen \u0026\u0026 make test",
+      "description": "Run the test suite"
+     },
+     "name": "Bash",
+     "type": "tool_use"
+    }
+   ],
+   "role": "assistant"
+  },
+  {
+   "content": [
+    {
+     "content": "ok  \tlumen/api\t0.211s\nok  \tlumen/orders\t0.322s\nok  \tlumen/pricing\t0.359s\nok  \tlumen/shipping\t0.396s\nok  \tlumen/stock\t0.285s\nok  \tlumen/store\t0.285s\nok  \tlumen/audit\t0.285s\nPASS",
+     "tool_use_id": "toolu_bench_07",
+     "type": "tool_result"
+    }
+   ],
+   "role": "user"
+  }
+ ],
+ "metadata": {
+  "user_id": "bench-user"
+ },
+ "model": "claude-opus-5-5",
+ "stream": true,
+ "system": [
+  {
+   "text": "You are a coding assistant running in a terminal.",
+   "type": "text"
+  },
+  {
+   "cache_control": {
+    "type": "ephemeral"
+   },
+   "text": "You are a coding assistant that works in the user's terminal. You help with software engineering tasks: fixing bugs, adding features, explaining code, refactoring and reviewing changes. Use the instructions below and the tools available to you.\n\n# Tone and style\nBe concise and direct. Answer in fewer than four lines unless the user asks for detail or the task needs it. Do not add a preamble or a summary of what you just did unless asked. When you run a command that changes the system, say briefly what it does and why. Use GitHub-flavoured Markdown; it is rendered in a monospace font. Never use emojis unless the user asks for them. Output text to talk to the user; never use tool calls or code comments as a way to talk to the user.\n\n# Being proactive\nDo what the user asked, including reasonable follow-up actions, but do not surprise them with changes they did not ask for. When the user asks how to approach something, answer the question first rather than starting to change files. Do not add explanations of your code changes unless the user asks.\n\n# Following conventions\nBefore you change a file, understand its conventions: mimic its style, use the libraries and helpers it already uses and follow its patterns. Never assume a library is available, even a well-known one; check the dependency manifest or neighbouring files first. When you create a component, look at existing ones first. When you edit code, look at its imports and surrounding context so the change is idiomatic. Follow security best practices: never write code that exposes or logs secrets or keys, and never commit them.\n\n# Code style\nDo not add comments to the code you write unless the user asks or the code is complex and needs the context. Comments say why, not what.\n\n# Task management\nUse the TodoWrite tool to plan and track tasks that need several steps. Mark a todo as completed as soon as it is done; do not batch completions. Break larger tasks into smaller steps, and give the user visibility into your progress.\n\n# Doing tasks\nFor a software engineering task: search the codebase to understand it and the user's query, using the search tools extensively, in parallel and in sequence; implement the solution with the tools available; verify it with the project's tests where possible, never assuming a test framework or script; finally run the lint and typecheck commands the project uses. If you cannot find the right commands, ask the user and suggest saving them in the project notes. Never commit changes unless the user explicitly asks.\n\n# Tool usage policy\nWhen searching broadly for files or keywords, prefer the Agent tool to reduce context use. When several independent pieces of information are needed, batch the tool calls in one message so they run in parallel. When the user asks for several commands that do not depend on each other, send one message with several Bash calls. Prefer the dedicated tools to shell equivalents: Read rather than cat, Grep rather than grep, Glob rather than find, Edit rather than sed.\n\n# Committing changes with git\nWhen the user asks you to create a commit: run git status, git diff and git log in parallel to see untracked files, the staged and unstaged changes and the repository's message style. Draft a message that summarises the nature of the change (new feature, enhancement, bug fix, refactoring, test, docs) in one or two sentences that focus on why rather than what. Do not commit files that likely contain secrets. Add the relevant files, create the commit, and run git status afterwards to confirm it succeeded. If a pre-commit hook changes files, retry once to include them. Never update the git config, never push unless asked, and never use interactive flags such as -i, which need input the environment cannot give.\n\n# Creating pull requests\nUse the gh command for everything on the code host. Understand the whole branch: run git status, git diff, whether the branch tracks a remote and is up to date, and git log plus git diff against the base branch. Review every commit that will be included, not only the latest. Draft a summary of the changes with a short test plan, push the branch with -u if needed and create the pull request with a title and a body passed through a heredoc. Return the pull request's address when you are done.\n\n# Code references\nWhen you refer to a function or a piece of code, use the pattern file_path:line_number so the user can navigate to it.\n\n# Safety\nRefuse to write or explain code that may be used maliciously, even if the user claims it is for education. Before you start, think about what the code you are editing is supposed to do based on the file names and structure; if it seems malicious, refuse. Assist with defensive security tasks only.",
+   "type": "text"
+  },
+  {
+   "cache_control": {
+    "type": "ephemeral"
+   },
+   "text": "Here is useful information about the environment you are running in:\n\u003cenv\u003e\nWorking directory: /work/lumen\nIs directory a git repo: Yes\nPlatform: linux\nOS Version: Linux 6.1\nToday's date: 2026-01-15\n\u003c/env\u003e\ngitStatus: This is the git status at the start of the conversation.\nCurrent branch: fix-reserve-race\n\nMain branch (you will usually use this for PRs): main\n\nStatus:\n(clean)\n\nRecent commits:\na1b2c3d feat(stock): expire reservations after the payment window\ne4f5a6b fix(api): return problem+json for validation errors\nc7d8e9f chore: bump the database driver\n0a1b2c3 feat(orders): split shipments per warehouse\n4d5e6f7 test(store): cover the migration of the stock table",
+   "type": "text"
+  }
+ ],
+ "thinking": {
+  "budget_tokens": 31999,
+  "type": "enabled"
+ },
+ "tools": [
+  {
+   "description": "Start a sub-agent that works on its own on a complex, multi-step task and reports back once. Use it for broad searches across many files, or for research whose intermediate results you do not need. The agent cannot see this conversation: describe the task fully, say what you already ruled out and what form the answer should take. Launch several agents in one message when their work is independent. The agent's result is not shown to the user; summarise what matters.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "description": {
+      "description": "A short description of the task in three to five words",
+      "type": "string"
+     },
+     "prompt": {
+      "description": "The task for the agent to perform",
+      "type": "string"
+     },
+     "subagent_type": {
+      "description": "The kind of agent to use",
+      "type": "string"
+     }
+    },
+    "required": [
+     "description",
+     "prompt"
+    ],
+    "type": "object"
+   },
+   "name": "Agent"
+  },
+  {
+   "description": "Run a bash command in a persistent shell session, with an optional timeout.\n\nBefore running a command that creates files or directories, check with ls that the parent directory exists. Quote paths that contain spaces with double quotes. The command may set a timeout in milliseconds of up to 600000; the default is 120000. Output longer than 30000 characters is truncated.\n\nAvoid find, grep, cat, head, tail, sed, awk and echo for reading and searching: use Glob, Grep and Read instead. When you run several commands, separate them with ; or \u0026\u0026, never with newlines. Keep the working directory stable by using absolute paths rather than cd.\n\nWrite a clear, concise description of what the command does in five to ten words.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "command": {
+      "description": "The command to execute",
+      "type": "string"
+     },
+     "description": {
+      "description": "Clear, concise description of what this command does in five to ten words",
+      "type": "string"
+     },
+     "run_in_background": {
+      "description": "Run the command in the background and read its output later",
+      "type": "boolean"
+     },
+     "timeout": {
+      "description": "Optional timeout in milliseconds (max 600000)",
+      "type": "number"
+     }
+    },
+    "required": [
+     "command"
+    ],
+    "type": "object"
+   },
+   "name": "Bash"
+  },
+  {
+   "description": "Fast file pattern matching that works with any codebase size. Supports glob patterns such as \"**/*.go\" or \"api/**/*.ts\". Returns matching file paths sorted by modification time. Use it when you need to find files by name.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "path": {
+      "description": "The directory to search in; defaults to the working directory",
+      "type": "string"
+     },
+     "pattern": {
+      "description": "The glob pattern to match files against",
+      "type": "string"
+     }
+    },
+    "required": [
+     "pattern"
+    ],
+    "type": "object"
+   },
+   "name": "Glob"
+  },
+  {
+   "description": "A search tool built on ripgrep. Always use Grep for search tasks; never run grep or rg through Bash. Supports full regular expression syntax, filtering by glob or file type, and three output modes: content shows matching lines, files_with_matches shows only paths (the default), count shows match counts. Literal braces need escaping. Patterns match within single lines unless multiline is set.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "-A": {
+      "description": "Lines to show after each match; content mode only",
+      "type": "number"
+     },
+     "-B": {
+      "description": "Lines to show before each match; content mode only",
+      "type": "number"
+     },
+     "-i": {
+      "description": "Case insensitive search",
+      "type": "boolean"
+     },
+     "-n": {
+      "description": "Show line numbers in the output; content mode only",
+      "type": "boolean"
+     },
+     "glob": {
+      "description": "Glob pattern to filter files, such as \"*.go\"",
+      "type": "string"
+     },
+     "head_limit": {
+      "description": "Limit the output to the first N lines or entries",
+      "type": "number"
+     },
+     "multiline": {
+      "description": "Let patterns span lines",
+      "type": "boolean"
+     },
+     "output_mode": {
+      "description": "Output mode; defaults to files_with_matches",
+      "enum": [
+       "content",
+       "files_with_matches",
+       "count"
+      ],
+      "type": "string"
+     },
+     "path": {
+      "description": "File or directory to search in; defaults to the working directory",
+      "type": "string"
+     },
+     "pattern": {
+      "description": "The regular expression to search for in file contents",
+      "type": "string"
+     },
+     "type": {
+      "description": "File type to search, such as go or py",
+      "type": "string"
+     }
+    },
+    "required": [
+     "pattern"
+    ],
+    "type": "object"
+   },
+   "name": "Grep"
+  },
+  {
+   "description": "Read a file from the local filesystem. The file_path must be absolute. By default it reads up to 2000 lines from the start of the file; for long files give an offset and a limit. Lines longer than 2000 characters are truncated. Results are returned with line numbers starting at 1. It can read images, PDFs and notebooks too. Read several files in one message when you need them all.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "file_path": {
+      "description": "The absolute path to the file to read",
+      "type": "string"
+     },
+     "limit": {
+      "description": "The number of lines to read",
+      "type": "number"
+     },
+     "offset": {
+      "description": "The line number to start reading from",
+      "type": "number"
+     }
+    },
+    "required": [
+     "file_path"
+    ],
+    "type": "object"
+   },
+   "name": "Read"
+  },
+  {
+   "description": "Perform an exact string replacement in a file. You must read the file in this conversation before editing it. Keep the indentation exactly as it appears after the line number prefix of the Read output, and never include the prefix itself in old_string or new_string. The edit fails when old_string is not unique in the file; give more surrounding context to make it unique, or set replace_all to change every instance.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "file_path": {
+      "description": "The absolute path to the file to modify",
+      "type": "string"
+     },
+     "new_string": {
+      "description": "The text to replace it with; must differ from old_string",
+      "type": "string"
+     },
+     "old_string": {
+      "description": "The text to replace",
+      "type": "string"
+     },
+     "replace_all": {
+      "description": "Replace every occurrence of old_string",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "file_path",
+     "old_string",
+     "new_string"
+    ],
+    "type": "object"
+   },
+   "name": "Edit"
+  },
+  {
+   "description": "Write a file to the local filesystem, overwriting it if it exists. Read an existing file first. Prefer editing existing files; never create documentation files unless asked.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "content": {
+      "description": "The content to write to the file",
+      "type": "string"
+     },
+     "file_path": {
+      "description": "The absolute path to the file to write",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_path",
+     "content"
+    ],
+    "type": "object"
+   },
+   "name": "Write"
+  },
+  {
+   "description": "Create and manage a structured task list for the current session. Use it for tasks with three or more distinct steps, when the user gives several tasks, or after new instructions arrive. Keep exactly one task in progress at a time and mark tasks completed as soon as they are done.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "todos": {
+      "description": "The updated todo list",
+      "items": {
+       "additionalProperties": false,
+       "properties": {
+        "content": {
+         "minLength": 1,
+         "type": "string"
+        },
+        "id": {
+         "type": "string"
+        },
+        "status": {
+         "enum": [
+          "pending",
+          "in_progress",
+          "completed"
+         ],
+         "type": "string"
+        }
+       },
+       "required": [
+        "content",
+        "status",
+        "id"
+       ],
+       "type": "object"
+      },
+      "type": "array"
+     }
+    },
+    "required": [
+     "todos"
+    ],
+    "type": "object"
+   },
+   "name": "TodoWrite"
+  },
+  {
+   "description": "Fetch a web page and answer a question about its content with a small model. The URL must be fully formed; http is upgraded to https. Results may be summarised when the page is large. Read-only.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "prompt": {
+      "description": "What to find out from the page",
+      "type": "string"
+     },
+     "url": {
+      "description": "The URL to fetch",
+      "format": "uri",
+      "type": "string"
+     }
+    },
+    "required": [
+     "url",
+     "prompt"
+    ],
+    "type": "object"
+   },
+   "name": "WebFetch"
+  },
+  {
+   "description": "Search the issue tracker for issues matching a query, newest first, with their state, labels and assignee. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "limit": {
+      "description": "The limit to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "query": {
+      "description": "The query to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "state": {
+      "description": "The state to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__tracker__search_issues"
+  },
+  {
+   "description": "Read one issue with its description, comments and linked changes. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "issue_id": {
+      "description": "The issue id to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "issue_id"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__tracker__get_issue"
+  },
+  {
+   "description": "List the comments of an issue, oldest first, with author handles and timestamps. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "issue_id": {
+      "description": "The issue id to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "limit": {
+      "description": "The limit to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "issue_id"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__tracker__list_comments"
+  },
+  {
+   "description": "List the project's milestones with their due dates and open issue counts. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "project": {
+      "description": "The project to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "state": {
+      "description": "The state to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "project"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__tracker__list_milestones"
+  },
+  {
+   "description": "List the labels a project uses, with their descriptions. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "project": {
+      "description": "The project to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "project"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__tracker__list_labels"
+  },
+  {
+   "description": "Read one pull request: title, state, checks, reviewers and the files it changes. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "number": {
+      "description": "The number to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "number"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__tracker__get_pull_request"
+  },
+  {
+   "description": "List pull requests by state, author or branch, newest first. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "author": {
+      "description": "The author to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "branch": {
+      "description": "The branch to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "state": {
+      "description": "The state to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "state"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__tracker__list_pull_requests"
+  },
+  {
+   "description": "Read one CI check run with its failing steps and the last lines of each step's log. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "run_id": {
+      "description": "The run id to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "run_id"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__tracker__get_check_run"
+  },
+  {
+   "description": "List the project's releases with their tags and dates. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "limit": {
+      "description": "The limit to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "project": {
+      "description": "The project to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "project"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__tracker__list_releases"
+  },
+  {
+   "description": "Read the notes of one release. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "tag": {
+      "description": "The tag to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "tag"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__tracker__get_release_notes"
+  },
+  {
+   "description": "Search the default branch of every repository in the organisation for a literal string. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "language": {
+      "description": "The language to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "limit": {
+      "description": "The limit to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "query": {
+      "description": "The query to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__tracker__search_code"
+  },
+  {
+   "description": "List the commits that changed a file, newest first, with author handles and subjects. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "limit": {
+      "description": "The limit to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "path": {
+      "description": "The path to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__tracker__get_file_history"
+  },
+  {
+   "description": "Search the team's internal documentation by meaning and return the best matching sections with their headings. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "limit": {
+      "description": "The limit to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "query": {
+      "description": "The query to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "space": {
+      "description": "The space to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__docs__search"
+  },
+  {
+   "description": "Read one documentation page as Markdown. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "page_id": {
+      "description": "The page id to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "page_id"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__docs__get_page"
+  },
+  {
+   "description": "List the documentation spaces and what each is for. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "filter": {
+      "description": "The filter to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "filter"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__docs__list_spaces"
+  },
+  {
+   "description": "Read one section of a documentation page by its heading. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "heading": {
+      "description": "The heading to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "page_id": {
+      "description": "The page id to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "page_id"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__docs__get_section"
+  },
+  {
+   "description": "List the pages below a page. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "page_id": {
+      "description": "The page id to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "page_id"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__docs__list_children"
+  },
+  {
+   "description": "List documentation pages changed in the last days, newest first. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "days": {
+      "description": "The days to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "space": {
+      "description": "The space to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "days"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__docs__recent_changes"
+  },
+  {
+   "description": "Read the runbook for a service: alerts, dashboards, escalation and common fixes. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "service": {
+      "description": "The service to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "service"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__docs__get_runbook"
+  },
+  {
+   "description": "Explain a term from the team glossary. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "term": {
+      "description": "The term to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "term"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__docs__get_glossary_term"
+  },
+  {
+   "description": "List the architecture decision records with their status and date. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "limit": {
+      "description": "The limit to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "status": {
+      "description": "The status to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "status"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__docs__list_decisions"
+  },
+  {
+   "description": "Read one architecture decision record. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "decision_id": {
+      "description": "The decision id to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "decision_id"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__docs__get_decision"
+  },
+  {
+   "description": "Read the reference of one internal HTTP endpoint: method, path, parameters, answers and errors. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "operation": {
+      "description": "The operation to use; see the tool description for the accepted values.",
+      "type": "string"
+     },
+     "service": {
+      "description": "The service to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "service"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__docs__get_api_reference"
+  },
+  {
+   "description": "List the services with their owners, languages and repositories. Answers are bounded; ask again with a narrower filter when the answer says it was cut.",
+   "input_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "properties": {
+     "team": {
+      "description": "The team to use; see the tool description for the accepted values.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "team"
+    ],
+    "type": "object"
+   },
+   "name": "mcp__docs__list_services"
+  }
+ ]
+}

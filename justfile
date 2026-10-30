@@ -174,6 +174,11 @@ plugin-check:
 eval *args:
     go run ./cmd/codesynapse eval . --repo codesynapse --baseline docs/benchmarks/task-eval/codesynapse.json {{args}}
 
+# Time the gateway's local answers on synthetic Claude Code requests; skips without a reachable local model (docs/operations/gateway.md)
+gateway-bench *args:
+    CODESYNAPSE_GATEWAY_BENCH_URL="${CODESYNAPSE_GATEWAY_BENCH_URL:-http://localhost:11434/v1}" \
+        go test -count=1 -timeout 0 -run '^TestGatewayBench$' -v ./services/api/internal/gateway/ {{args}}
+
 # Register the MCP server with your AI agents (asks per agent: Claude Code, Codex, Gemini, OpenCode, Cursor, project)
 mcp:
     go install ./cmd/codesynapse

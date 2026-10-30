@@ -1,0 +1,20 @@
+{
+ "max_tokens": 512,
+ "messages": [
+  {
+   "content": "The stock reservation endpoint returns 500 when two orders reserve the last item at the same time. Can you find out why and fix it?",
+   "role": "user"
+  }
+ ],
+ "metadata": {
+  "user_id": "bench-user"
+ },
+ "model": "claude-haiku-4-5",
+ "stream": true,
+ "system": [
+  {
+   "text": "Decide whether the user's latest message starts a new topic in this coding session. Answer with a JSON object with two fields: isNewTopic (boolean) and title (a title of two to four words, or null when the topic is unchanged). Answer with the JSON object only.",
+   "type": "text"
+  }
+ ]
+}
