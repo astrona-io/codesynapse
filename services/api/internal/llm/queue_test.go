@@ -133,6 +133,43 @@ func TestGatewayTargetNeedsOptInAndLocal(t *testing.T) {
 	assert.True(t, got.DisableThinking)
 }
 
+func TestGatewayTargetLatencySettings(t *testing.T) {
+	base := ProviderConfig{Name: "l", Kind: "openai", BaseURL: "http://localhost:11434/v1", Model: "m", Gateway: true}
+	cases := map[string]struct {
+		first, timeout int
+		ttl            string
+		wantFirst      time.Duration
+		wantTimeout    time.Duration
+		wantOptions    map[string]any
+		bad            bool
+	}{
+		"defaults":           {wantFirst: DefaultGatewayFirstToken, wantTimeout: 320 * time.Second, wantOptions: map[string]any{"keep_alive": "15m0s"}},
+		"set":                {first: 45, timeout: 120, ttl: "1h", wantFirst: 45 * time.Second, wantTimeout: 120 * time.Second, wantOptions: map[string]any{"keep_alive": "1h0m0s"}},
+		"longest first":      {first: 600, wantFirst: 600 * time.Second, wantTimeout: 320 * time.Second, wantOptions: map[string]any{"keep_alive": "15m0s"}},
+		"first too long":     {first: 601, bad: true},
+		"negative first":     {first: -1, bad: true},
+		"kept until evicted": {ttl: "forever", wantFirst: DefaultGatewayFirstToken, wantTimeout: 320 * time.Second, wantOptions: map[string]any{"keep_alive": "-1"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := base
+			p.GatewayFirstTokenSeconds, p.TimeoutSeconds, p.KVCacheTTL = tc.first, tc.timeout, tc.ttl
+			cfg := Config{Providers: []ProviderConfig{p}}
+			err := cfg.normalise(func(string) string { return "" })
+			if tc.bad {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			got, ok := NewRegistry(cfg).GatewayTarget()
+			require.True(t, ok)
+			assert.Equal(t, got.FirstToken, tc.wantFirst)
+			assert.Equal(t, got.Timeout, tc.wantTimeout)
+			assert.Equal(t, got.Options, tc.wantOptions)
+		})
+	}
+}
+
 func TestGatewayExcludeAndWait(t *testing.T) {
 	base := ProviderConfig{Name: "l", Kind: "openai", BaseURL: "http://localhost:11434/v1", Model: "m", Gateway: true}
 	cases := map[string]struct {

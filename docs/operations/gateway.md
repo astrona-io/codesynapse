@@ -10,7 +10,7 @@ Coding assistants send many small background requests, such as naming a chat or 
 1. **Answers locally first.** Every request is offered to the local model when it has no images (tools are fine) and fits the local model's context (see [How much fits](#how-much-fits)). When the request offers tools, the local model may call them and read their results; the call is checked first, and if the model gets it wrong (a tool that was not offered, broken arguments) the cloud answers instead. Tool data stays on your side. Nothing is sent to the cloud. A request that asks for thinking, as most agent turns do, is answered locally without thinking, and Claude's earlier thinking blocks are left out of what the local model sees (they are signed reasoning only Claude reads). If the local answer fails, the cloud gets the request unchanged, thinking blocks included.
 2. **Checks the answer for the main model.** A request for a larger model than haiku is buffered: if the local answer is empty, stopped at `max_tokens` or broke off, the cloud answers instead. Haiku requests keep streaming as they are written.
 3. **Passes everything else on.** Other requests go to `api.anthropic.com` and nowhere else. The assistant's own Anthropic credential is used for that one request and is never stored.
-4. **Falls back safely.** If no local slot is free within 60 seconds (`gateway_wait_seconds`), or the local model fails or answers with an error, nothing has been written yet and the request goes to the cloud instead. The wait covers only the queue for a free slot; once the local model has started, the provider's `timeout_seconds` bounds the answer.
+4. **Falls back safely.** If no local slot is free within 30 seconds (`gateway_wait_seconds`), the model has not sent its first token within 90 seconds of getting the slot (`gateway_first_token_seconds`), or the local model fails or answers with an error, nothing has been written yet and the request goes to the cloud instead. The wait covers only the queue for a free slot; once the local model has started, the provider's `timeout_seconds` bounds the whole answer.
 
 **Every model is offered to the local model by default**, the main model (opus, sonnet) as well as haiku: local first is on for every organisation that has not switched it off, with no setup. An organisation whose local model is too small for its agents' main model turns **Answer with the local model first** off; then only haiku-class requests go to it.
 
@@ -70,11 +70,13 @@ Local answering needs a local provider that you opt in explicitly. In `config/ll
     gateway: true   # answer gateway requests, tools included, from this local model
     context_window: 131072   # how much fits; requests that do not go to the cloud
     # gateway_exclude: [claude-opus-*]   # models never answered locally, for every organisation
-    # gateway_wait_seconds: 60           # wait for a free local slot (1-300) before the cloud takes over
+    # gateway_wait_seconds: 30           # wait for a free local slot (1-300) before the cloud takes over
+    # gateway_first_token_seconds: 90    # wait for the first token (1-600) once the slot is held
     # timeout_seconds: 600               # how long one local answer may take once it has started
+    # kv_cache_ttl: 30m                  # sent to Ollama as keep_alive, so the model and its cache stay loaded
 ```
 
-`gateway_exclude` follows the same rules as the organisation's list and is merged with it; an invalid entry stops the API at start-up with an error naming the provider. `gateway_wait_seconds` is how long a request waits in the provider's queue for a free slot; it does not limit the answer, which `timeout_seconds` bounds.
+`gateway_exclude` follows the same rules as the organisation's list and is merged with it; an invalid entry stops the API at start-up with an error naming the provider. `gateway_wait_seconds` is how long a request waits in the provider's queue for a free slot. `gateway_first_token_seconds` bounds the prompt processing (prefill) once the slot is held: a long prompt the model cannot start on in time goes to the cloud before anything is written. `timeout_seconds` bounds the whole local answer (default `max(300, max_input_tokens/100)` seconds); past it the request also goes to the cloud when nothing has been written. On Ollama the gateway sends `keep_alive` from `kv_cache_ttl` (default 15 minutes) with every request, also on the OpenAI-compatible paths unless the agent set its own.
 
 ### Ollama: thinking, context length and how an answer ends
 
@@ -177,7 +179,7 @@ The reasons a request was not answered locally are a fixed list:
 | `no_local_model` | No local provider with `gateway: true` is configured, so the request was not offered locally |
 | `count_tokens` | A token count (`/v1/messages/count_tokens`): always counted by the cloud, never estimated locally |
 | `queue_timeout` | No local slot was free within `gateway_wait_seconds` |
-| `answer_timeout` | The local model started but did not finish within the provider's `timeout_seconds` |
+| `answer_timeout` | The local model sent no first token within `gateway_first_token_seconds`, or did not finish within the provider's `timeout_seconds`, before anything was written |
 | `cancelled` | The assistant gave up on the request before the local model answered |
 | `model_error` | The local model could not be reached or failed, also when its stream stopped without `[DONE]` and without a finish, or carried an error |
 | `bad_status` | The local model answered with an error status |
@@ -186,6 +188,36 @@ The reasons a request was not answered locally are a fixed list:
 | `bad_answer` | The answer could not be read, or it called a tool that was not offered or with broken arguments |
 
 On the OpenAI-compatible paths there is no cloud behind the local model, so their failures count with route `local`. Only the reason, the route and the timings are recorded; never the prompt or the answer.
+
+## Local model performance
+
+Time to the first token is almost all prompt processing (prefill), and it grows faster than the prompt. Measured on an Apple M5 Pro (48 GB) with a 27B model on Ollama's MLX runner, synthetic prompts, one request at a time:
+
+| Prompt | Cold (nothing cached) | Same prompt again | Same prefix, new last message |
+|---|---|---|---|
+| ~5k tokens | 12 s | 2 s | 13 s (prefix not reused) |
+| ~20k tokens | 56 s | – | 37 s (16k of 22k reused) |
+| ~40k tokens | 180 s | 4 s | 123 s (41k of 43k reused) |
+
+What that means for the gateway:
+
+- **A turn that only adds messages is cheap.** Ollama keeps the last prompt and reuses it when the next one starts with the same bytes; an agent turn that appends to the conversation processes only the new part. A prompt that changes in the middle reuses only up to Ollama's last checkpoint (about every 8k tokens).
+- **The prefix must be byte-stable.** Claude Code starts its system prompt with a billing header that changes every turn. The gateway leaves that header out of what the local model sees, and translates the rest deterministically (fixed key order, tools in the agent's order, schemas as written), so turn two finds turn one in the cache.
+- **The cache holds one conversation.** Two conversations, or CodeSynapse's own tasks, on the same model take turns evicting it. A busy model answers every gateway request cold.
+- **Cold long prompts go to the cloud.** With `gateway_first_token_seconds: 90`, a cold prompt above roughly 30k tokens falls through as `answer_timeout`; warm turns of the same conversation stay local. Raise it (up to 600) when you would rather wait than pay, or lower the provider's `context_window` so long requests go to the cloud without waiting at all.
+- **The queue wait is short on purpose.** One 20k prefill holds the slot for about a minute, so waiting longer than `gateway_wait_seconds: 30` for a slot seldom pays.
+
+Recommended Ollama server settings for a machine that serves the gateway (set them where Ollama runs, for example `launchctl setenv` on macOS, and restart Ollama):
+
+| Setting | Value | Why |
+|---|---|---|
+| `OLLAMA_CONTEXT_LENGTH` | `65536` (match the provider's `context_window`) | A larger window costs memory and prefill time the gateway never uses |
+| `OLLAMA_KEEP_ALIVE` | `30m`, or `-1` on a dedicated machine | An unloaded model loses its cache; the gateway's `keep_alive` (`kv_cache_ttl`) also keeps it loaded |
+| `OLLAMA_NUM_PARALLEL` | `1` (with the provider's `max_concurrent: 1`) | Parallel slots split the cache and slow each prefill |
+| `OLLAMA_FLASH_ATTENTION` | `1` | Faster, smaller attention on long prompts (llama.cpp runner) |
+| `OLLAMA_KV_CACHE_TYPE` | `q8_0` | Halves cache memory with flash attention (llama.cpp runner) |
+
+Keep other work off the gateway's model while agents use it, or give that work its own model.
 
 ## What the audit log records
 
