@@ -27,7 +27,7 @@ func TestAgentSessions(t *testing.T) {
 	carol, _ := signup("carol@example.com", "Carol")
 	var org accounts.Org
 	require.Equal(t, ada.do("POST", "/api/v1/accounts/orgs", `{"name":"Sessions"}`, &org), 201)
-	require.Equal(t, ada.do("PUT", "/api/v1/accounts/orgs/"+org.Slug+"/members", `{"email":"bob@example.com","role":"member"}`, nil), 200)
+	invite(t, ada, org.Slug, bob, "bob@example.com", "member")
 
 	var made struct {
 		Key    string

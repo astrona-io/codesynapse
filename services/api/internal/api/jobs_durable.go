@@ -48,7 +48,7 @@ var jobRoles = map[string][]string{
 }
 
 // JobRoles lists the roles a worker can take.
-func JobRoles() []string { return []string{"ingest", "ai", "fix"} }
+func JobRoles() []string { return telemetry.WorkerRoleNames() }
 
 // kindsFor turns roles into job kinds; nil roles mean every kind.
 func kindsFor(roles []string) ([]string, error) {

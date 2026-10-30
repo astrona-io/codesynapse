@@ -40,11 +40,20 @@ init:
             printf '\n# NebulaGraph root password (the graph database; at most 24 characters).\nNEBULA_PASSWORD=%s\n' "$(openssl rand -hex 12)" >> .env
             echo "added NEBULA_PASSWORD to .env"
         fi
+        for svc in API WORKER MCP; do
+            if ! grep -q "^NEBULA_${svc}_PASSWORD=" .env; then
+                printf '\n# NebulaGraph password of the %s service user (at most 24 characters).\nNEBULA_%s_PASSWORD=%s\n' "$svc" "$svc" "$(openssl rand -hex 12)" >> .env
+                echo "added NEBULA_${svc}_PASSWORD to .env"
+            fi
+        done
         exit 0
     fi
     sed -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-postgres/$(openssl rand -hex 24)/" \
+        -e "s/change-me-nebula-api/$(openssl rand -hex 12)/" \
+        -e "s/change-me-nebula-worker/$(openssl rand -hex 12)/" \
+        -e "s/change-me-nebula-mcp/$(openssl rand -hex 12)/" \
         -e "s/change-me-nebula/$(openssl rand -hex 12)/" \
         -e "s/change-me-metrics/$(openssl rand -hex 24)/" \
         -e "s/change-me-admin/$(openssl rand -hex 16)/" \
@@ -262,7 +271,7 @@ _kind-secret:
     $k get secret codesynapse >/dev/null 2>&1 || $k create secret generic codesynapse
     # Add any key the Secret lacks, so a cluster set up by an older chart
     # (before NebulaGraph, say) gets the new ones and keeps the rest.
-    for kv in CODESYNAPSE_API_TOKEN:hex24 CODESYNAPSE_MCP_TOKEN:hex24 POSTGRES_PASSWORD:hex24 NEBULA_PASSWORD:hex12 METRICS_PASSWORD:hex24 SECRET_KEY:b64; do
+    for kv in CODESYNAPSE_API_TOKEN:hex24 CODESYNAPSE_MCP_TOKEN:hex24 POSTGRES_PASSWORD:hex24 NEBULA_PASSWORD:hex12 NEBULA_API_PASSWORD:hex12 NEBULA_WORKER_PASSWORD:hex12 NEBULA_MCP_PASSWORD:hex12 METRICS_PASSWORD:hex24 SECRET_KEY:b64; do
         key=${kv%%:*}
         if [ -z "$($k get secret codesynapse -o "jsonpath={.data.$key}")" ]; then
             case ${kv#*:} in hex24) v=$(openssl rand -hex 24) ;; hex12) v=$(openssl rand -hex 12) ;; b64) v=$(openssl rand -base64 32) ;; esac
@@ -344,45 +353,57 @@ test-postgres: _runtime
     #!/usr/bin/env sh
     set -eu
     pw=$(openssl rand -hex 16)
-    name="codesynapse-pg-test-$$"
-    {{engine}} run --rm -d --name "$name" -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=cs {{pg_image}} >/dev/null
-    trap '{{engine}} stop "$name" >/dev/null 2>&1' EXIT
+    name="codesynapse-pg-test-$$-$(openssl rand -hex 3)"
+    # The cleanup is in place before anything starts, so a run that fails half-way leaves nothing behind.
+    trap '{{engine}} rm -f "$name" >/dev/null 2>&1 || true' EXIT
+    trap 'exit 130' INT TERM
+    # The runtime picks a free host port: a fixed one can be held by anything, even an outgoing connection.
+    {{engine}} run --rm -d --name "$name" -p 127.0.0.1::5432 -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=cs {{pg_image}} >/dev/null
+    port=$({{engine}} port "$name" 5432/tcp | head -n1 | sed 's/.*://')
+    [ -n "$port" ] || { echo "no host port for PostgreSQL" >&2; exit 1; }
     # A container that never comes up fails the run instead of hanging it.
     n=0; until {{engine}} exec "$name" pg_isready -U postgres >/dev/null 2>&1; do n=$((n+1)); [ "$n" -lt 90 ] || { echo "PostgreSQL did not start" >&2; exit 1; }; sleep 1; done
     sleep 1
-    CODESYNAPSE_TEST_DATABASE_URL="postgres://postgres:$pw@127.0.0.1:55432/cs?sslmode=disable" go test -race -count=1 ./internal/accounts/...
+    CODESYNAPSE_TEST_DATABASE_URL="postgres://postgres:$pw@127.0.0.1:$port/cs?sslmode=disable" go test -race -count=1 ./internal/accounts/...
 
 # Store contract against a throwaway NebulaGraph cluster (the images docker-compose.yml ships) and Milvus
 test-nebula: _runtime
     #!/usr/bin/env sh
     set -eu
-    id="$$"; net="codesynapse-neb-test-$id"; mv="codesynapse-milvus-test-$id"
+    id="$$-$(openssl rand -hex 3)"; net="codesynapse-neb-test-$id"; mv="codesynapse-milvus-test-$id"
     flags="--log_dir=/logs --v=0 --minloglevel=1 --heartbeat_interval_secs=1"
+    trap '{{engine}} rm -f "$net-metad" "$net-storaged" "$net-graphd" "$mv" >/dev/null 2>&1; {{engine}} network rm "$net" >/dev/null 2>&1 || true' EXIT
+    trap 'exit 130' INT TERM
     {{engine}} network create "$net" >/dev/null
     {{engine}} run --rm -d --network "$net" --name "$net-metad" {{nebula_metad_image}} --meta_server_addrs="$net-metad:9559" --local_ip="$net-metad" --ws_ip="$net-metad" --port=9559 --data_path=/data/meta $flags >/dev/null
     {{engine}} run --rm -d --network "$net" --name "$net-storaged" {{nebula_storaged_image}} --meta_server_addrs="$net-metad:9559" --local_ip="$net-storaged" --ws_ip="$net-storaged" --port=9779 --data_path=/data/storage $flags >/dev/null
-    {{engine}} run --rm -d --network "$net" --name "$net-graphd" -p 127.0.0.1:59669:9669 {{nebula_graphd_image}} --meta_server_addrs="$net-metad:9559" --local_ip="$net-graphd" --ws_ip="$net-graphd" --port=9669 --enable_authorize=true $flags >/dev/null
-    {{engine}} run --rm -d --name "$mv" -p 127.0.0.1:59530:19530 -e ETCD_USE_EMBED=true -e ETCD_DATA_DIR=/var/lib/milvus/etcd \
+    {{engine}} run --rm -d --network "$net" --name "$net-graphd" -p 127.0.0.1::9669 {{nebula_graphd_image}} --meta_server_addrs="$net-metad:9559" --local_ip="$net-graphd" --ws_ip="$net-graphd" --port=9669 --enable_authorize=true $flags >/dev/null
+    {{engine}} run --rm -d --name "$mv" -p 127.0.0.1::19530 -e ETCD_USE_EMBED=true -e ETCD_DATA_DIR=/var/lib/milvus/etcd \
         -e COMMON_STORAGETYPE=local -e DEPLOY_MODE=STANDALONE {{milvus_image}} milvus run standalone >/dev/null
-    trap '{{engine}} stop "$net-metad" "$net-storaged" "$net-graphd" "$mv" >/dev/null 2>&1; {{engine}} network rm "$net" >/dev/null 2>&1' EXIT
+    graphd_port=$({{engine}} port "$net-graphd" 9669/tcp | head -n1 | sed 's/.*://')
+    milvus_port=$({{engine}} port "$mv" 19530/tcp | head -n1 | sed 's/.*://')
+    [ -n "$graphd_port" ] && [ -n "$milvus_port" ] || { echo "no host port for NebulaGraph or Milvus" >&2; exit 1; }
     console() { {{engine}} run --rm --network "$net" --entrypoint nebula-console {{nebula_console_image}} -addr "$net-graphd" -port 9669 -u root -p nebula -e "$1"; }
     n=0; until console 'SHOW HOSTS' >/dev/null 2>&1; do n=$((n+1)); [ "$n" -lt 60 ] || { echo "NebulaGraph did not start" >&2; exit 1; }; sleep 2; done
     console "ADD HOSTS \"$net-storaged\":9779" >/dev/null
     n=0; until console 'SHOW HOSTS' | grep -q ONLINE; do n=$((n+1)); [ "$n" -lt 60 ] || { echo "the storage host did not come online" >&2; exit 1; }; sleep 2; done
     n=0; until {{engine}} exec "$mv" curl -sf http://127.0.0.1:9091/healthz >/dev/null 2>&1; do n=$((n+1)); [ "$n" -lt 90 ] || { echo "Milvus did not start" >&2; exit 1; }; sleep 2; done
-    export CODESYNAPSE_TEST_NEBULA_ADDR=127.0.0.1:59669 CODESYNAPSE_TEST_MILVUS_URL=http://127.0.0.1:59530
+    export CODESYNAPSE_TEST_NEBULA_ADDR="127.0.0.1:$graphd_port" CODESYNAPSE_TEST_MILVUS_URL="http://127.0.0.1:$milvus_port"
     go test -race -count=1 ./internal/store/nebulastore/... ./internal/vector/...
 
 # Push and tenant-filtered queries against a throwaway VictoriaMetrics
 test-metrics: _runtime
     #!/usr/bin/env sh
     set -eu
-    name="codesynapse-vm-test-$$"; pw=$(openssl rand -hex 16)
-    {{engine}} run --rm -d --name "$name" -p 127.0.0.1:58428:8428 {{victoriametrics_image}} \
+    name="codesynapse-vm-test-$$-$(openssl rand -hex 3)"; pw=$(openssl rand -hex 16)
+    trap '{{engine}} rm -f "$name" >/dev/null 2>&1 || true' EXIT
+    trap 'exit 130' INT TERM
+    {{engine}} run --rm -d --name "$name" -p 127.0.0.1::8428 {{victoriametrics_image}} \
         -search.latencyOffset=1s -httpAuth.username=cs -httpAuth.password="$pw" >/dev/null
-    trap '{{engine}} stop "$name" >/dev/null 2>&1' EXIT
-    n=0; until curl -sf http://127.0.0.1:58428/health >/dev/null; do n=$((n+1)); [ "$n" -lt 60 ] || { echo "VictoriaMetrics did not start" >&2; exit 1; }; sleep 1; done
-    CODESYNAPSE_TEST_METRICS_URL=http://127.0.0.1:58428 CODESYNAPSE_TEST_METRICS_USER=cs CODESYNAPSE_TEST_METRICS_PASSWORD="$pw" \
+    port=$({{engine}} port "$name" 8428/tcp | head -n1 | sed 's/.*://')
+    [ -n "$port" ] || { echo "no host port for VictoriaMetrics" >&2; exit 1; }
+    n=0; until curl -sf "http://127.0.0.1:$port/health" >/dev/null; do n=$((n+1)); [ "$n" -lt 60 ] || { echo "VictoriaMetrics did not start" >&2; exit 1; }; sleep 1; done
+    CODESYNAPSE_TEST_METRICS_URL="http://127.0.0.1:$port" CODESYNAPSE_TEST_METRICS_USER=cs CODESYNAPSE_TEST_METRICS_PASSWORD="$pw" \
         go test -race -count=1 -run TestVictoriaMetrics ./internal/telemetry/ ./services/api/internal/api/
 
 # Store, accounts and metrics contracts against throwaway NebulaGraph, Milvus, PostgreSQL and VictoriaMetrics containers

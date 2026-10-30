@@ -136,7 +136,7 @@ func TestRuntimeUploadIsPerOrganisation(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: link.org, Graph: storetest.Repo, AddedBy: u.ID, AddedAt: time.Now()}))
 	}
-	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+acme.Slug+"/members", `{"email":"carol@example.com","role":"guest"}`, nil), 200)
+	invite(t, bob, acme.Slug, carol, "carol@example.com", "guest")
 	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+acme.Slug+"/repos/"+url.PathEscape(storetest.Repo)+"/access", `{"user":"carol@example.com","role":"viewer"}`, nil), 200)
 	inAcme, inExt := []string{OrgHeader, acme.Slug}, []string{OrgHeader, ext.Slug}
 	base := "/api/v1/repos/" + url.PathEscape(storetest.Repo) + "/runtime"

@@ -65,6 +65,16 @@ func (c *client) do(method, path, body string, out any, headers ...string) int {
 	return res.StatusCode
 }
 
+// invite adds invitee to the organisation the way people join one: inviter
+// invites the email and invitee accepts the token in their own session.
+func invite(t *testing.T, inviter *client, org string, invitee *client, email, role string) {
+	t.Helper()
+	var created struct{ Token string }
+	require.Equal(t, inviter.do("POST", "/api/v1/accounts/orgs/"+org+"/invitations", `{"email":"`+email+`","role":"`+role+`"}`, &created), 201)
+	require.True(t, created.Token != "", "the invitation carries its token")
+	require.Equal(t, invitee.do("POST", "/api/v1/invitations/accept", `{"token":"`+created.Token+`"}`, nil), 200)
+}
+
 // accountsServer serves an installation already handed to a setup owner.
 func accountsServer(t *testing.T) (*httptest.Server, *accounts.Service) {
 	t.Helper()

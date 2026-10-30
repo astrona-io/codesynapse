@@ -42,6 +42,10 @@ const (
 	// Agent gateway traffic, read from VictoriaMetrics by the API
 	// (PlatformStatSource).
 	StatGateway = "gateway"
+	// Ingest runs and their files (phase 4), from the ingest run reports.
+	StatIngestRuns  = "ingest_runs"
+	StatIngestFiles = "ingest_files"
+	StatIngestSkips = "ingest_skips"
 )
 
 // Limits and retention of the daily rollup.
@@ -123,6 +127,13 @@ var statMetrics = map[string]statMetric{
 	// was written without it.
 	StatGateway: {dims: []string{"requests", "local", "cloud", "rejected", "failed", "fallthroughs", "queue_timeout", "answer_timeout",
 		"local_ms", "local_n", "cloud_ms", "cloud_n", "queue_ms", "queue_n", "measured"}, perOrg: true},
+	// Ingest runs that finished that day by status, the ones whose
+	// discovery did not complete and the ones whose report had already
+	// expired (IngestHistory) when the day was written; the files of the
+	// runs with a report, and their skips by reason.
+	StatIngestRuns:  {dims: []string{"succeeded", "failed", "cancelled", "incomplete_discovery", "without_report"}, perOrg: true},
+	StatIngestFiles: {dims: []string{"scanned", "indexed", "skipped", "failed", "unprocessed"}, perOrg: true},
+	StatIngestSkips: {dims: []string{"ignored_path", "generated_code", "binary", "non_k8s_yaml"}, perOrg: true},
 }
 
 // StatToolOther is the mcp_tools name of a tool outside the fixed list.

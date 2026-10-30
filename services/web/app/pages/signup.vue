@@ -1,6 +1,9 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'auth' })
 const session = useSession()
+const route = useRoute()
+// An invitation link sends people here and back again once they are in.
+const next = computed(() => safeNext(route.query.next))
 const setup = computed(() => !!session.status.value?.needs_setup)
 useHead({ title: () => (setup.value ? 'Set up CodeSynapse' : 'Create an account · CodeSynapse') })
 const name = ref('')
@@ -41,7 +44,7 @@ async function submit() {
   try {
     await $fetch('/api/cg/auth/login', { method: 'POST', body: { login: email.value, password: password.value } })
     await session.load()
-    await navigateTo(setup.value ? '/setup' : '/overview')
+    await navigateTo(setup.value ? '/setup' : next.value)
   } catch (e) {
     error.value = plainError(e, { 401: SIGNIN_AFTER_SIGNUP, 429: SIGNUP_ERRORS[429] })
   } finally {
@@ -54,7 +57,7 @@ async function submit() {
   <div class="stack--tight">
     <h1>{{ setup ? 'Set up CodeSynapse' : 'Create an account' }}</h1>
     <p v-if="setup" class="muted">This is the installation's root account. It administers the platform (settings, health, people and the audit log) and never works in an organisation. Next you create the first organisation and the separate account that owns it.</p>
-    <p v-else class="muted">You get an organisation of your own. To join an existing one, ask its owner to add your email.</p>
+    <p v-else class="muted">You get an organisation of your own. To join an existing one, ask its owner for an invitation link.</p>
   </div>
   <template v-if="setup || session.status.value?.signup_open">
     <form class="stack--tight" @submit.prevent="submit">
@@ -73,7 +76,7 @@ async function submit() {
       <p v-if="error" ref="errorEl" class="notice notice--danger" role="alert" tabindex="-1">{{ error }}</p>
       <button type="submit" :disabled="busy">{{ busy ? 'Creating…' : setup ? 'Create the root account' : 'Create account' }}</button>
     </form>
-    <p v-if="!setup" class="muted small">Already have an account? <NuxtLink to="/login">Sign in</NuxtLink></p>
+    <p v-if="!setup" class="muted small">Already have an account? <NuxtLink :to="{ path: '/login', query: route.query.next ? { next } : {} }">Sign in</NuxtLink></p>
   </template>
-  <p v-else class="notice">Sign-up is closed on this installation. Ask an administrator to add you, then <NuxtLink to="/login">sign in</NuxtLink>.</p>
+  <p v-else class="notice">Sign-up is closed on this installation. Ask an administrator for an invitation, then <NuxtLink :to="{ path: '/login', query: route.query.next ? { next } : {} }">sign in</NuxtLink>.</p>
 </template>

@@ -49,6 +49,7 @@ func RunIngest(t *testing.T, st accounts.Store) {
 	queued, err := st.GetIngestRun(ctx, org.ID, graph, "first")
 	require.NoError(t, err)
 	assert.True(t, queued.MetricCoverage)
+	assert.Equal(t, ingestFigures(t, st, org.ID).Running, 1)
 	assert.Equal(t, len(queued.RepositoryID), 24)
 	encoded, err := json.Marshal(queued)
 	require.NoError(t, err)
@@ -126,6 +127,17 @@ func RunIngest(t *testing.T, st accounts.Store) {
 	require.NoError(t, err)
 	assert.Equal(t, stored.Report.Files[0].Path, "go.mod")
 	assert.Equal(t, stored.Report.SkipBreakdown[ingestreport.IgnoredPath], 1)
+	figures := ingestFigures(t, st, org.ID)
+	assert.Equal(t, figures.Succeeded, 1)
+	assert.Equal(t, figures.Running, 0)
+	assert.Equal(t, figures.Scanned, 2)
+	assert.Equal(t, figures.Indexed, stored.Report.FilesIndexed)
+	assert.Equal(t, figures.Skipped, 1)
+	assert.Equal(t, figures.Skips.IgnoredPath, 1)
+	assert.Equal(t, figures.IncompleteDiscovery, 0)
+	past, err := st.IngestStats(ctx, time.Now().Add(-48*time.Hour), time.Now().Add(-24*time.Hour))
+	require.NoError(t, err)
+	assert.Len(t, past, 0)
 	assert.True(t, errors.Is(st.SaveIngestRun(work, prepared), accounts.ErrIngestConflict))
 	// Export failure preserves the last confirmed sample and cannot run two owners.
 	offline := errors.New("export unavailable")
@@ -159,6 +171,13 @@ func RunIngest(t *testing.T, st accounts.Store) {
 	history, err := st.ListIngestRuns(ctx, org.ID, graph, 10000)
 	require.NoError(t, err)
 	assert.Len(t, history, accounts.IngestHistory+1)
+	// Expired reports still count their status, by their start.
+	figures = ingestFigures(t, st, org.ID)
+	assert.Equal(t, figures.Succeeded, 1)
+	assert.Equal(t, figures.Failed, accounts.IngestHistory+2)
+	assert.Equal(t, figures.WithoutReport, 2)
+	assert.Equal(t, figures.IncompleteDiscovery, accounts.IngestHistory)
+	assert.Equal(t, figures.Scanned, 2)
 	for _, summary := range history {
 		assert.Len(t, summary.Report.Files, 0)
 	}
@@ -233,6 +252,22 @@ func RunIngest(t *testing.T, st accounts.Store) {
 	require.NoError(t, err)
 	assert.True(t, verification.OK)
 }
+
+// ingestFigures are org's ingest figures of the last and next hour.
+func ingestFigures(t *testing.T, st accounts.Store, org string) accounts.IngestFigures {
+	t.Helper()
+	rows, err := st.IngestStats(t.Context(), time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	for _, r := range rows {
+		if r.OrgID == org {
+			assert.True(t, r.OrgExists)
+			return r.IngestFigures
+		}
+	}
+	t.Fatalf("no ingest figures for the organisation")
+	return accounts.IngestFigures{}
+}
+
 func ingestTotal(snapshot accounts.IngestMetricSnapshot, id string) accounts.IngestMetricTotal {
 	for _, total := range snapshot.Totals {
 		if total.RepositoryID == id {

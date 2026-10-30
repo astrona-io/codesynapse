@@ -1,6 +1,6 @@
 # Defaults for the in-chart milvus. Override them under `milvus:` in the
 # codesynapse chart's values.
-image: docker.io/milvusdb/milvus:v3.0.4
+image: docker.io/milvusdb/milvus:v3.0.5
 size: 10Gi
 storageClass: ""
 resources:

@@ -9,7 +9,8 @@ images:
   metad: ghcr.io/astrona-io/codesynapse-nebula-metad:v3.8.0
   storaged: ghcr.io/astrona-io/codesynapse-nebula-storaged:v3.8.0
   graphd: ghcr.io/astrona-io/codesynapse-nebula-graphd:v3.8.0
-  # Registers the storage host and replaces the first root password.
+  # Registers the storage host, replaces the first root password and creates
+  # the space and the service users.
   console: ghcr.io/astrona-io/codesynapse-nebula-console:v3.8.0
 size: 20Gi
 storageClass: ""

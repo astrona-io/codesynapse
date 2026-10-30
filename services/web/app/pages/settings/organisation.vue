@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AccountOrg, Membership, OrgGateway, Role } from '~/utils/types'
+import type { AccountOrg, Invitation, InvitationCreated, Membership, OrgGateway, Role } from '~/utils/types'
 
 const session = useSession()
 const org = computed(() => session.current.value?.org)
@@ -102,16 +102,14 @@ const role = ref<Role>('member')
 const error = ref('')
 const notice = ref('')
 const busy = ref(false)
-async function put(e: string, r: Role, done: string) {
-  if (busy.value) return false
+async function changeRole(m: Membership, r: Role) {
+  if (busy.value) return
   busy.value = true
   error.value = ''
   notice.value = ''
-  let ok = false
   try {
-    await apiPut(`accounts/orgs/${org.value!.slug}/members`, { email: e, role: r })
-    notice.value = done
-    ok = true
+    await apiPut(`accounts/orgs/${org.value!.slug}/members`, { user_id: m.user.id, role: r })
+    notice.value = `${m.user.name} is now ${r}.`
   } catch (err) {
     error.value = plainError(err)
   } finally {
@@ -120,12 +118,47 @@ async function put(e: string, r: Role, done: string) {
   // Refresh either way: a refused role change leaves the select showing the
   // role that was not saved until the list is read again.
   await refresh()
-  return ok
 }
-async function add() {
-  if (await put(email.value, role.value, `Added ${email.value}.`)) email.value = ''
+// Invitations: the answer is the same whether or not the email has an
+// account, so the page never says which. The link is shown once.
+const { data: invites, refresh: refreshInvites } = useApiGet<{ invitations: Invitation[] }>(() => `accounts/orgs/${org.value?.slug ?? '-'}/invitations`, { immediate: false })
+watch(canManage, (yes) => { if (yes) refreshInvites() }, { immediate: true })
+const inviteLink = ref('')
+const invitedEmail = ref('')
+async function invite() {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  inviteLink.value = ''
+  try {
+    const made = await apiPost<InvitationCreated>(`accounts/orgs/${org.value!.slug}/invitations`, { email: email.value, role: role.value })
+    inviteLink.value = `${location.origin}${made.accept_path}`
+    invitedEmail.value = made.invitation.email
+    email.value = ''
+  } catch (err) {
+    error.value = plainError(err)
+  } finally {
+    busy.value = false
+  }
+  await refreshInvites()
 }
-const changeRole = (m: Membership, r: Role) => put(m.user.email, r, `${m.user.name} is now ${r}.`)
+async function revoke(inv: Invitation) {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    await apiDelete(`accounts/orgs/${org.value!.slug}/invitations/${encodeURIComponent(inv.id)}`)
+    notice.value = `Invitation for ${inv.email} revoked.`
+    if (invitedEmail.value === inv.email) inviteLink.value = ''
+  } catch (err) {
+    error.value = plainError(err)
+  } finally {
+    busy.value = false
+  }
+  await refreshInvites()
+}
 const removing = ref<Membership | null>(null)
 async function remove() {
   const m = removing.value
@@ -261,12 +294,30 @@ watch(() => org.value?.slug, () => {
           </tbody>
         </table>
       </div>
-      <form v-if="canManage" class="row" @submit.prevent="add">
-        <div class="field grow"><label for="memail">Add a member by email</label><input id="memail" v-model="email" type="email" placeholder="name@company.com" required></div>
+      <form v-if="canManage" class="row" @submit.prevent="invite">
+        <div class="field grow"><label for="memail">Invite by email</label><input id="memail" v-model="email" type="email" placeholder="name@company.com" required></div>
         <div class="field"><label for="mrole">Role</label><select id="mrole" v-model="role"><option v-for="r in roles" :key="r.id" :value="r.id">{{ r.label }}</option></select></div>
-        <button type="submit" class="align-end" :disabled="busy">Add</button>
+        <button type="submit" class="align-end" :disabled="busy">Invite</button>
       </form>
-      <p v-if="canManage" class="muted small">People need an account first. Then they appear here with the role you chose.</p>
+      <p v-if="canManage" class="muted small">CodeSynapse sends no email. Send the link yourself. It works once, for 7 days, and only for someone signed in with that email address. If they have no account yet, they create one first. They join with the role you chose, or your own role if that is lower when they accept.</p>
+      <div v-if="inviteLink" class="invite-link">
+        <CopyField :value="inviteLink" secret :label="`Invitation link for ${invitedEmail}`" />
+        <p class="muted small">This is the only time the link is shown. If you lose it, revoke the invitation and send a new one.</p>
+      </div>
+      <div v-if="canManage && invites?.invitations.length" class="table-wrap">
+        <table>
+          <caption class="muted small">Pending invitations</caption>
+          <thead><tr><th>Email</th><th>Role</th><th>Expires</th><th><span class="sr-only">Actions</span></th></tr></thead>
+          <tbody>
+            <tr v-for="inv in invites.invitations" :key="inv.id">
+              <td class="wrap">{{ inv.email }}</td>
+              <td><span class="badge">{{ inv.role }}</span></td>
+              <td><time :datetime="inv.expires_at">{{ new Date(inv.expires_at).toLocaleDateString() }}</time></td>
+              <td class="num"><button type="button" class="secondary tiny" :disabled="busy" :aria-label="`Revoke the invitation for ${inv.email}`" @click="revoke(inv)">Revoke</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
       <p v-if="notice" class="notice notice--ok" role="status">{{ notice }}</p>
       <details>
@@ -300,4 +351,6 @@ watch(() => org.value?.slug, () => {
 .role { width: auto; min-height: 30px; padding: 3px 8px; }
 .roles { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0 0; }
 .roles dd { margin: 0; }
+.invite-link { margin: 12px 0; max-width: 640px; }
+caption { text-align: left; padding: 12px 0 6px; }
 </style>

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts/accountstest"
 	"github.com/astrona-io/codesynapse/internal/arch"
 	"github.com/astrona-io/codesynapse/internal/catalog"
 	"github.com/astrona-io/codesynapse/internal/model"
@@ -218,8 +219,7 @@ func TestCatalogWritesNeedEditorAccessAndAreAudited(t *testing.T) {
 	actor := accounts.Principal{User: owner.User, Via: "session"}
 	backup, _, err := acc.SignUp(ctx, "backup@example.com", "Backup", "correct horse battery staple")
 	require.NoError(t, err)
-	_, err = acc.AddMember(ctx, actor, owner.OrgID, backup.Email, accounts.Member)
-	require.NoError(t, err)
+	require.NoError(t, accountstest.Join(ctx, t, acc, actor, owner.OrgID, backup, accounts.Member))
 	_, err = acc.SetRepoGrant(ctx, actor, owner.OrgID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: backup.ID}, accounts.Admin)
 	require.NoError(t, err)
 	_, err = acc.SetRepoGrant(ctx, actor, owner.OrgID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: owner.User.ID}, accounts.Viewer)

@@ -189,14 +189,18 @@ func (s *Store) JobQueue(_ context.Context, now time.Time) (accounts.JobQueue, e
 	t := s.jobTable()
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	q := accounts.JobQueue{Waiting: map[string]int{}, Active: map[string]int{}}
+	q := accounts.JobQueue{Waiting: map[string]int{}, Active: map[string]int{}, Oldest: map[string]time.Time{}}
 	for _, j := range t.jobs {
 		if !j.Active() {
 			continue
 		}
 		q.Active[j.Kind]++
-		if j.LeaseUntil.Before(now) {
+		expired := j.LeaseUntil.Before(now)
+		if expired {
 			q.Waiting[j.Kind]++
+		}
+		if old, ok := q.Oldest[j.Kind]; (expired || j.State == accounts.JobQueued) && (!ok || j.CreatedAt.Before(old)) {
+			q.Oldest[j.Kind] = j.CreatedAt
 		}
 	}
 	return q, nil
