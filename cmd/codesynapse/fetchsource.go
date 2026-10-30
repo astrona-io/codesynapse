@@ -83,14 +83,25 @@ func (b *bridge) fetchSource(ctx context.Context, msg []byte, c toolCall) (map[s
 		res, failed := localFail(err)
 		return res, src, failed
 	}
-	src.RawTokens, src.CleanedTokens, src.ExtractedTokens = ans.RawTokens, ans.CleanedTokens, ans.TextTokens
-	src.ReduceUs = ans.Reduce.Microseconds()
+	// Clamped to what the server accepts: an out-of-range figure answers
+	// 400, which the bridge takes for an older server and stops measuring.
+	src.RawTokens = min(max(ans.RawTokens, 0), maxSourceTokens)
+	src.CleanedTokens = min(max(ans.CleanedTokens, 0), maxSourceTokens)
+	src.ExtractedTokens = min(max(ans.TextTokens, 0), maxSourceTokens)
+	src.ReduceUs = min(max(ans.Reduce.Microseconds(), 0), maxSourceUs)
 	return map[string]any{
 		"content":           []map[string]any{{"type": "text", "text": string(raw)}},
 		"structuredContent": json.RawMessage(raw),
 		"_meta":             map[string]any{"codesynapse/source": "local-fetch"},
 	}, src, false
 }
+
+// maxSourceTokens and maxSourceUs are the server's limits for one report
+// (services/api/internal/api/usage_local.go).
+const (
+	maxSourceTokens = 1_000_000
+	maxSourceUs     = 60 * 1_000_000
+)
 
 // sourceUsage is how one fetch_source call went, for the usage report: the
 // result (hit, revalidated, miss, refused, error) and the page's estimated
