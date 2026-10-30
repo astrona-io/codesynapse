@@ -172,6 +172,12 @@ func (b *bridge) reportLocalSource(ctx context.Context, tool string, d time.Dura
 		body.Source = nil
 		err = b.report.do(rctx, http.MethodPost, "/api/v1/usage/local", body, nil)
 	}
+	if errors.As(err, &se) && se.Status == http.StatusForbidden && strings.Contains(se.msg, "execution session is unavailable") &&
+		b.needsRegistration() && b.register(rctx) == nil {
+		// The API forgot the session (a restart with a fresh store): register
+		// it again and report once more.
+		err = b.report.do(b.callCtx(rctx), http.MethodPost, "/api/v1/usage/local", body, nil)
+	}
 	if err == nil {
 		return true
 	}

@@ -44,7 +44,8 @@ func (o *prebriefOptions) Validate(context.Context, *app.Env) error { return nil
 
 func (o *prebriefOptions) Run(ctx context.Context, _ *app.Env) error {
 	in := readHook(o.EC.Stdin)
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("CODESYNAPSE_PREBRIEF")), "false") || !worthBriefing(in.Prompt) {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("CODESYNAPSE_PREBRIEF")), "false") || !worthBriefing(in.Prompt) ||
+		codesynapseOffline(in.SessionID) {
 		return nil
 	}
 	limit := prebriefTimeout
@@ -83,7 +84,7 @@ func prebrief(ctx context.Context, c apiClient, in hookInput) (string, error) {
 		return "", errNoCheckout
 	}
 	root := strings.TrimSpace(string(top))
-	ctx, err = c.executionContext(ctx, in.SessionID, in.SessionID)
+	ctx, err = c.registerWithin(ctx, in.SessionID, in.SessionID, hookRegisterBudget)
 	if err != nil {
 		return "", err
 	}

@@ -129,7 +129,10 @@ func (r *runtimeRoutes) initialize(ctx context.Context, id string) (*bridge, err
 		return nil, err
 	}
 	var output bytes.Buffer
-	b := &bridge{url: r.owner.url, token: r.api.token, session: id, http: r.owner.http, out: &output}
+	// parent shares the online state; initMsg opens a new server session
+	// when a restart forgot this one (reinit).
+	b := &bridge{url: r.owner.url, token: r.api.token, session: id, http: r.owner.http, out: &output,
+		parent: r.owner, initMsg: r.init}
 	initialized := false
 	defer func() {
 		if !initialized {

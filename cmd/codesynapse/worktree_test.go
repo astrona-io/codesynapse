@@ -73,6 +73,10 @@ func TestBridgeAnswersFromTheWorkingTree(t *testing.T) {
 			_, _ = io.WriteString(w, `{"repos":[]}`)
 			return
 		}
+		if r.URL.Path == "/api/v1/execution/sessions" {
+			_, _ = io.WriteString(w, `{"tenant_id":"t","subject_id":"s","session_id":"chat-1","parent_session_id":"chat-1"}`)
+			return
+		}
 		var u localUsage
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&u))
 		mu.Lock()

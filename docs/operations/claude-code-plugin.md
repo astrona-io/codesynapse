@@ -79,6 +79,8 @@ edit metadata and forward a `transcript_path` when supplied by the runtime.
 
 The hooks never fail a session: a problem (no repository, no git, unreadable input) means no opinion. Their state (which files were turned back, which tree was checked) is kept per chat session in the plugin's data folder.
 
+The hooks also skip their guards while the server is offline. The bridge notes when it cannot reach the server. While it does, the read guard lets whole-file reads through, and the Stop hook skips its pre-finish check with a notice. That check runs at the next stop once the server answers. The prompt briefing, memory recall and activity reports are skipped too. A Stop hook that cannot reach the API itself also skips its check, and no hook waits more than 3 seconds to register the session. See [when the server is down](claude-code-bridge.md#when-the-server-is-down).
+
 ## The ruleset and how to improve it
 
 The built-in ruleset is short (`internal/agentrules`): start with `minimal_context`, `get_symbol_context` before editing, `file_outline` before large reads, `change_checklist` before ripples, `verify_plan` and `get_pr_context` before finishing. A short answer-style block follows: answer first, no greetings, recaps or closing offers, negations and exact text kept, only changed lines of code in chat, and full sentences for security warnings, irreversible actions, ordered steps, questions to the user and anything persisted. Its effect on output tokens is not measured. To use your own wording, put it in a file (at most 4 KiB) and set `CODESYNAPSE_AGENT_RULES_FILE` on the API; every session picks it up at its next start, with no plugin update.
