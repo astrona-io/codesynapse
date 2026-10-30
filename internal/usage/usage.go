@@ -65,7 +65,8 @@ func IsWorkflow(tool string) bool {
 		return true
 	}
 	switch tool {
-	case FirstCodeSynapse, FirstNative, ReadTurnedBack, FetchSteered, FilesEdited, FilesEditedFound, LocalRead, LocalAvoided, LocalBriefs, LocalDrafts, Unindexed:
+	case FirstCodeSynapse, FirstNative, ReadTurnedBack, FetchSteered, FilesEdited, FilesEditedFound, LocalRead, LocalAvoided, LocalBriefs, LocalDrafts, Unindexed,
+		SourceFetches, SourceHits, SourceRaw, SourceSaved:
 		return true
 	}
 	return false

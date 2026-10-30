@@ -195,6 +195,9 @@ type bridge struct {
 	// once it refused to record their answers (reportLocal).
 	localOff bool
 	refused  map[string]bool
+	// noSourceCounts (guarded by mu) leaves fetch_source's measurement out
+	// of reports once the server refused it (an older server).
+	noSourceCounts bool
 
 	// The git tools are answered here (gitbridge.go). report tells the API
 	// about each call; gitDir is the checkout, found on first use.

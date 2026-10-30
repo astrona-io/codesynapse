@@ -284,6 +284,10 @@ export interface WorkspaceStats {
     sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; avoided_method: string
     // ask_local: tokens local models read, and its part of avoided_tokens.
     local_read_tokens?: number; local_avoided_tokens?: number; local_briefs?: number; local_drafts?: number
+    // fetch_source: pages returned, cache hits, tokens as served and the
+    // tokens agents did not read, valued at the reference input price
+    // (dollars null when it has none). Absent from older APIs.
+    sources?: { fetches: number; hits: number; raw_tokens: number; saved_tokens: number; per_mtok: number; dollars: number | null; price_source?: string }
     unindexed?: { repos: { repo: string; skipped: number }[]; skipped: number; avoided_per_session: number }
     // How sessions began, reported by the Claude Code plugin's hooks.
     workflow: { first_codesynapse: number; first_native: number; reads_turned_back: number; fetches_steered: number; first_share_pct: number; files_edited: number; files_edited_found: number; edit_recall_pct: number; bash: Record<string, number> | null; bash_total: number }
@@ -942,6 +946,8 @@ export interface SavingsBucket {
   never_read_tokens: number; graph_saved_dollars: number | null
   local_input_tokens: number; local_output_tokens: number; local_cached_tokens: number
   compression_saved_dollars: number | null; gateway_saved_dollars: number | null
+  // fetch_source's tokens saved and their dollars; absent from older APIs.
+  source_saved_tokens?: number; sources_saved_dollars?: number | null
 }
 export interface SavingsSeries {
   days: number; step: 'hour' | '6h' | 'day' | 'week'; buckets: SavingsBucket[]
@@ -950,5 +956,6 @@ export interface SavingsSeries {
   metrics: boolean
   // Graph answers of days with no hourly measurement: in the tiles, in no bucket.
   unplaced_never_read_tokens: number; unplaced_graph_saved_dollars: number
+  unplaced_source_saved_tokens?: number; unplaced_sources_saved_dollars?: number
   reference_price: ReferencePrice | null
 }

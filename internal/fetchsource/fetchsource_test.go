@@ -3,6 +3,7 @@ package fetchsource
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/netguard"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
@@ -107,10 +109,16 @@ func TestFetchExtractsTextAndCachesIt(t *testing.T) {
 		assert.NotContains(t, out.Text, gone)
 	}
 	assert.Contains(t, out.Text, "[REDACTED]", "page text passes redact.Free")
+	assert.True(t, out.Reduce > 0, "cleaning and pruning are timed")
+	assert.Equal(t, Result(out, nil), telemetry.SourceMiss)
+	raw, err := json.Marshal(out)
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "reduce", "the time is not part of the answer")
 
 	again, err := f.Fetch(context.Background(), ts.URL+"/widgets?a=1&b=2")
 	require.NoError(t, err)
 	assert.Equal(t, again.Cache, Hit)
+	assert.Equal(t, Result(again, nil), telemetry.SourceHit)
 	assert.Equal(t, again.Text, out.Text)
 	assert.Equal(t, ts.hits.Load(), int32(1), "a fresh entry is answered without a request")
 	assert.NotContains(t, out.Text, "Home", "nav is dropped")
@@ -314,6 +322,24 @@ func TestFetchRefusesInternalAddresses(t *testing.T) {
 		assert.ErrorIs(t, err, ErrRefused, raw)
 	}
 	assert.Equal(t, ts.hits.Load(), int32(0))
+}
+
+func TestResult(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		out  Out
+		err  error
+		want string
+	}{
+		{"hit", Out{Cache: Hit}, nil, telemetry.SourceHit},
+		{"revalidated", Out{Cache: Revalidated}, nil, telemetry.SourceRevalidated},
+		{"fetched", Out{Cache: Fetched}, nil, telemetry.SourceMiss},
+		{"invalid", Out{}, fmt.Errorf("%w: bad", ErrInvalid), telemetry.SourceRefused},
+		{"internal address", Out{}, ErrRefused, telemetry.SourceRefused},
+		{"unavailable", Out{}, fmt.Errorf("%w: 404", ErrUnavailable), telemetry.SourceError},
+	} {
+		t.Run(tc.name, func(t *testing.T) { assert.Equal(t, Result(tc.out, tc.err), tc.want) })
+	}
 }
 
 func TestFetchRefusesInvalidURLs(t *testing.T) {

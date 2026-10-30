@@ -125,6 +125,9 @@ type Out struct {
 	ExtractDropped int    `json:"extract_dropped,omitempty"`
 	ExtractNote    string `json:"extract_note,omitempty"`
 	Text           string `json:"text"`
+	// Reduce is the time cleaning and pruning took on this machine (tier 1,
+	// the CPU), for the usage report; it is not part of the answer.
+	Reduce time.Duration `json:"-"`
 }
 
 // trackingParams are dropped from the cache key and the request: they
@@ -305,7 +308,7 @@ func (f *Fetcher) FetchFor(ctx context.Context, raw, question string) (Out, erro
 	ttl := f.ttls.For(u.Hostname())
 	if cached && now.Before(e.Fetched.Add(ttl)) {
 		f.cache.Touch(key)
-		return answer(u, e, Hit, question), nil
+		return timed(time.Now(), u, e, Hit, question), nil
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
@@ -339,7 +342,7 @@ func (f *Fetcher) FetchFor(ctx context.Context, raw, question string) (Out, erro
 	case res.StatusCode == http.StatusNotModified && cached:
 		e.Fetched, e.TTL = now, ttl
 		_ = f.cache.Put(key, e) //nolint:errcheck // the answer stands without the cache
-		return answer(u, e, Revalidated, question), nil
+		return timed(time.Now(), u, e, Revalidated, question), nil
 	case res.StatusCode != http.StatusOK:
 		return Out{}, fmt.Errorf("%w: the server answered %d", ErrUnavailable, res.StatusCode)
 	}
@@ -354,13 +357,24 @@ func (f *Fetcher) FetchFor(ctx context.Context, raw, question string) (Out, erro
 	if len(body) > MaxBody {
 		return Out{}, fmt.Errorf("%w: the page is larger than %d bytes", ErrUnavailable, MaxBody)
 	}
+	cleanStart := time.Now()
 	text := Clean(mt, body)
 	e = Entry{Cleaner: CleanerVersion,
 		URL: u.String(), ETag: clip(res.Header.Get("ETag"), maxHeader), LastModified: clip(res.Header.Get("Last-Modified"), maxHeader),
 		Fetched: now, TTL: ttl, ContentType: mt, RawBytes: len(body), Text: redact.Free(text),
 	}
+	cleaning := time.Since(cleanStart)
 	_ = f.cache.Put(key, e) //nolint:errcheck // the answer stands without the cache
-	return answer(u, e, Fetched, question), nil
+	out := timed(time.Now(), u, e, Fetched, question)
+	out.Reduce += cleaning
+	return out, nil
+}
+
+// timed is answer with the time pruning took since start in Reduce.
+func timed(start time.Time, u *url.URL, e Entry, status, question string) Out {
+	out := answer(u, e, status, question)
+	out.Reduce = time.Since(start)
+	return out
 }
 
 // answer prunes the cached text for question (JSON is never pruned) and
@@ -399,4 +413,22 @@ func clip(s string, n int) string {
 func firstLine(err error) string {
 	msg, _, _ := strings.Cut(err.Error(), "\n")
 	return clip(msg, 300)
+}
+
+// Result is the result an answer is counted under in
+// codesynapse_source_fetches_total: hit, revalidated or miss for a page
+// returned, refused for a URL or address the tool would not fetch, error for
+// a page it could not get.
+func Result(out Out, err error) string {
+	switch {
+	case errors.Is(err, ErrInvalid) || errors.Is(err, ErrRefused):
+		return telemetry.SourceRefused
+	case err != nil:
+		return telemetry.SourceError
+	case out.Cache == Hit:
+		return telemetry.SourceHit
+	case out.Cache == Revalidated:
+		return telemetry.SourceRevalidated
+	}
+	return telemetry.SourceMiss
 }
