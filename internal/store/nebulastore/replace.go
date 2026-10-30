@@ -99,6 +99,11 @@ func (s *Store) lease(ctx context.Context, head, repo, run string, ttl time.Dura
 		if errors.As(err, &ne) && strings.Contains(strings.ToLower(ne.Message), "filter") {
 			return errBusy
 		}
+		// Another publisher is writing the lease vertex this instant: the lease
+		// is taken, so wait like any other holder.
+		if retriable(err) {
+			return errBusy
+		}
 		return fmt.Errorf("reserve ingest: %w", err)
 	}
 	rows, err := s.write(ctx, fmt.Sprintf(readLease, literal(head)), nil)
