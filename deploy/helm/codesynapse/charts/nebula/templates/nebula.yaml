@@ -94,18 +94,35 @@ spec:
           volumeMounts:
             - {name: scratch, mountPath: /logs, subPath: logs}
             - {name: scratch, mountPath: /tmp, subPath: tmp}
-        # Registers the storage host and replaces the well-known first
-        # password of root with NEBULA_PASSWORD (at most 24 characters), then
-        # reports ready and sleeps. Idempotent across restarts. The console
-        # exits 0 on a statement error, so its output is checked.
+        # Registers the storage host, replaces the well-known first password
+        # of root with NEBULA_PASSWORD, creates the space and one user per
+        # service (api: DBA, owns the schema; worker and mcp: USER, data
+        # only), then reports ready and sleeps. Only this container holds the
+        # root password. Idempotent across restarts; a changed service
+        # password in the Secret is applied when the pod restarts. The
+        # console exits 0 on a statement error, so its output is checked.
         - name: init
           image: {{ .Values.images.console }}
           command:
             - sh
             - -c
             - |
-              [ -n "$NEBULA_PASSWORD" ] || { echo 'NEBULA_PASSWORD is not set' >&2; exit 1; }
+              # Passwords go into nGQL text, so only a plain alphabet is
+              # allowed; NebulaGraph accepts at most 24 characters.
+              chk() {
+                [ -n "$2" ] || { echo "$1 is not set in the Secret" >&2; exit 1; }
+                [ "${#2}" -le 24 ] || { echo "$1 is longer than 24 characters" >&2; exit 1; }
+                case "$2" in *[!A-Za-z0-9._~+/=-]*) echo "$1 may only hold letters, digits and ._~+/=-" >&2; exit 1;; esac
+              }
+              chk NEBULA_PASSWORD "$NEBULA_PASSWORD"
+              chk NEBULA_API_PASSWORD "$NEBULA_API_PASSWORD"
+              chk NEBULA_WORKER_PASSWORD "$NEBULA_WORKER_PASSWORD"
+              chk NEBULA_MCP_PASSWORD "$NEBULA_MCP_PASSWORD"
               c() { nebula-console -addr 127.0.0.1 -port 9669 -u root -p "$1" -e "$2"; }
+              run() {
+                out=$(c "$NEBULA_PASSWORD" "$1" 2>&1)
+                case "$out" in *ERROR*) return 1;; esac
+              }
               n=0
               until c "$NEBULA_PASSWORD" 'SHOW HOSTS' >/dev/null 2>&1 || c nebula 'SHOW HOSTS' >/dev/null 2>&1; do
                 n=$((n+1)); [ "$n" -lt 120 ] || { echo 'graphd did not answer' >&2; exit 1; }; sleep 2
@@ -123,10 +140,25 @@ spec:
               until c "$NEBULA_PASSWORD" 'SHOW HOSTS' | grep -q ONLINE; do
                 n=$((n+1)); [ "$n" -lt 60 ] || { echo 'storaged did not come online' >&2; exit 1; }; sleep 2
               done
+              run "CREATE SPACE IF NOT EXISTS \`codesynapse\` (partition_num = {{ int .Values.space.partitions }}, replica_factor = {{ int .Values.space.replicas }}, vid_type = FIXED_STRING(40))" \
+                || { echo "$out" >&2; exit 1; }
+              for u in "{{ .Values.users.api }} DBA $NEBULA_API_PASSWORD" "{{ .Values.users.worker }} USER $NEBULA_WORKER_PASSWORD" "{{ .Values.users.mcp }} USER $NEBULA_MCP_PASSWORD"; do
+                set -- $u
+                run "CREATE USER IF NOT EXISTS $1 WITH PASSWORD \"$3\"" || { echo "creating user $1 failed" >&2; exit 1; }
+                run "ALTER USER $1 WITH PASSWORD \"$3\"" || { echo "setting the password of $1 failed" >&2; exit 1; }
+                # graphd sees a new space on its next heartbeat.
+                n=0
+                until run "GRANT ROLE $2 ON \`codesynapse\` TO $1"; do
+                  n=$((n+1)); [ "$n" -lt 60 ] || { echo "granting $2 to $1 failed" >&2; exit 1; }; sleep 2
+                done
+              done
               touch /tmp/ready
               exec sleep infinity
           env:
             {{- include "cs.secretEnv" (list . "NEBULA_PASSWORD" "NEBULA_PASSWORD") | nindent 12 }}
+            {{- include "cs.secretEnv" (list . "NEBULA_API_PASSWORD" "NEBULA_API_PASSWORD") | nindent 12 }}
+            {{- include "cs.secretEnv" (list . "NEBULA_WORKER_PASSWORD" "NEBULA_WORKER_PASSWORD") | nindent 12 }}
+            {{- include "cs.secretEnv" (list . "NEBULA_MCP_PASSWORD" "NEBULA_MCP_PASSWORD") | nindent 12 }}
           readinessProbe:
             exec: {command: [test, -f, /tmp/ready]}
             periodSeconds: 5

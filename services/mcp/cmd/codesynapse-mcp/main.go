@@ -126,6 +126,14 @@ func (o *serveOptions) open(ctx context.Context) (store.Reader, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	// The MCP service never changes the schema (its database user may not):
+	// it waits for the API, which owns it.
+	if err := app.WaitForSchema(ctx, st, app.SchemaWait, func(err error) {
+		o.EC.Logger.Warn("waiting for the API to create the graph schema", "error", err)
+	}); err != nil {
+		_ = st.Close(context.Background()) //nolint:errcheck,contextcheck // the schema error is the one to report
+		return nil, nil, err
+	}
 	return st, func() { _ = st.Close(context.Background()) }, nil //nolint:errcheck,contextcheck // shutdown
 }
 

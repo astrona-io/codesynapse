@@ -22,6 +22,11 @@ var ErrNotFound = errors.New("not found")
 // memory past memory.MaxFactsPerRepo or memory.MaxEntitiesPerRepo.
 var ErrMemoryFull = memory.ErrFull
 
+// ErrSchemaMissing is returned by CheckSchema when the database lacks part of
+// the schema this version needs. Only the process that owns the schema (the
+// API service, or the codesynapse CLI with an owner's credentials) creates it.
+var ErrSchemaMissing = errors.New("the graph schema is missing or out of date")
+
 // Limits shared by all implementations so a single query cannot return an
 // unbounded result to an API client or an agent.
 const (
@@ -94,8 +99,12 @@ type Ranked struct {
 
 // Writer persists graphs.
 type Writer interface {
-	// EnsureSchema creates constraints and indexes. It is idempotent.
+	// EnsureSchema creates constraints and indexes. It is idempotent. Only
+	// the process that owns the schema calls it.
 	EnsureSchema(ctx context.Context) error
+	// CheckSchema reports, without changing anything, whether everything
+	// EnsureSchema creates exists. It wraps ErrSchemaMissing when not.
+	CheckSchema(ctx context.Context) error
 	// ReplaceRepo atomically swaps the stored graph for repo with g. Nodes
 	// and edges no longer present in g are removed.
 	ReplaceRepo(ctx context.Context, repo string, g *model.Graph) error

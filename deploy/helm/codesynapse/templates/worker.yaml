@@ -48,7 +48,7 @@ spec:
           ports:
             - {name: health, containerPort: 8081}
           env:
-            {{- include "cs.jobEnv" (list $ $p.push) | nindent 12 }}
+            {{- include "cs.jobEnv" (list $ $p.push "worker") | nindent 12 }}
             - {name: CODESYNAPSE_WORKER_ROLES, value: {{ $v.roles | quote }}}
             - {name: CODESYNAPSE_WORKER_ADDR, value: "0.0.0.0:8081"}
             - {name: GOMEMLIMIT, value: {{ include "cs.gomemlimit" $v.resources | quote }}}

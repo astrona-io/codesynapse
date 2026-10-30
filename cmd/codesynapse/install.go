@@ -39,13 +39,17 @@ const defaultChart = "oci://ghcr.io/astrona-io/charts/codesynapse"
 var localValues []byte
 
 // secretKeys are the credentials the chart reads from its Secret, and how
-// each is made: hex for tokens and passwords, base64 for the 32-byte key.
+// each is made: random bytes, as hex for tokens and passwords and as base64
+// for the 32-byte key. NebulaGraph refuses passwords over 24 characters, so
+// its get 12 bytes.
 var secretKeys = []struct {
 	name   string
+	bytes  int
 	base64 bool
 }{
-	{"CODESYNAPSE_API_TOKEN", false}, {"CODESYNAPSE_MCP_TOKEN", false}, {"POSTGRES_PASSWORD", false},
-	{"NEBULA_PASSWORD", false}, {"METRICS_PASSWORD", false}, {"SECRET_KEY", true},
+	{"CODESYNAPSE_API_TOKEN", 24, false}, {"CODESYNAPSE_MCP_TOKEN", 24, false}, {"POSTGRES_PASSWORD", 24, false},
+	{"NEBULA_PASSWORD", 12, false}, {"NEBULA_API_PASSWORD", 12, false}, {"NEBULA_WORKER_PASSWORD", 12, false},
+	{"NEBULA_MCP_PASSWORD", 12, false}, {"METRICS_PASSWORD", 24, false}, {"SECRET_KEY", 32, true},
 }
 
 // k8sName is a DNS-1123 label: what a namespace or release may be called.
@@ -260,25 +264,30 @@ Remove it again with:   codesynapse uninstall %[1]s -n %[2]s
 
 // ensureSecret makes the credentials Secret once. Its content goes to
 // kubectl on stdin, never in arguments other processes can read, and an
-// existing Secret is never replaced: the stores keep their passwords.
+// existing value is never replaced: the stores keep their passwords. A Secret
+// made by an older CLI only gets the keys it lacks.
 func (o *installOptions) ensureSecret(ctx context.Context, k []string) (bool, error) {
-	if _, err := o.run(ctx, nil, "kubectl", append(k, "--namespace", o.namespace, "get", "secret", "codesynapse")...); err == nil {
-		return false, nil
-	}
-	data := map[string]string{}
-	for _, key := range secretKeys {
-		b := make([]byte, 24)
-		if key.base64 {
-			b = make([]byte, 32)
+	ns := append(append([]string{}, k...), "--namespace", o.namespace)
+	if names, err := o.run(ctx, nil, "kubectl", append(ns, "get", "secret", "codesynapse",
+		"--output", `go-template={{range $k, $v := .data}}{{$k}}{{"\n"}}{{end}}`)...); err == nil {
+		have := map[string]bool{}
+		for _, n := range strings.Fields(string(names)) {
+			have[n] = true
 		}
-		if _, err := rand.Read(b); err != nil {
+		data, err := newSecretValues(func(name string) bool { return !have[name] })
+		if err != nil || len(data) == 0 {
 			return false, err
 		}
-		v := hex.EncodeToString(b)
-		if key.base64 {
-			v = base64.StdEncoding.EncodeToString(b)
+		patch, err := json.Marshal(map[string]any{"stringData": data})
+		if err != nil {
+			return false, err
 		}
-		data[key.name] = v
+		_, err = o.run(ctx, patch, "kubectl", append(ns, "patch", "secret", "codesynapse", "--type", "merge", "--patch-file", "/dev/stdin")...)
+		return false, err
+	}
+	data, err := newSecretValues(func(string) bool { return true })
+	if err != nil {
+		return false, err
 	}
 	manifest, err := json.Marshal(map[string]any{
 		"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
@@ -288,8 +297,29 @@ func (o *installOptions) ensureSecret(ctx context.Context, k []string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	_, err = o.run(ctx, manifest, "kubectl", append(k, "--namespace", o.namespace, "create", "-f", "-")...)
+	_, err = o.run(ctx, manifest, "kubectl", append(ns, "create", "-f", "-")...)
 	return err == nil, err
+}
+
+// newSecretValues makes a random value for each of secretKeys that want
+// selects.
+func newSecretValues(want func(name string) bool) (map[string]string, error) {
+	data := map[string]string{}
+	for _, key := range secretKeys {
+		if !want(key.name) {
+			continue
+		}
+		b := make([]byte, key.bytes)
+		if _, err := rand.Read(b); err != nil {
+			return nil, err
+		}
+		v := hex.EncodeToString(b)
+		if key.base64 {
+			v = base64.StdEncoding.EncodeToString(b)
+		}
+		data[key.name] = v
+	}
+	return data, nil
 }
 
 func (o *installOptions) runUninstall(ctx context.Context) error {

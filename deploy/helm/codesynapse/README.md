@@ -33,9 +33,14 @@ The steps below do the same by hand.
      --from-literal=CODESYNAPSE_MCP_TOKEN="$(openssl rand -hex 24)" \
      --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)" \
      --from-literal=NEBULA_PASSWORD="$(openssl rand -hex 12)" \
+     --from-literal=NEBULA_API_PASSWORD="$(openssl rand -hex 12)" \
+     --from-literal=NEBULA_WORKER_PASSWORD="$(openssl rand -hex 12)" \
+     --from-literal=NEBULA_MCP_PASSWORD="$(openssl rand -hex 12)" \
      --from-literal=METRICS_PASSWORD="$(openssl rand -hex 24)" \
      --from-literal=SECRET_KEY="$(openssl rand -base64 32)"
    ```
+
+   `NEBULA_PASSWORD` is the in-chart NebulaGraph's `root` password and only its init step reads it. That step creates the graph space and one user per service from `nebula.users`: `cs_api` (DBA on the space: creates and upgrades the schema), `cs_worker` and `cs_mcp` (USER: read and write data, change no schema). Each service signs in with its own `NEBULA_<SERVICE>_PASSWORD`. NebulaGraph passwords are at most 24 characters of `A-Za-z0-9._~+/=-`. A changed service password is applied when the NebulaGraph pod restarts.
 
    Optional keys: `CODESYNAPSE_GIT_TOKENS` (installation Git tokens, `host=token,...`; keep them read-only), `CODESYNAPSE_GIT_PUSH_TOKENS` (same format, tokens that may push; only the fix worker and an API that runs jobs with push on get them; without it pushes use `CODESYNAPSE_GIT_TOKENS`), `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`. With an external database, put its URL in `CODESYNAPSE_DATABASE_URL` and drop `POSTGRES_PASSWORD`. Keep `SECRET_KEY`: organisation Git tokens and identity provider secrets sealed with a lost key have to be entered again.
 
@@ -92,7 +97,7 @@ Each store is a subchart in `charts/`, declared in `Chart.yaml` with `condition:
 | Store | Disable | Link instead |
 |---|---|---|
 | PostgreSQL (accounts, jobs, audit log) | `postgresql.enabled=false` | `CODESYNAPSE_DATABASE_URL` in the Secret; drop `POSTGRES_PASSWORD`. A managed database, or CloudNativePG with three instances (the `uri` of its `<cluster>-app` Secret); `just chart-failover-postgres` tests a primary failover |
-| NebulaGraph (code graph) | `nebula.enabled=false` | `nebula.externalAddrs` (required, graphd `host:9669`, comma separated); `NEBULA_PASSWORD` (the `root` password) stays in the Secret. Authentication must be on. Set `nebula.space.replicas: 3` before the first install so the graph space keeps three copies of each partition (fixed once created) |
+| NebulaGraph (code graph) | `nebula.enabled=false` | `nebula.externalAddrs` (required, graphd `host:9669`, comma separated). Authentication must be on. Create the space `codesynapse` (three replicas on a cluster; fixed once created) and the users of `nebula.users` yourself, with `NEBULA_API_PASSWORD`, `NEBULA_WORKER_PASSWORD` and `NEBULA_MCP_PASSWORD` in the Secret; no root password is needed (statements in `docs/operations/upgrading.md`) |
 | Milvus (memory vectors) | `milvus.enabled=false` | `milvus.externalURL` (the proxy, `http(s)://host:19530`), and `MILVUS_TOKEN` in the Secret when authentication is on; empty turns memory vectors off. A Milvus cluster from the zilliztech chart with SeaweedFS for S3 and Woodpecker as the log is tested by `just chart-failover-milvus`; set `mq.type: woodpecker` before its first start |
 | VictoriaMetrics (metrics) | `victoriametrics.enabled=false` | `victoriametrics.externalURL`; empty turns export off |
 | VictoriaTraces (traces) | `victoriatraces.enabled=false` | `victoriatraces.externalURL`, the full OTLP/HTTP traces endpoint; empty turns export off |

@@ -26,6 +26,7 @@ grep -q -- '-datasource.url=https://metrics.example.com' "$out/external.yaml"
 for bad in api.replica=2 'worker.roles=ingest\,typo' 'worker.roles=ingest\,fix' fixWorker.roles=ai image.pullPolicy=Sometimes \
     auditRetentionDays=7 postgresql.sizee=1Gi nebula.size=lots \
     nebula.space.replicas=2 nebula.space.partitions=0 nebula.space.extra=1 \
+    nebula.users.api=root nebula.users.mcp=Bad-Name 'nebula.users.worker=x' nebula.users.extra=cs_x nebula.users.api=null \
     worker.restrictEgress=maybe 'worker.egressAllow[0].cidr=nonsense' 'worker.egressAllow[0].extra=1' \
     auditArchive.hotDays=3 auditArchive.s3.endpoint=http://minio:9000 auditArchive.s3.lockMode=legal \
     auditArchive.s3.prefix=../audit/ auditArchive.s3.extra=1; do
@@ -106,6 +107,35 @@ fi
 helm template codesynapse "$chart" -f "$values" --set nebula.enabled=false,nebula.externalAddrs=nebula.example.com:9669,nebula.space.replicas=3,nebula.space.partitions=30 > "$out/nebula-cluster.yaml"
 grep -q 'name: CODESYNAPSE_NEBULA_REPLICAS, value: "3"' "$out/nebula-cluster.yaml"
 grep -q 'name: CODESYNAPSE_NEBULA_PARTITIONS, value: "30"' "$out/nebula-cluster.yaml"
+
+# Each service signs in to NebulaGraph as its own user; two services sharing
+# one would share its role.
+if helm template codesynapse "$chart" -f "$values" --set nebula.users.mcp=cs_worker > /dev/null 2>&1; then
+    echo "chart rendered two services with one NebulaGraph user" >&2
+    exit 1
+fi
+python3 - "$out/rendered.yaml" <<'PY'
+import sys, re
+docs = open(sys.argv[1]).read().split("\n---\n")
+want = {"api": ("cs_api", "NEBULA_API_PASSWORD"), "worker": ("cs_worker", "NEBULA_WORKER_PASSWORD"),
+        "fix-worker": ("cs_worker", "NEBULA_WORKER_PASSWORD"), "mcp": ("cs_mcp", "NEBULA_MCP_PASSWORD")}
+seen = set()
+for d in docs:
+    name = re.search(r"^  name: codesynapse-(\S+)$", d, re.M)
+    if not re.search(r"^kind: (Deployment|StatefulSet)$", d, re.M) or not name:
+        continue
+    svc = name.group(1)
+    if svc in want:
+        seen.add(svc)
+        user, key = want[svc]
+        assert f"name: CODESYNAPSE_NEBULA_USER, value: \"{user}\"" in d, f"{svc} should sign in as {user}"
+        assert f"key: {key}" in d, f"{svc} should read {key}"
+    # Only the NebulaGraph init container holds the root password.
+    if svc != "nebula":
+        assert "key: NEBULA_PASSWORD" not in d, f"{svc} holds the NebulaGraph root password"
+assert seen == set(want), f"expected {sorted(want)}, found {sorted(seen)}"
+print("nebula: one user per service; only the init step holds the root password")
+PY
 
 # The fix worker pushes: it cannot be on without the switch that allows it.
 if helm template codesynapse "$chart" -f "$values" --set features.allowPush=false > /dev/null 2>&1; then

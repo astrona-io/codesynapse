@@ -52,24 +52,40 @@ services:
       nebula-metad:
         condition: service_healthy
 
-  # Registers the storage host and replaces the well-known first password of
-  # the root user with NEBULA_PASSWORD. Runs once per start; idempotent: a
-  # host that is registered and a password that is changed are left alone.
+  # Registers the storage host, replaces the well-known first password of the
+  # root user with NEBULA_PASSWORD, creates the space and one user per service:
+  # cs_api owns the schema (DBA), cs_worker and cs_mcp read and write data
+  # (USER) and can change no schema. No service gets the root password. Runs
+  # once per start and is idempotent; a service password changed in .env is
+  # applied on the next start.
   nebula-init:
     image: ghcr.io/astrona-io/codesynapse-nebula-console:v3.8.0
     entrypoint: ["sh", "-c"]
     command:
       - |
-        [ -n "$$NEBULA_PASSWORD" ] || { echo 'NEBULA_PASSWORD is not set; run just init' >&2; exit 1; }
+        # Passwords go into nGQL text, so only a plain alphabet is allowed;
+        # NebulaGraph accepts at most 24 characters.
+        chk() {
+          [ -n "$$2" ] || { echo "$$1 is not set; run just init" >&2; exit 1; }
+          [ "$${#2}" -le 24 ] || { echo "$$1 is longer than 24 characters" >&2; exit 1; }
+          case "$$2" in *[!A-Za-z0-9._~+/=-]*) echo "$$1 may only hold letters, digits and ._~+/=-" >&2; exit 1;; esac
+        }
+        chk NEBULA_PASSWORD "$$NEBULA_PASSWORD"
+        chk NEBULA_API_PASSWORD "$$NEBULA_API_PASSWORD"
+        chk NEBULA_WORKER_PASSWORD "$$NEBULA_WORKER_PASSWORD"
+        chk NEBULA_MCP_PASSWORD "$$NEBULA_MCP_PASSWORD"
         c() { nebula-console -addr nebula-graphd -port 9669 -u root -p "$$1" -e "$$2"; }
+        # The console exits 0 on a statement error, so look at its output.
+        run() {
+          out=$$(c "$$NEBULA_PASSWORD" "$$1" 2>&1)
+          case "$$out" in *ERROR*) return 1;; esac
+        }
         n=0
         until c "$$NEBULA_PASSWORD" 'SHOW HOSTS' >/dev/null 2>&1 || c nebula 'SHOW HOSTS' >/dev/null 2>&1; do
           n=$$((n+1)); [ "$$n" -lt 60 ] || { echo 'graphd did not answer' >&2; exit 1; }; sleep 2
         done
         # The first password is only valid until it is changed.
         if c nebula 'SHOW HOSTS' >/dev/null 2>&1; then
-          # The console exits 0 on a statement error, so look at its output.
-          # NebulaGraph accepts at most 24 characters.
           out=$$(c nebula "CHANGE PASSWORD root FROM \"nebula\" TO \"$$NEBULA_PASSWORD\"" 2>&1)
           case "$$out" in *ERROR*) echo "$$out" >&2; exit 1;; esac
         fi
@@ -83,8 +99,23 @@ services:
         until c "$$NEBULA_PASSWORD" 'SHOW HOSTS' | grep -q ONLINE; do
           n=$$((n+1)); [ "$$n" -lt 60 ] || { echo 'storaged did not come online' >&2; exit 1; }; sleep 2
         done
+        run 'CREATE SPACE IF NOT EXISTS `codesynapse` (partition_num = 10, replica_factor = 1, vid_type = FIXED_STRING(40))' \
+          || { echo "$$out" >&2; exit 1; }
+        for u in "cs_api DBA $$NEBULA_API_PASSWORD" "cs_worker USER $$NEBULA_WORKER_PASSWORD" "cs_mcp USER $$NEBULA_MCP_PASSWORD"; do
+          set -- $$u
+          run "CREATE USER IF NOT EXISTS $$1 WITH PASSWORD \"$$3\"" || { echo "creating user $$1 failed" >&2; exit 1; }
+          run "ALTER USER $$1 WITH PASSWORD \"$$3\"" || { echo "setting the password of $$1 failed" >&2; exit 1; }
+          # graphd sees a new space on its next heartbeat.
+          n=0
+          until run "GRANT ROLE $$2 ON \`codesynapse\` TO $$1"; do
+            n=$$((n+1)); [ "$$n" -lt 60 ] || { echo "granting $$2 to $$1 failed" >&2; exit 1; }; sleep 2
+          done
+        done
     environment:
       NEBULA_PASSWORD: ${NEBULA_PASSWORD:?run "just init" to add NEBULA_PASSWORD to .env}
+      NEBULA_API_PASSWORD: ${NEBULA_API_PASSWORD:?run "just init" to add NEBULA_API_PASSWORD to .env}
+      NEBULA_WORKER_PASSWORD: ${NEBULA_WORKER_PASSWORD:?run "just init" to add NEBULA_WORKER_PASSWORD to .env}
+      NEBULA_MCP_PASSWORD: ${NEBULA_MCP_PASSWORD:?run "just init" to add NEBULA_MCP_PASSWORD to .env}
     restart: "no"
     read_only: true
     tmpfs: [/tmp]
@@ -242,8 +273,8 @@ services:
     environment: &api-env
       CODESYNAPSE_RUN_JOBS: "false"
       CODESYNAPSE_NEBULA_ADDRS: nebula-graphd:9669
-      CODESYNAPSE_NEBULA_USER: root
-      CODESYNAPSE_NEBULA_PASSWORD: ${NEBULA_PASSWORD:?run "just init" to add NEBULA_PASSWORD to .env}
+      CODESYNAPSE_NEBULA_USER: cs_api
+      CODESYNAPSE_NEBULA_PASSWORD: ${NEBULA_API_PASSWORD:?run "just init" to add NEBULA_API_PASSWORD to .env}
       CODESYNAPSE_MILVUS_URL: http://milvus:19530
       CODESYNAPSE_METRICS_URL: http://victoriametrics:8428
       CODESYNAPSE_METRICS_USER: codesynapse
@@ -363,6 +394,9 @@ services:
       target: worker
     environment: &worker-env
       <<: *api-env
+      # Workers read and write data and may not change the schema.
+      CODESYNAPSE_NEBULA_USER: cs_worker
+      CODESYNAPSE_NEBULA_PASSWORD: ${NEBULA_WORKER_PASSWORD:?run "just init" to add NEBULA_WORKER_PASSWORD to .env}
       CODESYNAPSE_WORKER_ROLES: ingest,ai
       CODESYNAPSE_ALLOW_PUSH: "false"
       CODESYNAPSE_API_TOKEN: ""
@@ -421,8 +455,8 @@ services:
       dockerfile: services/mcp/Dockerfile
     environment:
       CODESYNAPSE_NEBULA_ADDRS: nebula-graphd:9669
-      CODESYNAPSE_NEBULA_USER: root
-      CODESYNAPSE_NEBULA_PASSWORD: ${NEBULA_PASSWORD:?run "just init" to add NEBULA_PASSWORD to .env}
+      CODESYNAPSE_NEBULA_USER: cs_mcp
+      CODESYNAPSE_NEBULA_PASSWORD: ${NEBULA_MCP_PASSWORD:?run "just init" to add NEBULA_MCP_PASSWORD to .env}
       CODESYNAPSE_MILVUS_URL: http://milvus:19530
       CODESYNAPSE_METRICS_URL: http://victoriametrics:8428
       CODESYNAPSE_METRICS_USER: codesynapse
