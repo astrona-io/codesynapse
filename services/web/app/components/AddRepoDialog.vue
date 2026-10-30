@@ -71,7 +71,9 @@ const allPicked = computed(() => openRepos.value.length > 0 && openRepos.value.e
 const pickAll = (on: boolean) => { for (const r of openRepos.value) picked[r.repo] = on }
 
 // Watching the organisation adds the repositories created from now on; the
-// ones listed today are the baseline, so unpicked ones stay out.
+// ones listed today are the baseline, so unpicked ones stay out. Private
+// ones only when the watch's creator is an owner or admin and the
+// organisation has a Git token for the host (the API decides every scan).
 const autoAdd = ref(true)
 const watchNote = ref('')
 const adding = ref(false)
@@ -93,7 +95,8 @@ async function addChosen() {
     if (autoAdd.value && listing.value) {
       try {
         await apiPost('watches', { provider: listing.value.provider, host: listing.value.host, org: listing.value.org, include_archived: form.include_archived, include_forks: form.include_forks })
-        watchNote.value = `Watching ${listing.value.org}: new public repositories are added automatically.`
+        const what = canOrg.value ? 'new public repositories, and new private ones the organisation\'s token reads,' : 'new public repositories'
+        watchNote.value = `Watching ${listing.value.org}: ${what} are added automatically.`
       } catch (e) {
         watchNote.value = `Could not watch ${listing.value.org}: ${apiErrorMessage(e)}`
       }
@@ -191,6 +194,11 @@ async function addChosen() {
               <label class="check"><input v-model="space" type="radio" value="me" :disabled="!canMe"> Only me<span v-if="!canMe" class="dim"> (turned off by your organisation)</span></label>
             </fieldset>
             <label class="check"><input v-model="autoAdd" type="checkbox"> Automatically add new repositories {{ listing.org }} creates later</label>
+            <p v-if="autoAdd" class="muted small">
+              <template v-if="canOrg">Adds new public repositories, and new private ones your organisation's Git token for {{ listing.host }} can read while you stay an owner or admin.</template>
+              <template v-else>Adds new public repositories only. Private ones are added when an owner or admin sets up the watch and the organisation has a Git token for {{ listing.host }}.</template>
+              The watch does not add repositories that exist today: pick those in the list.
+            </p>
             <p class="muted small" role="status">{{ watchNote }}</p>
             <div class="row opts">
               <input v-model="filter" class="find" placeholder="Filter repositories" aria-label="Filter repositories">

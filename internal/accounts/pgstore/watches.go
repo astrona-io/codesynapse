@@ -10,15 +10,15 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
-const watchCols = "org_id, key, actor_id, execution, provider, host, login, include_archived, include_forks, paused, last_scan, last_status, last_error, next_scan, added, known"
+const watchCols = "org_id, key, actor_id, execution, provider, host, login, include_archived, include_forks, paused, last_scan, last_status, last_error, next_scan, added, known, private_baseline, include_private, private_since, exclude"
 
 func scanWatch(row pgx.Row) (accounts.OrgWatch, error) {
 	var w accounts.OrgWatch
 	var key string
-	var exec, known []byte
-	var lastScan *time.Time
+	var exec, known, exclude []byte
+	var lastScan, baseline, since *time.Time
 	if err := row.Scan(&w.OrgID, &key, &w.ActorID, &exec, &w.Provider, &w.Host, &w.Login, &w.IncludeArchived, &w.IncludeForks, &w.Paused,
-		&lastScan, &w.LastStatus, &w.LastError, &w.NextScan, &w.Added, &known); err != nil {
+		&lastScan, &w.LastStatus, &w.LastError, &w.NextScan, &w.Added, &known, &baseline, &w.IncludePrivate, &since, &exclude); err != nil {
 		return accounts.OrgWatch{}, err
 	}
 	if err := json.Unmarshal(exec, &w.Execution); err != nil {
@@ -27,8 +27,17 @@ func scanWatch(row pgx.Row) (accounts.OrgWatch, error) {
 	if err := json.Unmarshal(known, &w.Known); err != nil {
 		return accounts.OrgWatch{}, err
 	}
+	if err := json.Unmarshal(exclude, &w.Exclude); err != nil {
+		return accounts.OrgWatch{}, err
+	}
 	if lastScan != nil {
 		w.LastScan = lastScan.UTC()
+	}
+	if baseline != nil {
+		w.PrivateBaseline = baseline.UTC()
+	}
+	if since != nil {
+		w.PrivateSince = since.UTC()
 	}
 	w.NextScan = w.NextScan.UTC()
 	return w, nil
@@ -63,10 +72,21 @@ func (s *Store) PutOrgWatch(ctx context.Context, w accounts.OrgWatch) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `INSERT INTO org_watches (org_id, key, actor_id, execution, provider, host, login, include_archived, include_forks, paused, next_scan, known)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, '[]')
-ON CONFLICT (org_id, key) DO UPDATE SET actor_id = $3, execution = $4, provider = $5, include_archived = $8, include_forks = $9, paused = $10`,
-		w.OrgID, w.Key(), w.ActorID, exec, w.Provider, w.Host, w.Login, w.IncludeArchived, w.IncludeForks, w.Paused, w.NextScan)
+	patterns := w.Exclude
+	if patterns == nil {
+		patterns = []string{}
+	}
+	exclude, err := json.Marshal(patterns)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(ctx, `INSERT INTO org_watches (org_id, key, actor_id, execution, provider, host, login, include_archived, include_forks, paused, next_scan, known,
+  include_private, private_since, exclude)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, '[]', $12, $13, $14)
+ON CONFLICT (org_id, key) DO UPDATE SET actor_id = $3, execution = $4, provider = $5, include_archived = $8, include_forks = $9, paused = $10,
+  include_private = $12, private_since = $13, exclude = $14`,
+		w.OrgID, w.Key(), w.ActorID, exec, w.Provider, w.Host, w.Login, w.IncludeArchived, w.IncludeForks, w.Paused, w.NextScan,
+		w.IncludePrivate, nullTime(w.PrivateSince), exclude)
 	return mapErr(err, "watch")
 }
 
@@ -95,7 +115,8 @@ func (s *Store) RecordWatchScan(ctx context.Context, orgID, key string, scan acc
 		}
 	}
 	_, err := s.db.Exec(ctx, `UPDATE org_watches SET last_scan = COALESCE($3, last_scan), last_status = $4, last_error = $5,
-  next_scan = COALESCE($6, next_scan), added = added + $7, known = COALESCE($8::jsonb, known)
-WHERE org_id = $1 AND key = $2`, orgID, key, nullTime(scan.LastScan), scan.LastStatus, scan.LastError, nullTime(scan.NextScan), scan.Added, known)
+  next_scan = COALESCE($6, next_scan), added = added + $7, known = COALESCE($8::jsonb, known),
+  private_baseline = COALESCE($9, private_baseline)
+WHERE org_id = $1 AND key = $2`, orgID, key, nullTime(scan.LastScan), scan.LastStatus, scan.LastError, nullTime(scan.NextScan), scan.Added, known, nullTime(scan.PrivateBaseline))
 	return err
 }

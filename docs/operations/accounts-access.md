@@ -187,7 +187,30 @@ They are used, with no fallback to the organisation's token, to:
 - push fix branches for it;
 - list repositories for Import into your own space.
 
-Organisation watches still add public repositories only, to the organisation space.
+Organisation watches never use personal tokens.
+
+### Organisation watches
+
+A watch adds the repositories an organisation or user on a Git host creates after the watch was set up. Repositories that exist when it is created are its baseline and are never added by it; pick those in the import list. Every 15 minutes the scan runs as the member who created the watch:
+
+- When the watch includes private repositories, that member is an owner or admin of the organisation at the time of the scan (checked again every scan) and the organisation has a Git token for the host, the scan writes a `git_token.list` audit event and then lists with that token. If the event cannot be written, the scan lists anonymously.
+- Otherwise it lists anonymously and sees public repositories only. The installation's tokens are never used.
+- New public repositories are added like any other add. A new private repository is added only to the organisation space, after the organisation's token proved access, and is cloned with that token.
+- The first scan that lists with a token, and the first one after the token is replaced, adds no private repositories: the ones it finds join the baseline, so setting a token does not add everything it can read.
+- Each add writes a `watch.repo_add` audit event first; at most 10 repositories are queued per scan.
+
+#### Changing a watch
+
+Use Edit on the dashboard's watch list, or `PUT /api/v1/watches/{host}/{login}` from a signed-in session (API keys are refused; the body is at most 16 KiB). The member who created the watch and the organisation's owners and admins can change it; a member cannot change a colleague's watch. Whoever changes it becomes the member the scan runs as. Each change writes a `watch.update` audit event first, and a change whose event cannot be written is refused.
+
+| Field | Meaning |
+|---|---|
+| `paused` | Stop or resume scanning. |
+| `include_archived`, `include_forks` | Also add archived repositories and forks. |
+| `include_private` | Also add private repositories, read with the organisation's Git token. On by default when an owner or admin creates the watch, off otherwise. Only owners and admins can turn it on. |
+| `exclude` | Names never added: at most 20 patterns of at most 100 characters, letters, digits, `-`, `_`, `.` and `*` (any characters). `test-*` skips names starting with `test-`, `*-archive` names ending in `-archive`. Case does not matter. |
+
+Changes apply to later scans only and never remove or unlink a repository the watch already added. Repositories a setting or pattern skipped are remembered as seen (without an audit event, before the 10-per-scan limit), so loosening a setting later does not add them; add them from the import list. Turning `include_private` on takes a new private baseline at the next scan: private repositories that exist then are not added.
 
 ## Audit log
 
