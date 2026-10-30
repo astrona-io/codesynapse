@@ -204,8 +204,11 @@ type bridge struct {
 	probing   bool
 	listStale bool
 	kick      chan struct{}
-	reinitMu  sync.Mutex
-	cacheMu   sync.Mutex
+	// probes holds the running probe loop, so a stopped bridge can wait
+	// for it.
+	probes   sync.WaitGroup
+	reinitMu sync.Mutex
+	cacheMu  sync.Mutex
 }
 
 type rpcMessage struct {
@@ -381,6 +384,24 @@ func (b *bridge) postTo(ctx context.Context, msg []byte, m rpcMessage, sink func
 	hctx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
 	timer := time.AfterFunc(wait, func() { stop(errHeaderTimeout) })
+	// A tool call keeps its whole limit only while the server is there: a
+	// connection lost without a reset (a VPN that dropped, a NAT that forgot
+	// it) would otherwise hold the call for minutes. After callLiveWait
+	// without headers a fresh connection asks whether the server answers.
+	var headersMu sync.Mutex
+	gotHeaders := false
+	if m.Method == "tools/call" {
+		live := time.AfterFunc(callLiveWait, func() {
+			if err := b.alive(ctx); err != nil && unreachable(err) {
+				headersMu.Lock()
+				defer headersMu.Unlock()
+				if !gotHeaders {
+					stop(errNotAlive)
+				}
+			}
+		})
+		defer live.Stop()
+	}
 	req, err := http.NewRequestWithContext(hctx, http.MethodPost, b.url, bytes.NewReader(msg))
 	if err != nil {
 		timer.Stop()
@@ -391,8 +412,14 @@ func (b *bridge) postTo(ctx context.Context, msg []byte, m rpcMessage, sink func
 	b.headers(req)
 	res, err := b.http.Do(req)
 	timer.Stop()
+	headersMu.Lock()
+	gotHeaders = true
+	headersMu.Unlock()
 	if err != nil {
-		if errors.Is(context.Cause(hctx), errHeaderTimeout) {
+		switch cause := context.Cause(hctx); {
+		case errors.Is(cause, errNotAlive):
+			return cause
+		case errors.Is(cause, errHeaderTimeout):
 			return fmt.Errorf("%w after %s", errHeaderTimeout, wait)
 		}
 		return err

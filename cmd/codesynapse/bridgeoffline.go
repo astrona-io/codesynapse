@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -44,14 +45,16 @@ var errOffline = errors.New("CodeSynapse server unreachable")
 // errHeaderTimeout means the server accepted the request but sent nothing.
 var errHeaderTimeout = errors.New("CodeSynapse did not answer in time")
 
+// errNotAlive means a tool call waited without an answer and a liveness check
+// on a fresh connection did not reach the server either.
+var errNotAlive = fmt.Errorf("%w: a liveness check did not reach the server", errHeaderTimeout)
+
 const (
 	bridgeDialTimeout = 5 * time.Second
 	// bridgeHeaderTimeout bounds the wait for an answer to anything but a
 	// tool call; bridgeInitHeaderTimeout the wait for initialize.
 	bridgeHeaderTimeout     = 30 * time.Second
 	bridgeInitHeaderTimeout = 10 * time.Second
-	// probeTimeout bounds one background attempt to reach the server.
-	probeTimeout = 10 * time.Second
 	// maxBridgeCache bounds a kept answer.
 	maxBridgeCache = 2 << 20
 	// offlineFresh is how long hooks trust an offline marker; the probe
@@ -68,7 +71,42 @@ var (
 	bridgeInitWait = 10 * time.Second
 	probeMinDelay  = time.Second
 	probeMaxDelay  = 15 * time.Second
+	// probeTimeout bounds one background attempt to reach the server.
+	probeTimeout = 10 * time.Second
+	// callLiveWait is how long a tool call waits for headers before a
+	// liveness check; aliveTimeout bounds that check.
+	callLiveWait = 20 * time.Second
+	aliveTimeout = 5 * time.Second
 )
+
+// alive asks the server, on a connection of its own, whether it answers at
+// all. Any HTTP answer counts; only an error that unreachable accepts means
+// it is gone.
+func (b *bridge) alive(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, aliveTimeout)
+	defer cancel()
+	var t *http.Transport
+	if own, ok := b.http.Transport.(*http.Transport); ok {
+		t = own.Clone()
+	} else {
+		t = newBridgeHTTP().Transport.(*http.Transport).Clone() //nolint:forcetypeassert // built just above
+	}
+	t.DisableKeepAlives = true
+	defer t.CloseIdleConnections()
+	ping := []byte(`{"jsonrpc":"2.0","id":"codesynapse-bridge-alive","method":"ping"}`)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.url, bytes.NewReader(ping))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	b.headers(req)
+	res, err := (&http.Client{Transport: t, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+	if err != nil {
+		return err
+	}
+	return res.Body.Close()
+}
 
 // offlineProtocols are the versions an offline initialize may agree to: those
 // the server's SDK negotiates, so the replayed initialize agrees on the same.
@@ -130,15 +168,29 @@ func gatewayStatus(status int) bool {
 	return status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
 }
 
-// refusedForGood reports whether a registration error is an answer that
-// retrying will not change: a refused key or session.
+// refusedForGood reports whether an error is an answer that retrying will not
+// change: a refused key or session (401, 403) or an unusable chat identity.
+// Any other answer (a 404 or 400 from an ingress during an upgrade, a 500) is
+// a failed attempt: tried again, never a reason to give up on the chat.
 func refusedForGood(err error) bool {
 	if errors.Is(err, execution.ErrMissing) || errors.Is(err, execution.ErrConflict) || errors.Is(err, execution.ErrInvalid) {
 		return true
 	}
-	var se *statusError
-	return errors.As(err, &se) && se.Status >= 400 && se.Status < 500 &&
-		se.Status != http.StatusRequestTimeout && se.Status != http.StatusTooManyRequests
+	if se := (*statusError)(nil); errors.As(err, &se) {
+		return se.Status == http.StatusUnauthorized || se.Status == http.StatusForbidden
+	}
+	if mse := (*mcpStatusError)(nil); errors.As(err, &mse) {
+		return mse.Status == http.StatusUnauthorized || mse.Status == http.StatusForbidden
+	}
+	return false
+}
+
+// runtimeSessionLost reports whether the MCP server no longer knows the
+// chat's runtime session (expired, revoked, a fresh accounts database), which
+// registering it again may fix.
+func runtimeSessionLost(err error) bool {
+	var mse *mcpStatusError
+	return errors.As(err, &mse) && mse.Status == http.StatusForbidden && strings.Contains(mse.Detail, "runtime session is unavailable")
 }
 
 func refusalText(err error) string {
@@ -171,7 +223,7 @@ func (b *bridge) start(ctx context.Context) {
 	b.mu.Lock()
 	b.probing = true
 	b.mu.Unlock()
-	go b.probeLoop(ctx)
+	b.probes.Go(func() { b.probeLoop(ctx) })
 }
 
 func (b *bridge) settleRegistration() {
@@ -436,9 +488,9 @@ func (b *bridge) send(ctx context.Context, msg []byte, m rpcMessage) error {
 	b.mu.Lock()
 	used := b.mcpID
 	b.mu.Unlock()
-	err := b.post(ctx, msg, m)
+	answered, err := b.postAnswer(ctx, msg, m)
 	var se *mcpStatusError
-	if err != nil && m.Method != "initialize" && errors.As(err, &se) {
+	if err != nil && !answered && m.Method != "initialize" && errors.As(err, &se) {
 		retry := false
 		switch {
 		case se.Status == http.StatusNotFound && used != "":
@@ -446,17 +498,42 @@ func (b *bridge) send(ctx context.Context, msg []byte, m rpcMessage) error {
 				return b.settle(ctx, rerr)
 			}
 			retry = true
-		case se.Status == http.StatusForbidden && strings.Contains(se.Detail, "runtime session is unavailable") && b.needsRegistration():
+		case runtimeSessionLost(err) && b.needsRegistration():
 			if rerr := b.register(ctx); rerr != nil {
 				return b.settle(ctx, rerr)
 			}
 			retry = true
 		}
 		if retry {
-			err = b.post(ctx, msg, m)
+			answered, err = b.postAnswer(ctx, msg, m)
 		}
 	}
+	if answered {
+		// The client has its answer; a stream that broke off after it is no
+		// reason to send a second one for the same id.
+		return b.settle(ctx, nil)
+	}
 	return b.settle(ctx, err)
+}
+
+// postAnswer posts msg, writes what comes back to the client and reports
+// whether the response to m was among it.
+func (b *bridge) postAnswer(ctx context.Context, msg []byte, m rpcMessage) (bool, error) {
+	answered := false
+	err := b.postTo(ctx, msg, m, func(data []byte) {
+		if len(m.ID) > 0 && !answered {
+			var r struct {
+				ID     json.RawMessage `json:"id"`
+				Result json.RawMessage `json:"result"`
+				Error  json.RawMessage `json:"error"`
+			}
+			if json.Unmarshal(data, &r) == nil && bytes.Equal(bytes.TrimSpace(r.ID), bytes.TrimSpace(m.ID)) && (r.Result != nil || r.Error != nil) {
+				answered = true
+			}
+		}
+		b.deliver(data, m)
+	})
+	return answered, err
 }
 
 // settle records what a request says about the server's availability.
@@ -537,7 +614,7 @@ func (b *bridge) markOffline() {
 	r.mu.Unlock()
 	r.writeMarker(false)
 	if begin {
-		go r.probeLoop(r.runCtx)
+		r.probes.Go(func() { r.probeLoop(r.runCtx) })
 	}
 }
 
@@ -570,7 +647,7 @@ func (b *bridge) kickProbe() {
 	}
 	r.mu.Unlock()
 	if begin {
-		go r.probeLoop(r.runCtx)
+		r.probes.Go(func() { r.probeLoop(r.runCtx) })
 		return
 	}
 	select {
@@ -646,28 +723,61 @@ func (b *bridge) recover(ctx context.Context) (bool, error) {
 	if !off && !need {
 		return true, nil
 	}
-	if need {
-		if err := b.reinit(pctx, ""); err != nil {
-			return false, err
+	attempt := func() error { return b.reinit(pctx, "") }
+	if !need {
+		attempt = func() error {
+			ping := []byte(`{"jsonrpc":"2.0","id":"codesynapse-bridge-probe","method":"ping"}`)
+			err := b.postTo(pctx, ping, rpcMessage{Method: "ping"}, func([]byte) {})
+			var se *mcpStatusError
+			if errors.As(err, &se) && se.Status == http.StatusNotFound && used != "" {
+				err = b.reinit(pctx, used)
+			}
+			return err
 		}
+	}
+	err := attempt()
+	if runtimeSessionLost(err) && b.needsRegistration() {
+		// The runtime session ended during the outage (expiry, revocation, a
+		// fresh accounts database): register it again, as send does.
+		if rerr := b.register(pctx); rerr != nil {
+			return b.probeOutcome(rerr)
+		}
+		err = attempt()
+	}
+	return b.probeOutcome(err)
+}
+
+// probeOutcome sorts what one probe attempt ended with. Only an unreachable
+// server keeps the probe going. A refused key or session is the chat's
+// refusal from now on. Any other answer means the server is there: the bridge
+// goes online, and the next call shows the error to the agent.
+func (b *bridge) probeOutcome(err error) (bool, error) {
+	switch {
+	case err == nil:
 		return true, nil
-	}
-	ping := []byte(`{"jsonrpc":"2.0","id":"codesynapse-bridge-probe","method":"ping"}`)
-	err := b.postTo(pctx, ping, rpcMessage{Method: "ping"}, func([]byte) {})
-	var se *mcpStatusError
-	if errors.As(err, &se) && se.Status == http.StatusNotFound && used != "" {
-		err = b.reinit(pctx, used)
-	}
-	if err != nil && unreachable(err) {
+	case unreachable(err):
 		return false, err
+	case refusedForGood(err):
+		b.mu.Lock()
+		if b.regErr == nil {
+			b.regErr = err
+		}
+		b.mu.Unlock()
+		b.writeMarker(true)
+		b.settleRegistration()
+		return true, err
+	}
+	if b.logger != nil {
+		b.logger.Debug("CodeSynapse answered the probe with an error", "error", err)
 	}
 	return true, nil
 }
 
 // The kept copy of the last initialize and tools/list answers, per server
 // URL, so a chat that starts while the server is down still lists its tools.
-// It holds what the server told every client of this key; the URL carries no
-// credentials (checkBridgeURL).
+// It is keyed by URL only and holds no secrets: the instructions and tool
+// list the server gives its clients. The URL carries no credentials
+// (checkBridgeURL).
 type bridgeCache struct {
 	URL        string          `json:"url"`
 	Initialize json.RawMessage `json:"initialize,omitempty"`
@@ -795,7 +905,8 @@ func offlineFile(session string) string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "codesynapse", "offline", session)
+	// The prefix keeps names such as "." and ".." inside the folder.
+	return filepath.Join(dir, "codesynapse", "offline", "session-"+session)
 }
 
 func (b *bridge) writeMarker(refused bool) {
@@ -839,5 +950,8 @@ func codesynapseOffline(session string) bool {
 	if m.Refused {
 		fresh = refusedFresh
 	}
-	return time.Since(m.At) < fresh
+	// A time ahead of the clock (a damaged file, a clock set back) must not
+	// keep the guards off for good.
+	age := time.Since(m.At)
+	return age < fresh && age > -time.Minute
 }

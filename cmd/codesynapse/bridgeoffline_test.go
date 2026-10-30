@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,11 +28,20 @@ import (
 // dropped, as during a restart) and restarted (every session forgotten).
 type fakeMCP struct {
 	*httptest.Server
-	up       atomic.Bool
-	mu       sync.Mutex
-	sessions map[string]bool
-	next     int
-	methods  []string
+	up atomic.Bool
+	// hang accepts requests and never answers, like a lost connection.
+	hang atomic.Bool
+	// runtimeGone refuses the runtime session until the API registers it
+	// again; revoked refuses the key.
+	runtimeGone, revoked atomic.Bool
+	// notFound answers 404 to everything, like an ingress mid-upgrade.
+	notFound atomic.Bool
+	// breakCalls answers a tool call and then breaks the stream off.
+	breakCalls atomic.Bool
+	mu         sync.Mutex
+	sessions   map[string]bool
+	next       int
+	methods    []string
 }
 
 func newFakeMCP(t *testing.T, up bool) *fakeMCP {
@@ -52,6 +62,24 @@ func dropConnection(w http.ResponseWriter) {
 func (f *fakeMCP) serve(w http.ResponseWriter, r *http.Request) {
 	if !f.up.Load() {
 		dropConnection(w)
+		return
+	}
+	if f.hang.Load() {
+		// The server notices a closed connection only once the body is read.
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+		return
+	}
+	if f.notFound.Load() {
+		http.Error(w, "no such route", http.StatusNotFound)
+		return
+	}
+	if f.revoked.Load() {
+		http.Error(w, "log in or use a valid API key", http.StatusUnauthorized)
+		return
+	}
+	if f.runtimeGone.Load() {
+		http.Error(w, "runtime session is unavailable; register it with the API using the same personal key", http.StatusForbidden)
 		return
 	}
 	if r.Header.Get("Authorization") != "Bearer csk_test" || r.Header.Get(execution.SessionHeader) != "chat-1" {
@@ -94,6 +122,13 @@ func (f *fakeMCP) serve(w http.ResponseWriter, r *http.Request) {
 	case "tools/list":
 		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"minimal_context","inputSchema":{"type":"object","properties":{"repo":{"type":"string"}}}}]}}`, m.ID)
 	case "tools/call":
+		if f.breakCalls.Load() {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"answer\"}]}}\n\n", m.ID)
+			w.(http.Flusher).Flush()
+			dropConnection(w) // the chunked stream never ends properly
+			return
+		}
 		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"answer"}]}}`, m.ID)
 	default:
 		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{}}`, m.ID)
@@ -117,6 +152,8 @@ type bridgeAPI struct {
 	*httptest.Server
 	mode  atomic.Value
 	calls atomic.Int32
+	// mcp, when set, learns of every registration (runtimeGone ends).
+	mcp atomic.Pointer[fakeMCP]
 }
 
 func newBridgeAPI(t *testing.T, mode string) *bridgeAPI {
@@ -134,6 +171,9 @@ func newBridgeAPI(t *testing.T, mode string) *bridgeAPI {
 			return
 		}
 		a.calls.Add(1)
+		if f := a.mcp.Load(); f != nil {
+			f.runtimeGone.Store(false)
+		}
 		var in struct {
 			SessionID string `json:"session_id"`
 		}
@@ -173,9 +213,12 @@ type chat struct {
 
 func fastProbes(t *testing.T) {
 	t.Helper()
-	wait, lo, hi := bridgeInitWait, probeMinDelay, probeMaxDelay
-	bridgeInitWait, probeMinDelay, probeMaxDelay = 300*time.Millisecond, 10*time.Millisecond, 50*time.Millisecond
-	t.Cleanup(func() { bridgeInitWait, probeMinDelay, probeMaxDelay = wait, lo, hi })
+	wait, lo, hi, probe, live, alive := bridgeInitWait, probeMinDelay, probeMaxDelay, probeTimeout, callLiveWait, aliveTimeout
+	bridgeInitWait, probeMinDelay, probeMaxDelay, probeTimeout = 300*time.Millisecond, 10*time.Millisecond, 50*time.Millisecond, time.Second
+	callLiveWait, aliveTimeout = 200*time.Millisecond, 200*time.Millisecond
+	t.Cleanup(func() {
+		bridgeInitWait, probeMinDelay, probeMaxDelay, probeTimeout, callLiveWait, aliveTimeout = wait, lo, hi, probe, live, alive
+	})
 }
 
 func isolateCache(t *testing.T) {
@@ -203,16 +246,8 @@ func startChat(t *testing.T, mcpURL, apiURL, cacheDir string) *chat {
 			t.Error("the bridge did not stop")
 		}
 		cancel()
-		// Let a probe that is still running notice before the temp dirs go.
-		for range 100 {
-			b.mu.Lock()
-			probing := b.probing
-			b.mu.Unlock()
-			if !probing {
-				break
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
+		// Let a probe that is still running stop before the temp dirs go.
+		b.probes.Wait()
 	})
 	return c
 }
@@ -463,4 +498,173 @@ func TestHooksSkipGuardsWhileOffline(t *testing.T) {
 	out = stopGuard(context.Background(), in, logger)
 	require.True(t, out != nil)
 	assert.Equal(t, out["decision"], "block", "the check runs on the next stop")
+}
+
+// callUntilAnswered repeats a tool call until the server answers it.
+func (c *chat) callUntilAnswered(first int) string {
+	c.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for id := first; ; id++ {
+		text, isErr := toolText(c.t, c.call(fmt.Sprint(id)))
+		if !isErr || time.Now().After(deadline) {
+			return text
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestBridgeProbeAfterTheRuntimeSessionEnded(t *testing.T) {
+	fastProbes(t)
+	t.Run("the session is registered again", func(t *testing.T) {
+		isolateCache(t)
+		mcp, api := newFakeMCP(t, false), newBridgeAPI(t, "up")
+		api.mcp.Store(mcp)
+		c := startChat(t, mcp.URL, api.URL, t.TempDir())
+		c.initialize()
+		text, _ := toolText(t, c.call("2"))
+		assert.Equal(t, text, offlineText)
+		// The session expired during the outage: the replayed initialize is
+		// refused until the API registers it again.
+		mcp.runtimeGone.Store(true)
+		mcp.up.Store(true)
+		c.await("list_changed", listChanged)
+		text, isErr := toolText(t, c.call("3"))
+		assert.False(t, isErr)
+		assert.Equal(t, text, "answer")
+		assert.Equal(t, api.calls.Load(), int32(2), "registered at start and once more")
+		assert.False(t, codesynapseOffline("chat-1"))
+	})
+	t.Run("a key revoked during the outage is a refusal", func(t *testing.T) {
+		isolateCache(t)
+		mcp, api := newFakeMCP(t, false), newBridgeAPI(t, "up")
+		c := startChat(t, mcp.URL, api.URL, t.TempDir())
+		c.initialize()
+		mcp.revoked.Store(true)
+		mcp.up.Store(true)
+		deadline := time.Now().Add(5 * time.Second)
+		for id := 2; ; id++ {
+			text, isErr := toolText(t, c.call(fmt.Sprint(id)))
+			assert.True(t, isErr)
+			if text != offlineText {
+				assert.Contains(t, text, "refused this chat")
+				break
+			}
+			require.True(t, time.Now().Before(deadline), "the refusal was never noticed")
+			time.Sleep(20 * time.Millisecond)
+		}
+		assert.True(t, codesynapseOffline("chat-1"), "the hooks skip their guards")
+	})
+	t.Run("another answer brings the chat online with the error", func(t *testing.T) {
+		isolateCache(t)
+		mcp, api := newFakeMCP(t, false), newBridgeAPI(t, "up")
+		c := startChat(t, mcp.URL, api.URL, t.TempDir())
+		c.initialize()
+		mcp.notFound.Store(true)
+		mcp.up.Store(true)
+		c.await("list_changed", listChanged)
+		r := c.call("2")
+		// The server's error reaches the agent, as a JSON-RPC error or a tool error.
+		text := ""
+		if r.Error != nil {
+			text = r.Error.Message
+		} else {
+			var isErr bool
+			text, isErr = toolText(t, r)
+			assert.True(t, isErr)
+		}
+		assert.True(t, text != offlineText, "a server that answers is not offline")
+		assert.False(t, strings.Contains(text, "refused this chat"), "a 404 is not a refusal")
+		assert.False(t, codesynapseOffline("chat-1"))
+	})
+}
+
+func TestBridgeGivesUpOnALostConnection(t *testing.T) {
+	fastProbes(t)
+	isolateCache(t)
+	mcp, api := newFakeMCP(t, true), newBridgeAPI(t, "up")
+	c := startChat(t, mcp.URL, api.URL, t.TempDir())
+	c.initialize()
+	// Let the initialized notification through first: it has its own limit.
+	for i := 0; i < 200 && !slices.Contains(mcp.seen(), "notifications/initialized"); i++ {
+		time.Sleep(5 * time.Millisecond)
+	}
+	mcp.hang.Store(true)
+	started := time.Now()
+	text, isErr := toolText(t, c.call("2"))
+	assert.True(t, isErr)
+	assert.Equal(t, text, offlineText)
+	assert.True(t, time.Since(started) < 3*time.Second, "the call is not held for the whole limit")
+	assert.True(t, codesynapseOffline("chat-1"), "the hooks are told")
+
+	mcp.hang.Store(false)
+	assert.Equal(t, c.callUntilAnswered(3), "answer", "the chat comes back")
+}
+
+func TestBridgeAnswersOnceWhenAStreamBreaksAfterTheAnswer(t *testing.T) {
+	fastProbes(t)
+	isolateCache(t)
+	mcp, api := newFakeMCP(t, true), newBridgeAPI(t, "up")
+	c := startChat(t, mcp.URL, api.URL, t.TempDir())
+	c.initialize()
+	mcp.breakCalls.Store(true)
+	text, isErr := toolText(t, c.call("2"))
+	assert.False(t, isErr)
+	assert.Equal(t, text, "answer")
+	c.send(`{"jsonrpc":"2.0","id":3,"method":"tools/list"}`)
+	c.answer("3")
+	answers := 0
+	for _, r := range c.seen {
+		if string(r.ID) == "2" {
+			answers++
+		}
+	}
+	assert.Equal(t, answers, 1, "one answer per id")
+	assert.False(t, codesynapseOffline("chat-1"), "the server answered: not offline")
+}
+
+func TestRefusedForGood(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"API 401", &statusError{Status: http.StatusUnauthorized}, true},
+		{"API 403", &statusError{Status: http.StatusForbidden}, true},
+		{"API 404 from an ingress", &statusError{Status: http.StatusNotFound}, false},
+		{"API 400", &statusError{Status: http.StatusBadRequest}, false},
+		{"API 500", &statusError{Status: http.StatusInternalServerError}, false},
+		{"MCP 401", &mcpStatusError{Status: http.StatusUnauthorized}, true},
+		{"MCP 404", &mcpStatusError{Status: http.StatusNotFound}, false},
+		{"identity conflict", execution.ErrConflict, true},
+		{"network", io.ErrUnexpectedEOF, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, refusedForGood(tc.err), tc.want)
+		})
+	}
+}
+
+func TestOfflineMarker(t *testing.T) {
+	isolateCache(t)
+	for _, session := range []string{".", ".."} {
+		if file := offlineFile(session); file != "" {
+			assert.Equal(t, filepath.Base(file), "session-"+session, "a marker never names the folder or its parent")
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		at   time.Time
+		want bool
+	}{
+		{"just now", time.Now(), true},
+		{"old", time.Now().Add(-offlineFresh - time.Minute), false},
+		{"far in the future", time.Now().Add(24 * time.Hour), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := json.Marshal(offlineMarker{At: tc.at})
+			require.NoError(t, err)
+			writePrivate(offlineFile("chat-1"), data)
+			assert.Equal(t, codesynapseOffline("chat-1"), tc.want)
+		})
+	}
 }
