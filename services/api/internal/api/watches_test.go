@@ -612,4 +612,33 @@ func TestOrgWatchSettingsCanBeChanged(t *testing.T) {
 		assert.Len(t, events("git_token.list"), n)
 		assert.Equal(t, linked(), []string{"app", "new-secret"}, "and removes nothing it added")
 	})
+
+	t.Run("scan now makes the watch due for the next tick", func(t *testing.T) {
+		const scanPath = path + "/scan"
+		due := func() bool {
+			list, err := acc.St.DueOrgWatches(ctx, time.Now().UTC())
+			require.NoError(t, err)
+			return slices.ContainsFunc(list, func(w accounts.OrgWatch) bool { return w.OrgID == org.ID })
+		}
+		require.False(t, due(), "the last scan set the next one 15 minutes out")
+
+		assert.Equal(t, member.do("POST", scanPath, "", nil, in...), 403, "a member cannot scan a colleague's watch")
+		audit.refuse("watch.scan")
+		code := bob.do("POST", scanPath, "", nil, in...)
+		audit.refuse("")
+		assert.True(t, code >= 500, "a scan that cannot be audited is refused")
+		assert.False(t, due())
+
+		var got WatchView
+		require.Equal(t, bob.do("POST", scanPath, "", &got, in...), 202)
+		assert.Equal(t, got.LastStatus, "queued")
+		assert.True(t, due(), "the scheduler picks it up")
+		assert.Len(t, events("watch.scan"), 1)
+		scan(t)
+		assert.False(t, due(), "the scan sets the next one again")
+
+		require.Equal(t, bob.do("PUT", path, `{"paused":true}`, nil, in...), 200)
+		assert.Equal(t, bob.do("POST", scanPath, "", nil, in...), 409, "a paused watch is not scanned")
+		assert.Equal(t, bob.do("POST", "/api/v1/watches/127.0.0.1/nobody/scan", "", nil, in...), 404)
+	})
 }

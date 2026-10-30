@@ -203,6 +203,8 @@ A watch adds the repositories an organisation or user on a Git host creates afte
 
 Use Edit on the dashboard's watch list, or `PUT /api/v1/watches/{host}/{login}` from a signed-in session (API keys are refused; the body is at most 16 KiB). The member who created the watch and the organisation's owners and admins can change it; a member cannot change a colleague's watch. Whoever changes it becomes the member the scan runs as. Each change writes a `watch.update` audit event first, and a change whose event cannot be written is refused.
 
+To check a watch without waiting for the 15-minute interval, for example after changing its settings, use Check now on the watch list, or `POST /api/v1/watches/{host}/{login}/scan` from a signed-in session. The same people may do it as may change the watch. It writes a `watch.scan` audit event first and makes the watch due, so the scheduler scans it within a minute. A paused watch answers 409. A check applies the current settings to repositories created since the last scan; it does not add repositories the watch already knows.
+
 | Field | Meaning |
 |---|---|
 | `paused` | Stop or resume scanning. |
