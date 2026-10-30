@@ -372,8 +372,8 @@ func (s *Server) handleUpdateWatch(w http.ResponseWriter, r *http.Request) {
 	watch.ActorID, watch.Execution = p.User.ID, identityOf(r.Context())
 	if watch.IncludePrivate && !wasPrivate {
 		// Turning private repositories on needs the role that may use the
-		// token. The next scan with the token takes a new private baseline,
-		// so private repositories from before this are not added.
+		// token. The next scan with the token adds the private repositories
+		// that exist already (scanWatch), at most maxClonesPerScan a scan.
 		if !m.Role.AtLeast(accounts.Admin) {
 			s.problem(w, http.StatusForbidden, errPrivateNeedsAdmin)
 			return
@@ -537,11 +537,13 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 		c.Token, tokenSet = s.watchToken(wctx, p, w.OrgID, w.Host, w.Login, logger)
 	}
 	authed := c.Token != ""
-	// The first scan with the token, the first after the token was
-	// replaced, and the first after private repositories were turned on may
-	// see private repositories that are older than that: they become
-	// baseline, not additions.
-	baseline := authed && (w.PrivateBaseline.IsZero() || tokenSet.After(w.PrivateBaseline) || w.PrivateSince.After(w.PrivateBaseline))
+	// The first scan with the token, and the first after private
+	// repositories were turned on, add the private repositories that exist
+	// already: an owner or admin asked for them. Only the first scan after
+	// the token was replaced takes the older ones as baseline, so a new
+	// token alone never adds what existed before it.
+	fresh := authed && (w.PrivateBaseline.IsZero() || w.PrivateSince.After(w.PrivateBaseline))
+	baseline := authed && !fresh && tokenSet.After(w.PrivateBaseline)
 	lctx, cancel := context.WithTimeout(wctx, 90*time.Second)
 	defer cancel()
 	listed, err := c.ListRepos(lctx, w.Login)
@@ -566,6 +568,12 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 	}
 	added, lastErr := 0, ""
 	for _, x := range listed {
+		if x.Private && fresh {
+			// Known from an earlier baseline, but turned on now: added unless
+			// the settings leave it out, and left unknown when the cap is hit
+			// so a later scan adds it.
+			delete(known, x.Name)
+		}
 		if known[x.Name] || !validRepoSegment(x.Name) || (x.Private && !authed) {
 			continue
 		}
@@ -604,7 +612,7 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 		lastErr = lastErr[:300]
 	}
 	scan := accounts.WatchScan{LastScan: now, LastStatus: status, LastError: lastErr, NextScan: now.Add(watchScanInterval), Added: added, Known: seen}
-	if baseline {
+	if fresh || baseline {
 		scan.PrivateBaseline = now
 	}
 	if err := s.cfg.Accounts.St.RecordWatchScan(ctx, w.OrgID, w.Key(), scan); err != nil {

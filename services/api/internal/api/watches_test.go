@@ -219,7 +219,7 @@ func TestOrgWatchAddsPrivateRepositoriesWithTheOrganisationsToken(t *testing.T) 
 	t.Cleanup(cancel)
 	st := memory.New()
 	// Indexed already for the same remote, so adding one links and does not clone.
-	for _, name := range []string{"new-private", "audit-private", "carol-private", "late-private"} {
+	for _, name := range []string{"old-private", "new-private", "audit-private", "carol-private", "late-private"} {
 		graph := "127.0.0.1/acme/" + name
 		g := model.NewGraph()
 		g.AddNode(model.Node{ID: model.NodeID(graph, model.KindRepository, graph), Kind: model.KindRepository, Repo: graph, Name: graph, URL: "https://127.0.0.1/acme/" + name + ".git"})
@@ -281,11 +281,11 @@ func TestOrgWatchAddsPrivateRepositoriesWithTheOrganisationsToken(t *testing.T) 
 	}
 
 	setToken()
-	t.Run("the first scan with the token takes older private repositories as baseline", func(t *testing.T) {
+	t.Run("the first scan with the token adds the private repositories that exist", func(t *testing.T) {
 		scan(t)
 		assert.Equal(t, auth(), "Bearer "+token, "an owner's watch lists with the organisation's token")
 		assert.Len(t, events("git_token.list"), 1)
-		assert.Len(t, linked(), 0, "a private repository from before the watch could see it is not added")
+		assert.Len(t, linked(), 1, "private repositories were asked for, so the older ones are added")
 		assert.False(t, watch().PrivateBaseline.IsZero())
 		assert.True(t, slices.Contains(watch().Known, "old-private"))
 	})
@@ -294,15 +294,15 @@ func TestOrgWatchAddsPrivateRepositoriesWithTheOrganisationsToken(t *testing.T) 
 		listPrivate("new-private")
 		scan(t)
 		got := linked()
-		require.Len(t, got, 1)
+		require.Len(t, got, 2)
 		e := got["127.0.0.1/acme/new-private"]
 		assert.Equal(t, e.Visibility, accounts.Private)
 		assert.False(t, e.Personal(), "into the organisation's space")
-		assert.Equal(t, watch().Added, 1)
+		assert.Equal(t, watch().Added, 2, "counted since the watch began")
 		lists, adds := events("git_token.list"), events("watch.repo_add")
 		require.Len(t, lists, 2)
-		require.Len(t, adds, 1)
-		assert.True(t, newest(lists).ID < adds[0].ID, "the token listing is audited before the add")
+		require.Len(t, adds, 2)
+		assert.True(t, newest(lists).ID < newest(adds).ID, "the token listing is audited before the add")
 		assert.Equal(t, newest(lists).Via, "automation")
 	})
 
@@ -313,14 +313,14 @@ func TestOrgWatchAddsPrivateRepositoriesWithTheOrganisationsToken(t *testing.T) 
 		audit.refuse("")
 		assert.Equal(t, auth(), "")
 		assert.Len(t, events("git_token.list"), 2)
-		assert.Len(t, linked(), 1)
+		assert.Len(t, linked(), 2)
 	})
 
 	t.Run("without a token it lists anonymously", func(t *testing.T) {
 		require.Equal(t, bob.do("DELETE", "/api/v1/accounts/orgs/"+org.Slug+"/git-tokens/127.0.0.1", "", nil), 204)
 		scan(t)
 		assert.Equal(t, auth(), "")
-		assert.Len(t, linked(), 1)
+		assert.Len(t, linked(), 2)
 	})
 
 	t.Run("a replaced token takes a new baseline", func(t *testing.T) {
@@ -328,7 +328,7 @@ func TestOrgWatchAddsPrivateRepositoriesWithTheOrganisationsToken(t *testing.T) 
 		setToken()
 		scan(t)
 		assert.Equal(t, auth(), "Bearer "+token)
-		assert.Len(t, linked(), 1, "what the new token shows on its first scan is baseline")
+		assert.Len(t, linked(), 2, "what the new token shows on its first scan is baseline")
 		assert.True(t, watch().PrivateBaseline.After(before))
 		assert.True(t, slices.Contains(watch().Known, "audit-private"))
 	})
@@ -344,7 +344,7 @@ func TestOrgWatchAddsPrivateRepositoriesWithTheOrganisationsToken(t *testing.T) 
 		listPrivate("carol-private")
 		scan(t)
 		assert.Equal(t, auth(), "Bearer "+token)
-		assert.Len(t, linked(), 2)
+		assert.Len(t, linked(), 3)
 		assert.Equal(t, newest(events("git_token.list")).UserID, carolUser.User.ID, "audited as the creator")
 	})
 
@@ -355,7 +355,7 @@ func TestOrgWatchAddsPrivateRepositoriesWithTheOrganisationsToken(t *testing.T) 
 		scan(t)
 		assert.Equal(t, auth(), "", "a member's watch never uses the organisation's token")
 		assert.Len(t, events("git_token.list"), n)
-		assert.Len(t, linked(), 2)
+		assert.Len(t, linked(), 3)
 		assert.False(t, slices.Contains(watch().Known, "late-private"), "left for a scan that can see it")
 	})
 }
@@ -456,7 +456,7 @@ func TestOrgWatchSettingsCanBeChanged(t *testing.T) {
 	t.Cleanup(cancel)
 	st := memory.New()
 	// Indexed already for the same remote, so adding one links and does not clone.
-	for _, name := range []string{"app", "test-app", "Docs-Archive", "new-secret", "test-secret"} {
+	for _, name := range []string{"app", "test-app", "Docs-Archive", "old-secret", "new-secret", "test-secret", "late-secret"} {
 		graph := "127.0.0.1/acme/" + name
 		g := model.NewGraph()
 		g.AddNode(model.Node{ID: model.NodeID(graph, model.KindRepository, graph), Kind: model.KindRepository, Repo: graph, Name: graph, URL: "https://127.0.0.1/acme/" + name + ".git"})
@@ -590,7 +590,7 @@ func TestOrgWatchSettingsCanBeChanged(t *testing.T) {
 		assert.Equal(t, member.do("DELETE", "/api/v1/watches/127.0.0.1/other", "", nil, in...), 204)
 	})
 
-	t.Run("turning private repositories on takes a new private baseline", func(t *testing.T) {
+	t.Run("turning private repositories on adds the ones that exist", func(t *testing.T) {
 		before := watch().PrivateBaseline
 		var got WatchView
 		require.Equal(t, bob.do("PUT", path, `{"include_private":true,"exclude":["test-*"]}`, &got, in...), 200)
@@ -598,19 +598,31 @@ func TestOrgWatchSettingsCanBeChanged(t *testing.T) {
 		assert.True(t, watch().PrivateSince.After(before))
 		scan(t)
 		assert.Equal(t, auth(), "Bearer "+token)
-		assert.Equal(t, linked(), []string{"app"}, "a private repository from before the switch is not added")
+		assert.Equal(t, linked(), []string{"app", "old-secret"}, "a private repository from before the switch is added")
 		assert.True(t, slices.Contains(watch().Known, "old-secret"))
 
 		publish("new-secret", "test-secret")
 		scan(t)
-		assert.Equal(t, linked(), []string{"app", "new-secret"}, "a later one is, unless a pattern excludes it")
+		assert.Equal(t, linked(), []string{"app", "new-secret", "old-secret"}, "a later one is, unless a pattern excludes it")
 
 		require.Equal(t, bob.do("PUT", path, `{"include_private":false}`, nil, in...), 200)
 		n := len(events("git_token.list"))
 		scan(t)
 		assert.Equal(t, auth(), "", "switched off, the scan lists anonymously")
 		assert.Len(t, events("git_token.list"), n)
-		assert.Equal(t, linked(), []string{"app", "new-secret"}, "and removes nothing it added")
+		assert.Equal(t, linked(), []string{"app", "new-secret", "old-secret"}, "and removes nothing it added")
+	})
+
+	t.Run("a replaced token alone adds nothing that existed before it", func(t *testing.T) {
+		require.Equal(t, bob.do("PUT", path, `{"include_private":true}`, nil, in...), 200)
+		scan(t)
+		publish("late-secret")
+		require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+org.Slug+"/git-tokens/127.0.0.1", `{"token":"`+token+`"}`, nil), 200)
+		before := watch().PrivateBaseline
+		scan(t)
+		assert.Equal(t, linked(), []string{"app", "new-secret", "old-secret"}, "what the replaced token shows first is baseline")
+		assert.True(t, watch().PrivateBaseline.After(before))
+		assert.True(t, slices.Contains(watch().Known, "late-secret"))
 	})
 
 	t.Run("scan now makes the watch due for the next tick", func(t *testing.T) {
