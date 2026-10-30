@@ -344,9 +344,13 @@ export interface SeriesPanel {
 // panels carry four lines each, named p50, p75, p95 and p99 (quantiles
 // estimated from histogram buckets); the platform statistics have
 // cross-tenant twins of both under /admin/stats/series.
+// gateway_routes and gateway_local_share are the local/cloud trend;
+// gateway_fallthrough names its series by reason code, whatever codes the
+// gateway records.
 export type GatewaySeriesPanel =
   | 'gateway_latency_local' | 'gateway_latency_cloud' | 'gateway_latency_avg'
   | 'gateway_queue_wait' | 'gateway_timeouts'
+  | 'gateway_routes' | 'gateway_local_share' | 'gateway_fallthrough'
 
 // Model queue peak hours (GET /api/v1/stats/queue, /admin/stats/queue).
 // cells has 7 × 96 entries, Monday first, 15-minute slots in the viewer's
@@ -922,6 +926,8 @@ export interface GatewayStat {
   // Requests the local model did not answer, by the gateway's fixed reasons;
   // timeouts are queue_timeout plus answer_timeout. Absent from older APIs.
   fallthroughs?: number; fallthrough_reasons?: Record<string, number>; timeouts?: number; timeout_share_pct?: number
+  // Cloud requests no fall-through reason accounts for. Absent from older APIs.
+  cloud_without_reason?: number
   // Seconds; null when that route answered nothing in the window.
   local_avg_seconds?: number | null; local_p95_seconds?: number | null
   cloud_avg_seconds?: number | null; cloud_p95_seconds?: number | null

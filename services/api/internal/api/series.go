@@ -250,6 +250,16 @@ var seriesPanels = map[string]seriesPanel{
 		Help:    "Average time to answer a gateway request, by route: local model, cloud, or rejected before any model saw it.",
 		Empty:   "No gateway request in this window.",
 		queries: []seriesQuery{{expr: gatewayAvg, by: "route"}}},
+	// Which route took the requests, over time: the trend behind the
+	// "answered locally" share on Statistics → Gateway.
+	"gateway_routes": {Title: "Gateway requests by route", Unit: "requests", Kind: "count",
+		Help:    "Gateway requests per step by the route that took them: the local model, the cloud, or rejected before any model saw it.",
+		Empty:   "No gateway request in this window.",
+		queries: []seriesQuery{{expr: `sum by (route) (increase(gateway_requests_total[$w]))`, by: "route"}}},
+	"gateway_local_share": {Title: "Answered locally", Unit: "%", Kind: "gauge",
+		Help:    "Share of gateway requests the local model answered, per step.",
+		Empty:   "No gateway request in this window.",
+		queries: []seriesQuery{{name: "local", expr: `100 * sum(increase(gateway_requests_total{route="local"}[$w])) / (sum(increase(gateway_requests_total[$w])) > 0)`}}},
 	"gateway_fallthrough": {Title: "Requests the local model did not answer", Unit: "requests", Kind: "count",
 		Help:    "Gateway requests the local model did not answer, by reason. queue_timeout and answer_timeout mean it was too slow; the other reasons are requests it does not take or failed on.",
 		Empty:   "Every request offered to the local model was answered in this window.",
