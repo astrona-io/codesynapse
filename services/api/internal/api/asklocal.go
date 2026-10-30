@@ -69,6 +69,7 @@ const briefMergeSystem = `You merge notes taken from parts of a codebase into on
 func (s *Server) askLocalRoutes() {
 	s.route("POST /api/v1/repos/{repo}/ask-local", repoRole(accounts.Member), s.withExecution(s.handleAskLocal))
 	s.route("POST /api/v1/repos/{repo}/local-draft", repoRole(accounts.Member), s.withExecution(s.handleLocalDraft))
+	s.route("POST /api/v1/repos/{repo}/source-extract", repoRole(accounts.Member), s.withExecution(s.handleSourceExtract))
 	s.route("POST /api/v1/repos/{repo}/brief-plan", repoRole(accounts.Viewer), s.handleBriefPlan)
 }
 

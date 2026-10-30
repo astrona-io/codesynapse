@@ -359,6 +359,7 @@ func (s *Server) routes() {
 	s.repoPolicyRoutes()
 	s.triageRoutes()
 	s.runtimeRoutes()
+	s.sarifRoutes()
 	s.imageScanRoutes()
 	s.semanticRoutes()
 	s.conventionsRoutes()
@@ -582,6 +583,12 @@ func (s *Server) unlinkRepo(r *http.Request, graph string) (int, error) {
 		// The organisation's uploaded test runs leave with its link.
 		if rs, ok := s.st.(store.RuntimeStore); ok {
 			if err := rs.DeleteRuntimeFacts(ctx, memory.Namespace(l.OrgID, graph)); err != nil {
+				return 0, err
+			}
+		}
+		// So do its imported findings of external tools.
+		if ss, ok := s.st.(store.SARIFStore); ok {
+			if err := ss.DeleteSARIFFindings(ctx, memory.Namespace(l.OrgID, graph)); err != nil {
 				return 0, err
 			}
 		}

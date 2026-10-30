@@ -42,6 +42,13 @@ var jobPanels = map[string]adminPanel{
 	"jobs_scheduler": {seriesPanel: seriesPanel{Title: "Scheduler holders", Unit: "processes", Kind: "gauge",
 		Help:    "API processes that hold the scheduler lease. Anything but 1 means no process, or more than one, runs the scheduler and maintenance loops.",
 		queries: []seriesQuery{{name: "holders", expr: `sum(platform_codesynapse_loops_lease_held)`}}}},
+	// Every process samples platform_go_goroutines, so counting its series
+	// per job counts the processes of each service (codesynapse-api,
+	// -worker, -mcp). The instance label is only counted, never shown.
+	"jobs_processes": {seriesPanel: seriesPanel{Title: "Processes by service", Unit: "processes", Kind: "gauge",
+		Help:    "Running API, worker and MCP processes that report measurements. A process that stopped drops out within five minutes.",
+		Empty:   "No process reported in this window.",
+		queries: []seriesQuery{{expr: `count by (job) (platform_go_goroutines)`, by: "job"}}}},
 	"jobs_worker_roles": {seriesPanel: seriesPanel{Title: "Workers by role", Unit: "processes", Kind: "gauge",
 		Help:    "Processes that run jobs, by role: ingest (clone, sync, index), ai and fix. A process with several roles counts under each.",
 		Empty:   "No worker reported in this window.",

@@ -57,7 +57,7 @@ func TestForwardPassesCredentialAndStreams(t *testing.T) {
 	assert.Equal(t, gotBody, `{"model":"m1","stream":true,"tools":[{}]}`)
 	assert.True(t, meta.FirstByte > 0, "the first byte of the stream is timed")
 	meta.FirstByte = 0
-	assert.Equal(t, meta, Meta{Path: "/v1/messages", Model: "m1", Stream: true, Bytes: len(gotBody), Tools: true, Route: "cloud", Out: 13})
+	assert.Equal(t, meta, Meta{Path: "/v1/messages", Model: "m1", Stream: true, Bytes: len(gotBody), Tools: true, Route: "cloud", Out: 13, Fallthrough: FallNoLocalModel})
 }
 
 func TestNoCredentialIsRefused(t *testing.T) {
@@ -188,7 +188,7 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 		local  func(context.Context) (func(), error)
 		reason string
 	}{
-		"main model, local first off": {`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallNotEligible},
+		"main model, local first off": {`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallLocalFirstOff},
 		"server tool":                 {`{"model":"claude-haiku-5-5","tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallUnsupportedTool},
 		"has image":                   {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"image"}]}]}`, 200, nil, FallHasImage},
 		"has document":                {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"document"}]}]}`, 200, nil, FallHasImage},
@@ -229,6 +229,53 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 	}
 }
 
+// TestCountTokensGoesToTheCloudWithAReason: a token count is never estimated
+// locally, and the reason says so, unless the gateway has no local route.
+func TestCountTokensGoesToTheCloudWithAReason(t *testing.T) {
+	body := `{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`
+	cases := map[string]struct {
+		local   bool
+		exclude []string
+		reason  string
+	}{
+		"local first":        {true, nil, FallCountTokens},
+		"excluded model":     {true, []string{"claude-opus-*"}, FallExcluded},
+		"no local route set": {false, nil, ""},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			localHit := false
+			loc := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { localHit = true }))
+			defer loc.Close()
+			var path string
+			cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				path = r.URL.Path
+				_, _ = io.WriteString(w, `{"input_tokens":9}`)
+			}))
+			defer cloud.Close()
+			g := NewAnthropic()
+			g.Upstream = cloud.URL
+			if tc.local {
+				l := &Local{BaseURL: loc.URL + "/v1", Model: "qwen"}
+				g.Local = func() *Local { return l }
+			}
+			var meta Meta
+			g.Done = func(_ context.Context, m Meta, _ int, _ time.Duration) { meta = m }
+			rec := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, CountPath, strings.NewReader(body))
+			r = r.WithContext(WithExclude(WithLocalFirst(r.Context(), true), tc.exclude))
+			r.Header.Set("X-Api-Key", "k")
+			g.Handler(CountPath)(rec, r)
+			assert.Equal(t, rec.Body.String(), `{"input_tokens":9}`, "the cloud's count, unchanged")
+			assert.Equal(t, path, CountPath)
+			assert.False(t, localHit, "the local model never counts")
+			assert.Equal(t, meta.Route, "cloud")
+			assert.Equal(t, meta.Fallthrough, tc.reason)
+			assert.False(t, meta.Asked, "nothing waited in the local queue")
+		})
+	}
+}
+
 func TestLocalFailuresAreTold(t *testing.T) {
 	body := `{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"hi"}]}`
 	slow := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -243,10 +290,12 @@ func TestLocalFailuresAreTold(t *testing.T) {
 	cases := map[string]struct {
 		local  *Local
 		reason string
+		unset  bool // a gateway without a Local function at all
 	}{
-		"answer timeout": {&Local{BaseURL: slow.URL, Client: &http.Client{Timeout: 30 * time.Millisecond}}, FallTimeout},
-		"not reachable":  {&Local{BaseURL: gone.URL}, FallModelError},
-		"no local model": {nil, FallNoLocalModel},
+		"answer timeout":    {&Local{BaseURL: slow.URL, Client: &http.Client{Timeout: 30 * time.Millisecond}}, FallTimeout, false},
+		"not reachable":     {&Local{BaseURL: gone.URL}, FallModelError, false},
+		"no local model":    {nil, FallNoLocalModel, false},
+		"no local function": {nil, FallNoLocalModel, true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -254,7 +303,9 @@ func TestLocalFailuresAreTold(t *testing.T) {
 			defer cloud.Close()
 			g := NewAnthropic()
 			g.Upstream = cloud.URL
-			g.Local = func() *Local { return tc.local }
+			if !tc.unset {
+				g.Local = func() *Local { return tc.local }
+			}
 			var meta Meta
 			g.Done = func(_ context.Context, m Meta, _ int, _ time.Duration) { meta = m }
 			rec := httptest.NewRecorder()
@@ -321,7 +372,7 @@ func TestReadChunkCache(t *testing.T) {
 		{"clamped to the prompt", `data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":1},"timings":{"cache_n":70}}`, 9},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c, ok := readChunk(bufio.NewScanner(strings.NewReader(tc.line + "\n")))
+			c, ok := (&streamReader{sc: bufio.NewScanner(strings.NewReader(tc.line + "\n"))}).next()
 			require.True(t, ok)
 			assert.Equal(t, c.Cached, tc.cached)
 		})

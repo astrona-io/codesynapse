@@ -335,7 +335,7 @@ func TestRecordGatewayTimeAndFallthrough(t *testing.T) {
 		gateway.FallExcluded, gateway.FallNotEligible, gateway.FallTooLarge, gateway.FallHasThinking, gateway.FallHasImage,
 		gateway.FallQueueTimeout, gateway.FallCancelled, gateway.FallTimeout, gateway.FallModelError,
 		gateway.FallBadStatus, gateway.FallEmptyAnswer, gateway.FallTruncated, gateway.FallBadAnswer,
-		gateway.FallNoLocalModel, gateway.FallBadRequest, gateway.FallSystemNotText, gateway.FallUnsupportedBlock, gateway.FallUnsupportedTool,
+		gateway.FallNoLocalModel, gateway.FallBadRequest, gateway.FallSystemNotText, gateway.FallUnsupportedBlock, gateway.FallUnsupportedTool, gateway.FallLocalFirstOff,
 	}
 	for _, reason := range reasons {
 		recordGateway(ctx, gateway.Meta{Route: "cloud", Fallthrough: reason, Asked: true, QueueWait: time.Second, LocalAnswer: time.Second}, http.StatusOK, 2*time.Second)

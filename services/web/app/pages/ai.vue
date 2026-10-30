@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AIProvider } from '~/utils/types'
+import type { AIProvider, ProviderCheck } from '~/utils/types'
 
 const session = useSession()
 // Routing and connection tests change or probe the installation's models,
@@ -30,6 +30,7 @@ const AREAS = [
   { task: 'cleanup-briefing', label: 'Cleanup briefings', hint: 'What to clean up first, from the cleanup plan (local models only)', local: true },
   { task: 'local-answer', label: 'Agent questions', hint: 'Reads files for coding agents (ask_local) so they spend fewer cloud tokens (local models only)', local: true },
   { task: 'local-draft', label: 'Code drafts', hint: 'Drafts self-contained code for coding agents to check and apply (local_draft; local models only)', local: true },
+  { task: 'source-extract', label: 'Page extracts', hint: 'Keeps the parts of a long web page that answer a coding agent’s question (fetch_source; local models only)', local: true },
   { task: 'fix', label: 'Fixes', hint: 'Writes fix branches for accepted review comments (needs source: use a local model)' },
 ]
 const routing = reactive<{ default: string; tasks: Record<string, string> }>({ default: '', tasks: {} })
@@ -58,8 +59,8 @@ async function saveRouting() {
     saving.value = false
   }
 }
-const TASK_LABEL: Record<string, string> = { 'security-triage': 'Security triage', review: 'Code review', briefing: 'Briefing', fix: 'Fixes', 'pr-summary': 'Change summary', 'cleanup-briefing': 'Cleanup briefing', 'local-answer': 'Agent questions', 'local-draft': 'Code drafts' }
-interface TestResult { ok: boolean; error?: string; reply?: string; models?: string[]; missing?: string[]; seconds?: number; model?: string }
+const TASK_LABEL: Record<string, string> = { 'security-triage': 'Security triage', review: 'Code review', briefing: 'Briefing', fix: 'Fixes', 'pr-summary': 'Change summary', 'cleanup-briefing': 'Cleanup briefing', 'local-answer': 'Agent questions', 'local-draft': 'Code drafts', 'source-extract': 'Page extracts' }
+interface TestResult { ok: boolean; error?: string; reply?: string; models?: string[]; missing?: string[]; seconds?: number; model?: string; check?: ProviderCheck }
 const tests = ref<Record<string, TestResult | 'running'>>({})
 async function test(name: string) {
   if (tests.value[name] === 'running') return
@@ -182,6 +183,7 @@ const resultOf = (n: string) => tests.value[n]
           <p v-else class="error">{{ (resultOf(p.name) as TestResult).error }}</p>
           <p v-if="(resultOf(p.name) as TestResult).missing?.length" class="error">Not on this server: {{ (resultOf(p.name) as TestResult).missing!.join(', ') }}. On Ollama, run <code>ollama pull {{ (resultOf(p.name) as TestResult).missing![0] }}</code>; otherwise fix the name in <code>config/llm.yaml</code>.</p>
           <p v-if="(resultOf(p.name) as TestResult).models?.length" class="muted small">Server offers: {{ (resultOf(p.name) as TestResult).models!.join(', ') }}</p>
+          <ProviderCheckResult v-if="(resultOf(p.name) as TestResult).check" :check="(resultOf(p.name) as TestResult).check!" />
         </template>
         <p v-else-if="p.usage.last_error" class="error small">Last error: {{ p.usage.last_error }}</p>
       </section>

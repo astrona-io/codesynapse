@@ -123,6 +123,7 @@ nav:
           - Root bootstrap: plans/ROOT_BOOTSTRAP_PLAN.md
       - Security:
           - Security model: operations/security-model.md
+          - Findings of other tools: operations/sarif-import.md
       - Coding agents:
           - Claude Code bridge: operations/claude-code-bridge.md
           - Claude Code plugin: operations/claude-code-plugin.md
@@ -144,6 +145,7 @@ nav:
           - Repo config plan: plans/REPO_CONFIG_PLAN.md
           - Ingest transparency plan: plans/INGEST_TRANSPARENCY_PLAN.md
           - Text optimisation plan: plans/TEXT_OPTIMIZATION_PLAN.md
+          - SARIF import plan: plans/SARIF_IMPORT_PLAN.md
       - Telemetry plan: plans/TELEMETRY_PLAN.md
       - Platform statistics plan: plans/PLATFORM_STATS_PLAN.md
       - Glossary: GLOSSARY.md

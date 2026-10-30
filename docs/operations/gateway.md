@@ -7,14 +7,20 @@
 
 Coding assistants send many small background requests, such as naming a chat or summarising a line. Paying a big cloud model for those wastes money and tokens. The gateway sits between the assistant and the cloud and does three things:
 
-1. **Answers locally first.** Every request is offered to the local model when it has no images (tools are fine) and fits the local model's context: the body size divided by four plus `max_tokens` must be at most the provider's `context_window`, and the body at most 4 MiB. When `context_window` is not known, the old limit of 256 KiB applies. When the request offers tools, the local model may call them and read their results; the call is checked first, and if the model gets it wrong (a tool that was not offered, broken arguments) the cloud answers instead. Tool data stays on your side. Nothing is sent to the cloud. A request that asks for thinking, as most agent turns do, is answered locally without thinking, and Claude's earlier thinking blocks are left out of what the local model sees (they are signed reasoning only Claude reads). If the local answer fails, the cloud gets the request unchanged, thinking blocks included.
+1. **Answers locally first.** Every request is offered to the local model when it has no images (tools are fine) and fits the local model's context (see [How much fits](#how-much-fits)). When the request offers tools, the local model may call them and read their results; the call is checked first, and if the model gets it wrong (a tool that was not offered, broken arguments) the cloud answers instead. Tool data stays on your side. Nothing is sent to the cloud. A request that asks for thinking, as most agent turns do, is answered locally without thinking, and Claude's earlier thinking blocks are left out of what the local model sees (they are signed reasoning only Claude reads). If the local answer fails, the cloud gets the request unchanged, thinking blocks included.
 2. **Checks the answer for the main model.** A request for a larger model than haiku is buffered: if the local answer is empty, stopped at `max_tokens` or broke off, the cloud answers instead. Haiku requests keep streaming as they are written.
 3. **Passes everything else on.** Other requests go to `api.anthropic.com` and nowhere else. The assistant's own Anthropic credential is used for that one request and is never stored.
-4. **Falls back safely.** If no local slot is free within 60 seconds (`gateway_wait_seconds`), or the local model fails or answers with an error, nothing has been written yet and the request goes to the cloud instead. The wait covers only the queue for a free slot; once the local model has started, the provider's `timeout_seconds` bounds the answer.
+4. **Falls back safely.** If no local slot is free within 30 seconds (`gateway_wait_seconds`), the model has not sent its first token within 90 seconds of getting the slot (`gateway_first_token_seconds`), or the local model fails or answers with an error, nothing has been written yet and the request goes to the cloud instead. The wait covers only the queue for a free slot; once the local model has started, the provider's `timeout_seconds` bounds the whole answer.
 
 **Every model is offered to the local model by default**, the main model (opus, sonnet) as well as haiku: local first is on for every organisation that has not switched it off, with no setup. An organisation whose local model is too small for its agents' main model turns **Answer with the local model first** off; then only haiku-class requests go to it.
 
-To keep particular models away from the local model while the rest still go to it, give an **exclude list** (next section). A request for an excluded model always goes to the cloud, whether local first is on or off; the exclusion wins.
+A haiku-class request is one whose model name has `claude` and `haiku` as separate words and no larger class (`sonnet`, `opus`, `fable`) beside them. That covers `claude-haiku-5-5`, dated names such as `claude-haiku-5-5-20261001`, a `[1m]` suffix, Bedrock's `us.anthropic.claude-haiku-5-5-20261001-v1:0`, Vertex's `claude-haiku-5-5@20261001` and older names such as `claude-3-5-haiku-latest`. A name that only contains the letters, such as another vendor's `haiku-7b`, is not haiku-class.
+
+To keep particular models away from the local model while the rest still go to it, give an **exclude list** (next section). A request for an excluded model always goes to the cloud, whether local first is on or off; the exclusion wins. That holds for haiku too: the installation's and the organisation's lists add up, and `claude-haiku-*` on either keeps haiku requests in the cloud even with local first off.
+
+**Quick requests queue first.** Claude Code sends short side requests beside the main agent: a chat title, a summary, a check of a shell command. They carry no tools and ask for the small model or a short answer. The gateway treats a request as quick when it has no tools, its body is at most 32 KiB, and it asks for a haiku-class model or for `max_tokens` of at most 1024. A quick request waiting for the local model is served before the ordinary requests waiting ahead of it, because it finishes fast and is the most likely to be kept. A waiting request is overtaken at most 4 times, then it gets the next free slot, so a stream of quick requests cannot starve a main-agent request. CodeSynapse's own model calls queue in order, as before.
+
+Token counts (`POST /v1/messages/count_tokens`) always go to the cloud, also with local first on. The gateway does not estimate them: Claude Code sizes its context with the number and decides when to compact by it, only the model's own tokenizer gives it (Claude Opus 4.7 and later count about 30 percent more tokens for the same text than older models), and Anthropic does not charge for counting. Each one is recorded with the reason `count_tokens` (or `excluded` for a model on an exclude list), so it shows up under the reasons a request was not answered locally.
 
 Each answer carries a header, `X-CodeSynapse-Route: local` or `X-CodeSynapse-Route: cloud`, so you can see where it came from.
 
@@ -64,13 +70,42 @@ Local answering needs a local provider that you opt in explicitly. In `config/ll
     gateway: true   # answer gateway requests, tools included, from this local model
     context_window: 131072   # how much fits; requests that do not go to the cloud
     # gateway_exclude: [claude-opus-*]   # models never answered locally, for every organisation
-    # gateway_wait_seconds: 60           # wait for a free local slot (1-300) before the cloud takes over
+    # gateway_wait_seconds: 30           # wait for a free local slot (1-300) before the cloud takes over
+    # gateway_first_token_seconds: 90    # wait for the first token (1-600) once the slot is held
     # timeout_seconds: 600               # how long one local answer may take once it has started
+    # kv_cache_ttl: 30m                  # sent to Ollama as keep_alive, so the model and its cache stay loaded
 ```
 
-`gateway_exclude` follows the same rules as the organisation's list and is merged with it; an invalid entry stops the API at start-up with an error naming the provider. `gateway_wait_seconds` is how long a request waits in the provider's queue for a free slot; it does not limit the answer, which `timeout_seconds` bounds.
+`gateway_exclude` follows the same rules as the organisation's list and is merged with it; an invalid entry stops the API at start-up with an error naming the provider. `gateway_wait_seconds` is how long a request waits in the provider's queue for a free slot. `gateway_first_token_seconds` bounds the prompt processing (prefill) once the slot is held: a long prompt the model cannot start on in time goes to the cloud before anything is written. `timeout_seconds` bounds the whole local answer (default `max(300, max_input_tokens/100)` seconds); past it the request also goes to the cloud when nothing has been written. On Ollama the gateway sends `keep_alive` from `kv_cache_ttl` (default 15 minutes) with every request, also on the OpenAI-compatible paths unless the agent set its own.
+
+### Ollama: thinking, context length and how an answer ends
+
+Measured on Ollama 0.40.12 with `qwen3.8:27b` on `/v1/chat/completions` (synthetic prompts):
+
+- **Thinking.** Without `reasoning_effort`, the model thinks first. Its thinking arrives in a separate `reasoning` field of each delta (vLLM calls it `reasoning_content`), never in `content`, and it counts towards `max_tokens`. With `max_tokens: 60`, all 60 tokens went to thinking, `content` stayed empty and the stream ended with `finish_reason: "length"`. The gateway reports that as `truncated`. With `effort: none` in the provider block (sent as `reasoning_effort: "none"`), no `reasoning` field appears and the answer starts at once. Set `effort: none` for a reasoning model on Ollama; `disable_thinking: true` is the vLLM equivalent.
+- **Context length.** The OpenAI-compatible endpoint ignores `num_ctx` and every other Ollama `options`, so the gateway cannot set the context. Ollama loads the model with `OLLAMA_CONTEXT_LENGTH` (environment of `ollama serve`) or the model's own default. Check what was loaded with `curl -s localhost:11434/api/ps` (`context_length`) and set `context_window` in `config/llm.yaml` to that number or less. When the loaded context is smaller than `context_window`, a long prompt can be cut by Ollama itself, without an error.
+- **How a stream ends.** A whole answer ends with a chunk that has `finish_reason` `stop`, `length` or `tool_calls`, then a usage chunk and `data: [DONE]`. A tool call arrives whole in one delta. If generation fails after Ollama has sent the 200, its chat endpoint does not pass the error on: the stream just stops, with no `finish_reason` and no `[DONE]`. vLLM and llama.cpp send `data: {"error": ...}` instead.
+- **`max_tokens`** from the request (Claude Code often asks for 32000 or more) is passed as is. Ollama uses it as the token limit of the answer; see [How much fits](#how-much-fits) for how the gateway counts it against `context_window`.
+
+The gateway reads a stream like this: a held answer that ended with `length` (or with `[DONE]` but no `finish_reason`) is `truncated`, one with nothing in it is `empty_answer`, and a stream that stopped without `[DONE]` and without a `finish_reason`, or carried an error, is `model_error`. Before 2026-10-30 that last case was counted as `truncated`.
+
+### How much fits
+
+The gateway judges the size on the request it would send the local model, after translation, so Claude's thinking blocks and Anthropic's wrappers do not count. It estimates 3.5 bytes of that JSON per token. Measured with `qwen3.8:27b` on Ollama, the translated JSON came to 3.7 bytes a token for Go code and tool schemas and 4.3 for prose; four bytes a token would undercount code, and Ollama silently drops the start of a prompt that overflows its context. `bytes_per_token` and `input_budget_policy` apply to CodeSynapse's own model calls, not to the gateway: the gateway always estimates.
+
+A request fits when estimate + 2048 tokens of margin + the answer room fit in `context_window`:
+
+- The answer room is the request's `max_tokens` when that fits.
+- Otherwise, for an answer the gateway holds and checks (a request with tools, or for a larger model than haiku), it lowers the `max_tokens` it sends to the room that is left, but never below the provider's `max_output_tokens` (or the request's own `max_tokens` when that is smaller). An answer that reaches the lowered limit stops at `max_tokens` and goes to the cloud as `truncated`.
+- A haiku request without tools streams straight to the agent, so its `max_tokens` is never lowered.
+
+Whatever the window, the agent's body and the translated request are at most 4 MiB, so a request held for the local model stays bounded in memory. Without `context_window`, the translated request is at most 256 KiB.
+
+Example: `context_window: 262144` and `max_output_tokens: 32768` take a translated request up to about 777 KiB (227 328 estimated tokens), whatever `max_tokens` Claude Code asks for. Before this, the body divided by four plus the full `max_tokens` had to fit, so a request asking for 128 000 tokens of answer went to the cloud above about 524 KiB.
 
 See `config/llm.example.yaml` for the full provider block and [Local models](local-models.md) for choosing a model. Without such a provider the gateway still works, but every request goes to the cloud as a plain pass-through.
+
+To see whether the gateway's local model is really usable, open **Admin → Overview**: the Local models panel names the gateway's provider, whether its model is pulled and whether Ollama loaded it with at least `context_window` tokens of context. Requests that do not fit a smaller real context go to the cloud or are cut short. See [Checking the model server](local-models.md#checking-the-model-server).
 
 ## Connect Claude Code
 
@@ -133,7 +168,8 @@ The reasons a request was not answered locally are a fixed list:
 
 | Reason | Meaning |
 |---|---|
-| `not_eligible` | The organisation answers only haiku-class requests locally, and this one asked for a larger model |
+| `not_eligible` | The installation's own eligibility rule does not offer this model to the local model |
+| `local_first_off` | The organisation turned `local_first` off, so only haiku-class requests are offered locally, and this one asked for a larger model |
 | `bad_request` | The gateway could not read the request: broken JSON, no messages, a role other than `user` or `assistant`, or content that is neither text nor blocks. The cloud answers it, usually with its own error |
 | `system_not_text` | The system prompt is neither a string nor a list of text blocks |
 | `unsupported_block` | A message holds a block the local model cannot take, such as `server_tool_use`, `web_search_tool_result` or an unknown block type, also inside a tool result. Text, `tool_use`, `tool_result`, `search_result` and `tool_reference` blocks are converted, and `cache_control` and citation settings are dropped |
@@ -142,14 +178,15 @@ The reasons a request was not answered locally are a fixed list:
 | `has_thinking` | The request asks for thinking or sends thinking back, and the organisation turned `local_thinking` off |
 | `has_image` | The request carries an image or a document, also inside a tool result |
 | `excluded` | The model is on the installation's or organisation's exclude list |
-| `no_local_model` | No local provider with `gateway: true` is configured |
+| `no_local_model` | No local provider with `gateway: true` is configured, so the request was not offered locally |
+| `count_tokens` | A token count (`/v1/messages/count_tokens`): always counted by the cloud, never estimated locally |
 | `queue_timeout` | No local slot was free within `gateway_wait_seconds` |
-| `answer_timeout` | The local model started but did not finish within the provider's `timeout_seconds` |
+| `answer_timeout` | The local model sent no first token within `gateway_first_token_seconds`, or did not finish within the provider's `timeout_seconds`, before anything was written |
 | `cancelled` | The assistant gave up on the request before the local model answered |
-| `model_error` | The local model could not be reached or failed |
+| `model_error` | The local model could not be reached or failed, also when its stream stopped without `[DONE]` and without a finish, or carried an error |
 | `bad_status` | The local model answered with an error status |
 | `empty_answer` | The local model answered nothing |
-| `truncated` | The answer stopped at `max_tokens` or broke off. A held answer cut off by a `max_tokens` of 64 or less that the client set itself (a quota check asks for one token) is kept with `stop_reason: "max_tokens"`, because the cloud would stop the same way |
+| `truncated` | The answer stopped at `max_tokens` (thinking counts towards it; see [Ollama](#ollama-thinking-context-length-and-how-an-answer-ends)) or ended with `[DONE]` but no finish. A held answer cut off by a `max_tokens` of 64 or less that the client set itself (a quota check asks for one token) is kept with `stop_reason: "max_tokens"`, because the cloud would stop the same way |
 | `bad_answer` | The answer could not be read, or it called a tool that was not offered or with broken arguments |
 
 On the OpenAI-compatible paths there is no cloud behind the local model, so their failures count with route `local`. Only the reason, the route and the timings are recorded; never the prompt or the answer.
@@ -192,6 +229,36 @@ Use the same values as the gateway provider in `config/llm.yaml`, so the benchma
 The requests live in `services/api/internal/gateway/testdata/gatewaybench`. They are shaped like Claude Code's (a system prompt in cache-controlled blocks, about thirty tools with JSON schemas, system reminders, `tool_use`/`tool_result` rounds, a failed tool call and signed thinking in earlier assistant turns), from 126 bytes to about 240 KB. Every word and line of code in them is made up about a fictional project. They are generated by `benchfixtures_test.go`; after changing it, regenerate them with `CODESYNAPSE_GATEWAY_BENCH_WRITE=1 go test -run TestBenchFixtures ./services/api/internal/gateway/`. `TestBenchFixtures` runs in CI and fails when the files and the generator differ or when the gateway would no longer offer a fixture to a local model.
 
 The output and the JSON file hold the fixture names and numbers only, never prompt or answer text. Results from earlier runs are kept in [`docs/benchmarks/gateway`](../benchmarks/gateway/README.md).
+
+## Local model performance
+
+Time to the first token is almost all prompt processing (prefill), and it grows faster than the prompt. Measured on an Apple M5 Pro (48 GB) with a 27B model on Ollama's MLX runner, synthetic prompts, one request at a time:
+
+| Prompt | Cold (nothing cached) | Same prompt again | Same prefix, new last message |
+|---|---|---|---|
+| ~5k tokens | 12 s | 2 s | 13 s (prefix not reused) |
+| ~20k tokens | 56 s | – | 37 s (16k of 22k reused) |
+| ~40k tokens | 180 s | 4 s | 123 s (41k of 43k reused) |
+
+What that means for the gateway:
+
+- **A turn that only adds messages is cheap.** Ollama keeps the last prompt and reuses it when the next one starts with the same bytes; an agent turn that appends to the conversation processes only the new part. A prompt that changes in the middle reuses only up to Ollama's last checkpoint (about every 8k tokens).
+- **The prefix must be byte-stable.** Claude Code starts its system prompt with a billing header that changes every turn. The gateway leaves that header out of what the local model sees, and translates the rest deterministically (fixed key order, tools in the agent's order, schemas as written), so turn two finds turn one in the cache.
+- **The cache holds one conversation.** Two conversations, or CodeSynapse's own tasks, on the same model take turns evicting it. A busy model answers every gateway request cold.
+- **Cold long prompts go to the cloud.** With `gateway_first_token_seconds: 90`, a cold prompt above roughly 30k tokens falls through as `answer_timeout`; warm turns of the same conversation stay local. Raise it (up to 600) when you would rather wait than pay, or lower the provider's `context_window` so long requests go to the cloud without waiting at all.
+- **The queue wait is short on purpose.** One 20k prefill holds the slot for about a minute, so waiting longer than `gateway_wait_seconds: 30` for a slot seldom pays.
+
+Recommended Ollama server settings for a machine that serves the gateway (set them where Ollama runs, for example `launchctl setenv` on macOS, and restart Ollama):
+
+| Setting | Value | Why |
+|---|---|---|
+| `OLLAMA_CONTEXT_LENGTH` | `65536` (match the provider's `context_window`) | A larger window costs memory and prefill time the gateway never uses |
+| `OLLAMA_KEEP_ALIVE` | `30m`, or `-1` on a dedicated machine | An unloaded model loses its cache; the gateway's `keep_alive` (`kv_cache_ttl`) also keeps it loaded |
+| `OLLAMA_NUM_PARALLEL` | `1` (with the provider's `max_concurrent: 1`) | Parallel slots split the cache and slow each prefill |
+| `OLLAMA_FLASH_ATTENTION` | `1` | Faster, smaller attention on long prompts (llama.cpp runner) |
+| `OLLAMA_KV_CACHE_TYPE` | `q8_0` | Halves cache memory with flash attention (llama.cpp runner) |
+
+Keep other work off the gateway's model while agents use it, or give that work its own model.
 
 ## What the audit log records
 

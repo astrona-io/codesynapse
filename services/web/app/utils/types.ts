@@ -614,6 +614,16 @@ export interface Attention {
 export interface AdminOrg extends AccountOrg { members: number; roles: Record<string, number>; repositories: number; lost_access: number; teams: number }
 export interface AdminUser extends AccountUser { disabled_at?: string; orgs: { slug: string; name: string; role: Role }[]; active_keys: number; last_key_use?: string }
 export interface HealthCheck { ok: boolean; detail: string; seconds: number }
+// A local model server's answer about the models config/llm.yaml names
+// (llm.ProviderCheck). Context figures are 0 when the server does not say.
+export interface ProviderCheck {
+  name: string; server?: string; version?: string; reachable: boolean
+  model: string; model_found: boolean; embedding_model?: string; embedding_found?: boolean
+  tasks: string[]; gateway: boolean
+  context_window: number; model_context?: number; num_ctx?: number; loaded_context?: number
+  ok: boolean; problems: string[]; warnings: string[]; seconds: number
+}
+export interface LocalModelsCheck { providers: ProviderCheck[]; gateway: string; ok: boolean; problems: string[]; warnings: string[] }
 
 // Platform statistics (GET /api/v1/admin/stats/*): aggregates only, root
 // never counted. Tiles a later phase fills are null until then. 90d and
@@ -691,7 +701,11 @@ export interface IngestFigures {
   skips: { ignored_path: number; generated_code: number; binary: number; non_k8s_yaml: number }
 }
 export interface OrgIngestRow extends IngestFigures { org_id: string; slug: string; name: string; deleted: boolean }
-export type IngestSection = StatsTable<IngestFigures, OrgIngestRow>
+// formats: indexed files by language or format across the platform as of
+// now, each graph once; null when one organisation is selected.
+export interface IngestSection extends StatsTable<IngestFigures, OrgIngestRow> {
+  formats: { name: string; files: number }[] | null; formats_unknown: number
+}
 // Models section of the platform statistics. cost_dollars is null when the
 // cost is unknown (cost_basis "unknown"), for local calls ("local") and
 // without calls ("none"); provider_cache_saved_dollars is the provider's
@@ -712,17 +726,18 @@ export interface ModelRow extends ModelFigures {
   ttft_p95_seconds: number | null; request_p95_seconds: number | null
   tasks: ModelTaskStat[]
 }
-export interface ModelsSection extends StatsTable<ModelTotals, ModelOrgRow> { models: ModelRow[] }
+export interface ModelsSection extends StatsTable<ModelTotals, ModelOrgRow> { models: ModelRow[]; models_range?: string }
 // Storage and alerts sections of the platform statistics (phase 6). A null
 // figure is one the store does not report.
 export interface StoreSizeRow { db_system: string; kind: string; rows: number | null; bytes: number | null; rows_change: number | null; bytes_change: number | null }
-export interface StatsStorage { range: StatsRange; available: boolean; reason?: string; sampled_at: string | null; stores: StoreSizeRow[] }
+export interface StatsStorage { range: StatsRange; available: boolean; reason?: string; sampled_at: string | null; stores: StoreSizeRow[]; rollup?: StatsRollup }
 export interface AlertItem { name: string; state: string; severity: string; value: string; active_at: string }
 export interface AlertRuleItem { name: string; group: string; state: string; severity: string; health: string; failing: boolean; last_evaluation: string }
 export interface StatsAlerts { configured: boolean; reachable: boolean; firing: number; pending: number; alerts: AlertItem[]; rules: AlertRuleItem[] }
 export interface AdminHealth {
   version: string; checked: string
-  graph: HealthCheck; accounts: HealthCheck; metrics: HealthCheck; audit: HealthCheck
+  graph: HealthCheck; accounts: HealthCheck; metrics: HealthCheck; audit: HealthCheck; models: HealthCheck
+  local_models?: LocalModelsCheck
   counts: { users: number; suspended: number; admins: number; orgs: number; graphs: number; audit_events_checked: number }
   jobs: { total: number; running: number; succeeded: number; failed: number }
   unowned: string[]
