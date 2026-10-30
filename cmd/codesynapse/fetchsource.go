@@ -18,7 +18,8 @@ import (
 // machine: the server never fetches a URL an agent names, so the tool reaches
 // nothing the developer's own browser could not. Pages are cached in the
 // user cache folder. The call is reported like the git tools, without the
-// URL, its host or the checkout's name.
+// URL, its host or the checkout's name, plus how the fetch went and the
+// page's sizes (sourceUsage) for the "External sources" savings.
 //
 // With a question and a pruned page still over fetchsource.ExtractThreshold
 // characters, the page and the question go to the server's local-only
@@ -52,36 +53,55 @@ func (b *bridge) answerFetchSource(ctx context.Context, msg []byte, m rpcMessage
 	ctx, cancel := context.WithTimeout(ctx, fetchSourceTimeout)
 	defer cancel()
 
-	result, failed := b.fetchSource(ctx, msg, c)
+	result, src, failed := b.fetchSource(ctx, msg, c)
 	out, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": result})
 	if err != nil {
 		out = errorResponse(m.ID, err)
 		failed = true
+		src.Result = telemetry.SourceError
 	}
-	if !b.reportLocal(ctx, c.Params.Name, time.Since(start), len(out)/4, failed) {
+	if !b.reportLocalSource(ctx, c.Params.Name, time.Since(start), len(out)/4, failed, &src) {
 		return false
 	}
 	b.write(out)
 	return true
 }
 
-func (b *bridge) fetchSource(ctx context.Context, msg []byte, c toolCall) (map[string]any, bool) {
+func (b *bridge) fetchSource(ctx context.Context, msg []byte, c toolCall) (map[string]any, sourceUsage, bool) {
 	ans, err := b.sourceFetcher().Run(ctx, c.Params.Arguments)
+	src := sourceUsage{Result: fetchsource.Result(ans, err)}
 	if err != nil {
-		return localFail(err)
+		res, failed := localFail(err)
+		return res, src, failed
 	}
 	var in fetchsource.In
 	_ = json.Unmarshal(c.Params.Arguments, &in) //nolint:errcheck // Run decoded the same arguments strictly
 	b.extractSource(ctx, msg, in.Question, &ans)
 	raw, err := json.Marshal(ans)
 	if err != nil {
-		return localFail(err)
+		src.Result = telemetry.SourceError
+		res, failed := localFail(err)
+		return res, src, failed
 	}
+	src.RawTokens, src.CleanedTokens, src.ExtractedTokens = ans.RawTokens, ans.CleanedTokens, ans.TextTokens
+	src.ReduceUs = ans.Reduce.Microseconds()
 	return map[string]any{
 		"content":           []map[string]any{{"type": "text", "text": string(raw)}},
 		"structuredContent": json.RawMessage(raw),
 		"_meta":             map[string]any{"codesynapse/source": "local-fetch"},
-	}, false
+	}, src, false
+}
+
+// sourceUsage is how one fetch_source call went, for the usage report: the
+// result (hit, revalidated, miss, refused, error) and the page's estimated
+// tokens as served, cleaned and returned, and the time cleaning took. Never
+// the URL, its host, the question or the text.
+type sourceUsage struct {
+	Result          string `json:"result"`
+	RawTokens       int    `json:"raw_tokens"`
+	CleanedTokens   int    `json:"cleaned_tokens"`
+	ExtractedTokens int    `json:"extracted_tokens"`
+	ReduceUs        int64  `json:"reduce_us"`
 }
 
 // sourceTTLs reads the per-host TTLs from the user's config folder. A file

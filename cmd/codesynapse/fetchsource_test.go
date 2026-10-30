@@ -14,6 +14,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/fetchsource"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
@@ -67,6 +68,9 @@ func TestBridgeAnswersFetchSourceAndReportsItWithoutTheURL(t *testing.T) {
 		assert.Equal(t, u.Tool, fetchsource.Tool)
 		assert.True(t, u.Failed)
 		assert.Equal(t, u.Repo, "", "a fetched page is not tied to the checkout")
+		require.True(t, u.Source != nil, "the measurement goes with the report")
+		assert.Equal(t, u.Source.Result, telemetry.SourceRefused)
+		assert.Equal(t, u.Source.RawTokens, 0)
 		for _, leak := range []string{"169.254", "example.com", "secret-page", "meta-data"} {
 			assert.NotContains(t, r, leak)
 		}
@@ -181,4 +185,40 @@ func TestBridgeExtractsLongPages(t *testing.T) {
 	u := page(long, "text/html")
 	unindexed.extractSource(context.Background(), nil, "how", u)
 	assert.Contains(t, u.ExtractNote, "not indexed")
+}
+
+// A server older than the measurement refuses the unknown source field with
+// 400: the report is sent again without it, the answer is still given here,
+// and later reports leave it out.
+func TestBridgeDropsSourceCountsForAnOlderServer(t *testing.T) {
+	var mu sync.Mutex
+	var withSource, without int
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		mu.Lock()
+		defer mu.Unlock()
+		if bytes.Contains(raw, []byte(`"source"`)) {
+			withSource++
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		without++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(api.Close)
+	var out bytes.Buffer
+	b := &bridge{token: "csk_test", out: &out, repoName: "acme/app", fetcher: fetchsource.New(nil),
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)), report: apiClient{base: api.URL, token: "csk_test", http: api.Client()}}
+	b.repoOnce.Do(func() {})
+	for range 2 {
+		msg := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"fetch_source","arguments":{"url":"https://169.254.169.254/"}}}`
+		var m rpcMessage
+		require.NoError(t, json.Unmarshal([]byte(msg), &m))
+		assert.True(t, b.answerFetchSource(context.Background(), []byte(msg), m))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []int{withSource, without}, []int{1, 2}, "one refused report, then none with the measurement")
+	assert.True(t, b.mayAnswer(fetchsource.Tool), "the tool is still answered here")
 }

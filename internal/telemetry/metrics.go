@@ -355,6 +355,22 @@ var (
 	GatewayFirstByte = Default.ScopedHistogram("gateway_first_byte_seconds", "Time to the first byte of a streamed gateway answer, by route (local, cloud).", ttft, "route").TenantShare(gatewayShare)
 )
 
+// External sources: fetch_source answers the Claude Code bridge gave
+// (docs/plans/TEXT_OPTIMIZATION_PLAN.md, pillar D). Recorded by the API from
+// the bridge's usage report through RecordSourceFetch (sources.go), which
+// keeps every label inside its fixed set. No URL, host, path or question is
+// ever a label; the hit ratio is computed in the query.
+var (
+	// reduceBuckets: cleaning and pruning a page take milliseconds; a local
+	// model's extract (tier 2) takes seconds.
+	reduceBuckets = []float64{0.001, 0.005, 0.02, 0.1, 0.5, 2, 10, 60}
+
+	SourceFetches = Default.ScopedCounter("codesynapse_source_fetches_total", "fetch_source answers by result (hit, revalidated, miss, refused, error).", "result")
+	SourceTokens  = Default.ScopedCounter("codesynapse_source_tokens_total", "Estimated tokens (bytes/4) of the pages fetch_source returned, by stage (raw, cleaned, extracted).", "stage")
+	// Two tiers per organisation.
+	SourceReduce = Default.ScopedHistogram("codesynapse_source_reduce_seconds", "Time fetch_source took to reduce a page, by tier (cpu, local_model).", reduceBuckets, "tier").TenantShare(2)
+)
+
 // Per-tenant shares of the request-path histograms. One organisation calling
 // every tool or route still fits; one flooding new combinations (a model
 // allowlist, many tools under many models) stops at its share instead of

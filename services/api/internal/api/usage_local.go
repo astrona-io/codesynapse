@@ -43,6 +43,45 @@ type localUsageReport struct {
 	DurationMs     int    `json:"duration_ms"`
 	ResponseTokens int    `json:"response_tokens"`
 	Failed         bool   `json:"failed"`
+	// Source is fetch_source's measurement (docs/plans/TEXT_OPTIMIZATION_PLAN.md,
+	// pillar D): how the page was answered and its sizes, never its URL.
+	Source *sourceReport `json:"source,omitempty"`
+}
+
+// sourceReport is one fetch_source answer: the result
+// (telemetry.SourceResults), the estimated tokens of the page as served, of
+// its cleaned text and of the text returned, and the microseconds reducing
+// it took on the developer's machine.
+type sourceReport struct {
+	Result          string `json:"result"`
+	RawTokens       int    `json:"raw_tokens"`
+	CleanedTokens   int    `json:"cleaned_tokens"`
+	ExtractedTokens int    `json:"extracted_tokens"`
+	ReduceUs        int    `json:"reduce_us"`
+}
+
+const (
+	// maxSourceTokens is fetchsource.MaxBody in tokens, with room.
+	maxSourceTokens = 1_000_000
+	maxSourceUs     = 60 * 1_000_000
+)
+
+func (sr *sourceReport) validate() error {
+	switch {
+	case !slices.Contains(telemetry.SourceResults, sr.Result):
+		return fmt.Errorf("unknown source result %q", sr.Result)
+	case sr.RawTokens < 0 || sr.RawTokens > maxSourceTokens, sr.CleanedTokens < 0 || sr.CleanedTokens > maxSourceTokens,
+		sr.ExtractedTokens < 0 || sr.ExtractedTokens > maxSourceTokens:
+		return errors.New("source tokens out of range")
+	case sr.ReduceUs < 0 || sr.ReduceUs > maxSourceUs:
+		return errors.New("source reduce_us out of range")
+	}
+	return nil
+}
+
+// returned reports whether a page was returned (not refused, not failed).
+func (sr *sourceReport) returned() bool {
+	return sr.Result == telemetry.SourceHit || sr.Result == telemetry.SourceRevalidated || sr.Result == telemetry.SourceMiss
 }
 
 func (s *Server) usageLocalRoutes() {
@@ -195,9 +234,37 @@ func (s *Server) countLocal(r *http.Request, in localUsageReport, org, repo stri
 	if in.Failed {
 		b.Errors = 1
 	}
-	if err := s.st.AddUsage(r.Context(), []usage.Bucket{b}); err != nil {
+	buckets := append([]usage.Bucket{b}, s.countSource(r, in, org)...)
+	if err := s.st.AddUsage(r.Context(), buckets); err != nil {
 		s.logger.Warn("local call not counted", "tool", in.Tool, "error", err)
 	}
+}
+
+// countSource records fetch_source's measurement in the source instruments
+// and returns its daily buckets: pages returned, cache hits, raw tokens and
+// tokens saved (raw minus returned, per page). They carry the organisation
+// and no repository.
+func (s *Server) countSource(r *http.Request, in localUsageReport, org string) []usage.Bucket {
+	sr := in.Source
+	if sr == nil {
+		return nil
+	}
+	telemetry.RecordSourceFetch(r.Context(), in.Tool, telemetry.SourceFetch{Result: sr.Result, RawTokens: sr.RawTokens,
+		CleanedTokens: sr.CleanedTokens, ExtractedTokens: sr.ExtractedTokens, Tier: telemetry.TierCPU,
+		Reduce: time.Duration(sr.ReduceUs) * time.Microsecond})
+	if !sr.returned() {
+		return nil
+	}
+	day := usage.Day(time.Now())
+	counter := func(tool string, n int) usage.Bucket {
+		return usage.Bucket{Day: day, Org: org, Tool: tool, Client: in.Client, Calls: n}
+	}
+	out := []usage.Bucket{counter(usage.SourceFetches, 1), counter(usage.SourceRaw, sr.RawTokens),
+		counter(usage.SourceSaved, max(0, sr.RawTokens-sr.ExtractedTokens))}
+	if sr.Result != telemetry.SourceMiss {
+		out = append(out, counter(usage.SourceHits, 1))
+	}
+	return out
 }
 
 // localAnswerAction is the audit action of a call the bridge answered.
@@ -220,6 +287,10 @@ func (in localUsageReport) validate() error {
 		return errors.New("duration_ms out of range")
 	case in.ResponseTokens < 0 || in.ResponseTokens > maxLocalTokens:
 		return errors.New("response_tokens out of range")
+	case in.Source != nil && in.Tool != fetchsource.Tool:
+		return errors.New("source is reported for fetch_source only")
+	case in.Source != nil:
+		return in.Source.validate()
 	}
 	return nil
 }
