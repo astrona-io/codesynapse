@@ -40,10 +40,24 @@ func RunJobs(t *testing.T, newStore func(*testing.T) accounts.Store) {
 		got, err = st.JobQueue(ctx, now.Add(2*time.Minute))
 		require.NoError(t, err)
 		assert.Equal(t, got.Waiting["sync"], 1, "an expired lease leaves the job for a worker")
-		require.NoError(t, st.FinishJob(ctx, "w1", "proc-a", accounts.JobOutcome{State: accounts.JobSucceeded, At: now}))
+		assert.True(t, got.Oldest["sync"].Equal(now), "the oldest waiting job is the queued one")
+		older := job("w0", "acme/web")
+		older.CreatedAt = now.Add(-time.Hour)
+		require.NoError(t, st.AddJob(ctx, older))
+		running := job("w2", "acme/docs")
+		running.CreatedAt = now.Add(-2 * time.Hour)
+		require.NoError(t, st.AddJob(ctx, running))
+		require.NoError(t, st.StartJob(ctx, "w2", "proc-a", now.Add(time.Hour), now))
 		got, err = st.JobQueue(ctx, now.Add(2*time.Minute))
 		require.NoError(t, err)
-		assert.Equal(t, len(got.Waiting)+len(got.Active), 0, "a finished job is neither")
+		assert.True(t, got.Oldest["sync"].Equal(now.Add(-time.Hour)), "the oldest job that has not started, not the running one")
+		assert.Equal(t, got.Active["sync"], 3)
+		for _, id := range []string{"w0", "w1", "w2"} {
+			require.NoError(t, st.FinishJob(ctx, id, "proc-a", accounts.JobOutcome{State: accounts.JobSucceeded, At: now}))
+		}
+		got, err = st.JobQueue(ctx, now.Add(2*time.Minute))
+		require.NoError(t, err)
+		assert.Equal(t, len(got.Waiting)+len(got.Active)+len(got.Oldest), 0, "a finished job is neither")
 	})
 
 	// A store that can wake workers does so when a job is added, so idle

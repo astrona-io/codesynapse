@@ -636,6 +636,9 @@ type Store interface {
 	HasPlatformStats(ctx context.Context, day time.Time) (bool, error)
 	ListPlatformStats(ctx context.Context, q PlatformStatQuery) ([]PlatformStat, error)
 	PrunePlatformStats(ctx context.Context, before time.Time) (int, error)
+	// IngestStats sums the ingest runs of [from, to) per organisation
+	// (ingeststats.go, IngestInWindow), deleted organisations included.
+	IngestStats(ctx context.Context, from, to time.Time) ([]OrgIngestStats, error)
 
 	// DropAuditSegment removes the oldest segment once its retention ended;
 	// the next segment's PrevHash becomes the chain's anchor, as the first
