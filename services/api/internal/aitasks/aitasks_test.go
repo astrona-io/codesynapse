@@ -21,24 +21,32 @@ import (
 	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
-// fakeModel answers with canned JSON and records the prompts it saw.
-func fakeModel(t *testing.T, answer string) (*httptest.Server, *[]string) {
+// fakeModel answers with canned JSON and records the prompts and system
+// prompts it saw.
+func fakeModel(t *testing.T, answer string) (*httptest.Server, *[]string, *[]string) {
 	t.Helper()
-	var prompts []string
+	var prompts, systems []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Messages []struct{ Content string } `json:"messages"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
+		systems = append(systems, req.Messages[0].Content)
 		prompts = append(prompts, req.Messages[1].Content)
 		resp := map[string]any{"model": "fake", "choices": []any{map[string]any{"message": map[string]string{"content": answer}, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 5}}
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	t.Cleanup(srv.Close)
-	return srv, &prompts
+	return srv, &prompts, &systems
 }
 
 func setup(t *testing.T, answer string, sendSource bool) (Runner, *memory.Store, *[]string) {
+	t.Helper()
+	r, st, prompts, _ := setupWithSystems(t, answer, sendSource)
+	return r, st, prompts
+}
+
+func setupWithSystems(t *testing.T, answer string, sendSource bool) (Runner, *memory.Store, *[]string, *[]string) {
 	t.Helper()
 	ctx := taskContext(t)
 	root := t.TempDir()
@@ -58,13 +66,13 @@ func setup(t *testing.T, answer string, sendSource bool) (Runner, *memory.Store,
 	st := memory.New()
 	require.NoError(t, st.ReplaceRepo(ctx, storetest.Repo, g))
 
-	srv, prompts := fakeModel(t, answer)
+	srv, prompts, systems := fakeModel(t, answer)
 	cfg, err := llm.Load("", func(k string) string {
 		return map[string]string{"CODESYNAPSE_LLM_BASE_URL": srv.URL}[k]
 	})
 	require.NoError(t, err)
 	cfg.Providers[0].SendSource = &sendSource
-	return Runner{St: st, LLM: llm.NewRegistry(cfg)}, st, prompts
+	return Runner{St: st, LLM: llm.NewRegistry(cfg)}, st, prompts, systems
 }
 
 func TestSecurityTriage(t *testing.T) {

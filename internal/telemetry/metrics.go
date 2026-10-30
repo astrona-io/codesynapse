@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"slices"
 	"sync"
 )
 
@@ -188,6 +189,10 @@ var (
 	// LoopsLeaseHeld is 1 while this process runs the singleton loops. The sum
 	// over fresh instances is how many processes think they lead: it must be 1.
 	LoopsLeaseHeld = Default.Gauge("platform_codesynapse_loops_lease_held", "1 while this process holds the api-loops lease and runs the scheduler, else 0.")
+	// WorkerRoles is 1 for each job role (ingest, ai, fix) this process
+	// runs and 0 for the others; summed over instances it is how many
+	// processes run each role.
+	WorkerRoles = Default.Gauge("platform_codesynapse_worker_roles", "1 for each job role (ingest, ai, fix) this process runs, else 0.", "role")
 
 	// Sampled from the standard library's runtime/metrics (internal/app);
 	// no second SDK accumulator and no contrib runtime package.
@@ -236,6 +241,29 @@ func SetLoopsLeaseHeld(ctx context.Context, held bool) {
 		v = 1
 	}
 	LoopsLeaseHeld.SetContext(ctx, v)
+}
+
+// Worker roles: the fixed values of WorkerRoles' role label, the roles of
+// codesynapse-api worker --roles.
+const (
+	RoleIngest = "ingest"
+	RoleAI     = "ai"
+	RoleFix    = "fix"
+)
+
+// WorkerRoleNames lists the roles in a stable order.
+func WorkerRoleNames() []string { return []string{RoleIngest, RoleAI, RoleFix} }
+
+// SetWorkerRoles records the job roles this process runs: 1 for each role
+// in roles, 0 for every other known role. Unknown roles are dropped.
+func SetWorkerRoles(ctx context.Context, roles []string) {
+	for _, role := range WorkerRoleNames() {
+		v := 0.0
+		if slices.Contains(roles, role) {
+			v = 1
+		}
+		WorkerRoles.SetContext(ctx, v, role)
+	}
 }
 
 // Exporter names: the fixed values of platform_telemetry_export_failures_total.

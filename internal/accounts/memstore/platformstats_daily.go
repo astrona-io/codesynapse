@@ -248,6 +248,7 @@ func (s *Store) CountPlatformStats(_ context.Context, day time.Time) ([]accounts
 		}
 	}
 	jt.mu.Unlock()
+	accounts.AddIngestStats(set, s.ingestStats(start, end))
 	return set.Rows(), nil
 }
 

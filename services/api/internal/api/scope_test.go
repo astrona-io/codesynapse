@@ -45,7 +45,7 @@ func TestTenantIsolation(t *testing.T) {
 	var team, side accounts.Org
 	require.Equal(t, bob.do("POST", "/api/v1/accounts/orgs", `{"name":"Team"}`, &team), 201)
 	require.Equal(t, ada.do("POST", "/api/v1/accounts/orgs", `{"name":"Side"}`, &side), 201)
-	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+team.Slug+"/members", `{"email":"carol@example.com","role":"viewer"}`, nil), 200)
+	invite(t, bob, team.Slug, carol, "carol@example.com", "viewer")
 
 	// Platform administration cannot attach a graph to another tenant.
 	assert.Equal(t, ada.do("POST", "/api/v1/accounts/orgs/"+team.Slug+"/repos", `{"graph":"`+storetest.Repo+`"}`, nil), 404)

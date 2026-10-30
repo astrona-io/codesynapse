@@ -113,8 +113,9 @@ ORDER BY created_at DESC OFFSET $1)`, accounts.JobHistory)
 
 // JobQueue implements accounts.Store.
 func (s *Store) JobQueue(ctx context.Context, now time.Time) (accounts.JobQueue, error) {
-	q := accounts.JobQueue{Waiting: map[string]int{}, Active: map[string]int{}}
-	rows, err := s.db.Query(ctx, `SELECT kind, count(*), count(*) FILTER (WHERE lease_until < $1) FROM jobs
+	q := accounts.JobQueue{Waiting: map[string]int{}, Active: map[string]int{}, Oldest: map[string]time.Time{}}
+	rows, err := s.db.Query(ctx, `SELECT kind, count(*), count(*) FILTER (WHERE lease_until < $1),
+ min(created_at) FILTER (WHERE state = 'queued' OR lease_until < $1) FROM jobs
 WHERE state IN ('queued', 'running') GROUP BY kind`, now)
 	if err != nil {
 		return q, err
@@ -123,10 +124,14 @@ WHERE state IN ('queued', 'running') GROUP BY kind`, now)
 	for rows.Next() {
 		var kind string
 		var active, waiting int
-		if err := rows.Scan(&kind, &active, &waiting); err != nil {
+		var oldest *time.Time
+		if err := rows.Scan(&kind, &active, &waiting, &oldest); err != nil {
 			return q, err
 		}
 		q.Active[kind] = active
+		if oldest != nil {
+			q.Oldest[kind] = oldest.UTC()
+		}
 		if waiting > 0 {
 			q.Waiting[kind] = waiting
 		}

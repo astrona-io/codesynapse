@@ -33,6 +33,7 @@ func TestContract(t *testing.T) {
 	accountstest.RunPromptLog(t, func(*testing.T) accounts.Store { return New() })
 	accountstest.RunSchedules(t, func(*testing.T) accounts.Store { return New() })
 	accountstest.RunWatches(t, func(*testing.T) accounts.Store { return New() })
+	accountstest.RunInvitations(t, func(*testing.T) accounts.Store { return New() })
 	accountstest.RunProfile(t, func(*testing.T) accounts.Store { return New() })
 	accountstest.RunUsername(t, func(*testing.T) accounts.Store { return New() })
 	accountstest.RunInitialAdmin(t, func(*testing.T) accounts.Store { return New() })

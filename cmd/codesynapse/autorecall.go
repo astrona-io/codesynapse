@@ -15,11 +15,16 @@ import (
 	"github.com/astrona-io/codesynapse/internal/memory"
 )
 
+// promptRecallBudget is the whole prompt recall: session registration,
+// repository lookup and the lookup by meaning together. Each call used to
+// have its own timeout, so three slow answers outlasted the hook's timeout
+// and Claude Code discarded the hook with a warning in the chat. A recall
+// that runs out of time adds nothing, quietly. A var so tests can shorten it;
+// TestPromptRecallFitsTheHook keeps it under the plugin's timeout.
+var promptRecallBudget = 5 * time.Second
+
 const (
 	eventPrompt = "UserPromptSubmit"
-
-	// promptRecallTimeout keeps a prompt from waiting on a slow model.
-	promptRecallTimeout = 4 * time.Second
 	// promptRecallChars is how much memory one prompt may add to the context.
 	promptRecallChars = 1500
 	// compactRecallChars is the whole recall after a compaction.

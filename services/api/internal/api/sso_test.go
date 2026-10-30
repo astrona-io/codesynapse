@@ -174,7 +174,7 @@ func TestSSOLinking(t *testing.T) {
 	// owner's role.
 	carol := newClient(t, f.ts)
 	require.Equal(t, carol.signUp(`{"email":"carol@corp.example","name":"Carol","password":"`+pw+`"}`, nil), 202)
-	require.Equal(t, f.owner.do("PUT", "/api/v1/accounts/orgs/"+f.org.Slug+"/members", `{"email":"carol@corp.example","role":"viewer"}`, nil), 200)
+	invite(t, f.owner, f.org.Slug, carol, "carol@corp.example", "viewer")
 	status, _ = f.signIn(t, newClient(t, f.ts), map[string]any{"sub": "carol-1", "email": "carol@corp.example", "email_verified": true, "groups": []any{"cs-admins"}})
 	require.Equal(t, status, 200)
 	carolUser, err := f.acc.St.UserByEmail(ctx, "carol@corp.example")

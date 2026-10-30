@@ -128,7 +128,7 @@ func TestImportListUsesTheOrganisationsToken(t *testing.T) {
 	require.Equal(t, carol.signUp(`{"email":"carol@example.com","name":"Carol","password":"`+pw+`"}`, nil), 202)
 	var org accounts.Org
 	require.Equal(t, bob.do("POST", "/api/v1/accounts/orgs", `{"name":"Work"}`, &org), 201)
-	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+org.Slug+"/members", `{"email":"carol@example.com","role":"member"}`, nil), 200)
+	invite(t, bob, org.Slug, carol, "carol@example.com", "member")
 	type answer struct {
 		Repos         []ImportCandidate
 		Authenticated bool

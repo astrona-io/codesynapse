@@ -202,9 +202,11 @@ func runRootDenied(t *testing.T, st accounts.Store) {
 	role, err := st.MemberRole(ctx, org, dana.ID)
 	require.NoError(t, err)
 	assert.Equal(t, role, accounts.Owner)
-	_, err = svc.AddMember(ctx, danaP, org, SetupOwner, accounts.Member)
+	setupOwner, err := st.UserByEmail(ctx, SetupOwner)
+	require.NoError(t, err)
+	_, err = svc.SetMemberRole(ctx, danaP, org, setupOwner.ID, accounts.Member)
 	require.NoError(t, err, "dana remains an owner who can act")
-	_, err = svc.AddMember(ctx, danaP, org, dana.Email, accounts.Member)
+	_, err = svc.SetMemberRole(ctx, danaP, org, dana.ID, accounts.Member)
 	assert.True(t, errors.Is(err, accounts.ErrLastOwner), "root's ownership does not count")
 }
 

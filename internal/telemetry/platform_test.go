@@ -3,6 +3,7 @@ package telemetry
 import (
 	"bytes"
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -81,6 +82,64 @@ func TestPlatformHealthHasNoTenant(t *testing.T) {
 		}
 	}
 	assert.Equal(t, metricUnit("platform_go_heap_bytes"), "By")
+}
+
+// TestWorkerRolesLabelSet: the worker roles gauge names only ingest, ai and
+// fix, exports with the platform_ prefix and carries no tenant, even when
+// set with a tenant in the context.
+func TestWorkerRolesLabelSet(t *testing.T) {
+	ctx := WithTenant(context.Background(), "111111111111111111111111")
+	tests := []struct {
+		name  string
+		roles []string
+		want  map[string]float64
+	}{
+		{"every role", []string{RoleIngest, RoleAI, RoleFix}, map[string]float64{"ingest": 1, "ai": 1, "fix": 1}},
+		{"fix worker", []string{RoleFix}, map[string]float64{"ingest": 0, "ai": 0, "fix": 1}},
+		{"api with workers", []string{}, map[string]float64{"ingest": 0, "ai": 0, "fix": 0}},
+		{"unknown role dropped", []string{RoleAI, "deploy", "acme/repo"}, map[string]float64{"ingest": 0, "ai": 1, "fix": 0}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			SetWorkerRoles(ctx, tt.roles)
+			var text bytes.Buffer
+			require.NoError(t, Default.WriteText(&text))
+			var got []string
+			for line := range strings.Lines(text.String()) {
+				if strings.HasPrefix(line, "platform_codesynapse_worker_roles{") {
+					got = append(got, strings.TrimSpace(line))
+				}
+			}
+			assert.Equal(t, len(got), 3, "one series per known role")
+			for role, v := range tt.want {
+				assert.Contains(t, text.String(), `platform_codesynapse_worker_roles{role="`+role+`"} `+map[float64]string{0: "0", 1: "1"}[v]+"\n")
+			}
+			for _, line := range got {
+				assert.False(t, strings.Contains(line, "tenant_id"), line)
+			}
+		})
+	}
+	scopes, err := Default.Produce(ctx)
+	require.NoError(t, err)
+	found := false
+	for _, sc := range scopes {
+		for _, m := range sc.Metrics {
+			if !strings.HasSuffix(m.Name, "codesynapse_worker_roles") {
+				continue
+			}
+			found = true
+			assert.Equal(t, m.Name, "platform_codesynapse_worker_roles")
+			gauge, ok := m.Data.(metricdata.Gauge[float64])
+			require.True(t, ok)
+			for _, p := range gauge.DataPoints {
+				_, has := p.Attributes.Value("tenant_id")
+				assert.False(t, has, "the worker roles gauge carries no tenant")
+				role, _ := p.Attributes.Value("role")
+				assert.True(t, slices.Contains(WorkerRoleNames(), role.AsString()), role.AsString())
+			}
+		}
+	}
+	assert.True(t, found, "the OTLP export carries the gauge")
 }
 
 func TestUnscopedGaugeMustBePlatform(t *testing.T) {

@@ -123,12 +123,9 @@ func (s *Service) setTeamMemberPolicy(ctx context.Context, p Principal, teamID, 
 	if err := s.canMaintain(ctx, p, t); err != nil {
 		return TeamMember{}, err
 	}
-	u, err := s.St.UserByEmail(ctx, NormalizeEmail(email))
+	u, err := s.MemberByEmail(ctx, t.OrgID, email)
 	if err != nil {
 		return TeamMember{}, err
-	}
-	if _, err := s.St.MemberRole(ctx, t.OrgID, u.ID); err != nil {
-		return TeamMember{}, fmt.Errorf("%w: add %s to the organisation first", ErrInvalidInput, u.Email)
 	}
 	places, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeTeam, SubjectType: TypeUser, SubjectID: u.ID})
 	if err != nil {
@@ -303,6 +300,16 @@ func (s *Service) SetRepoGrant(ctx context.Context, p Principal, orgID, graph st
 	return policyChange(ctx, s, func(tx *Service) (RepoGrant, error) {
 		return tx.setRepoGrantPolicy(ctx, p, orgID, graph, subject, role)
 	})
+}
+
+// CanGrant reports whether p may change graph's grants. Callers that look a
+// subject up by email check it first, so only repository admins, who see the
+// grants anyway, learn whether an email belongs to a member.
+func (s *Service) CanGrant(ctx context.Context, p Principal, orgID, graph string) error {
+	if p.Via == "key" {
+		return ErrForbidden
+	}
+	return s.canAdminRepo(ctx, p, orgID, graph)
 }
 
 func (s *Service) setRepoGrantPolicy(ctx context.Context, p Principal, orgID, graph string, subject Tuple, role Role) (RepoGrant, error) {

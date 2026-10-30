@@ -25,15 +25,14 @@ func RunUserGitTokens(t *testing.T, st accounts.Store) {
 		u, _, err := svc.SignUp(ctx, email, email, pw)
 		require.NoError(t, err)
 		hash := "utok-" + u.ID
-		require.NoError(t, st.CreateSession(ctx, accounts.Session{TokenHash: hash, UserID: u.ID, CreatedAt: now, ExpiresAt: now.Add(time.Hour)}))
+		require.NoError(t, st.CreateSession(ctx, accounts.Session{TokenHash: hash, UserID: u.ID, CreatedAt: now, ExpiresAt: sessionExpiry(now)}))
 		return u, accounts.Principal{User: u, Via: "session", SessionHash: hash}
 	}
 	owner, ownerP := user("utok-owner@example.com")
 	member, memberP := user("utok-member@example.com")
 	org, err := svc.CreateOrg(ctx, ownerP, "Utok Acme", "")
 	require.NoError(t, err)
-	_, err = svc.AddMember(ctx, ownerP, org.ID, member.Email, accounts.Member)
-	require.NoError(t, err)
+	require.NoError(t, Join(ctx, t, svc, ownerP, org.ID, member, accounts.Member))
 
 	const tok = "ghp_userownabcdefghijklmnopqrstuvwxyz01"
 	_, err = svc.SetUserGitToken(ctx, memberP, "github.com", tok)

@@ -483,6 +483,30 @@ export interface Membership {
   role: Role
   added_at: string
 }
+// A pending invitation to an organisation. The accept token is shown once,
+// when it is created (InvitationCreated), and never listed.
+export interface Invitation {
+  id: string
+  org_id: string
+  email: string
+  role: Role
+  invited_by: string
+  created_at: string
+  expires_at: string
+}
+export interface InvitationCreated {
+  invitation: Invitation
+  token: string
+  accept_path: string
+}
+// What the accept page shows before joining. for_you says the signed-in
+// account's email is the invited one.
+export interface InvitationPreview {
+  org: AccountOrg
+  role: Role
+  expires_at: string
+  for_you: boolean
+}
 export interface Me {
   user: AccountUser
   via: 'session' | 'key' | 'service'
@@ -623,6 +647,17 @@ export interface OrgUsageRow extends UsageFigures { org_id: string; slug: string
 export interface UsageCount { name: string; calls: number; errors: number; sessions: number }
 export interface UsageSection extends StatsTable<UsageFigures, OrgUsageRow> { from: string; to: string; tools: UsageCount[]; clients: UsageCount[] }
 export interface StatsTable<T, R> { range: StatsRange; totals: T; rows: R[]; page: number; pages: number; total: number; rollup?: StatsRollup }
+export interface JobFigures { finished: number; ok: number; error: number; left_behind: number; cancelled: number }
+export interface OrgJobRow extends JobFigures { org_id: string; slug: string; name: string; deleted: boolean }
+export interface JobQueueRow { kind: string; waiting: number; active: number; oldest_waiting_seconds: number | null }
+export interface JobsSection extends StatsTable<JobFigures, OrgJobRow> { queue: JobQueueRow[]; kinds: (JobFigures & { kind: string })[]; measured: boolean }
+export interface IngestFigures {
+  succeeded: number; failed: number; cancelled: number; running: number; without_report: number; incomplete_discovery: number
+  scanned: number; indexed: number; skipped: number; files_failed: number; unprocessed: number
+  skips: { ignored_path: number; generated_code: number; binary: number; non_k8s_yaml: number }
+}
+export interface OrgIngestRow extends IngestFigures { org_id: string; slug: string; name: string; deleted: boolean }
+export type IngestSection = StatsTable<IngestFigures, OrgIngestRow>
 // Storage and alerts sections of the platform statistics (phase 6). A null
 // figure is one the store does not report.
 export interface StoreSizeRow { db_system: string; kind: string; rows: number | null; bytes: number | null; rows_change: number | null; bytes_change: number | null }
