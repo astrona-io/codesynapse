@@ -23,7 +23,7 @@
     ],
     "UserPromptSubmit": [
       { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "prompt"], "timeout": 5 }] },
-      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["memory", "recall", "--hook"], "timeout": 8 }] },
+      { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["memory", "recall", "--hook"], "timeout": 10 }] },
       { "hooks": [{ "type": "command", "command": "codesynapse", "args": ["hook", "brief"], "timeout": 180 }] }
     ],
     "CwdChanged": [
