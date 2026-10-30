@@ -230,9 +230,17 @@ func TestPlatformStats(t *testing.T) {
 		put(1, stat(accounts.StatOrgs, "created", "", 2), stat(accounts.StatUsers, "created", "", 3), stat(accounts.StatActiveUsers, "30d", "", 7),
 			stat(accounts.StatBrowserSessions, "created", "", 5),
 			stat(accounts.StatExecutionSessions, "created", "", 4), stat(accounts.StatExecutionSessions, "created_runtime", "", 4),
-			stat(accounts.StatExecutionSessions, "created", patOrg.ID, 4), stat(accounts.StatExecutionSessions, "created_runtime", patOrg.ID, 4))
+			stat(accounts.StatExecutionSessions, "created", patOrg.ID, 4), stat(accounts.StatExecutionSessions, "created_runtime", patOrg.ID, 4),
+			stat(accounts.StatWatches, "added", "", 2),
+			stat(accounts.StatLLMCalls, "local.requests", "", 5), stat(accounts.StatLLMCalls, "local.requests", patOrg.ID, 5),
+			stat(accounts.StatLLMCalls, "cloud.requests", "", 3), stat(accounts.StatLLMCalls, "cloud.input", "", 900),
+			stat(accounts.StatLLMCalls, "cloud.cost_micro", "", 1_500_000), stat(accounts.StatLLMMemory, "embedded", "", 4),
+			stat(accounts.StatStoreRows, "postgres.database", "", 150), stat(accounts.StatStoreBytes, "postgres.database", "", 1600))
 		put(10, stat(accounts.StatOrgs, "created", "", 1), stat(accounts.StatUsers, "created", "", 1), stat(accounts.StatActiveUsers, "30d", "", 9),
-			stat(accounts.StatExecutionSessions, "revoked", patOrg.ID, 2), stat(accounts.StatExecutionSessions, "revoked", "", 2))
+			stat(accounts.StatExecutionSessions, "revoked", patOrg.ID, 2), stat(accounts.StatExecutionSessions, "revoked", "", 2),
+			stat(accounts.StatWatches, "added", "", 1),
+			stat(accounts.StatLLMCalls, "local.requests", "", 1), stat(accounts.StatLLMCalls, "local.requests", patOrg.ID, 1),
+			stat(accounts.StatStoreRows, "postgres.database", "", 100), stat(accounts.StatStoreBytes, "postgres.database", "", 1000))
 		put(200, stat(accounts.StatOrgs, "created", "", 5), stat(accounts.StatUsers, "created", "", 10))
 		put(500, stat(accounts.StatOrgs, "created", "", 100)) // past retention and every range
 
@@ -281,7 +289,39 @@ func TestPlatformStats(t *testing.T) {
 		}
 		require.Equal(t, ada.do("GET", "/api/v1/admin/stats/tenants?range=365d", "", &tenants), 200)
 		assert.Equal(t, tenants.Totals.OrgsCreated, 8)
-		assert.Equal(t, tenants.Rollup.Unavailable, []string{"watch_adds", "active_members"})
+		assert.Equal(t, tenants.Rollup.Unavailable, []string{"active_members"})
+		assert.Equal(t, tenants.Totals.WatchAdds, 3, "repositories watches added come from the rollup")
+
+		var models ModelsSection
+		require.Equal(t, ada.do("GET", "/api/v1/admin/stats/models?range=90d", "", &models), 200)
+		require.True(t, models.Rollup != nil)
+		assert.Equal(t, models.Rollup.Written, 2)
+		assert.Equal(t, models.ModelsRange, "30d", "model names come from the last 30 days")
+		assert.Equal(t, []float64{models.Totals.Requests, models.Totals.LocalRequests, models.Totals.CloudRequests, models.Totals.InputTokens},
+			[]float64{9, 6, 3, 900})
+		assert.Equal(t, models.Totals.CostBasis, costEstimate)
+		assert.Equal(t, deref(models.Totals.CostDollars), 1.5)
+		assert.Equal(t, models.Totals.EmbeddedEntities, 4.0)
+		for _, row := range models.Rows {
+			if row.OrgID == patOrg.ID {
+				assert.Equal(t, []any{row.Requests, row.CostBasis}, []any{6.0, costLocal})
+			}
+		}
+		var oneModels ModelsSection
+		require.Equal(t, ada.do("GET", "/api/v1/admin/stats/models?range=365d&org="+patOrg.ID, "", &oneModels), 200)
+		assert.Equal(t, oneModels.Totals.Requests, 6.0, "one organisation's calls only")
+		var modelsJS string
+		require.Equal(t, ada.do("GET", "/api/v1/admin/stats/export?section=models&range=90d&format=json", "", &modelsJS), 200)
+		assert.Contains(t, modelsJS, `"requests":9`)
+
+		var storage StatsStorage
+		require.Equal(t, ada.do("GET", "/api/v1/admin/stats/storage?range=90d", "", &storage), 200)
+		require.True(t, storage.Available && storage.Rollup != nil)
+		require.Len(t, storage.Stores, 1)
+		row := storage.Stores[0]
+		assert.Equal(t, []string{row.System, row.Kind}, []string{"postgres", "database"})
+		assert.Equal(t, []float64{*row.Rows, *row.RowsChange, *row.Bytes, *row.BytesChange}, []float64{150, 50, 1600, 600})
+		assert.Equal(t, storage.SampledAt.Format(time.DateOnly), today.AddDate(0, 0, -1).Format(time.DateOnly))
 
 		var csv, js string
 		require.Equal(t, ada.do("GET", "/api/v1/admin/stats/export?section=sessions&range=90d&format=csv", "", &csv), 200)

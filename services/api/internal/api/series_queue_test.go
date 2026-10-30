@@ -222,7 +222,7 @@ func TestViewerZone(t *testing.T) {
 
 // queueVM answers every query with one bucket series and records the text
 // and filters of the queue queries; the API's own background loops query
-// other series meanwhile.
+// other series meanwhile (the daily rollup reads llm_ model series too).
 type queueVM struct {
 	mu      sync.Mutex
 	queries []string
@@ -230,7 +230,7 @@ type queueVM struct {
 }
 
 func (f *queueVM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if q := r.URL.Query().Get("query"); strings.Contains(q, "llm_") {
+	if q := r.URL.Query().Get("query"); strings.Contains(q, "llm_queue_") || strings.Contains(q, "llm_answer_start_") {
 		f.mu.Lock()
 		f.queries = append(f.queries, q)
 		f.filters = append(f.filters, strings.Join(r.URL.Query()["extra_filters[]"], ";"))

@@ -233,7 +233,7 @@ func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusBadRequest, errors.New("section must be summary, tenants, sessions, usage, jobs, ingest, security, audit or models"))
 		return
 	}
-	if _, ok := seriesRanges[req.Range]; req.Section == "models" && !ok {
+	if req.Section == "models" && !modelsRange(req.Range) {
 		s.problem(w, http.StatusBadRequest, errModelsRange)
 		return
 	}

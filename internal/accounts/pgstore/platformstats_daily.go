@@ -69,6 +69,11 @@ const statKeysSQL = `SELECT k.org_id,
  count(*) FILTER (WHERE (k.revoked_at IS NULL OR k.revoked_at >= $2) AND k.expires_at > $2 AND k.expires_at <= $3)
 FROM api_keys k JOIN users u ON u.id = k.user_id WHERE NOT u.bootstrap_root AND k.created_at < $2 GROUP BY k.org_id`
 
+// org_watches has no creation time: active is the state when the day is
+// written, like the other state figures.
+const statWatchesSQL = `SELECT (SELECT count(*) FROM org_watches WHERE NOT paused),
+ (SELECT count(*) FROM events WHERE action = 'watch.repo_add' AND outcome = 'success' AND at >= $1 AND at < $2)`
+
 // CountPlatformStats implements accounts.Store. It reads in one repeatable
 // read snapshot so the figures of a day agree with each other.
 func (s *Store) CountPlatformStats(ctx context.Context, day time.Time) ([]accounts.PlatformStat, error) {
@@ -158,6 +163,11 @@ func (s *Store) CountPlatformStats(ctx context.Context, day time.Time) ([]accoun
 		}
 		set.Total(accounts.StatBrowserSessions, "active", n[0])
 		set.Total(accounts.StatBrowserSessions, "created", n[1])
+		if err := tx.QueryRow(ctx, statWatchesSQL, start, end).Scan(&n[0], &n[1]); err != nil {
+			return err
+		}
+		set.Total(accounts.StatWatches, "active", n[0])
+		set.Total(accounts.StatWatches, "added", n[1])
 		if err := scanRows(ctx, tx, statExecutionSQL, []any{start, end}, func(r pgx.Rows) error {
 			var org string
 			var v [6]int64

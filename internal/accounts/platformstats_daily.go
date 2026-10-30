@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/internal/toolsets"
 	"github.com/astrona-io/codesynapse/internal/usage"
 	"github.com/astrona-io/codesynapse/rules"
@@ -60,6 +61,17 @@ const (
 	StatIngestRuns  = "ingest_runs"
 	StatIngestFiles = "ingest_files"
 	StatIngestSkips = "ingest_skips"
+	// Organisation watches: active when the day is written, repositories
+	// they added that day.
+	StatWatches = "watches"
+	// CodeSynapse's own model calls (phase 5), read from VictoriaMetrics by
+	// the API (PlatformStatSource), and the memory work done with models.
+	StatLLMCalls  = "llm_calls"
+	StatLLMMemory = "llm_memory"
+	// Store sizes (phase 6): the day's sample of rows and bytes per store
+	// and kind, read from VictoriaMetrics by the API (PlatformStatSource).
+	StatStoreRows  = "store_rows"
+	StatStoreBytes = "store_bytes"
 )
 
 // Limits and retention of the daily rollup.
@@ -83,11 +95,23 @@ var statJobOutcomes = []string{"succeeded", "failed"}
 // statMetric describes one metric: its dimensions and whether it also has
 // rows per organisation. An orgOnly metric has no platform rows: its
 // platform figure is the sum of the organisations', and the rows per
-// organisation are what the three-organisation rule counts.
+// organisation are what the three-organisation rule counts. A sparse
+// metric's platform rows are written only when measured, so a missing row
+// means "not sampled" rather than zero. dimsFunc lists dimensions that the
+// packages owning them register at start-up (store kinds) instead of dims.
 type statMetric struct {
-	dims    []string
-	perOrg  bool
-	orgOnly bool
+	dims     []string
+	dimsFunc func() []string
+	perOrg   bool
+	orgOnly  bool
+	sparse   bool
+}
+
+func (m statMetric) dimensions() []string {
+	if m.dimsFunc != nil {
+		return m.dimsFunc()
+	}
+	return m.dims
 }
 
 var statMetrics = map[string]statMetric{
@@ -174,6 +198,72 @@ var statMetrics = map[string]statMetric{
 	StatIngestRuns:  {dims: []string{"succeeded", "failed", "cancelled", "incomplete_discovery", "without_report"}, perOrg: true},
 	StatIngestFiles: {dims: []string{"scanned", "indexed", "skipped", "failed", "unprocessed"}, perOrg: true},
 	StatIngestSkips: {dims: []string{"ignored_path", "generated_code", "binary", "non_k8s_yaml"}, perOrg: true},
+	// Watches that are not paused when the day is written, and the
+	// repositories watches added that day (watch.repo_add successes).
+	StatWatches: {dims: []string{"active", "added"}},
+	// Model calls of the day by provider kind and figure ("cloud.requests").
+	// Cost and the provider's cache saving are in millionths of a dollar.
+	// measured is 1 on the platform row when the metrics store answered.
+	StatLLMCalls: {dims: llmDims(), perOrg: true},
+	// Entity names embedded and conversation turns handed to extraction.
+	StatLLMMemory: {dims: []string{"embedded", "offload"}, perOrg: true},
+	// Store sizes by "db_system.kind" from the day's sample: only kinds the
+	// stores registered (telemetry.StoreKindAllowed), only when sampled.
+	StatStoreRows:  {dimsFunc: storeDims, sparse: true},
+	StatStoreBytes: {dimsFunc: storeDims, sparse: true},
+}
+
+// StatLLMKinds are the provider kinds of llm_calls: local and cloud from the
+// provider configuration when the day is written, unknown for a provider it
+// does not configure.
+var StatLLMKinds = []string{"local", "cloud", "unknown"}
+
+// StatLLMFigures are the figures of llm_calls per provider kind.
+var StatLLMFigures = []string{"requests", "failures", "input", "output", "cached", "bytes", "usage_unknown", "pricing_missing", "cost_micro", "saved_micro"}
+
+func llmDims() []string {
+	out := []string{}
+	for _, k := range StatLLMKinds {
+		for _, f := range StatLLMFigures {
+			out = append(out, k+"."+f)
+		}
+	}
+	return append(out, "measured")
+}
+
+// statDimOK is the rollup table's check on dimensions: ^[a-z0-9_.-]{1,40}$.
+func statDimOK(d string) bool {
+	if d == "" || len(d) > 40 {
+		return false
+	}
+	for _, c := range d {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' && c != '.' && c != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// storeDims are the registered store kinds, as "db_system.kind", that fit
+// the table's dimension check.
+func storeDims() []string {
+	out := []string{}
+	for _, d := range telemetry.StoreKinds() {
+		if statDimOK(d) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// StatStoreDim is the store_rows and store_bytes dimension of a store kind;
+// ok is false for a kind outside the allowlist.
+func StatStoreDim(system, kind string) (string, bool) {
+	d := system + "." + kind
+	if !telemetry.StoreKindAllowed(system, kind) || !statDimOK(d) {
+		return "", false
+	}
+	return d, true
 }
 
 // SecurityGradeDims are the security_grades dimensions: the grades in
@@ -288,7 +378,7 @@ func PlatformStatMetrics() []string {
 
 // PlatformStatDimensions lists a metric's dimensions (nil for an unknown one).
 func PlatformStatDimensions(metric string) []string {
-	return slices.Clone(statMetrics[metric].dims)
+	return slices.Clone(statMetrics[metric].dimensions())
 }
 
 // PlatformStat is one row of the daily rollup.
@@ -333,7 +423,7 @@ func isStatDay(t time.Time) bool {
 // form a row the rollup may hold.
 func ValidPlatformStat(metric, dimension, orgID string) bool {
 	m, ok := statMetrics[metric]
-	if !ok || !slices.Contains(m.dims, dimension) {
+	if !ok || !slices.Contains(m.dimensions(), dimension) {
 		return false
 	}
 	if orgID == "" {
@@ -455,6 +545,14 @@ func (s *PlatformStatSet) Rows() []PlatformStat {
 	out := []PlatformStat{}
 	for _, m := range PlatformStatMetrics() {
 		if statMetrics[m].orgOnly {
+			continue
+		}
+		if statMetrics[m].sparse {
+			for k, v := range s.platform {
+				if k[0] == m {
+					out = append(out, PlatformStat{Day: s.day, Metric: m, Dimension: k[1], Value: v})
+				}
+			}
 			continue
 		}
 		for _, d := range statMetrics[m].dims {

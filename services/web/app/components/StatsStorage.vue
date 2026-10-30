@@ -31,24 +31,36 @@ const change = (v: number | null, unit = '') => {
   if (v === 0) return '0'
   return (v > 0 ? '+' : '−') + fmtUnit(Math.abs(v), unit)
 }
-const sampled = computed(() => data.value?.sampled_at
-  ? new Date(data.value.sampled_at).toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC'
-  : '')
+// 90 days and 1 year read the daily rollup, which keeps one sample a day:
+// the date is the day, not a time.
+const sampled = computed(() => {
+  const at = data.value?.sampled_at
+  if (!at) return ''
+  const day = { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' } as const
+  return data.value?.rollup
+    ? `on ${new Date(at).toLocaleDateString([], day)} (UTC)`
+    : new Date(at).toLocaleString([], { ...day, hour: '2-digit', minute: '2-digit' }) + ' UTC'
+})
+const unavailable = computed(() => {
+  const d = data.value
+  if (!d || d.available) return ''
+  if (d.rollup) return 'No store sizes in the daily figures for this window yet: they are recorded each night from the day\'s sample.'
+  return d.reason === 'no metrics store' ? 'Store sizes need the metrics store (CODESYNAPSE_METRICS_URL).' : 'No store sample yet: the API samples once a day at 00:15 UTC.'
+})
 </script>
 
 <template>
   <div class="stack">
     <p v-if="error" class="notice notice--danger">{{ apiErrorMessage(error) }}</p>
     <template v-if="data">
-      <p v-if="!data.available" class="muted small">
-        {{ data.reason === 'no metrics store' ? 'Store sizes need the metrics store (CODESYNAPSE_METRICS_URL).' : 'No store sample yet: the API samples once a day at 00:15 UTC.' }}
-      </p>
+      <p v-if="!data.available" class="muted small">{{ unavailable }}</p>
       <template v-else>
         <div class="grid cols-3">
           <StatTile v-for="t in totals" :key="t.system" :label="stores[t.system] ?? t.system" :value="fmtCompact(t.rows)"
             :hint="t.bytes !== null ? `rows · ${fmtUnit(t.bytes, 'bytes')} on disk` : 'rows'" />
         </div>
-        <p class="muted small">Sampled {{ sampled }}. Change is over the window. NebulaGraph and Milvus report rows only; PostgreSQL rows are planner estimates, exact for the audit log.</p>
+        <p class="muted small">
+          Sampled {{ sampled }}. Change is over the window<template v-if="data.rollup">, from the first recorded day ({{ data.rollup.written }} of {{ data.rollup.days }} days recorded); the charts show the last 30 days</template>. NebulaGraph and Milvus report rows only; PostgreSQL rows are planner estimates, exact for the audit log.</p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Store</th><th>Kind</th><th class="num">Rows</th><th class="num">Change</th><th class="num">Size</th><th class="num">Change</th></tr></thead>

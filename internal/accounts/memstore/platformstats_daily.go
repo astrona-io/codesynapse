@@ -40,8 +40,23 @@ func (s *Store) CountPlatformStats(_ context.Context, day time.Time) ([]accounts
 	day = accounts.StatDay(day)
 	start, end := day, day.AddDate(0, 0, 1)
 	set := accounts.NewPlatformStatSet(day)
+	// Watches have no creation time: active is the state now. The schedule
+	// table is read before s.mu, as TenantStats does.
+	st := s.scheduleTable()
+	st.mu.Lock()
+	for _, w := range st.watches {
+		if !w.Paused {
+			set.Total(accounts.StatWatches, "active", 1)
+		}
+	}
+	st.mu.Unlock()
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	for _, e := range s.events {
+		if e.Action == "watch.repo_add" && e.Outcome == accounts.Success && !e.At.Before(start) && e.At.Before(end) {
+			set.Total(accounts.StatWatches, "added", 1)
+		}
+	}
 
 	counted := func(userID string) bool {
 		u, ok := s.users[userID]
