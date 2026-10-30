@@ -212,7 +212,11 @@ func TestShortenProseYieldsTheLocalModel(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, got, "`Load` returns 42 entries, not 40.")
 	assert.True(t, local.got[0].MaxTokens > 0 && local.got[0].MaxTokens < len(shortenProse), "the answer is capped")
+	// The rewrite releases the slot just after it hands over the answer.
 	running, _ := r.slots["local"].counts()
+	for deadline := time.Now().Add(time.Second); running != 0 && time.Now().Before(deadline); running, _ = r.slots["local"].counts() {
+		time.Sleep(time.Millisecond)
+	}
 	assert.Equal(t, running, 0, "the slot is free again")
 }
 
