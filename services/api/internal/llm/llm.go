@@ -619,11 +619,14 @@ func (r *Registry) Complete(ctx context.Context, name string, req Request) (Resp
 	}
 	// Wait for a free slot before the request clock starts, so queueing does
 	// not eat the provider timeout. The caller's own deadline still applies.
-	release, err := r.slots[name].acquire(ctx)
-	if err != nil {
-		return Response{Preflight: count}, err
+	// A caller that took the slot already (ShortenProse) holds it for us.
+	if heldSlot(ctx) != name {
+		release, err := r.slots[name].acquire(ctx)
+		if err != nil {
+			return Response{Preflight: count}, err
+		}
+		defer release()
 	}
-	defer release()
 	ctx = telemetry.WithModel(ctx, name, cfg.Model)
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
 	defer cancel()

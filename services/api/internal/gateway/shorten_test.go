@@ -32,9 +32,9 @@ func sessionCtx(t *testing.T, session string) context.Context {
 func fakeShortener(calls *atomic.Int32) *Shortener {
 	return &Shortener{
 		Ready: func() bool { return true },
-		Rewrite: func(_ context.Context, text string) (string, bool) {
+		Rewrite: func(_ context.Context, text string) (string, error) {
 			calls.Add(1)
-			return "short: " + text[:len(text)/2], true
+			return "short: " + text[:len(text)/2], nil
 		},
 	}
 }
@@ -140,19 +140,19 @@ func TestShortenKeepsOriginalOnDoubt(t *testing.T) {
 		s       *Shortener
 		badBody []byte
 	}{
-		{"rewrite refused (fact check)", nil, &Shortener{Rewrite: func(context.Context, string) (string, bool) { return "", false }}, nil},
-		{"rewrite not shorter", nil, &Shortener{Rewrite: func(_ context.Context, s string) (string, bool) { return s + "!", true }}, nil},
-		{"rewrite times out", nil, &Shortener{Rewrite: func(ctx context.Context, _ string) (string, bool) {
+		{"rewrite refused (fact check)", nil, &Shortener{Rewrite: func(context.Context, string) (string, error) { return "", errRefused }}, nil},
+		{"rewrite not shorter", nil, &Shortener{Rewrite: func(_ context.Context, s string) (string, error) { return s + "!", nil }}, nil},
+		{"request ends while rewriting", nil, &Shortener{Rewrite: func(ctx context.Context, _ string) (string, error) {
 			<-ctx.Done()
-			return "", false
+			return "", ctx.Err()
 		}}, nil},
-		{"no local model", nil, &Shortener{Ready: func() bool { return false }, Rewrite: func(context.Context, string) (string, bool) { return "x", true }}, nil},
-		{"no session", func(*testing.T) context.Context { return context.Background() }, &Shortener{Rewrite: func(context.Context, string) (string, bool) { return "x", true }}, nil},
-		{"duplicate key", nil, &Shortener{Rewrite: func(context.Context, string) (string, bool) { return "x", true }},
+		{"no local model", nil, &Shortener{Ready: func() bool { return false }, Rewrite: func(context.Context, string) (string, error) { return "x", nil }}, nil},
+		{"no session", func(*testing.T) context.Context { return context.Background() }, &Shortener{Rewrite: func(context.Context, string) (string, error) { return "x", nil }}, nil},
+		{"duplicate key", nil, &Shortener{Rewrite: func(context.Context, string) (string, error) { return "x", nil }},
 			[]byte(`{"messages":[{"role":"user","content":"` + prose + `"}],"messages":[]}`)},
-		{"duplicate role", nil, &Shortener{Rewrite: func(context.Context, string) (string, bool) { return "x", true }},
+		{"duplicate role", nil, &Shortener{Rewrite: func(context.Context, string) (string, error) { return "x", nil }},
 			[]byte(`{"messages":[{"role":"assistant","role":"user","content":"` + prose + `"}]}`)},
-		{"invalid json", nil, &Shortener{Rewrite: func(context.Context, string) (string, bool) { return "x", true }},
+		{"invalid json", nil, &Shortener{Rewrite: func(context.Context, string) (string, error) { return "x", nil }},
 			[]byte(`{"messages":[{"role":"user","content":"` + prose + `"}]`)},
 		{"nil shortener", nil, nil, nil},
 	}
@@ -162,7 +162,7 @@ func TestShortenKeepsOriginalOnDoubt(t *testing.T) {
 			if tc.ctx != nil {
 				ctx = tc.ctx(t)
 			}
-			if tc.name == "rewrite times out" {
+			if tc.name == "request ends while rewriting" {
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithTimeout(ctx, 50*time.Millisecond)
 				defer cancel()
@@ -173,14 +173,54 @@ func TestShortenKeepsOriginalOnDoubt(t *testing.T) {
 			}
 			out, res := tc.s.Apply(ctx, b)
 			assert.Equal(t, string(out), string(b))
+			res.Skip = ""
 			assert.Equal(t, res, Shortened{})
+		})
+	}
+}
+
+var errRefused = errors.New("refused")
+
+// TestShortenSkipReasons: a block offered for a new rewrite that goes out as
+// typed names why, and that choice is remembered like a rewrite.
+func TestShortenSkipReasons(t *testing.T) {
+	cases := []struct {
+		name    string
+		rewrite func(ctx context.Context, text string) (string, error)
+		skip    string
+	}{
+		{"local model busy", func(context.Context, string) (string, error) { return "", ErrLocalBusy }, SkipBusy},
+		{"rewrite too slow", func(ctx context.Context, _ string) (string, error) { <-ctx.Done(); return "", ctx.Err() }, SkipTimeout},
+		{"rewrite refused", func(context.Context, string) (string, error) { return "", errRefused }, SkipNoRewrite},
+		{"rewrite not shorter", func(_ context.Context, s string) (string, error) { return s + "!", nil }, SkipNoRewrite},
+		{"shortened", func(_ context.Context, s string) (string, error) { return s[:len(s)/2], nil }, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			s := &Shortener{Timeout: 20 * time.Millisecond, Rewrite: func(ctx context.Context, text string) (string, error) {
+				calls.Add(1)
+				return tc.rewrite(ctx, text)
+			}}
+			ctx := sessionCtx(t, "sess")
+			in := body(t, msg{"user", prose})
+			out, res := s.Apply(ctx, in)
+			assert.Equal(t, res.Skip, tc.skip)
+			assert.Equal(t, res.Changed, tc.skip == "")
+			if tc.skip != "" {
+				assert.Equal(t, string(out), string(in), "a skipped block goes out as typed")
+			}
+			again, res := s.Apply(ctx, in)
+			assert.Equal(t, string(again), string(out), "the same bytes on the next turn")
+			assert.Equal(t, res.Skip, "", "a replay names no skip")
+			assert.Equal(t, calls.Load(), int32(1), "the block is not offered again")
 		})
 	}
 }
 
 func TestShortenRefusalIsRemembered(t *testing.T) {
 	var calls atomic.Int32
-	s := &Shortener{Rewrite: func(context.Context, string) (string, bool) { calls.Add(1); return "", false }}
+	s := &Shortener{Rewrite: func(context.Context, string) (string, error) { calls.Add(1); return "", errRefused }}
 	ctx := sessionCtx(t, "sess")
 	in := body(t, msg{"user", prose})
 	s.Apply(ctx, in)
