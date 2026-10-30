@@ -65,14 +65,14 @@ async function onAdded() {
 
 // Organisations whose new repositories are added automatically
 // (accounts only; the dialog creates them).
-interface Watch { key: string; provider: string; host: string; org: string; paused: boolean; last_scan?: string; last_status?: string; last_error?: string; next_scan?: string; added: number; mine: boolean }
+interface Watch { key: string; provider: string; host: string; org: string; include_archived: boolean; include_forks: boolean; include_private: boolean; exclude: string[]; paused: boolean; last_scan?: string; last_status?: string; last_error?: string; next_scan?: string; added: number; mine: boolean }
 const { data: watchList, refresh: refreshWatches } = useApiGet<{ watches: Watch[] }>('watches')
 const watchError = ref('')
 const watchNotice = ref('')
 const watchBusy = ref(false)
 const stopping = ref<Watch | null>(null)
-async function watchCall(method: 'PUT' | 'DELETE', w: Watch, body?: object) {
-  if (watchBusy.value) return
+async function watchCall(method: 'PUT' | 'DELETE', w: Watch, body?: object, done?: string): Promise<boolean> {
+  if (watchBusy.value) return false
   watchBusy.value = true
   watchError.value = ''
   watchNotice.value = ''
@@ -80,13 +80,36 @@ async function watchCall(method: 'PUT' | 'DELETE', w: Watch, body?: object) {
     const path = `watches/${encodeURIComponent(w.host)}/${encodeURIComponent(w.org)}`
     if (method === 'PUT') await apiPut(path, body)
     else await apiDelete(path)
-    watchNotice.value = method === 'DELETE' ? `Stopped watching ${w.key}. Repositories it added stay.` : `${w.paused ? 'Resumed' : 'Paused'} ${w.key}.`
+    watchNotice.value = done ?? (method === 'DELETE' ? `Stopped watching ${w.key}. Repositories it added stay.` : `${w.paused ? 'Resumed' : 'Paused'} ${w.key}.`)
     await refreshWatches()
+    return true
   } catch (e) {
     watchError.value = plainError(e)
+    return false
   } finally {
     watchBusy.value = false
   }
+}
+// Who can change a watch: its creator, or an owner or admin. Only owners and
+// admins can turn private repositories on (the API checks both).
+const canAdmin = computed(() => session.can('admin'))
+const editing = ref<Watch | null>(null)
+const editForm = reactive({ include_archived: false, include_forks: false, include_private: false, exclude: '' })
+const editError = ref('')
+function startEdit(w: Watch) {
+  Object.assign(editForm, { include_archived: w.include_archived, include_forks: w.include_forks, include_private: w.include_private, exclude: w.exclude.join('\n') })
+  editError.value = ''
+  editing.value = w
+}
+// Patterns are typed one per line (commas work too); the API validates them.
+const editPatterns = computed(() => editForm.exclude.split(/[\n,]/).map((p) => p.trim()).filter(Boolean))
+async function saveEdit() {
+  const w = editing.value
+  if (!w) return
+  const body: Record<string, unknown> = { include_archived: editForm.include_archived, include_forks: editForm.include_forks, exclude: editPatterns.value }
+  if (editForm.include_private !== w.include_private) body.include_private = editForm.include_private
+  if (await watchCall('PUT', w, body, `Saved ${w.key}. The changes apply to repositories created from now on.`)) editing.value = null
+  else { editError.value = watchError.value; watchError.value = '' }
 }
 async function stopWatching() {
   const w = stopping.value
@@ -231,6 +254,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
           <span class="muted">{{ w.paused ? 'paused' : w.last_status || 'waiting for first check' }} · {{ plural(w.added, 'repository', 'repositories') }} added</span>
           <span v-if="w.last_scan" class="muted small">checked {{ relTime(w.last_scan) }}</span>
           <span class="right row tight-actions">
+            <button v-if="w.mine || canAdmin" type="button" class="secondary tiny" :disabled="watchBusy" :aria-label="`Edit ${w.key}`" @click="startEdit(w)">Edit</button>
             <button type="button" class="secondary tiny" :disabled="watchBusy" :aria-label="`${w.paused ? 'Resume' : 'Pause'} ${w.key}`" @click="watchCall('PUT', w, { paused: !w.paused })">{{ w.paused ? 'Resume' : 'Pause' }}</button>
             <button type="button" class="secondary tiny" :disabled="watchBusy" :aria-label="`Stop watching ${w.key}`" @click="stopping = w">Stop watching</button>
           </span>
@@ -242,6 +266,24 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
     </section>
     <ConfirmDialog :open="!!stopping" title="Stop watching?" confirm-label="Stop watching" danger :busy="watchBusy" @confirm="stopWatching" @cancel="stopping = null">
       <p>New repositories of {{ stopping?.key }} are no longer added. Repositories it already added stay.</p>
+    </ConfirmDialog>
+    <ConfirmDialog :open="!!editing" :title="`Edit ${editing?.key ?? 'watch'}`" confirm-label="Save" :busy="watchBusy" @confirm="saveEdit" @cancel="editing = null">
+      <p>Changes apply to repositories created from now on. Nothing already added is removed, and existing repositories are picked from the import list.</p>
+      <fieldset class="watch-edit">
+        <legend>Add new repositories that are</legend>
+        <label class="watch-check"><input v-model="editForm.include_archived" type="checkbox"> Archived</label>
+        <label class="watch-check"><input v-model="editForm.include_forks" type="checkbox"> Forks</label>
+        <label class="watch-check"><input v-model="editForm.include_private" type="checkbox" :disabled="!canAdmin && !editForm.include_private"> Private, read with the organisation's Git token for {{ editing?.host }}</label>
+        <span class="small">
+          <template v-if="canAdmin">Only while the watch's creator is an owner or admin and the organisation has a token for this host. Private repositories that exist when you turn this on are not added.</template>
+          <template v-else>Owners and admins can turn this on.</template>
+        </span>
+      </fieldset>
+      <label class="watch-field">Never add repositories named
+        <textarea v-model="editForm.exclude" rows="3" spellcheck="false" autocomplete="off" placeholder="test-*&#10;*-archive" />
+        <span class="small">One pattern per line, at most 20. <code>*</code> stands for any characters: <code>test-*</code> skips names starting with "test-", <code>*-archive</code> names ending in "-archive". Letters, digits, <code>-</code>, <code>_</code> and <code>.</code> otherwise; case does not matter.</span>
+      </label>
+      <p v-if="editError" class="error" role="alert">{{ editError }}</p>
     </ConfirmDialog>
 
     <component :is="AddRepoDialog" v-if="AddRepoDialog" :open="addOpen" :clone-enabled="settings?.clone_enabled" :host-tokens="settings?.git_token_hosts" :busy="running" @close="addOpen = false" @added="onAdded" />
@@ -307,4 +349,9 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
 .right { margin-left: auto; }
 .job-error { flex-basis: 100%; margin-left: 17px; }
 .tight-actions { gap: 6px; flex-wrap: nowrap; }
+.watch-edit { display: grid; gap: 8px; margin: 0; padding: 12px 14px; border: 2px solid var(--line); border-radius: var(--radius-xs); }
+.watch-edit legend { padding: 0 6px; font-weight: 600; }
+.watch-check { display: flex; align-items: center; gap: 8px; }
+.watch-field { display: grid; gap: 6px; }
+.watch-field textarea { min-height: 72px; }
 </style>

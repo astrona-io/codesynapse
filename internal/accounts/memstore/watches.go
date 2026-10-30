@@ -36,6 +36,7 @@ func (s *Store) PutOrgWatch(_ context.Context, w accounts.OrgWatch) error {
 		w.LastScan, w.LastStatus, w.LastError, w.NextScan, w.Added, w.Known = old.LastScan, old.LastStatus, old.LastError, old.NextScan, old.Added, old.Known
 		w.PrivateBaseline = old.PrivateBaseline
 	}
+	w.Exclude = slices.Clone(w.Exclude)
 	t.watches[id] = w
 	return nil
 }

@@ -65,19 +65,27 @@ type WatchView struct {
 	Org             string `json:"org"`
 	IncludeArchived bool   `json:"include_archived"`
 	IncludeForks    bool   `json:"include_forks"`
-	Paused          bool   `json:"paused"`
-	LastScan        string `json:"last_scan,omitempty"`
-	LastStatus      string `json:"last_status,omitempty"`
-	LastError       string `json:"last_error,omitempty"`
-	NextScan        string `json:"next_scan,omitempty"`
-	Added           int    `json:"added"`
+	// IncludePrivate lists with the organisation's token while the creator
+	// is an owner or admin; Exclude holds the name patterns never added.
+	IncludePrivate bool     `json:"include_private"`
+	Exclude        []string `json:"exclude"`
+	Paused         bool     `json:"paused"`
+	LastScan       string   `json:"last_scan,omitempty"`
+	LastStatus     string   `json:"last_status,omitempty"`
+	LastError      string   `json:"last_error,omitempty"`
+	NextScan       string   `json:"next_scan,omitempty"`
+	Added          int      `json:"added"`
 	// Mine says the signed-in member created it and can change it; admins can too.
 	Mine bool `json:"mine"`
 }
 
 func watchView(w accounts.OrgWatch, userID string) WatchView {
+	exclude := w.Exclude
+	if exclude == nil {
+		exclude = []string{}
+	}
 	v := WatchView{Key: w.Key(), Provider: w.Provider, Host: w.Host, Org: w.Login, IncludeArchived: w.IncludeArchived, IncludeForks: w.IncludeForks,
-		Paused: w.Paused, LastStatus: w.LastStatus, LastError: w.LastError, Added: w.Added, Mine: w.ActorID == userID}
+		IncludePrivate: w.IncludePrivate, Exclude: exclude, Paused: w.Paused, LastStatus: w.LastStatus, LastError: w.LastError, Added: w.Added, Mine: w.ActorID == userID}
 	if !w.LastScan.IsZero() {
 		v.LastScan = w.LastScan.Format(time.RFC3339)
 	}
@@ -171,6 +179,25 @@ type watchRequest struct {
 	Org             string `json:"org"`
 	IncludeArchived bool   `json:"include_archived"`
 	IncludeForks    bool   `json:"include_forks"`
+	// IncludePrivate defaults to on for owners and admins; others cannot
+	// turn it on.
+	IncludePrivate *bool    `json:"include_private"`
+	Exclude        []string `json:"exclude"`
+}
+
+// maxWatchBody caps a watch request: 20 patterns of 100 characters and the
+// settings fit many times over.
+const maxWatchBody = 16 << 10
+
+// errPrivateNeedsAdmin answers a member who asks a watch for private
+// repositories: listing them takes the organisation's token, which only
+// owners and admins use.
+var errPrivateNeedsAdmin = errors.New("only owners and admins can have a watch add private repositories")
+
+// decodeWatch reads a watch request body, capped at maxWatchBody.
+func decodeWatch(w http.ResponseWriter, r *http.Request, v any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxWatchBody)
+	return decodeJSON(w, r, v)
 }
 
 //nolint:contextcheck // watchCaller adds the validated execution identity to the request context
@@ -180,13 +207,27 @@ func (s *Server) handleAddWatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req watchRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	if err := decodeWatch(w, r, &req); err != nil {
 		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
 	kind, host, login, err := parseOrgInput(req.Provider, req.Host, req.Org)
 	if err != nil {
 		s.problem(w, http.StatusBadRequest, err)
+		return
+	}
+	exclude, err := accounts.WatchExcludes(req.Exclude)
+	if err != nil {
+		s.accountError(w, err)
+		return
+	}
+	admin := m.Role.AtLeast(accounts.Admin)
+	includePrivate := admin
+	if req.IncludePrivate != nil {
+		includePrivate = *req.IncludePrivate
+	}
+	if includePrivate && !admin {
+		s.problem(w, http.StatusForbidden, errPrivateNeedsAdmin)
 		return
 	}
 	existing, err := s.cfg.Accounts.St.OrgWatches(r.Context(), m.Org.ID)
@@ -207,7 +248,9 @@ func (s *Server) handleAddWatch(w http.ResponseWriter, r *http.Request) {
 	// An owner or admin lists with the organisation's token, so the private
 	// repositories it reads are part of the baseline from the start.
 	var tokenSet time.Time
-	c.Token, tokenSet = s.watchToken(r.Context(), p, m.Org.ID, host, login, s.logger)
+	if includePrivate {
+		c.Token, tokenSet = s.watchToken(r.Context(), p, m.Org.ID, host, login, s.logger)
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 	// What exists now is the baseline: the person already chose what to add,
@@ -231,7 +274,10 @@ func (s *Server) handleAddWatch(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	watch := accounts.OrgWatch{OrgID: m.Org.ID, ActorID: p.User.ID, Execution: identityOf(r.Context()), Provider: string(kind), Host: host, Login: login,
-		IncludeArchived: req.IncludeArchived, IncludeForks: req.IncludeForks, NextScan: now.Add(watchScanInterval)}
+		IncludeArchived: req.IncludeArchived, IncludeForks: req.IncludeForks, IncludePrivate: includePrivate, Exclude: exclude, NextScan: now.Add(watchScanInterval)}
+	if includePrivate {
+		watch.PrivateSince = now
+	}
 	if err := s.cfg.Accounts.St.PutOrgWatch(ctx, watch); err != nil {
 		s.accountError(w, err)
 		return
@@ -251,14 +297,19 @@ func (s *Server) handleAddWatch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, watchView(watch, p.User.ID))
 }
 
+// watchUpdate changes some settings of a watch; a field left out keeps its
+// value, and Exclude, when given, replaces the patterns.
 type watchUpdate struct {
-	Paused          *bool `json:"paused"`
-	IncludeArchived *bool `json:"include_archived"`
-	IncludeForks    *bool `json:"include_forks"`
+	Paused          *bool     `json:"paused"`
+	IncludeArchived *bool     `json:"include_archived"`
+	IncludeForks    *bool     `json:"include_forks"`
+	IncludePrivate  *bool     `json:"include_private"`
+	Exclude         *[]string `json:"exclude"`
 }
 
 // ownWatch loads the watch named in the path, which the caller may change
-// when they created it or administer the organisation.
+// when they created it or are an owner or admin of the organisation; a
+// member cannot change a colleague's watch.
 func (s *Server) ownWatch(w http.ResponseWriter, r *http.Request, p accounts.Principal, m accounts.Membership) (accounts.OrgWatch, bool) {
 	key := accounts.WatchKey(r.PathValue("host"), r.PathValue("login"))
 	list, err := s.cfg.Accounts.St.OrgWatches(r.Context(), m.Org.ID)
@@ -289,9 +340,20 @@ func (s *Server) handleUpdateWatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req watchUpdate
-	if err := decodeJSON(w, r, &req); err != nil {
+	if err := decodeWatch(w, r, &req); err != nil {
 		s.problem(w, http.StatusBadRequest, err)
 		return
+	}
+	// Settings apply to later scans only: nothing already added is removed
+	// or unlinked, and what the new settings let in that exists today is
+	// not added (it is known, or part of the private baseline below).
+	if req.Exclude != nil {
+		exclude, err := accounts.WatchExcludes(*req.Exclude)
+		if err != nil {
+			s.accountError(w, err)
+			return
+		}
+		watch.Exclude = exclude
 	}
 	if req.Paused != nil {
 		watch.Paused = *req.Paused
@@ -302,8 +364,23 @@ func (s *Server) handleUpdateWatch(w http.ResponseWriter, r *http.Request) {
 	if req.IncludeForks != nil {
 		watch.IncludeForks = *req.IncludeForks
 	}
-	// Whoever changes a watch runs it from now on.
+	wasPrivate := watch.IncludePrivate
+	if req.IncludePrivate != nil {
+		watch.IncludePrivate = *req.IncludePrivate
+	}
+	// Whoever changes a watch runs it from now on (only its creator or an
+	// owner or admin may, see ownWatch).
 	watch.ActorID, watch.Execution = p.User.ID, identityOf(r.Context())
+	if watch.IncludePrivate && !wasPrivate {
+		// Turning private repositories on needs the role that may use the
+		// token. The next scan with the token takes a new private baseline,
+		// so private repositories from before this are not added.
+		if !m.Role.AtLeast(accounts.Admin) {
+			s.problem(w, http.StatusForbidden, errPrivateNeedsAdmin)
+			return
+		}
+		watch.PrivateSince = time.Now().UTC().Truncate(time.Microsecond)
+	}
 	if _, err := s.cfg.Accounts.Record(r.Context(), accounts.Event{UserID: p.User.ID, Via: p.Via, OrgID: m.Org.ID, Action: "watch.update", Target: watch.Key(), Outcome: accounts.Success, Status: http.StatusOK}); err != nil {
 		s.accountError(w, err)
 		return
@@ -422,14 +499,17 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 		fail("failed", err)
 		return
 	}
-	p, _ := principal(wctx)
 	var tokenSet time.Time
-	c.Token, tokenSet = s.watchToken(wctx, p, w.OrgID, w.Host, w.Login, logger)
+	if w.IncludePrivate {
+		p, _ := principal(wctx)
+		c.Token, tokenSet = s.watchToken(wctx, p, w.OrgID, w.Host, w.Login, logger)
+	}
 	authed := c.Token != ""
-	// The first scan with the token, or the first after the token was
-	// replaced, may see private repositories that are older than the watch:
-	// they become baseline, not additions.
-	baseline := authed && (w.PrivateBaseline.IsZero() || tokenSet.After(w.PrivateBaseline))
+	// The first scan with the token, the first after the token was
+	// replaced, and the first after private repositories were turned on may
+	// see private repositories that are older than that: they become
+	// baseline, not additions.
+	baseline := authed && (w.PrivateBaseline.IsZero() || tokenSet.After(w.PrivateBaseline) || w.PrivateSince.After(w.PrivateBaseline))
 	lctx, cancel := context.WithTimeout(wctx, 90*time.Second)
 	defer cancel()
 	listed, err := c.ListRepos(lctx, w.Login)
@@ -454,10 +534,14 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 	}
 	added, lastErr := 0, ""
 	for _, x := range listed {
-		if known[x.Name] || !keepListed(x, w.IncludeArchived, w.IncludeForks, authed) {
+		if known[x.Name] || !validRepoSegment(x.Name) || (x.Private && !authed) {
 			continue
 		}
-		if x.Private && baseline {
+		// What the settings leave out is skipped before the cap counts and is
+		// known from then on, so a later change of settings applies to
+		// repositories created after it, not to these. Not audited, like
+		// the scan's other skips.
+		if !keepListed(x, w.IncludeArchived, w.IncludeForks, authed) || accounts.WatchExcluded(w.Exclude, x.Name) || (x.Private && baseline) {
 			known[x.Name] = true
 			continue
 		}

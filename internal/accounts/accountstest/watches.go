@@ -45,11 +45,14 @@ func RunWatches(t *testing.T, newStore func(*testing.T) accounts.Store) {
 
 		changed := w
 		changed.Paused, changed.IncludeForks = true, true
+		changed.IncludePrivate, changed.PrivateSince, changed.Exclude = true, now, []string{"*-archive", "test-*"}
 		require.NoError(t, st.PutOrgWatch(ctx, changed))
 		list, err = st.OrgWatches(ctx, "org-1")
 		require.NoError(t, err)
 		require.Equal(t, len(list), 1)
-		assert.True(t, list[0].Paused && list[0].IncludeForks)
+		assert.True(t, list[0].Paused && list[0].IncludeForks && list[0].IncludePrivate)
+		assert.True(t, list[0].PrivateSince.Equal(now))
+		assert.Equal(t, list[0].Exclude, []string{"*-archive", "test-*"})
 		assert.Equal(t, list[0].Added, 2, "changing settings keeps the scan state")
 		assert.Equal(t, list[0].Known, []string{"a/b", "a/c"})
 		assert.Equal(t, list[0].LastStatus, "ok")

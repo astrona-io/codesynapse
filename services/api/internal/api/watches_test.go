@@ -397,3 +397,219 @@ func TestOrgWatchCreatedWithTheTokenHasAPrivateBaseline(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, events, 1, "the listing with the token is audited")
 }
+
+func TestOrgWatchSettingsCanBeChanged(t *testing.T) {
+	const token = "ghp_watch_token_123456"
+	prev := canRead
+	canRead = func(_ context.Context, remote string, auth gitx.Auth) error {
+		if !strings.Contains(remote, "secret") || auth.Token == token {
+			return nil
+		}
+		return gitx.ErrNoAccess
+	}
+	t.Cleanup(func() { canRead = prev })
+
+	var (
+		mu       sync.Mutex
+		public   = []string{"api"}
+		private  = []string{"old-secret"}
+		lastAuth = "unset"
+	)
+	publish := func(names ...string) {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, n := range names {
+			if strings.Contains(n, "secret") {
+				private = append(private, n)
+			} else {
+				public = append(public, n)
+			}
+		}
+	}
+	auth := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return lastAuth
+	}
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/orgs/acme/repos" || r.URL.Query().Get("page") > "1" {
+			_, _ = fmt.Fprint(w, `[]`)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		lastAuth = r.Header.Get("Authorization")
+		var out []string
+		for _, p := range public {
+			out = append(out, `{"name":"`+p+`","default_branch":"main"}`)
+		}
+		if lastAuth != "" {
+			for _, p := range private {
+				out = append(out, `{"name":"`+p+`","default_branch":"main","private":true}`)
+			}
+		}
+		_, _ = fmt.Fprint(w, "["+strings.Join(out, ",")+"]")
+	}))
+	t.Cleanup(gh.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	st := memory.New()
+	// Indexed already for the same remote, so adding one links and does not clone.
+	for _, name := range []string{"app", "test-app", "Docs-Archive", "new-secret", "test-secret"} {
+		graph := "127.0.0.1/acme/" + name
+		g := model.NewGraph()
+		g.AddNode(model.Node{ID: model.NodeID(graph, model.KindRepository, graph), Kind: model.KindRepository, Repo: graph, Name: graph, URL: "https://127.0.0.1/acme/" + name + ".git"})
+		require.NoError(t, st.ReplaceRepo(ctx, graph, g))
+	}
+	audit := &refusingAudit{Store: acctmem.New()}
+	acc := accounts.NewService(audit, true)
+	bootstrapAccounts(t, acc)
+	key := make([]byte, 32)
+	key[5] = 9
+	sealer, err := accounts.NewSealer(key)
+	require.NoError(t, err)
+	acc.Secrets = sealer
+	srv := New(ctx, Config{Accounts: acc, Workspace: t.TempDir(), AllowPrivateGit: true, ForgeAPI: gh.URL}, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	bob := newClient(t, ts)
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, nil), 202)
+	var org accounts.Org
+	require.Equal(t, bob.do("POST", "/api/v1/accounts/orgs", `{"name":"Platform Team"}`, &org), 201)
+	in := []string{OrgHeader, org.Slug}
+	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+org.Slug+"/git-tokens/127.0.0.1", `{"token":"`+token+`"}`, nil), 200)
+	var dan struct{ User accounts.User }
+	member := newClient(t, ts)
+	require.Equal(t, member.signUp(`{"email":"dan@example.com","name":"Dan","password":"`+pw+`"}`, &dan), 202)
+	invite(t, bob, org.Slug, member, "dan@example.com", "member")
+
+	const path = "/api/v1/watches/127.0.0.1/acme"
+	watch := func() accounts.OrgWatch {
+		all, err := acc.St.OrgWatches(ctx, org.ID)
+		require.NoError(t, err)
+		require.Len(t, all, 1)
+		return all[0]
+	}
+	events := func(action string) []accounts.Event {
+		rows, err := acc.St.ListEvents(ctx, accounts.EventFilter{OrgID: org.ID, Action: action, Limit: 50})
+		require.NoError(t, err)
+		return rows
+	}
+	linked := func() []string {
+		repos, err := acc.St.OrgRepositories(ctx, org.ID)
+		require.NoError(t, err)
+		var out []string
+		for _, r := range repos {
+			out = append(out, strings.TrimPrefix(r.Graph, "127.0.0.1/acme/"))
+		}
+		slices.Sort(out)
+		return out
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	scan := func(t *testing.T) {
+		t.Helper()
+		srv.scanWatch(ctx, watch(), time.Now().UTC(), logger)
+		require.Equal(t, watch().LastStatus, "ok", watch().LastError)
+	}
+
+	t.Run("a member cannot ask a new watch for private repositories", func(t *testing.T) {
+		assert.Equal(t, member.do("POST", "/api/v1/watches", `{"provider":"github","host":"127.0.0.1","org":"acme","include_private":true}`, nil, in...), 403)
+	})
+
+	t.Run("an owner's new watch has private repositories off when asked", func(t *testing.T) {
+		var created WatchView
+		require.Equal(t, bob.do("POST", "/api/v1/watches", `{"provider":"github","host":"127.0.0.1","org":"acme","include_private":false,"exclude":["Test-*"]}`, &created, in...), 201)
+		assert.False(t, created.IncludePrivate)
+		assert.Equal(t, created.Exclude, []string{"test-*"})
+		assert.Equal(t, auth(), "", "without private repositories the token is not used")
+		assert.Len(t, events("git_token.list"), 0)
+	})
+
+	t.Run("patterns are validated", func(t *testing.T) {
+		many := make([]string, accounts.MaxWatchExcludes+1)
+		for i := range many {
+			many[i] = fmt.Sprintf(`"p%d-*"`, i)
+		}
+		for name, body := range map[string]string{
+			"too many":   `{"exclude":[` + strings.Join(many, ",") + `]}`,
+			"too long":   `{"exclude":["` + strings.Repeat("a", accounts.MaxWatchPattern+1) + `"]}`,
+			"slash":      `{"exclude":["acme/api"]}`,
+			"class":      `{"exclude":["[a-z]*"]}`,
+			"only stars": `{"exclude":["*"]}`,
+		} {
+			assert.Equal(t, bob.do("PUT", path, body, nil, in...), 400, name)
+		}
+		assert.Equal(t, bob.do("PUT", path, `{"exclude":["`+strings.Repeat("a", maxWatchBody)+`"]}`, nil, in...), 400, "the body is capped")
+		assert.Equal(t, watch().Exclude, []string{"test-*"}, "a refused change changes nothing")
+	})
+
+	t.Run("who may change a watch", func(t *testing.T) {
+		var key struct{ Key string }
+		require.Equal(t, bob.do("POST", "/api/v1/me/keys", `{"org":"`+org.Slug+`","name":"laptop"}`, &key), 201)
+		agent := newClient(t, ts)
+		agent.auth = "Bearer " + key.Key
+		assert.Equal(t, agent.do("PUT", path, `{"include_forks":true}`, nil), 403, "an API key cannot")
+		assert.Equal(t, member.do("PUT", path, `{"include_forks":true}`, nil, in...), 403, "a member cannot change a colleague's watch")
+		assert.False(t, watch().IncludeForks)
+		assert.Equal(t, len(events("watch.update")), 0)
+	})
+
+	t.Run("the change is audited first", func(t *testing.T) {
+		audit.refuse("watch.update")
+		code := bob.do("PUT", path, `{"exclude":["*-archive"]}`, nil, in...)
+		audit.refuse("")
+		assert.True(t, code >= 500, "a change that cannot be audited is refused")
+		assert.Equal(t, watch().Exclude, []string{"test-*"})
+
+		var got WatchView
+		require.Equal(t, bob.do("PUT", path, `{"exclude":["test-*","*-ARCHIVE"]}`, &got, in...), 200)
+		assert.Equal(t, got.Exclude, []string{"*-archive", "test-*"})
+		assert.Len(t, events("watch.update"), 1)
+	})
+
+	t.Run("excluded repositories are skipped before the cap and not audited", func(t *testing.T) {
+		publish("test-app", "Docs-Archive", "app")
+		scan(t)
+		assert.Equal(t, linked(), []string{"app"}, "only the repository no pattern matches")
+		assert.Len(t, events("watch.repo_add"), 1)
+		assert.True(t, slices.Contains(watch().Known, "test-app") && slices.Contains(watch().Known, "Docs-Archive"), "excluded ones are known")
+
+		require.Equal(t, bob.do("PUT", path, `{"exclude":[]}`, nil, in...), 200)
+		scan(t)
+		assert.Equal(t, linked(), []string{"app"}, "removing a pattern does not add what it excluded before")
+	})
+
+	t.Run("a member cannot turn private repositories on", func(t *testing.T) {
+		var mine WatchView
+		require.Equal(t, member.do("POST", "/api/v1/watches", `{"provider":"github","host":"127.0.0.1","org":"other"}`, &mine, in...), 201)
+		assert.False(t, mine.IncludePrivate, "off by default for members")
+		assert.Equal(t, member.do("PUT", "/api/v1/watches/127.0.0.1/other", `{"include_private":true}`, nil, in...), 403)
+		assert.Equal(t, member.do("PUT", "/api/v1/watches/127.0.0.1/other", `{"include_archived":true}`, nil, in...), 200, "the creator changes their own watch")
+		assert.Equal(t, member.do("DELETE", "/api/v1/watches/127.0.0.1/other", "", nil, in...), 204)
+	})
+
+	t.Run("turning private repositories on takes a new private baseline", func(t *testing.T) {
+		before := watch().PrivateBaseline
+		var got WatchView
+		require.Equal(t, bob.do("PUT", path, `{"include_private":true,"exclude":["test-*"]}`, &got, in...), 200)
+		assert.True(t, got.IncludePrivate)
+		assert.True(t, watch().PrivateSince.After(before))
+		scan(t)
+		assert.Equal(t, auth(), "Bearer "+token)
+		assert.Equal(t, linked(), []string{"app"}, "a private repository from before the switch is not added")
+		assert.True(t, slices.Contains(watch().Known, "old-secret"))
+
+		publish("new-secret", "test-secret")
+		scan(t)
+		assert.Equal(t, linked(), []string{"app", "new-secret"}, "a later one is, unless a pattern excludes it")
+
+		require.Equal(t, bob.do("PUT", path, `{"include_private":false}`, nil, in...), 200)
+		n := len(events("git_token.list"))
+		scan(t)
+		assert.Equal(t, auth(), "", "switched off, the scan lists anonymously")
+		assert.Len(t, events("git_token.list"), n)
+		assert.Equal(t, linked(), []string{"app", "new-secret"}, "and removes nothing it added")
+	})
+}
