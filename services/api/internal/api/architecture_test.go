@@ -182,7 +182,7 @@ func TestCatalogWritesNeedTheEditorRole(t *testing.T) {
 	bobUser, err := acc.St.UserByEmail(ctx, "bob@example.com")
 	require.NoError(t, err)
 	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: acme.ID, Graph: "acme/web", AddedBy: bobUser.ID, AddedAt: time.Now()}))
-	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+acme.Slug+"/members", `{"email":"carol@example.com","role":"guest"}`, nil), 200)
+	invite(t, bob, acme.Slug, carol, "carol@example.com", "guest")
 	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+acme.Slug+"/repos/"+url.PathEscape("acme/web")+"/access", `{"user":"carol@example.com","role":"viewer"}`, nil), 200)
 	inAcme, inExt := []string{OrgHeader, acme.Slug}, []string{OrgHeader, ext.Slug}
 	base := "/api/v1/repos/acme%2Fweb/architecture"

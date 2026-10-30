@@ -46,8 +46,7 @@ func RunRepoPolicy(t *testing.T, st accounts.Store) {
 
 	reader, _, err := svc.SignUp(ctx, "annotation-reader@example.com", "Annotation reader", pw)
 	require.NoError(t, err)
-	_, err = svc.AddMember(ctx, p, org.ID, reader.Email, accounts.Member)
-	require.NoError(t, err)
+	require.NoError(t, Join(ctx, t, svc, p, org.ID, reader, accounts.Member))
 	_, err = svc.SetRepoGrant(ctx, p, org.ID, graph, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: reader.ID}, accounts.Member)
 	require.NoError(t, err)
 	assert.True(t, errors.Is(svc.SetRepoPolicy(ctx, accounts.Principal{User: reader, Via: "session"}, approval), accounts.ErrForbidden))

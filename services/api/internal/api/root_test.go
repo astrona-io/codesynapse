@@ -143,7 +143,7 @@ func TestRootGovernance(t *testing.T) {
 	carol := newClient(t, ts)
 	var carolSigned struct{ User accounts.User }
 	require.Equal(t, carol.signUp(`{"email":"carol@example.com","name":"Carol","password":"`+pw+`"}`, &carolSigned), 202)
-	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+signed.Org.Slug+"/members", `{"email":"carol@example.com","role":"viewer"}`, nil), 200)
+	invite(t, bob, signed.Org.Slug, carol, "carol@example.com", "viewer")
 	assert.Equal(t, root.do("POST", "/api/v1/admin/orgs/"+signed.Org.ID+"/owner", `{"user_id":"`+carolSigned.User.ID+`"}`, nil), 204)
 	role, err := acc.St.MemberRole(ctx, signed.Org.ID, carolSigned.User.ID)
 	require.NoError(t, err)

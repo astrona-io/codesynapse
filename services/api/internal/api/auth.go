@@ -200,6 +200,11 @@ func (s *Server) accountRoutes() {
 	s.account("GET /api/v1/accounts/orgs/{org}/members", businessRoute, s.handleMembers)
 	s.account("PUT /api/v1/accounts/orgs/{org}/members", businessRoute, s.handleSetMember)
 	s.account("DELETE /api/v1/accounts/orgs/{org}/members/{user}", businessRoute, s.handleRemoveMember)
+	s.account("GET /api/v1/accounts/orgs/{org}/invitations", businessRoute, s.handleInvitations)
+	s.account("POST /api/v1/accounts/orgs/{org}/invitations", businessRoute, s.handleCreateInvitation)
+	s.account("DELETE /api/v1/accounts/orgs/{org}/invitations/{id}", businessRoute, s.handleRevokeInvitation)
+	s.account("POST /api/v1/invitations/preview", businessRoute, s.handlePreviewInvitation)
+	s.account("POST /api/v1/invitations/accept", businessRoute, s.handleAcceptInvitation)
 	s.account("GET /api/v1/accounts/orgs/{org}/audit", businessRoute, s.handleOrgAudit)
 	s.account("GET /api/v1/admin/audit", governanceRoute, s.handleAdminAudit)
 	s.account("GET /api/v1/admin/audit/verify", governanceRoute, s.handleVerifyAudit)
@@ -563,10 +568,15 @@ func (s *Server) handleMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 type memberRequest struct {
-	Email string        `json:"email"`
-	Role  accounts.Role `json:"role"`
+	UserID string        `json:"user_id"`
+	Role   accounts.Role `json:"role"`
+	// Email is no longer accepted: people join through invitations, so
+	// nothing here answers differently for registered and unknown emails.
+	Email string `json:"email,omitempty"`
 }
 
+// handleSetMember changes an existing member's role. New members join through
+// invitations (invitations.go).
 func (s *Server) handleSetMember(w http.ResponseWriter, r *http.Request) {
 	p, o, ok := s.orgFor(w, r, accounts.Viewer)
 	if !ok {
@@ -577,7 +587,11 @@ func (s *Server) handleSetMember(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	m, err := s.cfg.Accounts.AddMember(r.Context(), p, o.ID, req.Email, req.Role)
+	if req.Email != "" || req.UserID == "" {
+		s.problem(w, 400, errors.New("name a member by user_id; invite new members by email with POST /api/v1/accounts/orgs/{org}/invitations"))
+		return
+	}
+	m, err := s.cfg.Accounts.SetMemberRole(r.Context(), p, o.ID, req.UserID, req.Role)
 	if err != nil {
 		s.accountError(w, err)
 		return

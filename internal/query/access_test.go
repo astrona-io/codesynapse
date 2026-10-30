@@ -46,8 +46,7 @@ func TestAccessSnapshotMatchesAuthoritativePermissions(t *testing.T) {
 		user accounts.User
 		role accounts.Role
 	}{{member, accounts.Member}, {guest, accounts.Guest}} {
-		_, err = acc.AddMember(ctx, owner, org.ID, entry.user.Email, entry.role)
-		require.NoError(t, err)
+		require.NoError(t, accountstest.Join(ctx, t, acc, owner, org.ID, entry.user, entry.role))
 	}
 	team, err := acc.CreateTeam(ctx, owner, org.ID, "Editors")
 	require.NoError(t, err)

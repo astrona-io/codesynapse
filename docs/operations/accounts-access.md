@@ -45,6 +45,20 @@ The first account is the installation's root account. A fresh installation creat
 
 On an installation that predates this, the API identifies the root at start-up from its setup history. If that history is missing (for example, pruned by audit retention), platform administrators stay limited to administration until an operator runs `codesynapse-api designate-root --email <root>`. See [root bootstrap](../ROOT_BOOTSTRAP_PLAN.md).
 
+## Inviting members
+
+People join an organisation through an invitation. CodeSynapse sends no email: the owner or admin who invites someone passes the link on themselves.
+
+- **Create.** `POST /api/v1/accounts/orgs/{org}/invitations` with `{"email","role"}`, by an owner or admin in a signed-in session (an API key answers 403). Only an owner can invite an owner. The API never looks the email up, always answers `201` with the invitation, a one-time `token` and `accept_path` (`/invite/<token>`), and takes at least as long as a sign-up, so the answer is the same whether or not the email has an account. The token is shown once and stored only as its SHA-256. An invitation expires after 7 days and is used once. An organisation has at most 50 pending invitations.
+- **List and revoke.** `GET /api/v1/accounts/orgs/{org}/invitations` lists the pending ones, and `DELETE /api/v1/accounts/orgs/{org}/invitations/{id}` revokes one. Both need an owner or admin in a signed-in session. Tokens are never listed.
+- **Accept.** `POST /api/v1/invitations/preview` shows the organisation, role and expiry. `POST /api/v1/invitations/accept` joins. Both take `{"token"}` in the body and need a signed-in session. The account's email must be the invited one (case does not matter), otherwise the answer is 403. Expired, used, revoked or unknown tokens all answer 404. The role is checked again at acceptance and capped at the inviter's role at that moment. If the inviter can no longer add members, acceptance is refused. Root and suspended accounts cannot accept. Someone who is already a member gets 409.
+- **People without an account** create one first. Sign-up must be open (`CODESYNAPSE_SIGNUP_OPEN=true`), or the organisation uses single sign-on. The dashboard's accept page sends them to sign in or sign up and back. Account emails are not verified, so the token is what proves the invitation was meant for them. Pass the link only to the person invited.
+- **Audit.** `org.invite.create`, `org.invite.accept`, `org.invite.revoke` and `org.invite.expire` are written before the change, and a failed audit entry refuses it. Refused acceptances (wrong email, inviter gone, already a member) are audited as failures. Expired invitations are removed, with `org.invite.expire`, the next time the organisation creates or revokes one or someone presents the token.
+
+Memberships that single sign-on manages follow the provider's groups, not invitations.
+
+`PUT /api/v1/accounts/orgs/{org}/members` changes an existing member's role and takes `{"user_id","role"}`. It no longer takes an email. An email answers 400 and points to invitations, and a user ID that is not a member answers 404, the same as an unknown ID. Endpoints that name a person by email (team membership, repository grants, owner recovery) look the email up among the organisation's members only. An unknown email and an outsider's both answer 404, and the lookup runs only after the caller's own permission is checked.
+
 ## Single sign-on
 
 An organisation can connect its own OpenID Connect provider (Entra ID, Okta, Keycloak, …). People then sign in through it, get an account on first use, and the provider's groups decide their role and teams. Register `CODESYNAPSE_PUBLIC_URL` + `/sso/callback` as the redirect URI; `SECRET_KEY` must be set. Owners and admins set it up under Settings → Single sign-on and share the sign-in link it shows. See [single sign-on](../SSO_PLAN.md).

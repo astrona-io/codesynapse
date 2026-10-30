@@ -23,7 +23,7 @@ func RunMemberRepos(t *testing.T, st accounts.Store) {
 		u, _, err := svc.SignUp(ctx, email, email, pw)
 		require.NoError(t, err)
 		hash := "space-" + u.ID
-		require.NoError(t, st.CreateSession(ctx, accounts.Session{TokenHash: hash, UserID: u.ID, CreatedAt: now, ExpiresAt: now.Add(time.Hour)}))
+		require.NoError(t, st.CreateSession(ctx, accounts.Session{TokenHash: hash, UserID: u.ID, CreatedAt: now, ExpiresAt: sessionExpiry(now)}))
 		return u, accounts.Principal{User: u, Via: "session", SessionHash: hash}
 	}
 	owner, ownerP := user("space-owner@example.com")
@@ -32,8 +32,7 @@ func RunMemberRepos(t *testing.T, st accounts.Store) {
 	org, err := svc.CreateOrg(ctx, ownerP, "Space Acme", "")
 	require.NoError(t, err)
 	for _, u := range []accounts.User{member, other} {
-		_, err := svc.AddMember(ctx, ownerP, org.ID, u.Email, accounts.Member)
-		require.NoError(t, err)
+		require.NoError(t, Join(ctx, t, svc, ownerP, org.ID, u, accounts.Member))
 	}
 
 	on, err := svc.MemberReposSetting(ctx, memberP, org.ID)
