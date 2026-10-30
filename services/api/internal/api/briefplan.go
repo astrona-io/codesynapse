@@ -67,7 +67,7 @@ func briefPlan(ctx context.Context, st store.Reader, repo, prompt string) (Brief
 	case ui:
 		side = asklocal.FrontEnd
 	}
-	areas, err := promptAreas(ctx, r, repo, prompt)
+	areas, err := promptAreas(ctx, r, repo, prompt, docs)
 	if err != nil {
 		return BriefPlan{}, err
 	}
@@ -88,6 +88,11 @@ func briefPlan(ctx context.Context, st store.Reader, repo, prompt string) (Brief
 	}
 
 	codeNamed := agentctx.NamesCode(prompt)
+	terms := promptTerms(prompt)
+	// covers ranks a range by the words of the prompt its name holds.
+	covers := map[string]int{}
+	// held: some range in the area holds another word of the prompt.
+	held := make([]bool, len(areas))
 	var exact, rest, other []string
 	// Per area: on the prompt's side, then off it.
 	on := make([][]string, len(areas))
@@ -101,8 +106,30 @@ func briefPlan(ctx context.Context, st store.Reader, repo, prompt string) (Brief
 		s := side(p)
 		found = found || s
 		a := -1
-		if !isTestPath(p) {
+		if !isTestPath(p) && (docs || !asklocal.DocsFile(p)) {
+			// A page under docs/ is not in the code area "docs"
+			// (internal/ingest/docs) unless the prompt is about the
+			// documentation (case l).
 			a = areaOf(p, areas)
+		}
+		dir, base := path.Split(p)
+		name := it.QualifiedID[strings.LastIndexByte(it.QualifiedID, '/')+1:]
+		// The words in the symbol's and file's names, and a file named
+		// after several of them before the rest: orgtokens.go names "org"
+		// and "token" itself.
+		c := 16 * termsIn(base+"/"+name, terms)
+		if b := termsIn(base, terms); b >= 2 {
+			c += b
+		}
+		covers[it.Read] = max(covers[it.Read], c)
+		if a >= 0 && termsIn(path.Base(dir)+"/"+base+"/"+name, terms) >= 2 {
+			// Every area the range lies in, not only the closest:
+			// gateway/local.go holds "local" for the area "gateway".
+			for j := range areas {
+				if areaOf(p, areas[j:j+1]) == 0 {
+					held[j] = true
+				}
+			}
 		}
 		switch {
 		case s && it.Retrieval == "exact" && codeNamed:
@@ -130,10 +157,12 @@ func briefPlan(ctx context.Context, st store.Reader, repo, prompt string) (Brief
 		if err != nil {
 			return BriefPlan{}, err
 		}
-		if len(on[i])+len(off[i])+len(modules) == 0 {
-			// minimal_context found nothing there, and it is no directory of
-			// pages: the word named a part of the code base the prompt is not
-			// about ("list", "default").
+		if !held[i] && len(modules) == 0 {
+			// Nothing minimal_context found there holds another word of the
+			// prompt, and it is no directory of pages: the word named a part
+			// of the code base the prompt is not about ("list", "default",
+			// "access" in "my token can access private repos", case l).
+			on[i], off[i] = nil, nil
 			continue
 		}
 		var onMods, offMods []string
@@ -189,6 +218,14 @@ func briefPlan(ctx context.Context, st store.Reader, repo, prompt string) (Brief
 			more = more || len(queues[i]) > 0
 		}
 	}
+	if !codeNamed {
+		// A prompt in plain words: a range that holds several of them
+		// (orgtokens.go for "org" and "token") says more than one that
+		// shares a single common word with it (vuln.key, case l).
+		byCover := func(x, y string) int { return cmp.Compare(covers[y], covers[x]) }
+		slices.SortStableFunc(rest, byCover)
+		slices.SortStableFunc(other, byCover)
+	}
 	for _, loc := range rest {
 		take(loc)
 	}
@@ -202,6 +239,34 @@ func briefPlan(ctx context.Context, st store.Reader, repo, prompt string) (Brief
 		}
 	}
 	return plan, nil
+}
+
+// promptTerms are the plain words of a prompt that may name something,
+// lower-cased: at least three letters and not a stopword.
+func promptTerms(prompt string) []string {
+	var out []string
+	for _, w := range areaWord.FindAllString(prompt, -1) {
+		w = strings.ToLower(strings.Trim(w, "_"))
+		if len(w) >= 3 && !agentctx.Stopword(w) && !slices.Contains(out, w) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// termsIn counts the terms a range's names hold: "org" and "token" in
+// orgtokens.go, "llm" and "queue" in llm/queue.go. The keywords an item of
+// minimal_context matched are not counted: a search also matches the module
+// path ("github") of every Go name.
+func termsIn(names string, terms []string) int {
+	where := strings.ToLower(names)
+	n := 0
+	for _, t := range terms {
+		if strings.Contains(where, t) {
+			n++
+		}
+	}
+	return n
 }
 
 // rangePath is the file of a "path:start-end" location.
@@ -250,16 +315,28 @@ func namedFiles(ctx context.Context, r store.Reader, repo, prompt string) ([]str
 // "llm-config" is two of them.
 var areaWord = regexp.MustCompile(`[A-Za-z][A-Za-z0-9_]+`)
 
+// verbLead are words after which a prompt's next word is a verb ("can
+// access", "should route"): what is done, not a part of the code base.
+var verbLead = map[string]bool{
+	"can": true, "could": true, "will": true, "would": true, "should": true, "must": true, "may": true,
+	"might": true, "to": true, "cannot": true, "don": true, "doesn": true, "didn": true, "won": true,
+}
+
 // promptAreas are the plain words of a prompt that name a package of the
 // repository (a Go package, a page or component of the front end, a Python
 // module) or the base name of a file (queue.go), lower-cased, in the order
-// the prompt names them.
-func promptAreas(ctx context.Context, r store.Reader, repo, prompt string) ([]string, error) {
+// the prompt names them. Stopwords and verbs ("can access") name no area,
+// nor does the documentation ("docs") unless the prompt is about it: "when
+// I write docs / code" is not about internal/ingest/docs (case l).
+func promptAreas(ctx context.Context, r store.Reader, repo, prompt string, docs bool) ([]string, error) {
 	var out []string
 	seen := map[string]bool{}
+	prev := ""
 	for _, w := range areaWord.FindAllString(prompt, -1) {
 		w = strings.ToLower(strings.Trim(w, "_"))
-		if len(w) < 3 || seen[w] {
+		verb := verbLead[prev]
+		prev = w
+		if len(w) < 3 || seen[w] || verb || agentctx.Stopword(w) || !docs && asklocal.AboutDocs(w) {
 			continue
 		}
 		seen[w] = true
