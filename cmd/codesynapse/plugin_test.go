@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/astrona-io/codesynapse/internal/agentcfg"
 	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
@@ -82,6 +83,16 @@ func TestPluginFiles(t *testing.T) {
 			}
 		}
 	}
+	// The CLI knows the hooks its release's plugin runs, so the session
+	// hook and `doctor` can tell an installed plugin is behind.
+	raw, err := os.ReadFile(filepath.Join(root, "hooks", "hooks.json"))
+	require.NoError(t, err)
+	shipped, err := agentcfg.ParsePluginHooks(raw)
+	require.NoError(t, err)
+	missing, extra := agentcfg.CompareHooks(shipped)
+	assert.Len(t, missing, 0, "agentcfg.ShippedHooks lists a hook hooks.json does not run")
+	assert.Len(t, extra, 0, "hooks.json runs a hook missing from agentcfg.ShippedHooks")
+	assert.Len(t, shipped, len(agentcfg.ShippedHooks), "agentcfg.ShippedHooks has duplicates")
 	// The answer hook's matcher catches the tools under either server name.
 	for _, g := range hooks.Hooks["PostToolUse"] {
 		if strings.Contains(g.Matcher, "mcp__") {
@@ -100,7 +111,7 @@ func TestPluginFiles(t *testing.T) {
 			Source string `json:"source"`
 		} `json:"plugins"`
 	}
-	raw, err := os.ReadFile(filepath.Join("..", "..", ".claude-plugin", "marketplace.json"))
+	raw, err = os.ReadFile(filepath.Join("..", "..", ".claude-plugin", "marketplace.json"))
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &market))
 	require.Len(t, market.Plugins, 1)

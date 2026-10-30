@@ -11,6 +11,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/agentrules"
 	"github.com/astrona-io/codesynapse/internal/app"
+	"github.com/astrona-io/codesynapse/internal/cliversion"
 	"github.com/astrona-io/codesynapse/internal/conventions"
 )
 
@@ -24,7 +25,8 @@ func sessionRules(ctx context.Context, in toolHookInput, logger *slog.Logger) ma
 	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
 	c.http.Timeout = 3 * time.Second
 	var res struct {
-		Text string `json:"text"`
+		Text          string `json:"text"`
+		ServerVersion string `json:"server_version"`
 	}
 	if c.token != "" {
 		if err := c.do(ctx, http.MethodGet, "/api/v1/agent-rules", nil, &res); err != nil {
@@ -34,13 +36,23 @@ func sessionRules(ctx context.Context, in toolHookInput, logger *slog.Logger) ma
 		}
 		text += repoConventions(ctx, c, in.Cwd, logger)
 	}
+	// Claude Code names the plugin's folder in the hook's environment.
+	notice := updateNotice(version, res.ServerVersion, os.Getenv("CLAUDE_PLUGIN_ROOT"))
+	var shown []string // systemMessage is shown to the person, not the model
+	if notice != "" {
+		text += "\n\n" + cliversion.ForAgent(notice)
+		shown = append(shown, "CodeSynapse: "+notice)
+	}
 	out := map[string]any{"hookSpecificOutput": map[string]any{
 		"hookEventName": "SessionStart", "additionalContext": text,
 	}}
 	if home, err := os.UserHomeDir(); err == nil {
 		if warn := gatewayWarning(ctx, home); warn != "" {
-			out["systemMessage"] = warn // shown to the person, not the model
+			shown = append(shown, warn)
 		}
+	}
+	if len(shown) > 0 {
+		out["systemMessage"] = strings.Join(shown, "\n")
 	}
 	return out
 }

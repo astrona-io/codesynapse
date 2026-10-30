@@ -12,6 +12,11 @@ import (
 // for every machine at once; the built-in text is the fallback there. The
 // Agents page asks with ?for=setup to show the text to copy, which is not a
 // session starting, so it is not counted.
+//
+// server_version is this server's release. CLI and server are released from
+// one tag, so the hook compares its own version with it and tells the person
+// to upgrade when the CLI is behind (internal/cliversion). Nothing about the
+// caller's version is sent or recorded.
 
 func (s *Server) agentRulesRoutes() {
 	s.route("GET /api/v1/agent-rules", anyone, s.handleAgentRules)
@@ -27,5 +32,5 @@ func (s *Server) handleAgentRules(w http.ResponseWriter, r *http.Request) {
 		telemetry.RecordStep(r.Context(), telemetry.StepRules, true)
 		telemetry.RecordStepTokens(r.Context(), telemetry.StepRules, telemetry.KindContextIn, telemetry.EstimateTokens(len(text)))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"version": version, "custom": custom, "text": text})
+	writeJSON(w, http.StatusOK, map[string]any{"version": version, "custom": custom, "text": text, "server_version": s.cfg.Version})
 }

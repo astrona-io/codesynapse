@@ -57,6 +57,10 @@ Hooks record metadata, load rules and report retrieval counts; they do not auto-
 
 ---
 
+### Outdated CLI or plugin
+
+A session can start with a CodeSynapse update notice: the CLI is an older release than the server, or the Claude Code plugin and the CLI ship different hooks. The SessionStart hook adds it to your context, and the MCP bridge appends it to the server instructions of `initialize` (Codex, Cursor). Tell the user in the words given before your first answer, for example: "You are on an old version of CodeSynapse (v0.0.23; the newest is v0.0.24). Please upgrade to the newest version of CodeSynapse, then run `codesynapse doctor --fix` and start a new session to pick up the missing changes from this update." Development builds never get one. `codesynapse doctor` lists what is out of date (server, version, key, each agent's registration, plugin hooks) with the command for each; `--fix` repairs the local part. Details: [Claude Code plugin](operations/claude-code-plugin.md#doctor).
+
 ### Shorter results
 
 The MCP server removes empty fields (`null`, `""`, `[]`, `{}`) from the JSON text of tool results, so you do not pay tokens for them. A missing field means empty; zero and `false` are always kept. Turn it off with `--slim-results=false` / `CODESYNAPSE_MCP_SLIM=false`.

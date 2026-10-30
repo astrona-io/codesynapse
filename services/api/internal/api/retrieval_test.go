@@ -104,6 +104,19 @@ func TestAgentRulesEndpoint(t *testing.T) {
 	}
 }
 
+// The session hook learns the newest CLI from the rules it fetches anyway.
+func TestAgentRulesNameTheServerVersion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ts := httptest.NewServer(New(ctx, Config{Version: "v0.0.24"}, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil))))
+	t.Cleanup(ts.Close)
+	var rules struct {
+		ServerVersion string `json:"server_version"`
+	}
+	require.Equal(t, get(t, ts, "/api/v1/agent-rules", &rules), 200)
+	assert.Equal(t, rules.ServerVersion, "v0.0.24")
+}
+
 func TestAgentStatusCountsTodaysActivity(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

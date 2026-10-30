@@ -438,6 +438,7 @@ func (b *bridge) deliver(data []byte, sent rpcMessage) {
 			b.protocol = r.Result.ProtocolVersion
 			b.mu.Unlock()
 		}
+		data = withUpgradeNotice(data, version)
 	}
 	var compact bytes.Buffer
 	if json.Compact(&compact, data) == nil {

@@ -54,7 +54,7 @@ func main() {
 // commands are the CLI's subcommands (the plugin test checks the hooks
 // call ones that exist).
 func commands(ec *app.Env) []*cobra.Command {
-	return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), upgradeCmd(ec), statsCmd(ec), evalCmd(ec), hookCmd(ec), gitHookCmd(ec), installCmd(ec), statusCmd(ec), uninstallCmd(ec), mcpCmd(ec), cursorCmd(ec), assistantCmd(ec, "codex"), assistantCmd(ec, "claude"), memoryCmd(ec), runtimeCmd(ec), imagesCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
+	return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), upgradeCmd(ec), statsCmd(ec), evalCmd(ec), hookCmd(ec), gitHookCmd(ec), installCmd(ec), statusCmd(ec), doctorCmd(ec), uninstallCmd(ec), mcpCmd(ec), cursorCmd(ec), assistantCmd(ec, "codex"), assistantCmd(ec, "claude"), memoryCmd(ec), runtimeCmd(ec), imagesCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
 }
 
 // ingestOptions configures `codesynapse ingest`.
@@ -877,23 +877,11 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 	if err != nil {
 		return err
 	}
-	bin, err := os.Executable()
+	server, err := installServer(o.url, o.apiURL)
 	if err != nil {
 		return err
 	}
-	if strings.Contains(bin, "go-build") {
-		// `go run` builds into a temporary folder the bridge would vanish from.
-		return errors.New("run an installed codesynapse binary (go install ./cmd/codesynapse, or just mcp), not go run")
-	}
-	bin = brewStablePath(bin)
-	token := os.Getenv(agentcfg.TokenEnv)
-	if token == "" {
-		token = newAPIClient(o.apiURL).token
-	}
-	server := agentcfg.Server{
-		URL: o.url, Token: token, Command: bin, APIURL: o.apiURL, StoreToken: storeToken,
-		ContextCap: o.tokens, ForceContextCap: o.EC.Command.Flags().Changed("context-cap"),
-	}
+	server.ContextCap, server.ForceContextCap = o.tokens, o.EC.Command.Flags().Changed("context-cap")
 	var notes []string
 	server.Note = func(msg string) { notes = append(notes, msg) }
 	in := bufio.NewReader(o.EC.Stdin)
@@ -928,6 +916,25 @@ func (o *mcpInstallOptions) Run(ctx context.Context, _ *app.Env) error {
 		return errors.New("no matching assistants detected; install project hooks with `codesynapse mcp hooks . --client codex` or `--client cursor`")
 	}
 	return nil
+}
+
+// installServer is the connection `mcp install` registers: this binary as
+// the bridge, the personal key from the environment or the private token
+// file, and the two endpoints.
+func installServer(mcpURL, apiURL string) (agentcfg.Server, error) {
+	bin, err := os.Executable()
+	if err != nil {
+		return agentcfg.Server{}, err
+	}
+	if strings.Contains(bin, "go-build") {
+		// `go run` builds into a temporary folder the bridge would vanish from.
+		return agentcfg.Server{}, errors.New("run an installed codesynapse binary (go install ./cmd/codesynapse, or just mcp), not go run")
+	}
+	token := os.Getenv(agentcfg.TokenEnv)
+	if token == "" {
+		token = newAPIClient(apiURL).token
+	}
+	return agentcfg.Server{URL: mcpURL, Token: token, Command: brewStablePath(bin), APIURL: apiURL, StoreToken: storeToken}, nil
 }
 
 // runGateway sets Claude Code up to send its model requests to the gateway

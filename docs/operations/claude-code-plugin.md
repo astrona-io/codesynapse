@@ -92,3 +92,21 @@ The built-in ruleset is short (`internal/agentrules`): start with `minimal_conte
 ## Updating
 
 The plugin follows the repository: without a pinned version, `/plugin update` (or Claude Code's automatic updates) takes the latest commit of the marketplace. The `codesynapse` binary updates separately (`brew upgrade codesynapse` once releases are public).
+
+When the two drift apart, the session start says so. The rules the hook fetches name the server's version. A release CLI older than the server gets this, shown to you and handed to the agent to repeat before its first answer:
+
+> You are on an old version of CodeSynapse (v0.0.23; the newest is v0.0.24). Please upgrade to the newest version of CodeSynapse, then run `codesynapse doctor --fix` and start a new session to pick up the missing changes from this update.
+
+A plugin that lacks hooks this CLI ships gets "Please run `codesynapse doctor --fix` to fix the missing changes from this update, then start a new session." A plugin that runs hooks the CLI does not have asks for a CLI upgrade. Development and untagged builds (`dev`, `v0.0.23-4-g…`, `-dirty`) never get a notice. The check reads one local file and adds no request; without a key the hook makes none at all.
+
+## Doctor
+
+`codesynapse doctor` checks the setup and prints one line per check, `OK` or `NEEDS ACTION`, with the command that fixes it:
+
+- **API server**: `CODESYNAPSE_API_URL` (or `--api-url`) answers.
+- **CLI version**: this CLI against the server's release. Development builds are not compared.
+- **API token**: present (environment or the user config file), the file is mode 0600, and the server accepts it. The key is never printed.
+- **MCP registration**: one line per agent `codesynapse mcp install` knows (Claude Code, Codex, Gemini, OpenCode, Cursor, the project's `.mcp.json`). Stale means the binary is gone, the bridge arguments are old or the plugin and a user-scope server are both present.
+- **Claude Code plugin**: the installed plugin's hooks against the ones this CLI ships.
+
+`codesynapse doctor --fix` repairs what is safe on this machine: it sets the token file to 0600, re-runs the `mcp install` registration for each missing or stale agent (keeping its URLs), and updates a user-scope plugin with `claude plugin marketplace update` and `claude plugin update`. It changes nothing `mcp install` does not write. Upgrading the CLI itself, and a rejected key, stay with you. Start a new session afterwards (restart Claude Code after a plugin update). The command exits non-zero only while something needs action; `-o json` gives the checks as JSON.
