@@ -79,10 +79,10 @@ There is no licence or seat limit in CodeSynapse, and this plan adds none.
 | The same per day for longer ranges, by tool and by client | usage buckets, summed over repositories | day | 180 days, rollup 400 days |
 | Tool latency p50 and p95, per tool for the top tools | `mcp_tool_duration_seconds` | 1 min to 6 h | 30 days |
 | Tokens served to agents, tokens avoided, and the share of agent work tokens avoided (without prompt-cache reads) | `mcp_response_tokens_total`; usage buckets; see [token savings without the prompt cache](#token-savings-without-the-prompt-cache) | day | as above |
-| Answered on the developer's machine versus server | usage buckets (`usage/local`); later `mcp_local_answers_total` (coverage plan item 17) | day | as above |
+| Answered on the developer's machine versus server | `mcp_local_answers_total{outcome="recorded"}` (admin panel `local_answers`, beside `mcp_calls` for the server's share); usage buckets (`usage/local`) per day | 1 min to 6 h; day | as above |
 | Agent workflow: sessions that began with CodeSynapse, reads turned back, Bash classes | usage pseudo tools (`usage.IsWorkflow`, `usage.BashClasses`) | day | as above |
 | Unindexed checkouts reported: count of distinct names per organisation, never the names | usage pseudo tool `usage.Unindexed` | day | as above |
-| API traffic: requests by route pattern and status class, p50 and p95 by route | `http_requests_total`, `http_request_duration_seconds` (recorded, no panel today) | 1 min to 6 h | 30 days |
+| API traffic: requests by route pattern and status class, p50 and p95 by route | `http_requests_total`, `http_request_duration_seconds`: admin panels `api_routes`, `api_failures` (5xx by route), `api_route_latency` (p50 and p95 per route); status class on Overview (`platform_api_requests`) | 1 min to 6 h | 30 days |
 | Gateway: requests by route (local, cloud, rejected) and status class | `gateway_requests_total` | 1 min to 6 h | 30 days |
 | Gateway: response time by route, queue wait, fall-throughs by reason (timeouts apart) | `gateway_request_duration_seconds`, `gateway_queue_wait_seconds`, `gateway_fallthrough_total`; daily totals in the `gateway` rollup metric | 1 min to 6 h | 30 days; 400 days as daily totals |
 
@@ -96,7 +96,7 @@ The instruments are those of telemetry coverage phase 1 and phase 3. This plan a
 | Finished jobs by kind and outcome (`ok`, `error`, `left_behind`, `cancelled`) (org) | `codesynapse_jobs_finished_total` (phase 3) | 1 min to 6 h | 30 days, rollup 400 days |
 | Wait and run time p50 and p95 per kind | `codesynapse_job_wait_seconds`, `codesynapse_job_duration_seconds` (phase 3) | 1 min to 6 h | 30 days |
 | Lease events and the scheduler holder | `platform_codesynapse_lease_events_total`, `platform_codesynapse_loops_lease_held` (phase 1) | 1 min | 30 days |
-| Processes per service and worker role | phase 1 runtime gauges counted per `job` and `instance`; a new `platform_codesynapse_worker_roles{role}` gauge (`ingest`, `ai`, `fix`), 1 per role a worker process runs | 1 min | 30 days |
+| Processes per service and worker role | phase 1 runtime gauges counted per `job` (admin panel `jobs_processes`, `count by (job) (platform_go_goroutines)`; the instance is counted, never shown); the `platform_codesynapse_worker_roles{role}` gauge (`ingest`, `ai`, `fix`), 1 per role a worker process runs (`jobs_worker_roles`) | 1 min | 30 days |
 | Indexing time by phase and by language | `codesynapse_ingest_phase_*`, `codesynapse_ingest_extract_seconds_total` (phase 3) | 1 h | 30 days |
 
 Job counts per organisation come from `codesynapse_jobs_finished_total` grouped by `tenant_id`, never from job rows. Job rows hold the repository name and the error text, which are tenant content, so no cross-tenant view lists them. This matches `handleAdminHealth`, which already clears `RecentFailures`.
@@ -119,7 +119,7 @@ As built (phase 4):
 - **Finished jobs.** Live ranges read `codesynapse_jobs_finished_total` (and its `platform_` twin, for jobs without an organisation) with one instant query over the window. Those jobs count in the totals and the kind breakdown but in no organisation row. An organisation that no longer exists reads "deleted organisation" and sorts last. Without VictoriaMetrics, or when it fails, `measured` is false and the summary's `jobs_failed` stays `null`; `jobs_waiting` is always filled. 90d and 365d read the rollup's `jobs_finished` (`succeeded` as ok, `failed` as error); `left_behind` and `cancelled` are not kept per day and are listed in `rollup.unavailable`.
 - **Ingest.** Runs and files are summed from `ingest_runs` in PostgreSQL (`Store.IngestStats`, one constant statement grouped by organisation): a finished run counts in the window it finished in (its start when the finish time has expired), a running one in every window that ends after it started. Outcomes are succeeded, failed and cancelled, plus running, incomplete discovery and runs whose report has expired (counted by outcome only, `without_report`). Files are scanned, indexed, skipped, failed and unprocessed, with skips by reason. The daily rollup gained `ingest_runs`, `ingest_files` and `ingest_skips`, all with organisation rows, so 90d and 365d have the same figures; running is always live.
 - **Worker roles.** `platform_codesynapse_worker_roles{role}` (`ingest`, `ai`, `fix`) is 1 for each role a worker process runs and is set at start-up (`telemetry.SetWorkerRoles`); it carries no tenant (`TestWorkerRolesLabelSet`).
-- **Charts** (`admin_series_jobs.go`): `jobs_finished`, `jobs_org_finished`, `jobs_failures`, `jobs_wait`, `jobs_duration`, `jobs_queue`, `jobs_leases`, `jobs_scheduler`, `jobs_worker_roles`, `ingest_runs`, `ingest_org_runs`, `ingest_phases`, `ingest_extract`, `ingest_files`, `ingest_skips`. Kinds, outcomes, phases and skip reasons are fixed lists in the code, so they are shown whole; extraction time by language folds a language fewer than three organisations indexed into "other". The `repo` label of the file counters is always summed away, and `TestAdminPanelsNoRepo` fails on any panel that groups or filters by it.
+- **Charts** (`admin_series_jobs.go`): `jobs_finished`, `jobs_org_finished`, `jobs_failures`, `jobs_wait`, `jobs_duration`, `jobs_queue`, `jobs_leases`, `jobs_scheduler`, `jobs_processes` (processes per service, counted from the runtime gauge every process samples), `jobs_worker_roles`, `ingest_runs`, `ingest_org_runs`, `ingest_phases`, `ingest_extract`, `ingest_files`, `ingest_skips`. Kinds, outcomes, phases and skip reasons are fixed lists in the code, so they are shown whole; extraction time by language folds a language fewer than three organisations indexed into "other". The `repo` label of the file counters is always summed away, and `TestAdminPanelsNoRepo` fails on any panel that groups or filters by it.
 - **Not yet.** Indexed files by language or format across the platform need the per-graph `Stats.Formats` read once per graph; that comes with the store sampler of phase 6. Until then the language chart shows extraction time only.
 - **Dashboard.** Statistics gains Jobs and Indexing tabs: the queue with the oldest wait, finished jobs by kind and per organisation, the ingest tiles and table, and their charts in one batch per tab.
 
@@ -166,7 +166,7 @@ Rule IDs are shown only at the platform level and only when at least three organ
 | Figure | Source | Step | Kept |
 |---|---|---|---|
 | Events per period by action family (`user.*`, `http ...`, `mcp.*`, `repo.*`, `git_token.*`, ...) and outcome | PostgreSQL `events`, grouped by the action's prefix | hour | rollup 400 days |
-| Failed sign-ins by cause (wrong password, unknown login, rate limited, suspended) | `events` `user.login` failures by their constant `Detail`; later `codesynapse_auth_attempts_total` (coverage item 12) | hour | rollup 400 days |
+| Failed sign-ins by cause (wrong password, unknown login, rate limited, suspended) | `events` `user.login` failures by their constant `Detail` (audit section); `codesynapse_auth_attempts_total` by method and outcome on Overview (`platform_sign_in`) | hour | rollup 400 days |
 | Suspensions and resumptions, platform admin grants, `root.denied`, `auth.denied` | `events` | day | rollup 400 days |
 | Chain verification: last result, entries checked, when | `accounts.VerifyAudit`, run by the scheduler once a day and on demand; the result is kept, not recomputed per view | day | latest and 400 days of results |
 | Archive: sealed segments, oldest hot entry, last seal outcome | `audit_segments`; `platform_codesynapse_audit_seals_total` (coverage item 15) | day | rollup 400 days |
@@ -199,7 +199,9 @@ No session ID, key ID or user agent is shown.
 |---|---|---|---|
 | Rules firing and pending, with since when | vmalert `GET /api/v1/alerts` on the internal URL (telemetry coverage phase 2) | now | none (vmalert holds state) |
 | Rule groups and their last evaluation errors | vmalert `GET /api/v1/rules` | now | none |
-| Firing time per rule per day | `ALERTS` and `ALERTS_FOR_STATE` series that vmalert writes back to VictoriaMetrics, if remote write is on | 1 h | 30 days |
+| Firing time per rule per day (not built) | `ALERTS` and `ALERTS_FOR_STATE` series that vmalert writes back to VictoriaMetrics, if remote write is on | 1 h | 30 days |
+
+Firing time per rule is not built: neither compose nor the chart turns on vmalert's remote write (`-remoteWrite.url` with its own credentials), so the `ALERTS` series do not exist. Turning it on is a deployment decision, not a panel.
 
 Alert labels and annotations are constant text by the rules in [TELEMETRY_PLAN.md](TELEMETRY_PLAN.md#alerting). The API passes on the rule name, state, severity, the value and the times, and drops any other label. When vmalert is off, the tab says so and shows nothing else.
 
