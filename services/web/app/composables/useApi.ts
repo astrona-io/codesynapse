@@ -44,26 +44,32 @@ export function useApiGet<T, R = T>(path: MaybeRefOrGetter<string>, opts: { imme
   }) as unknown as ApiGet<R>
 }
 
+// $fetch typed by Nitro's route table makes vue-tsc 3.3.14 overflow its
+// stack (TS2321) matching our catch-all /api/cg/** route; every call here
+// goes to that one route, so the route inference adds nothing.
+type ApiFetch = (url: string, opts?: { method?: string; body?: Record<string, unknown>; signal?: AbortSignal }) => Promise<unknown>
+const fetchApi = $fetch as unknown as ApiFetch
+
 // apiGet is a one-off GET for code that fetches on its own schedule (a
 // debounced search); pages use useApiGet.
 export function apiGet<T>(path: string, opts: { signal?: AbortSignal } = {}): Promise<T> {
-  return $fetch(apiPath(path), { signal: opts.signal }) as Promise<T>
+  return fetchApi(apiPath(path), { signal: opts.signal }) as Promise<T>
 }
 
 export function apiPost<T>(path: string, body: unknown): Promise<T> {
-  return $fetch(apiPath(path), { method: 'POST', body: body as Record<string, unknown> }) as Promise<T>
+  return fetchApi(apiPath(path), { method: 'POST', body: body as Record<string, unknown> }) as Promise<T>
 }
 
 export function apiPut<T>(path: string, body: unknown): Promise<T> {
-  return $fetch(apiPath(path), { method: 'PUT', body: body as Record<string, unknown> }) as Promise<T>
+  return fetchApi(apiPath(path), { method: 'PUT', body: body as Record<string, unknown> }) as Promise<T>
 }
 
 export function apiPatch<T>(path: string, body: unknown): Promise<T> {
-  return $fetch(apiPath(path), { method: 'PATCH', body: body as Record<string, unknown> }) as Promise<T>
+  return fetchApi(apiPath(path), { method: 'PATCH', body: body as Record<string, unknown> }) as Promise<T>
 }
 
 export function apiDelete(path: string): Promise<unknown> {
-  return $fetch(apiPath(path), { method: 'DELETE' })
+  return fetchApi(apiPath(path), { method: 'DELETE' })
 }
 
 export function apiErrorMessage(err: unknown): string {
