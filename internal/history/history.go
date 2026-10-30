@@ -38,6 +38,10 @@ type Snapshot struct {
 	// tool's own IDs), for the platform statistics. Snapshots taken before
 	// it existed have none.
 	Rules map[string]int `json:"rules,omitempty"`
+	// Formats counts indexed files per language or format (model.Stats
+	// Formats), only the names in snapshot.Formats, the rest as "other", for
+	// the platform statistics. Snapshots taken before it existed have none.
+	Formats map[string]int `json:"formats,omitempty"`
 
 	Modules          int `json:"modules"`
 	Direct           int `json:"direct"`
