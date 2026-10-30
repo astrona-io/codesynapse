@@ -204,6 +204,9 @@ func describeRequest(method string, req mcp.Request) accounts.MCPRequest {
 var bulkArgs = map[string]bool{
 	"diff": true, "patch": true, "code": true, "content": true, "body": true, "text": true,
 	"turns": true, "messages": true, "triples": true, "comments": true,
+	// fetch_source's question is answered on the developer's machine and
+	// never kept; a call that reaches the server keeps only its digest.
+	"question": true,
 }
 
 // maxArgValue is the longest encoded value kept; longer ones are digested.

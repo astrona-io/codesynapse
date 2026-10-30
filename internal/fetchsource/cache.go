@@ -22,7 +22,8 @@ const DefaultCacheBytes = 200 << 20
 // plus its fields, with room for JSON escaping.
 const maxEntryFile = 3*MaxBody + 64<<10
 
-// Entry is one cached page. The text has already passed redact.Free.
+// Entry is one cached page: its cleaned text, before any pruning, which
+// has already passed redact.Free.
 type Entry struct {
 	URL          string        `json:"url"`
 	ETag         string        `json:"etag,omitempty"`
@@ -31,7 +32,9 @@ type Entry struct {
 	TTL          time.Duration `json:"ttl"`
 	ContentType  string        `json:"content_type"`
 	RawBytes     int           `json:"raw_bytes"`
-	Text         string        `json:"text"`
+	// Cleaner is the cleanerVersion that made Text.
+	Cleaner int    `json:"cleaner,omitempty"`
+	Text    string `json:"text"`
 }
 
 // Cache keeps fetched pages as files in one folder that only the user can

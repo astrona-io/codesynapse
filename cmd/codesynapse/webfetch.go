@@ -51,8 +51,8 @@ func fetchSteer(in toolHookInput) map[string]any {
 	s.Steers++
 	saveState(state, s)
 	reason := fmt.Sprintf("fetch_source already has this page in its local cache. Call fetch_source with url %q instead: "+
-		"it answers from the cache (asking the site only whether a stale copy changed) with the page as plain text. "+
-		"If fetch_source takes a question argument, pass what you want to learn from the page as question. "+
+		"it answers from the cache (asking the site only whether a stale copy changed) with the page as Markdown-like text. "+
+		"Pass what you want to learn from the page as question to get only the sections that answer it. "+
 		"If fetch_source is not available, call WebFetch again.", u.String())
 	return map[string]any{"hookSpecificOutput": map[string]any{
 		"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason,
