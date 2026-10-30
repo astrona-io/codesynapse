@@ -123,6 +123,33 @@ The CodeSynapse stack itself uses about 1 GB across its containers at rest (meas
 
 To check it works, ask an agent a question about a large file and look for an `ask_local` call. Statistics → Agents shows the local models' work under Local models.
 
+## Checking the model server
+
+A model that was never pulled, a context smaller than `context_window`, or no provider with `gateway: true` does not stop anything: requests go to the cloud, or Ollama cuts long prompts without an error. The provider check finds these. Platform admins see it in two places:
+
+- **Admin → Overview**, under System health (tile "Local models") and the Local models panel. It checks every local provider each time the page loads or you press "Check again".
+- **AI models → Test connection** on one provider. The check is shown below the test's own reply.
+
+For each local provider the check:
+
+1. asks the server for its model list through the provider's own client, and says whether `model` and `embedding_model` are there (a name without a tag also matches `:latest`);
+2. on Ollama, reads the chat model from `/api/show`: the most context it takes, whether it can chat, and a `num_ctx` its Modelfile sets; and the embedding model's capabilities, to make sure it can embed;
+3. on Ollama, reads `/api/ps` for the context the model is loaded with now and compares it with `context_window`. A smaller loaded context is a problem; a model that is not loaded yet is a warning, because Ollama decides its context at the next request;
+4. lists the tasks routed to the provider and whether it is the gateway's provider (the first local provider with `gateway: true` and a model). When no provider has `gateway: true`, the check says the gateway sends everything to the cloud.
+
+It sends model names only, never a prompt or code. Cloud providers are not probed. Other OpenAI-compatible servers (MLX, LM Studio, vLLM) do not report their context, so the check only reminds you to serve at least `context_window` tokens.
+
+What the messages mean and what to do:
+
+| Message | Fix |
+|---|---|
+| the server does not answer its model list | Start Ollama; from the containers the address is `host.docker.internal`. |
+| the server does not have qwen3.8:27b | `ollama pull qwen3.8:27b`, or fix `model`. |
+| Ollama loaded qwen3.8:27b with 4096 tokens of context but context_window is 262144 | Set the app's Context length to 256k, or start `ollama serve` with `OLLAMA_CONTEXT_LENGTH=262144`, then unload the model (`ollama stop qwen3.8:27b`) so the next request loads it again. |
+| is not loaded, so the context Ollama gives it is not known | Send one request (Test connection does) and check again. |
+| context_window is ... but the model takes at most ... | Lower `context_window` to the model's maximum. |
+| embeddings are routed here but no embedding_model is set | Add `embedding_model: nomic-embed-text` and pull it. |
+
 ## Queueing and shorter prompts
 
 A local provider answers one request at a time (`max_concurrent`, default 1). If several agents ask at once, the rest wait in a queue and continue when their answer is ready. That keeps the GPU busy without overloading it. A waiting request gives up only when its caller does. Raise `max_concurrent` if your server batches requests (for Ollama set `OLLAMA_NUM_PARALLEL` too).

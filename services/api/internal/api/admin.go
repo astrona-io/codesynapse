@@ -8,6 +8,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
 // Platform administration (SaaS phase 4): organisations and users across
@@ -163,15 +164,19 @@ func (s *Server) handleSetPlatformAdmin(w http.ResponseWriter, r *http.Request) 
 
 // Health is GET /api/v1/admin/health.
 type Health struct {
-	Version  string       `json:"version"`
-	Checked  string       `json:"checked"`
-	Graph    HealthCheck  `json:"graph"`
-	Accounts HealthCheck  `json:"accounts"`
-	Metrics  HealthCheck  `json:"metrics"`
-	Audit    HealthCheck  `json:"audit"`
-	Counts   HealthCounts `json:"counts"`
-	Jobs     JobHealth    `json:"jobs"`
-	Unowned  []string     `json:"unowned"`
+	Version  string      `json:"version"`
+	Checked  string      `json:"checked"`
+	Graph    HealthCheck `json:"graph"`
+	Accounts HealthCheck `json:"accounts"`
+	Metrics  HealthCheck `json:"metrics"`
+	Audit    HealthCheck `json:"audit"`
+	// Models sums up LocalModels: whether every local model server answers
+	// with the models and context config/llm.yaml expects.
+	Models      HealthCheck     `json:"models"`
+	LocalModels *llm.LocalCheck `json:"local_models,omitempty"`
+	Counts      HealthCounts    `json:"counts"`
+	Jobs        JobHealth       `json:"jobs"`
+	Unowned     []string        `json:"unowned"`
 }
 
 // HealthCheck is one dependency's state.
@@ -252,6 +257,14 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 			return v.Reason, errors.New("the audit chain does not verify: " + v.Reason)
 		}
 		return plural(v.Checked, "entry verifies", "entries verify"), nil
+	})
+	h.Models = timed(func() (string, error) {
+		if s.cfg.LLM == nil {
+			return "", errors.New("not configured: no AI providers (config/llm.yaml)")
+		}
+		lc := s.cfg.LLM.CheckLocal(ctx)
+		h.LocalModels = &lc
+		return localModelsSummary(lc)
 	})
 	h.Jobs = jobHealth(s.jobs.List(r.Context()))
 	h.Jobs.RecentFailures = []Job{}

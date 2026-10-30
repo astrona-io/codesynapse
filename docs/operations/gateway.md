@@ -105,6 +105,8 @@ Example: `context_window: 262144` and `max_output_tokens: 32768` take a translat
 
 See `config/llm.example.yaml` for the full provider block and [Local models](local-models.md) for choosing a model. Without such a provider the gateway still works, but every request goes to the cloud as a plain pass-through.
 
+To see whether the gateway's local model is really usable, open **Admin → Overview**: the Local models panel names the gateway's provider, whether its model is pulled and whether Ollama loaded it with at least `context_window` tokens of context. Requests that do not fit a smaller real context go to the cloud or are cut short. See [Checking the model server](local-models.md#checking-the-model-server).
+
 ## Connect Claude Code
 
 1. Create an API key (`csk_...`) in the dashboard and put it in the environment as `CODESYNAPSE_GATEWAY_KEY`.
