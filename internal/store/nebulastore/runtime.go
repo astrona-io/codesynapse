@@ -42,7 +42,13 @@ func runtimeHeadVID(ns string) string { return vid("h", "runtime|"+ns) }
 
 // SetRuntimeFacts implements store.RuntimeStore.
 func (s *Store) SetRuntimeFacts(ctx context.Context, ns string, f runtimefacts.Facts) error {
-	doc, err := json.Marshal(f)
+	return s.setChunked(ctx, ns, store.RuntimeGraph(ns), f)
+}
+
+// setChunked stores v as the document under ns, which belongs to graphName
+// (so deleting the graph drops it).
+func (s *Store) setChunked(ctx context.Context, ns, graphName string, v any) error {
+	doc, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
@@ -61,7 +67,7 @@ func (s *Store) SetRuntimeFacts(ctx context.Context, ns string, f runtimefacts.F
 	if _, err := rand.Read(raw); err != nil {
 		return err
 	}
-	gen, graphName, data := hex.EncodeToString(raw), store.RuntimeGraph(ns), buf.Bytes()
+	gen, data := hex.EncodeToString(raw), buf.Bytes()
 	count := 0
 	for off := 0; off < len(data) || count == 0; off += runtimeChunkBytes {
 		part := data[off:min(off+runtimeChunkBytes, len(data))]
@@ -104,52 +110,67 @@ func (s *Store) dropChunks(ctx context.Context, stmt string, params map[string]a
 
 // RuntimeFacts implements store.RuntimeReader.
 func (s *Store) RuntimeFacts(ctx context.Context, ns string) (runtimefacts.Facts, error) {
-	head, err := s.read(ctx, "FETCH PROP ON `runtime_head` "+literal(runtimeHeadVID(ns))+" YIELD properties(vertex).gen AS gen, properties(vertex).chunks AS chunks", nil)
-	if err != nil {
+	var f runtimefacts.Facts
+	if err := s.getChunked(ctx, ns, &f); err != nil {
 		return runtimefacts.Facts{}, err
 	}
+	return f, nil
+}
+
+// getChunked reads the document under ns into v; ErrNotFound when there
+// is none.
+func (s *Store) getChunked(ctx context.Context, ns string, v any) error {
+	head, err := s.read(ctx, "FETCH PROP ON `runtime_head` "+literal(runtimeHeadVID(ns))+" YIELD properties(vertex).gen AS gen, properties(vertex).chunks AS chunks", nil)
+	if err != nil {
+		return err
+	}
 	if len(head) == 0 {
-		return runtimefacts.Facts{}, store.ErrNotFound
+		return store.ErrNotFound
 	}
 	gen, _ := head[0]["gen"].(string)
 	count, _ := head[0]["chunks"].(int64)
 	rows, err := s.read(ctx, "MATCH (v:`runtime_chunk`) WHERE v.`runtime_chunk`.`ns` == $ns AND v.`runtime_chunk`.`gen` == $gen RETURN v.`runtime_chunk`.`idx` AS idx, v.`runtime_chunk`.`data` AS data ORDER BY idx LIMIT $limit",
 		map[string]any{"ns": ns, "gen": gen, "limit": int64(maxRuntimeChunks + 1)})
 	if err != nil {
-		return runtimefacts.Facts{}, err
+		return err
 	}
 	if int64(len(rows)) != count {
-		return runtimefacts.Facts{}, errRuntimeIncomplete
+		return errRuntimeIncomplete
 	}
 	var data []byte
 	for _, r := range rows {
 		p, _ := r["data"].(string)
 		b, err := base64.StdEncoding.DecodeString(p)
 		if err != nil {
-			return runtimefacts.Facts{}, fmt.Errorf("runtime facts: %w", err)
+			return fmt.Errorf("runtime facts: %w", err)
 		}
 		data = append(data, b...)
 	}
 	zr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return runtimefacts.Facts{}, fmt.Errorf("runtime facts: %w", err)
+		return fmt.Errorf("runtime facts: %w", err)
 	}
-	var f runtimefacts.Facts
-	if err := json.NewDecoder(io.LimitReader(zr, 16*maxRuntimeBytes)).Decode(&f); err != nil {
-		return runtimefacts.Facts{}, fmt.Errorf("runtime facts: %w", err)
+	if err := json.NewDecoder(io.LimitReader(zr, 16*maxRuntimeBytes)).Decode(v); err != nil {
+		return fmt.Errorf("runtime facts: %w", err)
 	}
-	return f, nil
+	return nil
 }
 
 // DeleteRuntimeFacts implements store.RuntimeStore.
 func (s *Store) DeleteRuntimeFacts(ctx context.Context, ns string) error {
+	return s.deleteChunked(ctx, ns)
+}
+
+// deleteChunked drops the document under ns.
+func (s *Store) deleteChunked(ctx context.Context, ns string) error {
 	if err := s.deleteVertices(ctx, []string{runtimeHeadVID(ns)}); err != nil {
 		return err
 	}
 	return s.dropChunks(ctx, "MATCH (v:`runtime_chunk`) WHERE v.`runtime_chunk`.`ns` == $ns RETURN id(v) AS id LIMIT 400", map[string]any{"ns": ns})
 }
 
-// deleteRuntimeOf drops every namespace's facts of graph.
+// deleteRuntimeOf drops every document of graph: each namespace's facts
+// and imported findings.
 func (s *Store) deleteRuntimeOf(ctx context.Context, graphName string) error {
 	if err := s.dropChunks(ctx, "MATCH (v:`runtime_head`) WHERE v.`runtime_head`.`graph_name` == $graph RETURN id(v) AS id LIMIT 400", map[string]any{"graph": graphName}); err != nil {
 		return err

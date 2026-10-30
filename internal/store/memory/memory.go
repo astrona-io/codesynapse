@@ -15,6 +15,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/reviews"
 	"github.com/astrona-io/codesynapse/internal/runtimefacts"
+	"github.com/astrona-io/codesynapse/internal/sarifimport"
 	"github.com/astrona-io/codesynapse/internal/sessionmemory"
 	"github.com/astrona-io/codesynapse/internal/store"
 	"github.com/astrona-io/codesynapse/internal/usage"
@@ -39,6 +40,8 @@ type Store struct {
 	vecs           map[string]embedding // memory entity ID -> vector
 	// runtime holds measured facts per repository; a re-index keeps them.
 	runtime map[string]runtimefacts.Facts
+	// sarif holds imported findings of external tools per namespace.
+	sarif map[string]sarifimport.Set
 }
 
 type repoGraph struct {

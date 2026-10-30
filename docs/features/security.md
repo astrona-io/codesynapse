@@ -145,6 +145,10 @@ steps:
       category: codesynapse
 ```
 
+### Findings of other tools
+
+Upload the SARIF output of other scanners (gitleaks, Semgrep, gosec, zizmor, …) from CI with `PUT /api/v1/repos/{repo}/sarif`, and CodeSynapse keeps their findings per organisation, each naming the tool and version that found it, the tool's rule ID and its help link. Only the tool, rule, severity, location and a short redacted message are kept, never snippets. See [Findings of other tools](../operations/sarif-import.md); showing them in the report and the dashboard is [planned](../plans/SARIF_IMPORT_PLAN.md).
+
 ## Languages
 
 | | Symbols & calls | Tests | Security rules | Dependency CVEs |
