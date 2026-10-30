@@ -22,7 +22,7 @@ To keep particular models away from the local model while the rest still go to i
 
 Token counts (`POST /v1/messages/count_tokens`) always go to the cloud, also with local first on. The gateway does not estimate them: Claude Code sizes its context with the number and decides when to compact by it, only the model's own tokenizer gives it (Claude Opus 4.7 and later count about 30 percent more tokens for the same text than older models), and Anthropic does not charge for counting. Each one is recorded with the reason `count_tokens` (or `excluded` for a model on an exclude list), so it shows up under the reasons a request was not answered locally.
 
-Each answer carries a header, `X-CodeSynapse-Route: local` or `X-CodeSynapse-Route: cloud`, so you can see where it came from.
+Each answer carries a header, `X-CodeSynapse-Route: local` or `X-CodeSynapse-Route: cloud`, so you can see where it came from. Answers of the gateway itself, such as a refusal or the failover report, carry `X-CodeSynapse-Route: gateway`.
 
 The audit log records the model, the size and the status of each request. It never records the text.
 
@@ -115,6 +115,21 @@ To see whether the gateway's local model is really usable, open **Admin → Over
 The command checks that the gateway answers, backs up `~/.claude/settings.json`, shows you the difference and then sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_CUSTOM_HEADERS` there. To undo it, run `codesynapse mcp install --gateway --remove`. If the gateway cannot be reached when a session starts, you get a warning.
 
 The key travels in the header `X-CodeSynapse-Key`. The headers `Authorization` and `x-api-key` stay your own Anthropic credential.
+
+### When the gateway is down
+
+By default `--gateway` points Claude Code at a small proxy on your own machine (`http://127.0.0.1:18431`, change it with `--proxy-port`), and the proxy forwards every request to the gateway. If the gateway cannot be reached, the proxy sends requests straight to `https://api.anthropic.com` with your own `Authorization` or `x-api-key` header, so your session keeps working.
+
+- **When it fails over:** only when the gateway never took the request in (the connection failed, or it did not accept the request within a minute), or when something in front of the gateway (a load balancer or ingress) answers 502, 503 or 504 without a JSON body and without the gateway's `X-CodeSynapse-Route` header. The gateway sets that header on every answer of its own, also on an error it relays from Anthropic, so such an answer is never sent a second time. A 4xx (401 and 429 included), the gateway's own errors and a stream that broke off part-way are passed back to Claude Code as they are and never sent again. A gateway that took the request but sends no answer within 10 minutes gets a 504 back to Claude Code (the request may have been acted on), and the requests after it go direct.
+- **What reaches Anthropic:** the request as Claude Code sent it, with every `X-CodeSynapse-*` header removed, so your CodeSynapse key never leaves for Anthropic. There is no local routing, prompt shortening or server audit for these requests.
+- **Switching back:** after 30 seconds the proxy asks the gateway `GET /v1/models`. Any answer from the gateway itself, a refusal included, sends traffic back to it.
+- **Reporting:** the proxy counts the direct requests per outage (start, end, number of requests, model names) in `gateway-failover.json` in your user config folder (0600). When the gateway answers again it sends those counts to `POST /v1/codesynapse/failover` with your key. Each outage becomes one `gateway.failover` audit entry, and `gateway_failover_requests_total` counts the requests per organisation. The gateway takes one report a minute per key, only while the gateway is switched on for the organisation, at most 100,000 requests per outage and outages no older than 30 days; an outage it already recorded for the key is not recorded again when a report is resent. Prompts, bodies and credentials are never counted, stored or logged.
+- **Starting:** `codesynapse mcp install --gateway` starts the proxy, and two hooks in `~/.claude/settings.json` (`SessionStart` and `UserPromptSubmit`) run `codesynapse gateway proxy --ensure`, which starts it again when it is not running. It stops by itself after two idle hours, or within a minute after you remove or change the setup. Run it in the foreground with `codesynapse gateway proxy`; its log is `gateway-proxy.log` in the same folder.
+- **Your key only:** install pins the proxy to the key it wrote into `~/.claude/settings.json` (only its SHA-256 is saved). A request with another CodeSynapse key gets a 403, so no other program on your machine can make the proxy report under a key of its own. After you change the key, run `codesynapse mcp install --gateway` again.
+- **Port in use:** the proxy proves it is yours by answering a challenge with a secret only your user can read. If another program holds the port, the install stops and names `--proxy-port`. If that happens later, the hook points Claude Code back at the gateway directly and shows you a message; sessions started after that go to the gateway without failover until the proxy runs again.
+- **Proxy settings:** both the gateway and the direct leg honour `HTTPS_PROXY` and `NO_PROXY`, like Claude Code itself. Neither follows redirects.
+- **Without failover:** `codesynapse mcp install --gateway --failover=false` points Claude Code at the gateway itself, as before. Every request then goes through the gateway or fails.
+- **Removing it:** `codesynapse mcp install --gateway --remove` takes the settings, the hooks and the proxy's files out again. `codesynapse uninstall` does the same after it removed the release, unless you pass `--keep-gateway`.
 
 ## Shorter prompts on the way to the cloud
 
@@ -273,6 +288,8 @@ Keep other work off the gateway's model while agents use it, or give that work i
 ## What the audit log records
 
 Every gateway request becomes one `gateway.request` entry in the hash-chained audit log. Its detail holds the route (`local`, `cloud` or `rejected`), the model, whether the request streamed or carried tools, the body size, the time taken and `shortened=true|false`. When the request carries user text, the entry also holds `prompt_bytes` and `prompt_sha256`: the size and SHA-256 of the newest user text as the assistant sent it. When the gateway shortened that text, `fwd_bytes` and `fwd_sha256` describe the text it forwarded. A request the local model could not answer adds `reason=<reason>`, one of the reasons listed under [Seeing how well the local model keeps up](#seeing-how-well-the-local-model-keeps-up). The audit log never holds the text itself.
+
+Requests the developer's [failover proxy](#when-the-gateway-is-down) sent straight to Anthropic while the gateway was down arrive later as `gateway.failover` entries, one per outage: `start`, `end`, `requests` and `models` (model names with counts; anything that is not a plain model name counts as `other`). They record the key that reported them.
 
 ## Prompt log (opt-in, off by default)
 

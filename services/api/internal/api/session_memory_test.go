@@ -32,11 +32,18 @@ type runtimeFixture struct {
 
 func newRuntimeFixture(t *testing.T, cfg Config) runtimeFixture {
 	t.Helper()
+	return newRuntimeFixtureOn(t, cfg, acctmem.New())
+}
+
+// newRuntimeFixtureOn is newRuntimeFixture on the given accounts store, so a
+// test can wrap it (to fail writes, for instance).
+func newRuntimeFixtureOn(t *testing.T, cfg Config, accStore accounts.Store) runtimeFixture {
+	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 	st := memstore.New()
 	require.NoError(t, st.ReplaceRepo(ctx, storetest.Repo, storetest.Fixture()))
-	acc := accounts.NewService(acctmem.New(), true)
+	acc := accounts.NewService(accStore, true)
 	bootstrapAccounts(t, acc)
 	u, org, err := acc.SignUp(ctx, "runtime@example.com", "Runtime", pw)
 	require.NoError(t, err)

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/astrona-io/codesynapse/internal/gatewayproxy"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
@@ -30,24 +31,24 @@ func TestGatewayWarning(t *testing.T) {
 	conf := `{"env":{"ANTHROPIC_BASE_URL":"` + srv.URL + `","ANTHROPIC_CUSTOM_HEADERS":"X-CodeSynapse-Key: ` + key + `"}}`
 
 	t.Run("no settings file", func(t *testing.T) {
-		assert.Equal(t, gatewayWarning(t.Context(), t.TempDir()), "")
+		assert.Equal(t, gatewayWarningWith(t.Context(), t.TempDir(), gatewayproxy.Files{}), "")
 	})
 	t.Run("base URL not ours", func(t *testing.T) {
 		home := t.TempDir()
 		writeClaudeSettings(t, home, `{"env":{"ANTHROPIC_BASE_URL":"`+srv.URL+`"}}`)
-		assert.Equal(t, gatewayWarning(t.Context(), home), "")
+		assert.Equal(t, gatewayWarningWith(t.Context(), home, gatewayproxy.Files{}), "")
 	})
 	t.Run("gateway healthy", func(t *testing.T) {
 		home := t.TempDir()
 		writeClaudeSettings(t, home, conf)
 		status = http.StatusServiceUnavailable // no local model still counts as up
-		assert.Equal(t, gatewayWarning(t.Context(), home), "")
+		assert.Equal(t, gatewayWarningWith(t.Context(), home, gatewayproxy.Files{}), "")
 	})
 	t.Run("gateway refuses", func(t *testing.T) {
 		home := t.TempDir()
 		writeClaudeSettings(t, home, conf)
 		status = http.StatusUnauthorized
-		w := gatewayWarning(t.Context(), home)
+		w := gatewayWarningWith(t.Context(), home, gatewayproxy.Files{})
 		assert.True(t, strings.Contains(w, "mcp install --gateway --remove"))
 		assert.False(t, strings.Contains(w, key), "the key never reaches the warning")
 	})
@@ -57,6 +58,24 @@ func TestGatewayWarning(t *testing.T) {
 		url := dead.URL
 		dead.Close()
 		writeClaudeSettings(t, home, `{"env":{"ANTHROPIC_BASE_URL":"`+url+`","ANTHROPIC_CUSTOM_HEADERS":"X-CodeSynapse-Key: `+key+`"}}`)
-		assert.True(t, strings.Contains(gatewayWarning(t.Context(), home), "not answering"))
+		assert.True(t, strings.Contains(gatewayWarningWith(t.Context(), home, gatewayproxy.Files{}), "not answering"))
 	})
+	t.Run("behind the failover proxy", func(t *testing.T) {
+		home := t.TempDir()
+		url := deadGateway(t)
+		files := gatewayproxy.Files{Dir: t.TempDir()}
+		cfg := gatewayproxy.Config{Gateway: url, Port: gatewayproxy.DefaultPort}
+		require.NoError(t, files.Save(cfg))
+		writeClaudeSettings(t, home, `{"env":{"ANTHROPIC_BASE_URL":"`+cfg.URL()+`","ANTHROPIC_CUSTOM_HEADERS":"X-CodeSynapse-Key: `+key+`"}}`)
+		w := gatewayWarningWith(t.Context(), home, files)
+		assert.Contains(t, w, url, "the gateway behind the proxy is checked")
+		assert.Contains(t, w, "straight to Anthropic")
+	})
+}
+
+func deadGateway(t *testing.T) string {
+	t.Helper()
+	dead := httptest.NewServer(http.NotFoundHandler())
+	dead.Close()
+	return dead.URL
 }

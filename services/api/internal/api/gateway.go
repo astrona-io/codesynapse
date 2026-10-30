@@ -225,11 +225,28 @@ func (s *Server) gatewayRoutes() {
 		}
 	}
 	for _, path := range []string{"/v1/messages", gateway.CountPath} {
-		s.route("POST "+path, orgRole(accounts.Member), guard(g.Handler(path)))
+		s.route("POST "+path, orgRole(accounts.Member), owned(guard(g.Handler(path))))
 	}
 	o := &gateway.OpenAI{Local: g.Local, Done: s.auditGateway}
-	s.route("POST /v1/chat/completions", orgRole(accounts.Member), guard(o.ChatHandler()))
-	s.route("GET /v1/models", orgRole(accounts.Member), guard(o.ModelsHandler()))
+	s.route("POST /v1/chat/completions", orgRole(accounts.Member), owned(guard(o.ChatHandler())))
+	s.route("GET /v1/models", orgRole(accounts.Member), owned(guard(o.ModelsHandler())))
+	// Counts of requests the developer's failover proxy sent straight to
+	// Anthropic while the gateway was unreachable; no key slot, as it carries
+	// no model request.
+	s.failover = &failoverLimit{}
+	s.route("POST "+failoverPath, orgRole(accounts.Member), owned(s.handleGatewayFailover))
+}
+
+// owned marks every answer of a gateway route as the gateway's own, before
+// the handler runs: the cloud leg relays Anthropic's status and body (an
+// HTML 503 from Anthropic's edge included), and the developer's failover
+// proxy must never take such an answer for a stopped gateway and send the
+// request a second time. The local and cloud paths overwrite the value.
+func owned(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(gateway.RouteHeader, "gateway")
+		h(w, r)
+	}
 }
 
 // gatewaySession binds the request to the key's own runtime session; headers
