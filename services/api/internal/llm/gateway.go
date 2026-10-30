@@ -27,6 +27,8 @@ const (
 
 // GatewayTarget is the local model the agent gateway may answer from.
 type GatewayTarget struct {
+	// Name is the provider's name in config/llm.yaml.
+	Name    string
 	BaseURL string
 	Model   string
 	APIKey  string
@@ -100,7 +102,7 @@ func (r *Registry) GatewayTarget() (GatewayTarget, bool) {
 		}
 		queue := r.slots[p.Name]
 		return GatewayTarget{
-			BaseURL: p.BaseURL, Model: p.Model, APIKey: p.apiKey, ContextWindow: p.ContextWindow, MaxOutput: p.MaxOutputTokens,
+			Name: p.Name, BaseURL: p.BaseURL, Model: p.Model, APIKey: p.apiKey, ContextWindow: p.ContextWindow, MaxOutput: p.MaxOutputTokens,
 			Exclude: p.GatewayExclude, Wait: wait, FirstToken: first, Timeout: time.Duration(p.TimeoutSeconds) * time.Second,
 			Options: kvCacheOptions(p), Effort: p.Effort, DisableThinking: p.DisableThinking, Acquire: func(ctx context.Context) (func(), error) {
 				return queue.acquire(WithTask(ctx, gatewayTask))

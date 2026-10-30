@@ -39,3 +39,13 @@ func TestAIStatusFollowsTheEndpoint(t *testing.T) {
 	assert.False(t, got[0].Online)
 	assert.True(t, got[0].Error != "")
 }
+
+func TestLocalModelsSummary(t *testing.T) {
+	detail, err := localModelsSummary(llm.LocalCheck{Providers: []llm.ProviderCheck{{Name: "ollama", OK: true}}, Gateway: "ollama", OK: true})
+	require.NoError(t, err)
+	assert.Equal(t, detail, "1 local provider, gateway on ollama")
+
+	_, err = localModelsSummary(llm.LocalCheck{Providers: []llm.ProviderCheck{{Name: "ollama"}, {Name: "mlx", OK: true}}})
+	require.Error(t, err)
+	assert.Equal(t, err.Error(), "2 local providers, gateway off: 1 provider fails its check")
+}

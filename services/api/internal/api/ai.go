@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/url"
@@ -164,6 +165,11 @@ func (s *Server) handleAITest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{"provider": name}
+	// A local provider's server is also asked about its models and their
+	// real context, with model names only.
+	if c, ok := s.cfg.LLM.Check(r.Context(), name); ok {
+		out["check"] = c
+	}
 	models, err := s.cfg.LLM.Models(r.Context(), name)
 	if err != nil {
 		out["ok"], out["error"] = false, err.Error()
@@ -183,6 +189,26 @@ func (s *Server) handleAITest(w http.ResponseWriter, r *http.Request) {
 		out["ok"], out["reply"], out["model"] = true, resp.Text, resp.Model
 	}
 	writeJSON(w, 200, out)
+}
+
+// localModelsSummary is the one line of the local models' check on the
+// operator overview.
+func localModelsSummary(lc llm.LocalCheck) (string, error) {
+	failing := 0
+	for _, c := range lc.Providers {
+		if !c.OK {
+			failing++
+		}
+	}
+	gateway := "gateway off"
+	if lc.Gateway != "" {
+		gateway = "gateway on " + lc.Gateway
+	}
+	detail := plural(len(lc.Providers), "local provider", "local providers") + ", " + gateway
+	if failing > 0 {
+		return "", fmt.Errorf("%s: %s its check", detail, plural(failing, "provider fails", "providers fail"))
+	}
+	return detail, nil
 }
 
 type aiTaskRequest struct {

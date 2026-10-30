@@ -614,6 +614,16 @@ export interface Attention {
 export interface AdminOrg extends AccountOrg { members: number; roles: Record<string, number>; repositories: number; lost_access: number; teams: number }
 export interface AdminUser extends AccountUser { disabled_at?: string; orgs: { slug: string; name: string; role: Role }[]; active_keys: number; last_key_use?: string }
 export interface HealthCheck { ok: boolean; detail: string; seconds: number }
+// A local model server's answer about the models config/llm.yaml names
+// (llm.ProviderCheck). Context figures are 0 when the server does not say.
+export interface ProviderCheck {
+  name: string; server?: string; version?: string; reachable: boolean
+  model: string; model_found: boolean; embedding_model?: string; embedding_found?: boolean
+  tasks: string[]; gateway: boolean
+  context_window: number; model_context?: number; num_ctx?: number; loaded_context?: number
+  ok: boolean; problems: string[]; warnings: string[]; seconds: number
+}
+export interface LocalModelsCheck { providers: ProviderCheck[]; gateway: string; ok: boolean; problems: string[]; warnings: string[] }
 
 // Platform statistics (GET /api/v1/admin/stats/*): aggregates only, root
 // never counted. Tiles a later phase fills are null until then. 90d and
@@ -726,7 +736,8 @@ export interface AlertRuleItem { name: string; group: string; state: string; sev
 export interface StatsAlerts { configured: boolean; reachable: boolean; firing: number; pending: number; alerts: AlertItem[]; rules: AlertRuleItem[] }
 export interface AdminHealth {
   version: string; checked: string
-  graph: HealthCheck; accounts: HealthCheck; metrics: HealthCheck; audit: HealthCheck
+  graph: HealthCheck; accounts: HealthCheck; metrics: HealthCheck; audit: HealthCheck; models: HealthCheck
+  local_models?: LocalModelsCheck
   counts: { users: number; suspended: number; admins: number; orgs: number; graphs: number; audit_events_checked: number }
   jobs: { total: number; running: number; succeeded: number; failed: number }
   unowned: string[]
