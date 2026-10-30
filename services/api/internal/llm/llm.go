@@ -175,9 +175,13 @@ type ProviderConfig struct {
 	// organisation; each organisation can add its own (docs/operations/gateway.md).
 	GatewayExclude []string `yaml:"gateway_exclude" json:"gateway_exclude,omitempty"`
 	// GatewayWaitSeconds is how long a gateway request waits for a free slot
-	// on this provider before it goes to the cloud: 1 to 300, default 60.
+	// on this provider before it goes to the cloud: 1 to 300, default 30.
 	// The answer itself is bounded by TimeoutSeconds.
 	GatewayWaitSeconds int `yaml:"gateway_wait_seconds" json:"gateway_wait_seconds,omitempty"`
+	// GatewayFirstTokenSeconds is how long a gateway request that has the
+	// slot waits for the model's first token before it goes to the cloud:
+	// 1 to 600, default 90. Prefill is what makes long prompts slow.
+	GatewayFirstTokenSeconds int `yaml:"gateway_first_token_seconds" json:"gateway_first_token_seconds,omitempty"`
 	// Effort is the Anthropic output effort (low, medium, high, xhigh, max).
 	// OpenAI-compatible servers get it as reasoning_effort; "none" turns off
 	// thinking on Ollama, which ignores chat_template_kwargs.
