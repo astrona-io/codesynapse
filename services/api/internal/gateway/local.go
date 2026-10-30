@@ -30,6 +30,9 @@ const (
 	// the gateway sends it to the cloud instead (gateway_wait_seconds). The
 	// answer itself is bounded by the provider's timeout_seconds.
 	defaultWait = 60 * time.Second
+	// quickBody and quickMaxTokens bound a quick request (see quick).
+	quickBody      = 32 << 10
+	quickMaxTokens = 1024
 )
 
 // Usage is what the local model reported for one answer; zero when it
@@ -64,6 +67,9 @@ type Local struct {
 	ContextWindow int
 	// Acquire takes the local model's queue slot and returns its release.
 	Acquire func(ctx context.Context) (func(), error)
+	// AcquireFirst takes a slot ahead of the requests Acquire queued, for
+	// quick requests (see quick); nil means Acquire.
+	AcquireFirst func(ctx context.Context) (func(), error)
 	// Wait bounds the time in the queue; 0 means defaultWait.
 	Wait time.Duration
 	// Effort is sent as reasoning_effort ("none" turns thinking off on
@@ -86,8 +92,47 @@ func (l *Local) client() *http.Client {
 	return noRedirects
 }
 
-// SmallModel is the default Eligible: Claude's small model class.
-func SmallModel(model string) bool { return strings.Contains(strings.ToLower(model), "haiku") }
+// SmallModel is the default Eligible: Claude's small model class. It takes
+// every form Claude Code and the cloud platforms send (claude-haiku-5-5, a
+// dated claude-haiku-5-5-20261001, claude-3-5-haiku-latest, Bedrock's
+// us.anthropic.claude-haiku-5-5-20261001-v1:0, Vertex's
+// claude-haiku-5-5@20261001, a [1m] suffix) by its words: "haiku" and
+// "claude" as whole words and no bigger class beside them, so a name that
+// only contains the letters, such as another vendor's haiku-7b, is not one.
+func SmallModel(model string) bool {
+	words := strings.FieldsFunc(strings.ToLower(model), func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	})
+	var haiku, claude bool
+	for _, w := range words {
+		switch w {
+		case "haiku":
+			haiku = true
+		case "claude":
+			claude = true
+		case "sonnet", "opus", "fable":
+			return false
+		}
+	}
+	return haiku && (claude || len(words) == 1)
+}
+
+// quick says whether a request is a short side request Claude Code sends
+// beside the main agent (a title, a summary, a command's safety check): no
+// tools, a small body, and the small model or a short answer. These finish
+// fastest and are the likeliest to be kept, so they queue first.
+func quick(in anthropicIn, size int) bool {
+	return len(in.Tools) == 0 && size <= quickBody &&
+		(SmallModel(in.Model) || (in.MaxTokens > 0 && in.MaxTokens <= quickMaxTokens))
+}
+
+// acquirer picks the queue slot a request waits for: ahead for a quick one.
+func (l *Local) acquirer(in anthropicIn, size int) func(context.Context) (func(), error) {
+	if l.AcquireFirst != nil && quick(in, size) {
+		return l.AcquireFirst
+	}
+	return l.Acquire
+}
 
 type localFirstKey struct{}
 
@@ -379,7 +424,7 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 	}
 	u := Usage{Asked: true}
 	release := func() {}
-	if l.Acquire != nil {
+	if acquire := l.acquirer(in, len(body)); acquire != nil {
 		wait := l.Wait
 		if wait <= 0 {
 			wait = defaultWait
@@ -387,7 +432,7 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 		queued := time.Now()
 		qctx, cancel := context.WithTimeout(ctx, wait)
 		var err error
-		release, err = l.Acquire(qctx)
+		release, err = acquire(qctx)
 		cancel()
 		u.Wait = time.Since(queued)
 		if err != nil {
