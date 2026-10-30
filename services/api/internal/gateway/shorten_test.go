@@ -364,7 +364,8 @@ func TestFallthroughIsShortened(t *testing.T) {
 			}
 			var meta Meta
 			g.Done = func(_ context.Context, m Meta, _ int, _ time.Duration) { meta = m }
-			ctx := sessionCtx(t, "sess")
+			// Thinking requests reach the cloud only with local thinking off.
+			ctx := WithLocalThinking(sessionCtx(t, "sess"), false)
 			if tc.first != nil {
 				ctx = WithLocalFirst(ctx, *tc.first)
 			}

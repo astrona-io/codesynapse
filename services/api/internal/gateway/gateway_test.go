@@ -215,7 +215,7 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 			g.Done = func(_ context.Context, m Meta, _ int, _ time.Duration) { meta = m }
 			rec := httptest.NewRecorder()
 			r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(tc.body))
-			r = r.WithContext(WithLocalFirst(r.Context(), false))
+			r = r.WithContext(WithLocalThinking(WithLocalFirst(r.Context(), false), false))
 			r.Header.Set("X-Api-Key", "k")
 			g.Handler("/v1/messages")(rec, r)
 			assert.Equal(t, rec.Body.String(), "cloud")

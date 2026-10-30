@@ -250,6 +250,11 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 		s.accountError(w, err)
 		return r, false
 	}
+	thinking, err := s.cfg.Accounts.GatewayLocalThinking(r.Context(), m.Org.ID)
+	if err != nil {
+		s.accountError(w, err)
+		return r, false
+	}
 	id, err := s.cfg.Accounts.GatewayExecutionSession(r.Context(), p, m.Org.ID)
 	if err != nil {
 		s.problem(w, http.StatusForbidden, errors.New("this key cannot use the gateway"))
@@ -265,7 +270,7 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 		s.accountError(w, err)
 		return r, false
 	}
-	ctx = gateway.WithExclude(gateway.WithLocalFirst(ctx, first), exclude)
+	ctx = gateway.WithLocalThinking(gateway.WithExclude(gateway.WithLocalFirst(ctx, first), exclude), thinking)
 	return r.WithContext(gateway.WithShortenPrompts(gateway.WithPromptCapture(ctx, keep), shorten)), true
 }
 
@@ -273,7 +278,8 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 // session only) whether the organisation uses the agent gateway (on unless
 // switched off), whether the local model answers first (on unless switched
 // off), which models it never answers (local_exclude, empty unless set)
-// and whether it shortens typed prose bound for the cloud (on unless
+// whether it shortens typed prose bound for the cloud and whether requests
+// that ask for thinking go to the local model first (both on unless
 // switched off). A PUT changes only the fields it sends. "available" says
 // whether the operator turned the gateway on for the installation, and
 // "shorten_available" whether a local model can shorten prompts at all.
@@ -292,13 +298,14 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 			LocalFirst     *bool     `json:"local_first"`
 			LocalExclude   *[]string `json:"local_exclude"`
 			ShortenPrompts *bool     `json:"shorten_prompts"`
+			LocalThinking  *bool     `json:"local_thinking"`
 		}
 		if err := decodeJSON(w, r, &req); err != nil {
 			s.problem(w, http.StatusBadRequest, err)
 			return
 		}
-		if req.Enabled == nil && req.LocalFirst == nil && req.LocalExclude == nil && req.ShortenPrompts == nil {
-			s.problem(w, http.StatusBadRequest, errors.New("send enabled, local_first, local_exclude, shorten_prompts or several"))
+		if req.Enabled == nil && req.LocalFirst == nil && req.LocalExclude == nil && req.ShortenPrompts == nil && req.LocalThinking == nil {
+			s.problem(w, http.StatusBadRequest, errors.New("send enabled, local_first, local_exclude, shorten_prompts, local_thinking or several"))
 			return
 		}
 		// Refuse a bad list before anything changes, so a PUT is all or nothing.
@@ -334,6 +341,12 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if req.LocalThinking != nil {
+			if err := s.cfg.Accounts.SetGatewayLocalThinking(r.Context(), p, o.ID, *req.LocalThinking); err != nil {
+				s.accountError(w, err)
+				return
+			}
+		}
 	}
 	set, err := s.cfg.Accounts.GatewaySetting(r.Context(), p, o.ID)
 	if err != nil {
@@ -343,7 +356,7 @@ func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
 	shortenReady := s.cfg.LLM != nil && s.cfg.LLM.CanShorten()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled": set.Enabled, "local_first": set.LocalFirst, "local_exclude": set.LocalExclude,
-		"shorten_prompts": set.ShortenPrompts, "installation_exclude": s.gatewayInstallExclude(),
+		"shorten_prompts": set.ShortenPrompts, "local_thinking": set.LocalThinking, "installation_exclude": s.gatewayInstallExclude(),
 		"available": s.cfg.Gateway, "shorten_available": shortenReady,
 	})
 }

@@ -7,7 +7,7 @@
 
 Coding assistants send many small background requests, such as naming a chat or summarising a line. Paying a big cloud model for those wastes money and tokens. The gateway sits between the assistant and the cloud and does three things:
 
-1. **Answers locally first.** Every request is offered to the local model when it uses no thinking and no images (tools are fine) and fits the local model's context: the body size divided by four plus `max_tokens` must be at most the provider's `context_window`, and the body at most 4 MiB. When `context_window` is not known, the old limit of 256 KiB applies. When the request offers tools, the local model may call them and read their results; the call is checked first, and if the model gets it wrong (a tool that was not offered, broken arguments) the cloud answers instead. Tool data stays on your side. Nothing is sent to the cloud.
+1. **Answers locally first.** Every request is offered to the local model when it has no images (tools are fine) and fits the local model's context: the body size divided by four plus `max_tokens` must be at most the provider's `context_window`, and the body at most 4 MiB. When `context_window` is not known, the old limit of 256 KiB applies. When the request offers tools, the local model may call them and read their results; the call is checked first, and if the model gets it wrong (a tool that was not offered, broken arguments) the cloud answers instead. Tool data stays on your side. Nothing is sent to the cloud. A request that asks for thinking, as most agent turns do, is answered locally without thinking, and Claude's earlier thinking blocks are left out of what the local model sees (they are signed reasoning only Claude reads). If the local answer fails, the cloud gets the request unchanged, thinking blocks included.
 2. **Checks the answer for the main model.** A request for a larger model than haiku is buffered: if the local answer is empty, stopped at `max_tokens` or broke off, the cloud answers instead. Haiku requests keep streaming as they are written.
 3. **Passes everything else on.** Other requests go to `api.anthropic.com` and nowhere else. The assistant's own Anthropic credential is used for that one request and is never stored.
 4. **Falls back safely.** If no local slot is free within 60 seconds (`gateway_wait_seconds`), or the local model fails or answers with an error, nothing has been written yet and the request goes to the cloud instead. The wait covers only the queue for a free slot; once the local model has started, the provider's `timeout_seconds` bounds the answer.
@@ -29,7 +29,7 @@ The gateway is on by default, and it needs accounts (a PostgreSQL database). Two
 | `CODESYNAPSE_GATEWAY=false` | The operator, on the API | Off for the whole installation |
 | **Settings → Organisation → Agent gateway** | An organisation owner or admin, signed in on the dashboard | Off for that organisation only. Its keys get `403` from the gateway |
 
-The same panel has **Answer with the local model first** (on by default; `local_first` on `PUT /api/v1/accounts/orgs/{org}/gateway`, which changes only the fields it is sent). It also has **Shorten typed prompts before they go to the cloud** (on by default; `shorten_prompts`, see below). The switches are audited, as `org.gateway.set`, `org.gateway.local_first.set` and `org.gateway.shorten_prompts.set`. None can be changed with an API key. If the operator switched the gateway off, the Settings page says so, and requests are refused even when the organisation switch is on.
+The same panel has **Answer with the local model first** (on by default; `local_first` on `PUT /api/v1/accounts/orgs/{org}/gateway`, which changes only the fields it is sent). It also has **Answer thinking requests with the local model first** (on by default; `local_thinking`; off sends every request that asks for thinking or carries thinking blocks straight to the cloud) and **Shorten typed prompts before they go to the cloud** (on by default; `shorten_prompts`, see below). The switches are audited, as `org.gateway.set`, `org.gateway.local_first.set`, `org.gateway.local_thinking.set` and `org.gateway.shorten_prompts.set`. None can be changed with an API key. If the operator switched the gateway off, the Settings page says so, and requests are refused even when the organisation switch is on.
 
 ## Keep some models away from the local model
 
@@ -135,7 +135,7 @@ The reasons a request was not answered locally are a fixed list:
 |---|---|
 | `not_eligible` | The organisation answers only haiku-class requests locally, and this one asked for a larger model |
 | `too_large` | The request does not fit the local model's context or the body limit |
-| `has_thinking` | The request asks for thinking or sends thinking back |
+| `has_thinking` | The request asks for thinking or sends thinking back, and the organisation turned `local_thinking` off |
 | `has_image` | The request carries an image or a document, also inside a tool result |
 | `excluded` | The model is on the installation's or organisation's exclude list |
 | `no_local_model` | No local provider with `gateway: true` is configured |

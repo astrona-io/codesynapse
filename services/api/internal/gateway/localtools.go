@@ -42,9 +42,10 @@ type block struct {
 	IsError   bool            `json:"is_error"`
 }
 
-// convertMessage turns one Anthropic message into OpenAI messages. Images,
-// thinking and any other block make the request ineligible.
-func convertMessage(m anthropicMsg) ([]oaMsg, bool) {
+// convertMessage turns one Anthropic message into OpenAI messages. Images
+// and any other block make the request ineligible, and so does thinking
+// unless dropThinking leaves the assistant's thinking blocks out.
+func convertMessage(m anthropicMsg, dropThinking bool) ([]oaMsg, bool) {
 	if m.Role != "user" && m.Role != "assistant" {
 		return nil, false
 	}
@@ -63,6 +64,7 @@ func convertMessage(m anthropicMsg) ([]oaMsg, bool) {
 		switch {
 		case b.Type == "text":
 			texts = append(texts, b.Text)
+		case dropThinking && m.Role == "assistant" && (b.Type == "thinking" || b.Type == "redacted_thinking"):
 		case b.Type == "tool_use" && m.Role == "assistant":
 			args := strings.TrimSpace(string(b.Input))
 			if args == "" || args == "null" {

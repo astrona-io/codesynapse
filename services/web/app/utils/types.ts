@@ -438,6 +438,9 @@ export interface OrgGateway {
   // The local model shortens prose people type before a request goes to
   // the cloud; on unless an owner or admin turned it off.
   shorten_prompts: boolean
+  // Requests that ask for thinking go to the local model first too; on
+  // unless an owner or admin turned it off.
+  local_thinking: boolean
   // A local model is routed to "compress" and the installation allows it.
   shorten_available: boolean
 }
