@@ -73,7 +73,7 @@ func (o *serveOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.llmConfig, "llm-config", app.Getenv("CODESYNAPSE_LLM_CONFIG", "config/llm.yaml"), "AI provider configuration (YAML); optional")
 	f.StringVar(&o.workspace, "workspace", app.Getenv("CODESYNAPSE_WORKSPACE", ""), "Writable directory for repositories registered by git URL")
 	f.BoolVar(&o.vulnScan, "vulns", app.Getenv("CODESYNAPSE_VULN_SCAN", "") == "true", "Check dependencies against osv.dev on ingest (sends module paths and versions)")
-	f.BoolVar(&o.licenses, "license-lookup", app.Getenv("CODESYNAPSE_LICENSE_LOOKUP", "") == "true", "Ask deps.dev for dependency licences not found on disk, which dependencies are deprecated or behind their latest release, and the Go module proxy for retracted Go module versions (sends package names and versions)")
+	f.BoolVar(&o.licenses, "license-lookup", app.Getenv("CODESYNAPSE_LICENSE_LOOKUP", "") == "true", "Ask deps.dev for dependency licences not found on disk, which dependencies are deprecated or behind their latest release and the OpenSSF Scorecard of their source projects, and the Go module proxy for retracted Go module versions (sends package names and versions)")
 	f.BoolVar(&o.dataflow, "dataflow", app.Getenv("CODESYNAPSE_INGEST_DATAFLOW", "") == "true", "Resolve Go calls through function values with SSA and VTA on ingest (slower; edges marked dataflow)")
 	f.BoolVar(&o.moduleProxy, "go-module-download", app.Getenv("CODESYNAPSE_GO_MODULE_DOWNLOAD", "true") != "false", "Let ingest fetch missing Go modules from the public module proxy only, so dependencies are type-checked")
 	f.BoolVar(&o.network, "allow-network", app.Getenv("CODESYNAPSE_ALLOW_NETWORK", "") == "true", "Let ingest download Go modules (trusted repos only)")
@@ -225,6 +225,12 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 			return err
 		}
 	}
+	var alerts *telemetry.AlertsClient
+	if !o.worker {
+		if alerts, err = telemetry.NewAlertsClient(os.Getenv(app.EnvAlertsURL)); err != nil {
+			return fmt.Errorf("%s: %w", app.EnvAlertsURL, err)
+		}
+	}
 	var roles []string // all: this process runs every job
 	switch {
 	case o.worker:
@@ -238,7 +244,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		AllowPush: pushAllowed(app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true", o.worker, roles, o.EC.Logger),
 		Accounts:  acc, ServiceToken: os.Getenv(EnvToken), SecureCookies: app.Getenv("CODESYNAPSE_COOKIE_SECURE", "true") == "true",
 		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour, AuditHot: time.Duration(hotDays()) * 24 * time.Hour, AuditArchive: auditArchive,
-		Metrics: metricsQuerier(), IngestMetrics: ingestMetrics,
+		Metrics: metricsQuerier(), IngestMetrics: ingestMetrics, Alerts: alerts,
 		TrustedProxies: trusted, PublicMCPURL: app.Getenv("CODESYNAPSE_PUBLIC_MCP_URL", "http://localhost:8090/mcp"),
 		PublicAPIURL:   app.Getenv("CODESYNAPSE_PUBLIC_API_URL", ""),
 		AgentRulesFile: os.Getenv("CODESYNAPSE_AGENT_RULES_FILE"),

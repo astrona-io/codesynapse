@@ -29,12 +29,13 @@ func edgeKinds() []string {
 var (
 	nodeTexts = []string{"nid", "kind", "repo", "name", "qualified_name", "package", "file", "signature", "summary", "body_hash", "clone_hash", "clone_sig", "via", "doc_type", "status", "meta", "duplicates",
 		"time", "head", "root", "branch", "metrics", "severity", "rule", "ignore", "version", "fixed_version", "reachability", "url",
-		"liveness", "cleanup", "licenses", "coverage", "language", "ecosystem", "license", "license_source", "symbol_id", "revision", "identities", "analysis", "latest", "deprecated", "retracted",
+		"liveness", "cleanup", "licenses", "coverage", "language", "ecosystem", "license", "license_source", "symbol_id", "revision", "identities", "analysis", "latest", "deprecated", "retracted", "scorecard_date",
 		// The publication run that last wrote the node (replace.go).
 		"run"}
-	nodeLongs = []string{"bytes", "start_line", "end_line", "complexity", "loc", "level", "churn", "roots", "behind"}
-	nodeBools = []string{"exported", "is_test", "indirect", "dev", "code_absent"}
-	nodeLists = []string{"cwe", "aliases", "security_tags"}
+	nodeLongs   = []string{"bytes", "start_line", "end_line", "complexity", "loc", "level", "churn", "roots", "behind"}
+	nodeBools   = []string{"exported", "is_test", "indirect", "dev", "code_absent"}
+	nodeDoubles = []string{"scorecard"}
+	nodeLists   = []string{"cwe", "aliases", "security_tags", "scorecard_checks"}
 )
 
 // indexedNodeColumns are the node columns the indexes below are made of.
@@ -44,9 +45,10 @@ var indexedNodeColumns = []string{"repo", "kind", "file"}
 // NOT NULL, which lets UPSERT add to it on a vertex that does not exist yet.
 type column struct{ name, typ, def string }
 
-func texts(names ...string) []column { return typed("string", names) }
-func longs(names ...string) []column { return typed("int64", names) }
-func bools(names ...string) []column { return typed("bool", names) }
+func texts(names ...string) []column   { return typed("string", names) }
+func longs(names ...string) []column   { return typed("int64", names) }
+func bools(names ...string) []column   { return typed("bool", names) }
+func doubles(names ...string) []column { return typed("double", names) }
 
 // defaulted are columns that are never NULL, so a read needs no nil case.
 func defaulted(typ, def string, names ...string) []column {
@@ -104,7 +106,7 @@ func (s schemaItem) kind() string {
 // schemaItems is everything the store keeps. A tag or edge type an older
 // version created gets the columns it lacks appended.
 var schemaItems = func() []schemaItem {
-	node := slices.Concat(texts(nodeTexts...), longs(nodeLongs...), bools(nodeBools...), texts(nodeLists...))
+	node := slices.Concat(texts(nodeTexts...), longs(nodeLongs...), bools(nodeBools...), doubles(nodeDoubles...), texts(nodeLists...))
 	// A composite index misses rows whose later columns are NULL, and a
 	// lookup by one column may be served by any index that starts with it, so
 	// every indexed column is never NULL.
@@ -115,7 +117,10 @@ var schemaItems = func() []schemaItem {
 	}
 	items := []schemaItem{
 		// The lease a publisher holds on a repository (replace.go).
-		{name: "ingest_head", cols: slices.Concat(texts("repo", "stage_run"), longs("stage_expires"))},
+		// Every lease write sets stage_expires; the index lets the size
+		// sampler see whether any lease is held (sizes.go).
+		{name: "ingest_head", cols: slices.Concat(texts("repo", "stage_run"), counters("stage_expires")),
+			indexes: []index{{"ingest_head_by_expires", []indexCol{{"stage_expires", 0}}}}},
 		{name: "node", cols: node, indexes: []index{
 			{"node_by_repo", []indexCol{{"repo", 64}}},
 			{"node_by_kind", []indexCol{{"kind", 24}}},

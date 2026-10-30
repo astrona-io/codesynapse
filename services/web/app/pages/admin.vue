@@ -16,6 +16,7 @@ if (route.path === '/admin') await navigateTo('/admin/overview', { replace: true
         <NuxtLink to="/admin/orgs">Organisations</NuxtLink>
         <NuxtLink to="/admin/users">Users</NuxtLink>
         <NuxtLink to="/admin/stats">Statistics</NuxtLink>
+        <NuxtLink to="/admin/queue">Model queue</NuxtLink>
         <NuxtLink to="/admin/audit">Audit log</NuxtLink>
       </nav>
       <NuxtPage />

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/astrona-io/codesynapse/internal/fetchsource"
 	"github.com/astrona-io/codesynapse/internal/ghtools"
 	"github.com/astrona-io/codesynapse/internal/gittools"
 	"github.com/astrona-io/codesynapse/internal/gitx"
@@ -143,7 +144,11 @@ func (b *bridge) reportLocal(ctx context.Context, tool string, d time.Duration, 
 	b.mu.Lock()
 	client := cmp.Or(b.client, "claude-code")
 	b.mu.Unlock()
-	body := localUsage{Tool: tool, Client: client, Repo: b.checkoutRepo(ctx), DurationMs: int(d.Milliseconds()), ResponseTokens: tokens, Failed: failed}
+	repo := ""
+	if tool != fetchsource.Tool { // a fetched page has nothing to do with the checkout
+		repo = b.checkoutRepo(ctx)
+	}
+	body := localUsage{Tool: tool, Client: client, Repo: repo, DurationMs: int(d.Milliseconds()), ResponseTokens: tokens, Failed: failed}
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	err := b.report.do(rctx, http.MethodPost, "/api/v1/usage/local", body, nil)

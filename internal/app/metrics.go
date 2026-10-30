@@ -18,6 +18,9 @@ const (
 	EnvMetricsPassword = "CODESYNAPSE_METRICS_PASSWORD" //nolint:gosec // env var name, not a credential
 	EnvMetricsExporter = "CODESYNAPSE_METRICS_EXPORTER"
 	EnvEnvironment     = "CODESYNAPSE_ENVIRONMENT"
+	// EnvAlertsURL is the internal vmalert the platform Statistics page
+	// reads alerts from: https, or http to a service name only.
+	EnvAlertsURL = "CODESYNAPSE_ALERTS_URL"
 )
 
 // StartMetrics exports one cumulative metric stream every 15s when a URL is
