@@ -42,14 +42,15 @@ const (
 )
 
 // Tasks a provider can be routed to.
-var Tasks = []string{"security-triage", "review", "briefing", "fix", "memory", "embeddings", "code-annotation", "pr-summary", "cleanup-briefing", "local-answer", "local-draft", "compress"}
+var Tasks = []string{"security-triage", "review", "briefing", "fix", "memory", "embeddings", "code-annotation", "pr-summary", "cleanup-briefing", "local-answer", "local-draft", "source-extract", "compress"}
 
 // LocalTasks run only on a local model: they read a diff, the cleanup plan
 // or files of the developer's checkout (local-answer and local-draft, the
-// ask_local and local_draft tools).
+// ask_local and local_draft tools) or a web page and the agent's question
+// (source-extract, tier 2 of fetch_source).
 // Without a routed local provider they pick the first local one; with none,
 // the task is unavailable.
-var LocalTasks = []string{"pr-summary", "cleanup-briefing", "local-answer", "local-draft", "compress"}
+var LocalTasks = []string{"pr-summary", "cleanup-briefing", "local-answer", "local-draft", "source-extract", "compress"}
 
 // ErrNoLocalModel means a local-only task has no local provider to run on.
 var ErrNoLocalModel = errors.New("this task runs only on a local model and none is configured")

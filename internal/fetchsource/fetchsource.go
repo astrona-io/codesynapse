@@ -114,8 +114,17 @@ type Out struct {
 	SectionsKept int  `json:"sections_kept"`
 	Pruned       bool `json:"pruned,omitempty"`
 	// Truncated is true when the text was cut at MaxAnswer bytes.
-	Truncated bool   `json:"truncated,omitempty"`
-	Text      string `json:"text"`
+	Truncated bool `json:"truncated,omitempty"`
+	// Extracted is true when a local model shortened the pruned text for
+	// the question (tier 2, extract.go); ExtractModel names it and
+	// ExtractDropped counts the code snippets it wrote that the page lacks.
+	// ExtractNote says why a long page was not shortened, or what the
+	// check changed.
+	Extracted      bool   `json:"extracted,omitempty"`
+	ExtractModel   string `json:"extract_model,omitempty"`
+	ExtractDropped int    `json:"extract_dropped,omitempty"`
+	ExtractNote    string `json:"extract_note,omitempty"`
+	Text           string `json:"text"`
 }
 
 // trackingParams are dropped from the cache key and the request: they

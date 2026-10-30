@@ -193,7 +193,7 @@ type aiTaskRequest struct {
 // handleAITask queues an AI task; the job result is the review id.
 func (s *Server) handleAITask(w http.ResponseWriter, r *http.Request) {
 	repo, task := r.PathValue("repo"), r.PathValue("task")
-	if !slices.Contains(llm.Tasks, task) || task == "fix" || task == "memory" || task == "embeddings" || task == taskLocalAnswer || task == taskLocalDraft {
+	if !slices.Contains(llm.Tasks, task) || task == "fix" || task == "memory" || task == "embeddings" || task == taskLocalAnswer || task == taskLocalDraft || task == taskSourceExtract {
 		s.problem(w, 400, errors.New("task must be one of security-triage, review, briefing, pr-summary, cleanup-briefing"))
 		return
 	}

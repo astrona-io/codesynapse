@@ -14,6 +14,7 @@ This page covers why you would run one, what the two recommended Qwen models nee
 | Agents ask it about files instead of reading them (`ask_local`) | `local-answer` | yes |
 | It briefs the agent on each code prompt before the agent starts (the plugin's pre-brief) | `local-answer` | yes |
 | Agents have it draft self-contained code, which they check and apply themselves (`local_draft`) | `local-draft` | yes |
+| It shortens a long web page to the parts that answer the agent's question (`fetch_source` with a `question`) | `source-extract` | yes |
 | Older chat turns become memory facts before a compaction | `memory` | yes |
 | Recall by meaning (embeddings) | `embeddings` | yes, with `embedding_model` |
 | Change summaries, cleanup briefings | `pr-summary`, `cleanup-briefing` | yes |
