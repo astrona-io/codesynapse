@@ -15,6 +15,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
 // Model queue statistics (docs/operations/local-models.md): how long model
@@ -72,7 +73,7 @@ func queuePanels(sel queueSelectors, platform bool) map[string]seriesPanel {
 		load = append(load, seriesQuery{name: "slots", expr: `sum(max_over_time(` + queueCapacity + `[$w]))`})
 		loadHelp += " Slots is max_concurrent summed over the processes that run model requests: running at slots means the endpoint is full."
 	}
-	return map[string]seriesPanel{
+	panels := map[string]seriesPanel{
 		"queue_wait": {Title: "Model queue wait", Unit: "seconds", Kind: "gauge",
 			Help:  "Median and 95th percentile time " + who + " model requests waited for a queue slot, by provider.",
 			Empty: "No model request in this window.",
@@ -93,6 +94,13 @@ func queuePanels(sel queueSelectors, platform bool) map[string]seriesPanel {
 			Empty:   "No model answer in this window.",
 			queries: []seriesQuery{{expr: `label_join(histogram_quantile(0.95, sum by (le, llm_provider, basis) (increase(` + sel.start + `[$w]))), "series", " ", "llm_provider", "basis")`, by: "series"}}},
 	}
+	// Every queue series carries llm_provider (capacity included), so a
+	// model's tab can ask for its own lines only.
+	for name, p := range panels {
+		p.byProvider = true
+		panels[name] = p
+	}
+	return panels
 }
 
 func init() {
@@ -156,6 +164,12 @@ type QueueThresholds struct {
 // QueueProvider is one provider's queue.
 type QueueProvider struct {
 	Name string `json:"name"`
+	// Configured: the provider is in the installation's model
+	// configuration, so its charts can be asked for on their own
+	// (?provider=). A provider only the measurements still know is not.
+	Configured bool `json:"configured"`
+	// Models are the configured chat and embedding models.
+	Models []string `json:"models"`
 	// Slots is max_concurrent in each process (0: unlimited or not
 	// configured here); Capacity is the slots summed over the processes
 	// that reported, platform view only.
@@ -167,7 +181,12 @@ type QueueProvider struct {
 	// measurements, which is not the same as no requests.
 	Cells    []*QueueCell `json:"cells"`
 	Requests float64      `json:"requests"`
-	Verdict  QueueVerdict `json:"verdict"`
+	// P95 and Share are over the whole period: the 95th percentile wait
+	// and the share of requests that found every slot taken. Nil without
+	// requests.
+	P95     *float64     `json:"p95"`
+	Share   *float64     `json:"share"`
+	Verdict QueueVerdict `json:"verdict"`
 }
 
 // QueueCell sums every step that fell into one weekday and slot. Avg, P95
@@ -321,8 +340,17 @@ func (s *Server) queuePeak(ctx context.Context, scope string, weeks int, now tim
 	}
 
 	slotsOf := map[string]int{}
+	modelsOf := map[string][]string{}
 	if s.cfg.LLM != nil {
 		for _, p := range s.cfg.LLM.Configs() {
+			models := []string{}
+			for _, m := range []string{p.Model, p.EmbeddingModel} {
+				// "auto" before the server answered names no model yet.
+				if m != "" && m != llm.Auto && !slices.Contains(models, m) {
+					models = append(models, m)
+				}
+			}
+			modelsOf[p.Name] = models
 			if n := p.QueueSlots(); n > 0 {
 				slotsOf[p.Name] = n
 				if _, ok := folded[p.Name]; !ok {
@@ -337,7 +365,12 @@ func (s *Server) queuePeak(ctx context.Context, scope string, weeks int, now tim
 		if name == "" || name == "none" {
 			continue // a provider the telemetry allowlist did not know
 		}
-		p := QueueProvider{Name: name, Slots: slotsOf[name], Cells: f.publish(), Requests: f.requests()}
+		models, configured := modelsOf[name]
+		if models == nil {
+			models = []string{}
+		}
+		p := QueueProvider{Name: name, Configured: configured, Models: models, Slots: slotsOf[name], Cells: f.publish(), Requests: f.requests()}
+		p.P95, p.Share = f.overall()
 		p.Running, p.Waiting = valueOf(running, name), valueOf(waiting, name)
 		if capacity != nil {
 			p.Capacity = valueOf(capacity, name)
@@ -514,6 +547,22 @@ func (f *queueFold) requests() float64 {
 		}
 	}
 	return total
+}
+
+// overall is the p95 wait and the share that found the endpoint full over
+// every cell; nil without requests.
+func (f *queueFold) overall() (p95, share *float64) {
+	var acc queueAcc
+	for _, c := range f.cells {
+		acc.merge(c)
+	}
+	if v, ok := acc.quantile(0.95); ok {
+		p95 = &v
+	}
+	if v, ok := acc.queued(); ok {
+		share = &v
+	}
+	return p95, share
 }
 
 var weekdayNames = [7]string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}

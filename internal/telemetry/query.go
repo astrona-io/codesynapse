@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -39,12 +40,32 @@ var ErrBadTenant = errors.New("telemetry: tenant filter must be organisation IDs
 // ErrBadRepository rejects repository names and absent tenant scope.
 var ErrBadRepository = errors.New("telemetry: repository filter requires an opaque repository ID and tenant scope")
 
+// ErrBadProvider rejects provider filters that are not plain provider names.
+var ErrBadProvider = errors.New("telemetry: provider filter must be a plain provider name")
+
+// providerRe is what a provider name may hold to reach a label matcher: the
+// caller checks it against the configured providers, this keeps quotes,
+// backslashes and regular expression syntax out of the filter whatever the
+// configuration says.
+var providerRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
 // QueryRange runs a MetricsQL range query. tenants, when not nil, restricts
 // every series to those tenant_id values through VictoriaMetrics'
 // extra_filters, so the database enforces the scope whatever the query
 // says; an empty non-nil list matches nothing.
 func (q *Querier) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration, tenants []string) ([]Series, error) {
-	return q.queryRange(ctx, expr, start, end, step, tenants, "")
+	return q.queryRange(ctx, expr, start, end, step, tenants, "", "")
+}
+
+// QueryRangeForProvider is QueryRange limited to one llm_provider, a name
+// the caller took from the configured providers. The provider joins the
+// tenant filter in one extra_filters selector: VictoriaMetrics ORs separate
+// ones, so a second selector would widen the scope instead of narrowing it.
+func (q *Querier) QueryRangeForProvider(ctx context.Context, expr string, start, end time.Time, step time.Duration, tenants []string, provider string) ([]Series, error) {
+	if !providerRe.MatchString(provider) {
+		return nil, ErrBadProvider
+	}
+	return q.queryRange(ctx, expr, start, end, step, tenants, "", provider)
 }
 
 // QueryRangeForRepo intersects a trusted repository-entry ID with tenant scope.
@@ -52,15 +73,16 @@ func (q *Querier) QueryRangeForRepo(ctx context.Context, expr string, start, end
 	if tenants == nil || !tenantRe.MatchString(repositoryID) {
 		return nil, ErrBadRepository
 	}
-	return q.queryRange(ctx, expr, start, end, step, tenants, repositoryID)
+	return q.queryRange(ctx, expr, start, end, step, tenants, repositoryID, "")
 }
 
-func (q *Querier) queryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration, tenants []string, repositoryID string) ([]Series, error) {
+func (q *Querier) queryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration, tenants []string, repositoryID, provider string) ([]Series, error) {
 	v := url.Values{}
 	v.Set("query", expr)
 	v.Set("start", strconv.FormatInt(start.Unix(), 10))
 	v.Set("end", strconv.FormatInt(end.Unix(), 10))
 	v.Set("step", strconv.FormatInt(int64(step/time.Second), 10)+"s")
+	var matchers []string
 	if tenants != nil {
 		if len(tenants) == 0 {
 			return nil, nil
@@ -70,11 +92,19 @@ func (q *Querier) queryRange(ctx context.Context, expr string, start, end time.T
 				return nil, ErrBadTenant
 			}
 		}
-		filter := `tenant_id=~"` + strings.Join(tenants, "|") + `"`
+		matchers = append(matchers, `tenant_id=~"`+strings.Join(tenants, "|")+`"`)
 		if repositoryID != "" {
-			filter += `,repo="` + repositoryID + `"`
+			matchers = append(matchers, `repo="`+repositoryID+`"`)
 		}
-		v.Add("extra_filters[]", "{"+filter+"}")
+	}
+	if provider != "" {
+		if !providerRe.MatchString(provider) {
+			return nil, ErrBadProvider
+		}
+		matchers = append(matchers, `llm_provider="`+provider+`"`)
+	}
+	if len(matchers) > 0 {
+		v.Add("extra_filters[]", "{"+strings.Join(matchers, ",")+"}")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(q.URL, "/")+"/api/v1/query_range?"+v.Encode(), nil)
 	if err != nil {

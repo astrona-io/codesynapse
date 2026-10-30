@@ -366,6 +366,10 @@ export interface QueueVerdict {
 }
 export interface QueueProvider {
   name: string
+  // configured: in the installation's model configuration, so its charts
+  // can be asked for on their own; models: its chat and embedding models.
+  configured: boolean
+  models: string[]
   // slots: max_concurrent per process (0 unlimited); capacity: slots over
   // every reporting process, platform view only. running and waiting are
   // null when nothing reported in the last minutes.
@@ -374,6 +378,9 @@ export interface QueueProvider {
   running: number | null
   waiting: number | null
   requests: number
+  // Over the whole period; null without requests.
+  p95: number | null
+  share: number | null
   cells: (QueueCell | null)[]
   verdict: QueueVerdict
 }

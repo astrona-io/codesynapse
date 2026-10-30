@@ -48,6 +48,9 @@ type seriesPanel struct {
 	queries    []seriesQuery
 	platform   bool // cross-tenant: platform admins only
 	repository bool
+	// byProvider panels may be limited to one configured model provider
+	// (?provider=), which joins the tenant in VictoriaMetrics' filter.
+	byProvider bool
 }
 
 // Gateway queries shared by the organisation and platform panels; only the
@@ -433,6 +436,10 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusBadRequest, errors.New("range must be 1h, 6h, 24h, 7d or 30d"))
 		return
 	}
+	provider := r.URL.Query().Get("provider")
+	if !s.providerFilterOK(w, p, provider) {
+		return
+	}
 	var tenants []string // nil: every tenant (platform admins, single-tenant installs)
 	caller, _ := principal(r.Context())
 	if p.platform && !s.platformPanelView(w, r, []string{name}, rng) {
@@ -470,7 +477,7 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 		repositoryID = runs[0].RepositoryID
 		tenants = []string{reach.OrgID}
 	}
-	out, err := s.runPanel(r.Context(), name, rng, p, tenants, repositoryID)
+	out, err := s.runPanel(r.Context(), name, rng, p, tenants, repositoryID, provider)
 	if err != nil {
 		s.problem(w, http.StatusBadGateway, err)
 		return
@@ -479,10 +486,40 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// providerFilterOK answers 400 unless provider is empty, or the panel is
+// split by provider and provider names one of the configured providers.
+// The name reaches VictoriaMetrics only as a label matcher in
+// extra_filters, never in the query text.
+func (s *Server) providerFilterOK(w http.ResponseWriter, p seriesPanel, provider string) bool {
+	if provider == "" {
+		return true
+	}
+	if !p.byProvider {
+		s.problem(w, http.StatusBadRequest, errors.New("this panel is not split by model provider"))
+		return false
+	}
+	if !s.configuredProvider(provider) {
+		s.problem(w, http.StatusBadRequest, errors.New("unknown model provider"))
+		return false
+	}
+	return true
+}
+
+// configuredProvider reports whether name is a provider of the
+// installation's model configuration.
+func (s *Server) configuredProvider(name string) bool {
+	if s.cfg.LLM == nil || name == "" {
+		return false
+	}
+	_, ok := s.cfg.LLM.Config(name)
+	return ok
+}
+
 // runPanel runs a panel's queries over a range, its lines unfolded and
 // aligned on the same steps. tenants nil means every tenant; repositoryID
-// is set for repository panels.
-func (s *Server) runPanel(ctx context.Context, name, rng string, p seriesPanel, tenants []string, repositoryID string) (SeriesPanel, error) {
+// is set for repository panels; provider, already checked against the
+// configuration, limits a byProvider panel to that provider.
+func (s *Server) runPanel(ctx context.Context, name, rng string, p seriesPanel, tenants []string, repositoryID, provider string) (SeriesPanel, error) {
 	sr := seriesRanges[rng]
 	// The last step is the current one, still filling: recent activity
 	// shows at once instead of when the step completes.
@@ -503,9 +540,12 @@ func (s *Server) runPanel(ctx context.Context, name, rng string, p seriesPanel, 
 	for _, q := range p.queries {
 		var res []telemetry.Series
 		var err error
-		if p.repository {
+		switch {
+		case p.repository:
 			res, err = s.cfg.Metrics.QueryRangeForRepo(ctx, strings.ReplaceAll(q.expr, "$w", sr.window), start.Add(sr.step), end, sr.step, tenants, repositoryID)
-		} else {
+		case provider != "":
+			res, err = s.cfg.Metrics.QueryRangeForProvider(ctx, strings.ReplaceAll(q.expr, "$w", sr.window), start.Add(sr.step), end, sr.step, tenants, provider)
+		default:
 			res, err = s.cfg.Metrics.QueryRange(ctx, strings.ReplaceAll(q.expr, "$w", sr.window), start.Add(sr.step), end, sr.step, tenants)
 		}
 		if err != nil {

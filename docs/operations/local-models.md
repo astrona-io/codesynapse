@@ -128,7 +128,9 @@ A local provider answers one request at a time (`max_concurrent`, default 1). If
 
 ### Reading the queue
 
-Statistics → Model queue shows, per provider:
+Statistics → Model queue opens on an **Overview** tab: one row per model endpoint (provider) with its models, running now against its slots, waiting now, the p95 wait, the number of requests and the share that found it full over the period, and the verdict. The charts below it draw every endpoint. Each endpoint has a tab of its own (click its row, or link to it with `?model=<provider>`) with the tiles, the peak hours and the same charts for that endpoint only. The API accepts only a provider of `config/llm.yaml` there and answers 400 for any other name; the name reaches VictoriaMetrics as a label filter next to the organisation's, never in the query. An endpoint the configuration no longer has keeps its row and peak hours, but no charts of its own.
+
+Per provider the page shows:
 
 - **Running now** and **Waiting now**: requests holding a slot and requests in line, against the slots per process (`max_concurrent`). Administration → Model queue adds the installation's total slots over every API and worker process.
 - **Wait over time**: the median and 95th percentile time requests waited for a slot, and the share of requests that found every slot busy (waited longer than 5 ms). "Time until the answer starts" shows how long the model took once it had a slot: to the first token when the answer streams, or the whole answer when it does not.

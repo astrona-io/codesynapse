@@ -179,11 +179,15 @@ func (s *Server) handleAdminSeries(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusBadRequest, errors.New("range must be 1h, 6h, 24h, 7d or 30d"))
 		return
 	}
+	provider := q.Get("provider")
+	if !s.providerFilterOK(w, adminPanels[name].seriesPanel, provider) {
+		return
+	}
 	sq, ok := s.platformView(w, r, accounts.StatsRequest{Section: "series", Panel: name, Range: rng, OrgID: q.Get("org")})
 	if !ok {
 		return
 	}
-	s.writeAdminPanel(r.Context(), w, name, rng, sq.OrgID)
+	s.writeAdminPanel(r.Context(), w, name, rng, sq.OrgID, provider)
 }
 
 func (s *Server) handleAdminSeriesBatch(w http.ResponseWriter, r *http.Request) {
@@ -195,6 +199,13 @@ func (s *Server) handleAdminSeriesBatch(w http.ResponseWriter, r *http.Request) 
 	}
 	if _, ok := seriesRanges[rng]; !ok {
 		s.problem(w, http.StatusBadRequest, errors.New("range must be 1h, 6h, 24h, 7d or 30d"))
+		return
+	}
+	// An unknown provider refuses the whole batch, before the audit; a
+	// panel that is not split by provider answers 400 on its own below.
+	provider := q.Get("provider")
+	if provider != "" && !s.configuredProvider(provider) {
+		s.problem(w, http.StatusBadRequest, errors.New("unknown model provider"))
 		return
 	}
 	// Only known names reach the audit target; unknown ones answer 404
@@ -212,8 +223,10 @@ func (s *Server) handleAdminSeriesBatch(w http.ResponseWriter, r *http.Request) 
 	items := make([]SeriesBatchItem, len(names))
 	_ = forEach(r.Context(), len(names), func(ctx context.Context, i int) error { //nolint:errcheck // each item carries its own status
 		rec := &bufferedResponse{header: http.Header{}, status: http.StatusOK}
-		if _, ok := adminPanels[names[i]]; ok {
-			s.writeAdminPanel(ctx, rec, names[i], rng, sq.OrgID)
+		if p, ok := adminPanels[names[i]]; ok {
+			if s.providerFilterOK(rec, p.seriesPanel, provider) {
+				s.writeAdminPanel(ctx, rec, names[i], rng, sq.OrgID, provider)
+			}
 		} else {
 			s.problem(rec, http.StatusNotFound, errors.New("unknown panel"))
 		}
@@ -229,12 +242,12 @@ func (s *Server) handleAdminSeriesBatch(w http.ResponseWriter, r *http.Request) 
 
 // writeAdminPanel answers one authorised admin panel. orgID, already
 // checked against PostgreSQL, limits it to one organisation.
-func (s *Server) writeAdminPanel(ctx context.Context, w http.ResponseWriter, name, rng, orgID string) {
+func (s *Server) writeAdminPanel(ctx context.Context, w http.ResponseWriter, name, rng, orgID, provider string) {
 	if s.cfg.Metrics == nil {
 		s.problem(w, http.StatusConflict, errors.New("metrics are not configured (CODESYNAPSE_METRICS_URL)"))
 		return
 	}
-	out, err := s.adminPanelData(ctx, name, rng, orgID)
+	out, err := s.adminPanelData(ctx, name, rng, orgID, provider)
 	if err != nil {
 		s.problem(w, http.StatusBadGateway, err)
 		return
@@ -242,13 +255,13 @@ func (s *Server) writeAdminPanel(ctx context.Context, w http.ResponseWriter, nam
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) adminPanelData(ctx context.Context, name, rng, orgID string) (SeriesPanel, error) {
+func (s *Server) adminPanelData(ctx context.Context, name, rng, orgID, provider string) (SeriesPanel, error) {
 	p := adminPanels[name]
 	var tenants []string // nil: every tenant
 	if orgID != "" {
 		tenants = []string{orgID}
 	}
-	out, err := s.runPanel(ctx, name, rng, p.seriesPanel, tenants, "")
+	out, err := s.runPanel(ctx, name, rng, p.seriesPanel, tenants, "", provider)
 	if err != nil {
 		return SeriesPanel{}, err
 	}
