@@ -14,14 +14,18 @@ import (
 // action's prefix before the first dot, or "http" for "http <pattern>";
 // the code folds it into accounts.AuditFamilies.
 
-const auditHoursQuery = `SELECT date_trunc('hour', at AT TIME ZONE 'UTC'),
-  CASE WHEN action LIKE 'http %' THEN 'http' ELSE left(split_part(action, '.', 1), 40) END AS family, outcome, count(*)
-FROM events WHERE at >= $1 AND at < $2
-GROUP BY 1, 2, 3 ORDER BY 1, 2 COLLATE "C", 3 COLLATE "C" LIMIT $3`
+const auditHoursQuery = `SELECT hour, family, outcome, n FROM (
+  SELECT date_trunc('hour', at AT TIME ZONE 'UTC') AS hour,
+    CASE WHEN action LIKE 'http %' THEN 'http' ELSE left(split_part(action, '.', 1), 40) END AS family, outcome, count(*) AS n
+  FROM events WHERE at >= $1 AND at < $2
+  GROUP BY 1, 2, 3) h
+ORDER BY hour, family COLLATE "C", outcome COLLATE "C" LIMIT $3`
 
-const auditLoginsQuery = `SELECT left(detail, 40), count(*) FROM events
-WHERE action = 'user.login' AND outcome = 'failure' AND at >= $1 AND at < $2
-GROUP BY 1 ORDER BY 1 COLLATE "C" LIMIT 100`
+const auditLoginsQuery = `SELECT reason, n FROM (
+  SELECT left(detail, 40) AS reason, count(*) AS n FROM events
+  WHERE action = 'user.login' AND outcome = 'failure' AND at >= $1 AND at < $2
+  GROUP BY 1) l
+ORDER BY reason COLLATE "C" LIMIT 100`
 
 const auditSecurityQuery = `SELECT action, count(*) FROM events
 WHERE action = ANY($3) AND at >= $1 AND at < $2
