@@ -153,6 +153,28 @@ func (c apiClient) executionContext(ctx context.Context, primary, parent string)
 	return execution.With(ctx, id)
 }
 
+// hookRegisterBudget bounds the session registration of a hook, so an API
+// that accepts connections but does not answer delays the chat by seconds at
+// most.
+const hookRegisterBudget = 3 * time.Second
+
+// errServerOffline means the chat's bridge found CodeSynapse unreachable a
+// moment ago (codesynapseOffline), so a hook did not try.
+var errServerOffline = errors.New("the CodeSynapse server is offline")
+
+// registerWithin registers the session within d and returns ctx (not bounded
+// by d) carrying it.
+func (c apiClient) registerWithin(ctx context.Context, primary, parent string, d time.Duration) (context.Context, error) {
+	rctx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
+	got, err := c.executionContext(rctx, primary, parent)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := execution.From(got)
+	return execution.With(ctx, id)
+}
+
 // statusError is an answer of the API other than success. Its text is the
 // problem's detail, as before; Status lets callers tell a refusal from an
 // outage.
@@ -310,6 +332,8 @@ func failureReason(err error, apiURL string) string {
 		return "this repository is not indexed in CodeSynapse. Add it in the dashboard (Import) to turn memory on."
 	case errors.Is(err, execution.ErrMissing), errors.Is(err, execution.ErrConflict):
 		return "Claude Code gave no usable session id."
+	case errors.Is(err, errServerOffline):
+		return "the CodeSynapse server is offline; it is used again once it answers."
 	case errors.As(err, &netErr), errors.Is(err, syscall.ECONNREFUSED):
 		return "the CodeSynapse API is not reachable at " + apiURL + "."
 	}
@@ -375,13 +399,20 @@ func (o *recallOptions) recall(ctx context.Context) (string, error) {
 		o.skipped = true
 		return "", nil
 	}
+	if o.hook && codesynapseOffline(primary) {
+		return "", errServerOffline
+	}
 	if prompt {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, promptRecallBudget)
 		defer cancel()
 	}
 	var err error
-	ctx, err = c.executionContext(ctx, primary, parent)
+	if o.hook {
+		ctx, err = c.registerWithin(ctx, primary, parent, hookRegisterBudget)
+	} else {
+		ctx, err = c.executionContext(ctx, primary, parent)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -504,7 +535,14 @@ func (o *offloadOptions) offload(ctx context.Context) (int, error) {
 	}
 	c := newAPIClient(o.apiURL)
 	var err error
-	ctx, err = c.executionContext(ctx, in.SessionID, parent)
+	if o.hook {
+		if codesynapseOffline(in.SessionID) {
+			return 0, errServerOffline
+		}
+		ctx, err = c.registerWithin(ctx, in.SessionID, parent, hookRegisterBudget)
+	} else {
+		ctx, err = c.executionContext(ctx, in.SessionID, parent)
+	}
 	if err != nil {
 		return 0, err
 	}

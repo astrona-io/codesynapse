@@ -68,6 +68,15 @@ Cursor CLI currently drops per-call MCP IDs, so launching plain `cursor-agent` c
 
 The bridge registers the actual runtime ID and attaches both execution headers to every upstream tool call. Each chat has its own upstream MCP transport, including when the client shares a single native MCP process across chats. Discovery can list capabilities without a chat identity; it cannot execute tools. There is no model-selected identity or global “current chat” file. Each bridge permits at most 128 chats before requiring a restart.
 
+The per-chat transports share their bridge's view of whether the server can be reached. They follow the Claude Code bridge rules for an unreachable server (see [when the server is down](claude-code-bridge.md#when-the-server-is-down)):
+
+- Connections get a 5-second dial timeout.
+- A tool call while the server is unreachable gets the offline error result instead of a transport error.
+- A server restart (404 on the MCP session) is answered by opening the chat's session again and retrying once.
+- `notifications/tools/list_changed` goes out when the server is back.
+
+Chat identity rules do not change.
+
 Local correlation receipts contain only opaque call/thread IDs, their primary chat and expiry. They live in a private cache partitioned by API URL, credential hash and client; files are mode 0600. Call receipts expire after 30 minutes and are consumed once. Thread lineage and CLI switch markers expire after seven days. Each cache partition is bounded to 4096 receipts. They are never OTel attributes or conversation archives.
 
 Concurrency tests exercise two interleaved chats through stateful and stateless transports for both adapters, refusal of model-supplied IDs, and receipt credential isolation. Cursor desktop correlation is covered by wire fixtures; an actual installed desktop client has not been verified here. Verify a real tool call in two independent chats after installation, especially after client upgrades. Missing runtime metadata produces an explicit error instead of guessing an identity. See [runtime session setup](../AGENT_GUIDE.md#runtime-session-setup).

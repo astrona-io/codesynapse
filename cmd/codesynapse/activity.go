@@ -57,6 +57,9 @@ func recordActivity(ctx context.Context, command string, raw []byte, logger *slo
 	if c.token == "" {
 		return "not reported: no API token (CODESYNAPSE_API_TOKEN or the user config api-token file)"
 	}
+	if codesynapseOffline(tool.SessionID) {
+		return "not reported: the CodeSynapse server is offline"
+	}
 	ctx, cancel := context.WithTimeout(ctx, activityBudget)
 	defer cancel()
 	s := loadState(state)

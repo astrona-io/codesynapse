@@ -100,7 +100,7 @@ func (o *mcpBridgeOptions) Run(ctx context.Context, _ *app.Env) error {
 		if c.token == "" {
 			return fmt.Errorf("no API key: run codesynapse mcp install with a personal key")
 		}
-		b := &bridge{url: o.url, token: c.token, out: o.EC.Stdout, http: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+		b := &bridge{url: o.url, token: c.token, out: o.EC.Stdout, logger: o.EC.Logger, http: newBridgeHTTP(), cacheDir: bridgeCacheDir()}
 		b.routes = &runtimeRoutes{client: o.client, api: c, owner: b, chats: map[string]*runtimeChat{}}
 		if o.client == "cursor" {
 			b.routes.primary = os.Getenv(cursorCLISessionEnv)
@@ -128,51 +128,18 @@ func (o *mcpBridgeOptions) Run(ctx context.Context, _ *app.Env) error {
 	if c.token == "" {
 		return fmt.Errorf("no API key: set %s or run `codesynapse mcp install`", apiTokenEnv)
 	}
-	// Keep the registered session in the context: reports of local answers
-	// (reportLocal) carry it, so the audit entry names the chat.
-	ctx, err := registerBridgeSession(ctx, c, session, bridgeRegisterWait)
-	if err != nil {
-		return err
-	}
+	// The session is registered in the background (bridgeoffline.go): an API
+	// that cannot be reached must not end the process, since Claude Code
+	// remembers a server that exited for the rest of the chat. Nothing is
+	// forwarded or answered here before the registration succeeded.
 	b := &bridge{url: o.url, token: c.token, session: session, out: o.EC.Stdout, report: c, logger: o.EC.Logger,
-		http: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+		http: newBridgeHTTP(), cacheDir: bridgeCacheDir()}
 	if o.worktree {
 		if cwd, err := os.Getwd(); err == nil {
 			b.worktree = newWorktree(ctx, cwd, o.repo, o.EC.Logger)
 		}
 	}
 	return b.run(ctx, o.EC.Stdin)
-}
-
-// bridgeRegisterWait is how long the bridge keeps trying to reach the API
-// before it gives up. Claude Code waits 30 s for a server to connect and
-// remembers a failure for the rest of the chat, so an API that is restarting
-// when the chat starts would otherwise cost the whole chat its tools.
-var bridgeRegisterWait = 20 * time.Second
-
-// registerBridgeSession registers the chat's runtime session, retrying while
-// the API cannot be reached. An answer from the API (a refused key or
-// session) is final and returned at once.
-func registerBridgeSession(ctx context.Context, c apiClient, session string, wait time.Duration) (context.Context, error) {
-	deadline := time.Now().Add(wait)
-	delay := 250 * time.Millisecond
-	for {
-		rctx, err := c.executionContext(ctx, session, session)
-		if err == nil {
-			return rctx, nil
-		}
-		var status *statusError
-		if errors.As(err, &status) || errors.Is(err, execution.ErrMissing) || errors.Is(err, execution.ErrConflict) ||
-			ctx.Err() != nil || time.Now().Add(delay).After(deadline) {
-			return nil, err
-		}
-		select {
-		case <-ctx.Done():
-			return nil, err
-		case <-time.After(delay):
-		}
-		delay = min(delay*2, 2*time.Second)
-	}
 }
 
 type bridge struct {
@@ -215,6 +182,33 @@ type bridge struct {
 	// fetcher answers fetch_source (fetchsource.go), made on first use.
 	fetchOnce sync.Once
 	fetcher   *fetchsource.Fetcher
+
+	// Availability (bridgeoffline.go). parent is set on a runtime adapter's
+	// per-chat bridge: the online state is the parent's.
+	parent   *bridge
+	runCtx   context.Context
+	cacheDir string // where the last initialize and tools/list are kept; "" keeps none
+	// Registration of the runtime session: regCh is closed once it settled,
+	// with ident (registered) or regErr (refused for good).
+	regMu   sync.Mutex
+	regOnce sync.Once
+	regCh   chan struct{}
+	ident   *execution.Identity
+	regErr  error
+	// Guarded by mu: initMsg is the client's initialize, replayed for a new
+	// server session; needInit says the server has no session for this chat
+	// yet; offline, probing and listStale track an outage.
+	initMsg   []byte
+	needInit  bool
+	offline   bool
+	probing   bool
+	listStale bool
+	kick      chan struct{}
+	// probes holds the running probe loop, so a stopped bridge can wait
+	// for it.
+	probes   sync.WaitGroup
+	reinitMu sync.Mutex
+	cacheMu  sync.Mutex
 }
 
 type rpcMessage struct {
@@ -225,6 +219,7 @@ type rpcMessage struct {
 
 func (b *bridge) run(ctx context.Context, in io.Reader) error {
 	b.readyCh = make(chan struct{})
+	b.start(ctx)
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 64<<10), maxBridgeMessage)
 	slots := make(chan struct{}, bridgeParallel)
@@ -249,7 +244,7 @@ func (b *bridge) run(ctx context.Context, in io.Reader) error {
 			}
 			// Everything else waits for the session the answer opens.
 			initSeen = true
-			b.forward(ctx, msg, m)
+			b.initialize(ctx, msg, m)
 			continue
 		}
 		if !initSeen && len(m.ID) > 0 && m.Method != "" {
@@ -269,22 +264,7 @@ func (b *bridge) run(ctx context.Context, in io.Reader) error {
 			case <-ctx.Done():
 				return
 			}
-			if m.Method == "tools/call" && (b.answerGit(ctx, msg, m) || b.answerAskLocal(ctx, msg, m) || b.answerFetchSource(ctx, msg, m) || b.answerLocally(ctx, msg, m)) {
-				return
-			}
-			msg := b.withRepo(ctx, msg, m)
-			if b.routes != nil && m.Method == "tools/call" {
-				target, err := b.routes.forCall(ctx, msg)
-				if err != nil {
-					if len(m.ID) > 0 {
-						b.write(errorResponse(m.ID, err))
-					}
-					return
-				}
-				target.forward(ctx, msg, m)
-				return
-			}
-			b.forward(ctx, msg, m)
+			b.dispatch(ctx, msg, m)
 		}()
 	}
 	wg.Wait()
@@ -323,14 +303,18 @@ func (b *bridge) answerLocally(ctx context.Context, msg []byte, m rpcMessage) bo
 }
 
 // forward posts one message and writes whatever the server answers. A failed
-// request still gets a JSON-RPC error, so the client never waits forever.
+// request still gets a JSON-RPC error, so the client never waits forever; a
+// server that cannot be reached gets the offline answer (bridgeoffline.go).
 func (b *bridge) forward(ctx context.Context, msg []byte, m rpcMessage) {
-	if err := b.post(ctx, msg, m); err != nil && len(m.ID) > 0 && m.Method != "" {
-		b.write(errorResponse(m.ID, err))
+	err := b.send(ctx, msg, m)
+	if err == nil || len(m.ID) == 0 || m.Method == "" {
+		return
 	}
-	if m.Method == "initialize" {
-		b.readyOnce.Do(func() { close(b.readyCh) })
+	if errors.Is(err, errOffline) {
+		b.answerUnavailable(m, offlineText)
+		return
 	}
+	b.write(errorResponse(m.ID, err))
 }
 
 // clientHeader carries the MCP client's name from initialize on every
@@ -383,17 +367,61 @@ func (b *bridge) headers(req *http.Request) {
 }
 
 func (b *bridge) post(ctx context.Context, msg []byte, m rpcMessage) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	return b.postTo(ctx, msg, m, func(data []byte) { b.deliver(data, m) })
+}
+
+// bridgeCallLimit bounds one forwarded request.
+const bridgeCallLimit = 5 * time.Minute
+
+// postTo posts msg and hands each message of the answer to sink.
+func (b *bridge) postTo(ctx context.Context, msg []byte, m rpcMessage, sink func([]byte)) error {
+	ctx, cancel := context.WithTimeout(ctx, bridgeCallLimit)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.url, bytes.NewReader(msg))
+	// A server that accepts the connection but never answers is offline too.
+	// Tool calls get the whole limit: the server sends no headers before a
+	// tool's first message, and some tools take minutes.
+	wait := headerWait(m.Method)
+	hctx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	timer := time.AfterFunc(wait, func() { stop(errHeaderTimeout) })
+	// A tool call keeps its whole limit only while the server is there: a
+	// connection lost without a reset (a VPN that dropped, a NAT that forgot
+	// it) would otherwise hold the call for minutes. After callLiveWait
+	// without headers a fresh connection asks whether the server answers.
+	var headersMu sync.Mutex
+	gotHeaders := false
+	if m.Method == "tools/call" {
+		live := time.AfterFunc(callLiveWait, func() {
+			if err := b.alive(ctx); err != nil && unreachable(err) {
+				headersMu.Lock()
+				defer headersMu.Unlock()
+				if !gotHeaders {
+					stop(errNotAlive)
+				}
+			}
+		})
+		defer live.Stop()
+	}
+	req, err := http.NewRequestWithContext(hctx, http.MethodPost, b.url, bytes.NewReader(msg))
 	if err != nil {
+		timer.Stop()
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	b.headers(req)
 	res, err := b.http.Do(req)
+	timer.Stop()
+	headersMu.Lock()
+	gotHeaders = true
+	headersMu.Unlock()
 	if err != nil {
+		switch cause := context.Cause(hctx); {
+		case errors.Is(cause, errNotAlive):
+			return cause
+		case errors.Is(cause, errHeaderTimeout):
+			return fmt.Errorf("%w after %s", errHeaderTimeout, wait)
+		}
 		return err
 	}
 	defer res.Body.Close() //nolint:errcheck // read-only response
@@ -405,21 +433,21 @@ func (b *bridge) post(ctx context.Context, msg []byte, m rpcMessage) error {
 	body := io.LimitReader(res.Body, maxBridgeMessage)
 	if res.StatusCode >= 300 {
 		data, _ := io.ReadAll(io.LimitReader(body, 4<<10)) //nolint:errcheck // best-effort detail
-		return fmt.Errorf("CodeSynapse answered %d: %s", res.StatusCode, strings.TrimSpace(string(data)))
+		return &mcpStatusError{Status: res.StatusCode, Detail: strings.TrimSpace(string(data))}
 	}
 	if res.StatusCode == http.StatusAccepted {
 		return nil
 	}
 	ct, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type")) //nolint:errcheck // empty means JSON
 	if ct == "text/event-stream" {
-		return readEvents(body, func(data []byte) { b.deliver(data, m) })
+		return readEvents(body, sink)
 	}
 	data, err := io.ReadAll(body)
 	if err != nil {
 		return err
 	}
 	if len(bytes.TrimSpace(data)) > 0 {
-		b.deliver(data, m)
+		sink(data)
 	}
 	return nil
 }
@@ -429,8 +457,10 @@ func (b *bridge) post(ctx context.Context, msg []byte, m rpcMessage) error {
 func (b *bridge) deliver(data []byte, sent rpcMessage) {
 	if sent.Method == "tools/list" {
 		b.learnRepoTools(data)
+		b.remember("tools", data)
 	}
 	if sent.Method == "initialize" {
+		b.remember("initialize", data)
 		var r struct {
 			Result struct {
 				ProtocolVersion string `json:"protocolVersion"`

@@ -287,6 +287,9 @@ func readGuard(ctx context.Context, in toolHookInput) map[string]any {
 	if limit <= 0 || file == "" || in.ToolInput.Offset > 0 || in.ToolInput.Limit > 0 {
 		return nil
 	}
+	if codesynapseOffline(in.SessionID) {
+		return nil // what it would point to answers "offline" now: read as asked
+	}
 	lines := countLines(file, limit)
 	if lines < limit || !guardable(ctx, file) {
 		return nil
@@ -450,6 +453,11 @@ func stopGuard(ctx context.Context, in toolHookInput, logger *slog.Logger) map[s
 	if s.Stop == key {
 		return nil // this state was checked already, or is how the session began
 	}
+	if codesynapseOffline(in.SessionID) {
+		// verify_plan and get_pr_context cannot answer now. The state is not
+		// noted as checked, so the next stop with the server back asks again.
+		return map[string]any{"systemMessage": stopOfflineNotice}
+	}
 	s.Stop = key
 	saveState(state, s)
 	problems := change.Problems
@@ -459,7 +467,13 @@ func stopGuard(ctx context.Context, in toolHookInput, logger *slog.Logger) map[s
 		}
 	}
 	repo := w.repo
-	if name, known, indexing := serverRepo(ctx, in, w.root, w.repo); !known {
+	name, known, indexing, offline := serverRepo(ctx, in, w.root, w.repo)
+	if offline {
+		s.Stop = ""
+		saveState(state, s)
+		return map[string]any{"systemMessage": stopOfflineNotice}
+	}
+	if !known {
 		// verify_plan and get_pr_context answer "not found" for a checkout the
 		// server has not indexed, so asking for them only wastes a turn. Say so
 		// in the chat (systemMessage) rather than finishing without a word.
@@ -505,36 +519,40 @@ func stopGuard(ctx context.Context, in toolHookInput, logger *slog.Logger) map[s
 	return map[string]any{"decision": "block", "reason": b.String()}
 }
 
+// stopOfflineNotice tells the person why the pre-finish check did not run.
+const stopOfflineNotice = "CodeSynapse skipped its pre-finish check: the server is offline. It runs again once the server answers."
+
 // serverRepo asks the server which indexed repository root is. known is false
 // only when the server answered and does not list the checkout; with no token
-// or no answer it stays true, since nothing says the tools are unavailable.
+// or an answer that refuses it stays true, since nothing says the tools are
+// unavailable. offline is true when the server could not be reached at all.
 // checkout is the name the checkout's origin gives; a skipped check is reported
 // under it (usage.Unindexed).
-func serverRepo(ctx context.Context, in toolHookInput, root, checkout string) (name string, known, indexing bool) {
+func serverRepo(ctx context.Context, in toolHookInput, root, checkout string) (name string, known, indexing, offline bool) {
 	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
 	if c.token == "" || in.SessionID == "" {
-		return "", true, false
+		return "", true, false, false
 	}
 	ctx, cancel := context.WithTimeout(ctx, activityBudget)
 	defer cancel()
 	ctx, err := c.executionContext(ctx, in.SessionID, in.SessionID)
 	if err != nil {
-		return "", true, false
+		return "", true, false, unreachable(err)
 	}
 	name, err = c.resolveRepo(ctx, root)
 	if errors.Is(err, errNoRepo) {
 		if c.indexingNow(ctx, checkout) {
 			// Already on its way in: nothing to recommend, so it is not counted.
-			return "", false, true
+			return "", false, true, false
 		}
 		// Counted so Statistics can recommend indexing it; best effort, the
 		// person already gets the notice either way.
 		rctx, rcancel := context.WithTimeout(context.WithoutCancel(ctx), activityBudget)
 		defer rcancel()
 		_ = c.do(rctx, http.MethodPost, "/api/v1/usage/unindexed", map[string]string{"repo": checkout, "client": "claude-code"}, nil) //nolint:errcheck // counters are best effort
-		return "", false, false
+		return "", false, false, false
 	}
-	return name, true, false
+	return name, true, false, false
 }
 
 // indexingNow reports whether a clone or ingest job for repo is queued or

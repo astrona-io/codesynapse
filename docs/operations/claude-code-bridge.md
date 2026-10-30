@@ -32,6 +32,18 @@ sequenceDiagram
 
 Claude Code starts one bridge per chat and keeps it across `/compact` and `/clear`. A new chat gets a new process and a new session. The bridge never makes up an ID; without one it exits.
 
+## When the server is down
+
+A chat never waits on CodeSynapse and never loses it for good. While the server is stopped, restarting or unreachable, the chat works with Read, Grep and Bash. Once the server answers again, the same chat uses CodeSynapse again; there is no need to restart it.
+
+- **Start-up.** The bridge starts even when the API cannot be reached. It registers the chat's session in the background, retrying with a backoff of 1 to 15 seconds. It forwards nothing until the session is registered, and it answers no call locally until the call has been reported.
+- **Connecting.** If the server does not answer within 10 seconds, the bridge answers `initialize` itself. Its instructions start with an offline line. `tools/list` returns the tools the server listed last time, kept per server URL in the user cache folder (`codesynapse/bridge`, 0700/0600, no secrets). With no kept list, it returns an empty one. Every tool call returns an error result the agent reads: "CodeSynapse is offline (server unreachable); use Read/Grep/Bash for this step. It reconnects automatically."
+- **Coming back.** The bridge keeps probing. When the server answers, the bridge opens an MCP session with the chat's original `initialize` and sends `notifications/tools/list_changed`, so Claude Code lists the tools again.
+- **Server restarts.** A server that forgot the MCP session answers 404. The bridge opens a new session and retries the call once, and the agent sees only the answer. If the API forgot the runtime session, the bridge registers it again, during a call and while it reconnects after an outage.
+- **Timeouts.** A connection gets 5 seconds, and a reply has 30 seconds to start (10 seconds for `initialize`). A tool call itself may still run for up to 5 minutes. If a tool call has had no reply for 20 seconds, the bridge checks the server over a new connection (5 seconds). If nothing answers, the connection is lost: the call returns the offline error at once and the bridge starts probing.
+- **A refused key is different.** If the API refuses the key or the session (401 or 403), the bridge does not retry. Every call says "CodeSynapse refused this chat (…)". Fix the key, then open a new chat. Any other error the server answers with while the bridge reconnects (a 404 from a proxy, a 500) ends the outage: the next call shows that error to the agent.
+- **Hooks.** While the bridge finds the server offline, it keeps a marker in the user cache folder (`codesynapse/offline/session-<session>`, a timestamp only). The read guard lets whole-file reads through. The pre-finish check is skipped with a notice and runs again at the next stop once the server answers. The prompt briefing, memory recall and activity reports are skipped. A hook that registers the session gives up after 3 seconds.
+
 ## Install the binary
 
 With Homebrew, on macOS or Linux:
@@ -135,7 +147,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
   | CLAUDE_CODE_SESSION_ID=check-$(date +%s) codesynapse mcp bridge
 ```
 
-A JSON-RPC `result` with the server's instructions means the key and session registration both work. Each run registers a session that expires after seven days.
+A JSON-RPC `result` with the server's instructions means the key and session registration both work. Each run registers a session that expires after seven days. If the instructions start with "CodeSynapse is offline", the bridge could not reach the server within 10 seconds. If they start with "CodeSynapse refused this chat", the key or session was refused.
 
 ## Troubleshooting
 
@@ -143,7 +155,8 @@ A JSON-RPC `result` with the server's instructions means the key and session reg
 |---|---|
 | `/mcp` shows `AUTH_HEADER_REJECTED` (HTTP 403) mentioning `X-CodeSynapse-Session` | An older direct-HTTP `codesynapse` entry is still configured. Local and project entries override the user-scope bridge. Remove it from every scope (`claude mcp remove codesynapse -s local` in each project that has one, then `-s user`) and install again. |
 | `mcp install` says the token is not a personal key | You passed an installation token from `.env`. Create a `csk_` key in the dashboard. |
-| `register runtime session: log in or use a valid API key` | The stored key was revoked, or its owner was suspended or removed from the organisation. Install again with a fresh key. |
+| Tool calls answer `CodeSynapse refused this chat (register runtime session: log in or use a valid API key)` | The stored key was revoked, or its owner was suspended or removed from the organisation. Install again with a fresh key, then open a new chat. |
+| Tool calls answer `CodeSynapse is offline (server unreachable)` | The API or MCP server cannot be reached. Start it (`just up`) or check the URL. The chat reconnects by itself within about 15 seconds of the server answering. |
 | `claude mcp get codesynapse` reports `Failed to connect` | Expected. The CLI starts the bridge without `CLAUDE_CODE_SESSION_ID`, so it exits. Check from a new chat with `/mcp`. |
 | `no chat session: start the bridge from Claude Code` | Same cause, when you run the bridge by hand. Set `CLAUDE_CODE_SESSION_ID` as in the check above. |
 | `use https for hosts other than this machine` | The `--url` or `--api-url` is plain `http` on a remote host. Use `https`. |
