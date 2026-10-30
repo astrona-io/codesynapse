@@ -23,6 +23,9 @@ type GatewayTarget struct {
 	// ContextWindow is the model's context in tokens (0 when not known); the
 	// gateway sends requests that would not fit to the cloud.
 	ContextWindow int
+	// MaxOutput is the provider's effective max_output_tokens: the least
+	// answer room the gateway keeps when it lowers a request's max_tokens.
+	MaxOutput int
 	// Exclude is the installation's normalized list of model patterns that
 	// never go to this model (gateway_exclude).
 	Exclude []string
@@ -70,7 +73,7 @@ func (r *Registry) GatewayTarget() (GatewayTarget, bool) {
 		}
 		queue := r.slots[p.Name]
 		return GatewayTarget{
-			BaseURL: p.BaseURL, Model: p.Model, APIKey: p.apiKey, ContextWindow: p.ContextWindow,
+			BaseURL: p.BaseURL, Model: p.Model, APIKey: p.apiKey, ContextWindow: p.ContextWindow, MaxOutput: p.MaxOutputTokens,
 			Exclude: p.GatewayExclude, Wait: wait, Effort: p.Effort, DisableThinking: p.DisableThinking, Acquire: func(ctx context.Context) (func(), error) {
 				return queue.acquire(WithTask(ctx, gatewayTask))
 			},

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,11 +22,15 @@ const (
 	// RouteHeader tells the agent where the answer came from.
 	RouteHeader = "X-CodeSynapse-Route"
 	// maxLocalBody bounds what the local model is offered whatever its
-	// context window, so a request held for it stays small in memory.
+	// context window, both the agent's body and the translated request, so a
+	// request held for it stays small in memory.
 	maxLocalBody = 4 << 20
-	// unknownWindowBody is the cap when the operator did not say how large
-	// the local model's context is.
+	// unknownWindowBody is the cap on the translated request when the
+	// operator did not say how large the local model's context is.
 	unknownWindowBody = 256 << 10
+	// localMargin is the room kept free in the window beside the estimate
+	// and the answer: chat template framing and estimate error.
+	localMargin = 2048
 	// defaultWait is how long a request queues for a free local slot before
 	// the gateway sends it to the cloud instead (gateway_wait_seconds). The
 	// answer itself is bounded by the provider's timeout_seconds.
@@ -65,6 +70,11 @@ type Local struct {
 	// ContextWindow is the local model's context in tokens; a request whose
 	// estimate does not fit goes to the cloud. 0 means unknown.
 	ContextWindow int
+	// MaxOutput is the provider's max_output_tokens. A held request whose
+	// max_tokens does not fit beside the prompt is sent with the room the
+	// window leaves, never less than MaxOutput (or the request's own
+	// max_tokens when that is smaller); 0 never lowers it.
+	MaxOutput int
 	// Acquire takes the local model's queue slot and returns its release.
 	Acquire func(ctx context.Context) (func(), error)
 	// AcquireFirst takes a slot ahead of the requests Acquire queued, for
@@ -177,13 +187,40 @@ func (l *Local) excluded(ctx context.Context, model string) bool {
 	return modelpattern.Match(l.Exclude, model) || modelpattern.Match(org, model)
 }
 
-// fits estimates the request at four bytes per token (JSON overcounts, which
-// errs towards the cloud) plus the answer it asks room for.
-func (l *Local) fits(size, maxTokens int) bool {
-	if l.ContextWindow <= 0 {
-		return size <= unknownWindowBody
+// estimateTokens counts the translated request at 3.5 bytes a token, rounded
+// up. Measured with qwen3.8 on Ollama, the OpenAI-compatible JSON came to 3.7
+// bytes a token for Go code and tool schemas and 4.3 for prose, so four
+// bytes a token undercounts code and the window would overflow.
+func estimateTokens(size int) int { return (size*2 + 6) / 7 }
+
+// fit decides whether a translated request of size bytes fits the local
+// model and returns the max_tokens to send. It fits when its estimate,
+// localMargin and the answer it asks room for stay inside the context window.
+// A held answer is checked whole before the agent sees it, so its max_tokens
+// may be lowered to the room that is left, down to MaxOutput; a streamed one
+// is not, because the agent would see it stop early.
+func (l *Local) fit(size, maxTokens int, held bool) (int, bool) {
+	maxTokens = max(maxTokens, 0)
+	if size > maxLocalBody {
+		return 0, false
 	}
-	return size <= maxLocalBody && size/4+max(maxTokens, 0) <= l.ContextWindow
+	if l.ContextWindow <= 0 {
+		if size > unknownWindowBody {
+			return 0, false
+		}
+		return maxTokens, true
+	}
+	room := l.ContextWindow - estimateTokens(size) - localMargin
+	if room <= 0 {
+		return 0, false
+	}
+	if maxTokens <= room {
+		return maxTokens, true
+	}
+	if !held || l.MaxOutput <= 0 || room < min(maxTokens, l.MaxOutput) {
+		return 0, false
+	}
+	return room, true
 }
 
 type anthropicIn struct {
@@ -325,9 +362,6 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 	if l.excluded(ctx, in.Model) {
 		return in, nil, FallExcluded
 	}
-	if !l.fits(len(body), in.MaxTokens) {
-		return in, nil, FallTooLarge
-	}
 	elig := l.Eligible
 	if elig == nil {
 		elig = SmallModel
@@ -389,9 +423,6 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 			req["parallel_tool_calls"] = false
 		}
 	}
-	if in.MaxTokens > 0 {
-		req["max_tokens"] = in.MaxTokens
-	}
 	if l.DisableThinking {
 		req["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
 	}
@@ -412,8 +443,23 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 	if err != nil {
 		return in, nil, FallBadRequest
 	}
+	// The fit is judged on what the local model is sent, not the agent's
+	// body: thinking blocks and Anthropic's wrappers are gone by now.
+	// max_tokens depends on the size, so it is appended after; its few bytes
+	// are inside localMargin.
+	maxTokens, fits := l.fit(len(out), in.MaxTokens, in.held())
+	if !fits {
+		return in, nil, FallTooLarge
+	}
+	if maxTokens > 0 {
+		out = append(strconv.AppendInt(append(out[:len(out)-1], `,"max_tokens":`...), int64(maxTokens), 10), '}')
+	}
 	return in, out, ""
 }
+
+// held says the answer is collected and checked before the agent sees any of
+// it: a request with tools, or one for a larger model than the small one.
+func (in anthropicIn) held() bool { return len(in.Tools) > 0 || !SmallModel(in.Model) }
 
 // serve tries to answer from the local model. It returns false, with nothing
 // written and one of the Fall* reasons, when the cloud should take the request.
@@ -479,7 +525,7 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 	// A request for a bigger model than the small one may ask more than the
 	// local model can do: hold its answer and keep it only when it is whole.
 	strict := !SmallModel(in.Model)
-	if len(in.Tools) > 0 || strict {
+	if in.held() {
 		// A tool call is only usable whole: collect the answer, check it, and
 		// let the cloud take the request if the local model got it wrong.
 		first, more := next()
