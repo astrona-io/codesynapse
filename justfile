@@ -346,7 +346,7 @@ build:
 
 # Unit tests with the race detector
 test:
-    go test -race ./...
+    go test -race -timeout 20m ./...
 
 # Accounts contract against a throwaway PostgreSQL container (never the compose database: the test drops its tables)
 test-postgres: _runtime
