@@ -56,6 +56,8 @@ var modelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$`)
 // keeps a prompt log, the texts go to that separate table, linked to this
 // entry by its ID and the same digests.
 func (s *Server) auditGateway(ctx context.Context, m gateway.Meta, status int, took time.Duration) {
+	ctx, cancel := auditContext(ctx)
+	defer cancel()
 	recordGateway(ctx, m, status, took)
 	model := m.Model
 	if !modelName.MatchString(model) {
@@ -170,7 +172,7 @@ func (s *Server) gatewayRoutes() {
 		if !ok {
 			return nil
 		}
-		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire, ContextWindow: t.ContextWindow, Exclude: t.Exclude, Wait: t.Wait}
+		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire, ContextWindow: t.ContextWindow, Exclude: t.Exclude, Wait: t.Wait, Effort: t.Effort, DisableThinking: t.DisableThinking}
 	}
 	// Shortening uses the local "compress" task only; compress_prompts: false
 	// in config/llm.yaml turns it off for the installation.

@@ -144,9 +144,21 @@ func (s *Server) record(ctx context.Context, e accounts.Event) {
 		s.logAudit(e)
 		return
 	}
+	ctx, cancel := auditContext(ctx)
+	defer cancel()
 	if _, err := s.cfg.Accounts.Record(ctx, e); err != nil {
 		s.logger.Error("audit log write failed", "action", e.Action, "error", err)
 	}
+}
+
+// auditWriteTimeout bounds an audit write that outlives its request.
+const auditWriteTimeout = 10 * time.Second
+
+// auditContext keeps the request's values but not its cancellation: an entry
+// is written after the handler answered, and a client that hung up by then
+// must not lose it.
+func auditContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), auditWriteTimeout)
 }
 
 // logAudit writes an entry as a structured log line for log collectors.
