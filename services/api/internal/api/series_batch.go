@@ -62,7 +62,7 @@ func (s *Server) handleSeriesBatch(w http.ResponseWriter, r *http.Request) {
 	items := make([]SeriesBatchItem, len(names))
 	_ = forEach(ctx, len(names), func(ctx context.Context, i int) error { //nolint:errcheck // each item carries its own status
 		v := url.Values{"panel": {names[i]}}
-		for _, k := range []string{"range", "repo"} {
+		for _, k := range []string{"range", "repo", "provider"} {
 			if q.Has(k) {
 				v.Set(k, q.Get(k))
 			}

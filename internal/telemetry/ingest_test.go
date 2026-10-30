@@ -210,3 +210,43 @@ func TestQueryRangeRepositoryScope(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, calls, 1)
 }
+
+func TestQueryRangeProviderFilter(t *testing.T) {
+	var got [][]string
+	q := &Querier{URL: "http://metrics.test", HTTP: &http.Client{Transport: metricTransport(func(req *http.Request) (*http.Response, error) {
+		got = append(got, req.URL.Query()["extra_filters[]"])
+		return metricResponse(http.StatusOK, `{"status":"success","data":{"result":[]}}`), nil
+	})}}
+	start, end := time.Now().Add(-time.Hour), time.Now()
+	cases := map[string]struct {
+		tenants  []string
+		provider string
+		want     []string // nil: refused before any request
+	}{
+		"with the tenant, in one selector": {[]string{"aaaaaaaaaaaaaaaaaaaaaaaa"}, "local", []string{`{tenant_id=~"aaaaaaaaaaaaaaaaaaaaaaaa",llm_provider="local"}`}},
+		"every tenant":                     {nil, "gpu-2.eu", []string{`{llm_provider="gpu-2.eu"}`}},
+		"a quote":                          {nil, `local"} or {x="`, nil},
+		"a regular expression":             {nil, "local|cloud", nil},
+		"a backslash":                      {nil, `local\`, nil},
+		"empty":                            {nil, "", nil},
+		"too long":                         {nil, strings.Repeat("a", 65), nil},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got = nil
+			_, err := q.QueryRangeForProvider(t.Context(), "sum(metric)", start, end, time.Minute, tc.tenants, tc.provider)
+			if tc.want == nil {
+				require.ErrorIs(t, err, ErrBadProvider)
+				assert.Len(t, got, 0)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			assert.Equal(t, got[0], tc.want)
+		})
+	}
+	got = nil
+	_, err := q.QueryRangeForProvider(t.Context(), "sum(metric)", start, end, time.Minute, []string{}, "local")
+	require.NoError(t, err)
+	assert.Len(t, got, 0, "an empty tenant list still matches nothing")
+}

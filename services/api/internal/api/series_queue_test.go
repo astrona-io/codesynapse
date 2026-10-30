@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
 // queueStep is one 15-minute step of a provider: requests in total, how
@@ -318,4 +320,83 @@ func TestQueuePanelsAreFixed(t *testing.T) {
 		_, ok = adminPanels[name]
 		assert.True(t, ok, name)
 	}
+}
+
+// A model's tab asks for its queue charts with ?provider=: only configured
+// providers pass, and the name travels in the tenant's extra_filters
+// selector, never in the query text.
+func TestQueueSeriesByProvider(t *testing.T) {
+	vm := &queueVM{}
+	vmSrv := httptest.NewServer(vm)
+	defer vmSrv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	acc := accounts.NewService(acctmem.New(), true)
+	bootstrapAccounts(t, acc)
+	reg := llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{
+		{Name: "local", Kind: llm.KindOpenAI, BaseURL: "http://127.0.0.1:1/v1", Model: "qwen", EmbeddingModel: "nomic", MaxConcurrent: 1, TimeoutSeconds: 5},
+		{Name: "cloud", Kind: llm.KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "big", TimeoutSeconds: 5},
+	}, Default: "local"})
+	ts := httptest.NewServer(New(ctx, Config{Accounts: acc, Metrics: &telemetry.Querier{URL: vmSrv.URL}, LLM: reg}, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil))))
+	defer ts.Close()
+
+	admin := newClient(t, ts)
+	var adminSigned struct{ User accounts.User }
+	require.Equal(t, admin.signUp(`{"email":"ada@example.com","name":"Ada","password":"`+pw+`"}`, &adminSigned), http.StatusAccepted)
+	require.NoError(t, acc.SetPlatformAdmin(ctx, rootSession(t, acc), adminSigned.User.ID, true))
+	bob := newClient(t, ts)
+	var signed struct{ Org accounts.Org }
+	require.Equal(t, bob.signUp(`{"email":"bob@example.com","name":"Bob","password":"`+pw+`"}`, &signed), http.StatusAccepted)
+	tenant := `tenant_id=~"` + signed.Org.ID + `"`
+
+	cases := map[string]struct {
+		client *client
+		path   string
+		status int
+		filter string // every recorded query's extra_filters; "-" when none may run
+	}{
+		"a configured provider":         {bob, "/api/v1/stats/series?panel=queue_wait&range=1h&provider=local", 200, `{` + tenant + `,llm_provider="local"}`},
+		"without a provider":            {bob, "/api/v1/stats/series?panel=queue_wait&range=1h", 200, `{` + tenant + `}`},
+		"an unknown provider":           {bob, "/api/v1/stats/series?panel=queue_wait&range=1h&provider=nope", 400, "-"},
+		"a matcher in the name":         {bob, "/api/v1/stats/series?panel=queue_wait&range=1h&provider=" + url.QueryEscape(`local",tenant_id=~".*`), 400, "-"},
+		"a panel not split by provider": {bob, "/api/v1/stats/series?panel=llm_cost&range=1h&provider=local", 400, "-"},
+		"the batch passes it on":        {bob, "/api/v1/stats/series/batch?panels=queue_load,queue_start&range=1h&provider=cloud", 200, `{` + tenant + `,llm_provider="cloud"}`},
+		"platform, every tenant":        {admin, "/api/v1/admin/stats/series?panel=queue_saturation&range=1h&provider=local", 200, `{llm_provider="local"}`},
+		"platform, unknown provider":    {admin, "/api/v1/admin/stats/series?panel=queue_saturation&range=1h&provider=nope", 400, "-"},
+		"platform batch":                {admin, "/api/v1/admin/stats/series/batch?panels=queue_load,queue_wait&range=1h&provider=local", 200, `{llm_provider="local"}`},
+		"platform batch, unknown":       {admin, "/api/v1/admin/stats/series/batch?panels=queue_load&range=1h&provider=nope", 400, "-"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			vm.seen()
+			assert.Equal(t, tc.client.do("GET", tc.path, "", nil), tc.status)
+			queries, filters := vm.seen()
+			if tc.filter == "-" {
+				assert.Len(t, queries, 0, "nothing reaches VictoriaMetrics")
+				return
+			}
+			require.True(t, len(queries) > 0)
+			for i, q := range queries {
+				assert.Equal(t, filters[i], tc.filter)
+				for _, leak := range []string{`"local"`, `"cloud"`, "tenant_id"} {
+					assert.False(t, strings.Contains(q, leak), "the query text is fixed: "+q)
+				}
+			}
+		})
+	}
+
+	var batch struct{ Panels map[string]SeriesBatchItem }
+	require.Equal(t, admin.do("GET", "/api/v1/admin/stats/series/batch?panels=queue_load,platform_db_latency&range=1h&provider=local", "", &batch), 200)
+	assert.Equal(t, batch.Panels["queue_load"].Status, 200)
+	assert.Equal(t, batch.Panels["platform_db_latency"].Status, 404)
+
+	var peak QueuePeak
+	require.Equal(t, bob.do("GET", "/api/v1/stats/queue?weeks=1", "", &peak), 200)
+	require.Len(t, peak.Providers, 1, "the configured provider with a queue; cloud has no limit and no requests")
+	p := peak.Providers[0]
+	assert.Equal(t, p.Name, "local")
+	assert.True(t, p.Configured)
+	assert.Equal(t, p.Models, []string{"qwen", "nomic"})
+	assert.Equal(t, p.Slots, 1)
+	assert.True(t, p.P95 != nil, "the fake answers three requests")
 }
