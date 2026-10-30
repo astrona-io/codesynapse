@@ -14,6 +14,14 @@ func TestWorthBriefing(t *testing.T) {
 		"i have new realse installed, v0.0.21 now, so we can countine",
 		"ok, go ahead with the next one",
 		"",
+		// 2026-10-30: standing instructions on how to work, typed fast. The
+		// first passed on "test" as verb and noun and on its length; the
+		// second on "CLI Realase" as a capitalised name.
+		"remeber to rebuild apps there needed so i can test the featuers, you are allowed to do that everytime you need it", //nolint:misspell // typed this way by a user
+		"you can do both in one PR thanks, i have merge the 2 open PR's in the featuer you can automatic merge PRs when pass, and tell me if a new CLI Realase needed, for what PR",
+		"do we write everything to plan",
+		"whats next?",
+		"okay take 1+2 then",
 	} {
 		assert.False(t, WorthBriefing(p), p)
 	}
@@ -25,6 +33,9 @@ func TestWorthBriefing(t *testing.T) {
 		"the dashboard throws an error after sign-in",
 		"add a test for the session cache",
 		"look at internal/asklocal and tell me what it checks",
+		"remember to fix handleLogin before the release",
+		"you can see the 503 from the gateway in the logs",
+		"test the handler for empty bodies",
 	} {
 		assert.True(t, WorthBriefing(p), p)
 	}
