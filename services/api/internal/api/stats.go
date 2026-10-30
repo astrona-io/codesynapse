@@ -171,6 +171,9 @@ type WorkflowStats struct {
 	FirstCodeSynapse int `json:"first_codesynapse"`
 	FirstNative      int `json:"first_native"`
 	ReadsTurnedBack  int `json:"reads_turned_back"`
+	// FetchesSteered are WebFetch calls of pages fetch_source had cached
+	// that the hook pointed at fetch_source.
+	FetchesSteered int `json:"fetches_steered"`
 	// FirstSharePct is FirstCodeSynapse of both, rounded; 0 with no sessions.
 	FirstSharePct int `json:"first_share_pct"`
 	// FilesEdited are the files sessions changed, FilesEditedFound those a
@@ -516,6 +519,8 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 				a.Workflow.FirstNative += bk.Calls
 			case usage.ReadTurnedBack:
 				a.Workflow.ReadsTurnedBack += bk.Calls
+			case usage.FetchSteered:
+				a.Workflow.FetchesSteered += bk.Calls
 			case usage.FilesEdited:
 				a.Workflow.FilesEdited += bk.Calls
 			case usage.FilesEditedFound:

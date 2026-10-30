@@ -22,6 +22,9 @@ const (
 	FirstCodeSynapse = "(first:codesynapse)"
 	FirstNative      = "(first:native)"
 	ReadTurnedBack   = "(guard:read-turned-back)"
+	// FetchSteered counts WebFetch calls of a page fetch_source had cached
+	// that the plugin's hook pointed at fetch_source.
+	FetchSteered = "(guard:fetch-steered)"
 	// FilesEdited counts the files sessions changed (that CodeSynapse
 	// indexes), FilesEditedFound those of them a CodeSynapse answer of the
 	// same session had pointed to: recall measured on real edits.
@@ -62,7 +65,7 @@ func IsWorkflow(tool string) bool {
 		return true
 	}
 	switch tool {
-	case FirstCodeSynapse, FirstNative, ReadTurnedBack, FilesEdited, FilesEditedFound, LocalRead, LocalAvoided, LocalBriefs, LocalDrafts, Unindexed:
+	case FirstCodeSynapse, FirstNative, ReadTurnedBack, FetchSteered, FilesEdited, FilesEditedFound, LocalRead, LocalAvoided, LocalBriefs, LocalDrafts, Unindexed:
 		return true
 	}
 	return false
