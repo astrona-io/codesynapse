@@ -234,6 +234,10 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 		return nil, fmt.Errorf("yaml/template extraction: %w", err)
 	}
 	g.Merge(cfgGraph)
+	// The topology joins code and configuration, so it runs once both are in g.
+	if err := arch.BuildTopology(ctx, opts.Repo, root, g); err != nil {
+		return nil, fmt.Errorf("architecture topology: %w", err)
+	}
 
 	progress(6, "Reading git history")
 	if opts.CommitLimit > 0 && repoNode.Head != "" {

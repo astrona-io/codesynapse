@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/astrona-io/codesynapse/internal/arch"
 	"github.com/astrona-io/codesynapse/internal/curation"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/query"
@@ -46,11 +47,38 @@ type ContextResult struct {
 	// OpenProposals are drafts someone has proposed that match the task. They
 	// are not decisions; they are listed so work is not duplicated or contradicted.
 	OpenProposals []ProposalView `json:"open_proposals"`
+	// Components are the deployable parts the task touches or names: the
+	// image build, its Go main packages, the manifests that run it and the
+	// environment keys involved, each with its evidence. Candidate links rest
+	// on similar names only.
+	Components []ComponentView `json:"components"`
 	// Truncated is set when more records applied than Limit allowed; Omitted counts them.
 	Truncated bool   `json:"truncated"`
 	Omitted   int    `json:"omitted"`
 	Source    Source `json:"source"`
 }
+
+// ComponentView is a component built from the deployment files, and why it
+// bears on the task.
+type ComponentView struct {
+	Name    string        `json:"name"`
+	Why     []string      `json:"why"`
+	Summary string        `json:"summary,omitempty"`
+	Members []arch.Member `json:"members"`
+	Env     []arch.EnvKey `json:"env,omitempty"`
+	// Candidates counts the members linked on similar names only.
+	Candidates int      `json:"candidates"`
+	Notes      []string `json:"notes,omitempty"`
+	// Truncated is set when members or environment keys were left out here.
+	Truncated bool `json:"truncated,omitempty"`
+}
+
+// Bounds on the components a context answer carries.
+const (
+	maxContextComponents = 5
+	maxComponentMembers  = 30
+	maxComponentEnv      = 30
+)
 
 // Context finds the records that apply to a task: those that name the code it
 // touches (its symbols, files and their packages), those for the components it
@@ -61,7 +89,8 @@ func (s Service) Context(ctx context.Context, repo string, t Task) (ContextResul
 	if err != nil {
 		return ContextResult{}, err
 	}
-	res := ContextResult{Binding: []Applicable{}, Informational: []Applicable{}, Issues: []Issue{}, Notes: []string{}, OpenProposals: []ProposalView{}, Source: l.source}
+	res := ContextResult{Binding: []Applicable{}, Informational: []Applicable{}, Issues: []Issue{}, Notes: []string{}, OpenProposals: []ProposalView{},
+		Components: []ComponentView{}, Source: l.source}
 	byNode := map[string]string{} // record node ID -> record ID
 	for id, n := range l.nodes {
 		byNode[n.ID] = id
@@ -76,13 +105,18 @@ func (s Service) Context(ctx context.Context, repo string, t Task) (ContextResul
 	// Code the task touches, and the files and packages around it: a decision
 	// about a package covers the symbols in it.
 	var touched []model.Node
+	files := map[string]bool{}
 	for _, f := range t.Files {
 		f = strings.TrimPrefix(strings.TrimSpace(f), "./")
 		if f == "" {
 			continue
 		}
+		files[f] = true
 		n, err := s.R.Node(ctx, model.NodeID(repo, model.KindFile, f))
 		if err != nil {
+			if _, cerr := s.R.Node(ctx, model.NodeID(repo, model.KindConfig, f)); cerr == nil {
+				continue // a Dockerfile or manifest: the components below cover it
+			}
 			res.Notes = append(res.Notes, fmt.Sprintf("file %q is not in the index", f))
 			continue
 		}
@@ -134,11 +168,32 @@ func (s Service) Context(ctx context.Context, repo string, t Task) (ContextResul
 			}
 		}
 	}
+	named := map[string]bool{}
 	for _, c := range t.Components {
 		c = strings.ToLower(strings.TrimSpace(c))
+		named[arch.ComponentKey(c)] = true
 		for _, id := range l.order {
 			if slices.Contains(l.entry(id, nil).Components, c) {
 				note(id, 3, fmt.Sprintf("applies to component %s", c))
+			}
+		}
+	}
+	comps, err := s.components(ctx, repo, t.Query, named, files, around)
+	if err != nil {
+		return res, err
+	}
+	for _, c := range comps {
+		if len(res.Components) >= maxContextComponents {
+			res.Notes = append(res.Notes, fmt.Sprintf("%d components bear on the task, the first %d are listed", len(comps), maxContextComponents))
+			break
+		}
+		res.Components = append(res.Components, c)
+		if named[c.Name] {
+			continue // already scored above
+		}
+		for _, id := range l.order {
+			if slices.ContainsFunc(l.entry(id, nil).Components, func(rc string) bool { return arch.ComponentKey(rc) == c.Name }) {
+				note(id, 2, fmt.Sprintf("applies to component %s, which %s", c.Name, c.Why[0]))
 			}
 		}
 	}
@@ -281,4 +336,87 @@ func (s Service) decisionsFor(ctx context.Context, repo string, n model.Node, by
 			}
 		}
 	}
+}
+
+// components returns the components built from the deployment files that the
+// task names (by component or as a word of the query) or touches through a
+// member, a file or an environment key read in a touched file.
+func (s Service) components(ctx context.Context, repo, query string, named, files map[string]bool, around map[string]string) ([]ComponentView, error) {
+	ranked, err := s.R.List(ctx, repo, store.Filter{Kinds: []model.NodeKind{model.KindComponent}}, store.ByName, store.MaxLimit)
+	if err != nil {
+		return nil, err
+	}
+	words := map[string]bool{}
+	for _, w := range strings.Fields(strings.ToLower(query)) {
+		if w = strings.Trim(w, ".,;:!?\"'()`"); len(w) > 2 {
+			words[w] = true
+		}
+	}
+	var out []ComponentView
+	for _, r := range ranked {
+		t, ok := arch.TopologyOf(r.Node)
+		if !ok {
+			continue
+		}
+		name := r.Node.QualifiedName
+		var why []string
+		switch {
+		case named[name]:
+			why = append(why, "is named by the task")
+		case words[name]:
+			why = append(why, "is named in the task")
+		}
+		for _, m := range t.Members {
+			what, hit := around[m.Node]
+			if !hit && files[m.File] {
+				what, hit = m.File, true
+			}
+			if hit {
+				why = append(why, fmt.Sprintf("groups %s (%s)", what, m.Role))
+				break
+			}
+		}
+		if len(why) == 0 {
+		env:
+			for _, k := range t.Env {
+				for _, u := range k.ReadBy {
+					if files[u.File] {
+						why = append(why, fmt.Sprintf("reads %s in %s", k.Name, u.File))
+						break env
+					}
+				}
+			}
+		}
+		if len(why) == 0 {
+			continue
+		}
+		v := ComponentView{Name: name, Why: why, Summary: r.Node.Summary, Members: t.Members, Env: t.Env, Notes: t.Notes}
+		for _, m := range t.Members {
+			if m.Candidate {
+				v.Candidates++
+			}
+		}
+		if len(v.Members) > maxComponentMembers {
+			v.Members, v.Truncated = v.Members[:maxComponentMembers], true
+		}
+		if len(v.Env) > maxComponentEnv {
+			v.Env, v.Truncated = v.Env[:maxComponentEnv], true
+		}
+		out = append(out, v)
+	}
+	// What the task names first, then what it touches, by name within each.
+	slices.SortStableFunc(out, func(a, b ComponentView) int {
+		return cmp.Compare(componentRank(a, named, words), componentRank(b, named, words))
+	})
+	return out, nil
+}
+
+func componentRank(c ComponentView, named, words map[string]bool) int {
+	switch {
+	case named[c.Name]:
+		return 0
+	case words[c.Name]:
+		return 1
+	}
+	return 2
 }
