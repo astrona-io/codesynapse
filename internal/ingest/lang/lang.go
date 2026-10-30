@@ -102,6 +102,9 @@ type symbol struct {
 	// inputs are parameters a route handler receives from the client
 	// (Flask/FastAPI path and query parameters), for taint.go.
 	inputs []string
+	// params are the declared parameter names, for binding call arguments
+	// (taintflow.go): "*" is a rest parameter, "" a destructured one.
+	params []string
 }
 
 type call struct {
@@ -126,6 +129,9 @@ type fileResult struct {
 	// partial is set when the source ended with open brackets or an open
 	// string: declarations after the problem may be missing or misplaced.
 	partial bool
+	// taint keeps what taint tracking needs to scan the file again once
+	// calls between files are resolved (taintflow.go); nil when it is not.
+	taint *taintSource
 }
 
 // unbalanced reports whether opening and closing brackets in masked source
@@ -253,6 +259,8 @@ type indexer struct {
 	res   *Result
 	// rustMods holds the module names of each Rust crate (rust.go).
 	rustMods map[string]map[string]bool
+	// taintBytes is the source kept for taint across functions (taintflow.go).
+	taintBytes int
 }
 
 func (ix *indexer) id(kind model.NodeKind, local string) string {
@@ -313,6 +321,15 @@ func (ix *indexer) parse(rel, lang string, src []byte) {
 	}
 	if isTestPath(rel, lang) {
 		fr.isTest = true
+	}
+	if t := fr.taint; t != nil {
+		// Vue lines are shifted and test code is no entry: neither is
+		// scanned again. Files past the budget keep their own findings.
+		if lang == Vue || fr.isTest || ix.taintBytes+t.size() > maxTaintBytes {
+			fr.taint = nil
+		} else {
+			ix.taintBytes += t.size()
+		}
 	}
 	ix.res.Languages[lang]++
 
@@ -503,6 +520,11 @@ func (ix *indexer) link() {
 		slices.SortFunc(files, func(a, b *parsedFile) int { return strings.Compare(a.rel, b.rel) })
 	}
 	djangoPrefix := ix.djangoPrefixes(byModule)
+	// For taint across functions (taintflow.go): how each file resolves a
+	// call, and which declarations calls reach through declarations and
+	// imports.
+	resolvers := map[*parsedFile]func(call, string) (string, model.Evidence){}
+	called := map[string]bool{}
 	unique := func(m map[string][]string, key string) (string, model.Evidence) {
 		if ids := m[key]; len(ids) == 1 {
 			return ids[0], model.EvidenceInferred
@@ -666,8 +688,12 @@ func (ix *indexer) link() {
 			}
 			return "", ""
 		}
+		resolvers[pf] = resolve
 		link := func(from string, c call, class string) {
 			to, evidence := resolve(c, class)
+			if evidence == model.EvidenceSyntactic {
+				called[to] = true
+			}
 			if to == "" && !pf.fr.isTest {
 				if key := extBound.callKey(c); key != "" {
 					ix.res.ExternalCalls[key] = append(ix.res.ExternalCalls[key], from)
@@ -742,12 +768,19 @@ func (ix *indexer) link() {
 						r.guards = append(r.guards, AccessGuards(rubyActionGuards(f.fr.rbClasses, typ, lastPart(s.name), rubyType))...)
 					}
 				}
+				// A Django view receives the URL's parameters as arguments.
+				if s := symOf[to]; s != nil && evidence == model.EvidenceSyntactic && s.kind != model.KindType && pf.lang == Python && path.Base(pf.rel) == "urls.py" {
+					s.addInputs(djangoParams(r.name))
+				}
 				id := ix.addRoute(pf, r)
 				if to != "" {
 					ix.g.AddEdge(model.Edge{From: id, To: to, Kind: model.EdgeHandledBy, Evidence: evidence})
 				}
 			}
 		}
+	}
+	ix.taintAcross(resolvers, called)
+	for _, pf := range ix.files {
 		for _, f := range pf.fr.findings {
 			if pf.fr.isTest {
 				continue // fixtures with fake secrets would bury real findings
