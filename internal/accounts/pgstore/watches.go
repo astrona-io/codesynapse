@@ -10,15 +10,15 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts"
 )
 
-const watchCols = "org_id, key, actor_id, execution, provider, host, login, include_archived, include_forks, paused, last_scan, last_status, last_error, next_scan, added, known"
+const watchCols = "org_id, key, actor_id, execution, provider, host, login, include_archived, include_forks, paused, last_scan, last_status, last_error, next_scan, added, known, private_baseline"
 
 func scanWatch(row pgx.Row) (accounts.OrgWatch, error) {
 	var w accounts.OrgWatch
 	var key string
 	var exec, known []byte
-	var lastScan *time.Time
+	var lastScan, baseline *time.Time
 	if err := row.Scan(&w.OrgID, &key, &w.ActorID, &exec, &w.Provider, &w.Host, &w.Login, &w.IncludeArchived, &w.IncludeForks, &w.Paused,
-		&lastScan, &w.LastStatus, &w.LastError, &w.NextScan, &w.Added, &known); err != nil {
+		&lastScan, &w.LastStatus, &w.LastError, &w.NextScan, &w.Added, &known, &baseline); err != nil {
 		return accounts.OrgWatch{}, err
 	}
 	if err := json.Unmarshal(exec, &w.Execution); err != nil {
@@ -29,6 +29,9 @@ func scanWatch(row pgx.Row) (accounts.OrgWatch, error) {
 	}
 	if lastScan != nil {
 		w.LastScan = lastScan.UTC()
+	}
+	if baseline != nil {
+		w.PrivateBaseline = baseline.UTC()
 	}
 	w.NextScan = w.NextScan.UTC()
 	return w, nil
@@ -95,7 +98,8 @@ func (s *Store) RecordWatchScan(ctx context.Context, orgID, key string, scan acc
 		}
 	}
 	_, err := s.db.Exec(ctx, `UPDATE org_watches SET last_scan = COALESCE($3, last_scan), last_status = $4, last_error = $5,
-  next_scan = COALESCE($6, next_scan), added = added + $7, known = COALESCE($8::jsonb, known)
-WHERE org_id = $1 AND key = $2`, orgID, key, nullTime(scan.LastScan), scan.LastStatus, scan.LastError, nullTime(scan.NextScan), scan.Added, known)
+  next_scan = COALESCE($6, next_scan), added = added + $7, known = COALESCE($8::jsonb, known),
+  private_baseline = COALESCE($9, private_baseline)
+WHERE org_id = $1 AND key = $2`, orgID, key, nullTime(scan.LastScan), scan.LastStatus, scan.LastError, nullTime(scan.NextScan), scan.Added, known, nullTime(scan.PrivateBaseline))
 	return err
 }

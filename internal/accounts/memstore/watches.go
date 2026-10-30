@@ -34,6 +34,7 @@ func (s *Store) PutOrgWatch(_ context.Context, w accounts.OrgWatch) error {
 	id := watchID(w.OrgID, w.Key())
 	if old, ok := t.watches[id]; ok {
 		w.LastScan, w.LastStatus, w.LastError, w.NextScan, w.Added, w.Known = old.LastScan, old.LastStatus, old.LastError, old.NextScan, old.Added, old.Known
+		w.PrivateBaseline = old.PrivateBaseline
 	}
 	t.watches[id] = w
 	return nil
@@ -85,6 +86,9 @@ func (s *Store) RecordWatchScan(_ context.Context, orgID, key string, scan accou
 	w.Added += scan.Added
 	if scan.Known != nil {
 		w.Known = scan.Known
+	}
+	if !scan.PrivateBaseline.IsZero() {
+		w.PrivateBaseline = scan.PrivateBaseline
 	}
 	t.watches[id] = w
 	return nil

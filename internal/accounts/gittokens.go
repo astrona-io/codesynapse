@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -95,12 +96,23 @@ func (s *Service) GitTokens(ctx context.Context, p Principal, orgID string) ([]G
 // OpenGitToken returns an organisation's token for host in clear, for a
 // clone or fetch the caller is about to run. ErrNotFound without one.
 func (s *Service) OpenGitToken(ctx context.Context, orgID, host string) (string, error) {
+	tok, _, err := s.OpenGitTokenAt(ctx, orgID, host)
+	return tok, err
+}
+
+// OpenGitTokenAt is OpenGitToken plus when that token was set, read in the
+// same lookup, so a caller can tell a replaced token from the one it saw.
+func (s *Service) OpenGitTokenAt(ctx context.Context, orgID, host string) (string, time.Time, error) {
 	if s.Secrets == nil {
-		return "", ErrNoSecretKey
+		return "", time.Time{}, ErrNoSecretKey
 	}
 	t, err := s.St.GitToken(ctx, orgID, host)
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
-	return s.Secrets.Open(t.Sealed, t.KeyID, orgID, host)
+	tok, err := s.Secrets.Open(t.Sealed, t.KeyID, orgID, host)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return tok, t.UpdatedAt, nil
 }

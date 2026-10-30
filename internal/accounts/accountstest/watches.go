@@ -58,6 +58,13 @@ func RunWatches(t *testing.T, newStore func(*testing.T) accounts.Store) {
 		list, _ = st.OrgWatches(ctx, "org-1")
 		assert.Equal(t, list[0].Added, 3)
 		assert.Equal(t, list[0].Known, []string{"a/b", "a/c"}, "a scan without a seen list keeps it")
+		assert.True(t, list[0].PrivateBaseline.IsZero(), "no private baseline until a scan records one")
+
+		require.NoError(t, st.RecordWatchScan(ctx, "org-1", w.Key(), accounts.WatchScan{LastStatus: "ok", PrivateBaseline: now}))
+		require.NoError(t, st.RecordWatchScan(ctx, "org-1", w.Key(), accounts.WatchScan{LastStatus: "ok"}))
+		require.NoError(t, st.PutOrgWatch(ctx, changed))
+		list, _ = st.OrgWatches(ctx, "org-1")
+		assert.True(t, list[0].PrivateBaseline.Equal(now), "a later scan and a settings change keep the private baseline")
 
 		require.NoError(t, st.RecordWatchScan(ctx, "org-1", "gone/none", accounts.WatchScan{}), "a removed watch is no error")
 		require.NoError(t, st.DeleteOrgWatch(ctx, "org-1", w.Key()))

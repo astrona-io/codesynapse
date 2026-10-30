@@ -16,11 +16,23 @@ import (
 	"github.com/astrona-io/codesynapse/internal/model"
 )
 
-// Organisation watches (accounts mode): a member asks for the public
-// repositories an organisation or user on a git host creates later to be
-// added to their CodeSynapse organisation, so the import is not repeated.
-// A watch runs as the member who created it, rechecked on every scan, and
-// adds only public repositories, anonymously, the way POST /repos does.
+// Organisation watches (accounts mode): a member asks for the repositories
+// an organisation or user on a git host creates later to be added to their
+// CodeSynapse organisation, so the import is not repeated. A watch runs as
+// the member who created it, rechecked on every scan, and adds repositories
+// the way POST /repos does.
+//
+// A scan lists anonymously and adds public repositories, unless the creator
+// is, at that scan, an owner or admin of the organisation and the
+// organisation has its own Git token for the host: then it lists with that
+// token, as POST /imports/list does for the same people (git_token.list is
+// audited first; without the entry it lists anonymously), and also adds the
+// private repositories the token reads, to the organisation's space, after
+// proving access with the same token. Never the installation's tokens or a
+// personal one. Private repositories that existed before the watch first
+// listed with the token (or with a token replaced since) are never in the
+// creation baseline, so that scan adds them to the baseline instead of
+// adding them; people add existing repositories from the import list.
 
 const (
 	// watchScanInterval is how often a watch lists its organisation again.
@@ -34,7 +46,9 @@ type watchAddKey struct{}
 
 // signedInOrWatching says whether p may attach a repository: a signed-in
 // session, or the delegated identity of a watch scan, which only the scan
-// (watchContext) can mark.
+// (watchContext) can mark. It says nothing about visibility: a scan adds a
+// private repository only after the organisation's token proved access, and
+// linkPolicyRepository still checks the role the space needs.
 func signedInOrWatching(ctx context.Context, p accounts.Principal) bool {
 	if p.Via == "session" {
 		return true
@@ -190,6 +204,10 @@ func (s *Server) handleAddWatch(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
+	// An owner or admin lists with the organisation's token, so the private
+	// repositories it reads are part of the baseline from the start.
+	var tokenSet time.Time
+	c.Token, tokenSet = s.watchToken(r.Context(), p, m.Org.ID, host, login, s.logger)
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 	// What exists now is the baseline: the person already chose what to add,
@@ -197,7 +215,11 @@ func (s *Server) handleAddWatch(w http.ResponseWriter, r *http.Request) {
 	listed, err := c.ListRepos(ctx, login)
 	if err != nil {
 		if errors.Is(err, forge.ErrNotFound) {
-			s.problem(w, http.StatusNotFound, errors.New(login+" was not found on "+host+", or it has no public repositories"))
+			what := "public repositories"
+			if c.Token != "" {
+				what = "repositories the organisation's token can read"
+			}
+			s.problem(w, http.StatusNotFound, errors.New(login+" was not found on "+host+", or it has no "+what))
 			return
 		}
 		s.orgError(w, err)
@@ -218,7 +240,11 @@ func (s *Server) handleAddWatch(w http.ResponseWriter, r *http.Request) {
 	for _, x := range listed[:min(len(listed), accounts.MaxWatchKnown)] {
 		known = append(known, x.Name)
 	}
-	if err := s.cfg.Accounts.St.RecordWatchScan(ctx, m.Org.ID, key, accounts.WatchScan{LastScan: now, LastStatus: "watching", NextScan: now.Add(watchScanInterval), Known: known}); err != nil {
+	scan := accounts.WatchScan{LastScan: now, LastStatus: "watching", NextScan: now.Add(watchScanInterval), Known: known}
+	if c.Token != "" && !tokenSet.After(now) {
+		scan.PrivateBaseline = now
+	}
+	if err := s.cfg.Accounts.St.RecordWatchScan(ctx, m.Org.ID, key, scan); err != nil {
 		s.accountError(w, err)
 		return
 	}
@@ -396,6 +422,14 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 		fail("failed", err)
 		return
 	}
+	p, _ := principal(wctx)
+	var tokenSet time.Time
+	c.Token, tokenSet = s.watchToken(wctx, p, w.OrgID, w.Host, w.Login, logger)
+	authed := c.Token != ""
+	// The first scan with the token, or the first after the token was
+	// replaced, may see private repositories that are older than the watch:
+	// they become baseline, not additions.
+	baseline := authed && (w.PrivateBaseline.IsZero() || tokenSet.After(w.PrivateBaseline))
 	lctx, cancel := context.WithTimeout(wctx, 90*time.Second)
 	defer cancel()
 	listed, err := c.ListRepos(lctx, w.Login)
@@ -420,15 +454,19 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 	}
 	added, lastErr := 0, ""
 	for _, x := range listed {
-		if known[x.Name] || !keepListed(x, w.IncludeArchived, w.IncludeForks, false) {
+		if known[x.Name] || !keepListed(x, w.IncludeArchived, w.IncludeForks, authed) {
+			continue
+		}
+		if x.Private && baseline {
+			known[x.Name] = true
 			continue
 		}
 		name := forge.RepoName(w.Host, w.Login, x.Name)
 		if !linked[name] {
 			if added == maxClonesPerScan {
-				break // the rest wait for the next scan
+				continue // the rest wait for the next scan; a baseline still takes them all
 			}
-			if ok, err := s.addWatched(wctx, w, c.CloneURL(w.Login, x.Name), name); err != nil {
+			if ok, err := s.addWatched(wctx, w, c.CloneURL(w.Login, x.Name), name, authed); err != nil {
 				lastErr = name + ": " + err.Error()
 			} else if ok {
 				added++
@@ -449,9 +487,42 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 	if len(lastErr) > 300 {
 		lastErr = lastErr[:300]
 	}
-	if err := s.cfg.Accounts.St.RecordWatchScan(ctx, w.OrgID, w.Key(), accounts.WatchScan{LastScan: now, LastStatus: status, LastError: lastErr, NextScan: now.Add(watchScanInterval), Added: added, Known: seen}); err != nil {
+	scan := accounts.WatchScan{LastScan: now, LastStatus: status, LastError: lastErr, NextScan: now.Add(watchScanInterval), Added: added, Known: seen}
+	if baseline {
+		scan.PrivateBaseline = now
+	}
+	if err := s.cfg.Accounts.St.RecordWatchScan(ctx, w.OrgID, w.Key(), scan); err != nil {
 		logger.Warn("recording organisation watch scan", "error", err)
 	}
+}
+
+// watchToken opens the organisation's Git token for host when p (the
+// watch's creator) is, right now, an owner or admin of the organisation, the
+// people who manage that token (as for POST /imports/list), and returns it
+// with when it was set. The git_token.list entry is written first. Without
+// the role, a token or the entry it returns nothing, and the watch lists
+// anonymously.
+func (s *Server) watchToken(ctx context.Context, p accounts.Principal, orgID, host, login string, logger *slog.Logger) (string, time.Time) {
+	key := accounts.WatchKey(host, login)
+	if err := s.cfg.Accounts.Require(ctx, p, orgID, accounts.Admin); err != nil {
+		if !errors.Is(err, accounts.ErrForbidden) {
+			logger.Warn("checking the watch creator's role; listing anonymously", "org", orgID, "watch", key, "error", err)
+		}
+		return "", time.Time{}
+	}
+	tok, set, err := s.cfg.Accounts.OpenGitTokenAt(ctx, orgID, host)
+	if err != nil {
+		if !errors.Is(err, accounts.ErrNotFound) && !errors.Is(err, accounts.ErrNoSecretKey) {
+			logger.Warn("opening the organisation's Git token; listing anonymously", "org", orgID, "watch", key, "error", err)
+		}
+		return "", time.Time{}
+	}
+	if _, err := s.cfg.Accounts.Record(ctx, accounts.Event{UserID: p.User.ID, Via: p.Via, OrgID: orgID, Action: "git_token.list",
+		Target: host + "/" + login, Outcome: accounts.Success, Detail: "organisation watch"}); err != nil {
+		logger.Warn("auditing the watch's token listing; listing anonymously", "org", orgID, "watch", key, "error", err)
+		return "", time.Time{}
+	}
+	return tok, set
 }
 
 // watchSkip says the watch has nothing to add: the organisation already has
@@ -469,8 +540,8 @@ func watchSkip(err error) bool {
 // answer watchSkip for this add, so a no-op leaves no watch.repo_add entry;
 // other skips in a scan (known, filtered or linked repositories) are not
 // audited either. linkPolicyRepository decides again under the policy lock.
-func (s *Server) watchSkips(ctx context.Context, name, remote string) (bool, error) {
-	entry, _, err := s.linkEntry(ctx, name, remote, accounts.Public, "")
+func (s *Server) watchSkips(ctx context.Context, name, remote, visibility, space string) (bool, error) {
+	entry, _, err := s.linkEntry(ctx, name, remote, visibility, space)
 	if err != nil {
 		return false, err
 	}
@@ -491,12 +562,14 @@ func (s *Server) watchSkips(ctx context.Context, name, remote string) (bool, err
 	return watchSkip(err), nil
 }
 
-// addWatched attaches one new public repository the way POST /repos does:
-// an indexed graph is linked only for the same remote, otherwise it is
-// cloned anonymously. The audit entry is written first; without it nothing
-// is added. It reports whether anything was added: a skip (watchSkips) is
-// not, and is not audited.
-func (s *Server) addWatched(ctx context.Context, w accounts.OrgWatch, remote, name string) (bool, error) {
+// addWatched attaches one new repository the way POST /repos does: a public
+// one is linked or cloned anonymously; a private one only when the scan
+// listed with the organisation's token (withToken), into the organisation's
+// space, after that token proved it reads the remote, and is cloned with it.
+// An indexed graph is linked only for the same remote. The audit entry is
+// written first; without it nothing is added. It reports whether anything
+// was added: a skip (watchSkips) is not, and is not audited.
+func (s *Server) addWatched(ctx context.Context, w accounts.OrgWatch, remote, name string, withToken bool) (bool, error) {
 	if !validRepoName(name) {
 		return false, errors.New("the name is not valid here")
 	}
@@ -504,10 +577,20 @@ func (s *Server) addWatched(ctx context.Context, w accounts.OrgWatch, remote, na
 	if err != nil {
 		return false, err
 	}
+	vis, space, auth := accounts.Public, "", gitx.Auth{}
 	if !publicRemote(ctx, remote) {
-		return false, errors.New("not readable without a token")
+		if !withToken {
+			return false, errors.New("not readable without a token")
+		}
+		// The organisation's own token, never a personal one: so the entry
+		// is the organisation's, whatever space the creator would default to.
+		proved, err := s.proveAccess(ctx, w.OrgID, "", remote)
+		if err != nil {
+			return false, err
+		}
+		vis, space, auth = accounts.Private, spaceOrg, proved
 	}
-	if skip, err := s.watchSkips(ctx, name, remote); err != nil || skip {
+	if skip, err := s.watchSkips(ctx, name, remote, vis, space); err != nil || skip {
 		return false, err
 	}
 	if _, err := s.cfg.Accounts.Record(ctx, accounts.Event{UserID: w.ActorID, Via: "automation", OrgID: w.OrgID, Action: "watch.repo_add", Target: name, Outcome: accounts.Success}); err != nil {
@@ -517,22 +600,26 @@ func (s *Server) addWatched(ctx context.Context, w accounts.OrgWatch, remote, na
 		if n.URL == "" || !sameRemote(n.URL, remote) {
 			return false, errors.New("the name is already used for another source")
 		}
-		err := s.linkRepo(ctx, name, remote, accounts.Public, "")
+		err := s.linkRepo(ctx, name, remote, vis, space)
 		if watchSkip(err) {
 			return false, nil
 		}
+		if err == nil && vis == accounts.Private {
+			// Proved just now: restore a link that had lost access.
+			_ = s.cfg.Accounts.St.SetRepositoryAccess(ctx, w.OrgID, name, accounts.AccessOK, time.Now().UTC().Truncate(time.Microsecond)) //nolint:errcheck // linked above; a failed stamp only delays the restore to the next sync
+		}
 		return err == nil, err
 	}
-	if err := s.linkRepo(ctx, name, remote, accounts.Public, ""); watchSkip(err) {
+	if err := s.linkRepo(ctx, name, remote, vis, space); watchSkip(err) {
 		return false, nil // nothing to clone
 	} else if err != nil {
 		return false, err
 	}
 	org, authorize := s.jobAuthorization(ctx, name, accounts.Admin)
-	d, err := s.durableIf(ctx, "clone", accounts.Admin, cloneParams{Remote: remote, Name: name})
+	d, err := s.durableIf(ctx, "clone", accounts.Admin, cloneParams{Remote: remote, Name: name, Private: vis == accounts.Private})
 	if err != nil {
 		return false, err
 	}
-	_, err = s.startCloneAuth(remote, name, "", gitx.Auth{}, JobOptions{OrgID: org, Identity: identityOf(ctx), Authorize: authorize, Durable: d}) //nolint:contextcheck // jobs outlive the scan
+	_, err = s.startCloneAuth(remote, name, "", auth, JobOptions{OrgID: org, Identity: identityOf(ctx), Authorize: authorize, Durable: d}) //nolint:contextcheck // jobs outlive the scan
 	return err == nil, err
 }

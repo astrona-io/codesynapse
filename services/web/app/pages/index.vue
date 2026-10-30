@@ -63,7 +63,7 @@ async function onAdded() {
   await Promise.all([refreshJobs(), refreshOverview(), refreshWatches()])
 }
 
-// Organisations whose new public repositories are added automatically
+// Organisations whose new repositories are added automatically
 // (accounts only; the dialog creates them).
 interface Watch { key: string; provider: string; host: string; org: string; paused: boolean; last_scan?: string; last_status?: string; last_error?: string; next_scan?: string; added: number; mine: boolean }
 const { data: watchList, refresh: refreshWatches } = useApiGet<{ watches: Watch[] }>('watches')
@@ -223,7 +223,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
 
     <section v-if="session.accounts.value && watchList?.watches.length" class="panel">
       <p class="eyebrow">Auto-add</p><h2>Watched organisations</h2>
-      <p class="muted small">New public repositories of these are added to your organisation automatically, checked every 15 minutes.</p>
+      <p class="muted small">New repositories of these are added to your organisation automatically, checked every 15 minutes: public ones, and private ones the organisation's Git token reads while the watch's creator is an owner or admin.</p>
       <ul class="jobs">
         <li v-for="w in watchList.watches" :key="w.key" class="job">
           <span class="dot" :class="{ 'dot--ok': !w.paused && (!w.last_status || w.last_status === 'ok' || w.last_status === 'watching'), 'dot--warn': w.paused, 'dot--bad': !w.paused && !!w.last_error }" />

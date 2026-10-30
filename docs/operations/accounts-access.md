@@ -187,7 +187,17 @@ They are used, with no fallback to the organisation's token, to:
 - push fix branches for it;
 - list repositories for Import into your own space.
 
-Organisation watches still add public repositories only, to the organisation space.
+Organisation watches never use personal tokens.
+
+### Organisation watches
+
+A watch adds the repositories an organisation or user on a Git host creates after the watch was set up. Repositories that exist when it is created are its baseline and are never added by it; pick those in the import list. Every 15 minutes the scan runs as the member who created the watch:
+
+- When that member is an owner or admin of the organisation at the time of the scan (checked again every scan) and the organisation has a Git token for the host, the scan writes a `git_token.list` audit event and then lists with that token. If the event cannot be written, the scan lists anonymously.
+- Otherwise it lists anonymously and sees public repositories only. The installation's tokens are never used.
+- New public repositories are added like any other add. A new private repository is added only to the organisation space, after the organisation's token proved access, and is cloned with that token.
+- The first scan that lists with a token, and the first one after the token is replaced, adds no private repositories: the ones it finds join the baseline, so setting a token does not add everything it can read.
+- Each add writes a `watch.repo_add` audit event first; at most 10 repositories are queued per scan.
 
 ## Audit log
 

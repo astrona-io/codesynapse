@@ -7,10 +7,12 @@ import (
 	"github.com/astrona-io/codesynapse/internal/execution"
 )
 
-// Organisation watches: a person asks CodeSynapse to add the public
-// repositories an organisation or user on a git host creates later, so the
-// import does not have to be repeated. The watch runs as the member who
-// created it (Execution, ActorID) and is rechecked on every scan.
+// Organisation watches: a person asks CodeSynapse to add the repositories an
+// organisation or user on a git host creates later, so the import does not
+// have to be repeated: public ones always, private ones too while the
+// creator is an owner or admin and the organisation's Git token for the host
+// reads them. The watch runs as the member who created it (Execution,
+// ActorID) and is rechecked on every scan.
 
 // OrgWatch is one watched organisation or user on a git host, within one
 // CodeSynapse organisation.
@@ -35,6 +37,11 @@ type OrgWatch struct {
 	// Known is the repositories the watch has already seen (owner/name as
 	// listed), so a repository someone removed is not added again.
 	Known []string
+	// PrivateBaseline is when the watch first listed with the
+	// organisation's Git token, or first did so after that token was
+	// replaced; zero until then. The private repositories found on that
+	// scan join Known instead of being added.
+	PrivateBaseline time.Time
 }
 
 // Key identifies the watch inside its organisation: host/login, lowercase.
@@ -53,6 +60,8 @@ type WatchScan struct {
 	Added int
 	// Known replaces the seen list.
 	Known []string
+	// PrivateBaseline records a new private baseline; zero keeps the old one.
+	PrivateBaseline time.Time
 }
 
 const (
