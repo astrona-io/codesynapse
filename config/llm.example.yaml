@@ -15,6 +15,7 @@ providers:
     model: mlx-community/Qwen3.8-27B-4bit
     context_window: 262144    # the model's full context (max_position_embeddings in its config.json)
     max_output_tokens: 32768  # longest answer; also sets how many findings go into one triage request
+                              # and the least answer room the gateway keeps when it lowers an agent's max_tokens to fit context_window
     disable_thinking: true    # Qwen3/R1-style models: skip the reasoning phase for fast JSON answers
     # bytes_per_token: 3      # local models: count 3 request bytes as one token (default 1, the safe upper bound)
     # kv_cache: auto          # local servers reuse the prompt cache (auto, on, off)
