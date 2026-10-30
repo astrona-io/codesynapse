@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AdminOrg, OrgSessionRow, OrgTenantRow, SeriesRange, SessionTotals, StatsRange, StatsSummary, StatsTable, TenantTotals, UsageSection } from '~/utils/types'
+import type { AdminOrg, IngestSection, JobsSection, OrgSessionRow, OrgTenantRow, SeriesRange, SessionTotals, StatsRange, StatsSummary, StatsTable, TenantTotals, UsageSection } from '~/utils/types'
 
 // Platform statistics: counts across every organisation, aggregates only.
 // Every load is recorded in the audit log, so nothing refreshes unless the
@@ -11,14 +11,17 @@ const ranges: { id: StatsRange; label: string }[] = [
 ]
 const range = ref<StatsRange>('24h')
 const org = ref('')
-const tab = ref<'tenants' | 'sessions' | 'usage' | 'security' | 'audit' | 'storage' | 'alerts'>('tenants')
+type Tab = 'tenants' | 'sessions' | 'usage' | 'jobs' | 'ingest' | 'security' | 'audit' | 'storage' | 'alerts'
+const tab = ref<Tab>('tenants')
 // Security, audit, storage and alerts load in their own components, only while shown.
 const sectionTick = ref(0)
-const tabled = computed(() => tab.value === 'tenants' || tab.value === 'sessions' || tab.value === 'usage')
+const tabled = computed(() => tab.value !== 'storage' && tab.value !== 'alerts')
 const page = ref(1)
 const tenantSort = ref('name')
 const sessionSort = ref('name')
 const usageSort = ref('name')
+const jobSort = ref('name')
+const ingestSort = ref('name')
 watch([range, org, tab], () => { page.value = 1 })
 
 const filter = computed(() => `range=${range.value}${org.value ? `&org=${encodeURIComponent(org.value)}` : ''}`)
@@ -30,15 +33,27 @@ const { data: sessions, error: sessionsError, refresh: refreshSessions, execute:
   () => `admin/stats/sessions?${filter.value}&sort=${sessionSort.value}&page=${page.value}`, { immediate: false })
 const { data: usage, error: usageError, refresh: refreshUsage, execute: loadUsage } = useApiGet<UsageSection>(
   () => `admin/stats/usage?${filter.value}&sort=${usageSort.value}&page=${page.value}`, { immediate: false })
+const { data: jobs, error: jobsError, refresh: refreshJobs, execute: loadJobs } = useApiGet<JobsSection>(
+  () => `admin/stats/jobs?${filter.value}&sort=${jobSort.value}&page=${page.value}`, { immediate: false })
+const { data: ingest, error: ingestError, refresh: refreshIngest, execute: loadIngest } = useApiGet<IngestSection>(
+  () => `admin/stats/ingest?${filter.value}&sort=${ingestSort.value}&page=${page.value}`, { immediate: false })
 
 // Usage charts come from VictoriaMetrics, which keeps 30 days: 90 days and
 // 1 year show the last 30. Tools and clients fewer than three organisations
 // use are "other" unless one organisation is selected.
-const usagePanels = ['sessions', 'mcp_calls', 'mcp_errors', 'mcp_tokens', 'local_answers', 'tool_latency', 'tool_latency_by_tool',
-  'org_tool_calls', 'org_sessions', 'org_tokens', 'api_routes', 'api_failures', 'api_route_latency', 'gateway_requests', 'gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_fallthrough', 'llm_cost', 'db_latency']
+const chartPanels: Partial<Record<Tab, string[]>> = {
+  usage: ['sessions', 'mcp_calls', 'mcp_errors', 'mcp_tokens', 'local_answers', 'tool_latency', 'tool_latency_by_tool',
+  'org_tool_calls', 'org_sessions', 'org_tokens', 'api_routes', 'api_failures', 'api_route_latency', 'gateway_requests', 'gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_fallthrough', 'llm_cost', 'db_latency'],
+  jobs: ['jobs_finished', 'jobs_failures', 'jobs_org_finished', 'jobs_queue', 'jobs_wait', 'jobs_duration', 'jobs_worker_roles', 'jobs_scheduler', 'jobs_leases'],
+  ingest: ['ingest_runs', 'ingest_org_runs', 'ingest_phases', 'ingest_extract', 'ingest_files', 'ingest_skips'],
+}
+// The charts follow the last tab that has any, so switching to a table
+// without charts does not ask for them again.
+const chartTab = ref<Tab>('usage')
+const panelNames = computed(() => chartPanels[chartTab.value] ?? [])
 const live = computed(() => range.value !== '90d' && range.value !== '365d')
 const seriesRange = computed<SeriesRange>(() => (live.value ? range.value as SeriesRange : '30d'))
-const { panels: charts, pending: chartsPending, refresh: refreshCharts, execute: loadCharts } = useSeriesBatch(usagePanels, seriesRange, undefined,
+const { panels: charts, pending: chartsPending, refresh: refreshCharts, execute: loadCharts } = useSeriesBatch(panelNames, seriesRange, undefined,
   { base: 'admin/stats/series/batch', org, immediate: false })
 const chartsOff = ref(false)
 // Security and audit load and refresh themselves (AdminSecurityStats,
@@ -47,10 +62,15 @@ const securityTab = ref<{ refresh: () => void; error: unknown } | null>(null)
 const auditTab = ref<{ refresh: () => void; error: unknown } | null>(null)
 watch(tab, (t) => {
   if (t === 'sessions' && !sessions.value) loadSessions()
-  if (t === 'usage' && !usage.value) { loadUsage(); loadCharts() }
+  if (t === 'usage' && !usage.value) loadUsage()
+  if (t === 'jobs' && !jobs.value) loadJobs()
+  if (t === 'ingest' && !ingest.value) loadIngest()
+  if (!chartPanels[t]) return
+  if (t !== chartTab.value) { chartTab.value = t; chartsOff.value = false; loadCharts() }
+  else if (!Object.keys(charts.value).length) loadCharts()
 })
-const error = computed(() => summaryError.value ?? (tab.value === 'tenants' ? tenantsError.value : tab.value === 'sessions' ? sessionsError.value
-  : tab.value === 'usage' ? usageError.value : tab.value === 'security' ? securityTab.value?.error : tab.value === 'audit' ? auditTab.value?.error : null))
+const errors: Partial<Record<Tab, Ref<unknown>>> = { tenants: tenantsError, sessions: sessionsError, usage: usageError, jobs: jobsError, ingest: ingestError }
+const error = computed(() => summaryError.value ?? (tab.value === 'security' ? securityTab.value?.error : tab.value === 'audit' ? auditTab.value?.error : errors[tab.value]?.value) ?? null)
 
 const auto = ref(false)
 let timer: ReturnType<typeof setInterval> | undefined
@@ -61,6 +81,8 @@ function refreshAll() {
   else if (tab.value === 'security') securityTab.value?.refresh()
   else if (tab.value === 'audit') auditTab.value?.refresh()
   else if (tab.value === 'usage') { refreshUsage(); refreshCharts() }
+  else if (tab.value === 'jobs') { refreshJobs(); refreshCharts() }
+  else if (tab.value === 'ingest') { refreshIngest(); refreshCharts() }
   else sectionTick.value++
 }
 watch(auto, (on) => {
@@ -70,7 +92,8 @@ watch(auto, (on) => {
 onBeforeUnmount(() => clearInterval(timer))
 
 const exportHref = (format: 'csv' | 'json') => apiPath(`admin/stats/export?section=${tab.value}&${tab.value === 'audit' ? `range=${range.value}` : filter.value}&format=${format}`)
-const table = computed(() => (tab.value === 'tenants' ? tenants.value : tab.value === 'sessions' ? sessions.value : tab.value === 'usage' ? usage.value : null))
+const tables: Partial<Record<Tab, Ref<StatsTable<unknown, unknown> | null | undefined>>> = { tenants, sessions, usage, jobs, ingest }
+const table = computed(() => tables[tab.value]?.value ?? null)
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? '–' : `${v}%`)
 const shareHint = computed(() => {
   const t = usage.value?.totals
@@ -88,6 +111,9 @@ const upperShare = computed(() => {
   return u !== null && u !== undefined && u > (t?.share_avoided_pct ?? 0) ? u : null
 })
 const n = (v: number | null | undefined) => (v === null || v === undefined ? '–' : fmtCompact(v))
+// wait reads a queue age: seconds under two minutes, then minutes, hours.
+const wait = (s: number | null) => (s === null ? '–' : s < 120 ? `${s} s` : s < 7200 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`)
+const runs = (f: { succeeded: number; failed: number; cancelled: number }) => f.succeeded + f.failed + f.cancelled
 const roles = (r: Record<string, number>) => Object.entries(r).map(([k, v]) => `${v} ${k}`).join(' · ') || '–'
 
 // A long range names figures the daily rollup cannot answer (distinct
@@ -134,7 +160,7 @@ const activeHint = computed(() => {
       <StatTile label="Runtime sessions" :value="n(summary.execution_active)" :hint="`${summary.execution_created} started in this window`" />
       <StatTile label="API keys" :value="n(summary.keys_active)" :hint="`${summary.browser_active} browser sessions open`" />
       <StatTile label="Indexed graphs" :value="n(summary.graphs)" hint="not measured yet" />
-      <StatTile label="Jobs waiting" :value="n(summary.jobs_waiting)" hint="not measured yet" />
+      <StatTile label="Jobs waiting" :value="n(summary.jobs_waiting)" :hint="summary.jobs_failed === null ? 'failed jobs not measured' : `${fmtCompact(summary.jobs_failed)} failed in this window`" />
       <StatTile label="Audit chain" :value="!summary.chain ? 'Not verified yet' : summary.chain.run_error ? 'Could not finish' : summary.chain.ok ? 'Intact' : 'Broken'"
         :hint="summary.chain ? `checked ${new Date(summary.chain.at).toLocaleString()}` : 'checked daily'" :tone="summary.chain?.ok ? undefined : 'warning'"
         tip="The stored result of the last audit chain verification; opening this page does not walk the chain." />
@@ -149,15 +175,23 @@ const activeHint = computed(() => {
           <button type="button" :aria-pressed="tab === 'usage'" @click="tab = 'usage'">Usage</button>
           <button type="button" :aria-pressed="tab === 'security'" @click="tab = 'security'">Security</button>
           <button type="button" :aria-pressed="tab === 'audit'" @click="tab = 'audit'">Audit</button>
+          <button type="button" :aria-pressed="tab === 'jobs'" @click="tab = 'jobs'">Jobs</button>
+          <button type="button" :aria-pressed="tab === 'ingest'" @click="tab = 'ingest'">Indexing</button>
           <button type="button" :aria-pressed="tab === 'storage'" @click="tab = 'storage'">Storage</button>
           <button type="button" :aria-pressed="tab === 'alerts'" @click="tab = 'alerts'">Alerts</button>
         </div>
-        <div v-if="tabled || tab === 'security' || tab === 'audit'" class="row">
+        <div v-if="tabled" class="row">
           <select v-if="tab === 'tenants'" v-model="tenantSort" class="inline" aria-label="Sort tenants">
             <option value="name">By name</option><option value="members">Most members</option><option value="seats">Most seats</option><option value="active">Most active</option><option value="entries">Most repositories</option>
           </select>
           <select v-else-if="tab === 'sessions'" v-model="sessionSort" class="inline" aria-label="Sort sessions">
             <option value="name">By name</option><option value="execution">Most runtime sessions</option><option value="keys">Most API keys</option>
+          </select>
+          <select v-else-if="tab === 'jobs'" v-model="jobSort" class="inline" aria-label="Sort jobs">
+            <option value="name">By name</option><option value="finished">Most finished</option><option value="ok">Most succeeded</option><option value="error">Most failed</option>
+          </select>
+          <select v-else-if="tab === 'ingest'" v-model="ingestSort" class="inline" aria-label="Sort indexing">
+            <option value="name">By name</option><option value="runs">Most runs</option><option value="failed">Most failed</option><option value="scanned">Most files scanned</option><option value="indexed">Most files indexed</option>
           </select>
           <select v-else-if="tab === 'usage'" v-model="usageSort" class="inline" aria-label="Sort usage">
             <option value="name">By name</option><option value="sessions">Most sessions</option><option value="calls">Most calls</option><option value="errors">Most errors</option><option value="tokens">Most tokens</option><option value="avoided">Most avoided</option>
@@ -266,6 +300,78 @@ const activeHint = computed(() => {
         <p v-if="org" class="muted small">The audit log is counted for the whole platform; the organisation filter does not apply.</p>
         <AdminAuditStats ref="auditTab" :range="range" />
       </template>
+      <template v-if="tab === 'jobs' && jobs">
+        <div class="grid cols-2 breakdowns">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Queue</th><th class="num">Waiting</th><th class="num">Running</th><th class="num">Oldest wait</th></tr></thead>
+              <tbody>
+                <tr v-for="q in jobs.queue" :key="q.kind"><td class="mono small">{{ q.kind }}</td><td class="num">{{ q.waiting }}</td><td class="num">{{ q.active }}</td><td class="num">{{ wait(q.oldest_waiting_seconds) }}</td></tr>
+                <tr v-if="!jobs.queue.length"><td colspan="4" class="muted small">No job is queued or running.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Finished by kind</th><th class="num">Finished</th><th class="num">Failed</th></tr></thead>
+              <tbody>
+                <tr v-for="k in jobs.kinds" :key="k.kind"><td class="mono small">{{ k.kind }}</td><td class="num">{{ k.finished }}</td><td class="num">{{ k.error }}</td></tr>
+                <tr v-if="!jobs.kinds.length"><td colspan="3" class="muted small">{{ jobs.measured ? 'Nothing finished in this window.' : 'Not measured: live statistics are off or did not answer.' }}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p class="muted small">
+          The queue is as of now. Finished {{ jobs.totals.finished }} · succeeded {{ jobs.totals.ok }} · failed {{ jobs.totals.error }}<template v-if="!missing('left_behind')">
+          · left for another process {{ jobs.totals.left_behind }}</template><template v-if="!missing('cancelled')"> · cancelled {{ jobs.totals.cancelled }}</template>.
+          Jobs without an organisation count in these totals but in no row.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Organisation</th><th class="num">Finished</th><th class="num">Succeeded</th><th class="num">Failed</th><th class="num">Left behind</th><th class="num">Cancelled</th></tr></thead>
+            <tbody>
+              <tr v-for="o in jobs.rows" :key="o.org_id">
+                <td>{{ o.name }} <span v-if="!o.deleted" class="muted mono small">{{ o.slug }}</span></td>
+                <td class="num">{{ o.finished }}</td>
+                <td class="num">{{ o.ok }}</td>
+                <td class="num">{{ o.error }}</td>
+                <td class="num">{{ missing('left_behind') ? '–' : o.left_behind }}</td>
+                <td class="num">{{ missing('cancelled') ? '–' : o.cancelled }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+      <template v-if="tab === 'ingest' && ingest">
+        <div class="grid cols-4 usage-tiles">
+          <StatTile label="Indexing runs" :value="n(runs(ingest.totals))" :hint="`${ingest.totals.failed} failed · ${ingest.totals.cancelled} cancelled`" />
+          <StatTile label="Running now" :value="n(ingest.totals.running)" hint="not finished yet" />
+          <StatTile label="Files scanned" :value="n(ingest.totals.scanned)" :hint="`${fmtCompact(ingest.totals.indexed)} indexed`" />
+          <StatTile label="Files skipped" :value="n(ingest.totals.skipped)" :hint="`${fmtCompact(ingest.totals.files_failed)} failed · ${fmtCompact(ingest.totals.unprocessed)} not processed`" />
+        </div>
+        <p class="muted small">
+          Skipped: {{ ingest.totals.skips.ignored_path }} ignored paths · {{ ingest.totals.skips.generated_code }} generated code · {{ ingest.totals.skips.binary }} binary ·
+          {{ ingest.totals.skips.non_k8s_yaml }} YAML that is not Kubernetes · {{ ingest.totals.incomplete_discovery }} runs did not see every file ·
+          {{ ingest.totals.without_report }} runs whose report expired count by outcome only.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Organisation</th><th class="num">Runs</th><th class="num">Failed</th><th class="num">Running</th><th class="num">Scanned</th><th class="num">Indexed</th><th class="num">Skipped</th><th class="num">Files failed</th></tr></thead>
+            <tbody>
+              <tr v-for="o in ingest.rows" :key="o.org_id">
+                <td>{{ o.name }} <span v-if="!o.deleted" class="muted mono small">{{ o.slug }}</span></td>
+                <td class="num">{{ runs(o) }}</td>
+                <td class="num">{{ o.failed }}</td>
+                <td class="num">{{ o.running }}</td>
+                <td class="num">{{ fmtCompact(o.scanned) }}</td>
+                <td class="num">{{ fmtCompact(o.indexed) }}</td>
+                <td class="num">{{ fmtCompact(o.skipped) }}</td>
+                <td class="num">{{ fmtCompact(o.files_failed) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
       <StatsStorage v-if="tab === 'storage'" :range="range" :tick="sectionTick" />
       <StatsAlerts v-if="tab === 'alerts'" :tick="sectionTick" />
       <div v-if="table && table.pages > 1" class="row pager">
@@ -274,11 +380,11 @@ const activeHint = computed(() => {
         <button class="secondary tiny" :disabled="page >= table.pages" @click="page++">Next</button>
       </div>
     </section>
-    <section v-if="tab === 'usage' && !chartsOff" class="panel">
+    <section v-if="chartPanels[tab] && tab === chartTab && !chartsOff" class="panel">
       <h2>Over time</h2>
       <p class="muted small">From live statistics<template v-if="!live">, which keep 30 days: the charts show the last 30</template>. Organisations deleted since read "deleted organisation".</p>
       <div class="grid cols-2">
-        <SeriesCard v-for="p in usagePanels" :key="p" :panel="p" :range="seriesRange" :tick="0" :batched="charts[p] ?? null" :batch-pending="chartsPending" @unavailable="chartsOff = true" />
+        <SeriesCard v-for="p in panelNames" :key="p" :panel="p" :range="seriesRange" :tick="0" :batched="charts[p] ?? null" :batch-pending="chartsPending" @unavailable="chartsOff = true" />
       </div>
     </section>
   </div>

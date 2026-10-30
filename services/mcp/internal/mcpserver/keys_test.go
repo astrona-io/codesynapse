@@ -216,8 +216,7 @@ func TestSharesAndReadOnlyKeys(t *testing.T) {
 	// An external recipient must first join the owning organisation explicitly.
 	_, err = acc.SetRepoGrant(ctx, ownerA, pa.OrgID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: pc.User.ID}, accounts.Viewer)
 	assert.Error(t, err, "a grant cannot replace explicit membership")
-	_, err = acc.AddMember(ctx, ownerA, pa.OrgID, pc.User.Email, accounts.Guest)
-	require.NoError(t, err)
+	require.NoError(t, accountstest.Join(ctx, t, acc, ownerA, pa.OrgID, pc.User, accounts.Guest))
 	_, err = acc.SetRepoGrant(ctx, ownerA, pa.OrgID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: pc.User.ID}, accounts.Viewer)
 	require.NoError(t, err)
 	a, err := connectKey(t, url, keys["a"])
@@ -254,8 +253,7 @@ func TestSharesAndReadOnlyKeys(t *testing.T) {
 	// A viewer needs an explicit read grant when the organisation default is NONE.
 	viewer, _, err := acc.SignUp(ctx, "viewer@example.com", "viewer", "correct horse battery staple")
 	require.NoError(t, err)
-	_, err = acc.AddMember(ctx, ownerA, pa.OrgID, viewer.Email, accounts.Viewer)
-	require.NoError(t, err)
+	require.NoError(t, accountstest.Join(ctx, t, acc, ownerA, pa.OrgID, viewer, accounts.Viewer))
 	_, err = acc.SetRepoGrant(ctx, ownerA, pa.OrgID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: viewer.ID}, accounts.Viewer)
 	require.NoError(t, err)
 	vkey, _, err := acc.CreateKey(ctx, accounts.Principal{User: viewer, Via: "session"}, pa.OrgID, "v", 0)

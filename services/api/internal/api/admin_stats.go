@@ -87,18 +87,25 @@ func (s *Server) statsSummary(ctx context.Context, rng string, q accounts.StatsQ
 
 func (s *Server) summaryFigures(ctx context.Context, rng string, q accounts.StatsQuery) (StatsSummary, error) {
 	q.OrgID = "" // the tiles are the platform's
+	var sum StatsSummary
 	if q.Daily != "" {
-		return s.dailySummary(ctx, rng, q)
+		var err error
+		if sum, err = s.dailySummary(ctx, rng, q); err != nil {
+			return StatsSummary{}, err
+		}
+	} else {
+		t, err := s.cfg.Accounts.St.TenantStats(ctx, q)
+		if err != nil {
+			return StatsSummary{}, err
+		}
+		ss, err := s.cfg.Accounts.St.SessionStats(ctx, q)
+		if err != nil {
+			return StatsSummary{}, err
+		}
+		sum = summaryOf(rng, t, ss)
 	}
-	t, err := s.cfg.Accounts.St.TenantStats(ctx, q)
-	if err != nil {
-		return StatsSummary{}, err
-	}
-	ss, err := s.cfg.Accounts.St.SessionStats(ctx, q)
-	if err != nil {
-		return StatsSummary{}, err
-	}
-	return summaryOf(rng, t, ss), nil
+	s.jobTiles(ctx, q, &sum)
+	return sum, nil
 }
 
 func summaryOf(rng string, t accounts.TenantStats, ss accounts.SessionStats) StatsSummary {
@@ -222,8 +229,8 @@ var statsRoles = []accounts.Role{accounts.Owner, accounts.Admin, accounts.Member
 func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 	req := statsRequest(r, r.URL.Query().Get("section"))
 	req.Format = r.URL.Query().Get("format")
-	if !slices.Contains([]string{"summary", "tenants", "sessions", "usage", "security", "audit"}, req.Section) {
-		s.problem(w, http.StatusBadRequest, errors.New("section must be summary, tenants, sessions, usage, security or audit"))
+	if !slices.Contains([]string{"summary", "tenants", "sessions", "usage", "jobs", "ingest", "security", "audit"}, req.Section) {
+		s.problem(w, http.StatusBadRequest, errors.New("section must be summary, tenants, sessions, usage, jobs, ingest, security or audit"))
 		return
 	}
 	if req.Format != "csv" && req.Format != "json" {
@@ -259,6 +266,14 @@ func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 			{"active_users", sum.ActiveUsers}, {"memberships", sum.Memberships}, {"seats", sum.Seats}, {"seated_people", sum.SeatedPeople},
 			{"execution_active", sum.ExecutionActive}, {"execution_created", sum.ExecutionCreated}, {"keys_active", sum.KeysActive}, {"browser_active", sum.BrowserActive}} {
 			rows = append(rows, []string{f.name, strconv.Itoa(f.v)})
+		}
+		for _, f := range []struct {
+			name string
+			v    *int
+		}{{"jobs_waiting", sum.JobsWaiting}, {"jobs_failed", sum.JobsFailed}} {
+			if f.v != nil {
+				rows = append(rows, []string{f.name, strconv.Itoa(*f.v)})
+			}
 		}
 		if sum.Rollup != nil {
 			rows = append(rows, []string{"days", strconv.Itoa(sum.Rollup.Days)}, []string{"days_written", strconv.Itoa(sum.Rollup.Written)})
@@ -306,6 +321,20 @@ func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body, header, rows = usageExport(d)
+	case "jobs":
+		d, err := s.jobsStats(ctx, q)
+		if err != nil {
+			s.statsError(w, err)
+			return
+		}
+		body, header, rows = jobsExport(d)
+	case "ingest":
+		d, err := s.ingestStats(ctx, q)
+		if err != nil {
+			s.statsError(w, err)
+			return
+		}
+		body, header, rows = ingestExport(d)
 	case "security":
 		d, err := s.securityStats(ctx, q)
 		if err != nil {

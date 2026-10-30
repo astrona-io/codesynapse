@@ -36,8 +36,7 @@ func RunReBAC(t *testing.T, st accounts.Store) {
 		u accounts.User
 		r accounts.Role
 	}{{reader, accounts.Viewer}, {guest, accounts.Guest}} {
-		_, err := svc.AddMember(ctx, ownerP, org.ID, m.u.Email, m.r)
-		require.NoError(t, err)
+		require.NoError(t, Join(ctx, t, svc, ownerP, org.ID, m.u, m.r))
 	}
 	graph := "policy/api"
 	require.NoError(t, st.AddRepository(ctx, accounts.Repository{OrgID: org.ID, Graph: graph, AddedBy: owner.ID, Visibility: accounts.Private, AddedAt: now}))
@@ -58,8 +57,7 @@ func RunReBAC(t *testing.T, st accounts.Store) {
 	assert.Equal(t, role(reader), accounts.Role(""), "new organisations default to NONE")
 	_, err = svc.ResolveRepository(ctx, outsiderP, org.ID, graph, accounts.Viewer)
 	assert.True(t, errors.Is(err, accounts.ErrNotFound))
-	_, err = svc.AddMember(ctx, outsiderP, org.ID, outsider.Email, accounts.Owner)
-	assert.True(t, errors.Is(err, accounts.ErrForbidden), "platform admin cannot enrol itself")
+	assert.True(t, errors.Is(Join(ctx, t, svc, outsiderP, org.ID, outsider, accounts.Owner), accounts.ErrForbidden), "platform admin cannot enrol itself")
 	require.NoError(t, svc.SetDefaultRepoAccess(ctx, ownerP, org.ID, accounts.DefaultRepoReadOnly))
 	assert.Equal(t, role(reader), accounts.Viewer)
 	assert.Equal(t, role(guest), accounts.Role(""))
@@ -68,7 +66,7 @@ func RunReBAC(t *testing.T, st accounts.Store) {
 	_, err = svc.SetTeamMember(ctx, ownerP, team.ID, reader.Email, accounts.RelMember)
 	require.NoError(t, err)
 	_, err = svc.SetTeamMember(ctx, ownerP, team.ID, outsider.Email, accounts.RelMember)
-	assert.True(t, errors.Is(err, accounts.ErrInvalidInput))
+	assert.True(t, errors.Is(err, accounts.ErrNotFound), "teams name members only, like an unknown email")
 	teamSub := accounts.Tuple{SubjectType: accounts.TypeTeam, SubjectID: team.ID, SubjectRelation: accounts.RelMember}
 	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, teamSub, accounts.Admin)
 	require.NoError(t, err)

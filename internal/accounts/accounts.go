@@ -604,6 +604,14 @@ type Store interface {
 	UserGitTokens(ctx context.Context, userID string) ([]UserGitToken, error)    // by host
 	DeleteUserGitToken(ctx context.Context, userID, host string) error           // ErrNotFound
 
+	// Invitations (invitations.go). PutInvitation inserts a new one;
+	// DeleteInvitation removes one of orgID (ErrNotFound when gone), which is
+	// what makes a token work once.
+	PutInvitation(ctx context.Context, inv Invitation) error
+	InvitationByTokenHash(ctx context.Context, tokenHash string) (Invitation, error) // ErrNotFound
+	OrgInvitations(ctx context.Context, orgID string) ([]Invitation, error)          // oldest first
+	DeleteInvitation(ctx context.Context, orgID, id string) error
+
 	// AddEvent appends e to the audit chain: under a lock, it sets
 	// e.PrevHash to the last entry's hash and e.Hash = e.ChainHash().
 	AddEvent(ctx context.Context, e Event) (Event, error)
@@ -628,6 +636,9 @@ type Store interface {
 	HasPlatformStats(ctx context.Context, day time.Time) (bool, error)
 	ListPlatformStats(ctx context.Context, q PlatformStatQuery) ([]PlatformStat, error)
 	PrunePlatformStats(ctx context.Context, before time.Time) (int, error)
+	// IngestStats sums the ingest runs of [from, to) per organisation
+	// (ingeststats.go, IngestInWindow), deleted organisations included.
+	IngestStats(ctx context.Context, from, to time.Time) ([]OrgIngestStats, error)
 
 	// DropAuditSegment removes the oldest segment once its retention ended;
 	// the next segment's PrevHash becomes the chain's anchor, as the first

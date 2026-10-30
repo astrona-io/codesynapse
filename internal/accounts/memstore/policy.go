@@ -38,6 +38,7 @@ func (s *Store) PolicyTransaction(ctx context.Context, _ string, fn func(account
 	s.repos = tx.repos
 	s.tokens = tx.tokens
 	s.userTokens = tx.userTokens
+	s.invites = tx.invites
 	s.teams = tx.teams
 	s.tuples = tx.tuples
 	s.tupleAt = tx.tupleAt
@@ -189,6 +190,7 @@ func (s *Store) snapshot() *Store {
 	tx.repos = maps.Clone(s.repos)
 	tx.tokens = maps.Clone(s.tokens)
 	tx.userTokens = maps.Clone(s.userTokens)
+	tx.invites = maps.Clone(s.invites)
 	tx.teams = maps.Clone(s.teams)
 	tx.tuples = maps.Clone(s.tuples)
 	tx.tupleAt = maps.Clone(s.tupleAt)

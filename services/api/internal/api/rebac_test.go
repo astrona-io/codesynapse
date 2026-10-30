@@ -50,7 +50,7 @@ func TestReBACOverHTTP(t *testing.T) {
 	for _, g := range []string{"acme/api", "acme/web"} {
 		require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: acme.ID, Graph: g, AddedBy: bobUser.ID, AddedAt: time.Now()}))
 	}
-	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+acme.Slug+"/members", `{"email":"carol@example.com","role":"guest"}`, nil), 200)
+	invite(t, bob, acme.Slug, carol, "carol@example.com", "guest")
 	inAcme, inExt := []string{OrgHeader, acme.Slug}, []string{OrgHeader, ext.Slug}
 	visible := func(c *client, org []string) []string {
 		var list struct{ Repos []struct{ Name string } }
@@ -104,9 +104,9 @@ func TestReBACOverHTTP(t *testing.T) {
 	assert.Equal(t, visible(carol, inAcme), []string{"acme/api", "acme/web"}, "removal restores team inheritance")
 
 	// External grants require explicit membership in the owning organisation.
-	assert.Equal(t, bob.do("PUT", access("acme/web"), `{"user":"dave@example.com","role":"member"}`, nil), 403, "shares are read-only")
-	assert.Equal(t, bob.do("PUT", access("acme/web"), `{"user":"dave@example.com","role":"viewer"}`, nil), 403)
-	require.Equal(t, bob.do("PUT", "/api/v1/accounts/orgs/"+acme.Slug+"/members", `{"email":"dave@example.com","role":"guest"}`, nil), 200)
+	assert.Equal(t, bob.do("PUT", access("acme/web"), `{"user":"dave@example.com","role":"member"}`, nil), 404, "grants name members only")
+	assert.Equal(t, bob.do("PUT", access("acme/web"), `{"user":"dave@example.com","role":"viewer"}`, nil), 404)
+	invite(t, bob, acme.Slug, dave, "dave@example.com", "guest")
 	require.Equal(t, bob.do("PUT", access("acme/web"), `{"user":"dave@example.com","role":"viewer"}`, nil), 200)
 	assert.Equal(t, visible(dave, inExt), []string{}, "another organisation cannot use the grant")
 	assert.Equal(t, visible(dave, inAcme), []string{"acme/web"})

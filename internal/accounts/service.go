@@ -437,12 +437,35 @@ func (s *Service) createOrg(ctx context.Context, owner, name, slug string) (Org,
 	}
 }
 
-// AddMember gives an existing user a role in org.
-func (s *Service) AddMember(ctx context.Context, p Principal, orgID, email string, role Role) (Membership, error) {
-	return policyChange(ctx, s, func(tx *Service) (Membership, error) { return tx.addMemberPolicy(ctx, p, orgID, email, role) })
+// ErrNoMemberEmail answers an email that is not a member's: unknown addresses
+// and other organisations' people alike.
+var ErrNoMemberEmail = fmt.Errorf("%w: no member of this organisation has that email", ErrNotFound)
+
+// MemberByEmail finds a member of orgID by email. Callers have already
+// authorised the caller in orgID. It looks only among the members, so it
+// never tells whether an address has an account elsewhere.
+func (s *Service) MemberByEmail(ctx context.Context, orgID, email string) (User, error) {
+	email = NormalizeEmail(email)
+	ms, err := s.St.OrgMembers(ctx, orgID)
+	if err != nil {
+		return User{}, err
+	}
+	for _, m := range ms {
+		if NormalizeEmail(m.User.Email) == email {
+			return m.User, nil
+		}
+	}
+	return User{}, ErrNoMemberEmail
 }
 
-func (s *Service) addMemberPolicy(ctx context.Context, p Principal, orgID, email string, role Role) (Membership, error) {
+// SetMemberRole changes the role of a user who is already a member of org.
+// New members join only through invitations, so this never looks anyone up
+// by email and answers ErrNotFound alike for unknown users and non-members.
+func (s *Service) SetMemberRole(ctx context.Context, p Principal, orgID, userID string, role Role) (Membership, error) {
+	return policyChange(ctx, s, func(tx *Service) (Membership, error) { return tx.setMemberRolePolicy(ctx, p, orgID, userID, role) })
+}
+
+func (s *Service) setMemberRolePolicy(ctx context.Context, p Principal, orgID, userID string, role Role) (Membership, error) {
 	if p.Via == "key" {
 		return Membership{}, ErrForbidden
 	}
@@ -456,13 +479,14 @@ func (s *Service) addMemberPolicy(ctx context.Context, p Principal, orgID, email
 	if !mine.AtLeast(Admin) || (role == Owner && mine != Owner) {
 		return Membership{}, ErrForbidden
 	}
-	u, err := s.St.UserByEmail(ctx, NormalizeEmail(email))
-	if err != nil {
+	if _, err := s.St.MemberRole(ctx, orgID, userID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return Membership{}, fmt.Errorf("member: %w", ErrNotFound)
+		}
 		return Membership{}, err
 	}
-	if _, err := s.St.MemberRole(ctx, orgID, u.ID); errors.Is(err, ErrNotFound) && mine != Owner {
-		return Membership{}, ErrForbidden
-	} else if err != nil && !errors.Is(err, ErrNotFound) {
+	u, err := s.St.UserByID(ctx, userID)
+	if err != nil {
 		return Membership{}, err
 	}
 	if err := s.guardLastOwner(ctx, orgID, u.ID, role); err != nil {

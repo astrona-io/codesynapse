@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
+	"github.com/astrona-io/codesynapse/internal/accounts/accountstest"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/security"
 	"github.com/astrona-io/codesynapse/internal/store/storetest"
@@ -78,8 +79,7 @@ func TestFindingTriageEndpoints(t *testing.T) {
 	viewer, _, err := f.accounts.SignUp(t.Context(), "triage-viewer@example.com", "Viewer", pw)
 	require.NoError(t, err)
 	owner := accounts.Principal{User: f.user, Via: "session"}
-	_, err = f.accounts.AddMember(t.Context(), owner, f.org.ID, viewer.Email, accounts.Member)
-	require.NoError(t, err)
+	require.NoError(t, accountstest.Join(t.Context(), t, f.accounts, owner, f.org.ID, viewer, accounts.Member))
 	_, err = f.accounts.SetRepoGrant(t.Context(), owner, f.org.ID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: viewer.ID}, accounts.Viewer)
 	require.NoError(t, err)
 	browser := newClient(t, f.client.ts)

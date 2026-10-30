@@ -10,7 +10,7 @@ import (
 )
 
 // Audit statistics: fixed SQL over events with the window in $1 and $2,
-// served by the (at, action) index of migration 0036. The family is the
+// served by the (at, action) index of migration 0037. The family is the
 // action's prefix before the first dot, or "http" for "http <pattern>";
 // the code folds it into accounts.AuditFamilies.
 

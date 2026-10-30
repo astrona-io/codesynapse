@@ -56,6 +56,10 @@ const (
 	StatAuditLogins        = "audit_logins"
 	StatAuditSecurity      = "audit_security"
 	StatAuditChain         = "audit_chain"
+	// Ingest runs and their files (phase 4), from the ingest run reports.
+	StatIngestRuns  = "ingest_runs"
+	StatIngestFiles = "ingest_files"
+	StatIngestSkips = "ingest_skips"
 )
 
 // Limits and retention of the daily rollup.
@@ -163,6 +167,13 @@ var statMetrics = map[string]statMetric{
 	// Chain verification runs of the day by result, and the archive at the
 	// end of the day (sealed segments and the entries in them).
 	StatAuditChain: {dims: []string{"verified", "broken", "run_error", "segments", "sealed"}},
+	// Ingest runs that finished that day by status, the ones whose
+	// discovery did not complete and the ones whose report had already
+	// expired (IngestHistory) when the day was written; the files of the
+	// runs with a report, and their skips by reason.
+	StatIngestRuns:  {dims: []string{"succeeded", "failed", "cancelled", "incomplete_discovery", "without_report"}, perOrg: true},
+	StatIngestFiles: {dims: []string{"scanned", "indexed", "skipped", "failed", "unprocessed"}, perOrg: true},
+	StatIngestSkips: {dims: []string{"ignored_path", "generated_code", "binary", "non_k8s_yaml"}, perOrg: true},
 }
 
 // SecurityGradeDims are the security_grades dimensions: the grades in
@@ -203,6 +214,7 @@ func auditEventDims() []string {
 		out = append(out, f+"."+Success, f+"."+Failure)
 	}
 	return out
+
 }
 
 // StatToolOther is the mcp_tools name of a tool outside the fixed list.

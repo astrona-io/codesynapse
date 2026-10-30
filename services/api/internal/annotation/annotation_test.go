@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +16,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/execution"
+	"github.com/astrona-io/codesynapse/internal/prose"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 	"github.com/astrona-io/codesynapse/services/api/internal/llm"
@@ -223,4 +227,33 @@ func FuzzParse(f *testing.F) {
 	f.Add(validAnswer)
 	f.Add(`{"items":[]}`)
 	f.Fuzz(func(_ *testing.T, answer string) { _, _ = parse(answer, batch()) })
+}
+
+// The system prompt is one constant with the no-filler style once; the full
+// style block would ask for tables and examples, which the JSON answer forbids.
+func TestSystemPromptStyle(t *testing.T) {
+	assert.Equal(t, strings.Count(system, prose.NoFiller), 1)
+	assert.Equal(t, strings.Count(system, prose.Style), 0)
+	f, err := parser.ParseFile(token.NewFileSet(), "model.go", nil, 0)
+	require.NoError(t, err)
+	isConst := false
+	for _, d := range f.Decls {
+		if g, ok := d.(*ast.GenDecl); ok && g.Tok == token.CONST {
+			for _, sp := range g.Specs {
+				for _, n := range sp.(*ast.ValueSpec).Names {
+					isConst = isConst || n.Name == "system"
+				}
+			}
+		}
+	}
+	assert.True(t, isConst, "system is declared as a constant")
+}
+
+// Fixture answers are what a good model returns, so they carry no filler.
+func TestFixtureSummariesHaveNoFiller(t *testing.T) {
+	items, err := parse(validAnswer, batch())
+	require.NoError(t, err)
+	for _, it := range items {
+		assert.NoError(t, prose.Check(it.Summary))
+	}
 }
