@@ -29,6 +29,13 @@ type fakeVM struct {
 }
 
 func (f *fakeVM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// The daily platform rollup starts with the server and evaluates one
+	// point (start equals end); it is not what these tests look at, and
+	// recording it would race with last().
+	if q := r.URL.Query(); q.Get("start") == q.Get("end") {
+		_, _ = io.WriteString(w, `{"status":"success","data":{"resultType":"matrix","result":[]}}`)
+		return
+	}
 	f.mu.Lock()
 	f.filters = append(f.filters, strings.Join(r.URL.Query()["extra_filters[]"], ";"))
 	f.queries = append(f.queries, r.URL.Query().Get("query"))
