@@ -23,7 +23,7 @@ const statsRollupRetry = 10 * time.Minute
 func (s *Server) rollupPlatformStats(ctx context.Context) {
 	for {
 		wait := nextStatsRollup(time.Now())
-		if written, err := s.cfg.Accounts.RollupPlatformStats(ctx, s.usageStatSource, s.gatewayStatSource, s.securityStatSource, s.auditStatSource); err != nil {
+		if written, err := s.cfg.Accounts.RollupPlatformStats(ctx, s.usageStatSource, s.gatewayStatSource, s.securityStatSource, s.auditStatSource, s.llmStatSource, s.storeStatSource); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
@@ -145,5 +145,101 @@ func (s *Server) gatewayStatSource(ctx context.Context, day time.Time, set *acco
 		}
 	}
 	set.Total(accounts.StatGateway, "measured", 1)
+	return nil
+}
+
+// llmStatSource adds the day's model calls to the daily rollup: per
+// organisation and provider kind (never a model name, which the rollup does
+// not keep), and the memory work done with models. Calls without a trusted
+// tenant count in the platform rows only. A metrics store that does not
+// answer leaves the day at zero with measured 0.
+func (s *Server) llmStatSource(ctx context.Context, day time.Time, set *accounts.PlatformStatSet) error {
+	if s.cfg.Metrics == nil {
+		return nil
+	}
+	m, err := s.collectModelCells(ctx, "1d", 24*time.Hour, day.AddDate(0, 0, 1), nil)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		s.logger.Warn("the daily model statistics are written without the metrics store", "error", err)
+		return nil
+	}
+	add := func(metric, tenant, dim string, v float64) {
+		// A glitch in the metrics store (+Inf, a counter reset) must not
+		// reach int64: past MaxInt64 the conversion is undefined and the
+		// 90/365-day sums would overflow, like storeStatSource refuses.
+		if math.IsNaN(v) || math.IsInf(v, 0) || v > math.MaxInt64/2 {
+			return
+		}
+		n := int64(math.Round(v))
+		if n <= 0 || !accounts.ValidPlatformStat(metric, dim, "") {
+			return
+		}
+		if tenant != "" && tenant != telemetry.NoTenant && accounts.ValidPlatformStat(metric, dim, tenant) {
+			set.Both(tenant, metric, dim, n)
+			return
+		}
+		set.Total(metric, dim, n)
+	}
+	for _, c := range m.cells {
+		for figure, v := range map[string]float64{
+			"requests": c.requests, "failures": c.failures, "input": c.input, "output": c.output, "cached": c.cached,
+			"bytes": c.bytes, "usage_unknown": c.usageUnknown, "pricing_missing": c.pricingMissing,
+			"cost_micro": c.cost * 1e6, "saved_micro": c.saved * 1e6,
+		} {
+			add(accounts.StatLLMCalls, c.tenant, c.kind+"."+figure, v)
+		}
+	}
+	for tenant, v := range m.memory {
+		add(accounts.StatLLMMemory, tenant, "embedded", v[0])
+		add(accounts.StatLLMMemory, tenant, "offload", v[1])
+	}
+	set.Total(accounts.StatLLMCalls, "measured", 1)
+	return nil
+}
+
+// storeRollupQueries read the day's store sample (storesample.go) at the
+// end of the day; max by (db_system, kind) takes one value whichever
+// replica exported it.
+var storeRollupQueries = map[string]string{
+	accounts.StatStoreRows:  `max by (db_system, kind) (last_over_time(platform_codesynapse_store_rows[1d]))`,
+	accounts.StatStoreBytes: `max by (db_system, kind) (last_over_time(platform_codesynapse_store_bytes[1d]))`,
+}
+
+// storeStatSource adds the day's store sizes to the daily rollup, so the
+// storage section answers 90d and 365d past the metrics store's retention.
+// Only kinds the stores registered are kept; a day without a sample writes
+// no store rows.
+func (s *Server) storeStatSource(ctx context.Context, day time.Time, set *accounts.PlatformStatSet) error {
+	if s.cfg.Metrics == nil {
+		return nil
+	}
+	end := day.AddDate(0, 0, 1)
+	tmp := accounts.NewPlatformStatSet(day)
+	for _, metric := range []string{accounts.StatStoreRows, accounts.StatStoreBytes} {
+		res, err := s.cfg.Metrics.QueryRange(ctx, storeRollupQueries[metric], end, end, 24*time.Hour, nil)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			s.logger.Warn("the daily store sizes are written without the metrics store", "error", err)
+			return nil
+		}
+		for _, ts := range res {
+			if len(ts.Points) == 0 {
+				continue
+			}
+			v := ts.Points[len(ts.Points)-1].V
+			dim, ok := accounts.StatStoreDim(ts.Labels["db_system"], ts.Labels["kind"])
+			if !ok || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > math.MaxInt64/2 {
+				continue
+			}
+			tmp.Total(metric, dim, int64(math.Round(v)))
+		}
+	}
+	for _, r := range tmp.Rows() {
+		set.Add(r)
+	}
 	return nil
 }

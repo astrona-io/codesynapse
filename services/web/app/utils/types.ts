@@ -716,11 +716,11 @@ export interface ModelRow extends ModelFigures {
   ttft_p95_seconds: number | null; request_p95_seconds: number | null
   tasks: ModelTaskStat[]
 }
-export interface ModelsSection extends StatsTable<ModelTotals, ModelOrgRow> { models: ModelRow[] }
+export interface ModelsSection extends StatsTable<ModelTotals, ModelOrgRow> { models: ModelRow[]; models_range?: string }
 // Storage and alerts sections of the platform statistics (phase 6). A null
 // figure is one the store does not report.
 export interface StoreSizeRow { db_system: string; kind: string; rows: number | null; bytes: number | null; rows_change: number | null; bytes_change: number | null }
-export interface StatsStorage { range: StatsRange; available: boolean; reason?: string; sampled_at: string | null; stores: StoreSizeRow[] }
+export interface StatsStorage { range: StatsRange; available: boolean; reason?: string; sampled_at: string | null; stores: StoreSizeRow[]; rollup?: StatsRollup }
 export interface AlertItem { name: string; state: string; severity: string; value: string; active_at: string }
 export interface AlertRuleItem { name: string; group: string; state: string; severity: string; health: string; failing: boolean; last_evaluation: string }
 export interface StatsAlerts { configured: boolean; reachable: boolean; firing: number; pending: number; alerts: AlertItem[]; rules: AlertRuleItem[] }

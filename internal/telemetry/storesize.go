@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"slices"
 	"sync"
 )
 
@@ -46,6 +47,20 @@ func StoreKindAllowed(system, kind string) bool {
 	storeKinds.RLock()
 	defer storeKinds.RUnlock()
 	return storeKinds.m[system][kind]
+}
+
+// StoreKinds lists the registered kinds as "db_system.kind", sorted.
+func StoreKinds() []string {
+	storeKinds.RLock()
+	defer storeKinds.RUnlock()
+	out := []string{}
+	for system, kinds := range storeKinds.m {
+		for k := range kinds {
+			out = append(out, system+"."+k)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // StoreSize is one sampled figure. Rows or bytes below 0 mean not reported.
