@@ -193,6 +193,21 @@ func (a answer) complete() bool {
 	return a.Finish != "" && a.Finish != "length" && (strings.TrimSpace(a.Text) != "" || len(a.Calls) > 0)
 }
 
+// shortAnswer is the largest max_tokens of a request that wants only a few
+// words, such as Claude Code's quota check, which asks for one token.
+const shortAnswer = 64
+
+// keep says a held answer is good enough to send: complete, or cut off by a
+// max_tokens the client set low itself. The cloud stops the same way there,
+// so sending such a request on would only spend cloud quota on it.
+func (a answer) keep(maxTokens int) bool {
+	if a.complete() {
+		return true
+	}
+	short := maxTokens > 0 && maxTokens <= shortAnswer
+	return short && a.Finish == "length" && (strings.TrimSpace(a.Text) != "" || len(a.Calls) > 0)
+}
+
 func (a answer) stopReason() string {
 	switch {
 	case len(a.Calls) > 0:

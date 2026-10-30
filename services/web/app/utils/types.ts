@@ -891,6 +891,8 @@ export interface ModelStat {
 // Agent gateway traffic; saved_dollars is null when a local answer reported no usage.
 export interface GatewayStat {
   requests: number; local: number; cloud: number; rejected: number; failed: number; local_share_pct: number
+  // failed split by route and status class (cloud_4xx, cloud_5xx, rejected_4xx, ...). Absent from older APIs.
+  failed_by?: Record<string, number>
   bytes_in: number; bytes_out: number; local_input_tokens: number; local_output_tokens: number
   // The part of local_input_tokens the runtime's prompt cache served; 0 when it reports none (Ollama).
   local_cached_tokens?: number

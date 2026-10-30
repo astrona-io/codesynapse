@@ -274,7 +274,7 @@ test('models and savings split the token pool without counting ask_local twice',
 
 test('gateway page: tiles, quantile charts on one scale and reasons as bars', async (t) => {
   const gateway = {
-    requests: 40, local: 30, cloud: 10, rejected: 0, failed: 1, local_share_pct: 75, bytes_in: 1, bytes_out: 1,
+    requests: 40, local: 30, cloud: 10, rejected: 0, failed: 3, failed_by: { cloud_4xx: 2, cloud_5xx: 1 }, local_share_pct: 75, bytes_in: 1, bytes_out: 1,
     local_input_tokens: 0, local_output_tokens: 0, local_unmetered: 0, saved_dollars: 0,
     fallthroughs: 8, fallthrough_reasons: { queue_timeout: 3, answer_timeout: 1, too_large: 4 }, timeouts: 4, timeout_share_pct: 10,
     local_avg_seconds: 2, local_p95_seconds: 4.5, cloud_avg_seconds: 12.4, cloud_p95_seconds: null,
@@ -296,7 +296,8 @@ test('gateway page: tiles, quantile charts on one scale and reasons as bars', as
     apiErrorMessage: (e) => String(e),
   }, {})
   const html = await render(gateway)
-  assert.match(html, /Gateway requests 40 30 local · 10 cloud · 0 refused · 1 failed/)
+  assert.match(html, /Gateway requests 40 30 local · 10 cloud · 0 refused /)
+  assert.match(html, /Failed requests 3 2 cloud 4xx · 1 cloud 5xx <i>requests answered with a 4xx or 5xx status\. Cloud ones are the provider&#39;s own answer/, 'failures name the route that answered them')
   assert.match(html, /Answered locally 75% /)
   for (const p of ['gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_queue_wait', 'gateway_timeouts']) {
     assert.match(html, new RegExp(`data-panel="${p}"`), `${p} is drawn`)

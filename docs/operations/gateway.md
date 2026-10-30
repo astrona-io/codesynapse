@@ -145,7 +145,7 @@ The reasons a request was not answered locally are a fixed list:
 | `model_error` | The local model could not be reached or failed |
 | `bad_status` | The local model answered with an error status |
 | `empty_answer` | The local model answered nothing |
-| `truncated` | The answer stopped at `max_tokens` or broke off |
+| `truncated` | The answer stopped at `max_tokens` or broke off. A held answer cut off by a `max_tokens` of 64 or less that the client set itself (a quota check asks for one token) is kept with `stop_reason: "max_tokens"`, because the cloud would stop the same way |
 | `bad_answer` | The answer could not be read, or it called a tool that was not offered or with broken arguments |
 
 On the OpenAI-compatible paths there is no cloud behind the local model, so their failures count with route `local`. Only the reason, the route and the timings are recorded; never the prompt or the answer.
