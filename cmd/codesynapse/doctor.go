@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/agentcfg"
 	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/cliversion"
+	"github.com/astrona-io/codesynapse/internal/gatewayproxy"
 	"github.com/astrona-io/codesynapse/internal/toolsets"
 )
 
@@ -47,7 +49,7 @@ type doctorCheck struct {
 
 func (o *doctorOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f := o.EC.Command.Flags()
-	f.BoolVar(&o.fix, "fix", false, "Repair what is safe to repair here: the MCP registrations `mcp install` writes, the Claude Code plugin (through Claude Code's own plugin update) and the token file's permissions")
+	f.BoolVar(&o.fix, "fix", false, "Repair what is safe to repair here: the MCP registrations `mcp install` writes, the Claude Code plugin (through Claude Code's own plugin update), the token file's permissions and the gateway's failover proxy")
 	f.StringVar(&o.url, "url", app.Getenv("CODESYNAPSE_MCP_URL", "http://localhost:8090/mcp"), "MCP endpoint for an agent that has no registration yet")
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "API to check")
 	return nil
@@ -129,6 +131,9 @@ func (o *doctorOptions) checks(ctx context.Context, home, cwd string) []doctorCh
 	out = append(out, o.registrationChecks(home, cwd)...)
 	if c, ok := pluginCheck(home); ok {
 		out = append(out, c)
+	}
+	if files, err := gatewayproxy.DefaultFiles(); err == nil {
+		out = append(out, gatewayCheck(ctx, filepath.Join(home, ".claude", "settings.json"), files, setUpFailover, startProxy))
 	}
 	return out
 }
@@ -308,8 +313,8 @@ func pluginCheck(home string) (doctorCheck, bool) {
 
 func doctorCmd(ec *app.Env) *cobra.Command {
 	return app.NewSubCommand("doctor", &doctorOptions{EC: ec}, ec).
-		WithShortDesc("Check that this CLI, the server, the agent registrations and the Claude Code plugin are current; --fix repairs them").
-		WithLongDesc("Checks the CLI's version against the server's, that the API answers and accepts your key (never printed), what `codesynapse mcp install` registered with each agent, and that the Claude Code plugin runs every hook this CLI ships. Each line is OK or NEEDS ACTION with the command that repairs it. --fix runs the repairs that are safe here: `mcp install` again for agents whose registration is missing or stale (keeping their endpoints and your context cap), Claude Code's own plugin update for a user-scope plugin that is behind, and chmod 600 on the token file. It exits non-zero while something needs action. Start a new session afterwards.").
+		WithShortDesc("Check that this CLI, the server, the agent registrations, the Claude Code plugin and the gateway failover are current; --fix repairs them").
+		WithLongDesc("Checks the CLI's version against the server's, that the API answers and accepts your key (never printed), what `codesynapse mcp install` registered with each agent, that the Claude Code plugin runs every hook this CLI ships, and that a gateway set up by `mcp install --gateway` goes through the failover proxy. Each line is OK or NEEDS ACTION with the command that repairs it. --fix runs the repairs that are safe here: `mcp install` again for agents whose registration is missing or stale (keeping their endpoints and your context cap), Claude Code's own plugin update for a user-scope plugin that is behind, chmod 600 on the token file, and the failover proxy for a gateway reached directly or with missing hooks (reusing the gateway URL and key in Claude Code's settings; a setup made with --failover=false is left alone, and no gateway is set up where there was none). It exits non-zero while something needs action. Start a new session afterwards.").
 		WithExample("  codesynapse doctor\n  codesynapse doctor --fix\n  codesynapse doctor -o json").
 		WithGroupID(app.GroupBase).
 		WithNoArgs().

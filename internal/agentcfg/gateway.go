@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -329,6 +330,23 @@ func ClaudeGatewayConfig(file string) (base, key string, ok bool) {
 		}
 	}
 	return base, key, base != "" && key != ""
+}
+
+// ClaudeGatewayHooks says whether every event SetClaudeGatewayProxy hooks
+// still runs the proxy's ensure command.
+func ClaudeGatewayHooks(file string) bool {
+	doc, _, err := readSettings(file)
+	if err != nil {
+		return false
+	}
+	hooks, _ := doc["hooks"].(map[string]any)
+	for _, event := range ensureEvents {
+		groups, _ := hooks[event].([]any)
+		if !slices.ContainsFunc(groups, isEnsureGroup) {
+			return false
+		}
+	}
+	return true
 }
 
 // RemoveClaudeGateway undoes SetClaudeGateway. The base URL goes only when

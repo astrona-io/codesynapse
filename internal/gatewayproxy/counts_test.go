@@ -151,3 +151,18 @@ func TestConfigValidate(t *testing.T) {
 		})
 	}
 }
+
+// Doctor tells a setup made with --failover=false from one made before
+// failover existed by this marker; setting the proxy up again clears it.
+func TestChooseDirect(t *testing.T) {
+	files := Files{Dir: t.TempDir()}
+	assert.False(t, files.DirectChosen())
+	require.NoError(t, files.ChooseDirect())
+	assert.True(t, files.DirectChosen())
+	require.NoError(t, files.Save(Config{Gateway: "https://gw.example.com", Port: DefaultPort}))
+	assert.False(t, files.DirectChosen())
+	require.NoError(t, files.ChooseDirect())
+	_, err := files.Remove()
+	require.NoError(t, err)
+	assert.False(t, files.DirectChosen())
+}
