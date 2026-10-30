@@ -219,6 +219,7 @@ const (
 	FallTruncated        = "truncated"         // a held answer stopped at max tokens or ended without a finish
 	FallBadAnswer        = "bad_answer"        // a held answer had a bad tool call or was too large to hold
 	FallNoLocalModel     = "no_local_model"    // the gateway has no local model to offer the request to
+	FallCountTokens      = "count_tokens"      // a token count: only the cloud counts with the model's own tokenizer
 )
 
 // failure names why a call to the local model failed: a deadline is a

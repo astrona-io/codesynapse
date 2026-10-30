@@ -206,7 +206,7 @@ func (s *Server) gatewayRoutes() {
 			h(w, r)
 		}
 	}
-	for _, path := range []string{"/v1/messages", "/v1/messages/count_tokens"} {
+	for _, path := range []string{"/v1/messages", gateway.CountPath} {
 		s.route("POST "+path, orgRole(accounts.Member), guard(g.Handler(path)))
 	}
 	o := &gateway.OpenAI{Local: g.Local, Done: s.auditGateway}

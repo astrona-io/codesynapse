@@ -16,6 +16,8 @@ Coding assistants send many small background requests, such as naming a chat or 
 
 To keep particular models away from the local model while the rest still go to it, give an **exclude list** (next section). A request for an excluded model always goes to the cloud, whether local first is on or off; the exclusion wins.
 
+Token counts (`POST /v1/messages/count_tokens`) always go to the cloud, also with local first on. The gateway does not estimate them: Claude Code sizes its context with the number and decides when to compact by it, only the model's own tokenizer gives it (Claude Opus 4.7 and later count about 30 percent more tokens for the same text than older models), and Anthropic does not charge for counting. Each one is recorded with the reason `count_tokens` (or `excluded` for a model on an exclude list), so it shows up under the reasons a request was not answered locally.
+
 Each answer carries a header, `X-CodeSynapse-Route: local` or `X-CodeSynapse-Route: cloud`, so you can see where it came from.
 
 The audit log records the model, the size and the status of each request. It never records the text.
@@ -143,6 +145,7 @@ The reasons a request was not answered locally are a fixed list:
 | `has_image` | The request carries an image or a document, also inside a tool result |
 | `excluded` | The model is on the installation's or organisation's exclude list |
 | `no_local_model` | No local provider with `gateway: true` is configured |
+| `count_tokens` | A token count (`/v1/messages/count_tokens`): always counted by the cloud, never estimated locally |
 | `queue_timeout` | No local slot was free within `gateway_wait_seconds` |
 | `answer_timeout` | The local model started but did not finish within the provider's `timeout_seconds` |
 | `cancelled` | The assistant gave up on the request before the local model answered |
