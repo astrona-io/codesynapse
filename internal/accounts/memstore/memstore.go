@@ -65,6 +65,8 @@ type Store struct {
 	dailyOnce      sync.Once
 	prompts        *promptTable
 	promptsOnce    sync.Once
+	verifications  []accounts.AuditVerification // oldest first
+	verifyID       int64
 }
 
 type member struct {

@@ -11,9 +11,9 @@ const ranges: { id: StatsRange; label: string }[] = [
 ]
 const range = ref<StatsRange>('24h')
 const org = ref('')
-type Tab = 'tenants' | 'sessions' | 'usage' | 'jobs' | 'ingest' | 'storage' | 'alerts'
+type Tab = 'tenants' | 'sessions' | 'usage' | 'jobs' | 'ingest' | 'security' | 'audit' | 'storage' | 'alerts'
 const tab = ref<Tab>('tenants')
-// Storage and alerts load in their own components, only while shown.
+// Security, audit, storage and alerts load in their own components, only while shown.
 const sectionTick = ref(0)
 const tabled = computed(() => tab.value !== 'storage' && tab.value !== 'alerts')
 const page = ref(1)
@@ -56,6 +56,10 @@ const seriesRange = computed<SeriesRange>(() => (live.value ? range.value as Ser
 const { panels: charts, pending: chartsPending, refresh: refreshCharts, execute: loadCharts } = useSeriesBatch(panelNames, seriesRange, undefined,
   { base: 'admin/stats/series/batch', org, immediate: false })
 const chartsOff = ref(false)
+// Security and audit load and refresh themselves (AdminSecurityStats,
+// AdminAuditStats) when their tab opens.
+const securityTab = ref<{ refresh: () => void; error: unknown } | null>(null)
+const auditTab = ref<{ refresh: () => void; error: unknown } | null>(null)
 watch(tab, (t) => {
   if (t === 'sessions' && !sessions.value) loadSessions()
   if (t === 'usage' && !usage.value) loadUsage()
@@ -66,7 +70,7 @@ watch(tab, (t) => {
   else if (!Object.keys(charts.value).length) loadCharts()
 })
 const errors: Partial<Record<Tab, Ref<unknown>>> = { tenants: tenantsError, sessions: sessionsError, usage: usageError, jobs: jobsError, ingest: ingestError }
-const error = computed(() => summaryError.value ?? errors[tab.value]?.value ?? null)
+const error = computed(() => summaryError.value ?? (tab.value === 'security' ? securityTab.value?.error : tab.value === 'audit' ? auditTab.value?.error : errors[tab.value]?.value) ?? null)
 
 const auto = ref(false)
 let timer: ReturnType<typeof setInterval> | undefined
@@ -74,6 +78,8 @@ function refreshAll() {
   refreshSummary()
   if (tab.value === 'tenants') refreshTenants()
   else if (tab.value === 'sessions') refreshSessions()
+  else if (tab.value === 'security') securityTab.value?.refresh()
+  else if (tab.value === 'audit') auditTab.value?.refresh()
   else if (tab.value === 'usage') { refreshUsage(); refreshCharts() }
   else if (tab.value === 'jobs') { refreshJobs(); refreshCharts() }
   else if (tab.value === 'ingest') { refreshIngest(); refreshCharts() }
@@ -85,9 +91,9 @@ watch(auto, (on) => {
 })
 onBeforeUnmount(() => clearInterval(timer))
 
-const exportHref = (format: 'csv' | 'json') => apiPath(`admin/stats/export?section=${tab.value}&${filter.value}&format=${format}`)
-const tables = { tenants, sessions, usage, jobs, ingest }
-const table = computed(() => (tab.value === 'storage' || tab.value === 'alerts' ? null : tables[tab.value].value))
+const exportHref = (format: 'csv' | 'json') => apiPath(`admin/stats/export?section=${tab.value}&${tab.value === 'audit' ? `range=${range.value}` : filter.value}&format=${format}`)
+const tables: Partial<Record<Tab, Ref<StatsTable<unknown, unknown> | null | undefined>>> = { tenants, sessions, usage, jobs, ingest }
+const table = computed(() => tables[tab.value]?.value ?? null)
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? '–' : `${v}%`)
 const shareHint = computed(() => {
   const t = usage.value?.totals
@@ -155,6 +161,9 @@ const activeHint = computed(() => {
       <StatTile label="API keys" :value="n(summary.keys_active)" :hint="`${summary.browser_active} browser sessions open`" />
       <StatTile label="Indexed graphs" :value="n(summary.graphs)" hint="not measured yet" />
       <StatTile label="Jobs waiting" :value="n(summary.jobs_waiting)" :hint="summary.jobs_failed === null ? 'failed jobs not measured' : `${fmtCompact(summary.jobs_failed)} failed in this window`" />
+      <StatTile label="Audit chain" :value="!summary.chain ? 'Not verified yet' : summary.chain.run_error ? 'Could not finish' : summary.chain.ok ? 'Intact' : 'Broken'"
+        :hint="summary.chain ? `checked ${new Date(summary.chain.at).toLocaleString()}` : 'checked daily'" :tone="summary.chain?.ok ? undefined : 'warning'"
+        tip="The stored result of the last audit chain verification; opening this page does not walk the chain." />
       <StatTile label="Alerts firing" :value="n(summary.alerts_firing)" :hint="summary.alerts_firing === null ? 'alerts off or not answering' : 'now, from vmalert'"
         :tone="summary.alerts_firing ? 'warning' : undefined" />
     </div>
@@ -164,6 +173,8 @@ const activeHint = computed(() => {
           <button type="button" :aria-pressed="tab === 'tenants'" @click="tab = 'tenants'">Tenants</button>
           <button type="button" :aria-pressed="tab === 'sessions'" @click="tab = 'sessions'">Sessions</button>
           <button type="button" :aria-pressed="tab === 'usage'" @click="tab = 'usage'">Usage</button>
+          <button type="button" :aria-pressed="tab === 'security'" @click="tab = 'security'">Security</button>
+          <button type="button" :aria-pressed="tab === 'audit'" @click="tab = 'audit'">Audit</button>
           <button type="button" :aria-pressed="tab === 'jobs'" @click="tab = 'jobs'">Jobs</button>
           <button type="button" :aria-pressed="tab === 'ingest'" @click="tab = 'ingest'">Indexing</button>
           <button type="button" :aria-pressed="tab === 'storage'" @click="tab = 'storage'">Storage</button>
@@ -283,6 +294,11 @@ const activeHint = computed(() => {
           </div>
         </div>
         <p class="muted small">Tools and clients that fewer than three organisations use are counted as other, unless one organisation is selected.</p>
+      </template>
+      <AdminSecurityStats v-if="tab === 'security'" ref="securityTab" v-model:page="page" :filter="filter" />
+      <template v-if="tab === 'audit'">
+        <p v-if="org" class="muted small">The audit log is counted for the whole platform; the organisation filter does not apply.</p>
+        <AdminAuditStats ref="auditTab" :range="range" />
       </template>
       <template v-if="tab === 'jobs' && jobs">
         <div class="grid cols-2 breakdowns">

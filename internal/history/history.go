@@ -34,6 +34,10 @@ type Snapshot struct {
 	Findings    map[string]int `json:"findings,omitempty"`
 	Vulns       map[string]int `json:"vulns,omitempty"`
 	VulnsCalled int            `json:"vulns_called"`
+	// Rules counts findings by rule ID, catalogue rules only (never a SARIF
+	// tool's own IDs), for the platform statistics. Snapshots taken before
+	// it existed have none.
+	Rules map[string]int `json:"rules,omitempty"`
 
 	Modules          int `json:"modules"`
 	Direct           int `json:"direct"`
