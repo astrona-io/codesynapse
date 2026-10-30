@@ -279,7 +279,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
         <label class="watch-check"><input v-model="editForm.include_forks" type="checkbox"> Forks</label>
         <label class="watch-check"><input v-model="editForm.include_private" type="checkbox" :disabled="!canAdmin && !editForm.include_private"> Private, read with the organisation's Git token for {{ editing?.host }}</label>
         <span class="small">
-          <template v-if="canAdmin">Only while the watch's creator is an owner or admin and the organisation has a token for this host. Private repositories that exist when you turn this on are not added.</template>
+          <template v-if="canAdmin">Only while the watch's creator is an owner or admin and the organisation has a token for this host. Turning this on adds the private repositories that exist already, up to 10 a scan; later ones are added as they appear.</template>
           <template v-else>Owners and admins can turn this on.</template>
         </span>
       </fieldset>
