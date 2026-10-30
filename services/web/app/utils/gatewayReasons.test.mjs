@@ -5,7 +5,7 @@ import { gatewayReasonLabel, gatewayReasonRows, gatewayRouteLabel } from './gate
 
 test('known reasons read as plain language, new codes still show', () => {
   assert.equal(gatewayReasonLabel('queue_timeout'), 'waited too long for a slot')
-  assert.equal(gatewayReasonLabel('count_tokens'), 'count tokens', 'a code the UI does not know yet is spelled out')
+  assert.equal(gatewayReasonLabel('slot_lost'), 'slot lost', 'a code the UI does not know yet is spelled out')
   assert.equal(gatewayReasonLabel('not-eligible_tools'), 'not eligible tools')
   assert.equal(gatewayReasonLabel(''), 'unknown')
   assert.equal(gatewayRouteLabel('local'), 'local model')

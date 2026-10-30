@@ -321,11 +321,12 @@ func TestGatewayViewScopedToCaller(t *testing.T) {
 		filters, queries := slices.Clone(vm.filters), slices.Clone(vm.queries)
 		vm.filters, vm.queries = nil, nil
 		vm.mu.Unlock()
-		// The daily rollup runs in the background across tenants, grouped
-		// by tenant_id; panel queries never name the tenant.
+		// The daily platform rollups run in the background across tenants
+		// on the same querier, grouped by tenant_id or over other metrics;
+		// panel queries never name the tenant.
 		seen := 0
 		for i, f := range filters {
-			if strings.Contains(queries[i], "tenant_id") {
+			if strings.Contains(queries[i], "tenant_id") || !strings.Contains(queries[i], "gateway_") {
 				continue
 			}
 			seen++

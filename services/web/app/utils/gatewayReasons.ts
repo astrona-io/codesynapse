@@ -12,7 +12,7 @@ const REASONS: Record<string, string> = {
 
 const ROUTES: Record<string, string> = { local: 'local model', cloud: 'cloud', rejected: 'refused', other: 'other' }
 
-// humanize turns an unknown code such as "count_tokens" into "count tokens".
+// humanize turns an unknown code such as "slot_lost" into "slot lost".
 function humanize(code: string): string {
   const s = code.replace(/[_-]+/g, ' ').trim()
   return s || 'unknown'
