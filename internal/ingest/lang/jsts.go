@@ -2,6 +2,7 @@ package lang
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/astrona-io/codesynapse/internal/model"
@@ -312,11 +313,13 @@ func parseJS(src []byte, _ bool) *fileResult {
 		}
 		fr.findings = append(fr.findings, jsRules(raw[i], l, n, ownerName(o), childProcess)...)
 	}
-	fr.findings = supersede(fr.findings, jsTaintFindings(raw, lines, depth, owners, childProcess))
+	fr.taint = &taintSource{raw: raw, code: lines, depth: depth, owners: owners, symbols: fr.symbols, childProcess: childProcess, pattern: slices.Clip(fr.findings)}
+	fr.findings = supersede(fr.findings, fr.taint.jsFindings(nil))
 	for _, s := range fr.symbols {
 		if s.kind == model.KindType {
 			continue
 		}
+		s.params = jsParams(lines, s)
 		body := strings.Join(lines[max(0, s.start-1):min(len(lines), s.end)], "\n")
 		s.complexity = countBranches(body, jsBranches) + strings.Count(body, "?.")*0 + strings.Count(body, " ? ")
 	}

@@ -436,8 +436,9 @@ func resolveLicenses(ctx context.Context, opts Options, root string, mods []vuln
 }
 
 // checkHygiene fills in which dependencies are deprecated or behind their
-// latest release, from deps.dev, and which Go module versions are retracted,
-// from the module proxy (both switched on with the licence lookup).
+// latest release and the OpenSSF Scorecard of their source projects, from
+// deps.dev, and which Go module versions are retracted, from the module
+// proxy (all switched on with the licence lookup).
 func checkHygiene(ctx context.Context, c *license.DepsDev, proxy *hygiene.GoProxy, mods []vuln.Module) {
 	deps := make([]license.Dep, 0, len(mods))
 	for _, m := range mods {
@@ -447,10 +448,17 @@ func checkHygiene(ctx context.Context, c *license.DepsDev, proxy *hygiene.GoProx
 	}
 	found := hygiene.Check(ctx, c, deps)
 	retracted := hygiene.Retracted(ctx, proxy, deps)
-	deprecated, behind := 0, 0
+	scores := hygiene.Scorecards(ctx, c, deps)
+	deprecated, behind, low := 0, 0, 0
 	for i, m := range mods {
 		d := license.Dep{Ecosystem: cmp.Or(m.Ecosystem, vuln.EcosystemGo), Name: m.BuildPath(), Version: m.Version}
 		mods[i].Retracted = retracted[d.Key()]
+		if s, ok := scores[d.Key()]; ok {
+			mods[i].Scorecard, mods[i].ScorecardDate, mods[i].ScorecardChecks = s.Overall, s.Date, s.Lowest
+			if s.Overall < hygiene.LowScorecard {
+				low++
+			}
+		}
 		if s, ok := found[d.Key()]; ok {
 			mods[i].Latest, mods[i].Deprecated, mods[i].Behind = s.Latest, s.Deprecated, s.Behind
 			if s.Deprecated != "" {
@@ -461,7 +469,7 @@ func checkHygiene(ctx context.Context, c *license.DepsDev, proxy *hygiene.GoProx
 			}
 		}
 	}
-	logx.FromContext(ctx).Info("dependency hygiene checked", "dependencies", len(deps), "found", len(found), "deprecated", deprecated, "behind", behind, "retracted", len(retracted))
+	logx.FromContext(ctx).Info("dependency hygiene checked", "dependencies", len(deps), "found", len(found), "deprecated", deprecated, "behind", behind, "retracted", len(retracted), "scorecards", len(scores), "low_scorecard", low)
 }
 
 // Licenses checks the dependency licences of the repository at root without

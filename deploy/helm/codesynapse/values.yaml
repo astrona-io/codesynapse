@@ -98,6 +98,11 @@ alerting:
   # A Secret with the ALERTMANAGER_* keys; empty uses global.existingSecret.
   existingSecret: ""
   evaluationInterval: 1m
+  # An operator's own vmalert the API reads alerts from for the platform
+  # Statistics page when enabled is false: https://host[:port], or http to an
+  # in-cluster service (name, name.namespace.svc). Empty with enabled false
+  # shows alerts as off. With enabled true the API reads the chart's vmalert.
+  externalURL: ""
   resources:
     requests: {cpu: 10m, memory: 32Mi}
     limits: {memory: 128Mi}

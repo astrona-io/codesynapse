@@ -4,7 +4,8 @@ Alerts for operators (docs/operations/alerting.md): vmalert evaluates the
 rules in deploy/alerts (packaged as alerts/, a link to that directory)
 against the metrics store and sends what fires to the Alertmanager-compatible
 receiver named in a Secret. Credentials reach it as environment
-(-envflag.enable), never as arguments or values. Nothing connects to it.
+(-envflag.enable), never as arguments or values. Only the API connects to
+it, to show alerts on the platform Statistics page.
 */}}
 {{- $url := include "cs.metricsURL" . }}
 {{- if not $url }}
@@ -90,9 +91,21 @@ spec:
         - name: rules
           configMap:
             name: {{ include "cs.name" (list . "vmalert") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cs.name" (list . "vmalert") }}
+  labels:
+    {{- include "cs.labels" (list . "vmalert") | nindent 4 }}
+spec:
+  selector:
+    {{- include "cs.selector" (list . "vmalert") | nindent 4 }}
+  ports:
+    - {name: http, port: 8880, targetPort: http}
 {{- if .Values.global.networkPolicies }}
 ---
-# vmalert serves nothing anyone needs: refuse every connection to it.
+# Only the API reads vmalert (alerts and rules for the Statistics page).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -104,5 +117,11 @@ spec:
     matchLabels:
       {{- include "cs.selector" (list . "vmalert") | nindent 6 }}
   policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "cs.selector" (list . "api") | nindent 14 }}
+      ports: [{port: 8880}]
 {{- end }}
 {{- end }}

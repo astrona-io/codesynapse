@@ -310,6 +310,7 @@ func Run(t *testing.T, s store.Store) {
 		require.True(t, ok, "every store keeps runtime facts")
 		runtimeContract(t, rs)
 	})
+	t.Run("store_sizes", func(t *testing.T) { sizesContract(t, s) })
 
 	codeGraphContract(t, s)
 

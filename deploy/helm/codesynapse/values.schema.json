@@ -240,6 +240,11 @@
           "type": "string",
           "pattern": "^[1-9][0-9]*(s|m|h)$"
         },
+        "externalURL": {
+          "description": "An operator's own vmalert the API reads alerts from for the platform Statistics page when enabled is false: https://host[:port], or http:// to an in-cluster service name (name, name.namespace.svc[.cluster.local]). Empty shows alerts as off. No credentials, path, query or fragment.",
+          "type": "string",
+          "pattern": "^(|https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?|http://[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?((\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)?\\.svc(\\.cluster\\.local)?)?(:[0-9]{1,5})?/?)$"
+        },
         "resources": {
           "$ref": "#/definitions/resources"
         }

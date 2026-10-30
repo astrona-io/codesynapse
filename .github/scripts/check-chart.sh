@@ -61,8 +61,17 @@ if helm template codesynapse "$chart" -f "$values" --set victoriametrics.enabled
     echo "chart rendered alerting without a metrics store" >&2
     exit 1
 fi
+# The API reads the chart's vmalert for the Statistics page, or an operator's
+# own (https, or an in-cluster service name), and nothing when both are off.
+grep -q 'name: CODESYNAPSE_ALERTS_URL, value: "http://codesynapse-vmalert:8880"' "$out/rendered.yaml" || { echo "alerting: the API is not given the vmalert URL" >&2; exit 1; }
+grep -q 'kind: Service' "$out/rendered.yaml"
+if grep -q CODESYNAPSE_ALERTS_URL "$out/no-alerting.yaml"; then echo "alerts URL rendered with alerting off" >&2; exit 1; fi
+helm template codesynapse "$chart" -f "$values" --set alerting.enabled=false,alerting.externalURL=http://vmalert.monitoring.svc:8880 > "$out/alert-external.yaml"
+grep -q 'name: CODESYNAPSE_ALERTS_URL, value: "http://vmalert.monitoring.svc:8880"' "$out/alert-external.yaml"
 for bad in alerting.enabled=maybe alerting.extra=1 alerting.evaluationInterval=soon alerting.image=vmalert:latest \
-    alerting.existingSecret=Not_A_Name alerting.resources.limits.memory=lots; do
+    alerting.existingSecret=Not_A_Name alerting.resources.limits.memory=lots \
+    alerting.externalURL=http://alerts.example.com alerting.externalURL=http://10.0.0.1:8880 \
+    alerting.externalURL=https://user:pw@alerts.example.com alerting.externalURL=https://alerts.example.com/api; do
     if helm template codesynapse "$chart" -f "$values" --set "$bad" > /dev/null 2>&1; then
         echo "values.schema.json accepted $bad" >&2
         exit 1

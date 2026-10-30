@@ -25,6 +25,11 @@
 {{- if .Values.victorialogs.enabled }}http://{{ include "cs.name" (list . "victorialogs") }}:9428{{ else }}{{ .Values.victorialogs.externalURL }}{{ end -}}
 {{- end -}}
 
+{{/* The vmalert the API reads alerts from: the chart's, or alerting.externalURL. */}}
+{{- define "cs.alertsURL" -}}
+{{- if .Values.alerting.enabled }}http://{{ include "cs.name" (list . "vmalert") }}:8880{{ else }}{{ .Values.alerting.externalURL }}{{ end -}}
+{{- end -}}
+
 {{/*
 Environment shared by api, worker and mcp: stores and telemetry. Args: root,
 service ("api", "worker" or "mcp"). Each service signs in to NebulaGraph as
