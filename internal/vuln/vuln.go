@@ -76,6 +76,11 @@ type Module struct {
 	// Retracted comes from the Go module proxy during ingest; see
 	// model.Node.
 	Retracted string `json:"retracted,omitempty"`
+	// Scorecard, ScorecardDate and ScorecardChecks come from deps.dev
+	// during ingest; see model.Node.
+	Scorecard       float64  `json:"scorecard,omitempty"`
+	ScorecardDate   string   `json:"scorecard_date,omitempty"`
+	ScorecardChecks []string `json:"scorecard_checks,omitempty"`
 }
 
 // Replacement is the target of a go.mod replace directive.

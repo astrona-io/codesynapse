@@ -462,6 +462,9 @@ func value(v *nebula.ValueWrapper) (any, error) {
 		return v.AsFloat()
 	case v.IsString():
 		return v.AsString()
+	case v.IsDateTime() || v.IsDate() || v.IsTime():
+		// Only admin answers (SHOW JOBS) carry these; the graph stores text.
+		return v.String(), nil
 	case v.IsList() || v.IsSet():
 		items, err := v.AsList()
 		if v.IsSet() {

@@ -143,6 +143,10 @@ func TestShortenModule(t *testing.T) {
 		{"github.com/acme/app", "~"},
 		{"github.com/acme/app-tools/x.F", "github.com/acme/app-tools/x.F"}, // another module that starts the same
 		{"internal/store/store.go", "internal/store/store.go"},
+		{"GET /x (github.com/acme/app/api)", "GET /x (~/api)"},                               // a route's handler package
+		{"github.com/acme/app/x.Map[github.com/acme/app/y.K]", "~/x.Map[~/y.K]"},             // type arguments
+		{"github.com/acme/app/x.Pair[int, github.com/acme/app/y.K]", "~/x.Pair[int, ~/y.K]"}, // after a comma
+		{"github.com/acme/appx.F", "github.com/acme/appx.F"},                                 // not at a boundary
 	} {
 		t.Run(tt.local, func(t *testing.T) {
 			assert.Equal(t, ShortenModule(tt.local, mod), tt.short)
@@ -151,6 +155,8 @@ func TestShortenModule(t *testing.T) {
 		})
 	}
 	assert.Equal(t, ExpandModule("docs/~notes.md", mod), "docs/~notes.md", "a tilde elsewhere stays")
+	assert.Equal(t, ShortenModule("github.com/acme/app/x.F (~)", mod), "github.com/acme/app/x.F (~)",
+		"a local with a \"~\" of its own is left whole: expanding could not tell the two apart")
 }
 
 type fakeRanker struct {

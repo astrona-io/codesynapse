@@ -26,7 +26,11 @@ func dependencyContract(t *testing.T, db CodeGraph) {
 	repoID := model.NodeID(repo, model.KindRepository, repo)
 	g.AddNode(model.Node{ID: repoID, Repo: repo, Kind: model.KindRepository, Name: repo})
 	for _, name := range []string{"b", "a", "npm:c"} {
-		g.AddNode(model.Node{ID: mod(repo, name), Repo: repo, Kind: model.KindModule, Name: name, Version: "1.0.0", Ecosystem: "Go", Via: "x > y", Roots: 2})
+		n := model.Node{ID: mod(repo, name), Repo: repo, Kind: model.KindModule, Name: name, Version: "1.0.0", Ecosystem: "Go", Via: "x > y", Roots: 2}
+		if name == "a" {
+			n.Scorecard, n.ScorecardDate, n.ScorecardChecks = 3.7, "2026-10-19", []string{"Code-Review:0", "Maintained:2"}
+		}
+		g.AddNode(n)
 		g.AddEdge(model.Edge{From: repoID, To: mod(repo, name), Kind: model.EdgeDependsOn})
 	}
 	g.AddEdge(model.Edge{From: mod(repo, "a"), To: mod(repo, "b"), Kind: model.EdgeDependsOn})
@@ -48,6 +52,10 @@ func dependencyContract(t *testing.T, db CodeGraph) {
 	assert.Equal(t, got.Modules[0].Name, "a", "ordered by ID")
 	assert.Equal(t, got.Modules[0].Via, "x > y", "paths survive storage")
 	assert.Equal(t, got.Modules[0].Roots, 2)
+	assert.Equal(t, got.Modules[0].Scorecard, 3.7, "a float survives storage")
+	assert.Equal(t, got.Modules[0].ScorecardDate, "2026-10-19")
+	assert.Equal(t, got.Modules[0].ScorecardChecks, []string{"Code-Review:0", "Maintained:2"})
+	assert.Equal(t, got.Modules[1].ScorecardDate, "", "unset stays unset")
 	require.Len(t, got.Vulnerabilities, 1)
 	assert.Equal(t, got.Vulnerabilities[0].Name, "GO-1")
 	require.Len(t, got.Edges, 2, "module to module only: not from the repository, not AFFECTS")

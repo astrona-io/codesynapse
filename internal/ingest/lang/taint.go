@@ -19,8 +19,12 @@ import (
 // missing a flow to reporting a guess:
 //   - Statements are lines, joined while brackets are open (at most
 //     maxJoin lines); a value is tracked by its local name only, not
-//     through attributes, containers, calls into other functions or
-//     returns.
+//     through attributes or containers.
+//   - Inside one file, a call carries the taint of its arguments to its
+//     result. At ingest, calls to the repository's own functions apply
+//     their summaries instead (taintflow.go): the result carries only what
+//     the callee returns, and request input passed in is reported at the
+//     callee's sinks.
 //   - A JavaScript name is forgotten when the block it was assigned in
 //     closes; a Python name lives for the whole function.
 //   - Reassigning a name with a clean value clears it; a value that went
@@ -60,15 +64,48 @@ type taintSink struct {
 	childProcess bool
 }
 
+// taint is what a value carries: the request input it comes from and,
+// while a function is summarised, which of its parameters (bit i is
+// parameter i).
+type taint struct {
+	from   string
+	params uint64
+}
+
+func (t taint) none() bool { return t.from == "" && t.params == 0 }
+
+// or merges u into t; t's request input wins.
+func (t taint) or(u taint) taint {
+	if t.from == "" {
+		t.from = u.from
+	}
+	t.params |= u.params
+	return t
+}
+
 // taintVar is a tainted local and the depth of the block it was set in.
 type taintVar struct {
-	from  string
+	t     taint
 	depth int
 }
 
 type taintState struct {
 	lang *taintLang
 	vars map[string]taintVar
+
+	// The rest is for calls between functions (taintflow.go); all zero
+	// when one file is scanned on its own.
+	// resolve finds the repository function a call names, or nil.
+	resolve func(class, recv, name string) *taintFn
+	class   string // the class of the code being scanned, for self.f()
+	// decl is the name a statement declares (function f(a) {): not a call.
+	decl string
+	// fn is the function being summarised; its findings are not reported.
+	fn *taintFn
+	// entry names the function request input is read in, and cross takes
+	// the findings that input causes in the functions it is passed to.
+	entry string
+	cross func(ref taintRef, path []string, from, entry string)
 }
 
 // stmt is one statement: its first line, the masked code and the raw text
@@ -84,15 +121,31 @@ var (
 	fixedURL = regexp.MustCompile("^(?:[rRbBfF]{0,2}[\"'`])https?://[^/\"'`{}$\\s]+/")
 )
 
-// relevant is a cheap test that a statement can matter: some name is
-// tainted already, or it mentions a request source.
+// relevant is a cheap test that a statement can matter: it mentions a
+// tainted name or a request source, or calls a function that returns
+// request input. A statement that does none of these can neither reach a
+// sink nor change what a name carries.
 func (st *taintState) relevant(code string) bool {
-	if len(st.vars) > 0 {
-		return true
-	}
 	for _, l := range st.lang.guards {
 		if strings.Contains(code, l) {
-			return st.lang.sources.MatchString(code)
+			if st.lang.sources.MatchString(code) {
+				return true
+			}
+			break
+		}
+	}
+	if len(st.vars) > 0 {
+		for _, m := range identRe.FindAllStringIndex(code, -1) {
+			if _, ok := st.vars[code[m[0]:m[1]]]; ok {
+				return true
+			}
+		}
+	}
+	if st.resolve != nil {
+		for _, m := range callHead.FindAllStringIndex(code, -1) {
+			if fn := st.callee(code, m); fn != nil && fn.sum.from != "" {
+				return true
+			}
 		}
 	}
 	return false
@@ -107,14 +160,21 @@ func hasInputs(funcs []*symbol) bool {
 	return false
 }
 
-// taintOf returns the request input expr carries, or "".
-func (st *taintState) taintOf(expr string) string {
-	expr = blankSanitized(expr, st.lang.sanitizers)
+// taintOf returns what expr carries: the request input it is built from
+// and, while summarising, the parameters.
+func (st *taintState) taintOf(expr string) taint { return st.taintAt(expr, 0) }
+
+// maxCallNest bounds how deeply calls nested in arguments are followed.
+const maxCallNest = 4
+
+func (st *taintState) taintAt(expr string, nest int) taint {
+	expr, called := st.blankCalls(expr, nest)
 	if strings.Contains(expr, "==") || strings.Contains(expr, "!=") {
 		if !strings.Contains(expr, "?") && !strings.Contains(expr, " if ") {
-			return "" // a comparison is a boolean
+			return taint{} // a comparison is a boolean
 		}
 	}
+	var t taint
 	for _, m := range st.lang.sources.FindAllStringIndex(expr, -1) {
 		if m[0] > 0 && (isIdentByte(expr[m[0]-1]) || expr[m[0]-1] == '.' && !strings.HasPrefix(expr[m[0]:], "request.")) {
 			continue
@@ -122,10 +182,11 @@ func (st *taintState) taintOf(expr string) string {
 		if st.lang.skipSource != nil && st.lang.skipSource(expr, m[1]) {
 			continue
 		}
-		return strings.Join(strings.Fields(expr[m[0]:m[1]]), "")
+		t.from = strings.Join(strings.Fields(expr[m[0]:m[1]]), "")
+		break
 	}
 	if len(st.vars) == 0 {
-		return ""
+		return t.or(called)
 	}
 	for _, m := range identRe.FindAllStringIndex(expr, -1) {
 		if m[0] > 0 && (expr[m[0]-1] == '.' || isIdentByte(expr[m[0]-1])) {
@@ -142,39 +203,57 @@ func (st *taintState) taintOf(expr string) string {
 		if st.lang.objectKeys && strings.HasPrefix(rest, ":") {
 			continue
 		}
-		return v.from
+		t = t.or(v.t)
 	}
-	return ""
+	return t.or(called)
 }
 
 func isIdentByte(c byte) bool {
 	return c == '_' || c == '$' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }
 
-// blankSanitized replaces calls to sanitizers, arguments included, with
-// spaces: int(request.args["n"]) carries nothing.
-func blankSanitized(expr string, sanitizers map[string]bool) string {
+// blankCalls replaces calls to sanitizers and to summarised repository
+// functions, arguments included, with spaces: int(request.args["n"])
+// carries nothing, and a summarised call carries only what its callee
+// returns, which is the second result.
+func (st *taintState) blankCalls(expr string, nest int) (string, taint) {
 	var b []byte
+	var t taint
+	skip := 0 // calls inside a blanked call are its arguments
 	for _, m := range callHead.FindAllStringIndex(expr, -1) {
-		if m[0] > 0 && expr[m[0]-1] == '.' {
+		if m[0] < skip || m[0] > 0 && expr[m[0]-1] == '.' {
 			continue
 		}
-		name := strings.Join(strings.Fields(strings.TrimSuffix(expr[m[0]:m[1]], "(")), "")
-		if !sanitizers[name] {
-			continue
+		var fn *taintFn
+		if !st.lang.sanitizers[callName(expr[m[0]:m[1]])] {
+			if nest >= maxCallNest {
+				continue
+			}
+			if fn = st.callee(expr, m); fn == nil {
+				continue
+			}
 		}
 		if b == nil {
 			b = []byte(expr)
 		}
 		end := closingParen(expr, m[1])
+		if fn != nil {
+			t = t.or(st.returned(fn, expr[m[1]:], nest+1))
+		}
 		for i := m[0]; i < end; i++ {
 			b[i] = ' '
 		}
+		skip = end
 	}
 	if b == nil {
-		return expr
+		return expr, t
 	}
-	return string(b)
+	return string(b), t
+}
+
+// callName is a call head without spaces or the parenthesis: "os.path.basename".
+func callName(head string) string {
+	return strings.Join(strings.Fields(strings.TrimSuffix(head, "(")), "")
 }
 
 // closingParen returns the offset after the parenthesis closing the one
@@ -195,25 +274,41 @@ func closingParen(s string, from int) int {
 	return len(s)
 }
 
-// sinks reports the sinks of one statement that receive request input.
-func (st *taintState) sinks(s stmt, owner string, childProcess bool) []finding {
+// sinks reports the sinks of one statement that receive request input,
+// adds those a parameter reaches to the summary being built, and says
+// whether any sink received something.
+func (st *taintState) sinks(s stmt, owner string, childProcess bool) ([]finding, bool) {
 	var out []finding
+	hit := false
 	done := map[string]bool{}
 	for _, sk := range st.lang.sinks {
 		if done[sk.rule] || sk.childProcess && !childProcess {
 			continue
 		}
 		for _, m := range sk.head.FindAllStringIndex(s.code, -1) {
-			from := st.sinkArg(sk, s, m[1])
-			if from == "" {
+			t := st.sinkArg(sk, s, m[1])
+			if t.none() {
 				continue
 			}
-			out = append(out, finding{rule: sk.rule, detail: calleeAt(s.code, m[1]) + ": " + sk.what + " comes from the incoming request (via " + from + ")", line: s.line, owner: owner})
+			hit = true
+			base := calleeAt(s.code, m[1]) + ": " + sk.what + " comes from the incoming request"
+			if st.fn != nil {
+				for i := range maxParams {
+					if t.params&(1<<i) != 0 {
+						st.fn.sum.addSink(i, taintRef{rule: sk.rule, rel: st.fn.src.rel, line: s.line, owner: owner, base: base})
+					}
+				}
+				continue // a summary reports nothing itself
+			}
+			if t.from == "" {
+				continue
+			}
+			out = append(out, finding{rule: sk.rule, detail: base + " (via " + t.from + ")", line: s.line, owner: owner})
 			done[sk.rule] = true
 			break
 		}
 	}
-	return out
+	return out, hit
 }
 
 // calleeAt returns the dotted name of the call whose "(" ends at end - 1:
@@ -230,9 +325,9 @@ func calleeAt(code string, end int) string {
 	return code[j:i]
 }
 
-// sinkArg returns what request input reaches the checked argument of the
-// call whose arguments start at off.
-func (st *taintState) sinkArg(sk taintSink, s stmt, off int) string {
+// sinkArg returns what reaches the checked argument of the call whose
+// arguments start at off.
+func (st *taintState) sinkArg(sk taintSink, s stmt, off int) taint {
 	spans := argSpans(s.code[off:])
 	var picked [][2]int
 	for i, sp := range spans {
@@ -247,6 +342,7 @@ func (st *taintState) sinkArg(sk taintSink, s stmt, off int) string {
 			picked = append(picked, sp)
 		}
 	}
+	var t taint
 	for _, sp := range picked {
 		a := strings.TrimSpace(s.code[off+sp[0] : off+sp[1]])
 		if a == "" || a[0] == '{' || a[0] == '[' && sk.rule == "sql-from-request" {
@@ -255,11 +351,9 @@ func (st *taintState) sinkArg(sk taintSink, s stmt, off int) string {
 		if sk.rule == "ssrf-from-request" && fixedURL.MatchString(strings.TrimSpace(s.raw[off+sp[0]:min(len(s.raw), off+sp[1])])) {
 			continue // the client chooses a path on a fixed host at most
 		}
-		if from := st.taintOf(a); from != "" {
-			return from
-		}
+		t = t.or(st.taintOf(a))
 	}
-	return ""
+	return t
 }
 
 func isKeywordArg(a string) bool {
@@ -274,11 +368,14 @@ func isKeywordArg(a string) bool {
 // assign records the names a statement assigns: tainted by a tainted value,
 // cleared by a clean one (augmented assignments only add).
 func (st *taintState) assign(names []string, rhs string, augmented bool, depth int) {
-	from := st.taintOf(rhs)
+	t := st.taintOf(rhs)
 	for _, n := range names {
 		switch {
-		case from != "":
-			st.vars[n] = taintVar{from: from, depth: depth}
+		case !t.none():
+			if v, ok := st.vars[n]; ok && augmented {
+				t = v.t.or(t)
+			}
+			st.vars[n] = taintVar{t: t, depth: depth}
 		case !augmented:
 			delete(st.vars, n)
 		}
@@ -476,6 +573,27 @@ func pyInputParams(decorators []string, lines []pyLine, def int) []string {
 	if !routed {
 		return nil
 	}
+	var out []string
+	for _, p := range pyParamList(lines, def) {
+		decl, def, _ := strings.Cut(p, "=")
+		name, ann, _ := strings.Cut(decl, ":")
+		name, ann, def = strings.TrimSpace(name), strings.TrimSpace(ann), strings.TrimSpace(def)
+		if name == "" || name == "self" || name == "request" || strings.HasPrefix(name, "*") || pyNumeric.MatchString(ann) {
+			continue
+		}
+		if strings.Contains(def, "Depends(") {
+			continue
+		}
+		if pathParams[name] || pyStrAnn.MatchString(ann) || pyFastAPIIn.MatchString(def) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// pyParamList returns the parameter declarations of the def on line def,
+// as written ("name: str = Query(None)").
+func pyParamList(lines []pyLine, def int) []string {
 	var sig strings.Builder
 	for i := def; i <= len(lines) && i < def+maxJoin; i++ {
 		sig.WriteString(lines[i-1].text + " ")
@@ -488,18 +606,22 @@ func pyInputParams(decorators []string, lines []pyLine, def int) []string {
 	if open < 0 {
 		return nil
 	}
+	return splitArgs(s[open+1:])
+}
+
+// pyParams returns the parameter names of the def on line def, for binding
+// call arguments: "*" stands for *args, **kwargs and the bare * that
+// starts keyword-only parameters; the / marker is dropped.
+func pyParams(lines []pyLine, def int) []string {
 	var out []string
-	for _, p := range splitArgs(s[open+1:]) {
-		decl, def, _ := strings.Cut(p, "=")
-		name, ann, _ := strings.Cut(decl, ":")
-		name, ann, def = strings.TrimSpace(name), strings.TrimSpace(ann), strings.TrimSpace(def)
-		if name == "" || name == "self" || name == "request" || strings.HasPrefix(name, "*") || pyNumeric.MatchString(ann) {
-			continue
-		}
-		if strings.Contains(def, "Depends(") {
-			continue
-		}
-		if pathParams[name] || pyStrAnn.MatchString(ann) || pyFastAPIIn.MatchString(def) {
+	for _, p := range pyParamList(lines, def) {
+		decl, _, _ := strings.Cut(p, "=")
+		name, _, _ := strings.Cut(decl, ":")
+		switch name = strings.TrimSpace(name); {
+		case name == "" || name == "/":
+		case strings.HasPrefix(name, "*"):
+			out = append(out, "*")
+		default:
 			out = append(out, name)
 		}
 	}
@@ -523,48 +645,63 @@ func pyTaintView(raw []string) []string {
 	return view
 }
 
-// pyTaintFindings follows request input inside each function of a parsed
-// Python file.
-func pyTaintFindings(fr *fileResult, raw []string, lines []pyLine) []finding {
+var pyReturnT = regexp.MustCompile(`(?:^|[^\w.])(?:return|yield)\s+(.*)$`)
+
+// pyFindings follows request input inside each function of a parsed
+// Python file. cx is nil when the file is scanned on its own.
+func (src *taintSource) pyFindings(cx *taintCtx) []finding {
 	var funcs []*symbol
-	for _, s := range fr.symbols {
+	for _, s := range src.symbols {
 		if s.kind != model.KindType && s.end >= s.start {
 			funcs = append(funcs, s)
 		}
 	}
-	if len(funcs) == 0 || !strings.Contains(strings.Join(raw, "\n"), "request") && !hasInputs(funcs) {
+	if len(funcs) == 0 || cx == nil && !src.mentions("request") && !hasInputs(funcs) {
 		return nil
 	}
-	view := pyTaintView(raw)
 	var out []finding
 	for _, s := range funcs {
-		st := &taintState{lang: pyTaint, vars: map[string]taintVar{}}
+		st := &taintState{lang: pyTaint, vars: map[string]taintVar{}, class: s.class, entry: s.name}
+		cx.attach(st)
 		for _, p := range s.inputs {
-			st.vars[p] = taintVar{from: "route parameter " + p}
+			st.vars[p] = taintVar{t: taint{from: "route parameter " + p}}
 		}
-		open := func(depth int, l string) bool {
-			return depth > 0 || strings.HasSuffix(strings.TrimSpace(l), "\\")
+		out = append(out, src.pyScan(st, s)...)
+	}
+	return out
+}
+
+// pyScan follows what st tracks through the statements of function s.
+func (src *taintSource) pyScan(st *taintState, s *symbol) []finding {
+	open := func(depth int, l string) bool {
+		return depth > 0 || strings.HasSuffix(strings.TrimSpace(l), "\\")
+	}
+	skip := func(i int) bool { return src.py[i-1].blank }
+	var out []finding
+	for _, stm := range joinStatements(src.view(), src.raw, s.start, s.end, open, skip) {
+		t := strings.TrimSpace(stm.code)
+		if strings.HasPrefix(t, "@") || strings.HasPrefix(t, "def ") || strings.HasPrefix(t, "async def ") || strings.HasPrefix(t, "class ") {
+			continue
 		}
-		skip := func(i int) bool { return lines[i-1].blank }
-		for _, stm := range joinStatements(view, raw, s.start, s.end, open, skip) {
-			t := strings.TrimSpace(stm.code)
-			if strings.HasPrefix(t, "@") || strings.HasPrefix(t, "def ") || strings.HasPrefix(t, "async def ") || strings.HasPrefix(t, "class ") {
-				continue
+		if !st.relevant(stm.code) {
+			continue
+		}
+		found, hit := st.sinks(stm, s.name, false)
+		out = append(out, found...)
+		st.through(stm.code)
+		if st.fn != nil {
+			if m := pyReturnT.FindStringSubmatch(stm.code); m != nil {
+				st.returns(m[1])
 			}
-			if !st.relevant(stm.code) {
-				continue
-			}
-			found := st.sinks(stm, s.name, false)
-			out = append(out, found...)
-			if m := pyForT.FindStringSubmatch(stm.code); m != nil {
-				st.assign(splitNames(m[1]), m[2], false, 0)
-			} else if m := pyAssignT.FindStringSubmatch(stm.code); m != nil {
-				names := splitNames(m[1])
-				st.assign(names, m[3], m[2] == "+=", 0)
-				if len(found) > 0 {
-					for _, n := range names {
-						delete(st.vars, n) // reported at the sink already
-					}
+		}
+		if m := pyForT.FindStringSubmatch(stm.code); m != nil {
+			st.assign(splitNames(m[1]), m[2], false, 0)
+		} else if m := pyAssignT.FindStringSubmatch(stm.code); m != nil {
+			names := splitNames(m[1])
+			st.assign(names, m[3], m[2] == "+=", 0)
+			if hit {
+				for _, n := range names {
+					delete(st.vars, n) // reported at the sink already
 				}
 			}
 		}
@@ -608,36 +745,71 @@ var (
 	}
 )
 
-// jsTaintFindings follows request input inside the blocks of a JavaScript
-// or TypeScript file. Handlers are often anonymous callbacks
+var jsReturnT = regexp.MustCompile(`(?:^|[^\w$.])return\s+(.*)$`)
+
+// jsFindings follows request input inside the blocks of a JavaScript or
+// TypeScript file. Handlers are often anonymous callbacks
 // (app.get("/", (req, res) => {…})), so names are scoped by block depth
-// instead of by declared function.
-func jsTaintFindings(raw, lines []string, depth []int, owners []*symbol, childProcess bool) []finding {
+// instead of by declared function. cx is nil when the file is scanned on
+// its own.
+func (src *taintSource) jsFindings(cx *taintCtx) []finding {
 	st := &taintState{lang: jsTaint, vars: map[string]taintVar{}}
+	cx.attach(st)
+	return src.jsScan(st, 1, len(src.code), nil)
+}
+
+// jsScan follows what st tracks through lines [from, to]. fn is the
+// function being summarised, nil when reporting.
+func (src *taintSource) jsScan(st *taintState, from, to int, fn *symbol) []finding {
 	open := func(d int, l string) bool {
 		t := strings.TrimSpace(l)
 		return d > 0 && !strings.HasSuffix(t, "{") && !strings.HasSuffix(t, "=>")
 	}
 	var out []finding
-	for _, s := range joinStatements(lines, raw, 1, len(lines), open, nil) {
-		d := depth[s.line-1]
+	for _, s := range joinStatements(src.code, src.raw, from, to, open, nil) {
+		d := src.depth[s.line-1]
 		for n, v := range st.vars {
 			if d < v.depth {
 				delete(st.vars, n) // the block it was set in has closed
 			}
 		}
-		if !strings.ContainsAny(s.code, "(=") || !st.relevant(s.code) {
+		owner := src.owners[s.line]
+		st.class, st.decl = "", ""
+		if owner != nil {
+			st.class = owner.class
+			if owner.start == s.line {
+				st.decl = lastPart(owner.name) // its declaration is no call
+			}
+		}
+		if fn == nil {
+			st.entry = ownerName(owner)
+			if st.entry == "" {
+				st.entry = "a callback in " + src.rel
+			}
+		} else if s.line == fn.start {
+			// An arrow function's expression body is what it returns.
+			if _, body, ok := strings.Cut(s.code, "=>"); ok && !strings.HasPrefix(strings.TrimSpace(body), "{") {
+				st.returns(body)
+			}
+		}
+		if fn == nil && !strings.ContainsAny(s.code, "(=") || !st.relevant(s.code) {
 			continue
 		}
-		found := st.sinks(s, ownerName(owners[s.line]), childProcess)
+		found, hit := st.sinks(s, ownerName(owner), src.childProcess)
 		out = append(out, found...)
+		st.through(s.code)
+		if fn != nil {
+			if m := jsReturnT.FindStringSubmatch(s.code); m != nil {
+				st.returns(m[1])
+			}
+		}
 		m := jsAssignT.FindStringSubmatch(s.code)
 		if m == nil || d == 0 {
 			continue
 		}
 		names := jsNames(m[1])
 		st.assign(names, m[3], m[2] == "+=", d)
-		if len(found) > 0 {
+		if hit {
 			for _, n := range names {
 				delete(st.vars, n)
 			}

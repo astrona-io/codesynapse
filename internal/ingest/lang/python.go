@@ -2,6 +2,7 @@ package lang
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/astrona-io/codesynapse/internal/model"
@@ -183,6 +184,7 @@ func parsePython(src []byte) *fileResult {
 			}
 			s.doc = pyDocstring(raw, i+1)
 			s.inputs = pyInputParams(pendingRaw, lines, n)
+			s.params = pyParams(lines, n)
 			fr.routes = append(fr.routes, pyRoutesFor(pendingRaw, pendingDecorators, s.start, s.name)...)
 			fr.symbols = append(fr.symbols, s)
 			stack = append(stack, openSym{s, l.indent})
@@ -219,7 +221,8 @@ func parsePython(src []byte) *fileResult {
 		fr.findings = append(fr.findings, pyRules(raw[i], l.text, n, ownerName(owner))...)
 	}
 	closeTo(-1, lastCode)
-	fr.findings = supersede(fr.findings, pyTaintFindings(fr, raw, lines))
+	fr.taint = &taintSource{py: lines, raw: raw, symbols: fr.symbols, pattern: slices.Clip(fr.findings)}
+	fr.findings = supersede(fr.findings, fr.taint.pyFindings(nil))
 	for _, s := range fr.symbols {
 		if s.kind == model.KindType {
 			continue
