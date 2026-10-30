@@ -23,6 +23,7 @@ export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1
 cleanup() {
   brew uninstall --force --quiet "${tap}/codesynapse-formula-ci" >/dev/null 2>&1 || true
   brew untap --force --quiet "$tap" >/dev/null 2>&1 || true
+  brew untrust "$tap" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
 trap cleanup EXIT
@@ -51,6 +52,11 @@ done > "$work/dist/SHA256SUMS"
 "$root/.github/scripts/homebrew-formula.sh" "$tag" "$work/dist/SHA256SUMS" > "$work/codesynapse.rb"
 
 brew tap-new --no-git "$tap" >/dev/null
+# Homebrew 7 loads formulae only from trusted taps; older releases have no
+# `brew trust` and load any tap.
+if brew trust --help >/dev/null 2>&1; then
+  brew trust "$tap" >/dev/null
+fi
 tapdir="$(brew --repository "$tap")"
 
 echo "==> brew style / brew audit --strict"
