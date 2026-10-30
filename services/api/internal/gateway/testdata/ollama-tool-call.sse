@@ -1,0 +1,8 @@
+data: {"id":"chatcmpl-540","object":"chat.completion.chunk","created":1793366137,"model":"qwen3.8:27b","system_fingerprint":"fp_ollama","choices":[{"index":0,"delta":{"role":"assistant","content":"","tool_calls":[{"id":"call_9gh2mm1q","index":0,"type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-540","object":"chat.completion.chunk","created":1793366137,"model":"qwen3.8:27b","system_fingerprint":"fp_ollama","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"id":"chatcmpl-540","object":"chat.completion.chunk","created":1793366137,"model":"qwen3.8:27b","system_fingerprint":"fp_ollama","choices":[],"usage":{"prompt_tokens":285,"prompt_tokens_details":{"cached_tokens":2},"completion_tokens":25,"total_tokens":310},"timings":{"prompt_n":285,"prompt_ms":3188,"prompt_per_token_ms":11.185964912280701,"prompt_per_second":89.39774153074028,"predicted_n":25,"predicted_ms":10722,"predicted_per_token_ms":428.88,"predicted_per_second":2.331654542063048}}
+
+data: [DONE]
+

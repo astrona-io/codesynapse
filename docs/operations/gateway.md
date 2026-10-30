@@ -72,6 +72,17 @@ Local answering needs a local provider that you opt in explicitly. In `config/ll
 
 `gateway_exclude` follows the same rules as the organisation's list and is merged with it; an invalid entry stops the API at start-up with an error naming the provider. `gateway_wait_seconds` is how long a request waits in the provider's queue for a free slot; it does not limit the answer, which `timeout_seconds` bounds.
 
+### Ollama: thinking, context length and how an answer ends
+
+Measured on Ollama 0.40.12 with `qwen3.8:27b` on `/v1/chat/completions` (synthetic prompts):
+
+- **Thinking.** Without `reasoning_effort`, the model thinks first. Its thinking arrives in a separate `reasoning` field of each delta (vLLM calls it `reasoning_content`), never in `content`, and it counts towards `max_tokens`. With `max_tokens: 60`, all 60 tokens went to thinking, `content` stayed empty and the stream ended with `finish_reason: "length"`. The gateway reports that as `truncated`. With `effort: none` in the provider block (sent as `reasoning_effort: "none"`), no `reasoning` field appears and the answer starts at once. Set `effort: none` for a reasoning model on Ollama; `disable_thinking: true` is the vLLM equivalent.
+- **Context length.** The OpenAI-compatible endpoint ignores `num_ctx` and every other Ollama `options`, so the gateway cannot set the context. Ollama loads the model with `OLLAMA_CONTEXT_LENGTH` (environment of `ollama serve`) or the model's own default. Check what was loaded with `curl -s localhost:11434/api/ps` (`context_length`) and set `context_window` in `config/llm.yaml` to that number or less. When the loaded context is smaller than `context_window`, a long prompt can be cut by Ollama itself, without an error.
+- **How a stream ends.** A whole answer ends with a chunk that has `finish_reason` `stop`, `length` or `tool_calls`, then a usage chunk and `data: [DONE]`. A tool call arrives whole in one delta. If generation fails after Ollama has sent the 200, its chat endpoint does not pass the error on: the stream just stops, with no `finish_reason` and no `[DONE]`. vLLM and llama.cpp send `data: {"error": ...}` instead.
+- **`max_tokens`** from the request (Claude Code often asks for 32000 or more) is passed as is. Ollama uses it as the token limit of the answer, and the gateway counts it against `context_window` when it decides whether a request fits.
+
+The gateway reads a stream like this: a held answer that ended with `length` (or with `[DONE]` but no `finish_reason`) is `truncated`, one with nothing in it is `empty_answer`, and a stream that stopped without `[DONE]` and without a `finish_reason`, or carried an error, is `model_error`. Before 2026-10-30 that last case was counted as `truncated`.
+
 See `config/llm.example.yaml` for the full provider block and [Local models](local-models.md) for choosing a model. Without such a provider the gateway still works, but every request goes to the cloud as a plain pass-through.
 
 ## Connect Claude Code
@@ -149,10 +160,10 @@ The reasons a request was not answered locally are a fixed list:
 | `queue_timeout` | No local slot was free within `gateway_wait_seconds` |
 | `answer_timeout` | The local model started but did not finish within the provider's `timeout_seconds` |
 | `cancelled` | The assistant gave up on the request before the local model answered |
-| `model_error` | The local model could not be reached or failed |
+| `model_error` | The local model could not be reached or failed, also when its stream stopped without `[DONE]` and without a finish, or carried an error |
 | `bad_status` | The local model answered with an error status |
 | `empty_answer` | The local model answered nothing |
-| `truncated` | The answer stopped at `max_tokens` or broke off. A held answer cut off by a `max_tokens` of 64 or less that the client set itself (a quota check asks for one token) is kept with `stop_reason: "max_tokens"`, because the cloud would stop the same way |
+| `truncated` | The answer stopped at `max_tokens` (thinking counts towards it; see [Ollama](#ollama-thinking-context-length-and-how-an-answer-ends)) or ended with `[DONE]` but no finish. A held answer cut off by a `max_tokens` of 64 or less that the client set itself (a quota check asks for one token) is kept with `stop_reason: "max_tokens"`, because the cloud would stop the same way |
 | `bad_answer` | The answer could not be read, or it called a tool that was not offered or with broken arguments |
 
 On the OpenAI-compatible paths there is no cloud behind the local model, so their failures count with route `local`. Only the reason, the route and the timings are recorded; never the prompt or the answer.

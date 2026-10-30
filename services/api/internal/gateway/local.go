@@ -425,7 +425,8 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 	}
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
-	next := func() (chunk, bool) { return readChunk(sc) }
+	rd := &streamReader{sc: sc}
+	next := rd.next
 	answered := func(got Usage) (Usage, string, bool) {
 		got.Wait, got.Answer, got.Asked = u.Wait, time.Since(started), true
 		return got, "", true
@@ -440,6 +441,11 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 		ans, ok := collect(first, more, next, declaredTools(in.offered))
 		if err := sc.Err(); err != nil {
 			return fail(failure(ctx, err))
+		}
+		// A stream the server broke off is a model error, not an answer that
+		// ran out of max_tokens: calling it truncated hides a failing server.
+		if rd.failed || (!rd.done && ans.Finish == "") {
+			return fail(FallModelError)
 		}
 		if !ok {
 			return fail(FallBadAnswer)
@@ -458,6 +464,9 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 	first, more := next()
 	if err := sc.Err(); !more && err != nil {
 		return fail(failure(ctx, err))
+	}
+	if !more && (rd.failed || !rd.done) {
+		return fail(FallModelError)
 	}
 	w.Header().Set(RouteHeader, "local")
 	if in.Stream {
@@ -482,18 +491,36 @@ type chunk struct {
 	Cached int
 }
 
-// readChunk returns the next OpenAI stream chunk; false at the end.
-func readChunk(sc *bufio.Scanner) (chunk, bool) {
-	for sc.Scan() {
-		data, found := strings.CutPrefix(strings.TrimSpace(sc.Text()), "data:")
+// streamReader reads an OpenAI chat completion stream and remembers how it
+// ended: with [DONE] (done), with an error the server put in the stream after
+// its 200 (failed; vLLM and llama.cpp send data: {"error": ...}), or neither,
+// when the server broke off. Ollama's chat endpoint drops a generation error
+// that comes after the 200 and just stops, with no finish and no [DONE].
+type streamReader struct {
+	sc     *bufio.Scanner
+	done   bool
+	failed bool
+}
+
+// next returns the next stream chunk; false at the end. Reasoning deltas
+// (Ollama's "reasoning", vLLM's "reasoning_content") are not part of the
+// answer and are skipped, though they count towards max_tokens.
+func (r *streamReader) next() (chunk, bool) {
+	if r.done || r.failed {
+		return chunk{}, false
+	}
+	for r.sc.Scan() {
+		data, found := strings.CutPrefix(strings.TrimSpace(r.sc.Text()), "data:")
 		if !found {
 			continue
 		}
 		data = strings.TrimSpace(data)
 		if data == "[DONE]" {
+			r.done = true
 			return chunk{}, false
 		}
 		var v struct {
+			Error   json.RawMessage `json:"error"`
 			Choices []struct {
 				Delta struct {
 					Content   string `json:"content"`
@@ -521,6 +548,10 @@ func readChunk(sc *bufio.Scanner) (chunk, bool) {
 		}
 		if json.Unmarshal([]byte(data), &v) != nil {
 			continue
+		}
+		if len(v.Error) > 0 && string(v.Error) != "null" {
+			r.failed = true
+			return chunk{}, false
 		}
 		var c chunk
 		if len(v.Choices) > 0 {
