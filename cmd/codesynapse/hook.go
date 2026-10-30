@@ -55,6 +55,9 @@ import (
 //     CodeSynapse tool that answers git status/diff/log/blame, a text search,
 //     a file read or a whole test run with less output, and counts each one
 //     (bash.go). It never blocks.
+//   - hook webfetch (PreToolUse on WebFetch): the first WebFetch in a session
+//     of a page fetch_source already cached is pointed at fetch_source
+//     (webfetch.go). Uncached pages and a second WebFetch go through.
 //   - hook answer (PostToolUse on the CodeSynapse tools) and hook read-done
 //     (PostToolUse on Read) count, per tool, the file line ranges answers
 //     gave and how many the agent then read (agent workflow roadmap step
@@ -88,6 +91,7 @@ type toolHookInput struct {
 		Offset    int    `json:"offset"`
 		Limit     int    `json:"limit"`
 		Repo      string `json:"repo"`
+		URL       string `json:"url"` // WebFetch
 	} `json:"tool_input"`
 	ToolResponse json.RawMessage `json:"tool_response"`
 	Prompt       string          `json:"prompt"` // UserPromptSubmit
@@ -120,6 +124,11 @@ type hookState struct {
 	First    string       `json:"first,omitempty"`
 	Turned   int          `json:"turned,omitempty"`
 	Reported workflowSent `json:"reported,omitempty"`
+	// Steered are the fetch_source cache keys (hashes, never URLs) of pages
+	// whose WebFetch was pointed at fetch_source; Steers counts those steers
+	// (webfetch.go).
+	Steered []string `json:"steered,omitempty"`
+	Steers  int      `json:"steers,omitempty"`
 	// Base is the checkout as the session began (edits.go).
 	Base *treeBase `json:"base,omitempty"`
 	// EditDirs are the directories the session's own agent edited files in
@@ -148,6 +157,7 @@ type workflowSent struct {
 	// Edited and Found are the edit counts already reported (edits.go).
 	Edited int `json:"edited,omitempty"`
 	Found  int `json:"found,omitempty"`
+	Steers int `json:"steers,omitempty"`
 }
 
 // answerRange is one file:start-end an answer gave.
@@ -198,6 +208,9 @@ func saveState(file string, s hookState) {
 	if len(s.Read) > 200 {
 		s.Read = s.Read[len(s.Read)-200:]
 	}
+	if len(s.Steered) > maxSteered {
+		s.Steered = s.Steered[len(s.Steered)-maxSteered:]
+	}
 	if len(s.Ranges) > maxTrackedRanges {
 		s.Ranges = s.Ranges[len(s.Ranges)-maxTrackedRanges:]
 	}
@@ -239,6 +252,8 @@ func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 		noteLookup(in)
 	case "bash":
 		out = bashHint(in)
+	case "webfetch":
+		out = fetchSteer(in)
 	case "session":
 		out = sessionRules(ctx, in, o.EC.Logger)
 	case "answer":
@@ -564,6 +579,9 @@ func hookCmd(ec *app.Env) *cobra.Command {
 		WithNoArgs().Build())
 	parent.AddCommand(app.NewSubCommand("bash", &hookOptions{EC: ec, event: "bash"}, ec).
 		WithShortDesc("PreToolUse hook for Bash: hint at the CodeSynapse tool that answers git, search, file reads and test runs with less output").
+		WithNoArgs().Build())
+	parent.AddCommand(app.NewSubCommand("webfetch", &hookOptions{EC: ec, event: "webfetch"}, ec).
+		WithShortDesc("PreToolUse hook for WebFetch: point the first fetch of a page fetch_source already cached at fetch_source").
 		WithNoArgs().Build())
 	parent.AddCommand(app.NewSubCommand("answer", &hookOptions{EC: ec, event: "answer"}, ec).
 		WithShortDesc("PostToolUse hook for the CodeSynapse tools: note the line ranges an answer gave").

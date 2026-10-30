@@ -134,7 +134,8 @@ func noteLookup(in toolHookInput) {
 }
 
 // workflowReport is what happened since the last report: how the session
-// began (once) and the reads turned back. nil when there is nothing new.
+// began (once), the reads turned back and the WebFetch calls pointed at
+// fetch_source. nil when there is nothing new.
 func (s hookState) workflowReport() map[string]int {
 	out := map[string]int{}
 	if !s.Reported.First && s.First != "" {
@@ -147,6 +148,9 @@ func (s hookState) workflowReport() map[string]int {
 	if d := s.Turned - s.Reported.Turned; d > 0 {
 		out["reads_turned_back"] = d
 	}
+	if d := s.Steers - s.Reported.Steers; d > 0 {
+		out["fetches_steered"] = d
+	}
 	if len(out) == 0 {
 		return nil
 	}
@@ -154,5 +158,5 @@ func (s hookState) workflowReport() map[string]int {
 }
 
 func (s *hookState) markReported() {
-	s.Reported.First, s.Reported.Turned = s.First != "", s.Turned
+	s.Reported.First, s.Reported.Turned, s.Reported.Steers = s.First != "", s.Turned, s.Steers
 }

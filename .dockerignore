@@ -5,3 +5,4 @@ bin
 **/node_modules
 services/web/.nuxt
 services/web/.output
+.claude

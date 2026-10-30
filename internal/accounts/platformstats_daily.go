@@ -10,6 +10,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/toolsets"
 	"github.com/astrona-io/codesynapse/internal/usage"
+	"github.com/astrona-io/codesynapse/rules"
 )
 
 // Daily platform statistics (docs/PLATFORM_STATS_PLAN.md, "Daily rollup").
@@ -42,6 +43,19 @@ const (
 	// Agent gateway traffic, read from VictoriaMetrics by the API
 	// (PlatformStatSource).
 	StatGateway = "gateway"
+	// Security posture and the audit log (phase 7), written by the API
+	// (PlatformStatSource): the security figures from the latest snapshot
+	// of every graph, the audit figures from the events of the day.
+	StatSecurityGrades     = "security_grades"
+	StatSecurityFindings   = "security_findings"
+	StatSecurityVulns      = "security_vulns"
+	StatSecurityWorse      = "security_worse"
+	StatSecurityRules      = "security_rules"
+	StatSecuritySuppressed = "security_suppressed"
+	StatAuditEvents        = "audit_events"
+	StatAuditLogins        = "audit_logins"
+	StatAuditSecurity      = "audit_security"
+	StatAuditChain         = "audit_chain"
 	// Ingest runs and their files (phase 4), from the ingest run reports.
 	StatIngestRuns  = "ingest_runs"
 	StatIngestFiles = "ingest_files"
@@ -127,6 +141,32 @@ var statMetrics = map[string]statMetric{
 	// was written without it.
 	StatGateway: {dims: []string{"requests", "local", "cloud", "rejected", "failed", "fallthroughs", "queue_timeout", "answer_timeout",
 		"local_ms", "local_n", "cloud_ms", "cloud_n", "queue_ms", "queue_n", "measured"}, perOrg: true},
+	// Graphs by security grade at the end of the day: once per graph on
+	// the platform, once per entry for an organisation. none counts graphs
+	// without a snapshot.
+	StatSecurityGrades: {dims: SecurityGradeDims, perOrg: true},
+	// Open findings and vulnerable-dependency advisories by severity, of the
+	// same graphs; called counts the advisories the code calls.
+	StatSecurityFindings: {dims: severityDims(), perOrg: true},
+	StatSecurityVulns:    {dims: append(severityDims(), "called"), perOrg: true},
+	// Graphs whose grade got worse since the previous snapshot of their
+	// branch.
+	StatSecurityWorse: {dims: []string{"graphs"}, perOrg: true},
+	// Findings by catalogue rule ID. The rows per organisation are what the
+	// three-organisation rule counts; they are never shown per organisation.
+	StatSecurityRules: {dims: ruleDims(), perOrg: true},
+	// Active finding triage decisions (the suppression overlay) by state.
+	StatSecuritySuppressed: {dims: append(slices.Clone(TriageStates), "total"), perOrg: true},
+	// Audit entries of the day by action family and outcome
+	// ("user.failure"), platform only.
+	StatAuditEvents: {dims: auditEventDims()},
+	// Failed password sign-ins by cause.
+	StatAuditLogins: {dims: LoginCauseNames},
+	// Suspensions, resumptions, platform admin changes and refusals.
+	StatAuditSecurity: {dims: AuditSecurityNames},
+	// Chain verification runs of the day by result, and the archive at the
+	// end of the day (sealed segments and the entries in them).
+	StatAuditChain: {dims: []string{"verified", "broken", "run_error", "segments", "sealed"}},
 	// Ingest runs that finished that day by status, the ones whose
 	// discovery did not complete and the ones whose report had already
 	// expired (IngestHistory) when the day was written; the files of the
@@ -134,6 +174,47 @@ var statMetrics = map[string]statMetric{
 	StatIngestRuns:  {dims: []string{"succeeded", "failed", "cancelled", "incomplete_discovery", "without_report"}, perOrg: true},
 	StatIngestFiles: {dims: []string{"scanned", "indexed", "skipped", "failed", "unprocessed"}, perOrg: true},
 	StatIngestSkips: {dims: []string{"ignored_path", "generated_code", "binary", "non_k8s_yaml"}, perOrg: true},
+}
+
+// SecurityGradeDims are the security_grades dimensions: the grades in
+// lower case, na for a graph that could not be graded, none for one
+// without a snapshot.
+var SecurityGradeDims = []string{"a", "b", "c", "d", "f", "na", "none"}
+
+// SecurityGradeDim is the security_grades dimension of a snapshot grade
+// ("" for a graph without a snapshot).
+func SecurityGradeDim(grade string, snapshot bool) string {
+	if !snapshot {
+		return "none"
+	}
+	if g := strings.ToLower(grade); slices.Contains(SecurityGradeDims[:5], g) {
+		return g
+	}
+	return "na"
+}
+
+// SecuritySeverities are the severities the security metrics name.
+var SecuritySeverities = []string{"critical", "high", "medium", "low", "info"}
+
+func severityDims() []string { return slices.Clone(SecuritySeverities) }
+
+// ruleDims are the catalogue's rule IDs.
+func ruleDims() []string {
+	out := []string{}
+	for _, r := range rules.All() {
+		out = append(out, r.ID)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+func auditEventDims() []string {
+	out := []string{}
+	for _, f := range append(slices.Clone(AuditFamilies), AuditFamilyOther) {
+		out = append(out, f+"."+Success, f+"."+Failure)
+	}
+	return out
+
 }
 
 // StatToolOther is the mcp_tools name of a tool outside the fixed list.

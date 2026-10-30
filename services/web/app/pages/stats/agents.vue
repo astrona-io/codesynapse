@@ -167,6 +167,7 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
               <StatTile label="Began with CodeSynapse" :value="`${a.workflow.first_share_pct}%`" :hint="`${fmtInt(a.workflow.first_codesynapse)} of ${fmtInt(a.workflow.first_codesynapse + a.workflow.first_native)} sessions that looked at code`" />
               <StatTile label="Began with Read or Grep" :value="fmtInt(a.workflow.first_native)" tip="sessions whose first lookup skipped CodeSynapse" />
               <StatTile label="Whole-file reads turned back" :value="fmtInt(a.workflow.reads_turned_back)" tip="large files the agent was sent to the outline of" />
+              <StatTile label="Web fetches sent to the cache" :value="fmtInt(a.workflow.fetches_steered)" tip="WebFetch calls of pages fetch_source had cached, pointed at fetch_source" />
             </div>
             <p class="muted small">Counted by the plugin's hooks as numbers only, never paths or prompts. A low first share means the ruleset is not reaching agents or its wording is not working: it is served from the API (<code>/api/v1/agent-rules</code>) and can be changed with <code>CODESYNAPSE_AGENT_RULES_FILE</code>, then watch this figure.</p>
           </template>
