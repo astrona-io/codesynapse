@@ -100,15 +100,17 @@ func (s *Server) watchRoutes() {
 	s.route("POST /api/v1/watches", orgRole(accounts.Member), s.handleAddWatch)
 	s.route("PUT /api/v1/watches/{host}/{login}", orgRole(accounts.Member), s.handleUpdateWatch)
 	s.route("DELETE /api/v1/watches/{host}/{login}", orgRole(accounts.Member), s.handleDeleteWatch)
+	s.route("POST /api/v1/watches/{host}/{login}/scan", orgRole(accounts.Member), s.handleScanWatch)
 }
 
-// watchCaller returns the signed-in member and the organisation acted in.
-func (s *Server) watchCaller(w http.ResponseWriter, r *http.Request, mutating bool) (*http.Request, accounts.Principal, accounts.Membership, bool) {
+// watchCaller returns the signed-in member and the organisation acted in,
+// with the validated execution identity in the request context.
+func (s *Server) watchCaller(w http.ResponseWriter, r *http.Request) (*http.Request, accounts.Principal, accounts.Membership, bool) {
 	p, ok := s.caller(w, r)
 	if !ok {
 		return r, p, accounts.Membership{}, false
 	}
-	if mutating && p.Via != "session" {
+	if p.Via != "session" {
 		// Like adding a repository: a person decides, an API key does not.
 		s.accountError(w, accounts.ErrForbidden)
 		return r, p, accounts.Membership{}, false
@@ -118,11 +120,8 @@ func (s *Server) watchCaller(w http.ResponseWriter, r *http.Request, mutating bo
 		s.problem(w, http.StatusBadRequest, err)
 		return r, p, m, false
 	}
-	if mutating {
-		var ok bool
-		if r, ok = s.executionIn(w, r, p, m.Org.ID); !ok {
-			return r, p, m, false
-		}
+	if r, ok = s.executionIn(w, r, p, m.Org.ID); !ok {
+		return r, p, m, false
 	}
 	return r, p, m, true
 }
@@ -202,7 +201,7 @@ func decodeWatch(w http.ResponseWriter, r *http.Request, v any) error {
 
 //nolint:contextcheck // watchCaller adds the validated execution identity to the request context
 func (s *Server) handleAddWatch(w http.ResponseWriter, r *http.Request) {
-	r, p, m, ok := s.watchCaller(w, r, true)
+	r, p, m, ok := s.watchCaller(w, r)
 	if !ok {
 		return
 	}
@@ -331,7 +330,7 @@ func (s *Server) ownWatch(w http.ResponseWriter, r *http.Request, p accounts.Pri
 
 //nolint:contextcheck // watchCaller adds the validated execution identity to the request context
 func (s *Server) handleUpdateWatch(w http.ResponseWriter, r *http.Request) {
-	r, p, m, ok := s.watchCaller(w, r, true)
+	r, p, m, ok := s.watchCaller(w, r)
 	if !ok {
 		return
 	}
@@ -394,7 +393,7 @@ func (s *Server) handleUpdateWatch(w http.ResponseWriter, r *http.Request) {
 
 //nolint:contextcheck // watchCaller adds the validated execution identity to the request context
 func (s *Server) handleDeleteWatch(w http.ResponseWriter, r *http.Request) {
-	r, p, m, ok := s.watchCaller(w, r, true)
+	r, p, m, ok := s.watchCaller(w, r)
 	if !ok {
 		return
 	}
@@ -411,6 +410,39 @@ func (s *Server) handleDeleteWatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleScanWatch makes the watch due now, so the scheduler scans it on its
+// next tick (within a minute) instead of after the interval, for instance
+// right after its settings changed. The scan itself stays in the scheduler
+// loop, under the api-loops lease, so two replicas never scan one watch at
+// once; it runs as the watch's creator, as every scan does.
+//
+//nolint:contextcheck // watchCaller adds the validated execution identity to the request context
+func (s *Server) handleScanWatch(w http.ResponseWriter, r *http.Request) {
+	r, p, m, ok := s.watchCaller(w, r)
+	if !ok {
+		return
+	}
+	watch, ok := s.ownWatch(w, r, p, m)
+	if !ok {
+		return
+	}
+	if watch.Paused {
+		s.problem(w, http.StatusConflict, errors.New("the watch is paused; resume it to scan"))
+		return
+	}
+	if _, err := s.cfg.Accounts.Record(r.Context(), accounts.Event{UserID: p.User.ID, Via: p.Via, OrgID: m.Org.ID, Action: "watch.scan", Target: watch.Key(), Outcome: accounts.Success, Status: http.StatusAccepted}); err != nil {
+		s.accountError(w, err)
+		return
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := s.cfg.Accounts.St.RecordWatchScan(r.Context(), m.Org.ID, watch.Key(), accounts.WatchScan{LastStatus: "queued", NextScan: now}); err != nil {
+		s.accountError(w, err)
+		return
+	}
+	watch.LastStatus, watch.LastError, watch.NextScan = "queued", "", now
+	writeJSON(w, http.StatusAccepted, watchView(watch, p.User.ID))
 }
 
 // --- scanning ---------------------------------------------------------------

@@ -71,7 +71,7 @@ const watchError = ref('')
 const watchNotice = ref('')
 const watchBusy = ref(false)
 const stopping = ref<Watch | null>(null)
-async function watchCall(method: 'PUT' | 'DELETE', w: Watch, body?: object, done?: string): Promise<boolean> {
+async function watchCall(method: 'PUT' | 'DELETE' | 'SCAN', w: Watch, body?: object, done?: string): Promise<boolean> {
   if (watchBusy.value) return false
   watchBusy.value = true
   watchError.value = ''
@@ -79,9 +79,12 @@ async function watchCall(method: 'PUT' | 'DELETE', w: Watch, body?: object, done
   try {
     const path = `watches/${encodeURIComponent(w.host)}/${encodeURIComponent(w.org)}`
     if (method === 'PUT') await apiPut(path, body)
+    else if (method === 'SCAN') await apiPost(`${path}/scan`, {})
     else await apiDelete(path)
-    watchNotice.value = done ?? (method === 'DELETE' ? `Stopped watching ${w.key}. Repositories it added stay.` : `${w.paused ? 'Resumed' : 'Paused'} ${w.key}.`)
+    watchNotice.value = done ?? (method === 'SCAN' ? `Checking ${w.key} within a minute.` : method === 'DELETE' ? `Stopped watching ${w.key}. Repositories it added stay.` : `${w.paused ? 'Resumed' : 'Paused'} ${w.key}.`)
     await refreshWatches()
+    // The scheduler starts the check on its next tick; show how it went.
+    if (method === 'SCAN') setTimeout(() => { void refreshWatches() }, 75_000)
     return true
   } catch (e) {
     watchError.value = plainError(e)
@@ -108,7 +111,7 @@ async function saveEdit() {
   if (!w) return
   const body: Record<string, unknown> = { include_archived: editForm.include_archived, include_forks: editForm.include_forks, exclude: editPatterns.value }
   if (editForm.include_private !== w.include_private) body.include_private = editForm.include_private
-  if (await watchCall('PUT', w, body, `Saved ${w.key}. The changes apply to repositories created from now on.`)) editing.value = null
+  if (await watchCall('PUT', w, body, `Saved ${w.key}. The changes apply to repositories created from now on; use Check now to look for them without waiting.`)) editing.value = null
   else { editError.value = watchError.value; watchError.value = '' }
 }
 async function stopWatching() {
@@ -255,6 +258,7 @@ const stateText = (j: Job) => (j.state === 'running' ? 'in progress' : j.state =
           <span v-if="w.last_scan" class="muted small">checked {{ relTime(w.last_scan) }}</span>
           <span class="right row tight-actions">
             <button v-if="w.mine || canAdmin" type="button" class="secondary tiny" :disabled="watchBusy" :aria-label="`Edit ${w.key}`" @click="startEdit(w)">Edit</button>
+            <button v-if="(w.mine || canAdmin) && !w.paused" type="button" class="secondary tiny" :disabled="watchBusy || w.last_status === 'queued'" :aria-label="`Check ${w.key} now`" @click="watchCall('SCAN', w)">Check now</button>
             <button type="button" class="secondary tiny" :disabled="watchBusy" :aria-label="`${w.paused ? 'Resume' : 'Pause'} ${w.key}`" @click="watchCall('PUT', w, { paused: !w.paused })">{{ w.paused ? 'Resume' : 'Pause' }}</button>
             <button type="button" class="secondary tiny" :disabled="watchBusy" :aria-label="`Stop watching ${w.key}`" @click="stopping = w">Stop watching</button>
           </span>
