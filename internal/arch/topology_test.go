@@ -316,8 +316,13 @@ func FuzzParseStages(f *testing.F) {
 	f.Add("FROM a AS b\nFROM b\nCOPY --from=b /x /y\nRUN go build -o /x ./c")
 	f.Fuzz(func(t *testing.T, text string) {
 		df := parseStages("Dockerfile", []byte(text))
+		if len(df.stages) > maxStages {
+			t.Fatalf("%d stages", len(df.stages))
+		}
 		for _, i := range df.targets() {
-			_ = df.stageBuilds(i, map[int]bool{})
+			if n := len(df.stageBuilds(i)); n > maxStageLinks {
+				t.Fatalf("stage %d carries %d builds", i, n)
+			}
 		}
 	})
 }

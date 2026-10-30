@@ -118,7 +118,40 @@ const (
 	maxEnvUses    = 3
 	maxMembers    = 100
 	maxContainers = 50
+	// A Dockerfile is untrusted: these bound what one file can make the
+	// stage walk do.
+	maxStages      = 100 // stages read per Dockerfile
+	maxStageBuilds = 20  // distinct go builds kept per stage
+	maxStageCopies = 20  // COPY --from followed per stage
+	maxStageLinks  = 50  // builds one stage's image is said to carry
+	// Names and evidence come from untrusted files; they are capped and
+	// redacted like other summaries.
+	maxNameLen     = 120
+	maxEvidenceLen = 300
 )
+
+// capName caps and redacts a name or evidence text taken from a file.
+func capName(s string, n int) string { return redact.Summary(s, n) }
+
+// capText caps and redacts every name and evidence text of t. Stage names,
+// service keys, container names, metadata.name and go build directories all
+// come from the files, so this is what keeps a component's Meta small.
+func capText(t *Topology) {
+	for i := range t.Members {
+		m := &t.Members[i]
+		m.Name = capName(m.Name, maxNameLen)
+		m.Evidence = capName(m.Evidence, maxEvidenceLen)
+	}
+	for i := range t.Env {
+		k := &t.Env[i]
+		k.Name = capName(k.Name, maxNameLen)
+		for _, uses := range [][]EnvUse{k.ReadBy, k.SetBy} {
+			for j := range uses {
+				uses[j].Via = capName(uses[j].Via, maxNameLen)
+			}
+		}
+	}
+}
 
 var (
 	envNameRe   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
@@ -150,6 +183,7 @@ type dockerfile struct {
 	rel    string
 	stages []dstage
 	byName map[string]int
+	memo   map[int][]mainLink // stageBuilds per stage
 }
 
 // unit is one build target: a Dockerfile stage that becomes an image.
@@ -334,6 +368,9 @@ func parseStages(rel string, content []byte) *dockerfile {
 	for _, in := range config.ParseDockerfile(content) {
 		switch in.Cmd {
 		case "FROM":
+			if len(df.stages) >= maxStages {
+				return df // the rest of the file is not followed
+			}
 			s := dstage{line: in.Line, base: -1}
 			fields := noFlags(strings.Fields(in.Args))
 			if len(fields) > 0 {
@@ -349,7 +386,14 @@ func parseStages(rel string, content []byte) *dockerfile {
 		case "RUN":
 			if len(df.stages) > 0 {
 				s := &df.stages[len(df.stages)-1]
-				s.builds = append(s.builds, goBuilds(in.Args, in.Line)...)
+				for _, b := range goBuilds(in.Args, in.Line) {
+					if len(s.builds) >= maxStageBuilds {
+						break
+					}
+					if !slices.ContainsFunc(s.builds, func(o goBuild) bool { return o.dir == b.dir && o.out == b.out }) {
+						s.builds = append(s.builds, b)
+					}
+				}
 			}
 		case "COPY":
 			if len(df.stages) == 0 {
@@ -371,7 +415,9 @@ func parseStages(rel string, content []byte) *dockerfile {
 				src = src[:len(src)-1] // the last is the destination
 			}
 			s := &df.stages[len(df.stages)-1]
-			s.copies = append(s.copies, copyFrom{stage: j, src: src})
+			if len(s.copies) < maxStageCopies {
+				s.copies = append(s.copies, copyFrom{stage: j, src: src})
+			}
 		}
 	}
 	return df
@@ -413,7 +459,12 @@ func goBuilds(args string, line int) []goBuild {
 				}
 			}
 			for _, d := range dirs {
-				out = append(out, goBuild{dir: d, out: b.out, line: line})
+				if len(out) >= maxStageBuilds {
+					return out
+				}
+				if !slices.ContainsFunc(out, func(o goBuild) bool { return o.dir == d && o.out == b.out }) {
+					out = append(out, goBuild{dir: d, out: b.out, line: line})
+				}
 			}
 			break
 		}
@@ -434,29 +485,59 @@ type mainLink struct {
 // names the build's -o path (or a directory holding it) is proof, a copy
 // that names other paths leaves the build out, and a build without -o is
 // only a candidate: nothing says which file the copy takes.
-func (df *dockerfile) stageBuilds(i int, seen map[int]bool) []mainLink {
-	if seen[i] || i < 0 || i >= len(df.stages) {
+//
+// Each stage is worked out once and kept, so every COPY --from of a stage
+// sees all of its builds and a file of many stages costs at most stages x
+// copies x maxStageLinks steps. A stage only names earlier ones; the
+// in-progress mark guards against a loop anyway.
+func (df *dockerfile) stageBuilds(i int) []mainLink {
+	if i < 0 || i >= len(df.stages) {
 		return nil
 	}
-	seen[i] = true
+	if df.memo == nil {
+		df.memo = map[int][]mainLink{}
+	}
+	if out, ok := df.memo[i]; ok {
+		return out // done, or in progress (nil) when a loop leads back here
+	}
+	df.memo[i] = nil
 	s := df.stages[i]
 	var out []mainLink
-	for _, b := range s.builds {
-		out = append(out, mainLink{build: b, stage: i})
+	keep := func(m mainLink) {
+		for k := range out {
+			if out[k].build.dir == m.build.dir && out[k].build.out == m.build.out {
+				if out[k].candidate && !m.candidate {
+					out[k] = m
+				}
+				return
+			}
+		}
+		if len(out) < maxStageLinks {
+			out = append(out, m)
+		}
 	}
-	if s.base >= 0 {
-		out = append(out, df.stageBuilds(s.base, seen)...)
+	for _, b := range s.builds {
+		keep(mainLink{build: b, stage: i})
+	}
+	if s.base >= 0 && s.base < i {
+		for _, m := range df.stageBuilds(s.base) {
+			keep(m)
+		}
 	}
 	for _, c := range s.copies {
-		for _, m := range df.stageBuilds(c.stage, seen) {
+		if c.stage >= i {
+			continue
+		}
+		for _, m := range df.stageBuilds(c.stage) {
 			if m.build.out != "" && !copied(m.build.out, c.src) {
 				continue // the copy names other files
 			}
 			m.candidate = m.candidate || m.build.out == ""
 			m.via = "copied from stage " + df.stages[c.stage].name
-			out = append(out, m)
+			keep(m)
 		}
 	}
+	df.memo[i] = out
 	return out
 }
 
@@ -551,7 +632,7 @@ func buildUnits(dfs map[string]*dockerfile, services []composeService) []*unit {
 // directory. Units that would share a name get a number: they are never
 // merged on a name.
 func nameUnits(units []*unit) {
-	used := map[string]int{}
+	taken := map[string]bool{}
 	for _, u := range units {
 		s := u.df.stages[u.stage]
 		name := ""
@@ -574,14 +655,19 @@ func nameUnits(units []*unit) {
 			}
 			name = strings.ToLower(dir)
 		}
-		name = slug(name)
+		// The name becomes the node ID and name: redact it like any text
+		// taken from a file; slug caps the length.
+		name = slug(capName(name, maxNameLen))
 		if name == "" {
 			name = "image"
 		}
-		used[name]++
-		if n := used[name]; n > 1 {
-			name = fmt.Sprintf("%s-%d", name, n)
+		// A suffixed name can itself be another unit's name ("api-2" next to
+		// two "api"), so count up until the name is free.
+		base := name
+		for n := 2; taken[name]; n++ {
+			name = fmt.Sprintf("%s-%d", base, n)
 		}
+		taken[name] = true
 		u.name = name
 	}
 }
@@ -868,7 +954,7 @@ func (x *topoIndex) addComponent(u *unit, units []*unit, services []composeServi
 	}
 	var mains []mainHit
 	seenPkg := map[string]int{}
-	for _, m := range df.stageBuilds(u.stage, map[int]bool{}) {
+	for _, m := range df.stageBuilds(u.stage) {
 		pkg, guessed := x.resolveBuild(u, m.build.dir)
 		if pkg == "" || !x.mains[pkg] {
 			continue
@@ -985,6 +1071,7 @@ func (x *topoIndex) addComponent(u *unit, units []*unit, services []composeServi
 		t.Notes = append(t.Notes, fmt.Sprintf("more than %d members; the rest are left out", maxMembers))
 	}
 
+	capText(&t)
 	meta, err := json.Marshal(t)
 	if err != nil {
 		return
