@@ -400,7 +400,7 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 		if !ok {
 			return fail(FallBadAnswer)
 		}
-		if strict && !ans.complete() {
+		if strict && !ans.keep(in.MaxTokens) {
 			return fail(heldFailure(ans))
 		}
 		w.Header().Set(RouteHeader, "local")

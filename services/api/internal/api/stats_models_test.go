@@ -106,6 +106,7 @@ func TestModelStats(t *testing.T) {
 	assert.True(t, c.ReadTPS == nil, "no streamed answers, no speed")
 	gw := out.Gateway
 	assert.Equal(t, []float64{gw.Requests, gw.Local, gw.Cloud, gw.Rejected, gw.Failed, gw.LocalSharePct}, []float64{12, 6, 4, 2, 3, 50})
+	assert.Equal(t, gw.FailedBy, map[string]float64{"cloud_5xx": 1, "rejected_4xx": 2})
 	assert.Equal(t, []float64{gw.BytesIn, gw.BytesOut}, []float64{4000, 500})
 	require.True(t, gw.SavedDollars != nil)
 	assert.Equal(t, *gw.SavedDollars, 0.6, "100k in at $3 and 20k out at $15 per million")

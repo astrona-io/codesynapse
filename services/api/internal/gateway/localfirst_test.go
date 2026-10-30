@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -68,6 +69,51 @@ func TestLocalFirst(t *testing.T) {
 			assert.Equal(t, rec.Code, 200)
 			assert.Contains(t, rec.Body.String(), `"stop_reason":"end_turn"`)
 			assert.Contains(t, rec.Body.String(), "Hel")
+		})
+	}
+}
+
+// TestLocalFirstShortLimit covers a held answer cut off by a max_tokens the
+// client set low itself: it is kept with stop_reason max_tokens, while an
+// empty one, one that broke off and one cut off by a large limit go on.
+func TestLocalFirstShortLimit(t *testing.T) {
+	body := func(n int) string {
+		return `{"model":"claude-opus-5-5","max_tokens":` + strconv.Itoa(n) + `,"messages":[{"role":"user","content":"quota"}]}`
+	}
+	cases := map[string]struct {
+		answer string
+		body   string
+		route  string
+		reason string
+	}{
+		"one token":            {truncatedAnswer, body(1), "local", ""},
+		"at the short limit":   {truncatedAnswer, body(shortAnswer), "local", ""},
+		"above the limit":      {truncatedAnswer, body(shortAnswer + 1), "cloud", FallTruncated},
+		"stream broke off":     {brokenOffAnswer, body(1), "cloud", FallTruncated},
+		"cut off with nothing": {"data: {\"choices\":[{\"delta\":{\"content\":\" \"},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n", body(1), "cloud", FallTruncated},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			loc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, tc.answer) }))
+			defer loc.Close()
+			cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "cloud") }))
+			defer cloud.Close()
+			g := NewAnthropic()
+			g.Upstream = cloud.URL
+			l := &Local{BaseURL: loc.URL + "/v1", Model: "qwen"}
+			g.Local = func() *Local { return l }
+			var meta Meta
+			g.Done = func(_ context.Context, m Meta, _ int, _ time.Duration) { meta = m }
+			rec := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(tc.body))
+			r = r.WithContext(WithLocalFirst(r.Context(), true))
+			r.Header.Set("X-Api-Key", "k")
+			g.Handler("/v1/messages")(rec, r)
+			assert.Equal(t, rec.Header().Get(RouteHeader), tc.route)
+			assert.Equal(t, meta.Fallthrough, tc.reason)
+			if tc.route == "local" {
+				assert.Contains(t, rec.Body.String(), `"stop_reason":"max_tokens"`)
+			}
 		})
 	}
 }

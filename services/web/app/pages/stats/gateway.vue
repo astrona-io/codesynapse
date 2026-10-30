@@ -40,6 +40,12 @@ const FALL_LABEL: Record<string, string> = {
 }
 const gwReasons = computed(() => Object.entries(gw.value?.fallthrough_reasons ?? {}).sort((p, q) => q[1] - p[1]))
 const gwReasonText = (n: number) => gwReasons.value.slice(0, n).map(([k, v]) => `${fmtCompact(v)} ${FALL_LABEL[k] ?? k}`).join(' · ')
+// Failed requests by route and status class: cloud ones are the provider's
+// own answers passed through, not the local model.
+const FAIL_LABEL: Record<string, string> = {
+  cloud_4xx: 'cloud 4xx', cloud_5xx: 'cloud 5xx', local_4xx: 'local 4xx', local_5xx: 'local 5xx', rejected_4xx: 'refused', rejected_5xx: 'gateway 5xx',
+}
+const failText = computed(() => Object.entries(gw.value?.failed_by ?? {}).sort((p, q) => q[1] - p[1]).map(([k, v]) => `${fmtCompact(v)} ${FAIL_LABEL[k] ?? k}`).join(' · '))
 const reasonRows = computed(() => gwReasons.value.map(([k, v]) => ({ label: FALL_LABEL[k] ?? k, value: v, detail: k })))
 const secs = (v: number | null | undefined) => (v == null ? '–' : v < 10 ? `${v.toFixed(1)} s` : `${Math.round(v)} s`)
 const chartWindow = computed(() => `${seriesRangeLabel(range.value)}${days.value > 30 ? ' (the metrics store keeps 30 days)' : ''}`)
@@ -52,7 +58,12 @@ const chartWindow = computed(() => `${seriesRangeLabel(range.value)}${days.value
       <p class="muted small">Requests in {{ windowLabel(days) }}: how many the local model answered, how often it was too slow, and how long answers took. Prompts are never recorded. What local answers saved is part of the total under <NuxtLink to="/stats/models">Models &amp; savings</NuxtLink>.</p>
       <p v-if="modelsError" class="muted small">Gateway figures need live metrics: {{ apiErrorMessage(modelsError) }}</p>
       <div v-else-if="gw && gw.requests > 0" class="grid kpis">
-        <StatTile label="Gateway requests" :value="fmtCompact(gw.requests)" :hint="`${fmtCompact(gw.local)} local · ${fmtCompact(gw.cloud)} cloud · ${fmtCompact(gw.rejected)} refused${gw.failed ? ` · ${fmtCompact(gw.failed)} failed` : ''}`" />
+        <StatTile label="Gateway requests" :value="fmtCompact(gw.requests)" :hint="`${fmtCompact(gw.local)} local · ${fmtCompact(gw.cloud)} cloud · ${fmtCompact(gw.rejected)} refused`" />
+        <StatTile
+          v-if="gw.failed" label="Failed requests" :value="fmtCompact(gw.failed)"
+          :hint="failText || 'answered 4xx or 5xx'"
+          tip="requests answered with a 4xx or 5xx status. Cloud ones are the provider's own answer passed on unchanged (a rate limit, an unknown model, an overloaded provider), not the local model; local model timeouts and errors go to the cloud instead and are counted under Not answered locally"
+        />
         <StatTile label="Answered locally" :value="`${gw.local_share_pct}%`" hint="of gateway requests, by the local model" />
         <StatTile
           v-if="gw.timeouts !== undefined" label="Local model timeouts" :value="fmtCompact(gw.timeouts)"

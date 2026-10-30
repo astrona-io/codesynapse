@@ -94,14 +94,19 @@ type ModelStats struct {
 // local model answered), cloud (passed on), rejected (refused before any
 // model).
 type GatewayStat struct {
-	Requests      float64 `json:"requests"`
-	Local         float64 `json:"local"`
-	Cloud         float64 `json:"cloud"`
-	Rejected      float64 `json:"rejected"`
-	Failed        float64 `json:"failed"`
-	LocalSharePct float64 `json:"local_share_pct"`
-	BytesIn       float64 `json:"bytes_in"`
-	BytesOut      float64 `json:"bytes_out"`
+	Requests float64 `json:"requests"`
+	Local    float64 `json:"local"`
+	Cloud    float64 `json:"cloud"`
+	Rejected float64 `json:"rejected"`
+	Failed   float64 `json:"failed"`
+	// FailedBy splits Failed by route and status class ("cloud_4xx",
+	// "cloud_5xx", "rejected_4xx", "local_5xx"): a cloud failure is the
+	// provider's own answer passed through (a rate limit, an unknown model),
+	// not something the local model did.
+	FailedBy      map[string]float64 `json:"failed_by"`
+	LocalSharePct float64            `json:"local_share_pct"`
+	BytesIn       float64            `json:"bytes_in"`
+	BytesOut      float64            `json:"bytes_out"`
 	// LocalInputTokens and LocalOutputTokens are what the local model
 	// reported for the requests it answered. LocalCachedTokens is the part
 	// of the input its prompt cache served; runtimes that report no cache
@@ -357,7 +362,7 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		{modelQueries.p50, func(l map[string]string, v float64) { stat(l).ContextP50 = ptr(round3(v)) }},
 		{modelQueries.p95, func(l map[string]string, v float64) { stat(l).ContextP95 = ptr(round3(v)) }},
 	}
-	gw := GatewayStat{FallthroughReasons: map[string]float64{}}
+	gw := GatewayStat{FallthroughReasons: map[string]float64{}, FailedBy: map[string]float64{}}
 	gt := gatewayTimes{sum: map[string]float64{}, count: map[string]float64{}}
 	steps = append(steps, []struct {
 		expr string
@@ -365,16 +370,19 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 	}{
 		{gatewayQueries.requests, func(l map[string]string, v float64) {
 			gw.Requests += v
-			switch l["route"] {
+			route := l["route"]
+			switch route {
 			case "local":
 				gw.Local += v
 			case "cloud":
 				gw.Cloud += v
 			default:
 				gw.Rejected += v
+				route = "rejected"
 			}
 			if l["class"] == "4xx" || l["class"] == "5xx" {
 				gw.Failed += v
+				gw.FailedBy[route+"_"+l["class"]] += v
 			}
 		}},
 		{gatewayQueries.bytes, func(l map[string]string, v float64) {
@@ -464,9 +472,11 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 	for _, f := range []*float64{&gw.Requests, &gw.Local, &gw.Cloud, &gw.Rejected, &gw.Failed, &gw.LocalUnmetered, &gw.LocalInputTokens, &gw.LocalOutputTokens, &gw.LocalCachedTokens, &gw.BytesIn, &gw.BytesOut, &gw.Fallthroughs, &gw.Timeouts} {
 		*f = math.Round(*f)
 	}
-	for reason, v := range gw.FallthroughReasons {
-		if gw.FallthroughReasons[reason] = math.Round(v); gw.FallthroughReasons[reason] == 0 {
-			delete(gw.FallthroughReasons, reason)
+	for _, m := range []map[string]float64{gw.FallthroughReasons, gw.FailedBy} {
+		for k, v := range m {
+			if m[k] = math.Round(v); m[k] == 0 {
+				delete(m, k)
+			}
 		}
 	}
 	if gw.Requests > 0 {
