@@ -214,3 +214,71 @@ func TestRouteResourcesAndAreaOf(t *testing.T) {
 	assert.Equal(t, areaOf("services/web/app/pages/stats/activity.vue", areas), 2)
 	assert.Equal(t, areaOf("internal/model/model.go", areas), -1)
 }
+
+// TestBriefPlanForAQuestionInPlainWords: PLAN item 18, case l (2026-10-30).
+// A typed question about private organisation repositories that a Git
+// token can read but that never reach the repository list got three
+// unrelated documentation sections: "docs / code" made it a documentation
+// prompt, "see", "know" and "like" spent the keyword cap, and "access",
+// "repo" and "list" named files (access.go, repo.go, list.go) that hold no
+// other word of the prompt. The ranges that hold several of its words (the
+// organisation token handlers, the repository dialog's list, the
+// organisation watches) now lead.
+func TestBriefPlanForAQuestionInPlainWords(t *testing.T) {
+	g := model.NewGraph()
+	node := func(kind model.NodeKind, name, qualified, file string, start, end int) string {
+		id := storetest.ID(kind, qualified)
+		g.AddNode(model.Node{ID: id, Repo: storetest.Repo, Kind: kind, Name: name, QualifiedName: qualified,
+			File: file, StartLine: start, EndLine: end, Exported: name[0] >= 'A' && name[0] <= 'Z'})
+		return id
+	}
+	const mod = "github.com/example/app/"
+	// What the question is about.
+	node(model.KindFile, "orgtokens.go", "services/api/internal/api/orgtokens.go", "services/api/internal/api/orgtokens.go", 0, 0)
+	node(model.KindMethod, "handleSetOrgGitToken", mod+"services/api/internal/api.Server.handleSetOrgGitToken", "services/api/internal/api/orgtokens.go", 40, 90)
+	node(model.KindType, "OrgWatch", mod+"internal/accounts.OrgWatch", "internal/accounts/watches.go", 20, 38)
+	node(model.KindMethod, "Key", mod+"internal/accounts.OrgWatch.Key", "internal/accounts/watches.go", 41, 41)
+	node(model.KindFunction, "list", "services/web/app/components/AddRepoDialog.list", "services/web/app/components/AddRepoDialog.vue", 51, 64)
+	node(model.KindSection, "Private repositories", "docs/operations/running.md#private-repositories", "docs/operations/running.md", 159, 177)
+	// What it was briefed with, and names that only share one word with it.
+	node(model.KindSection, "Limits worth knowing", "docs/operations/chat-memory-setup.md#limits", "docs/operations/chat-memory-setup.md", 184, 191)
+	node(model.KindSection, "SARIF and GitHub code scanning", "docs/features/security.md#sarif", "docs/features/security.md", 120, 141)
+	node(model.KindSection, "Token and latency benchmark", "docs/RETRIEVAL_PLAN.md#benchmark", "docs/RETRIEVAL_PLAN.md", 98, 115)
+	node(model.KindPackage, "docs", mod+"internal/ingest/docs", "", 0, 0)
+	node(model.KindFile, "docs.go", "internal/ingest/docs/docs.go", "internal/ingest/docs/docs.go", 0, 0)
+	node(model.KindFunction, "Extract", mod+"internal/ingest/docs.Extract", "internal/ingest/docs/docs.go", 10, 60)
+	node(model.KindFile, "access.go", "internal/model/access.go", "internal/model/access.go", 0, 0)
+	node(model.KindType, "AccessSnapshot", mod+"internal/model.AccessSnapshot", "internal/model/access.go", 27, 41)
+	node(model.KindFile, "repo.go", "internal/config/repo.go", "internal/config/repo.go", 0, 0)
+	node(model.KindFunction, "Load", mod+"internal/config.Load", "internal/config/repo.go", 20, 50)
+	node(model.KindFile, "list.go", "internal/store/nebulastore/list.go", "internal/store/nebulastore/list.go", 0, 0)
+	node(model.KindMethod, "List", mod+"internal/store/nebulastore.Store.List", "internal/store/nebulastore/list.go", 20, 122)
+	node(model.KindFunction, "key", mod+"internal/vuln.key", "internal/vuln/lockfiles.go", 19, 19)
+	node(model.KindMethod, "github", mod+"services/api/internal/fixes.Runner.github", "services/api/internal/fixes/fixes.go", 423, 433)
+	node(model.KindMethod, "token", mod+"internal/sso/ssotest.Provider.token", "internal/sso/ssotest/ssotest.go", 100, 134)
+	node(model.KindMethod, "see", mod+"internal/accounts.Store.see", "internal/accounts/notifications.go", 12, 19)
+	node(model.KindFunction, "Known", mod+"internal/toolsets.Known", "internal/toolsets/toolsets.go", 34, 41)
+	st := memory.New()
+	require.NoError(t, st.ReplaceRepo(t.Context(), storetest.Repo, g))
+
+	prompt := `what i can see i know my "github token key" can access private org-repos, but it's look like the indexing do not catch up and adding the repo's into my repo list? and thats mean when i wirte docs / code i lose the benefits of the system now if the repo is not public?`
+	assert.False(t, asklocal.AboutDocs(prompt), "docs beside code is not a documentation prompt")
+	plan, err := briefPlan(t.Context(), st, storetest.Repo, prompt)
+	require.NoError(t, err)
+	t.Log(plan.Ranges)
+	files := make([]string, len(plan.Ranges))
+	for i, r := range plan.Ranges {
+		files[i] = rangePath(r)
+	}
+	for _, f := range []string{"services/api/internal/api/orgtokens.go", "internal/accounts/watches.go",
+		"services/web/app/components/AddRepoDialog.vue", "docs/operations/running.md"} {
+		i := slices.Index(files, f)
+		assert.True(t, i >= 0 && i < 6, f+" is not among the first ranges: "+strings.Join(files, " "))
+	}
+	for _, f := range []string{"docs/operations/chat-memory-setup.md", "docs/features/security.md", "docs/RETRIEVAL_PLAN.md"} {
+		assert.False(t, slices.Contains(files, f), f+" is in the plan")
+	}
+	for _, kw := range []string{"see", "know", "but", "look", "like"} {
+		assert.False(t, slices.Contains(plan.Keywords, kw), kw+" is a keyword")
+	}
+}

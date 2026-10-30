@@ -19,6 +19,7 @@ func TestAboutDocsAndDocsFile(t *testing.T) {
 		"the gateway stats should have its own tab/page",
 		"make the Stats struct count tokens too",
 		"the docker image is too large",
+		"when i write docs / code i lose the benefits",
 	} {
 		assert.False(t, AboutDocs(p), p)
 	}

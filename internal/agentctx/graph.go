@@ -341,6 +341,16 @@ var (
 		"make": true, "use": true, "using": true, "should": true, "need": true, "want": true, "all": true, "any": true,
 		"not": true, "are": true, "can": true, "get": true, "set": true, "new": true, "change": true, "update": true,
 		"code": true, "function": true, "method": true, "file": true, "test": true, "tests": true, "bug": true,
+		// Conversation: a typed question ("what i can see i know …, but it's
+		// look like …") spent the keyword cap on these before it reached
+		// "repo", "list" and "public" (PLAN item 18, case l).
+		"see": true, "know": true, "look": true, "looks": true, "like": true, "seem": true, "seems": true,
+		"but": true, "just": true, "really": true, "mean": true, "means": true, "thats": true, "its": true,
+		"now": true, "then": true, "also": true, "some": true, "something": true, "someway": true,
+		"anything": true, "anywhere": true, "there": true, "they": true, "them": true, "have": true,
+		"has": true, "was": true, "were": true, "will": true, "would": true, "could": true, "does": true,
+		"don": true, "doesn": true, "isn": true, "you": true, "your": true, "our": true, "about": true,
+		"because": true, "still": true, "very": true, "lose": true, "benefit": true, "benefits": true,
 	}
 	// taskWords say what to do, not where: matched by name they pulled
 	// Implementations, RecordIngestPhase and AuditLog.only into briefs about
@@ -351,6 +361,12 @@ var (
 		"start": true, "helper": true, "reuse": true, "reuses": true,
 	}
 )
+
+// Stopword reports whether a lower-case word of a task is too common to
+// name anything: what a task does or says around the names it is about.
+func Stopword(w string) bool {
+	return stopwords[w] || taskWords[w]
+}
 
 // proseWeight scales the keywords of plain words once a task names code
 // exactly: "hook" or "token" in a task that names agentStats must not

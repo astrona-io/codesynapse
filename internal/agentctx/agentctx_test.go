@@ -74,6 +74,17 @@ func TestKeywords(t *testing.T) {
 	assert.Contains(t, kw, "Store")
 	assert.NotContains(t, kw, "the")
 	assert.LessOrEqual(t, len(kw), 12)
+
+	// A typed question: the conversation around its words does not take
+	// the cap from the words at its end (PLAN item 18, case l).
+	kw = keywords(`what i can see i know my "github token key" can access private org-repos, but it's look like the indexing do not catch up and adding the repo's into my repo list? and thats mean when i wirte docs / code i lose the benefits of the system now if the repo is not public?`)
+	for _, w := range []string{"see", "know", "but", "look", "like", "thats", "its", "lose", "benefits"} {
+		assert.NotContains(t, kw, w)
+	}
+	assert.Contains(t, kw, "repo")
+	assert.Contains(t, kw, "list")
+	// Written as a name, a stopword still counts.
+	assert.Contains(t, keywords("rename Like to Matches"), "Like")
 }
 
 func TestMinimalContextBudget(t *testing.T) {

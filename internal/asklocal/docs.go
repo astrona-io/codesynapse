@@ -16,9 +16,16 @@ import (
 // docsWords are what a prompt about the documentation talks about.
 var docsWords = regexp.MustCompile(`(?i)\b(documentation|docs|mkdocs|docusaurus|sphinx|readme|markdown|docs? ?site|antora|vitepress|hugo)\b`)
 
-// AboutDocs reports whether a prompt is about the documentation.
+// codeWords name the code itself. A prompt that names it beside the
+// documentation ("when I write docs / code") is about both, and keeping its
+// brief to the documentation pages briefed a question about private
+// repositories with unrelated pages (PLAN item 18, case l).
+var codeWords = regexp.MustCompile(`(?i)\b(code|coding)\b`)
+
+// AboutDocs reports whether a prompt is about the documentation and not
+// also about the code.
 func AboutDocs(prompt string) bool {
-	return docsWords.MatchString(prompt)
+	return docsWords.MatchString(prompt) && !codeWords.MatchString(prompt)
 }
 
 // docsDirs are top-level directories that hold a documentation site.
