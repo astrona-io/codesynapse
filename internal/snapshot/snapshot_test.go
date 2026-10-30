@@ -76,6 +76,27 @@ func TestTakeKeepsCatalogueRulesOnly(t *testing.T) {
 	assert.Equal(t, snap.Rules, map[string]int{"code-injection": 2})
 }
 
+// Formats count the graph's files, and a name outside the list counts as
+// other: like rule IDs, it feeds cross-tenant counts.
+func TestTakeCountsFormats(t *testing.T) {
+	ctx := context.Background()
+	g := storetest.Fixture()
+	g.AddNode(model.Node{ID: storetest.ID(model.KindFile, "odd.x"), Kind: model.KindFile, Repo: storetest.Repo, Name: "odd.x", File: "odd.x", Language: "acme-secret"})
+	g.AddNode(model.Node{ID: storetest.ID(model.KindFile, "app.py"), Kind: model.KindFile, Repo: storetest.Repo, Name: "app.py", File: "app.py", Language: "python"})
+	s := memory.New()
+	require.NoError(t, s.ReplaceRepo(ctx, storetest.Repo, g))
+	st, err := s.Stats(ctx, storetest.Repo)
+	require.NoError(t, err)
+	snap, err := Take(ctx, s, storetest.Repo)
+	require.NoError(t, err)
+	assert.Equal(t, snap.Formats["python"], 1)
+	assert.Equal(t, snap.Formats["other"], 1)
+	assert.Equal(t, snap.Formats["go"], st.Formats["go"])
+	assert.True(t, snap.Formats["go"] > 0, "the fixture's Go files")
+	_, leaked := snap.Formats["acme-secret"]
+	assert.False(t, leaked, "a name outside the list never reaches the snapshot")
+}
+
 func TestRecordKeepsHistoryAndNeverFails(t *testing.T) {
 	ctx := context.Background()
 	s, g := repoWithReports(t)

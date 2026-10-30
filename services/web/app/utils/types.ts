@@ -691,7 +691,11 @@ export interface IngestFigures {
   skips: { ignored_path: number; generated_code: number; binary: number; non_k8s_yaml: number }
 }
 export interface OrgIngestRow extends IngestFigures { org_id: string; slug: string; name: string; deleted: boolean }
-export type IngestSection = StatsTable<IngestFigures, OrgIngestRow>
+// formats: indexed files by language or format across the platform as of
+// now, each graph once; null when one organisation is selected.
+export interface IngestSection extends StatsTable<IngestFigures, OrgIngestRow> {
+  formats: { name: string; files: number }[] | null; formats_unknown: number
+}
 // Models section of the platform statistics. cost_dollars is null when the
 // cost is unknown (cost_basis "unknown"), for local calls ("local") and
 // without calls ("none"); provider_cache_saved_dollars is the provider's
