@@ -212,6 +212,10 @@ func (s *Server) gatewayRoutes() {
 	o := &gateway.OpenAI{Local: g.Local, Done: s.auditGateway}
 	s.route("POST /v1/chat/completions", orgRole(accounts.Member), guard(o.ChatHandler()))
 	s.route("GET /v1/models", orgRole(accounts.Member), guard(o.ModelsHandler()))
+	// Counts of requests the developer's failover proxy sent straight to
+	// Anthropic while the gateway was unreachable; no session binding or key
+	// slot, as it carries no model request.
+	s.route("POST "+failoverPath, orgRole(accounts.Member), s.handleGatewayFailover)
 }
 
 // gatewaySession binds the request to the key's own runtime session; headers

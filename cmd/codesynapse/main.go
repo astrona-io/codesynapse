@@ -27,6 +27,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/cleanup"
 	"github.com/astrona-io/codesynapse/internal/duplicates"
 	"github.com/astrona-io/codesynapse/internal/forge"
+	"github.com/astrona-io/codesynapse/internal/gatewayproxy"
 	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/ingest"
 	"github.com/astrona-io/codesynapse/internal/ingestreport"
@@ -54,7 +55,7 @@ func main() {
 // commands are the CLI's subcommands (the plugin test checks the hooks
 // call ones that exist).
 func commands(ec *app.Env) []*cobra.Command {
-	return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), upgradeCmd(ec), statsCmd(ec), evalCmd(ec), hookCmd(ec), gitHookCmd(ec), installCmd(ec), statusCmd(ec), doctorCmd(ec), uninstallCmd(ec), mcpCmd(ec), cursorCmd(ec), assistantCmd(ec, "codex"), assistantCmd(ec, "claude"), memoryCmd(ec), runtimeCmd(ec), imagesCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
+	return []*cobra.Command{ingestCmd(ec), reviewCmd(ec), auditCmd(ec), licensesCmd(ec), cleanupCmd(ec), duplicatesCmd(ec), sbomCmd(ec), upgradeCmd(ec), statsCmd(ec), evalCmd(ec), hookCmd(ec), gitHookCmd(ec), installCmd(ec), statusCmd(ec), doctorCmd(ec), uninstallCmd(ec), mcpCmd(ec), cursorCmd(ec), assistantCmd(ec, "codex"), assistantCmd(ec, "claude"), memoryCmd(ec), gatewayCmd(ec), runtimeCmd(ec), imagesCmd(ec), schemaCmd(ec), repoConfigCmd(ec)}
 }
 
 // ingestOptions configures `codesynapse ingest`.
@@ -813,6 +814,9 @@ type mcpInstallOptions struct {
 	tokens  int
 	gateway bool
 	remove  bool
+	// failover runs the local proxy in front of the gateway (gateway proxy).
+	failover  bool
+	proxyPort int
 }
 
 func (o *mcpInstallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -824,6 +828,8 @@ func (o *mcpInstallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.StringVar(&o.cap, "context-cap", "150k", "Chat size at which Claude Code and Codex compact (100k to 1M; 0 leaves their settings alone). With the memory hooks older turns are offloaded first. A cap you set yourself is kept unless you pass this flag")
 	f.BoolVar(&o.gateway, "gateway", false, "Route Claude Code's model requests through the CodeSynapse gateway (writes ANTHROPIC_BASE_URL and the key header into ~/.claude/settings.json; key from "+agentcfg.GatewayKeyEnv+")")
 	f.BoolVar(&o.remove, "remove", false, "With --gateway: take the gateway settings out of Claude Code again")
+	f.BoolVar(&o.failover, "failover", true, "With --gateway: put the local failover proxy in front of the gateway, so requests go straight to Anthropic with your own credential while the gateway is unreachable (false: Claude Code talks to the gateway directly)")
+	f.IntVar(&o.proxyPort, "proxy-port", gatewayproxy.DefaultPort, "With --gateway: loopback port of the failover proxy")
 	f.StringVar(&o.profile, "profile", toolsets.Core, "Toolsets the agents get: core (the thirteen everyday tools), all, or core plus a comma list of "+strings.Join(toolsets.Names(), ", "))
 	return nil
 }
@@ -942,13 +948,17 @@ func installServer(mcpURL, apiURL string) (agentcfg.Server, error) {
 // environment only; nothing is written when the health check fails.
 func (o *mcpInstallOptions) runGateway(ctx context.Context, home string) error {
 	file := filepath.Join(home, ".claude", "settings.json")
+	files, err := gatewayproxy.DefaultFiles()
+	if err != nil {
+		return err
+	}
 	if o.remove {
 		diff, err := agentcfg.RemoveClaudeGateway(file, time.Now())
 		if err != nil {
 			return err
 		}
 		_, _ = fmt.Fprintln(o.EC.Stderr, diff)
-		return nil
+		return removeProxyFiles(files, o.EC.Stderr)
 	}
 	key := cmp.Or(os.Getenv(agentcfg.GatewayKeyEnv), os.Getenv(agentcfg.TokenEnv))
 	if key == "" {
@@ -957,12 +967,64 @@ func (o *mcpInstallOptions) runGateway(ctx context.Context, home string) error {
 	if err := agentcfg.CheckGateway(ctx, nil, o.apiURL, key); err != nil {
 		return err
 	}
-	diff, err := agentcfg.SetClaudeGateway(file, o.apiURL, key, time.Now())
+	if !o.failover {
+		diff, err := agentcfg.SetClaudeGateway(file, o.apiURL, key, time.Now())
+		if err != nil {
+			return err
+		}
+		if err := removeProxyFiles(files, o.EC.Stderr); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(o.EC.Stderr, "Claude Code now sends its requests through %s, without failover (old file kept as a .bak beside %s):\n%s\nStart a new Claude Code session. Undo with: codesynapse mcp install --gateway --remove\n", o.apiURL, file, diff)
+		return nil
+	}
+	bin, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(o.EC.Stderr, "Claude Code now sends its requests through %s (old file kept as a .bak beside %s):\n%s\nStart a new Claude Code session. Undo with: codesynapse mcp install --gateway --remove\n", o.apiURL, file, diff)
+	if strings.Contains(bin, "go-build") {
+		return errors.New("run an installed codesynapse binary (go install ./cmd/codesynapse), not go run: the Claude Code hook starts the proxy from it")
+	}
+	cfg := gatewayproxy.Config{Gateway: strings.TrimRight(o.apiURL, "/"), Port: o.proxyPort}
+	diff, err := installGatewayProxy(ctx, files, cfg, file, key, agentcfg.ShellQuote(brewStablePath(bin))+" gateway proxy --ensure", startProxy)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(o.EC.Stderr, "Claude Code now sends its requests to the failover proxy on %s, which forwards them to %s and, only while that is unreachable, straight to Anthropic with your own credential (old file kept as a .bak beside %s):\n%s\nStart a new Claude Code session. Without failover: --failover=false. Undo with: codesynapse mcp install --gateway --remove\n", cfg.URL(), cfg.Gateway, file, diff)
 	return nil
+}
+
+// installGatewayProxy saves the proxy's config, makes sure our proxy runs on
+// its port and only then points Claude Code at it, so settings never name a
+// port nothing (or a stranger) answers on.
+func installGatewayProxy(ctx context.Context, files gatewayproxy.Files, cfg gatewayproxy.Config, settings, key, ensure string, start func() error) (string, error) {
+	if err := files.Save(cfg); err != nil {
+		return "", err
+	}
+	secret, err := files.Secret()
+	if err != nil {
+		return "", err
+	}
+	switch waitProxy(ctx, cfg, secret, start) {
+	case gatewayproxy.PortOurs:
+	case gatewayproxy.PortStranger:
+		_, _ = files.Remove() //nolint:errcheck // nothing was pointed at it yet
+		return "", fmt.Errorf("another program listens on 127.0.0.1:%d; pick a free port with --proxy-port, or install without failover (--failover=false)", cfg.Port)
+	default:
+		_, _ = files.Remove() //nolint:errcheck // nothing was pointed at it yet
+		return "", fmt.Errorf("the gateway proxy did not start on 127.0.0.1:%d (log: %s); try --proxy-port, or --failover=false", cfg.Port, files.LogPath())
+	}
+	return agentcfg.SetClaudeGatewayProxy(settings, cfg.URL(), key, ensure, time.Now())
+}
+
+// removeProxyFiles deletes the proxy's config, secret and counts; a running
+// proxy stops by itself once its config is gone.
+func removeProxyFiles(files gatewayproxy.Files, w io.Writer) error {
+	n, err := files.Remove()
+	if n > 0 {
+		_, _ = fmt.Fprintf(w, "%d request(s) sent straight to Anthropic during gateway outages were never reported; their counts are deleted.\n", n)
+	}
+	return err
 }
 
 // brewStablePath swaps a Homebrew Cellar path, which `brew upgrade` removes,

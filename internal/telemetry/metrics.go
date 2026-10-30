@@ -88,6 +88,10 @@ var (
 	GatewayLocalTokens = Default.ScopedCounter("gateway_local_tokens_total", "Tokens the local model reported for gateway answers, by kind (input, output, and cached: the part of input the runtime's prompt cache served).", "tenant_id", "kind")
 	// GatewayLocalUnmetered counts local answers whose server reported no usage.
 	GatewayLocalUnmetered = Default.ScopedCounter("gateway_local_unmetered_total", "Gateway answers from the local model that reported no token usage.", "tenant_id")
+	// GatewayFailover counts requests developers' failover proxies sent
+	// straight to Anthropic while the gateway was unreachable, as reported
+	// once it answered again.
+	GatewayFailover = Default.ScopedCounter("gateway_failover_requests_total", "Requests the local failover proxy sent straight to Anthropic while the gateway was unreachable, reported afterwards.", "tenant_id")
 )
 
 // Databases.
