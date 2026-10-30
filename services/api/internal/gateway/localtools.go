@@ -40,22 +40,26 @@ type block struct {
 	ToolUseID string          `json:"tool_use_id"`
 	Content   json.RawMessage `json:"content"`
 	IsError   bool            `json:"is_error"`
+	ToolName  string          `json:"tool_name"` // tool_reference
+	Title     string          `json:"title"`     // search_result
+	Source    string          `json:"source"`    // search_result
 }
 
-// convertMessage turns one Anthropic message into OpenAI messages. Images
-// and any other block make the request ineligible, and so does thinking
+// convertMessage turns one Anthropic message into OpenAI messages; when it
+// cannot, reason says why. Any block it does not know (server tool use and
+// results among them) keeps the request in the cloud, and so does thinking
 // unless dropThinking leaves the assistant's thinking blocks out.
-func convertMessage(m anthropicMsg, dropThinking bool) ([]oaMsg, bool) {
+func convertMessage(m anthropicMsg, dropThinking bool) (out []oaMsg, reason string) {
 	if m.Role != "user" && m.Role != "assistant" {
-		return nil, false
+		return nil, FallBadRequest
 	}
 	var s string
 	if json.Unmarshal(m.Content, &s) == nil {
-		return []oaMsg{{Role: m.Role, Content: s}}, true
+		return []oaMsg{{Role: m.Role, Content: s}}, ""
 	}
 	var blocks []block
 	if json.Unmarshal(m.Content, &blocks) != nil {
-		return nil, false
+		return nil, FallBadRequest
 	}
 	var texts []string
 	var results []oaMsg
@@ -64,6 +68,12 @@ func convertMessage(m anthropicMsg, dropThinking bool) ([]oaMsg, bool) {
 		switch {
 		case b.Type == "text":
 			texts = append(texts, b.Text)
+		case b.Type == "search_result" && m.Role == "user":
+			t, ok := searchResultText(b)
+			if !ok {
+				return nil, FallUnsupportedBlock
+			}
+			texts = append(texts, t)
 		case dropThinking && m.Role == "assistant" && (b.Type == "thinking" || b.Type == "redacted_thinking"):
 		case b.Type == "tool_use" && m.Role == "assistant":
 			args := strings.TrimSpace(string(b.Input))
@@ -76,34 +86,130 @@ func convertMessage(m anthropicMsg, dropThinking bool) ([]oaMsg, bool) {
 		case b.Type == "tool_result" && m.Role == "user":
 			t, ok := resultText(b.Content)
 			if !ok {
-				return nil, false
+				return nil, FallUnsupportedBlock
 			}
 			if b.IsError {
 				t = "[error] " + t
 			}
 			results = append(results, oaMsg{Role: "tool", ToolCallID: b.ToolUseID, Content: t})
 		default:
-			return nil, false
+			return nil, FallUnsupportedBlock
 		}
 	}
 	joined := strings.Join(texts, "\n\n")
 	if m.Role == "assistant" {
-		return []oaMsg{{Role: "assistant", Content: joined, ToolCalls: uses}}, true
+		return []oaMsg{{Role: "assistant", Content: joined, ToolCalls: uses}}, ""
 	}
 	// Results come first: OpenAI wants them straight after the assistant's calls.
-	out := results
+	out = results
 	if len(texts) > 0 || len(results) == 0 {
 		out = append(out, oaMsg{Role: "user", Content: joined})
 	}
-	return out, true
+	return out, ""
 }
 
-// resultText flattens a tool result: a string or text blocks.
+// resultText flattens a tool result: a string, or text, search_result and
+// tool_reference blocks. A tool_reference is how a tool search loads a
+// deferred tool: the local model gets that tool's definition (offeredTools)
+// and a line saying it was loaded.
 func resultText(raw json.RawMessage) (string, bool) {
 	if !present(raw) {
 		return "", true
 	}
-	return text(raw)
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s, true
+	}
+	var blocks []block
+	if json.Unmarshal(raw, &blocks) != nil {
+		return "", false
+	}
+	parts := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		switch b.Type {
+		case "text":
+			parts = append(parts, b.Text)
+		case "tool_reference":
+			if b.ToolName == "" {
+				return "", false
+			}
+			parts = append(parts, "Tool loaded: "+b.ToolName)
+		case "search_result":
+			t, ok := searchResultText(b)
+			if !ok {
+				return "", false
+			}
+			parts = append(parts, t)
+		default:
+			return "", false
+		}
+	}
+	return strings.Join(parts, "\n\n"), true
+}
+
+// searchResultText flattens a search_result block to its title, source and
+// text. Citations are left out: the local model answers without them.
+func searchResultText(b block) (string, bool) {
+	body, ok := text(b.Content)
+	if !ok {
+		return "", false
+	}
+	head := strings.TrimSpace(b.Title)
+	if b.Source != "" {
+		head = strings.TrimSpace(head + " (" + b.Source + ")")
+	}
+	if head == "" {
+		return body, true
+	}
+	return head + "\n" + body, true
+}
+
+// offeredTools is in.Tools without the deferred ones (defer_loading) that no
+// tool_reference in the conversation loaded: the cloud does not show those to
+// its model either, so the local model is not offered them.
+func offeredTools(in anthropicIn) []json.RawMessage {
+	var loaded map[string]bool
+	out := make([]json.RawMessage, 0, len(in.Tools))
+	for _, r := range in.Tools {
+		var t struct {
+			Name         string `json:"name"`
+			DeferLoading bool   `json:"defer_loading"`
+		}
+		if json.Unmarshal(r, &t) == nil && t.DeferLoading {
+			if loaded == nil {
+				loaded = referencedTools(in.Messages)
+			}
+			if !loaded[t.Name] {
+				continue
+			}
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// referencedTools lists the tool names that tool_reference blocks in tool
+// results loaded.
+func referencedTools(msgs []anthropicMsg) map[string]bool {
+	names := map[string]bool{}
+	for _, m := range msgs {
+		var blocks []block
+		if m.Role != "user" || json.Unmarshal(m.Content, &blocks) != nil {
+			continue
+		}
+		for _, b := range blocks {
+			var inner []block
+			if b.Type != "tool_result" || json.Unmarshal(b.Content, &inner) != nil {
+				continue
+			}
+			for _, ib := range inner {
+				if ib.Type == "tool_reference" && ib.ToolName != "" {
+					names[ib.ToolName] = true
+				}
+			}
+		}
+	}
+	return names
 }
 
 // customTool is the part of an Anthropic tool definition the gateway needs.
@@ -114,12 +220,17 @@ type customTool struct {
 	InputSchema json.RawMessage `json:"input_schema"`
 }
 
-// convertTools maps tools and tool_choice. Server tools (web search, code
-// execution) run at the provider and make the request ineligible.
+// convertTools maps tools and tool_choice. Server tools (web search, web
+// fetch, code execution) and Anthropic-defined client tools carry a type
+// instead of an input schema. The local model cannot run them, and leaving
+// one out would answer without a tool the request offered, so either keeps
+// the request in the cloud.
 func convertTools(raw []json.RawMessage, choice json.RawMessage) (tools []map[string]any, oaChoice any, parallel, ok bool) {
 	if len(raw) == 0 {
-		return nil, nil, true, !present(choice)
+		// auto and none ask nothing of tools that are not there.
+		return nil, nil, true, !present(choice) || choiceType(choice) == "auto" || choiceType(choice) == "none"
 	}
+	names := map[string]bool{}
 	for _, r := range raw {
 		var t customTool
 		if json.Unmarshal(r, &t) != nil || t.Name == "" || (t.Type != "" && t.Type != "custom") {
@@ -129,6 +240,7 @@ func convertTools(raw []json.RawMessage, choice json.RawMessage) (tools []map[st
 		if !present(params) {
 			params = json.RawMessage(`{"type":"object","properties":{}}`)
 		}
+		names[t.Name] = true
 		tools = append(tools, map[string]any{"type": "function", "function": map[string]any{
 			"name": t.Name, "description": t.Description, "parameters": params,
 		}})
@@ -153,7 +265,9 @@ func convertTools(raw []json.RawMessage, choice json.RawMessage) (tools []map[st
 	case "none":
 		oaChoice = "none"
 	case "tool":
-		if c.Name == "" {
+		// The named tool must be one the local model is offered (not a
+		// deferred tool that was never loaded).
+		if !names[c.Name] {
 			return nil, nil, true, false
 		}
 		oaChoice = map[string]any{"type": "function", "function": map[string]string{"name": c.Name}}
@@ -161,6 +275,17 @@ func convertTools(raw []json.RawMessage, choice json.RawMessage) (tools []map[st
 		return nil, nil, true, false
 	}
 	return tools, oaChoice, parallel, true
+}
+
+// choiceType is a tool_choice's type, empty when it cannot be read.
+func choiceType(choice json.RawMessage) string {
+	var c struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(choice, &c) != nil {
+		return ""
+	}
+	return c.Type
 }
 
 // declaredTools lists the names the request offered.

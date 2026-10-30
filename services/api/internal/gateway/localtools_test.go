@@ -200,7 +200,7 @@ func TestLocalToolChoiceMapping(t *testing.T) {
 			l := &Local{}
 			_, out, reason := l.translate(t.Context(), []byte(body+`}`))
 			if name == "unknown type" {
-				assert.Equal(t, reason, FallNotEligible, "unknown tool_choice goes to the cloud")
+				assert.Equal(t, reason, FallUnsupportedTool, "unknown tool_choice goes to the cloud")
 				return
 			}
 			require.Equal(t, reason, "")
@@ -233,7 +233,7 @@ func TestLocalToolRequestsFallThrough(t *testing.T) {
 			body: `{"model":"claude-haiku-5-5","tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"x"}]}`,
 		},
 		"tool choice without tools": {
-			body: `{"model":"claude-haiku-5-5","tool_choice":{"type":"auto"},"messages":[{"role":"user","content":"x"}]}`,
+			body: `{"model":"claude-haiku-5-5","tool_choice":{"type":"any"},"messages":[{"role":"user","content":"x"}]}`,
 		},
 		"malformed arguments": {
 			body:   good,

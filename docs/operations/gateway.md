@@ -134,6 +134,10 @@ The reasons a request was not answered locally are a fixed list:
 | Reason | Meaning |
 |---|---|
 | `not_eligible` | The organisation answers only haiku-class requests locally, and this one asked for a larger model |
+| `bad_request` | The gateway could not read the request: broken JSON, no messages, a role other than `user` or `assistant`, or content that is neither text nor blocks. The cloud answers it, usually with its own error |
+| `system_not_text` | The system prompt is neither a string nor a list of text blocks |
+| `unsupported_block` | A message holds a block the local model cannot take, such as `server_tool_use`, `web_search_tool_result` or an unknown block type, also inside a tool result. Text, `tool_use`, `tool_result`, `search_result` and `tool_reference` blocks are converted, and `cache_control` and citation settings are dropped |
+| `unsupported_tool` | The request offers a tool the local model cannot run (a server tool such as `web_search`, `web_fetch`, `code_execution` or `tool_search_tool_*`, or an Anthropic-defined client tool such as `bash_*` or `text_editor_*`), or a `tool_choice` it cannot follow. Such a request stays in the cloud, because answering without the tool would change what the request asked for. Deferred tools (`defer_loading: true`) are not a reason: the local model is offered only those a `tool_reference` loaded, as the cloud does |
 | `too_large` | The request does not fit the local model's context or the body limit |
 | `has_thinking` | The request asks for thinking or sends thinking back, and the organisation turned `local_thinking` off |
 | `has_image` | The request carries an image or a document, also inside a tool result |
