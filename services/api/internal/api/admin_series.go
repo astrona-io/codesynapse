@@ -107,8 +107,11 @@ var adminPanels = map[string]adminPanel{
 		Empty:   "No request failed on the server in this window.",
 		queries: []seriesQuery{{expr: `sum by (route) (increase({__name__=~"(platform_)?http_requests_total",code=~"5.*"}[$w]))`, by: "route"}}}},
 	"api_route_latency": {seriesPanel: seriesPanel{Title: "API latency by route", Unit: "seconds", Kind: "gauge",
-		Help:    "95th percentile request time by route pattern.",
-		queries: []seriesQuery{{expr: `histogram_quantile(0.95, sum by (le, route) (increase({__name__=~"(platform_)?http_request_duration_seconds_bucket"}[$w])))`, by: "route"}}}},
+		Help: "Median and 95th percentile request time by route pattern.",
+		queries: []seriesQuery{
+			{expr: `label_replace(histogram_quantile(0.5, sum by (le, route) (increase({__name__=~"(platform_)?http_request_duration_seconds_bucket"}[$w]))), "series", "$1 p50", "route", "(.*)")`, by: "series"},
+			{expr: `label_replace(histogram_quantile(0.95, sum by (le, route) (increase({__name__=~"(platform_)?http_request_duration_seconds_bucket"}[$w]))), "series", "$1 p95", "route", "(.*)")`, by: "series"},
+		}}},
 	"gateway_requests": {seriesPanel: seriesPanel{Title: "Gateway requests", Unit: "requests", Kind: "count",
 		Help:    "Gateway requests by route (local, cloud, rejected) and status class.",
 		Empty:   "No gateway request in this window.",
