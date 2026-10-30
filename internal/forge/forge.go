@@ -294,6 +294,13 @@ func (c Client) list(ctx context.Context, path, query string) (Listing, error) {
 			q += "&sort=full_name"
 		}
 		body, h, err := c.getHeader(ctx, c.apiBase()+path+"?"+q)
+		if slowAnswer(ctx, err) {
+			// GitHub now and then takes longer than the client allows for a
+			// page that includes private repositories, and answers the same
+			// page quickly when asked again; one slow page should not fail
+			// the whole listing (a failed watch waits an hour).
+			body, h, err = c.getHeader(ctx, c.apiBase()+path+"?"+q)
+		}
 		if err != nil {
 			return Listing{}, err
 		}
@@ -312,6 +319,13 @@ func (c Client) list(ctx context.Context, path, query string) (Listing, error) {
 		}
 	}
 	return l, nil
+}
+
+// slowAnswer says err is the client's own timeout for one request, not the
+// caller's context ending, so asking again may work.
+func slowAnswer(ctx context.Context, err error) bool {
+	var ne net.Error
+	return err != nil && ctx.Err() == nil && errors.As(err, &ne) && ne.Timeout()
 }
 
 func (c Client) sizeParam() string {

@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
@@ -64,6 +66,63 @@ func TestListReposPagesAndFallsBackToUser(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNotFound)
 	_, err = c.ListRepos(context.Background(), "../etc")
 	assert.Error(t, err)
+}
+
+func TestListReposAsksASlowPageAgainOnce(t *testing.T) {
+	var mu sync.Mutex
+	asked := map[string]int{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		mu.Lock()
+		asked[r.URL.Path+"#"+page]++
+		n := asked[r.URL.Path+"#"+page]
+		mu.Unlock()
+		slow := (r.URL.Path == "/orgs/flaky/repos" && page == "2" && n == 1) || r.URL.Path == "/orgs/stuck/repos"
+		if slow {
+			select {
+			case <-time.After(2 * time.Second):
+			case <-r.Context().Done():
+			}
+			return
+		}
+		count := 100
+		if page == "2" {
+			count = 1
+		}
+		names := make([]string, count)
+		for i := range names {
+			names[i] = fmt.Sprintf(`{"name":"r%d","default_branch":"main"}`, i)
+		}
+		_, _ = fmt.Fprint(w, "["+strings.Join(names, ",")+"]")
+	}))
+	defer srv.Close()
+	times := func(key string) int {
+		mu.Lock()
+		defer mu.Unlock()
+		return asked[key]
+	}
+	c := Client{BaseURL: srv.URL, AllowPrivate: true, HTTP: &http.Client{Timeout: 200 * time.Millisecond}}
+
+	t.Run("a page that timed out once is asked again", func(t *testing.T) {
+		got, err := c.ListRepos(context.Background(), "flaky")
+		require.NoError(t, err)
+		assert.Len(t, got, 101)
+		assert.Equal(t, times("/orgs/flaky/repos#2"), 2)
+	})
+
+	t.Run("only once", func(t *testing.T) {
+		_, err := c.ListRepos(context.Background(), "stuck")
+		require.Error(t, err)
+		assert.Equal(t, times("/orgs/stuck/repos#1"), 2)
+	})
+
+	t.Run("not when the caller's context ended", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		_, err := Client{BaseURL: srv.URL, AllowPrivate: true}.ListRepos(ctx, "stuck")
+		require.Error(t, err)
+		assert.Equal(t, times("/orgs/stuck/repos#1"), 3)
+	})
 }
 
 func TestListReposDoesNotFollowRedirects(t *testing.T) {
