@@ -1,0 +1,26 @@
+{
+  "file": "store/store.go",
+  "entries": [
+    {
+      "id": "Type|~/store.Store",
+      "kind": "Type",
+      "name": "store.Store",
+      "lines": "5-8",
+      "signature": "type Store struct"
+    },
+    {
+      "id": "Method|(*~/store.Store).Get",
+      "kind": "Method",
+      "name": "(*store.Store).Get",
+      "lines": "10-20",
+      "signature": "func (s *Store) Get(key string) (string, error)"
+    },
+    {
+      "id": "Function|~/store.New",
+      "kind": "Function",
+      "name": "store.New",
+      "lines": "22-26",
+      "signature": "func New() *Store"
+    }
+  ]
+}

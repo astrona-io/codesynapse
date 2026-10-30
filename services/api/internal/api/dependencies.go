@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/astrona-io/codesynapse/internal/hygiene"
 	"github.com/astrona-io/codesynapse/internal/license"
+	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/store"
 )
 
@@ -28,6 +30,38 @@ type Package struct {
 	// Retracted is the rationale of a retracted Go module version, from
 	// the module proxy when lookups are on.
 	Retracted string `json:"retracted,omitempty"`
+	// Scorecard is the OpenSSF Scorecard of the package's source project,
+	// from deps.dev when lookups are on.
+	Scorecard *Scorecard `json:"scorecard,omitempty"`
+}
+
+// Scorecard is an OpenSSF Scorecard overall score (0 to 10), the day it
+// was produced and up to three of its lowest checks, lowest first.
+type Scorecard struct {
+	Score  float64          `json:"score"`
+	Date   string           `json:"date"`
+	Checks []ScorecardCheck `json:"checks,omitempty"`
+}
+
+// ScorecardCheck is one Scorecard check by name with its score (0 to 10).
+type ScorecardCheck struct {
+	Name  string `json:"name"`
+	Score int    `json:"score"`
+}
+
+// scorecardOf is the Scorecard stored on a Module node, nil when it has
+// none; check entries that do not parse are dropped.
+func scorecardOf(n model.Node) *Scorecard {
+	if n.ScorecardDate == "" {
+		return nil
+	}
+	sc := &Scorecard{Score: n.Scorecard, Date: n.ScorecardDate}
+	for _, c := range n.ScorecardChecks {
+		if ch, ok := hygiene.ParseCheck(c); ok {
+			sc.Checks = append(sc.Checks, ScorecardCheck{Name: ch.Name, Score: ch.Score})
+		}
+	}
+	return sc
 }
 
 // EcosystemCount is how many packages one ecosystem contributes.
@@ -65,7 +99,8 @@ func dependenciesOf(g store.DependencyGraph) Dependencies {
 			continue // ships with every Go program; the licence report leaves it out too
 		}
 		out.Packages = append(out.Packages, Package{Ecosystem: eco, Name: n.Name, Version: n.Version, License: cmp.Or(n.License, "unknown"),
-			Direct: !n.Indirect, Dev: n.Dev, Via: n.Via, Roots: n.Roots, Latest: n.Latest, Deprecated: n.Deprecated, Behind: n.Behind, Retracted: n.Retracted})
+			Direct: !n.Indirect, Dev: n.Dev, Via: n.Via, Roots: n.Roots, Latest: n.Latest, Deprecated: n.Deprecated, Behind: n.Behind, Retracted: n.Retracted,
+			Scorecard: scorecardOf(n)})
 		counts[eco]++
 	}
 	slices.SortFunc(out.Packages, func(a, b Package) int {

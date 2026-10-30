@@ -1,0 +1,58 @@
+{
+  "root": {
+    "id": "Method|(*~/store.Store).Get",
+    "qualified_id": "(*store.Store).Get",
+    "kind": "Method",
+    "location": "store/store.go:10-20",
+    "signature": "func (s *Store) Get(key string) (string, error)"
+  },
+  "nodes": [
+    {
+      "qualified_id": "api.handleGet",
+      "kind": "Function",
+      "location": "api/api.go:12-30",
+      "depth": 1,
+      "entry_point": true
+    },
+    {
+      "qualified_id": "store.New",
+      "kind": "Function",
+      "location": "store/store.go:22-26",
+      "depth": 1
+    },
+    {
+      "qualified_id": "store.TestGet",
+      "kind": "Function",
+      "location": "store/store_test.go:3-9",
+      "depth": 1,
+      "is_test": true
+    }
+  ],
+  "edges": [
+    {
+      "from": "api.handleGet",
+      "to": "(*store.Store).Get",
+      "kind": "CALLS",
+      "count": 1,
+      "evidence": "unknown"
+    },
+    {
+      "from": "store.New",
+      "to": "(*store.Store).Get",
+      "kind": "CALLS",
+      "count": 1,
+      "evidence": "unknown"
+    },
+    {
+      "from": "store.TestGet",
+      "to": "(*store.Store).Get",
+      "kind": "CALLS",
+      "count": 1,
+      "evidence": "unknown"
+    }
+  ],
+  "total": 3,
+  "entry_points": [
+    "api.handleGet"
+  ]
+}
