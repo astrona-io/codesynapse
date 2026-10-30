@@ -102,6 +102,7 @@ type Records interface {
 	store.AccessStore
 	store.SessionMemoryStore
 	store.RuntimeStore
+	store.SARIFStore
 }
 
 // RunRecords exercises only those records; Run includes them.
@@ -113,6 +114,7 @@ func RunRecords(t *testing.T, s Records) {
 	t.Run("access_projection", func(t *testing.T) { accessContract(t, s) })
 	t.Run("session_memory", func(t *testing.T) { sessionMemoryContract(t, s) })
 	t.Run("runtime_facts", func(t *testing.T) { runtimeContract(t, s) })
+	t.Run("sarif_findings", func(t *testing.T) { sarifContract(t, s) })
 	t.Run("history", func(t *testing.T) { historyContract(t, s) })
 	t.Run("curated", func(t *testing.T) { curatedContract(t, s) })
 	t.Run("reviews survive re-indexing", func(t *testing.T) { reviewContract(ctx, t, s) })
@@ -309,6 +311,16 @@ func Run(t *testing.T, s store.Store) {
 		})
 		require.True(t, ok, "every store keeps runtime facts")
 		runtimeContract(t, rs)
+	})
+	t.Run("sarif_findings", func(t *testing.T) {
+		ss, ok := s.(interface {
+			store.Reader
+			store.Writer
+			store.RuntimeStore
+			store.SARIFStore
+		})
+		require.True(t, ok, "every store keeps imported findings")
+		sarifContract(t, ss)
 	})
 	t.Run("store_sizes", func(t *testing.T) { sizesContract(t, s) })
 

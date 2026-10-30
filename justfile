@@ -422,6 +422,7 @@ cover:
 fuzz time="20s":
     go test ./internal/gitx -run=^$ -fuzz=FuzzParseDiff -fuzztime={{time}}
     go test ./internal/redact -run=^$ -fuzz=FuzzText -fuzztime={{time}}
+    go test ./internal/sarifimport -run=^$ -fuzz=FuzzParse -fuzztime={{time}}
 
 # Lint Go code
 lint:

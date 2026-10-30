@@ -25,7 +25,7 @@ For the people who run CodeSynapse for a team.
 
     What is protected and how.
 
-    [Security model](security-model.md)
+    [Security model](security-model.md) · [Findings of other tools](sarif-import.md)
 
 - **Connect coding agents**
 
