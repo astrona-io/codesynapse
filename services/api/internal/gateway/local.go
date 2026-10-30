@@ -103,6 +103,20 @@ func localFirst(ctx context.Context) bool {
 	return on || !chose
 }
 
+type localThinkingKey struct{}
+
+// WithLocalThinking records whether the request's organisation offers
+// requests that ask for thinking to the local model too. A request that
+// carries no choice is offered: that is the default.
+func WithLocalThinking(ctx context.Context, on bool) context.Context {
+	return context.WithValue(ctx, localThinkingKey{}, on)
+}
+
+func localThinking(ctx context.Context) bool {
+	on, chose := ctx.Value(localThinkingKey{}).(bool)
+	return on || !chose
+}
+
 type excludeKey struct{}
 
 // WithExclude records the organisation's model patterns (normalized by
@@ -271,14 +285,19 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 	if !elig(in.Model) || len(in.Messages) == 0 {
 		return in, nil, FallNotEligible
 	}
-	if in.Thinking.Type != "" && in.Thinking.Type != "disabled" {
+	// With local thinking on, the local model answers without thinking and
+	// leaves Claude's earlier thinking blocks out: they are signed reasoning
+	// it cannot read. The cloud still gets them unchanged when it answers,
+	// and in adaptive mode a turn without thinking is not an error there.
+	think := localThinking(ctx)
+	if !think && in.Thinking.Type != "" && in.Thinking.Type != "disabled" {
 		return in, nil, FallHasThinking
 	}
 	for _, m := range in.Messages {
 		switch image, thinking := contentKinds(m.Content); {
 		case image:
 			return in, nil, FallHasImage
-		case thinking:
+		case thinking && !think:
 			return in, nil, FallHasThinking
 		}
 	}
@@ -291,7 +310,7 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 		msgs = append(msgs, oaMsg{Role: "system", Content: sys})
 	}
 	for _, m := range in.Messages {
-		conv, ok := convertMessage(m)
+		conv, ok := convertMessage(m, think)
 		if !ok {
 			return in, nil, FallNotEligible
 		}

@@ -41,6 +41,9 @@ type GatewaySettings struct {
 	// answered locally, whatever LocalFirst says.
 	LocalExclude   []string
 	ShortenPrompts bool
+	// LocalThinking offers requests that ask for thinking to the local model
+	// too; the cloud answers when the local answer fails.
+	LocalThinking bool
 }
 
 // GatewaySetting returns the settings for a member of the organisation.
@@ -61,7 +64,36 @@ func (s *Service) GatewaySetting(ctx context.Context, p Principal, orgID string)
 		return GatewaySettings{}, err
 	}
 	shorten, err := s.St.GatewayShortenPrompts(ctx, orgID)
-	return GatewaySettings{Enabled: on, LocalFirst: first, LocalExclude: exclude, ShortenPrompts: shorten}, err
+	if err != nil {
+		return GatewaySettings{}, err
+	}
+	thinking, err := s.St.GatewayLocalThinking(ctx, orgID)
+	return GatewaySettings{Enabled: on, LocalFirst: first, LocalExclude: exclude, ShortenPrompts: shorten, LocalThinking: thinking}, err
+}
+
+// GatewayLocalThinking says whether the organisation's gateway offers
+// requests that ask for thinking to the local model first (on unless an
+// owner or admin turned it off). Like GatewayEnabled it checks no caller.
+func (s *Service) GatewayLocalThinking(ctx context.Context, orgID string) (bool, error) {
+	return s.St.GatewayLocalThinking(ctx, orgID)
+}
+
+// SetGatewayLocalThinking chooses whether requests that ask for thinking go
+// to the local model first or straight to the cloud (on by default). Same
+// rules as SetGateway.
+func (s *Service) SetGatewayLocalThinking(ctx context.Context, p Principal, orgID string, on bool) error {
+	if err := signedIn(p); err != nil {
+		return err
+	}
+	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+		return err
+	}
+	e := actorEvent(p, "org.gateway.local_thinking.set", orgID, orgID)
+	e.Detail = fmt.Sprintf("local_thinking=%t", on)
+	if _, err := s.Record(ctx, e); err != nil {
+		return err
+	}
+	return s.St.SetGatewayLocalThinking(ctx, orgID, on)
 }
 
 // GatewayShortenPrompts says whether the organisation's gateway has the local

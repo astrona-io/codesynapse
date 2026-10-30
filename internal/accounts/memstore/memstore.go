@@ -26,6 +26,7 @@ type Store struct {
 	localFirst     map[string]bool     // gateway local-first choice, per organisation
 	localExclude   map[string][]string // gateway models never answered locally, per organisation
 	shorten        map[string]bool     // gateway prompt shortening choice, per organisation
+	localThinking  map[string]bool     // gateway local answers for thinking requests, per organisation
 	imageScans     map[string]accounts.ImageScan
 	seen           map[string]time.Time // notifications seen, per user
 	orgs           map[string]accounts.Org

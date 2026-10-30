@@ -80,3 +80,21 @@ func (s *Store) SetGatewayShortenPrompts(ctx context.Context, orgID string, on b
 ON CONFLICT (org_id) DO UPDATE SET shorten_prompts = EXCLUDED.shorten_prompts, updated_at = now()`, orgID, on)
 	return affected(tag, err, "organisation")
 }
+
+// GatewayLocalThinking implements accounts.Store.
+func (s *Store) GatewayLocalThinking(ctx context.Context, orgID string) (bool, error) {
+	var on bool
+	err := s.db.QueryRow(ctx, "SELECT local_thinking FROM org_gateway WHERE org_id = $1", orgID).Scan(&on)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return true, nil // never chose: on, like the column default
+	}
+	return on, err
+}
+
+// SetGatewayLocalThinking implements accounts.Store. A new row takes the
+// column defaults, so the gateway itself stays on.
+func (s *Store) SetGatewayLocalThinking(ctx context.Context, orgID string, on bool) error {
+	tag, err := s.db.Exec(ctx, `INSERT INTO org_gateway (org_id, local_thinking) SELECT id, $2 FROM orgs WHERE id = $1
+ON CONFLICT (org_id) DO UPDATE SET local_thinking = EXCLUDED.local_thinking, updated_at = now()`, orgID, on)
+	return affected(tag, err, "organisation")
+}

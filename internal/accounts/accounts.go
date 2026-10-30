@@ -463,6 +463,10 @@ type Store interface {
 	// never chose).
 	GatewayShortenPrompts(ctx context.Context, orgID string) (bool, error)
 	SetGatewayShortenPrompts(ctx context.Context, orgID string, on bool) error
+	// GatewayLocalThinking says whether the gateway offers requests that ask
+	// for thinking to the local model first (true when it never chose).
+	GatewayLocalThinking(ctx context.Context, orgID string) (bool, error)
+	SetGatewayLocalThinking(ctx context.Context, orgID string, on bool) error
 	// GatewayLocalExclude lists the model patterns the gateway never offers
 	// to the local model (empty, never nil, when the organisation never
 	// chose); SetGatewayLocalExclude replaces the list.

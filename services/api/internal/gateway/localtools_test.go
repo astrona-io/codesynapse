@@ -235,9 +235,6 @@ func TestLocalToolRequestsFallThrough(t *testing.T) {
 		"tool choice without tools": {
 			body: `{"model":"claude-haiku-5-5","tool_choice":{"type":"auto"},"messages":[{"role":"user","content":"x"}]}`,
 		},
-		"thinking on": {
-			body: `{"model":"claude-haiku-5-5","thinking":{"type":"enabled","budget_tokens":100},"tools":[` + weatherTool + `],"messages":[{"role":"user","content":"x"}]}`,
-		},
 		"malformed arguments": {
 			body:   good,
 			stream: `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c","function":{"name":"weather","arguments":"{\"city\":"}}]},"finish_reason":"tool_calls"}]}` + "\n\n" + "data: [DONE]\n\n",
@@ -295,4 +292,53 @@ func TestLocalSendsReasoningSettings(t *testing.T) {
 			}
 		})
 	}
+}
+
+// With local thinking on (the default), a request that asks for thinking or
+// carries Claude's thinking blocks goes to the local model without them; off,
+// the cloud takes it.
+func TestLocalThinking(t *testing.T) {
+	asked := `{"model":"claude-opus-5-5","max_tokens":100,"thinking":{"type":"adaptive"},"tools":[` + weatherTool + `],"messages":[
+		{"role":"user","content":"weather in Oslo?"},
+		{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"sig"},{"type":"redacted_thinking","data":"x"},{"type":"tool_use","id":"tu1","name":"weather","input":{"city":"Oslo"}}]},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","content":"3C"}]}]}`
+	answer := `data: {"choices":[{"delta":{"content":"It is 3C."},"finish_reason":"stop"}]}` + "\n\n" + "data: [DONE]\n\n"
+
+	t.Run("on by default", func(t *testing.T) {
+		var got string
+		srv := toolServer(t, answer, &got)
+		defer srv.Close()
+		rec, ok := askLocal(t, &Local{BaseURL: srv.URL, Model: "q"}, asked)
+		require.True(t, ok)
+		assert.True(t, strings.Contains(rec.Body.String(), "It is 3C."))
+		assert.True(t, !strings.Contains(got, "sig") && !strings.Contains(got, "thinking"), "thinking stays out of the local request")
+		var req struct {
+			Messages []struct {
+				Role      string `json:"role"`
+				ToolCalls []any  `json:"tool_calls"`
+			}
+		}
+		require.NoError(t, json.Unmarshal([]byte(got), &req))
+		require.Len(t, req.Messages, 3)
+		assert.Equal(t, len(req.Messages[1].ToolCalls), 1, "the tool call around the thinking is kept")
+	})
+	t.Run("off", func(t *testing.T) {
+		var got string
+		srv := toolServer(t, answer, &got)
+		defer srv.Close()
+		l := &Local{BaseURL: srv.URL, Model: "q"}
+		for name, body := range map[string]string{
+			"asked":     `{"model":"claude-opus-5-5","thinking":{"type":"adaptive"},"messages":[{"role":"user","content":"x"}]}`,
+			"sent back": strings.Replace(asked, `"thinking":{"type":"adaptive"},`, "", 1),
+		} {
+			_, out, reason := l.translate(WithLocalThinking(t.Context(), false), []byte(body))
+			assert.True(t, out == nil, name)
+			assert.Equal(t, reason, FallHasThinking, name)
+		}
+	})
+	t.Run("user thinking blocks stay ineligible", func(t *testing.T) {
+		l := &Local{Model: "q"}
+		_, out, _ := l.translate(t.Context(), []byte(`{"model":"claude-opus-5-5","messages":[{"role":"user","content":[{"type":"thinking","thinking":"x"}]}]}`))
+		assert.True(t, out == nil, "only the assistant's own thinking is left out")
+	})
 }

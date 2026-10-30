@@ -103,3 +103,27 @@ func (s *Store) SetGatewayLocalExclude(_ context.Context, orgID string, patterns
 	s.localExclude[orgID] = append([]string{}, patterns...)
 	return nil
 }
+
+// GatewayLocalThinking implements accounts.Store.
+func (s *Store) GatewayLocalThinking(_ context.Context, orgID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if on, chose := s.localThinking[orgID]; chose {
+		return on, nil
+	}
+	return true, nil // never chose: on
+}
+
+// SetGatewayLocalThinking implements accounts.Store.
+func (s *Store) SetGatewayLocalThinking(_ context.Context, orgID string, on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.orgs[orgID]; !ok {
+		return fmt.Errorf("organisation: %w", accounts.ErrNotFound)
+	}
+	if s.localThinking == nil {
+		s.localThinking = map[string]bool{}
+	}
+	s.localThinking[orgID] = on
+	return nil
+}
