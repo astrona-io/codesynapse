@@ -194,33 +194,44 @@ type securityState struct {
 	triage  map[string]map[string]int
 }
 
-func (s *Server) readSecurityState(ctx context.Context, since, until time.Time) (securityState, error) {
-	st := securityState{entries: map[string][]string{}}
-	var err error
-	if st.orgs, err = s.cfg.Accounts.St.ListOrgs(ctx, 100000); err != nil {
-		return st, err
+// platformGraphs lists the organisations, the graphs of each one's usable
+// entries and every such graph once, sorted. An entry whose access was lost
+// is hidden from its organisation, so it is in no platform figure.
+func (s *Server) platformGraphs(ctx context.Context) (orgs []accounts.Org, entries map[string][]string, graphs []string, err error) {
+	if orgs, err = s.cfg.Accounts.St.ListOrgs(ctx, 100000); err != nil {
+		return nil, nil, nil, err
 	}
-	ids := make([]string, len(st.orgs))
-	for i, o := range st.orgs {
+	ids := make([]string, len(orgs))
+	for i, o := range orgs {
 		ids[i] = o.ID
 	}
 	repos, err := s.cfg.Accounts.St.RepositoriesForOrgs(ctx, ids)
 	if err != nil {
-		return st, err
+		return nil, nil, nil, err
 	}
+	entries = map[string][]string{}
 	seen := map[string]bool{}
-	var graphs []string
 	for _, e := range repos {
 		if !e.Usable() {
-			continue // hidden from the organisation, so not its posture
+			continue
 		}
-		st.entries[e.OrgID] = append(st.entries[e.OrgID], e.Graph)
+		entries[e.OrgID] = append(entries[e.OrgID], e.Graph)
 		if !seen[e.Graph] {
 			seen[e.Graph] = true
 			graphs = append(graphs, e.Graph)
 		}
 	}
 	slices.Sort(graphs)
+	return orgs, entries, graphs, nil
+}
+
+func (s *Server) readSecurityState(ctx context.Context, since, until time.Time) (securityState, error) {
+	var st securityState
+	orgs, entries, graphs, err := s.platformGraphs(ctx)
+	if err != nil {
+		return st, err
+	}
+	st.orgs, st.entries = orgs, entries
 	if st.graphs, err = s.readGraphSecurity(ctx, graphs, since, until); err != nil {
 		return st, err
 	}

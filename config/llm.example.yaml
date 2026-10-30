@@ -24,7 +24,8 @@ providers:
     # gateway: true         # the agent gateway (on unless CODESYNAPSE_GATEWAY=false) offers every model's requests, tools included, to this local model first; what it cannot answer goes to the cloud
     # gateway_exclude:      # models never answered locally, for every organisation (each organisation can add its own in Settings):
     #   - claude-opus-*     #   an exact name or a prefix ending in *; a-z 0-9 . : _ -, at most 64 characters, at most 32 entries
-    # gateway_wait_seconds: 60 # how long a gateway request waits for a free local slot before the cloud takes it (1-300); timeout_seconds bounds the answer itself
+    # gateway_wait_seconds: 30 # how long a gateway request waits for a free local slot before the cloud takes it (1-300)
+    # gateway_first_token_seconds: 90 # how long it waits for the first token once it has the slot (1-600); timeout_seconds bounds the whole answer
     # kv_cache_ttl: 15m       # how long a cached prompt is kept: up to 24h, 0 for not at all, or forever
     # max_input_tokens:       # defaults to context_window - max_output_tokens - 1024
     input_budget_policy: estimate # counts final redacted request JSON bytes conservatively
@@ -108,6 +109,7 @@ tasks:
   # cleanup-briefing: local-mlx  # the cleanup plan in plain language (local providers only)
   # local-answer: local-mlx      # ask_local: reads files for coding agents to save their tokens (local providers only)
   # local-draft: local-mlx       # local_draft: drafts self-contained code for coding agents to check (local providers only)
+  # source-extract: local-mlx    # fetch_source: keeps the parts of a long web page that answer the agent's question (local providers only)
   # memory: local-ollama     # agent memory: facts extracted from conversation turns (local providers only)
   # embeddings: local-ollama # agent memory: recall by meaning (local, with embedding_model)
   # compress: local-mlx      # shortens prompt prose before it goes to a cloud model (local providers only)

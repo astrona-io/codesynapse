@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -209,7 +211,9 @@ func (r *Registry) compressCloud(ctx context.Context, name string, req Request) 
 // original must be used, when the call failed or the rewrite is empty, did not
 // shrink enough or lost a number or backticked name.
 func (r *Registry) shorten(ctx context.Context, local, p string) (string, bool) {
-	resp, err := r.Complete(WithTask(ctx, "compress"), local, Request{System: compressSystem, User: p})
+	// A rewrite must be shorter than p, so half its bytes in tokens is room
+	// enough; the cap keeps a model that runs on from holding the slot.
+	resp, err := r.Complete(WithTask(ctx, "compress"), local, Request{System: compressSystem, User: p, MaxTokens: len(p)/2 + 16})
 	if err != nil {
 		logx.FromContext(ctx).Debug("prompt compression skipped", "error", err)
 		return "", false
@@ -230,22 +234,81 @@ func (r *Registry) CanShorten() bool {
 	return status == CompressionOn
 }
 
+// ErrLocalBusy says ShortenProse did not run because the local model was
+// busy: a slot was taken or somebody waited for one.
+var ErrLocalBusy = errors.New("the local model is busy")
+
+// ErrNoRewrite says ShortenProse made no usable rewrite: shortening is off,
+// the text is not plain prose, or the rewrite failed its checks.
+var ErrNoRewrite = errors.New("no usable rewrite")
+
+type heldSlotKey struct{}
+
+// withHeldSlot tells Complete that the caller holds provider's queue slot.
+func withHeldSlot(ctx context.Context, provider string) context.Context {
+	return context.WithValue(ctx, heldSlotKey{}, provider)
+}
+
+func heldSlot(ctx context.Context) string {
+	p, _ := ctx.Value(heldSlotKey{}).(string)
+	return p
+}
+
 // ShortenProse has the local "compress" model shorten one block of prose a
 // person typed, for the agent gateway's cloud leg. The block is taken whole
 // or not at all: it must pass compressible (no code, diffs, lists, JSON or
 // tags) and hold nothing redact.Free would change, so a rewrite never puts a
-// placeholder where a secret or personal detail was. ok is false, and the
-// caller sends the original, when shortening is off, no local model is
-// routed to "compress", or the rewrite fails the checks of shorten.
-func (r *Registry) ShortenProse(ctx context.Context, text string) (string, bool) {
+// placeholder where a secret or personal detail was.
+//
+// Shortening is optional and must never slow a local answer: it runs only
+// when the local model's slot is free and nobody waits for it (ErrLocalBusy
+// otherwise), and once started the generation is not cancelled with ctx,
+// because a client that hangs up mid-answer is an HTTP 500 in Ollama's log
+// and a wasted run. It finishes in the background, bounded by the
+// provider's timeout and an output cap, and holds the slot until then; the
+// caller stops waiting when ctx ends and gets ctx.Err(). Any other refusal
+// is ErrNoRewrite, and the caller sends the original.
+func (r *Registry) ShortenProse(ctx context.Context, text string) (string, error) {
 	if !compressible(text) || redact.Free(text) != text {
-		return "", false
+		return "", ErrNoRewrite
 	}
 	local, status := r.compressor()
 	if status != CompressionOn {
-		return "", false
+		return "", ErrNoRewrite
 	}
-	return r.shorten(ctx, local, text)
+	release, ok := r.slots[local].tryAcquire(WithTask(ctx, "compress"))
+	if !ok {
+		return "", ErrLocalBusy
+	}
+	type result struct {
+		short string
+		ok    bool
+	}
+	done := make(chan result, 1)
+	bg := withHeldSlot(context.WithoutCancel(ctx), local)
+	go func() {
+		defer release()
+		// Detached from the request, a panic here is not recovered by
+		// net/http and would end the process: log it (its type only, the
+		// value may carry prompt text) and let the caller send the original.
+		defer func() {
+			if v := recover(); v != nil {
+				logx.FromContext(bg).Error("prompt shortening panicked", "provider", local, "panic_type", fmt.Sprintf("%T", v))
+				done <- result{}
+			}
+		}()
+		short, ok := r.shorten(bg, local, text)
+		done <- result{short, ok}
+	}()
+	select {
+	case res := <-done:
+		if !res.ok {
+			return "", ErrNoRewrite
+		}
+		return res.short, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 }
 
 // Prompt bytes the gateway removed for a cloud model the configuration does

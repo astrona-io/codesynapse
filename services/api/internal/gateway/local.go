@@ -34,7 +34,7 @@ const (
 	// defaultWait is how long a request queues for a free local slot before
 	// the gateway sends it to the cloud instead (gateway_wait_seconds). The
 	// answer itself is bounded by the provider's timeout_seconds.
-	defaultWait = 60 * time.Second
+	defaultWait = 30 * time.Second
 	// quickBody and quickMaxTokens bound a quick request (see quick).
 	quickBody      = 32 << 10
 	quickMaxTokens = 1024
@@ -82,6 +82,15 @@ type Local struct {
 	AcquireFirst func(ctx context.Context) (func(), error)
 	// Wait bounds the time in the queue; 0 means defaultWait.
 	Wait time.Duration
+	// FirstToken bounds the time from the slot to the model's first chunk,
+	// which is the prompt's prefill; Timeout bounds the whole answer. Either
+	// running out before anything was written sends the request to the
+	// cloud as answer_timeout. 0 means no bound beyond the agent's own.
+	FirstToken, Timeout time.Duration
+	// Options are extra request fields for the local server (keep_alive on
+	// Ollama), so the model and its prompt cache outlive the agent's pause
+	// between turns.
+	Options map[string]any
 	// Effort is sent as reasoning_effort ("none" turns thinking off on
 	// Ollama) and DisableThinking as chat_template_kwargs (vLLM). Without
 	// them a reasoning model spends max_tokens on thinking and answers
@@ -278,13 +287,30 @@ func present(raw json.RawMessage) bool {
 	return len(raw) > 0 && string(raw) != "null"
 }
 
+// billingHeader starts the first system block Claude Code sends: request
+// metadata (version, prompt and turn numbers, the previous request's ID) that
+// changes every turn and means nothing to a local model.
+const billingHeader = "x-anthropic-billing-header:"
+
+// stableSystem leaves out a leading billing header block. It is the first
+// thing in the prompt, so as it changed every turn the local server could
+// reuse none of its prompt cache; the cloud still gets it unchanged.
+func stableSystem(sys string) string {
+	if !strings.HasPrefix(sys, billingHeader) {
+		return sys
+	}
+	_, rest, _ := strings.Cut(sys, "\n\n")
+	return rest
+}
+
 // Reasons a request offered to the local model went to the cloud instead:
 // the fixed values of Meta.Fallthrough, mirrored in the telemetry allowlist
 // (internal/telemetry/outcomes.go). Each says one thing, so the statistics
 // can tell a slow model (queue_timeout, answer_timeout) from a broken one.
 const (
 	FallExcluded         = "excluded"          // the model is on the installation's or organisation's exclude list
-	FallNotEligible      = "not_eligible"      // the model is not one the organisation answers locally
+	FallNotEligible      = "not_eligible"      // the installation's Eligible rule does not offer the model locally
+	FallLocalFirstOff    = "local_first_off"   // the organisation switched local first off and the request is not for the small model
 	FallBadRequest       = "bad_request"       // the body is not a request the gateway can read (bad JSON, no messages, unknown role)
 	FallSystemNotText    = "system_not_text"   // the system prompt is not a string or text blocks
 	FallUnsupportedBlock = "unsupported_block" // a message holds a block the local model cannot take (server tool results, unknown types)
@@ -362,18 +388,18 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 	if l.excluded(ctx, in.Model) {
 		return in, nil, FallExcluded
 	}
-	elig := l.Eligible
-	if elig == nil {
-		elig = SmallModel
-		if localFirst(ctx) {
-			elig = func(string) bool { return true }
-		}
-	}
-	if !elig(in.Model) {
-		return in, nil, FallNotEligible
-	}
 	if len(in.Messages) == 0 {
 		return in, nil, FallBadRequest
+	}
+	switch {
+	case l.Eligible != nil:
+		if !l.Eligible(in.Model) {
+			return in, nil, FallNotEligible
+		}
+	case !localFirst(ctx) && !SmallModel(in.Model):
+		// The organisation's choice, not something the local model cannot
+		// do, so it is told apart from not_eligible.
+		return in, nil, FallLocalFirstOff
 	}
 	// With local thinking on, the local model answers without thinking and
 	// leaves Claude's earlier thinking blocks out: they are signed reasoning
@@ -397,7 +423,7 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 		if !ok {
 			return in, nil, FallSystemNotText
 		}
-		msgs = append(msgs, oaMsg{Role: "system", Content: sys})
+		msgs = append(msgs, oaMsg{Role: "system", Content: stableSystem(sys)})
 	}
 	for _, m := range in.Messages {
 		conv, why := convertMessage(m, think)
@@ -439,6 +465,14 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 	if len(in.StopSequences) > 0 {
 		req["stop"] = in.StopSequences
 	}
+	for k, v := range l.Options {
+		if _, set := req[k]; !set {
+			req[k] = v
+		}
+	}
+	// json.Marshal writes map keys sorted and the tool schemas as sent, so
+	// the same turn always gives the same bytes and the local server can
+	// reuse the prompt cache of the turn before.
 	out, err := json.Marshal(req)
 	if err != nil {
 		return in, nil, FallBadRequest
@@ -497,8 +531,30 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 		u.Answer = time.Since(started)
 		return u, reason, false
 	}
+	// rctx carries the gateway's own bounds; a call it ended is a timeout,
+	// one the agent ended a cancel.
+	rctx, stop := context.WithCancel(ctx)
+	defer stop()
+	if l.Timeout > 0 {
+		var cancel context.CancelFunc
+		rctx, cancel = context.WithTimeout(rctx, l.Timeout)
+		defer cancel()
+	}
+	// The first chunk ends the prefill bound; only Timeout is left after it.
+	begun := func() {}
+	if l.FirstToken > 0 {
+		timer := time.AfterFunc(l.FirstToken, stop)
+		defer timer.Stop()
+		begun = func() { timer.Stop() }
+	}
+	why := func(err error) string {
+		if ctx.Err() == nil && rctx.Err() != nil {
+			return FallTimeout
+		}
+		return failure(ctx, err)
+	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(l.BaseURL, "/")+"/chat/completions", bytes.NewReader(req))
+	httpReq, err := http.NewRequestWithContext(rctx, http.MethodPost, strings.TrimRight(l.BaseURL, "/")+"/chat/completions", bytes.NewReader(req))
 	if err != nil {
 		return fail(FallModelError)
 	}
@@ -508,7 +564,7 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 	}
 	resp, err := l.client().Do(httpReq)
 	if err != nil {
-		return fail(failure(ctx, err))
+		return fail(why(err))
 	}
 	defer resp.Body.Close() //nolint:errcheck // read side
 	if resp.StatusCode != http.StatusOK {
@@ -529,9 +585,10 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 		// A tool call is only usable whole: collect the answer, check it, and
 		// let the cloud take the request if the local model got it wrong.
 		first, more := next()
+		begun()
 		ans, ok := collect(first, more, next, declaredTools(in.offered))
 		if err := sc.Err(); err != nil {
-			return fail(failure(ctx, err))
+			return fail(why(err))
 		}
 		// A stream the server broke off is a model error, not an answer that
 		// ran out of max_tokens: calling it truncated hides a failing server.
@@ -553,8 +610,9 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 	// Wait for the first chunk before writing anything, so a model that
 	// fails to start still falls through to the cloud.
 	first, more := next()
+	begun()
 	if err := sc.Err(); !more && err != nil {
-		return fail(failure(ctx, err))
+		return fail(why(err))
 	}
 	if !more && (rd.failed || !rd.done) {
 		return fail(FallModelError)

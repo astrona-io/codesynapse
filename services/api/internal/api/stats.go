@@ -99,11 +99,14 @@ type AgentStats struct {
 	// LocalBriefs counts prompts a local model briefed the agent on.
 	LocalBriefs int `json:"local_briefs"`
 	// LocalDrafts counts drafts a local model wrote for an agent.
-	LocalDrafts  int        `json:"local_drafts"`
-	AvgLatencyMs float64    `json:"avg_latency_ms"`
-	MaxLatencyMs int        `json:"max_latency_ms"`
-	Daily        []DayStat  `json:"daily"`
-	Tools        []ToolStat `json:"tools"`
+	LocalDrafts int `json:"local_drafts"`
+	// Sources is what fetch_source saved: pages an agent read as cleaned
+	// text instead of as served.
+	Sources      SourceStats `json:"sources"`
+	AvgLatencyMs float64     `json:"avg_latency_ms"`
+	MaxLatencyMs int         `json:"max_latency_ms"`
+	Daily        []DayStat   `json:"daily"`
+	Tools        []ToolStat  `json:"tools"`
 	// Workflow says how sessions began, as the plugin's hooks reported.
 	Workflow WorkflowStats `json:"workflow"`
 	Clients  []ClientStat  `json:"clients"`
@@ -111,6 +114,32 @@ type AgentStats struct {
 	// Unindexed lists checkouts agents worked in that the server has not
 	// indexed, so they got no graph answers.
 	Unindexed UnindexedStats `json:"unindexed"`
+}
+
+// SourceStats is the "External sources" line of Models & savings: pages
+// fetch_source returned, how many its cache answered, their tokens as served
+// and the tokens the agent did not read (raw minus returned, per page).
+// Dollars values SavedTokens at the reference model's input price (PerMTok,
+// PriceSource); nil when that price is unknown, never zero.
+type SourceStats struct {
+	Fetches     int      `json:"fetches"`
+	Hits        int      `json:"hits"`
+	RawTokens   int      `json:"raw_tokens"`
+	SavedTokens int      `json:"saved_tokens"`
+	PerMTok     float64  `json:"per_mtok"`
+	Dollars     *float64 `json:"dollars"`
+	PriceSource string   `json:"price_source,omitempty"`
+}
+
+// sourcesSaved values the saved tokens at ref's input price. Only input is
+// valued: reading less does not change what an agent writes by a measurable
+// amount.
+func sourcesSaved(st SourceStats, ref PriceReference) SourceStats {
+	st.PerMTok, st.PriceSource, st.Dollars = ref.InputPerMTok, ref.Source, nil
+	if ref.InputPerMTok > 0 {
+		st.Dollars = ptr(round4(float64(st.SavedTokens) * ref.InputPerMTok / 1e6))
+	}
+	return st
 }
 
 // UnindexedRepo is one checkout whose pre-finish check was skipped.
@@ -371,7 +400,9 @@ func (s *Server) buildStats(ctx context.Context, days int, now time.Time) (Stats
 				return err
 			}
 			st.Agents = agentUsage(buckets, ov.Repos, days, now)
-			st.Agents.Saved = savedEstimate(st.Agents, s.priceReference())
+			ref := s.priceReference()
+			st.Agents.Saved = savedEstimate(st.Agents, ref)
+			st.Agents.Sources = sourcesSaved(st.Agents.Sources, ref)
 			st.Memory, err = s.memoryStats(ctx, buckets, st.Agents.Sessions, days, now)
 			return err
 		},
@@ -488,6 +519,20 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 		}
 		if bk.Tool == usage.LocalRead {
 			a.LocalReadTokens += bk.Calls
+			continue
+		}
+		switch bk.Tool {
+		case usage.SourceFetches:
+			a.Sources.Fetches += bk.Calls
+			continue
+		case usage.SourceHits:
+			a.Sources.Hits += bk.Calls
+			continue
+		case usage.SourceRaw:
+			a.Sources.RawTokens += bk.Calls
+			continue
+		case usage.SourceSaved:
+			a.Sources.SavedTokens += bk.Calls
 			continue
 		}
 		if bk.Tool == usage.LocalAvoided {

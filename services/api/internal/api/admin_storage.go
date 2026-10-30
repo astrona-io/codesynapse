@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
@@ -45,6 +46,9 @@ type StatsStorage struct {
 	Reason    string         `json:"reason,omitempty"`
 	SampledAt *time.Time     `json:"sampled_at"`
 	Stores    []StoreSizeRow `json:"stores"`
+	// Rollup is set for 90d and 365d, which read the daily rollup: the
+	// sizes of the latest written day and their change since the first.
+	Rollup *StatsRollup `json:"rollup,omitempty"`
 }
 
 func (s *Server) handleStatsStorage(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +74,9 @@ func storeStep(since, now time.Time) time.Duration {
 
 func (s *Server) statsStorage(ctx context.Context, rng string, q accounts.StatsQuery) (StatsStorage, error) {
 	out := StatsStorage{Range: rng, Stores: []StoreSizeRow{}}
+	if q.Daily != "" {
+		return s.dailyStorage(ctx, out, q)
+	}
 	if s.cfg.Metrics == nil {
 		out.Reason = "no metrics store"
 		return out, nil
@@ -143,6 +150,91 @@ func storeRows(rows, bytes []telemetry.Series) []StoreSizeRow {
 		return cmp.Or(cmp.Compare(a.System, b.System), cmp.Compare(a.Kind, b.Kind))
 	})
 	return out
+}
+
+// dailyStorage answers 90d and 365d from the daily rollup: per store and
+// kind the size on the latest day that has one, and the change since the
+// first such day in the range. Kinds no longer registered are left out.
+func (s *Server) dailyStorage(ctx context.Context, out StatsStorage, q accounts.StatsQuery) (StatsStorage, error) {
+	p, ok := principal(ctx)
+	if !ok {
+		return out, accounts.ErrForbidden
+	}
+	roll := StatsRollup{Days: accounts.DailyStatRanges[q.Daily], Unavailable: []string{}}
+	out.Rollup = &roll
+	hist, err := s.cfg.Accounts.PlatformStatsHistory(ctx, p, q.Daily, []string{accounts.StatStoreRows, accounts.StatStoreBytes}, "", false)
+	if err != nil {
+		return out, err
+	}
+	if len(hist) >= accounts.MaxPlatformStatRows {
+		return out, errDailyTooLarge
+	}
+	type point struct {
+		first, last       int64
+		firstDay, lastDay time.Time
+	}
+	series := map[[2]string]*point{} // metric, dimension
+	days := map[time.Time]bool{}
+	for _, r := range hist {
+		if r.OrgID != "" {
+			continue
+		}
+		days[r.Day] = true
+		k := [2]string{r.Metric, r.Dimension}
+		pt := series[k]
+		if pt == nil {
+			series[k] = &point{first: r.Value, last: r.Value, firstDay: r.Day, lastDay: r.Day}
+			continue
+		}
+		if r.Day.Before(pt.firstDay) {
+			pt.first, pt.firstDay = r.Value, r.Day
+		}
+		if r.Day.After(pt.lastDay) {
+			pt.last, pt.lastDay = r.Value, r.Day
+		}
+	}
+	roll.Written = len(days)
+	for d := range days {
+		if roll.Latest == nil || d.After(*roll.Latest) {
+			day := d
+			roll.Latest = &day
+		}
+	}
+	type key struct{ system, kind string }
+	by := map[key]*StoreSizeRow{}
+	for k, pt := range series {
+		system, kind, _ := strings.Cut(k[1], ".")
+		if !telemetry.StoreKindAllowed(system, kind) {
+			continue
+		}
+		row := by[key{system, kind}]
+		if row == nil {
+			row = &StoreSizeRow{System: system, Kind: kind}
+			by[key{system, kind}] = row
+		}
+		last, change := float64(pt.last), float64(pt.last-pt.first)
+		if k[0] == accounts.StatStoreRows {
+			row.Rows, row.RowsChange = &last, &change
+		} else {
+			row.Bytes, row.BytesChange = &last, &change
+		}
+	}
+	for _, row := range by {
+		out.Stores = append(out.Stores, *row)
+	}
+	slices.SortFunc(out.Stores, func(a, b StoreSizeRow) int {
+		return cmp.Or(cmp.Compare(a.System, b.System), cmp.Compare(a.Kind, b.Kind))
+	})
+	if len(out.Stores) == 0 {
+		out.Reason = "no sample in the daily rollup yet"
+		return out, nil
+	}
+	out.Available = true
+	if roll.Latest != nil {
+		at := *roll.Latest
+		out.SampledAt = &at
+	}
+	return out, nil
 }
 
 // StatsAlerts answers GET /api/v1/admin/stats/alerts.

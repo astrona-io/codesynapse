@@ -21,6 +21,8 @@ import (
 //
 //   - graph answers (tokens never read and their dollars) from the daily
 //     usage counters through agentUsage and savedEstimate;
+//   - external sources (fetch_source's tokens saved and their dollars) from
+//     the same counters through agentUsage and sourcesSaved;
 //   - local model work, prompt compression and the gateway's local answers
 //     from the metrics store, with fixed MetricsQL and the caller's tenants
 //     as extra_filters.
@@ -28,7 +30,8 @@ import (
 // The usage counters are daily. Below a day, each day's graph answers are
 // placed over its hours in proportion to the tokens the navigation tools
 // returned per hour (mcp_response_tokens_total); a day with no such
-// measurement is left unplaced and counted apart.
+// measurement is left unplaced and counted apart. External sources are
+// placed the same way by the raw page tokens of codesynapse_source_tokens_total.
 
 // Bucket sizes, as the API names them.
 const (
@@ -92,6 +95,10 @@ type SavingsBucket struct {
 	LocalCachedTokens float64  `json:"local_cached_tokens"`
 	CompressionSaved  *float64 `json:"compression_saved_dollars"`
 	GatewaySaved      *float64 `json:"gateway_saved_dollars"`
+	// SourceSavedTokens is what fetch_source kept the agent from reading
+	// and SourcesSaved its dollars (sourcesSaved).
+	SourceSavedTokens int      `json:"source_saved_tokens"`
+	SourcesSaved      *float64 `json:"sources_saved_dollars"`
 }
 
 // SavingsSeries is the answer of GET /api/v1/stats/savings.
@@ -107,23 +114,27 @@ type SavingsSeries struct {
 	// Unplaced counts graph-answer tokens (and their dollars) of days the
 	// hourly measurement does not cover; they are in the window's tiles but
 	// in no sub-day bucket.
-	UnplacedTokens  int             `json:"unplaced_never_read_tokens"`
-	UnplacedDollars float64         `json:"unplaced_graph_saved_dollars"`
-	Reference       *PriceReference `json:"reference_price"`
+	UnplacedTokens  int     `json:"unplaced_never_read_tokens"`
+	UnplacedDollars float64 `json:"unplaced_graph_saved_dollars"`
+	// UnplacedSource* are the same for external sources.
+	UnplacedSourceTokens  int             `json:"unplaced_source_saved_tokens"`
+	UnplacedSourceDollars float64         `json:"unplaced_sources_saved_dollars"`
+	Reference             *PriceReference `json:"reference_price"`
 }
 
 // savingsQueries; $w is the slot. The graph shape sums the navigation tools'
 // response tokens, the base of their avoided figure (agentStats).
 //
 //nolint:gosec // metric names, not credentials
-var savingsQueries = struct{ input, output, cached, compressed, gateway, unmetered, graphShape string }{
-	input:      `sum by (llm_provider)(increase(llm_tokens_input_total[$w]))`,
-	output:     `sum by (llm_provider)(increase(llm_tokens_output_total[$w]))`,
-	cached:     `sum by (llm_provider)(increase(llm_tokens_saved_total[$w]))`,
-	compressed: `sum by (llm_provider)(increase(llm_compressed_bytes_total[$w]))`,
-	gateway:    `sum by (kind)(increase(gateway_local_tokens_total[$w]))`,
-	unmetered:  `sum(increase(gateway_local_unmetered_total[$w]))`,
-	graphShape: `sum(increase(mcp_response_tokens_total{mcp_tool=~"` + navigationToolsRegex() + `"}[$w]))`,
+var savingsQueries = struct{ input, output, cached, compressed, gateway, unmetered, graphShape, sourceShape string }{
+	input:       `sum by (llm_provider)(increase(llm_tokens_input_total[$w]))`,
+	output:      `sum by (llm_provider)(increase(llm_tokens_output_total[$w]))`,
+	cached:      `sum by (llm_provider)(increase(llm_tokens_saved_total[$w]))`,
+	compressed:  `sum by (llm_provider)(increase(llm_compressed_bytes_total[$w]))`,
+	gateway:     `sum by (kind)(increase(gateway_local_tokens_total[$w]))`,
+	unmetered:   `sum(increase(gateway_local_unmetered_total[$w]))`,
+	graphShape:  `sum(increase(mcp_response_tokens_total{mcp_tool=~"` + navigationToolsRegex() + `"}[$w]))`,
+	sourceShape: `sum(increase(codesynapse_source_tokens_total{stage="raw"}[$w]))`,
 }
 
 // navigationToolsRegex is a constant alternation of the tool names, sorted
@@ -139,9 +150,10 @@ func navigationToolsRegex() string {
 
 // savingsSlot is one metrics-store slot of the window.
 type savingsSlot struct {
-	model      map[string]*ModelStat // per provider: tokens and compressed bytes
-	gw         GatewayStat
-	graphShape float64
+	model       map[string]*ModelStat // per provider: tokens and compressed bytes
+	gw          GatewayStat
+	graphShape  float64
+	sourceShape float64
 }
 
 // metricsSlots reads the window's slots from the metrics store. Points are
@@ -188,6 +200,7 @@ func (s *Server) metricsSlots(ctx context.Context, l savingsLayout, tenants []st
 		}},
 		{savingsQueries.unmetered, func(i int, _ map[string]string, v float64) { slots[i].gw.LocalUnmetered += v }},
 		{savingsQueries.graphShape, func(i int, _ map[string]string, v float64) { slots[i].graphShape += v }},
+		{savingsQueries.sourceShape, func(i int, _ map[string]string, v float64) { slots[i].sourceShape += v }},
 	}
 	for _, st := range steps {
 		res, err := s.cfg.Metrics.QueryRange(ctx, strings.ReplaceAll(st.expr, "$w", window), start.Add(l.slot), end, l.slot, tenants)
@@ -217,43 +230,46 @@ func (s *Server) buildSavings(l savingsLayout, buckets []usage.Bucket, repos []R
 	for i := range out.Buckets {
 		out.Buckets[i] = SavingsBucket{Start: l.bounds[i].Unix(), End: l.bounds[i+1].Unix()}
 	}
-	// graph is one span of whole days valued exactly as the tiles value a
-	// window: agentUsage, then savedEstimate.
-	graph := func(from, to time.Time) (int, *float64) {
+	// span is one span of whole days valued exactly as the tiles value a
+	// window: agentUsage, then savedEstimate and sourcesSaved.
+	span := func(from, to time.Time) AgentStats {
 		days := int(to.Sub(from) / (24 * time.Hour))
 		a := agentUsage(buckets, repos, days, to.Add(-time.Hour))
 		a.Saved = savedEstimate(a, ref)
-		return a.AvoidedTokens - a.LocalAvoidedTokens, a.Saved.TotalDollars
+		a.Sources = sourcesSaved(a.Sources, ref)
+		return a
 	}
 	if l.slot >= 24*time.Hour {
 		for i := range out.Buckets {
-			out.Buckets[i].NeverReadTokens, out.Buckets[i].GraphSaved = graph(l.bounds[i], l.bounds[i+1])
+			a := span(l.bounds[i], l.bounds[i+1])
+			b := &out.Buckets[i]
+			b.NeverReadTokens, b.GraphSaved = a.AvoidedTokens-a.LocalAvoidedTokens, a.Saved.TotalDollars
+			b.SourceSavedTokens, b.SourcesSaved = a.Sources.SavedTokens, a.Sources.Dollars
 		}
 	} else {
 		perDay := int(24 * time.Hour / l.slot)
 		for d := 0; d*perDay < len(out.Buckets); d++ {
 			from := start.Add(time.Duration(d) * 24 * time.Hour)
-			tokens, dollars := graph(from, from.Add(24*time.Hour))
-			var weights []float64
+			a := span(from, from.Add(24*time.Hour))
+			day := out.Buckets[d*perDay : min(len(out.Buckets), (d+1)*perDay)]
+			var graphW, sourceW []float64
 			if slots != nil {
 				for j := range perDay {
-					weights = append(weights, slots[d*perDay+j].graphShape)
+					graphW = append(graphW, slots[d*perDay+j].graphShape)
+					sourceW = append(sourceW, slots[d*perDay+j].sourceShape)
 				}
 			}
-			parts := apportion(tokens, weights)
-			if parts == nil {
-				out.UnplacedTokens += tokens
-				if dollars != nil {
-					out.UnplacedDollars = round4(out.UnplacedDollars + *dollars)
-				}
-				continue
+			if !place(day, a.AvoidedTokens-a.LocalAvoidedTokens, a.Saved.TotalDollars, graphW, func(b *SavingsBucket, n int, v *float64) {
+				b.NeverReadTokens, b.GraphSaved = n, v
+			}) {
+				out.UnplacedTokens += a.AvoidedTokens - a.LocalAvoidedTokens
+				out.UnplacedDollars = round4(out.UnplacedDollars + deref(a.Saved.TotalDollars))
 			}
-			for j, n := range parts {
-				b := &out.Buckets[d*perDay+j]
-				b.NeverReadTokens = n
-				if dollars != nil {
-					b.GraphSaved = ptr(round4(*dollars * weights[j] / sum(weights)))
-				}
+			if !place(day, a.Sources.SavedTokens, a.Sources.Dollars, sourceW, func(b *SavingsBucket, n int, v *float64) {
+				b.SourceSavedTokens, b.SourcesSaved = n, v
+			}) {
+				out.UnplacedSourceTokens += a.Sources.SavedTokens
+				out.UnplacedSourceDollars = round4(out.UnplacedSourceDollars + deref(a.Sources.Dollars))
 			}
 		}
 	}
@@ -294,6 +310,27 @@ func (s *Server) buildSavings(l savingsLayout, buckets []usage.Bucket, repos []R
 		b.LocalInputTokens, b.LocalOutputTokens, b.LocalCachedTokens = math.Round(b.LocalInputTokens), math.Round(b.LocalOutputTokens), math.Round(b.LocalCachedTokens)
 	}
 	return out
+}
+
+// place spreads one day's tokens and dollars over its sub-day buckets in
+// proportion to weights, through set; false when the weights cannot place
+// them (no measurement), and the day stays unplaced.
+func place(day []SavingsBucket, tokens int, dollars *float64, weights []float64, set func(b *SavingsBucket, n int, v *float64)) bool {
+	parts := apportion(tokens, weights)
+	if parts == nil {
+		return false
+	}
+	for j, n := range parts {
+		var v *float64
+		if dollars != nil {
+			v = ptr(0)
+			if w := sum(weights); w > 0 {
+				v = ptr(round4(*dollars * weights[j] / w))
+			}
+		}
+		set(&day[j], n, v)
+	}
+	return true
 }
 
 // bucketOf is the bucket whose span holds t.

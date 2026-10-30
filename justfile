@@ -174,6 +174,11 @@ plugin-check:
 eval *args:
     go run ./cmd/codesynapse eval . --repo codesynapse --baseline docs/benchmarks/task-eval/codesynapse.json {{args}}
 
+# Time the gateway's local answers on synthetic Claude Code requests; skips without a reachable local model (docs/operations/gateway.md)
+gateway-bench *args:
+    CODESYNAPSE_GATEWAY_BENCH_URL="${CODESYNAPSE_GATEWAY_BENCH_URL:-http://localhost:11434/v1}" \
+        go test -count=1 -timeout 0 -run '^TestGatewayBench$' -v ./services/api/internal/gateway/ {{args}}
+
 # Register the MCP server with your AI agents (asks per agent: Claude Code, Codex, Gemini, OpenCode, Cursor, project)
 mcp:
     go install ./cmd/codesynapse
@@ -346,7 +351,7 @@ build:
 
 # Unit tests with the race detector
 test:
-    go test -race ./...
+    go test -race -timeout 20m ./...
 
 # Accounts contract against a throwaway PostgreSQL container (never the compose database: the test drops its tables)
 test-postgres: _runtime
@@ -422,6 +427,7 @@ cover:
 fuzz time="20s":
     go test ./internal/gitx -run=^$ -fuzz=FuzzParseDiff -fuzztime={{time}}
     go test ./internal/redact -run=^$ -fuzz=FuzzText -fuzztime={{time}}
+    go test ./internal/sarifimport -run=^$ -fuzz=FuzzParse -fuzztime={{time}}
 
 # Lint Go code
 lint:

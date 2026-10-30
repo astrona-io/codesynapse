@@ -8,7 +8,9 @@ import type { BatchedPanel } from '~/composables/useSeriesBatch'
 // A page that loads its panels together (useSeriesBatch) passes batched;
 // a card on its own fetches its panel.
 // yMax shares one y scale between cards shown side by side.
-const props = defineProps<{ panel: string; range: SeriesRange; tick?: number; repo?: string; batched?: BatchedPanel | null; batchPending?: boolean; yMax?: number }>()
+// label names a series for people (a reason code as plain words); "other"
+// keeps its name, so the chart still draws it in the neutral colour.
+const props = defineProps<{ panel: string; range: SeriesRange; tick?: number; repo?: string; batched?: BatchedPanel | null; batchPending?: boolean; yMax?: number; label?: (name: string) => string }>()
 const emit = defineEmits<{ unavailable: [status: number] }>()
 const own = props.batched === undefined
   ? useApiGet<SeriesPanel>(() => `stats/series?panel=${props.panel}&range=${props.range}${props.repo ? `&repo=${encodeURIComponent(props.repo)}` : ""}`)
@@ -27,6 +29,12 @@ const error = computed<{ statusCode: number; message: string } | null>(() => {
 watch(error, (e) => {
   if (e?.statusCode === 409 || e?.statusCode === 403) emit('unavailable', e.statusCode)
 }, { immediate: true })
+const lines = computed(() => {
+  const d = data.value
+  if (!d || !props.label) return d?.series ?? []
+  const label = props.label
+  return d.series.map((l) => (l.name === 'other' ? l : { ...l, name: label(l.name) }))
+})
 const empty = computed(() => !data.value?.series.some((s) => s.values.some((v) => v !== null)))
 const headline = computed(() => {
   const d = data.value
@@ -45,7 +53,7 @@ const headline = computed(() => {
     <DataState v-if="error && error.statusCode !== 409 && error.statusCode !== 403" :error="error.message" compact />
     <DataState v-else-if="pending && !data" pending empty compact />
     <template v-else-if="data">
-      <LineChart v-if="!empty" :times="data.times" :series="data.series" :title="data.title" :unit="data.unit" :step-seconds="data.step_seconds" :y-max="yMax ?? 0" />
+      <LineChart v-if="!empty" :times="data.times" :series="lines" :title="data.title" :unit="data.unit" :step-seconds="data.step_seconds" :y-max="yMax ?? 0" />
       <p v-else class="muted small empty-chart">{{ data.empty }}</p>
       <p class="muted small">{{ data.help }}</p>
     </template>

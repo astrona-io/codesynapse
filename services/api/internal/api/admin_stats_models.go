@@ -34,7 +34,7 @@ import (
 
 // errModelsRange is the answer to a range the models section has no
 // series for: VictoriaMetrics keeps 30 days.
-var errModelsRange = errors.New("range must be 1h, 6h, 24h, 7d or 30d: model series are kept for 30 days")
+var errModelsRange = errors.New("range must be 1h, 6h, 24h, 7d, 30d, 90d or 365d")
 
 // Model kinds: local and cloud come from the provider configuration
 // (ProviderConfig.Local); unknown is a provider this process does not
@@ -134,6 +134,10 @@ type ModelOrgRow struct {
 type ModelsSection struct {
 	StatsTable[ModelTotals, ModelOrgRow]
 	Models []ModelRow `json:"models"`
+	// ModelsRange is the window of Models when it differs from Range: the
+	// rollup keeps no model names or latencies, so 90d and 365d list the
+	// last 30 days' models (none without a metrics store).
+	ModelsRange string `json:"models_range,omitempty"`
 }
 
 // adminModelQueries; $r is the window. The (platform_)? twins hold calls
@@ -154,8 +158,8 @@ var adminModelQueries = struct {
 	cloudBytes:     `sum by (tenant_id, llm_provider, llm_model)(increase({__name__=~"(platform_)?cloud_bytes_sent_total"}[$r]))`,
 	ttft:           `histogram_quantile(0.95, sum by (le, llm_provider, llm_model)(increase({__name__=~"(platform_)?llm_time_to_first_token_seconds_bucket"}[$r])))`,
 	duration:       `histogram_quantile(0.95, sum by (le, llm_provider, llm_model)(increase({__name__=~"(platform_)?llm_request_duration_seconds_bucket"}[$r])))`,
-	embedded:       `sum(increase({__name__=~"(platform_)?memory_entities_embedded_total"}[$r]))`,
-	offload:        `sum(increase({__name__=~"(platform_)?memory_offload_turns_total"}[$r]))`,
+	embedded:       `sum by (tenant_id)(increase({__name__=~"(platform_)?memory_entities_embedded_total"}[$r]))`,
+	offload:        `sum by (tenant_id)(increase({__name__=~"(platform_)?memory_offload_turns_total"}[$r]))`,
 }
 
 // modelCell is one tenant's calls of one stored model identity.
@@ -170,9 +174,11 @@ type modelCell struct {
 
 // modelsData is the section before paging.
 type modelsData struct {
-	totals ModelTotals
-	rows   []ModelOrgRow
-	models []ModelRow
+	totals      ModelTotals
+	rows        []ModelOrgRow
+	models      []ModelRow
+	rollup      *StatsRollup
+	modelsRange string
 }
 
 var modelSorts = map[string]func(ModelOrgRow) int{
@@ -186,14 +192,22 @@ var modelSorts = map[string]func(ModelOrgRow) int{
 // errNoMetrics answers 409: the section reads VictoriaMetrics only.
 var errNoMetrics = errors.New("metrics are not configured (CODESYNAPSE_METRICS_URL)")
 
+// modelsRange checks a models range: the series ranges, or 90d and 365d
+// from the daily rollup.
+func modelsRange(rng string) bool {
+	_, live := seriesRanges[rng]
+	_, daily := accounts.DailyStatRanges[rng]
+	return live || daily
+}
+
 func (s *Server) handleStatsModels(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Metrics == nil {
-		s.problem(w, http.StatusConflict, errNoMetrics)
+	req := statsRequest(r, "models")
+	if !modelsRange(req.Range) {
+		s.problem(w, http.StatusBadRequest, errModelsRange)
 		return
 	}
-	req := statsRequest(r, "models")
-	if _, ok := seriesRanges[req.Range]; !ok {
-		s.problem(w, http.StatusBadRequest, errModelsRange)
+	if _, daily := accounts.DailyStatRanges[req.Range]; !daily && s.cfg.Metrics == nil {
+		s.problem(w, http.StatusConflict, errNoMetrics)
 		return
 	}
 	q, ok := s.platformView(w, r, req)
@@ -206,7 +220,7 @@ func (s *Server) handleStatsModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sortRows(d.rows, modelSorts[r.URL.Query().Get("sort")])
-	writeJSON(w, http.StatusOK, ModelsSection{StatsTable: page(r, req.Range, d.totals, d.rows, nil), Models: d.models})
+	writeJSON(w, http.StatusOK, ModelsSection{StatsTable: page(r, req.Range, d.totals, d.rows, d.rollup), Models: d.models, ModelsRange: d.modelsRange})
 }
 
 // modelsError answers a failed models read: VictoriaMetrics errors are a
@@ -229,8 +243,12 @@ type metricsError struct{ err error }
 func (e metricsError) Error() string { return e.err.Error() }
 func (e metricsError) Unwrap() error { return e.err }
 
-// modelStats reads the window rng (one of seriesRanges) ending at q.Now.
+// modelStats reads the window rng ending at q.Now: one of seriesRanges
+// from VictoriaMetrics, 90d and 365d from the daily rollup.
 func (s *Server) modelStats(ctx context.Context, rng string, q accounts.StatsQuery) (modelsData, error) {
+	if q.Daily != "" {
+		return s.dailyModelStats(ctx, q)
+	}
 	if s.cfg.Metrics == nil {
 		return modelsData{}, errNoMetrics
 	}
@@ -242,9 +260,109 @@ func (s *Server) modelStats(ctx context.Context, rng string, q accounts.StatsQue
 	if q.OrgID != "" {
 		tenants = []string{q.OrgID}
 	}
-	end := q.Now.Truncate(time.Second)
+	m, err := s.collectModelCells(ctx, rng, sr.span, q.Now.Truncate(time.Second), tenants)
+	if err != nil {
+		return modelsData{}, err
+	}
+	d := modelsData{totals: ModelTotals{ModelFigures: sumModelCells(m.cells), EmbeddedEntities: math.Round(m.embedded), OffloadTurns: math.Round(m.offload)}}
+	d.models = s.modelRows(m.cells, m.ttft, m.duration)
+	byOrg := map[string][]*modelCell{}
+	for _, c := range m.cells {
+		if c.tenant != "" && c.tenant != telemetry.NoTenant {
+			byOrg[c.tenant] = append(byOrg[c.tenant], c)
+		}
+	}
+	rows, err := s.modelOrgRows(ctx, q.OrgID, byOrg)
+	if err != nil {
+		return modelsData{}, err
+	}
+	d.rows = rows
+	return d, nil
+}
+
+// dailyModelStats answers 90d and 365d: the totals and organisation rows
+// from the rollup, which keeps the calls per organisation and provider
+// kind; the model rows are the last 30 days' when a metrics store answers.
+func (s *Server) dailyModelStats(ctx context.Context, q accounts.StatsQuery) (modelsData, error) {
+	roll, platform, perOrg, err := s.readRollup(ctx, q, []string{accounts.StatLLMCalls, accounts.StatLLMMemory})
+	if err != nil {
+		return modelsData{}, err
+	}
+	roll.Unavailable = []string{"latency"}
+	d := modelsData{rollup: &roll, models: []ModelRow{}, modelsRange: "30d"}
+	if q.OrgID != "" {
+		// The selected organisation's figures, as the live ranges show them.
+		platform = perOrg[q.OrgID]
+	}
+	d.totals = ModelTotals{ModelFigures: sumModelCells(rollupModelCells(platform)),
+		EmbeddedEntities: float64(platform[[2]string{accounts.StatLLMMemory, "embedded"}]),
+		OffloadTurns:     float64(platform[[2]string{accounts.StatLLMMemory, "offload"}])}
+	byOrg := map[string][]*modelCell{}
+	for org, m := range perOrg {
+		if org != "" {
+			byOrg[org] = rollupModelCells(m)
+		}
+	}
+	if d.rows, err = s.modelOrgRows(ctx, q.OrgID, byOrg); err != nil {
+		return modelsData{}, err
+	}
+	if s.cfg.Metrics != nil {
+		var tenants []string
+		if q.OrgID != "" {
+			tenants = []string{q.OrgID}
+		}
+		m, err := s.collectModelCells(ctx, "30d", seriesRanges["30d"].span, q.Now.Truncate(time.Second), tenants)
+		if err != nil {
+			if ctx.Err() != nil {
+				return modelsData{}, ctx.Err()
+			}
+			s.logger.Warn("the models of the last 30 days are not available", "error", err)
+		} else {
+			d.models = s.modelRows(m.cells, m.ttft, m.duration)
+		}
+	}
+	return d, nil
+}
+
+// rollupModelCells turns one scope's llm_calls rows back into one cell per
+// provider kind, so sumModelCells works out the cost basis as for the live
+// ranges. Every cell counts as having a cost: a zero adds nothing.
+func rollupModelCells(m map[[2]string]int64) []*modelCell {
+	var out []*modelCell
+	for _, kind := range accounts.StatLLMKinds {
+		v := func(figure string) float64 {
+			return float64(m[[2]string{accounts.StatLLMCalls, kind + "." + figure}])
+		}
+		c := &modelCell{kind: kind, hasCost: true,
+			requests: v("requests"), failures: v("failures"), input: v("input"), output: v("output"), cached: v("cached"),
+			bytes: v("bytes"), usageUnknown: v("usage_unknown"), pricingMissing: v("pricing_missing"),
+			cost: v("cost_micro") / 1e6, saved: v("saved_micro") / 1e6}
+		if c.requests+c.input+c.output+c.bytes > 0 {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// modelCells are the calls of one window, split by tenant and stored model
+// identity, with their kinds set.
+type modelCells struct {
+	cells             []*modelCell
+	ttft, duration    map[[2]string]float64
+	embedded, offload float64
+	// memory is the memory work per tenant: embedded entities, offloaded
+	// turns.
+	memory map[string]*[2]float64
+}
+
+// collectModelCells runs adminModelQueries over the window rng (a MetricsQL
+// duration) ending at end; tenants nil reads every tenant.
+func (s *Server) collectModelCells(ctx context.Context, rng string, span time.Duration, end time.Time, tenants []string) (modelCells, error) {
+	if s.cfg.Metrics == nil {
+		return modelCells{}, errNoMetrics
+	}
 	each := func(expr string, add func(map[string]string, float64)) error {
-		res, err := s.cfg.Metrics.QueryRange(ctx, strings.ReplaceAll(expr, "$r", rng), end, end, sr.span, tenants)
+		res, err := s.cfg.Metrics.QueryRange(ctx, strings.ReplaceAll(expr, "$r", rng), end, end, span, tenants)
 		if err != nil {
 			return metricsError{err}
 		}
@@ -279,6 +397,14 @@ func (s *Server) modelStats(ctx context.Context, rng string, q accounts.StatsQue
 	}
 	ttft, duration := map[[2]string]float64{}, map[[2]string]float64{}
 	var embedded, offload float64
+	memory := map[string]*[2]float64{}
+	mem := func(l map[string]string, i int, v float64) {
+		t := l["tenant_id"]
+		if memory[t] == nil {
+			memory[t] = &[2]float64{}
+		}
+		memory[t][i] += v
+	}
 	steps := []struct {
 		expr string
 		add  func(map[string]string, float64)
@@ -316,12 +442,12 @@ func (s *Server) modelStats(ctx context.Context, rng string, q accounts.StatsQue
 		{adminModelQueries.cloudBytes, func(l map[string]string, v float64) { cell(l).bytes += v }},
 		{adminModelQueries.ttft, func(l map[string]string, v float64) { ttft[[2]string{l["llm_provider"], l["llm_model"]}] = v }},
 		{adminModelQueries.duration, func(l map[string]string, v float64) { duration[[2]string{l["llm_provider"], l["llm_model"]}] = v }},
-		{adminModelQueries.embedded, func(_ map[string]string, v float64) { embedded += v }},
-		{adminModelQueries.offload, func(_ map[string]string, v float64) { offload += v }},
+		{adminModelQueries.embedded, func(l map[string]string, v float64) { embedded += v; mem(l, 0, v) }},
+		{adminModelQueries.offload, func(l map[string]string, v float64) { offload += v; mem(l, 1, v) }},
 	}
 	for _, st := range steps {
 		if err := each(st.expr, st.add); err != nil {
-			return modelsData{}, err
+			return modelCells{}, err
 		}
 	}
 	all := make([]*modelCell, 0, len(cells))
@@ -336,20 +462,7 @@ func (s *Server) modelStats(ctx context.Context, rng string, q accounts.StatsQue
 		c.kind, _ = s.providerKind(c.provider)
 		all = append(all, c)
 	}
-	d := modelsData{totals: ModelTotals{ModelFigures: sumModelCells(all), EmbeddedEntities: math.Round(embedded), OffloadTurns: math.Round(offload)}}
-	d.models = s.modelRows(all, ttft, duration)
-	byOrg := map[string][]*modelCell{}
-	for _, c := range all {
-		if c.tenant != "" && c.tenant != telemetry.NoTenant {
-			byOrg[c.tenant] = append(byOrg[c.tenant], c)
-		}
-	}
-	rows, err := s.modelOrgRows(ctx, q.OrgID, byOrg)
-	if err != nil {
-		return modelsData{}, err
-	}
-	d.rows = rows
-	return d, nil
+	return modelCells{cells: all, ttft: ttft, duration: duration, embedded: embedded, offload: offload, memory: memory}, nil
 }
 
 // providerKind is local or cloud for a configured provider, cloud for the

@@ -69,6 +69,8 @@ func TestPlatformAdministration(t *testing.T) {
 	require.Equal(t, ada.do("GET", "/api/v1/admin/health", "", &h), 200)
 	assert.True(t, h.Graph.OK && h.Accounts.OK && h.Audit.OK, "%+v", h)
 	assert.False(t, h.Metrics.OK, "metrics are not configured in this test")
+	assert.False(t, h.Models.OK, "no AI providers in this test")
+	assert.True(t, h.LocalModels == nil)
 	assert.Equal(t, h.Counts.Users, 3)
 	assert.Equal(t, h.Counts.Admins, 1)
 	assert.True(t, h.Counts.AuditEvents > 0)

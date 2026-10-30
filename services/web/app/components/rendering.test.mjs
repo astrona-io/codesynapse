@@ -7,6 +7,7 @@ import { renderToString } from 'vue/server-renderer'
 import { parse, compileScript } from 'vue/compiler-sfc'
 import { localSaved, totalSaved } from '../utils/savings.ts'
 import { windowLabel } from '../composables/useStatistics.ts'
+import { gatewayReasonLabel, gatewayReasonRows, gatewayRouteLabel } from '../utils/gatewayReasons.ts'
 
 // Nuxt auto-imports these; useId only has to be stable within one render.
 let nextId = 0
@@ -48,7 +49,7 @@ async function renderComponent(t, file, globals, props = {}) {
   app.component('StatTile', { props: ['label', 'value', 'hint', 'tip', 'tone'], template: '<div :data-tone="tone">{{ label }} {{ value }} {{ hint }} <i>{{ tip }}</i></div>' })
   app.component('ColumnChart', { template: '<div />' })
   app.component('RankList', { props: ['rows'], template: '<ul class="rank"><li v-for="r in rows ?? []" :key="r.label">{{ r.label }} {{ r.value }}</li></ul>' })
-  app.component('SeriesCard', { props: ['panel', 'yMax'], template: '<figure :data-panel="panel" :data-ymax="yMax" />' })
+  app.component('SeriesCard', { props: ['panel', 'yMax', 'label'], template: '<figure :data-panel="panel" :data-ymax="yMax" :data-label="label ? label(\'slot_lost\') : undefined" />' })
   app.component('InfoTip', { props: ['text', 'term', 'label'], template: '<i class="info">{{ text }}</i>' })
   app.component('NuxtLink', { template: '<a><slot /></a>' })
   app.component('DataState', await compileComponent(t, './DataState.vue'))
@@ -248,7 +249,8 @@ test('models and savings split the token pool without counting ask_local twice',
     useStatistics: () => ({
       days: ref(30), error: ref(null), pending: ref(false),
       s: ref({ agents: { tokens: { total: 100000 }, work_tokens: 100000, avoided_tokens: 50000, local_avoided_tokens: 20000,
-        saved: { tokens: 30000, price: 'input', per_mtok: 10, dollars: 0.3, resend_tokens: 0, upper_dollars: null, unaware_tokens: 0, unaware_graph_tokens: 0, unaware_dollars: 0, total_dollars: 0.3 } } }),
+        saved: { tokens: 30000, price: 'input', per_mtok: 10, dollars: 0.3, resend_tokens: 0, upper_dollars: null, unaware_tokens: 0, unaware_graph_tokens: 0, unaware_dollars: 0, total_dollars: 0.3 },
+        sources: { fetches: 4, hits: 1, raw_tokens: 80000, saved_tokens: 60000, per_mtok: 10, dollars: 0.6, price_source: 'configured' } } }),
     }),
     useApiGet: (url) => ({ data: ref(url().startsWith('stats/savings') ? null : models), error: ref(null), pending: ref(false) }),
     localSaved, totalSaved, windowLabel,
@@ -261,7 +263,8 @@ test('models and savings split the token pool without counting ask_local twice',
   assert.match(html, /Kept off cloud models 48% /, '30k never read + 65k local of a 200k pool')
   assert.match(html, /Tokens never read 50000 /)
   assert.match(html, /Handled by local models 65000 60000 read · 5000 written/)
-  assert.match(html, /Total saved \(est\.\) \$1\.75 at claude-opus-5-5 prices <i>estimated<\/i>/, '60k × $10 + 5k × $20 per million, $0.30 for graph answers from the server, plus $0.50 from shorter prompts and $0.25 from gateway answers')
+  assert.match(html, /Total saved \(est\.\) \$2\.35 at claude-opus-5-5 prices <i>estimated<\/i>/, '60k × $10 + 5k × $20 per million, $0.30 for graph answers and $0.60 for external sources from the server, plus $0.50 from shorter prompts and $0.25 from gateway answers')
+  assert.match(html, /Saved by external sources \$0\.60 60000 tokens not read · 25% of 4 pages from the cache <i>web pages fetched with fetch_source: tokens as served \(80000\) minus the tokens returned, at the input price of \$10 per million tokens \(configured\)/)
   assert.match(html, /Saved by graph answers \$0\.30 30000 tokens never read <i>30000 tokens never read, each once at the input price/)
   assert.match(html, /Saved on cached input none reported +<i>the local runtime reported no prompt-cache hits/)
   assert.match(html, /Spent on cloud models \(est\.\) \$0\.25 /)
@@ -276,7 +279,7 @@ test('gateway page: tiles, quantile charts on one scale and reasons as bars', as
   const gateway = {
     requests: 40, local: 30, cloud: 10, rejected: 0, failed: 3, failed_by: { cloud_4xx: 2, cloud_5xx: 1 }, local_share_pct: 75, bytes_in: 1, bytes_out: 1,
     local_input_tokens: 0, local_output_tokens: 0, local_unmetered: 0, saved_dollars: 0,
-    fallthroughs: 8, fallthrough_reasons: { queue_timeout: 3, answer_timeout: 1, too_large: 4 }, timeouts: 4, timeout_share_pct: 10,
+    fallthroughs: 8, fallthrough_reasons: { queue_timeout: 3, answer_timeout: 1, too_large: 4 }, timeouts: 4, timeout_share_pct: 10, cloud_without_reason: 6,
     local_avg_seconds: 2, local_p95_seconds: 4.5, cloud_avg_seconds: 12.4, cloud_p95_seconds: null,
     queue_avg_seconds: 0.25, queue_p95_seconds: 19.5, local_answer_avg_seconds: 1.5,
   }
@@ -294,12 +297,13 @@ test('gateway page: tiles, quantile charts on one scale and reasons as bars', as
     seriesRangeLabel: () => 'Last 7 days',
     fmtCompact: (n) => String(n),
     apiErrorMessage: (e) => String(e),
+    gatewayReasonLabel, gatewayReasonRows, gatewayRouteLabel,
   }, {})
   const html = await render(gateway)
   assert.match(html, /Gateway requests 40 30 local · 10 cloud · 0 refused /)
   assert.match(html, /Failed requests 3 2 cloud 4xx · 1 cloud 5xx <i>requests answered with a 4xx or 5xx status\. Cloud ones are the provider&#39;s own answer/, 'failures name the route that answered them')
   assert.match(html, /Answered locally 75% /)
-  for (const p of ['gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_queue_wait', 'gateway_timeouts']) {
+  for (const p of ['gateway_local_share', 'gateway_routes', 'gateway_fallthrough', 'gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_queue_wait', 'gateway_timeouts']) {
     assert.match(html, new RegExp(`data-panel="${p}"`), `${p} is drawn`)
   }
   assert.match(html, /data-panel="gateway_latency_local" data-ymax="9"/, 'local shares the cloud chart\'s top')
@@ -308,10 +312,16 @@ test('gateway page: tiles, quantile charts on one scale and reasons as bars', as
   assert.match(html, /<li>too large 4<\/li><li>waited too long for a slot 3<\/li><li>answered too slowly 1<\/li>/, 'reasons are bars, largest first')
   assert.match(html, /<div data-tone="warning">Local model timeouts 4 10% of requests · 3 queue · 1 answer <i>requests that went to the cloud because the local model was too slow/)
   assert.match(html, /Not answered locally 8 4 too large · 3 waited too long for a slot <i>by reason: 4 too large · 3 waited too long for a slot · 1 answered too slowly\./)
+  assert.match(html, /data-panel="gateway_fallthrough"[^>]*data-label="slot lost"/, 'the reason trend names its lines in plain words, new codes included')
+  assert.match(html, /6 cloud requests have no recorded reason/)
   assert.match(html, /Response time, local 2\.0 s p95 4\.5 s /)
   assert.match(html, /Response time, cloud 12 s p95 – /, 'a missing quantile is a dash, never 0')
   assert.match(html, /Queue wait, local 0\.3 s p95 20 s <i>[^<]*answers then took 1\.5 s on average/)
 
+  await t.test('a reason code the page does not know yet is listed', async () => {
+    const html = await render({ ...gateway, fallthrough_reasons: { slot_lost: 9, too_large: 4 } })
+    assert.match(html, /<li>slot lost 9<\/li><li>too large 4<\/li>/)
+  })
   await t.test('no timeouts are not highlighted', async () => {
     const calm = await render({ ...gateway, timeouts: 0, timeout_share_pct: 0, fallthroughs: 0, fallthrough_reasons: {} })
     assert.match(calm, /<div>Local model timeouts 0 0% of requests/)
@@ -379,11 +389,12 @@ test('savings chart totals its columns, values money with the tiles\' formula an
   const { onMounted } = await import('vue')
   const day = 86400
   const start = Math.floor(Date.now() / 1000 / day) * day - day
-  const bucket = (s, never, input, cached, output, graph, prompts, gateway) => ({ start: s, end: s + day, never_read_tokens: never, graph_saved_dollars: graph,
-    local_input_tokens: input, local_cached_tokens: cached, local_output_tokens: output, compression_saved_dollars: prompts, gateway_saved_dollars: gateway })
+  const bucket = (s, never, input, cached, output, graph, prompts, gateway, sources = 0, sourceDollars = 0) => ({ start: s, end: s + day, never_read_tokens: never, graph_saved_dollars: graph,
+    local_input_tokens: input, local_cached_tokens: cached, local_output_tokens: output, compression_saved_dollars: prompts, gateway_saved_dollars: gateway,
+    source_saved_tokens: sources, sources_saved_dollars: sourceDollars })
   const series = {
     days: 2, step: 'day', metrics: true, unplaced_never_read_tokens: 0, unplaced_graph_saved_dollars: 0,
-    buckets: [bucket(start, 1000000, 1000000, 500000, 100000, 4, 0.5, null), bucket(start + day, 0, 0, 0, 0, 0, 0, 0), bucket(start + 3 * day, 7, 7, 0, 7, 7, 7, 7)],
+    buckets: [bucket(start, 1000000, 1000000, 500000, 100000, 4, 0.5, null, 250000, 1), bucket(start + day, 0, 0, 0, 0, 0, 0, 0), bucket(start + 3 * day, 7, 7, 0, 7, 7, 7, 7)],
   }
   const price = { provider: 'p', model: 'm', input_per_mtok: 4, output_per_mtok: 20, cached_input_per_mtok: 0.2 }
   const html = await renderComponent(t, './SavingsChart.vue', {
@@ -392,10 +403,11 @@ test('savings chart totals its columns, values money with the tiles\' formula an
   }, { series, price })
   assert.match(html, /Never read \(graph answers\) <strong>1000000<\/strong>/, 'the future bucket is left out of the totals')
   assert.match(html, /Local models <strong>1100000<\/strong>/)
+  assert.match(html, /Not read \(external sources\) <strong>250000<\/strong>/)
   assert.match(html, /Daily \(UTC\)/)
   assert.match(html, /<i class="info">One column per day \(UTC\)\. .*same formula as the tiles/, 'the long explanation sits behind the info icon')
-  // 500k × $4 + 500k × $0.20 + 100k × $20 per million, plus $4 for graph answers and $0.50 for shorter prompts.
-  assert.match(html, /<td class="num">\$8\.60<\/td>(<!--\]-->)?<\/tr>/)
+  // 500k × $4 + 500k × $0.20 + 100k × $20 per million, plus $4 for graph answers, $1 for external sources and $0.50 for shorter prompts.
+  assert.match(html, /<td class="num">\$9\.60<\/td>(<!--\]-->)?<\/tr>/)
   const utcDay = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(start * 1000))
   assert.ok(html.includes(`<td class="mono">${utcDay}</td>`), 'day columns are named by their UTC date')
   assert.equal((html.match(/<tr><td class="mono">/g) ?? []).length, 2, 'future buckets get no table row')

@@ -9,6 +9,18 @@ import (
 	"github.com/astrona-io/codesynapse/internal/testutil/require"
 )
 
+// TestTranslateEligibleRule keeps an installation's own Eligible rule apart
+// from the organisation's local-first choice: it wins either way.
+func TestTranslateEligibleRule(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"x"}]}`)
+	l := &Local{Eligible: SmallModel}
+	for _, first := range []bool{true, false} {
+		_, out, reason := l.translate(WithLocalFirst(t.Context(), first), body)
+		assert.Equal(t, reason, FallNotEligible)
+		assert.True(t, out == nil, "nothing to send")
+	}
+}
+
 // Each check translate makes names its own reason, so the statistics say
 // which part of a request kept it in the cloud.
 func TestTranslateReasons(t *testing.T) {
@@ -21,7 +33,7 @@ func TestTranslateReasons(t *testing.T) {
 		"no messages":            {`{"model":"claude-haiku-5-5","messages":[]}`, FallBadRequest},
 		"unknown role":           {`{"model":"claude-haiku-5-5","messages":[{"role":"system","content":"x"}]}`, FallBadRequest},
 		"content not text":       {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":42}]}`, FallBadRequest},
-		"model not eligible":     {`{"model":"claude-opus-5-5",` + user + `}`, FallNotEligible},
+		"local first off":        {`{"model":"claude-opus-5-5",` + user + `}`, FallLocalFirstOff},
 		"system with a non-text": {`{"model":"claude-haiku-5-5","system":[{"type":"image"}],` + user + `}`, FallSystemNotText},
 		"system a number":        {`{"model":"claude-haiku-5-5","system":7,` + user + `}`, FallSystemNotText},
 		"server tool use in history": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"x"},

@@ -268,9 +268,10 @@ func TestLocalSendsReasoningSettings(t *testing.T) {
 		want  map[string]any
 		not   []string
 	}{
-		"unset":            {not: []string{"reasoning_effort", "chat_template_kwargs"}},
-		"ollama effort":    {local: Local{Effort: "none"}, want: map[string]any{"reasoning_effort": "none"}, not: []string{"chat_template_kwargs"}},
-		"vllm no thinking": {local: Local{DisableThinking: true}, want: map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": false}}, not: []string{"reasoning_effort"}},
+		"unset":             {not: []string{"reasoning_effort", "chat_template_kwargs"}},
+		"ollama effort":     {local: Local{Effort: "none"}, want: map[string]any{"reasoning_effort": "none"}, not: []string{"chat_template_kwargs"}},
+		"vllm no thinking":  {local: Local{DisableThinking: true}, want: map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": false}}, not: []string{"reasoning_effort"}},
+		"ollama keep_alive": {local: Local{Options: map[string]any{"keep_alive": "15m0s", "model": "other"}}, want: map[string]any{"keep_alive": "15m0s", "model": "q"}},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

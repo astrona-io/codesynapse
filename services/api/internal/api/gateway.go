@@ -15,6 +15,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/modelpattern"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/services/api/internal/gateway"
+	"github.com/astrona-io/codesynapse/services/api/internal/llm"
 )
 
 // maxGatewayInFlight caps the requests one key may have open at once, so a
@@ -128,7 +129,20 @@ func gatewayDetail(m gateway.Meta, model string, took time.Duration) string {
 	if m.TextChanged && m.ForwardedSHA256 != "" {
 		fmt.Fprintf(&b, " fwd_bytes=%d fwd_sha256=%s", m.ForwardedBytes, m.ForwardedSHA256)
 	}
+	if skip := shortenSkip(m.ShortenSkip); skip != "" {
+		b.WriteString(" shorten_skip=" + skip)
+	}
 	return b.String()
+}
+
+// shortenSkip is the audit value of a shortening skip: one of the gateway's
+// fixed reasons, "other" for anything else, "" for none.
+func shortenSkip(skip string) string {
+	switch skip {
+	case "", gateway.SkipBusy, gateway.SkipTimeout, gateway.SkipNoRewrite:
+		return skip
+	}
+	return "other"
 }
 
 // authenticateGateway reads the CodeSynapse key from its own header and
@@ -172,17 +186,21 @@ func (s *Server) gatewayRoutes() {
 		if !ok {
 			return nil
 		}
-		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire, AcquireFirst: t.AcquireFirst, ContextWindow: t.ContextWindow, MaxOutput: t.MaxOutput, Exclude: t.Exclude, Wait: t.Wait, Effort: t.Effort, DisableThinking: t.DisableThinking}
+		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire, AcquireFirst: t.AcquireFirst, ContextWindow: t.ContextWindow, MaxOutput: t.MaxOutput, Exclude: t.Exclude, Wait: t.Wait, FirstToken: t.FirstToken, Timeout: t.Timeout, Options: t.Options, Effort: t.Effort, DisableThinking: t.DisableThinking}
 	}
 	// Shortening uses the local "compress" task only; compress_prompts: false
 	// in config/llm.yaml turns it off for the installation.
 	g.Shorten = &gateway.Shortener{
 		Ready: func() bool { return s.cfg.LLM != nil && s.cfg.LLM.CanShorten() },
-		Rewrite: func(ctx context.Context, text string) (string, bool) {
+		Rewrite: func(ctx context.Context, text string) (string, error) {
 			if s.cfg.LLM == nil {
-				return "", false
+				return "", llm.ErrNoRewrite
 			}
-			return s.cfg.LLM.ShortenProse(ctx, text)
+			short, err := s.cfg.LLM.ShortenProse(ctx, text)
+			if errors.Is(err, llm.ErrLocalBusy) {
+				err = gateway.ErrLocalBusy
+			}
+			return short, err
 		},
 	}
 	g.Done = s.auditGateway

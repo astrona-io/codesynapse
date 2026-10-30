@@ -210,6 +210,9 @@ func isWorkflow(rel string) bool {
 	return strings.HasPrefix(rel, ".github/workflows/") || strings.Contains(rel, "/.github/workflows/")
 }
 
+// IsCompose reports whether rel is named like a Docker Compose file.
+func IsCompose(rel string) bool { return isCompose(rel) }
+
 func isCompose(rel string) bool {
 	b := baseName(rel)
 	return strings.HasPrefix(b, "docker-compose") || strings.HasPrefix(b, "compose.") || b == "compose.yaml" || b == "compose.yml"

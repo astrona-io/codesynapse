@@ -38,7 +38,7 @@ func write(t *testing.T, in toolHookInput, agentID, file, body string) {
 // A tracked file someone had changed before the session began is not asked
 // about, and neither is its formatting; only what the session changed is.
 func TestStopGuardIgnoresAChangeFromBeforeTheSession(t *testing.T) {
-	offlineAPI(t)
+	refusingAPI(t)
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -59,7 +59,7 @@ func TestStopGuardIgnoresAChangeFromBeforeTheSession(t *testing.T) {
 // Compaction starts the session's context again, not its work: what it
 // changed before is still asked about.
 func TestStopGuardAsksAfterCompaction(t *testing.T) {
-	offlineAPI(t)
+	refusingAPI(t)
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -78,7 +78,7 @@ func TestStopGuardAsksAfterCompaction(t *testing.T) {
 // answers calls with no arguments for the start checkout, its files are
 // named.
 func TestStopGuardFollowsTheSessionIntoAnotherWorktree(t *testing.T) {
-	offlineAPI(t)
+	refusingAPI(t)
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -115,7 +115,7 @@ func TestStopGuardFollowsTheSessionIntoAnotherWorktree(t *testing.T) {
 // tools cannot answer for it by naming files of this one, and the start
 // checkout's changes are the person's: nothing to ask.
 func TestStopGuardIgnoresTheStartCheckoutWhenTheSessionWorksInAnotherRepository(t *testing.T) {
-	offlineAPI(t)
+	refusingAPI(t)
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -141,7 +141,7 @@ func TestStopGuardIgnoresTheStartCheckoutWhenTheSessionWorksInAnotherRepository(
 // hook input says agent_id or not. A subagent working in the parent's own
 // checkout made changes there the parent is asked about, with no arguments.
 func TestStopGuardLeavesSubagentWorktreesAlone(t *testing.T) {
-	offlineAPI(t)
+	refusingAPI(t)
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

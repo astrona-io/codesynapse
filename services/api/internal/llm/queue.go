@@ -71,6 +71,28 @@ func (s *slots) acquire(ctx context.Context) (func(), error) { return s.take(ctx
 // short requests that finish fast.
 func (s *slots) acquireFirst(ctx context.Context) (func(), error) { return s.take(ctx, true) }
 
+// tryAcquire takes a slot only when one is free and nobody waits for it, and
+// never queues: the lowest priority, for work that may be skipped but must
+// not delay anything else (the gateway's prompt shortening). ok is false
+// when it took nothing; that is not a wait, so nothing is recorded.
+func (s *slots) tryAcquire(ctx context.Context) (release func(), ok bool) {
+	if s == nil {
+		return func() {}, true
+	}
+	mctx := telemetry.WithTool(telemetry.WithModel(ctx, s.provider, s.model), "none")
+	s.capacity.Do(func() { telemetry.SetQueueCapacity(mctx, s.provider, s.size) })
+	s.qmu.Lock()
+	if s.running >= s.size || len(s.queue) > 0 {
+		s.qmu.Unlock()
+		return nil, false
+	}
+	s.running++
+	s.qmu.Unlock()
+	s.load(mctx, 1, 0)
+	telemetry.RecordQueueWait(mctx, queueTask(ctx), telemetry.QueueAcquired, 0)
+	return s.release(mctx), true
+}
+
 // take waits for a slot. Every wait is recorded, also one that found a slot
 // at once or ended before one came free, so the statistics count every
 // request.

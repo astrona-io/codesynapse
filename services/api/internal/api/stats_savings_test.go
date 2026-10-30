@@ -116,6 +116,9 @@ func savingsUsage() []usage.Bucket {
 			usage.Bucket{Day: day, Org: "o", Repo: "r", Tool: "file_outline", Client: "codex", Calls: 1, ResponseTokens: 333 + 11*i},
 			usage.Bucket{Day: day, Org: "o", Repo: "r", Tool: "ask_local", Client: "claude-code", Calls: 1, ResponseTokens: 200},
 			usage.Bucket{Day: day, Org: "o", Repo: "r", Tool: usage.LocalAvoided, Client: "claude-code", Calls: 900 + i},
+			usage.Bucket{Day: day, Org: "o", Tool: usage.SourceFetches, Client: "claude-code", Calls: 2},
+			usage.Bucket{Day: day, Org: "o", Tool: usage.SourceRaw, Client: "claude-code", Calls: 9000 + 13*i},
+			usage.Bucket{Day: day, Org: "o", Tool: usage.SourceSaved, Client: "claude-code", Calls: 7000 + 7*i},
 		)
 		tc := usage.TokenCounts{Input: 50_000, Output: 6000, CachedInput: 20_000, CacheWrite: 5000, Turns: 4, CacheKnownTurns: 4}
 		for tool, n := range tc.Counters() {
@@ -127,8 +130,8 @@ func savingsUsage() []usage.Bucket {
 	return out
 }
 
-// The chart's graph answers add up to the tiles of the same window: tokens
-// exactly, dollars to the cent.
+// The chart's graph answers and external sources add up to the tiles of the
+// same window: tokens exactly, dollars to the cent.
 func TestSavingsSumsEqualTiles(t *testing.T) {
 	buckets := savingsUsage()
 	repos := []RepoSummary{{Name: "r", GraphTokens: 1000, BaseTokens: 4000}}
@@ -143,6 +146,8 @@ func TestSavingsSumsEqualTiles(t *testing.T) {
 				require.True(t, saved.TotalDollars != nil)
 				want := tile.AvoidedTokens - tile.LocalAvoidedTokens
 				require.True(t, want > 0)
+				sources := sourcesSaved(tile.Sources, s.priceReference())
+				require.True(t, sources.SavedTokens > 0 && sources.Dollars != nil)
 
 				l := layoutFor(days, savingsNow)
 				var slots []savingsSlot
@@ -154,6 +159,7 @@ func TestSavingsSumsEqualTiles(t *testing.T) {
 					for k := range slots {
 						if k >= perDay || days == 1 {
 							slots[k].graphShape = float64(k%3) * 10
+							slots[k].sourceShape = float64(k%2) * 7
 						}
 					}
 				}
@@ -168,12 +174,38 @@ func TestSavingsSumsEqualTiles(t *testing.T) {
 				}
 				assert.Equal(t, tokens, want)
 				assert.True(t, math.Abs(dollars-*saved.TotalDollars) < 0.01, fmt.Sprintf("buckets %.4f, tile %.4f", dollars, *saved.TotalDollars))
+				srcTokens, srcDollars := got.UnplacedSourceTokens, got.UnplacedSourceDollars
+				for _, b := range got.Buckets {
+					srcTokens += b.SourceSavedTokens
+					if b.SourcesSaved != nil {
+						srcDollars += *b.SourcesSaved
+					}
+				}
+				assert.Equal(t, srcTokens, sources.SavedTokens)
+				assert.True(t, math.Abs(srcDollars-*sources.Dollars) < 0.01, fmt.Sprintf("sources: buckets %.4f, tile %.4f", srcDollars, *sources.Dollars))
 				if l.slot < 24*time.Hour && days > 1 {
 					assert.True(t, got.UnplacedTokens > 0, "the first day has no shape")
 				}
 			})
 		}
 	}
+}
+
+// External sources are valued at the reference input price only; without
+// one their dollars are unknown, not zero.
+func TestSourcesSaved(t *testing.T) {
+	st := agentUsage([]usage.Bucket{
+		{Day: usage.Day(savingsNow), Org: "o", Tool: usage.SourceFetches, Client: "claude-code", Calls: 4},
+		{Day: usage.Day(savingsNow), Org: "o", Tool: usage.SourceHits, Client: "claude-code", Calls: 3},
+		{Day: usage.Day(savingsNow), Org: "o", Tool: usage.SourceRaw, Client: "claude-code", Calls: 3_000_000},
+		{Day: usage.Day(savingsNow), Org: "o", Tool: usage.SourceSaved, Client: "claude-code", Calls: 2_000_000},
+	}, nil, 1, savingsNow).Sources
+	assert.Equal(t, []int{st.Fetches, st.Hits, st.RawTokens, st.SavedTokens}, []int{4, 3, 3_000_000, 2_000_000})
+	priced := sourcesSaved(st, PriceReference{InputPerMTok: 3, Source: "configured"})
+	require.True(t, priced.Dollars != nil)
+	assert.Equal(t, *priced.Dollars, 6.0)
+	assert.Equal(t, priced.PriceSource, "configured")
+	assert.True(t, sourcesSaved(st, PriceReference{}).Dollars == nil, "no input price: unknown")
 }
 
 // Days without calls are empty buckets, not missing ones.
@@ -188,6 +220,7 @@ func TestSavingsEmptyBuckets(t *testing.T) {
 		assert.Equal(t, b.NeverReadTokens, 0)
 		assert.True(t, b.GraphSaved != nil && *b.GraphSaved == 0, "known, and zero")
 		assert.True(t, b.CompressionSaved == nil && b.GatewaySaved == nil, "unknown without the metrics store")
+		assert.True(t, b.SourceSavedTokens == 0 && b.SourcesSaved != nil && *b.SourcesSaved == 0, "external sources: known, and zero")
 		assert.Equal(t, b.End-b.Start, int64(86400))
 	}
 }
@@ -198,13 +231,14 @@ func savingsVM(t *testing.T, filters *[]string) *httptest.Server {
 	t.Helper()
 	q := savingsQueries
 	series := map[string]string{
-		q.input:      `{"llm_provider":"local"}=1000;{"llm_provider":"cloud"}=50`,
-		q.output:     `{"llm_provider":"local"}=100`,
-		q.cached:     `{"llm_provider":"local"}=10`,
-		q.compressed: `{"llm_provider":"cloud"}=4000`,
-		q.gateway:    `{"kind":"input"}=10000;{"kind":"output"}=1000`,
-		q.unmetered:  ``,
-		q.graphShape: `{}=5`,
+		q.input:       `{"llm_provider":"local"}=1000;{"llm_provider":"cloud"}=50`,
+		q.output:      `{"llm_provider":"local"}=100`,
+		q.cached:      `{"llm_provider":"local"}=10`,
+		q.compressed:  `{"llm_provider":"cloud"}=4000`,
+		q.gateway:     `{"kind":"input"}=10000;{"kind":"output"}=1000`,
+		q.unmetered:   ``,
+		q.graphShape:  `{}=5`,
+		q.sourceShape: `{}=3`,
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*filters = append(*filters, strings.Join(r.URL.Query()["extra_filters[]"], ";"))
@@ -269,7 +303,7 @@ func TestSavingsMetrics(t *testing.T) {
 				assert.Equal(t, *b.CompressionSaved, round4(float64(n)*1000*3/1e6), "4000 bytes are 1000 tokens at $3 a million")
 				assert.Equal(t, *b.GatewaySaved, round4(float64(n)*gatewaySaved(GatewayStat{LocalInputTokens: 10000, LocalOutputTokens: 1000}, ref)))
 			}
-			assert.Equal(t, len(filters), 7)
+			assert.Equal(t, len(filters), 8)
 			for _, f := range filters {
 				assert.Contains(t, f, tenant[0], "every query is scoped to the caller's organisations")
 			}

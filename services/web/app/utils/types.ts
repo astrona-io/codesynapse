@@ -284,6 +284,10 @@ export interface WorkspaceStats {
     sessions: number; calls: number; errors: number; response_tokens: number; avoided_tokens: number; avoided_method: string
     // ask_local: tokens local models read, and its part of avoided_tokens.
     local_read_tokens?: number; local_avoided_tokens?: number; local_briefs?: number; local_drafts?: number
+    // fetch_source: pages returned, cache hits, tokens as served and the
+    // tokens agents did not read, valued at the reference input price
+    // (dollars null when it has none). Absent from older APIs.
+    sources?: { fetches: number; hits: number; raw_tokens: number; saved_tokens: number; per_mtok: number; dollars: number | null; price_source?: string }
     unindexed?: { repos: { repo: string; skipped: number }[]; skipped: number; avoided_per_session: number }
     // How sessions began, reported by the Claude Code plugin's hooks.
     workflow: { first_codesynapse: number; first_native: number; reads_turned_back: number; fetches_steered: number; first_share_pct: number; files_edited: number; files_edited_found: number; edit_recall_pct: number; bash: Record<string, number> | null; bash_total: number }
@@ -340,9 +344,13 @@ export interface SeriesPanel {
 // panels carry four lines each, named p50, p75, p95 and p99 (quantiles
 // estimated from histogram buckets); the platform statistics have
 // cross-tenant twins of both under /admin/stats/series.
+// gateway_routes and gateway_local_share are the local/cloud trend;
+// gateway_fallthrough names its series by reason code, whatever codes the
+// gateway records.
 export type GatewaySeriesPanel =
   | 'gateway_latency_local' | 'gateway_latency_cloud' | 'gateway_latency_avg'
   | 'gateway_queue_wait' | 'gateway_timeouts'
+  | 'gateway_routes' | 'gateway_local_share' | 'gateway_fallthrough'
 
 // Model queue peak hours (GET /api/v1/stats/queue, /admin/stats/queue).
 // cells has 7 × 96 entries, Monday first, 15-minute slots in the viewer's
@@ -614,6 +622,16 @@ export interface Attention {
 export interface AdminOrg extends AccountOrg { members: number; roles: Record<string, number>; repositories: number; lost_access: number; teams: number }
 export interface AdminUser extends AccountUser { disabled_at?: string; orgs: { slug: string; name: string; role: Role }[]; active_keys: number; last_key_use?: string }
 export interface HealthCheck { ok: boolean; detail: string; seconds: number }
+// A local model server's answer about the models config/llm.yaml names
+// (llm.ProviderCheck). Context figures are 0 when the server does not say.
+export interface ProviderCheck {
+  name: string; server?: string; version?: string; reachable: boolean
+  model: string; model_found: boolean; embedding_model?: string; embedding_found?: boolean
+  tasks: string[]; gateway: boolean
+  context_window: number; model_context?: number; num_ctx?: number; loaded_context?: number
+  ok: boolean; problems: string[]; warnings: string[]; seconds: number
+}
+export interface LocalModelsCheck { providers: ProviderCheck[]; gateway: string; ok: boolean; problems: string[]; warnings: string[] }
 
 // Platform statistics (GET /api/v1/admin/stats/*): aggregates only, root
 // never counted. Tiles a later phase fills are null until then. 90d and
@@ -691,7 +709,11 @@ export interface IngestFigures {
   skips: { ignored_path: number; generated_code: number; binary: number; non_k8s_yaml: number }
 }
 export interface OrgIngestRow extends IngestFigures { org_id: string; slug: string; name: string; deleted: boolean }
-export type IngestSection = StatsTable<IngestFigures, OrgIngestRow>
+// formats: indexed files by language or format across the platform as of
+// now, each graph once; null when one organisation is selected.
+export interface IngestSection extends StatsTable<IngestFigures, OrgIngestRow> {
+  formats: { name: string; files: number }[] | null; formats_unknown: number
+}
 // Models section of the platform statistics. cost_dollars is null when the
 // cost is unknown (cost_basis "unknown"), for local calls ("local") and
 // without calls ("none"); provider_cache_saved_dollars is the provider's
@@ -712,17 +734,18 @@ export interface ModelRow extends ModelFigures {
   ttft_p95_seconds: number | null; request_p95_seconds: number | null
   tasks: ModelTaskStat[]
 }
-export interface ModelsSection extends StatsTable<ModelTotals, ModelOrgRow> { models: ModelRow[] }
+export interface ModelsSection extends StatsTable<ModelTotals, ModelOrgRow> { models: ModelRow[]; models_range?: string }
 // Storage and alerts sections of the platform statistics (phase 6). A null
 // figure is one the store does not report.
 export interface StoreSizeRow { db_system: string; kind: string; rows: number | null; bytes: number | null; rows_change: number | null; bytes_change: number | null }
-export interface StatsStorage { range: StatsRange; available: boolean; reason?: string; sampled_at: string | null; stores: StoreSizeRow[] }
+export interface StatsStorage { range: StatsRange; available: boolean; reason?: string; sampled_at: string | null; stores: StoreSizeRow[]; rollup?: StatsRollup }
 export interface AlertItem { name: string; state: string; severity: string; value: string; active_at: string }
 export interface AlertRuleItem { name: string; group: string; state: string; severity: string; health: string; failing: boolean; last_evaluation: string }
 export interface StatsAlerts { configured: boolean; reachable: boolean; firing: number; pending: number; alerts: AlertItem[]; rules: AlertRuleItem[] }
 export interface AdminHealth {
   version: string; checked: string
-  graph: HealthCheck; accounts: HealthCheck; metrics: HealthCheck; audit: HealthCheck
+  graph: HealthCheck; accounts: HealthCheck; metrics: HealthCheck; audit: HealthCheck; models: HealthCheck
+  local_models?: LocalModelsCheck
   counts: { users: number; suspended: number; admins: number; orgs: number; graphs: number; audit_events_checked: number }
   jobs: { total: number; running: number; succeeded: number; failed: number }
   unowned: string[]
@@ -903,6 +926,8 @@ export interface GatewayStat {
   // Requests the local model did not answer, by the gateway's fixed reasons;
   // timeouts are queue_timeout plus answer_timeout. Absent from older APIs.
   fallthroughs?: number; fallthrough_reasons?: Record<string, number>; timeouts?: number; timeout_share_pct?: number
+  // Cloud requests no fall-through reason accounts for. Absent from older APIs.
+  cloud_without_reason?: number
   // Seconds; null when that route answered nothing in the window.
   local_avg_seconds?: number | null; local_p95_seconds?: number | null
   cloud_avg_seconds?: number | null; cloud_p95_seconds?: number | null
@@ -927,6 +952,8 @@ export interface SavingsBucket {
   never_read_tokens: number; graph_saved_dollars: number | null
   local_input_tokens: number; local_output_tokens: number; local_cached_tokens: number
   compression_saved_dollars: number | null; gateway_saved_dollars: number | null
+  // fetch_source's tokens saved and their dollars; absent from older APIs.
+  source_saved_tokens?: number; sources_saved_dollars?: number | null
 }
 export interface SavingsSeries {
   days: number; step: 'hour' | '6h' | 'day' | 'week'; buckets: SavingsBucket[]
@@ -935,5 +962,6 @@ export interface SavingsSeries {
   metrics: boolean
   // Graph answers of days with no hourly measurement: in the tiles, in no bucket.
   unplaced_never_read_tokens: number; unplaced_graph_saved_dollars: number
+  unplaced_source_saved_tokens?: number; unplaced_sources_saved_dollars?: number
   reference_price: ReferencePrice | null
 }

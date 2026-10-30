@@ -15,8 +15,8 @@ watch(() => props.price, (p) => { if (!p) view.value = 'tokens' }, { immediate: 
 interface Row {
   b: SavingsBucket
   future: boolean
-  tokens: { graph: number; local: number }
-  money: { graph: number | null; local: number | null; prompts: number | null }
+  tokens: { graph: number; sources: number; local: number }
+  money: { graph: number | null; sources: number | null; local: number | null; prompts: number | null }
   total: number | null
 }
 const nowSec = Math.floor(Date.now() / 1000)
@@ -24,26 +24,31 @@ const rows = computed<Row[]>(() => props.series.buckets.map((b) => {
   const p = props.price
   const l = p ? localSaved(p, b.local_input_tokens, b.local_cached_tokens, b.local_output_tokens) : null
   const gw = b.gateway_saved_dollars
+  // An API older than fetch_source's measurement has no sources: none.
+  const src = b.sources_saved_dollars === undefined ? 0 : b.sources_saved_dollars
   return {
     b,
     future: b.start > nowSec,
-    tokens: { graph: b.never_read_tokens, local: b.local_input_tokens + b.local_output_tokens },
+    tokens: { graph: b.never_read_tokens, sources: b.source_saved_tokens ?? 0, local: b.local_input_tokens + b.local_output_tokens },
     money: {
       graph: p ? b.graph_saved_dollars : null,
+      sources: p ? src : null,
       local: l ? l.input + l.cached + l.output + (gw ?? 0) : null,
       prompts: p ? b.compression_saved_dollars : null,
     },
-    total: totalSaved(p, { input: b.local_input_tokens, cached: b.local_cached_tokens, output: b.local_output_tokens }, [b.graph_saved_dollars, b.compression_saved_dollars, gw]),
+    total: totalSaved(p, { input: b.local_input_tokens, cached: b.local_cached_tokens, output: b.local_output_tokens }, [b.graph_saved_dollars, src, b.compression_saved_dollars, gw]),
   }
 }))
 
 const KEYS = {
   tokens: [
     { key: 'graph', label: 'Never read (graph answers)', color: 'var(--s-2)' },
+    { key: 'sources', label: 'Not read (external sources)', color: 'var(--s-1)' },
     { key: 'local', label: 'Local models', color: 'var(--s-3)' },
   ],
   money: [
     { key: 'graph', label: 'Graph answers', color: 'var(--s-2)' },
+    { key: 'sources', label: 'External sources', color: 'var(--s-1)' },
     { key: 'local', label: 'Local models and gateway answers', color: 'var(--s-3)' },
     { key: 'prompts', label: 'Shorter prompts', color: 'var(--s-4)' },
   ],
@@ -142,12 +147,13 @@ const STEP_SHORT: Record<SavingsSeries['step'], string> = {
 }
 const about = computed(() => [
   STEP_NOTE[props.series.step],
-  'Never read: tokens agents did not have to read because a graph answer replaced the files. Local models: tokens read and written by models on your own network instead of a cloud model.',
+  'Never read: tokens agents did not have to read because a graph answer replaced the files. External sources: web page tokens agents did not read because fetch_source returned cleaned text. Local models: tokens read and written by models on your own network instead of a cloud model.',
   props.price ? `Money is an estimate at ${props.price.model} prices, with the same formula as the tiles above, so the columns add up to them.` : 'Without a reference price there is no money view.',
   !props.series.metrics
     ? `Local model work needs live metrics, so only graph answers show${subDay.value ? ', and they cannot be placed below a day' : ''}.`
     : props.series.days > 30 ? 'The metrics store keeps 30 days: local model work before that is not shown.' : '',
   props.series.unplaced_never_read_tokens > 0 ? 'Graph answers are spread over a day by the hours agents used the graph; a day without that measurement stays in the totals but in no column.' : '',
+  (props.series.unplaced_source_saved_tokens ?? 0) > 0 ? 'External sources are spread over a day by the hours pages were fetched; a day without that measurement stays in the totals but in no column.' : '',
 ].filter(Boolean).join(' '))
 
 const hover = ref(-1)
@@ -180,7 +186,7 @@ const unknown = (v: number | null) => (v === null ? 'unknown' : money(v))
           <rect
             v-if="!r.future"
             :x="PAD.left + i * slot" :y="PAD.top" :width="slot" :height="plotH" class="hit" tabindex="0"
-            :aria-label="`${span(r.b)}: ${fmtInt(r.tokens.graph)} tokens never read, ${fmtInt(r.tokens.local)} tokens on local models${r.total !== null ? `, ${money(r.total)} saved` : ''}`"
+            :aria-label="`${span(r.b)}: ${fmtInt(r.tokens.graph)} tokens never read, ${fmtInt(r.tokens.sources)} source tokens not read, ${fmtInt(r.tokens.local)} tokens on local models${r.total !== null ? `, ${money(r.total)} saved` : ''}`"
             @pointerenter="hover = i" @pointerleave="hover = -1" @focus="hover = i" @blur="hover = -1"
           />
           <text v-if="i % every === 0" :x="PAD.left + (i + 0.5) * slot" :y="H - 6" class="tick" text-anchor="middle">{{ tick(r.b) }}</text>
@@ -189,13 +195,14 @@ const unknown = (v: number | null) => (v === null ? 'unknown' : money(v))
       <div v-if="tip" class="tooltip" :style="{ left: tipLeft }" role="status">
         <div class="muted">{{ span(tip.b) }}</div>
         <div class="tip-row"><i style="background: var(--s-2)" />Never read <strong>{{ fmtInt(tip.tokens.graph) }}</strong><span v-if="price" class="muted">{{ unknown(tip.money.graph) }}</span></div>
+        <div v-if="tip.tokens.sources" class="tip-row"><i style="background: var(--s-1)" />External sources <strong>{{ fmtInt(tip.tokens.sources) }}</strong><span v-if="price" class="muted">{{ unknown(tip.money.sources) }}</span></div>
         <div class="tip-row"><i style="background: var(--s-3)" />Local models <strong>{{ fmtInt(tip.tokens.local) }}</strong><span v-if="price" class="muted">{{ unknown(tip.money.local) }}</span></div>
         <div v-if="price" class="tip-row"><i style="background: var(--s-4)" />Shorter prompts <span class="muted">{{ unknown(tip.money.prompts) }}</span></div>
         <div v-if="price" class="tip-row total">Total saved (est.) <strong>{{ tip.total === null ? 'unknown' : money(tip.total) }}</strong></div>
       </div>
     </div>
     <figcaption class="muted small">
-      {{ STEP_SHORT[series.step] }}<template v-if="!series.metrics"> · graph answers only</template><template v-if="series.unplaced_never_read_tokens > 0"> · {{ fmtCompact(series.unplaced_never_read_tokens) }} tokens never read<template v-if="price"> ({{ money(series.unplaced_graph_saved_dollars) }})</template> in no column</template>
+      {{ STEP_SHORT[series.step] }}<template v-if="!series.metrics"> · graph answers only</template><template v-if="series.unplaced_never_read_tokens > 0"> · {{ fmtCompact(series.unplaced_never_read_tokens) }} tokens never read<template v-if="price"> ({{ money(series.unplaced_graph_saved_dollars) }})</template> in no column</template><template v-if="(series.unplaced_source_saved_tokens ?? 0) > 0"> · {{ fmtCompact(series.unplaced_source_saved_tokens ?? 0) }} source tokens<template v-if="price"> ({{ money(series.unplaced_sources_saved_dollars ?? 0) }})</template> in no column</template>
       <InfoTip :text="about" label="About this chart" />
     </figcaption>
     <details class="table-view">
@@ -204,15 +211,15 @@ const unknown = (v: number | null) => (v === null ? 'unknown' : money(v))
         <table>
           <thead>
             <tr>
-              <th>From</th><th class="num">Never read</th><th class="num">Local models</th>
-              <template v-if="price"><th class="num">Graph answers</th><th class="num">Local and gateway</th><th class="num">Shorter prompts</th><th class="num">Total (est.)</th></template>
+              <th>From</th><th class="num">Never read</th><th class="num">External sources</th><th class="num">Local models</th>
+              <template v-if="price"><th class="num">Graph answers</th><th class="num">External sources</th><th class="num">Local and gateway</th><th class="num">Shorter prompts</th><th class="num">Total (est.)</th></template>
             </tr>
           </thead>
           <tbody>
             <tr v-for="r in rows.filter((x) => !x.future)" :key="r.b.start">
               <td class="mono">{{ subDay ? tipFmt.format(new Date(r.b.start * 1000)) : tick(r.b) }}</td>
-              <td class="num">{{ fmtInt(r.tokens.graph) }}</td><td class="num">{{ fmtInt(r.tokens.local) }}</td>
-              <template v-if="price"><td class="num">{{ unknown(r.money.graph) }}</td><td class="num">{{ unknown(r.money.local) }}</td><td class="num">{{ unknown(r.money.prompts) }}</td><td class="num">{{ unknown(r.total) }}</td></template>
+              <td class="num">{{ fmtInt(r.tokens.graph) }}</td><td class="num">{{ fmtInt(r.tokens.sources) }}</td><td class="num">{{ fmtInt(r.tokens.local) }}</td>
+              <template v-if="price"><td class="num">{{ unknown(r.money.graph) }}</td><td class="num">{{ unknown(r.money.sources) }}</td><td class="num">{{ unknown(r.money.local) }}</td><td class="num">{{ unknown(r.money.prompts) }}</td><td class="num">{{ unknown(r.total) }}</td></template>
             </tr>
           </tbody>
         </table>

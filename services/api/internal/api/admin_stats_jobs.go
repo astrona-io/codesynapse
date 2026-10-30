@@ -271,12 +271,20 @@ type OrgIngestRow struct {
 // now, whatever the range.
 type IngestSection struct {
 	StatsTable[accounts.IngestFigures, OrgIngestRow]
+	// Formats is the platform's indexed files by language or format as of
+	// now, whatever the range; null when one organisation is selected.
+	// FormatsUnknown counts graphs whose latest snapshot has no format
+	// counts, so their files are in no format.
+	Formats        []PlatformFormatCount `json:"formats"`
+	FormatsUnknown int                   `json:"formats_unknown"`
 }
 
 type ingestData struct {
-	totals accounts.IngestFigures
-	rows   []OrgIngestRow
-	rollup *StatsRollup
+	totals         accounts.IngestFigures
+	rows           []OrgIngestRow
+	rollup         *StatsRollup
+	formats        []PlatformFormatCount
+	formatsUnknown int
 }
 
 var ingestSorts = map[string]func(OrgIngestRow) int{
@@ -298,7 +306,7 @@ func (s *Server) handleStatsIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sortRows(d.rows, ingestSorts[r.URL.Query().Get("sort")])
-	writeJSON(w, http.StatusOK, IngestSection{StatsTable: page(r, req.Range, d.totals, d.rows, d.rollup)})
+	writeJSON(w, http.StatusOK, IngestSection{StatsTable: page(r, req.Range, d.totals, d.rows, d.rollup), Formats: d.formats, FormatsUnknown: d.formatsUnknown})
 }
 
 func (s *Server) ingestStats(ctx context.Context, q accounts.StatsQuery) (ingestData, error) {
@@ -364,16 +372,21 @@ func (s *Server) ingestStats(ctx context.Context, q accounts.StatsQuery) (ingest
 	for _, o := range orgs {
 		d.rows = append(d.rows, OrgIngestRow{OrgID: o.id, Slug: o.slug, Name: o.name, Deleted: o.deleted, IngestFigures: perOrg[o.id]})
 	}
+	if err := s.ingestFormats(ctx, q, &d); err != nil {
+		return ingestData{}, err
+	}
 	return d, nil
 }
 
 type ingestBody struct {
-	Totals accounts.IngestFigures `json:"totals"`
-	Rows   []OrgIngestRow         `json:"rows"`
+	Totals         accounts.IngestFigures `json:"totals"`
+	Rows           []OrgIngestRow         `json:"rows"`
+	Formats        []PlatformFormatCount  `json:"formats"`
+	FormatsUnknown int                    `json:"formats_unknown"`
 }
 
 func ingestExport(d ingestData) (body any, header []string, rows [][]string) {
-	body = withRollup[ingestBody]{ingestBody{d.totals, d.rows}, d.rollup}
+	body = withRollup[ingestBody]{ingestBody{d.totals, d.rows, d.formats, d.formatsUnknown}, d.rollup}
 	header = []string{"slug", "name", "deleted", "succeeded", "failed", "cancelled", "running", "without_report", "incomplete_discovery",
 		"scanned", "indexed", "skipped", "files_failed", "unprocessed", "skip_ignored_path", "skip_generated_code", "skip_binary", "skip_non_k8s_yaml"}
 	for _, o := range d.rows {

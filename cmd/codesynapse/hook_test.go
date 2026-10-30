@@ -58,16 +58,21 @@ func TestReadGuard(t *testing.T) {
 	assert.True(t, readGuard(context.Background(), in) == nil, "0 turns the guard off")
 }
 
-// offlineAPI points the hooks at a closed port, so a developer's own token and
-// server cannot change what a test sees.
-func offlineAPI(t *testing.T) {
+// refusingAPI points the hooks at an API that refuses the key, so a
+// developer's own token and server cannot change what a test sees. A refusal
+// is an answer: the stop guard still asks (an unreachable server skips it).
+func refusingAPI(t *testing.T) {
 	t.Helper()
-	t.Setenv("CODESYNAPSE_API_URL", "http://127.0.0.1:1")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"detail":"invalid key"}`, http.StatusUnauthorized)
+	}))
+	t.Cleanup(ts.Close)
+	t.Setenv("CODESYNAPSE_API_URL", ts.URL)
 	t.Setenv(apiTokenEnv, "tok")
 }
 
 func TestStopGuard(t *testing.T) {
-	offlineAPI(t)
+	refusingAPI(t)
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
 	ctx := context.Background()
 	dir := gitRepo(t)
@@ -215,7 +220,7 @@ func TestSessionRulesFallBackToTheBuiltInText(t *testing.T) {
 // A checkout that was already dirty when the session began is not the
 // session's change: the Stop hook asks only once the session changes it.
 func TestStopGuardIgnoresWhatWasDirtyAtStart(t *testing.T) {
-	offlineAPI(t)
+	refusingAPI(t)
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
 	ctx := context.Background()
 	dir := gitRepo(t)
@@ -283,7 +288,7 @@ func TestStopGuardIgnoresWhatCodeSynapseDoesNotIndex(t *testing.T) {
 }
 
 func TestStopGuardReportsGoProblemsItself(t *testing.T) {
-	offlineAPI(t)
+	refusingAPI(t)
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
 	ctx := context.Background()
 	dir := gitRepo(t)
@@ -301,7 +306,7 @@ func TestStopGuardReportsGoProblemsItself(t *testing.T) {
 // TestStopGuardIgnoresUpstreamCommits: a checkout behind its upstream (others
 // merged since it last pulled) has not changed the files those merges did.
 func TestStopGuardIgnoresUpstreamCommits(t *testing.T) {
-	offlineAPI(t)
+	refusingAPI(t)
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
 	ctx := context.Background()
 	dir := gitRepo(t)

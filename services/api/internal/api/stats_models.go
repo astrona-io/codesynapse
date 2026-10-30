@@ -127,8 +127,12 @@ type GatewayStat struct {
 	// that part of all requests.
 	Fallthroughs       float64            `json:"fallthroughs"`
 	FallthroughReasons map[string]float64 `json:"fallthrough_reasons"`
-	Timeouts           float64            `json:"timeouts"`
-	TimeoutSharePct    float64            `json:"timeout_share_pct"`
+	// CloudWithoutReason is the part of Cloud no fall-through reason
+	// accounts for: requests the gateway sent to the cloud without recording
+	// why the local model did not take them.
+	CloudWithoutReason float64 `json:"cloud_without_reason"`
+	Timeouts           float64 `json:"timeouts"`
+	TimeoutSharePct    float64 `json:"timeout_share_pct"`
 	// Response times in seconds, from the request to its last byte, by the
 	// route that answered; nil when the route answered nothing.
 	LocalAvgSeconds *float64 `json:"local_avg_seconds"`
@@ -226,6 +230,7 @@ var modelQueries = struct{ requests, input, output, cached, readS, writeS, readT
 //nolint:gosec // metric names, not credentials
 var gatewayQueries = struct {
 	requests, bytes, tokens, unmetered, fallthroughs   string
+	cloudReasons                                       string
 	latencySum, latencyCount, latencyP95               string
 	queueSum, queueCount, queueP95, answerSum, answerN string
 }{
@@ -234,6 +239,7 @@ var gatewayQueries = struct {
 	tokens:       `sum by (kind)(increase(gateway_local_tokens_total[$r]))`,
 	unmetered:    `sum(increase(gateway_local_unmetered_total[$r]))`,
 	fallthroughs: `sum by (reason)(increase(gateway_fallthrough_total[$r]))`,
+	cloudReasons: `sum(increase(gateway_fallthrough_total{route="cloud"}[$r]))`,
 	latencySum:   `sum by (route)(increase(gateway_request_duration_seconds_sum[$r]))`,
 	latencyCount: `sum by (route)(increase(gateway_request_duration_seconds_count[$r]))`,
 	latencyP95:   `histogram_quantile(0.95, sum by (le, route)(increase(gateway_request_duration_seconds_bucket[$r])))`,
@@ -363,6 +369,7 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		{modelQueries.p95, func(l map[string]string, v float64) { stat(l).ContextP95 = ptr(round3(v)) }},
 	}
 	gw := GatewayStat{FallthroughReasons: map[string]float64{}, FailedBy: map[string]float64{}}
+	var cloudExplained float64
 	gt := gatewayTimes{sum: map[string]float64{}, count: map[string]float64{}}
 	steps = append(steps, []struct {
 		expr string
@@ -411,6 +418,7 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 				gw.Timeouts += v
 			}
 		}},
+		{gatewayQueries.cloudReasons, func(_ map[string]string, v float64) { cloudExplained += v }},
 		{gatewayQueries.latencySum, func(l map[string]string, v float64) { gt.sum[l["route"]] += v }},
 		{gatewayQueries.latencyCount, func(l map[string]string, v float64) { gt.count[l["route"]] += v }},
 		{gatewayQueries.latencyP95, func(l map[string]string, v float64) {
@@ -469,7 +477,8 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Spent, out.CompressionSaved = s.moneyTotals(all)
 	out.CompressionEnabled, out.CompressionOff = compressionState(s.cfg.LLM, all)
-	for _, f := range []*float64{&gw.Requests, &gw.Local, &gw.Cloud, &gw.Rejected, &gw.Failed, &gw.LocalUnmetered, &gw.LocalInputTokens, &gw.LocalOutputTokens, &gw.LocalCachedTokens, &gw.BytesIn, &gw.BytesOut, &gw.Fallthroughs, &gw.Timeouts} {
+	gw.CloudWithoutReason = max(0, gw.Cloud-cloudExplained)
+	for _, f := range []*float64{&gw.CloudWithoutReason, &gw.Requests, &gw.Local, &gw.Cloud, &gw.Rejected, &gw.Failed, &gw.LocalUnmetered, &gw.LocalInputTokens, &gw.LocalOutputTokens, &gw.LocalCachedTokens, &gw.BytesIn, &gw.BytesOut, &gw.Fallthroughs, &gw.Timeouts} {
 		*f = math.Round(*f)
 	}
 	for _, m := range []map[string]float64{gw.FallthroughReasons, gw.FailedBy} {

@@ -29,8 +29,15 @@ import (
 // replayed from a per-session memo for every later request. A block without a
 // memo entry (after a restart, or on another replica) goes out as typed: one
 // cache miss, never a second, different rewrite of an earlier turn.
+//
+// Shortening has the lowest priority on the local model: it runs only when
+// the model's slot is free and nobody waits (ErrLocalBusy otherwise), and a
+// request stops waiting for it after ShortenTimeout without cancelling the
+// generation (llm.ShortenProse). Either way the block goes out as typed and
+// that choice is memoized like a rewrite.
 const (
-	// ShortenTimeout bounds the one local call a request may make.
+	// ShortenTimeout bounds how long a request waits for the one local call
+	// it may make.
 	ShortenTimeout = 8 * time.Second
 	// shortenMinBytes: shorter prompts save too little to be worth a call.
 	shortenMinBytes = 400
@@ -44,6 +51,20 @@ const (
 	memoBytes      = 32 << 20
 	memoTTL        = 24 * time.Hour
 )
+
+// Why a request's new block was not shortened (Shortened.Skip): a fixed set,
+// recorded in the audit detail.
+const (
+	// SkipBusy: the local model's slot was taken or somebody waited for it.
+	SkipBusy = "local_busy"
+	// SkipTimeout: the rewrite took longer than ShortenTimeout.
+	SkipTimeout = "timeout"
+	// SkipNoRewrite: the local call failed or its rewrite failed the checks.
+	SkipNoRewrite = "no_rewrite"
+)
+
+// ErrLocalBusy is what Rewrite returns when the local model was busy.
+var ErrLocalBusy = errors.New("the local model is busy")
 
 type shortenKey struct{}
 
@@ -70,6 +91,10 @@ type Shortened struct {
 	// what Statistics counts: replays mostly hit the provider's prompt
 	// cache, so counting them again would overstate the saving.
 	New int
+	// Skip says why the block this request offered for a new rewrite went
+	// out as typed: one of the Skip* reasons, empty when it was shortened
+	// or no block was offered.
+	Skip string
 }
 
 // Shortener rewrites the user's own prose on the cloud leg.
@@ -77,11 +102,15 @@ type Shortener struct {
 	// Ready says whether a local model can shorten at all; when it cannot,
 	// the body is not even parsed and goes out unchanged.
 	Ready func() bool
-	// Rewrite asks the local model for a shorter version of text; ok false
-	// keeps the original. It must check facts itself (llm.ShortenProse).
-	Rewrite func(ctx context.Context, text string) (string, bool)
+	// Rewrite asks the local model for a shorter version of text; an error
+	// keeps the original, ErrLocalBusy when the model was busy. It must check
+	// facts itself and must not wait for the model (llm.ShortenProse).
+	Rewrite func(ctx context.Context, text string) (string, error)
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
+	// Timeout is how long a request waits for a rewrite; 0 means
+	// ShortenTimeout.
+	Timeout time.Duration
 
 	memo memo
 }
@@ -121,13 +150,15 @@ func (s *Shortener) Apply(ctx context.Context, body []byte) ([]byte, Shortened) 
 				continue
 			}
 			called = true
-			e = s.rewrite(ctx, id.SessionID, key, sp.text, now)
+			var skip string
+			e, skip = s.rewrite(ctx, id.SessionID, key, sp.text, now)
 			if e == nil {
 				continue
 			}
 			if e.ok {
 				res.New += len(sp.text) - len(e.short)
 			}
+			res.Skip = skip
 		} else if !e.wait(ctx) {
 			continue
 		}
@@ -137,14 +168,14 @@ func (s *Shortener) Apply(ctx context.Context, body []byte) ([]byte, Shortened) 
 		}
 	}
 	if len(changes) == 0 {
-		return body, Shortened{}
+		return body, Shortened{Skip: res.Skip}
 	}
 	out := make([]byte, 0, len(body))
 	at := 0
 	for _, c := range changes {
 		lit, err := jsonString(c.short)
 		if err != nil {
-			return body, Shortened{}
+			return body, Shortened{Skip: res.Skip}
 		}
 		out = append(out, body[at:c.span.start]...)
 		out = append(out, lit...)
@@ -165,26 +196,38 @@ func (s *Shortener) now() time.Time {
 // rewrite makes the one local call and memoizes its outcome, a refusal
 // included, so the block is sent the same way on every later turn. A request
 // that ended (the agent went away) leaves no entry. nil means keep the text.
-func (s *Shortener) rewrite(ctx context.Context, session string, key [32]byte, text string, now time.Time) *memoEntry {
+// skip is the Skip* reason when this call made no rewrite.
+func (s *Shortener) rewrite(ctx context.Context, session string, key [32]byte, text string, now time.Time) (*memoEntry, string) {
 	e, leader := s.memo.reserve(session, key, now)
 	if !leader {
 		if !e.wait(ctx) {
-			return nil
+			return nil, ""
 		}
-		return e
+		return e, ""
 	}
-	cctx, cancel := context.WithTimeout(ctx, ShortenTimeout)
-	short, ok := s.Rewrite(cctx, text)
+	wait := s.Timeout
+	if wait <= 0 {
+		wait = ShortenTimeout
+	}
+	cctx, cancel := context.WithTimeout(ctx, wait)
+	short, err := s.Rewrite(cctx, text)
+	timedOut := errors.Is(cctx.Err(), context.DeadlineExceeded)
 	cancel()
-	if ok && (short == "" || len(short) >= len(text)) {
-		ok = false
-	}
 	if ctx.Err() != nil {
 		s.memo.drop(session, e)
-		return nil
+		return nil, ""
 	}
-	s.memo.finish(session, e, short, ok)
-	return e
+	skip := ""
+	switch {
+	case errors.Is(err, ErrLocalBusy):
+		skip = SkipBusy
+	case err != nil && timedOut:
+		skip = SkipTimeout
+	case err != nil || short == "" || len(short) >= len(text):
+		skip = SkipNoRewrite
+	}
+	s.memo.finish(session, e, short, skip == "")
+	return e, skip
 }
 
 // candidate is the gateway's cheap filter; ShortenProse checks the rest

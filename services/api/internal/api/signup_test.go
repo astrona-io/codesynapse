@@ -23,6 +23,13 @@ func TestMain(m *testing.M) {
 	// Sign-ups wait for a floor in production; tests that only need an
 	// account do not. TestSignupTakesTheSameTime sets it on its own server.
 	defaultSignupFloor = 0
+	// Production argon2id costs seconds per account under -race; the
+	// hashes still verify the same way.
+	accounts.UseFastPasswordHashing()
+	// Resumed and worker-claimed jobs wait for the next poll; tests that
+	// check nothing was claimed sleep a multiple of jobPoll, so they still
+	// span several ticks.
+	jobPoll, jobPollFallback = 100*time.Millisecond, 100*time.Millisecond
 	os.Exit(m.Run())
 }
 

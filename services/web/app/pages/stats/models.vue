@@ -55,6 +55,22 @@ const graphShort = computed(() => {
   const sv = a.value?.saved
   return graphSaved.value === null || !sv ? '' : `${fmtCompact(sv.tokens + (sv.unaware_graph_tokens ?? 0))} tokens never read`
 })
+// External sources: pages fetch_source returned as cleaned text, the tokens
+// as served minus the tokens returned, at the reference input price (server
+// side); null is unknown and stays out of the total.
+const src = computed(() => a.value?.sources)
+const sourcesSaved = computed(() => (src.value?.fetches ? src.value.dollars : null))
+const sourcesHint = computed(() => {
+  const s = src.value
+  if (!s?.fetches) return ''
+  return `${fmtCompact(s.saved_tokens)} tokens not read · ${Math.round((100 * s.hits) / s.fetches)}% of ${fmtCompact(s.fetches)} pages from the cache`
+})
+const sourcesTip = computed(() => {
+  const s = src.value
+  if (!s?.fetches) return ''
+  if (s.dollars === null) return 'the reference model has no input price; not in the total'
+  return `web pages fetched with fetch_source: tokens as served (${fmtCompact(s.raw_tokens)}) minus the tokens returned, at the input price of $${s.per_mtok} per million tokens${s.price_source ? ` (${s.price_source})` : ''}; what the agent writes is not counted`
+})
 // Split by what the tokens would have been billed as: fresh input, cache
 // reads (at the cache price, else the input price) and output.
 const savedParts = computed(() => (price.value ? localSaved(price.value, localIn.value, localCached.value, localOut.value) : null))
@@ -76,13 +92,13 @@ const compressionOffHint = computed(() => compressionUnused.value
 const gw = computed(() => m.value?.gateway)
 const gwSaved = computed(() => gw.value?.saved_dollars ?? null)
 const spent = computed(() => m.value?.spent_dollars ?? null)
-const saved = computed(() => totalSaved(price.value, { input: localIn.value, cached: localCached.value, output: localOut.value }, [graphSaved.value, compressionSaved.value, gwSaved.value]))
+const saved = computed(() => totalSaved(price.value, { input: localIn.value, cached: localCached.value, output: localOut.value }, [graphSaved.value, compressionSaved.value, gwSaved.value, sourcesSaved.value]))
 // Where a price comes from, shown as its host and path.
 const sourceLabel = (u: string) => { try { const x = new URL(u); return x.host + x.pathname + (x.hash ? ` (${x.hash.slice(1)})` : '') } catch { return u } }
 const money = (v: number) => (v >= 100 ? `$${Math.round(v)}` : `$${v.toFixed(2)}`)
 
 const TASK_LABEL: Record<string, string> = {
-  'local-answer': 'Agent questions', 'local-draft': 'Code drafts', review: 'Code review', 'security-triage': 'Security triage', briefing: 'Briefings', fix: 'Fixes',
+  'local-answer': 'Agent questions', 'local-draft': 'Code drafts', 'source-extract': 'Page extracts', review: 'Code review', 'security-triage': 'Security triage', briefing: 'Briefings', fix: 'Fixes',
   memory: 'Memory', embeddings: 'Embeddings', 'code-annotation': 'Annotations', 'pr-summary': 'Change summaries', 'cleanup-briefing': 'Cleanup briefings', other: 'Other',
 }
 // Three most used tasks keep their colour; the rest fold into Other.
@@ -141,6 +157,7 @@ const modelWindow = computed(() => (days.value > 30 ? 'the last 30 days (the met
           :tip="!compressionOn ? compressionOffHint : compressionSaved === null ? 'a cloud model has no price set; not in the total' : 'CodeSynapse\'s own AI tasks, and prompts typed through the gateway unless an organisation turned shortening off: prose a local model shortened before it went to the cloud, at the input price (each gateway rewrite counted once)'"
         />
         <StatTile v-if="savedParts" label="Saved by graph answers" :value="graphSaved === null ? 'unknown' : money(graphSaved)" :hint="graphShort" :tip="graphHint" />
+        <StatTile v-if="savedParts && src?.fetches" label="Saved by external sources" :value="sourcesSaved === null ? 'unknown' : money(sourcesSaved)" :hint="sourcesHint" :tip="sourcesTip" />
         <StatTile v-if="savedParts" label="Saved on input" :value="money(savedParts.input)" :hint="`${fmtCompact(Math.max(0, localIn - localCached))} tokens read by local models instead`" />
         <StatTile
           v-if="savedParts" label="Saved on cached input"

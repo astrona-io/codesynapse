@@ -43,14 +43,19 @@ func RunPlatformStatsDaily(t *testing.T, newStore func(*testing.T) accounts.Stor
 			"execution_sessions/active": 2, "execution_sessions/created": 2, "execution_sessions/created_dashboard": 1, "execution_sessions/created_gateway": 0, "execution_sessions/created_runtime": 1, "execution_sessions/revoked": 0,
 			"api_keys/active": 1, "api_keys/used": 1, "api_keys/expiring_14d": 1,
 			"jobs_finished/sync.failed": 1, "jobs_finished/other.succeeded": 1, "jobs_finished/sync.succeeded": 0,
+			// A paused watch is not active; a failed addition and one of the
+			// day before are not the day's.
+			"watches/active": 1, "watches/added": 1,
+			// Written by the API's sources, zero without them.
+			"llm_calls/measured": 0, "llm_memory/embedded": 0,
 		}
 		for k, v := range want {
 			assert.Equal(t, got[k], v, k)
 		}
 		for _, m := range accounts.PlatformStatMetrics() {
 			for _, d := range accounts.PlatformStatDimensions(m) {
-				if !accounts.ValidPlatformStat(m, d, "") {
-					continue // organisation rows only
+				if !accounts.ValidPlatformStat(m, d, "") || m == accounts.StatStoreRows || m == accounts.StatStoreBytes {
+					continue // organisation rows only, or written only when sampled
 				}
 				_, ok := got[m+"/"+d]
 				assert.True(t, ok, "every platform row is written, zeros included: "+m+"/"+d)
@@ -327,6 +332,19 @@ func platformStatsFixture(ctx context.Context, t *testing.T, st accounts.Store) 
 		require.NoError(t, st.AddJob(ctx, j.rec))
 		require.NoError(t, st.StartJob(ctx, j.rec.ID, "proc", now.Add(time.Minute), now))
 		require.NoError(t, st.FinishJob(ctx, j.rec.ID, "proc", accounts.JobOutcome{State: j.state, At: now}))
+	}
+	for i, login := range []string{"acme", "paused"} {
+		id := execution.Identity{TenantID: adaOrg.ID, SubjectID: adaUser.ID, SessionID: "web:abc", ParentSessionID: "web:abc"}
+		require.NoError(t, st.PutOrgWatch(ctx, accounts.OrgWatch{OrgID: adaOrg.ID, ActorID: adaUser.ID, Execution: id, Provider: "github", Host: "github.com",
+			Login: login, Paused: i == 1, NextScan: now}))
+	}
+	for _, e := range []accounts.Event{
+		{At: now, UserID: adaUser.ID, Via: "automation", OrgID: adaOrg.ID, Action: "watch.repo_add", Target: "acme/one", Outcome: accounts.Success},
+		{At: now, UserID: adaUser.ID, Via: "automation", OrgID: adaOrg.ID, Action: "watch.repo_add", Target: "acme/two", Outcome: accounts.Failure},
+		{At: day.Add(-time.Minute), UserID: adaUser.ID, Via: "automation", OrgID: adaOrg.ID, Action: "watch.repo_add", Target: "acme/three", Outcome: accounts.Success},
+	} {
+		_, err := st.AddEvent(ctx, e)
+		require.NoError(t, err)
 	}
 	users, err := st.ListUsers(ctx, 100)
 	require.NoError(t, err)

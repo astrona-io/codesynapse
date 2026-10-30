@@ -215,8 +215,8 @@ func bump(m map[string]rangeCounts, tool string, returned, read int) map[string]
 // at the next Stop.
 func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger) {
 	state := stateFile(in.SessionID)
-	if state == "" || in.Cwd == "" {
-		return
+	if state == "" || in.Cwd == "" || codesynapseOffline(in.SessionID) {
+		return // kept: the next stop with the server back reports it
 	}
 	s := loadState(state)
 	total, tokens := hookTokenDelta(in.TranscriptPath, s.TokenSent)

@@ -8,6 +8,7 @@ const checks = computed(() => (h.value ? [
   { label: 'Accounts database', c: h.value.accounts },
   { label: 'Live statistics', c: h.value.metrics },
   { label: 'Audit log chain', c: h.value.audit },
+  { label: 'Local models', c: h.value.models },
 ] : []))
 // Live statistics that were never set up are off, not broken.
 const off = (c: HealthCheck) => !c.ok && c.detail.startsWith('not configured')
@@ -51,6 +52,17 @@ async function assign(graph: string) {
             </div>
           </div>
           <p class="muted small">Version {{ h.version || 'dev' }} · checked {{ relTime(h.checked) }} · indexing jobs: {{ h.jobs.running }} running, {{ h.jobs.failed }} failed of {{ h.jobs.total }} recent</p>
+        </section>
+        <section v-if="h.local_models" class="panel">
+          <h2>Local models</h2>
+          <p class="muted small">Each local model server is asked whether it has the models <code>config/llm.yaml</code> names and how much context it really gives the chat model. Only model names are sent. Ollama cuts prompts longer than its context without an error, so a smaller context than <code>context_window</code> is a problem.</p>
+          <ul v-if="h.local_models.problems.length || h.local_models.warnings.length" class="notes">
+            <li v-for="p in h.local_models.problems" :key="p" class="error">{{ p }}</li>
+            <li v-for="w in h.local_models.warnings" :key="w" class="muted">{{ w }}</li>
+          </ul>
+          <div class="grid cols-2">
+            <ProviderCheckResult v-for="c in h.local_models.providers" :key="c.name" :check="c" title class="check" :class="{ 'check--bad': !c.ok }" />
+          </div>
         </section>
         <div class="grid cols-4">
           <StatTile label="People" :value="String(h.counts.users)" :hint="`${h.counts.admins} platform admin(s) · ${h.counts.suspended} suspended`" />
@@ -96,5 +108,6 @@ async function assign(graph: string) {
 .check { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .check--bad { border-color: var(--danger); background: var(--danger-soft); }
 .state { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.notes { margin: 0 0 12px; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
 .inline { width: auto; min-height: 30px; padding: 3px 8px; }
 </style>

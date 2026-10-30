@@ -2,9 +2,13 @@ package llm
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/testutil/assert"
@@ -151,11 +155,12 @@ func TestShortenProse(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			local := &stubProvider{text: func(Request) string { return tc.answer }}
 			r, cloud, ctx := compressRegistry(t, tc.on, local)
-			got, ok := r.ShortenProse(ctx, tc.text)
-			assert.Equal(t, ok, tc.ok)
+			got, err := r.ShortenProse(ctx, tc.text)
 			if tc.ok {
+				require.NoError(t, err)
 				assert.Equal(t, got, short)
 			} else {
+				assert.True(t, errors.Is(err, ErrNoRewrite), "refusals are ErrNoRewrite")
 				assert.Equal(t, got, "")
 			}
 			assert.Equal(t, len(cloud.got), 0, "the cloud model is never asked")
@@ -170,9 +175,109 @@ func TestShortenProseWithoutLocalModel(t *testing.T) {
 	r := NewRegistry(Config{Providers: []ProviderConfig{{Name: "cloud", Kind: KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "m", MaxOutputTokens: 100, MaxInputTokens: 100000}}, Default: "cloud"})
 	cloud := &stubProvider{text: func(Request) string { return "short" }}
 	r.impl["cloud"] = cloud
-	_, ok := r.ShortenProse(t.Context(), strings.Repeat("Plain prose sentence number one hundred. ", 20))
-	assert.False(t, ok)
+	_, err := r.ShortenProse(t.Context(), strings.Repeat("Plain prose sentence number one hundred. ", 20))
+	assert.True(t, errors.Is(err, ErrNoRewrite))
 	assert.Equal(t, len(cloud.got), 0)
+}
+
+var shortenProse = strings.Repeat("Could you please look at the function `Load` because it really returns 42 entries instead of 40. ", 6)
+
+// TestShortenProseYieldsTheLocalModel: shortening never waits for the local
+// model's slot and never takes it from a request that waits for it.
+func TestShortenProseYieldsTheLocalModel(t *testing.T) {
+	local := &stubProvider{text: func(Request) string { return "`Load` returns 42 entries, not 40." }}
+	r, _, ctx := compressRegistry(t, nil, local)
+
+	held, err := r.slots["local"].acquire(ctx)
+	require.NoError(t, err)
+	_, err = r.ShortenProse(ctx, shortenProse)
+	assert.True(t, errors.Is(err, ErrLocalBusy), "a running answer keeps the slot")
+
+	waiting := make(chan func(), 1)
+	go func() {
+		release, _ := r.slots["local"].acquire(ctx)
+		waiting <- release
+	}()
+	for _, w := r.slots["local"].counts(); w == 0; _, w = r.slots["local"].counts() {
+		time.Sleep(time.Millisecond)
+	}
+	held()
+	next := <-waiting
+	_, err = r.ShortenProse(ctx, shortenProse)
+	assert.True(t, errors.Is(err, ErrLocalBusy), "the waiting request went first")
+	next()
+	assert.Equal(t, len(local.got), 0, "the model was never asked while busy")
+
+	got, err := r.ShortenProse(ctx, shortenProse)
+	require.NoError(t, err)
+	assert.Equal(t, got, "`Load` returns 42 entries, not 40.")
+	assert.True(t, local.got[0].MaxTokens > 0 && local.got[0].MaxTokens < len(shortenProse), "the answer is capped")
+	// The rewrite releases the slot just after it hands over the answer.
+	running, _ := r.slots["local"].counts()
+	for deadline := time.Now().Add(time.Second); running != 0 && time.Now().Before(deadline); running, _ = r.slots["local"].counts() {
+		time.Sleep(time.Millisecond)
+	}
+	assert.Equal(t, running, 0, "the slot is free again")
+}
+
+// TestShortenProseSurvivesAPanic: the rewrite runs outside the request, where
+// net/http does not recover panics. One in the provider must not end the
+// process; the caller gets no rewrite and the slot comes free.
+func TestShortenProseSurvivesAPanic(t *testing.T) {
+	local := &stubProvider{text: func(Request) string { panic("provider broke") }}
+	r, _, ctx := compressRegistry(t, nil, local)
+
+	_, err := r.ShortenProse(ctx, shortenProse)
+	assert.True(t, errors.Is(err, ErrNoRewrite), "a panic means no rewrite")
+	for running, _ := r.slots["local"].counts(); running != 0; running, _ = r.slots["local"].counts() {
+		time.Sleep(time.Millisecond)
+	}
+	release, ok := r.slots["local"].tryAcquire(ctx)
+	require.True(t, ok, "the slot is free again")
+	release()
+}
+
+// TestShortenProseIsNotCancelledMidAnswer: a caller that stops waiting does
+// not hang up on the local model (Ollama logs that as HTTP 500); the answer
+// runs to its end and holds the slot until then.
+func TestShortenProseIsNotCancelledMidAnswer(t *testing.T) {
+	started, finish := make(chan struct{}), make(chan struct{})
+	hungUp := make(chan bool, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		select {
+		case <-finish:
+			hungUp <- false
+		case <-r.Context().Done():
+			hungUp <- true
+			return
+		}
+		_, _ = w.Write([]byte(`{"model":"m","choices":[{"message":{"content":"short"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	}))
+	defer srv.Close()
+	r := NewRegistry(Config{Providers: []ProviderConfig{{Name: "local", Kind: KindOpenAI, BaseURL: srv.URL + "/v1", Model: "m",
+		MaxOutputTokens: 1000, MaxInputTokens: 100000, TimeoutSeconds: 30}}, Default: "local"})
+	base, err := execution.With(t.Context(), execution.Identity{TenantID: "t", SubjectID: "u", SessionID: "s", ParentSessionID: "s"})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(base)
+	errs := make(chan error, 1)
+	go func() {
+		_, err := r.ShortenProse(ctx, shortenProse)
+		errs <- err
+	}()
+	<-started
+	cancel()
+	assert.True(t, errors.Is(<-errs, context.Canceled), "the caller stops waiting at once")
+	running, _ := r.slots["local"].counts()
+	assert.Equal(t, running, 1, "the answer still holds the slot")
+	_, err = r.ShortenProse(base, shortenProse)
+	assert.True(t, errors.Is(err, ErrLocalBusy))
+	close(finish)
+	assert.False(t, <-hungUp, "the model's request was not cancelled")
+	for running, _ := r.slots["local"].counts(); running != 0; running, _ = r.slots["local"].counts() {
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func TestRecordGatewayCompressed(t *testing.T) {

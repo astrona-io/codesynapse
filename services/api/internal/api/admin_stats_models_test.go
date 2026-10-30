@@ -200,11 +200,82 @@ func TestModelsSection(t *testing.T) {
 		assert.True(t, f.CostDollars == nil && f.LocalSharePct == nil)
 	})
 
-	t.Run("long ranges and missing metrics", func(t *testing.T) {
-		_, err := s.modelStats(context.Background(), "90d", accounts.StatsQuery{Now: time.Now()})
+	t.Run("unknown ranges and missing metrics", func(t *testing.T) {
+		_, err := s.modelStats(context.Background(), "2y", accounts.StatsQuery{Now: time.Now()})
 		assert.ErrorIs(t, err, errModelsRange)
+		assert.False(t, modelsRange("2y"))
+		assert.True(t, modelsRange("90d") && modelsRange("365d") && modelsRange("1h"))
 		off := &Server{cfg: Config{Accounts: acc}}
 		_, err = off.modelStats(context.Background(), "7d", accounts.StatsQuery{Now: time.Now()})
 		assert.ErrorIs(t, err, errNoMetrics)
+	})
+}
+
+func TestModelAndStoreRollupSources(t *testing.T) {
+	const org = "0123456789abcdef01234567"
+	day := func(expr string) string { return strings.ReplaceAll(expr, "$r", "1d") }
+	q := adminModelQueries
+	l := func(tenant, provider string, extra ...string) string {
+		s := `"tenant_id":"` + tenant + `","llm_provider":"` + provider + `","llm_model":"m"`
+		for i := 0; i+1 < len(extra); i += 2 {
+			s += `,"` + extra[i] + `":"` + extra[i+1] + `"`
+		}
+		return "{" + s + "}"
+	}
+	series := map[string]string{
+		day(q.requests): l(org, "rolllocal", "task", "review", "outcome", "ok") + "=4;" +
+			l(org, "rollcloud", "task", "review", "outcome", "error") + "=2;" +
+			l(telemetry.NoTenant, "rollcloud", "task", "other", "outcome", "ok") + "=1",
+		day(q.input): l(org, "rollcloud", "task", "review") + "=100",
+		// A value past int64 (a counter glitch) is dropped, not stored.
+		day(q.output):   l(org, "rollcloud", "task", "review") + "=1e30",
+		day(q.cost):     l(org, "rollcloud") + "=0.25",
+		day(q.embedded): `{"tenant_id":"` + org + `"}=3`,
+		storeRollupQueries[accounts.StatStoreRows]: `{"db_system":"postgres","kind":"database"}=42;` +
+			`{"db_system":"postgres","kind":"not_registered"}=9;{"db_system":"postgres","kind":"database"}=NaN`,
+		storeRollupQueries[accounts.StatStoreBytes]: `{"db_system":"postgres","kind":"database"}=4096`,
+	}
+	var filters []string
+	vm := cannedVM(t, series, &filters)
+	reg := llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{
+		{Name: "rolllocal", Kind: llm.KindOpenAI, BaseURL: "http://127.0.0.1:11434/v1", Model: "m"},
+		{Name: "rollcloud", Kind: llm.KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "m"},
+	}, Default: "rolllocal"})
+	s := &Server{cfg: Config{Accounts: accounts.NewService(acctmem.New(), false), Metrics: &telemetry.Querier{URL: vm.URL}, LLM: reg},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	d := accounts.StatDay(time.Now()).AddDate(0, 0, -1)
+	set := accounts.NewPlatformStatSet(d)
+	require.NoError(t, s.llmStatSource(context.Background(), d, set))
+	require.NoError(t, s.storeStatSource(context.Background(), d, set))
+	got := map[string]int64{}
+	for _, r := range set.Rows() {
+		require.True(t, accounts.ValidPlatformStat(r.Metric, r.Dimension, r.OrgID), "every row passes the allowlist: "+r.Metric+"/"+r.Dimension)
+		if r.Value != 0 {
+			got[r.OrgID+"|"+r.Metric+"/"+r.Dimension] = r.Value
+		}
+	}
+	assert.Equal(t, got, map[string]int64{
+		"|llm_calls/local.requests": 4, org + "|llm_calls/local.requests": 4,
+		"|llm_calls/cloud.requests": 3, org + "|llm_calls/cloud.requests": 2,
+		"|llm_calls/cloud.failures": 2, org + "|llm_calls/cloud.failures": 2,
+		"|llm_calls/cloud.input": 100, org + "|llm_calls/cloud.input": 100,
+		"|llm_calls/cloud.cost_micro": 250000, org + "|llm_calls/cloud.cost_micro": 250000,
+		"|llm_calls/measured":  1,
+		"|llm_memory/embedded": 3, org + "|llm_memory/embedded": 3,
+		"|store_rows/postgres.database": 42, "|store_bytes/postgres.database": 4096,
+	})
+	for _, f := range filters {
+		assert.Equal(t, f, "", "the rollup reads every tenant")
+	}
+
+	t.Run("without a metrics store nothing is measured", func(t *testing.T) {
+		off := &Server{cfg: Config{Accounts: s.cfg.Accounts}, logger: s.logger}
+		set := accounts.NewPlatformStatSet(d)
+		require.NoError(t, off.llmStatSource(context.Background(), d, set))
+		require.NoError(t, off.storeStatSource(context.Background(), d, set))
+		for _, r := range set.Rows() {
+			assert.Equal(t, r.Value, int64(0), r.Metric+"/"+r.Dimension)
+			assert.False(t, r.Metric == accounts.StatStoreRows, "a day without a sample writes no store rows")
+		}
 	})
 }

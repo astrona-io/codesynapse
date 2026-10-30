@@ -1,21 +1,20 @@
 <script setup lang="ts">
-import type { ModelFigures, ModelsSection, SeriesRange, StatsRange } from '~/utils/types'
+import type { ModelFigures, ModelsSection, StatsRange } from '~/utils/types'
 
 // The models tab of the platform statistics: CodeSynapse's own model calls
-// across organisations, the local and cloud split and what they cost. The
-// figures come from live statistics, which keep 30 days, so 90 days and 1
-// year show the last 30. A cost nobody priced reads "unknown", never $0,
-// local models have no cost, and the provider's prompt-cache saving stays
-// apart from CodeSynapse's savings. Models the configuration does not name
-// are "other".
+// across organisations, the local and cloud split and what they cost. Short
+// ranges come from live statistics; 90 days and 1 year read the totals and
+// organisations from the daily rollup, which keeps no model names, so the
+// model table shows the last 30 days. A cost nobody priced reads "unknown",
+// never $0, local models have no cost, and the provider's prompt-cache
+// saving stays apart from CodeSynapse's savings. Models the configuration
+// does not name are "other".
 const props = defineProps<{ range: StatsRange; org: string; tick: number }>()
 
-const live = computed(() => props.range !== '90d' && props.range !== '365d')
-const win = computed<SeriesRange>(() => (live.value ? props.range as SeriesRange : '30d'))
 const sort = ref('name')
 const page = ref(1)
 watch([() => props.range, () => props.org, sort], () => { page.value = 1 })
-const filter = computed(() => `range=${win.value}${props.org ? `&org=${encodeURIComponent(props.org)}` : ''}`)
+const filter = computed(() => `range=${props.range}${props.org ? `&org=${encodeURIComponent(props.org)}` : ''}`)
 const { data, error, pending, refresh } = useApiGet<ModelsSection>(() => `admin/stats/models?${filter.value}&sort=${sort.value}&page=${page.value}`)
 watch(() => props.tick, () => refresh())
 const exportHref = (format: 'csv' | 'json') => apiPath(`admin/stats/export?section=models&${filter.value}&format=${format}`)
@@ -48,7 +47,10 @@ const kindBadge: Record<string, string> = { local: 'badge--green', cloud: 'badge
   <div class="stack">
     <div class="row head">
       <p class="muted small grow">
-        From live statistics<template v-if="!live">, which keep 30 days: the last 30 days</template>.
+        <template v-if="data?.rollup">
+          Totals and organisations from the daily figures ({{ data.rollup.written }} of {{ data.rollup.days }} days recorded); the model table shows the last 30 days.
+        </template>
+        <template v-else>From live statistics.</template>
         Models the configuration does not name, and those past the ten busiest, are counted as other.
       </p>
       <select v-model="sort" class="inline" aria-label="Sort organisations">

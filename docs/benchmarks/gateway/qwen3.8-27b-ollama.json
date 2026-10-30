@@ -1,0 +1,105 @@
+{
+  "model": "qwen3.8:27b",
+  "effort": "none",
+  "context_window": 262144,
+  "runs": 1,
+  "requests": 9,
+  "local": 8,
+  "local_rate": 0.8888888888888888,
+  "reasons": {
+    "answer_timeout": 1
+  },
+  "results": [
+    {
+      "fixture": "small-title",
+      "run": 1,
+      "route": "local",
+      "request_bytes": 565,
+      "first_token_ms": 21862,
+      "total_ms": 23454,
+      "input_tokens": 104,
+      "output_tokens": 27
+    },
+    {
+      "fixture": "small-quota",
+      "run": 1,
+      "route": "local",
+      "request_bytes": 126,
+      "first_token_ms": 51984,
+      "total_ms": 51985,
+      "input_tokens": 13,
+      "output_tokens": 1
+    },
+    {
+      "fixture": "main-first-turn",
+      "run": 1,
+      "route": "local",
+      "request_bytes": 27955,
+      "first_token_ms": 75923,
+      "total_ms": 79908,
+      "input_tokens": 6480,
+      "output_tokens": 134
+    },
+    {
+      "fixture": "main-after-grep",
+      "run": 1,
+      "route": "local",
+      "request_bytes": 29273,
+      "first_token_ms": 46948,
+      "total_ms": 49513,
+      "input_tokens": 6673,
+      "output_tokens": 154
+    },
+    {
+      "fixture": "main-after-read",
+      "run": 1,
+      "route": "local",
+      "request_bytes": 32684,
+      "first_token_ms": 11029,
+      "total_ms": 13303,
+      "input_tokens": 7778,
+      "output_tokens": 119
+    },
+    {
+      "fixture": "main-tool-error",
+      "run": 1,
+      "route": "local",
+      "request_bytes": 34565,
+      "first_token_ms": 46240,
+      "total_ms": 48564,
+      "input_tokens": 8105,
+      "output_tokens": 92
+    },
+    {
+      "fixture": "main-final-answer",
+      "run": 1,
+      "route": "local",
+      "request_bytes": 34370,
+      "first_token_ms": 2365,
+      "total_ms": 5857,
+      "input_tokens": 8103,
+      "output_tokens": 135
+    },
+    {
+      "fixture": "main-question",
+      "run": 1,
+      "route": "local",
+      "request_bytes": 27934,
+      "first_token_ms": 34560,
+      "total_ms": 44882,
+      "input_tokens": 6465,
+      "output_tokens": 67
+    },
+    {
+      "fixture": "main-large-context",
+      "run": 1,
+      "route": "cloud",
+      "reason": "answer_timeout",
+      "request_bytes": 242746,
+      "first_token_ms": -1,
+      "total_ms": 300004,
+      "input_tokens": 0,
+      "output_tokens": 0
+    }
+  ]
+}

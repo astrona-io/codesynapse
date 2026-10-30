@@ -118,6 +118,8 @@ type localUsage struct {
 	DurationMs     int    `json:"duration_ms"`
 	ResponseTokens int    `json:"response_tokens"`
 	Failed         bool   `json:"failed,omitempty"`
+	// Source is fetch_source's measurement; older servers refuse it.
+	Source *sourceUsage `json:"source,omitempty"`
 }
 
 // mayAnswer reports whether the bridge may still answer tool itself. Once
@@ -138,24 +140,47 @@ func (b *bridge) mayAnswer(tool string) bool {
 //   - the server does not accept reports of this tool (an older server
 //     answers 400): this tool from now on.
 func (b *bridge) reportLocal(ctx context.Context, tool string, d time.Duration, tokens int, failed bool) bool {
+	return b.reportLocalSource(ctx, tool, d, tokens, failed, nil)
+}
+
+// reportLocalSource is reportLocal with fetch_source's measurement. A server
+// older than the measurement answers 400 to the unknown field: the report is
+// sent again without it, and later reports of this chat leave it out.
+func (b *bridge) reportLocalSource(ctx context.Context, tool string, d time.Duration, tokens int, failed bool, src *sourceUsage) bool {
 	if b.report.base == "" {
 		return true // no API to report to (tests, single-tenant setups without one)
 	}
 	b.mu.Lock()
 	client := cmp.Or(b.client, "claude-code")
+	if b.noSourceCounts {
+		src = nil
+	}
 	b.mu.Unlock()
 	repo := ""
 	if tool != fetchsource.Tool { // a fetched page has nothing to do with the checkout
 		repo = b.checkoutRepo(ctx)
 	}
-	body := localUsage{Tool: tool, Client: client, Repo: repo, DurationMs: int(d.Milliseconds()), ResponseTokens: tokens, Failed: failed}
+	body := localUsage{Tool: tool, Client: client, Repo: repo, DurationMs: int(d.Milliseconds()), ResponseTokens: tokens, Failed: failed, Source: src}
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	err := b.report.do(rctx, http.MethodPost, "/api/v1/usage/local", body, nil)
+	var se *statusError
+	if src != nil && errors.As(err, &se) && se.Status == http.StatusBadRequest {
+		b.mu.Lock()
+		b.noSourceCounts = true
+		b.mu.Unlock()
+		body.Source = nil
+		err = b.report.do(rctx, http.MethodPost, "/api/v1/usage/local", body, nil)
+	}
+	if errors.As(err, &se) && se.Status == http.StatusForbidden && strings.Contains(se.msg, "execution session is unavailable") &&
+		b.needsRegistration() && b.register(rctx) == nil {
+		// The API forgot the session (a restart with a fresh store): register
+		// it again and report once more.
+		err = b.report.do(b.callCtx(rctx), http.MethodPost, "/api/v1/usage/local", body, nil)
+	}
 	if err == nil {
 		return true
 	}
-	var se *statusError
 	switch {
 	case !errors.As(err, &se) || (se.Status >= 500 && se.Status != http.StatusServiceUnavailable):
 		b.warn("local call not recorded; asking the server", "tool", tool, "error", err)
