@@ -10,3 +10,21 @@ How many of Claude Code's requests would the local model keep, and how fast? `ju
 - **Not measured:** whether a kept answer is right. The benchmark counts what the gateway's checks accept, which is what decides the route.
 
 Results files hold numbers and fixture names only.
+
+## Baseline
+
+[`qwen3.8-27b-ollama.json`](qwen3.8-27b-ollama.json): Ollama `qwen3.8:27b` (MLX runner, `context_window: 262144`, `effort: none`), main at `3931a3a`, 2026-10-30, `timeout_seconds` 300, one run.
+
+| Fixture | Route | First token ms | Total ms | In tok | Out tok |
+|---|---|---:|---:|---:|---:|
+| small-title | local | 21,862 | 23,454 | 104 | 27 |
+| small-quota | local | 51,984 | 51,985 | 13 | 1 |
+| main-first-turn | local | 75,923 | 79,908 | 6,480 | 134 |
+| main-after-grep | local | 46,948 | 49,513 | 6,673 | 154 |
+| main-after-read | local | 11,029 | 13,303 | 7,778 | 119 |
+| main-tool-error | local | 46,240 | 48,564 | 8,105 | 92 |
+| main-final-answer | local | 2,365 | 5,857 | 8,103 | 135 |
+| main-question | local | 34,560 | 44,882 | 6,465 | 67 |
+| main-large-context | cloud (`answer_timeout`) | - | 300,004 | - | - |
+
+8 of 9 answered locally (89%). The model served other agents' requests during the run (a five-token request outside the benchmark took 109 s just before it), so the times include waiting inside Ollama and are an upper bound; the routes are the result to compare. The 240 KB turn (about 60k tokens) did not get a first token within 300 s.
