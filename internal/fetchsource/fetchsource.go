@@ -204,7 +204,15 @@ func TTL(host string) time.Duration {
 type Fetcher struct {
 	client *http.Client
 	cache  *Cache
+	ttls   *TTLs
 	now    func() time.Time
+}
+
+// WithTTLs uses the per-host TTLs t (nil: the built-in list) and returns f.
+// Call it before the first fetch.
+func (f *Fetcher) WithTTLs(t *TTLs) *Fetcher {
+	f.ttls = t
+	return f
 }
 
 // New returns a Fetcher that refuses internal addresses; cache may be nil.
@@ -283,7 +291,10 @@ func (f *Fetcher) FetchFor(ctx context.Context, raw, question string) (Out, erro
 	e, cached := f.cache.Get(key, u.String())
 	// An entry another cleaner made is fetched again, not revalidated.
 	cached = cached && e.Cleaner == CleanerVersion
-	if cached && now.Before(e.Fetched.Add(e.TTL)) {
+	// Freshness follows the TTL configured now, so a changed rule applies to
+	// pages already cached.
+	ttl := f.ttls.For(u.Hostname())
+	if cached && now.Before(e.Fetched.Add(ttl)) {
 		f.cache.Touch(key)
 		return answer(u, e, Hit, question), nil
 	}
@@ -317,7 +328,7 @@ func (f *Fetcher) FetchFor(ctx context.Context, raw, question string) (Out, erro
 
 	switch {
 	case res.StatusCode == http.StatusNotModified && cached:
-		e.Fetched = now
+		e.Fetched, e.TTL = now, ttl
 		_ = f.cache.Put(key, e) //nolint:errcheck // the answer stands without the cache
 		return answer(u, e, Revalidated, question), nil
 	case res.StatusCode != http.StatusOK:
@@ -337,7 +348,7 @@ func (f *Fetcher) FetchFor(ctx context.Context, raw, question string) (Out, erro
 	text := Clean(mt, body)
 	e = Entry{Cleaner: CleanerVersion,
 		URL: u.String(), ETag: clip(res.Header.Get("ETag"), maxHeader), LastModified: clip(res.Header.Get("Last-Modified"), maxHeader),
-		Fetched: now, TTL: TTL(u.Hostname()), ContentType: mt, RawBytes: len(body), Text: redact.Free(text),
+		Fetched: now, TTL: ttl, ContentType: mt, RawBytes: len(body), Text: redact.Free(text),
 	}
 	_ = f.cache.Put(key, e) //nolint:errcheck // the answer stands without the cache
 	return answer(u, e, Fetched, question), nil

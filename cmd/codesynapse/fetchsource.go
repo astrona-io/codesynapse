@@ -58,6 +58,22 @@ func (b *bridge) fetchSource(ctx context.Context, c toolCall) (map[string]any, b
 	}, false
 }
 
+// sourceTTLs reads the per-host TTLs from the user's config folder. A file
+// that cannot be read or is invalid is reported once and ignored, so the
+// built-in documentation list applies; the hosts it names are not logged.
+func (b *bridge) sourceTTLs() *fetchsource.TTLs {
+	path, err := fetchsource.DefaultTTLFile()
+	if err != nil {
+		return nil
+	}
+	ttls, err := fetchsource.LoadTTLs(path)
+	if err != nil {
+		b.warn("fetch_source TTL file ignored; the built-in TTLs apply", "error", err)
+		return nil
+	}
+	return ttls
+}
+
 // sourceFetcher is the bridge's fetcher, made on first use. Without a usable
 // cache folder pages are still fetched, just not kept.
 func (b *bridge) sourceFetcher() *fetchsource.Fetcher {
@@ -73,7 +89,7 @@ func (b *bridge) sourceFetcher() *fetchsource.Fetcher {
 		if err != nil {
 			b.warn("fetch_source cache unavailable; pages are not kept", "error", err)
 		}
-		b.fetcher = fetchsource.New(cache)
+		b.fetcher = fetchsource.New(cache).WithTTLs(b.sourceTTLs())
 	})
 	return b.fetcher
 }
