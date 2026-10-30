@@ -155,6 +155,9 @@ type anthropicIn struct {
 	Thinking      struct {
 		Type string `json:"type"`
 	} `json:"thinking"`
+	// offered are the tools the local model is given: Tools without the
+	// deferred ones no tool_reference has loaded yet. Set by translate.
+	offered []json.RawMessage
 }
 
 type anthropicMsg struct {
@@ -198,20 +201,24 @@ func present(raw json.RawMessage) bool {
 // (internal/telemetry/outcomes.go). Each says one thing, so the statistics
 // can tell a slow model (queue_timeout, answer_timeout) from a broken one.
 const (
-	FallExcluded     = "excluded"       // the model is on the installation's or organisation's exclude list
-	FallNotEligible  = "not_eligible"   // the model, tools or content are not ones the local model takes
-	FallTooLarge     = "too_large"      // the request does not fit the local model's context
-	FallHasThinking  = "has_thinking"   // extended thinking was asked for or sent back
-	FallHasImage     = "has_image"      // the request carries an image or a document
-	FallQueueTimeout = "queue_timeout"  // no queue slot within the wait
-	FallCancelled    = "cancelled"      // the agent went away while the request waited
-	FallTimeout      = "answer_timeout" // the local model took too long to answer
-	FallModelError   = "model_error"    // the local server could not be reached or broke off
-	FallBadStatus    = "bad_status"     // the local server answered with a status other than 200
-	FallEmptyAnswer  = "empty_answer"   // a held answer had no text and no tool call
-	FallTruncated    = "truncated"      // a held answer stopped at max tokens or ended without a finish
-	FallBadAnswer    = "bad_answer"     // a held answer had a bad tool call or was too large to hold
-	FallNoLocalModel = "no_local_model" // the gateway has no local model to offer the request to
+	FallExcluded         = "excluded"          // the model is on the installation's or organisation's exclude list
+	FallNotEligible      = "not_eligible"      // the model is not one the organisation answers locally
+	FallBadRequest       = "bad_request"       // the body is not a request the gateway can read (bad JSON, no messages, unknown role)
+	FallSystemNotText    = "system_not_text"   // the system prompt is not a string or text blocks
+	FallUnsupportedBlock = "unsupported_block" // a message holds a block the local model cannot take (server tool results, unknown types)
+	FallUnsupportedTool  = "unsupported_tool"  // a tool or tool_choice the local model cannot run, such as a server tool
+	FallTooLarge         = "too_large"         // the request does not fit the local model's context
+	FallHasThinking      = "has_thinking"      // extended thinking was asked for or sent back
+	FallHasImage         = "has_image"         // the request carries an image or a document
+	FallQueueTimeout     = "queue_timeout"     // no queue slot within the wait
+	FallCancelled        = "cancelled"         // the agent went away while the request waited
+	FallTimeout          = "answer_timeout"    // the local model took too long to answer
+	FallModelError       = "model_error"       // the local server could not be reached or broke off
+	FallBadStatus        = "bad_status"        // the local server answered with a status other than 200
+	FallEmptyAnswer      = "empty_answer"      // a held answer had no text and no tool call
+	FallTruncated        = "truncated"         // a held answer stopped at max tokens or ended without a finish
+	FallBadAnswer        = "bad_answer"        // a held answer had a bad tool call or was too large to hold
+	FallNoLocalModel     = "no_local_model"    // the gateway has no local model to offer the request to
 )
 
 // failure names why a call to the local model failed: a deadline is a
@@ -267,7 +274,7 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 		return in, nil, FallTooLarge
 	}
 	if json.Unmarshal(body, &in) != nil {
-		return in, nil, FallNotEligible
+		return in, nil, FallBadRequest
 	}
 	if l.excluded(ctx, in.Model) {
 		return in, nil, FallExcluded
@@ -282,8 +289,11 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 			elig = func(string) bool { return true }
 		}
 	}
-	if !elig(in.Model) || len(in.Messages) == 0 {
+	if !elig(in.Model) {
 		return in, nil, FallNotEligible
+	}
+	if len(in.Messages) == 0 {
+		return in, nil, FallBadRequest
 	}
 	// With local thinking on, the local model answers without thinking and
 	// leaves Claude's earlier thinking blocks out: they are signed reasoning
@@ -305,20 +315,21 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 	if present(in.System) {
 		sys, ok := text(in.System)
 		if !ok {
-			return in, nil, FallNotEligible
+			return in, nil, FallSystemNotText
 		}
 		msgs = append(msgs, oaMsg{Role: "system", Content: sys})
 	}
 	for _, m := range in.Messages {
-		conv, ok := convertMessage(m, think)
-		if !ok {
-			return in, nil, FallNotEligible
+		conv, why := convertMessage(m, think)
+		if why != "" {
+			return in, nil, why
 		}
 		msgs = append(msgs, conv...)
 	}
-	tools, choice, parallel, ok := convertTools(in.Tools, in.ToolChoice)
+	in.offered = offeredTools(in)
+	tools, choice, parallel, ok := convertTools(in.offered, in.ToolChoice)
 	if !ok {
-		return in, nil, FallNotEligible
+		return in, nil, FallUnsupportedTool
 	}
 	// include_usage makes the server report the tokens it used, so the
 	// gateway can say what a local answer saved.
@@ -353,7 +364,7 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 	}
 	out, err := json.Marshal(req)
 	if err != nil {
-		return in, nil, FallNotEligible
+		return in, nil, FallBadRequest
 	}
 	return in, out, ""
 }
@@ -425,7 +436,7 @@ func (l *Local) serve(ctx context.Context, w http.ResponseWriter, body []byte) (
 		// A tool call is only usable whole: collect the answer, check it, and
 		// let the cloud take the request if the local model got it wrong.
 		first, more := next()
-		ans, ok := collect(first, more, next, declaredTools(in.Tools))
+		ans, ok := collect(first, more, next, declaredTools(in.offered))
 		if err := sc.Err(); err != nil {
 			return fail(failure(ctx, err))
 		}

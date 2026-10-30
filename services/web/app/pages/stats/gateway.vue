@@ -36,6 +36,7 @@ const FALL_LABEL: Record<string, string> = {
   queue_timeout: 'waited too long for a slot', answer_timeout: 'answered too slowly', cancelled: 'client gave up',
   model_error: 'model error', bad_status: 'error status', empty_answer: 'empty answer', truncated: 'cut off', bad_answer: 'unreadable answer',
   not_eligible: 'not eligible', too_large: 'too large', has_thinking: 'needs thinking', has_image: 'has an image or document',
+  bad_request: 'unreadable request', system_not_text: 'system prompt not text', unsupported_block: 'unsupported content', unsupported_tool: 'unsupported tool',
   no_local_model: 'no local model', excluded: 'excluded', other: 'other',
 }
 const gwReasons = computed(() => Object.entries(gw.value?.fallthrough_reasons ?? {}).sort((p, q) => q[1] - p[1]))

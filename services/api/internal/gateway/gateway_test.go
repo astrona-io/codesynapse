@@ -189,7 +189,7 @@ func TestLocalFallsThroughToCloud(t *testing.T) {
 		reason string
 	}{
 		"main model, local first off": {`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallNotEligible},
-		"server tool":                 {`{"model":"claude-haiku-5-5","tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallNotEligible},
+		"server tool":                 {`{"model":"claude-haiku-5-5","tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"hi"}]}`, 200, nil, FallUnsupportedTool},
 		"has image":                   {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"image"}]}]}`, 200, nil, FallHasImage},
 		"has document":                {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"document"}]}]}`, 200, nil, FallHasImage},
 		"image in a tool result":      {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":[{"type":"image"}]}]}]}`, 200, nil, FallHasImage},
