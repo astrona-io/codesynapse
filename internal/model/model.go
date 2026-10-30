@@ -46,7 +46,9 @@ const (
 	// an ADR, RFC, standard, policy, overview, runbook or diagram. Only its
 	// metadata and location are stored, not its text.
 	KindRecord NodeKind = "Record"
-	// KindComponent is a part of the system that records apply to.
+	// KindComponent is a part of the system that records apply to. Ingest
+	// also builds one per image build target, grouping its code and manifests
+	// (arch.BuildTopology; the members are in Meta).
 	KindComponent NodeKind = "Component"
 	// KindRoute is an entry point the code registers: an HTTP route, an MCP
 	// tool or a CLI command. Signature holds its kind (http, mcp, cli), Name
@@ -129,7 +131,9 @@ const (
 const (
 	// EdgeSupersedes links a Record to the older Record it replaces.
 	EdgeSupersedes EdgeKind = "SUPERSEDES"
-	// EdgeAppliesTo links a Record to a Component it governs.
+	// EdgeAppliesTo links a Record to a Component it governs, and a
+	// Component to the packages, builds and manifests it groups (Evidence is
+	// inferred for a candidate link).
 	EdgeAppliesTo EdgeKind = "APPLIES_TO"
 	// EdgeImplementsDecision links code (a symbol, file or package) to the
 	// Record whose decision it carries out.

@@ -237,8 +237,18 @@ func TestAdminPanelsNoRepo(t *testing.T) {
 			assert.False(t, strings.Contains(e, "repo="), name+": "+e)
 		}
 	}
-	for _, p := range []string{"jobs_finished", "jobs_worker_roles", "ingest_files", "ingest_skips", "ingest_extract"} {
+	for _, p := range []string{"jobs_finished", "jobs_processes", "jobs_worker_roles", "ingest_files", "ingest_skips", "ingest_extract"} {
 		_, ok := adminPanels[p]
 		assert.True(t, ok, p)
 	}
+	// Processes are counted per service; the instance label is never a line.
+	for _, q := range adminPanels["jobs_processes"].queries {
+		assert.Equal(t, q.by, "job")
+		assert.False(t, strings.Contains(q.expr, "instance"), q.expr)
+	}
+	// Route latency names each line by route and quantile.
+	lat := adminPanels["api_route_latency"].queries
+	require.Equal(t, len(lat), 2)
+	assert.Contains(t, lat[0].expr, `"$1 p50", "route"`)
+	assert.Contains(t, lat[1].expr, `"$1 p95", "route"`)
 }

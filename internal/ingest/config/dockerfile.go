@@ -101,6 +101,27 @@ func parseDockerfile(content []byte) []instruction {
 	return out
 }
 
+// Instruction is one Dockerfile instruction as other readers see it: its
+// first line, the command in upper case and its arguments with continuation
+// lines joined.
+type Instruction struct {
+	Line int
+	Cmd  string
+	Args string
+}
+
+// ParseDockerfile splits a Dockerfile into instructions with the same rules
+// as the security checks, for readers outside this package (the architecture
+// topology, which links image builds to the Go packages they compile).
+func ParseDockerfile(content []byte) []Instruction {
+	ins := parseDockerfile(content)
+	out := make([]Instruction, len(ins))
+	for i, in := range ins {
+		out[i] = Instruction{Line: in.line, Cmd: in.cmd, Args: in.args}
+	}
+	return out
+}
+
 // stage is one FROM of a multi-stage build.
 type stage struct {
 	line  int

@@ -62,6 +62,14 @@ func (o *OpenAI) ChatHandler() http.HandlerFunc {
 		// The agent names whatever model it has configured; the local one answers.
 		model, _ := json.Marshal(l.Model)
 		req["model"] = model
+		// The provider's cache fields (keep_alive) unless the agent set its own.
+		for k, v := range l.Options {
+			if _, set := req[k]; !set {
+				if raw, err := json.Marshal(v); err == nil {
+					req[k] = raw
+				}
+			}
+		}
 		out, err := json.Marshal(req)
 		if err != nil {
 			openAIProblem(w, http.StatusBadRequest, "the body could not be read")

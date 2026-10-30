@@ -82,7 +82,7 @@ const sourceLabel = (u: string) => { try { const x = new URL(u); return x.host +
 const money = (v: number) => (v >= 100 ? `$${Math.round(v)}` : `$${v.toFixed(2)}`)
 
 const TASK_LABEL: Record<string, string> = {
-  'local-answer': 'Agent questions', 'local-draft': 'Code drafts', review: 'Code review', 'security-triage': 'Security triage', briefing: 'Briefings', fix: 'Fixes',
+  'local-answer': 'Agent questions', 'local-draft': 'Code drafts', 'source-extract': 'Page extracts', review: 'Code review', 'security-triage': 'Security triage', briefing: 'Briefings', fix: 'Fixes',
   memory: 'Memory', embeddings: 'Embeddings', 'code-annotation': 'Annotations', 'pr-summary': 'Change summaries', 'cleanup-briefing': 'Cleanup briefings', other: 'Other',
 }
 // Three most used tasks keep their colour; the rest fold into Other.

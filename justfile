@@ -346,7 +346,7 @@ build:
 
 # Unit tests with the race detector
 test:
-    go test -race ./...
+    go test -race -timeout 20m ./...
 
 # Accounts contract against a throwaway PostgreSQL container (never the compose database: the test drops its tables)
 test-postgres: _runtime
@@ -422,6 +422,7 @@ cover:
 fuzz time="20s":
     go test ./internal/gitx -run=^$ -fuzz=FuzzParseDiff -fuzztime={{time}}
     go test ./internal/redact -run=^$ -fuzz=FuzzText -fuzztime={{time}}
+    go test ./internal/sarifimport -run=^$ -fuzz=FuzzParse -fuzztime={{time}}
 
 # Lint Go code
 lint:

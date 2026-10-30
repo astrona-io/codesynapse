@@ -37,11 +37,17 @@ func (s *Store) DeleteRuntimeFacts(_ context.Context, ns string) error {
 	return nil
 }
 
-// deleteRuntimeOf drops every namespace's facts of graph; the caller holds mu.
+// deleteRuntimeOf drops every namespace's facts and imported findings of
+// graph; the caller holds mu.
 func (s *Store) deleteRuntimeOf(graph string) {
 	for ns := range s.runtime {
 		if store.RuntimeGraph(ns) == graph {
 			delete(s.runtime, ns)
+		}
+	}
+	for ns := range s.sarif {
+		if store.RuntimeGraph(ns) == graph {
+			delete(s.sarif, ns)
 		}
 	}
 }

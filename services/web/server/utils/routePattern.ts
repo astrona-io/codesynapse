@@ -19,7 +19,7 @@ const REPO_SUB = new Set([
   'conventions', 'dashboard', 'dependencies', 'duplicates', 'entry-points', 'graph', 'history', 'hotspots',
   'identities', 'images', 'impact', 'ingestion', 'licenses', 'list', 'local-draft', 'memory', 'metrics',
   'outline', 'overview', 'packages', 'policy', 'remote', 'reviews', 'runtime', 'sbom', 'schedule', 'search',
-  'sections', 'security', 'semantic', 'session-memory', 'symbol', 'sync', 'triage', 'usage',
+  'sections', 'security', 'semantic', 'session-memory', 'source-extract', 'symbol', 'sync', 'triage', 'usage',
 ])
 
 const METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'])

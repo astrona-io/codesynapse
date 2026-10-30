@@ -44,7 +44,7 @@ const { data: ingest, error: ingestError, refresh: refreshIngest, execute: loadI
 const chartPanels: Partial<Record<Tab, string[]>> = {
   usage: ['sessions', 'mcp_calls', 'mcp_errors', 'mcp_tokens', 'local_answers', 'tool_latency', 'tool_latency_by_tool',
   'org_tool_calls', 'org_sessions', 'org_tokens', 'api_routes', 'api_failures', 'api_route_latency', 'gateway_requests', 'gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_fallthrough', 'llm_cost', 'db_latency'],
-  jobs: ['jobs_finished', 'jobs_failures', 'jobs_org_finished', 'jobs_queue', 'jobs_wait', 'jobs_duration', 'jobs_worker_roles', 'jobs_scheduler', 'jobs_leases'],
+  jobs: ['jobs_finished', 'jobs_failures', 'jobs_org_finished', 'jobs_queue', 'jobs_wait', 'jobs_duration', 'jobs_processes', 'jobs_worker_roles', 'jobs_scheduler', 'jobs_leases'],
   ingest: ['ingest_runs', 'ingest_org_runs', 'ingest_phases', 'ingest_extract', 'ingest_files', 'ingest_skips'],
 }
 // The charts follow the last tab that has any, so switching to a table
@@ -356,6 +356,16 @@ const activeHint = computed(() => {
           {{ ingest.totals.skips.non_k8s_yaml }} YAML that is not Kubernetes · {{ ingest.totals.incomplete_discovery }} runs did not see every file ·
           {{ ingest.totals.without_report }} runs whose report expired count by outcome only.
         </p>
+        <div v-if="ingest.formats" class="breakdowns">
+          <p class="eyebrow">Indexed files by language or format</p>
+          <BarList :items="ingest.formats.map((f) => ({ label: f.name, value: f.files }))" unit=" files" />
+          <p class="muted small">
+            As of now, whatever the range, from each graph's latest index; a graph several organisations hold counts once.
+            A language or format fewer than three organisations have is other.
+            <template v-if="ingest.formats_unknown">{{ ingest.formats_unknown }} graphs were indexed before formats were counted and are in none.</template>
+          </p>
+        </div>
+        <p v-else class="muted small">Indexed files by language or format are counted for the whole platform; select no organisation to see them.</p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Organisation</th><th class="num">Runs</th><th class="num">Failed</th><th class="num">Running</th><th class="num">Scanned</th><th class="num">Indexed</th><th class="num">Skipped</th><th class="num">Files failed</th></tr></thead>

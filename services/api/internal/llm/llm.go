@@ -42,14 +42,15 @@ const (
 )
 
 // Tasks a provider can be routed to.
-var Tasks = []string{"security-triage", "review", "briefing", "fix", "memory", "embeddings", "code-annotation", "pr-summary", "cleanup-briefing", "local-answer", "local-draft", "compress"}
+var Tasks = []string{"security-triage", "review", "briefing", "fix", "memory", "embeddings", "code-annotation", "pr-summary", "cleanup-briefing", "local-answer", "local-draft", "source-extract", "compress"}
 
 // LocalTasks run only on a local model: they read a diff, the cleanup plan
 // or files of the developer's checkout (local-answer and local-draft, the
-// ask_local and local_draft tools).
+// ask_local and local_draft tools) or a web page and the agent's question
+// (source-extract, tier 2 of fetch_source).
 // Without a routed local provider they pick the first local one; with none,
 // the task is unavailable.
-var LocalTasks = []string{"pr-summary", "cleanup-briefing", "local-answer", "local-draft", "compress"}
+var LocalTasks = []string{"pr-summary", "cleanup-briefing", "local-answer", "local-draft", "source-extract", "compress"}
 
 // ErrNoLocalModel means a local-only task has no local provider to run on.
 var ErrNoLocalModel = errors.New("this task runs only on a local model and none is configured")
@@ -174,9 +175,13 @@ type ProviderConfig struct {
 	// organisation; each organisation can add its own (docs/operations/gateway.md).
 	GatewayExclude []string `yaml:"gateway_exclude" json:"gateway_exclude,omitempty"`
 	// GatewayWaitSeconds is how long a gateway request waits for a free slot
-	// on this provider before it goes to the cloud: 1 to 300, default 60.
+	// on this provider before it goes to the cloud: 1 to 300, default 30.
 	// The answer itself is bounded by TimeoutSeconds.
 	GatewayWaitSeconds int `yaml:"gateway_wait_seconds" json:"gateway_wait_seconds,omitempty"`
+	// GatewayFirstTokenSeconds is how long a gateway request that has the
+	// slot waits for the model's first token before it goes to the cloud:
+	// 1 to 600, default 90. Prefill is what makes long prompts slow.
+	GatewayFirstTokenSeconds int `yaml:"gateway_first_token_seconds" json:"gateway_first_token_seconds,omitempty"`
 	// Effort is the Anthropic output effort (low, medium, high, xhigh, max).
 	// OpenAI-compatible servers get it as reasoning_effort; "none" turns off
 	// thinking on Ollama, which ignores chat_template_kwargs.

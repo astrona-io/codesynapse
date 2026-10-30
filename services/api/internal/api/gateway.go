@@ -172,7 +172,7 @@ func (s *Server) gatewayRoutes() {
 		if !ok {
 			return nil
 		}
-		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire, ContextWindow: t.ContextWindow, Exclude: t.Exclude, Wait: t.Wait, Effort: t.Effort, DisableThinking: t.DisableThinking}
+		return &gateway.Local{BaseURL: t.BaseURL, Model: t.Model, APIKey: t.APIKey, Acquire: t.Acquire, AcquireFirst: t.AcquireFirst, ContextWindow: t.ContextWindow, MaxOutput: t.MaxOutput, Exclude: t.Exclude, Wait: t.Wait, FirstToken: t.FirstToken, Timeout: t.Timeout, Options: t.Options, Effort: t.Effort, DisableThinking: t.DisableThinking}
 	}
 	// Shortening uses the local "compress" task only; compress_prompts: false
 	// in config/llm.yaml turns it off for the installation.
@@ -206,7 +206,7 @@ func (s *Server) gatewayRoutes() {
 			h(w, r)
 		}
 	}
-	for _, path := range []string{"/v1/messages", "/v1/messages/count_tokens"} {
+	for _, path := range []string{"/v1/messages", gateway.CountPath} {
 		s.route("POST "+path, orgRole(accounts.Member), guard(g.Handler(path)))
 	}
 	o := &gateway.OpenAI{Local: g.Local, Done: s.auditGateway}

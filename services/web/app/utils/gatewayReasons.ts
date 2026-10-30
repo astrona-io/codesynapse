@@ -6,7 +6,8 @@ const REASONS: Record<string, string> = {
   queue_timeout: 'waited too long for a slot', answer_timeout: 'answered too slowly', cancelled: 'client gave up',
   model_error: 'model error', bad_status: 'error status', empty_answer: 'empty answer', truncated: 'cut off', bad_answer: 'unreadable answer',
   not_eligible: 'not eligible', too_large: 'too large', has_thinking: 'needs thinking', has_image: 'has an image or document',
-  no_local_model: 'no local model', excluded: 'excluded', other: 'other',
+  bad_request: 'unreadable request', system_not_text: 'system prompt not text', unsupported_block: 'unsupported content', unsupported_tool: 'unsupported tool',
+  no_local_model: 'no local model', local_first_off: 'local first off', excluded: 'excluded', count_tokens: 'token count (cloud only)', other: 'other',
 }
 
 const ROUTES: Record<string, string> = { local: 'local model', cloud: 'cloud', rejected: 'refused', other: 'other' }

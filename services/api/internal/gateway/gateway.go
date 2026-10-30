@@ -32,6 +32,10 @@ const (
 	KeyHeader = "X-CodeSynapse-Key"
 )
 
+// CountPath is Anthropic's token counting endpoint. It always goes to
+// the cloud, with the reason FallCountTokens.
+const CountPath = "/v1/messages/count_tokens"
+
 // AnthropicUpstream is the only cloud address the gateway forwards to.
 const AnthropicUpstream = "https://api.anthropic.com"
 
@@ -174,8 +178,9 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			meta.notePrompt(r.Context(), anthropicUserText(body))
 		}
 		local := g.local()
-		if local == nil && g.Local != nil && upstreamPath == "/v1/messages" {
-			// A gateway meant to answer locally has no local model right now.
+		if local == nil && upstreamPath == "/v1/messages" {
+			// No local model to offer the request to, now or at all: every
+			// cloud leg of /v1/messages names why it went there.
 			meta.Fallthrough = FallNoLocalModel
 		}
 		if local != nil && upstreamPath == "/v1/messages" {
@@ -195,6 +200,15 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 				return
 			}
 			meta.Fallthrough = reason
+		}
+		if upstreamPath == CountPath && g.Local != nil {
+			// Never estimated here: counting is free, and Claude Code sizes
+			// its context (when to compact) with the number, which only the
+			// model's own tokenizer gives. The exclude list still wins.
+			meta.Fallthrough = FallCountTokens
+			if excludedModel(r.Context(), local, body) {
+				meta.Fallthrough = FallExcluded
+			}
 		}
 		meta.Route = "cloud"
 		if !hasCredential(r) {

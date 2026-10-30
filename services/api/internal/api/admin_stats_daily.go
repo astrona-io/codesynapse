@@ -51,7 +51,7 @@ func (d dailyFigures) total(metric, dim string) int {
 }
 
 // windowMetrics are the platform rollup metrics a long range reads.
-var windowMetrics = []string{accounts.StatOrgs, accounts.StatUsers, accounts.StatActiveUsers, accounts.StatBrowserSessions, accounts.StatExecutionSessions}
+var windowMetrics = []string{accounts.StatOrgs, accounts.StatUsers, accounts.StatActiveUsers, accounts.StatBrowserSessions, accounts.StatExecutionSessions, accounts.StatWatches}
 
 // readDaily sums a long range from the rollup. orgRows also reads the
 // per-organisation execution sessions (only q.OrgID's when it is set).
@@ -131,11 +131,12 @@ func (s *Server) dailyTenants(ctx context.Context, q accounts.StatsQuery) (accou
 	t.Totals.OrgsCreated = d.total(accounts.StatOrgs, "created")
 	t.Totals.UsersCreated = d.total(accounts.StatUsers, "created")
 	t.Totals.ActiveUsers = int(d.last[[2]string{accounts.StatActiveUsers, "30d"}])
-	t.Totals.WatchAdds = 0
+	// Repositories watches added: platform-wide, as in the live ranges.
+	t.Totals.WatchAdds = d.total(accounts.StatWatches, "added")
 	for i := range t.Orgs {
 		t.Orgs[i].ActiveMembers = 0
 	}
-	d.rollup.Unavailable = append(d.rollup.Unavailable, "watch_adds", "active_members")
+	d.rollup.Unavailable = append(d.rollup.Unavailable, "active_members")
 	return t, &d.rollup, nil
 }
 

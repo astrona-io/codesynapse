@@ -33,12 +33,12 @@ func TestLocalFirst(t *testing.T) {
 		reason string
 	}{
 		"main model answered locally": {true, 0, completeAnswer, opus, "local", ""},
-		"switched off":                {false, 0, completeAnswer, opus, "cloud", FallNotEligible},
+		"switched off":                {false, 0, completeAnswer, opus, "cloud", FallLocalFirstOff},
 		"larger than the window":      {true, 50, completeAnswer, opus, "cloud", FallTooLarge},
 		"fits the window":             {true, 8192, completeAnswer, opus, "local", ""},
 		"empty answer":                {true, 0, emptyAnswer, opus, "cloud", FallEmptyAnswer},
 		"stopped at max tokens":       {true, 0, truncatedAnswer, opus, "cloud", FallTruncated},
-		"stream broke off":            {true, 0, brokenOffAnswer, opus, "cloud", FallTruncated},
+		"stream broke off":            {true, 0, brokenOffAnswer, opus, "cloud", FallModelError},
 		"nothing came":                {true, 0, "data: [DONE]\n\n", opus, "cloud", FallEmptyAnswer},
 		"large request, known window": {true, 1 << 20, completeAnswer, `{"model":"claude-opus-5-5","max_tokens":100,"messages":[{"role":"user","content":"` + strings.Repeat("a", 512<<10) + `"}]}`, "local", ""},
 		"large request, no window":    {true, 0, completeAnswer, `{"model":"claude-opus-5-5","max_tokens":100,"messages":[{"role":"user","content":"` + strings.Repeat("a", 512<<10) + `"}]}`, "cloud", FallTooLarge},
@@ -89,7 +89,7 @@ func TestLocalFirstShortLimit(t *testing.T) {
 		"one token":            {truncatedAnswer, body(1), "local", ""},
 		"at the short limit":   {truncatedAnswer, body(shortAnswer), "local", ""},
 		"above the limit":      {truncatedAnswer, body(shortAnswer + 1), "cloud", FallTruncated},
-		"stream broke off":     {brokenOffAnswer, body(1), "cloud", FallTruncated},
+		"stream broke off":     {brokenOffAnswer, body(1), "cloud", FallModelError},
 		"cut off with nothing": {"data: {\"choices\":[{\"delta\":{\"content\":\" \"},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n", body(1), "cloud", FallTruncated},
 	}
 	for name, tc := range cases {
@@ -139,8 +139,16 @@ func TestLocalExclude(t *testing.T) {
 		"installation list":                   {ptr(true), []string{"gpt-5"}, nil, "gpt-5", "cloud", FallExcluded},
 		"both lists add up":                   {ptr(true), []string{"gpt-5"}, []string{"o3"}, "o3", "cloud", FallExcluded},
 		"local first off, small model":        {ptr(false), nil, nil, "claude-haiku-5-5", "local", ""},
-		"local first off, main model":         {ptr(false), nil, nil, "claude-opus-5-5", "cloud", FallNotEligible},
+		"local first off, main model":         {ptr(false), nil, nil, "claude-opus-5-5", "cloud", FallLocalFirstOff},
 		"exclusion wins with local first off": {ptr(false), nil, []string{"claude-haiku-*"}, "claude-haiku-5-5", "cloud", FallExcluded},
+		"exclusion wins with local first on":  {ptr(true), []string{"claude-haiku-*"}, nil, "claude-haiku-5-5-20261001", "cloud", FallExcluded},
+		"local first off, dated small model":  {ptr(false), nil, nil, "claude-haiku-5-5-20261001", "local", ""},
+		"local first off, bedrock small":      {ptr(false), nil, nil, "us.anthropic.claude-haiku-5-5-20261001-v1:0", "local", ""},
+		"local first off, vertex small":       {ptr(false), nil, nil, "claude-haiku-5-5@20261001", "local", ""},
+		"local first off, older small":        {ptr(false), nil, nil, "claude-3-5-haiku-latest", "local", ""},
+		"local first off, other vendor haiku": {ptr(false), nil, nil, "haiku-7b", "cloud", FallLocalFirstOff},
+		"local first off, other main model":   {ptr(false), nil, nil, "claude-sonnet-5-5[1m]", "cloud", FallLocalFirstOff},
+		"exclusion of another model only":     {ptr(false), nil, []string{"claude-opus-*"}, "claude-haiku-5-5", "local", ""},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

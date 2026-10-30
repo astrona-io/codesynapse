@@ -173,7 +173,13 @@ func getJSON(ctx context.Context, method, url, apiKey string, body, out any) err
 	}
 	defer res.Body.Close() //nolint:errcheck // read-only
 	if res.StatusCode/100 != 2 {
-		return fmt.Errorf("%s: HTTP %d", url, res.StatusCode)
+		return fmt.Errorf("%s: %w", url, httpStatus(res.StatusCode))
 	}
 	return json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(out)
 }
+
+// httpStatus is a non-2xx answer; its text is the same as before callers
+// could tell it apart from a network error.
+type httpStatus int
+
+func (h httpStatus) Error() string { return fmt.Sprintf("HTTP %d", int(h)) }
