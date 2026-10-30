@@ -216,6 +216,8 @@ Set one of the two, never both. Only the API process that holds the `api-loops` 
 
 Keep the archive on once it is set. PostgreSQL then no longer holds the oldest entries, so the daily pruning without an archive stops and logs a warning instead of deleting anything.
 
+The process holding the `api-loops` lease verifies the chain once a day and stores the result in `audit_verifications` (kept 400 days); a check through `GET /api/v1/admin/audit/verify` is stored as well. The platform statistics show the latest stored result and never walk the chain themselves. A run that could not finish is stored with a fixed reason, never the error text.
+
 `GET /api/v1/admin/audit/verify` checks the rows in PostgreSQL and the links between the files through the stored hashes; it reports `segments` and `sealed` (entries in files). Add `?deep=true` to read every file back as well: its checksum, every entry's hash and every link. `archives` then counts the files read. A missing or changed file fails the check and names its segment. When older entries were pruned without an archive, `first_id` says where the check started.
 
 ### Gateway requests and the prompt log
@@ -237,19 +239,21 @@ The platform reads need a platform administrator's signed-in browser session: `G
 
 Every view is written to the audit log before any figure is read: `admin.users.view`, `admin.orgs.view`, `admin.health.view`, `admin.stats.view` (with the section, range, organisation and panel), and `admin.stats.export` (with the format as well). A batch of series panels is one view. When the audit entry cannot be written, the request answers 503 and shows no figures.
 
-Administration → Statistics shows the figures (`docs/PLATFORM_STATS_PLAN.md`, phases 1, 3 and 6):
+Administration → Statistics shows the figures (`docs/PLATFORM_STATS_PLAN.md`, phases 1, 3, 4, 6 and 7):
 
 | Route | Answers |
 |---|---|
-| `GET /api/v1/admin/stats/summary?range=` | Tiles: organisations, people, active people, memberships, seats, runtime sessions, API keys, browser sessions, jobs waiting now and jobs failed in the range (`null` without metrics). Graphs and cost are `null` until later phases; `alerts_firing` is `null` when alerts are off or vmalert does not answer. |
+| `GET /api/v1/admin/stats/summary?range=` | Tiles: organisations, people, active people, memberships, seats, runtime sessions, API keys, browser sessions, the audit chain status (the stored result of the last verification), jobs waiting now and jobs failed in the range (`null` without metrics). Graphs and cost are `null` until later phases; `alerts_firing` is `null` when alerts are off or vmalert does not answer. |
 | `GET /api/v1/admin/stats/tenants?range=&org=&sort=&page=` | Platform totals and one row per organisation: members by role, seats, active members, teams, repository entries, single sign-on, watches. |
 | `GET /api/v1/admin/stats/sessions?range=&org=&sort=&page=` | Browser sessions, runtime sessions (agent, dashboard, gateway) and API keys (active, used, expiring within 14 days), per organisation. |
 | `GET /api/v1/admin/stats/usage?range=&org=&sort=&page=` | Agent sessions, tool calls and errors, tokens served and avoided, the token share, workflow counts and unindexed checkouts per organisation, with the tools and clients used. A tool or client fewer than three organisations use is counted as "other" unless `org` is set. |
 | `GET /api/v1/admin/stats/jobs?range=&org=&sort=&page=` | The job queue per kind with the age of the oldest waiting job (as of now), and finished jobs by outcome per organisation and per kind. Never a repository name, error text or job ID. Jobs without an organisation count only in the totals. |
 | `GET /api/v1/admin/stats/ingest?range=&org=&sort=&page=` | Indexing runs by outcome (and running now), files scanned, indexed, skipped, failed and unprocessed, and skips by reason, per organisation, summed from the ingest run reports. |
+| `GET /api/v1/admin/stats/security?range=&org=&sort=&page=` | Counts from each graph's latest snapshot: grades, open findings and vulnerable dependencies by severity, those called from code, graphs graded worse in the window and suppressed findings, per organisation. The platform counts a graph once. Rule IDs come from the rule catalogue and appear at the platform level only, top 10 plus "other"; a rule fewer than three organisations have findings of is "other". Never a finding, path, symbol or repository name. |
+| `GET /api/v1/admin/stats/audit?range=` | Platform only (`org` answers 400): audit entries by action family and outcome, failed sign-ins by cause, security actions, the archive, and the stored chain verifications. |
 | `GET /api/v1/admin/stats/series?panel=&range=&org=` | One usage chart from VictoriaMetrics (`range` up to `30d`). Series per organisation carry its name; a deleted one reads "deleted organisation". |
 | `GET /api/v1/admin/stats/series/batch?panels=&range=&org=` | Up to 20 of those charts in one request and one audit event. |
-| `GET /api/v1/admin/stats/export?section=summary\|tenants\|sessions\|usage\|jobs\|ingest&range=&org=&format=csv\|json` | The whole section, at most 10,000 rows. CSV cells are formula-neutralised. |
+| `GET /api/v1/admin/stats/export?section=summary\|tenants\|sessions\|usage\|jobs\|ingest\|security\|audit&range=&org=&format=csv\|json` | The whole section, at most 10,000 rows. CSV cells are formula-neutralised. |
 | `GET /api/v1/admin/stats/storage?range=` | Rows and bytes per store (NebulaGraph, Milvus, PostgreSQL) and kind (tag, edge type, collection family, fixed table, whole database) from the daily sample, with the change over the window. Read from the metrics store; `available` is false without one or before the first sample. |
 | `GET /api/v1/admin/stats/alerts` | What the internal vmalert evaluates (`CODESYNAPSE_ALERTS_URL`, see [alerting](alerting.md#see-alerts-in-the-dashboard)): alerts firing and pending, and each alerting rule with its group, health and last evaluation. Only names, states, severity, value and times; no other labels or annotations. `configured` is false when the variable is unset, `reachable` false when vmalert did not answer. |
 

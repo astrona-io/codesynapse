@@ -67,12 +67,25 @@ type StatsSummary struct {
 	Cost         *float64 `json:"cost"`
 	AlertsFiring *int     `json:"alerts_firing"`
 
+	// Chain is the latest stored audit chain verification (null before the
+	// first run); never recomputed for a view.
+	Chain *accounts.AuditVerification `json:"chain"`
+
 	// Rollup is set for 90d and 365d, whose window figures come from the
 	// daily rollup.
 	Rollup *StatsRollup `json:"rollup,omitempty"`
 }
 
 func (s *Server) statsSummary(ctx context.Context, rng string, q accounts.StatsQuery) (StatsSummary, error) {
+	sum, err := s.summaryFigures(ctx, rng, q)
+	if err != nil {
+		return sum, err
+	}
+	sum.Chain, err = s.cfg.Accounts.LatestAuditVerification(ctx)
+	return sum, err
+}
+
+func (s *Server) summaryFigures(ctx context.Context, rng string, q accounts.StatsQuery) (StatsSummary, error) {
 	q.OrgID = "" // the tiles are the platform's
 	var sum StatsSummary
 	if q.Daily != "" {
@@ -216,15 +229,15 @@ var statsRoles = []accounts.Role{accounts.Owner, accounts.Admin, accounts.Member
 func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 	req := statsRequest(r, r.URL.Query().Get("section"))
 	req.Format = r.URL.Query().Get("format")
-	if !slices.Contains([]string{"summary", "tenants", "sessions", "usage", "jobs", "ingest"}, req.Section) {
-		s.problem(w, http.StatusBadRequest, errors.New("section must be summary, tenants, sessions, usage, jobs or ingest"))
+	if !slices.Contains([]string{"summary", "tenants", "sessions", "usage", "jobs", "ingest", "security", "audit"}, req.Section) {
+		s.problem(w, http.StatusBadRequest, errors.New("section must be summary, tenants, sessions, usage, jobs, ingest, security or audit"))
 		return
 	}
 	if req.Format != "csv" && req.Format != "json" {
 		s.problem(w, http.StatusBadRequest, errors.New("format must be csv or json"))
 		return
 	}
-	if req.Section == "summary" {
+	if req.Section == "summary" || req.Section == "audit" {
 		req.OrgID = ""
 	}
 	q, ok := s.platformView(w, r, req)
@@ -322,6 +335,20 @@ func (s *Server) handleStatsExport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body, header, rows = ingestExport(d)
+	case "security":
+		d, err := s.securityStats(ctx, q)
+		if err != nil {
+			s.statsError(w, err)
+			return
+		}
+		body, header, rows = securityExport(d)
+	case "audit":
+		a, err := s.auditStats(ctx, req.Range, q)
+		if err != nil {
+			s.statsError(w, err)
+			return
+		}
+		body, header, rows = auditExport(a)
 	}
 	name := "codesynapse-" + req.Section + "-" + req.Range + "." + req.Format
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
