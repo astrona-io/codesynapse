@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,12 +27,25 @@ import (
 
 // jobsVM answers the finished-jobs query with fixed series and every other
 // query with nothing.
-type jobsVM struct{ series string }
+// The API's background loops query it while the test sets the series, so
+// the series is guarded.
+type jobsVM struct {
+	mu     sync.Mutex
+	series string
+}
 
-func (v jobsVM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (v *jobsVM) set(series string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.series = series
+}
+
+func (v *jobsVM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	result := "[]"
 	if strings.Contains(r.URL.Query().Get("query"), "codesynapse_jobs_finished_total") {
+		v.mu.Lock()
 		result = v.series
+		v.mu.Unlock()
 	}
 	_, _ = io.WriteString(w, `{"status":"success","data":{"resultType":"matrix","result":`+result+`}}`)
 }
@@ -66,11 +80,11 @@ func TestJobsAndIngestSections(t *testing.T) {
 	ada, adaUser, _ := signup(ts, "ada@example.com", "Ada")
 	require.NoError(t, acc.SetPlatformAdmin(ctx, rootSession(t, acc), adaUser.ID, true))
 	member, memberUser, orgA := signup(ts, "a@example.com", "A")
-	vmSeries.series = `[
+	vmSeries.set(`[
 		{"metric":{"tenant_id":"` + orgA.ID + `","kind":"sync","outcome":"ok"},"values":[[1,"4"]]},
 		{"metric":{"tenant_id":"` + orgA.ID + `","kind":"sync","outcome":"error"},"values":[[1,"1"]]},
 		{"metric":{"tenant_id":"` + gone + `","kind":"clone","outcome":"ok"},"values":[[1,"2"]]},
-		{"metric":{"kind":"ingest","outcome":"error"},"values":[[1,"3"]]}]`
+		{"metric":{"kind":"ingest","outcome":"error"},"values":[[1,"3"]]}]`)
 
 	// A job in the queue and one that failed, both naming a repository and
 	// an error no platform view may show.
