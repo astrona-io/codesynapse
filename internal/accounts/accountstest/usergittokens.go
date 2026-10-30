@@ -25,7 +25,7 @@ func RunUserGitTokens(t *testing.T, st accounts.Store) {
 		u, _, err := svc.SignUp(ctx, email, email, pw)
 		require.NoError(t, err)
 		hash := "utok-" + u.ID
-		require.NoError(t, st.CreateSession(ctx, accounts.Session{TokenHash: hash, UserID: u.ID, CreatedAt: now, ExpiresAt: now.Add(time.Hour)}))
+		require.NoError(t, st.CreateSession(ctx, accounts.Session{TokenHash: hash, UserID: u.ID, CreatedAt: now, ExpiresAt: sessionExpiry(now)}))
 		return u, accounts.Principal{User: u, Via: "session", SessionHash: hash}
 	}
 	owner, ownerP := user("utok-owner@example.com")

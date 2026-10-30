@@ -22,11 +22,25 @@ func sessionFor(ctx context.Context, t testing.TB, svc *accounts.Service, u acco
 		now = svc.Now()
 	}
 	hash := accounts.HashToken(fmt.Sprintf("test-session-%s-%d", u.ID, sessionSeq.Add(1)))
-	require.NoError(t, svc.St.CreateSession(ctx, accounts.Session{TokenHash: hash, UserID: u.ID, CreatedAt: now, ExpiresAt: now.Add(accounts.SessionTTL)}))
+	require.NoError(t, svc.St.CreateSession(ctx, accounts.Session{TokenHash: hash, UserID: u.ID, CreatedAt: now, ExpiresAt: sessionExpiry(now)}))
 	return accounts.Principal{User: u, Via: "session", SessionHash: hash}
 }
 
 var sessionSeq atomic.Int64
+
+// sessionExpiry keeps a test session valid for the service's fixed clock and
+// for the real one: the PostgreSQL store drops a user's sessions that expired
+// by its own clock whenever it opens another one for that user.
+func sessionExpiry(now time.Time) time.Time {
+	return later(now, time.Now()).Add(accounts.SessionTTL)
+}
+
+func later(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
+}
 
 // Join makes u a member of orgID through an invitation from inviter, the only
 // way a new member joins. It returns the first refusal. The sessions it opens
