@@ -100,7 +100,7 @@ func TestFetchExtractsTextAndCachesIt(t *testing.T) {
 	assert.Equal(t, out.RawBytes, len(page))
 	assert.Equal(t, out.TextBytes, len(out.Text))
 	assert.True(t, out.TextTokens > 0 && out.TextTokens < out.RawTokens)
-	for _, want := range []string{"Widgets API", "# Widgets", "Create a widget with New.", "- fast", "- small", "```\nw := New()\nw.Run()\n```"} {
+	for _, want := range []string{"Widgets API", "# Widgets", "Create a widget with `New`.", "- fast", "- small", "```\nw := New()\nw.Run()\n```"} {
 		assert.Contains(t, out.Text, want)
 	}
 	for _, gone := range []string{"alert", "color:red", "<p>", "ghp_abc"} {
@@ -113,6 +113,91 @@ func TestFetchExtractsTextAndCachesIt(t *testing.T) {
 	assert.Equal(t, again.Cache, Hit)
 	assert.Equal(t, again.Text, out.Text)
 	assert.Equal(t, ts.hits.Load(), int32(1), "a fresh entry is answered without a request")
+	assert.NotContains(t, out.Text, "Home", "nav is dropped")
+	assert.Equal(t, out.CleanedBytes, out.TextBytes, "without a question the cleaned page is returned")
+	assert.True(t, out.CleanedTokens < out.RawTokens)
+}
+
+const guide = `<!doctype html><html><head><title>Widgets guide</title></head><body>
+<header><a href="/">Home</a><ul><li><a href="/a">A</a></li><li><a href="/b">B</a></li></ul></header>
+<main><h1>Widgets</h1><p>All about widgets.</p>
+<h2>Install</h2><p>Run the installer.</p><pre><code class="language-sh">go get example.com/widgets</code></pre>
+<h2>Timeouts</h2><p>Widgets wait for a while.</p><pre>func (w *Widget) SetTimeout(d time.Duration)</pre>
+<h3>Defaults</h3><p>Thirty seconds.</p>
+<h2>Colours</h2><p>Paint them, token ghp_abcdefghijklmnopqrstuvwxyz0123456789AB.</p></main>
+<footer>Copyright</footer></body></html>`
+
+// The cache keeps the cleaned page; a question prunes it per answer, and
+// the question never changes what is stored.
+func TestFetchPrunesForAQuestion(t *testing.T) {
+	ts := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = io.WriteString(w, guide)
+	})
+	cache := openCache(t)
+	f := testFetcher(t, cache, ts)
+	whole, err := f.Fetch(context.Background(), ts.URL+"/guide")
+	require.NoError(t, err)
+	assert.False(t, whole.Pruned)
+	assert.Equal(t, whole.Sections, 5)
+	assert.Equal(t, whole.SectionsKept, 5)
+	assert.NotContains(t, whole.Text, "Copyright")
+	assert.NotContains(t, whole.Text, "Home")
+
+	in := []byte(`{"url":"` + ts.URL + `/guide","question":"How do I set the timeout?"}`)
+	out, err := f.Run(context.Background(), in)
+	require.NoError(t, err)
+	assert.Equal(t, out.Cache, Hit)
+	assert.True(t, out.Pruned)
+	assert.Equal(t, out.Sections, 5)
+	assert.Equal(t, out.SectionsKept, 2, "Timeouts and its subsection")
+	for _, want := range []string{"Widgets guide", "# Widgets", "## Timeouts", "SetTimeout", "### Defaults", "Thirty seconds."} {
+		assert.Contains(t, out.Text, want)
+	}
+	for _, gone := range []string{"Run the installer", "Colours", "Paint"} {
+		assert.NotContains(t, out.Text, gone)
+	}
+	assert.Equal(t, out.CleanedBytes, whole.CleanedBytes)
+	assert.True(t, out.TextTokens < out.CleanedTokens && out.CleanedTokens < out.RawTokens)
+	assert.Equal(t, out.TextBytes, len(out.Text))
+	assert.Equal(t, out.Notice, Notice)
+
+	e, ok := cache.Get(Key(mustNormalise(t, ts.URL+"/guide")), mustNormalise(t, ts.URL+"/guide").String())
+	require.True(t, ok)
+	assert.Equal(t, e.Text, whole.Text, "the cache keeps the cleaned page, not a pruned one")
+	assert.NotContains(t, e.Text, "timeout?")
+	assert.Contains(t, e.Text, "[REDACTED]")
+
+	colours, err := f.FetchFor(context.Background(), ts.URL+"/guide", "colours")
+	require.NoError(t, err)
+	assert.Contains(t, colours.Text, "[REDACTED]", "pruned text is redacted")
+	assert.NotContains(t, colours.Text, "ghp_")
+
+	_, err = f.FetchFor(context.Background(), ts.URL+"/guide", strings.Repeat("q", MaxQuestion+1))
+	assert.ErrorIs(t, err, ErrInvalid)
+}
+
+// An entry another cleaner version made is fetched again.
+func TestFetchRefreshesEntriesOfAnOlderCleaner(t *testing.T) {
+	ts := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = io.WriteString(w, guide)
+	})
+	cache := openCache(t)
+	f := testFetcher(t, cache, ts)
+	u := mustNormalise(t, ts.URL+"/guide")
+	require.NoError(t, cache.Put(Key(u), Entry{URL: u.String(), Fetched: time.Now(), TTL: time.Hour, ContentType: "text/html", Text: "old"}))
+	out, err := f.Fetch(context.Background(), ts.URL+"/guide")
+	require.NoError(t, err)
+	assert.Equal(t, out.Cache, Fetched)
+	assert.NotContains(t, out.Text, "old")
+}
+
+func mustNormalise(t *testing.T, raw string) *url.URL {
+	t.Helper()
+	u, err := Normalise(raw)
+	require.NoError(t, err)
+	return u
 }
 
 func TestFetchRevalidatesAStaleEntry(t *testing.T) {
@@ -270,16 +355,16 @@ func TestFetchLimits(t *testing.T) {
 	_, err = f.Fetch(context.Background(), ts.URL+"/missing")
 	assert.ErrorIs(t, err, ErrUnavailable)
 	assert.Contains(t, err.Error(), "404")
-	out, err := f.Fetch(context.Background(), ts.URL+"/json")
+	out, err := f.FetchFor(context.Background(), ts.URL+"/json", "name")
 	require.NoError(t, err)
-	assert.Equal(t, out.Text, `{"name":"widget"}`)
+	assert.Equal(t, out.Text, `{"name":"widget"}`, "JSON is never pruned")
 }
 
 func TestAnswerIsCappedOnARuneBoundary(t *testing.T) {
 	u, err := Normalise("https://example.com/")
 	require.NoError(t, err)
 	text := strings.Repeat("é", MaxAnswer) // two bytes each
-	out := answer(u, Entry{Text: text, RawBytes: len(text)}, Fetched)
+	out := answer(u, Entry{Text: text, RawBytes: len(text)}, Fetched, "")
 	assert.True(t, out.Truncated)
 	assert.LessOrEqual(t, len(out.Text), MaxAnswer)
 	assert.Equal(t, strings.ToValidUTF8(out.Text, "?"), out.Text)

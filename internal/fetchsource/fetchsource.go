@@ -39,6 +39,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/netguard"
 	"github.com/astrona-io/codesynapse/internal/redact"
+	"github.com/astrona-io/codesynapse/internal/telemetry"
 )
 
 // Tool is the MCP tool name.
@@ -87,6 +88,9 @@ var allowedTypes = []string{"text/html", "text/plain", "text/markdown", "applica
 // In is fetch_source's input.
 type In struct {
 	URL string `json:"url" jsonschema:"the https URL of the page (documentation, API reference, changelog)"`
+	// Question narrows the answer to the sections that answer it. It is
+	// used on this machine only: never sent, cached or logged.
+	Question string `json:"question,omitempty" jsonschema:"optional: what you want to know from the page (at most 500 characters); only the title, the sections whose heading or code name its words and short declarations are returned. Leave it out for the whole page"`
 }
 
 // Out is fetch_source's answer.
@@ -96,17 +100,23 @@ type Out struct {
 	Cache       string `json:"cache"` // hit, revalidated, fetched
 	Fetched     string `json:"fetched"`
 	ContentType string `json:"content_type"`
-	RawBytes    int    `json:"raw_bytes"`
-	RawTokens   int    `json:"raw_tokens"`
-	TextBytes   int    `json:"text_bytes"`
-	TextTokens  int    `json:"text_tokens"`
+	// The page as served, its cleaned text (what the cache keeps) and the
+	// text returned, in bytes and estimated tokens.
+	RawBytes      int `json:"raw_bytes"`
+	RawTokens     int `json:"raw_tokens"`
+	CleanedBytes  int `json:"cleaned_bytes"`
+	CleanedTokens int `json:"cleaned_tokens"`
+	TextBytes     int `json:"text_bytes"`
+	TextTokens    int `json:"text_tokens"`
+	// Sections counts the cleaned page's headed sections and SectionsKept
+	// those returned whole; Pruned is true when a question left some out.
+	Sections     int  `json:"sections"`
+	SectionsKept int  `json:"sections_kept"`
+	Pruned       bool `json:"pruned,omitempty"`
 	// Truncated is true when the text was cut at MaxAnswer bytes.
 	Truncated bool   `json:"truncated,omitempty"`
 	Text      string `json:"text"`
 }
-
-// tokens estimates tokens as bytes/4, like the rest of CodeSynapse.
-func tokens(n int) int { return (n + 3) / 4 }
 
 // trackingParams are dropped from the cache key and the request: they
 // change nothing on the page.
@@ -249,21 +259,33 @@ func (f *Fetcher) Run(ctx context.Context, args json.RawMessage) (Out, error) {
 	if err := dec.Decode(&in); err != nil {
 		return Out{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
-	return f.Fetch(ctx, in.URL)
+	return f.FetchFor(ctx, in.URL, in.Question)
 }
 
-// Fetch answers for raw: from the cache while the entry is fresh, after a
-// conditional request when it is stale, else from a new download.
+// Fetch answers for raw with the whole cleaned page.
 func (f *Fetcher) Fetch(ctx context.Context, raw string) (Out, error) {
+	return f.FetchFor(ctx, raw, "")
+}
+
+// FetchFor answers for raw: from the cache while the entry is fresh, after
+// a conditional request when it is stale, else from a new download. The
+// cache keeps the cleaned page; question prunes it per answer.
+func (f *Fetcher) FetchFor(ctx context.Context, raw, question string) (Out, error) {
+	question = strings.TrimSpace(question)
+	if utf8.RuneCountInString(question) > MaxQuestion {
+		return Out{}, fmt.Errorf("%w: the question is longer than %d characters", ErrInvalid, MaxQuestion)
+	}
 	u, err := Normalise(raw)
 	if err != nil {
 		return Out{}, err
 	}
 	key, now := Key(u), f.now()
 	e, cached := f.cache.Get(key, u.String())
+	// An entry another cleaner made is fetched again, not revalidated.
+	cached = cached && e.Cleaner == cleanerVersion
 	if cached && now.Before(e.Fetched.Add(e.TTL)) {
 		f.cache.Touch(key)
-		return answer(u, e, Hit), nil
+		return answer(u, e, Hit, question), nil
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
@@ -297,7 +319,7 @@ func (f *Fetcher) Fetch(ctx context.Context, raw string) (Out, error) {
 	case res.StatusCode == http.StatusNotModified && cached:
 		e.Fetched = now
 		_ = f.cache.Put(key, e) //nolint:errcheck // the answer stands without the cache
-		return answer(u, e, Revalidated), nil
+		return answer(u, e, Revalidated, question), nil
 	case res.StatusCode != http.StatusOK:
 		return Out{}, fmt.Errorf("%w: the server answered %d", ErrUnavailable, res.StatusCode)
 	}
@@ -312,20 +334,24 @@ func (f *Fetcher) Fetch(ctx context.Context, raw string) (Out, error) {
 	if len(body) > MaxBody {
 		return Out{}, fmt.Errorf("%w: the page is larger than %d bytes", ErrUnavailable, MaxBody)
 	}
-	text := PlainText(body)
-	if mt == "text/html" {
-		text = HTMLText(body)
-	}
-	e = Entry{
+	text := Clean(mt, body)
+	e = Entry{Cleaner: cleanerVersion,
 		URL: u.String(), ETag: clip(res.Header.Get("ETag"), maxHeader), LastModified: clip(res.Header.Get("Last-Modified"), maxHeader),
 		Fetched: now, TTL: TTL(u.Hostname()), ContentType: mt, RawBytes: len(body), Text: redact.Free(text),
 	}
 	_ = f.cache.Put(key, e) //nolint:errcheck // the answer stands without the cache
-	return answer(u, e, Fetched), nil
+	return answer(u, e, Fetched, question), nil
 }
 
-func answer(u *url.URL, e Entry, status string) Out {
-	text, truncated := e.Text, false
+// answer prunes the cached text for question (JSON is never pruned) and
+// redacts what is returned once more: the cached text passed redact.Free
+// when it was stored, but possibly under older rules.
+func answer(u *url.URL, e Entry, status, question string) Out {
+	p := Pruned{Text: e.Text}
+	if e.ContentType != "application/json" {
+		p = PruneMarkdown(e.Text, question)
+	}
+	text, truncated := redact.Free(p.Text), false
 	if len(text) > MaxAnswer {
 		cut := MaxAnswer
 		for cut > 0 && !utf8.RuneStart(text[cut]) {
@@ -335,7 +361,10 @@ func answer(u *url.URL, e Entry, status string) Out {
 	}
 	return Out{
 		Notice: Notice, Host: u.Hostname(), Cache: status, Fetched: e.Fetched.UTC().Format(time.RFC3339), ContentType: e.ContentType,
-		RawBytes: e.RawBytes, RawTokens: tokens(e.RawBytes), TextBytes: len(text), TextTokens: tokens(len(text)),
+		RawBytes: e.RawBytes, RawTokens: telemetry.EstimateTokens(e.RawBytes),
+		CleanedBytes: len(e.Text), CleanedTokens: telemetry.EstimateTokens(len(e.Text)),
+		TextBytes: len(text), TextTokens: telemetry.EstimateTokens(len(text)),
+		Sections: p.Sections, SectionsKept: p.Kept, Pruned: p.Pruned,
 		Truncated: truncated, Text: text,
 	}
 }

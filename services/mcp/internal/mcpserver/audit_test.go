@@ -116,3 +116,11 @@ func TestEveryMCPRequestIsAudited(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "audit log is unavailable")
 }
+
+// fetch_source's question stays on the developer's machine on purpose; a
+// call that reaches the server anyway keeps only its digest.
+func TestAuditDigestsFetchSourceQuestions(t *testing.T) {
+	args, _ := summarizeArgs(map[string]any{"url": "https://docs.example.com/", "question": "how does our private billing work"})
+	assert.Equal(t, args["url"], "https://docs.example.com/")
+	assert.True(t, strings.HasPrefix(args["question"], "sha256:"), args["question"])
+}
