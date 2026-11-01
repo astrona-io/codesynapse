@@ -41,7 +41,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags 
 # glibc and nothing else: no shell, no package manager. Runs as root like
 # upstream, because compose volumes made by the upstream images are root's;
 # the chart runs every container as uid 10001.
-FROM gcr.io/distroless/base-nossl-debian13:latest@sha256:ca1c7e6a875e59345ae6ff182a1e0930f0ca1ffef23a9b830f8823ab348ad5dd AS server
+FROM gcr.io/distroless/base-nossl-debian13:latest@sha256:d710a5c8bfe4cf7e726d7e1afd73e363a9fb02c2a11ad893d2d6185c1b9a89cb AS server
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 COPY --from=build /out/nebula-probe /usr/local/bin/nebula-probe
 WORKDIR /usr/local/nebula
