@@ -28,7 +28,7 @@ func TestFilteredGraphLinkRequiresMatchingTenantApproval(t *testing.T) {
 		require.NoError(t, err)
 		workCtx, err := execution.With(context.WithValue(ctx, principalKey{}, principal), id)
 		require.NoError(t, err)
-		return f.server.linkPolicyRepository(workCtx, entry, accounts.Member)
+		return f.server.linkPolicyRepository(workCtx, entry, accounts.OrgRepositoriesWrite)
 	}
 	other, err := f.accounts.CreateOrg(ctx, principal, "Other graph owner", "")
 	require.NoError(t, err)
@@ -76,9 +76,9 @@ func TestRepositorySpaces(t *testing.T) {
 		return accounts.Repository{OrgID: f.org.ID, Graph: graph, Visibility: accounts.Public, OwnerID: owner, AddedBy: f.user.ID, AddedAt: time.Now()}
 	}
 
-	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/mine", f.user.ID), accounts.Member))
-	assert.True(t, errors.Is(f.server.linkPolicyRepository(workCtx, entry("space/mine", f.user.ID), accounts.Member), accounts.ErrExists), "the same space again")
-	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/mine", ""), accounts.Admin), "the organisation takes a member's entry over")
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/mine", f.user.ID), accounts.OrgRepositoriesWrite))
+	assert.True(t, errors.Is(f.server.linkPolicyRepository(workCtx, entry("space/mine", f.user.ID), accounts.OrgRepositoriesWrite), accounts.ErrExists), "the same space again")
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/mine", ""), accounts.OrgRepositoriesFull), "the organisation takes a member's entry over")
 	rows, err := f.accounts.St.GraphRepositories(ctx, "space/mine")
 	require.NoError(t, err)
 	require.Len(t, rows, 1, "moved, not copied")
@@ -93,21 +93,21 @@ func TestRepositorySpaces(t *testing.T) {
 	hidden := entry("space/hidden", f.user.ID)
 	hidden.Visibility = accounts.Private
 	require.NoError(t, f.accounts.St.AddRepository(ctx, hidden))
-	err = f.server.linkPolicyRepository(workCtx, entry("space/hidden", ""), accounts.Admin)
+	err = f.server.linkPolicyRepository(workCtx, entry("space/hidden", ""), accounts.OrgRepositoriesFull)
 	require.True(t, errors.As(err, &taken), "not without the organisation's own access")
 	assert.True(t, taken.private)
 	assert.False(t, strings.Contains(err.Error(), f.user.ID) || strings.Contains(err.Error(), f.user.Email), "the answer does not say whose space holds it")
 	assert.True(t, watchSkip(err), "a watch skips it")
 	proved := entry("space/hidden", "")
 	proved.Visibility = accounts.Private
-	require.NoError(t, f.server.linkPolicyRepository(workCtx, proved, accounts.Admin), "proved with the organisation's token")
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, proved, accounts.OrgRepositoriesFull), "proved with the organisation's token")
 	rows, err = f.accounts.St.GraphRepositories(ctx, "space/hidden")
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.False(t, rows[0].Personal())
 
-	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/shared", ""), accounts.Admin))
-	assert.True(t, errors.As(f.server.linkPolicyRepository(workCtx, entry("space/shared", f.user.ID), accounts.Member), &taken), "not again in a member's space")
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/shared", ""), accounts.OrgRepositoriesFull))
+	assert.True(t, errors.As(f.server.linkPolicyRepository(workCtx, entry("space/shared", f.user.ID), accounts.OrgRepositoriesWrite), &taken), "not again in a member's space")
 
 	private := entry("space/private", f.user.ID)
 	private.Visibility = accounts.Private
@@ -117,17 +117,17 @@ func TestRepositorySpaces(t *testing.T) {
 		"another graph":  withOwnerProof(workCtx, f.org.ID, f.user.ID, "space/other"),
 		"another tenant": withOwnerProof(workCtx, "other-org", f.user.ID, private.Graph),
 	} {
-		assert.True(t, errors.Is(f.server.linkPolicyRepository(c, private, accounts.Member), errPersonalPrivate), name)
+		assert.True(t, errors.Is(f.server.linkPolicyRepository(c, private, accounts.OrgRepositoriesWrite), errPersonalPrivate), name)
 	}
-	require.NoError(t, f.server.linkPolicyRepository(withOwnerProof(workCtx, f.org.ID, f.user.ID, private.Graph), private, accounts.Member), "the owner's own token proved access")
+	require.NoError(t, f.server.linkPolicyRepository(withOwnerProof(workCtx, f.org.ID, f.user.ID, private.Graph), private, accounts.OrgRepositoriesWrite), "the owner's own token proved access")
 
 	require.NoError(t, f.accounts.St.SetMemberReposEnabled(ctx, f.org.ID, false))
-	err = f.server.linkPolicyRepository(workCtx, entry("space/later", f.user.ID), accounts.Member)
+	err = f.server.linkPolicyRepository(workCtx, entry("space/later", f.user.ID), accounts.OrgRepositoriesWrite)
 	assert.True(t, errors.Is(err, accounts.ErrForbidden), "members' own repositories are turned off")
 	assert.True(t, watchSkip(err), "a member's watch skips it instead of failing every scan")
 	assert.True(t, watchSkip(errSpaceTaken{}), "a watch skips what the organisation has")
 	assert.False(t, watchSkip(accounts.ErrForbidden), "other refusals still fail the scan")
-	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/later", ""), accounts.Admin), "the organisation can still add it")
+	require.NoError(t, f.server.linkPolicyRepository(workCtx, entry("space/later", ""), accounts.OrgRepositoriesFull), "the organisation can still add it")
 
 	for err, code := range map[error]int{errSpaceTaken{}: 409, errMemberReposOff: 403, errPersonalPrivate: 403, accounts.ErrInvalidInput: 400} {
 		w := httptest.NewRecorder()

@@ -8,6 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/memory"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/store"
@@ -75,7 +76,7 @@ func (h *handlers) upsertTriples(ctx context.Context, req *mcp.CallToolRequest, 
 	if err != nil {
 		return nil, upsertTriplesOut{}, err
 	}
-	if err := h.canWrite(ctx, repo); err != nil {
+	if err := h.holds(ctx, repo, accounts.RepoMemoryWrite); err != nil {
 		return nil, upsertTriplesOut{}, err
 	}
 	b, err := memory.Prepare(h.memRepo(ctx, repo), in.Triples, clientName(req), time.Now())

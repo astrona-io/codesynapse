@@ -96,11 +96,11 @@ func watchView(w accounts.OrgWatch, userID string) WatchView {
 }
 
 func (s *Server) watchRoutes() {
-	s.route("GET /api/v1/watches", orgRole(accounts.Viewer), s.handleListWatches)
-	s.route("POST /api/v1/watches", orgRole(accounts.Member), s.handleAddWatch)
-	s.route("PUT /api/v1/watches/{host}/{login}", orgRole(accounts.Member), s.handleUpdateWatch)
-	s.route("DELETE /api/v1/watches/{host}/{login}", orgRole(accounts.Member), s.handleDeleteWatch)
-	s.route("POST /api/v1/watches/{host}/{login}/scan", orgRole(accounts.Member), s.handleScanWatch)
+	s.route("GET /api/v1/watches", orgPerm(accounts.OrgWatchesRead), s.handleListWatches)
+	s.route("POST /api/v1/watches", orgPerm(accounts.OrgWatchesWrite), s.handleAddWatch)
+	s.route("PUT /api/v1/watches/{host}/{login}", orgPerm(accounts.OrgWatchesWrite), s.handleUpdateWatch)
+	s.route("DELETE /api/v1/watches/{host}/{login}", orgPerm(accounts.OrgWatchesWrite), s.handleDeleteWatch)
+	s.route("POST /api/v1/watches/{host}/{login}/scan", orgPerm(accounts.OrgWatchesWrite), s.handleScanWatch)
 }
 
 // watchCaller returns the signed-in member and the organisation acted in,
@@ -220,7 +220,7 @@ func (s *Server) handleAddWatch(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	admin := m.Role.AtLeast(accounts.Admin)
+	admin := m.Role.Has(accounts.OrgWatchesFull)
 	includePrivate := admin
 	if req.IncludePrivate != nil {
 		includePrivate = *req.IncludePrivate
@@ -321,7 +321,7 @@ func (s *Server) ownWatch(w http.ResponseWriter, r *http.Request, p accounts.Pri
 		s.problem(w, http.StatusNotFound, errors.New("no such watch"))
 		return accounts.OrgWatch{}, false
 	}
-	if list[i].ActorID != p.User.ID && !m.Role.AtLeast(accounts.Admin) {
+	if list[i].ActorID != p.User.ID && !m.Role.Has(accounts.OrgWatchesFull) {
 		s.accountError(w, accounts.ErrForbidden)
 		return accounts.OrgWatch{}, false
 	}
@@ -374,7 +374,7 @@ func (s *Server) handleUpdateWatch(w http.ResponseWriter, r *http.Request) {
 		// Turning private repositories on needs the role that may use the
 		// token. The next scan with the token adds the private repositories
 		// that exist already (scanWatch), at most maxClonesPerScan a scan.
-		if !m.Role.AtLeast(accounts.Admin) {
+		if !m.Role.Has(accounts.OrgWatchesFull) {
 			s.problem(w, http.StatusForbidden, errPrivateNeedsAdmin)
 			return
 		}
@@ -490,7 +490,7 @@ func (s *Server) watchContext(ctx context.Context, w accounts.OrgWatch) (context
 	if err := s.cfg.Accounts.ValidatePrincipal(ctx, p); err != nil {
 		return nil, err
 	}
-	if err := s.cfg.Accounts.Require(ctx, p, w.OrgID, accounts.Member); err != nil {
+	if err := s.cfg.Accounts.Require(ctx, p, w.OrgID, accounts.OrgWatchesWrite); err != nil {
 		return nil, err
 	}
 	members, err := s.cfg.Accounts.St.UserMemberships(ctx, w.ActorID)
@@ -628,7 +628,7 @@ func (s *Server) scanWatch(ctx context.Context, w accounts.OrgWatch, now time.Ti
 // anonymously.
 func (s *Server) watchToken(ctx context.Context, p accounts.Principal, orgID, host, login string, logger *slog.Logger) (string, time.Time) {
 	key := accounts.WatchKey(host, login)
-	if err := s.cfg.Accounts.Require(ctx, p, orgID, accounts.Admin); err != nil {
+	if err := s.cfg.Accounts.Require(ctx, p, orgID, accounts.OrgGitTokensFull); err != nil {
 		if !errors.Is(err, accounts.ErrForbidden) {
 			logger.Warn("checking the watch creator's role; listing anonymously", "org", orgID, "watch", key, "error", err)
 		}

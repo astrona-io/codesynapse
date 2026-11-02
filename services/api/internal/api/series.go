@@ -471,7 +471,7 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 		}
 		repo := r.URL.Query().Get("repo")
 		reach, ok := contentScope.reach[repo]
-		if !ok || reach.Ambiguous || !reach.Role.AtLeast(accounts.Viewer) {
+		if !ok || reach.Ambiguous || !reach.Role.Has(accounts.RepoCodeRead) {
 			s.accountError(w, accounts.ErrNotFound)
 			return
 		}

@@ -44,7 +44,7 @@ func (s *Service) SetGitToken(ctx context.Context, p Principal, orgID, host, tok
 	if p.Via == "key" {
 		return GitToken{}, ErrForbidden
 	}
-	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgGitTokensFull); err != nil {
 		return GitToken{}, err
 	}
 	host, err := NormalizeHost(host)
@@ -71,7 +71,7 @@ func (s *Service) RemoveGitToken(ctx context.Context, p Principal, orgID, host s
 	if p.Via == "key" {
 		return ErrForbidden
 	}
-	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgGitTokensFull); err != nil {
 		return err
 	}
 	host, err := NormalizeHost(host)
@@ -87,7 +87,7 @@ func (s *Service) RemoveGitToken(ctx context.Context, p Principal, orgID, host s
 
 // GitTokens lists an organisation's tokens (host and preview) for members.
 func (s *Service) GitTokens(ctx context.Context, p Principal, orgID string) ([]GitToken, error) {
-	if err := s.Require(ctx, p, orgID, Member); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgGitTokensRead); err != nil {
 		return nil, err
 	}
 	return s.St.GitTokens(ctx, orgID)

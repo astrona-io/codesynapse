@@ -376,13 +376,14 @@ func (s *Service) teamOrgRole(ctx context.Context, orgID, userID string) (Role, 
 	return best, err
 }
 
-// Require returns ErrForbidden unless p has at least the role least in org.
-func (s *Service) Require(ctx context.Context, p Principal, orgID string, least Role) error {
+// Require returns ErrForbidden unless p's role in org holds perm, an
+// organisation permission.
+func (s *Service) Require(ctx context.Context, p Principal, orgID string, perm Permission) error {
 	r, err := s.RoleIn(ctx, p, orgID)
 	if err != nil {
 		return err
 	}
-	if !r.AtLeast(least) {
+	if !r.Has(perm) {
 		return ErrForbidden
 	}
 	return nil
@@ -476,7 +477,7 @@ func (s *Service) setMemberRolePolicy(ctx context.Context, p Principal, orgID, u
 	if err != nil {
 		return Membership{}, err
 	}
-	if !mine.AtLeast(Admin) || (role == Owner && mine != Owner) {
+	if !mine.Has(OrgMembersFull) || (role == Owner && mine != Owner) {
 		return Membership{}, ErrForbidden
 	}
 	if _, err := s.St.MemberRole(ctx, orgID, userID); err != nil {
@@ -513,7 +514,7 @@ func (s *Service) removeMemberPolicy(ctx context.Context, p Principal, orgID, us
 		return ErrForbidden
 	}
 	if userID != p.User.ID {
-		if err := s.Require(ctx, p, orgID, Admin); err != nil {
+		if err := s.Require(ctx, p, orgID, OrgMembersFull); err != nil {
 			return err
 		}
 	} else if _, err := s.RoleIn(ctx, p, orgID); err != nil {

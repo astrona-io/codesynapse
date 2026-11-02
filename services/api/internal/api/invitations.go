@@ -22,7 +22,7 @@ type invitationToken struct {
 }
 
 func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Viewer)
+	p, o, ok := s.orgFor(w, r, accounts.OrgMembersRead)
 	if !ok {
 		return
 	}
@@ -35,7 +35,7 @@ func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Viewer)
+	p, o, ok := s.orgFor(w, r, accounts.OrgMembersRead)
 	if !ok {
 		return
 	}
@@ -58,7 +58,7 @@ func (s *Server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleRevokeInvitation(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Viewer)
+	p, o, ok := s.orgFor(w, r, accounts.OrgMembersRead)
 	if !ok {
 		return
 	}

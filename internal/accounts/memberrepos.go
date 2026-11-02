@@ -15,7 +15,7 @@ import (
 // MemberReposSetting says whether members of the organisation may add
 // repositories to their own space.
 func (s *Service) MemberReposSetting(ctx context.Context, p Principal, orgID string) (bool, error) {
-	if err := s.Require(ctx, p, orgID, Member); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgRepositoriesWrite); err != nil {
 		return false, err
 	}
 	return s.St.MemberReposEnabled(ctx, orgID)
@@ -29,7 +29,7 @@ func (s *Service) SetMemberRepos(ctx context.Context, p Principal, orgID string,
 	if err := signedIn(p); err != nil {
 		return err
 	}
-	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgRepositoriesFull); err != nil {
 		return err
 	}
 	e := actorEvent(p, "org.member_repos.set", orgID, orgID)

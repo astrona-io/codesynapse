@@ -161,7 +161,7 @@ func runRootDenied(t *testing.T, st accounts.Store) {
 	assert.True(t, errors.Is(err, accounts.ErrRootAccount))
 	_, err = svc.RoleIn(ctx, rootP, org)
 	assert.True(t, errors.Is(err, accounts.ErrRootAccount))
-	assert.Error(t, svc.Require(ctx, rootP, org, accounts.Viewer))
+	assert.Error(t, svc.Require(ctx, rootP, org, accounts.OrgMembersRead))
 	_, _, err = svc.CreateKey(ctx, rootP, org, "root key", time.Hour)
 	assert.True(t, errors.Is(err, accounts.ErrRootAccount))
 	_, err = svc.ResolveRepository(ctx, rootP, org, "acme/api", accounts.Viewer)

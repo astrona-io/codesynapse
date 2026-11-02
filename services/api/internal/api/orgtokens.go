@@ -33,7 +33,7 @@ type gitTokenRequest struct {
 }
 
 func (s *Server) handleGitTokens(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Member)
+	p, o, ok := s.orgFor(w, r, accounts.OrgGitTokensRead)
 	if !ok {
 		return
 	}
@@ -46,7 +46,7 @@ func (s *Server) handleGitTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetGitToken(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Admin)
+	p, o, ok := s.orgFor(w, r, accounts.OrgGitTokensFull)
 	if !ok {
 		return
 	}
@@ -75,7 +75,7 @@ func (s *Server) handleSetGitToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRemoveGitToken(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Admin)
+	p, o, ok := s.orgFor(w, r, accounts.OrgGitTokensFull)
 	if !ok {
 		return
 	}

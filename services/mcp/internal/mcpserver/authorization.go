@@ -13,77 +13,81 @@ import (
 )
 
 type toolPolicy struct {
-	role accounts.Role
-	// target is repository, reuse, review, list, or catalog. Reuse also checks
-	// an optional source; review IDs resolve from storage.
+	// perm is the repository permission the caller's role must hold on the
+	// target repository. list and catalog tools have no single repository:
+	// they show only what the caller can read, so theirs is a read level.
+	perm accounts.Permission
+	// target is repository, reuse, review, comment, list, or catalog. Reuse
+	// also checks an optional source; review IDs resolve from storage (the
+	// "id" argument for review, "review_id" for comment).
 	target string
 }
 
 var toolPolicies = map[string]toolPolicy{
-	"ingestion_report":       {accounts.Viewer, "repository"},
-	"repo_list":              {accounts.Viewer, "list"},
-	"search_all_repos":       {accounts.Viewer, "list"},
-	"rule_guide":             {accounts.Viewer, "catalog"},
-	"repo_overview":          {accounts.Viewer, "repository"},
-	"search":                 {accounts.Viewer, "repository"},
-	"get_symbol_context":     {accounts.Viewer, "repository"},
-	"code_identities":        {accounts.Viewer, "repository"},
-	"code_identity_reviews":  {accounts.Viewer, "repository"},
-	"code_records":           {accounts.Viewer, "repository"},
-	"code_annotate":          {accounts.Member, "repository"},
-	"code_record_reuse":      {accounts.Member, "reuse"},
-	"get_call_graph":         {accounts.Viewer, "repository"},
-	"get_implementations":    {accounts.Viewer, "repository"},
-	"get_pr_context":         {accounts.Viewer, "repository"},
-	"verify_plan":            {accounts.Viewer, "repository"},
-	"change_checklist":       {accounts.Viewer, "repository"},
-	"handoff_context":        {accounts.Viewer, "repository"},
-	"unused_code":            {accounts.Viewer, "repository"},
-	"duplicate_code":         {accounts.Viewer, "repository"},
-	"cleanup_plan":           {accounts.Viewer, "repository"},
-	"architecture_search":    {accounts.Viewer, "repository"},
-	"architecture_get":       {accounts.Viewer, "repository"},
-	"architecture_context":   {accounts.Viewer, "repository"},
-	"architecture_issues":    {accounts.Viewer, "repository"},
-	"architecture_proposals": {accounts.Viewer, "repository"},
-	"architecture_propose":   {accounts.Member, "repository"},
-	"architecture_link":      {accounts.Member, "repository"},
-	"repo_trend":             {accounts.Viewer, "repository"},
-	"refactor_duplicates":    {accounts.Viewer, "repository"},
-	"shared_code":            {accounts.Viewer, "list"},
-	"license_report":         {accounts.Viewer, "repository"},
-	"minimal_context":        {accounts.Viewer, "repository"},
-	"repo_status":            {accounts.Viewer, "repository"},
-	"get_config_entries":     {accounts.Viewer, "repository"},
-	"get_doc_section":        {accounts.Viewer, "repository"},
-	"file_outline":           {accounts.Viewer, "repository"},
-	"hotspots":               {accounts.Viewer, "repository"},
-	"security_symbols":       {accounts.Viewer, "repository"},
-	"attack_surface":         {accounts.Viewer, "repository"},
-	"file_history":           {accounts.Viewer, "repository"},
-	"git_status":             {accounts.Viewer, "list"},
-	"git_diff_summary":       {accounts.Viewer, "list"},
-	"git_blame":              {accounts.Viewer, "list"},
-	"git_log":                {accounts.Viewer, "list"},
-	"gh_pr_status":           {accounts.Viewer, "list"},
-	"gh_pr_list":             {accounts.Viewer, "list"},
-	"gh_run_failure":         {accounts.Viewer, "list"},
-	"gh_run_list":            {accounts.Viewer, "list"},
-	"ask_local":              {accounts.Viewer, "list"},
-	"local_draft":            {accounts.Viewer, "list"},
-	"read_ranges":            {accounts.Viewer, "list"},
-	"fetch_source":           {accounts.Viewer, "list"},
-	"security_report":        {accounts.Viewer, "repository"},
-	"repo_metrics":           {accounts.Viewer, "repository"},
-	"list_reviews":           {accounts.Viewer, "repository"},
-	"get_review":             {accounts.Viewer, "review"},
-	"search_graph_nodes":     {accounts.Viewer, "repository"},
-	"query_subgraph":         {accounts.Viewer, "repository"},
-	"recall_context":         {accounts.Viewer, "repository"},
-	"submit_review":          {accounts.Member, "repository"},
-	"update_review_comment":  {accounts.Member, "review"},
-	"upsert_graph_triples":   {accounts.Member, "repository"},
-	"offload_turns":          {accounts.Member, "repository"},
+	"ingestion_report":       {accounts.RepoCodeRead, "repository"},
+	"repo_list":              {accounts.RepoCodeRead, "list"},
+	"search_all_repos":       {accounts.RepoCodeRead, "list"},
+	"rule_guide":             {accounts.RepoSecurityRead, "catalog"},
+	"repo_overview":          {accounts.RepoCodeRead, "repository"},
+	"search":                 {accounts.RepoCodeRead, "repository"},
+	"get_symbol_context":     {accounts.RepoCodeRead, "repository"},
+	"code_identities":        {accounts.RepoArchitectureRead, "repository"},
+	"code_identity_reviews":  {accounts.RepoArchitectureRead, "repository"},
+	"code_records":           {accounts.RepoArchitectureRead, "repository"},
+	"code_annotate":          {accounts.RepoArchitectureWrite, "repository"},
+	"code_record_reuse":      {accounts.RepoArchitectureWrite, "reuse"},
+	"get_call_graph":         {accounts.RepoCodeRead, "repository"},
+	"get_implementations":    {accounts.RepoCodeRead, "repository"},
+	"get_pr_context":         {accounts.RepoCodeRead, "repository"},
+	"verify_plan":            {accounts.RepoCodeRead, "repository"},
+	"change_checklist":       {accounts.RepoCodeRead, "repository"},
+	"handoff_context":        {accounts.RepoCodeRead, "repository"},
+	"unused_code":            {accounts.RepoCodeRead, "repository"},
+	"duplicate_code":         {accounts.RepoCodeRead, "repository"},
+	"cleanup_plan":           {accounts.RepoCodeRead, "repository"},
+	"architecture_search":    {accounts.RepoArchitectureRead, "repository"},
+	"architecture_get":       {accounts.RepoArchitectureRead, "repository"},
+	"architecture_context":   {accounts.RepoArchitectureRead, "repository"},
+	"architecture_issues":    {accounts.RepoArchitectureRead, "repository"},
+	"architecture_proposals": {accounts.RepoArchitectureRead, "repository"},
+	"architecture_propose":   {accounts.RepoArchitectureWrite, "repository"},
+	"architecture_link":      {accounts.RepoArchitectureWrite, "repository"},
+	"repo_trend":             {accounts.RepoCodeRead, "repository"},
+	"refactor_duplicates":    {accounts.RepoCodeRead, "repository"},
+	"shared_code":            {accounts.RepoCodeRead, "list"},
+	"license_report":         {accounts.RepoSecurityRead, "repository"},
+	"minimal_context":        {accounts.RepoCodeRead, "repository"},
+	"repo_status":            {accounts.RepoCodeRead, "repository"},
+	"get_config_entries":     {accounts.RepoCodeRead, "repository"},
+	"get_doc_section":        {accounts.RepoCodeRead, "repository"},
+	"file_outline":           {accounts.RepoCodeRead, "repository"},
+	"hotspots":               {accounts.RepoCodeRead, "repository"},
+	"security_symbols":       {accounts.RepoSecurityRead, "repository"},
+	"attack_surface":         {accounts.RepoSecurityRead, "repository"},
+	"file_history":           {accounts.RepoCodeRead, "repository"},
+	"git_status":             {accounts.RepoCodeRead, "list"},
+	"git_diff_summary":       {accounts.RepoCodeRead, "list"},
+	"git_blame":              {accounts.RepoCodeRead, "list"},
+	"git_log":                {accounts.RepoCodeRead, "list"},
+	"gh_pr_status":           {accounts.RepoCodeRead, "list"},
+	"gh_pr_list":             {accounts.RepoCodeRead, "list"},
+	"gh_run_failure":         {accounts.RepoCodeRead, "list"},
+	"gh_run_list":            {accounts.RepoCodeRead, "list"},
+	"ask_local":              {accounts.RepoCodeRead, "list"},
+	"local_draft":            {accounts.RepoCodeRead, "list"},
+	"read_ranges":            {accounts.RepoCodeRead, "list"},
+	"fetch_source":           {accounts.RepoCodeRead, "list"},
+	"security_report":        {accounts.RepoSecurityRead, "repository"},
+	"repo_metrics":           {accounts.RepoCodeRead, "repository"},
+	"list_reviews":           {accounts.RepoReviewsRead, "repository"},
+	"get_review":             {accounts.RepoReviewsRead, "review"},
+	"search_graph_nodes":     {accounts.RepoMemoryRead, "repository"},
+	"query_subgraph":         {accounts.RepoMemoryRead, "repository"},
+	"recall_context":         {accounts.RepoMemoryRead, "repository"},
+	"submit_review":          {accounts.RepoReviewsWrite, "repository"},
+	"update_review_comment":  {accounts.RepoReviewsWrite, "comment"},
+	"upsert_graph_triples":   {accounts.RepoMemoryWrite, "repository"},
+	"offload_turns":          {accounts.RepoMemoryWrite, "repository"},
 }
 
 type reachKey struct{}
@@ -145,12 +149,12 @@ func (h *handlers) authorizeTool(ctx context.Context, policy toolPolicy, raw jso
 		return fmt.Errorf("invalid tool arguments")
 	}
 	repo := args.Repo
-	if policy.target == "review" {
+	if policy.target == "review" || policy.target == "comment" {
 		if h.reviews == nil {
 			return fmt.Errorf("review tools are disabled")
 		}
 		id := args.ID
-		if policy.role == accounts.Member {
+		if policy.target == "comment" {
 			id = args.ReviewID
 		}
 		r, err := h.reviews.GetReview(ctx, id)
@@ -166,10 +170,8 @@ func (h *handlers) authorizeTool(ctx context.Context, policy toolPolicy, raw jso
 	if err != nil {
 		return err
 	}
-	if policy.role == accounts.Member {
-		if err := h.canWrite(ctx, resolved); err != nil {
-			return err
-		}
+	if err := h.holds(ctx, resolved, policy.perm); err != nil {
+		return err
 	}
 	if source := strings.TrimSpace(args.OriginRepo); policy.target == "reuse" && source != "" && source != resolved {
 		svc, _, err := h.catalogFor(ctx, resolved)

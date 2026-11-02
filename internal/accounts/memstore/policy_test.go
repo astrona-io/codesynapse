@@ -72,5 +72,5 @@ func TestOwnerControlDoesNotNeedTeamEvaluation(t *testing.T) {
 	require.NoError(t, st.CreateUser(ctx, u))
 	require.NoError(t, st.CreateOrg(ctx, accounts.Org{ID: "org", Slug: "org", CreatedAt: u.CreatedAt}, u.ID))
 	svc := accounts.NewService(unavailableTeamStore{st}, true)
-	require.NoError(t, svc.Require(ctx, accounts.Principal{User: u, Via: "session"}, "org", accounts.Owner))
+	require.NoError(t, svc.Require(ctx, accounts.Principal{User: u, Via: "session"}, "org", accounts.OrgOwnerRules))
 }

@@ -22,11 +22,11 @@ const maxPromptLogExport = 20000
 // prompts are kept) or sets (owner or admin, signed-in session only, audited
 // before the write) the organisation's gateway prompt log.
 func (s *Server) handlePromptLogSettings(w http.ResponseWriter, r *http.Request) {
-	least := accounts.Member
+	perm := accounts.OrgGatewayRead
 	if r.Method == http.MethodPut {
-		least = accounts.Admin
+		perm = accounts.OrgPromptLogFull
 	}
-	p, o, ok := s.orgFor(w, r, least)
+	p, o, ok := s.orgFor(w, r, perm)
 	if !ok {
 		return
 	}
@@ -105,7 +105,7 @@ func promptLogFilter(q url.Values) (accounts.PromptLogFilter, error) {
 // owner or admin in a signed-in session; every view is audited
 // (gateway.prompt_log.read) before a row is read. Other organisations answer 404.
 func (s *Server) handlePromptLog(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Admin)
+	p, o, ok := s.orgFor(w, r, accounts.OrgPromptLogRead)
 	if !ok {
 		return
 	}
@@ -139,7 +139,7 @@ func (s *Server) handlePromptLog(w http.ResponseWriter, r *http.Request) {
 // before a row is read. Each row carries the ID and digests of its audit
 // entry, so it can be checked against the chain.
 func (s *Server) handlePromptLogExport(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Admin)
+	p, o, ok := s.orgFor(w, r, accounts.OrgPromptLogRead)
 	if !ok {
 		return
 	}

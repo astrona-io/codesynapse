@@ -539,15 +539,15 @@ func (s *Server) handleCreateOrg(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, o)
 }
 
-// orgFor resolves the {org} slug and checks the caller has at least least.
-func (s *Server) orgFor(w http.ResponseWriter, r *http.Request, least accounts.Role) (accounts.Principal, accounts.Org, bool) {
+// orgFor resolves the {org} slug and checks that the caller's role there holds perm.
+func (s *Server) orgFor(w http.ResponseWriter, r *http.Request, perm accounts.Permission) (accounts.Principal, accounts.Org, bool) {
 	p, ok := s.caller(w, r)
 	if !ok {
 		return p, accounts.Org{}, false
 	}
 	o, err := s.cfg.Accounts.St.OrgBySlug(r.Context(), r.PathValue("org"))
 	if err == nil {
-		err = s.cfg.Accounts.Require(r.Context(), p, o.ID, least)
+		err = s.cfg.Accounts.Require(r.Context(), p, o.ID, perm)
 	}
 	if err != nil {
 		if errors.Is(err, accounts.ErrForbidden) {
@@ -560,7 +560,7 @@ func (s *Server) orgFor(w http.ResponseWriter, r *http.Request, least accounts.R
 }
 
 func (s *Server) handleMembers(w http.ResponseWriter, r *http.Request) {
-	_, o, ok := s.orgFor(w, r, accounts.Viewer)
+	_, o, ok := s.orgFor(w, r, accounts.OrgMembersRead)
 	if !ok {
 		return
 	}
@@ -583,7 +583,7 @@ type memberRequest struct {
 // handleSetMember changes an existing member's role. New members join through
 // invitations (invitations.go).
 func (s *Server) handleSetMember(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Viewer)
+	p, o, ok := s.orgFor(w, r, accounts.OrgMembersRead)
 	if !ok {
 		return
 	}
@@ -605,7 +605,7 @@ func (s *Server) handleSetMember(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Viewer)
+	p, o, ok := s.orgFor(w, r, accounts.OrgMembersRead)
 	if !ok {
 		return
 	}

@@ -64,7 +64,7 @@ func TestPublicationSerializesSharedGraphAttachment(t *testing.T) {
 	}
 	linked := make(chan error, 1)
 	go func() {
-		linked <- f.server.linkPolicyRepository(linkCtx, accounts.Repository{OrgID: other.ID, Graph: storetest.Repo, AddedBy: f.user.ID, Visibility: accounts.Private, AddedAt: time.Now()}, accounts.Member)
+		linked <- f.server.linkPolicyRepository(linkCtx, accounts.Repository{OrgID: other.ID, Graph: storetest.Repo, AddedBy: f.user.ID, Visibility: accounts.Private, AddedAt: time.Now()}, accounts.OrgRepositoriesWrite)
 	}()
 	select {
 	case err := <-linked:

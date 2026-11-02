@@ -152,7 +152,7 @@ var (
 // PromptLogSettingOf returns the organisation's prompt log setting for a
 // member: they may see whether their prompts are kept.
 func (s *Service) PromptLogSettingOf(ctx context.Context, p Principal, orgID string) (PromptLogSetting, error) {
-	if err := s.Require(ctx, p, orgID, Member); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgGatewayRead); err != nil {
 		return PromptLogSetting{}, err
 	}
 	return s.St.PromptLogSetting(ctx, orgID)
@@ -172,7 +172,7 @@ func (s *Service) SetPromptLog(ctx context.Context, p Principal, orgID string, s
 	if err := signedIn(p); err != nil {
 		return err
 	}
-	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgPromptLogFull); err != nil {
 		return err
 	}
 	if set.RetentionDays < MinPromptLogDays || set.RetentionDays > MaxPromptLogDays {
@@ -280,7 +280,7 @@ func (s *Service) AllowPromptLog(ctx context.Context, p Principal, orgID, action
 	if err := signedIn(p); err != nil {
 		return err
 	}
-	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgPromptLogRead); err != nil {
 		return err
 	}
 	if err := checkPromptLogFilter(f); err != nil {

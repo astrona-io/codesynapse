@@ -31,7 +31,7 @@ func (s *Service) createTeamPolicy(ctx context.Context, p Principal, orgID, name
 	if p.Via == "key" {
 		return Team{}, ErrForbidden
 	}
-	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgTeamsFull); err != nil {
 		return Team{}, err
 	}
 	name, err := checkName(name, "a team name")
@@ -68,7 +68,7 @@ func (s *Service) deleteTeamPolicy(ctx context.Context, p Principal, teamID stri
 	if err != nil {
 		return err
 	}
-	if err := s.Require(ctx, p, t.OrgID, Admin); err != nil {
+	if err := s.Require(ctx, p, t.OrgID, OrgTeamsFull); err != nil {
 		return err
 	}
 	admins, err := s.adminRepositories(ctx, t.OrgID)
@@ -87,7 +87,7 @@ func (s *Service) deleteTeamPolicy(ctx context.Context, p Principal, teamID stri
 
 // canMaintain: organisation owners and admins, and the team's maintainers.
 func (s *Service) canMaintain(ctx context.Context, p Principal, t Team) error {
-	if err := s.Require(ctx, p, t.OrgID, Admin); err == nil {
+	if err := s.Require(ctx, p, t.OrgID, OrgTeamsFull); err == nil {
 		return nil
 	}
 	if _, err := s.RoleIn(ctx, p, t.OrgID); err != nil {
@@ -201,7 +201,7 @@ func (s *Service) TeamMembers(ctx context.Context, p Principal, teamID string) (
 	if err != nil {
 		return nil, err
 	}
-	if err := s.Require(ctx, p, t.OrgID, Viewer); err != nil {
+	if err := s.Require(ctx, p, t.OrgID, OrgTeamsRead); err != nil {
 		if s.canMaintain(ctx, p, t) != nil {
 			return nil, err
 		}
@@ -241,7 +241,7 @@ func (s *Service) setTeamRolePolicy(ctx context.Context, p Principal, teamID str
 	if err != nil {
 		return err
 	}
-	if !mine.AtLeast(Admin) || (role == Owner && mine != Owner) {
+	if !mine.Has(OrgTeamsFull) || (role == Owner && mine != Owner) {
 		return ErrForbidden
 	}
 	if role != "" && !role.Valid() {

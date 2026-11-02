@@ -29,7 +29,7 @@ func (h *handlers) catalogFor(ctx context.Context, repoArg string) (catalog.Serv
 				return nil, store.ErrNotFound
 			}
 			reach, restricted, err := h.reach(ctx)
-			if err != nil || restricted && (reach[source].Ambiguous || reach[source].OrgID != callerOrg(ctx) || !reach[source].Role.AtLeast(accounts.Viewer)) {
+			if err != nil || restricted && (reach[source].Ambiguous || reach[source].OrgID != callerOrg(ctx) || !reach[source].Role.Has(accounts.RepoArchitectureRead)) {
 				return nil, store.ErrNotFound
 			}
 			return store.ForRepository(h.svc.R, source), nil

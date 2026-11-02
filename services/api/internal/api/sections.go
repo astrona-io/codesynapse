@@ -101,6 +101,6 @@ func (s *Server) handleSections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out.MemoryFacts = len(mem.Facts)
-	out.Admin = sc.all || sc.graphs[repo].AtLeast(accounts.Admin)
+	out.Admin = sc.all || sc.graphs[repo].Has(accounts.RepoSettingsFull)
 	writeJSON(w, 200, out)
 }

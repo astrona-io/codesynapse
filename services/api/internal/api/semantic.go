@@ -20,7 +20,7 @@ import (
 // enabled:false.
 
 func (s *Server) semanticRoutes() {
-	s.route("POST /api/v1/repos/{repo}/semantic", repoRole(accounts.Viewer), s.withExecution(s.handleSemantic))
+	s.route("POST /api/v1/repos/{repo}/semantic", repoPerm(accounts.RepoCodeRead), s.withExecution(s.handleSemantic))
 }
 
 // registryEmbedder embeds through the registry's local embedding provider.

@@ -61,11 +61,11 @@ type SessionCall struct {
 // agentSessionScope is the organisation and the actor filter of the caller: ""
 // (everyone) for owners and admins, the caller's own user otherwise.
 func (s *Server) agentSessionScope(w http.ResponseWriter, r *http.Request) (accounts.Org, string, bool) {
-	p, o, ok := s.orgFor(w, r, accounts.Member)
+	p, o, ok := s.orgFor(w, r, accounts.OrgAgentSessionsRead)
 	if !ok {
 		return o, "", false
 	}
-	if s.cfg.Accounts.Require(r.Context(), p, o.ID, accounts.Admin) == nil {
+	if s.cfg.Accounts.Require(r.Context(), p, o.ID, accounts.OrgAuditRead) == nil {
 		return o, "", true
 	}
 	return o, p.User.ID, true

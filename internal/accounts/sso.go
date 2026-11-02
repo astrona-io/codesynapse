@@ -161,7 +161,7 @@ func (s *Service) SetIdentityProvider(ctx context.Context, p Principal, orgID st
 		return IdentityProvider{}, err
 	}
 	return policyChange(ctx, s, func(tx *Service) (IdentityProvider, error) {
-		if err := tx.Require(ctx, p, orgID, Admin); err != nil {
+		if err := tx.Require(ctx, p, orgID, OrgSSOFull); err != nil {
 			return IdentityProvider{}, err
 		}
 		for _, teamID := range settings.TeamGroups {
@@ -201,7 +201,7 @@ func (s *Service) SetIdentityProvider(ctx context.Context, p Principal, orgID st
 
 // IdentityProviderOf returns an organisation's provider for its admins.
 func (s *Service) IdentityProviderOf(ctx context.Context, p Principal, orgID string) (IdentityProvider, error) {
-	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgSSORead); err != nil {
 		return IdentityProvider{}, err
 	}
 	return s.St.IdentityProvider(ctx, orgID)
@@ -214,7 +214,7 @@ func (s *Service) RemoveIdentityProvider(ctx context.Context, p Principal, orgID
 		return ErrForbidden
 	}
 	_, err := policyChange(ctx, s, func(tx *Service) (struct{}, error) {
-		if err := tx.Require(ctx, p, orgID, Admin); err != nil {
+		if err := tx.Require(ctx, p, orgID, OrgSSOFull); err != nil {
 			return struct{}{}, err
 		}
 		if err := tx.St.DeleteIdentityProvider(ctx, orgID); err != nil {

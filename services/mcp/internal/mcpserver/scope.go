@@ -102,14 +102,14 @@ func (h *handlers) allowed(ctx context.Context) (graphs []string, restricted boo
 	return graphs, restricted, err
 }
 
-// canWrite requires repository WRITE permission for memory and reviews.
-func (h *handlers) canWrite(ctx context.Context, graph string) error {
+// holds requires the caller's role on graph to hold perm.
+func (h *handlers) holds(ctx context.Context, graph string, perm accounts.Permission) error {
 	r, restricted, err := h.reach(ctx)
 	if err != nil || !restricted {
 		return err
 	}
-	if !r[graph].Role.AtLeast(accounts.Member) {
-		return fmt.Errorf("repository %q is read-only for you: writing memory or reviews needs editor access", graph)
+	if !r[graph].Role.Has(perm) {
+		return fmt.Errorf("repository %q: your role does not include %s", graph, perm)
 	}
 	return nil
 }

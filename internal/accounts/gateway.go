@@ -48,7 +48,7 @@ type GatewaySettings struct {
 
 // GatewaySetting returns the settings for a member of the organisation.
 func (s *Service) GatewaySetting(ctx context.Context, p Principal, orgID string) (GatewaySettings, error) {
-	if err := s.Require(ctx, p, orgID, Member); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgGatewayRead); err != nil {
 		return GatewaySettings{}, err
 	}
 	on, err := s.St.GatewayEnabled(ctx, orgID)
@@ -85,7 +85,7 @@ func (s *Service) SetGatewayLocalThinking(ctx context.Context, p Principal, orgI
 	if err := signedIn(p); err != nil {
 		return err
 	}
-	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgGatewayFull); err != nil {
 		return err
 	}
 	e := actorEvent(p, "org.gateway.local_thinking.set", orgID, orgID)
@@ -110,7 +110,7 @@ func (s *Service) SetGatewayShortenPrompts(ctx context.Context, p Principal, org
 	if err := signedIn(p); err != nil {
 		return err
 	}
-	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgGatewayFull); err != nil {
 		return err
 	}
 	e := actorEvent(p, "org.gateway.shorten_prompts.set", orgID, orgID)
@@ -133,7 +133,7 @@ func (s *Service) SetGatewayLocalExclude(ctx context.Context, p Principal, orgID
 	if err := signedIn(p); err != nil {
 		return err
 	}
-	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgGatewayFull); err != nil {
 		return err
 	}
 	e := actorEvent(p, "org.gateway.local_exclude.set", orgID, orgID)
@@ -151,7 +151,7 @@ func (s *Service) SetGatewayLocalFirst(ctx context.Context, p Principal, orgID s
 	if err := signedIn(p); err != nil {
 		return err
 	}
-	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgGatewayFull); err != nil {
 		return err
 	}
 	e := actorEvent(p, "org.gateway.local_first.set", orgID, orgID)
@@ -169,7 +169,7 @@ func (s *Service) SetGateway(ctx context.Context, p Principal, orgID string, ena
 	if err := signedIn(p); err != nil {
 		return err
 	}
-	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgGatewayFull); err != nil {
 		return err
 	}
 	e := actorEvent(p, "org.gateway.set", orgID, orgID)

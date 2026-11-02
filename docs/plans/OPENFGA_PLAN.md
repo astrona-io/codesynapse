@@ -79,8 +79,8 @@ A level includes the levels below it within the same area. `repository.reviews:f
 
 | Permission | What it allows (routes and MCP tools that check it) |
 |---|---|
-| `repository.code:read` | The code graph: search, symbols, outline, call graphs, metrics, hotspots, history, cleanup, duplicates, dependencies, licences, SBOM, impact, ingestion reports and the read-only MCP code tools |
-| `repository.security:read` | Security report, findings, SARIF and image-scan findings, triage list, `security_report`, `attack_surface` |
+| `repository.code:read` | The code graph: search, symbols, outline, call graphs, metrics, hotspots, history, cleanup, duplicates, dependencies, licences, SBOM, impact, ingestion reports, the brief plan and the read-only MCP code tools, including `ask_local` and `local_draft` |
+| `repository.security:read` | Security report, findings, SARIF and image-scan findings, triage list, `security_report`, `attack_surface`, `security_symbols`, `license_report`, `rule_guide` |
 | `repository.security:write` | Upload and delete SARIF and image scans |
 | `repository.security:full` | Triage and suppress findings |
 | `repository.reviews:read` | Reviews and their code, `list_reviews`, `get_review` |
@@ -89,13 +89,13 @@ A level includes the levels below it within the same area. `repository.reviews:f
 | `repository.fixes:write` | Create fix branches from accepted comments (pushes a `codesynapse/*` branch) |
 | `repository.memory:read` | Recall agent and session memory |
 | `repository.memory:write` | Save, offload, index and promote memory (`upsert_graph_triples`, `offload_turns`) |
-| `repository.memory:full` | Clear the repository's memory and session memory |
+| `repository.memory:full` | Clear the repository's memory and session memory (writers can do this today, so `repository:write` holds it) |
 | `repository.architecture:read` | Records, proposals, links, code records, identities and identity reviews |
 | `repository.architecture:write` | Propose, link, withdraw, annotate and record reuse (`architecture_propose`, `architecture_link`, `code_annotate`, `code_record_reuse`) |
 | `repository.architecture:full` | Identity reviews (same symbol, copy, distinct) |
 | `repository.runtime:read` | Coverage and test reports |
 | `repository.runtime:write` | Upload and delete coverage and test reports |
-| `repository.ai:write` | Model work for the repository: AI tasks, `ask_local`, `local_draft`, source extraction, briefs |
+| `repository.ai:write` | Model work for the repository through the API: AI tasks, the ask-local, local-draft and source-extract endpoints the bridge calls |
 | `repository.settings:read` | Repository policy (`.codesynapse.yaml` approval), schedule, branches |
 | `repository.settings:full` | Change the policy, schedule and remote |
 | `repository.sync:write` | Start a sync or re-index |
@@ -107,27 +107,32 @@ A level includes the levels below it within the same area. `repository.reviews:f
 
 | Permission | What it allows |
 |---|---|
-| `organisation.members:read` | List members and invitations |
-| `organisation.members:write` | Invite people |
-| `organisation.members:full` | Change roles, remove members, cancel invitations |
+| `organisation.members:read` | List members |
+| `organisation.members:write` | Invite people, list and cancel invitations |
+| `organisation.members:full` | Change roles, remove members |
 | `organisation.teams:read` | List teams and their members |
 | `organisation.teams:full` | Create and delete teams, set team roles and members |
 | `organisation.repositories:read` | List the organisation's repositories |
-| `organisation.repositories:write` | Add repositories to your own space, list a forge's repositories for import |
+| `organisation.repositories:write` | Add repositories to your own space, list a forge's repositories for import, see the member-repositories setting |
 | `organisation.repositories:full` | Add to the organisation space, set the repository default and the member-repositories setting |
 | `organisation.watches:read` | List watches |
 | `organisation.watches:write` | Create, change, pause and scan your own watches |
 | `organisation.watches:full` | Change anyone's watch; include private repositories |
-| `organisation.git_tokens:read` | See token previews |
+| `organisation.git_tokens:read` | See token previews (members can today, so `organisation:write` holds it) |
 | `organisation.git_tokens:full` | Set and remove tokens; list private repositories with them |
 | `organisation.sso:read` | See the provider settings |
 | `organisation.sso:full` | Set and remove the provider and its group mappings |
-| `organisation.gateway:read` | See gateway settings |
+| `organisation.gateway:read` | See gateway and prompt-log settings (members can today, so `organisation:write` holds it) |
 | `organisation.gateway:write` | Send model traffic through the gateway |
 | `organisation.gateway:full` | Change gateway settings |
 | `organisation.prompt_log:read` | Read and export the prompt log |
 | `organisation.prompt_log:full` | Turn the prompt log on or off, set its retention |
-| `organisation.audit:read` | The organisation's audit log, access changes and agent sessions |
+| `organisation.audit:read` | The organisation's audit log and everyone's agent sessions |
+| `organisation.agent_sessions:read` | Your own agent sessions |
+| `organisation.sessions:read` | Read a runtime session's activity |
+| `organisation.sessions:write` | Register, report on and end your own runtime sessions (guests can: agents run as them) |
+| `organisation#member` | Any membership, for routes the service checks further itself, such as a team maintainer changing their team's members |
+| `organisation#owner` | The owner rules: attach an existing graph to the organisation, see access changes, recover repository administration |
 | `organisation.roles:read` | List custom roles |
 | `organisation.roles:full` | Create, change and delete custom roles |
 
@@ -142,13 +147,13 @@ The built-in roles give exactly the access people have today. Phase 2 proves tha
 | `repository:read` | Every repository `:read` permission, except `repository.access:read` |
 | `repository:write` | `repository:read` + `security:write`, `reviews:write`, `fixes:write`, `memory:write`, `memory:full`, `architecture:write`, `runtime:write`, `ai:write` |
 | `repository:full` | Every repository permission |
-| `organisation:read` | `members:read`, `teams:read`, `repositories:read`, `watches:read`, `roles:read` |
-| `organisation:write` | `organisation:read` + `repositories:write`, `watches:write`, `gateway:write` |
+| `organisation:read` | `members:read`, `teams:read`, `repositories:read`, `watches:read`, `roles:read`, `sessions:read`, `sessions:write` |
+| `organisation:write` | `organisation:read` + `repositories:write`, `watches:write`, `gateway:read`, `gateway:write`, `git_tokens:read`, `agent_sessions:read` |
 | `organisation:full` | Every organisation permission |
 
-The guest and owner markers keep their meaning. A guest gets `organisation:read` without the repository default. An owner gets `organisation:full` plus the owner rules.
+The guest and owner markers keep their meaning. A guest gets `organisation#member`, `sessions:read` and `sessions:write` only: today a guest cannot list members, teams or repositories, and gets no repository default. An owner gets `organisation:full` plus the owner rules.
 
-Which routes need which permission is fixed in one table in Go: `permissionOf` for API routes and `toolPolicies` for MCP tools. A test fails when a route or tool is missing from it, like `TestEveryRouteIsClassified` today. If phase 2 finds a route whose current rule does not fit the table, the table is changed to keep today's behaviour, and the plan is updated to say so.
+Which routes need which permission is fixed in Go: each route's policy names its permission (`repoPerm`, `reviewPerm`, `orgPerm` in `services/api/internal/api/scope.go`), `toolPolicies` does the same for MCP tools, and the floors live in `internal/accounts/permissions.go`. A test fails when a route or tool is missing from it, like `TestEveryRouteIsClassified` today. If phase 2 finds a route whose current rule does not fit the table, the table is changed to keep today's behaviour, and the plan is updated to say so.
 
 ### Custom roles
 
@@ -289,6 +294,26 @@ New dependencies, all Apache-2.0: the `github.com/openfga/go-sdk` Go module and 
 - **Contract:** `just test-openfga` starts a throwaway OpenFGA (in-memory datastore, a random pre-shared key) and runs `internal/authz/fga/contract_test.go`: every row of the table above that the model decides, plus idempotent writes and `EnsureModel` reusing the stored model. It lives beside the client rather than in `accountstest`, which phase 2 is reshaping; phase 6 runs the same rows against the Go reference there.
 - **Compose:** `openfga-db-init` (the postgres image's `psql`) creates the `openfga` user and database idempotently and closes the database to everyone else; `openfga-migrate` runs OpenFGA's migrations; `openfga` runs with pre-shared keys, playground, metrics and profiler off, gRPC bound to 127.0.0.1 (the HTTP API reaches it in-process; the health check uses it), no published port. `just init` adds `OPENFGA_DB_PASSWORD` and `OPENFGA_API_KEY` (the one key OpenFGA accepts; see the open questions) to `.env`. Nothing reads them in the API, workers or MCP server yet.
 - **Deviations:** `OPENFGA_LIST_OBJECTS_DEADLINE` is 5 s, above the client's 2 s timeout, so OpenFGA never cuts a list short and returns it as complete (it does so silently at its deadline); OpenFGA refuses a deadline above its 6 s request timeout. The table's "above `MaxTuples`" is `ListLimit`. One key instead of one per service, following the recommendation below.
+
+### What phase 2 changed in the table
+
+Phase 2 found these routes whose current rule did not fit the first draft of the table. Each keeps today's behaviour, and the tables above say so:
+
+- guests hold no `organisation:read` permission, only membership and their own runtime sessions;
+- `sessions:read`, `sessions:write`, `agent_sessions:read` and the `organisation#member` marker were added;
+- `git_tokens:read` and `gateway:read` are in `organisation:write`, because members see token previews and gateway settings;
+- reading the prompt-log settings checks `gateway:read`; reading and exporting the log checks `prompt_log:read`;
+- listing and cancelling invitations check `members:write`, not `members:read` and `members:full`;
+- access changes and recovering repository administration check the owner marker, not `audit:read`; attaching an existing graph to the organisation does too;
+- seeing everyone's agent sessions checks `audit:read`; your own check `agent_sessions:read`;
+- `ask_local` and `local_draft` as MCP tools check `repository.code:read`; the API endpoints the bridge calls check `repository.ai:write`;
+- the brief plan checks `repository.code:read`;
+- the member-repositories setting is read with `repositories:write` and changed with `repositories:full`; the repository default is read and changed with `repositories:full`;
+- `rule_guide`, `security_symbols` and `license_report` check `repository.security:read`;
+- `repository.memory:full` is held by `repository:write`, because writers clear memory today;
+- the gateway's model routes (`/v1/...`) check `organisation.gateway:write`.
+
+Some checks stay on roles until phase 6, because they compare two roles rather than ask for a permission: the job record's role, the invitation ceiling (nobody invites above their own role) and the rule that only owners make owners.
 
 ## Phases
 

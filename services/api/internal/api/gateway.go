@@ -225,16 +225,16 @@ func (s *Server) gatewayRoutes() {
 		}
 	}
 	for _, path := range []string{"/v1/messages", gateway.CountPath} {
-		s.route("POST "+path, orgRole(accounts.Member), owned(guard(g.Handler(path))))
+		s.route("POST "+path, orgPerm(accounts.OrgGatewayWrite), owned(guard(g.Handler(path))))
 	}
 	o := &gateway.OpenAI{Local: g.Local, Done: s.auditGateway}
-	s.route("POST /v1/chat/completions", orgRole(accounts.Member), owned(guard(o.ChatHandler())))
-	s.route("GET /v1/models", orgRole(accounts.Member), owned(guard(o.ModelsHandler())))
+	s.route("POST /v1/chat/completions", orgPerm(accounts.OrgGatewayWrite), owned(guard(o.ChatHandler())))
+	s.route("GET /v1/models", orgPerm(accounts.OrgGatewayWrite), owned(guard(o.ModelsHandler())))
 	// Counts of requests the developer's failover proxy sent straight to
 	// Anthropic while the gateway was unreachable; no key slot, as it carries
 	// no model request.
 	s.failover = &failoverLimit{}
-	s.route("POST "+failoverPath, orgRole(accounts.Member), owned(s.handleGatewayFailover))
+	s.route("POST "+failoverPath, orgPerm(accounts.OrgGatewayWrite), owned(s.handleGatewayFailover))
 }
 
 // owned marks every answer of a gateway route as the gateway's own, before
@@ -319,11 +319,11 @@ func (s *Server) gatewaySession(w http.ResponseWriter, r *http.Request) (*http.R
 // whether the operator turned the gateway on for the installation, and
 // "shorten_available" whether a local model can shorten prompts at all.
 func (s *Server) handleOrgGateway(w http.ResponseWriter, r *http.Request) {
-	least := accounts.Member
+	perm := accounts.OrgGatewayRead
 	if r.Method == http.MethodPut {
-		least = accounts.Admin
+		perm = accounts.OrgGatewayFull
 	}
-	p, o, ok := s.orgFor(w, r, least)
+	p, o, ok := s.orgFor(w, r, perm)
 	if !ok {
 		return
 	}

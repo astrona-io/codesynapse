@@ -22,9 +22,9 @@ import (
 // without accounts answer 501.
 
 func (s *Server) imageScanRoutes() {
-	s.route("GET /api/v1/repos/{repo}/images", repoRole(accounts.Viewer), s.handleImageScan)
-	s.route("PUT /api/v1/repos/{repo}/images", repoRole(accounts.Member), s.handleUploadImageScan)
-	s.route("DELETE /api/v1/repos/{repo}/images", repoRole(accounts.Member), s.handleDeleteImageScan)
+	s.route("GET /api/v1/repos/{repo}/images", repoPerm(accounts.RepoSecurityRead), s.handleImageScan)
+	s.route("PUT /api/v1/repos/{repo}/images", repoPerm(accounts.RepoSecurityWrite), s.handleUploadImageScan)
+	s.route("DELETE /api/v1/repos/{repo}/images", repoPerm(accounts.RepoSecurityWrite), s.handleDeleteImageScan)
 }
 
 // ImageScanSummary is what the API says about the uploaded scan: counts for

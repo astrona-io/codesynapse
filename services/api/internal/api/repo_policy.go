@@ -17,14 +17,14 @@ import (
 
 func (s *Server) repoPolicyRoutes() {
 	s.ingestionRoutes()
-	s.route("GET /api/v1/repos/{repo}/policy", repoRole(accounts.Viewer), s.handleRepositoryConfig)
-	s.route("POST /api/v1/repos/{repo}/policy/preview", repoRole(accounts.Viewer), s.handlePreviewRepoPolicy)
-	s.route("PUT /api/v1/repos/{repo}/policy", repoRole(accounts.Admin), s.handleApproveRepoPolicy)
-	s.route("DELETE /api/v1/repos/{repo}/policy", repoRole(accounts.Admin), s.handleDeleteRepoPolicy)
-	s.route("GET /api/v1/repos/{repo}/annotations", repoRole(accounts.Viewer), s.handleAnnotations)
-	s.route("POST /api/v1/repos/{repo}/annotations", repoRole(accounts.Member), s.withExecution(s.handleAnnotate))
-	s.route("GET /api/v1/repos/{repo}/annotations/jobs/{job}", repoRole(accounts.Viewer), s.withExecution(s.handleAnnotationJob))
-	s.route("DELETE /api/v1/repos/{repo}/annotations/jobs/{job}", repoRole(accounts.Member), s.withExecution(s.handleCancelAnnotation))
+	s.route("GET /api/v1/repos/{repo}/policy", repoPerm(accounts.RepoSettingsRead), s.handleRepositoryConfig)
+	s.route("POST /api/v1/repos/{repo}/policy/preview", repoPerm(accounts.RepoSettingsRead), s.handlePreviewRepoPolicy)
+	s.route("PUT /api/v1/repos/{repo}/policy", repoPerm(accounts.RepoSettingsFull), s.handleApproveRepoPolicy)
+	s.route("DELETE /api/v1/repos/{repo}/policy", repoPerm(accounts.RepoSettingsFull), s.handleDeleteRepoPolicy)
+	s.route("GET /api/v1/repos/{repo}/annotations", repoPerm(accounts.RepoArchitectureRead), s.handleAnnotations)
+	s.route("POST /api/v1/repos/{repo}/annotations", repoPerm(accounts.RepoArchitectureWrite), s.withExecution(s.handleAnnotate))
+	s.route("GET /api/v1/repos/{repo}/annotations/jobs/{job}", repoPerm(accounts.RepoArchitectureRead), s.withExecution(s.handleAnnotationJob))
+	s.route("DELETE /api/v1/repos/{repo}/annotations/jobs/{job}", repoPerm(accounts.RepoArchitectureWrite), s.withExecution(s.handleCancelAnnotation))
 }
 
 func policyOrg(ctx context.Context, repo string) (string, error) {

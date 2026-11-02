@@ -175,8 +175,8 @@ func (s *Server) recoverIngestReports(ctx context.Context) {
 }
 
 func (s *Server) ingestionRoutes() {
-	s.route("GET /api/v1/repos/{repo}/ingestion", repoRole(accounts.Viewer), s.handleIngestion)
-	s.route("GET /api/v1/repos/{repo}/ingestion/{run}", repoRole(accounts.Viewer), s.handleIngestRun)
+	s.route("GET /api/v1/repos/{repo}/ingestion", repoPerm(accounts.RepoCodeRead), s.handleIngestion)
+	s.route("GET /api/v1/repos/{repo}/ingestion/{run}", repoPerm(accounts.RepoCodeRead), s.handleIngestRun)
 }
 
 func ingestSummary(run accounts.IngestRun) accounts.IngestRun {
