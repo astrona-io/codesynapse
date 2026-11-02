@@ -668,3 +668,21 @@ func TestOfflineMarker(t *testing.T) {
 		})
 	}
 }
+
+// A probe that finds the chat registered and online ends without marking the
+// bridge online: a call may have marked it offline since the probe looked, and
+// going online then would forward the next call over a session nobody opened.
+func TestProbeWithNothingToDoLeavesTheStateAlone(t *testing.T) {
+	out := chatOut{lines: make(chan []byte, 4)}
+	b := &bridge{out: out, kick: make(chan struct{}, 1)}
+	b.probing, b.listStale = true, true
+	b.probeLoop(t.Context())
+	assert.False(t, b.probing, "the probe ended")
+	assert.False(t, b.offline)
+	assert.True(t, b.listStale, "not marked online")
+	select {
+	case line := <-out.lines:
+		t.Fatalf("nothing is written, got %s", line)
+	default:
+	}
+}

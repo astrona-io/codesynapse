@@ -108,7 +108,9 @@ func TestVictoriaMetricsOTLP(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 		awaitOTLPValue(ctx, t, q, "sum(increase("+name+"[10m]))", []string{a}, 12)
-		awaitOTLPValue(ctx, t, q, "sum("+name+")", []string{a}, 6)
+		// The newest sample of each stream: a plain sum(name) looks back one
+		// step only and drops replica-b once the restart lands a second later.
+		awaitOTLPValue(ctx, t, q, "sum(last_over_time("+name+"[10m]))", []string{a}, 6)
 		end := time.Now().Add(time.Minute)
 		series, err := q.QueryRange(ctx, name, end.Add(-5*time.Minute), end, time.Second, []string{a})
 		require.NoError(t, err)
