@@ -131,21 +131,37 @@ nav:
   - Reference:
       - reference/index.md
       - Agent guide: AGENT_GUIDE.md
-      - Design:
+      - Glossary: GLOSSARY.md
+  - Roadmap:
+      - roadmap/index.md
+      - Feature decisions:
           - Plan and decisions: PLAN.md
           - SaaS: SAAS.md
           - "ADR 0001: search": adr/0001-search.md
+          - "ADR 0002: code symbol embeddings": adr/0002-code-symbol-embeddings.md
           - "ADR 0003: NebulaGraph": adr/0003-nebulagraph.md
-      - Identity and access:
-          - Access control plan: plans/ACCESS_CONTROL_PLAN.md
-          - Session context plan: plans/SESSION_CONTEXT_PLAN.md
-      - Data and retrieval:
-          - Retrieval plan: plans/RETRIEVAL_PLAN.md
-          - Architecture catalog plan: plans/ARCHITECTURE_CATALOG_PLAN.md
-          - Repo config plan: plans/REPO_CONFIG_PLAN.md
-          - Ingest transparency plan: plans/INGEST_TRANSPARENCY_PLAN.md
-          - Text optimisation plan: plans/TEXT_OPTIMIZATION_PLAN.md
+          - Identity and access:
+              - Access control plan: plans/ACCESS_CONTROL_PLAN.md
+              - Session context plan: plans/SESSION_CONTEXT_PLAN.md
+          - Data and retrieval:
+              - Retrieval plan: plans/RETRIEVAL_PLAN.md
+              - Architecture catalog plan: plans/ARCHITECTURE_CATALOG_PLAN.md
+              - Repo config plan: plans/REPO_CONFIG_PLAN.md
+              - Ingest transparency plan: plans/INGEST_TRANSPARENCY_PLAN.md
+              - Text optimisation plan: plans/TEXT_OPTIMIZATION_PLAN.md
+          - Agents and models:
+              - Gateway plan: plans/GATEWAY_PLAN.md
+          - Operations:
+              - Telemetry plan: plans/TELEMETRY_PLAN.md
+          - Code architecture audit:
+              - Audit plan: plans/CODE_ARCHITECTURE_AUDIT_PLAN.md
+              - Audit results: CODE_ARCHITECTURE_AUDIT.md
+              - Fix validation: FIX_VALIDATION.md
+              - Prompt budgets: PROMPT_BUDGETS.md
+              - Allocation reductions: ALLOCATION_REDUCTIONS.md
+              - Edge evidence: EDGE_EVIDENCE.md
+              - Retrieval results: RETRIEVAL_RESULTS.md
+      - Ideas:
+          - Ideas and open work: roadmap/ideas.md
           - SARIF import plan: plans/SARIF_IMPORT_PLAN.md
-      - Telemetry plan: plans/TELEMETRY_PLAN.md
-      - Platform statistics plan: plans/PLATFORM_STATS_PLAN.md
-      - Glossary: GLOSSARY.md
+          - Platform statistics plan: plans/PLATFORM_STATS_PLAN.md

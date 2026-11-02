@@ -40,4 +40,5 @@ just mcp       # register the MCP server with your coding agents
 | Understand how it works | [Architecture](../architecture/index.md) |
 | See what it can answer | [Features](../features/index.md) |
 | Run it for a team | [Administration](../operations/index.md) |
-| Look up a tool, setting or plan | [Reference](../reference/index.md) |
+| Look up a tool or a term | [Reference](../reference/index.md) |
+| Read why it was built this way, or what comes next | [Roadmap](../roadmap/index.md) |
