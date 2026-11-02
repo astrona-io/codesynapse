@@ -32,7 +32,7 @@ None of these become tuples.
 
 ## Permission names
 
-Every permission is written `resource:level`. The levels are ordered: `full` includes `write`, and `write` includes `read`. `none` is an explicit deny on a repository, not a level.
+Every permission is written `resource:level`. The levels are ordered: `full` includes `write`, and `write` includes `read`. `deny` is an explicit deny on a repository, not a level.
 
 ### Repository
 
@@ -41,7 +41,7 @@ Every permission is written `resource:level`. The levels are ordered: `full` inc
 | `viewer` | `repository:read` | Read the graph, reviews, memory, findings and reports; agents are read-only |
 | `editor` | `repository:write` | Also write reviews, memory and catalog records; upload runtime facts and SARIF |
 | `admin` | `repository:full` | Also sync, schedules, settings, grants and deletion |
-| `none` | `repository:none` | Explicit deny: overrides team grants and the organisation default |
+| `none` | `repository:deny` | Explicit deny: overrides team grants and the organisation default |
 
 ### Organisation
 
@@ -119,8 +119,8 @@ type repository
     define direct_full: [user]
     define direct_write: [user]
     define direct_read: [user]
-    define direct_none: [user]
-    define has_direct: direct_full or direct_write or direct_read or direct_none
+    define direct_deny: [user]
+    define has_direct: direct_full or direct_write or direct_read or direct_deny
     define team_full: [team#member]
     define team_write: [team#member]
     define team_read: [team#member]
@@ -139,7 +139,7 @@ These are today's rules. Every row becomes a test case in `accountstest` that ru
 |---|---|
 | Only explicit, active members of the owning organisation get access | `and active from organisation` on every repository level; tuples are removed when a membership ends or the account is suspended |
 | A direct user grant overrides team grants, even when weaker | `but not has_direct` on the team and default paths |
-| Explicit `repository:none` denies | `direct_none` is part of `has_direct` and grants nothing |
+| Explicit `repository:deny` denies | `direct_deny` is part of `has_direct` and grants nothing |
 | The strongest team grant in the same organisation wins | Union of `team_*`; the API writes team grants only for teams of the repository's organisation |
 | Organisation default `READ_ONLY` gives `repository:read`; `NONE` gives nothing | The `default_readers` tuple exists only while the default is `READ_ONLY` |
 | Guests get no default | Guests are in `guest`, not in `member`, so `default_readers` does not include them |
