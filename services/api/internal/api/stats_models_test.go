@@ -50,6 +50,12 @@ func modelVM(t *testing.T, filters *[]string) *httptest.Server {
 		gatewayQueries.queueP95:     `{}=19.5`,
 		gatewayQueries.answerSum:    `{}=9`,
 		gatewayQueries.answerN:      `{}=6`,
+		gatewayQueries.turns:        `{"turn":"1-2","route":"local"}=4;{"turn":"1-2","route":"cloud"}=1;{"turn":"31-100","route":"cloud"}=3;{"turn":"made-up","route":"cloud"}=9`,
+		gatewayQueries.turnP50:      `{"turn":"1-2"}=4200.4;{"turn":"31-100"}=61000`,
+		gatewayQueries.turnP90:      `{"turn":"1-2"}=NaN;{"turn":"31-100"}=95000`,
+		gatewayQueries.turnTokens:   `{"turn":"31-100","kind":"input"}=300;{"turn":"31-100","kind":"cached"}=180000;{"turn":"31-100","kind":"cache_write"}=19700;{"turn":"31-100","kind":"output"}=900`,
+		gatewayQueries.turnMetered:  `{"turn":"31-100"}=3`,
+		gatewayQueries.machine:      `{"mcp_tool":"read_ranges"}=20;{"mcp_tool":"git_status"}=5;{"mcp_tool":"ask_local"}=30`,
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*filters = append(*filters, strings.Join(r.URL.Query()["extra_filters[]"], ";"))
@@ -72,7 +78,7 @@ func TestModelStats(t *testing.T) {
 	var filters []string
 	vm := modelVM(t, &filters)
 	reg := llm.NewRegistry(llm.Config{Providers: []llm.ProviderConfig{
-		{Name: "local", Kind: llm.KindOpenAI, BaseURL: "http://127.0.0.1:11434/v1", Model: "qwen", ContextWindow: 262144},
+		{Name: "local", Kind: llm.KindOpenAI, BaseURL: "http://127.0.0.1:11434/v1", Model: "qwen", ContextWindow: 262144, Gateway: true},
 		{Name: "cloud", Kind: llm.KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "big", PriceInputPerMTok: 3, PriceOutputPerMTok: 15},
 	}, Default: "local"})
 	s := &Server{cfg: Config{Metrics: &telemetry.Querier{URL: vm.URL}, LLM: reg}, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
@@ -119,6 +125,13 @@ func TestModelStats(t *testing.T) {
 	assert.True(t, gw.CloudP95Seconds == nil, "a NaN quantile is left out")
 	require.True(t, gw.QueueAvgSeconds != nil && gw.QueueP95Seconds != nil && gw.LocalAnswerAvgSeconds != nil)
 	assert.Equal(t, []float64{*gw.QueueAvgSeconds, *gw.QueueP95Seconds, *gw.LocalAnswerAvgSeconds}, []float64{3, 19.5, 1.5})
+	assert.Equal(t, []string{gw.LocalProvider, gw.LocalModel}, []string{"local", "qwen"}, "names from the configuration, never the address")
+	assert.Equal(t, gw.Turns, []GatewayTurn{
+		{Turn: "1-2", Requests: 5, Local: 4, Cloud: 1, LocalSharePct: 80},
+		{Turn: "31-100", Requests: 3, Cloud: 3, Metered: 3, CloudInputP50: ptr(61000), CloudInputP90: ptr(95000), CloudInputAvg: ptr(66667), CachedSharePct: ptr(90)},
+	}, "buckets in order, unknown buckets dropped, no token figures without metered answers")
+	assert.Equal(t, out.Tiers, WorkTiers{Machine: 25, SelfHosted: 6 + 40, Cloud: 4 + 1, SelfHostedModels: []string{"local/qwen"}},
+		"ask_local is the self-hosted model's work, counted once in its requests")
 	for _, f := range filters {
 		assert.Contains(t, f, "0123456789abcdef01234567", "every query is scoped to the caller's organisations")
 	}

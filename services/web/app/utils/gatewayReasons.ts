@@ -6,12 +6,14 @@ const REASONS: Record<string, string> = {
   queue_timeout: 'waited too long for a slot', answer_timeout: 'answered too slowly', cancelled: 'client gave up',
   model_error: 'model error', bad_status: 'error status', empty_answer: 'empty answer', truncated: 'cut off', bad_answer: 'unreadable answer',
   not_eligible: 'not eligible', too_large: 'too large', has_thinking: 'needs thinking', has_image: 'has an image or document',
-  bad_request: 'unreadable request', bad_role: 'unknown message role', bad_content: 'unreadable message', encode_error: 'could not encode for the local model',
+  bad_request: 'unreadable request', bad_role: 'unknown message role', bad_content: 'unreadable message', encode_error: 'could not encode for the self-hosted model',
   system_not_text: 'system prompt not text', unsupported_block: 'unsupported content', unsupported_tool: 'unsupported tool',
-  no_local_model: 'no local model', local_first_off: 'local first off', excluded: 'excluded', count_tokens: 'token count (cloud only)', other: 'other',
+  no_local_model: 'no self-hosted model', local_first_off: 'self-hosted first off', excluded: 'excluded', count_tokens: 'token count (cloud only)', other: 'other',
 }
 
-const ROUTES: Record<string, string> = { local: 'local model', cloud: 'cloud', rejected: 'refused', other: 'other' }
+// local is the installation's own model, which may run on another host:
+// never the developer's machine, so it is never called just "local".
+const ROUTES: Record<string, string> = { local: 'CodeSynapse model (self-hosted)', cloud: 'cloud', rejected: 'refused', other: 'other' }
 
 // humanize turns an unknown code such as "slot_lost" into "slot lost".
 function humanize(code: string): string {

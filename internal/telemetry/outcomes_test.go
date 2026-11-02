@@ -129,3 +129,35 @@ func TestGatewayReasonsAreFixed(t *testing.T) {
 	assert.True(t, GatewayTimeout("queue_timeout") && GatewayTimeout("answer_timeout"), "both timeouts")
 	assert.False(t, GatewayTimeout("model_error"), "an error is not a timeout")
 }
+
+func TestGatewayTurnBuckets(t *testing.T) {
+	for _, tc := range []struct {
+		messages int
+		want     string
+	}{{-1, ""}, {0, ""}, {1, "1-2"}, {2, "1-2"}, {3, "3-10"}, {30, "11-30"}, {31, "31-100"}, {300, "101-300"}, {301, "301+"}, {1 << 30, "301+"}} {
+		assert.Equal(t, GatewayTurn(tc.messages), tc.want, tc.messages)
+	}
+	assert.Equal(t, GatewayTurnBuckets(), []string{"1-2", "3-10", "11-30", "31-100", "101-300", "301+"})
+	assert.True(t, turnShare >= len(GatewayTurnBuckets()), "every bucket fits an organisation's share")
+}
+
+func TestGatewayTurnRecordsCloudUsage(t *testing.T) {
+	ctx := WithTenant(context.Background(), "cdcdcdcdcdcdcdcdcdcdcdcd")
+	const id = `tenant_id="cdcdcdcdcdcdcdcdcdcdcdcd"`
+	RecordGatewayTurn(ctx, 40, "cloud", CloudTokens{Input: 10, Cached: 9000, CacheWrite: 500, Output: 7, Metered: true})
+	RecordGatewayTurn(ctx, 5, "local", CloudTokens{Input: 99, Metered: true})
+	RecordGatewayTurn(ctx, 0, "cloud", CloudTokens{Input: 1, Metered: true})
+	RecordGatewayTurn(ctx, 5, "rejected", CloudTokens{})
+	out := text(t, Default)
+	for _, w := range []string{
+		`gateway_turn_requests_total{turn="31-100",route="cloud",` + id,
+		`gateway_turn_requests_total{turn="3-10",route="local",` + id,
+		`gateway_cloud_input_tokens_bucket{turn="31-100",` + id + `,mcp_tool="none",llm_provider="none",llm_model="none",le="10000"} 1`,
+		`gateway_cloud_tokens_total{turn="31-100",kind="cached",` + id,
+	} {
+		assert.Contains(t, out, w)
+	}
+	for _, n := range []string{`route="rejected",` + id, `gateway_cloud_input_tokens_count{turn="3-10",` + id, `turn="",`} {
+		assert.False(t, strings.Contains(out, n), n)
+	}
+}
