@@ -39,6 +39,7 @@ func TestContract(t *testing.T) {
 	accountstest.RunUsername(t, func(*testing.T) accounts.Store { return New() })
 	accountstest.RunInitialAdmin(t, func(*testing.T) accounts.Store { return New() })
 	accountstest.RunPlatformStats(t, func(*testing.T) accounts.Store { return New() })
+	accountstest.RunOpenFGASync(t, func(*testing.T) accounts.Store { return New() })
 }
 
 func TestAuditTamperDetected(t *testing.T) {

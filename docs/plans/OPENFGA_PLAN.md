@@ -196,10 +196,10 @@ type user
 
 type organisation
   relations
-    define owner: [user]
-    define full: [user, team#member] or owner
-    define write: [user, team#member] or full
-    define read: [user, team#member] or write
+    define owner: [user, team#read]
+    define full: [user, team#read] or owner
+    define write: [user, team#read] or full
+    define read: [user, team#read] or write
     define guest: [user]
     # Active non-guest members; written only for explicit memberships.
     define member: [user]
@@ -212,7 +212,7 @@ type team
   relations
     define organisation: [organisation]
     define full: [user]
-    define member: [user] or full
+    define read: [user] or full
 
 type repository
   relations
@@ -224,9 +224,9 @@ type repository
     define direct_read: [user]
     define direct_deny: [user]
     define has_direct: direct_full or direct_write or direct_read or direct_deny
-    define team_full: [team#member]
-    define team_write: [team#member]
-    define team_read: [team#member]
+    define team_full: [team#read]
+    define team_write: [team#read]
+    define team_read: [team#read]
     define default_read: default_readers from org_space
     # A direct grant replaces team grants and the default, even when weaker.
     define full: (direct_full or (team_full but not has_direct)) and active from organisation
@@ -236,7 +236,7 @@ type repository
     # Custom roles: a grant of custom role C to subject S on this repository
     # writes one tuple per permission in C, in the user_ or team_ tier.
     define user_reviews_write: [user]
-    define team_reviews_write: [team#member]
+    define team_reviews_write: [team#read]
     # One pair like this per permission. The built-in levels feed in through
     # the generated rule, so `write` holds reviews_write as it does today.
     define reviews_write: (write or user_reviews_write or (team_reviews_write but not has_direct)) and active from organisation
@@ -274,7 +274,7 @@ OpenFGA cannot join a PostgreSQL transaction, so writes go through the outbox:
 3. A check for an organisation whose synced revision is behind its policy revision is refused, the same way a stale projection is refused today. A revoke takes effect when it commits, not when OpenFGA catches up: until the outbox is synced, the stale check fails closed.
 4. Checks use `HIGHER_CONSISTENCY`. Any OpenFGA error, timeout or truncated answer refuses the request. There is never a fallback to "allow".
 
-`codesynapse-api fga rebuild` writes every tuple again from PostgreSQL, and `fga verify` compares the two stores. Both are audited.
+`codesynapse-api openfga-rebuild` has the API write every tuple again from PostgreSQL, and `openfga-verify` compares the two stores. Both are audited. See "Phase 5 as built" for how.
 
 ## Running OpenFGA
 
@@ -294,6 +294,30 @@ New dependencies, all Apache-2.0: the `github.com/openfga/go-sdk` Go module and 
 - **Contract:** `just test-openfga` starts a throwaway OpenFGA (in-memory datastore, a random pre-shared key) and runs `internal/authz/fga/contract_test.go`: every row of the table above that the model decides, plus idempotent writes and `EnsureModel` reusing the stored model. It lives beside the client rather than in `accountstest`, which phase 2 is reshaping; phase 6 runs the same rows against the Go reference there.
 - **Compose:** `openfga-db-init` (the postgres image's `psql`) creates the `openfga` user and database idempotently and closes the database to everyone else; `openfga-migrate` runs OpenFGA's migrations; `openfga` runs with pre-shared keys, playground, metrics and profiler off, gRPC bound to 127.0.0.1 (the HTTP API reaches it in-process; the health check uses it), no published port. `just init` adds `OPENFGA_DB_PASSWORD` and `OPENFGA_API_KEY` (the one key OpenFGA accepts; see the open questions) to `.env`. Nothing reads them in the API, workers or MCP server yet.
 - **Deviations:** `OPENFGA_LIST_OBJECTS_DEADLINE` is 5 s, above the client's 2 s timeout, so OpenFGA never cuts a list short and returns it as complete (it does so silently at its deadline); OpenFGA refuses a deadline above its 6 s request timeout. The table's "above `MaxTuples`" is `ListLimit`. One key instead of one per service, following the recommendation below.
+
+### Phase 5 as built
+
+Nothing decides with OpenFGA yet: PostgreSQL and `AccessOf` keep deciding every request, and users see no change.
+
+- **Sync** (`internal/authz/fgasync`): for one organisation, `Desired` turns its policy into every tuple the model needs:
+  - memberships go to `member` and their level, guests to `guest`, and the default to `default_readers` (READ_ONLY only);
+  - each team is anchored to its organisation, with its organisation role as `team#read` on that level, members as `read` and maintainers as `full`;
+  - each repository is anchored to its organisation, with `org_space` for organisation entries only (personal entries get no default), and grants as `direct_full|write|read|deny` or `team_full|write|read`.
+
+  The policy comes from `accounts.(*Service).OrgPolicy` through one read snapshot. It holds only what `AccessOf` would count:
+  - members, but not suspended accounts or the bootstrap root;
+  - team members, for teams of the organisation and only for eligible members;
+  - the organisation's entries, but not lost ones.
+
+  The sync reads what OpenFGA holds for the organisation, its anchored teams and repositories, and every object the policy names, at most 8 objects at a time and bounded per object. It deletes what is not wanted and writes what is missing, in batches of 100. Non-anchor deletes go first and anchor deletes after them, then anchor writes and the rest, so a sync that stops halfway never strands tuples on an object a later sync cannot find. Only then does it record the revision. It is idempotent and safe to replay: a sync that is cut short leaves the old revision recorded, and the next one carries on from what OpenFGA then holds. A policy `Desired` cannot express (an unknown role, an ID with `:` or `#`) fails that organisation's sync as a whole, so its revision stays stale. The other organisations go ahead.
+- **Revisions:** every policy change already raised `orgs.policy_revision` through `policyChange`. Suspending or resuming an account and the platform-admin flag carried no organisation, so they raised none; they now raise the revision of every organisation the user belongs to (`touchUserOrgs`). The bootstrap root's classification (setup, `designate-root`) still raises none. The start-up rebuild covers it, and phase 6 keeps the Go `businessAllowed` and suspension checks in front of OpenFGA.
+- **Watermark** (migration 0041, `openfga_sync`): one row per organisation with the store, the model, the synced revision, when it was synced and when a rebuild was last asked for. It is separate from the projection outbox because it records what OpenFGA accepted, not what was queued. `OpenFGAPending` lists organisations with no row, or whose revision, store or model differ, or with a rebuild asked for since the last sync. `RecordOpenFGASync` never lowers a revision and clears a rebuild request only when the sync started after it.
+- **Freshness:** `fgasync.Fresh` returns `ErrStale` unless the row names the client's store and model and a revision at least the organisation's. Phase 6 calls it before every check.
+- **Where it runs:** `syncOpenFGA` (`services/api/internal/api/openfga.go`) is one of the `api-loops`, so only the process holding the lease writes. It selects or creates the `codesynapse` store and model, retrying with backoff while OpenFGA starts. It asks for a rebuild of every organisation each time it starts, so a new leader repairs any drift. Then it syncs at most 50 pending organisations every 15 s, each pass bounded to 40 s, well under the lease's minute. Each OpenFGA call has its own 2 s timeout. Workers and the MCP server hold no key: compose sets `CODESYNAPSE_OPENFGA_URL`/`_TOKEN` on the API only and blanks them for workers, and `serve` reads them only in an API process with accounts.
+- **Rebuild and verify:** `POST /api/v1/admin/openfga/rebuild[?org=ID]` (platform admin, signed-in session, never an API key) and `codesynapse-api openfga-rebuild [--org]` record `openfga.rebuild` in the audit log and then only mark organisations for the loop. Neither writes to OpenFGA outside the lease. `codesynapse-api openfga-verify [--org]` records `openfga.verify` and compares without writing tuples. It prints one JSON line per organisation and exits non-zero on drift.
+- **Repository objects:** `repository:<id>`, where the ID is the hex of the first 16 bytes of SHA-256 over the organisation ID, `|` and the graph name. Graph names may contain characters OpenFGA IDs cannot, and the object then names no repository.
+- **Metrics:** `platform_codesynapse_openfga_syncs_total{outcome}`, `platform_codesynapse_openfga_tuples_total{op}` and the `platform_codesynapse_openfga_pending_orgs` gauge, with no tenant, user or object labels.
+- **Tests:** `fgasync` unit tests use a fake client that refuses duplicate writes and missing deletes, stricter than the real client (which ignores both), so a sync that writes what is already there fails the test. They cover the tuples per policy, drift repair, idempotence, the batch order, a failure halfway and a failing organisation among good ones. `accountstest.RunOpenFGASync` runs the watermark contract on memstore and PostgreSQL. `TestParityWithAccessOf` (`just test-openfga`) applies real policy changes in sequence: grant, revoke, team change, team member removed, deny, default change, suspension, member removal, personal entry, lost entry, restore and team deletion. After each sync it checks that OpenFGA's `read`/`write`/`full` on every repository, and every organisation level and `active`, equal `AccessOf` for every user, and that `Verify` finds no drift.
 
 ### What phase 2 changed in the table
 
@@ -315,7 +339,7 @@ Phase 2 found these routes whose current rule did not fit the first draft of the
 
 Some checks stay on roles until phase 6, because they compare two roles rather than ask for a permission: the job record's role, the invitation ceiling (nobody invites above their own role) and the rule that only owners make owners.
 
-The rename followed as migration 0040: memberships, invitations, job records, SSO settings and daily statistics hold `guest`, `read`, `write`, `full` and `owner`; repository tuples `read`, `write`, `full` and `deny`; team tuples `read` and `full`, with `team#read` as the subject of team grants. It changes names only, so policy revisions stay as they were and projections need no rebuild (their `NONE`/`READ`/`WRITE`/`ADMIN` levels did not change). Responses use the new names; `accounts.ParseRole` (through `Role.UnmarshalJSON`) and `accounts.ParseTeamRelation` accept the old ones in requests for one release and log `deprecated role name in request` with the old and new name only. The OpenFGA model of phase 4 still calls the team relation `member`; phase 5 writes `team#read` as that relation or renames it in the model.
+The rename followed as migration 0040: memberships, invitations, job records, SSO settings and daily statistics hold `guest`, `read`, `write`, `full` and `owner`; repository tuples `read`, `write`, `full` and `deny`; team tuples `read` and `full`, with `team#read` as the subject of team grants. It changes names only, so policy revisions stay as they were and projections need no rebuild (their `NONE`/`READ`/`WRITE`/`ADMIN` levels did not change). Responses use the new names; `accounts.ParseRole` (through `Role.UnmarshalJSON`) and `accounts.ParseTeamRelation` accept the old ones in requests for one release and log `deprecated role name in request` with the old and new name only. Phase 5 renamed the model's team relation `member` to `read` to match.
 
 ## Phases
 
@@ -340,7 +364,7 @@ Each phase is one pull request.
    - compose service and init step;
    - `just test-openfga` on a throwaway container, running the full ReBAC contract against OpenFGA;
    - OpenFGA added to the integration contracts job in CI.
-5. **Outbox sync:** tuple writes from every policy change, synced-revision tracking, the freshness check, `fga rebuild` and `fga verify`, and metrics.
+5. **Outbox sync (done):** tuple writes from every policy change, synced-revision tracking, the freshness check, `openfga-rebuild` and `openfga-verify`, and metrics.
 6. **Cutover:** `AccessOf`, route policies and MCP checks ask OpenFGA when the switch is on (list with `ListObjects`, single checks with `Check` or `BatchCheck`), and the docs move to the new model. The Go evaluator leaves production code.
 7. **Helm subchart:** in the final deployment phase.
 

@@ -210,6 +210,7 @@ func (s *Store) snapshot() *Store {
 	tx.sched = s.scheduleTable()
 	tx.daily = s.dailyTable()
 	tx.prompts = s.promptTable()
+	tx.fga = s.fgaTable()
 	for key, annotations := range tx.annotations {
 		tx.annotations[key] = maps.Clone(annotations)
 	}

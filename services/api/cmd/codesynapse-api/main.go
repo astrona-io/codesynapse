@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/astrona-io/codesynapse/internal/accounts/pgstore"
 	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/auditarchive"
+	"github.com/astrona-io/codesynapse/internal/authz/fga"
 	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/telemetry"
 	"github.com/astrona-io/codesynapse/services/api/internal/api"
@@ -34,7 +36,7 @@ const EnvToken = "CODESYNAPSE_API_TOKEN" //nolint:gosec // env var name
 func main() {
 	os.Exit(app.Main("codesynapse-api", "HTTP API for the codesynapse dashboard", version,
 		func(ec *app.Env) []*cobra.Command {
-			return []*cobra.Command{serveCmd(ec), workerCmd(ec), designateRootCmd(ec), resetAdminCmd(ec)}
+			return []*cobra.Command{serveCmd(ec), workerCmd(ec), designateRootCmd(ec), resetAdminCmd(ec), openFGARebuildCmd(ec), openFGAVerifyCmd(ec)}
 		}))
 }
 
@@ -232,6 +234,17 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 			return err
 		}
 	}
+	var openFGA *fga.Config
+	if acc != nil && !o.worker { // only the API holds the OpenFGA key and writes tuples
+		cfg, err := fga.ConfigFromEnv()
+		switch {
+		case errors.Is(err, fga.ErrNotConfigured):
+		case err != nil:
+			return err
+		default:
+			openFGA = &cfg
+		}
+	}
 	var alerts *telemetry.AlertsClient
 	if !o.worker {
 		if alerts, err = telemetry.NewAlertsClient(os.Getenv(app.EnvAlertsURL)); err != nil {
@@ -250,7 +263,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		GitAuth:   gitx.Auth{Host: app.Getenv("CODESYNAPSE_GIT_TOKEN_HOST", "github.com"), Token: os.Getenv("CODESYNAPSE_GIT_TOKEN")},
 		AllowPush: pushAllowed(app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true", o.worker, roles, o.EC.Logger),
 		Accounts:  acc, ServiceToken: os.Getenv(EnvToken), SecureCookies: app.Getenv("CODESYNAPSE_COOKIE_SECURE", "true") == "true",
-		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour, AuditHot: time.Duration(hotDays()) * 24 * time.Hour, AuditArchive: auditArchive,
+		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour, AuditHot: time.Duration(hotDays()) * 24 * time.Hour, AuditArchive: auditArchive, OpenFGA: openFGA,
 		Metrics: metricsQuerier(), IngestMetrics: ingestMetrics, Alerts: alerts,
 		TrustedProxies: trusted, PublicMCPURL: app.Getenv("CODESYNAPSE_PUBLIC_MCP_URL", "http://localhost:8090/mcp"),
 		PublicAPIURL:   app.Getenv("CODESYNAPSE_PUBLIC_API_URL", ""),

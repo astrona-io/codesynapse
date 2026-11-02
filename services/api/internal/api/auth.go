@@ -208,6 +208,7 @@ func (s *Server) accountRoutes() {
 	s.account("GET /api/v1/accounts/orgs/{org}/audit", businessRoute, s.handleOrgAudit)
 	s.account("GET /api/v1/admin/audit", governanceRoute, s.handleAdminAudit)
 	s.account("GET /api/v1/admin/audit/verify", governanceRoute, s.handleVerifyAudit)
+	s.account("POST /api/v1/admin/openfga/rebuild", governanceRoute, s.handleOpenFGARebuild)
 	s.account("GET /api/v1/accounts/orgs/{org}/repos", businessRoute, s.handleOrgRepos)
 	s.account("GET /api/v1/accounts/orgs/{org}/repo-policy", businessRoute, s.handleRepoPolicy)
 	s.account("GET /api/v1/accounts/orgs/{org}/gateway", businessRoute, s.handleOrgGateway)

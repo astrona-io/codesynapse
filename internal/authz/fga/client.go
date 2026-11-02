@@ -43,6 +43,8 @@ const (
 	MaxWrite = 100
 	// maxStorePages bounds the store listing EnsureStore pages through.
 	maxStorePages = 20
+	// ReadPage is the page size Read asks for (OpenFGA's maximum).
+	ReadPage = 100
 )
 
 // Errors. Every error that comes with a decision means "not allowed".
@@ -263,6 +265,64 @@ func (c *Client) ListObjects(ctx context.Context, user, relation, objectType str
 		return nil, ErrTruncated
 	}
 	return resp.Objects, nil
+}
+
+// Read returns the stored tuples that match filter, following continuation
+// tokens. Object may be a whole object ("team:t1") or, together with User,
+// a type alone ("team:"). More than max tuples is ErrTruncated with no
+// tuples, so a caller never acts on part of an answer.
+func (c *Client) Read(ctx context.Context, filter Tuple, maxTuples int) ([]Tuple, error) {
+	if c.store == "" {
+		return nil, ErrNoStore
+	}
+	store := c.store
+	body := fgaclient.ClientReadRequest{}
+	if filter.User != "" {
+		body.User = &filter.User
+	}
+	if filter.Relation != "" {
+		body.Relation = &filter.Relation
+	}
+	if filter.Object != "" {
+		body.Object = &filter.Object
+	}
+	size := int32(ReadPage)
+	var out []Tuple
+	token := ""
+	for {
+		opts := fgaclient.ClientReadOptions{StoreId: &store, PageSize: &size, Consistency: higher()}
+		if token != "" {
+			t := token
+			opts.ContinuationToken = &t
+		}
+		resp, err := c.readPage(ctx, body, opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range resp.Tuples {
+			out = append(out, Tuple{User: t.Key.User, Relation: t.Key.Relation, Object: t.Key.Object})
+		}
+		if len(out) > maxTuples {
+			return nil, ErrTruncated
+		}
+		if resp.ContinuationToken == "" || resp.ContinuationToken == token {
+			return out, nil
+		}
+		token = resp.ContinuationToken
+	}
+}
+
+func (c *Client) readPage(ctx context.Context, body fgaclient.ClientReadRequest, opts fgaclient.ClientReadOptions) (*fgaclient.ClientReadResponse, error) {
+	ctx, cancel := c.call(ctx)
+	defer cancel()
+	resp, err := c.sdk.Read(ctx).Body(body).Options(opts).Execute()
+	if err != nil {
+		return nil, fmt.Errorf("openfga read: %w", err)
+	}
+	if resp == nil {
+		return nil, ErrBadAnswer
+	}
+	return resp, nil
 }
 
 // WriteTuples writes at most MaxWrite tuples in one transaction. Tuples that

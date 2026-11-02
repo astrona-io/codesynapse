@@ -369,6 +369,10 @@ services:
       CODESYNAPSE_API_TOKEN: ${CODESYNAPSE_API_TOKEN:?set CODESYNAPSE_API_TOKEN in .env}
       # Accounts: users, organisations, API keys and the audit log.
       CODESYNAPSE_DATABASE_URL: postgres://codesynapse:${POSTGRES_PASSWORD}@postgres:5432/codesynapse?sslmode=disable
+      # Only the API holds the OpenFGA key: it keeps OpenFGA's tuples in step
+      # with the access policy (docs/plans/OPENFGA_PLAN.md, phase 5).
+      CODESYNAPSE_OPENFGA_URL: http://openfga:8080
+      CODESYNAPSE_OPENFGA_TOKEN: ${OPENFGA_API_KEY:?run "just init" to add OPENFGA_API_KEY to .env}
       # Anyone may create an account after the first (which becomes the platform admin).
       # Seals organisation Git tokens (private repositories for organisations).
       CODESYNAPSE_SECRET_KEY: ${SECRET_KEY:-}
@@ -481,6 +485,8 @@ services:
       CODESYNAPSE_AUTO_ADMIN: "false"
       CODESYNAPSE_AUDIT_S3_ACCESS_KEY_ID: ""
       CODESYNAPSE_AUDIT_S3_SECRET_ACCESS_KEY: ""
+      CODESYNAPSE_OPENFGA_URL: ""
+      CODESYNAPSE_OPENFGA_TOKEN: ""
     volumes: &worker-volumes
       - ${SOURCES_DIR:-./sources}:/sources:ro
       - workspace:/workspace

@@ -54,6 +54,9 @@ func (s *Service) suspendUserPolicy(ctx context.Context, p Principal, userID str
 	if err := s.St.SetUserDisabled(ctx, userID, &now); err != nil {
 		return err
 	}
+	if err := s.touchUserOrgs(ctx, userID); err != nil {
+		return err
+	}
 	if err := s.St.DeleteUserSessions(ctx, userID); err != nil {
 		return err
 	}
@@ -76,6 +79,9 @@ func (s *Service) resumeUserPolicy(ctx context.Context, p Principal, userID stri
 		return err
 	}
 	if err := s.St.SetUserDisabled(ctx, userID, nil); err != nil {
+		return err
+	}
+	if err := s.touchUserOrgs(ctx, userID); err != nil {
 		return err
 	}
 	s.audit(ctx, actorEvent(p, "user.resume", "", u.Email))
@@ -108,6 +114,9 @@ func (s *Service) setPlatformAdminPolicy(ctx context.Context, p Principal, userI
 		return fmt.Errorf("%w: resume the account first", ErrInvalidInput)
 	}
 	if err := s.St.SetPlatformAdmin(ctx, userID, admin); err != nil {
+		return err
+	}
+	if err := s.touchUserOrgs(ctx, userID); err != nil {
 		return err
 	}
 	action := "user.platform_admin.revoke"
