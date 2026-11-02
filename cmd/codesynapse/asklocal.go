@@ -28,8 +28,8 @@ import (
 // and the time is spent to save the agent's tokens.
 const askLocalTimeout = 30 * time.Minute
 
-// answerAskLocal answers a tools/call for ask_local or local_draft and
-// reports whether it did.
+// answerAskLocal answers a tools/call for ask_local, local_draft or
+// read_ranges and reports whether it did.
 func (b *bridge) answerAskLocal(ctx context.Context, msg []byte, m rpcMessage) bool {
 	var c toolCall
 	if json.Unmarshal(msg, &c) != nil || len(m.ID) == 0 || !b.mayAnswer(c.Params.Name) {
@@ -40,6 +40,8 @@ func (b *bridge) answerAskLocal(ctx context.Context, msg []byte, m rpcMessage) b
 	case asklocal.Tool:
 	case asklocal.DraftTool:
 		answer = b.localDraft
+	case asklocal.ReadTool:
+		answer = b.readRanges
 	default:
 		return false
 	}
@@ -190,6 +192,38 @@ func (b *bridge) localDraft(ctx context.Context, msg []byte, c toolCall) (map[st
 		d.Notes = strings.TrimSpace(d.Notes + "\n\nNot read (binary, too large or over the file limit): " + strings.Join(skipped, ", ") + ".")
 	}
 	return localResult(d)
+}
+
+// readRanges returns the lines of file:start-end ranges of the checkout,
+// numbered. They go to the agent only, as its own Read would; nothing is
+// sent to the server or a model.
+func (b *bridge) readRanges(ctx context.Context, _ []byte, c toolCall) (map[string]any, bool) {
+	var in asklocal.ReadIn
+	if err := decodeArgs(c, &in); err != nil {
+		return localFail(err)
+	}
+	if err := in.Validate(); err != nil {
+		return localFail(err)
+	}
+	dir, err := b.checkout(ctx)
+	if err != nil {
+		return localFail(err)
+	}
+	files, skipped, err := readTracked(ctx, dir, in.Ranges)
+	if err != nil {
+		return localFail(err)
+	}
+	total := 0
+	for _, f := range files {
+		total += len(f.Text)
+	}
+	if total > asklocal.MaxReadBytes {
+		return localFail(fmt.Errorf("%w: %d bytes, more than %d; read fewer or narrower ranges, or ask_local about them", asklocal.ErrInvalid, total, asklocal.MaxReadBytes))
+	}
+	return map[string]any{
+		"content": []map[string]any{{"type": "text", "text": asklocal.RenderRanges(files, skipped)}},
+		"_meta":   map[string]any{"codesynapse/source": "local-file"},
+	}, false
 }
 
 // readTracked reads the files paths name in the checkout at dir: files,
