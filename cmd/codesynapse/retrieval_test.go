@@ -87,7 +87,8 @@ func TestRetrievalCounts(t *testing.T) {
 	read("internal/svc/svc_test.go", 1, 0)
 	reportRetrieval(context.Background(), stop, logger)
 	require.Len(t, reports, 2)
-	assert.Equal(t, reports[1], `{"avoided_repeat_ranges":{},"client":"claude-code","tools":{"get_symbol_context":{"returned":0,"read":1}}}`)
+	assert.Equal(t, reports[1], `{"avoided_repeat_ranges":{},"client":"claude-code","tools":{"get_symbol_context":{"returned":0,"read":1}}}`,
+		"a Read from line 1 with no limit is the whole file, not a range read")
 }
 
 // TestEditRecall: of the files the session changed (not those already
@@ -351,13 +352,24 @@ func TestRetrievalCountsReadRanges(t *testing.T) {
 	call("mcp__codesynapse__minimal_context", nil, `{"read":["internal/svc/svc.go:10-20","web/app.ts:3-9","lib/x.go:1-4"]}`)
 	call("mcp__plugin_codesynapse_codesynapse__read_ranges", []string{"internal/svc/svc.go:15-30", "web/app.ts:40-50", "bad"},
 		"=== internal/svc/svc.go (lines 15-30) ===\n15| // see other/file.go:3-4 and lib/x.go:1\n")
+	read := toolHookInput{SessionID: "chat-1", Cwd: dir, ToolName: "Read"}
+	read.ToolInput.FilePath, read.ToolInput.Offset, read.ToolInput.Limit = "lib/x.go", 1, 4
+	noteRead(read)
+	read.ToolInput.Offset, read.ToolInput.Limit = 0, 0
+	noteRead(read) // a whole file is not a range read
 
 	reportRetrieval(context.Background(), toolHookInput{SessionID: "chat-1", Cwd: dir}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.Len(t, reports, 1)
 	var got struct {
-		Tools map[string]rangeCounts `json:"tools"`
+		Tools    map[string]rangeCounts `json:"tools"`
+		Workflow map[string]int         `json:"workflow"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(reports[0]), &got))
-	assert.Equal(t, got.Tools, map[string]rangeCounts{"minimal_context": {Returned: 3, Read: 1}},
-		"svc.go:10-20 is read; app.ts:40-50 misses 3-9; the file text adds no ranges and read_ranges no counts of its own")
+	assert.Equal(t, got.Tools, map[string]rangeCounts{"minimal_context": {Returned: 3, Read: 2}},
+		"svc.go:10-20 and lib/x.go:1-4 are read; app.ts:40-50 misses 3-9; the file text adds no ranges and read_ranges no counts of its own")
+	assert.Equal(t, []int{got.Workflow["range_batches"], got.Workflow["ranges_batched"], got.Workflow["range_reads_single"]}, []int{1, 2, 1},
+		"one batch of two valid ranges, one partial Read")
+
+	reportRetrieval(context.Background(), toolHookInput{SessionID: "chat-1", Cwd: dir}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	assert.Len(t, reports, 1, "nothing new, nothing sent again")
 }

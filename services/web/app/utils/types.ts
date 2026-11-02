@@ -290,7 +290,7 @@ export interface WorkspaceStats {
     sources?: { fetches: number; hits: number; raw_tokens: number; saved_tokens: number; per_mtok: number; dollars: number | null; price_source?: string }
     unindexed?: { repos: { repo: string; skipped: number }[]; skipped: number; avoided_per_session: number }
     // How sessions began, reported by the Claude Code plugin's hooks.
-    workflow: { first_codesynapse: number; first_native: number; reads_turned_back: number; fetches_steered: number; first_share_pct: number; files_edited: number; files_edited_found: number; edit_recall_pct: number; bash: Record<string, number> | null; bash_total: number }
+    workflow: { first_codesynapse: number; first_native: number; reads_turned_back: number; fetches_steered: number; range_reads_single: number; range_batches: number; ranges_batched: number; batched_pct: number; first_share_pct: number; files_edited: number; files_edited_found: number; edit_recall_pct: number; bash: Record<string, number> | null; bash_total: number }
     avg_latency_ms: number; max_latency_ms: number; daily: UsageDay[]; tools: UsageTool[]
     clients: { client: string; sessions: number; calls: number }[]
     repos: { repo: string; calls: number; response_tokens: number; avoided_tokens: number }[]

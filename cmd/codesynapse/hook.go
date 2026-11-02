@@ -130,6 +130,11 @@ type hookState struct {
 	// (webfetch.go).
 	Steered []string `json:"steered,omitempty"`
 	Steers  int      `json:"steers,omitempty"`
+	// SingleRanges counts Read calls of part of a file, Batches the
+	// read_ranges calls that succeeded and Batched the ranges they read.
+	SingleRanges int `json:"single_ranges,omitempty"`
+	Batches      int `json:"batches,omitempty"`
+	Batched      int `json:"batched,omitempty"`
 	// Base is the checkout as the session began (edits.go).
 	Base *treeBase `json:"base,omitempty"`
 	// EditDirs are the directories the session's own agent edited files in
@@ -159,6 +164,10 @@ type workflowSent struct {
 	Edited int `json:"edited,omitempty"`
 	Found  int `json:"found,omitempty"`
 	Steers int `json:"steers,omitempty"`
+	// SingleRanges, Batches and Batched: range reads already reported.
+	SingleRanges int `json:"single_ranges,omitempty"`
+	Batches      int `json:"batches,omitempty"`
+	Batched      int `json:"batched,omitempty"`
 }
 
 // answerRange is one file:start-end an answer gave.

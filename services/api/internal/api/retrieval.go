@@ -43,6 +43,11 @@ type workflowCounts struct {
 	ReadsTurnedBack  int `json:"reads_turned_back"`
 	// FetchesSteered: WebFetch calls of cached pages pointed at fetch_source.
 	FetchesSteered int `json:"fetches_steered"`
+	// RangeReadsSingle: Read calls of part of a file; RangeBatches and
+	// RangesBatched: read_ranges calls and the ranges they read.
+	RangeReadsSingle int `json:"range_reads_single"`
+	RangeBatches     int `json:"range_batches"`
+	RangesBatched    int `json:"ranges_batched"`
 	// FilesEdited and FilesEditedFound: files the session changed, and of
 	// them those a CodeSynapse answer had pointed to (usage.FilesEdited).
 	FilesEdited      int `json:"files_edited"`
@@ -116,6 +121,7 @@ func (s *Server) handleRetrievalReport(w http.ResponseWriter, r *http.Request) {
 	}
 	if wf := in.Workflow; wf != nil {
 		for tool, n := range map[string]int{usage.FirstCodeSynapse: wf.FirstCodeSynapse, usage.FirstNative: wf.FirstNative, usage.ReadTurnedBack: wf.ReadsTurnedBack, usage.FetchSteered: wf.FetchesSteered,
+			usage.RangeReadsSingle: wf.RangeReadsSingle, usage.RangeBatches: wf.RangeBatches, usage.RangesBatched: wf.RangesBatched,
 			usage.FilesEdited: wf.FilesEdited, usage.FilesEditedFound: wf.FilesEditedFound} {
 			if n > 0 {
 				buckets = append(buckets, usage.Bucket{Day: day, Org: org, Repo: repo, Tool: tool, Client: in.Client, Calls: n})
@@ -169,7 +175,7 @@ func (in retrievalReport) validate() error {
 		return fmt.Errorf("report up to %d tools, or the workflow counts", maxRetrievalTools)
 	}
 	if wf := in.Workflow; wf != nil {
-		for _, n := range []int{wf.FirstCodeSynapse, wf.FirstNative, wf.ReadsTurnedBack, wf.FetchesSteered, wf.FilesEdited, wf.FilesEditedFound} {
+		for _, n := range []int{wf.FirstCodeSynapse, wf.FirstNative, wf.ReadsTurnedBack, wf.FetchesSteered, wf.RangeReadsSingle, wf.RangeBatches, wf.RangesBatched, wf.FilesEdited, wf.FilesEditedFound} {
 			if n < 0 || n > maxRetrievalRanges {
 				return fmt.Errorf("workflow counts must be between 0 and %d", maxRetrievalRanges)
 			}

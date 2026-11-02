@@ -67,7 +67,7 @@ func TestWorkflowReportShowsInStats(t *testing.T) {
 	ts, _ := newTestServer(t)
 	path := "/api/v1/repos/" + storetest.Repo + "/usage/retrieval"
 	// A session that never used a CodeSynapse tool reports the workflow alone.
-	require.Equal(t, post(t, ts, path, `{"client":"claude-code","workflow":{"first_native":1,"reads_turned_back":2,"fetches_steered":4}}`), 204)
+	require.Equal(t, post(t, ts, path, `{"client":"claude-code","workflow":{"first_native":1,"reads_turned_back":2,"fetches_steered":4,"range_reads_single":1,"range_batches":2,"ranges_batched":3}}`), 204)
 	require.Equal(t, post(t, ts, path, `{"client":"claude-code","workflow":{"first_codesynapse":3}}`), 204)
 	// Edits of sessions: four files changed, three of them pointed to.
 	require.Equal(t, post(t, ts, path, `{"client":"claude-code","workflow":{"files_edited":3,"files_edited_found":2}}`), 204)
@@ -80,6 +80,7 @@ func TestWorkflowReportShowsInStats(t *testing.T) {
 	assert.Equal(t, st.Agents.Workflow.FirstNative, 1)
 	assert.Equal(t, st.Agents.Workflow.ReadsTurnedBack, 2)
 	assert.Equal(t, st.Agents.Workflow.FetchesSteered, 4)
+	assert.Equal(t, []int{st.Agents.Workflow.RangeReadsSingle, st.Agents.Workflow.RangeBatches, st.Agents.Workflow.RangesBatched, st.Agents.Workflow.BatchedPct}, []int{1, 2, 3, 75})
 	assert.Equal(t, st.Agents.Workflow.FirstSharePct, 75)
 	assert.Equal(t, st.Agents.Workflow.FilesEdited, 4)
 	assert.Equal(t, st.Agents.Workflow.FilesEditedFound, 3)

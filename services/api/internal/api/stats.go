@@ -203,6 +203,13 @@ type WorkflowStats struct {
 	// FetchesSteered are WebFetch calls of pages fetch_source had cached
 	// that the hook pointed at fetch_source.
 	FetchesSteered int `json:"fetches_steered"`
+	// RangeReadsSingle are Read calls of part of a file, RangeBatches the
+	// read_ranges calls and RangesBatched the ranges those read; BatchedPct
+	// is RangesBatched of all range reads, rounded (0 with none).
+	RangeReadsSingle int `json:"range_reads_single"`
+	RangeBatches     int `json:"range_batches"`
+	RangesBatched    int `json:"ranges_batched"`
+	BatchedPct       int `json:"batched_pct"`
 	// FirstSharePct is FirstCodeSynapse of both, rounded; 0 with no sessions.
 	FirstSharePct int `json:"first_share_pct"`
 	// FilesEdited are the files sessions changed, FilesEditedFound those a
@@ -566,6 +573,12 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 				a.Workflow.ReadsTurnedBack += bk.Calls
 			case usage.FetchSteered:
 				a.Workflow.FetchesSteered += bk.Calls
+			case usage.RangeReadsSingle:
+				a.Workflow.RangeReadsSingle += bk.Calls
+			case usage.RangeBatches:
+				a.Workflow.RangeBatches += bk.Calls
+			case usage.RangesBatched:
+				a.Workflow.RangesBatched += bk.Calls
 			case usage.FilesEdited:
 				a.Workflow.FilesEdited += bk.Calls
 			case usage.FilesEditedFound:
@@ -649,6 +662,9 @@ func agentStats(buckets []usage.Bucket, days int, now time.Time, ratio map[strin
 	}
 	if n := a.Workflow.FirstCodeSynapse + a.Workflow.FirstNative; n > 0 {
 		a.Workflow.FirstSharePct = int(math.Round(100 * float64(a.Workflow.FirstCodeSynapse) / float64(n)))
+	}
+	if n := a.Workflow.RangesBatched + a.Workflow.RangeReadsSingle; n > 0 {
+		a.Workflow.BatchedPct = int(math.Round(100 * float64(a.Workflow.RangesBatched) / float64(n)))
 	}
 	if a.Workflow.FilesEdited > 0 {
 		a.Workflow.EditRecallPct = int(math.Round(100 * float64(min(a.Workflow.FilesEditedFound, a.Workflow.FilesEdited)) / float64(a.Workflow.FilesEdited)))
