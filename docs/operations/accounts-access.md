@@ -126,6 +126,8 @@ Rules:
 
 Some checks still compare built-in roles and ignore custom organisation roles until the OpenFGA cutover: the role a job runs with, the invitation ceiling and who may make owners.
 
+Custom roles and their grants are mirrored into OpenFGA with the rest of the policy: a grant becomes the role's permissions on that repository or organisation. Changing or deleting a role marks the organisation's policy as changed, and the next sync rewrites every grant of it. An organisation whose role cannot be mirrored (a corrupt row holding a permission of the other resource) stays behind in OpenFGA and shows as drift in `codesynapse-api openfga-verify`.
+
 Endpoints: `GET`/`POST /api/v1/accounts/orgs/{org}/roles`, `PUT`/`DELETE .../roles/{id}`, `GET`/`PUT /api/v1/accounts/orgs/{org}/role-grants` (`{"user"|"team", "role"}`), `DELETE .../role-grants?subject=user:<id>|team:<id>`, and `GET /api/v1/accounts/permissions` for the catalogue. A repository grant of a custom role is `PUT .../repos/{repo}/access` with `"role": "role:<id>"`.
 
 ## Scoped API keys

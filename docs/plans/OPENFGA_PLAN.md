@@ -1,6 +1,6 @@
 # OpenFGA authorisation plan
 
-Status: phases 3 and 4 done (2026-11-02): custom roles and scoped API keys are in; the OpenFGA model, the client, the compose service and the contract run; nothing asks OpenFGA for decisions yet.
+Status: phases 1 to 5 done; phase 6 in progress (2026-11-02): custom roles are mirrored into OpenFGA; nothing asks OpenFGA for decisions yet.
 
 Repository and organisation access moves from the Go evaluator in `internal/accounts/authz.go` to [OpenFGA](https://openfga.dev) (Apache-2.0, a CNCF project). At the same time, permissions get one naming scheme, `resource:level`, where the level is `read`, `write` or `full`, and they become fine-grained: `resource.area:level` permissions that organisations can bundle into their own roles.
 
@@ -223,27 +223,30 @@ type repository
     define direct_write: [user]
     define direct_read: [user]
     define direct_deny: [user]
-    define has_direct: direct_full or direct_write or direct_read or direct_deny
+    # A custom role grant marks the user or team (also when the role is gone)
+    # and writes the role's permissions in the user_ or team_ tier below.
+    define direct_custom: [user]
+    define has_direct: direct_full or direct_write or direct_read or direct_deny or direct_custom
     define team_full: [team#read]
     define team_write: [team#read]
     define team_read: [team#read]
+    define team_custom: [team#read]
+    define has_team: team_full or team_write or team_read or team_custom
     define default_read: default_readers from org_space
-    # A direct grant replaces team grants and the default, even when weaker.
+    # A direct grant replaces team grants and the default, even when weaker;
+    # a team grant replaces the default.
     define full: (direct_full or (team_full but not has_direct)) and active from organisation
     define write: (full or direct_write or (team_write but not has_direct)) and active from organisation
-    define read: (write or direct_read or ((team_read or default_read) but not has_direct)) and active from organisation
+    define read: (write or direct_read or ((team_read or (default_read but not has_team)) but not has_direct)) and active from organisation
 
-    # Custom roles: a grant of custom role C to subject S on this repository
-    # writes one tuple per permission in C, in the user_ or team_ tier.
     define user_reviews_write: [user]
     define team_reviews_write: [team#read]
-    # One pair like this per permission. The built-in levels feed in through
-    # the generated rule, so `write` holds reviews_write as it does today.
-    define reviews_write: (write or user_reviews_write or (team_reviews_write but not has_direct)) and active from organisation
-    define reviews_read: (reviews_write or read) and active from organisation
+    # One trio like this per permission: its floor role, the level above it
+    # in the same area, or a custom role's grant.
+    define reviews_write: (write or reviews_full or user_reviews_write or (team_reviews_write but not has_direct)) and active from organisation
 ```
 
-Phase 4 generates the per-permission relations from the Go permission table, so the model and the table cannot drift apart. A custom-role grant counts as a direct grant, so `has_direct` includes its `user_*` tuples.
+The per-permission relations are generated from the Go permission table (`TestModelFiles` in `internal/authz/fgasync` writes `model.fga` and `model.json` with `-update-model` and fails when either differs), so the model and the table cannot drift apart. The built-in `read`/`write`/`full` relations answer for built-in roles only; for a decision, phase 6 asks the permission's relation (`code_read`, `reviews_write`, …), which holds custom grants too.
 
 ### Rules the model must keep
 
@@ -289,7 +292,7 @@ New dependencies, all Apache-2.0: the `github.com/openfga/go-sdk` Go module and 
 
 ### Phase 3 as built
 
-- **Storage:** migration 0042 adds `custom_roles` (organisation, name unique ignoring case, description, resource, permissions as a text array, creator, timestamps). Grants are ordinary tuples whose relation is `role:<id>`: on a repository object for a user or `team#read`, and on the organisation object for a user or a team. Deleting a role while any tuple names it answers 409. Phase 5 must map these: a `role:<id>` tuple becomes the role's permissions on that object (or the role as an object of its own), and changing a role in `custom_roles` must rewrite what OpenFGA holds for every grant of it. Phase 3 landed after phase 5, so until the model holds custom roles `OrgPolicy` refuses an organisation that grants any (`accounts.ErrCustomRolesNotMirrored`): it stays behind in OpenFGA, never fresh, rather than mirrored without them.
+- **Storage:** migration 0042 adds `custom_roles` (organisation, name unique ignoring case, description, resource, permissions as a text array, creator, timestamps). Grants are ordinary tuples whose relation is `role:<id>`: on a repository object for a user or `team#read`, and on the organisation object for a user or a team. Deleting a role while any tuple names it answers 409. Phase 6 mirrors them into OpenFGA (see "Phase 6 as built").
 - **Evaluation:** permission sets are a 64-bit set (`accounts.Perms`). A direct grant, built-in or custom, wins on a repository; otherwise team grants are united (the strongest built-in one as before, plus every custom one); otherwise the default. A grant naming a missing role gives nothing, with no fallback. A repository is reachable only with `repository.code:read`. Custom organisation roles add to the built-in role (`Service.PermsIn`); `Require` checks the built-in bundle first, so owners and admins cost no extra read.
 - **Keys:** `api_keys.scope` holds the key's permissions; `Service.KeyLimit` re-reads the key on every check (a revoked or expired key reaches nothing) and `AccessFor` intersects the owner's access with it. The MCP server goes through the same `AccessFor`.
 - **Deviations, the safer choice in each case:** no organisation-wide grant of repository roles (the plan allowed one that works like the default); the job role, the invitation ceiling and owner-making stay on built-in roles until phase 6; repository roles and key scopes with repository permissions always include `repository.code:read`.
@@ -325,6 +328,18 @@ Nothing decides with OpenFGA yet: PostgreSQL and `AccessOf` keep deciding every 
 - **Repository objects:** `repository:<id>`, where the ID is the hex of the first 16 bytes of SHA-256 over the organisation ID, `|` and the graph name. Graph names may contain characters OpenFGA IDs cannot, and the object then names no repository.
 - **Metrics:** `platform_codesynapse_openfga_syncs_total{outcome}`, `platform_codesynapse_openfga_tuples_total{op}` and the `platform_codesynapse_openfga_pending_orgs` gauge, with no tenant, user or object labels.
 - **Tests:** `fgasync` unit tests use a fake client that refuses duplicate writes and missing deletes, stricter than the real client (which ignores both), so a sync that writes what is already there fails the test. They cover the tuples per policy, drift repair, idempotence, the batch order, a failure halfway and a failing organisation among good ones. `accountstest.RunOpenFGASync` runs the watermark contract on memstore and PostgreSQL. `TestParityWithAccessOf` (`just test-openfga`) applies real policy changes in sequence: grant, revoke, team change, team member removed, deny, default change, suspension, member removal, personal entry, lost entry, restore and team deletion. After each sync it checks that OpenFGA's `read`/`write`/`full` on every repository, and every organisation level and `active`, equal `AccessOf` for every user, and that `Verify` finds no drift.
+
+### Phase 6 as built
+
+Phase 6 lands in three pull requests: custom roles in OpenFGA, the internal check endpoint, and the cutover.
+
+- **Custom roles in OpenFGA:** a grant of `role:<id>` is mirrored as the role's permissions, read from `custom_roles` at every sync, so changing or deleting a role raises the policy revision and the next sync rewrites every grant of it.
+  - On a repository, a user's grant writes `direct_custom` plus `user_<permission>` for each permission; a team's writes `team_custom` plus `team_<permission>` with `team#read` as the subject.
+  - On the organisation, a member's or team's role writes `<permission>` (`audit_read`, …) beside the built-in level; each organisation permission relation is its floor level, the level above it in the area, or such a grant, and always `active`.
+  - The markers `direct_custom` and `team_custom` are written even for a role that grants nothing (gone, of another organisation or of the other resource), because the grant still replaces team grants and the default, as in `AccessOf`.
+  - A role holding a marker or a permission of the other resource fails that organisation's sync, so it stays stale.
+  - `accounts.ErrCustomRolesNotMirrored` is gone.
+  - `TestParityWithAccessOf` now compares every permission relation on every repository and organisation with `RepoAccess.Perms` and `OrgPerms`, through custom grants (direct over team, teams adding up, a missing role, another organisation's role), a role change and a role deleted while granted, and pins a few `AccessOf` decisions so the fixtures keep meaning what they say.
 
 ### What phase 2 changed in the table
 

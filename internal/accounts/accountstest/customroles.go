@@ -107,8 +107,19 @@ func RunCustomRoles(t *testing.T, st accounts.Store) {
 		err = svc.DeleteCustomRole(ctx, ownerP, org.ID, role.ID)
 		assert.True(t, errors.Is(err, accounts.ErrRoleInUse), "a granted role stays")
 		assert.True(t, errors.Is(err, accounts.ErrExists), "answers 409")
-		_, err = svc.OrgPolicy(ctx, org.ID)
-		assert.True(t, errors.Is(err, accounts.ErrCustomRolesNotMirrored), "OpenFGA never mirrors custom grants partially")
+		p, err := svc.OrgPolicy(ctx, org.ID)
+		require.NoError(t, err)
+		var mirrored *accounts.PolicyGrant
+		for _, r := range p.Repos {
+			for i, g := range r.Users {
+				if r.Graph == graph && g.SubjectID == reader.ID {
+					mirrored = &r.Users[i]
+				}
+			}
+		}
+		require.NotNil(t, mirrored, "the policy OpenFGA mirrors holds the custom grant")
+		assert.True(t, mirrored.Custom && mirrored.Role == "")
+		assert.Equal(t, mirrored.Perms, role.Perms(), "as the role's permissions")
 	})
 
 	t.Run("broken grant fails closed", func(t *testing.T) {
