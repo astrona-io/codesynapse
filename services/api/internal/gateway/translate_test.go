@@ -29,13 +29,15 @@ func TestTranslateReasons(t *testing.T) {
 		body string
 		want string
 	}{
-		"bad json":               {`{"model":`, FallBadRequest},
-		"no messages":            {`{"model":"claude-haiku-5-5","messages":[]}`, FallBadRequest},
-		"unknown role":           {`{"model":"claude-haiku-5-5","messages":[{"role":"system","content":"x"}]}`, FallBadRequest},
-		"content not text":       {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":42}]}`, FallBadRequest},
-		"local first off":        {`{"model":"claude-opus-5-5",` + user + `}`, FallLocalFirstOff},
-		"system with a non-text": {`{"model":"claude-haiku-5-5","system":[{"type":"image"}],` + user + `}`, FallSystemNotText},
-		"system a number":        {`{"model":"claude-haiku-5-5","system":7,` + user + `}`, FallSystemNotText},
+		"bad json":                {`{"model":`, FallBadRequest},
+		"no messages":             {`{"model":"claude-haiku-5-5","messages":[]}`, FallBadRequest},
+		"unknown role":            {`{"model":"claude-haiku-5-5","messages":[{"role":"tool","content":"x"}]}`, FallBadRole},
+		"content not text":        {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":42}]}`, FallBadContent},
+		"system message widget":   {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"x"},{"role":"system","content":[{"type":"widget"}]}]}`, FallUnsupportedBlock},
+		"system message a number": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"x"},{"role":"system","content":7}]}`, FallBadContent},
+		"local first off":         {`{"model":"claude-opus-5-5",` + user + `}`, FallLocalFirstOff},
+		"system with a non-text":  {`{"model":"claude-haiku-5-5","system":[{"type":"image"}],` + user + `}`, FallSystemNotText},
+		"system a number":         {`{"model":"claude-haiku-5-5","system":7,` + user + `}`, FallSystemNotText},
 		"server tool use in history": {`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"x"},
 			{"role":"assistant","content":[{"type":"server_tool_use","id":"s","name":"web_search","input":{}}]},
 			{"role":"user","content":"y"}]}`, FallUnsupportedBlock},
@@ -59,6 +61,38 @@ func TestTranslateReasons(t *testing.T) {
 			assert.True(t, out == nil, "nothing to send")
 		})
 	}
+}
+
+// Claude Code sends hook context (session start, prompt briefs) as system
+// messages between turns; every request of a session carried one, so all
+// of them went to the cloud as bad_request. The local model gets their text
+// in the user turn beside it, so roles still alternate.
+func TestTranslateSystemMessages(t *testing.T) {
+	body := []byte(`{"model":"claude-haiku-5-5","tools":[` + weatherTool + `],"messages":[
+		{"role":"user","content":"first"},
+		{"role":"system","content":[{"type":"text","text":"hook context"},
+			{"type":"tool_addition","tool":{"type":"tool_definition","definition":{"name":"added","input_schema":{"type":"object"}}}},
+			{"type":"tool_addition","tool":{"type":"tool_definition","definition":{"name":"weather","input_schema":{"type":"object"}}}}]},
+		{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"weather","input":{}}]},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"sunny"}]},
+		{"role":"system","content":"brief"},
+		{"role":"user","content":"second"}]}`)
+	_, out, reason := (&Local{}).translate(WithLocalFirst(t.Context(), true), body)
+	require.Equal(t, reason, "")
+	var got oaReq
+	require.NoError(t, json.Unmarshal(out, &got))
+	roles := make([]string, len(got.Messages))
+	for i, m := range got.Messages {
+		roles[i] = m.Role
+	}
+	assert.Equal(t, strings.Join(roles, ","), "user,assistant,tool,user")
+	assert.Equal(t, got.Messages[0].Content, "first\n\nhook context")
+	assert.Equal(t, got.Messages[3].Content, "brief\n\nsecond")
+	names := make([]string, len(got.Tools))
+	for i, tool := range got.Tools {
+		names[i] = tool.Function.Name
+	}
+	assert.Equal(t, strings.Join(names, ","), "weather,added")
 }
 
 type oaReq struct {
@@ -172,4 +206,18 @@ func TestLocalRefusesCallToUnloadedDeferredTool(t *testing.T) {
 	assert.True(t, !ok, "cloud takes it")
 	assert.Equal(t, rec.Body.Len(), 0)
 	assert.True(t, !strings.Contains(got, `"later"`), "deferred tool not sent to the local model")
+}
+
+// translate reads agent bodies the gateway does not control; whatever it
+// gets, it either names a reason or builds JSON for the local server.
+func FuzzTranslate(f *testing.F) {
+	f.Add(`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"x"}]}`)
+	f.Add(`{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"x"},{"role":"system","content":[{"type":"text","text":"h"},{"type":"tool_addition","tool":{"type":"tool_definition","definition":{"name":"a","input_schema":{}}}}]},{"role":"user","content":"y"}]}`)
+	f.Add(`{"model":"claude-haiku-5-5","messages":[{"role":"system","content":[{"type":"tool_addition","tool":{"type":"tool_definition","definition":null}}]}]}`)
+	f.Fuzz(func(t *testing.T, body string) {
+		_, out, reason := (&Local{}).translate(WithLocalFirst(t.Context(), true), []byte(body))
+		if reason == "" && !json.Valid(out) {
+			t.Fatalf("no reason and invalid JSON for %q", body)
+		}
+	})
 }

@@ -45,13 +45,79 @@ type block struct {
 	Source    string          `json:"source"`    // search_result
 }
 
+// systemBlock is a block of a system message between turns: text, or a
+// tool_addition that offers a tool from then on.
+type systemBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+	Tool struct {
+		Type       string          `json:"type"`
+		Definition json.RawMessage `json:"definition"`
+	} `json:"tool"`
+}
+
+// systemMessage reads a system message between turns: its text and the
+// tool definitions it adds. Any other block keeps the request in the cloud.
+func systemMessage(raw json.RawMessage) (text string, added []json.RawMessage, reason string) {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s, nil, ""
+	}
+	var blocks []systemBlock
+	if json.Unmarshal(raw, &blocks) != nil {
+		return "", nil, FallBadContent
+	}
+	var texts []string
+	for _, b := range blocks {
+		switch {
+		case b.Type == "text":
+			texts = append(texts, b.Text)
+		case b.Type == "tool_addition" && b.Tool.Type == "tool_definition" && present(b.Tool.Definition):
+			added = append(added, b.Tool.Definition)
+		default:
+			return "", nil, FallUnsupportedBlock
+		}
+	}
+	return strings.Join(texts, "\n\n"), added, ""
+}
+
+// joinUser merges user messages that follow each other into one, so the
+// local model sees roles alternate as most chat templates require.
+func joinUser(msgs []oaMsg) []oaMsg {
+	out := msgs[:0]
+	for _, m := range msgs {
+		if n := len(out); n > 0 && m.Role == "user" && out[n-1].Role == "user" {
+			switch {
+			case out[n-1].Content == "":
+				out[n-1].Content = m.Content
+			case m.Content != "":
+				out[n-1].Content += "\n\n" + m.Content
+			}
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
 // convertMessage turns one Anthropic message into OpenAI messages; when it
 // cannot, reason says why. Any block it does not know (server tool use and
 // results among them) keeps the request in the cloud, and so does thinking
 // unless dropThinking leaves the assistant's thinking blocks out.
 func convertMessage(m anthropicMsg, dropThinking bool) (out []oaMsg, reason string) {
+	if m.Role == "system" {
+		// Claude Code sends hook context (session start, prompt briefs) as
+		// system messages between turns. Chat templates often allow a system
+		// message only first, so its text goes to the local model as user
+		// text, which joinUser merges with the turn beside it.
+		t, _, why := systemMessage(m.Content)
+		if why != "" {
+			return nil, why
+		}
+		return []oaMsg{{Role: "user", Content: t}}, ""
+	}
 	if m.Role != "user" && m.Role != "assistant" {
-		return nil, FallBadRequest
+		return nil, FallBadRole
 	}
 	var s string
 	if json.Unmarshal(m.Content, &s) == nil {
@@ -59,7 +125,7 @@ func convertMessage(m anthropicMsg, dropThinking bool) (out []oaMsg, reason stri
 	}
 	var blocks []block
 	if json.Unmarshal(m.Content, &blocks) != nil {
-		return nil, FallBadRequest
+		return nil, FallBadContent
 	}
 	var texts []string
 	var results []oaMsg
@@ -185,7 +251,33 @@ func offeredTools(in anthropicIn) []json.RawMessage {
 		}
 		out = append(out, r)
 	}
+	// Tools a system message added between turns are offered too, once
+	// each; a name the request already offers keeps its first definition.
+	seen := map[string]bool{}
+	for _, r := range out {
+		seen[toolName(r)] = true
+	}
+	for _, m := range in.Messages {
+		if m.Role != "system" {
+			continue
+		}
+		_, added, _ := systemMessage(m.Content)
+		for _, r := range added {
+			if n := toolName(r); n != "" && !seen[n] {
+				seen[n] = true
+				out = append(out, r)
+			}
+		}
+	}
 	return out
+}
+
+func toolName(r json.RawMessage) string {
+	var t struct {
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal(r, &t)
+	return t.Name
 }
 
 // referencedTools lists the tool names that tool_reference blocks in tool

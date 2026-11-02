@@ -311,7 +311,10 @@ const (
 	FallExcluded         = "excluded"          // the model is on the installation's or organisation's exclude list
 	FallNotEligible      = "not_eligible"      // the installation's Eligible rule does not offer the model locally
 	FallLocalFirstOff    = "local_first_off"   // the organisation switched local first off and the request is not for the small model
-	FallBadRequest       = "bad_request"       // the body is not a request the gateway can read (bad JSON, no messages, unknown role)
+	FallBadRequest       = "bad_request"       // the body is not a request the gateway can read (bad JSON, no messages)
+	FallBadRole          = "bad_role"          // a message has a role other than user, assistant or system
+	FallBadContent       = "bad_content"       // a message's content is neither text nor a list of blocks
+	FallEncodeError      = "encode_error"      // the translated request could not be encoded for the local server
 	FallSystemNotText    = "system_not_text"   // the system prompt is not a string or text blocks
 	FallUnsupportedBlock = "unsupported_block" // a message holds a block the local model cannot take (server tool results, unknown types)
 	FallUnsupportedTool  = "unsupported_tool"  // a tool or tool_choice the local model cannot run, such as a server tool
@@ -432,6 +435,7 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 		}
 		msgs = append(msgs, conv...)
 	}
+	msgs = joinUser(msgs)
 	in.offered = offeredTools(in)
 	tools, choice, parallel, ok := convertTools(in.offered, in.ToolChoice)
 	if !ok {
@@ -475,7 +479,7 @@ func (l *Local) translate(ctx context.Context, body []byte) (in anthropicIn, out
 	// reuse the prompt cache of the turn before.
 	out, err := json.Marshal(req)
 	if err != nil {
-		return in, nil, FallBadRequest
+		return in, nil, FallEncodeError
 	}
 	// The fit is judged on what the local model is sent, not the agent's
 	// body: thinking blocks and Anthropic's wrappers are gone by now.
