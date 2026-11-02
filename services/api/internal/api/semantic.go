@@ -15,8 +15,9 @@ import (
 
 // Search by meaning over code symbols (docs/adr/0002-code-symbol-embeddings.md).
 // A local embedding provider embeds each symbol's description after an
-// ingest; /semantic ranks them for a task. Off, and answering enabled:false,
-// unless a local provider with an embedding model is routed to "embeddings".
+// ingest; /semantic ranks them for a task. On whenever a local provider has an
+// embedding model (llm.Registry.EmbeddingProvider); otherwise it answers
+// enabled:false.
 
 func (s *Server) semanticRoutes() {
 	s.route("POST /api/v1/repos/{repo}/semantic", repoRole(accounts.Viewer), s.withExecution(s.handleSemantic))

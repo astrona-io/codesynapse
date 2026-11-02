@@ -111,7 +111,8 @@ tasks:
   # local-draft: local-mlx       # local_draft: drafts self-contained code for coding agents to check (local providers only)
   # source-extract: local-mlx    # fetch_source: keeps the parts of a long web page that answer the agent's question (local providers only)
   # memory: local-ollama     # agent memory: facts extracted from conversation turns (local providers only)
-  # embeddings: local-ollama # agent memory: recall by meaning (local, with embedding_model)
+  # embeddings: local-ollama # recall by meaning and semantic code search (local, with embedding_model).
+  #                          # Unset, the first local provider with an embedding_model is used.
   # compress: local-mlx      # shortens prompt prose before it goes to a cloud model (local providers only)
 default: local-mlx
 
