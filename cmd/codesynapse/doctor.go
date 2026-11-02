@@ -33,6 +33,10 @@ type doctorOptions struct {
 	fix    bool
 	url    string
 	apiURL string
+
+	reset     bool
+	yes       bool
+	keepToken bool
 }
 
 // doctorCheck is one line of the report. Action is the command or step
@@ -52,11 +56,25 @@ func (o *doctorOptions) SetupFlags(_ context.Context, _ *app.Env) error {
 	f.BoolVar(&o.fix, "fix", false, "Repair what is safe to repair here: the MCP registrations `mcp install` writes, the Claude Code plugin (through Claude Code's own plugin update), the token file's permissions and the gateway's failover proxy")
 	f.StringVar(&o.url, "url", app.Getenv("CODESYNAPSE_MCP_URL", "http://localhost:8090/mcp"), "MCP endpoint for an agent that has no registration yet")
 	f.StringVar(&o.apiURL, "api-url", app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"), "API to check")
+	f.BoolVar(&o.reset, "reset", false, "Remove what `mcp install`, `mcp hooks` and `mcp agents-md` set up, so the assistants run as before (instead of the checks)")
+	f.BoolVarP(&o.yes, "yes", "y", false, "With --reset: remove without asking")
+	f.BoolVar(&o.keepToken, "keep-token", false, "With --reset: keep the stored key in the user config folder")
 	return nil
 }
 
 func (o *doctorOptions) Complete(context.Context, *app.Env) error { return nil }
-func (o *doctorOptions) Validate(context.Context, *app.Env) error { return nil }
+func (o *doctorOptions) Validate(context.Context, *app.Env) error {
+	if (o.yes || o.keepToken) && !o.reset {
+		return errors.New("--yes and --keep-token go with --reset")
+	}
+	if o.reset && o.fix {
+		return errors.New("--reset and --fix do opposite things; pick one")
+	}
+	if o.reset && !o.yes && !o.EC.IsTerminal {
+		return errors.New("not a terminal: pass --yes to reset without a prompt")
+	}
+	return nil
+}
 
 // errNeedsAction makes doctor exit non-zero, so scripts and CI can use it.
 var errNeedsAction = errors.New("some checks need action; see above")
@@ -69,6 +87,9 @@ func (o *doctorOptions) Run(ctx context.Context, _ *app.Env) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
+	}
+	if o.reset {
+		return o.runReset(ctx, home, cwd)
 	}
 	checks := o.checks(ctx, home, cwd)
 	fixed := false
@@ -314,8 +335,8 @@ func pluginCheck(home string) (doctorCheck, bool) {
 func doctorCmd(ec *app.Env) *cobra.Command {
 	return app.NewSubCommand("doctor", &doctorOptions{EC: ec}, ec).
 		WithShortDesc("Check that this CLI, the server, the agent registrations, the Claude Code plugin and the gateway failover are current; --fix repairs them").
-		WithLongDesc("Checks the CLI's version against the server's, that the API answers and accepts your key (never printed), what `codesynapse mcp install` registered with each agent, that the Claude Code plugin runs every hook this CLI ships, and that a gateway set up by `mcp install --gateway` goes through the failover proxy. Each line is OK or NEEDS ACTION with the command that repairs it. --fix runs the repairs that are safe here: `mcp install` again for agents whose registration is missing or stale (keeping their endpoints and your context cap), Claude Code's own plugin update for a user-scope plugin that is behind, chmod 600 on the token file, and the failover proxy for a gateway reached directly or with missing hooks (reusing the gateway URL and key in Claude Code's settings; a setup made with --failover=false is left alone, and no gateway is set up where there was none). It exits non-zero while something needs action. Start a new session afterwards.").
-		WithExample("  codesynapse doctor\n  codesynapse doctor --fix\n  codesynapse doctor -o json").
+		WithLongDesc("Checks the CLI's version against the server's, that the API answers and accepts your key (never printed), what `codesynapse mcp install` registered with each agent, that the Claude Code plugin runs every hook this CLI ships, and that a gateway set up by `mcp install --gateway` goes through the failover proxy. Each line is OK or NEEDS ACTION with the command that repairs it. --fix runs the repairs that are safe here: `mcp install` again for agents whose registration is missing or stale (keeping their endpoints and your context cap), Claude Code's own plugin update for a user-scope plugin that is behind, chmod 600 on the token file, and the failover proxy for a gateway reached directly or with missing hooks (reusing the gateway URL and key in Claude Code's settings; a setup made with --failover=false is left alone, and no gateway is set up where there was none). It exits non-zero while something needs action. Start a new session afterwards. --reset does the opposite: it lists what `mcp install`, `mcp hooks` and `mcp agents-md` left behind (MCP server entries, lifecycle hooks, gateway settings, memory blocks in AGENTS.md/CLAUDE.md, the stored key), asks, and removes just those entries, backing up edited files as .bak. It leaves the Claude Code plugin, shared project settings, a context cap, git hooks and cluster installs alone.").
+		WithExample("  codesynapse doctor\n  codesynapse doctor --fix\n  codesynapse doctor -o json\n  codesynapse doctor --reset").
 		WithGroupID(app.GroupBase).
 		WithNoArgs().
 		Build()
