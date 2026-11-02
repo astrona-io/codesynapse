@@ -745,28 +745,52 @@ const (
 	maxEmbedChars  = 512
 )
 
-// ErrNoEmbeddings means no local provider with an embedding model is routed
-// to the "embeddings" task.
-var ErrNoEmbeddings = errors.New("no local embedding model: set embedding_model on a local provider and route \"embeddings\" to it")
+// ErrNoEmbeddings means no local provider with an embedding model can embed:
+// none has one, or "embeddings" is routed to one that cannot.
+var ErrNoEmbeddings = errors.New("no local embedding model: set embedding_model on a local provider (ollama pull nomic-embed-text)")
 
 type embedder interface {
 	Embed(ctx context.Context, model string, inputs []string) ([][]float32, error)
 }
 
-// EmbeddingProvider returns the provider routed to "embeddings" when it is
-// local and has an embedding model. Memory names and queries never go to a
-// cloud provider.
+// EmbeddingProvider returns the local provider that embeds: the one routed
+// to "embeddings", or, with no route, the default provider when it can embed
+// and else the first local provider that can. Semantic code search and recall
+// by meaning are therefore on whenever a local embedding model is configured
+// (docs/adr/0002-code-symbol-embeddings.md). Names and queries never go to a
+// cloud provider, and an explicit route to one that cannot embed is refused
+// rather than replaced.
 func (r *Registry) EmbeddingProvider() (string, ProviderConfig, error) {
-	name, err := r.ProviderFor("embeddings", "")
-	if err != nil {
-		return "", ProviderConfig{}, ErrNoEmbeddings
+	r.mu.Lock()
+	routed := r.cfg.Tasks["embeddings"]
+	candidates := []string{routed}
+	if routed == "" {
+		candidates = []string{r.cfg.Default}
+		for _, p := range r.cfg.Providers {
+			candidates = append(candidates, p.Name)
+		}
+	}
+	r.mu.Unlock()
+	for _, name := range candidates {
+		if cfg, ok := r.canEmbed(name); ok {
+			return name, cfg, nil
+		}
+	}
+	return "", ProviderConfig{}, ErrNoEmbeddings
+}
+
+// canEmbed reports whether provider name is local and has a concrete
+// embedding model (an auto one counts once its server named one).
+func (r *Registry) canEmbed(name string) (ProviderConfig, bool) {
+	if name == "" {
+		return ProviderConfig{}, false
 	}
 	cfg, ok := r.Config(name)
 	impl, _ := r.provider(name)
 	if _, can := impl.(embedder); !ok || !can || !cfg.Local() || cfg.EmbeddingModel == "" || cfg.EmbeddingModel == Auto {
-		return "", ProviderConfig{}, ErrNoEmbeddings
+		return ProviderConfig{}, false
 	}
-	return name, cfg, nil
+	return cfg, true
 }
 
 // Embed returns one vector per input from provider name, inputs redacted

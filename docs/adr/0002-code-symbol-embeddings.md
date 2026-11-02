@@ -35,6 +35,7 @@ Embed, with these limits:
 - **What is embedded:** the kind, qualified name, signature and the first documentation sentence of a symbol (what `Node.Summary` already holds, after `redact.Summary`), and nothing else. Source bodies, comments beyond the first sentence, YAML values and string literals are never embedded.
 - **Where:** a local model only. Providers that are not local (`ProviderConfig.Local()`) are refused, as for agent memory. Without a configured local embedding provider nothing is embedded and every answer is exactly what it was.
 - **Tenancy:** the index holds descriptions of one graph, which an organisation may see only through its repository access. It is filtered like the graph itself: the search starts from the caller's visible repository, and `store.ForRepository` fences every node the ranking returns. Vectors are never returned to a client.
+- **On by default (2026-11-02):** the leg needs no switch. It runs whenever a local provider has an embedding model: the one routed to "embeddings", or with no route the default provider, else the first local one that has an embedding model (an `embedding_model: auto` provider, and the provider discovered from a local Ollama or LM Studio, count once their server serves an embedding model). An explicit "embeddings" route to a provider that cannot embed is refused, not replaced.
 - **Role:** the semantic leg adds candidates and score to the lexical ranking in `minimal_context`; exact names still win. It does not replace `search`.
 
 ## Consequences

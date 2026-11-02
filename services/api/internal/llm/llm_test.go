@@ -174,6 +174,39 @@ func TestEmbeddings(t *testing.T) {
 	}
 }
 
+// Semantic search is on by default: with no "embeddings" route the first
+// local provider that can embed is used, never a cloud one.
+func TestEmbeddingProviderWithoutRoute(t *testing.T) {
+	cloud := ProviderConfig{Name: "cloud", Kind: KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "big", EmbeddingModel: "text-embedding-3-small", TimeoutSeconds: 5}
+	chat := ProviderConfig{Name: "mlx", Kind: KindOpenAI, BaseURL: "http://127.0.0.1:8080/v1", Model: "qwen", TimeoutSeconds: 5}
+	ollama := ProviderConfig{Name: "ollama", Kind: KindOpenAI, BaseURL: "http://127.0.0.1:11434/v1", Model: "llama", EmbeddingModel: "nomic-embed-text", TimeoutSeconds: 5}
+	for _, tc := range []struct {
+		name      string
+		providers []ProviderConfig
+		def       string
+		want      string
+	}{
+		{"default cannot embed, a later local one can", []ProviderConfig{cloud, chat, ollama}, "mlx", "ollama"},
+		{"cloud default is skipped", []ProviderConfig{cloud, ollama}, "cloud", "ollama"},
+		{"default embeds itself", []ProviderConfig{ollama, chat}, "ollama", "ollama"},
+		{"only cloud has a model", []ProviderConfig{cloud, chat}, "cloud", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := NewRegistry(Config{Providers: tc.providers, Default: tc.def})
+			name, _, err := r.EmbeddingProvider()
+			if tc.want == "" {
+				assert.True(t, errors.Is(err, ErrNoEmbeddings))
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, name, tc.want)
+		})
+	}
+	r := NewRegistry(Config{Providers: []ProviderConfig{chat, ollama}, Default: "mlx", Tasks: map[string]string{"embeddings": "mlx"}})
+	_, _, err := r.EmbeddingProvider()
+	assert.True(t, errors.Is(err, ErrNoEmbeddings), "an explicit route that cannot embed is not replaced")
+}
+
 func TestLocalOnlyTasksNeverUseCloud(t *testing.T) {
 	cloud := ProviderConfig{Name: "cloud", Kind: KindOpenAI, BaseURL: "https://api.example.com/v1", Model: "m", MaxOutputTokens: 100, MaxInputTokens: 1000}
 	local := ProviderConfig{Name: "local", Kind: KindOpenAI, BaseURL: "http://127.0.0.1:11434/v1", Model: "m", MaxOutputTokens: 100, MaxInputTokens: 1000}
