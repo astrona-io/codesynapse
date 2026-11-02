@@ -142,6 +142,7 @@ nav:
           - "ADR 0003: NebulaGraph": adr/0003-nebulagraph.md
           - Identity and access:
               - Access control plan: plans/ACCESS_CONTROL_PLAN.md
+              - OpenFGA plan: plans/OPENFGA_PLAN.md
               - Session context plan: plans/SESSION_CONTEXT_PLAN.md
           - Data and retrieval:
               - Retrieval plan: plans/RETRIEVAL_PLAN.md
