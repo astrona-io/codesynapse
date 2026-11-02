@@ -32,8 +32,9 @@ var (
 	nodeTexts = []string{"nid", "kind", "repo", "name", "qualified_name", "package", "file", "signature", "summary", "body_hash", "clone_hash", "clone_sig", "via", "doc_type", "status", "meta", "duplicates",
 		"time", "head", "root", "branch", "metrics", "severity", "rule", "ignore", "version", "fixed_version", "reachability", "url",
 		"liveness", "cleanup", "licenses", "coverage", "language", "ecosystem", "license", "license_source", "symbol_id", "revision", "identities", "analysis", "latest", "deprecated", "retracted", "scorecard_date",
-		// The publication run that last wrote the node (replace.go).
-		"run"}
+		// The publication run that last wrote the node (replace.go) and the
+		// hashes incremental publication compares (delta.go).
+		"run", "content_hash", "edges_hash"}
 	nodeLongs   = []string{"bytes", "start_line", "end_line", "complexity", "loc", "level", "churn", "roots", "behind"}
 	nodeBools   = []string{"exported", "is_test", "indirect", "dev", "code_absent"}
 	nodeDoubles = []string{"scorecard"}
