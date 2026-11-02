@@ -13,6 +13,11 @@ import (
 // source of truth: OrgPolicy is what one organisation's tuples in OpenFGA
 // must say, and OpenFGASync records how far OpenFGA has caught up. Nothing
 // here decides access; AccessOf still does until phase 6.
+//
+// Custom roles are mirrored by their permissions: a grant becomes the
+// role's permissions on the object it names, read from custom_roles in the
+// same snapshot. Changing a role raises the organisation's policy revision,
+// so the next sync writes the new permissions for every grant of it.
 
 // OpenFGASync is the policy revision of one organisation that OpenFGA
 // accepted, in which store and under which model.
@@ -62,17 +67,21 @@ type OrgPolicy struct {
 	Repos   []PolicyRepo
 }
 
-// PolicyMember is an eligible member and their membership role.
+// PolicyMember is an eligible member, their membership role and what
+// custom organisation roles granted to them directly add.
 type PolicyMember struct {
 	UserID string
 	Role   Role
+	Perms  Perms
 }
 
 // PolicyTeam is a team of the organisation, its eligible members and the
-// organisation role it holds ("" for none).
+// organisation role it holds ("" for none) and what custom organisation
+// roles granted to it add for its members.
 type PolicyTeam struct {
 	ID      string
 	Role    Role
+	Perms   Perms
 	Members []PolicyTeamMember
 }
 
@@ -83,7 +92,7 @@ type PolicyTeamMember struct {
 }
 
 // PolicyRepo is one usable entry and its grants. Grant roles are Full,
-// Write, Read or Deny (an explicit deny, users only).
+// Write, Read or Deny (an explicit deny, users only), or a custom role.
 type PolicyRepo struct {
 	Graph    string
 	Personal bool
@@ -91,10 +100,16 @@ type PolicyRepo struct {
 	Teams    []PolicyGrant
 }
 
-// PolicyGrant grants Role to a user or team.
+// PolicyGrant grants Role to a user or team. A custom role grant has no
+// Role, Custom set and the role's repository permissions in Perms: none
+// when the role is gone, belongs to another organisation or holds
+// organisation permissions. A user's direct custom grant still replaces
+// their team grants and the default then, as in AccessOf.
 type PolicyGrant struct {
 	SubjectID string
 	Role      Role
+	Custom    bool
+	Perms     Perms
 }
 
 // touchUserOrgs bumps the policy revision of every organisation userID
@@ -178,19 +193,42 @@ func orgPolicy(ctx context.Context, st Store, orgID string) (OrgPolicy, error) {
 	for i := range p.Teams {
 		byTeam[p.Teams[i].ID] = &p.Teams[i]
 	}
-	// Custom organisation roles (to members or teams) are not in the model
-	// yet either.
-	orgGrants, err := st.ReadTuples(ctx, TupleFilter{ObjectType: TypeOrganisation, ObjectID: orgID})
+	stored, err := st.CustomRoles(ctx, []string{orgID})
+	if err != nil {
+		return p, err
+	}
+	// custom is what a role relation grants on resource: the role's
+	// permissions when it is this organisation's and of that resource,
+	// nothing otherwise (like AccessOf).
+	custom := func(relation, resource string) (Perms, bool) {
+		id, ok := CustomRoleID(relation)
+		if !ok {
+			return 0, false
+		}
+		for _, r := range stored {
+			if r.ID == id && r.OrgID == orgID && r.Resource == resource {
+				return r.Perms(), true
+			}
+		}
+		return 0, true
+	}
+	// Custom organisation roles of members; those of teams are read with
+	// the team roles below.
+	orgGrants, err := st.ReadTuples(ctx, TupleFilter{ObjectType: TypeOrganisation, ObjectID: orgID, SubjectType: TypeUser})
 	if err != nil {
 		return p, err
 	}
 	if items += len(orgGrants); items > MaxTuples {
 		return p, ErrAccessLimit
 	}
+	memberPerms := map[string]Perms{}
 	for _, t := range orgGrants {
-		if _, custom := CustomRoleID(t.Relation); custom {
-			return p, ErrCustomRolesNotMirrored
+		if perms, ok := custom(t.Relation, ResourceOrganisation); ok && eligible[t.SubjectID] && t.SubjectRelation == "" {
+			memberPerms[t.SubjectID] |= perms
 		}
+	}
+	for i := range p.Members {
+		p.Members[i].Perms = memberPerms[p.Members[i].UserID]
 	}
 	if len(teamIDs) > 0 {
 		tuples, err := st.ReadTuples(ctx, TupleFilter{ObjectType: TypeTeam, ObjectIDs: teamIDs})
@@ -227,10 +265,14 @@ func orgPolicy(ctx context.Context, st Store, orgID string) (OrgPolicy, error) {
 			team := byTeam[t.SubjectID]
 			// Like AccessOf: only the organisation's own teams' members, and
 			// only valid roles, raise an organisation role.
-			if team == nil || t.SubjectRelation != TeamRead || !Role(t.Relation).Valid() {
+			if team == nil || t.SubjectRelation != TeamRead {
 				continue
 			}
-			team.Role = Max(team.Role, Role(t.Relation))
+			if perms, ok := custom(t.Relation, ResourceOrganisation); ok {
+				team.Perms |= perms
+			} else if Role(t.Relation).Valid() {
+				team.Role = Max(team.Role, Role(t.Relation))
+			}
 		}
 	}
 
@@ -263,15 +305,15 @@ func orgPolicy(ctx context.Context, st Store, orgID string) (OrgPolicy, error) {
 			if err := validRepoTuple(t); err != nil {
 				return p, err
 			}
-			if _, custom := CustomRoleID(t.Relation); custom {
-				return p, ErrCustomRolesNotMirrored
-			}
 			key := t.ObjectID + "@" + t.SubjectType + ":" + t.SubjectID
 			if seen[key] {
 				return p, fmt.Errorf("%w: duplicate repository grant", ErrInvalidInput)
 			}
 			seen[key] = true
 			g := PolicyGrant{SubjectID: t.SubjectID, Role: repoRelationRole[t.Relation]}
+			if perms, ok := custom(t.Relation, ResourceRepository); ok {
+				g = PolicyGrant{SubjectID: t.SubjectID, Custom: true, Perms: perms}
+			}
 			switch t.SubjectType {
 			case TypeUser:
 				if eligible[t.SubjectID] {
@@ -302,12 +344,6 @@ func sortPolicy(p *OrgPolicy) {
 		slices.SortFunc(p.Repos[i].Teams, byGrant)
 	}
 }
-
-// ErrCustomRolesNotMirrored refuses to mirror an organisation that grants
-// custom roles: the OpenFGA model has no relation for them yet, and leaving
-// them out would make OpenFGA disagree with AccessOf. The organisation
-// stays behind (never fresh) until the model holds custom roles.
-var ErrCustomRolesNotMirrored = fmt.Errorf("%w: custom role grants are not in the OpenFGA model yet", ErrInvalidInput)
 
 // ErrNoOpenFGASync means the store does not record OpenFGA syncs.
 var ErrNoOpenFGASync = errors.New("the accounts store does not record OpenFGA syncs")

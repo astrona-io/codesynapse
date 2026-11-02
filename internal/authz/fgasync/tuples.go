@@ -45,6 +45,13 @@ var repoDirect = map[accounts.Role]string{
 	accounts.Deny:  "direct_deny",
 }
 
+// relDirectCustom marks a user's custom role grant on a repository; the
+// role's permissions go in user_<permission> beside it.
+const relDirectCustom = "direct_custom"
+
+// relTeamCustom marks a team's custom role grant, with team_<permission>.
+const relTeamCustom = "team_custom"
+
 // repoTeam is the relation of a team's repository grant.
 var repoTeam = map[accounts.Role]string{
 	accounts.Full:  "team_full",
@@ -85,14 +92,17 @@ func Desired(p accounts.OrgPolicy) ([]fga.Tuple, error) {
 		}
 		if m.Role == accounts.Guest {
 			add(user, relGuest, org)
-			continue
+		} else {
+			level, ok := orgLevel[m.Role]
+			if !ok {
+				return nil, fmt.Errorf("%w: membership role %q", accounts.ErrInvalidInput, m.Role)
+			}
+			add(user, relMember, org)
+			add(user, level, org)
 		}
-		level, ok := orgLevel[m.Role]
-		if !ok {
-			return nil, fmt.Errorf("%w: membership role %q", accounts.ErrInvalidInput, m.Role)
+		if err := addPerms(add, user, "", org, m.Perms, accounts.ResourceOrganisation); err != nil {
+			return nil, err
 		}
-		add(user, relMember, org)
-		add(user, level, org)
 	}
 	for _, t := range p.Teams {
 		team, err := object(fga.TypeTeam, t.ID)
@@ -104,6 +114,9 @@ func Desired(p accounts.OrgPolicy) ([]fga.Tuple, error) {
 		// guest membership.
 		if level, ok := orgLevel[t.Role]; ok {
 			add(team+"#"+relTeamRead, level, org)
+		}
+		if err := addPerms(add, team+"#"+relTeamRead, "", org, t.Perms, accounts.ResourceOrganisation); err != nil {
+			return nil, err
 		}
 		for _, m := range t.Members {
 			user, err := object(fga.TypeUser, m.UserID)
@@ -124,24 +137,42 @@ func Desired(p accounts.OrgPolicy) ([]fga.Tuple, error) {
 			add(org, relOrgSpace, repo)
 		}
 		for _, g := range r.Users {
-			rel, ok := repoDirect[g.Role]
-			if !ok {
-				return nil, fmt.Errorf("%w: user grant %q", accounts.ErrInvalidInput, g.Role)
-			}
 			user, err := object(fga.TypeUser, g.SubjectID)
 			if err != nil {
 				return nil, err
 			}
+			if g.Custom {
+				// Also for a role that grants nothing: the grant still
+				// replaces the user's team grants and the default.
+				add(user, relDirectCustom, repo)
+				if err := addPerms(add, user, "user_", repo, g.Perms, accounts.ResourceRepository); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			rel, ok := repoDirect[g.Role]
+			if !ok {
+				return nil, fmt.Errorf("%w: user grant %q", accounts.ErrInvalidInput, g.Role)
+			}
 			add(user, rel, repo)
 		}
 		for _, g := range r.Teams {
-			rel, ok := repoTeam[g.Role]
-			if !ok {
-				return nil, fmt.Errorf("%w: team grant %q", accounts.ErrInvalidInput, g.Role)
-			}
 			team, err := object(fga.TypeTeam, g.SubjectID)
 			if err != nil {
 				return nil, err
+			}
+			if g.Custom {
+				// The mark replaces the default, also for a role that grants
+				// nothing, as AccessOf does.
+				add(team+"#"+relTeamRead, relTeamCustom, repo)
+				if err := addPerms(add, team+"#"+relTeamRead, "team_", repo, g.Perms, accounts.ResourceRepository); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			rel, ok := repoTeam[g.Role]
+			if !ok {
+				return nil, fmt.Errorf("%w: team grant %q", accounts.ErrInvalidInput, g.Role)
 			}
 			add(team+"#"+relTeamRead, rel, repo)
 		}
@@ -149,7 +180,40 @@ func Desired(p accounts.OrgPolicy) ([]fga.Tuple, error) {
 	return out, nil
 }
 
+// addPerms writes one tuple per permission a custom role grants, under
+// prefix (user_ or team_ on a repository, none on the organisation). perms
+// is already closed within each area (accounts.PermsOf), so each
+// permission is written as it is. A permission of the other resource or a
+// marker is an error: roles never hold one.
+func addPerms(add func(user, relation, obj string), user, prefix, obj string, perms accounts.Perms, resource string) error {
+	for _, p := range perms.List() {
+		if p.Marker() || p.Resource() != resource {
+			return fmt.Errorf("%w: %s in a %s role", accounts.ErrInvalidInput, p, resource)
+		}
+		add(user, prefix+Relation(p), obj)
+	}
+	return nil
+}
+
 // anchor reports whether t ties a team or repository to its organisation.
 // Anchors are written first and deleted last, so every object with tuples
 // has one and a later sync finds it.
 func anchor(t fga.Tuple) bool { return t.Relation == relOrganisation }
+
+// Relation is the model relation of a permission: area_level
+// (repository.reviews:write is reviews_write on a repository), with the
+// two markers mapped to the relations they are: organisation#member is
+// active (guests included) and organisation#owner is owner. The model
+// files are generated from the same mapping (TestModelFiles).
+func Relation(p accounts.Permission) string {
+	switch p {
+	case accounts.OrgMembership:
+		return "active"
+	case accounts.OrgOwnerRules:
+		return "owner"
+	}
+	if !p.Valid() {
+		return ""
+	}
+	return p.Area() + "_" + p.Level()
+}

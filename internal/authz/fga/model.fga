@@ -1,7 +1,7 @@
 # Authorisation model for repository and organisation access
-# (docs/plans/OPENFGA_PLAN.md). model.json is the same model in OpenFGA's
-# JSON form, which the client writes; TestModelDSLMatchesJSON keeps the two
-# in step. Change both together.
+# (docs/plans/OPENFGA_PLAN.md). Generated from the Go permission table by
+# TestModelFiles in internal/authz/fgasync; do not edit by hand. model.json
+# is the same model in OpenFGA's JSON form, which the client writes.
 model
   schema 1.1
 
@@ -23,6 +23,35 @@ type organisation
     # Written as organisation:O#default_readers@organisation:O#member only
     # while the organisation's default is READ_ONLY.
     define default_readers: [organisation#member]
+    # One relation per permission (organisation.members:read is
+    # members_read): its floor role, the level above it in the same area,
+    # or a custom role granted to the member or one of their teams.
+    define agent_sessions_read: ([user, team#read] or write) and active
+    define audit_read: ([user, team#read] or full) and active
+    define gateway_full: ([user, team#read] or full) and active
+    define gateway_read: ([user, team#read] or write or gateway_write) and active
+    define gateway_write: ([user, team#read] or write or gateway_full) and active
+    define git_tokens_full: ([user, team#read] or full) and active
+    define git_tokens_read: ([user, team#read] or write or git_tokens_full) and active
+    define members_full: ([user, team#read] or full) and active
+    define members_read: ([user, team#read] or read or members_write) and active
+    define members_write: ([user, team#read] or full or members_full) and active
+    define prompt_log_full: ([user, team#read] or full) and active
+    define prompt_log_read: ([user, team#read] or full or prompt_log_full) and active
+    define repositories_full: ([user, team#read] or full) and active
+    define repositories_read: ([user, team#read] or read or repositories_write) and active
+    define repositories_write: ([user, team#read] or write or repositories_full) and active
+    define roles_full: ([user, team#read] or full) and active
+    define roles_read: ([user, team#read] or read or roles_full) and active
+    define sessions_read: ([user, team#read] or active or sessions_write) and active
+    define sessions_write: ([user, team#read] or active) and active
+    define sso_full: ([user, team#read] or full) and active
+    define sso_read: ([user, team#read] or full or sso_full) and active
+    define teams_full: ([user, team#read] or full) and active
+    define teams_read: ([user, team#read] or read or teams_full) and active
+    define watches_full: ([user, team#read] or full) and active
+    define watches_read: ([user, team#read] or read or watches_write) and active
+    define watches_write: ([user, team#read] or write or watches_full) and active
 
 type team
   relations
@@ -39,15 +68,94 @@ type repository
     define direct_write: [user]
     define direct_read: [user]
     define direct_deny: [user]
-    define has_direct: direct_full or direct_write or direct_read or direct_deny
+    # A user's custom role on the entry; its permissions are the user_*
+    # relations below. Written also when the role is gone, so it still
+    # replaces team grants and the default while granting nothing.
+    define direct_custom: [user]
+    define has_direct: direct_full or direct_write or direct_read or direct_deny or direct_custom
     define team_full: [team#read]
     define team_write: [team#read]
     define team_read: [team#read]
+    # A team's custom role on the entry, like direct_custom: its
+    # permissions are the team_* relations below.
+    define team_custom: [team#read]
+    define has_team: team_full or team_write or team_read or team_custom
     define default_read: default_readers from org_space
-    # A direct grant replaces team grants and the default, even when weaker.
+    # A direct grant replaces team grants and the default, even when weaker;
+    # a team grant replaces the default.
     define full: (direct_full or (team_full but not has_direct)) and active from organisation
     define write: (full or direct_write or (team_write but not has_direct)) and active from organisation
-    define read: (write or direct_read or ((team_read or default_read) but not has_direct)) and active from organisation
-    # Per-permission relations (repository.reviews:write as reviews_write,
-    # with user_ and team_ tiers for custom roles) are generated here from the
-    # Go permission table once phase 2 has landed it.
+    define read: (write or direct_read or ((team_read or (default_read but not has_team)) but not has_direct)) and active from organisation
+    # One relation per permission (repository.reviews:write is
+    # reviews_write): its floor role, the level above it in the same area,
+    # or a custom role's grant to the user or, without a direct grant, to
+    # one of the user's teams.
+    define user_access_full: [user]
+    define team_access_full: [team#read]
+    define access_full: (full or user_access_full or (team_access_full but not has_direct)) and active from organisation
+    define user_access_read: [user]
+    define team_access_read: [team#read]
+    define access_read: (full or access_full or user_access_read or (team_access_read but not has_direct)) and active from organisation
+    define user_ai_write: [user]
+    define team_ai_write: [team#read]
+    define ai_write: (write or user_ai_write or (team_ai_write but not has_direct)) and active from organisation
+    define user_architecture_full: [user]
+    define team_architecture_full: [team#read]
+    define architecture_full: (full or user_architecture_full or (team_architecture_full but not has_direct)) and active from organisation
+    define user_architecture_read: [user]
+    define team_architecture_read: [team#read]
+    define architecture_read: (read or architecture_write or user_architecture_read or (team_architecture_read but not has_direct)) and active from organisation
+    define user_architecture_write: [user]
+    define team_architecture_write: [team#read]
+    define architecture_write: (write or architecture_full or user_architecture_write or (team_architecture_write but not has_direct)) and active from organisation
+    define user_code_read: [user]
+    define team_code_read: [team#read]
+    define code_read: (read or user_code_read or (team_code_read but not has_direct)) and active from organisation
+    define user_entry_full: [user]
+    define team_entry_full: [team#read]
+    define entry_full: (full or user_entry_full or (team_entry_full but not has_direct)) and active from organisation
+    define user_fixes_write: [user]
+    define team_fixes_write: [team#read]
+    define fixes_write: (write or user_fixes_write or (team_fixes_write but not has_direct)) and active from organisation
+    define user_memory_full: [user]
+    define team_memory_full: [team#read]
+    define memory_full: (write or user_memory_full or (team_memory_full but not has_direct)) and active from organisation
+    define user_memory_read: [user]
+    define team_memory_read: [team#read]
+    define memory_read: (read or memory_write or user_memory_read or (team_memory_read but not has_direct)) and active from organisation
+    define user_memory_write: [user]
+    define team_memory_write: [team#read]
+    define memory_write: (write or memory_full or user_memory_write or (team_memory_write but not has_direct)) and active from organisation
+    define user_reviews_full: [user]
+    define team_reviews_full: [team#read]
+    define reviews_full: (full or user_reviews_full or (team_reviews_full but not has_direct)) and active from organisation
+    define user_reviews_read: [user]
+    define team_reviews_read: [team#read]
+    define reviews_read: (read or reviews_write or user_reviews_read or (team_reviews_read but not has_direct)) and active from organisation
+    define user_reviews_write: [user]
+    define team_reviews_write: [team#read]
+    define reviews_write: (write or reviews_full or user_reviews_write or (team_reviews_write but not has_direct)) and active from organisation
+    define user_runtime_read: [user]
+    define team_runtime_read: [team#read]
+    define runtime_read: (read or runtime_write or user_runtime_read or (team_runtime_read but not has_direct)) and active from organisation
+    define user_runtime_write: [user]
+    define team_runtime_write: [team#read]
+    define runtime_write: (write or user_runtime_write or (team_runtime_write but not has_direct)) and active from organisation
+    define user_security_full: [user]
+    define team_security_full: [team#read]
+    define security_full: (full or user_security_full or (team_security_full but not has_direct)) and active from organisation
+    define user_security_read: [user]
+    define team_security_read: [team#read]
+    define security_read: (read or security_write or user_security_read or (team_security_read but not has_direct)) and active from organisation
+    define user_security_write: [user]
+    define team_security_write: [team#read]
+    define security_write: (write or security_full or user_security_write or (team_security_write but not has_direct)) and active from organisation
+    define user_settings_full: [user]
+    define team_settings_full: [team#read]
+    define settings_full: (full or user_settings_full or (team_settings_full but not has_direct)) and active from organisation
+    define user_settings_read: [user]
+    define team_settings_read: [team#read]
+    define settings_read: (read or settings_full or user_settings_read or (team_settings_read but not has_direct)) and active from organisation
+    define user_sync_write: [user]
+    define team_sync_write: [team#read]
+    define sync_write: (full or user_sync_write or (team_sync_write but not has_direct)) and active from organisation

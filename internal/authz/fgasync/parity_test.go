@@ -22,8 +22,11 @@ import (
 // changes to the accounts store, syncs them to a real OpenFGA server (`just
 // test-openfga` starts a throwaway one) and checks after every step that
 // OpenFGA answers exactly what the Go evaluator (AccessOf) decides, for
-// every user and every repository entry, lost ones included, and for every
-// organisation level.
+// every user and every repository entry, lost ones included, for every
+// permission of each and for every organisation level. Custom roles are
+// part of it: a direct custom grant replaces team grants and the default,
+// team custom roles add up, a grant naming a missing role gives nothing,
+// and changing a role rewrites what OpenFGA holds for its grants.
 func TestParityWithAccessOf(t *testing.T) {
 	url, token := os.Getenv("CODESYNAPSE_TEST_OPENFGA_URL"), os.Getenv("CODESYNAPSE_TEST_OPENFGA_TOKEN")
 	if url == "" {
@@ -67,10 +70,11 @@ func TestParityWithAccessOf(t *testing.T) {
 	require.NoError(t, st.CreateTeam(ctx, accounts.Team{ID: "t1", OrgID: "o1", Slug: "t1", Name: "t1", CreatedAt: now}))
 	require.NoError(t, st.CreateTeam(ctx, accounts.Team{ID: "t2", OrgID: "o2", Slug: "t2", Name: "t2", CreatedAt: now}))
 	type entry struct{ org, graph string }
-	repos := []entry{{"o1", "g/shared"}, {"o1", "g/other"}, {"o1", "g/mine"}, {"o2", "g/theirs"}}
+	repos := []entry{{"o1", "g/shared"}, {"o1", "g/other"}, {"o1", "g/mine"}, {"o1", "g/extra"}, {"o2", "g/theirs"}}
 	for _, r := range []accounts.Repository{
 		{OrgID: "o1", Graph: "g/shared", Visibility: accounts.Public, AddedBy: "owner", AddedAt: now},
 		{OrgID: "o1", Graph: "g/other", Visibility: accounts.Public, AddedBy: "owner", AddedAt: now},
+		{OrgID: "o1", Graph: "g/extra", Visibility: accounts.Public, AddedBy: "owner", AddedAt: now},
 		{OrgID: "o2", Graph: "g/theirs", Visibility: accounts.Public, AddedBy: "dave", AddedAt: now},
 	} {
 		require.NoError(t, st.AddRepository(ctx, r))
@@ -91,6 +95,11 @@ func TestParityWithAccessOf(t *testing.T) {
 			require.NoError(t, st.WriteTuple(ctx, x))
 		}
 	}
+	role := func(id, org, resource string, ps ...accounts.Permission) accounts.CustomRole {
+		return accounts.CustomRole{ID: id, OrgID: org, Name: id, Resource: resource, Permissions: ps,
+			CreatedBy: "owner", CreatedAt: now, UpdatedAt: now}
+	}
+	custom := accounts.CustomRelation
 	revoke := func(ts ...accounts.Tuple) {
 		for _, x := range ts {
 			_, err := st.DeleteTuples(ctx, accounts.TupleFilter{ObjectType: x.ObjectType, ObjectID: x.ObjectID,
@@ -99,6 +108,33 @@ func TestParityWithAccessOf(t *testing.T) {
 		}
 	}
 
+	// fact pins what AccessOf decides after a step, so the fixtures keep
+	// covering the cases they are named for rather than only agreeing.
+	type fact struct {
+		user  string
+		repo  entry
+		perm  accounts.Permission
+		holds bool
+	}
+	facts := map[string][]fact{
+		"custom roles": {
+			{"bob", entry{"o1", "g/other"}, accounts.RepoReviewsWrite, true},
+			{"bob", entry{"o1", "g/other"}, accounts.RepoMemoryWrite, false},
+			{"carol", entry{"o1", "g/shared"}, accounts.RepoMemoryFull, true},
+			{"carol", entry{"o1", "g/shared"}, accounts.RepoReviewsWrite, true},
+			{"erin", entry{"o1", "g/shared"}, accounts.RepoReviewsWrite, true},
+			{"erin", entry{"o1", "g/other"}, accounts.RepoCodeRead, false},
+			{"erin", entry{"o1", "g/extra"}, accounts.RepoCodeRead, false},
+			{"bob", entry{"o1", "g/extra"}, accounts.RepoSettingsFull, false},
+		},
+		"role changed": {
+			{"bob", entry{"o1", "g/other"}, accounts.RepoReviewsWrite, false},
+			{"bob", entry{"o1", "g/other"}, accounts.RepoFixesWrite, true},
+		},
+		"role deleted while granted": {
+			{"carol", entry{"o1", "g/shared"}, accounts.RepoMemoryFull, false},
+		},
+	}
 	steps := []struct {
 		name   string
 		change func()
@@ -140,6 +176,40 @@ func TestParityWithAccessOf(t *testing.T) {
 			require.NoError(t, st.SetUserDisabled(ctx, "erin", nil))
 			require.NoError(t, st.SetMember(ctx, "o1", "bob", accounts.Read))
 		}},
+		{"custom roles", func() {
+			for _, r := range []accounts.CustomRole{
+				role("r-rev", "o1", accounts.ResourceRepository, accounts.RepoCodeRead, accounts.RepoReviewsWrite, accounts.RepoSecurityRead),
+				role("r-mem", "o1", accounts.ResourceRepository, accounts.RepoCodeRead, accounts.RepoMemoryFull),
+				role("r-aud", "o1", accounts.ResourceOrganisation, accounts.OrgAuditRead, accounts.OrgMembersRead),
+				role("r-far", "o2", accounts.ResourceRepository, accounts.RepoCodeRead, accounts.RepoSettingsFull),
+			} {
+				require.NoError(t, st.CreateCustomRole(ctx, r))
+			}
+			require.NoError(t, st.CreateTeam(ctx, accounts.Team{ID: "t3", OrgID: "o1", Slug: "t3", Name: "t3", CreatedAt: now}))
+			write(tuple(accounts.TypeTeam, "t3", accounts.TeamRead, accounts.TypeUser, "erin", ""),
+				tuple(accounts.TypeTeam, "t3", accounts.TeamRead, accounts.TypeUser, "carol", ""),
+				// A direct custom role replaces bob's team grant on g/other.
+				grant("o1", "g/other", custom("r-rev"), accounts.TypeUser, "bob"),
+				// Team custom roles add up (carol is in t1 and t3) and replace
+				// the default for erin.
+				grant("o1", "g/shared", custom("r-mem"), accounts.TypeTeam, "t1"),
+				grant("o1", "g/shared", custom("r-rev"), accounts.TypeTeam, "t3"),
+				// A missing role and another organisation's give nothing, and
+				// still replace the default.
+				grant("o1", "g/other", custom("missing"), accounts.TypeUser, "erin"),
+				grant("o1", "g/extra", custom("gone"), accounts.TypeTeam, "t3"),
+				grant("o1", "g/extra", custom("r-far"), accounts.TypeUser, "bob"),
+				// Organisation roles add to the built-in role, also for a guest
+				// through a team; another organisation's role gives nothing.
+				tuple(accounts.TypeOrganisation, "o1", custom("r-aud"), accounts.TypeUser, "bob", ""),
+				tuple(accounts.TypeOrganisation, "o1", custom("r-aud"), accounts.TypeTeam, "t3", accounts.TeamRead),
+				tuple(accounts.TypeOrganisation, "o2", custom("r-aud"), accounts.TypeUser, "alice", ""))
+		}},
+		{"role changed", func() {
+			require.NoError(t, st.UpdateCustomRole(ctx, role("r-rev", "o1", accounts.ResourceRepository, accounts.RepoCodeRead, accounts.RepoFixesWrite)))
+			require.NoError(t, st.UpdateCustomRole(ctx, role("r-aud", "o1", accounts.ResourceOrganisation, accounts.OrgRolesFull)))
+		}},
+		{"role deleted while granted", func() { require.NoError(t, st.DeleteCustomRole(ctx, "o1", "r-mem")) }},
 		{"team deleted", func() { require.NoError(t, st.DeleteTeam(ctx, "t1")) }},
 	}
 
@@ -161,20 +231,33 @@ func TestParityWithAccessOf(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			role := map[entry]accounts.Role{}
+			perms := map[entry]accounts.Perms{}
 			for _, r := range a.Repos {
-				role[entry{r.OrgID, r.Graph}] = r.Role
+				perms[entry{r.OrgID, r.Graph}] = r.Perms
+			}
+			for _, f := range facts[step.name] {
+				if f.user == u {
+					assert.Equal(t, perms[f.repo].Has(f.perm), f.holds, fmt.Sprintf("step %q: AccessOf %s %s %v", step.name, u, f.perm, f.repo))
+				}
 			}
 			for _, r := range repos {
-				for _, level := range []accounts.Role{accounts.Read, accounts.Write, accounts.Full} {
-					checks = append(checks, fga.Tuple{User: "user:" + u, Relation: string(level), Object: "repository:" + fga.RepositoryID(r.org, r.graph)})
-					want = append(want, role[r].AtLeast(level))
+				for _, p := range accounts.AllPermissions() {
+					if p.Resource() == accounts.ResourceRepository {
+						checks = append(checks, fga.Tuple{User: "user:" + u, Relation: Relation(p), Object: "repository:" + fga.RepositoryID(r.org, r.graph)})
+						want = append(want, perms[r].Has(p))
+					}
 				}
 			}
 			for _, o := range orgs {
 				for _, level := range []accounts.Role{accounts.Read, accounts.Write, accounts.Full, accounts.Owner} {
 					checks = append(checks, fga.Tuple{User: "user:" + u, Relation: string(level), Object: "organisation:" + o})
 					want = append(want, a.Orgs[o].AtLeast(level))
+				}
+				for _, p := range accounts.AllPermissions() {
+					if p.Resource() == accounts.ResourceOrganisation && !p.Marker() {
+						checks = append(checks, fga.Tuple{User: "user:" + u, Relation: Relation(p), Object: "organisation:" + o})
+						want = append(want, a.OrgPerms[o].Has(p))
+					}
 				}
 				_, member := a.Orgs[o]
 				checks = append(checks, fga.Tuple{User: "user:" + u, Relation: "active", Object: "organisation:" + o})
