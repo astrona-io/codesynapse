@@ -132,6 +132,8 @@ services:
   milvus:
     image: docker.io/milvusdb/milvus:v3.0.5
     command: ["milvus", "run", "standalone"]
+    # Embedded etcd can change leaders during startup and make Milvus exit.
+    restart: on-failure
     environment:
       ETCD_USE_EMBED: "true"
       ETCD_DATA_DIR: /var/lib/milvus/etcd
@@ -142,6 +144,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:9091/healthz"]
+      start_period: 60s
       interval: 10s
       timeout: 5s
       retries: 30
