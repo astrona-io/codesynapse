@@ -161,6 +161,7 @@ jobs:
               - 'internal/store/**'
               - 'internal/vector/**'
               - 'internal/accounts/**'
+              - 'internal/authz/**'
               - 'internal/model/**'
               - 'internal/telemetry/**'
               - 'services/api/internal/api/series*.go'
@@ -192,3 +193,5 @@ jobs:
         run: just test-nebula
       - name: VictoriaMetrics telemetry and series contract
         run: just test-metrics
+      - name: OpenFGA authorisation model contract
+        run: just test-openfga

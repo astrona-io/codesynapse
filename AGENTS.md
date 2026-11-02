@@ -89,6 +89,7 @@ internal/agentcfg/      `codesynapse mcp install`: registers the MCP server with
 internal/reviews/       Code reviews: model, validation, redaction, comment decisions
 internal/accounts/      Users, organisations, roles, sessions, API keys, audit log (memstore/, pgstore/ with
                         embedded migrations, accountstest/ contract)
+internal/authz/fga/     OpenFGA model (model.fga, model.json kept in step by a test) and a client that fails closed; not wired in yet
 config/                 llm.example.yaml (committed); llm.yaml is local and gitignored
 internal/app/           Shared wiring: graph store flags (NebulaGraph, Milvus), bearer auth, HTTP server, cobra CLI bootstrap
 internal/logx/          slog logger carried in contexts
@@ -116,6 +117,7 @@ just test-integration   # test-nebula + test-postgres on throwaway containers
 just test-postgres      # accounts contract against a throwaway PostgreSQL container
 just test-nebula        # NebulaGraph/Milvus store contract on throwaway containers
 just test-metrics       # telemetry push and tenant-filtered queries on a throwaway VictoriaMetrics
+just test-openfga       # authorisation model contract (internal/authz/fga) on a throwaway OpenFGA
 just review     # offline review pack for the current branch
 just eval       # score minimal_context and search on past commits against docs/benchmarks/task-eval (needs full history)
 just image-build  # api, worker, mcp and web images
