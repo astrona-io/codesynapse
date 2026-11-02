@@ -355,7 +355,7 @@ func (o *lifecycleOptions) Run(ctx context.Context, _ *app.Env) error {
 			out = readGuard(ctx, tool)
 		}
 		if activity.Category == "shell" && o.client == "codex" {
-			out = bashHint(tool)
+			out = bashHint(ctx, tool)
 		}
 		if o.client == "cursor" && out != nil {
 			spec, _ := out["hookSpecificOutput"].(map[string]any)

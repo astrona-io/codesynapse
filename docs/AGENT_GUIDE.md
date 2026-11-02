@@ -352,7 +352,7 @@ The prompt works for any language. It starts from what CodeSynapse already has (
 
 ## 3. Tool usage best practices
 
-In Claude Code, the [plugin](operations/claude-code-plugin.md) carries this workflow as a skill and backs it with hooks: large whole-file reads are turned back once with an outline, and a changed tree is checked with `verify_plan` and `get_pr_context` before Claude finishes.
+In Claude Code, the [plugin](operations/claude-code-plugin.md) carries this workflow as a skill and backs it with hooks: large whole-file reads (Read, or a plain `cat` in the shell) are turned back once with an outline, shell reads and greps are pointed at `read_ranges`, `ask_local` and `search` every time, and a changed tree is checked with `verify_plan` and `get_pr_context` before Claude finishes.
 
 **Search by meaning.** When the installation has a local embedding model (`embedding_model` on a local provider, used without further setting, and Milvus or the in-memory index; on by default), `minimal_context` also ranks symbols whose name, signature and first doc sentence are close in meaning to the task (`why: "meaning"`), so a task that shares no word with the code still finds it. It is off without the model and never an error: the answer stays the keyword one. Source bodies are never embedded.
 
