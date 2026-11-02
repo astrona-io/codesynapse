@@ -82,16 +82,17 @@ type toolHookInput struct {
 	Source    string `json:"source"` // SessionStart: startup, resume, clear or compact
 	ToolName  string `json:"tool_name"`
 	ToolInput struct {
-		OldString string `json:"old_string"`
-		NewString string `json:"new_string"`
-		Content   string `json:"content"`
-		Patch     string `json:"patch"`
-		FilePath  string `json:"file_path"`
-		Command   string `json:"command"`
-		Offset    int    `json:"offset"`
-		Limit     int    `json:"limit"`
-		Repo      string `json:"repo"`
-		URL       string `json:"url"` // WebFetch
+		OldString string   `json:"old_string"`
+		NewString string   `json:"new_string"`
+		Content   string   `json:"content"`
+		Patch     string   `json:"patch"`
+		FilePath  string   `json:"file_path"`
+		Command   string   `json:"command"`
+		Offset    int      `json:"offset"`
+		Limit     int      `json:"limit"`
+		Repo      string   `json:"repo"`
+		Ranges    []string `json:"ranges"` // read_ranges
+		URL       string   `json:"url"`    // WebFetch
 	} `json:"tool_input"`
 	ToolResponse json.RawMessage `json:"tool_response"`
 	Prompt       string          `json:"prompt"` // UserPromptSubmit

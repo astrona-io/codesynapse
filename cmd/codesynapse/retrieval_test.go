@@ -322,3 +322,42 @@ func TestRepeatRangesAndResend(t *testing.T) {
 	assert.Equal(t, reports[1].Resend, map[string]int{"search": (100 + 25) * 2}, "two later turns re-send the new share of both answers")
 	assert.Equal(t, len(reports[1].Repeats), 0)
 }
+
+// TestRetrievalCountsReadRanges: a read_ranges call reads the answered
+// ranges it covers, like a Read of each, and the file text it returns is
+// not taken for an answer's ranges.
+func TestRetrievalCountsReadRanges(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
+	var reports []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		reports = append(reports, string(body))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(api.Close)
+	t.Setenv("CODESYNAPSE_API_URL", api.URL)
+	t.Setenv(apiTokenEnv, "csk_test")
+	dir := gitRepo(t)
+
+	call := func(tool string, ranges []string, text string) {
+		t.Helper()
+		in := toolHookInput{SessionID: "chat-1", Cwd: dir, ToolName: tool}
+		in.ToolInput.Ranges = ranges
+		resp, err := json.Marshal([]map[string]any{{"type": "text", "text": text}})
+		require.NoError(t, err)
+		in.ToolResponse = resp
+		noteAnswer(in)
+	}
+	call("mcp__codesynapse__minimal_context", nil, `{"read":["internal/svc/svc.go:10-20","web/app.ts:3-9","lib/x.go:1-4"]}`)
+	call("mcp__plugin_codesynapse_codesynapse__read_ranges", []string{"internal/svc/svc.go:15-30", "web/app.ts:40-50", "bad"},
+		"=== internal/svc/svc.go (lines 15-30) ===\n15| // see other/file.go:3-4 and lib/x.go:1\n")
+
+	reportRetrieval(context.Background(), toolHookInput{SessionID: "chat-1", Cwd: dir}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	require.Len(t, reports, 1)
+	var got struct {
+		Tools map[string]rangeCounts `json:"tools"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(reports[0]), &got))
+	assert.Equal(t, got.Tools, map[string]rangeCounts{"minimal_context": {Returned: 3, Read: 1}},
+		"svc.go:10-20 is read; app.ts:40-50 misses 3-9; the file text adds no ranges and read_ranges no counts of its own")
+}
