@@ -26,12 +26,12 @@ const AREAS = [
   { task: 'review', label: 'Code review', hint: 'Reviews of changes and risky code' },
   { task: 'security-triage', label: 'Security analysis', hint: 'Triage of findings and fixes' },
   { task: 'briefing', label: 'Briefings', hint: 'Architecture and risk overviews' },
-  { task: 'pr-summary', label: 'Change summaries', hint: 'Plain-language summary of a diff (local models only)', local: true },
-  { task: 'cleanup-briefing', label: 'Cleanup briefings', hint: 'What to clean up first, from the cleanup plan (local models only)', local: true },
-  { task: 'local-answer', label: 'Agent questions', hint: 'Reads files for coding agents (ask_local) so they spend fewer cloud tokens (local models only)', local: true },
-  { task: 'local-draft', label: 'Code drafts', hint: 'Drafts self-contained code for coding agents to check and apply (local_draft; local models only)', local: true },
-  { task: 'source-extract', label: 'Page extracts', hint: 'Keeps the parts of a long web page that answer a coding agent’s question (fetch_source; local models only)', local: true },
-  { task: 'fix', label: 'Fixes', hint: 'Writes fix branches for accepted review comments (needs source: use a local model)' },
+  { task: 'pr-summary', label: 'Change summaries', hint: 'Plain-language summary of a diff (self-hosted models only)', local: true },
+  { task: 'cleanup-briefing', label: 'Cleanup briefings', hint: 'What to clean up first, from the cleanup plan (self-hosted models only)', local: true },
+  { task: 'local-answer', label: 'Agent questions', hint: 'Reads files for coding agents (ask_local) so they spend fewer cloud tokens (self-hosted models only)', local: true },
+  { task: 'local-draft', label: 'Code drafts', hint: 'Drafts self-contained code for coding agents to check and apply (local_draft; self-hosted models only)', local: true },
+  { task: 'source-extract', label: 'Page extracts', hint: 'Keeps the parts of a long web page that answer a coding agent’s question (fetch_source; self-hosted models only)', local: true },
+  { task: 'fix', label: 'Fixes', hint: 'Writes fix branches for accepted review comments (needs source: use a self-hosted model)' },
 ]
 const routing = reactive<{ default: string; tasks: Record<string, string> }>({ default: '', tasks: {} })
 // Local-only areas follow the global model when it is local.
@@ -81,7 +81,7 @@ const resultOf = (n: string) => tests.value[n]
 <template>
   <div class="stack">
     <PageHeader eyebrow="Workspace" title="AI models"
-      lede="Language models CodeSynapse uses to triage findings, review code and write briefings. Local models (MLX, Ollama, vLLM) keep code on your machine; cloud models only get what you allow." />
+      lede="Language models CodeSynapse uses to triage findings, review code and write briefings. Self-hosted models (MLX, Ollama, vLLM) keep code on machines you run; cloud models only get what you allow." />
 
     <DataState :error="loadError ? plainError(loadError) : ''" :pending="!data" :empty="!data" loading="Loading models…">
       <div v-if="data && !data.providers.length && !operator" class="panel how">
@@ -115,14 +115,14 @@ const resultOf = (n: string) => tests.value[n]
       <div class="route route--global">
         <div><strong>Global</strong><p class="muted small">Fallback for every area without its own model</p></div>
         <select v-model="routing.default" aria-label="Global model" :disabled="!operator">
-          <option v-for="p in data.providers" :key="p.name" :value="p.name">{{ p.name }} · {{ p.model || 'server default' }} · {{ p.local ? 'local' : 'cloud' }}</option>
+          <option v-for="p in data.providers" :key="p.name" :value="p.name">{{ p.name }} · {{ p.model || 'server default' }} · {{ p.local ? 'self-hosted' : 'cloud' }}</option>
         </select>
       </div>
       <div v-for="a in AREAS" :key="a.task" class="route">
         <div><strong>{{ a.label }}</strong><p class="muted small">{{ a.hint }}</p></div>
         <select v-model="routing.tasks[a.task]" :aria-label="`Model for ${a.label}`" :disabled="!operator">
-          <option value="">{{ a.local && !globalIsLocal ? 'First local model' : `Use global (${routing.default})` }}</option>
-          <option v-for="p in data.providers.filter(x => !a.local || x.local)" :key="p.name" :value="p.name">{{ p.name }} · {{ p.local ? 'local' : 'cloud' }}</option>
+          <option value="">{{ a.local && !globalIsLocal ? 'First self-hosted model' : `Use global (${routing.default})` }}</option>
+          <option v-for="p in data.providers.filter(x => !a.local || x.local)" :key="p.name" :value="p.name">{{ p.name }} · {{ p.local ? 'self-hosted' : 'cloud' }}</option>
         </select>
       </div>
       <p v-if="routeError" class="error small" role="alert">{{ routeError }}</p>
@@ -132,7 +132,7 @@ const resultOf = (n: string) => tests.value[n]
       <section v-for="p in data.providers" :key="p.name" class="panel provider">
         <div class="panel__header">
           <div>
-            <p class="eyebrow">{{ p.kind === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible' }} · {{ p.local ? 'local' : 'cloud' }}</p>
+            <p class="eyebrow">{{ p.kind === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible' }} · {{ p.local ? 'self-hosted' : 'cloud' }}</p>
             <h2 class="mono">{{ p.name }}</h2>
             <p class="status-line"><span class="badge" :class="health(p.name).tone">{{ health(p.name).label }}</span><span class="muted small">{{ health(p.name).note }}</span></p>
           </div>
@@ -158,7 +158,7 @@ const resultOf = (n: string) => tests.value[n]
           <dd v-else>{{ plural(p.usage.requests, 'request') }} · {{ fmtInt(p.usage.input_tokens) }} in / {{ fmtInt(p.usage.output_tokens) }} out<span v-if="p.usage.cached_tokens"> · {{ Math.round(100 * p.usage.cached_tokens / p.usage.input_tokens) }}% from the prompt cache</span><span v-if="p.usage.requests"> · avg {{ p.usage.avg_seconds.toFixed(1) }} s</span><span v-if="p.usage.failures" class="error"> · {{ p.usage.failures }} failed</span><span class="muted small"> · this API process only</span></dd>
           <template v-if="p.usage.running || p.usage.waiting || p.usage.compressed_bytes">
             <dt>Queue<InfoTip text="Requests running on this provider now and waiting for a free slot, in this API process. Embeddings and completions share the same slots (max_concurrent in config/llm.yaml)." /></dt>
-            <dd>{{ p.usage.running ?? 0 }} running · {{ p.usage.waiting ?? 0 }} waiting<span v-if="p.usage.compressed_bytes"> · {{ fmtInt(p.usage.compressed_bytes) }} bytes of prompt removed by the local model</span></dd>
+            <dd>{{ p.usage.running ?? 0 }} running · {{ p.usage.waiting ?? 0 }} waiting<span v-if="p.usage.compressed_bytes"> · {{ fmtInt(p.usage.compressed_bytes) }} bytes of prompt removed by the self-hosted model</span></dd>
           </template>
         </dl>
         <details v-if="p.served" class="served" :open="p.model === 'auto'">

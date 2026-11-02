@@ -73,7 +73,7 @@ const share = (q: number) => (allRequests.value ? Math.round((100 * q) / allRequ
           <thead><tr><th>Provider</th><th>Share of requests</th><th class="num">Requests</th><th class="num">Tokens in / out</th></tr></thead>
           <tbody>
             <tr v-for="{ p, u } in providers" :key="p.provider">
-              <td>{{ p.provider }} <span v-if="p.local" class="badge badge--green">local</span><div class="muted small mono">{{ p.model }}</div></td>
+              <td>{{ p.provider }} <span v-if="p.local" class="badge badge--green">self-hosted</span><div class="muted small mono">{{ p.model }}</div></td>
               <td><span class="share"><span class="share__track"><span :style="{ width: `${share(u.requests)}%` }" /></span>{{ share(u.requests) }}%</span></td>
               <td class="num">{{ fmtInt(u.requests) }}<div v-if="u.failures" class="muted small">{{ u.failures }} failed</div></td>
               <td class="num">{{ fmtCompact(u.input) }} / {{ fmtCompact(u.output) }}</td>

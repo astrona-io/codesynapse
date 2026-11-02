@@ -45,7 +45,7 @@ const reached = computed(() => [
 ])
 const arrived = computed(() => [
   { label: 'Saved by agents', value: m.value?.saves ?? 0, color: 'var(--s-2)', detail: 'upsert_graph_triples calls' },
-  { label: 'Extracted from offloading', value: m.value?.offload_facts ?? 0, color: 'var(--s-4)', detail: 'by the local model' },
+  { label: 'Extracted from offloading', value: m.value?.offload_facts ?? 0, color: 'var(--s-4)', detail: 'by the self-hosted model' },
 ])
 const autoShare = computed(() => {
   const total = reached.value.reduce((t, x) => t + x.value, 0)
@@ -128,7 +128,7 @@ function unavailable(panel: string, status: number) {
       <div class="grid kpis">
         <StatTile label="Prompts looked up" :value="fmtCompact(m.auto_recalls ?? 0)" :hint="`~${fmtInt(per(m.auto_recall_tokens ?? 0, m.auto_recalls ?? 0))} tokens added per prompt`" />
         <StatTile label="Conversations offloaded" :value="fmtCompact(m.offloads ?? 0)" :hint="`${fmtCompact(m.offloaded_turns ?? 0)} turns, ~${fmtInt(per(m.offloaded_turns ?? 0, m.offloads ?? 0))} per offload`" />
-        <StatTile label="Facts per offload" :value="fmtInt(per(m.offload_facts ?? 0, m.offloads ?? 0))" :hint="`${fmtCompact(m.offload_facts ?? 0)} facts from the local model`" />
+        <StatTile label="Facts per offload" :value="fmtInt(per(m.offload_facts ?? 0, m.offloads ?? 0))" :hint="`${fmtCompact(m.offload_facts ?? 0)} facts from the self-hosted model`" />
       </div>
       <p v-if="!(m.offloads ?? 0)" class="muted small">No offloading yet: it runs when a chat compacts, which happens in long sessions.</p>
     </section>

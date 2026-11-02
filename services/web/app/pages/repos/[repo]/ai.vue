@@ -90,7 +90,7 @@ const elapsed = (j: Job) => Math.round((Date.now() - Date.parse(j.started_at)) /
         <label class="row tight">Model
           <select v-model="choice[t.id]" :aria-label="`Model for ${t.title}`">
             <option value="">{{ routed(t.id) }} (default)</option>
-            <option v-for="p in providers?.providers ?? []" :key="p.name" :value="p.name">{{ p.name }} · {{ p.local ? 'local' : 'cloud' }}</option>
+            <option v-for="p in providers?.providers ?? []" :key="p.name" :value="p.name">{{ p.name }} · {{ p.local ? 'self-hosted' : 'cloud' }}</option>
           </select>
         </label>
         <div class="row">

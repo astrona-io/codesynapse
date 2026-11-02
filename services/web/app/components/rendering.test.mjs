@@ -175,7 +175,7 @@ test('statistics renders missing token and edit fields from an older API', async
   })
   assert.match(html, /Model usage unavailable/)
   assert.match(html, /Small edits and output/)
-  assert.doesNotMatch(html, /Local models/, 'no AI providers in an older API, no local-model section')
+  assert.doesNotMatch(html, /Local models|self-hosted\)/, 'no AI providers in an older API, no local-model section')
 })
 
 test('statistics show the server share of agent work, or why it is unknown', async (t) => {
@@ -224,10 +224,10 @@ test('statistics show local model work from the metrics store', async (t) => {
     seriesRangeFor: () => '30d',
     seriesRangeLabel: () => 'Last 30 days',
   })
-  assert.match(html, /AI work that stayed on your network/)
+  assert.match(html, /AI work that stayed on the installation&#39;s own models/)
   assert.match(html, /qwen3\.8:27b/)
-  assert.match(html, /Local requests 40 /, 'requests from the metrics store, not the API process')
-  assert.match(html, /Tokens processed locally 10000 /, 'input + output tokens')
+  assert.match(html, /Self-hosted requests 40 /, 'requests from the metrics store, not the API process')
+  assert.match(html, /Tokens processed self-hosted 10000 /, 'input + output tokens')
   assert.match(html, /Share of AI requests 80% /, '40 of 50 requests stayed local')
 })
 
@@ -262,11 +262,11 @@ test('models and savings split the token pool without counting ask_local twice',
   }, {})
   assert.match(html, /Kept off cloud models 48% /, '30k never read + 65k local of a 200k pool')
   assert.match(html, /Tokens never read 50000 /)
-  assert.match(html, /Handled by local models 65000 60000 read · 5000 written/)
+  assert.match(html, /Handled by self-hosted models 65000 60000 read · 5000 written/)
   assert.match(html, /Total saved \(est\.\) \$2\.35 at claude-opus-5-5 prices <i>estimated<\/i>/, '60k × $10 + 5k × $20 per million, $0.30 for graph answers and $0.60 for external sources from the server, plus $0.50 from shorter prompts and $0.25 from gateway answers')
   assert.match(html, /Saved by external sources \$0\.60 60000 tokens not read · 25% of 4 pages from the cache <i>web pages fetched with fetch_source: tokens as served \(80000\) minus the tokens returned, at the input price of \$10 per million tokens \(configured\)/)
   assert.match(html, /Saved by graph answers \$0\.30 30000 tokens never read <i>30000 tokens never read, each once at the input price/)
-  assert.match(html, /Saved on cached input none reported +<i>the local runtime reported no prompt-cache hits/)
+  assert.match(html, /Saved on cached input none reported +<i>the self-hosted runtime reported no prompt-cache hits/)
   assert.match(html, /Spent on cloud models \(est\.\) \$0\.25 /)
   assert.match(html, /Saved by shorter prompts \$0\.50 +<i>CodeSynapse&#39;s own AI tasks/)
   assert.match(html, /prompts typed through the gateway unless an organisation turned shortening off/)
@@ -353,7 +353,7 @@ test('shorter prompts tile says why it is off instead of showing $0', async (t) 
     fmtInt: (n) => String(n),
     apiErrorMessage: (e) => String(e),
   }, {})
-  assert.match(html, /Saved by shorter prompts off +<i>no local model to shorten with; covers CodeSynapse&#39;s own AI tasks and, unless an organisation turned it off, prompts typed through the gateway/)
+  assert.match(html, /Saved by shorter prompts off +<i>no self-hosted model to shorten with; covers CodeSynapse&#39;s own AI tasks and, unless an organisation turned it off, prompts typed through the gateway/)
   assert.doesNotMatch(html, /Saved by shorter prompts \$0\.00/)
 })
 
@@ -380,7 +380,7 @@ test('graph answers of agents without repeat reports are valued, and local cache
     apiErrorMessage: (e) => String(e),
   }, {})
   assert.match(html, /Saved by graph answers \$10\.00 2500000 tokens never read <i>2500000 tokens never read by agents that cannot tell repeated answers apart \(\$10\.00\), at the input price; left out of the share/)
-  assert.match(html, /Saved on cached input \$0\.10 500000 tokens from the local prompt cache <i>500000 tokens the local models&#39; prompt cache served/)
+  assert.match(html, /Saved on cached input \$0\.10 500000 tokens from the self-hosted prompt cache <i>500000 tokens the self-hosted models&#39; prompt cache served/)
   assert.match(html, /Total saved \(est\.\) \$12\.10 /, '500k × $4 + 500k × $0.20 + $10 for graph answers')
   assert.match(html, /built-in estimate(<!--\[-->)? from <a [^>]*>platform\.claude\.com\/docs\/en\/about-claude\/pricing<\/a>(<!--\[-->)?, checked 2026-10-29/)
 })
@@ -402,7 +402,7 @@ test('savings chart totals its columns, values money with the tiles\' formula an
     fmtCompact: (n) => String(n), fmtInt: (n) => String(n),
   }, { series, price })
   assert.match(html, /Never read \(graph answers\) <strong>1000000<\/strong>/, 'the future bucket is left out of the totals')
-  assert.match(html, /Local models <strong>1100000<\/strong>/)
+  assert.match(html, /Self-hosted models <strong>1100000<\/strong>/)
   assert.match(html, /Not read \(external sources\) <strong>250000<\/strong>/)
   assert.match(html, /Daily \(UTC\)/)
   assert.match(html, /<i class="info">One column per day \(UTC\)\. .*same formula as the tiles/, 'the long explanation sits behind the info icon')

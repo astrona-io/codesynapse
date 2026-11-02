@@ -27,7 +27,7 @@ const agentTokens = computed(() => a.value?.work_tokens ?? a.value?.tokens.total
 const pool = computed(() => [
   { label: 'Cloud agents', value: agentTokens.value, color: 'var(--s-1)', tip: 'fresh input, cache writes and output Claude Code and Codex reported; prompt-cache reads left out' },
   { label: 'Never read (graph answers)', value: graphAvoided.value, color: 'var(--s-2)', tip: 'file tokens the graph tools answered instead' },
-  { label: 'Local models', value: localIn.value + localOut.value, color: 'var(--s-3)', tip: 'ask_local, reviews, memory and other AI work on your machine' },
+  { label: 'Self-hosted models', value: localIn.value + localOut.value, color: 'var(--s-3)', tip: 'ask_local, reviews, memory and other AI work on the installation\'s own models' },
   { label: 'CodeSynapse on cloud models', value: cloudTokens.value, color: 'var(--s-4)', tip: 'AI work routed to a cloud provider' },
 ])
 const poolTotal = computed(() => pool.value.reduce((t, p) => t + p.value, 0))
@@ -80,13 +80,13 @@ const compressionSaved = computed(() => m.value?.compression_saved_dollars ?? nu
 const compressionOn = computed(() => m.value?.compression_enabled ?? true)
 const COMPRESSION_OFF: Record<string, string> = {
   disabled: 'compress_prompts is false in config/llm.yaml',
-  no_local_model: 'no local model to shorten with',
+  no_local_model: 'no self-hosted model to shorten with',
   no_ai: 'no AI providers configured',
 }
 // On, but every task runs on a local model: nothing goes to the cloud to shorten.
 const compressionUnused = computed(() => m.value?.compression_off === 'no_cloud_task')
 const compressionOffHint = computed(() => compressionUnused.value
-  ? 'every task runs on a local model, so there is nothing to shorten; it saves money only for tasks routed to a cloud model'
+  ? 'every task runs on a self-hosted model, so there is nothing to shorten; it saves money only for tasks routed to a cloud model'
   : `${COMPRESSION_OFF[m.value?.compression_off ?? ''] ?? 'not running'}; covers CodeSynapse's own AI tasks and, unless an organisation turned it off, prompts typed through the gateway`)
 // Gateway answers the local model gave, priced at the reference model on the server; null when a local answer reported no usage.
 const gw = computed(() => m.value?.gateway)
@@ -137,11 +137,11 @@ const modelWindow = computed(() => (days.value > 30 ? 'the last 30 days (the met
       <p class="muted small">Every token an agent or CodeSynapse spent, or did not have to spend, in the window. Cloud agents' tokens come from Claude Code and Codex hooks; the rest from CodeSynapse's own counters. Estimates say how they are estimated.</p>
       <h3 class="row-title">Counts</h3>
       <div class="grid kpis">
-        <StatTile label="Kept off cloud models" :value="offCloud === null ? '–' : `${offCloud}%`" tip="never read, or read by a local model" />
+        <StatTile label="Kept off cloud models" :value="offCloud === null ? '–' : `${offCloud}%`" tip="never read, or read by a self-hosted model" />
         <StatTile label="Tokens never read" :value="fmtCompact(a?.avoided_tokens ?? 0)" tip="graph answers and ask_local, estimated" />
-        <StatTile label="Handled by local models" :value="fmtCompact(localIn + localOut)" :hint="`${fmtCompact(localIn)} read · ${fmtCompact(localOut)} written`" />
-        <StatTile label="Prompts pre-briefed" :value="fmtCompact(a?.local_briefs ?? 0)" tip="a local model briefed the agent first" />
-        <StatTile label="Code drafts" :value="fmtCompact(a?.local_drafts ?? 0)" tip="a local model drafted code the agent then checked" />
+        <StatTile label="Handled by self-hosted models" :value="fmtCompact(localIn + localOut)" :hint="`${fmtCompact(localIn)} read · ${fmtCompact(localOut)} written`" />
+        <StatTile label="Prompts pre-briefed" :value="fmtCompact(a?.local_briefs ?? 0)" tip="the self-hosted model briefed the agent first" />
+        <StatTile label="Code drafts" :value="fmtCompact(a?.local_drafts ?? 0)" tip="the self-hosted model drafted code the agent then checked" />
       </div>
       <h3 class="row-title">Money (estimate)</h3>
       <div class="grid kpis">
@@ -154,21 +154,21 @@ const modelWindow = computed(() => (days.value > 30 ? 'the last 30 days (the met
         <StatTile
           v-if="savedParts" label="Saved by shorter prompts"
           :value="compressionUnused ? 'not used' : !compressionOn ? 'off' : compressionSaved === null ? 'unknown' : money(compressionSaved)"
-          :tip="!compressionOn ? compressionOffHint : compressionSaved === null ? 'a cloud model has no price set; not in the total' : 'CodeSynapse\'s own AI tasks, and prompts typed through the gateway unless an organisation turned shortening off: prose a local model shortened before it went to the cloud, at the input price (each gateway rewrite counted once)'"
+          :tip="!compressionOn ? compressionOffHint : compressionSaved === null ? 'a cloud model has no price set; not in the total' : 'CodeSynapse\'s own AI tasks, and prompts typed through the gateway unless an organisation turned shortening off: prose a self-hosted model shortened before it went to the cloud, at the input price (each gateway rewrite counted once)'"
         />
         <StatTile v-if="savedParts" label="Saved by graph answers" :value="graphSaved === null ? 'unknown' : money(graphSaved)" :hint="graphShort" :tip="graphHint" />
         <StatTile v-if="savedParts && src?.fetches" label="Saved by external sources" :value="sourcesSaved === null ? 'unknown' : money(sourcesSaved)" :hint="sourcesHint" :tip="sourcesTip" />
-        <StatTile v-if="savedParts" label="Saved on input" :value="money(savedParts.input)" :hint="`${fmtCompact(Math.max(0, localIn - localCached))} tokens read by local models instead`" />
+        <StatTile v-if="savedParts" label="Saved on input" :value="money(savedParts.input)" :hint="`${fmtCompact(Math.max(0, localIn - localCached))} tokens read by self-hosted models instead`" />
         <StatTile
           v-if="savedParts" label="Saved on cached input"
           :value="localCached ? money(savedParts.cached) : 'none reported'"
-          :hint="localCached ? `${fmtCompact(localCached)} tokens from the local prompt cache` : ''"
-          :tip="localCached ? `${fmtCompact(localCached)} tokens the local models' prompt cache served, at the cache-read price; agents' own prompt cache is never counted` : 'the local runtime reported no prompt-cache hits (Ollama does not report them); agents\' own prompt cache is never counted'"
+          :hint="localCached ? `${fmtCompact(localCached)} tokens from the self-hosted prompt cache` : ''"
+          :tip="localCached ? `${fmtCompact(localCached)} tokens the self-hosted models' prompt cache served, at the cache-read price; agents' own prompt cache is never counted` : 'the self-hosted runtime reported no prompt-cache hits (Ollama does not report them); agents\' own prompt cache is never counted'"
         />
-        <StatTile v-if="savedParts" label="Saved on output" :value="money(savedParts.output)" :hint="`${fmtCompact(localOut)} tokens written locally`" />
+        <StatTile v-if="savedParts" label="Saved on output" :value="money(savedParts.output)" :hint="`${fmtCompact(localOut)} tokens written by self-hosted models`" />
         <StatTile v-if="gw && gw.requests > 0" label="Saved by gateway answers" :value="gwSaved === null ? 'unknown' : money(gwSaved)"
           :hint="gwSaved === null ? `${fmtCompact(gw.local_unmetered)} answers without usage` : `${fmtCompact(gw.local_input_tokens)} read · ${fmtCompact(gw.local_output_tokens)} written`"
-          :tip="gwSaved === null ? `${fmtCompact(gw.local_unmetered)} local answers reported no token usage; not in the total` : `${fmtCompact(gw.local_input_tokens)} read${gw.local_cached_tokens ? ` (${fmtCompact(gw.local_cached_tokens)} from its prompt cache)` : ''} · ${fmtCompact(gw.local_output_tokens)} written locally, at the reference prices`" />
+          :tip="gwSaved === null ? `${fmtCompact(gw.local_unmetered)} self-hosted answers reported no token usage; not in the total` : `${fmtCompact(gw.local_input_tokens)} read${gw.local_cached_tokens ? ` (${fmtCompact(gw.local_cached_tokens)} from its prompt cache)` : ''} · ${fmtCompact(gw.local_output_tokens)} written self-hosted, at the reference prices`" />
       </div>
       <p class="muted small">Gateway requests, response times and timeouts are under <NuxtLink to="/stats/gateway">Statistics → Gateway</NuxtLink>.</p>
       <DonutChart
@@ -219,7 +219,7 @@ const modelWindow = computed(() => (days.value > 30 ? 'the last 30 days (the met
           <article v-for="x in models" :key="x.provider + x.model" class="model">
             <header>
               <strong class="mono">{{ x.model }}</strong>
-              <span class="badge" :class="x.local ? 'badge--green' : 'badge--violet'">{{ x.local ? 'local' : 'cloud' }}</span>
+              <span class="badge" :class="x.local ? 'badge--green' : 'badge--violet'">{{ x.local ? 'self-hosted' : 'cloud' }}</span>
             </header>
             <p class="muted small">
               {{ fmtInt(x.requests) }} requests<template v-if="x.failures"> · {{ fmtInt(x.failures) }} failed</template> · {{ fmtCompact(x.avg_prompt_tokens) }} tokens per prompt
