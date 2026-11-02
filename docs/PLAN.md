@@ -41,7 +41,7 @@ This page is the starting point. Each larger feature has its own plan in [`plans
 | [Text optimisation](plans/TEXT_OPTIMIZATION_PLAN.md) | `fetch_source`, cached and reduced external pages | See the plan |
 | [Agent gateway](plans/GATEWAY_PLAN.md) | Agent model traffic through CodeSynapse, local model first | See the plan |
 | [SARIF import](plans/SARIF_IMPORT_PLAN.md) | Findings of external security tools, each naming the tool that found it | Phase 1 (upload and storage) done |
-| [OpenFGA authorisation](plans/OPENFGA_PLAN.md) | Access decisions in OpenFGA, permissions named `resource:read\|write\|full` | Proposed |
+| [OpenFGA authorisation](plans/OPENFGA_PLAN.md) | Access decisions in OpenFGA, fine-grained `resource.area:level` permissions and custom roles | Proposed |
 
 ## Architecture
 
