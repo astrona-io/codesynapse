@@ -51,10 +51,12 @@ import (
 //     tool or a native one. Stop reports it with the number of reads the
 //     guard turned back, so Statistics shows whether agents use CodeSynapse
 //     first. It never blocks.
-//   - hook bash (PreToolUse on Bash): hints, once per class and session, at the
-//     CodeSynapse tool that answers git status/diff/log/blame, a text search,
-//     a file read or a whole test run with less output, and counts each one
-//     (bash.go). It never blocks.
+//   - hook bash (PreToolUse on Bash): hints at the CodeSynapse tool that
+//     answers git status/diff/log/blame, a text search, a file read or a whole
+//     test run with less output, and counts each one (bash.go). Reads and
+//     searches are steered every time, the other classes once per session; a
+//     plain cat of a large tracked source file is turned back like a whole
+//     Read (CODESYNAPSE_BASH_GUARD=false keeps the once-per-class hints only).
 //   - hook webfetch (PreToolUse on WebFetch): the first WebFetch in a session
 //     of a page fetch_source already cached is pointed at fetch_source
 //     (webfetch.go). Uncached pages and a second WebFetch go through.
@@ -261,7 +263,7 @@ func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 	case "lookup":
 		noteLookup(in)
 	case "bash":
-		out = bashHint(in)
+		out = bashHint(ctx, in)
 	case "webfetch":
 		out = fetchSteer(in)
 	case "session":
@@ -289,10 +291,7 @@ func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 
 // readGuard turns back the first whole read of a large file in a session.
 func readGuard(ctx context.Context, in toolHookInput) map[string]any {
-	limit := readGuardLines
-	if v, err := strconv.Atoi(os.Getenv("CODESYNAPSE_READ_GUARD_LINES")); err == nil {
-		limit = v
-	}
+	limit := readGuardLimit()
 	file := in.ToolInput.FilePath
 	if limit <= 0 || file == "" || in.ToolInput.Offset > 0 || in.ToolInput.Limit > 0 {
 		return nil
@@ -315,12 +314,27 @@ func readGuard(ctx context.Context, in toolHookInput) map[string]any {
 	s.Read = append(s.Read, file)
 	s.Turned++
 	saveState(state, s)
+	return turnBack(file, lines, "To read the whole file anyway, read it again.")
+}
+
+// readGuardLimit is the line count a whole read must reach to be turned back;
+// 0 or less turns the guard off.
+func readGuardLimit() int {
+	if v, err := strconv.Atoi(os.Getenv("CODESYNAPSE_READ_GUARD_LINES")); err == nil {
+		return v
+	}
+	return readGuardLines
+}
+
+// turnBack is the PreToolUse answer that sends a whole read of a large file
+// back with what to do instead; again says how to read it anyway.
+func turnBack(file string, lines int, again string) map[string]any {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s has %d+ lines. To learn what it says, call ask_local with your question and this path: a local model reads it and answers with file:line citations, so the file stays out of your context. To change it, read only the ranges you need (Read with offset and limit, or read_ranges for several at once), or call file_outline for its symbols with signatures and line ranges.", filepath.Base(file), lines)
 	if outline := goOutline(file); len(outline) > 0 {
 		b.WriteString(" Outline:\n" + strings.Join(outline, "\n"))
 	}
-	b.WriteString("\nTo read the whole file anyway, read it again.")
+	b.WriteString("\n" + again)
 	return map[string]any{"hookSpecificOutput": map[string]any{
 		"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": b.String(),
 	}}
