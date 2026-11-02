@@ -5,6 +5,8 @@ package ingest
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -52,6 +54,12 @@ type Options struct {
 	PreviousIdentities string
 	// CommitLimit is how many recent commits to index; 0 skips history.
 	CommitLimit int
+	// CacheDir, when set, keeps what the history secret scan found so the
+	// next run of the same repository reads only new commits and changed
+	// files. It holds hashes, paths and line numbers, never source or
+	// credential values. A directory inside Root is ignored: the repository
+	// must not be able to supply its own cache.
+	CacheDir string
 	// AllowNetwork lets `go list` download modules.
 	AllowNetwork bool
 	// ModuleProxy lets go list fetch missing modules from the public module
@@ -245,7 +253,7 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 			// History is enrichment; a shallow clone or odd repo should not
 			// block indexing the code.
 			logger.Warn("skipping git history", logx.Error(err))
-		} else if err := githistory.ScanSecrets(ctx, opts.Repo, root, opts.CommitLimit, g); err != nil {
+		} else if err := githistory.ScanSecrets(ctx, opts.Repo, root, opts.CommitLimit, secretCacheFile(opts.CacheDir, root, opts.Repo), g); err != nil {
 			logger.Warn("skipping the git history secret scan", logx.Error(err))
 		}
 	}
@@ -509,4 +517,25 @@ func licenseDeps(mods []vuln.Module) []license.Dependency {
 			License: m.License, Source: m.LicenseSource, Indirect: m.Indirect, Dev: m.Dev}
 	}
 	return deps
+}
+
+// secretCacheFile is where the history secret scan of repo keeps its cache,
+// or "" for none: no directory, or one inside the checkout at root.
+func secretCacheFile(dir, root, repo string) string {
+	if dir == "" {
+		return ""
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return ""
+	}
+	if rel, err := filepath.Rel(absRoot, absDir); err != nil || filepath.IsLocal(rel) || rel == "." {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(repo))
+	return filepath.Join(absDir, "secrets-"+hex.EncodeToString(sum[:12])+".json")
 }

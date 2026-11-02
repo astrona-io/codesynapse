@@ -195,6 +195,9 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	s.jobs.licenseLookup = cfg.LicenseLookup
 	s.jobs.dataflow = cfg.Dataflow
 	s.jobs.moduleProxy = cfg.ModuleProxy
+	if cfg.Workspace != "" {
+		s.jobs.cacheDir = filepath.Join(cfg.Workspace, ".codesynapse", "ingest-cache")
+	}
 	s.jobs.Policy = s.approveIngestPolicy
 	s.jobs.Publish = s.publishRepo
 	s.jobs.Ingested = s.afterIngest

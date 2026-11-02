@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -107,9 +109,45 @@ const (
 // extended regular expression, git log -G), newest first, showing only
 // the files that matched. Output past MaxDiffBytes is an error.
 func LogPatches(ctx context.Context, dir string, limit int, pickaxe string) ([]byte, error) {
+	return LogPatchesRange(ctx, dir, limit, pickaxe, "", "HEAD")
+}
+
+// LogPatchesRange is LogPatches for the commits reachable from to and, when
+// from is not empty, not from from.
+func LogPatchesRange(ctx context.Context, dir string, limit int, pickaxe, from, to string) ([]byte, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
-	return Run(ctx, dir, "log", "--no-color", "--no-merges", "--no-renames", "--no-ext-diff", "--no-textconv",
-		"-p", "--unified=0", "-G"+pickaxe, "--format="+recSep+"%H"+fieldSep+"%aI", "-n", strconv.Itoa(limit), "HEAD", "--")
+	if err := ValidateRev(to); err != nil {
+		return nil, err
+	}
+	args := []string{"log", "--no-color", "--no-merges", "--no-renames", "--no-ext-diff", "--no-textconv",
+		"-p", "--unified=0", "-G" + pickaxe, "--format=" + recSep + "%H" + fieldSep + "%aI", "-n", strconv.Itoa(limit), to}
+	if from != "" {
+		if err := ValidateRev(from); err != nil {
+			return nil, err
+		}
+		args = append(args, "--not", from)
+	}
+	return Run(ctx, dir, append(args, "--")...)
+}
+
+// IsAncestor reports whether ancestor is reachable from rev. A revision the
+// repository does not have is an error, not false.
+func IsAncestor(ctx context.Context, dir, ancestor, rev string) (bool, error) {
+	if err := ValidateRev(ancestor); err != nil {
+		return false, err
+	}
+	if err := ValidateRev(rev); err != nil {
+		return false, err
+	}
+	_, err := Run(ctx, dir, "merge-base", "--is-ancestor", ancestor, rev)
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &exit) && exit.ExitCode() == 1:
+		return false, nil
+	}
+	return false, err
 }
