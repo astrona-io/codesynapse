@@ -195,9 +195,12 @@ The reasons a request was not answered locally are a fixed list:
 |---|---|
 | `not_eligible` | The installation's own eligibility rule does not offer this model to the local model |
 | `local_first_off` | The organisation turned `local_first` off, so only haiku-class requests are offered locally, and this one asked for a larger model |
-| `bad_request` | The gateway could not read the request: broken JSON, no messages, a role other than `user` or `assistant`, or content that is neither text nor blocks. The cloud answers it, usually with its own error |
+| `bad_request` | The gateway could not read the request: broken JSON or no messages. The cloud answers it, usually with its own error |
+| `bad_role` | A message has a role other than `user`, `assistant` or `system` |
+| `bad_content` | A message's content is neither text nor a list of blocks |
+| `encode_error` | The translated request could not be encoded for the local server |
 | `system_not_text` | The system prompt is neither a string nor a list of text blocks |
-| `unsupported_block` | A message holds a block the local model cannot take, such as `server_tool_use`, `web_search_tool_result` or an unknown block type, also inside a tool result. Text, `tool_use`, `tool_result`, `search_result` and `tool_reference` blocks are converted, and `cache_control` and citation settings are dropped |
+| `unsupported_block` | A message holds a block the local model cannot take, such as `server_tool_use`, `web_search_tool_result` or an unknown block type, also inside a tool result. Text, `tool_use`, `tool_result`, `search_result` and `tool_reference` blocks are converted, and `cache_control` and citation settings are dropped. System messages between turns (Claude Code's hook context) reach the local model as text in the user turn beside them, and the tools their `tool_addition` blocks add are offered to it |
 | `unsupported_tool` | The request offers a tool the local model cannot run (a server tool such as `web_search`, `web_fetch`, `code_execution` or `tool_search_tool_*`, or an Anthropic-defined client tool such as `bash_*` or `text_editor_*`), or a `tool_choice` it cannot follow. Such a request stays in the cloud, because answering without the tool would change what the request asked for. Deferred tools (`defer_loading: true`) are not a reason: the local model is offered only those a `tool_reference` loaded, as the cloud does |
 | `too_large` | The request does not fit the local model's context or the body limit |
 | `has_thinking` | The request asks for thinking or sends thinking back, and the organisation turned `local_thinking` off |
