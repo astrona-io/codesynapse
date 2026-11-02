@@ -50,6 +50,7 @@ async function renderComponent(t, file, globals, props = {}) {
   app.component('ColumnChart', { template: '<div />' })
   app.component('RankList', { props: ['rows'], template: '<ul class="rank"><li v-for="r in rows ?? []" :key="r.label">{{ r.label }} {{ r.value }}</li></ul>' })
   app.component('SeriesCard', { props: ['panel', 'yMax', 'label'], template: '<figure :data-panel="panel" :data-ymax="yMax" :data-label="label ? label(\'slot_lost\') : undefined" />' })
+  app.component('GatewayTurns', { props: ['turns'], template: '<figure :data-turns="turns.map((t) => t.turn).join(\',\')" />' })
   app.component('InfoTip', { props: ['text', 'term', 'label'], template: '<i class="info">{{ text }}</i>' })
   app.component('NuxtLink', { template: '<a><slot /></a>' })
   app.component('DataState', await compileComponent(t, './DataState.vue'))
@@ -272,7 +273,7 @@ test('models and savings split the token pool without counting ask_local twice',
   assert.match(html, /prompts typed through the gateway unless an organisation turned shortening off/)
   assert.match(html, /Saved by gateway answers \$0\.25 /)
   assert.match(html, /Statistics → Gateway/)
-  assert.doesNotMatch(html, /Gateway requests \d|Local model timeouts/, 'the gateway tiles moved to their own page')
+  assert.doesNotMatch(html, /Gateway requests \d|(Local|Self-hosted) model timeouts/, 'the gateway tiles moved to their own page')
 })
 
 test('gateway page: tiles, quantile charts on one scale and reasons as bars', async (t) => {
@@ -282,7 +283,13 @@ test('gateway page: tiles, quantile charts on one scale and reasons as bars', as
     fallthroughs: 8, fallthrough_reasons: { queue_timeout: 3, answer_timeout: 1, too_large: 4 }, timeouts: 4, timeout_share_pct: 10, cloud_without_reason: 6,
     local_avg_seconds: 2, local_p95_seconds: 4.5, cloud_avg_seconds: 12.4, cloud_p95_seconds: null,
     queue_avg_seconds: 0.25, queue_p95_seconds: 19.5, local_answer_avg_seconds: 1.5,
+    local_provider: 'gpu-box', local_model: 'qwen',
+    turns: [
+      { turn: '1-2', requests: 5, local: 4, cloud: 1, local_share_pct: 80, metered: 0, cloud_input_p50: null, cloud_input_p90: null, cloud_input_avg: null, cached_share_pct: null },
+      { turn: '31-100', requests: 3, local: 0, cloud: 3, local_share_pct: 0, metered: 3, cloud_input_p50: 61000, cloud_input_p90: 95000, cloud_input_avg: 66667, cached_share_pct: 90 },
+    ],
   }
+  const tiers = { machine: 25, self_hosted: 46, cloud: 5, self_hosted_models: ['gpu-box/qwen'] }
   const line = (name, values) => ({ name, values, total: Math.max(...values) })
   const panels = {
     gateway_latency_local: { status: 200, data: { series: [line('p50', [0.2, 0.4]), line('p99', [1.5, 3])] } },
@@ -290,7 +297,7 @@ test('gateway page: tiles, quantile charts on one scale and reasons as bars', as
   }
   const render = (gw) => renderComponent(t, '../pages/stats/gateway.vue', {
     useStatistics: () => ({ days: ref(7), error: ref(null), pending: ref(false), s: ref(null) }),
-    useApiGet: () => ({ data: ref({ range: '7d', models: [], gateway: gw }), error: ref(null), pending: ref(false) }),
+    useApiGet: () => ({ data: ref({ range: '7d', models: [], gateway: gw, tiers }), error: ref(null), pending: ref(false) }),
     useSeriesBatch: () => ({ panels: ref(panels), pending: ref(false), refresh: () => {} }),
     windowLabel,
     seriesRangeFor: () => '7d',
@@ -300,9 +307,14 @@ test('gateway page: tiles, quantile charts on one scale and reasons as bars', as
     gatewayReasonLabel, gatewayReasonRows, gatewayRouteLabel,
   }, {})
   const html = await render(gateway)
-  assert.match(html, /Gateway requests 40 30 local · 10 cloud · 0 refused /)
+  assert.match(html, /Gateway requests 40 30 self-hosted · 10 cloud · 0 refused /)
   assert.match(html, /Failed requests 3 2 cloud 4xx · 1 cloud 5xx <i>requests answered with a 4xx or 5xx status\. Cloud ones are the provider&#39;s own answer/, 'failures name the route that answered them')
-  assert.match(html, /Answered locally 75% /)
+  assert.match(html, /Answered self-hosted 75% of gateway requests, by gpu-box\/qwen /, 'the model by its configured name')
+  assert.match(html, /Your machine 25 answers with no model /)
+  assert.match(html, /CodeSynapse model \(self-hosted\) 46 gpu-box\/qwen /)
+  assert.match(html, /Cloud 5 model requests /)
+  assert.doesNotMatch(html, /\blocal model\b|Answered locally/, 'the installation\'s model is never called just local')
+  assert.match(html, /data-turns="1-2,31-100"/, 'the turn chart gets every bucket')
   for (const p of ['gateway_local_share', 'gateway_routes', 'gateway_fallthrough', 'gateway_latency_local', 'gateway_latency_cloud', 'gateway_latency_avg', 'gateway_queue_wait', 'gateway_timeouts']) {
     assert.match(html, new RegExp(`data-panel="${p}"`), `${p} is drawn`)
   }
@@ -310,13 +322,13 @@ test('gateway page: tiles, quantile charts on one scale and reasons as bars', as
   assert.match(html, /data-panel="gateway_latency_cloud" data-ymax="9"/)
   assert.match(html, /estimates from histogram buckets/)
   assert.match(html, /<li>too large 4<\/li><li>waited too long for a slot 3<\/li><li>answered too slowly 1<\/li>/, 'reasons are bars, largest first')
-  assert.match(html, /<div data-tone="warning">Local model timeouts 4 10% of requests · 3 queue · 1 answer <i>requests that went to the cloud because the local model was too slow/)
-  assert.match(html, /Not answered locally 8 4 too large · 3 waited too long for a slot <i>by reason: 4 too large · 3 waited too long for a slot · 1 answered too slowly\./)
+  assert.match(html, /<div data-tone="warning">Self-hosted model timeouts 4 10% of requests · 3 queue · 1 answer <i>requests that went to the cloud because the self-hosted model was too slow/)
+  assert.match(html, /Not answered self-hosted 8 4 too large · 3 waited too long for a slot <i>by reason: 4 too large · 3 waited too long for a slot · 1 answered too slowly\./)
   assert.match(html, /data-panel="gateway_fallthrough"[^>]*data-label="slot lost"/, 'the reason trend names its lines in plain words, new codes included')
   assert.match(html, /6 cloud requests have no recorded reason/)
-  assert.match(html, /Response time, local 2\.0 s p95 4\.5 s /)
+  assert.match(html, /Response time, self-hosted 2\.0 s p95 4\.5 s /)
   assert.match(html, /Response time, cloud 12 s p95 – /, 'a missing quantile is a dash, never 0')
-  assert.match(html, /Queue wait, local 0\.3 s p95 20 s <i>[^<]*answers then took 1\.5 s on average/)
+  assert.match(html, /Queue wait, self-hosted 0\.3 s p95 20 s <i>[^<]*answers then took 1\.5 s on average/)
 
   await t.test('a reason code the page does not know yet is listed', async () => {
     const html = await render({ ...gateway, fallthrough_reasons: { slot_lost: 9, too_large: 4 } })
@@ -324,15 +336,15 @@ test('gateway page: tiles, quantile charts on one scale and reasons as bars', as
   })
   await t.test('no timeouts are not highlighted', async () => {
     const calm = await render({ ...gateway, timeouts: 0, timeout_share_pct: 0, fallthroughs: 0, fallthrough_reasons: {} })
-    assert.match(calm, /<div>Local model timeouts 0 0% of requests/)
-    assert.match(calm, /Not answered locally 0 +<i>the local model answered every request offered to it/)
+    assert.match(calm, /<div>Self-hosted model timeouts 0 0% of requests/)
+    assert.match(calm, /Not answered self-hosted 0 +<i>the self-hosted model answered every request offered to it/)
   })
   await t.test('an older API without timings shows no empty tiles', async () => {
     const old = { ...gateway }
-    for (const k of ['fallthroughs', 'fallthrough_reasons', 'timeouts', 'timeout_share_pct', 'local_avg_seconds', 'local_p95_seconds', 'cloud_avg_seconds', 'cloud_p95_seconds', 'queue_avg_seconds', 'queue_p95_seconds', 'local_answer_avg_seconds']) delete old[k]
+    for (const k of ['fallthroughs', 'fallthrough_reasons', 'timeouts', 'timeout_share_pct', 'local_avg_seconds', 'local_p95_seconds', 'cloud_avg_seconds', 'cloud_p95_seconds', 'queue_avg_seconds', 'queue_p95_seconds', 'local_answer_avg_seconds', 'local_provider', 'local_model', 'turns']) delete old[k]
     const html = await render(old)
-    assert.match(html, /Answered locally 75% /)
-    assert.doesNotMatch(html, /Local model timeouts|Response time, (local|cloud)|Queue wait, local/)
+    assert.match(html, /Answered self-hosted 75% of gateway requests, by the self-hosted model /)
+    assert.doesNotMatch(html, /Self-hosted model timeouts|Response time, (self-hosted|cloud)|Queue wait, self-hosted|data-turns/)
   })
 })
 

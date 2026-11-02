@@ -101,6 +101,16 @@ type Meta struct {
 	// FirstByte is the time from the request to the first byte of the
 	// answer, zero when nothing was written.
 	FirstByte time.Duration
+	// Messages is the number of messages in a /v1/messages request: how far
+	// into its conversation the agent is, without any session ID. It drops
+	// when the agent compacts the conversation.
+	Messages int
+	// CloudIn, CloudCached, CloudCacheWrite and CloudOut are the usage the
+	// cloud reported for its answer to /v1/messages; CloudMetered says it
+	// reported any. CloudIn is the input its prompt cache did not serve or
+	// store, so the whole input is the three added up.
+	CloudIn, CloudCached, CloudCacheWrite, CloudOut int
+	CloudMetered                                    bool
 }
 
 // countWriter counts the bytes of the response and notes when the first
@@ -230,7 +240,7 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			meta.Shortened, meta.Removed, meta.Saved, meta.ShortenSkip = sh.Changed, sh.Removed, sh.New, sh.Skip
 		}
 		meta.noteForwarded(r.Context(), sent, body)
-		status, err := g.forward(r.Context(), w, r, upstreamPath, body)
+		status, err := g.forward(r.Context(), w, r, upstreamPath, body, &meta)
 		if err != nil {
 			logx.FromContext(r.Context()).Warn("gateway forward failed", "error", err)
 			if status == 0 {
@@ -281,18 +291,25 @@ func inspect(path string, body []byte) Meta {
 		Model  string            `json:"model"`
 		Stream bool              `json:"stream"`
 		Tools  []json.RawMessage `json:"tools"`
+		// struct{} counts the messages without copying them.
+		Messages []struct{} `json:"messages"`
 	}
 	_ = json.Unmarshal(body, &v) // a bad body is the upstream's to refuse
 	model := v.Model
 	if len(model) > 64 {
 		model = model[:64]
 	}
-	return Meta{Path: path, Model: model, Stream: v.Stream, Bytes: len(body), Tools: len(v.Tools) > 0}
+	m := Meta{Path: path, Model: model, Stream: v.Stream, Bytes: len(body), Tools: len(v.Tools) > 0}
+	if path == "/v1/messages" {
+		m.Messages = len(v.Messages)
+	}
+	return m
 }
 
 // forward sends the request to the upstream and streams the answer. It returns
-// the upstream status, or 0 when nothing was written yet.
-func (g *Anthropic) forward(ctx context.Context, w http.ResponseWriter, r *http.Request, path string, body []byte) (int, error) {
+// the upstream status, or 0 when nothing was written yet. The usage of a
+// successful /v1/messages answer goes into meta.
+func (g *Anthropic) forward(ctx context.Context, w http.ResponseWriter, r *http.Request, path string, body []byte, meta *Meta) (int, error) {
 	base := g.Upstream
 	if base == "" {
 		base = AnthropicUpstream
@@ -322,11 +339,17 @@ func (g *Anthropic) forward(ctx context.Context, w http.ResponseWriter, r *http.
 	}
 	w.Header().Set(RouteHeader, "cloud")
 	w.WriteHeader(resp.StatusCode)
+	var usage *cloudUsage
+	if path == "/v1/messages" && resp.StatusCode == http.StatusOK {
+		usage = newCloudUsage(resp.Header.Get("Content-Type"))
+		defer func() { usage.finish(); usage.note(meta) }()
+	}
 	flusher, _ := w.(http.Flusher)
 	buf := make([]byte, 16<<10)
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
+			usage.Write(buf[:n])
 			if _, werr := w.Write(buf[:n]); werr != nil {
 				return resp.StatusCode, nil // the agent went away
 			}

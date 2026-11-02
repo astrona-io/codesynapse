@@ -87,6 +87,64 @@ func GatewayReason(reason string) string {
 	return "other"
 }
 
+// gatewayTurnLimits are the upper ends of the turn buckets; a larger message
+// count is the last bucket. Claude Code adds two messages per tool call.
+var gatewayTurnLimits = []struct {
+	upTo  int
+	label string
+}{{2, "1-2"}, {10, "3-10"}, {30, "11-30"}, {100, "31-100"}, {300, "101-300"}}
+
+// GatewayTurnLast is the bucket past the last limit.
+const GatewayTurnLast = "301+"
+
+// GatewayTurn is the turn bucket of a request that carried messages
+// messages, or "" for none (count_tokens, a body without messages).
+func GatewayTurn(messages int) string {
+	if messages <= 0 {
+		return ""
+	}
+	for _, l := range gatewayTurnLimits {
+		if messages <= l.upTo {
+			return l.label
+		}
+	}
+	return GatewayTurnLast
+}
+
+// GatewayTurnBuckets lists the turn buckets in order.
+func GatewayTurnBuckets() []string {
+	out := make([]string, 0, len(gatewayTurnLimits)+1)
+	for _, l := range gatewayTurnLimits {
+		out = append(out, l.label)
+	}
+	return append(out, GatewayTurnLast)
+}
+
+// CloudTokens is the usage the cloud reported for one answer.
+type CloudTokens struct {
+	Input, Cached, CacheWrite, Output int
+	Metered                           bool
+}
+
+// RecordGatewayTurn records one answered /v1/messages request in its turn
+// bucket, and the cloud's usage when it answered and reported any.
+func RecordGatewayTurn(ctx context.Context, messages int, route string, u CloudTokens) {
+	turn := GatewayTurn(messages)
+	if turn == "" || (route != "local" && route != "cloud") {
+		return
+	}
+	GatewayTurns.IncContext(ctx, turn, route)
+	if route != "cloud" || !u.Metered {
+		return
+	}
+	in, cached, write, out := max(0, u.Input), max(0, u.Cached), max(0, u.CacheWrite), max(0, u.Output)
+	GatewayCloudInput.ObserveContext(ctx, float64(in+cached+write), turn)
+	GatewayCloudTokens.AddContext(ctx, float64(in), turn, "input")
+	GatewayCloudTokens.AddContext(ctx, float64(cached), turn, "cached")
+	GatewayCloudTokens.AddContext(ctx, float64(write), turn, "cache_write")
+	GatewayCloudTokens.AddContext(ctx, float64(out), turn, "output")
+}
+
 // RecordGatewayDuration records how long a gateway request took.
 func RecordGatewayDuration(ctx context.Context, route string, d time.Duration) {
 	GatewayDuration.ObserveContext(ctx, max(0, d.Seconds()), GatewayRoute(route))

@@ -168,24 +168,34 @@ They send the gateway key as `Authorization: Bearer csk_...`. These paths are **
 
 ## Seeing how well the local model keeps up
 
-**Statistics → Gateway** shows the gateway on its own page, with the same window chips as the other Statistics pages. Its tiles cover the selected window:
+**Statistics → Gateway** shows the gateway on its own page, with the same window chips as the other Statistics pages. The page calls the gateway's local model "the CodeSynapse model (self-hosted)": it is the installation's own model, which may run on another host, not the developer's machine. Where the page names it, it uses the provider name and model from `config/llm.yaml`, never a URL or host. Its tiles cover the selected window:
 
 | Tile | What it shows |
 |---|---|
-| Gateway requests, Answered locally | All requests by route, and the share the local model answered |
-| Local model timeouts | Requests that went to the cloud because the local model was too slow: they waited too long for its queue slot (`queue_timeout`) or for its answer (`answer_timeout`). The tile is tinted when there is at least one. A share above a few percent means the local model is overloaded or too slow for its traffic |
-| Not answered locally | Every request the local model did not answer, by reason (below) |
-| Response time, local / cloud | Average time from request to last byte by the route that answered, with the 95th percentile. The cloud figure includes any time first spent on the local model |
-| Queue wait, local | How long requests waited for the local model's slot, average and 95th percentile, and how long its own answers took |
+| Gateway requests, Answered self-hosted | All requests by route, and the share the self-hosted model answered |
+| Self-hosted model timeouts | Requests that went to the cloud because the self-hosted model was too slow: they waited too long for its queue slot (`queue_timeout`) or for its answer (`answer_timeout`). The tile is tinted when there is at least one. A share above a few percent means the model is overloaded or too slow for its traffic |
+| Not answered self-hosted | Every request the self-hosted model did not answer, by reason (below) |
+| Response time, self-hosted / cloud | Average time from request to last byte by the route that answered, with the 95th percentile. The cloud figure includes any time first spent on the self-hosted model |
+| Queue wait, self-hosted | How long requests waited for the self-hosted model's slot, average and 95th percentile, and how long its own answers took |
 | Bytes in / out | Request and response sizes through the gateway |
+
+**Where work ran** counts the window's work in three places:
+
+| Tile | What it counts |
+|---|---|
+| Your machine | Calls the Claude Code bridge answered on the developer's machine with no model: git and gh tools, `read_ranges`, code graph answers for unsynced changes and fetched pages (`mcp_local_answers_total{outcome="recorded"}`, without `ask_local` and `local_draft`, whose model work is counted in the next tile) |
+| CodeSynapse model (self-hosted) | Requests a provider configured as local answered: gateway answers, `ask_local`, `local_draft`, briefings, page extracts, prompt shortening and AI tasks routed there. The hint names each provider and model |
+| Cloud | Gateway requests passed on to the cloud, and CodeSynapse's AI tasks on any other provider |
+
+**Over a conversation** shows whether the cloud agent's input grows as a chat goes on. Each gateway request to `/v1/messages` is put in a bucket by the number of messages it carries (1-2, 3-10, 11-30, 31-100, 101-300, 301+), which stands in for how far into the chat it is; no chat or session ID is recorded. Per bucket the chart shows how many requests the self-hosted model answered and how many went to the cloud, and for the cloud answers the input tokens per answer (median as a bar, 90th percentile as a tick, all rows on one scale) and the share read from Anthropic's prompt cache. The input is the sum of `input_tokens`, `cache_read_input_tokens` and `cache_creation_input_tokens` from the usage Anthropic sends with the answer; the gateway reads only those numbers while the answer passes through, at most one 16 KiB line of a stream or 1 MiB of a plain answer, and never the text. A row shows "no cloud usage reported" when no cloud answer in it carried usage. Calls answered on your machine are not part of a chat request, so they are not split by bucket.
 
 What gateway answers saved stays on **Statistics → Models & savings** as "Saved by gateway answers", because it is part of the total saved there.
 
 Below the tiles, the page charts the same over time from the metrics store, which keeps 30 days (a 90-day window shows the last 30):
 
-- **Response time, local model** and **Response time, cloud**: the 50th, 75th, 95th and 99th percentile as lines, one chart per route. The two charts share one y axis by default, so the route whose lines sit lower is the faster one; "Own scale" gives each its own. The percentiles are `histogram_quantile` estimates from the request-duration histogram, whose buckets end at 5, 10, 25, 50, 100, 250 and 500 ms and 1, 2.5, 5, 10, 30, 60, 120 and 300 s, so a value is only as precise as the bucket it falls in.
-- **Gateway response time (average)** by route, **Local model queue wait** and **Local model timeouts**, as lines.
-- **Not answered locally, by reason**: the fall-through reasons for the window, as bars, largest first.
+- **Response time, self-hosted model** and **Response time, cloud**: the 50th, 75th, 95th and 99th percentile as lines, one chart per route. The two charts share one y axis by default, so the route whose lines sit lower is the faster one; "Own scale" gives each its own. The percentiles are `histogram_quantile` estimates from the request-duration histogram, whose buckets end at 5, 10, 25, 50, 100, 250 and 500 ms and 1, 2.5, 5, 10, 30, 60, 120 and 300 s, so a value is only as precise as the bucket it falls in.
+- **Gateway response time (average)** by route, **Self-hosted model queue wait** and **Self-hosted model timeouts**, as lines.
+- **Not answered self-hosted, by reason**: the fall-through reasons for the window, as bars, largest first.
 
 Platform administrators see the response-time percentiles across organisations under **Administration → Statistics**. A route fewer than three organisations used in the window is hidden there, and a reason fewer than three organisations share is folded into "other". Yesterday's totals are also kept for 400 days in the daily platform statistics (`gateway` metric), so they outlive the metrics store.
 

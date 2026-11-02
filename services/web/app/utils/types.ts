@@ -935,7 +935,24 @@ export interface GatewayStat {
   local_avg_seconds?: number | null; local_p95_seconds?: number | null
   cloud_avg_seconds?: number | null; cloud_p95_seconds?: number | null
   queue_avg_seconds?: number | null; queue_p95_seconds?: number | null; local_answer_avg_seconds?: number | null
+  // The self-hosted model the gateway offers requests to, by its configured
+  // provider name and model (never an address). Absent when there is none.
+  local_provider?: string; local_model?: string
+  // One row per turn bucket (messages in the request), in order. Absent from older APIs.
+  turns?: GatewayTurn[]
 }
+// Gateway requests that carried a number of messages in the turn bucket:
+// local (self-hosted) and cloud answers, and the cloud input per answer
+// (median, p90, mean; cached included) with the share its cache served.
+// The token figures are null when no cloud answer reported usage.
+export interface GatewayTurn {
+  turn: string; requests: number; local: number; cloud: number; local_share_pct: number; metered: number
+  cloud_input_p50: number | null; cloud_input_p90: number | null; cloud_input_avg: number | null; cached_share_pct: number | null
+}
+// Where the window's work ran: on the developer's machine (no model),
+// on the installation's own models (self-hosted, possibly another host),
+// or in the cloud. self_hosted_models are "provider/model" names.
+export interface WorkTiers { machine: number; self_hosted: number; cloud: number; self_hosted_models: string[] }
 export interface ModelStats {
   range: string; models: ModelStat[]
   // Cloud spend and the dollars prompt compression saved; null when a price is missing.
@@ -944,6 +961,7 @@ export interface ModelStats {
   // disabled, no_local_model or no_ai. The gateway shortens typed prompts unless an organisation turned it off.
   compression_enabled?: boolean; compression_off?: 'disabled' | 'no_local_model' | 'no_ai' | 'no_cloud_task'
   gateway?: GatewayStat
+  tiers?: WorkTiers
   reference_price?: ReferencePrice
 }
 export interface ReferencePrice { provider: string; model: string; input_per_mtok: number; output_per_mtok: number; cached_input_per_mtok?: number; cache_write_per_mtok?: number; caches_by_default?: boolean; estimate?: boolean; source?: string; checked?: string }

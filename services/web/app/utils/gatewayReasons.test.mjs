@@ -8,7 +8,7 @@ test('known reasons read as plain language, new codes still show', () => {
   assert.equal(gatewayReasonLabel('slot_lost'), 'slot lost', 'a code the UI does not know yet is spelled out')
   assert.equal(gatewayReasonLabel('not-eligible_tools'), 'not eligible tools')
   assert.equal(gatewayReasonLabel(''), 'unknown')
-  assert.equal(gatewayRouteLabel('local'), 'local model')
+  assert.equal(gatewayRouteLabel('local'), 'CodeSynapse model (self-hosted)', 'never just local: it is not the developer\'s machine')
   assert.equal(gatewayRouteLabel('shadow'), 'shadow')
 })
 

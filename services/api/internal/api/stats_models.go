@@ -88,6 +88,51 @@ type ModelStats struct {
 	CompressionOff     string `json:"compression_off,omitempty"`
 	// Gateway counts the model requests agents sent through the gateway.
 	Gateway GatewayStat `json:"gateway"`
+	// Tiers says where the work in the window ran.
+	Tiers WorkTiers `json:"tiers"`
+}
+
+// WorkTiers counts work by where it ran. Machine: calls the Claude Code
+// bridge answered on the developer's machine without any model (git and gh
+// tools, read_ranges, working-tree graph answers, fetch_source). SelfHosted:
+// requests the installation's own models answered (a provider whose
+// configuration is local: the gateway's local route, ask_local, local_draft,
+// briefings, page extracts, prompt shortening and CodeSynapse's AI tasks
+// routed there); it may run on another host than CodeSynapse. Cloud: the
+// gateway's cloud route and CodeSynapse's tasks on any other provider.
+type WorkTiers struct {
+	Machine    float64 `json:"machine"`
+	SelfHosted float64 `json:"self_hosted"`
+	Cloud      float64 `json:"cloud"`
+	// SelfHostedModels names the self-hosted models that did work, as
+	// "provider/model" from the configuration; never an address.
+	SelfHostedModels []string `json:"self_hosted_models"`
+}
+
+// machineModelTools are bridge calls whose answer a self-hosted model wrote;
+// llm_requests_total counts that work, so the machine tier leaves them out.
+var machineModelTools = map[string]bool{"ask_local": true, "local_draft": true}
+
+// GatewayTurn is the gateway's traffic of one turn bucket: requests that
+// carried that many messages (a conversation grows by two per tool call and
+// shrinks when the agent compacts it).
+type GatewayTurn struct {
+	Turn string `json:"turn"`
+	// Local is answered by the self-hosted model, Cloud by the cloud.
+	Requests      float64 `json:"requests"`
+	Local         float64 `json:"local"`
+	Cloud         float64 `json:"cloud"`
+	LocalSharePct float64 `json:"local_share_pct"`
+	// Metered is the cloud answers that reported usage, which the token
+	// figures cover. CloudInputP50/P90 are the median and 90th percentile of
+	// one answer's whole input (cached included), CloudInputAvg its mean,
+	// and CachedSharePct the part of that input the cloud's prompt cache
+	// served. Nil when no cloud answer reported usage.
+	Metered        float64  `json:"metered"`
+	CloudInputP50  *float64 `json:"cloud_input_p50"`
+	CloudInputP90  *float64 `json:"cloud_input_p90"`
+	CloudInputAvg  *float64 `json:"cloud_input_avg"`
+	CachedSharePct *float64 `json:"cached_share_pct"`
 }
 
 // GatewayStat is the gateway's traffic in the window. Routes: local (the
@@ -145,6 +190,13 @@ type GatewayStat struct {
 	QueueAvgSeconds       *float64 `json:"queue_avg_seconds"`
 	QueueP95Seconds       *float64 `json:"queue_p95_seconds"`
 	LocalAnswerAvgSeconds *float64 `json:"local_answer_avg_seconds"`
+	// LocalProvider and LocalModel name the self-hosted model the gateway
+	// offers requests to, from the configuration (never its address); empty
+	// when there is none.
+	LocalProvider string `json:"local_provider,omitempty"`
+	LocalModel    string `json:"local_model,omitempty"`
+	// Turns has one row per turn bucket, in order.
+	Turns []GatewayTurn `json:"turns"`
 }
 
 // gatewaySaved prices the locally answered tokens at the reference model:
@@ -233,6 +285,8 @@ var gatewayQueries = struct {
 	cloudReasons                                       string
 	latencySum, latencyCount, latencyP95               string
 	queueSum, queueCount, queueP95, answerSum, answerN string
+	turns, turnP50, turnP90, turnTokens, turnMetered   string
+	machine                                            string
 }{
 	requests:     `sum by (route, class)(increase(gateway_requests_total[$r]))`,
 	bytes:        `sum by (route, direction)(increase(gateway_bytes_total[$r]))`,
@@ -248,7 +302,16 @@ var gatewayQueries = struct {
 	queueP95:     `histogram_quantile(0.95, sum by (le)(increase(gateway_queue_wait_seconds_bucket[$r])))`,
 	answerSum:    `sum(increase(gateway_local_answer_seconds_sum{outcome="answered"}[$r]))`,
 	answerN:      `sum(increase(gateway_local_answer_seconds_count{outcome="answered"}[$r]))`,
+	turns:        `sum by (turn, route)(increase(gateway_turn_requests_total[$r]))`,
+	turnP50:      `histogram_quantile(0.5, sum by (le, turn)(increase(gateway_cloud_input_tokens_bucket[$r])))`,
+	turnP90:      `histogram_quantile(0.9, sum by (le, turn)(increase(gateway_cloud_input_tokens_bucket[$r])))`,
+	turnTokens:   `sum by (turn, kind)(increase(gateway_cloud_tokens_total[$r]))`,
+	turnMetered:  `sum by (turn)(increase(gateway_cloud_input_tokens_count[$r]))`,
+	machine:      `sum by (mcp_tool)(increase(mcp_local_answers_total{outcome="recorded"}[$r]))`,
 }
+
+// turnSums adds up one turn bucket's token counts.
+type turnSums struct{ input, cached, write float64 }
 
 // gatewayTimes adds up the sums and counts behind the gateway's averages.
 type gatewayTimes struct {
@@ -371,6 +434,19 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 	gw := GatewayStat{FallthroughReasons: map[string]float64{}, FailedBy: map[string]float64{}}
 	var cloudExplained float64
 	gt := gatewayTimes{sum: map[string]float64{}, count: map[string]float64{}}
+	turns := map[string]*GatewayTurn{}
+	sums := map[string]*turnSums{}
+	turn := func(l map[string]string) (*GatewayTurn, *turnSums) {
+		name := l["turn"]
+		if !slices.Contains(telemetry.GatewayTurnBuckets(), name) {
+			return nil, nil
+		}
+		if turns[name] == nil {
+			turns[name], sums[name] = &GatewayTurn{Turn: name}, &turnSums{}
+		}
+		return turns[name], sums[name]
+	}
+	var tiers WorkTiers
 	steps = append(steps, []struct {
 		expr string
 		add  func(map[string]string, float64)
@@ -434,6 +510,52 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		{gatewayQueries.queueP95, func(_ map[string]string, v float64) { gw.QueueP95Seconds = ptr(round3(v)) }},
 		{gatewayQueries.answerSum, func(_ map[string]string, v float64) { gt.answerSum += v }},
 		{gatewayQueries.answerN, func(_ map[string]string, v float64) { gt.answN += v }},
+		{gatewayQueries.turns, func(l map[string]string, v float64) {
+			t, _ := turn(l)
+			if t == nil {
+				return
+			}
+			switch l["route"] {
+			case "local":
+				t.Local += v
+			case "cloud":
+				t.Cloud += v
+			}
+		}},
+		{gatewayQueries.turnP50, func(l map[string]string, v float64) {
+			if t, _ := turn(l); t != nil {
+				t.CloudInputP50 = ptr(math.Round(v))
+			}
+		}},
+		{gatewayQueries.turnP90, func(l map[string]string, v float64) {
+			if t, _ := turn(l); t != nil {
+				t.CloudInputP90 = ptr(math.Round(v))
+			}
+		}},
+		{gatewayQueries.turnTokens, func(l map[string]string, v float64) {
+			_, sum := turn(l)
+			if sum == nil {
+				return
+			}
+			switch l["kind"] {
+			case "input":
+				sum.input += v
+			case "cached":
+				sum.cached += v
+			case "cache_write":
+				sum.write += v
+			}
+		}},
+		{gatewayQueries.turnMetered, func(l map[string]string, v float64) {
+			if t, _ := turn(l); t != nil {
+				t.Metered += v
+			}
+		}},
+		{gatewayQueries.machine, func(l map[string]string, v float64) {
+			if !machineModelTools[l["mcp_tool"]] {
+				tiers.Machine += v
+			}
+		}},
 	}...)
 	for _, st := range steps {
 		if err := each(st.expr, st.add); err != nil {
@@ -476,6 +598,12 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		out.Models = append(out.Models, *m)
 	}
 	out.Spent, out.CompressionSaved = s.moneyTotals(all)
+	gw.Turns = gatewayTurns(turns, sums)
+	if s.cfg.LLM != nil {
+		if t, ok := s.cfg.LLM.GatewayTarget(); ok {
+			gw.LocalProvider, gw.LocalModel = t.Name, t.Model
+		}
+	}
 	out.CompressionEnabled, out.CompressionOff = compressionState(s.cfg.LLM, all)
 	gw.CloudWithoutReason = max(0, gw.Cloud-cloudExplained)
 	for _, f := range []*float64{&gw.CloudWithoutReason, &gw.Requests, &gw.Local, &gw.Cloud, &gw.Rejected, &gw.Failed, &gw.LocalUnmetered, &gw.LocalInputTokens, &gw.LocalOutputTokens, &gw.LocalCachedTokens, &gw.BytesIn, &gw.BytesOut, &gw.Fallthroughs, &gw.Timeouts} {
@@ -511,6 +639,7 @@ func (s *Server) handleModelStats(w http.ResponseWriter, r *http.Request) {
 		gw.SavedDollars = ptr(gatewaySaved(gw, *out.Reference))
 	}
 	out.Gateway = gw
+	out.Tiers = workTiers(tiers.Machine, gw, all)
 	slices.SortFunc(out.Models, func(a, b ModelStat) int {
 		return cmp.Or(cmp.Compare(b.InputTokens+b.OutputTokens, a.InputTokens+a.OutputTokens), cmp.Compare(a.Provider+a.Model, b.Provider+b.Model))
 	})
@@ -615,4 +744,60 @@ func (s *Server) moneyTotals(models []ModelStat) (spent, compression *float64) {
 		compression = ptr(round4(cs))
 	}
 	return spent, compression
+}
+
+// gatewayTurns orders the turn rows and fills in their shares; buckets
+// without traffic are left out.
+func gatewayTurns(turns map[string]*GatewayTurn, sums map[string]*turnSums) []GatewayTurn {
+	out := []GatewayTurn{}
+	for _, name := range telemetry.GatewayTurnBuckets() {
+		t := turns[name]
+		if t == nil {
+			continue
+		}
+		t.Local, t.Cloud, t.Metered = math.Round(t.Local), math.Round(t.Cloud), math.Round(t.Metered)
+		t.Requests = t.Local + t.Cloud
+		if t.Requests == 0 && t.Metered == 0 {
+			continue
+		}
+		if t.Requests > 0 {
+			t.LocalSharePct = round1(t.Local / t.Requests * 100)
+		}
+		sum := sums[name]
+		if whole := sum.input + sum.cached + sum.write; t.Metered > 0 && whole > 0 {
+			t.CloudInputAvg = ptr(math.Round(whole / t.Metered))
+			t.CachedSharePct = ptr(round1(sum.cached / whole * 100))
+		} else {
+			t.CloudInputP50, t.CloudInputP90 = nil, nil
+		}
+		out = append(out, *t)
+	}
+	return out
+}
+
+// workTiers puts the window's work in its tier: the bridge's own answers,
+// the gateway's routes, and CodeSynapse's model requests by whether their
+// provider is configured as local. A provider no longer configured counts
+// as cloud, since nothing says it ran on the installation's hardware.
+func workTiers(machine float64, gw GatewayStat, models []ModelStat) WorkTiers {
+	t := WorkTiers{Machine: math.Round(machine), SelfHosted: gw.Local, Cloud: gw.Cloud, SelfHostedModels: []string{}}
+	if gw.Local > 0 && gw.LocalProvider != "" {
+		t.SelfHostedModels = append(t.SelfHostedModels, gw.LocalProvider+"/"+gw.LocalModel)
+	}
+	for _, m := range models {
+		if m.Requests == 0 {
+			continue
+		}
+		if !m.Local {
+			t.Cloud += m.Requests
+			continue
+		}
+		t.SelfHosted += m.Requests
+		if name := m.Provider + "/" + m.Model; !slices.Contains(t.SelfHostedModels, name) {
+			t.SelfHostedModels = append(t.SelfHostedModels, name)
+		}
+	}
+	t.SelfHosted, t.Cloud = math.Round(t.SelfHosted), math.Round(t.Cloud)
+	slices.Sort(t.SelfHostedModels)
+	return t
 }

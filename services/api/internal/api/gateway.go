@@ -435,6 +435,11 @@ func recordGateway(ctx context.Context, m gateway.Meta, status int, took time.Du
 		t.FirstByte = m.FirstByte
 	}
 	telemetry.RecordGatewayTimings(ctx, t)
+	if class == "2xx" {
+		telemetry.RecordGatewayTurn(ctx, m.Messages, route, telemetry.CloudTokens{
+			Input: m.CloudIn, Cached: m.CloudCached, CacheWrite: m.CloudCacheWrite, Output: m.CloudOut, Metered: m.CloudMetered,
+		})
+	}
 	if route != "local" || m.Fallthrough != "" || class != "2xx" {
 		return
 	}

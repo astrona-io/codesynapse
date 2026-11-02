@@ -357,6 +357,21 @@ var (
 	// GatewayFirstByte covers streamed answers only: the time the agent
 	// waits before anything arrives.
 	GatewayFirstByte = Default.ScopedHistogram("gateway_first_byte_seconds", "Time to the first byte of a streamed gateway answer, by route (local, cloud).", ttft, "route").TenantShare(gatewayShare)
+
+	// How the cloud agent's input grows over a conversation. turn is the
+	// request's message count in fixed buckets (GatewayTurn), never a
+	// session: the gateway sees no session, and a count needs no state.
+	// Record through RecordGatewayTurn.
+	cloudInput = []float64{1e3, 5e3, 1e4, 2e4, 4e4, 6e4, 8e4, 1e5, 1.5e5, 2e5, 5e5, 1e6}
+	// GatewayTurns counts /v1/messages requests by turn bucket and the route
+	// that answered (local, cloud).
+	GatewayTurns = Default.ScopedCounter("gateway_turn_requests_total", "Gateway /v1/messages requests by how many messages they carried (turn bucket) and route (local, cloud).", "turn", "route")
+	// GatewayCloudInput is the whole input of one cloud answer (uncached,
+	// cache reads and cache writes), for the median and p90 per turn bucket.
+	GatewayCloudInput = Default.ScopedHistogram("gateway_cloud_input_tokens", "Input tokens the cloud reported for one gateway answer, cached ones included, by turn bucket.", cloudInput, "turn").TenantShare(turnShare)
+	// GatewayCloudTokens adds the cloud's reported usage up by kind (input:
+	// uncached, cached: cache reads, cache_write, output).
+	GatewayCloudTokens = Default.ScopedCounter("gateway_cloud_tokens_total", "Tokens the cloud reported for gateway answers, by turn bucket and kind (input, cached, cache_write, output).", "turn", "kind")
 )
 
 // External sources: fetch_source answers the Claude Code bridge gave
@@ -383,6 +398,8 @@ const (
 	toolShare    = 48
 	routeShare   = 64
 	gatewayShare = 12
+	// One series per turn bucket and organisation.
+	turnShare = 6
 	// A few tasks and outcomes per provider an organisation uses.
 	llmQueueShare = 24
 )
