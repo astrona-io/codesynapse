@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/app"
+	"github.com/astrona-io/codesynapse/internal/asklocal"
 	"github.com/astrona-io/codesynapse/internal/toolsets"
 	"github.com/astrona-io/codesynapse/internal/usage"
 )
@@ -50,9 +52,15 @@ func toolOf(name string) string {
 	return ""
 }
 
-// noteAnswer records the ranges a CodeSynapse answer gave.
+// noteAnswer records the ranges a CodeSynapse answer gave. read_ranges
+// gives no answer of its own: it is how the agent reads ranges, and the
+// text it returns is file content, whose path:line mentions point nowhere.
 func noteAnswer(in toolHookInput) {
 	tool := toolOf(in.ToolName)
+	if tool == asklocal.ReadTool {
+		noteRangeReads(in)
+		return
+	}
 	state := stateFile(in.SessionID)
 	if tool == "" || state == "" || len(in.ToolResponse) == 0 {
 		return
@@ -157,6 +165,31 @@ func noteRead(in toolHookInput) {
 	if in.ToolInput.Limit > 0 {
 		to = from + in.ToolInput.Limit - 1
 	}
+	s.markRead(file, from, to)
+	saveState(state, s)
+}
+
+// noteRangeReads marks the answered ranges a read_ranges call covered as
+// read, like a Read of each range. A call that failed read nothing.
+func noteRangeReads(in toolHookInput) {
+	state := stateFile(in.SessionID)
+	if state == "" || len(in.ToolInput.Ranges) == 0 || bytes.Contains(in.ToolResponse, []byte(`"isError":true`)) {
+		return
+	}
+	s := loadState(state)
+	for _, spec := range in.ToolInput.Ranges[:min(len(in.ToolInput.Ranges), asklocal.MaxPaths)] {
+		file, from, to, err := asklocal.ParseSpec(spec)
+		if err != nil || from == 0 {
+			continue
+		}
+		s.markRead(filepath.ToSlash(file), from, to)
+	}
+	saveState(state, s)
+}
+
+// markRead counts the answered ranges lines from..to of file overlap as
+// read and remembers the span, so a later answer of them is a repeat.
+func (s *hookState) markRead(file string, from, to int) {
 	for i := range s.Ranges {
 		r := &s.Ranges[i]
 		sameFile := file == r.File || strings.HasSuffix(file, "/"+r.File)
@@ -167,7 +200,6 @@ func noteRead(in toolHookInput) {
 		s.Counts = bump(s.Counts, r.Tool, 0, 1)
 	}
 	s.Spans = append(s.Spans, answerRange{File: file, Start: from, End: to})
-	saveState(state, s)
 }
 
 func bumpRepeat(m map[string]rangeCounts, tool string) map[string]rangeCounts {
