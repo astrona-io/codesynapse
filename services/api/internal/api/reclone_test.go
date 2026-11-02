@@ -40,7 +40,7 @@ func TestRetryFailedClones(t *testing.T) {
 		raw, err := json.Marshal(cloneParams{Name: repo})
 		require.NoError(t, err)
 		require.NoError(t, acc.St.AddJob(ctx, accounts.JobRecord{ID: id, Kind: "clone", Repo: repo, OrgID: org.ID, ActorID: u.ID, Via: "session",
-			Role: accounts.Admin, Execution: live, Params: raw, State: accounts.JobQueued, LeaseOwner: "test", LeaseUntil: finished, CreatedAt: finished}))
+			Role: accounts.Full, Execution: live, Params: raw, State: accounts.JobQueued, LeaseOwner: "test", LeaseUntil: finished, CreatedAt: finished}))
 		require.NoError(t, acc.St.FinishJob(ctx, id, "test", accounts.JobOutcome{State: accounts.JobFailed, Error: msg, At: finished}))
 	}
 	failed("dns-1", "o/dns", "git clone: exit status 128: Could not resolve host: github.com (Timeout while contacting DNS servers)")

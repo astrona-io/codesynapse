@@ -8,7 +8,7 @@ export function useRepoSpace() {
   const session = useSession()
   const slug = computed(() => session.current.value?.org.slug)
   const { data } = useApiGet<{ enabled: boolean }>(() => `accounts/orgs/${slug.value ?? '-'}/member-repos`, { immediate: session.accounts.value })
-  const canOrg = computed(() => session.can('admin'))
+  const canOrg = computed(() => session.can('full'))
   const canMe = computed(() => session.accounts.value && (data.value?.enabled ?? true))
   const space = ref<RepoSpace>(canOrg.value ? 'org' : 'me')
   watch(canOrg, (on) => { if (!on) space.value = 'me' })

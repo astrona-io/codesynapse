@@ -125,7 +125,7 @@ func (s *Service) SetFindingTriage(ctx context.Context, p Principal, t FindingTr
 		if p.Via != "session" && p.Via != "key" {
 			return FindingTriage{}, ErrForbidden
 		}
-		if _, err := tx.ResolveRepository(ctx, p, t.OrgID, t.Graph, Admin); err != nil {
+		if _, err := tx.ResolveRepository(ctx, p, t.OrgID, t.Graph, Full); err != nil {
 			return FindingTriage{}, err
 		}
 		t.ActorID, t.CreatedAt = p.User.ID, tx.now()
@@ -154,7 +154,7 @@ func (s *Service) ClearFindingTriage(ctx context.Context, p Principal, orgID, gr
 		if !fingerprintPattern.MatchString(fingerprint) {
 			return struct{}{}, ErrInvalidInput
 		}
-		if _, err := tx.ResolveRepository(ctx, p, orgID, graph, Admin); err != nil {
+		if _, err := tx.ResolveRepository(ctx, p, orgID, graph, Full); err != nil {
 			return struct{}{}, err
 		}
 		if err := tx.St.DeleteFindingTriage(ctx, orgID, graph, fingerprint); err != nil {

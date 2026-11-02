@@ -368,7 +368,7 @@ func (s *Service) teamOrgRole(ctx context.Context, orgID, userID string) (Role, 
 	for i, t := range mine {
 		ids[i] = t.ObjectID
 	}
-	grants, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeOrganisation, ObjectID: orgID, SubjectType: TypeTeam, SubjectIDs: ids, SubjectRelation: RelMember})
+	grants, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeOrganisation, ObjectID: orgID, SubjectType: TypeTeam, SubjectIDs: ids, SubjectRelation: TeamRead})
 	var best Role
 	for _, g := range grants {
 		best = Max(best, Role(g.Relation))

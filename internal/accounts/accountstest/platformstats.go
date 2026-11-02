@@ -59,8 +59,8 @@ func RunPlatformStats(t *testing.T, newStore func(*testing.T) accounts.Store) {
 	for _, o := range orgs {
 		require.NoError(t, st.CreateOrg(ctx, o.org, o.owner))
 	}
-	require.NoError(t, st.SetMember(ctx, "o-a", "u-sue", accounts.Member))
-	require.NoError(t, st.SetMember(ctx, "o-b", "u-pat", accounts.Member))
+	require.NoError(t, st.SetMember(ctx, "o-a", "u-sue", accounts.Write))
+	require.NoError(t, st.SetMember(ctx, "o-b", "u-pat", accounts.Write))
 	require.NoError(t, st.SetMember(ctx, "o-b", "u-gus", accounts.Guest))
 	require.NoError(t, st.SetMember(ctx, "o-c", "u-pat", accounts.Guest))
 	require.NoError(t, st.CreateTeam(ctx, accounts.Team{ID: "t-1", OrgID: "o-a", Slug: "devs", Name: "Devs", CreatedAt: now}))
@@ -186,7 +186,7 @@ func RunPlatformStats(t *testing.T, newStore func(*testing.T) accounts.Store) {
 		assert.Equal(t, got.Totals, accounts.TenantTotals{
 			Orgs: 4, OrgsCreated: 1, OrgsWithoutMembers: 1, OrgsWithSSO: 1,
 			Users: 4, UsersCreated: 1, UsersSuspended: 1, PlatformAdmins: 1, GuestOnlyUsers: 1, MultiOrgUsers: 1, ActiveUsers: 3,
-			Memberships: 5, Roles: map[string]int{"owner": 1, "member": 2, "guest": 2}, Seats: 2, SeatedPeople: 1, Teams: 1,
+			Memberships: 5, Roles: map[string]int{"owner": 1, "write": 2, "guest": 2}, Seats: 2, SeatedPeople: 1, Teams: 1,
 			Entries: 3, OrgEntries: 2, PersonalEntries: 1, PublicEntries: 1, PrivateEntries: 1, LocalEntries: 1, LostEntries: 1, Graphs: 2,
 			Watches: 1, WatchAdds: 1,
 		})
@@ -197,9 +197,9 @@ func RunPlatformStats(t *testing.T, newStore func(*testing.T) accounts.Store) {
 		}
 		assert.Equal(t, names, []string{"Alpha", "Beta", "Delta", "Gamma"}, "ordered by name")
 		assert.Equal(t, got.Orgs[0], accounts.OrgTenantRow{OrgID: "o-a", Slug: "alpha", Name: "Alpha", CreatedAt: ago(40 * day),
-			Members: 2, Roles: map[string]int{"owner": 1, "member": 1}, Seats: 1, ActiveMembers: 1, Teams: 1, Entries: 2, SSO: true, Watches: 1})
+			Members: 2, Roles: map[string]int{"owner": 1, "write": 1}, Seats: 1, ActiveMembers: 1, Teams: 1, Entries: 2, SSO: true, Watches: 1})
 		assert.Equal(t, got.Orgs[1], accounts.OrgTenantRow{OrgID: "o-b", Slug: "beta", Name: "Beta", CreatedAt: ago(40 * day),
-			Members: 2, Roles: map[string]int{"member": 1, "guest": 1}, Seats: 1, ActiveMembers: 2, Entries: 1, PersonalEntries: 1, PrivateEntries: 1, LostEntries: 1})
+			Members: 2, Roles: map[string]int{"write": 1, "guest": 1}, Seats: 1, ActiveMembers: 2, Entries: 1, PersonalEntries: 1, PrivateEntries: 1, LostEntries: 1})
 		assert.Equal(t, got.Orgs[2].Members, 0, "root is never a member")
 		assert.Equal(t, got.Orgs[2].Roles, map[string]int{})
 		assert.Equal(t, got.Orgs[3].Members, 1)

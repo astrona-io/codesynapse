@@ -105,7 +105,7 @@ func (s *Server) handleWriteSessionMemory(w http.ResponseWriter, r *http.Request
 		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
-	_, authorize := s.jobAuthorization(r.Context(), r.PathValue("repo"), accounts.Member)
+	_, authorize := s.jobAuthorization(r.Context(), r.PathValue("repo"), accounts.Write)
 	if err := checkJob(r.Context(), authorize); err != nil {
 		s.accountError(w, err)
 		return
@@ -182,7 +182,7 @@ func (s *Server) handleSessionOffload(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	_, authorize := s.jobAuthorization(r.Context(), r.PathValue("repo"), accounts.Member)
+	_, authorize := s.jobAuthorization(r.Context(), r.PathValue("repo"), accounts.Write)
 	job, err := s.offload.SubmitSession(r.Context(), r.PathValue("repo"), scope.Namespace, in.Source, in.Turns, record.ExpiresAt, authorize)
 	if err != nil {
 		status := http.StatusBadRequest
@@ -275,7 +275,7 @@ func (s *Server) handlePromoteSessionMemory(w http.ResponseWriter, r *http.Reque
 		s.problem(w, http.StatusBadRequest, err)
 		return
 	}
-	_, authorize := s.jobAuthorization(r.Context(), r.PathValue("repo"), accounts.Member)
+	_, authorize := s.jobAuthorization(r.Context(), r.PathValue("repo"), accounts.Write)
 	if err := checkJob(r.Context(), authorize); err != nil {
 		s.accountError(w, err)
 		return
@@ -293,7 +293,7 @@ func (s *Server) handleIndexRepository(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	_, authorize := s.jobAuthorization(r.Context(), r.PathValue("repo"), accounts.Member)
+	_, authorize := s.jobAuthorization(r.Context(), r.PathValue("repo"), accounts.Write)
 	n, err := s.recall.IndexRepository(r.Context(), ns, authorize)
 	if errors.Is(err, llm.ErrNoEmbeddings) {
 		writeJSON(w, http.StatusOK, map[string]int{"indexed": 0})

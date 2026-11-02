@@ -207,7 +207,7 @@ func TestLostAccessShowsPersonalEntriesToTheirOwnerOnly(t *testing.T) {
 		{"no principal sees the organisation's only", "", []string{"acme/shared"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := context.WithValue(ctx, scopeKey{}, scope{orgs: []accounts.Membership{{Org: org, Role: accounts.Viewer}}})
+			c := context.WithValue(ctx, scopeKey{}, scope{orgs: []accounts.Membership{{Org: org, Role: accounts.Read}}})
 			if tc.caller != "" {
 				c = context.WithValue(c, principalKey{}, accounts.Principal{User: accounts.User{ID: tc.caller}, Via: "session"})
 			}

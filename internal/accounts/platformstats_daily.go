@@ -126,7 +126,7 @@ var statMetrics = map[string]statMetric{
 	// Memberships of accounts other than root, by role. The platform total
 	// is the sum over organisations, so a person counts once per
 	// organisation.
-	StatMemberships: {dims: []string{"total", "owner", "admin", "member", "viewer", "guest"}, perOrg: true},
+	StatMemberships: {dims: []string{"total", "owner", "full", "write", "read", "guest"}, perOrg: true},
 	// Active non-guest members; the platform row counts distinct people.
 	StatSeats: {dims: []string{"total"}, perOrg: true},
 	// Repository entries by space, visibility and lost access.

@@ -315,6 +315,8 @@ Phase 2 found these routes whose current rule did not fit the first draft of the
 
 Some checks stay on roles until phase 6, because they compare two roles rather than ask for a permission: the job record's role, the invitation ceiling (nobody invites above their own role) and the rule that only owners make owners.
 
+The rename followed as migration 0040: memberships, invitations, job records, SSO settings and daily statistics hold `guest`, `read`, `write`, `full` and `owner`; repository tuples `read`, `write`, `full` and `deny`; team tuples `read` and `full`, with `team#read` as the subject of team grants. It changes names only, so policy revisions stay as they were and projections need no rebuild (their `NONE`/`READ`/`WRITE`/`ADMIN` levels did not change). Responses use the new names; `accounts.ParseRole` (through `Role.UnmarshalJSON`) and `accounts.ParseTeamRelation` accept the old ones in requests for one release and log `deprecated role name in request` with the old and new name only. The OpenFGA model of phase 4 still calls the team relation `member`; phase 5 writes `team#read` as that relation or renames it in the model.
+
 ## Phases
 
 Each phase is one pull request.

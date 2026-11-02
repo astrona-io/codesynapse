@@ -49,7 +49,7 @@ func TestAccessPolicyMigration(t *testing.T) {
 	require.NoError(t, err)
 	var direct, team, policy string
 	require.NoError(t, tx.QueryRow(ctx, "SELECT relation FROM relation_tuples WHERE subject_id='owner'").Scan(&direct))
-	assert.Equal(t, direct, accounts.RepoNone)
+	assert.Equal(t, direct, "none") // the name before migration 0040
 	require.NoError(t, tx.QueryRow(ctx, "SELECT relation FROM relation_tuples WHERE subject_id='team'").Scan(&team))
 	assert.Equal(t, team, "invalid")
 	require.NoError(t, tx.QueryRow(ctx, "SELECT default_repo_access FROM orgs WHERE id='org'").Scan(&policy))

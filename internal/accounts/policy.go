@@ -89,7 +89,7 @@ func (s *Service) RecoverRepoAdmin(ctx context.Context, p Principal, orgID, grap
 		if err != nil {
 			return struct{}{}, err
 		}
-		t := Tuple{ObjectType: TypeRepository, ObjectID: RepoObject(orgID, graph), Relation: RepoAdmin, SubjectType: TypeUser, SubjectID: userID, CreatedBy: p.User.ID, CreatedAt: tx.now()}
+		t := Tuple{ObjectType: TypeRepository, ObjectID: RepoObject(orgID, graph), Relation: RepoFull, SubjectType: TypeUser, SubjectID: userID, CreatedBy: p.User.ID, CreatedAt: tx.now()}
 		if _, err := tx.St.DeleteTuples(ctx, TupleFilter{ObjectType: t.ObjectType, ObjectID: t.ObjectID, SubjectType: TypeUser, SubjectID: userID}); err != nil {
 			return struct{}{}, err
 		}
@@ -129,7 +129,7 @@ func (s *Service) hasRepoAdmin(ctx context.Context, orgID, graph string) (bool, 
 			return false, err
 		}
 		for _, r := range a.Repos {
-			if r.OrgID == orgID && r.Graph == graph && r.Role == Admin {
+			if r.OrgID == orgID && r.Graph == graph && r.Role == Full {
 				return true, nil
 			}
 		}
@@ -281,7 +281,7 @@ func (s *Service) repairRepoGrants(ctx context.Context, p Principal, orgID, grap
 		if _, err := s.St.DeleteTuples(ctx, TupleFilter{ObjectType: TypeRepository, ObjectID: object, SubjectType: TypeUser, SubjectID: userID}); err != nil {
 			return 0, err
 		}
-		if err := s.St.WriteTuple(ctx, Tuple{ObjectType: TypeRepository, ObjectID: object, Relation: RepoNone, SubjectType: TypeUser, SubjectID: userID, CreatedBy: p.User.ID, CreatedAt: s.now()}); err != nil {
+		if err := s.St.WriteTuple(ctx, Tuple{ObjectType: TypeRepository, ObjectID: object, Relation: RepoDeny, SubjectType: TypeUser, SubjectID: userID, CreatedBy: p.User.ID, CreatedAt: s.now()}); err != nil {
 			return 0, err
 		}
 	}

@@ -72,7 +72,7 @@ func TestRootRefusedEveryBusinessRoute(t *testing.T) {
 	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: org.ID, Graph: storetest.Repo, Visibility: accounts.Public, AddedBy: setup.OwnerID, AddedAt: time.Now()}))
 	require.NoError(t, acc.St.SetMember(ctx, org.ID, setup.RootUserID, accounts.Owner))
 	require.NoError(t, acc.St.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(org.ID, storetest.Repo),
-		Relation: accounts.RepoAdmin, SubjectType: accounts.TypeUser, SubjectID: setup.RootUserID, CreatedAt: time.Now()}))
+		Relation: accounts.RepoFull, SubjectType: accounts.TypeUser, SubjectID: setup.RootUserID, CreatedAt: time.Now()}))
 	root := rootClient(t, ts)
 
 	require.True(t, len(srv.classes) > 100, "every route is registered through a classifier")

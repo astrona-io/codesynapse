@@ -219,10 +219,10 @@ func TestCatalogWritesNeedEditorAccessAndAreAudited(t *testing.T) {
 	actor := accounts.Principal{User: owner.User, Via: "session"}
 	backup, _, err := acc.SignUp(ctx, "backup@example.com", "Backup", "correct horse battery staple")
 	require.NoError(t, err)
-	require.NoError(t, accountstest.Join(ctx, t, acc, actor, owner.OrgID, backup, accounts.Member))
-	_, err = acc.SetRepoGrant(ctx, actor, owner.OrgID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: backup.ID}, accounts.Admin)
+	require.NoError(t, accountstest.Join(ctx, t, acc, actor, owner.OrgID, backup, accounts.Write))
+	_, err = acc.SetRepoGrant(ctx, actor, owner.OrgID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: backup.ID}, accounts.Full)
 	require.NoError(t, err)
-	_, err = acc.SetRepoGrant(ctx, actor, owner.OrgID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: owner.User.ID}, accounts.Viewer)
+	_, err = acc.SetRepoGrant(ctx, actor, owner.OrgID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: owner.User.ID}, accounts.Read)
 	require.NoError(t, err)
 	assert.False(t, callContext(ctx, t, cs, "architecture_search", map[string]any{"repo": storetest.Repo}, nil).IsError)
 	assert.True(t, callContext(ctx, t, cs, "architecture_propose", map[string]any{"repo": storetest.Repo, "type": "adr", "title": "Denied"}, nil).IsError)

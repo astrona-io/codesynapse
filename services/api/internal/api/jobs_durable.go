@@ -277,8 +277,8 @@ func (s *Server) startRecordedClone(jobCtx context.Context, rec accounts.JobReco
 			return fmt.Errorf("the repository's Git token is no longer available: %w", err)
 		}
 	}
-	org, authorize := s.jobAuthorization(jobCtx, rec.Repo, accounts.Admin)
-	d, err := durable(jobCtx, "clone", accounts.Admin, p)
+	org, authorize := s.jobAuthorization(jobCtx, rec.Repo, accounts.Full)
+	d, err := durable(jobCtx, "clone", accounts.Full, p)
 	if err != nil {
 		return err
 	}

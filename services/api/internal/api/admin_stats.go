@@ -222,7 +222,7 @@ func (s *Server) handleStatsSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, page(r, req.Range, ss.Totals, ss.Orgs, rollup))
 }
 
-var statsRoles = []accounts.Role{accounts.Owner, accounts.Admin, accounts.Member, accounts.Viewer, accounts.Guest}
+var statsRoles = []accounts.Role{accounts.Owner, accounts.Full, accounts.Write, accounts.Read, accounts.Guest}
 
 // handleStatsExport answers one section as CSV or JSON, every row (at most
 // accounts.MaxStatsRows), recorded as admin.stats.export.

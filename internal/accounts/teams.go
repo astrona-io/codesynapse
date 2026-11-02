@@ -9,7 +9,7 @@ import (
 // TeamMember is a user's place in a team.
 type TeamMember struct {
 	User     User   `json:"user"`
-	Relation string `json:"relation"` // member or maintainer
+	Relation string `json:"relation"` // read or full (also manages the team)
 }
 
 // RepoGrant is a grant on a repository, with a readable subject.
@@ -93,7 +93,7 @@ func (s *Service) canMaintain(ctx context.Context, p Principal, t Team) error {
 	if _, err := s.RoleIn(ctx, p, t.OrgID); err != nil {
 		return err
 	}
-	ts, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeTeam, ObjectID: t.ID, Relation: RelMaintainer, SubjectType: TypeUser, SubjectID: p.User.ID})
+	ts, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeTeam, ObjectID: t.ID, Relation: TeamFull, SubjectType: TypeUser, SubjectID: p.User.ID})
 	if err != nil {
 		return err
 	}
@@ -104,7 +104,7 @@ func (s *Service) canMaintain(ctx context.Context, p Principal, t Team) error {
 }
 
 // SetTeamMember adds a member of the team's organisation (guests included)
-// as member or maintainer, replacing their previous place.
+// as read or full, replacing their previous place.
 func (s *Service) SetTeamMember(ctx context.Context, p Principal, teamID, email, relation string) (TeamMember, error) {
 	return policyChange(ctx, s, func(tx *Service) (TeamMember, error) { return tx.setTeamMemberPolicy(ctx, p, teamID, email, relation) })
 }
@@ -113,8 +113,8 @@ func (s *Service) setTeamMemberPolicy(ctx context.Context, p Principal, teamID, 
 	if p.Via == "key" {
 		return TeamMember{}, ErrForbidden
 	}
-	if relation != RelMember && relation != RelMaintainer {
-		return TeamMember{}, fmt.Errorf("%w: member or maintainer", ErrInvalidInput)
+	if relation != TeamRead && relation != TeamFull {
+		return TeamMember{}, fmt.Errorf("%w: a team relation is read or full", ErrInvalidInput)
 	}
 	t, err := s.St.TeamByID(ctx, teamID)
 	if err != nil {
@@ -252,7 +252,7 @@ func (s *Service) setTeamRolePolicy(ctx context.Context, p Principal, teamID str
 	}
 	if role != "" {
 		if err := s.St.WriteTuple(ctx, Tuple{ObjectType: TypeOrganisation, ObjectID: t.OrgID, Relation: string(role), SubjectType: TypeTeam,
-			SubjectID: t.ID, SubjectRelation: RelMember, CreatedBy: p.User.ID, CreatedAt: s.now()}); err != nil {
+			SubjectID: t.ID, SubjectRelation: TeamRead, CreatedBy: p.User.ID, CreatedAt: s.now()}); err != nil {
 			return err
 		}
 	}
@@ -286,7 +286,7 @@ func (s *Service) canAdminRepo(ctx context.Context, p Principal, orgID, graph st
 		return err
 	}
 	for _, r := range a.Repos {
-		if r.OrgID == orgID && r.Graph == graph && r.Role == Admin {
+		if r.OrgID == orgID && r.Graph == graph && r.Role == Full {
 			return nil
 		}
 	}

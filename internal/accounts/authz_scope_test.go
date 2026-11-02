@@ -19,9 +19,9 @@ func TestScopePersonalAcrossOrgs(t *testing.T) {
 		{"organisation first", false, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := Access{Orgs: map[string]Role{"a": Member, "b": Member}, Repos: []RepoAccess{
-				{OrgID: "a", Graph: "g", Role: Viewer, Personal: tc.first},
-				{OrgID: "b", Graph: "g", Role: Viewer, Personal: tc.other},
+			a := Access{Orgs: map[string]Role{"a": Write, "b": Write}, Repos: []RepoAccess{
+				{OrgID: "a", Graph: "g", Role: Read, Personal: tc.first},
+				{OrgID: "b", Graph: "g", Role: Read, Personal: tc.other},
 			}}
 			got := a.Scope(map[string]bool{"a": true, "b": true})["g"]
 			assert.True(t, got.Ambiguous)

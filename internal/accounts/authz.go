@@ -3,6 +3,7 @@ package accounts
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -17,18 +18,32 @@ const (
 	TypeOrganisation = "organisation"
 	TypeRepository   = "repository"
 
-	RelMember     = "member"
-	RelMaintainer = "maintainer"
-	RepoNone      = "none"
-	RepoAdmin     = "admin"
-	RepoEditor    = "editor"
-	RepoViewer    = "viewer"
+	// Team relations: a reader belongs to the team and receives its
+	// grants; full also manages the team's members.
+	TeamRead = "read"
+	TeamFull = "full"
+	// Repository relations.
+	RepoDeny  = "deny"
+	RepoFull  = "full"
+	RepoWrite = "write"
+	RepoRead  = "read"
 
 	// MaxTuples bounds one read.
 	MaxTuples      = 5000
 	MaxTeams       = 128
 	MaxMemberships = 256
 )
+
+// ParseTeamRelation reads a team relation from a request, accepting the
+// names used before the rename (member, maintainer) for one release.
+func ParseTeamRelation(s string) string {
+	old := map[string]string{"member": TeamRead, "maintainer": TeamFull}[s]
+	if old == "" {
+		return s
+	}
+	slog.Warn("deprecated team relation in request", "old", s, "new", old)
+	return old
+}
 
 // RepoObject is the repository object ID of org's entry for graph.
 func RepoObject(orgID, graph string) string { return orgID + "|" + graph }
@@ -37,7 +52,7 @@ func RepoObject(orgID, graph string) string { return orgID + "|" + graph }
 func SplitRepoObject(id string) (orgID, graph string, ok bool) { return strings.Cut(id, "|") }
 
 // repoRelationRole maps repository relations to the role names routes use.
-var repoRelationRole = map[string]Role{RepoAdmin: Admin, RepoEditor: Member, RepoViewer: Viewer, RepoNone: None}
+var repoRelationRole = map[string]Role{RepoFull: Full, RepoWrite: Write, RepoRead: Read, RepoDeny: Deny}
 
 // RepoRelation is the relation granting r on a repository ("" for none).
 func RepoRelation(r Role) string {
@@ -53,7 +68,7 @@ func RepoRelation(r Role) string {
 type RepoAccess struct {
 	OrgID string `json:"org_id"`
 	Graph string `json:"graph"`
-	Role  Role   `json:"role"` // Admin, Member (editor) or Viewer
+	Role  Role   `json:"role"` // Full, Write or Read
 	// Via explains the strongest path: "organisation", "user" or "team".
 	Via      string `json:"via"`
 	Revision int64  `json:"revision"`
@@ -68,7 +83,7 @@ type Access struct {
 	// team roles), guests included.
 	Orgs map[string]Role
 	// Teams the user belongs to, by ID (maintainers included).
-	Teams map[string]string // team ID -> member or maintainer
+	Teams map[string]string // team ID -> read or full
 	// Repos holds one entry per organisation entry the user reaches.
 	Repos []RepoAccess
 }
@@ -137,7 +152,7 @@ func (s *Service) accessOf(ctx context.Context, userID string) (Access, error) {
 	}
 	teamIDs = teamIDs[:0]
 	for _, t := range teamTuples {
-		if t.Relation != RelMember && t.Relation != RelMaintainer {
+		if t.Relation != TeamRead && t.Relation != TeamFull {
 			return a, ErrInvalidInput
 		}
 		if _, ok := orgs[teamOrgs[t.ObjectID]]; !ok {
@@ -151,7 +166,7 @@ func (s *Service) accessOf(ctx context.Context, userID string) (Access, error) {
 	}
 	var teams []Tuple
 	if len(teamIDs) > 0 {
-		teams, err = s.St.ReadTuples(ctx, TupleFilter{SubjectType: TypeTeam, SubjectIDs: teamIDs, SubjectRelation: RelMember})
+		teams, err = s.St.ReadTuples(ctx, TupleFilter{SubjectType: TypeTeam, SubjectIDs: teamIDs, SubjectRelation: TeamRead})
 		if err != nil {
 			return a, err
 		}
@@ -220,9 +235,9 @@ func (s *Service) accessOf(ctx context.Context, userID string) (Access, error) {
 		} else if t, ok := teamBest[key]; ok {
 			role, via = t, TypeTeam
 		} else if !repo.Personal() && org.DefaultRepoAccess == DefaultRepoReadOnly && membershipRole(ms, orgID) != Guest {
-			role = Viewer
+			role = Read
 		}
-		if role != Viewer && role != Member && role != Admin {
+		if role != Read && role != Write && role != Full {
 			continue
 		}
 		a.Repos = append(a.Repos, RepoAccess{OrgID: orgID, Graph: repo.Graph, Role: role, Via: via, Revision: org.PolicyRevision, Personal: repo.Personal()})
@@ -241,7 +256,7 @@ func membershipRole(ms []Membership, orgID string) Role {
 
 // ResolveRepository enforces the same account policy for API and MCP actions.
 func (s *Service) ResolveRepository(ctx context.Context, p Principal, orgID, graph string, least Role) (RepoAccess, error) {
-	if least != Viewer && least != Member && least != Admin {
+	if least != Read && least != Write && least != Full {
 		return RepoAccess{}, ErrForbidden
 	}
 	if p.OrgID != "" && p.OrgID != orgID {
@@ -303,12 +318,12 @@ func (s *Service) ValidatePrincipal(ctx context.Context, p Principal) error {
 
 // validRepoTuple checks a repository grant against the schema.
 func validRepoTuple(t Tuple) error {
-	if t.ObjectType != TypeRepository || repoRelationRole[t.Relation] == "" || (t.Relation == RepoNone && t.SubjectType != TypeUser) {
-		return fmt.Errorf("%w: repository relations are admin, editor, viewer and user-only none", ErrInvalidInput)
+	if t.ObjectType != TypeRepository || repoRelationRole[t.Relation] == "" || (t.Relation == RepoDeny && t.SubjectType != TypeUser) {
+		return fmt.Errorf("%w: repository relations are full, write, read and user-only deny", ErrInvalidInput)
 	}
 	switch {
 	case t.SubjectType == TypeUser && t.SubjectRelation == "":
-	case t.SubjectType == TypeTeam && t.SubjectRelation == RelMember:
+	case t.SubjectType == TypeTeam && t.SubjectRelation == TeamRead:
 	default:
 		return fmt.Errorf("%w: grant to a user or to a team's members", ErrInvalidInput)
 	}

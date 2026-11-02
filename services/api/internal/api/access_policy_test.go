@@ -111,12 +111,12 @@ func TestQueuedJobRechecksSession(t *testing.T) {
 	require.NoError(t, err)
 	srv := &Server{cfg: Config{Accounts: acc}}
 	jobCtx := context.WithValue(ctx, principalKey{}, p)
-	jobCtx = context.WithValue(jobCtx, scopeKey{}, scope{reach: map[string]accounts.Reach{"repo": {OrgID: org.ID, Role: accounts.Admin}}})
+	jobCtx = context.WithValue(jobCtx, scopeKey{}, scope{reach: map[string]accounts.Reach{"repo": {OrgID: org.ID, Role: accounts.Full}}})
 	id, err := acc.RegisterExecutionSession(ctx, user.ID, org.ID, "queued-job-runtime")
 	require.NoError(t, err)
 	jobCtx, err = execution.With(jobCtx, id)
 	require.NoError(t, err)
-	_, authorize := srv.jobAuthorization(jobCtx, "repo", accounts.Admin)
+	_, authorize := srv.jobAuthorization(jobCtx, "repo", accounts.Full)
 	require.NoError(t, authorize(jobCtx))
 	jobs := NewJobs(ctx, memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)), 0, false, false)
 	jobs.sem <- struct{}{}

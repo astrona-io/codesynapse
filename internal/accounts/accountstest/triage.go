@@ -90,13 +90,13 @@ func RunFindingTriage(t *testing.T, st accounts.Store) {
 	viewer, _, err := svc.SignUp(ctx, "triage-viewer@example.com", "Triage viewer", pw)
 	require.NoError(t, err)
 	for _, u := range []accounts.User{admin, editor, viewer} {
-		require.NoError(t, Join(ctx, t, svc, p, org.ID, u, accounts.Member))
+		require.NoError(t, Join(ctx, t, svc, p, org.ID, u, accounts.Write))
 	}
-	_, err = svc.SetRepoGrant(ctx, p, org.ID, graph, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: admin.ID}, accounts.Admin)
+	_, err = svc.SetRepoGrant(ctx, p, org.ID, graph, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: admin.ID}, accounts.Full)
 	require.NoError(t, err)
-	_, err = svc.SetRepoGrant(ctx, p, org.ID, graph, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: editor.ID}, accounts.Member)
+	_, err = svc.SetRepoGrant(ctx, p, org.ID, graph, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: editor.ID}, accounts.Write)
 	require.NoError(t, err)
-	_, err = svc.SetRepoGrant(ctx, p, org.ID, graph, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: viewer.ID}, accounts.Viewer)
+	_, err = svc.SetRepoGrant(ctx, p, org.ID, graph, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: viewer.ID}, accounts.Read)
 	require.NoError(t, err)
 	_, err = svc.SetFindingTriage(ctx, accounts.Principal{User: viewer, Via: "session"}, base)
 	assert.True(t, errors.Is(err, accounts.ErrForbidden), "viewer: %v", err)

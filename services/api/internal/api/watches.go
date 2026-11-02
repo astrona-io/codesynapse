@@ -739,8 +739,8 @@ func (s *Server) addWatched(ctx context.Context, w accounts.OrgWatch, remote, na
 	} else if err != nil {
 		return false, err
 	}
-	org, authorize := s.jobAuthorization(ctx, name, accounts.Admin)
-	d, err := s.durableIf(ctx, "clone", accounts.Admin, cloneParams{Remote: remote, Name: name, Private: vis == accounts.Private})
+	org, authorize := s.jobAuthorization(ctx, name, accounts.Full)
+	d, err := s.durableIf(ctx, "clone", accounts.Full, cloneParams{Remote: remote, Name: name, Private: vis == accounts.Private})
 	if err != nil {
 		return false, err
 	}

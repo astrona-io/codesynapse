@@ -27,7 +27,7 @@ const initials = computed(() => {
 })
 const role = computed(() => {
   const m = session.current.value
-  return m ? `${m.role[0]!.toUpperCase()}${m.role.slice(1)} · ${m.org.name}` : session.isPlatformAdmin.value ? 'Platform admin' : ''
+  return m ? `${ROLE_LABEL[m.role] ?? m.role} · ${m.org.name}` : session.isPlatformAdmin.value ? 'Platform admin' : ''
 })
 const links = computed(() => session.accounts.value
   ? [

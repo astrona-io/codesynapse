@@ -120,7 +120,7 @@ func TestInvitationsOverHTTP(t *testing.T) {
 
 		var m accounts.Membership
 		require.Equal(t, carol.do("POST", "/api/v1/invitations/accept", token, &m), 200)
-		assert.Equal(t, m.Role, accounts.Member)
+		assert.Equal(t, m.Role, accounts.Write)
 		assert.Equal(t, carol.do("POST", "/api/v1/invitations/accept", token, nil), 404, "single use")
 		assert.Equal(t, newClient(t, ts).do("POST", "/api/v1/invitations/accept", token, nil), 401)
 		require.Equal(t, bob.do("GET", base, "", &listed), 200)

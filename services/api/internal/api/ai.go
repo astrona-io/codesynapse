@@ -263,8 +263,8 @@ type aiTaskParams struct {
 
 // startAITask queues task for repo as the requester in ctx.
 func (s *Server) startAITask(ctx context.Context, repo string, p aiTaskParams) (Job, error) {
-	org, authorize := s.jobAuthorization(ctx, repo, accounts.Member)
-	d, err := s.durableIf(ctx, "ai", accounts.Member, p)
+	org, authorize := s.jobAuthorization(ctx, repo, accounts.Write)
+	d, err := s.durableIf(ctx, "ai", accounts.Write, p)
 	if err != nil {
 		return Job{}, err
 	}

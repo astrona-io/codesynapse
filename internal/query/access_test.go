@@ -45,14 +45,14 @@ func TestAccessSnapshotMatchesAuthoritativePermissions(t *testing.T) {
 	for _, entry := range []struct {
 		user accounts.User
 		role accounts.Role
-	}{{member, accounts.Member}, {guest, accounts.Guest}} {
+	}{{member, accounts.Write}, {guest, accounts.Guest}} {
 		require.NoError(t, accountstest.Join(ctx, t, acc, owner, org.ID, entry.user, entry.role))
 	}
 	team, err := acc.CreateTeam(ctx, owner, org.ID, "Editors")
 	require.NoError(t, err)
-	_, err = acc.SetTeamMember(ctx, owner, team.ID, member.Email, accounts.RelMember)
+	_, err = acc.SetTeamMember(ctx, owner, team.ID, member.Email, accounts.TeamRead)
 	require.NoError(t, err)
-	_, err = acc.SetRepoGrant(ctx, owner, org.ID, "example/repo", accounts.Tuple{SubjectType: accounts.TypeTeam, SubjectID: team.ID, SubjectRelation: accounts.RelMember}, accounts.Member)
+	_, err = acc.SetRepoGrant(ctx, owner, org.ID, "example/repo", accounts.Tuple{SubjectType: accounts.TypeTeam, SubjectID: team.ID, SubjectRelation: accounts.TeamRead}, accounts.Write)
 	require.NoError(t, err)
 
 	check := func(wantMember int) {
@@ -71,7 +71,7 @@ func TestAccessSnapshotMatchesAuthoritativePermissions(t *testing.T) {
 		}
 	}
 	check(2)
-	_, err = acc.SetRepoGrant(ctx, owner, org.ID, "example/repo", accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: member.ID}, accounts.None)
+	_, err = acc.SetRepoGrant(ctx, owner, org.ID, "example/repo", accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: member.ID}, accounts.Deny)
 	require.NoError(t, err)
 	check(0)
 	require.NoError(t, acc.St.SetRepositoryAccess(ctx, org.ID, "example/repo", accounts.AccessLost, time.Now()))

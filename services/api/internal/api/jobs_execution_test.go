@@ -100,7 +100,7 @@ func TestAccountslessAutomationRejectsPersistedIdentity(t *testing.T) {
 	ctx, err := execution.With(t.Context(), fixedExecution())
 	require.NoError(t, err)
 	s := &Server{}
-	_, authorize := s.jobAuthorization(ctx, "repo", accounts.Admin)
+	_, authorize := s.jobAuthorization(ctx, "repo", accounts.Full)
 	assert.True(t, errors.Is(authorize(ctx), errExecutionRegistry))
 	_, err = s.scheduleContext(t.Context(), Schedule{Repo: "repo", OrgID: "test-org", ActorID: "test-user", Execution: fixedExecution()})
 	assert.True(t, errors.Is(err, errExecutionRegistry))

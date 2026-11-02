@@ -48,7 +48,7 @@ const filters = computed(() => {
 })
 const enabled = computed(() => !!setting.value)
 const { data, error, pending } = useApiGet<{ entries: PromptLogEntry[]; next_before_id: number }>(
-  () => `${base.value}?limit=100&${filters.value}`, { immediate: session.can('admin') })
+  () => `${base.value}?limit=100&${filters.value}`, { immediate: session.can('full') })
 const rows = computed(() => data.value?.entries ?? [])
 const exportUrl = (format: string) => apiPath(`${base.value}/export?format=${format}&${filters.value}`)
 
@@ -62,7 +62,7 @@ const uid = useId()
 <template>
   <div class="stack">
     <p v-if="!org" class="notice">Choose an organisation in the sidebar first.</p>
-    <p v-else-if="!session.can('admin')" class="notice">Only owners and admins of {{ org.name }} can see its prompt log.<template v-if="setting"> It is {{ setting.enabled ? `on: prompts sent through the gateway are kept for ${setting.retention_days} days` : 'off: no prompt text is kept' }}.</template></p>
+    <p v-else-if="!session.can('full')" class="notice">Only owners and admins of {{ org.name }} can see its prompt log.<template v-if="setting"> It is {{ setting.enabled ? `on: prompts sent through the gateway are kept for ${setting.retention_days} days` : 'off: no prompt text is kept' }}.</template></p>
     <template v-else>
       <section class="panel">
         <h2>Prompt log</h2>

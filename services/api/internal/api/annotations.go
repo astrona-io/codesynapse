@@ -200,7 +200,7 @@ func (s *Server) annotateIngest(ctx context.Context, repo string, g *model.Graph
 	}
 }
 func (s *Server) handleAnnotate(w http.ResponseWriter, r *http.Request) {
-	_, authorize := s.jobAuthorization(r.Context(), r.PathValue("repo"), accounts.Member)
+	_, authorize := s.jobAuthorization(r.Context(), r.PathValue("repo"), accounts.Write)
 	var input struct {
 		SymbolIDs []string `json:"symbol_ids"`
 	}

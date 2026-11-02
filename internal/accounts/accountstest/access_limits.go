@@ -38,10 +38,10 @@ func SeedAccessBenchmark(tb testing.TB, st accounts.Store, suffix ...string) (st
 			if err := tx.CreateTeam(ctx, accounts.Team{ID: id, OrgID: orgID, Slug: id, Name: id, CreatedAt: now}); err != nil {
 				return err
 			}
-			if err := tx.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeTeam, ObjectID: id, Relation: accounts.RelMember, SubjectType: accounts.TypeUser, SubjectID: userID, CreatedAt: now}); err != nil {
+			if err := tx.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeTeam, ObjectID: id, Relation: accounts.TeamRead, SubjectType: accounts.TypeUser, SubjectID: userID, CreatedAt: now}); err != nil {
 				return err
 			}
-			if err := tx.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(orgID, prefix+"/repo-000"), Relation: accounts.RepoAdmin, SubjectType: accounts.TypeTeam, SubjectID: id, SubjectRelation: accounts.RelMember, CreatedAt: now}); err != nil {
+			if err := tx.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(orgID, prefix+"/repo-000"), Relation: accounts.RepoFull, SubjectType: accounts.TypeTeam, SubjectID: id, SubjectRelation: accounts.TeamRead, CreatedAt: now}); err != nil {
 				return err
 			}
 		}
@@ -64,7 +64,7 @@ func RunAccessBounds(t *testing.T, st accounts.Store) {
 	now := time.Now().UTC()
 	extra := "bounded-extra"
 	require.NoError(t, st.CreateTeam(ctx, accounts.Team{ID: extra, OrgID: orgID, Slug: extra, Name: extra, CreatedAt: now}))
-	require.NoError(t, st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeTeam, ObjectID: extra, Relation: accounts.RelMember, SubjectType: accounts.TypeUser, SubjectID: userID, CreatedAt: now}))
+	require.NoError(t, st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeTeam, ObjectID: extra, Relation: accounts.TeamRead, SubjectType: accounts.TypeUser, SubjectID: userID, CreatedAt: now}))
 	_, err = svc.AccessOf(ctx, userID)
 	assert.Equal(t, err, accounts.ErrAccessLimit)
 }
