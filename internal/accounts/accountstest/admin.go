@@ -27,7 +27,7 @@ func RunAdmin(t *testing.T, st accounts.Store) {
 	user, org, err := svc.SignUp(ctx, "admin-user@example.com", "User", pw)
 	require.NoError(t, err)
 	userP := accounts.Principal{User: user, Via: "session"}
-	key, _, err := svc.CreateKey(ctx, userP, org.ID, "laptop", 0)
+	key, _, err := svc.CreateKey(ctx, userP, org.ID, "laptop", 0, nil)
 	require.NoError(t, err)
 	tok, _, err := svc.Login(ctx, user.Email, pw, "10.0.0.1")
 	require.NoError(t, err)

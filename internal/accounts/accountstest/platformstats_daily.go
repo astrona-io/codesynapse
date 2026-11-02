@@ -308,7 +308,7 @@ func platformStatsFixture(ctx context.Context, t *testing.T, st accounts.Store) 
 	require.NoError(t, st.AddRepository(ctx, accounts.Repository{OrgID: adaOrg.ID, Graph: "acme/two", Visibility: accounts.Private, AddedBy: adaUser.ID, OwnerID: adaUser.ID, AddedAt: now}))
 	require.NoError(t, st.SetRepositoryAccess(ctx, adaOrg.ID, "acme/two", accounts.AccessLost, now))
 
-	_, key, err := svc.CreateKey(ctx, ada, adaOrg.ID, "ci", 7*24*time.Hour)
+	_, key, err := svc.CreateKey(ctx, ada, adaOrg.ID, "ci", 7*24*time.Hour, nil)
 	require.NoError(t, err)
 	require.NoError(t, st.TouchAPIKey(ctx, key.ID, now))
 	_, err = svc.RegisterExecutionSession(ctx, adaUser.ID, adaOrg.ID, "claude-1")

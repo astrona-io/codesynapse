@@ -123,7 +123,7 @@ func TestUserGitTokens(t *testing.T) {
 	t.Run("each entry uses only its own token", func(t *testing.T) {
 		code, body := register(bob, shared, sharedRepo, spaceOrg)
 		require.Equal(t, code, 200, body)
-		reach := scope{reach: map[string]accounts.Reach{mineRepo: {OrgID: team.ID, Role: accounts.Full}, sharedRepo: {OrgID: team.ID, Role: accounts.Full}}}
+		reach := scope{reach: map[string]accounts.Reach{mineRepo: {OrgID: team.ID, Perms: accounts.Full.Bundle(accounts.ResourceRepository)}, sharedRepo: {OrgID: team.ID, Perms: accounts.Full.Bundle(accounts.ResourceRepository)}}}
 		inScope := context.WithValue(ctx, scopeKey{}, reach)
 		assert.Equal(t, srv.syncAuth(inScope, mineRepo, mine), gitx.Auth{Host: "127.0.0.1", Token: carolToken}, "personal: the owner's token")
 		assert.Equal(t, srv.syncAuth(inScope, sharedRepo, shared), gitx.Auth{Host: "127.0.0.1", Token: orgToken}, "organisation: the organisation's token")
@@ -139,7 +139,7 @@ func TestUserGitTokens(t *testing.T) {
 		require.Equal(t, carol.do("DELETE", "/api/v1/me/git-tokens/127.0.0.1", "", nil), 204)
 		srv.verifyAccess(ctx, mineRepo)
 		assert.False(t, strings.Contains(strings.Join(visible(carol), ","), mineRepo), "no fallback to the organisation's token")
-		_, err := srv.pushAuthFor(context.WithValue(ctx, scopeKey{}, scope{reach: map[string]accounts.Reach{mineRepo: {OrgID: team.ID, Role: accounts.Full}}}), mineRepo, mine)
+		_, err := srv.pushAuthFor(context.WithValue(ctx, scopeKey{}, scope{reach: map[string]accounts.Reach{mineRepo: {OrgID: team.ID, Perms: accounts.Full.Bundle(accounts.ResourceRepository)}}}), mineRepo, mine)
 		assert.Error(t, err)
 		var restored struct{ Restored []string }
 		require.Equal(t, carol.do("PUT", "/api/v1/me/git-tokens/127.0.0.1", `{"token":"`+carolToken+`"}`, &restored), 200)

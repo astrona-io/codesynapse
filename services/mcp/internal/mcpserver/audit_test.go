@@ -43,7 +43,7 @@ func TestEveryMCPRequestIsAudited(t *testing.T) {
 	org := accounts.Org{ID: "o-bob", Slug: "bob", Name: "Bob's", CreatedAt: time.Now().UTC()}
 	require.NoError(t, acc.St.CreateOrg(ctx, org, bob.ID))
 	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: org.ID, Graph: storetest.Repo, Visibility: accounts.Public, AddedBy: bob.ID, AddedAt: time.Now().UTC().Truncate(time.Microsecond)}))
-	key, apiKey, err := acc.CreateKey(ctx, accounts.Principal{User: bob, Via: "session"}, org.ID, "agent", 0)
+	key, apiKey, err := acc.CreateKey(ctx, accounts.Principal{User: bob, Via: "session"}, org.ID, "agent", 0, nil)
 	require.NoError(t, err)
 	_, err = acc.RegisterExecutionSession(ctx, bob.ID, org.ID, "chat-audit")
 	require.NoError(t, err)

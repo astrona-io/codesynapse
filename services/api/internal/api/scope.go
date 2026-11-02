@@ -69,7 +69,7 @@ func orgPerm(p accounts.Permission) policy    { return policy{kind: inOrg, perm:
 // content. Only explicit single-tenant mode uses all.
 type scope struct {
 	all    bool
-	graphs map[string]accounts.Role
+	graphs map[string]accounts.Perms
 	// reach says whose content (reviews, memory) each graph shows.
 	reach map[string]accounts.Reach
 	// orgs are the organisations the request acts in: the key's, the one
@@ -125,7 +125,7 @@ func (s *Server) membershipScope(r *http.Request, p accounts.Principal) (scope, 
 		return scope{}, err
 	}
 	want := r.Header.Get(OrgHeader)
-	sc := scope{graphs: map[string]accounts.Role{}, reach: map[string]accounts.Reach{}}
+	sc := scope{graphs: map[string]accounts.Perms{}, reach: map[string]accounts.Reach{}}
 	for _, m := range ms {
 		if (p.OrgID != "" && m.Org.ID != p.OrgID) || (want != "" && m.Org.Slug != want) {
 			continue
@@ -144,17 +144,20 @@ func (s *Server) scopeOf(r *http.Request, p accounts.Principal) (scope, error) {
 	if err != nil || p.Via == "service" {
 		return sc, err
 	}
-	access, err := s.cfg.Accounts.AccessOf(r.Context(), p.User.ID)
+	// AccessFor: a scoped key reaches its scope intersected with what its
+	// user holds now.
+	access, err := s.cfg.Accounts.AccessFor(r.Context(), p)
 	if err != nil {
 		return scope{}, err
 	}
 	selected := map[string]bool{}
 	for i, m := range sc.orgs {
 		sc.orgs[i].Role = accounts.Max(m.Role, access.OrgRole(m.Org.ID))
+		sc.orgs[i].Perms = access.OrgPerms[m.Org.ID]
 		selected[m.Org.ID] = true
 	}
 	for graph, reach := range access.Scope(selected) {
-		sc.graphs[graph], sc.reach[graph] = reach.Role, reach
+		sc.graphs[graph], sc.reach[graph] = reach.Perms, reach
 	}
 	return sc, nil
 }
@@ -400,7 +403,7 @@ func defaultSpace(m accounts.Membership, space string) string {
 	if space != "" {
 		return space
 	}
-	if m.Role.Has(accounts.OrgRepositoriesFull) {
+	if m.Has(accounts.OrgRepositoriesFull) {
 		return spaceOrg
 	}
 	return spaceMe
@@ -601,7 +604,7 @@ func (s *Server) handleOrgRepos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, _ := principal(r.Context())
-	a, err := s.cfg.Accounts.AccessOf(r.Context(), p.User.ID)
+	a, err := s.cfg.Accounts.AccessFor(r.Context(), p)
 	if err != nil {
 		s.accountError(w, err)
 		return
@@ -609,7 +612,7 @@ func (s *Server) handleOrgRepos(w http.ResponseWriter, r *http.Request) {
 	reach := a.Scope(map[string]bool{o.ID: true})
 	repos = slices.DeleteFunc(repos, func(repo accounts.Repository) bool {
 		r, ok := reach[repo.Graph]
-		return !ok || r.OrgID != o.ID || !r.Role.Has(accounts.RepoCodeRead)
+		return !ok || r.OrgID != o.ID || !r.Has(accounts.RepoCodeRead)
 	})
 	writeJSON(w, 200, map[string]any{"org": o, "repositories": repos})
 }

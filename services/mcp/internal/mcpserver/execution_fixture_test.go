@@ -23,7 +23,7 @@ func (fixtureRuntimeAccess) Authenticate(_ context.Context, token string) (*Call
 	return &Caller{UserID: "fixture-user", OrgID: "org-fixture", KeyID: "fixture-key", token: token}, nil
 }
 func (fixtureRuntimeAccess) Denied(context.Context, *Caller, string) error { return nil }
-func (fixtureRuntimeAccess) Reach(context.Context, string, string) (map[string]accounts.Reach, error) {
+func (fixtureRuntimeAccess) Reach(context.Context, *Caller) (map[string]accounts.Reach, error) {
 	return nil, fmt.Errorf("fixture is not an authorization provider")
 }
 func (fixtureRuntimeAccess) ResolveExecutionSession(_ context.Context, user, org, session string) (execution.Identity, error) {

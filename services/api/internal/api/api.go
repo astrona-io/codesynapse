@@ -585,7 +585,7 @@ func (s *Server) unlinkRepo(r *http.Request, graph string) (int, error) {
 	left := len(links)
 	for _, l := range links {
 		reach, ok := sc.reach[graph]
-		mine := ok && !reach.Ambiguous && reach.OrgID == l.OrgID && reach.Role.Has(accounts.RepoEntryFull)
+		mine := ok && !reach.Ambiguous && reach.OrgID == l.OrgID && reach.Has(accounts.RepoEntryFull)
 		if !mine {
 			continue
 		}

@@ -510,11 +510,13 @@ func (s *Store) DeleteUserSessions(ctx context.Context, userID string) error {
 	return err
 }
 
-const keyCols = "id, user_id, org_id, name, prefix, hash, created_at, last_used_at, expires_at, revoked_at"
+const keyCols = "id, user_id, org_id, name, prefix, hash, created_at, last_used_at, expires_at, revoked_at, scope"
 
 func scanKey(row pgx.Row) (accounts.APIKey, error) {
 	var k accounts.APIKey
-	err := row.Scan(&k.ID, &k.UserID, &k.OrgID, &k.Name, &k.Prefix, &k.Hash, &k.CreatedAt, &k.LastUsedAt, &k.ExpiresAt, &k.RevokedAt)
+	var scope []string
+	err := row.Scan(&k.ID, &k.UserID, &k.OrgID, &k.Name, &k.Prefix, &k.Hash, &k.CreatedAt, &k.LastUsedAt, &k.ExpiresAt, &k.RevokedAt, &scope)
+	k.Scope = toPermissions(scope)
 	k.CreatedAt = k.CreatedAt.UTC()
 	for _, t := range []**time.Time{&k.LastUsedAt, &k.ExpiresAt, &k.RevokedAt} {
 		if *t != nil {
@@ -527,8 +529,8 @@ func scanKey(row pgx.Row) (accounts.APIKey, error) {
 
 // CreateAPIKey implements accounts.Store.
 func (s *Store) CreateAPIKey(ctx context.Context, k accounts.APIKey) error {
-	_, err := s.db.Exec(ctx, "INSERT INTO api_keys ("+keyCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-		k.ID, k.UserID, k.OrgID, k.Name, k.Prefix, k.Hash, k.CreatedAt, k.LastUsedAt, k.ExpiresAt, k.RevokedAt)
+	_, err := s.db.Exec(ctx, "INSERT INTO api_keys ("+keyCols+") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+		k.ID, k.UserID, k.OrgID, k.Name, k.Prefix, k.Hash, k.CreatedAt, k.LastUsedAt, k.ExpiresAt, k.RevokedAt, toStrings(k.Scope))
 	return mapErr(err, "key")
 }
 

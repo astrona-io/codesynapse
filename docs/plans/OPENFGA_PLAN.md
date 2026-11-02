@@ -1,6 +1,6 @@
 # OpenFGA authorisation plan
 
-Status: phase 4 done (2026-11-02): the model, the client, the compose service and the contract run; nothing asks OpenFGA for decisions yet.
+Status: phases 3 and 4 done (2026-11-02): custom roles and scoped API keys are in; the OpenFGA model, the client, the compose service and the contract run; nothing asks OpenFGA for decisions yet.
 
 Repository and organisation access moves from the Go evaluator in `internal/accounts/authz.go` to [OpenFGA](https://openfga.dev) (Apache-2.0, a CNCF project). At the same time, permissions get one naming scheme, `resource:level`, where the level is `read`, `write` or `full`, and they become fine-grained: `resource.area:level` permissions that organisations can bundle into their own roles.
 
@@ -286,6 +286,13 @@ OpenFGA cannot join a PostgreSQL transaction, so writes go through the outbox:
 - **Switch:** `CODESYNAPSE_AUTHZ=openfga` turns OpenFGA on. Without the switch, the Go evaluator keeps deciding until phase 6 removes it from production code. It stays as the test reference.
 
 New dependencies, all Apache-2.0: the `github.com/openfga/go-sdk` Go module and the `openfga/openfga` image (pinned by digest). The test container uses the same image.
+
+### Phase 3 as built
+
+- **Storage:** migration 0042 adds `custom_roles` (organisation, name unique ignoring case, description, resource, permissions as a text array, creator, timestamps). Grants are ordinary tuples whose relation is `role:<id>`: on a repository object for a user or `team#read`, and on the organisation object for a user or a team. Deleting a role while any tuple names it answers 409. Phase 5 must map these: a `role:<id>` tuple becomes the role's permissions on that object (or the role as an object of its own), and changing a role in `custom_roles` must rewrite what OpenFGA holds for every grant of it. Phase 3 landed after phase 5, so until the model holds custom roles `OrgPolicy` refuses an organisation that grants any (`accounts.ErrCustomRolesNotMirrored`): it stays behind in OpenFGA, never fresh, rather than mirrored without them.
+- **Evaluation:** permission sets are a 64-bit set (`accounts.Perms`). A direct grant, built-in or custom, wins on a repository; otherwise team grants are united (the strongest built-in one as before, plus every custom one); otherwise the default. A grant naming a missing role gives nothing, with no fallback. A repository is reachable only with `repository.code:read`. Custom organisation roles add to the built-in role (`Service.PermsIn`); `Require` checks the built-in bundle first, so owners and admins cost no extra read.
+- **Keys:** `api_keys.scope` holds the key's permissions; `Service.KeyLimit` re-reads the key on every check (a revoked or expired key reaches nothing) and `AccessFor` intersects the owner's access with it. The MCP server goes through the same `AccessFor`.
+- **Deviations, the safer choice in each case:** no organisation-wide grant of repository roles (the plan allowed one that works like the default); the job role, the invitation ceiling and owner-making stay on built-in roles until phase 6; repository roles and key scopes with repository permissions always include `repository.code:read`.
 
 ### Phase 4 as built
 

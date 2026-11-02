@@ -16,6 +16,7 @@ func TestContract(t *testing.T) {
 	accountstest.Run(t, st)
 	accountstest.RunConcurrentAudit(t, st)
 	accountstest.RunReBAC(t, st)
+	accountstest.RunCustomRoles(t, st)
 	accountstest.RunAdmin(t, st)
 	accountstest.RunAccessBounds(t, st)
 	accountstest.RunPolicyRecovery(t, st)

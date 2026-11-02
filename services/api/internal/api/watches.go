@@ -220,7 +220,7 @@ func (s *Server) handleAddWatch(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	admin := m.Role.Has(accounts.OrgWatchesFull)
+	admin := m.Has(accounts.OrgWatchesFull)
 	includePrivate := admin
 	if req.IncludePrivate != nil {
 		includePrivate = *req.IncludePrivate
@@ -321,7 +321,7 @@ func (s *Server) ownWatch(w http.ResponseWriter, r *http.Request, p accounts.Pri
 		s.problem(w, http.StatusNotFound, errors.New("no such watch"))
 		return accounts.OrgWatch{}, false
 	}
-	if list[i].ActorID != p.User.ID && !m.Role.Has(accounts.OrgWatchesFull) {
+	if list[i].ActorID != p.User.ID && !m.Has(accounts.OrgWatchesFull) {
 		s.accountError(w, accounts.ErrForbidden)
 		return accounts.OrgWatch{}, false
 	}
@@ -374,7 +374,7 @@ func (s *Server) handleUpdateWatch(w http.ResponseWriter, r *http.Request) {
 		// Turning private repositories on needs the role that may use the
 		// token. The next scan with the token adds the private repositories
 		// that exist already (scanWatch), at most maxClonesPerScan a scan.
-		if !m.Role.Has(accounts.OrgWatchesFull) {
+		if !m.Has(accounts.OrgWatchesFull) {
 			s.problem(w, http.StatusForbidden, errPrivateNeedsAdmin)
 			return
 		}
@@ -502,7 +502,7 @@ func (s *Server) watchContext(ctx context.Context, w accounts.OrgWatch) (context
 		return nil, accounts.ErrForbidden
 	}
 	ctx = context.WithValue(ctx, principalKey{}, p)
-	ctx = context.WithValue(ctx, scopeKey{}, scope{graphs: map[string]accounts.Role{}, reach: map[string]accounts.Reach{}, orgs: []accounts.Membership{members[i]}})
+	ctx = context.WithValue(ctx, scopeKey{}, scope{graphs: map[string]accounts.Perms{}, reach: map[string]accounts.Reach{}, orgs: []accounts.Membership{members[i]}})
 	return context.WithValue(ctx, watchAddKey{}, true), nil
 }
 

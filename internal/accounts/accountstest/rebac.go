@@ -134,7 +134,7 @@ func RunReBAC(t *testing.T, st accounts.Store) {
 	_, err = svc.ResolveRepository(ctx, readerP, org.ID, graph, accounts.Read)
 	assert.True(t, errors.Is(err, accounts.ErrUnauthorized))
 	require.NoError(t, st.SetUserDisabled(ctx, reader.ID, nil))
-	token, key, err := svc.CreateKey(ctx, ownerP, org.ID, "policy test", 0)
+	token, key, err := svc.CreateKey(ctx, ownerP, org.ID, "policy test", 0, nil)
 	require.NoError(t, err)
 	kp, err := svc.AuthenticateKey(ctx, token)
 	require.NoError(t, err)

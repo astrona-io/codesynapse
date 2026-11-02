@@ -68,7 +68,12 @@ func RepoRelation(r Role) string {
 type RepoAccess struct {
 	OrgID string `json:"org_id"`
 	Graph string `json:"graph"`
-	Role  Role   `json:"role"` // Full, Write or Read
+	// Role is the strongest built-in role Perms covers: Full, Write, Read
+	// or "" for a custom role holding less than read. Checks use Perms.
+	Role  Role  `json:"role"`
+	Perms Perms `json:"permissions"`
+	// CustomRole names the custom role that granted Perms, if one did.
+	CustomRole string `json:"custom_role,omitempty"`
 	// Via explains the strongest path: "organisation", "user" or "team".
 	Via      string `json:"via"`
 	Revision int64  `json:"revision"`
@@ -82,6 +87,9 @@ type Access struct {
 	// Orgs are the user's effective organisation roles (memberships and
 	// team roles), guests included.
 	Orgs map[string]Role
+	// OrgPerms are the user's organisation permissions: the role's bundle
+	// and custom organisation roles.
+	OrgPerms map[string]Perms
 	// Teams the user belongs to, by ID (maintainers included).
 	Teams map[string]string // team ID -> read or full
 	// Repos holds one entry per organisation entry the user reaches.
@@ -91,10 +99,13 @@ type Access struct {
 // OrgRole is the user's effective role in orgID ("" without one).
 func (a Access) OrgRole(orgID string) Role { return a.Orgs[orgID] }
 
+// Has reports whether the reach holds p.
+func (r Reach) Has(p Permission) bool { return r.Perms.Has(p) }
+
 // AccessOf evaluates a bounded snapshot of current account policy. A partial
 // membership or tuple result never authorizes access.
 func (s *Service) AccessOf(ctx context.Context, userID string) (Access, error) {
-	a := Access{UserID: userID, Orgs: map[string]Role{}, Teams: map[string]string{}}
+	a := Access{UserID: userID, Orgs: map[string]Role{}, OrgPerms: map[string]Perms{}, Teams: map[string]string{}}
 	err := s.St.ReadSnapshot(ctx, func(st Store) error {
 		scoped := *s
 		scoped.St = st
@@ -106,7 +117,7 @@ func (s *Service) AccessOf(ctx context.Context, userID string) (Access, error) {
 }
 
 func (s *Service) accessOf(ctx context.Context, userID string) (Access, error) {
-	a := Access{UserID: userID, Orgs: map[string]Role{}, Teams: map[string]string{}}
+	a := Access{UserID: userID, Orgs: map[string]Role{}, OrgPerms: map[string]Perms{}, Teams: map[string]string{}}
 	u, err := s.St.UserByID(ctx, userID)
 	if err != nil {
 		return a, err
@@ -171,6 +182,34 @@ func (s *Service) accessOf(ctx context.Context, userID string) (Access, error) {
 			return a, err
 		}
 	}
+	orgIDs := make([]string, 0, len(orgs))
+	for id := range orgs {
+		orgIDs = append(orgIDs, id)
+	}
+	roles, err := s.St.CustomRoles(ctx, orgIDs)
+	if err != nil {
+		return a, err
+	}
+	customs := map[string]CustomRole{}
+	for _, r := range roles {
+		customs[r.ID] = r
+	}
+	// custom is the role a relation names when it belongs to orgID and
+	// holds resource's permissions; anything else grants nothing.
+	custom := func(relation, orgID, resource string) (CustomRole, bool) {
+		id, _ := CustomRoleID(relation)
+		r, ok := customs[id]
+		return r, ok && r.OrgID == orgID && r.Resource == resource
+	}
+	orgDirect, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeOrganisation, SubjectType: TypeUser, SubjectID: userID})
+	if err != nil {
+		return a, err
+	}
+	for _, t := range orgDirect {
+		if r, ok := custom(t.Relation, t.ObjectID, ResourceOrganisation); ok && orgs[t.ObjectID].ID != "" {
+			a.OrgPerms[t.ObjectID] |= r.Perms()
+		}
+	}
 	direct, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeRepository, SubjectType: TypeUser, SubjectID: userID})
 	if err != nil {
 		return a, err
@@ -185,12 +224,18 @@ func (s *Service) accessOf(ctx context.Context, userID string) (Access, error) {
 		}
 		directByRepo[t.ObjectID] = t
 	}
-	teamBest := map[string]Role{}
+	teamBest := map[string]Perms{}
+	teamCustom := map[string]string{}
 	seen := map[string]bool{}
 	for _, t := range teams {
 		if t.ObjectType == TypeOrganisation {
-			if teamOrgs[t.SubjectID] == t.ObjectID && Role(t.Relation).Valid() {
+			if teamOrgs[t.SubjectID] != t.ObjectID {
+				continue
+			}
+			if Role(t.Relation).Valid() {
 				a.Orgs[t.ObjectID] = Max(a.Orgs[t.ObjectID], Role(t.Relation))
+			} else if r, ok := custom(t.Relation, t.ObjectID, ResourceOrganisation); ok {
+				a.OrgPerms[t.ObjectID] |= r.Perms()
 			}
 			continue
 		}
@@ -209,11 +254,16 @@ func (s *Service) accessOf(ctx context.Context, userID string) (Access, error) {
 			return a, ErrInvalidInput
 		}
 		seen[key] = true
-		teamBest[t.ObjectID] = Max(teamBest[t.ObjectID], repoRelationRole[t.Relation])
+		// Team grants add up: each team brings its bundle.
+		if r, ok := custom(t.Relation, orgID, ResourceRepository); ok {
+			teamBest[t.ObjectID] |= r.Perms()
+			teamCustom[t.ObjectID] = r.Name
+		} else {
+			teamBest[t.ObjectID] |= repoRelationRole[t.Relation].Bundle(ResourceRepository)
+		}
 	}
-	orgIDs := make([]string, 0, len(orgs))
-	for id := range orgs {
-		orgIDs = append(orgIDs, id)
+	for id, role := range a.Orgs {
+		a.OrgPerms[id] |= role.Bundle(ResourceOrganisation)
 	}
 	repos, err := s.St.RepositoriesForOrgs(ctx, orgIDs)
 	if err != nil {
@@ -229,18 +279,29 @@ func (s *Service) accessOf(ctx context.Context, userID string) (Access, error) {
 			continue
 		}
 		key := RepoObject(orgID, repo.Graph)
-		role, via := Role(""), TypeOrganisation
+		var perms Perms
+		via, name := TypeOrganisation, ""
 		if d, ok := directByRepo[key]; ok {
-			role, via = repoRelationRole[d.Relation], TypeUser
+			// A direct grant replaces the rest, also when it names a role
+			// that is gone: that grants nothing rather than falling back.
+			via = TypeUser
+			if _, isCustom := CustomRoleID(d.Relation); isCustom {
+				if r, ok := custom(d.Relation, orgID, ResourceRepository); ok {
+					perms, name = r.Perms(), r.Name
+				}
+			} else {
+				perms = repoRelationRole[d.Relation].Bundle(ResourceRepository)
+			}
 		} else if t, ok := teamBest[key]; ok {
-			role, via = t, TypeTeam
+			perms, via, name = t, TypeTeam, teamCustom[key]
 		} else if !repo.Personal() && org.DefaultRepoAccess == DefaultRepoReadOnly && membershipRole(ms, orgID) != Guest {
-			role = Read
+			perms = Read.Bundle(ResourceRepository)
 		}
-		if role != Read && role != Write && role != Full {
+		if !perms.Has(RepoCodeRead) {
 			continue
 		}
-		a.Repos = append(a.Repos, RepoAccess{OrgID: orgID, Graph: repo.Graph, Role: role, Via: via, Revision: org.PolicyRevision, Personal: repo.Personal()})
+		a.Repos = append(a.Repos, RepoAccess{OrgID: orgID, Graph: repo.Graph, Role: BuiltinRepoRole(perms), Perms: perms, CustomRole: name,
+			Via: via, Revision: org.PolicyRevision, Personal: repo.Personal()})
 	}
 	return a, nil
 }
@@ -265,13 +326,13 @@ func (s *Service) ResolveRepository(ctx context.Context, p Principal, orgID, gra
 	if err := s.ValidatePrincipal(ctx, p); err != nil {
 		return RepoAccess{}, err
 	}
-	a, err := s.AccessOf(ctx, p.User.ID)
+	a, err := s.AccessFor(ctx, p)
 	if err != nil {
 		return RepoAccess{}, err
 	}
 	for _, r := range a.Repos {
 		if r.OrgID == orgID && r.Graph == graph {
-			if !r.Role.AtLeast(least) {
+			if !r.Perms.Covers(least.Bundle(ResourceRepository)) {
 				return RepoAccess{}, ErrForbidden
 			}
 			return r, nil
@@ -318,8 +379,9 @@ func (s *Service) ValidatePrincipal(ctx context.Context, p Principal) error {
 
 // validRepoTuple checks a repository grant against the schema.
 func validRepoTuple(t Tuple) error {
-	if t.ObjectType != TypeRepository || repoRelationRole[t.Relation] == "" || (t.Relation == RepoDeny && t.SubjectType != TypeUser) {
-		return fmt.Errorf("%w: repository relations are full, write, read and user-only deny", ErrInvalidInput)
+	_, isCustom := CustomRoleID(t.Relation)
+	if t.ObjectType != TypeRepository || (repoRelationRole[t.Relation] == "" && !isCustom) || (t.Relation == RepoDeny && t.SubjectType != TypeUser) {
+		return fmt.Errorf("%w: repository relations are full, write, read, a custom role and user-only deny", ErrInvalidInput)
 	}
 	switch {
 	case t.SubjectType == TypeUser && t.SubjectRelation == "":
@@ -332,7 +394,9 @@ func validRepoTuple(t Tuple) error {
 
 // Reach is one graph in a caller's scope.
 type Reach struct {
-	Role Role
+	// Perms are the permissions held on the graph (the union over the
+	// selected organisations' entries when it is ambiguous).
+	Perms Perms
 	// OrgID is the organisation whose content (reviews, memory) the graph
 	// shows: a selected organisation's entry first, else the one that
 	// shared it.
@@ -355,12 +419,12 @@ func (a Access) Scope(selected map[string]bool) map[string]Reach {
 		cur, exists := out[r.Graph]
 		if exists && cur.OrgID != r.OrgID {
 			cur.Ambiguous = true
-			cur.Role = Max(cur.Role, r.Role)
+			cur.Perms |= r.Perms
 			// Personal only when every entry is someone's own.
 			cur.Personal = cur.Personal && r.Personal
 			out[r.Graph] = cur
 		} else {
-			out[r.Graph] = Reach{Role: r.Role, OrgID: r.OrgID, Personal: r.Personal}
+			out[r.Graph] = Reach{Perms: r.Perms, OrgID: r.OrgID, Personal: r.Personal}
 		}
 	}
 	return out

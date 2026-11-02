@@ -49,7 +49,7 @@ func TestAgentActivityIsolationAndValidation(t *testing.T) {
 	assert.True(t, json.Valid([]byte(rows[0].Detail)))
 	other, otherOrg, err := f.accounts.SignUp(t.Context(), "other-activity@example.com", "Other", pw)
 	require.NoError(t, err)
-	key, _, err := f.accounts.CreateKey(t.Context(), accounts.Principal{User: other, Via: "session"}, otherOrg.ID, "other", 0)
+	key, _, err := f.accounts.CreateKey(t.Context(), accounts.Principal{User: other, Via: "session"}, otherOrg.ID, "other", 0, nil)
 	require.NoError(t, err)
 	originalAuth := f.client.auth
 	f.client.auth = "Bearer " + key

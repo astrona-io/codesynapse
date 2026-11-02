@@ -90,9 +90,31 @@ func TestPlatformFlagDoesNotGrantMCPReach(t *testing.T) {
 	require.True(t, admin.User.PlatformAdmin, "a has platform administration")
 	other, err := acc.AuthenticateKey(ctx, keys["b"])
 	require.NoError(t, err)
-	reach, err := (AccountsAccess{Acc: acc}).Reach(ctx, admin.User.ID, other.OrgID)
+	reach, err := (AccountsAccess{Acc: acc}).Reach(ctx, &Caller{UserID: admin.User.ID, OrgID: other.OrgID})
 	require.NoError(t, err)
 	assert.Len(t, reach, 0)
+}
+
+func TestScopedKeyLimitsMCPReach(t *testing.T) {
+	_, keys, acc, _, _ := keyServer(t)
+	ctx := context.Background()
+	full, err := acc.AuthenticateKey(ctx, keys["a"])
+	require.NoError(t, err)
+	session := accounts.Principal{User: full.User, Via: "session"}
+	_, key, err := acc.CreateKey(ctx, session, full.OrgID, "code only", 0, []accounts.Permission{accounts.RepoCodeRead})
+	require.NoError(t, err)
+	reach, err := (AccountsAccess{Acc: acc}).Reach(ctx, &Caller{UserID: full.User.ID, OrgID: full.OrgID, KeyID: key.ID})
+	require.NoError(t, err)
+	require.True(t, len(reach) > 0)
+	for graph, r := range reach {
+		assert.True(t, r.Has(accounts.RepoCodeRead), graph)
+		assert.False(t, r.Has(accounts.RepoMemoryWrite), "the key's scope limits what its user holds", graph)
+	}
+	unscoped, err := (AccountsAccess{Acc: acc}).Reach(ctx, &Caller{UserID: full.User.ID, OrgID: full.OrgID, KeyID: full.KeyID})
+	require.NoError(t, err)
+	for graph, r := range unscoped {
+		assert.True(t, r.Has(accounts.RepoMemoryWrite), "unscoped keys act as their user", graph)
+	}
 }
 
 func TestAccountsHandlersDenyMissingCaller(t *testing.T) {

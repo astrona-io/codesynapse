@@ -545,7 +545,29 @@ export interface ApiKey {
   last_used_at?: string
   expires_at?: string
   revoked_at?: string
+  // scope limits the key to these permissions; absent, it acts as its user.
+  scope?: string[]
 }
+
+// Custom roles (docs/plans/OPENFGA_PLAN.md, phase 3).
+export type PermissionResource = 'repository' | 'organisation'
+export type PermissionLevel = 'read' | 'write' | 'full'
+// GET /api/v1/accounts/permissions: every permission a role or key scope can name.
+export interface PermissionInfo { permission: string; resource: PermissionResource; area: string; level: PermissionLevel; floor: Role }
+export interface CustomRole {
+  id: string
+  org_id: string
+  name: string
+  description: string
+  resource: PermissionResource
+  // Expanded: lower levels of an area are listed too.
+  permissions: string[]
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+// A custom organisation role held by a member (subject user) or a team.
+export interface OrgRoleGrant { subject_type: 'user' | 'team'; subject_id: string; relation: string; role: CustomRole; label: string }
 export interface GitToken {
   org_id: string
   host: string
@@ -581,8 +603,10 @@ export interface Team { id: string; org_id: string; slug: string; name: string; 
 export interface RepoGrant {
   subject_type: 'user' | 'team'
   subject_id: string
-  relation: 'full' | 'write' | 'read' | 'deny'
-  role: Role | 'deny'
+  // role:<id> for a custom role.
+  relation: 'full' | 'write' | 'read' | 'deny' | `role:${string}`
+  role: Role | 'deny' | ''
+  custom_role?: CustomRole
   label: string
   external: boolean
   created_at: string

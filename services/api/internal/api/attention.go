@@ -274,7 +274,7 @@ func (s *Server) lostAccess(ctx context.Context) ([]accounts.Repository, error) 
 	sc := scopeFrom(ctx)
 	var orgIDs []string
 	for _, m := range sc.orgs {
-		if m.Role.Has(accounts.OrgRepositoriesRead) {
+		if m.Has(accounts.OrgRepositoriesRead) {
 			orgIDs = append(orgIDs, m.Org.ID)
 		}
 	}

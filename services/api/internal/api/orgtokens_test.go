@@ -151,13 +151,13 @@ func TestPrivateRepositoriesWithOrgTokens(t *testing.T) {
 
 	// Fix branches: an organisation pushes with its own token.
 	req := httptest.NewRequest("POST", "/", nil)
-	req = req.WithContext(context.WithValue(ctx, scopeKey{}, scope{graphs: map[string]accounts.Role{secretRepo: accounts.Owner},
-		reach: map[string]accounts.Reach{secretRepo: {Role: accounts.Full, OrgID: team.ID}},
+	req = req.WithContext(context.WithValue(ctx, scopeKey{}, scope{graphs: map[string]accounts.Perms{secretRepo: accounts.Owner.Bundle(accounts.ResourceRepository)},
+		reach: map[string]accounts.Reach{secretRepo: {Perms: accounts.Full.Bundle(accounts.ResourceRepository), OrgID: team.ID}},
 		orgs:  []accounts.Membership{{Org: team, Role: accounts.Owner}}}))
 	push, err := srv.pushAuth(req, secretRepo, secret)
 	require.NoError(t, err)
 	assert.Equal(t, push.Token, bobToken2)
-	req = req.WithContext(context.WithValue(ctx, scopeKey{}, scope{graphs: map[string]accounts.Role{}, orgs: []accounts.Membership{{Org: other, Role: accounts.Owner}}}))
+	req = req.WithContext(context.WithValue(ctx, scopeKey{}, scope{graphs: map[string]accounts.Perms{}, orgs: []accounts.Membership{{Org: other, Role: accounts.Owner}}}))
 	_, err = srv.pushAuth(req, secretRepo, secret)
 	assert.Error(t, err, "an organisation that does not use the repository cannot push to it")
 
