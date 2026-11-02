@@ -34,7 +34,7 @@ func TestEveryToolHasPolicy(t *testing.T) {
 	for _, tool := range listed.Tools {
 		policy, ok := toolPolicies[tool.Name]
 		assert.True(t, ok, tool.Name)
-		assert.Equal(t, tool.Annotations.ReadOnlyHint, policy.role == accounts.Viewer, tool.Name)
+		assert.Equal(t, tool.Annotations.ReadOnlyHint, policy.perm.Level() == accounts.LevelRead, tool.Name)
 	}
 
 	// Registration alone cannot enable a tool without an explicit policy.

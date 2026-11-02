@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -80,8 +81,9 @@ func TestReBACOverHTTP(t *testing.T) {
 	assert.Equal(t, visible(carol, inAcme), []string{"acme/api", "acme/web"})
 	var mine struct {
 		Repos []struct {
-			Graph, Via string
-			Role       accounts.Role
+			Graph, Via  string
+			Role        accounts.Role
+			Permissions []accounts.Permission
 		}
 	}
 	require.Equal(t, carol.do("GET", "/api/v1/me/access", "", &mine), 200)
@@ -89,6 +91,8 @@ func TestReBACOverHTTP(t *testing.T) {
 		if r.Graph == "acme/api" {
 			assert.Equal(t, r.Via, "team")
 			assert.Equal(t, r.Role, accounts.Member)
+			assert.True(t, slices.Contains(r.Permissions, accounts.RepoMemoryWrite), "a writer holds memory:write")
+			assert.False(t, slices.Contains(r.Permissions, accounts.RepoSyncWrite), "a writer does not sync")
 		}
 	}
 	assert.Equal(t, carol.do("PUT", access("acme/web"), `{"user":"dave@example.com","role":"viewer"}`, nil), 403, "editors do not grant")

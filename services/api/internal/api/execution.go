@@ -14,10 +14,10 @@ import (
 var errExecutionRegistry = errors.New("execution requires an authenticated runtime session registry; enable accounts before starting jobs")
 
 func (s *Server) executionRoutes() {
-	s.route("POST /api/v1/execution/activity", orgRole(accounts.Guest), s.withExecution(s.handleHookActivity))
-	s.route("GET /api/v1/execution/sessions/{session}/activity", orgRole(accounts.Guest), s.handleSessionActivity)
-	s.route("POST /api/v1/execution/sessions", orgRole(accounts.Guest), s.handleRegisterExecution)
-	s.route("DELETE /api/v1/execution/sessions/{session}", orgRole(accounts.Guest), s.handleRevokeExecution)
+	s.route("POST /api/v1/execution/activity", orgPerm(accounts.OrgSessionsWrite), s.withExecution(s.handleHookActivity))
+	s.route("GET /api/v1/execution/sessions/{session}/activity", orgPerm(accounts.OrgSessionsRead), s.handleSessionActivity)
+	s.route("POST /api/v1/execution/sessions", orgPerm(accounts.OrgSessionsWrite), s.handleRegisterExecution)
+	s.route("DELETE /api/v1/execution/sessions/{session}", orgPerm(accounts.OrgSessionsWrite), s.handleRevokeExecution)
 }
 
 func (s *Server) handleRegisterExecution(w http.ResponseWriter, r *http.Request) {

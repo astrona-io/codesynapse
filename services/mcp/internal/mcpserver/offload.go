@@ -16,6 +16,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/agentctx"
 	"github.com/astrona-io/codesynapse/internal/execution"
 	"github.com/astrona-io/codesynapse/internal/memory"
@@ -163,7 +164,7 @@ func (h *handlers) offloadTurns(ctx context.Context, req *mcp.CallToolRequest, i
 	if err != nil {
 		return nil, offloadJob{}, err
 	}
-	if err := h.canWrite(ctx, repo); err != nil {
+	if err := h.holds(ctx, repo, accounts.RepoMemoryWrite); err != nil {
 		return nil, offloadJob{}, err
 	}
 	if len(in.Turns) == 0 || len(in.Turns) > extract.MaxTurns {

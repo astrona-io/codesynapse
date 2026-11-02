@@ -20,13 +20,13 @@ import (
 )
 
 func (s *Server) sessionMemoryRoutes() {
-	s.route("POST /api/v1/repos/{repo}/memory/index", repoRole(accounts.Member), s.withExecution(s.handleIndexRepository))
-	s.route("GET /api/v1/repos/{repo}/session-memory", repoRole(accounts.Viewer), s.withExecution(s.handleSessionMemory))
-	s.route("POST /api/v1/repos/{repo}/session-memory", repoRole(accounts.Member), s.withExecution(s.handleWriteSessionMemory))
-	s.route("DELETE /api/v1/repos/{repo}/session-memory", repoRole(accounts.Member), s.withExecution(s.handleDeleteSessionMemory))
-	s.route("POST /api/v1/repos/{repo}/session-memory/recall", repoRole(accounts.Viewer), s.withExecution(s.handleSessionRecall))
-	s.route("POST /api/v1/repos/{repo}/session-memory/offload", repoRole(accounts.Member), s.withExecution(s.handleSessionOffload))
-	s.route("POST /api/v1/repos/{repo}/session-memory/promote", repoRole(accounts.Member), s.withExecution(s.handlePromoteSessionMemory))
+	s.route("POST /api/v1/repos/{repo}/memory/index", repoPerm(accounts.RepoMemoryWrite), s.withExecution(s.handleIndexRepository))
+	s.route("GET /api/v1/repos/{repo}/session-memory", repoPerm(accounts.RepoMemoryRead), s.withExecution(s.handleSessionMemory))
+	s.route("POST /api/v1/repos/{repo}/session-memory", repoPerm(accounts.RepoMemoryWrite), s.withExecution(s.handleWriteSessionMemory))
+	s.route("DELETE /api/v1/repos/{repo}/session-memory", repoPerm(accounts.RepoMemoryFull), s.withExecution(s.handleDeleteSessionMemory))
+	s.route("POST /api/v1/repos/{repo}/session-memory/recall", repoPerm(accounts.RepoMemoryRead), s.withExecution(s.handleSessionRecall))
+	s.route("POST /api/v1/repos/{repo}/session-memory/offload", repoPerm(accounts.RepoMemoryWrite), s.withExecution(s.handleSessionOffload))
+	s.route("POST /api/v1/repos/{repo}/session-memory/promote", repoPerm(accounts.RepoMemoryWrite), s.withExecution(s.handlePromoteSessionMemory))
 }
 
 func (s *Server) sessionScope(r *http.Request) (sessionmemory.Scope, store.SessionMemoryStore, error) {

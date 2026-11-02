@@ -7,8 +7,19 @@ useHead({ title: () => `Access · ${repo.value}` })
 const session = useSession()
 const org = computed(() => session.current.value?.org)
 const path = computed(() => `accounts/orgs/${org.value?.slug ?? '-'}/repos/${encodeURIComponent(repo.value)}/access`)
-const { data, refresh, error: loadError } = useApiGet<{ grants: RepoGrant[]; default_repo_access: 'NONE' | 'READ_ONLY'; effective?: { role: Role; via: string } }>(() => path.value)
+const { data, refresh, error: loadError } = useApiGet<{ grants: RepoGrant[]; default_repo_access: 'NONE' | 'READ_ONLY'; effective?: { role: Role; via: string; permissions?: string[] } }>(() => path.value)
 const canManage = computed(() => data.value?.effective?.role === 'admin')
+// The highest level per area: a level includes the ones below it.
+const levels = ['read', 'write', 'full']
+const yours = computed(() => {
+  const top = new Map<string, string>()
+  for (const p of data.value?.effective?.permissions ?? []) {
+    const [area, level] = p.replace(/^repository\./, '').split(':')
+    if (!area || !level) continue
+    if (levels.indexOf(level) > levels.indexOf(top.get(area) ?? '')) top.set(area, level)
+  }
+  return [...top].map(([area, level]) => `${area.replace('_', ' ')}: ${level}`)
+})
 const internal = computed(() => (data.value?.grants ?? []).filter((g) => !g.external))
 const external = computed(() => (data.value?.grants ?? []).filter((g) => g.external))
 const roleLabel: Record<string, string> = { none: 'No access: overrides all inherited access', viewer: 'Read: navigation and recall', member: 'Write: also writes memory and reviews', admin: 'Admin: also syncs and manages access' }
@@ -58,6 +69,9 @@ async function revoke(g: RepoGrant) {
           <h2>In {{ org.name }}</h2>
           <p class="muted small">Organisation default: {{ data.default_repo_access === 'READ_ONLY' ? 'read only' : 'no access' }}. Removing a direct grant restores inheritance.</p>
           <p v-if="data?.effective" class="muted small">Your permission: {{ roleLabel[data.effective.role] }}. From: {{ data.effective.via }}.</p>
+          <ul v-if="yours.length" class="perms" aria-label="What you can do here">
+            <li v-for="p in yours" :key="p" class="pill">{{ p }}</li>
+          </ul>
           <form v-if="canManage" class="row" @submit.prevent="grant">
             <div class="field"><label for="kind">Give access to</label><select id="kind" v-model="kind"><option value="user">A person</option><option value="team">A team</option></select></div>
             <div class="field grow"><label for="who">{{ kind === 'user' ? 'Email' : 'Team' }}</label><input id="who" v-model="who" :type="kind === 'user' ? 'email' : 'text'" required :placeholder="kind === 'user' ? 'name@company.com' : 'e.g. contractors'"></div>
@@ -104,4 +118,5 @@ async function revoke(g: RepoGrant) {
 <style scoped>
 .grow { flex: 1 1 220px; min-width: 0; }
 .align-end { align-self: flex-end; }
+.perms { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
 </style>

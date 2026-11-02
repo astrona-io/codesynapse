@@ -108,7 +108,7 @@ func (s *Service) CreateInvitation(ctx context.Context, p Principal, orgID, emai
 		if err != nil {
 			return err
 		}
-		if !mine.AtLeast(Admin) || !mine.AtLeast(role) {
+		if !mine.Has(OrgMembersWrite) || !mine.AtLeast(role) {
 			return ErrForbidden
 		}
 		open, err := tx.expireInvitations(ctx, orgID)
@@ -168,7 +168,7 @@ func (s *Service) Invitations(ctx context.Context, p Principal, orgID string) ([
 	if err := signedIn(p); err != nil {
 		return nil, err
 	}
-	if err := s.Require(ctx, p, orgID, Admin); err != nil {
+	if err := s.Require(ctx, p, orgID, OrgMembersWrite); err != nil {
 		return nil, err
 	}
 	all, err := s.St.OrgInvitations(ctx, orgID)
@@ -192,7 +192,7 @@ func (s *Service) RevokeInvitation(ctx context.Context, p Principal, orgID, id s
 		return err
 	}
 	return s.inviteTx(ctx, func(tx *Service) error {
-		if err := tx.Require(ctx, p, orgID, Admin); err != nil {
+		if err := tx.Require(ctx, p, orgID, OrgMembersWrite); err != nil {
 			return err
 		}
 		open, err := tx.expireInvitations(ctx, orgID)
@@ -373,7 +373,7 @@ func (s *Service) inviterRole(ctx context.Context, inv Invitation) (Role, error)
 		}
 		r = Max(r, tr)
 	}
-	if !r.AtLeast(Admin) {
+	if !r.Has(OrgMembersWrite) {
 		return "", ErrInviterGone
 	}
 	return r, nil

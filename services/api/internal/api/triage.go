@@ -23,9 +23,9 @@ import (
 // transaction.
 
 func (s *Server) triageRoutes() {
-	s.route("GET /api/v1/repos/{repo}/triage", repoRole(accounts.Viewer), s.withExecution(s.handleListTriage))
-	s.route("PUT /api/v1/repos/{repo}/triage", repoRole(accounts.Admin), s.withExecution(s.handleSetTriage))
-	s.route("DELETE /api/v1/repos/{repo}/triage/{fingerprint}", repoRole(accounts.Admin), s.withExecution(s.handleClearTriage))
+	s.route("GET /api/v1/repos/{repo}/triage", repoPerm(accounts.RepoSecurityRead), s.withExecution(s.handleListTriage))
+	s.route("PUT /api/v1/repos/{repo}/triage", repoPerm(accounts.RepoSecurityFull), s.withExecution(s.handleSetTriage))
+	s.route("DELETE /api/v1/repos/{repo}/triage/{fingerprint}", repoPerm(accounts.RepoSecurityFull), s.withExecution(s.handleClearTriage))
 }
 
 // maxFindingIDBytes bounds the finding ID a request names.

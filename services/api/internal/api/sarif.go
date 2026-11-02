@@ -30,9 +30,9 @@ import (
 const maxSARIFUpload = sarifimport.MaxLogBytes
 
 func (s *Server) sarifRoutes() {
-	s.route("GET /api/v1/repos/{repo}/sarif", repoRole(accounts.Viewer), s.handleSARIF)
-	s.route("PUT /api/v1/repos/{repo}/sarif", repoRole(accounts.Member), s.handleUploadSARIF)
-	s.route("DELETE /api/v1/repos/{repo}/sarif", repoRole(accounts.Member), s.handleDeleteSARIF)
+	s.route("GET /api/v1/repos/{repo}/sarif", repoPerm(accounts.RepoSecurityRead), s.handleSARIF)
+	s.route("PUT /api/v1/repos/{repo}/sarif", repoPerm(accounts.RepoSecurityWrite), s.handleUploadSARIF)
+	s.route("DELETE /api/v1/repos/{repo}/sarif", repoPerm(accounts.RepoSecurityWrite), s.handleDeleteSARIF)
 }
 
 // SARIFTool is what the API says about one tool's latest upload.

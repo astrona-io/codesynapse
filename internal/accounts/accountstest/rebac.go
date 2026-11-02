@@ -223,7 +223,7 @@ func RunPolicyRecovery(t *testing.T, st accounts.Store) {
 	require.NoError(t, err)
 	assert.Equal(t, report.MalformedGrants, 1)
 	assert.Equal(t, report.OrphanedRepositories, []string{graph})
-	require.NoError(t, svc.Require(ctx, ownerP, orgID, accounts.Owner))
+	require.NoError(t, svc.Require(ctx, ownerP, orgID, accounts.OrgOwnerRules))
 	require.NoError(t, svc.RecoverRepoAdmin(ctx, ownerP, orgID, graph, users[1].ID))
 	for i, u := range users {
 		a, err := svc.AccessOf(ctx, u.ID)

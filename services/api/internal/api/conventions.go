@@ -13,7 +13,7 @@ import (
 // minimal_context answer paying for it.
 
 func (s *Server) conventionsRoutes() {
-	s.route("GET /api/v1/repos/{repo}/conventions", repoRole(accounts.Viewer), s.handleConventions)
+	s.route("GET /api/v1/repos/{repo}/conventions", repoPerm(accounts.RepoCodeRead), s.handleConventions)
 }
 
 func (s *Server) handleConventions(w http.ResponseWriter, r *http.Request) {

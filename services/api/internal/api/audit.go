@@ -235,7 +235,7 @@ func entries(segs []accounts.AuditSegment) int {
 
 // handleOrgAudit exports an organisation's audit log (org admins).
 func (s *Server) handleOrgAudit(w http.ResponseWriter, r *http.Request) {
-	_, o, ok := s.orgFor(w, r, accounts.Admin)
+	_, o, ok := s.orgFor(w, r, accounts.OrgAuditRead)
 	if !ok {
 		return
 	}

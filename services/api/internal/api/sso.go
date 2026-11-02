@@ -43,7 +43,7 @@ func (s *Server) discover(ctx context.Context, idp accounts.IdentityProvider, se
 // handleGetSSO shows an organisation's provider to its admins; the client
 // secret never leaves the store, only its preview.
 func (s *Server) handleGetSSO(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Admin)
+	p, o, ok := s.orgFor(w, r, accounts.OrgSSORead)
 	if !ok {
 		return
 	}
@@ -62,7 +62,7 @@ func (s *Server) handleGetSSO(w http.ResponseWriter, r *http.Request) {
 // handleSetSSO connects or updates the provider after checking that the
 // issuer answers OpenID discovery through the guarded client.
 func (s *Server) handleSetSSO(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Admin)
+	p, o, ok := s.orgFor(w, r, accounts.OrgSSOFull)
 	if !ok {
 		return
 	}
@@ -89,7 +89,7 @@ func (s *Server) handleSetSSO(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteSSO(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Admin)
+	p, o, ok := s.orgFor(w, r, accounts.OrgSSOFull)
 	if !ok {
 		return
 	}

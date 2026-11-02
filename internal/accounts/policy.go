@@ -45,7 +45,7 @@ func (s *Service) SetDefaultRepoAccess(ctx context.Context, p Principal, orgID, 
 		if p.Via == "key" {
 			return struct{}{}, ErrForbidden
 		}
-		if err := tx.Require(ctx, p, orgID, Admin); err != nil {
+		if err := tx.Require(ctx, p, orgID, OrgRepositoriesFull); err != nil {
 			return struct{}{}, err
 		}
 		if err := tx.St.SetDefaultRepoAccess(ctx, orgID, policy); err != nil {

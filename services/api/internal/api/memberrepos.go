@@ -10,11 +10,11 @@ import (
 // session only) whether members may add repositories to their own space (on
 // unless switched off). Switching it off keeps what members already added.
 func (s *Server) handleOrgMemberRepos(w http.ResponseWriter, r *http.Request) {
-	least := accounts.Member
+	perm := accounts.OrgRepositoriesWrite
 	if r.Method == http.MethodPut {
-		least = accounts.Admin
+		perm = accounts.OrgRepositoriesFull
 	}
-	p, o, ok := s.orgFor(w, r, least)
+	p, o, ok := s.orgFor(w, r, perm)
 	if !ok {
 		return
 	}

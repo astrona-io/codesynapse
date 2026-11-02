@@ -43,9 +43,9 @@ var (
 )
 
 func (s *Server) runtimeRoutes() {
-	s.route("GET /api/v1/repos/{repo}/runtime", repoRole(accounts.Viewer), s.handleRuntimeFacts)
-	s.route("PUT /api/v1/repos/{repo}/runtime", repoRole(accounts.Member), s.handleUploadRuntime)
-	s.route("DELETE /api/v1/repos/{repo}/runtime", repoRole(accounts.Member), s.handleDeleteRuntime)
+	s.route("GET /api/v1/repos/{repo}/runtime", repoPerm(accounts.RepoRuntimeRead), s.handleRuntimeFacts)
+	s.route("PUT /api/v1/repos/{repo}/runtime", repoPerm(accounts.RepoRuntimeWrite), s.handleUploadRuntime)
+	s.route("DELETE /api/v1/repos/{repo}/runtime", repoPerm(accounts.RepoRuntimeWrite), s.handleDeleteRuntime)
 }
 
 type runtimeReport struct {

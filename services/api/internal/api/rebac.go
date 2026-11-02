@@ -28,7 +28,7 @@ func (s *Server) team(w http.ResponseWriter, r *http.Request, o accounts.Org) (a
 }
 
 func (s *Server) handleTeams(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Viewer)
+	p, o, ok := s.orgFor(w, r, accounts.OrgTeamsRead)
 	if !ok {
 		return
 	}
@@ -59,7 +59,7 @@ type nameRequest struct {
 }
 
 func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Viewer)
+	p, o, ok := s.orgFor(w, r, accounts.OrgTeamsRead)
 	if !ok {
 		return
 	}
@@ -77,7 +77,7 @@ func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Viewer)
+	p, o, ok := s.orgFor(w, r, accounts.OrgTeamsRead)
 	if !ok {
 		return
 	}
@@ -98,7 +98,7 @@ type teamMemberRequest struct {
 }
 
 func (s *Server) handleSetTeamMember(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Guest)
+	p, o, ok := s.orgFor(w, r, accounts.OrgMembership)
 	if !ok {
 		return
 	}
@@ -120,7 +120,7 @@ func (s *Server) handleSetTeamMember(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRemoveTeamMember(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Guest)
+	p, o, ok := s.orgFor(w, r, accounts.OrgMembership)
 	if !ok {
 		return
 	}
@@ -140,7 +140,7 @@ type roleRequest struct {
 }
 
 func (s *Server) handleSetTeamRole(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Viewer)
+	p, o, ok := s.orgFor(w, r, accounts.OrgTeamsRead)
 	if !ok {
 		return
 	}
@@ -211,11 +211,12 @@ func (s *Server) handleRepoGrants(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"org": o.Slug, "repo": r.PathValue("repo"), "grants": gs, "default_repo_access": o.DefaultRepoAccess, "effective": effective})
+	writeJSON(w, 200, map[string]any{"org": o.Slug, "repo": r.PathValue("repo"), "grants": gs, "default_repo_access": o.DefaultRepoAccess,
+		"effective": effectiveView{RepoAccess: effective, Permissions: effective.Role.Permissions(accounts.ResourceRepository)}})
 }
 
 func (s *Server) handleRepoPolicy(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Admin)
+	p, o, ok := s.orgFor(w, r, accounts.OrgRepositoriesFull)
 	if !ok {
 		return
 	}
@@ -242,7 +243,7 @@ func (s *Server) handleRepoPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAccessChanges(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Owner)
+	p, o, ok := s.orgFor(w, r, accounts.OrgOwnerRules)
 	if !ok {
 		return
 	}
@@ -260,7 +261,7 @@ func (s *Server) handleAccessChanges(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRecoverRepoAdmin(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Owner)
+	p, o, ok := s.orgFor(w, r, accounts.OrgOwnerRules)
 	if !ok {
 		return
 	}
@@ -349,6 +350,15 @@ type reachView struct {
 	accounts.RepoAccess
 	Org    string `json:"org"` // slug
 	Shared bool   `json:"shared"`
+	// Permissions are what the role allows on the repository.
+	Permissions []accounts.Permission `json:"permissions"`
+}
+
+// effectiveView is the caller's own access to one repository with the
+// permissions its role holds.
+type effectiveView struct {
+	accounts.RepoAccess
+	Permissions []accounts.Permission `json:"permissions"`
 }
 
 // handleMyAccess lists what the caller reaches and why, including
@@ -375,7 +385,7 @@ func (s *Server) handleMyAccess(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		_, member := a.Orgs[ra.OrgID]
-		out = append(out, reachView{RepoAccess: ra, Org: slugs[ra.OrgID], Shared: !member})
+		out = append(out, reachView{RepoAccess: ra, Org: slugs[ra.OrgID], Shared: !member, Permissions: ra.Role.Permissions(accounts.ResourceRepository)})
 	}
 	if p.OrgID != "" {
 		for org := range a.Orgs {

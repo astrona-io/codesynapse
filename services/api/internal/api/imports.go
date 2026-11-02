@@ -89,7 +89,7 @@ func keepListed(x forge.Repo, archived, forks, private bool) bool {
 }
 
 func (s *Server) importRoutes() {
-	s.route("POST /api/v1/imports/list", orgRole(accounts.Member), s.handleImportList)
+	s.route("POST /api/v1/imports/list", orgPerm(accounts.OrgRepositoriesWrite), s.handleImportList)
 }
 
 func (s *Server) handleImportList(w http.ResponseWriter, r *http.Request) {
@@ -140,7 +140,7 @@ func (s *Server) handleImportList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		switch err := s.cfg.Accounts.Require(r.Context(), p, m.Org.ID, accounts.Admin); {
+		switch err := s.cfg.Accounts.Require(r.Context(), p, m.Org.ID, accounts.OrgGitTokensFull); {
 		case err == nil:
 			tok, err := s.cfg.Accounts.OpenGitToken(r.Context(), m.Org.ID, host)
 			switch {

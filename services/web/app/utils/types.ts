@@ -585,7 +585,8 @@ export interface RepoGrant {
   external: boolean
   created_at: string
 }
-export interface ReachView { org_id: string; org: string; graph: string; role: Role; via: string; shared: boolean }
+// permissions: "repository.<area>:<level>" names the role holds, sorted.
+export interface ReachView { org_id: string; org: string; graph: string; role: Role; via: string; shared: boolean; permissions: string[] }
 
 // GET /api/v1/attention: what needs attention, worst first.
 export type AttentionLevel = 'critical' | 'high' | 'medium' | 'low'

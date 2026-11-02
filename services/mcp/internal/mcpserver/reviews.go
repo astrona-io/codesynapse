@@ -10,6 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/reviews"
 	"github.com/astrona-io/codesynapse/internal/store"
@@ -70,7 +71,7 @@ func (h *handlers) submitReview(ctx context.Context, req *mcp.CallToolRequest, i
 	if err != nil {
 		return nil, submitReviewOut{}, err
 	}
-	if err := h.canWrite(ctx, repo); err != nil {
+	if err := h.holds(ctx, repo, accounts.RepoReviewsWrite); err != nil {
 		return nil, submitReviewOut{}, err
 	}
 	repoNode, err := h.svc.R.Node(ctx, model.NodeID(repo, model.KindRepository, repo))
@@ -142,7 +143,7 @@ func (h *handlers) updateReviewComment(ctx context.Context, req *mcp.CallToolReq
 	if err := h.canSeeReview(ctx, r.Repo, r.OrgID); err != nil {
 		return nil, reviews.Counts{}, err
 	}
-	if err := h.canWrite(ctx, r.Repo); err != nil {
+	if err := h.holds(ctx, r.Repo, accounts.RepoReviewsWrite); err != nil {
 		return nil, reviews.Counts{}, err
 	}
 	by := clientName(req)

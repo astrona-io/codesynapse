@@ -74,7 +74,7 @@ type retrievalReport struct {
 }
 
 func (s *Server) retrievalRoutes() {
-	s.route("POST /api/v1/repos/{repo}/usage/retrieval", repoRole(accounts.Viewer), s.handleRetrievalReport)
+	s.route("POST /api/v1/repos/{repo}/usage/retrieval", repoPerm(accounts.RepoCodeRead), s.handleRetrievalReport)
 }
 
 func (s *Server) handleRetrievalReport(w http.ResponseWriter, r *http.Request) {

@@ -29,13 +29,14 @@ type policyKind int
 const (
 	// open: any authenticated caller (handlers that need more check it).
 	open policyKind = iota
-	// onRepo: the caller needs a role on the {repo} graph.
+	// onRepo: the caller's role on the {repo} graph must hold the permission.
 	onRepo
-	// onReview: the caller needs a role on the review's repository.
+	// onReview: the same, on the review's repository.
 	onReview
 	// listed: any caller; the handler shows only visible repositories.
 	listed
-	// inOrg: the caller needs a role in the selected organisation.
+	// inOrg: the caller's role in the selected organisation must hold the
+	// permission.
 	inOrg
 	// platform: platform admins and the service token only.
 	platform
@@ -44,8 +45,10 @@ const (
 )
 
 type policy struct {
-	kind  policyKind
-	least accounts.Role
+	kind policyKind
+	// perm is the permission onRepo, onReview and inOrg routes check
+	// (accounts.Permission); the other kinds need none.
+	perm accounts.Permission
 	// governance routes stay open to accounts limited to governance (the
 	// bootstrap root, root.go); every other route refuses them.
 	governance bool
@@ -58,9 +61,9 @@ var (
 	localOnly    = policy{kind: local}
 )
 
-func repoRole(r accounts.Role) policy   { return policy{kind: onRepo, least: r} }
-func reviewRole(r accounts.Role) policy { return policy{kind: onReview, least: r} }
-func orgRole(r accounts.Role) policy    { return policy{kind: inOrg, least: r} }
+func repoPerm(p accounts.Permission) policy   { return policy{kind: onRepo, perm: p} }
+func reviewPerm(p accounts.Permission) policy { return policy{kind: onReview, perm: p} }
+func orgPerm(p accounts.Permission) policy    { return policy{kind: inOrg, perm: p} }
 
 // scope carries repository permissions and the tenant that owns private
 // content. Only explicit single-tenant mode uses all.
@@ -163,6 +166,10 @@ func (s *Server) route(pattern string, pol policy, h http.HandlerFunc) {
 		class = governanceRoute
 	}
 	s.classify(pattern, class)
+	if s.policies == nil {
+		s.policies = map[string]policy{}
+	}
+	s.policies[pattern] = pol
 	s.mux.HandleFunc(pattern, s.guard(pol, h))
 }
 
@@ -221,7 +228,7 @@ func (s *Server) guard(pol policy, h http.HandlerFunc) http.HandlerFunc {
 			s.problem(w, http.StatusForbidden, errors.New("use an organisation repository in accounts mode"))
 			return
 		case onRepo:
-			if !s.allowRepo(w, sc, r.PathValue("repo"), pol.least) {
+			if !s.allowRepo(w, sc, r.PathValue("repo"), pol.perm) {
 				return
 			}
 		case onReview:
@@ -234,7 +241,7 @@ func (s *Server) guard(pol policy, h http.HandlerFunc) http.HandlerFunc {
 				s.problem(w, http.StatusNotFound, errors.New("no such review"))
 				return
 			}
-			if !s.allowRepo(w, sc, rv.Repo, pol.least) {
+			if !s.allowRepo(w, sc, rv.Repo, pol.perm) {
 				return
 			}
 		case inOrg:
@@ -243,7 +250,7 @@ func (s *Server) guard(pol policy, h http.HandlerFunc) http.HandlerFunc {
 				s.problem(w, http.StatusBadRequest, err)
 				return
 			}
-			if err := s.cfg.Accounts.Require(ctx, p, m.Org.ID, pol.least); err != nil {
+			if err := s.cfg.Accounts.Require(ctx, p, m.Org.ID, pol.perm); err != nil {
 				s.problem(w, http.StatusForbidden, errors.New("your role in "+m.Org.Name+" does not allow this"))
 				return
 			}
@@ -260,14 +267,14 @@ func (s *Server) guard(pol policy, h http.HandlerFunc) http.HandlerFunc {
 }
 
 // allowRepo writes 404 for graphs outside the scope (their existence is not
-// revealed) and 403 for a role that is too weak.
-func (s *Server) allowRepo(w http.ResponseWriter, sc scope, graph string, least accounts.Role) bool {
+// revealed) and 403 for a role that does not hold perm.
+func (s *Server) allowRepo(w http.ResponseWriter, sc scope, graph string, perm accounts.Permission) bool {
 	role, ok := sc.graphs[graph]
 	if !ok {
 		s.problem(w, http.StatusNotFound, errors.New("no such repository"))
 		return false
 	}
-	if !role.AtLeast(least) {
+	if !role.Has(perm) {
 		s.problem(w, http.StatusForbidden, errors.New("your role does not allow this"))
 		return false
 	}
@@ -343,20 +350,20 @@ func (s *Server) linkRepo(ctx context.Context, graph, remote, visibility, space 
 	if s.cfg.Accounts == nil {
 		return nil
 	}
-	entry, least, err := s.linkEntry(ctx, graph, remote, visibility, space)
+	entry, perm, err := s.linkEntry(ctx, graph, remote, visibility, space)
 	if err != nil {
 		return err
 	}
-	err = s.linkPolicyRepository(ctx, entry, least)
+	err = s.linkPolicyRepository(ctx, entry, perm)
 	if errors.Is(err, accounts.ErrExists) {
 		return nil // already linked in the same space: adding it again is fine
 	}
 	return err
 }
 
-// linkEntry is the entry linkRepo would add for the caller, and the role
+// linkEntry is the entry linkRepo would add for the caller, and the permission
 // that space needs.
-func (s *Server) linkEntry(ctx context.Context, graph, remote, visibility, space string) (accounts.Repository, accounts.Role, error) {
+func (s *Server) linkEntry(ctx context.Context, graph, remote, visibility, space string) (accounts.Repository, accounts.Permission, error) {
 	sc := scopeFrom(ctx)
 	m, err := sc.selected()
 	if err != nil {
@@ -376,15 +383,15 @@ func (s *Server) linkEntry(ctx context.Context, graph, remote, visibility, space
 	space = defaultSpace(m, space)
 	entry := accounts.Repository{OrgID: m.Org.ID, Graph: graph, Remote: remote,
 		Visibility: visibility, AddedBy: p.User.ID, AddedAt: time.Now().UTC().Truncate(time.Microsecond)}
-	least := accounts.Admin
+	perm := accounts.OrgRepositoriesFull
 	switch space {
 	case spaceOrg:
 	case spaceMe:
-		entry.OwnerID, least = p.User.ID, accounts.Member
+		entry.OwnerID, perm = p.User.ID, accounts.OrgRepositoriesWrite
 	default:
 		return accounts.Repository{}, "", fmt.Errorf("%w: space must be %q or %q", accounts.ErrInvalidInput, spaceOrg, spaceMe)
 	}
-	return entry, least, nil
+	return entry, perm, nil
 }
 
 // defaultSpace picks the organisation for its owners and admins and the
@@ -393,7 +400,7 @@ func defaultSpace(m accounts.Membership, space string) string {
 	if space != "" {
 		return space
 	}
-	if m.Role.AtLeast(accounts.Admin) {
+	if m.Role.Has(accounts.OrgRepositoriesFull) {
 		return spaceOrg
 	}
 	return spaceMe
@@ -435,7 +442,7 @@ func (s *Server) linkError(w http.ResponseWriter, err error) {
 
 // A shared filtered graph is usable only under the same reviewed policy. The
 // accounts lock also serializes this decision with policy approval changes.
-func (s *Server) linkPolicyRepository(ctx context.Context, entry accounts.Repository, least accounts.Role) error {
+func (s *Server) linkPolicyRepository(ctx context.Context, entry accounts.Repository, perm accounts.Permission) error {
 	p, ok := principal(ctx)
 	id, err := execution.Require(ctx)
 	if err != nil {
@@ -450,7 +457,7 @@ func (s *Server) linkPolicyRepository(ctx context.Context, entry accounts.Reposi
 		if err := service.ValidatePrincipal(ctx, p); err != nil {
 			return err
 		}
-		if err := service.Require(ctx, p, entry.OrgID, least); err != nil {
+		if err := service.Require(ctx, p, entry.OrgID, perm); err != nil {
 			return err
 		}
 		if _, err := service.ResolveExecutionSession(ctx, p.User.ID, entry.OrgID, id.SessionID); err != nil {
@@ -522,7 +529,7 @@ type attachRequest struct {
 //
 //nolint:contextcheck // executionIn adds validated identity to the incoming request context
 func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request) {
-	p, o, ok := s.orgFor(w, r, accounts.Owner)
+	p, o, ok := s.orgFor(w, r, accounts.OrgOwnerRules)
 	if !ok {
 		return
 	}
@@ -565,7 +572,7 @@ func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	err = s.linkPolicyRepository(r.Context(), accounts.Repository{OrgID: o.ID, Graph: req.Graph, Remote: n.URL, Visibility: vis,
-		AddedBy: p.User.ID, AddedAt: now}, accounts.Owner)
+		AddedBy: p.User.ID, AddedAt: now}, accounts.OrgOwnerRules)
 	if err == nil && vis == accounts.Private {
 		// Recheck the organisation credential before exposing private content.
 		s.verifyLink(r.Context(), accounts.Repository{OrgID: o.ID, Graph: req.Graph, Remote: n.URL, Visibility: vis, Access: accounts.AccessOK})
@@ -584,7 +591,7 @@ func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request) {
 
 // handleOrgRepos lists an organisation's repository entries.
 func (s *Server) handleOrgRepos(w http.ResponseWriter, r *http.Request) {
-	_, o, ok := s.orgFor(w, r, accounts.Viewer)
+	_, o, ok := s.orgFor(w, r, accounts.OrgRepositoriesRead)
 	if !ok {
 		return
 	}
@@ -602,7 +609,7 @@ func (s *Server) handleOrgRepos(w http.ResponseWriter, r *http.Request) {
 	reach := a.Scope(map[string]bool{o.ID: true})
 	repos = slices.DeleteFunc(repos, func(repo accounts.Repository) bool {
 		r, ok := reach[repo.Graph]
-		return !ok || r.OrgID != o.ID || !r.Role.AtLeast(accounts.Viewer)
+		return !ok || r.OrgID != o.ID || !r.Role.Has(accounts.RepoCodeRead)
 	})
 	writeJSON(w, 200, map[string]any{"org": o, "repositories": repos})
 }
