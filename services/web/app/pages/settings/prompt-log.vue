@@ -55,7 +55,7 @@ const exportUrl = (format: string) => apiPath(`${base.value}/export?format=${for
 const open = ref<number | null>(null)
 const toggle = (id: number) => { open.value = open.value === id ? null : id }
 const saving = (e: PromptLogEntry) => (e.shortened && e.prompt_bytes ? Math.round((1 - e.forwarded_bytes / e.prompt_bytes) * 100) : 0)
-const routeLabel: Record<string, string> = { local: 'Local model', cloud: 'Cloud', rejected: 'Refused' }
+const routeLabel: Record<string, string> = { local: 'Self-hosted model', cloud: 'Cloud', rejected: 'Refused' }
 const uid = useId()
 </script>
 
@@ -85,7 +85,7 @@ const uid = useId()
           <div class="field"><label :for="`${uid}-user`">Person</label><select :id="`${uid}-user`" v-model="user"><option value="">Anyone</option><option v-for="m in members?.members ?? []" :key="m.user.id" :value="m.user.id">{{ m.user.name || m.user.email }}</option></select></div>
           <div class="field"><label :for="`${uid}-ses`">Chat session</label><input :id="`${uid}-ses`" v-model.lazy="chat" placeholder="any" autocomplete="off"></div>
           <div class="field"><label :for="`${uid}-model`">Model</label><input :id="`${uid}-model`" v-model.lazy="model" placeholder="any" autocomplete="off"></div>
-          <div class="field"><label :for="`${uid}-route`">Answered by</label><select :id="`${uid}-route`" v-model="routeFilter"><option value="">Any</option><option value="local">Local model</option><option value="cloud">Cloud</option><option value="rejected">Refused</option></select></div>
+          <div class="field"><label :for="`${uid}-route`">Answered by</label><select :id="`${uid}-route`" v-model="routeFilter"><option value="">Any</option><option value="local">Self-hosted model</option><option value="cloud">Cloud</option><option value="rejected">Refused</option></select></div>
           <div class="field"><label :for="`${uid}-short`">Shortened</label><select :id="`${uid}-short`" v-model="shortened"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></div>
           <div class="field"><label :for="`${uid}-fall`">Why not local</label><select :id="`${uid}-fall`" v-model="fallthrough"><option value="">Any</option><option v-for="f in FALLTHROUGH" :key="f" :value="f">{{ f.replaceAll('_', ' ') }}</option></select></div>
           <div class="field"><label :for="`${uid}-period`">Period</label><select :id="`${uid}-period`" v-model.number="period"><option :value="1">Last 24 hours</option><option :value="7">Last 7 days</option><option :value="30">Last 30 days</option><option :value="400">Last 400 days</option></select></div>
@@ -124,7 +124,7 @@ const uid = useId()
                         </div>
                       </div>
                       <div v-if="e.answer" class="answer">
-                        <h3>Local model's answer</h3>
+                        <h3>Self-hosted model's answer</h3>
                         <pre>{{ e.answer }}</pre>
                       </div>
                       <dl class="facts">

@@ -20,7 +20,7 @@ watch(() => props.tick, () => refresh())
 const exportHref = (format: 'csv' | 'json') => apiPath(`admin/stats/export?section=models&${filter.value}&format=${format}`)
 
 const basisLabel: Record<string, string> = {
-  none: 'no calls', local: 'local models have no cost', estimate: 'from the configured prices',
+  none: 'no calls', local: 'self-hosted models have no cost', estimate: 'from the configured prices',
   partial: 'some calls without a price left out', unknown: 'no call had a price',
 }
 function cost(f: ModelFigures): string {
@@ -55,7 +55,7 @@ const kindBadge: Record<string, string> = { local: 'badge--green', cloud: 'badge
       </p>
       <select v-model="sort" class="inline" aria-label="Sort organisations">
         <option value="name">By name</option><option value="requests">Most calls</option><option value="failures">Most failures</option>
-        <option value="tokens">Most tokens</option><option value="cost">Highest cost</option><option value="local">Most local</option>
+        <option value="tokens">Most tokens</option><option value="cost">Highest cost</option><option value="local">Most self-hosted</option>
       </select>
       <a :href="exportHref('csv')" download class="chip">CSV</a>
       <a :href="exportHref('json')" download class="chip">JSON</a>
@@ -66,9 +66,9 @@ const kindBadge: Record<string, string> = { local: 'badge--green', cloud: 'badge
           <StatTile label="Model calls" :value="fmtCompact(data.totals.requests)" :hint="`${fmtCompact(data.totals.failures)} failed`" />
           <StatTile label="Estimated cloud cost" :value="cost(data.totals)" :hint="costHint" :tip="costTip"
             :tone="data.totals.cost_basis === 'unknown' || data.totals.cost_basis === 'partial' ? 'warning' : undefined" />
-          <StatTile label="Answered locally" :value="pct(data.totals.local_share_pct)"
+          <StatTile label="Answered self-hosted" :value="pct(data.totals.local_share_pct)"
             :hint="`${fmtCompact(data.totals.local_requests)} local · ${fmtCompact(data.totals.cloud_requests)} cloud calls`"
-            tip="The share of model calls a local model answered. Calls of a provider this installation no longer configures count as neither." />
+            tip="The share of model calls a self-hosted model (a provider configured as local) answered. Calls of a provider this installation no longer configures count as neither." />
           <StatTile label="Sent to cloud models" :value="fmtUnit(data.totals.cloud_bytes, 'bytes')" hint="request bodies, retries included" />
         </div>
         <p class="muted small">
@@ -123,7 +123,7 @@ const kindBadge: Record<string, string> = { local: 'badge--green', cloud: 'badge
         <h3>Organisations</h3>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Organisation</th><th class="num">Calls</th><th class="num">Failed</th><th class="num">Tokens</th><th class="num">Local</th><th class="num">Cost</th><th class="num">Unknown cost</th></tr></thead>
+            <thead><tr><th>Organisation</th><th class="num">Calls</th><th class="num">Failed</th><th class="num">Tokens</th><th class="num">Self-hosted</th><th class="num">Cost</th><th class="num">Unknown cost</th></tr></thead>
             <tbody>
               <tr v-for="o in data.rows" :key="o.org_id">
                 <td>{{ o.name }} <span v-if="!o.deleted" class="muted mono small">{{ o.slug }}</span></td>

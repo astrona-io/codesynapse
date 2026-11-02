@@ -121,7 +121,7 @@ The CodeSynapse stack itself uses about 1 GB across its containers at rest (meas
 
 7. Connect your agents with the [Claude Code plugin](claude-code-plugin.md) or `codesynapse mcp install`. `ask_local` is in the core tools, and the session rules, server instructions and hooks point agents at it, so they use it without being asked. The bridge part needs a `codesynapse` release newer than 0.0.13.
 
-To check it works, ask an agent a question about a large file and look for an `ask_local` call. Statistics → Agents shows the local models' work under Local models.
+To check it works, ask an agent a question about a large file and look for an `ask_local` call. Statistics → Agents shows the local models' work under "CodeSynapse model (self-hosted)". The statistics pages call a provider configured as local "self-hosted": it is the installation's own model and may run on another host, while "your machine" means only what the Claude Code bridge answers on the developer's machine without a model.
 
 ## Checking the model server
 

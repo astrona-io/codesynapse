@@ -195,11 +195,11 @@ const repoUse = computed(() => (a.value?.repos ?? []).map((r) => ({ label: r.rep
     </section>
 
     <section v-if="local" class="panel">
-      <p class="eyebrow">Local models</p><h2>AI work that stayed on your network</h2>
+      <p class="eyebrow">CodeSynapse model (self-hosted)</p><h2>AI work that stayed on the installation's own models</h2>
       <p class="muted small">Reviews, security triage, briefings and memory extraction CodeSynapse ran on {{ local.models.join(', ') }}. {{ modelsReady ? `${seriesRangeLabel(modelRange)}, every process.` : 'Since the API started; live metrics are off.' }}</p>
       <div class="grid kpis">
-        <StatTile label="Local requests" :value="fmtCompact(local.requests)" :hint="local.failures ? `${local.failures} failed` : 'no failures'" />
-        <StatTile label="Tokens processed locally" :value="fmtCompact(local.tokens)" tip="input + output, no cloud bill" />
+        <StatTile label="Self-hosted requests" :value="fmtCompact(local.requests)" :hint="local.failures ? `${local.failures} failed` : 'no failures'" />
+        <StatTile label="Tokens processed self-hosted" :value="fmtCompact(local.tokens)" tip="input + output, no cloud bill" />
         <StatTile label="Share of AI requests" :value="local.sharePct === null ? '–' : `${local.sharePct}%`" tip="local ÷ all AI providers" />
       </div>
     </section>

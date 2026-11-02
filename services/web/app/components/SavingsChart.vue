@@ -44,12 +44,12 @@ const KEYS = {
   tokens: [
     { key: 'graph', label: 'Never read (graph answers)', color: 'var(--s-2)' },
     { key: 'sources', label: 'Not read (external sources)', color: 'var(--s-1)' },
-    { key: 'local', label: 'Local models', color: 'var(--s-3)' },
+    { key: 'local', label: 'Self-hosted models', color: 'var(--s-3)' },
   ],
   money: [
     { key: 'graph', label: 'Graph answers', color: 'var(--s-2)' },
     { key: 'sources', label: 'External sources', color: 'var(--s-1)' },
-    { key: 'local', label: 'Local models and gateway answers', color: 'var(--s-3)' },
+    { key: 'local', label: 'Self-hosted models and gateway answers', color: 'var(--s-3)' },
     { key: 'prompts', label: 'Shorter prompts', color: 'var(--s-4)' },
   ],
 } as const
@@ -147,11 +147,11 @@ const STEP_SHORT: Record<SavingsSeries['step'], string> = {
 }
 const about = computed(() => [
   STEP_NOTE[props.series.step],
-  'Never read: tokens agents did not have to read because a graph answer replaced the files. External sources: web page tokens agents did not read because fetch_source returned cleaned text. Local models: tokens read and written by models on your own network instead of a cloud model.',
+  'Never read: tokens agents did not have to read because a graph answer replaced the files. External sources: web page tokens agents did not read because fetch_source returned cleaned text. Self-hosted models: tokens read and written by the installation’s own models instead of a cloud model.',
   props.price ? `Money is an estimate at ${props.price.model} prices, with the same formula as the tiles above, so the columns add up to them.` : 'Without a reference price there is no money view.',
   !props.series.metrics
-    ? `Local model work needs live metrics, so only graph answers show${subDay.value ? ', and they cannot be placed below a day' : ''}.`
-    : props.series.days > 30 ? 'The metrics store keeps 30 days: local model work before that is not shown.' : '',
+    ? `Self-hosted model work needs live metrics, so only graph answers show${subDay.value ? ', and they cannot be placed below a day' : ''}.`
+    : props.series.days > 30 ? 'The metrics store keeps 30 days: self-hosted model work before that is not shown.' : '',
   props.series.unplaced_never_read_tokens > 0 ? 'Graph answers are spread over a day by the hours agents used the graph; a day without that measurement stays in the totals but in no column.' : '',
   (props.series.unplaced_source_saved_tokens ?? 0) > 0 ? 'External sources are spread over a day by the hours pages were fetched; a day without that measurement stays in the totals but in no column.' : '',
 ].filter(Boolean).join(' '))
@@ -186,7 +186,7 @@ const unknown = (v: number | null) => (v === null ? 'unknown' : money(v))
           <rect
             v-if="!r.future"
             :x="PAD.left + i * slot" :y="PAD.top" :width="slot" :height="plotH" class="hit" tabindex="0"
-            :aria-label="`${span(r.b)}: ${fmtInt(r.tokens.graph)} tokens never read, ${fmtInt(r.tokens.sources)} source tokens not read, ${fmtInt(r.tokens.local)} tokens on local models${r.total !== null ? `, ${money(r.total)} saved` : ''}`"
+            :aria-label="`${span(r.b)}: ${fmtInt(r.tokens.graph)} tokens never read, ${fmtInt(r.tokens.sources)} source tokens not read, ${fmtInt(r.tokens.local)} tokens on self-hosted models${r.total !== null ? `, ${money(r.total)} saved` : ''}`"
             @pointerenter="hover = i" @pointerleave="hover = -1" @focus="hover = i" @blur="hover = -1"
           />
           <text v-if="i % every === 0" :x="PAD.left + (i + 0.5) * slot" :y="H - 6" class="tick" text-anchor="middle">{{ tick(r.b) }}</text>
@@ -196,7 +196,7 @@ const unknown = (v: number | null) => (v === null ? 'unknown' : money(v))
         <div class="muted">{{ span(tip.b) }}</div>
         <div class="tip-row"><i style="background: var(--s-2)" />Never read <strong>{{ fmtInt(tip.tokens.graph) }}</strong><span v-if="price" class="muted">{{ unknown(tip.money.graph) }}</span></div>
         <div v-if="tip.tokens.sources" class="tip-row"><i style="background: var(--s-1)" />External sources <strong>{{ fmtInt(tip.tokens.sources) }}</strong><span v-if="price" class="muted">{{ unknown(tip.money.sources) }}</span></div>
-        <div class="tip-row"><i style="background: var(--s-3)" />Local models <strong>{{ fmtInt(tip.tokens.local) }}</strong><span v-if="price" class="muted">{{ unknown(tip.money.local) }}</span></div>
+        <div class="tip-row"><i style="background: var(--s-3)" />Self-hosted models <strong>{{ fmtInt(tip.tokens.local) }}</strong><span v-if="price" class="muted">{{ unknown(tip.money.local) }}</span></div>
         <div v-if="price" class="tip-row"><i style="background: var(--s-4)" />Shorter prompts <span class="muted">{{ unknown(tip.money.prompts) }}</span></div>
         <div v-if="price" class="tip-row total">Total saved (est.) <strong>{{ tip.total === null ? 'unknown' : money(tip.total) }}</strong></div>
       </div>
@@ -211,8 +211,8 @@ const unknown = (v: number | null) => (v === null ? 'unknown' : money(v))
         <table>
           <thead>
             <tr>
-              <th>From</th><th class="num">Never read</th><th class="num">External sources</th><th class="num">Local models</th>
-              <template v-if="price"><th class="num">Graph answers</th><th class="num">External sources</th><th class="num">Local and gateway</th><th class="num">Shorter prompts</th><th class="num">Total (est.)</th></template>
+              <th>From</th><th class="num">Never read</th><th class="num">External sources</th><th class="num">Self-hosted models</th>
+              <template v-if="price"><th class="num">Graph answers</th><th class="num">External sources</th><th class="num">Self-hosted and gateway</th><th class="num">Shorter prompts</th><th class="num">Total (est.)</th></template>
             </tr>
           </thead>
           <tbody>
