@@ -6,6 +6,8 @@ package fga
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 
@@ -130,4 +132,15 @@ func dropEmpty(v any) any {
 		return t
 	}
 	return v
+}
+
+// RepositoryID is the OpenFGA object ID of an organisation's entry for a
+// graph. Graph names may hold characters OpenFGA does not allow in an ID
+// (":", "#", spaces) and can be long, so the ID is a hash of the same key
+// accounts.RepoObject uses: 32 hex characters, the first 128 bits of
+// SHA-256. Answers that name repositories are mapped back through the
+// organisation's own entries.
+func RepositoryID(orgID, graph string) string {
+	sum := sha256.Sum256([]byte(orgID + "|" + graph))
+	return hex.EncodeToString(sum[:16])
 }

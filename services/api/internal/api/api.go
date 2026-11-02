@@ -22,6 +22,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/auditarchive"
+	"github.com/astrona-io/codesynapse/internal/authz/fga"
 	"github.com/astrona-io/codesynapse/internal/forge"
 	"github.com/astrona-io/codesynapse/internal/gitx"
 	"github.com/astrona-io/codesynapse/internal/imagescan"
@@ -75,6 +76,9 @@ type Config struct {
 	// archive, entries stay until the retention period ends.
 	AuditHot     time.Duration
 	AuditArchive auditarchive.Archive
+	// OpenFGA, when set, has the API keep OpenFGA's tuples in step with the
+	// access policy (openfga.go). Only the API holds its key.
+	OpenFGA *fga.Config
 	// Metrics reads time series for the statistics (nil without
 	// VictoriaMetrics).
 	Metrics       *telemetry.Querier
@@ -260,6 +264,9 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 		loops := []func(context.Context){s.recoverFixes, func(ctx context.Context) { s.runScheduler(ctx, logger) }, s.sweepVectors}
 		if cfg.Accounts != nil {
 			loops = append(loops, s.pruneAudit, s.projectAccess, s.pruneExecutionMemory, s.recoverIngestReports, s.reportJobQueue, s.rollupPlatformStats, s.prunePromptLog, s.sampleStores, s.verifyAuditChain)
+			if cfg.OpenFGA != nil {
+				loops = append(loops, s.syncOpenFGA)
+			}
 		}
 		s.singleton(ctx, loops...)
 	}

@@ -57,14 +57,14 @@ func defaultRead(o string) Tuple {
 	return Tuple{org(o) + "#member", "default_readers", org(o)}
 }
 func teamOf(tm, o string) Tuple        { return Tuple{org(o), "organisation", team(tm)} }
-func teamMember(user, tm string) Tuple { return Tuple{u(user), "member", team(tm)} }
+func teamMember(user, tm string) Tuple { return Tuple{u(user), "read", team(tm)} }
 func orgRepo(r, o string) []Tuple {
 	return []Tuple{{org(o), "organisation", repo(r)}, {org(o), "org_space", repo(r)}}
 }
 func personalRepo(r, o string) Tuple     { return Tuple{org(o), "organisation", repo(r)} }
 func direct(user, level, r string) Tuple { return Tuple{u(user), "direct_" + level, repo(r)} }
 func teamGrant(tm, level, r string) Tuple {
-	return Tuple{team(tm) + "#member", "team_" + level, repo(r)}
+	return Tuple{team(tm) + "#read", "team_" + level, repo(r)}
 }
 
 func write(t *testing.T, c *Client, tuples ...Tuple) {

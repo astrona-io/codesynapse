@@ -238,6 +238,38 @@ func RecordLease(ctx context.Context, lease, event string) {
 	LeaseEvents.IncContext(ctx, lease, event)
 }
 
+// OpenFGA sync (docs/plans/OPENFGA_PLAN.md, phase 5): platform instruments
+// with fixed labels only, never an organisation, user or object.
+var (
+	OpenFGASyncs       = Default.Counter("platform_codesynapse_openfga_syncs_total", "Organisation syncs to OpenFGA by outcome (ok, error).", "outcome")
+	OpenFGATuples      = Default.Counter("platform_codesynapse_openfga_tuples_total", "Tuples the sync wrote to or deleted from OpenFGA, by op (write, delete).", "op")
+	OpenFGAPendingOrgs = Default.Gauge("platform_codesynapse_openfga_pending_orgs", "Organisations OpenFGA was behind on at the last sync pass (at most one batch).")
+)
+
+// OpenFGA sync label values.
+const (
+	OpenFGAOK     = "ok"
+	OpenFGAError  = "error"
+	OpenFGAWrite  = "write"
+	OpenFGADelete = "delete"
+)
+
+// RecordOpenFGASync counts one organisation sync; other outcomes are dropped.
+func RecordOpenFGASync(ctx context.Context, outcome string) {
+	if outcome != OpenFGAOK && outcome != OpenFGAError {
+		return
+	}
+	OpenFGASyncs.IncContext(ctx, outcome)
+}
+
+// RecordOpenFGATuples counts n tuples written or deleted.
+func RecordOpenFGATuples(ctx context.Context, op string, n int) {
+	if (op != OpenFGAWrite && op != OpenFGADelete) || n <= 0 {
+		return
+	}
+	OpenFGATuples.AddContext(ctx, float64(n), op)
+}
+
 // SetLoopsLeaseHeld records whether this process runs the singleton loops.
 func SetLoopsLeaseHeld(ctx context.Context, held bool) {
 	v := 0.0

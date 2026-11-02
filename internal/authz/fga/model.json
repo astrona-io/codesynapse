@@ -22,7 +22,7 @@
                 "type": "user"
               },
               {
-                "relation": "member",
+                "relation": "read",
                 "type": "team"
               }
             ]
@@ -45,6 +45,10 @@
             "directly_related_user_types": [
               {
                 "type": "user"
+              },
+              {
+                "relation": "read",
+                "type": "team"
               }
             ]
           },
@@ -54,7 +58,7 @@
                 "type": "user"
               },
               {
-                "relation": "member",
+                "relation": "read",
                 "type": "team"
               }
             ]
@@ -65,7 +69,7 @@
                 "type": "user"
               },
               {
-                "relation": "member",
+                "relation": "read",
                 "type": "team"
               }
             ]
@@ -156,17 +160,17 @@
               }
             ]
           },
-          "member": {
-            "directly_related_user_types": [
-              {
-                "type": "user"
-              }
-            ]
-          },
           "organisation": {
             "directly_related_user_types": [
               {
                 "type": "organisation"
+              }
+            ]
+          },
+          "read": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
               }
             ]
           }
@@ -176,7 +180,10 @@
         "full": {
           "this": {}
         },
-        "member": {
+        "organisation": {
+          "this": {}
+        },
+        "read": {
           "union": {
             "child": [
               {
@@ -189,9 +196,6 @@
               }
             ]
           }
-        },
-        "organisation": {
-          "this": {}
         }
       },
       "type": "team"
@@ -248,7 +252,7 @@
           "team_full": {
             "directly_related_user_types": [
               {
-                "relation": "member",
+                "relation": "read",
                 "type": "team"
               }
             ]
@@ -256,7 +260,7 @@
           "team_read": {
             "directly_related_user_types": [
               {
-                "relation": "member",
+                "relation": "read",
                 "type": "team"
               }
             ]
@@ -264,7 +268,7 @@
           "team_write": {
             "directly_related_user_types": [
               {
-                "relation": "member",
+                "relation": "read",
                 "type": "team"
               }
             ]

@@ -9,10 +9,12 @@ type user
 
 type organisation
   relations
-    define owner: [user]
-    define full: [user, team#member] or owner
-    define write: [user, team#member] or full
-    define read: [user, team#member] or write
+    # A team can hold the owner role too (SetTeamRole), so owner takes
+    # team#read like the levels below.
+    define owner: [user, team#read]
+    define full: [user, team#read] or owner
+    define write: [user, team#read] or full
+    define read: [user, team#read] or write
     define guest: [user]
     # Active non-guest members; written only for explicit memberships and
     # removed when a membership ends or the account is suspended.
@@ -26,7 +28,7 @@ type team
   relations
     define organisation: [organisation]
     define full: [user]
-    define member: [user] or full
+    define read: [user] or full
 
 type repository
   relations
@@ -38,9 +40,9 @@ type repository
     define direct_read: [user]
     define direct_deny: [user]
     define has_direct: direct_full or direct_write or direct_read or direct_deny
-    define team_full: [team#member]
-    define team_write: [team#member]
-    define team_read: [team#member]
+    define team_full: [team#read]
+    define team_write: [team#read]
+    define team_read: [team#read]
     define default_read: default_readers from org_space
     # A direct grant replaces team grants and the default, even when weaker.
     define full: (direct_full or (team_full but not has_direct)) and active from organisation

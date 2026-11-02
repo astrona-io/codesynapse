@@ -220,3 +220,40 @@ func TestWriteBounds(t *testing.T) {
 	assert.NoError(t, c.WriteTuples(ctx, []Tuple{anyTuple}))
 	assert.Equal(t, calls, 1)
 }
+
+func TestReadPagesAndBounds(t *testing.T) {
+	page := func(token string, objs ...string) string {
+		parts := make([]string, len(objs))
+		for i, o := range objs {
+			parts[i] = fmt.Sprintf(`{"key":{"user":"user:u","relation":"member","object":%q}}`, o)
+		}
+		return `{"tuples":[` + strings.Join(parts, ",") + `],"continuation_token":"` + token + `"}`
+	}
+	var bodies []map[string]any
+	c := fake(t, map[string]http.HandlerFunc{"/read": func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		if body["continuation_token"] == "next" {
+			answer(page("", "team:b"))(w, r)
+			return
+		}
+		answer(page("next", "team:a"))(w, r)
+	}})
+	ctx := context.Background()
+	got, err := c.Read(ctx, Tuple{Object: "team:a"}, 10)
+	require.NoError(t, err)
+	assert.Equal(t, got, []Tuple{{User: "user:u", Relation: "member", Object: "team:a"}, {User: "user:u", Relation: "member", Object: "team:b"}})
+	require.Len(t, bodies, 2)
+	assert.Equal(t, bodies[0]["consistency"], any("HIGHER_CONSISTENCY"))
+	assert.Equal(t, bodies[0]["tuple_key"], any(map[string]any{"object": "team:a"}))
+
+	got, err = c.Read(ctx, Tuple{Object: "team:a"}, 1)
+	assert.ErrorIs(t, err, ErrTruncated)
+	assert.Len(t, got, 0)
+
+	c = fake(t, map[string]http.HandlerFunc{"/read": func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) }})
+	got, err = c.Read(ctx, Tuple{Object: "team:a"}, 10)
+	assert.Error(t, err)
+	assert.Len(t, got, 0)
+}
