@@ -96,7 +96,9 @@ type Jobs struct {
 	licenseLookup bool
 	dataflow      bool
 	moduleProxy   bool
-	sem           chan struct{}
+	// cacheDir keeps per-repository ingest caches (ingest.Options.CacheDir).
+	cacheDir string
+	sem      chan struct{}
 	// store keeps jobs durable (jobs_durable.go); owner is this process;
 	// kinds are the durable job kinds it runs (others are only recorded).
 	store jobStore
@@ -450,7 +452,7 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 		job.Phase, job.Step, job.Steps = name, step, ingest.Steps+1
 		j.mu.Unlock()
 	}
-	g, err := ingest.Run(ctx, ingest.Options{Progress: progress, Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Dataflow: j.dataflow, ModuleProxy: j.moduleProxy, Branch: opts.Branch, PreviousIdentities: previous, ApprovedPolicyDigest: approved,
+	g, err := ingest.Run(ctx, ingest.Options{Progress: progress, Repo: job.Repo, Root: root, CommitLimit: j.commitLimit, CacheDir: j.cacheDir, AllowNetwork: j.network, VulnScan: j.vulnScan, LicenseLookup: j.licenseLookup, Dataflow: j.dataflow, ModuleProxy: j.moduleProxy, Branch: opts.Branch, PreviousIdentities: previous, ApprovedPolicyDigest: approved,
 		Extracted: func(extractor string, d time.Duration) { telemetry.RecordExtract(ctx, extractor, d) }})
 	endIngest(err)
 	if err == nil {

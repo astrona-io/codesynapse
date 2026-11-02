@@ -21,7 +21,10 @@ var (
 	pemLine      = "MIIEvQIBAD" + "ANBgkqhkiG" + "9w0BAQEFAA" + "SCBKcwggSj" + "AgEAAoIBAQ"
 )
 
-func TestScanSecrets(t *testing.T) {
+// secretRepo is a git repository in a temporary directory and a function
+// that commits files to it ("" removes one).
+func secretRepo(t *testing.T) (string, func(msg string, files map[string]string)) {
+	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
 	git := func(args ...string) {
@@ -41,9 +44,15 @@ func TestScanSecrets(t *testing.T) {
 			require.NoError(t, os.WriteFile(p, []byte(body), 0o600))
 		}
 		git("add", "-A")
-		git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", msg)
+		git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", msg)
 	}
 	git("init", "-q", "-b", "main")
+	return root, commit
+}
+
+func TestScanSecrets(t *testing.T) {
+	ctx := context.Background()
+	root, commit := secretRepo(t)
 	commit("add config", map[string]string{
 		"config.go":      "package app\n\nconst token = \"" + removedToken + "\"\n",
 		"docs.md":        "Use a key like " + exampleKey + ".\n",
@@ -57,7 +66,7 @@ func TestScanSecrets(t *testing.T) {
 
 	g := model.NewGraph()
 	require.NoError(t, Extract(ctx, "r", root, 10, g))
-	require.NoError(t, ScanSecrets(ctx, "r", root, 10, g))
+	require.NoError(t, ScanSecrets(ctx, "r", root, 10, "", g))
 
 	got := map[string]model.Node{}
 	for _, n := range g.Nodes() {
@@ -105,4 +114,109 @@ func TestQuotedKeyHeaderIsNotAKey(t *testing.T) {
 		"+\t{in: \"-----BEGIN " + "RSA PRIVATE KEY-----\\nMIIE\\n-----END RSA PRIVATE KEY-----\"},\n+\t}\n"
 	leaks, _ := parsePatches([]byte(patch), nil)
 	assert.Len(t, leaks, 0)
+}
+
+// findings are the history findings ScanSecrets adds, by ID, with the
+// commit each hangs off.
+func findings(ctx context.Context, t *testing.T, root string, limit int, cacheFile string) map[string]string {
+	t.Helper()
+	g := model.NewGraph()
+	require.NoError(t, Extract(ctx, "r", root, limit, g))
+	require.NoError(t, ScanSecrets(ctx, "r", root, limit, cacheFile, g))
+	got := map[string]string{}
+	for _, e := range g.Edges() {
+		if e.Kind == model.EdgeHasFinding {
+			n, ok := g.Node(e.To)
+			require.True(t, ok)
+			got[e.To] = e.From + " " + n.File + " " + n.Summary
+		}
+	}
+	return got
+}
+
+func TestScanSecretsCache(t *testing.T) {
+	ctx := context.Background()
+	root, commit := secretRepo(t)
+	cacheFile := filepath.Join(t.TempDir(), "cache", "secrets.json")
+	token := func(i int) string {
+		return "gh" + "p_" + strings.Repeat("Zx9Qw3Er7T", 3) + "abcdefghi"[i:i+1] + "Ui5Op2"
+	}
+	commit("one", map[string]string{"a.go": "package a\n\nconst t = \"" + token(0) + "\"\n"})
+	commit("two", map[string]string{"a.go": "package a\n"})
+
+	same := func(step string) {
+		t.Helper()
+		cached := findings(ctx, t, root, 10, cacheFile)
+		assert.Equal(t, cached, findings(ctx, t, root, 10, ""), step)
+		data, err := os.ReadFile(cacheFile)
+		require.NoError(t, err)
+		for i := range 5 {
+			assert.False(t, strings.Contains(string(data), token(i)), step+": a value is in the cache")
+		}
+		c := loadSecretCache(cacheFile, 10)
+		require.NotNil(t, c, step)
+		assert.Equal(t, c.Head, gitx.HeadCommit(ctx, root), step)
+	}
+	same("first scan")
+	assert.Len(t, findings(ctx, t, root, 10, cacheFile), 1)
+	same("nothing new")
+
+	commit("three", map[string]string{"b.go": "package a\n\nconst t = \"" + token(1) + "\"\n"})
+	commit("four", map[string]string{"b.go": ""})
+	same("new commits")
+	assert.Len(t, findings(ctx, t, root, 10, cacheFile), 2)
+
+	// A rewritten history is read again from the start.
+	_, err := gitx.Run(ctx, root, "reset", "-q", "--hard", "HEAD~3")
+	require.NoError(t, err)
+	commit("five", map[string]string{"c.go": "package a\n\nconst t = \"" + token(2) + "\"\n"})
+	commit("six", map[string]string{"c.go": ""})
+	same("rewritten history")
+	assert.Len(t, findings(ctx, t, root, 10, cacheFile), 1)
+
+	// The limit counts matched commits, cached ones included.
+	for i := range 3 {
+		commit("more", map[string]string{"d.go": "package a\n\nconst t = \"" + token(3+i%2) + "\"\n"})
+		commit("gone", map[string]string{"d.go": ""})
+	}
+	assert.Equal(t, findings(ctx, t, root, 3, cacheFile), findings(ctx, t, root, 3, ""))
+	assert.Equal(t, findings(ctx, t, root, 3, cacheFile), findings(ctx, t, root, 3, ""))
+	c := loadSecretCache(cacheFile, 3)
+	require.NotNil(t, c)
+	assert.Len(t, c.Commits, 3)
+	assert.True(t, loadSecretCache(cacheFile, 10) == nil, "a cache for another limit is not used")
+}
+
+func TestLoadSecretCacheRefusesBadFiles(t *testing.T) {
+	dir := t.TempDir()
+	head := strings.Repeat("a", 40)
+	good := secretCache{Head: head, Commits: []scannedCommit{{Hash: head, Hits: []hit{{Kind: "GitHub token", Key: strings.Repeat("b", 16), File: "a.go", Line: 3}}}}}
+	path := filepath.Join(dir, "c.json")
+	require.NoError(t, good.save(path, 5))
+	require.NotNil(t, loadSecretCache(path, 5))
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, info.Mode().Perm(), os.FileMode(0o600))
+
+	for name, edit := range map[string]func(c *secretCache){
+		"parent path":   func(c *secretCache) { c.Commits[0].Hits[0].File = "../x" },
+		"absolute path": func(c *secretCache) { c.Commits[0].Hits[0].File = "/etc/x" },
+		"bad head":      func(c *secretCache) { c.Head = "HEAD" },
+		"bad key":       func(c *secretCache) { c.Commits[0].Hits[0].Key = "value" },
+		"too many":      func(c *secretCache) { c.Commits = append(c.Commits, make([]scannedCommit, 5)...) },
+		"bad file key":  func(c *secretCache) { c.Files = map[string][]string{"x": nil} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := good
+			bad.Commits = []scannedCommit{good.Commits[0]}
+			bad.Commits[0].Hits = []hit{good.Commits[0].Hits[0]}
+			edit(&bad)
+			p := filepath.Join(dir, name+".json")
+			require.NoError(t, bad.save(p, 5))
+			assert.True(t, loadSecretCache(p, 5) == nil)
+		})
+	}
+	require.NoError(t, os.WriteFile(path, []byte("{"), 0o600))
+	assert.True(t, loadSecretCache(path, 5) == nil)
+	assert.True(t, loadSecretCache(filepath.Join(dir, "missing.json"), 5) == nil)
 }
