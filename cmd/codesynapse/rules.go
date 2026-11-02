@@ -163,6 +163,11 @@ func (s hookState) workflowReport() map[string]int {
 	if d := s.Steers - s.Reported.Steers; d > 0 {
 		out["fetches_steered"] = d
 	}
+	for key, d := range map[string]int{"range_reads_single": s.SingleRanges - s.Reported.SingleRanges, "range_batches": s.Batches - s.Reported.Batches, "ranges_batched": s.Batched - s.Reported.Batched} {
+		if d > 0 {
+			out[key] = d
+		}
+	}
 	if len(out) == 0 {
 		return nil
 	}
@@ -171,4 +176,5 @@ func (s hookState) workflowReport() map[string]int {
 
 func (s *hookState) markReported() {
 	s.Reported.First, s.Reported.Turned, s.Reported.Steers = s.First != "", s.Turned, s.Steers
+	s.Reported.SingleRanges, s.Reported.Batches, s.Reported.Batched = s.SingleRanges, s.Batches, s.Batched
 }

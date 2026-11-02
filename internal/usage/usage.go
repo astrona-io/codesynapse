@@ -25,6 +25,12 @@ const (
 	// FetchSteered counts WebFetch calls of a page fetch_source had cached
 	// that the plugin's hook pointed at fetch_source.
 	FetchSteered = "(guard:fetch-steered)"
+	// RangeReadsSingle counts Read calls of part of a file (an offset or a
+	// limit), RangeBatches the read_ranges calls and RangesBatched the ranges
+	// they read: how often agents batch range reads instead of one Read each.
+	RangeReadsSingle = "(reads:single-range)"
+	RangeBatches     = "(reads:batches)"
+	RangesBatched    = "(reads:batched)"
 	// FilesEdited counts the files sessions changed (that CodeSynapse
 	// indexes), FilesEditedFound those of them a CodeSynapse answer of the
 	// same session had pointed to: recall measured on real edits.
@@ -65,7 +71,7 @@ func IsWorkflow(tool string) bool {
 		return true
 	}
 	switch tool {
-	case FirstCodeSynapse, FirstNative, ReadTurnedBack, FetchSteered, FilesEdited, FilesEditedFound, LocalRead, LocalAvoided, LocalBriefs, LocalDrafts, Unindexed,
+	case FirstCodeSynapse, FirstNative, ReadTurnedBack, FetchSteered, RangeReadsSingle, RangeBatches, RangesBatched, FilesEdited, FilesEditedFound, LocalRead, LocalAvoided, LocalBriefs, LocalDrafts, Unindexed,
 		SourceFetches, SourceHits, SourceRaw, SourceSaved:
 		return true
 	}

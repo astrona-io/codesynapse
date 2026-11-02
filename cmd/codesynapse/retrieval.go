@@ -165,6 +165,9 @@ func noteRead(in toolHookInput) {
 	if in.ToolInput.Limit > 0 {
 		to = from + in.ToolInput.Limit - 1
 	}
+	if in.ToolInput.Offset > 1 || in.ToolInput.Limit > 0 {
+		s.SingleRanges++ // part of a file: read_ranges could have batched it
+	}
 	s.markRead(file, from, to)
 	saveState(state, s)
 }
@@ -177,12 +180,18 @@ func noteRangeReads(in toolHookInput) {
 		return
 	}
 	s := loadState(state)
+	n := 0
 	for _, spec := range in.ToolInput.Ranges[:min(len(in.ToolInput.Ranges), asklocal.MaxPaths)] {
 		file, from, to, err := asklocal.ParseSpec(spec)
 		if err != nil || from == 0 {
 			continue
 		}
 		s.markRead(filepath.ToSlash(file), from, to)
+		n++
+	}
+	if n > 0 {
+		s.Batches++
+		s.Batched += n
 	}
 	saveState(state, s)
 }
