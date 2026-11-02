@@ -122,7 +122,9 @@ func TestStageBuildsBounded(t *testing.T) {
 		links += len(got)
 	}
 	assert.True(t, links <= maxStages*maxStageLinks, "links %d", links)
-	assert.True(t, time.Since(start) < 2*time.Second, "took %s", time.Since(start))
+	// The limit catches quadratic work, not speed: the bounded build takes
+	// 0.05s, about 1s under the race detector and more on a busy CI runner.
+	assert.True(t, time.Since(start) < 15*time.Second, "took %s", time.Since(start))
 }
 
 func cmpStage(i int) string {

@@ -663,6 +663,21 @@ func (b *bridge) probeLoop(ctx context.Context) {
 	delay := probeMinDelay
 	for {
 		done, err := b.recover(ctx)
+		if errors.Is(err, errNothingToProbe) {
+			// Registered and online: end probing, unless a call marked the
+			// bridge offline since recover looked. Going online here would
+			// undo that mark with a server nobody reached.
+			b.mu.Lock()
+			off := b.offline
+			if !off {
+				b.probing = false
+			}
+			b.mu.Unlock()
+			if !off {
+				return
+			}
+			continue
+		}
 		if done {
 			if err == nil {
 				b.markOnline(true)
@@ -698,8 +713,13 @@ func (b *bridge) probeLoop(ctx context.Context) {
 	}
 }
 
+// errNothingToProbe is recover's answer when the chat is registered and was
+// never marked offline: there is no server answer to go online on.
+var errNothingToProbe = errors.New("nothing to probe")
+
 // recover makes one attempt. done means stop probing: with a nil error the
-// server is back (or was never known to be down), else the chat is refused.
+// server is back, with errNothingToProbe it was never known to be down, else
+// the chat is refused.
 func (b *bridge) recover(ctx context.Context) (bool, error) {
 	pctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -721,7 +741,7 @@ func (b *bridge) recover(ctx context.Context) (bool, error) {
 	off, need, used := b.offline, b.needInit, b.mcpID
 	b.mu.Unlock()
 	if !off && !need {
-		return true, nil
+		return true, errNothingToProbe
 	}
 	attempt := func() error { return b.reinit(pctx, "") }
 	if !need {
