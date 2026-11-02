@@ -32,6 +32,8 @@ type PolicyMetadata struct {
 
 type repoMetadata struct {
 	Policy PolicyMetadata `json:"repository_policy"`
+	// IndexVersion is model.IndexVersion, read back by model.IndexVersionOf.
+	IndexVersion int `json:"index_version"`
 	// GoModule is read back by model.GoModuleOf.
 	GoModule string `json:"go_module,omitempty"`
 	// Conventions are the house style found in the code (internal/conventions),

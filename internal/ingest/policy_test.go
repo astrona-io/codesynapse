@@ -62,6 +62,7 @@ func TestPolicyApprovalAndFilteredGraph(t *testing.T) {
 	meta, err := RepositoryPolicy(*node)
 	require.NoError(t, err)
 	assert.Equal(t, meta.Digest, policy.Digest())
+	assert.Equal(t, model.IndexVersionOf(*node), model.IndexVersion, "the ingest records its version")
 	assert.Equal(t, meta.ExcludedFiles, 5)
 	var metricReport metrics.Report
 	require.NoError(t, json.Unmarshal([]byte(node.Metrics), &metricReport))

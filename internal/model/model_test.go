@@ -38,3 +38,10 @@ func TestGraphDedupAndPrune(t *testing.T) {
 	assert.Len(t, g.Edges(), 1)
 	assert.Equal(t, g.Edges()[0].Count, 2)
 }
+
+func TestIndexVersionOf(t *testing.T) {
+	assert.Equal(t, IndexVersionOf(Node{Kind: KindRepository, Meta: `{"index_version":3,"go_module":"x"}`}), 3)
+	for _, n := range []Node{{Kind: KindRepository}, {Kind: KindRepository, Meta: "{"}, {Kind: KindFunction, Meta: `{"index_version":3}`}} {
+		assert.Equal(t, IndexVersionOf(n), 0, "unrecorded reads as 0")
+	}
+}

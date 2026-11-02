@@ -148,7 +148,7 @@ func Run(ctx context.Context, opts Options) (*model.Graph, error) {
 	}
 	// The Go module at the root: answers write it as "~" in node IDs
 	// (internal/coretools, compact) and the resolver expands it back.
-	repoMeta := repoMetadata{Policy: metadata, GoModule: rootModulePath(root)}
+	repoMeta := repoMetadata{Policy: metadata, IndexVersion: model.IndexVersion, GoModule: rootModulePath(root)}
 	if rules, at := codeowners.Read(root); at != "" && policy.PathAllowed(at) {
 		repoMeta.CodeOwners = rules
 	}

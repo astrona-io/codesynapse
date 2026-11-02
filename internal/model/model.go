@@ -533,11 +533,18 @@ func ContainsFold(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
+// IndexVersion is the version of what an ingest extracts. Raise it whenever
+// a change to extraction, rules or analysis makes graphs indexed before it
+// incomplete or wrong: the API's scheduler then re-indexes every repository
+// whose graph is older, even when it has no new commit.
+const IndexVersion = 1
+
 // repoMeta is what answers read from a Repository node's Meta.
 type repoMeta struct {
-	GoModule    string      `json:"go_module"`
-	Conventions []string    `json:"conventions"`
-	CodeOwners  []OwnerRule `json:"code_owners"`
+	IndexVersion int         `json:"index_version"`
+	GoModule     string      `json:"go_module"`
+	Conventions  []string    `json:"conventions"`
+	CodeOwners   []OwnerRule `json:"code_owners"`
 }
 
 // OwnerRule is one line of a CODEOWNERS file (package codeowners).
@@ -553,6 +560,10 @@ func metaOf(repo Node) repoMeta {
 	}
 	return meta
 }
+
+// IndexVersionOf is the IndexVersion of the ingest that wrote a repository's
+// graph; 0 for graphs written before versions were recorded.
+func IndexVersionOf(repo Node) int { return metaOf(repo).IndexVersion }
 
 // GoModuleOf is the Go module path at the root of a repository, recorded in
 // its Repository node's Meta at ingest, or "".

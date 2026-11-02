@@ -489,7 +489,8 @@ func (s *Server) runScheduler(ctx context.Context, logger *slog.Logger) {
 		case <-ctx.Done():
 			return
 		case now := <-t.C:
-			if repos, err := s.st.Repos(ctx); err != nil {
+			repos, err := s.st.Repos(ctx)
+			if err != nil {
 				logger.Warn("listing repositories for auto-sync", "error", err)
 			} else {
 				for _, n := range repos {
@@ -522,6 +523,9 @@ func (s *Server) runScheduler(ctx context.Context, logger *slog.Logger) {
 				default:
 					s.sched.started(ctx, repo, now, "started", nil)
 				}
+			}
+			if err == nil {
+				s.reindexOutdated(ctx, repos, now, logger)
 			}
 		}
 	}
