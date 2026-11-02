@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/agentrules"
-	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/cliversion"
 	"github.com/astrona-io/codesynapse/internal/conventions"
 )
@@ -22,7 +21,7 @@ import (
 func sessionRules(ctx context.Context, in toolHookInput, logger *slog.Logger) map[string]any {
 	noteBaseline(ctx, in, logger)
 	text := agentrules.Default
-	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
+	c := newHookClient(hookAPIURL())
 	c.http.Timeout = 3 * time.Second
 	var res struct {
 		Text          string `json:"text"`

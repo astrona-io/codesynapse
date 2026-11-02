@@ -65,6 +65,8 @@ func TestHookTokenReportDeltaAndRetry(t *testing.T) {
 		assert.NotContains(t, string(raw), "m1")
 		require.NoError(t, json.Unmarshal(raw, &in))
 		if failed {
+			// The API's own 503 (a proxy's would mark the server down).
+			w.Header().Set("Content-Type", "application/problem+json")
 			w.WriteHeader(503)
 			return
 		}

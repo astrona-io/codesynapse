@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/asklocal"
 	"github.com/astrona-io/codesynapse/internal/toolsets"
 	"github.com/astrona-io/codesynapse/internal/usage"
@@ -316,7 +315,7 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 	if len(delta) == 0 && len(repeats) == 0 && wf == nil && tokens == nil && !hasEdits && bash == nil {
 		return
 	}
-	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
+	c := newHookClient(hookAPIURL())
 	c.http.Timeout = 5 * time.Second
 	client := in.Client
 	if client == "" {

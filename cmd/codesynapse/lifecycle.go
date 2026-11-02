@@ -279,7 +279,7 @@ func (o *lifecycleOptions) Run(ctx context.Context, _ *app.Env) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	c := newAPIClient(o.apiURL)
+	c := newHookClient(o.apiURL)
 	primary := os.Getenv(cursorCLISessionEnv)
 	if o.client == "cursor" && primary == "" {
 		var lookupErr error

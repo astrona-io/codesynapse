@@ -181,7 +181,7 @@ func TestDoctor(t *testing.T) {
 		require.NoError(t, o.Run(context.Background(), nil))
 		var got []doctorCheck
 		require.NoError(t, json.Unmarshal(out.Bytes(), &got))
-		assert.Len(t, got, 4) // server, version, token, gateway
+		assert.Len(t, got, 6) // server, outage mark, last pre-brief, version, token, gateway
 	})
 }
 

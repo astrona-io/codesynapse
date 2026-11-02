@@ -553,7 +553,7 @@ const stopOfflineNotice = "CodeSynapse skipped its pre-finish check: the server 
 // checkout is the name the checkout's origin gives; a skipped check is reported
 // under it (usage.Unindexed).
 func serverRepo(ctx context.Context, in toolHookInput, root, checkout string) (name string, known, indexing, offline bool) {
-	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
+	c := newHookClient(hookAPIURL())
 	if c.token == "" || in.SessionID == "" {
 		return "", true, false, false
 	}
@@ -561,7 +561,7 @@ func serverRepo(ctx context.Context, in toolHookInput, root, checkout string) (n
 	defer cancel()
 	ctx, err := c.executionContext(ctx, in.SessionID, in.SessionID)
 	if err != nil {
-		return "", true, false, unreachable(err)
+		return "", true, false, unreachable(err) || errors.Is(err, errServerOffline)
 	}
 	name, err = c.resolveRepo(ctx, root)
 	if errors.Is(err, errNoRepo) {

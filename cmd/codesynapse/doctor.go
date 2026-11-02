@@ -126,8 +126,11 @@ func writeDoctor(w io.Writer, checks []doctorCheck, fixing bool) {
 
 // checks runs every check, read only; the fix of each runs later.
 func (o *doctorOptions) checks(ctx context.Context, home, cwd string) []doctorCheck {
+	// Read before the server check, whose answer clears the mark.
+	mark, marked := readOutage(o.apiURL)
 	server, serverVersion, serverOK := o.serverCheck(ctx)
-	out := []doctorCheck{server, o.versionCheck(serverVersion, serverOK), o.tokenCheck(ctx, serverOK)}
+	out := []doctorCheck{server, outageCheck(mark, marked, serverOK, time.Now()), briefCheck(time.Now()),
+		o.versionCheck(serverVersion, serverOK), o.tokenCheck(ctx, serverOK)}
 	out = append(out, o.registrationChecks(home, cwd)...)
 	if c, ok := pluginCheck(home); ok {
 		out = append(out, c)
@@ -156,6 +159,45 @@ func (o *doctorOptions) serverCheck(ctx context.Context) (c doctorCheck, serverV
 	c.OK = true
 	c.Detail = o.apiURL + " answers (server " + cmp.Or(res.Version, "version unknown") + ")"
 	return c, res.Version, true
+}
+
+// outageCheck shows the outage mark the hooks read (outage.go). It is a
+// report, never an action: the server check says what to do.
+func outageCheck(m outageMark, marked, serverOK bool, now time.Time) doctorCheck {
+	c := doctorCheck{Name: "Hook outage mark", OK: true}
+	switch {
+	case !marked:
+		c.Detail = "not set; hooks call the server"
+	case m.fresh(now) && serverOK:
+		c.Detail = fmt.Sprintf("was set %s ago (%s); cleared, the server answers now", roundAge(m.age(now)), outageReasons[m.Reason])
+	case m.fresh(now):
+		c.Detail = fmt.Sprintf("set %s ago (%s); hooks skip the server for up to %s, or until a call succeeds", roundAge(m.age(now)), outageReasons[m.Reason], outageFresh)
+	default:
+		c.Detail = fmt.Sprintf("stale, from %s ago (%s); hooks call the server", roundAge(m.age(now)), outageReasons[m.Reason])
+	}
+	return c
+}
+
+// briefCheck shows the last pre-brief on this machine.
+func briefCheck(now time.Time) doctorCheck {
+	c := doctorCheck{Name: "Last pre-brief", OK: true}
+	n, ok := lastBrief()
+	if !ok {
+		c.Detail = "none recorded yet"
+		return c
+	}
+	c.Detail = fmt.Sprintf("%s ago: %s", roundAge(n.age(now)), briefOutcomes[n.Outcome])
+	if n.Outcome != briefOffline && n.Outcome != briefSkippedChat {
+		c.Detail += fmt.Sprintf(" after %s", (time.Duration(n.Millis) * time.Millisecond).Round(100*time.Millisecond))
+	}
+	return c
+}
+
+func roundAge(d time.Duration) time.Duration {
+	if d < 0 {
+		return 0
+	}
+	return d.Round(time.Second)
 }
 
 func (o *doctorOptions) versionCheck(serverVersion string, serverOK bool) doctorCheck {

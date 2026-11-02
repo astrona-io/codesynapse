@@ -540,9 +540,11 @@ func (b *bridge) postAnswer(ctx context.Context, msg []byte, m rpcMessage) (bool
 func (b *bridge) settle(ctx context.Context, err error) error {
 	if err == nil {
 		b.markOnline(false)
+		b.shareOnline()
 		return nil
 	}
 	if ctx.Err() == nil && unreachable(err) {
+		b.shareOutage(err)
 		b.markOffline()
 		return errOffline
 	}
@@ -681,6 +683,7 @@ func (b *bridge) probeLoop(ctx context.Context) {
 		if done {
 			if err == nil {
 				b.markOnline(true)
+				b.shareOnline()
 			} else {
 				b.mu.Lock()
 				b.probing = false
@@ -696,6 +699,7 @@ func (b *bridge) probeLoop(ctx context.Context) {
 		b.mu.Unlock()
 		if off {
 			b.writeMarker(false)
+			b.shareOutage(err)
 		}
 		t := time.NewTimer(delay)
 		select {
@@ -921,12 +925,12 @@ func offlineFile(session string) string {
 	if execution.Validate(execution.Identity{TenantID: "t", SubjectID: "s", SessionID: session, ParentSessionID: session}) != nil {
 		return ""
 	}
-	dir, err := bridgeCacheRoot()
-	if err != nil {
+	dir := offlineDir()
+	if dir == "" {
 		return ""
 	}
 	// The prefix keeps names such as "." and ".." inside the folder.
-	return filepath.Join(dir, "codesynapse", "offline", "session-"+session)
+	return filepath.Join(dir, "session-"+session)
 }
 
 func (b *bridge) writeMarker(refused bool) {
@@ -952,14 +956,16 @@ func (b *bridge) clearMarker() {
 }
 
 // codesynapseOffline reports whether the chat's bridge recently found
-// CodeSynapse unreachable or refused.
+// CodeSynapse unreachable or refused, or anything on this machine failed to
+// connect to the hooks' API a moment ago (serverDown).
 func codesynapseOffline(session string) bool {
-	file := offlineFile(session)
-	if file == "" {
-		return false
-	}
-	data, err := os.ReadFile(file) //nolint:gosec // our own marker
-	if err != nil || len(data) > 4096 {
+	return chatOffline(session) || serverDown(hookAPIURL())
+}
+
+// chatOffline is the chat's own marker, written by its bridge.
+func chatOffline(session string) bool {
+	data := readSmall(offlineFile(session))
+	if data == nil {
 		return false
 	}
 	var m offlineMarker
