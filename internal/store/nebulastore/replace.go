@@ -62,20 +62,39 @@ func (s *Store) ReplaceRepo(ctx context.Context, repo string, g *model.Graph) er
 		defer cancel()
 		_ = s.release(ctx, head, run)
 	}()
+	hashes := hashNodes(nodes, edges)
+	stored, err := s.storedHashes(ctx, repo)
+	if err != nil {
+		return err
+	}
+	d := planDelta(nodes, edges, hashes, stored)
 	if err := store.CommitCheck(ctx); err != nil {
 		return err
 	}
-	if err := s.putNodes(ctx, run, nodes); err != nil {
-		return fmt.Errorf("write nodes: %w", err)
+	log := logx.FromContext(ctx)
+	if !d.full {
+		if err := s.publishDelta(ctx, run, d, hashes); err != nil {
+			return err
+		}
+		log.Info("graph published", "mode", "delta", "nodes", len(d.nodes), "edges", len(d.edges), "removed", len(d.removed), "unchanged", len(nodes)-len(d.nodes))
+		return nil
 	}
+	// Edges first and nodes (with their hashes) after, as in the delta: a
+	// hash is never stored before the edges it describes.
 	if err := s.putEdges(ctx, run, edges); err != nil {
 		return fmt.Errorf("write edges: %w", err)
+	}
+	if err := s.dropStaleEdges(ctx, repo, run); err != nil {
+		return fmt.Errorf("remove stale edges: %w", err)
+	}
+	if err := s.putNodes(ctx, run, nodes, hashes); err != nil {
+		return fmt.Errorf("write nodes: %w", err)
 	}
 	removed, err := s.dropStale(ctx, repo, run)
 	if err != nil {
 		return fmt.Errorf("remove stale graph: %w", err)
 	}
-	logx.FromContext(ctx).Info("graph published", "nodes", len(nodes), "edges", len(edges), "removed", removed)
+	log.Info("graph published", "mode", "full", "nodes", len(nodes), "edges", len(edges), "removed", removed)
 	return nil
 }
 
@@ -137,8 +156,9 @@ func nodeRow(n model.Node, run string) map[string]any {
 	return p
 }
 
-// putNodes upserts nodes in batches that share their set columns.
-func (s *Store) putNodes(ctx context.Context, run string, nodes []model.Node) error {
+// putNodes upserts nodes in batches that share their set columns, each with
+// its hashes when hashes has them.
+func (s *Store) putNodes(ctx context.Context, run string, nodes []model.Node, hashes map[string]nodeHash) error {
 	type group struct {
 		cols []string
 		rows [][]any
@@ -148,6 +168,9 @@ func (s *Store) putNodes(ctx context.Context, run string, nodes []model.Node) er
 	var order []string
 	for _, n := range nodes {
 		p := nodeRow(n, run)
+		if h, ok := hashes[n.ID]; ok {
+			p["content_hash"], p["edges_hash"] = h.content, h.edges
+		}
 		cols := make([]string, 0, len(p))
 		for k := range p {
 			cols = append(cols, k)
@@ -264,20 +287,8 @@ func (s *Store) dropStaleEdges(ctx context.Context, repo, run string) error {
 		if len(rows) == 0 {
 			return nil
 		}
-		byKind := map[string][]string{}
-		for _, r := range rows {
-			a, _ := r["a"].(string)
-			b, _ := r["b"].(string)
-			t, _ := r["t"].(string)
-			if !model.EdgeKind(t).Valid() {
-				return fmt.Errorf("stored edge has invalid type %q", t)
-			}
-			byKind[t] = append(byKind[t], literal(a)+"->"+literal(b)+"@0")
-		}
-		for t, pairs := range byKind {
-			if _, err := s.write(ctx, "DELETE EDGE "+quote(t)+" "+strings.Join(pairs, ","), nil); err != nil {
-				return err
-			}
+		if err := s.deleteEdgeRows(ctx, rows); err != nil {
+			return err
 		}
 	}
 }
