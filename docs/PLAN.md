@@ -42,6 +42,7 @@ This page is the starting point. Each larger feature has its own plan in [`plans
 | [Agent gateway](plans/GATEWAY_PLAN.md) | Agent model traffic through CodeSynapse, local model first | See the plan |
 | [SARIF import](plans/SARIF_IMPORT_PLAN.md) | Findings of external security tools, each naming the tool that found it | Phase 1 (upload and storage) done |
 | [OpenFGA authorisation](plans/OPENFGA_PLAN.md) | Access decisions in OpenFGA, fine-grained `resource.area:level` permissions and custom roles | Proposed |
+| [Feature health](plans/FEATURE_HEALTH_PLAN.md) | Timings per feature and client, and a per-user breaker that pauses slow optional features | Proposed |
 
 ## Architecture
 
