@@ -6,4 +6,4 @@ Puts the CodeSynapse code graph into Claude Code: the MCP bridge (every call goe
 /plugin install codesynapse --marketplace astrona-io/codesynapse
 ```
 
-It needs the `codesynapse` binary on your `PATH`, a CodeSynapse server and a personal API key. After updating the plugin or the CLI, run `codesynapse doctor --fix` and start a new session; a session start tells you when they no longer match. Setup, settings and troubleshooting: [docs/operations/claude-code-plugin.md](../../docs/operations/claude-code-plugin.md).
+It needs the `codesynapse` binary on your `PATH`, a CodeSynapse server and a personal API key. After updating the plugin or the CLI, run `codesynapse doctor --fix` and start a new session; a session start tells you when they no longer match. When the server cannot be reached, the first hook that tries marks it down for every chat on the machine for two minutes and the hooks skip it meanwhile, so prompts are not slowed down; `codesynapse doctor` shows the mark and the last pre-brief. Setup, settings and troubleshooting: [docs/operations/claude-code-plugin.md](../../docs/operations/claude-code-plugin.md).

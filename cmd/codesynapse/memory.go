@@ -58,6 +58,9 @@ type apiClient struct {
 	base  string
 	token string
 	http  *http.Client
+	// hook: a hook's client, which does not try while the outage mark of
+	// base is fresh (outage.go).
+	hook bool
 }
 
 func newAPIClient(base string) apiClient {
@@ -95,6 +98,9 @@ func (c apiClient) do(ctx context.Context, method, path string, body, out any) e
 }
 
 func (c apiClient) request(ctx context.Context, method, path string, rd io.Reader, encoding string, out any) error {
+	if c.hook && serverDown(c.base) {
+		return errServerOffline
+	}
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd)
 	if err != nil {
 		return err
@@ -114,9 +120,17 @@ func (c apiClient) request(ctx context.Context, method, path string, rd io.Reade
 	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	res, err := httpClient.Do(req)
 	if err != nil {
+		noteOutage(c.base, err)
 		return err
 	}
 	defer res.Body.Close() //nolint:errcheck // read-only response
+	// Any answer but a proxy's for a server behind it that is down means the
+	// server is there, refusals included.
+	if proxyDown(res) {
+		markOutage(c.base, "gateway")
+	} else {
+		clearOutage(c.base)
+	}
 	data, err := io.ReadAll(io.LimitReader(res.Body, 4<<20))
 	if err != nil {
 		return err
@@ -158,8 +172,9 @@ func (c apiClient) executionContext(ctx context.Context, primary, parent string)
 // most.
 const hookRegisterBudget = 3 * time.Second
 
-// errServerOffline means the chat's bridge found CodeSynapse unreachable a
-// moment ago (codesynapseOffline), so a hook did not try.
+// errServerOffline means CodeSynapse was found unreachable a moment ago (the
+// chat's bridge, codesynapseOffline, or any hook on this machine, serverDown),
+// so a hook did not try.
 var errServerOffline = errors.New("the CodeSynapse server is offline")
 
 // registerWithin registers the session within d and returns ctx (not bounded
@@ -382,6 +397,9 @@ func hookReply(w io.Writer, event, note, context string) error {
 
 func (o *recallOptions) recall(ctx context.Context) (string, error) {
 	c := newAPIClient(o.apiURL)
+	if o.hook {
+		c = newHookClient(o.apiURL)
+	}
 	dir := "."
 	primary, parent := os.Getenv("CODESYNAPSE_SESSION_ID"), os.Getenv("CODESYNAPSE_PARENT_SESSION_ID")
 	var in hookInput
@@ -534,6 +552,9 @@ func (o *offloadOptions) offload(ctx context.Context) (int, error) {
 		parent = in.SessionID
 	}
 	c := newAPIClient(o.apiURL)
+	if o.hook {
+		c = newHookClient(o.apiURL)
+	}
 	var err error
 	if o.hook {
 		if codesynapseOffline(in.SessionID) {

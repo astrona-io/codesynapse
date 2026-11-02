@@ -8,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/astrona-io/codesynapse/internal/app"
 	"github.com/astrona-io/codesynapse/internal/execution"
 )
 
@@ -50,7 +49,7 @@ func recordActivity(ctx context.Context, command string, raw []byte, logger *slo
 		return "not reported: hook input not understood"
 	}
 	state := stateFile(tool.SessionID)
-	c := newAPIClient(app.Getenv("CODESYNAPSE_API_URL", "http://127.0.0.1:8080"))
+	c := newHookClient(hookAPIURL())
 	if state == "" {
 		return "not reported: no valid session ID"
 	}
