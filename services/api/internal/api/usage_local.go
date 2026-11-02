@@ -278,7 +278,7 @@ const localAnswerAction = "mcp.local_answer"
 
 // localTools are the tools the bridge may answer on the developer's machine.
 func localTools() []string {
-	return slices.Concat(gittools.Tools, ghtools.Tools, coretools.Local, []string{asklocal.Tool, asklocal.DraftTool, fetchsource.Tool})
+	return slices.Concat(gittools.Tools, ghtools.Tools, coretools.Local, []string{asklocal.Tool, asklocal.DraftTool, asklocal.ReadTool, fetchsource.Tool})
 }
 
 func (in localUsageReport) validate() error {

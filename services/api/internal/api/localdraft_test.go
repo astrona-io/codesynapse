@@ -97,6 +97,7 @@ func TestLocalDraftEndpoint(t *testing.T) {
 
 func TestLocalDraftReportAndTaskGuard(t *testing.T) {
 	assert.NoError(t, localUsageReport{Tool: asklocal.DraftTool, Client: "claude-code"}.validate())
+	assert.NoError(t, localUsageReport{Tool: asklocal.ReadTool, Client: "claude-code"}.validate())
 
 	model := chatModel(t, func(_, _ string) string { return "OK" })
 	f := newRuntimeFixture(t, Config{LLM: localRegistry(model.URL)})

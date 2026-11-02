@@ -306,7 +306,7 @@ func readGuard(ctx context.Context, in toolHookInput) map[string]any {
 	s.Turned++
 	saveState(state, s)
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s has %d+ lines. To learn what it says, call ask_local with your question and this path: a local model reads it and answers with file:line citations, so the file stays out of your context. To change it, read only the ranges you need (Read with offset and limit), or call file_outline for its symbols with signatures and line ranges.", filepath.Base(file), lines)
+	fmt.Fprintf(&b, "%s has %d+ lines. To learn what it says, call ask_local with your question and this path: a local model reads it and answers with file:line citations, so the file stays out of your context. To change it, read only the ranges you need (Read with offset and limit, or read_ranges for several at once), or call file_outline for its symbols with signatures and line ranges.", filepath.Base(file), lines)
 	if outline := goOutline(file); len(outline) > 0 {
 		b.WriteString(" Outline:\n" + strings.Join(outline, "\n"))
 	}

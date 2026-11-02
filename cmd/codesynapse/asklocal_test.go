@@ -194,3 +194,71 @@ func TestBridgeAnswersLocalDraft(t *testing.T) {
 	assert.False(t, reports[0].Failed)
 	assert.True(t, reports[1].Failed)
 }
+
+// read_ranges returns the numbered lines of several ranges from the
+// checkout, reports the call and sends nothing else to the server.
+func TestBridgeAnswersReadRanges(t *testing.T) {
+	dir := askCheckout(t)
+	var mu sync.Mutex
+	var reports []localUsage
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/api/v1/usage/local":
+			var u localUsage
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&u))
+			reports = append(reports, u)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s: read_ranges sends no file to the server", r.URL.Path)
+		}
+	}))
+	t.Cleanup(api.Close)
+	var out bytes.Buffer
+	b := &bridge{token: "csk_test", session: "chat-1", out: &out, gitDir: dir, repoName: "acme/app", logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		report: apiClient{base: api.URL, token: "csk_test", http: api.Client()}}
+	b.repoOnce.Do(func() {})
+	call := func(args string) map[string]any {
+		t.Helper()
+		out.Reset()
+		msg := `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"read_ranges","arguments":` + args + `}}`
+		var m rpcMessage
+		require.NoError(t, json.Unmarshal([]byte(msg), &m))
+		require.True(t, b.answerAskLocal(context.Background(), []byte(msg), m))
+		var res struct {
+			Result map[string]any `json:"result"`
+		}
+		require.NoError(t, json.Unmarshal(out.Bytes(), &res))
+		return res.Result
+	}
+	text := func(res map[string]any) string {
+		return res["content"].([]any)[0].(map[string]any)["text"].(string)
+	}
+
+	res := call(`{"ranges":["pkg/one.go:3-3","pkg/two.go:1-99"]}`)
+	assert.Equal(t, res["isError"], nil)
+	assert.Equal(t, text(res), "=== pkg/one.go (lines 3-3) ===\n3| func One() int { return 1 }\n\n"+
+		"=== pkg/two.go (lines 1-3) ===\n1| package pkg\n2| \n3| func Two() int { return 2 }\n")
+	assert.Equal(t, res["_meta"].(map[string]any)["codesynapse/source"], "local-file")
+
+	for _, bad := range []string{
+		`{"ranges":["pkg/one.go"]}`,
+		`{"ranges":["pkg:1-2"]}`,
+		`{"ranges":[".env:1-1"]}`,
+		`{"ranges":["../x.go:1-2"]}`,
+		`{"ranges":[]}`,
+		`{"ranges":["pkg/one.go:1-2"],"all":true}`,
+	} {
+		res := call(bad)
+		assert.Equal(t, res["isError"], true, bad)
+		assert.NotContains(t, text(res), "TOKEN", bad)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, reports, 7)
+	assert.Equal(t, reports[0].Tool, asklocal.ReadTool)
+	assert.False(t, reports[0].Failed)
+	assert.True(t, reports[1].Failed)
+}

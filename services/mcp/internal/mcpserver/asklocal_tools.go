@@ -25,6 +25,13 @@ func registerAskLocal(s *mcp.Server, add func(name, desc string) *mcp.Tool) {
 		func(context.Context, *mcp.CallToolRequest, asklocal.DraftIn) (*mcp.CallToolResult, any, error) {
 			return nil, nil, errLocalDraft
 		})
+	mcp.AddTool(s, add(asklocal.ReadTool,
+		"Read the exact lines of several file:start-end ranges in one call, numbered, instead of one Read per range: the ranges minimal_context, file_outline, get_symbol_context or an ask_local citation gave you. Pass ranges (at most 50, only files git tracks; a range past the end of a file is cut to it). Returns the text of the lines, at most 256 KiB, read from your checkout as it is now. Use it for the text you are about to edit or quote; to learn what a long file says, ask_local is cheaper."),
+		func(context.Context, *mcp.CallToolRequest, asklocal.ReadIn) (*mcp.CallToolResult, any, error) {
+			return nil, nil, errReadRanges
+		})
 }
+
+var errReadRanges = errors.New("read_ranges reads files on your machine: connect through the CodeSynapse bridge (`codesynapse mcp install`, or the Claude Code plugin)")
 
 var errLocalDraft = errors.New("local_draft reads files on your machine: connect through the CodeSynapse bridge (`codesynapse mcp install`, or the Claude Code plugin)")
