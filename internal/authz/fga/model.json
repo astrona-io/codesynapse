@@ -1,0 +1,487 @@
+{
+  "schema_version": "1.1",
+  "type_definitions": [
+    {
+      "type": "user"
+    },
+    {
+      "metadata": {
+        "relations": {
+          "active": {},
+          "default_readers": {
+            "directly_related_user_types": [
+              {
+                "relation": "member",
+                "type": "organisation"
+              }
+            ]
+          },
+          "full": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              },
+              {
+                "relation": "member",
+                "type": "team"
+              }
+            ]
+          },
+          "guest": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "member": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "owner": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "read": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              },
+              {
+                "relation": "member",
+                "type": "team"
+              }
+            ]
+          },
+          "write": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              },
+              {
+                "relation": "member",
+                "type": "team"
+              }
+            ]
+          }
+        }
+      },
+      "relations": {
+        "active": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "member"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "guest"
+                }
+              }
+            ]
+          }
+        },
+        "default_readers": {
+          "this": {}
+        },
+        "full": {
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "computedUserset": {
+                  "relation": "owner"
+                }
+              }
+            ]
+          }
+        },
+        "guest": {
+          "this": {}
+        },
+        "member": {
+          "this": {}
+        },
+        "owner": {
+          "this": {}
+        },
+        "read": {
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "computedUserset": {
+                  "relation": "write"
+                }
+              }
+            ]
+          }
+        },
+        "write": {
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "computedUserset": {
+                  "relation": "full"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "type": "organisation"
+    },
+    {
+      "metadata": {
+        "relations": {
+          "full": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "member": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "organisation": {
+            "directly_related_user_types": [
+              {
+                "type": "organisation"
+              }
+            ]
+          }
+        }
+      },
+      "relations": {
+        "full": {
+          "this": {}
+        },
+        "member": {
+          "union": {
+            "child": [
+              {
+                "this": {}
+              },
+              {
+                "computedUserset": {
+                  "relation": "full"
+                }
+              }
+            ]
+          }
+        },
+        "organisation": {
+          "this": {}
+        }
+      },
+      "type": "team"
+    },
+    {
+      "metadata": {
+        "relations": {
+          "default_read": {},
+          "direct_deny": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "direct_full": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "direct_read": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "direct_write": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "full": {},
+          "has_direct": {},
+          "org_space": {
+            "directly_related_user_types": [
+              {
+                "type": "organisation"
+              }
+            ]
+          },
+          "organisation": {
+            "directly_related_user_types": [
+              {
+                "type": "organisation"
+              }
+            ]
+          },
+          "read": {},
+          "team_full": {
+            "directly_related_user_types": [
+              {
+                "relation": "member",
+                "type": "team"
+              }
+            ]
+          },
+          "team_read": {
+            "directly_related_user_types": [
+              {
+                "relation": "member",
+                "type": "team"
+              }
+            ]
+          },
+          "team_write": {
+            "directly_related_user_types": [
+              {
+                "relation": "member",
+                "type": "team"
+              }
+            ]
+          },
+          "write": {}
+        }
+      },
+      "relations": {
+        "default_read": {
+          "tupleToUserset": {
+            "computedUserset": {
+              "relation": "default_readers"
+            },
+            "tupleset": {
+              "relation": "org_space"
+            }
+          }
+        },
+        "direct_deny": {
+          "this": {}
+        },
+        "direct_full": {
+          "this": {}
+        },
+        "direct_read": {
+          "this": {}
+        },
+        "direct_write": {
+          "this": {}
+        },
+        "full": {
+          "intersection": {
+            "child": [
+              {
+                "union": {
+                  "child": [
+                    {
+                      "computedUserset": {
+                        "relation": "direct_full"
+                      }
+                    },
+                    {
+                      "difference": {
+                        "base": {
+                          "computedUserset": {
+                            "relation": "team_full"
+                          }
+                        },
+                        "subtract": {
+                          "computedUserset": {
+                            "relation": "has_direct"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "active"
+                  },
+                  "tupleset": {
+                    "relation": "organisation"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "has_direct": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "direct_full"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "direct_write"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "direct_read"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "direct_deny"
+                }
+              }
+            ]
+          }
+        },
+        "org_space": {
+          "this": {}
+        },
+        "organisation": {
+          "this": {}
+        },
+        "read": {
+          "intersection": {
+            "child": [
+              {
+                "union": {
+                  "child": [
+                    {
+                      "computedUserset": {
+                        "relation": "write"
+                      }
+                    },
+                    {
+                      "computedUserset": {
+                        "relation": "direct_read"
+                      }
+                    },
+                    {
+                      "difference": {
+                        "base": {
+                          "union": {
+                            "child": [
+                              {
+                                "computedUserset": {
+                                  "relation": "team_read"
+                                }
+                              },
+                              {
+                                "computedUserset": {
+                                  "relation": "default_read"
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "subtract": {
+                          "computedUserset": {
+                            "relation": "has_direct"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "active"
+                  },
+                  "tupleset": {
+                    "relation": "organisation"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "team_full": {
+          "this": {}
+        },
+        "team_read": {
+          "this": {}
+        },
+        "team_write": {
+          "this": {}
+        },
+        "write": {
+          "intersection": {
+            "child": [
+              {
+                "union": {
+                  "child": [
+                    {
+                      "computedUserset": {
+                        "relation": "full"
+                      }
+                    },
+                    {
+                      "computedUserset": {
+                        "relation": "direct_write"
+                      }
+                    },
+                    {
+                      "difference": {
+                        "base": {
+                          "computedUserset": {
+                            "relation": "team_write"
+                          }
+                        },
+                        "subtract": {
+                          "computedUserset": {
+                            "relation": "has_direct"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "relation": "active"
+                  },
+                  "tupleset": {
+                    "relation": "organisation"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "type": "repository"
+    }
+  ]
+}

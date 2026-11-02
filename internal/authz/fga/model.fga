@@ -1,0 +1,51 @@
+# Authorisation model for repository and organisation access
+# (docs/plans/OPENFGA_PLAN.md). model.json is the same model in OpenFGA's
+# JSON form, which the client writes; TestModelDSLMatchesJSON keeps the two
+# in step. Change both together.
+model
+  schema 1.1
+
+type user
+
+type organisation
+  relations
+    define owner: [user]
+    define full: [user, team#member] or owner
+    define write: [user, team#member] or full
+    define read: [user, team#member] or write
+    define guest: [user]
+    # Active non-guest members; written only for explicit memberships and
+    # removed when a membership ends or the account is suspended.
+    define member: [user]
+    define active: member or guest
+    # Written as organisation:O#default_readers@organisation:O#member only
+    # while the organisation's default is READ_ONLY.
+    define default_readers: [organisation#member]
+
+type team
+  relations
+    define organisation: [organisation]
+    define full: [user]
+    define member: [user] or full
+
+type repository
+  relations
+    define organisation: [organisation]
+    # Set only for organisation-space entries, never personal ones.
+    define org_space: [organisation]
+    define direct_full: [user]
+    define direct_write: [user]
+    define direct_read: [user]
+    define direct_deny: [user]
+    define has_direct: direct_full or direct_write or direct_read or direct_deny
+    define team_full: [team#member]
+    define team_write: [team#member]
+    define team_read: [team#member]
+    define default_read: default_readers from org_space
+    # A direct grant replaces team grants and the default, even when weaker.
+    define full: (direct_full or (team_full but not has_direct)) and active from organisation
+    define write: (full or direct_write or (team_write but not has_direct)) and active from organisation
+    define read: (write or direct_read or ((team_read or default_read) but not has_direct)) and active from organisation
+    # Per-permission relations (repository.reviews:write as reviews_write,
+    # with user_ and team_ tiers for custom roles) are generated here from the
+    # Go permission table once phase 2 has landed it.

@@ -264,6 +264,83 @@ services:
       timeout: 5s
       retries: 20
 
+  # OpenFGA, the repository-permission store (docs/plans/OPENFGA_PLAN.md).
+  # Nothing asks it for decisions yet: the API starts writing and checking in
+  # phase 6. It keeps its tuples in its own database and user on the postgres
+  # above; openfga-db-init creates both, openfga-migrate brings the schema up.
+  openfga-db-init:
+    image: ghcr.io/astrona-io/codesynapse-postgres:18-alpine
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        case "$$OPENFGA_DB_PASSWORD" in ""|*[!A-Za-z0-9]*) echo "OPENFGA_DB_PASSWORD must be letters and digits; run just init" >&2; exit 1;; esac
+        psql -v ON_ERROR_STOP=1 -h postgres -U codesynapse -d codesynapse -v pw="$$OPENFGA_DB_PASSWORD" <<'SQL'
+        SELECT 'CREATE ROLE openfga LOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'openfga')\gexec
+        ALTER ROLE openfga WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'pw';
+        SELECT 'CREATE DATABASE openfga OWNER openfga' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'openfga')\gexec
+        REVOKE ALL ON DATABASE openfga FROM PUBLIC;
+        GRANT CONNECT ON DATABASE openfga TO openfga;
+        SQL
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      OPENFGA_DB_PASSWORD: ${OPENFGA_DB_PASSWORD:?run "just init" to add OPENFGA_DB_PASSWORD to .env}
+    user: postgres
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  openfga-migrate:
+    image: docker.io/openfga/openfga:v1.22.0@sha256:9cf9a20af32a40434cd3a788c429879439ee9ea9abf65c9c200ee17cd43f769e
+    command: ["migrate"]
+    environment: &openfga-datastore
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://postgres:5432/openfga?sslmode=disable
+      OPENFGA_DATASTORE_USERNAME: openfga
+      OPENFGA_DATASTORE_PASSWORD: ${OPENFGA_DB_PASSWORD}
+      OPENFGA_LOG_FORMAT: json
+    restart: "no"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    depends_on:
+      openfga-db-init:
+        condition: service_completed_successfully
+
+  openfga:
+    image: docker.io/openfga/openfga:v1.22.0@sha256:9cf9a20af32a40434cd3a788c429879439ee9ea9abf65c9c200ee17cd43f769e
+    command: ["run"]
+    environment:
+      <<: *openfga-datastore
+      # Every call needs a pre-shared key; only the API will hold one.
+      OPENFGA_AUTHN_METHOD: preshared
+      OPENFGA_AUTHN_PRESHARED_KEYS: ${OPENFGA_API_KEY:?run "just init" to add OPENFGA_API_KEY to .env}
+      OPENFGA_HTTP_ADDR: 0.0.0.0:8080
+      # The HTTP gateway reaches gRPC in-process; nothing else needs it.
+      OPENFGA_GRPC_ADDR: 127.0.0.1:8081
+      OPENFGA_PLAYGROUND_ENABLED: "false"
+      OPENFGA_METRICS_ENABLED: "false"
+      OPENFGA_PROFILER_ENABLED: "false"
+      # Longer than the client's own timeout (internal/authz/fga), so a list
+      # is never cut short by the server and returned as if complete.
+      OPENFGA_LIST_OBJECTS_DEADLINE: 5s
+    # Internal network only: never published to the host.
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=127.0.0.1:8081"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      openfga-migrate:
+        condition: service_completed_successfully
+
   api:
     build:
       context: .

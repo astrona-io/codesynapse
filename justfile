@@ -46,11 +46,21 @@ init:
                 echo "added NEBULA_${svc}_PASSWORD to .env"
             fi
         done
+        if ! grep -q '^OPENFGA_DB_PASSWORD=' .env; then
+            printf '\n# OpenFGA: its PostgreSQL user, and the pre-shared key the API will use.\nOPENFGA_DB_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
+            echo "added OPENFGA_DB_PASSWORD to .env"
+        fi
+        if ! grep -q '^OPENFGA_API_KEY=' .env; then
+            printf 'OPENFGA_API_KEY=%s\n' "$(openssl rand -hex 32)" >> .env
+            echo "added OPENFGA_API_KEY to .env"
+        fi
         exit 0
     fi
     sed -e "s/change-me-api-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-mcp-token/$(openssl rand -hex 24)/" \
         -e "s/change-me-postgres/$(openssl rand -hex 24)/" \
+        -e "s/change-me-openfga-db/$(openssl rand -hex 24)/" \
+        -e "s/change-me-openfga-key/$(openssl rand -hex 32)/" \
         -e "s/change-me-nebula-api/$(openssl rand -hex 12)/" \
         -e "s/change-me-nebula-worker/$(openssl rand -hex 12)/" \
         -e "s/change-me-nebula-mcp/$(openssl rand -hex 12)/" \
@@ -201,6 +211,7 @@ nebula_storaged_image := `sh .github/scripts/compose-image.sh codesynapse-nebula
 nebula_graphd_image := `sh .github/scripts/compose-image.sh codesynapse-nebula-graphd`
 nebula_console_image := `sh .github/scripts/compose-image.sh codesynapse-nebula-console`
 victoriametrics_image := `sh .github/scripts/compose-image.sh victoria-metrics`
+openfga_image := `sh .github/scripts/compose-image.sh openfga`
 
 # Build the api, worker, mcp and web images, tagged codesynapse-<svc>:<tag> and <registry>/codesynapse-<svc>:<tag>. PLATFORM=linux/amd64 for a cluster of another architecture.
 image-build tag="dev":
@@ -411,8 +422,24 @@ test-metrics: _runtime
     CODESYNAPSE_TEST_METRICS_URL="http://127.0.0.1:$port" CODESYNAPSE_TEST_METRICS_USER=cs CODESYNAPSE_TEST_METRICS_PASSWORD="$pw" \
         go test -race -count=1 -run TestVictoriaMetrics ./internal/telemetry/ ./services/api/internal/api/
 
-# Store, accounts and metrics contracts against throwaway NebulaGraph, Milvus, PostgreSQL and VictoriaMetrics containers
-test-integration: test-nebula test-postgres test-metrics
+# Authorisation model contract (internal/authz/fga) against a throwaway OpenFGA with its in-memory datastore
+test-openfga: _runtime
+    #!/usr/bin/env sh
+    set -eu
+    name="codesynapse-fga-test-$$-$(openssl rand -hex 3)"; key=$(openssl rand -hex 24)
+    trap '{{engine}} rm -f "$name" >/dev/null 2>&1 || true' EXIT
+    trap 'exit 130' INT TERM
+    {{engine}} run --rm -d --name "$name" -p 127.0.0.1::8080 -e OPENFGA_AUTHN_METHOD=preshared -e OPENFGA_AUTHN_PRESHARED_KEYS="$key" \
+        -e OPENFGA_PLAYGROUND_ENABLED=false -e OPENFGA_METRICS_ENABLED=false -e OPENFGA_LIST_OBJECTS_DEADLINE=5s {{openfga_image}} run >/dev/null
+    port=$({{engine}} port "$name" 8080/tcp | head -n1 | sed 's/.*://')
+    [ -n "$port" ] || { echo "no host port for OpenFGA" >&2; exit 1; }
+    n=0; until curl -sf "http://127.0.0.1:$port/healthz" >/dev/null; do n=$((n+1)); [ "$n" -lt 60 ] || { echo "OpenFGA did not start" >&2; exit 1; }; sleep 1; done
+    # http is allowed to a single-label host only, so localhost rather than 127.0.0.1.
+    CODESYNAPSE_TEST_OPENFGA_URL="http://localhost:$port" CODESYNAPSE_TEST_OPENFGA_TOKEN="$key" \
+        go test -race -count=1 ./internal/authz/...
+
+# Store, accounts, metrics and authorisation contracts against throwaway NebulaGraph, Milvus, PostgreSQL, VictoriaMetrics and OpenFGA containers
+test-integration: test-nebula test-postgres test-metrics test-openfga
 
 # Tests and the shipped stack must use the same store images (see pg_image)
 check-test-images:

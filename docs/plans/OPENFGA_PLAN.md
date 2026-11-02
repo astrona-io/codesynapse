@@ -1,6 +1,6 @@
 # OpenFGA authorisation plan
 
-Status: proposed (2026-11-02).
+Status: phase 4 done (2026-11-02): the model, the client, the compose service and the contract run; nothing asks OpenFGA for decisions yet.
 
 Repository and organisation access moves from the Go evaluator in `internal/accounts/authz.go` to [OpenFGA](https://openfga.dev) (Apache-2.0, a CNCF project). At the same time, permissions get one naming scheme, `resource:level`, where the level is `read`, `write` or `full`, and they become fine-grained: `resource.area:level` permissions that organisations can bundle into their own roles.
 
@@ -181,7 +181,7 @@ The rename and the permission table are phase 2, before OpenFGA, so OpenFGA star
 
 ## Authorisation model
 
-This is a first draft in OpenFGA's DSL. Phase 4 finalises it, with tests for each row of the rules table below.
+This is the first draft in OpenFGA's DSL. Phase 4 put its core (users, organisations, teams and the three repository levels) in `internal/authz/fga/model.fga`, with a contract test for each row of the rules table below; the per-permission relations wait for the permission table of phase 2.
 
 ```
 model
@@ -282,6 +282,14 @@ OpenFGA cannot join a PostgreSQL transaction, so writes go through the outbox:
 
 New dependencies, all Apache-2.0: the `github.com/openfga/go-sdk` Go module and the `openfga/openfga` image (pinned by digest). The test container uses the same image.
 
+### Phase 4 as built
+
+- **Model format:** `internal/authz/fga/model.fga` is the source people read and edit; `model.json` beside it is the same model in OpenFGA's JSON form, made once with OpenFGA's own transformer (`fga model transform`) and embedded in the binary. No DSL parser ships: `github.com/openfga/language` stays out. `TestModelDSLMatchesJSON` renders the JSON back to DSL and compares every relation, so neither file changes alone. When phase 2's permission table lands, a generator writes both files and the test keeps them honest.
+- **Client** (`internal/authz/fga`): configured from `CODESYNAPSE_OPENFGA_URL` and `CODESYNAPSE_OPENFGA_TOKEN` only; https anywhere, http only to a single-label or cluster-local name (the rule of `telemetry.CheckAlertsURL`); no proxy, no redirects, a 2 s timeout on every call, one retry. `Check` and `BatchCheck` (at most 50) ask for `HIGHER_CONSISTENCY`; any error, missing answer or per-item error makes every answer false. `ListObjects` refuses an answer of `ListLimit` (1000, OpenFGA's own cap) or more as truncated. `WriteTuples`/`DeleteTuples` send at most 100 tuples in one transaction and ignore duplicates and missing deletes, so a replayed outbox batch is harmless. `EnsureStore`/`EnsureModel` find or create the store by name and write the model only when the stored one differs. The SDK's own telemetry is off: its attributes carry store and model IDs.
+- **Contract:** `just test-openfga` starts a throwaway OpenFGA (in-memory datastore, a random pre-shared key) and runs `internal/authz/fga/contract_test.go`: every row of the table above that the model decides, plus idempotent writes and `EnsureModel` reusing the stored model. It lives beside the client rather than in `accountstest`, which phase 2 is reshaping; phase 6 runs the same rows against the Go reference there.
+- **Compose:** `openfga-db-init` (the postgres image's `psql`) creates the `openfga` user and database idempotently and closes the database to everyone else; `openfga-migrate` runs OpenFGA's migrations; `openfga` runs with pre-shared keys, playground, metrics and profiler off, gRPC bound to 127.0.0.1 (the HTTP API reaches it in-process; the health check uses it), no published port. `just init` adds `OPENFGA_DB_PASSWORD` and `OPENFGA_API_KEY` (the one key OpenFGA accepts; see the open questions) to `.env`. Nothing reads them in the API, workers or MCP server yet.
+- **Deviations:** `OPENFGA_LIST_OBJECTS_DEADLINE` is 5 s, above the client's 2 s timeout, so OpenFGA never cuts a list short and returns it as complete (it does so silently at its deadline); OpenFGA refuses a deadline above its 6 s request timeout. The table's "above `MaxTuples`" is `ListLimit`. One key instead of one per service, following the recommendation below.
+
 ## Phases
 
 Each phase is one pull request.
@@ -311,10 +319,9 @@ Each phase is one pull request.
 
 ## Open questions
 
-- **MCP write rights:** should the MCP server's OpenFGA key be read-only? OpenFGA's pre-shared keys cannot be limited to reads. Two options:
-  - OpenFGA's OIDC authentication with its experimental access control, which can limit a client to checks;
-  - the MCP server asks the API instead of OpenFGA, which adds a call to every tool invocation.
-
-  The plan picks one in phase 4.
+- **MCP write rights (recommendation from phase 4, for the owner to confirm):** the MCP server holds no OpenFGA key and asks the API, forwarding the caller's own API key as it does for `offload_turns`. The API is then the only process that can reach OpenFGA, and the only writer.
+  - OpenFGA's access control (`OPENFGA_EXPERIMENTALS=enable-access-control`) can limit a client to reads, but it is marked experimental and not recommended for production, it works only with OIDC client credentials (the client is the token's `azp` or `client_id`), so every service would need an identity provider client, which goes against "no bundled identity provider", and its roles live in a separate access-control store that has to be bootstrapped by hand. Pre-shared keys cannot be scoped at all.
+  - The cost is one internal round trip per tool call: the API answers a tool's whole need in one `BatchCheck` or `ListObjects`, and the MCP server already rechecks the caller with the accounts database on every call today. Decisions are never cached on the MCP side.
+  - Workers need the same treatment: they hold no API token today, so in phase 6 they either get an internal check endpoint on the API (with the job's validated identity) or a key of their own, which would then be able to write. The first keeps "only the API holds a key"; it needs a decision before phase 6.
 - How long should old role names stay accepted on API input? The plan says one release.
 - Should custom roles be shareable across organisations, for example as platform-wide templates? The plan keeps them per organisation.
