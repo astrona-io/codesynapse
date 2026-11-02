@@ -125,6 +125,18 @@ type Membership struct {
 	User    User      `json:"user"`
 	Role    Role      `json:"role"`
 	AddedAt time.Time `json:"added_at"`
+	// Perms are the member's organisation permissions where the caller
+	// resolved them (built-in and custom roles, key scope); zero means
+	// only Role is known.
+	Perms Perms `json:"permissions,omitempty"`
+}
+
+// Has reports whether the member holds the organisation permission p.
+func (m Membership) Has(p Permission) bool {
+	if m.Perms != 0 {
+		return m.Perms.Has(p)
+	}
+	return m.Role.Has(p)
 }
 
 // Session is a login; only the token's hash is stored.
@@ -151,6 +163,9 @@ type APIKey struct {
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+	// Scope limits the key to these permissions (nil: everything its user
+	// holds). The user's current permissions still apply on top.
+	Scope []Permission `json:"scope,omitempty"`
 }
 
 // Visibility of a repository entry.
@@ -614,6 +629,13 @@ type Store interface {
 	TeamBySlug(ctx context.Context, orgID, slug string) (Team, error)
 	OrgTeams(ctx context.Context, orgID string) ([]Team, error)
 	TeamsByIDs(ctx context.Context, ids []string) ([]Team, error)
+
+	// Custom roles (customroles.go). Names are unique per organisation,
+	// ignoring case (ErrExists).
+	CustomRoles(ctx context.Context, orgIDs []string) ([]CustomRole, error)
+	CreateCustomRole(ctx context.Context, r CustomRole) error
+	UpdateCustomRole(ctx context.Context, r CustomRole) error     // ErrNotFound
+	DeleteCustomRole(ctx context.Context, orgID, id string) error // ErrNotFound
 	// DeleteTeam removes the team and every tuple naming it.
 	DeleteTeam(ctx context.Context, id string) error
 

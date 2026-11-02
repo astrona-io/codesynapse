@@ -59,16 +59,24 @@ func (a AccountsAccess) ImageScan(ctx context.Context, ns string) (accounts.Imag
 	return a.Acc.St.ImageScan(ctx, ns)
 }
 
-// Reach implements Access.
-func (a AccountsAccess) Reach(ctx context.Context, userID, orgID string) (map[string]accounts.Reach, error) {
-	access, err := a.Acc.AccessOf(ctx, userID)
+// Reach implements Access: what the caller's user holds in the key's
+// organisation, limited by the key's scope when it has one.
+func (a AccountsAccess) Reach(ctx context.Context, c *Caller) (map[string]accounts.Reach, error) {
+	if c == nil {
+		return map[string]accounts.Reach{}, nil
+	}
+	p := accounts.Principal{User: accounts.User{ID: c.UserID}, OrgID: c.OrgID}
+	if c.KeyID != "" {
+		p.Via, p.KeyID = "key", c.KeyID
+	}
+	access, err := a.Acc.AccessFor(ctx, p)
 	if err != nil {
 		return nil, err
 	}
-	if _, member := access.Orgs[orgID]; !member {
+	if _, member := access.Orgs[c.OrgID]; !member {
 		return map[string]accounts.Reach{}, nil
 	}
-	return access.Scope(map[string]bool{orgID: true}), nil
+	return access.Scope(map[string]bool{c.OrgID: true}), nil
 }
 
 // Authenticate checks credentials again for each invocation, including stdio.

@@ -60,7 +60,7 @@ func RunAccessBounds(t *testing.T, st accounts.Store) {
 	a, err := svc.AccessOf(ctx, userID)
 	require.NoError(t, err)
 	assert.Len(t, a.Repos, 100)
-	assert.Equal(t, calls, 7, "bounded bulk reads at 128 teams and 100 repositories")
+	assert.Equal(t, calls, 8, "bounded bulk reads at 128 teams and 100 repositories")
 	now := time.Now().UTC()
 	extra := "bounded-extra"
 	require.NoError(t, st.CreateTeam(ctx, accounts.Team{ID: extra, OrgID: orgID, Slug: extra, Name: extra, CreatedAt: now}))

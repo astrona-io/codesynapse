@@ -44,7 +44,8 @@ type Store struct {
 	userTokens     map[string]accounts.UserGitToken // user|host
 	invites        map[string]accounts.Invitation   // by ID
 	teams          map[string]accounts.Team
-	tuples         map[accounts.Tuple]bool // keys have CreatedBy/CreatedAt zeroed
+	roles          map[string]accounts.CustomRole // by ID
+	tuples         map[accounts.Tuple]bool        // keys have CreatedBy/CreatedAt zeroed
 	tupleAt        map[accounts.Tuple]accounts.Tuple
 	repoPolicies   map[string]accounts.RepoPolicyApproval
 	annotations    map[string]map[string]accounts.RepositoryAnnotation
@@ -83,7 +84,7 @@ var _ accounts.Store = (*Store)(nil)
 func New() *Store {
 	return &Store{outbox: map[string]int64{}, users: map[string]accounts.User{}, orgs: map[string]accounts.Org{}, members: map[string]map[string]member{},
 		sessions: map[string]accounts.Session{}, executions: map[string]accounts.ExecutionSession{}, keys: map[string]accounts.APIKey{}, repos: map[string]accounts.Repository{}, tokens: map[string]accounts.GitToken{}, userTokens: map[string]accounts.UserGitToken{}, invites: map[string]accounts.Invitation{},
-		teams: map[string]accounts.Team{}, tuples: map[accounts.Tuple]bool{}, tupleAt: map[accounts.Tuple]accounts.Tuple{}, repoPolicies: map[string]accounts.RepoPolicyApproval{}, annotations: map[string]map[string]accounts.RepositoryAnnotation{}, triage: map[string]map[string]accounts.FindingTriage{}, ingestRuns: map[string]ingestRecord{}, ingestEntries: map[string]ingestEntry{},
+		teams: map[string]accounts.Team{}, roles: map[string]accounts.CustomRole{}, tuples: map[accounts.Tuple]bool{}, tupleAt: map[accounts.Tuple]accounts.Tuple{}, repoPolicies: map[string]accounts.RepoPolicyApproval{}, annotations: map[string]map[string]accounts.RepositoryAnnotation{}, triage: map[string]map[string]accounts.FindingTriage{}, ingestRuns: map[string]ingestRecord{}, ingestEntries: map[string]ingestEntry{},
 		idps: map[string]accounts.IdentityProvider{}, identities: map[string]accounts.ExternalIdentity{}, ssoStates: map[string]accounts.SSOState{}, managed: map[string]bool{}}
 }
 
@@ -395,6 +396,7 @@ func (s *Store) DeleteUserSessions(_ context.Context, userID string) error {
 func (s *Store) CreateAPIKey(_ context.Context, k accounts.APIKey) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	k.Scope = slices.Clone(k.Scope)
 	s.keys[k.ID] = k
 	return nil
 }

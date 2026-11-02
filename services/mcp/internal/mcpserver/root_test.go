@@ -35,7 +35,7 @@ func TestRootIsDeniedEveryTool(t *testing.T) {
 	org := accounts.Org{ID: "o-ada", Slug: "ada", Name: "Ada's", CreatedAt: time.Now().UTC()}
 	require.NoError(t, acc.St.CreateOrg(ctx, org, ada.ID))
 	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: org.ID, Graph: storetest.Repo, Visibility: accounts.Public, AddedBy: ada.ID, AddedAt: time.Now().UTC().Truncate(time.Microsecond)}))
-	key, _, err := acc.CreateKey(ctx, accounts.Principal{User: ada, Via: "session"}, org.ID, "agent", 0)
+	key, _, err := acc.CreateKey(ctx, accounts.Principal{User: ada, Via: "session"}, org.ID, "agent", 0, nil)
 	require.NoError(t, err)
 	_, err = acc.RegisterExecutionSession(ctx, ada.ID, org.ID, "chat-ada")
 	require.NoError(t, err)
@@ -65,7 +65,7 @@ func TestRootIsDeniedEveryTool(t *testing.T) {
 	assert.Equal(t, res.StatusCode, http.StatusUnauthorized)
 	assert.Contains(t, string(body), accounts.ErrRootAccount.Error(), "the refusal says why")
 	// The per-tool authorization layer refuses root on its own as well.
-	_, err = (AccountsAccess{Acc: acc}).Reach(ctx, ada.ID, org.ID)
+	_, err = (AccountsAccess{Acc: acc}).Reach(ctx, &Caller{UserID: ada.ID, OrgID: org.ID})
 	assert.True(t, errors.Is(err, accounts.ErrRootAccount))
 	events, err := acc.St.ListEvents(ctx, accounts.EventFilter{Action: "root.denied"})
 	require.NoError(t, err)

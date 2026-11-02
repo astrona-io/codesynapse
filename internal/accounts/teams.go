@@ -16,6 +16,8 @@ type TeamMember struct {
 type RepoGrant struct {
 	Tuple
 	Role Role `json:"role"`
+	// CustomRole is the custom role the grant names (Role is then "").
+	CustomRole *CustomRole `json:"custom_role,omitempty"`
 	// Label names the subject: a user's email or "org/team".
 	Label string `json:"label"`
 	// External is true for subjects outside the owning organisation.
@@ -247,8 +249,11 @@ func (s *Service) setTeamRolePolicy(ctx context.Context, p Principal, teamID str
 	if role != "" && !role.Valid() {
 		return fmt.Errorf("%w: unknown role %q", ErrInvalidInput, role)
 	}
-	if _, err := s.St.DeleteTuples(ctx, TupleFilter{ObjectType: TypeOrganisation, ObjectID: t.OrgID, SubjectType: TypeTeam, SubjectID: t.ID}); err != nil {
-		return err
+	// Only the built-in role: a custom organisation role stays.
+	for _, r := range []Role{Guest, Read, Write, Full, Owner} {
+		if _, err := s.St.DeleteTuples(ctx, TupleFilter{ObjectType: TypeOrganisation, ObjectID: t.OrgID, Relation: string(r), SubjectType: TypeTeam, SubjectID: t.ID}); err != nil {
+			return err
+		}
 	}
 	if role != "" {
 		if err := s.St.WriteTuple(ctx, Tuple{ObjectType: TypeOrganisation, ObjectID: t.OrgID, Relation: string(role), SubjectType: TypeTeam,
@@ -267,30 +272,33 @@ func (s *Service) TeamRole(ctx context.Context, t Team) (Role, error) {
 	ts, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeOrganisation, ObjectID: t.OrgID, SubjectType: TypeTeam, SubjectID: t.ID})
 	var best Role
 	for _, x := range ts {
-		best = Max(best, Role(x.Relation))
+		if Role(x.Relation).Valid() {
+			best = Max(best, Role(x.Relation))
+		}
 	}
 	return best, err
 }
 
-// canAdminRepo requires an effective repository administrator grant.
-func (s *Service) canAdminRepo(ctx context.Context, p Principal, orgID, graph string) error {
+// canAdminRepo requires repository.access:full on the entry and returns
+// what p holds there.
+func (s *Service) canAdminRepo(ctx context.Context, p Principal, orgID, graph string) (Perms, error) {
 	if err := s.ValidatePrincipal(ctx, p); err != nil {
-		return err
+		return 0, err
 	}
 
 	if p.OrgID != "" && p.OrgID != orgID {
-		return ErrForbidden
+		return 0, ErrForbidden
 	}
-	a, err := s.AccessOf(ctx, p.User.ID)
+	a, err := s.AccessFor(ctx, p)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	for _, r := range a.Repos {
-		if r.OrgID == orgID && r.Graph == graph && r.Role == Full {
-			return nil
+		if r.OrgID == orgID && r.Graph == graph && r.Perms.Has(RepoAccessFull) {
+			return r.Perms, nil
 		}
 	}
-	return ErrForbidden
+	return 0, ErrForbidden
 }
 
 // SetRepoGrant gives a user or a team's members role on orgID's entry for
@@ -309,18 +317,36 @@ func (s *Service) CanGrant(ctx context.Context, p Principal, orgID, graph string
 	if p.Via == "key" {
 		return ErrForbidden
 	}
-	return s.canAdminRepo(ctx, p, orgID, graph)
+	_, err := s.canAdminRepo(ctx, p, orgID, graph)
+	return err
 }
 
 func (s *Service) setRepoGrantPolicy(ctx context.Context, p Principal, orgID, graph string, subject Tuple, role Role) (RepoGrant, error) {
 	if p.Via == "key" {
 		return RepoGrant{}, ErrForbidden // agents do not change access
 	}
-	err := s.canAdminRepo(ctx, p, orgID, graph)
+	mine, err := s.canAdminRepo(ctx, p, orgID, graph)
 	if err != nil {
 		return RepoGrant{}, err
 	}
-	t := Tuple{ObjectType: TypeRepository, ObjectID: RepoObject(orgID, graph), Relation: RepoRelation(role),
+	// role is a built-in role or "role:<id>" for a custom one, which must
+	// be this organisation's and hold repository permissions.
+	rel, grant := RepoRelation(role), role.Bundle(ResourceRepository)
+	if id, ok := CustomRoleID(string(role)); ok {
+		r, err := s.customRole(ctx, orgID, id)
+		if err != nil {
+			return RepoGrant{}, err
+		}
+		if r.Resource != ResourceRepository {
+			return RepoGrant{}, fmt.Errorf("%w: grant organisation roles on the organisation", ErrInvalidInput)
+		}
+		rel, grant = CustomRelation(r.ID), r.Perms()
+	}
+	// No escalation: nobody grants a permission they do not hold here.
+	if !mine.Covers(grant) {
+		return RepoGrant{}, fmt.Errorf("%w: you can only grant permissions you hold", ErrForbidden)
+	}
+	t := Tuple{ObjectType: TypeRepository, ObjectID: RepoObject(orgID, graph), Relation: rel,
 		SubjectType: subject.SubjectType, SubjectID: subject.SubjectID, SubjectRelation: subject.SubjectRelation, CreatedBy: p.User.ID, CreatedAt: s.now()}
 	if err := validRepoTuple(t); err != nil {
 		return RepoGrant{}, err
@@ -362,7 +388,7 @@ func (s *Service) removeRepoGrantPolicy(ctx context.Context, p Principal, orgID,
 	if p.Via == "key" {
 		return ErrForbidden
 	}
-	if err := s.canAdminRepo(ctx, p, orgID, graph); err != nil {
+	if _, err := s.canAdminRepo(ctx, p, orgID, graph); err != nil {
 		return err
 	}
 	n, err := s.St.DeleteTuples(ctx, TupleFilter{ObjectType: TypeRepository, ObjectID: RepoObject(orgID, graph),
@@ -383,7 +409,7 @@ func (s *Service) removeRepoGrantPolicy(ctx context.Context, p Principal, orgID,
 // RepoGrants lists the explicit grants on orgID's entry for graph
 // (repository administrators only).
 func (s *Service) RepoGrants(ctx context.Context, p Principal, orgID, graph string) ([]RepoGrant, error) {
-	if err := s.canAdminRepo(ctx, p, orgID, graph); err != nil {
+	if _, err := s.canAdminRepo(ctx, p, orgID, graph); err != nil {
 		return nil, err
 	}
 	ts, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeRepository, ObjectID: RepoObject(orgID, graph)})
@@ -423,6 +449,11 @@ func (s *Service) orgEntry(ctx context.Context, orgID, graph string) (Repository
 // describe names a grant's subject and whether it is outside orgID.
 func (s *Service) describe(ctx context.Context, orgID string, t Tuple) (RepoGrant, error) {
 	g := RepoGrant{Tuple: t, Role: repoRelationRole[t.Relation]}
+	if id, ok := CustomRoleID(t.Relation); ok {
+		if r, err := s.customRole(ctx, orgID, id); err == nil {
+			g.CustomRole = &r
+		}
+	}
 	switch t.SubjectType {
 	case TypeUser:
 		u, err := s.St.UserByID(ctx, t.SubjectID)

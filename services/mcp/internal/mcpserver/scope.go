@@ -37,7 +37,7 @@ const (
 type Access interface {
 	Authenticate(ctx context.Context, token string) (*Caller, error)
 	Denied(ctx context.Context, caller *Caller, tool string) error
-	Reach(ctx context.Context, userID, orgID string) (map[string]accounts.Reach, error)
+	Reach(ctx context.Context, caller *Caller) (map[string]accounts.Reach, error)
 }
 
 type callerKey struct{}
@@ -87,7 +87,7 @@ func (h *handlers) reach(ctx context.Context) (map[string]accounts.Reach, bool, 
 	if r, ok := ctx.Value(reachKey{}).(map[string]accounts.Reach); ok {
 		return r, true, nil
 	}
-	r, err := h.access.Reach(ctx, c.UserID, c.OrgID)
+	r, err := h.access.Reach(ctx, c)
 	return r, true, err
 }
 
@@ -108,7 +108,7 @@ func (h *handlers) holds(ctx context.Context, graph string, perm accounts.Permis
 	if err != nil || !restricted {
 		return err
 	}
-	if !r[graph].Role.Has(perm) {
+	if !r[graph].Has(perm) {
 		return fmt.Errorf("repository %q: your role does not include %s", graph, perm)
 	}
 	return nil

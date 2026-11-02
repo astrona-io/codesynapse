@@ -371,19 +371,37 @@ func (s *Service) teamOrgRole(ctx context.Context, orgID, userID string) (Role, 
 	grants, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeOrganisation, ObjectID: orgID, SubjectType: TypeTeam, SubjectIDs: ids, SubjectRelation: TeamRead})
 	var best Role
 	for _, g := range grants {
-		best = Max(best, Role(g.Relation))
+		if Role(g.Relation).Valid() {
+			best = Max(best, Role(g.Relation))
+		}
 	}
 	return best, err
 }
 
-// Require returns ErrForbidden unless p's role in org holds perm, an
-// organisation permission.
+// Require returns ErrForbidden unless p holds perm, an organisation
+// permission, in org (PermsIn: built-in and custom roles, key scope).
 func (s *Service) Require(ctx context.Context, p Principal, orgID string, perm Permission) error {
+	// The built-in role answers most checks without reading teams for
+	// custom roles, so owner control never depends on team evaluation.
 	r, err := s.RoleIn(ctx, p, orgID)
 	if err != nil {
 		return err
 	}
-	if !r.Has(perm) {
+	limit, err := s.KeyLimit(ctx, p)
+	if err != nil {
+		return err
+	}
+	if !limit.Has(perm) {
+		return ErrForbidden
+	}
+	if r.Bundle(ResourceOrganisation).Has(perm) {
+		return nil
+	}
+	held, err := s.PermsIn(ctx, p, orgID)
+	if err != nil {
+		return err
+	}
+	if !held.Has(perm) {
 		return ErrForbidden
 	}
 	return nil
@@ -572,14 +590,20 @@ func (s *Service) guardLastOwner(ctx context.Context, orgID, userID string, newR
 }
 
 // CreateKey makes a personal API key for org and returns the secret once.
-func (s *Service) CreateKey(ctx context.Context, p Principal, orgID, name string, ttl time.Duration) (string, APIKey, error) {
+// A nil scope makes an unscoped key; otherwise the key holds at most scope,
+// which must be permissions p holds in orgID now (CheckKeyScope).
+func (s *Service) CreateKey(ctx context.Context, p Principal, orgID, name string, ttl time.Duration, scope []Permission) (string, APIKey, error) {
 	if p.Via == "key" {
 		return "", APIKey{}, ErrForbidden // keys do not mint keys
 	}
 	if _, err := s.RoleIn(ctx, p, orgID); err != nil {
 		return "", APIKey{}, err
 	}
-	name, err := checkName(name, "a key name")
+	scope, err := s.CheckKeyScope(ctx, p, orgID, scope)
+	if err != nil {
+		return "", APIKey{}, err
+	}
+	name, err = checkName(name, "a key name")
 	if err != nil {
 		return "", APIKey{}, err
 	}
@@ -591,7 +615,7 @@ func (s *Service) CreateKey(ctx context.Context, p Principal, orgID, name string
 	if err != nil {
 		return "", APIKey{}, err
 	}
-	k := APIKey{ID: id, UserID: p.User.ID, OrgID: orgID, Name: name, Prefix: prefix, Hash: HashToken(key), CreatedAt: s.now()}
+	k := APIKey{ID: id, UserID: p.User.ID, OrgID: orgID, Name: name, Prefix: prefix, Hash: HashToken(key), CreatedAt: s.now(), Scope: scope}
 	if ttl > 0 {
 		exp := k.CreatedAt.Add(ttl)
 		k.ExpiresAt = &exp
@@ -599,7 +623,11 @@ func (s *Service) CreateKey(ctx context.Context, p Principal, orgID, name string
 	if err := s.St.CreateAPIKey(ctx, k); err != nil {
 		return "", APIKey{}, err
 	}
-	s.audit(ctx, actorEvent(p, "key.create", orgID, prefix))
+	e := actorEvent(p, "key.create", orgID, prefix)
+	if scope != nil {
+		e.Detail = fmt.Sprintf("scoped: %d permissions", len(scope))
+	}
+	s.audit(ctx, e)
 	return key, k, nil
 }
 

@@ -178,6 +178,20 @@ func orgPolicy(ctx context.Context, st Store, orgID string) (OrgPolicy, error) {
 	for i := range p.Teams {
 		byTeam[p.Teams[i].ID] = &p.Teams[i]
 	}
+	// Custom organisation roles (to members or teams) are not in the model
+	// yet either.
+	orgGrants, err := st.ReadTuples(ctx, TupleFilter{ObjectType: TypeOrganisation, ObjectID: orgID})
+	if err != nil {
+		return p, err
+	}
+	if items += len(orgGrants); items > MaxTuples {
+		return p, ErrAccessLimit
+	}
+	for _, t := range orgGrants {
+		if _, custom := CustomRoleID(t.Relation); custom {
+			return p, ErrCustomRolesNotMirrored
+		}
+	}
 	if len(teamIDs) > 0 {
 		tuples, err := st.ReadTuples(ctx, TupleFilter{ObjectType: TypeTeam, ObjectIDs: teamIDs})
 		if err != nil {
@@ -249,6 +263,9 @@ func orgPolicy(ctx context.Context, st Store, orgID string) (OrgPolicy, error) {
 			if err := validRepoTuple(t); err != nil {
 				return p, err
 			}
+			if _, custom := CustomRoleID(t.Relation); custom {
+				return p, ErrCustomRolesNotMirrored
+			}
 			key := t.ObjectID + "@" + t.SubjectType + ":" + t.SubjectID
 			if seen[key] {
 				return p, fmt.Errorf("%w: duplicate repository grant", ErrInvalidInput)
@@ -285,6 +302,12 @@ func sortPolicy(p *OrgPolicy) {
 		slices.SortFunc(p.Repos[i].Teams, byGrant)
 	}
 }
+
+// ErrCustomRolesNotMirrored refuses to mirror an organisation that grants
+// custom roles: the OpenFGA model has no relation for them yet, and leaving
+// them out would make OpenFGA disagree with AccessOf. The organisation
+// stays behind (never fresh) until the model holds custom roles.
+var ErrCustomRolesNotMirrored = fmt.Errorf("%w: custom role grants are not in the OpenFGA model yet", ErrInvalidInput)
 
 // ErrNoOpenFGASync means the store does not record OpenFGA syncs.
 var ErrNoOpenFGASync = errors.New("the accounts store does not record OpenFGA syncs")

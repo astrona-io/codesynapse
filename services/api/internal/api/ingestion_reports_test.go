@@ -68,7 +68,7 @@ func TestIngestReceiptRecoveryAndTenantIsolation(t *testing.T) {
 	u, org, err := f.accounts.SignUp(t.Context(), "ingest-other@example.com", "Other", pw)
 	require.NoError(t, err)
 	require.NoError(t, f.accounts.St.AddRepository(t.Context(), accounts.Repository{OrgID: org.ID, Graph: storetest.Repo, AddedBy: u.ID, AddedAt: time.Now()}))
-	key, _, err := f.accounts.CreateKey(t.Context(), accounts.Principal{User: u, Via: "session"}, org.ID, "reports", 0)
+	key, _, err := f.accounts.CreateKey(t.Context(), accounts.Principal{User: u, Via: "session"}, org.ID, "reports", 0, nil)
 	require.NoError(t, err)
 	other := newClient(t, f.client.ts)
 	other.auth = "Bearer " + key

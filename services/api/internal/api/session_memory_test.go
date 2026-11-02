@@ -48,7 +48,7 @@ func newRuntimeFixtureOn(t *testing.T, cfg Config, accStore accounts.Store) runt
 	u, org, err := acc.SignUp(ctx, "runtime@example.com", "Runtime", pw)
 	require.NoError(t, err)
 	require.NoError(t, acc.St.AddRepository(ctx, accounts.Repository{OrgID: org.ID, Graph: storetest.Repo, AddedBy: u.ID, AddedAt: time.Now()}))
-	key, _, err := acc.CreateKey(ctx, accounts.Principal{User: u, Via: "session"}, org.ID, "runtime", 0)
+	key, _, err := acc.CreateKey(ctx, accounts.Principal{User: u, Via: "session"}, org.ID, "runtime", 0, nil)
 	require.NoError(t, err)
 	cfg.Accounts = acc
 	srv := New(ctx, cfg, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -109,7 +109,7 @@ func TestRuntimeBindingRejectsOtherParticipants(t *testing.T) {
 	other, _, err := f.accounts.SignUp(ctx, "other@example.com", "Other", pw)
 	require.NoError(t, err)
 	require.NoError(t, f.accounts.St.SetMember(ctx, f.org.ID, other.ID, accounts.Write))
-	key, _, err := f.accounts.CreateKey(ctx, accounts.Principal{User: other, Via: "session"}, f.org.ID, "other", 0)
+	key, _, err := f.accounts.CreateKey(ctx, accounts.Principal{User: other, Via: "session"}, f.org.ID, "other", 0, nil)
 	require.NoError(t, err)
 	otherClient := newClient(t, f.client.ts)
 	otherClient.auth = "Bearer " + key

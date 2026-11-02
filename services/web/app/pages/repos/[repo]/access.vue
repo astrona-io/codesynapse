@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { RepoGrant, Role } from '~/utils/types'
+import type { CustomRole, RepoGrant, Role } from '~/utils/types'
 
 const route = useRoute()
 const repo = computed(() => route.params.repo as string)
@@ -8,7 +8,14 @@ const session = useSession()
 const org = computed(() => session.current.value?.org)
 const path = computed(() => `accounts/orgs/${org.value?.slug ?? '-'}/repos/${encodeURIComponent(repo.value)}/access`)
 const { data, refresh, error: loadError } = useApiGet<{ grants: RepoGrant[]; default_repo_access: 'NONE' | 'READ_ONLY'; effective?: { role: Role; via: string; permissions?: string[] } }>(() => path.value)
-const canManage = computed(() => data.value?.effective?.role === 'full')
+// Managing access needs repository.access:full, which a custom role can
+// hold without the rest of the built-in Full role.
+const canManage = computed(() => (data.value?.effective?.permissions ?? []).includes('repository.access:full'))
+// Custom repository roles of the organisation; people who cannot read them
+// (guests) simply do not get the choice.
+const { data: rolesData } = useApiGet<{ roles: CustomRole[] }>(() => `accounts/orgs/${org.value?.slug ?? '-'}/roles`)
+const customRoles = computed(() => (rolesData.value?.roles ?? []).filter((r) => r.resource === 'repository'))
+const grantRole = (g: RepoGrant) => g.custom_role ? `${g.custom_role.name} (custom role)` : roleLabel[g.role] ?? g.role
 // The highest level per area: a level includes the ones below it.
 const levels = ['read', 'write', 'full']
 const yours = computed(() => {
@@ -25,7 +32,7 @@ const external = computed(() => (data.value?.grants ?? []).filter((g) => g.exter
 const roleLabel: Record<string, string> = { deny: 'Deny: overrides all inherited access', read: 'Read: navigation and recall', write: 'Write: also writes memory and reviews', full: 'Full: also syncs and manages access' }
 const kind = ref<'user' | 'team'>('user')
 const who = ref('')
-const role = ref<Role | 'deny'>('read')
+const role = ref<string>('read')
 watch(kind, () => { if (kind.value === 'team' && role.value === 'deny') role.value = 'read' })
 const error = ref('')
 const ok = ref('')
@@ -35,7 +42,8 @@ async function put(body: Record<string, string>) {
   ok.value = ''
   try {
     const g = await apiPut<RepoGrant>(path.value, body)
-    ok.value = g.role === 'deny' ? `${g.label} has no access to this repository.` : `Saved ${ROLE_LABEL[g.role].toLowerCase()} access for ${g.label}.`
+    if (g.custom_role) ok.value = `${g.label} now has the ${g.custom_role.name} role here.`
+    else ok.value = g.role === 'deny' ? `${g.label} has no access to this repository.` : `Saved ${(ROLE_LABEL[g.role as Role] ?? g.role).toLowerCase()} access for ${g.label}.`
     await refresh()
     return true
   } catch (e) {
@@ -68,14 +76,14 @@ async function revoke(g: RepoGrant) {
         <section v-if="data" class="panel">
           <h2>In {{ org.name }}</h2>
           <p class="muted small">Organisation default: {{ data.default_repo_access === 'READ_ONLY' ? 'read only' : 'no access' }}. Removing a direct grant restores inheritance.</p>
-          <p v-if="data?.effective" class="muted small">Your permission: {{ roleLabel[data.effective.role] }}. From: {{ data.effective.via }}.</p>
+          <p v-if="data?.effective" class="muted small">Your permission: {{ roleLabel[data.effective.role] ?? 'a custom set of permissions' }}. From: {{ data.effective.via }}.</p>
           <ul v-if="yours.length" class="perms" aria-label="What you can do here">
             <li v-for="p in yours" :key="p" class="pill">{{ p }}</li>
           </ul>
           <form v-if="canManage" class="row" @submit.prevent="grant">
             <div class="field"><label for="kind">Give access to</label><select id="kind" v-model="kind"><option value="user">A person</option><option value="team">A team</option></select></div>
             <div class="field grow"><label for="who">{{ kind === 'user' ? 'Email' : 'Team' }}</label><input id="who" v-model="who" :type="kind === 'user' ? 'email' : 'text'" required :placeholder="kind === 'user' ? 'name@company.com' : 'e.g. contractors'"></div>
-            <div class="field"><label for="role">Role</label><select id="role" v-model="role"><option value="read">Read</option><option value="write">Write</option><option value="full">Full</option><option v-if="kind === 'user'" value="deny">Deny (override)</option></select></div>
+            <div class="field"><label for="role">Role</label><select id="role" v-model="role"><option value="read">Read</option><option value="write">Write</option><option value="full">Full</option><option v-if="kind === 'user'" value="deny">Deny (override)</option><optgroup v-if="customRoles.length" label="Custom roles"><option v-for="r in customRoles" :key="r.id" :value="`role:${r.id}`">{{ r.name }}</option></optgroup></select></div>
             <button type="submit" class="align-end">Give access</button>
           </form>
           <div v-if="internal.length" class="table-wrap">
@@ -84,7 +92,7 @@ async function revoke(g: RepoGrant) {
               <tbody>
                 <tr v-for="g in internal" :key="g.subject_type + g.subject_id">
                   <td><span class="badge">{{ g.subject_type === 'team' ? 'team' : 'person' }}</span> {{ g.label }}</td>
-                  <td>{{ roleLabel[g.role] }}</td>
+                  <td>{{ grantRole(g) }}</td>
                   <td class="num"><button v-if="canManage" class="secondary tiny" :aria-label="`Remove access for ${g.label}`" @click="revoke(g)">Remove</button></td>
                 </tr>
               </tbody>

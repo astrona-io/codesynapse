@@ -76,7 +76,7 @@ flowchart TD
     member -- yes --> direct{Direct user grant on R?<br/>full, write, read, deny}
     direct -- yes --> use1[Use it - deny wins even if a team grants]
     direct -- no --> team{Team grants in the same organisation?}
-    team -- yes --> use2[Strongest team grant wins]
+    team -- yes --> use2[Strongest team grant wins;<br/>custom roles add up]
     team -- no --> guest{Guest?}
     guest -- yes --> deny
     guest -- no --> def[Organisation default<br/>READ_ONLY or NONE]
@@ -108,6 +108,29 @@ When the organisation adds a repository a member already has in their own space 
 Each space uses only its own Git tokens. Organisation repositories use the organisation's tokens; a private repository in a member's own space uses only that member's own token (see [personal Git tokens](#personal-git-tokens)), never the organisation's, even when the organisation's token could read it. A private personal repository can be added only after the owner's own token read it; without one the API answers 403 and names Profile → Git tokens.
 
 A watch created by a member adds to that member's own space, and skips new repositories while members' own repositories are turned off. A watch skips what it cannot add without an audit entry and without counting it as added.
+
+## Custom roles
+
+Settings → Roles lets an organisation define its own roles: a name, a description and a set of `resource.area:level` permissions (the same names the Access page lists). A role is either a **repository role** or an **organisation role**, never both.
+
+- **Repository roles** are given on a repository's Access page, to a person or a team, in place of `read`, `write`, `full` or `deny`. A direct grant still wins over team grants, whether built-in or custom; team grants of custom roles add up. A repository role always includes `repository.code:read`, because a repository you cannot read is not reachable at all. There is no organisation-wide grant of a repository role; the organisation default stays `READ_ONLY` or `NONE`.
+- **Organisation roles** are given under Settings → Roles to a member or a team, and add to the member's built-in role. Each member or team holds at most one.
+
+Rules:
+
+- Only members holding `organisation.roles:full` manage roles and their grants, in a signed-in session; API keys answer 404. Members who can read the organisation can list roles.
+- Nobody creates, changes or gives a role holding a permission they do not hold themselves, and no role contains the owner rules.
+- At most 50 roles per organisation, names of at most 64 characters (no `:`, not a built-in role name, unique ignoring case), descriptions of at most 500. Both pass secret and personal-data redaction.
+- Changing a role changes it for everyone holding it. A role that is still given to anyone cannot be deleted (409); remove its grants first. A grant that names a deleted or unknown role gives nothing, and does not fall back to a team grant or the default.
+- Every change is audited before it is written (`org.role.create`, `org.role.update`, `org.role.delete`, `org.role.grant`, `org.role.revoke`); a failed audit refuses the change.
+
+Some checks still compare built-in roles and ignore custom organisation roles until the OpenFGA cutover: the role a job runs with, the invitation ceiling and who may make owners.
+
+Endpoints: `GET`/`POST /api/v1/accounts/orgs/{org}/roles`, `PUT`/`DELETE .../roles/{id}`, `GET`/`PUT /api/v1/accounts/orgs/{org}/role-grants` (`{"user"|"team", "role"}`), `DELETE .../role-grants?subject=user:<id>|team:<id>`, and `GET /api/v1/accounts/permissions` for the catalogue. A repository grant of a custom role is `PUT .../repos/{repo}/access` with `"role": "role:<id>"`.
+
+## Scoped API keys
+
+An API key can be limited to a set of permissions when it is created (Settings → API keys → "Limit what this key can do", or `"scope": [...]` on `POST /api/v1/me/keys`). What the key may do is its scope intersected with what its owner holds **at each request**: a key never gains anything, and loses a permission as soon as its owner does. The scope must be within what the owner holds when the key is made (403 otherwise), and a scope with repository permissions always includes `repository.code:read`. Registering runtime sessions and the owner's membership are always allowed, so a scoped agent can still start. A key without a scope acts as its owner, as before. Keys never change access in either case.
 
 ## API route scoping
 

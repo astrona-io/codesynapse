@@ -129,7 +129,7 @@ func (s *Service) hasRepoAdmin(ctx context.Context, orgID, graph string) (bool, 
 			return false, err
 		}
 		for _, r := range a.Repos {
-			if r.OrgID == orgID && r.Graph == graph && r.Role == Full {
+			if r.OrgID == orgID && r.Graph == graph && r.Perms.Has(RepoAccessFull) {
 				return true, nil
 			}
 		}

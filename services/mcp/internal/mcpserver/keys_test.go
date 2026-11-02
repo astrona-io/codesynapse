@@ -53,7 +53,7 @@ func keyServer(t *testing.T) (url string, keys map[string]string, acc *accounts.
 			require.NoError(t, acc.SetPlatformAdmin(ctx, root, u.ID, true))
 			u.PlatformAdmin = true
 		}
-		key, _, err := acc.CreateKey(ctx, accounts.Principal{User: u, Via: "session"}, org.ID, "agent", 0)
+		key, _, err := acc.CreateKey(ctx, accounts.Principal{User: u, Via: "session"}, org.ID, "agent", 0, nil)
 		require.NoError(t, err)
 		keys[name] = key
 		_, err = acc.RegisterExecutionSession(ctx, u.ID, org.ID, "chat-"+name)
@@ -226,7 +226,7 @@ func TestSharesAndReadOnlyKeys(t *testing.T) {
 	foreign, err := connectKey(t, url, keys["c"], "chat-c")
 	require.NoError(t, err)
 	assert.True(t, call(t, foreign, "repo_overview", map[string]any{"repo": storetest.Repo}, nil).IsError, "a key from another organisation cannot use the grant")
-	guestKey, _, err := acc.CreateKey(ctx, accounts.Principal{User: pc.User, Via: "session"}, pa.OrgID, "guest", 0)
+	guestKey, _, err := acc.CreateKey(ctx, accounts.Principal{User: pc.User, Via: "session"}, pa.OrgID, "guest", 0, nil)
 	require.NoError(t, err)
 	_, err = acc.RegisterExecutionSession(ctx, pc.User.ID, pa.OrgID, "chat-guest")
 	require.NoError(t, err)
@@ -256,7 +256,7 @@ func TestSharesAndReadOnlyKeys(t *testing.T) {
 	require.NoError(t, accountstest.Join(ctx, t, acc, ownerA, pa.OrgID, viewer, accounts.Read))
 	_, err = acc.SetRepoGrant(ctx, ownerA, pa.OrgID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: viewer.ID}, accounts.Read)
 	require.NoError(t, err)
-	vkey, _, err := acc.CreateKey(ctx, accounts.Principal{User: viewer, Via: "session"}, pa.OrgID, "v", 0)
+	vkey, _, err := acc.CreateKey(ctx, accounts.Principal{User: viewer, Via: "session"}, pa.OrgID, "v", 0, nil)
 	require.NoError(t, err)
 	_, err = acc.RegisterExecutionSession(ctx, viewer.ID, pa.OrgID, "chat-viewer")
 	require.NoError(t, err)

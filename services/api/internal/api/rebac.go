@@ -196,6 +196,21 @@ func (s *Server) subject(r *http.Request, orgID, user, team string) (accounts.Tu
 	return accounts.Tuple{}, errors.New("give either a user's email or a team")
 }
 
+// grantSubject is subject answering the request itself on failure: 404 for
+// an unknown member or team, 400 for a malformed one.
+func (s *Server) grantSubject(w http.ResponseWriter, r *http.Request, orgID, user, team string) (accounts.Tuple, bool) {
+	sub, err := s.subject(r, orgID, user, team)
+	if err != nil {
+		if errors.Is(err, accounts.ErrNotFound) {
+			s.problem(w, http.StatusNotFound, errors.New("no member or team by that name"))
+			return sub, false
+		}
+		s.problem(w, http.StatusBadRequest, err)
+		return sub, false
+	}
+	return sub, true
+}
+
 func (s *Server) handleRepoGrants(w http.ResponseWriter, r *http.Request) {
 	p, o, ok := s.orgForAny(w, r)
 	if !ok {
@@ -212,7 +227,7 @@ func (s *Server) handleRepoGrants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"org": o.Slug, "repo": r.PathValue("repo"), "grants": gs, "default_repo_access": o.DefaultRepoAccess,
-		"effective": effectiveView{RepoAccess: effective, Permissions: effective.Role.Permissions(accounts.ResourceRepository)}})
+		"effective": effectiveView{RepoAccess: effective, Permissions: effective.Perms.List()}})
 }
 
 func (s *Server) handleRepoPolicy(w http.ResponseWriter, r *http.Request) {
@@ -297,13 +312,8 @@ func (s *Server) handleSetRepoGrant(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	sub, err := s.subject(r, o.ID, req.User, req.Team)
-	if err != nil {
-		if errors.Is(err, accounts.ErrNotFound) {
-			s.problem(w, http.StatusNotFound, errors.New("no member or team by that name"))
-			return
-		}
-		s.problem(w, 400, err)
+	sub, ok := s.grantSubject(w, r, o.ID, req.User, req.Team)
+	if !ok {
 		return
 	}
 	g, err := s.cfg.Accounts.SetRepoGrant(r.Context(), p, o.ID, r.PathValue("repo"), sub, req.Role)
@@ -368,7 +378,7 @@ func (s *Server) handleMyAccess(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	a, err := s.cfg.Accounts.AccessOf(r.Context(), p.User.ID)
+	a, err := s.cfg.Accounts.AccessFor(r.Context(), p)
 	if err != nil {
 		s.problem(w, 500, err)
 		return
@@ -385,7 +395,7 @@ func (s *Server) handleMyAccess(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		_, member := a.Orgs[ra.OrgID]
-		out = append(out, reachView{RepoAccess: ra, Org: slugs[ra.OrgID], Shared: !member, Permissions: ra.Role.Permissions(accounts.ResourceRepository)})
+		out = append(out, reachView{RepoAccess: ra, Org: slugs[ra.OrgID], Shared: !member, Permissions: ra.Perms.List()})
 	}
 	if p.OrgID != "" {
 		for org := range a.Orgs {

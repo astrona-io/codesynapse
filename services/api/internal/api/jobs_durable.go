@@ -383,7 +383,7 @@ func (s *Server) jobContext(ctx context.Context, rec accounts.JobRecord) (contex
 		return nil, fmt.Errorf("the requester no longer has access: %w", err)
 	}
 	ctx = context.WithValue(ctx, principalKey{}, p)
-	ctx = context.WithValue(ctx, scopeKey{}, scope{graphs: map[string]accounts.Role{rec.Repo: access.Role}, reach: map[string]accounts.Reach{rec.Repo: {OrgID: rec.OrgID, Role: access.Role}}})
+	ctx = context.WithValue(ctx, scopeKey{}, scope{graphs: map[string]accounts.Perms{rec.Repo: access.Perms}, reach: map[string]accounts.Reach{rec.Repo: {OrgID: rec.OrgID, Perms: access.Perms}}})
 	return ctx, nil
 }
 

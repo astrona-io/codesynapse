@@ -224,6 +224,14 @@ func (s *Server) accountRoutes() {
 	s.account("POST /api/v1/accounts/orgs/{org}/repos/{repo}/recover-admin", businessRoute, s.handleRecoverRepoAdmin)
 	s.account("POST /api/v1/accounts/orgs/{org}/repos", businessRoute, s.handleAttachRepo)
 	s.account("GET /api/v1/me/access", businessRoute, s.handleMyAccess)
+	s.account("GET /api/v1/accounts/orgs/{org}/roles", businessRoute, s.handleCustomRoles)
+	s.account("POST /api/v1/accounts/orgs/{org}/roles", businessRoute, s.handleCreateCustomRole)
+	s.account("PUT /api/v1/accounts/orgs/{org}/roles/{id}", businessRoute, s.handleUpdateCustomRole)
+	s.account("DELETE /api/v1/accounts/orgs/{org}/roles/{id}", businessRoute, s.handleDeleteCustomRole)
+	s.account("GET /api/v1/accounts/orgs/{org}/role-grants", businessRoute, s.handleOrgRoleGrants)
+	s.account("PUT /api/v1/accounts/orgs/{org}/role-grants", businessRoute, s.handleSetOrgRoleGrant)
+	s.account("DELETE /api/v1/accounts/orgs/{org}/role-grants", businessRoute, s.handleRemoveOrgRoleGrant)
+	s.account("GET /api/v1/accounts/permissions", businessRoute, s.handlePermissionCatalog)
 	s.account("GET /api/v1/accounts/orgs/{org}/teams", businessRoute, s.handleTeams)
 	s.account("POST /api/v1/accounts/orgs/{org}/teams", businessRoute, s.handleCreateTeam)
 	s.account("DELETE /api/v1/accounts/orgs/{org}/teams/{team}", businessRoute, s.handleDeleteTeam)
@@ -456,6 +464,9 @@ type keyRequest struct {
 	Org     string `json:"org"` // slug
 	Name    string `json:"name"`
 	TTLDays int    `json:"ttl_days"`
+	// Scope limits the key to these permissions (with what its user holds
+	// at each use); absent, the key acts with everything its user holds.
+	Scope []accounts.Permission `json:"scope,omitempty"`
 }
 
 func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
@@ -477,7 +488,7 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	key, k, err := s.cfg.Accounts.CreateKey(r.Context(), p, org.ID, req.Name, time.Duration(req.TTLDays)*24*time.Hour)
+	key, k, err := s.cfg.Accounts.CreateKey(r.Context(), p, org.ID, req.Name, time.Duration(req.TTLDays)*24*time.Hour, req.Scope)
 	if err != nil {
 		s.accountError(w, err)
 		return

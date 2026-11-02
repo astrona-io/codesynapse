@@ -551,7 +551,7 @@ func (s *Server) scheduleContext(ctx context.Context, sc Schedule) (context.Cont
 		return nil, err
 	}
 	ctx = context.WithValue(ctx, principalKey{}, p)
-	ctx = context.WithValue(ctx, scopeKey{}, scope{graphs: map[string]accounts.Role{sc.Repo: access.Role}, reach: map[string]accounts.Reach{sc.Repo: {OrgID: sc.OrgID, Role: access.Role}}})
+	ctx = context.WithValue(ctx, scopeKey{}, scope{graphs: map[string]accounts.Perms{sc.Repo: access.Perms}, reach: map[string]accounts.Reach{sc.Repo: {OrgID: sc.OrgID, Perms: access.Perms}}})
 	return ctx, nil
 }
 

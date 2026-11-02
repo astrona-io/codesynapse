@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import type { ApiKey } from '~/utils/types'
+import type { ApiKey, PermissionInfo } from '~/utils/types'
 
 const session = useSession()
 const { data, refresh, error: loadError } = useApiGet<{ keys: ApiKey[] }>('me/keys')
 const name = ref('')
 const ttl = ref(0)
+// A scoped key does at most what it lists, and never more than you can do
+// at the time; an unscoped one acts as you.
+const scoped = ref(false)
+const scope = ref<string[]>([])
+const { data: catalogData } = useApiGet<{ permissions: PermissionInfo[] }>('accounts/permissions')
+const catalog = computed(() => catalogData.value?.permissions ?? [])
 const created = ref('')
 const error = ref('')
 const notice = ref('')
@@ -22,9 +28,13 @@ async function create() {
   created.value = ''
   const org = session.current.value?.org.slug ?? session.memberships.value[0]?.org.slug
   try {
-    const res = await apiPost<{ key: string }>('me/keys', { org, name: name.value, ttl_days: ttl.value })
+    const body: Record<string, unknown> = { org, name: name.value, ttl_days: ttl.value }
+    if (scoped.value) body.scope = scope.value
+    const res = await apiPost<{ key: string }>('me/keys', body)
     created.value = res.key
     name.value = ''
+    scoped.value = false
+    scope.value = []
     await refresh()
   } catch (e) {
     error.value = plainError(e)
@@ -58,12 +68,19 @@ async function revoke() {
     <section class="panel">
       <h2>New API key</h2>
       <p class="muted small">An API key lets an agent, a hook or the CLI act as you in <strong>{{ session.current.value?.org.name ?? 'your organisation' }}</strong>. It reaches only repositories you can access there; its memory, reviews and statistics stay there. Keys cannot register repositories or change access. The <NuxtLink to="/agents">Agents</NuxtLink> page walks you through connecting one.</p>
-      <form class="row" @submit.prevent="create">
+      <form class="stack--tight" @submit.prevent="create">
+        <div class="row">
         <div class="field grow"><label for="kname">Name</label><input id="kname" v-model="name" placeholder="e.g. laptop, CI" required maxlength="80" autocomplete="off"></div>
         <div class="field"><label for="ttl">Expires</label>
           <select id="ttl" v-model.number="ttl"><option :value="0">Never</option><option :value="30">In 30 days</option><option :value="90">In 90 days</option><option :value="365">In a year</option></select>
         </div>
-        <button type="submit" class="align-end" :disabled="creating">{{ creating ? 'Creating…' : 'Create key' }}</button>
+        <button type="submit" class="align-end" :disabled="creating || (scoped && !scope.length)">{{ creating ? 'Creating…' : 'Create key' }}</button>
+        </div>
+        <label class="check"><input v-model="scoped" type="checkbox"> Limit what this key can do</label>
+        <template v-if="scoped">
+          <p class="muted small">Pick what the key may do. It still never does more than you can: if you lose access, the key loses it too. Signing agent sessions in is always allowed.</p>
+          <PermissionPicker v-model="scope" :catalog="catalog" id-prefix="key" :disabled="creating" />
+        </template>
       </form>
       <p v-if="error" class="notice notice--danger" role="alert">{{ error }}</p>
       <p v-if="notice" class="notice notice--ok" role="status">{{ notice }}</p>
@@ -78,12 +95,13 @@ async function revoke() {
       <p v-if="loadError" class="notice notice--danger" role="alert">{{ plainError(loadError) }}</p>
       <div v-else-if="active.length" class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Key</th><th>Organisation</th><th>Last used</th><th>Expires</th><th><span class="sr-only">Actions</span></th></tr></thead>
+          <thead><tr><th>Name</th><th>Key</th><th>Organisation</th><th>Can do</th><th>Last used</th><th>Expires</th><th><span class="sr-only">Actions</span></th></tr></thead>
           <tbody>
             <tr v-for="k in active" :key="k.id">
               <td>{{ k.name }}</td>
               <td class="mono">{{ k.prefix }}…</td>
               <td>{{ orgName(k.org_id) }}</td>
+              <td><span v-if="k.scope?.length" class="badge" :title="k.scope.join(', ')">limited: {{ k.scope.length }} permissions</span><span v-else class="muted">everything you can</span></td>
               <td>{{ k.last_used_at ? relTime(k.last_used_at) : 'never' }}</td>
               <td>{{ k.expires_at ? new Date(k.expires_at).toLocaleDateString() : 'never' }}</td>
               <td class="num"><button type="button" class="secondary tiny" :aria-label="`Revoke ${k.name}`" @click="revoking = k">Revoke</button></td>
@@ -103,4 +121,5 @@ async function revoke() {
 <style scoped>
 .grow { flex: 1; min-width: 200px; }
 .align-end { align-self: flex-end; }
+.check { display: flex; gap: 8px; align-items: center; }
 </style>
