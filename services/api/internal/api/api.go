@@ -158,6 +158,7 @@ type Server struct {
 	recall  *recall.Service
 	sched   *schedules
 	reclone recloner
+	reindex reindexer
 	orgs    *orgs
 	logger  *slog.Logger
 	mux     *http.ServeMux
