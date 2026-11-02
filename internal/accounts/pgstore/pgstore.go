@@ -578,7 +578,7 @@ func (s *Store) AddRepository(ctx context.Context, r accounts.Repository) error 
 		if err := tx.addRepository(ctx, r); err != nil {
 			return err
 		}
-		if err := st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(r.OrgID, r.Graph), Relation: accounts.RepoAdmin, SubjectType: accounts.TypeUser, SubjectID: r.AddedBy, CreatedBy: r.AddedBy, CreatedAt: r.AddedAt}); err != nil {
+		if err := st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(r.OrgID, r.Graph), Relation: accounts.RepoFull, SubjectType: accounts.TypeUser, SubjectID: r.AddedBy, CreatedBy: r.AddedBy, CreatedAt: r.AddedAt}); err != nil {
 			return err
 		}
 		if _, err := st.AddEvent(ctx, accounts.Event{At: r.AddedAt, UserID: r.AddedBy, ActorEmail: u.Email, OrgID: r.OrgID, Action: "repo.admin.initial", Target: r.Graph, Outcome: accounts.Success}); err != nil {
@@ -618,7 +618,7 @@ func (s *Store) MoveRepositoryToOrg(ctx context.Context, ownerID string, r accou
 			if _, err := st.DeleteTuples(ctx, accounts.TupleFilter{ObjectType: accounts.TypeRepository, ObjectID: object, SubjectType: accounts.TypeUser, SubjectID: admin}); err != nil {
 				return err
 			}
-			if err := st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: object, Relation: accounts.RepoAdmin, SubjectType: accounts.TypeUser, SubjectID: admin, CreatedBy: r.AddedBy, CreatedAt: r.AddedAt}); err != nil {
+			if err := st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: object, Relation: accounts.RepoFull, SubjectType: accounts.TypeUser, SubjectID: admin, CreatedBy: r.AddedBy, CreatedAt: r.AddedAt}); err != nil {
 				return err
 			}
 		}

@@ -108,7 +108,7 @@ func TestRuntimeBindingRejectsOtherParticipants(t *testing.T) {
 	ctx := t.Context()
 	other, _, err := f.accounts.SignUp(ctx, "other@example.com", "Other", pw)
 	require.NoError(t, err)
-	require.NoError(t, f.accounts.St.SetMember(ctx, f.org.ID, other.ID, accounts.Member))
+	require.NoError(t, f.accounts.St.SetMember(ctx, f.org.ID, other.ID, accounts.Write))
 	key, _, err := f.accounts.CreateKey(ctx, accounts.Principal{User: other, Via: "session"}, f.org.ID, "other", 0)
 	require.NoError(t, err)
 	otherClient := newClient(t, f.client.ts)

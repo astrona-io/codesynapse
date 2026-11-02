@@ -105,7 +105,7 @@ func (s *Server) startFix(ctx context.Context, p fixParams) (Job, error) {
 	if err != nil {
 		return Job{}, fmt.Errorf("%w: %w", accounts.ErrForbidden, err)
 	}
-	org, authorize := s.jobAuthorization(ctx, rv.Repo, accounts.Member)
+	org, authorize := s.jobAuthorization(ctx, rv.Repo, accounts.Write)
 	runner := fixes.Runner{Authorize: authorize, St: s.st, LLM: s.cfg.LLM, Auth: auth, Author: s.cfg.GitAuthor,
 		Workdir: filepath.Join(s.cfg.Workspace, ".codesynapse", "fixes"),
 		CurrentRevision: func(ctx context.Context) (string, error) {
@@ -114,7 +114,7 @@ func (s *Server) startFix(ctx context.Context, p fixParams) (Job, error) {
 		},
 	}
 	in := fixes.Request{ValidationVersion: fixes.ValidationVersion, ReviewID: rv.ID, CommentIDs: p.CommentIDs, Provider: p.Provider, Root: n.Root, Remote: remote, Base: n.Head, BaseBranch: n.Branch}
-	d, err := s.durableIf(ctx, "fix", accounts.Member, p)
+	d, err := s.durableIf(ctx, "fix", accounts.Write, p)
 	if err != nil {
 		return Job{}, err
 	}

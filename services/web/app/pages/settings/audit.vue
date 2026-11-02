@@ -8,7 +8,7 @@ const org = computed(() => session.current.value?.org)
 <template>
   <div class="stack">
     <p v-if="!org" class="notice">Choose an organisation in the sidebar first.</p>
-    <p v-else-if="!session.can('admin')" class="notice">Only owners and admins of {{ org.name }} can read its audit log.</p>
+    <p v-else-if="!session.can('full')" class="notice">Only owners and admins of {{ org.name }} can read its audit log.</p>
     <AuditLog v-else :key="org.slug" :base="`accounts/orgs/${org.slug}/audit`" />
   </div>
 </template>

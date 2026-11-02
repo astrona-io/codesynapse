@@ -517,7 +517,7 @@ func (s *Service) syncTeams(ctx context.Context, idp IdentityProvider, u User, g
 		}
 		switch {
 		case want && len(have) == 0:
-			if err := s.St.WriteTuple(ctx, Tuple{ObjectType: TypeTeam, ObjectID: teamID, Relation: RelMember, SubjectType: TypeUser, SubjectID: u.ID,
+			if err := s.St.WriteTuple(ctx, Tuple{ObjectType: TypeTeam, ObjectID: teamID, Relation: TeamRead, SubjectType: TypeUser, SubjectID: u.ID,
 				CreatedBy: u.ID, CreatedAt: s.now()}); err != nil {
 				return err
 			}
@@ -639,7 +639,7 @@ func checkSettings(s IdentityProviderSettings) (IdentityProviderSettings, error)
 		return s, fmt.Errorf("%w: invalid groups claim name", ErrInvalidInput)
 	}
 	if s.DefaultRole != "" && (!s.DefaultRole.Valid() || s.DefaultRole == Owner) {
-		return s, fmt.Errorf("%w: the default role must be guest, viewer, member or admin", ErrInvalidInput)
+		return s, fmt.Errorf("%w: the default role must be guest, read, write or full", ErrInvalidInput)
 	}
 	if len(s.RoleGroups)+len(s.TeamGroups) > MaxGroupMappings || len(s.Scopes) > 10 {
 		return s, fmt.Errorf("%w: at most %d group mappings and 10 scopes", ErrInvalidInput, MaxGroupMappings)

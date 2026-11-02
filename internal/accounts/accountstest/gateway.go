@@ -23,7 +23,7 @@ func RunGateway(t *testing.T, st accounts.Store) {
 	for _, id := range []string{"gw-org-a", "gw-org-b"} {
 		require.NoError(t, st.CreateOrg(ctx, accounts.Org{ID: id, Name: id, Slug: id, CreatedAt: now}, "gw-owner"))
 	}
-	require.NoError(t, st.SetMember(ctx, "gw-org-a", "gw-member", accounts.Member))
+	require.NoError(t, st.SetMember(ctx, "gw-org-a", "gw-member", accounts.Write))
 	for _, u := range []string{"gw-owner", "gw-member"} {
 		require.NoError(t, st.CreateSession(ctx, accounts.Session{TokenHash: "h-" + u[3:], UserID: u, CreatedAt: now, ExpiresAt: now.Add(time.Hour)}))
 	}

@@ -494,7 +494,9 @@ export interface AccountOrg {
   default_repo_access: 'NONE' | 'READ_ONLY'
   policy_revision: number
 }
-export type Role = 'owner' | 'admin' | 'member' | 'viewer' | 'guest'
+export type Role = 'owner' | 'full' | 'write' | 'read' | 'guest'
+// What people read for a role: guests read only what they are granted, owners are full plus ownership.
+export const ROLE_LABEL: Record<Role | 'deny', string> = { guest: 'Read (guest)', read: 'Read', write: 'Write', full: 'Full', owner: 'Full (owner)', deny: 'Deny' }
 export interface Membership {
   org: AccountOrg
   user: AccountUser
@@ -574,13 +576,13 @@ export interface ImportCandidate {
 }
 
 // Relationship-based access (teams, repository grants and shares).
-export interface TeamMember { user: AccountUser; relation: 'member' | 'maintainer' }
+export interface TeamMember { user: AccountUser; relation: 'read' | 'full' }
 export interface Team { id: string; org_id: string; slug: string; name: string; role?: Role; members: TeamMember[] }
 export interface RepoGrant {
   subject_type: 'user' | 'team'
   subject_id: string
-  relation: 'admin' | 'editor' | 'viewer' | 'none'
-  role: Role | 'none'
+  relation: 'full' | 'write' | 'read' | 'deny'
+  role: Role | 'deny'
   label: string
   external: boolean
   created_at: string

@@ -57,7 +57,7 @@ func TestJobsSurviveRestart(t *testing.T) {
 		require.NoError(t, err)
 		// The memory store keeps Attempts as given: a job started that often.
 		require.NoError(t, acc.St.AddJob(ctx, accounts.JobRecord{ID: id, Kind: kind, Repo: repo, OrgID: org.ID, ActorID: u.ID, Via: "session",
-			Role: accounts.Admin, Execution: id2, Params: raw, State: accounts.JobQueued, Attempts: starts,
+			Role: accounts.Full, Execution: id2, Params: raw, State: accounts.JobQueued, Attempts: starts,
 			LeaseOwner: "stopped-process", LeaseUntil: past, CreatedAt: past}))
 	}
 	orphan("sync-1", "sync", "proj", live, syncParams{}, 1)
@@ -188,7 +188,7 @@ func TestJobsLeftBehind(t *testing.T) {
 		j.sem <- struct{}{}
 		done := make(chan error, 1)
 		job, err := j.Start("proj", root, JobOptions{Identity: id, OrgID: "org", Kind: "sync",
-			Durable: &durableJob{Kind: "sync", Role: accounts.Admin, ActorID: "user", Via: "session", Params: json.RawMessage(`{}`)},
+			Durable: &durableJob{Kind: "sync", Role: accounts.Full, ActorID: "user", Via: "session", Params: json.RawMessage(`{}`)},
 			Done:    func(err error) { done <- err }})
 		require.NoError(t, err)
 		return j, acc, cancel, job, done

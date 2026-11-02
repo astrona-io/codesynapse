@@ -34,7 +34,7 @@ func RunPromptLog(t *testing.T, newStore func(*testing.T) accounts.Store) {
 		}
 		require.NoError(t, st.CreateOrg(ctx, accounts.Org{ID: "pl-org-a", Name: "a", Slug: "pl-org-a", CreatedAt: now}, "pl-owner"))
 		require.NoError(t, st.CreateOrg(ctx, accounts.Org{ID: "pl-org-b", Name: "b", Slug: "pl-org-b", CreatedAt: now}, "pl-other"))
-		require.NoError(t, st.SetMember(ctx, "pl-org-a", "pl-member", accounts.Member))
+		require.NoError(t, st.SetMember(ctx, "pl-org-a", "pl-member", accounts.Write))
 		svc := accounts.NewService(st, false)
 		svc.Now = func() time.Time { return now }
 		return st, svc

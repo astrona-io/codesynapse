@@ -32,7 +32,7 @@ func RunUserGitTokens(t *testing.T, st accounts.Store) {
 	member, memberP := user("utok-member@example.com")
 	org, err := svc.CreateOrg(ctx, ownerP, "Utok Acme", "")
 	require.NoError(t, err)
-	require.NoError(t, Join(ctx, t, svc, ownerP, org.ID, member, accounts.Member))
+	require.NoError(t, Join(ctx, t, svc, ownerP, org.ID, member, accounts.Write))
 
 	const tok = "ghp_userownabcdefghijklmnopqrstuvwxyz01"
 	_, err = svc.SetUserGitToken(ctx, memberP, "github.com", tok)

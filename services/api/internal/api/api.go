@@ -1117,7 +1117,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	org, authorize := s.jobAuthorization(r.Context(), req.Repo, accounts.Admin)
+	org, authorize := s.jobAuthorization(r.Context(), req.Repo, accounts.Full)
 	job, err := s.jobs.Start(req.Repo, path, JobOptions{Identity: identityOf(r.Context()), OrgID: org, Authorize: authorize}) //nolint:contextcheck // jobs outlive the request by design
 	if err != nil {
 		s.problem(w, http.StatusConflict, err)

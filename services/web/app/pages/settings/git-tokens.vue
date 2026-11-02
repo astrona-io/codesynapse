@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const session = useSession()
 const org = computed(() => session.current.value?.org)
-const canManage = computed(() => session.can('admin'))
+const canManage = computed(() => session.can('full'))
 </script>
 
 <template>

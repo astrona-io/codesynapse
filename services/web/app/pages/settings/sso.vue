@@ -6,11 +6,11 @@ import type { IdentityProvider, Role, Team } from '~/utils/types'
 // the client secret.
 const session = useSession()
 const org = computed(() => session.current.value?.org)
-const canManage = computed(() => session.can('admin'))
+const canManage = computed(() => session.can('full'))
 const { data, refresh, error: loadError } = useApiGet<{ provider: IdentityProvider | null; redirect_uri: string }>(() => (org.value ? `accounts/orgs/${org.value.slug}/sso` : 'accounts/orgs/-/sso'), { immediate: canManage.value })
 const { data: teams } = useApiGet<{ teams: Team[] }>(() => (org.value ? `accounts/orgs/${org.value.slug}/teams` : 'accounts/orgs/-/teams'), { immediate: canManage.value })
 
-const ROLES: Role[] = ['guest', 'viewer', 'member', 'admin', 'owner']
+const ROLES: Role[] = ['guest', 'read', 'write', 'full', 'owner']
 interface Mapping { group: string; value: string }
 const form = reactive({ name: '', issuer: '', client_id: '', client_secret: '', enabled: true, groups_claim: 'groups', default_role: '' as Role | '', scopes: '' })
 const roles = ref<Mapping[]>([])
@@ -114,7 +114,7 @@ async function copy(text: string) {
             <div class="field"><label for="idp-default">Everyone else</label>
               <select id="idp-default" v-model="form.default_role">
                 <option value="">No access (mapped groups only)</option>
-                <option v-for="r in ROLES.filter((r) => r !== 'owner')" :key="r" :value="r">{{ r }}</option>
+                <option v-for="r in ROLES.filter((r) => r !== 'owner')" :key="r" :value="r">{{ ROLE_LABEL[r] }}</option>
               </select>
             </div>
             <div class="field grow"><label for="idp-scopes">Extra scopes</label><input id="idp-scopes" v-model="form.scopes" placeholder="groups offline_access"><span class="hint">Besides openid, email and profile. Space-separated.</span></div>
@@ -123,10 +123,10 @@ async function copy(text: string) {
           <h3>Groups → role</h3>
           <div v-for="(m, i) in roles" :key="'r' + i" class="row map">
             <input v-model="m.group" placeholder="group name or ID" aria-label="Group">
-            <select v-model="m.value" aria-label="Role"><option v-for="r in ROLES" :key="r" :value="r">{{ r }}</option></select>
+            <select v-model="m.value" aria-label="Role"><option v-for="r in ROLES" :key="r" :value="r">{{ ROLE_LABEL[r] }}</option></select>
             <button class="secondary tiny" type="button" :aria-label="`Remove the mapping for ${m.group || 'this group'}`" @click="roles.splice(i, 1)">Remove</button>
           </div>
-          <div><button class="secondary tiny" type="button" @click="roles.push({ group: '', value: 'member' })">Add a role mapping</button></div>
+          <div><button class="secondary tiny" type="button" @click="roles.push({ group: '', value: 'write' })">Add a role mapping</button></div>
 
           <h3>Groups → team</h3>
           <p v-if="!teams?.teams.length" class="muted small">No teams yet. Create them under <NuxtLink to="/settings/teams">Teams</NuxtLink> to map groups to them.</p>

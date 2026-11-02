@@ -4,7 +4,7 @@ import type { AccountOrg, Invitation, InvitationCreated, Membership, OrgGateway,
 const session = useSession()
 const org = computed(() => session.current.value?.org)
 const { data, refresh, error: loadError } = useApiGet<{ org: AccountOrg; members: Membership[] }>(() => (org.value ? `accounts/orgs/${org.value.slug}/members` : 'accounts/orgs/-/members'))
-const canManage = computed(() => session.can('admin'))
+const canManage = computed(() => session.can('full'))
 const { data: policy, refresh: refreshPolicy } = useApiGet<AccountOrg>(() => `accounts/orgs/${org.value?.slug ?? '-'}/repo-policy`)
 const defaultAccess = ref<'NONE' | 'READ_ONLY'>('NONE')
 watch(policy, (value) => { defaultAccess.value = value?.default_repo_access ?? 'NONE' }, { immediate: true })
@@ -91,14 +91,14 @@ async function savePolicy() {
   }
 }
 const roles: { id: Role; label: string; help: string }[] = [
-  { id: 'guest', label: 'Guest', help: 'Needs an explicit repository grant; receives no default access' },
-  { id: 'viewer', label: 'Viewer', help: 'Receives the organisation repository default unless a grant overrides it' },
-  { id: 'member', label: 'Member', help: 'Can add repositories; existing repositories follow their own permissions' },
-  { id: 'admin', label: 'Admin', help: 'Also manages members, Git tokens and settings' },
-  { id: 'owner', label: 'Owner', help: 'Manages organisation ownership and can explicitly recover repository administration' },
+  { id: 'guest', label: ROLE_LABEL.guest, help: 'Needs an explicit repository grant; receives no default access' },
+  { id: 'read', label: ROLE_LABEL.read, help: 'Receives the organisation repository default unless a grant overrides it' },
+  { id: 'write', label: ROLE_LABEL.write, help: 'Can add repositories; existing repositories follow their own permissions' },
+  { id: 'full', label: ROLE_LABEL.full, help: 'Also manages members, Git tokens and settings' },
+  { id: 'owner', label: ROLE_LABEL.owner, help: 'Manages organisation ownership and can explicitly recover repository administration' },
 ]
 const email = ref('')
-const role = ref<Role>('member')
+const role = ref<Role>('write')
 const error = ref('')
 const notice = ref('')
 const busy = ref(false)
@@ -289,7 +289,7 @@ watch(() => org.value?.slug, () => {
                 <select v-if="canManage" :value="m.role" :aria-label="`Role of ${m.user.name}`" class="role" :disabled="busy" @change="changeRole(m, ($event.target as HTMLSelectElement).value as Role)">
                   <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.label }}</option>
                 </select>
-                <span v-else class="badge">{{ m.role }}</span>
+                <span v-else class="badge">{{ ROLE_LABEL[m.role] ?? m.role }}</span>
               </td>
               <td class="num"><button v-if="canManage" type="button" class="secondary tiny" :disabled="busy" :aria-label="`Remove ${m.user.name}`" @click="removing = m">Remove</button></td>
             </tr>
@@ -313,7 +313,7 @@ watch(() => org.value?.slug, () => {
           <tbody>
             <tr v-for="inv in invites.invitations" :key="inv.id">
               <td class="wrap">{{ inv.email }}</td>
-              <td><span class="badge">{{ inv.role }}</span></td>
+              <td><span class="badge">{{ ROLE_LABEL[inv.role] ?? inv.role }}</span></td>
               <td><time :datetime="inv.expires_at">{{ new Date(inv.expires_at).toLocaleDateString() }}</time></td>
               <td class="num"><button type="button" class="secondary tiny" :disabled="busy" :aria-label="`Revoke the invitation for ${inv.email}`" @click="revoke(inv)">Revoke</button></td>
             </tr>

@@ -79,7 +79,7 @@ func (s *Service) SetRepoPolicy(ctx context.Context, p Principal, approval RepoP
 		if p.Via != "session" {
 			return struct{}{}, ErrForbidden
 		}
-		if _, err := tx.ResolveRepository(ctx, p, approval.OrgID, approval.Graph, Admin); err != nil {
+		if _, err := tx.ResolveRepository(ctx, p, approval.OrgID, approval.Graph, Full); err != nil {
 			return struct{}{}, err
 		}
 		approval.ActorID, approval.UpdatedAt = p.User.ID, tx.now()
@@ -104,7 +104,7 @@ func (s *Service) DeleteRepoPolicy(ctx context.Context, p Principal, orgID, grap
 		if p.Via != "session" {
 			return struct{}{}, ErrForbidden
 		}
-		if _, err := tx.ResolveRepository(ctx, p, orgID, graph, Admin); err != nil {
+		if _, err := tx.ResolveRepository(ctx, p, orgID, graph, Full); err != nil {
 			return struct{}{}, err
 		}
 		if err := tx.St.DeleteRepoPolicy(ctx, orgID, graph); err != nil {
@@ -185,7 +185,7 @@ func CheckAnnotationAuthority(ctx context.Context, st Store, record RepositoryAn
 		return err
 	}
 	svc := NewService(st, false)
-	if _, err := svc.ResolveRepository(ctx, Principal{User: u, Via: "session", OrgID: id.TenantID}, record.OrgID, record.Graph, Member); err != nil {
+	if _, err := svc.ResolveRepository(ctx, Principal{User: u, Via: "session", OrgID: id.TenantID}, record.OrgID, record.Graph, Write); err != nil {
 		return err
 	}
 	policy, err := st.GetRepoPolicy(ctx, record.OrgID, record.Graph)

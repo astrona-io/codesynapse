@@ -6,8 +6,10 @@ package accounts
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/astrona-io/codesynapse/internal/ingestreport"
@@ -16,18 +18,45 @@ import (
 // Role is a user's role in an organisation, weakest first.
 type Role string
 
-// Roles. A guest belongs to the organisation but inherits no repository:
-// it sees only what is granted to it (see authz.go).
+// Roles. Read, Write and Full are the three levels of an organisation or
+// repository role. A guest belongs to the organisation at the read level but
+// inherits no repository: it sees only what is granted to it (see authz.go).
+// An owner is full plus the owner rules.
 const (
-	None   Role = "none" // explicit repository deny; not an organisation role
-	Guest  Role = "guest"
-	Viewer Role = "viewer"
-	Member Role = "member"
-	Admin  Role = "admin"
-	Owner  Role = "owner"
+	Deny  Role = "deny" // explicit repository deny; not an organisation role
+	Guest Role = "guest"
+	Read  Role = "read"
+	Write Role = "write"
+	Full  Role = "full"
+	Owner Role = "owner"
 )
 
-var roleRank = map[Role]int{Guest: 0, Viewer: 1, Member: 2, Admin: 3, Owner: 4}
+// legacyRoles are the role names before the rename to read, write and full.
+// Requests may still use them for one release (see ParseRole).
+var legacyRoles = map[string]Role{"none": Deny, "viewer": Read, "editor": Write, "member": Write, "admin": Full}
+
+// ParseRole reads a role name from a request. The names used before the
+// rename are accepted for one release and logged as deprecated; the log
+// line names the old role only, never anything else from the request.
+func ParseRole(s string) Role {
+	if r, ok := legacyRoles[s]; ok {
+		slog.Warn("deprecated role name in request", "old", s, "new", string(r))
+		return r
+	}
+	return Role(s)
+}
+
+// UnmarshalJSON accepts the old role names through ParseRole.
+func (r *Role) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	*r = ParseRole(s)
+	return nil
+}
+
+var roleRank = map[Role]int{Guest: 0, Read: 1, Write: 2, Full: 3, Owner: 4}
 
 // Max returns the stronger of two roles ("" is weaker than any role).
 func Max(a, b Role) Role {

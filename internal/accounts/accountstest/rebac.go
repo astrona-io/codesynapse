@@ -35,7 +35,7 @@ func RunReBAC(t *testing.T, st accounts.Store) {
 	for _, m := range []struct {
 		u accounts.User
 		r accounts.Role
-	}{{reader, accounts.Viewer}, {guest, accounts.Guest}} {
+	}{{reader, accounts.Read}, {guest, accounts.Guest}} {
 		require.NoError(t, Join(ctx, t, svc, ownerP, org.ID, m.u, m.r))
 	}
 	graph := "policy/api"
@@ -53,28 +53,28 @@ func RunReBAC(t *testing.T, st accounts.Store) {
 		}
 		return ""
 	}
-	assert.Equal(t, role(owner), accounts.Admin)
+	assert.Equal(t, role(owner), accounts.Full)
 	assert.Equal(t, role(reader), accounts.Role(""), "new organisations default to NONE")
-	_, err = svc.ResolveRepository(ctx, outsiderP, org.ID, graph, accounts.Viewer)
+	_, err = svc.ResolveRepository(ctx, outsiderP, org.ID, graph, accounts.Read)
 	assert.True(t, errors.Is(err, accounts.ErrNotFound))
 	assert.True(t, errors.Is(Join(ctx, t, svc, outsiderP, org.ID, outsider, accounts.Owner), accounts.ErrForbidden), "platform admin cannot enrol itself")
 	require.NoError(t, svc.SetDefaultRepoAccess(ctx, ownerP, org.ID, accounts.DefaultRepoReadOnly))
-	assert.Equal(t, role(reader), accounts.Viewer)
+	assert.Equal(t, role(reader), accounts.Read)
 	assert.Equal(t, role(guest), accounts.Role(""))
 	team, err := svc.CreateTeam(ctx, ownerP, org.ID, "Builders")
 	require.NoError(t, err)
-	_, err = svc.SetTeamMember(ctx, ownerP, team.ID, reader.Email, accounts.RelMember)
+	_, err = svc.SetTeamMember(ctx, ownerP, team.ID, reader.Email, accounts.TeamRead)
 	require.NoError(t, err)
-	_, err = svc.SetTeamMember(ctx, ownerP, team.ID, outsider.Email, accounts.RelMember)
+	_, err = svc.SetTeamMember(ctx, ownerP, team.ID, outsider.Email, accounts.TeamRead)
 	assert.True(t, errors.Is(err, accounts.ErrNotFound), "teams name members only, like an unknown email")
-	teamSub := accounts.Tuple{SubjectType: accounts.TypeTeam, SubjectID: team.ID, SubjectRelation: accounts.RelMember}
-	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, teamSub, accounts.Admin)
+	teamSub := accounts.Tuple{SubjectType: accounts.TypeTeam, SubjectID: team.ID, SubjectRelation: accounts.TeamRead}
+	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, teamSub, accounts.Full)
 	require.NoError(t, err)
-	assert.Equal(t, role(reader), accounts.Admin)
+	assert.Equal(t, role(reader), accounts.Full)
 	for _, tc := range []struct {
 		name        string
 		grant, want accounts.Role
-	}{{"direct read overrides team admin", accounts.Viewer, accounts.Viewer}, {"direct deny overrides team and default", accounts.None, ""}, {"direct write", accounts.Member, accounts.Member}} {
+	}{{"direct read overrides team admin", accounts.Read, accounts.Read}, {"direct deny overrides team and default", accounts.Deny, ""}, {"direct write", accounts.Write, accounts.Write}} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := svc.SetRepoGrant(ctx, ownerP, org.ID, graph, subject(reader), tc.grant)
 			require.NoError(t, err)
@@ -82,30 +82,30 @@ func RunReBAC(t *testing.T, st accounts.Store) {
 		})
 	}
 	require.NoError(t, svc.RemoveRepoGrant(ctx, ownerP, org.ID, graph, subject(reader)))
-	assert.Equal(t, role(reader), accounts.Admin)
-	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, teamSub, accounts.None)
+	assert.Equal(t, role(reader), accounts.Full)
+	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, teamSub, accounts.Deny)
 	assert.True(t, errors.Is(err, accounts.ErrInvalidInput), "NONE applies only to users")
-	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, subject(outsider), accounts.Viewer)
+	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, subject(outsider), accounts.Read)
 	assert.True(t, errors.Is(err, accounts.ErrForbidden), "external shares need explicit membership")
 	// Store foreign keys reject new repository grants without tenant membership.
-	err = st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(org.ID, graph), Relation: accounts.RepoViewer, SubjectType: accounts.TypeUser, SubjectID: outsider.ID, CreatedAt: now})
+	err = st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(org.ID, graph), Relation: accounts.RepoRead, SubjectType: accounts.TypeUser, SubjectID: outsider.ID, CreatedAt: now})
 	assert.True(t, errors.Is(err, accounts.ErrNotFound))
 	assert.Equal(t, role(outsider), accounts.Role(""))
 	a, err := svc.AccessOf(ctx, reader.ID)
 	require.NoError(t, err)
 	assert.Len(t, a.Scope(map[string]bool{"foreign": true}), 0)
 	require.NoError(t, svc.SetDefaultRepoAccess(ctx, ownerP, org.ID, accounts.DefaultRepoNone))
-	assert.Equal(t, role(reader), accounts.Admin)
+	assert.Equal(t, role(reader), accounts.Full)
 	// Removing team membership removes inherited access immediately.
 	require.NoError(t, svc.RemoveTeamMember(ctx, ownerP, team.ID, reader.ID))
 	assert.Equal(t, role(reader), accounts.Role(""))
 	// Organisation ownership does not bypass an explicit repository deny.
-	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, subject(reader), accounts.Admin)
+	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, subject(reader), accounts.Full)
 	require.NoError(t, err)
-	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, subject(owner), accounts.None)
+	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, subject(owner), accounts.Deny)
 	require.NoError(t, err)
 	assert.Equal(t, role(owner), accounts.Role(""))
-	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, subject(guest), accounts.Viewer)
+	_, err = svc.SetRepoGrant(ctx, ownerP, org.ID, graph, subject(guest), accounts.Read)
 	assert.True(t, errors.Is(err, accounts.ErrForbidden))
 	require.NoError(t, svc.RecoverRepoAdmin(ctx, ownerP, org.ID, graph, owner.ID))
 	// Two concurrent removals cannot remove the last administrator.
@@ -131,17 +131,17 @@ func RunReBAC(t *testing.T, st accounts.Store) {
 	require.NoError(t, st.SetUserDisabled(ctx, reader.ID, &disabled))
 	_, err = svc.AccessOf(ctx, reader.ID)
 	assert.True(t, errors.Is(err, accounts.ErrSuspended))
-	_, err = svc.ResolveRepository(ctx, readerP, org.ID, graph, accounts.Viewer)
+	_, err = svc.ResolveRepository(ctx, readerP, org.ID, graph, accounts.Read)
 	assert.True(t, errors.Is(err, accounts.ErrUnauthorized))
 	require.NoError(t, st.SetUserDisabled(ctx, reader.ID, nil))
 	token, key, err := svc.CreateKey(ctx, ownerP, org.ID, "policy test", 0)
 	require.NoError(t, err)
 	kp, err := svc.AuthenticateKey(ctx, token)
 	require.NoError(t, err)
-	_, err = svc.ResolveRepository(ctx, kp, org.ID, graph, accounts.Admin)
+	_, err = svc.ResolveRepository(ctx, kp, org.ID, graph, accounts.Full)
 	require.NoError(t, err)
 	require.NoError(t, svc.RevokeKey(ctx, ownerP, key.ID))
-	_, err = svc.ResolveRepository(ctx, kp, org.ID, graph, accounts.Viewer)
+	_, err = svc.ResolveRepository(ctx, kp, org.ID, graph, accounts.Read)
 	assert.True(t, errors.Is(err, accounts.ErrKeyRevoked))
 	require.NoError(t, st.SetRepositoryAccess(ctx, org.ID, graph, accounts.AccessLost, now))
 	assert.Equal(t, role(owner), accounts.Role(""))
@@ -206,7 +206,7 @@ func RunPolicyRecovery(t *testing.T, st accounts.Store) {
 	orgID, graph := "recovery-org", "recovery/repo"
 	require.NoError(t, st.CreateOrg(ctx, accounts.Org{ID: orgID, Slug: orgID, Name: "Recovery", CreatedAt: now}, users[0].ID))
 	for _, u := range users[1:] {
-		require.NoError(t, st.SetMember(ctx, orgID, u.ID, accounts.Member))
+		require.NoError(t, st.SetMember(ctx, orgID, u.ID, accounts.Write))
 	}
 	ownerP := accounts.Principal{User: users[0], Via: "session"}
 	require.NoError(t, st.AddRepository(ctx, accounts.Repository{OrgID: orgID, Graph: graph, AddedBy: users[0].ID, Visibility: accounts.Public, AddedAt: now}))
@@ -214,9 +214,9 @@ func RunPolicyRecovery(t *testing.T, st accounts.Store) {
 	team := accounts.Team{ID: "recovery-team", OrgID: orgID, Slug: "recovery-team", Name: "Recovery", CreatedAt: now}
 	require.NoError(t, st.CreateTeam(ctx, team))
 	for _, u := range users {
-		require.NoError(t, st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeTeam, ObjectID: team.ID, Relation: accounts.RelMember, SubjectType: accounts.TypeUser, SubjectID: u.ID, CreatedAt: now}))
+		require.NoError(t, st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeTeam, ObjectID: team.ID, Relation: accounts.TeamRead, SubjectType: accounts.TypeUser, SubjectID: u.ID, CreatedAt: now}))
 	}
-	require.NoError(t, st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(orgID, graph), Relation: "invalid", SubjectType: accounts.TypeTeam, SubjectID: team.ID, SubjectRelation: accounts.RelMember, CreatedAt: now}))
+	require.NoError(t, st.WriteTuple(ctx, accounts.Tuple{ObjectType: accounts.TypeRepository, ObjectID: accounts.RepoObject(orgID, graph), Relation: "invalid", SubjectType: accounts.TypeTeam, SubjectID: team.ID, SubjectRelation: accounts.TeamRead, CreatedAt: now}))
 	_, err := svc.AccessOf(ctx, users[0].ID)
 	assert.True(t, errors.Is(err, accounts.ErrInvalidInput))
 	report, err := svc.AccessChangeReport(ctx, orgID)
@@ -230,7 +230,7 @@ func RunPolicyRecovery(t *testing.T, st accounts.Store) {
 		require.NoError(t, err)
 		if i == 1 {
 			require.Len(t, a.Repos, 1)
-			assert.Equal(t, a.Repos[0].Role, accounts.Admin)
+			assert.Equal(t, a.Repos[0].Role, accounts.Full)
 		} else {
 			assert.Len(t, a.Repos, 0, "repair preserves denial for other affected members, including the owner")
 		}

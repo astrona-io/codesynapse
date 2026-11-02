@@ -24,7 +24,7 @@ func RunJobs(t *testing.T, newStore func(*testing.T) accounts.Store) {
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	job := func(id, repo string) accounts.JobRecord {
-		return accounts.JobRecord{ID: id, Kind: "sync", Repo: repo, OrgID: "org-1", ActorID: "user-1", Via: "session", Role: accounts.Admin,
+		return accounts.JobRecord{ID: id, Kind: "sync", Repo: repo, OrgID: "org-1", ActorID: "user-1", Via: "session", Role: accounts.Full,
 			Execution: execution.Identity{TenantID: "org-1", SubjectID: "user-1", SessionID: "web:1", ParentSessionID: "web:1"},
 			Params:    json.RawMessage(`{"branch":"main"}`), Branch: "main", State: accounts.JobQueued,
 			LeaseOwner: "proc-a", LeaseUntil: now.Add(time.Minute), CreatedAt: now}

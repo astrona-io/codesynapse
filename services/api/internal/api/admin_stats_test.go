@@ -98,7 +98,7 @@ func TestPlatformStats(t *testing.T) {
 	pat, patUser, patOrg := signup("a@example.com")
 	_, _, org2 := signup("owner2@example.com")
 	_, _, org3 := signup("owner3@example.com")
-	require.NoError(t, st.SetMember(ctx, org2.ID, patUser.ID, accounts.Member))
+	require.NoError(t, st.SetMember(ctx, org2.ID, patUser.ID, accounts.Write))
 	require.NoError(t, st.SetMember(ctx, org3.ID, patUser.ID, accounts.Guest))
 	require.NoError(t, st.AddRepository(ctx, accounts.Repository{OrgID: patOrg.ID, Graph: "secret-repo", Remote: "https://example.com/acme/secret-repo.git", Visibility: accounts.Private, AddedAt: time.Now(), AddedBy: patUser.ID}))
 	var key struct{ Key string }

@@ -17,7 +17,7 @@ import (
 // a finding is an accepted risk, a false positive or fixed by a commit or
 // pull request, with who, when and why. Decisions live in the accounts
 // database per organisation and repository entry; the shared graph keeps
-// every finding. Reading needs viewer access, deciding repository admin
+// every finding. Reading needs read access, deciding repository admin
 // access from a signed-in session or an API key; every route needs a
 // registered runtime session. The service audits each change in the same
 // transaction.
@@ -59,7 +59,7 @@ func (s *Server) handleListTriage(w http.ResponseWriter, r *http.Request) {
 	// the PUT and DELETE routes check again.
 	canEdit := false
 	if p.Via == "session" || p.Via == "key" {
-		_, err := s.cfg.Accounts.ResolveRepository(r.Context(), p, org, repo, accounts.Admin)
+		_, err := s.cfg.Accounts.ResolveRepository(r.Context(), p, org, repo, accounts.Full)
 		canEdit = err == nil
 	}
 	writeJSON(w, 200, map[string]any{"triage": rows, "states": accounts.TriageStates, "can_edit": canEdit})

@@ -11,7 +11,7 @@ const route = useRoute()
 
 const { data: repos } = useApiGet<{ repos: RepoInfo[] }>('repos', { immediate: !session.restricted.value })
 const role = computed(() => session.current.value?.role)
-const canManage = computed(() => role.value === 'owner' || role.value === 'admin')
+const canManage = computed(() => role.value === 'owner' || role.value === 'full')
 
 interface Step { id: string; title: string; text: string; to: string; action: string; done: boolean; manual?: boolean }
 const steps = computed<Step[]>(() => {

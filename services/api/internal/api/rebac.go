@@ -111,7 +111,7 @@ func (s *Server) handleSetTeamMember(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, 400, err)
 		return
 	}
-	m, err := s.cfg.Accounts.SetTeamMember(r.Context(), p, t.ID, req.Email, cmpOr(req.Relation, accounts.RelMember))
+	m, err := s.cfg.Accounts.SetTeamMember(r.Context(), p, t.ID, req.Email, cmpOr(accounts.ParseTeamRelation(req.Relation), accounts.TeamRead))
 	if err != nil {
 		s.accountError(w, err)
 		return
@@ -191,7 +191,7 @@ func (s *Server) subject(r *http.Request, orgID, user, team string) (accounts.Tu
 		if err != nil {
 			return accounts.Tuple{}, err
 		}
-		return accounts.Tuple{SubjectType: accounts.TypeTeam, SubjectID: t.ID, SubjectRelation: accounts.RelMember}, nil
+		return accounts.Tuple{SubjectType: accounts.TypeTeam, SubjectID: t.ID, SubjectRelation: accounts.TeamRead}, nil
 	}
 	return accounts.Tuple{}, errors.New("give either a user's email or a team")
 }
@@ -206,7 +206,7 @@ func (s *Server) handleRepoGrants(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	effective, err := s.cfg.Accounts.ResolveRepository(r.Context(), p, o.ID, r.PathValue("repo"), accounts.Viewer)
+	effective, err := s.cfg.Accounts.ResolveRepository(r.Context(), p, o.ID, r.PathValue("repo"), accounts.Read)
 	if err != nil {
 		s.accountError(w, err)
 		return
@@ -322,7 +322,7 @@ func (s *Server) handleRemoveRepoGrant(w http.ResponseWriter, r *http.Request) {
 	typ, id, _ := strings.Cut(r.URL.Query().Get("subject"), ":")
 	sub := accounts.Tuple{SubjectType: typ, SubjectID: id}
 	if typ == accounts.TypeTeam {
-		sub.SubjectRelation = accounts.RelMember
+		sub.SubjectRelation = accounts.TeamRead
 	}
 	if err := s.cfg.Accounts.RemoveRepoGrant(r.Context(), p, o.ID, r.PathValue("repo"), sub); err != nil {
 		s.accountError(w, err)

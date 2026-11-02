@@ -114,7 +114,7 @@ func CheckIngestAuthority(ctx context.Context, st Store, run IngestRun) error {
 	if err != nil {
 		return err
 	}
-	_, err = service.ResolveRepository(ctx, Principal{User: u, Via: "session", OrgID: run.OrgID}, run.OrgID, run.Graph, Admin)
+	_, err = service.ResolveRepository(ctx, Principal{User: u, Via: "session", OrgID: run.OrgID}, run.OrgID, run.Graph, Full)
 	return err
 }
 

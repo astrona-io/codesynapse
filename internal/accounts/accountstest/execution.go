@@ -26,7 +26,7 @@ func RunExecutionSessions(t *testing.T, st accounts.Store) {
 	for _, id := range []string{"exec-org-a", "exec-org-b", "exec-cap-org"} {
 		require.NoError(t, st.CreateOrg(ctx, accounts.Org{ID: id, Name: id, Slug: id, CreatedAt: now}, "exec-owner"))
 	}
-	require.NoError(t, st.SetMember(ctx, "exec-org-a", "exec-peer", accounts.Member))
+	require.NoError(t, st.SetMember(ctx, "exec-org-a", "exec-peer", accounts.Write))
 	svc := accounts.NewService(st, false)
 	svc.Now = func() time.Time { return now }
 	id, err := svc.RegisterExecutionSession(ctx, "exec-owner", "exec-org-a", "exec-chat-a")
@@ -78,7 +78,7 @@ func RunExecutionSessions(t *testing.T, st accounts.Store) {
 	require.NoError(t, st.RemoveMember(ctx, "exec-org-a", "exec-peer"))
 	_, err = svc.ResolveExecutionSession(ctx, "exec-peer", "exec-org-a", "exec-peer-chat")
 	assert.True(t, errors.Is(err, accounts.ErrForbidden))
-	require.NoError(t, st.SetMember(ctx, "exec-org-a", "exec-peer", accounts.Member))
+	require.NoError(t, st.SetMember(ctx, "exec-org-a", "exec-peer", accounts.Write))
 	require.NoError(t, st.SetUserDisabled(ctx, "exec-peer", &now))
 	_, err = svc.ResolveExecutionSession(ctx, "exec-peer", "exec-org-a", "exec-peer-chat")
 	assert.True(t, errors.Is(err, accounts.ErrForbidden))

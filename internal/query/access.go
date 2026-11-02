@@ -80,7 +80,7 @@ func AccessSnapshot(ctx context.Context, source accounts.Store, orgID string) (m
 		return s, accounts.ErrAccessLimit
 	}
 	for _, x := range teamTuples {
-		if x.SubjectType != accounts.TypeUser || x.SubjectRelation != "" || !teamIDs[x.ObjectID] || (x.Relation != accounts.RelMember && x.Relation != accounts.RelMaintainer) {
+		if x.SubjectType != accounts.TypeUser || x.SubjectRelation != "" || !teamIDs[x.ObjectID] || (x.Relation != accounts.TeamRead && x.Relation != accounts.TeamFull) {
 			return s, accounts.ErrInvalidInput
 		}
 		if users[x.SubjectID] {
@@ -123,7 +123,7 @@ func AccessSnapshot(ctx context.Context, source accounts.Store, orgID string) (m
 			if !teamIDs[x.SubjectID] {
 				continue
 			}
-			if x.SubjectRelation != accounts.RelMember {
+			if x.SubjectRelation != accounts.TeamRead {
 				return s, accounts.ErrInvalidInput
 			}
 			g.SubjectKind = model.KindTeam
@@ -131,13 +131,13 @@ func AccessSnapshot(ctx context.Context, source accounts.Store, orgID string) (m
 			return s, accounts.ErrInvalidInput
 		}
 		switch x.Relation {
-		case accounts.RepoViewer:
+		case accounts.RepoRead:
 			g.Role = "READ"
-		case accounts.RepoEditor:
+		case accounts.RepoWrite:
 			g.Role = "WRITE"
-		case accounts.RepoAdmin:
+		case accounts.RepoFull:
 			g.Role = "ADMIN"
-		case accounts.RepoNone:
+		case accounts.RepoDeny:
 			g.Role = "NONE"
 		default:
 			return s, accounts.ErrInvalidInput

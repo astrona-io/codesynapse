@@ -141,7 +141,7 @@ async function open(slug: string, to: string) {
   session.switchOrg(slug)
   await navigateTo(to)
 }
-const manages = (role: string) => role === 'owner' || role === 'admin'
+const manages = (role: string) => role === 'owner' || role === 'full'
 </script>
 
 <template>

@@ -37,7 +37,7 @@ flowchart LR
 - An API key acts in exactly one organisation and stops working when its owner is removed or suspended. It can never mutate access.
 - Cookie-authenticated changes must be same-origin.
 
-The web app has sign-in, a first-run setup, Settings for your profile, API keys, members and Git tokens, an Agents page with client connection settings (runtime session integration is still required), and Help that explains every figure. Organisations have the roles owner, admin, member and viewer. An agent connected with a personal key and a registered runtime session sees only its organisation's repositories and keeps its memory, reviews and statistics apart from other organisations.
+The web app has sign-in, a first-run setup, Settings for your profile, API keys, members and Git tokens, an Agents page with client connection settings (runtime session integration is still required), and Help that explains every figure. Organisations have the roles owner, full, write, read and guest; the dashboard shows them as Full (owner), Full, Write, Read and Read (guest). Roles are named by level since migration 0040: organisation roles `guest`, `read`, `write`, `full`, `owner` (formerly `viewer`, `member`, `admin`), repository grants `read`, `write`, `full`, `deny` (formerly `viewer`, `editor`, `admin`, `none`) and team places `read` and `full` (formerly `member`, `maintainer`). Responses use the new names; requests still accept the old ones for one release and log a deprecation line. Route notes such as (Viewer), (Member) and (Admin) in these documents mean read, write and full. An agent connected with a personal key and a registered runtime session sees only its organisation's repositories and keeps its memory, reviews and statistics apart from other organisations.
 
 ## Root account and sign-up
 
@@ -67,14 +67,14 @@ An organisation can connect its own OpenID Connect provider (Entra ID, Okta, Key
 
 When someone asks to open a repository, CodeSynapse works out the answer from the memberships and grants stored in PostgreSQL, and nothing else decides. Every person must be an active, named member of the organisation that owns the repository. Being a platform administrator gives no access to code.
 
-Follow the diagram from the top. For example, if Sam is a member and has a direct grant of `viewer` on the repository, the answer is "viewer", even if a team Sam belongs to has a stronger grant.
+Follow the diagram from the top. For example, if Sam is a member and has a direct grant of `read` on the repository, the answer is "read", even if a team Sam belongs to has a stronger grant.
 
 ```mermaid
 flowchart TD
     req([Request: user U, repository R]) --> member{U active, explicit member<br/>of R's organisation?}
     member -- no --> deny[No access]
-    member -- yes --> direct{Direct user grant on R?<br/>admin, editor, viewer, none}
-    direct -- yes --> use1[Use it - NONE denies even if a team grants]
+    member -- yes --> direct{Direct user grant on R?<br/>full, write, read, deny}
+    direct -- yes --> use1[Use it - deny wins even if a team grants]
     direct -- no --> team{Team grants in the same organisation?}
     team -- yes --> use2[Strongest team grant wins]
     team -- no --> guest{Guest?}
@@ -84,11 +84,11 @@ flowchart TD
 
 | Permission | Allows |
 |---|---|
-| READ (viewer) | Navigation, review reading, memory recall |
-| WRITE (editor) | Also `upsert_graph_triples`, `offload_turns`, `submit_review`, `update_review_comment` |
-| ADMIN | Sync, schedules, settings, grants, repository configuration |
+| `read` | Navigation, review reading, memory recall |
+| `write` | Also `upsert_graph_triples`, `offload_turns`, `submit_review`, `update_review_comment` |
+| `full` | Sync, schedules, settings, grants, repository configuration |
 
-Organisation owner and admin roles manage membership and policy; they do not grant repository permissions. An explicit owner can recover administration through an audited action. `AccessOf` uses bounded bulk reads; overflow or invalid grants fail closed.
+Organisation owner and full roles manage membership and policy; they do not grant repository permissions. An explicit owner can recover administration through an audited action. `AccessOf` uses bounded bulk reads; overflow or invalid grants fail closed.
 
 Settings → Organisation controls the default and owner recovery; Settings → Teams and each repository's Access page manage grants. Changes are audited. See the [upgrade notes](../plans/ACCESS_CONTROL_PLAN.md#implementation-and-upgrade) before upgrading an existing accounts database.
 

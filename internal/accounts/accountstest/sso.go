@@ -28,8 +28,8 @@ func RunSSOStore(t *testing.T, newStore func(t *testing.T) accounts.Store) {
 	assert.True(t, errors.Is(err, accounts.ErrNotFound))
 	idp := accounts.IdentityProvider{OrgID: org.ID, Name: "Corp", Issuer: "https://idp.example", ClientID: "cs", SecretPreview: "abcd…", KeyID: "k1",
 		SealedSecret: []byte{1, 2, 3}, Enabled: true, CreatedBy: ada.ID, UpdatedAt: now,
-		IdentityProviderSettings: accounts.IdentityProviderSettings{Scopes: []string{"groups"}, GroupsClaim: "roles", DefaultRole: accounts.Viewer,
-			RoleGroups: map[string]accounts.Role{"admins": accounts.Admin}, TeamGroups: map[string]string{"devs": "t-1"}}}
+		IdentityProviderSettings: accounts.IdentityProviderSettings{Scopes: []string{"groups"}, GroupsClaim: "roles", DefaultRole: accounts.Read,
+			RoleGroups: map[string]accounts.Role{"admins": accounts.Full}, TeamGroups: map[string]string{"devs": "t-1"}}}
 	require.NoError(t, st.PutIdentityProvider(ctx, idp))
 	got, err := st.IdentityProvider(ctx, org.ID)
 	require.NoError(t, err)
@@ -76,13 +76,13 @@ func RunSSOStore(t *testing.T, newStore func(t *testing.T) accounts.Store) {
 	bob := accounts.User{ID: "u-bob", Email: "bob@example.com", Name: "Bob", CreatedAt: now}
 	require.NoError(t, st.CreateUser(ctx, bob))
 	assert.Error(t, st.SetManagedByIDP(ctx, org.ID, bob.ID, true), "only a membership can be managed")
-	require.NoError(t, st.SetMember(ctx, org.ID, bob.ID, accounts.Member))
+	require.NoError(t, st.SetMember(ctx, org.ID, bob.ID, accounts.Write))
 	require.NoError(t, st.SetManagedByIDP(ctx, org.ID, bob.ID, true))
 	managed, err := st.ManagedByIDP(ctx, org.ID, bob.ID)
 	require.NoError(t, err)
 	assert.True(t, managed)
 	require.NoError(t, st.RemoveMember(ctx, org.ID, bob.ID))
-	require.NoError(t, st.SetMember(ctx, org.ID, bob.ID, accounts.Member))
+	require.NoError(t, st.SetMember(ctx, org.ID, bob.ID, accounts.Write))
 	managed, err = st.ManagedByIDP(ctx, org.ID, bob.ID)
 	require.NoError(t, err)
 	assert.False(t, managed, "a membership added again by hand is not the provider's")

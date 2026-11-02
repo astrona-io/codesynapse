@@ -29,10 +29,10 @@ func TestReuseSourceReaderRequiresSameOrganisation(t *testing.T) {
 		{"ambiguous source", "o1", true, true, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			sc := scope{graphs: map[string]accounts.Role{"destination": accounts.Member}, reach: map[string]accounts.Reach{"destination": {OrgID: "o1", Role: accounts.Member}}}
+			sc := scope{graphs: map[string]accounts.Role{"destination": accounts.Write}, reach: map[string]accounts.Reach{"destination": {OrgID: "o1", Role: accounts.Write}}}
 			if tt.visible {
-				sc.graphs["source"] = accounts.Viewer
-				sc.reach["source"] = accounts.Reach{OrgID: tt.sourceOrg, Role: accounts.Viewer, Ambiguous: tt.ambiguous}
+				sc.graphs["source"] = accounts.Read
+				sc.reach["source"] = accounts.Reach{OrgID: tt.sourceOrg, Role: accounts.Read, Ambiguous: tt.ambiguous}
 			}
 			ctx := context.WithValue(context.Background(), scopeKey{}, sc)
 			r, err := s.catalogOf(ctx, "destination").ReadRepository(ctx, "source")

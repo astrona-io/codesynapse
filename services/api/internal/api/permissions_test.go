@@ -10,7 +10,8 @@ import (
 
 // roleRoutes is every route registered through s.route before routes
 // checked permissions, with the least role it needed then. It is frozen: a
-// route added later is checked by TestEveryRouteHasAPermission only.
+// route added later is checked by TestEveryRouteHasAPermission only. The
+// roles keep the names they had then (see frozenRole).
 var roleRoutes = map[string]struct {
 	kind       policyKind
 	least      accounts.Role
@@ -162,12 +163,15 @@ var roleRoutes = map[string]struct {
 	"PUT /api/v1/watches/{host}/{login}":                             {inOrg, "member", false},
 }
 
-var builtInRoles = []accounts.Role{accounts.None, accounts.Guest, accounts.Viewer, accounts.Member, accounts.Admin, accounts.Owner}
+var builtInRoles = []accounts.Role{accounts.Deny, accounts.Guest, accounts.Read, accounts.Write, accounts.Full, accounts.Owner}
 
 // TestBuiltInRolesKeepAccess proves that checking permissions changed no
 // one's access: for every route that existed when roles were checked, each
 // built-in role holds the route's permission exactly when it was at least the
 // role the route needed.
+// frozenRole maps the role names in roleRoutes to today's.
+var frozenRole = map[accounts.Role]accounts.Role{"guest": accounts.Guest, "viewer": accounts.Read, "member": accounts.Write, "admin": accounts.Full, "owner": accounts.Owner}
+
 func TestBuiltInRolesKeepAccess(t *testing.T) {
 	srv, _, _ := rootServer(t)
 	for pattern, old := range roleRoutes {
@@ -182,11 +186,11 @@ func TestBuiltInRolesKeepAccess(t *testing.T) {
 			continue
 		}
 		for _, r := range builtInRoles {
-			assert.Equal(t, r.Has(pol.perm), r.AtLeast(old.least), pattern+" as "+string(r)+" ("+string(pol.perm)+")")
+			assert.Equal(t, r.Has(pol.perm), r.AtLeast(frozenRole[old.least]), pattern+" as "+string(r)+" ("+string(pol.perm)+")")
 		}
 	}
 	// The gateway routes (registered only with the gateway on) needed Member.
-	assert.Equal(t, accounts.OrgGatewayWrite.Floor(), accounts.Member)
+	assert.Equal(t, accounts.OrgGatewayWrite.Floor(), accounts.Write)
 }
 
 // TestEveryRouteHasAPermission keeps every route that acts on a repository,

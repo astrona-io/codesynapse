@@ -91,7 +91,7 @@ func TestJobsAndIngestSections(t *testing.T) {
 	now := time.Now().UTC()
 	exec := execution.Identity{TenantID: orgA.ID, SubjectID: memberUser.ID, SessionID: "web:1", ParentSessionID: "web:1"}
 	job := func(id string) accounts.JobRecord {
-		return accounts.JobRecord{ID: id, Kind: "sync", Repo: "secret-repo/private", OrgID: orgA.ID, ActorID: memberUser.ID, Via: "session", Role: accounts.Admin,
+		return accounts.JobRecord{ID: id, Kind: "sync", Repo: "secret-repo/private", OrgID: orgA.ID, ActorID: memberUser.ID, Via: "session", Role: accounts.Full,
 			Execution: exec, State: accounts.JobQueued, LeaseOwner: "elsewhere", LeaseUntil: now.Add(time.Hour), CreatedAt: now.Add(-time.Minute)}
 	}
 	require.NoError(t, accSt.AddJob(ctx, job("job-queued")))

@@ -79,8 +79,8 @@ func TestFindingTriageEndpoints(t *testing.T) {
 	viewer, _, err := f.accounts.SignUp(t.Context(), "triage-viewer@example.com", "Viewer", pw)
 	require.NoError(t, err)
 	owner := accounts.Principal{User: f.user, Via: "session"}
-	require.NoError(t, accountstest.Join(t.Context(), t, f.accounts, owner, f.org.ID, viewer, accounts.Member))
-	_, err = f.accounts.SetRepoGrant(t.Context(), owner, f.org.ID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: viewer.ID}, accounts.Viewer)
+	require.NoError(t, accountstest.Join(t.Context(), t, f.accounts, owner, f.org.ID, viewer, accounts.Write))
+	_, err = f.accounts.SetRepoGrant(t.Context(), owner, f.org.ID, storetest.Repo, accounts.Tuple{SubjectType: accounts.TypeUser, SubjectID: viewer.ID}, accounts.Read)
 	require.NoError(t, err)
 	browser := newClient(t, f.client.ts)
 	require.Equal(t, browser.do("POST", "/api/v1/auth/login", `{"email":"triage-viewer@example.com","password":"`+pw+`"}`, nil), 200)

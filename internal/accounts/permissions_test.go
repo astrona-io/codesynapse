@@ -21,7 +21,7 @@ func TestPermissionNames(t *testing.T) {
 		assert.Equal(t, string(p), p.Resource()+"."+p.Area()+":"+p.Level())
 	}
 	assert.False(t, Permission("repository.code:delete").Valid())
-	assert.False(t, Admin.Has("repository.code:delete"), "unknown permissions are never held")
+	assert.False(t, Full.Has("repository.code:delete"), "unknown permissions are never held")
 	assert.False(t, Role("").Has(RepoCodeRead))
 }
 
@@ -39,7 +39,7 @@ func TestLevelsIncludeLowerLevels(t *testing.T) {
 			if !q.Valid() {
 				continue
 			}
-			for _, r := range []Role{Guest, Viewer, Member, Admin, Owner} {
+			for _, r := range []Role{Guest, Read, Write, Full, Owner} {
 				if r.Has(p) {
 					assert.True(t, r.Has(q), string(r)+" holds "+string(p)+" but not "+string(q))
 				}
@@ -57,33 +57,33 @@ func TestBuiltInBundles(t *testing.T) {
 			repoRead = append(repoRead, p)
 		}
 	}
-	assert.Equal(t, Viewer.Permissions(ResourceRepository), repoRead)
+	assert.Equal(t, Read.Permissions(ResourceRepository), repoRead)
 	write := append(slices.Clone(repoRead), RepoSecurityWrite, RepoReviewsWrite, RepoFixesWrite, RepoMemoryWrite,
 		RepoMemoryFull, RepoArchitectureWrite, RepoRuntimeWrite, RepoAIWrite)
 	slices.Sort(write)
-	assert.Equal(t, Member.Permissions(ResourceRepository), write)
+	assert.Equal(t, Write.Permissions(ResourceRepository), write)
 	var all []Permission
 	for _, p := range AllPermissions() {
 		if p.Resource() == ResourceRepository {
 			all = append(all, p)
 		}
 	}
-	assert.Equal(t, Admin.Permissions(ResourceRepository), all)
+	assert.Equal(t, Full.Permissions(ResourceRepository), all)
 
 	guest := []Permission{OrgMembership, OrgSessionsRead, OrgSessionsWrite}
 	slices.Sort(guest)
 	assert.Equal(t, Guest.Permissions(ResourceOrganisation), guest)
 	read := append(slices.Clone(guest), OrgMembersRead, OrgTeamsRead, OrgRepositoriesRead, OrgWatchesRead, OrgRolesRead)
 	slices.Sort(read)
-	assert.Equal(t, Viewer.Permissions(ResourceOrganisation), read)
+	assert.Equal(t, Read.Permissions(ResourceOrganisation), read)
 	orgWrite := append(slices.Clone(read), OrgRepositoriesWrite, OrgWatchesWrite, OrgGatewayRead, OrgGatewayWrite,
 		OrgGitTokensRead, OrgAgentSessionsRead)
 	slices.Sort(orgWrite)
-	assert.Equal(t, Member.Permissions(ResourceOrganisation), orgWrite)
+	assert.Equal(t, Write.Permissions(ResourceOrganisation), orgWrite)
 	full := slices.DeleteFunc(slices.Clone(AllPermissions()), func(p Permission) bool {
 		return p.Resource() != ResourceOrganisation || p == OrgOwnerRules
 	})
-	assert.Equal(t, Admin.Permissions(ResourceOrganisation), full)
+	assert.Equal(t, Full.Permissions(ResourceOrganisation), full)
 	ownerAll := slices.DeleteFunc(AllPermissions(), func(p Permission) bool { return p.Resource() != ResourceOrganisation })
 	assert.Equal(t, Owner.Permissions(ResourceOrganisation), ownerAll)
 }

@@ -4,13 +4,13 @@ import type { Role, Team } from '~/utils/types'
 const session = useSession()
 const org = computed(() => session.current.value?.org)
 const { data, refresh, error: loadError } = useApiGet<{ teams: Team[] }>(() => (org.value ? `accounts/orgs/${org.value.slug}/teams` : 'accounts/orgs/-/teams'))
-const canManage = computed(() => session.can('admin'))
+const canManage = computed(() => session.can('full'))
 const base = computed(() => `accounts/orgs/${org.value?.slug}/teams`)
 const roles: { id: Role | ''; label: string }[] = [
   { id: '', label: 'No organisation role' },
-  { id: 'viewer', label: 'Viewer: reads everything' },
-  { id: 'member', label: 'Member: also syncs and runs tasks' },
-  { id: 'admin', label: 'Admin: also manages access' },
+  { id: 'read', label: 'Read: reads everything' },
+  { id: 'write', label: 'Write: also syncs and runs tasks' },
+  { id: 'full', label: 'Full: also manages access' },
 ]
 const error = ref('')
 const notice = ref('')
@@ -44,7 +44,7 @@ watch(() => org.value?.slug, () => {
 })
 const createTeam = () => act(async () => { await apiPost(base.value, { name: newTeam.value }); newTeam.value = '' }, 'Team created.')
 const setRole = (t: Team, role: string) => act(() => apiPut(`${base.value}/${t.slug}/role`, { role }), `Role of ${t.name} saved.`)
-const addMember = (t: Team) => act(async () => { await apiPut(`${base.value}/${t.slug}/members`, { email: add[t.id], relation: 'member' }); add[t.id] = '' }, `Member added to ${t.name}.`)
+const addMember = (t: Team) => act(async () => { await apiPut(`${base.value}/${t.slug}/members`, { email: add[t.id], relation: 'read' }); add[t.id] = '' }, `Member added to ${t.name}.`)
 const setRelation = (t: Team, email: string, relation: string) => act(() => apiPut(`${base.value}/${t.slug}/members`, { email, relation }), 'Saved.')
 async function removeMember() {
   const r = removingMember.value
@@ -96,7 +96,7 @@ async function deleteTeam() {
                 <td class="wrap">{{ m.user.name }} <span class="muted">{{ m.user.email }}</span></td>
                 <td>
                   <select class="inline" :value="m.relation" :aria-label="`Place of ${m.user.name}`" :disabled="busy" @change="setRelation(t, m.user.email, ($event.target as HTMLSelectElement).value)">
-                    <option value="member">Member</option><option value="maintainer">Maintainer</option>
+                    <option value="read">Read</option><option value="full">Full: manages the team</option>
                   </select>
                 </td>
                 <td class="num"><button type="button" class="secondary tiny" :disabled="busy" :aria-label="`Remove ${m.user.name} from ${t.name}`" @click="removingMember = { team: t, id: m.user.id, name: m.user.name }">Remove</button></td>

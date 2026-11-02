@@ -95,7 +95,7 @@ async function watchCall(method: 'PUT' | 'DELETE' | 'SCAN', w: Watch, body?: obj
 }
 // Who can change a watch: its creator, or an owner or admin. Only owners and
 // admins can turn private repositories on (the API checks both).
-const canAdmin = computed(() => session.can('admin'))
+const canAdmin = computed(() => session.can('full'))
 const editing = ref<Watch | null>(null)
 const editForm = reactive({ include_archived: false, include_forks: false, include_private: false, exclude: '' })
 const editError = ref('')

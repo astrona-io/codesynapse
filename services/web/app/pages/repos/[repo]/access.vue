@@ -8,7 +8,7 @@ const session = useSession()
 const org = computed(() => session.current.value?.org)
 const path = computed(() => `accounts/orgs/${org.value?.slug ?? '-'}/repos/${encodeURIComponent(repo.value)}/access`)
 const { data, refresh, error: loadError } = useApiGet<{ grants: RepoGrant[]; default_repo_access: 'NONE' | 'READ_ONLY'; effective?: { role: Role; via: string; permissions?: string[] } }>(() => path.value)
-const canManage = computed(() => data.value?.effective?.role === 'admin')
+const canManage = computed(() => data.value?.effective?.role === 'full')
 // The highest level per area: a level includes the ones below it.
 const levels = ['read', 'write', 'full']
 const yours = computed(() => {
@@ -22,11 +22,11 @@ const yours = computed(() => {
 })
 const internal = computed(() => (data.value?.grants ?? []).filter((g) => !g.external))
 const external = computed(() => (data.value?.grants ?? []).filter((g) => g.external))
-const roleLabel: Record<string, string> = { none: 'No access: overrides all inherited access', viewer: 'Read: navigation and recall', member: 'Write: also writes memory and reviews', admin: 'Admin: also syncs and manages access' }
+const roleLabel: Record<string, string> = { deny: 'Deny: overrides all inherited access', read: 'Read: navigation and recall', write: 'Write: also writes memory and reviews', full: 'Full: also syncs and manages access' }
 const kind = ref<'user' | 'team'>('user')
 const who = ref('')
-const role = ref<Role | 'none'>('viewer')
-watch(kind, () => { if (kind.value === 'team' && role.value === 'none') role.value = 'viewer' })
+const role = ref<Role | 'deny'>('read')
+watch(kind, () => { if (kind.value === 'team' && role.value === 'deny') role.value = 'read' })
 const error = ref('')
 const ok = ref('')
 watch(repo, () => { error.value = ''; ok.value = ''; who.value = '' })
@@ -35,7 +35,7 @@ async function put(body: Record<string, string>) {
   ok.value = ''
   try {
     const g = await apiPut<RepoGrant>(path.value, body)
-    ok.value = g.role === 'none' ? `${g.label} has no access to this repository.` : `Saved ${g.role === 'viewer' ? 'read' : g.role === 'member' ? 'write' : 'admin'} access for ${g.label}.`
+    ok.value = g.role === 'deny' ? `${g.label} has no access to this repository.` : `Saved ${ROLE_LABEL[g.role].toLowerCase()} access for ${g.label}.`
     await refresh()
     return true
   } catch (e) {
@@ -75,7 +75,7 @@ async function revoke(g: RepoGrant) {
           <form v-if="canManage" class="row" @submit.prevent="grant">
             <div class="field"><label for="kind">Give access to</label><select id="kind" v-model="kind"><option value="user">A person</option><option value="team">A team</option></select></div>
             <div class="field grow"><label for="who">{{ kind === 'user' ? 'Email' : 'Team' }}</label><input id="who" v-model="who" :type="kind === 'user' ? 'email' : 'text'" required :placeholder="kind === 'user' ? 'name@company.com' : 'e.g. contractors'"></div>
-            <div class="field"><label for="role">Role</label><select id="role" v-model="role"><option value="viewer">Read</option><option value="member">Write</option><option value="admin">Admin</option><option v-if="kind === 'user'" value="none">No access (override)</option></select></div>
+            <div class="field"><label for="role">Role</label><select id="role" v-model="role"><option value="read">Read</option><option value="write">Write</option><option value="full">Full</option><option v-if="kind === 'user'" value="deny">Deny (override)</option></select></div>
             <button type="submit" class="align-end">Give access</button>
           </form>
           <div v-if="internal.length" class="table-wrap">

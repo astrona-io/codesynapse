@@ -57,12 +57,12 @@ const expires = computed(() => (preview.value ? new Date(preview.value.expires_a
     <section class="panel stack--tight">
       <template v-if="joined">
         <h2>You joined {{ joined.org.name }}</h2>
-        <p class="muted">Your role is <span class="badge">{{ joined.role }}</span>. Repositories follow the organisation's default and the grants you are given.</p>
+        <p class="muted">Your role is <span class="badge">{{ ROLE_LABEL[joined.role] ?? joined.role }}</span>. Repositories follow the organisation's default and the grants you are given.</p>
         <p><NuxtLink to="/overview">Go to the overview</NuxtLink></p>
       </template>
       <template v-else-if="preview">
         <h2>Join {{ preview.org.name }}</h2>
-        <p class="muted">You are invited as <span class="badge">{{ preview.role }}</span>. If the person who invited you now has a lower role, you join with theirs. The link works until {{ expires }}.</p>
+        <p class="muted">You are invited as <span class="badge">{{ ROLE_LABEL[preview.role] ?? preview.role }}</span>. If the person who invited you now has a lower role, you join with theirs. The link works until {{ expires }}.</p>
         <template v-if="preview.for_you">
           <button type="button" class="accent" :disabled="busy" @click="accept">{{ busy ? 'Joining…' : `Join ${preview.org.name}` }}</button>
         </template>

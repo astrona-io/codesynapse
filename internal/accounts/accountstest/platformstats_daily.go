@@ -35,7 +35,7 @@ func RunPlatformStatsDaily(t *testing.T, newStore func(*testing.T) accounts.Stor
 			"users/total": 3, "users/created": 3, "users/suspended": 0, "users/guest_only": 0, "users/multi_org": 1,
 			"users/platform_admins": f.platformAdmins,
 			"active_users/1d":       2, "active_users/7d": 2, "active_users/30d": 2,
-			"memberships/total": 5, "memberships/owner": 3, "memberships/member": 1, "memberships/guest": 1, "memberships/admin": 0, "memberships/viewer": 0,
+			"memberships/total": 5, "memberships/owner": 3, "memberships/write": 1, "memberships/guest": 1, "memberships/full": 0, "memberships/read": 0,
 			"seats/total":        3,
 			"repo_entries/total": 3, "repo_entries/organisation": 2, "repo_entries/personal": 1, "repo_entries/public": 2, "repo_entries/private": 1, "repo_entries/local": 0, "repo_entries/lost": 1,
 			"graphs/total":            2,
@@ -297,7 +297,7 @@ func platformStatsFixture(ctx context.Context, t *testing.T, st accounts.Store) 
 	require.Len(t, ms, 1)
 	setupOrg := ms[0].Org.ID
 	ada := accounts.Principal{User: adaUser, Via: "session"}
-	require.NoError(t, Join(ctx, t, svc, ada, adaOrg.ID, bobUser, accounts.Member))
+	require.NoError(t, Join(ctx, t, svc, ada, adaOrg.ID, bobUser, accounts.Write))
 	require.NoError(t, Join(ctx, t, svc, accounts.Principal{User: owner, Via: "session"}, setupOrg, bobUser, accounts.Guest))
 	empty, err := svc.CreateOrg(ctx, ada, "Stats empty", "")
 	require.NoError(t, err)
@@ -321,7 +321,7 @@ func platformStatsFixture(ctx context.Context, t *testing.T, st accounts.Store) 
 	}
 
 	job := func(id, kind, org, repo string) accounts.JobRecord {
-		return accounts.JobRecord{ID: id, Kind: kind, Repo: repo, OrgID: org, ActorID: adaUser.ID, Via: "session", Role: accounts.Admin,
+		return accounts.JobRecord{ID: id, Kind: kind, Repo: repo, OrgID: org, ActorID: adaUser.ID, Via: "session", Role: accounts.Full,
 			Execution: execution.Identity{TenantID: org, SubjectID: adaUser.ID, SessionID: "web:abc", ParentSessionID: "web:abc"},
 			State:     accounts.JobQueued, LeaseOwner: "proc", LeaseUntil: now.Add(time.Minute), CreatedAt: now}
 	}

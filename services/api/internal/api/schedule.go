@@ -546,7 +546,7 @@ func (s *Server) scheduleContext(ctx context.Context, sc Schedule) (context.Cont
 		return nil, err
 	}
 	p := accounts.Principal{User: accounts.User{ID: sc.ActorID}, OrgID: sc.OrgID, Via: "automation"}
-	access, err := s.cfg.Accounts.ResolveRepository(ctx, p, sc.OrgID, sc.Repo, accounts.Admin)
+	access, err := s.cfg.Accounts.ResolveRepository(ctx, p, sc.OrgID, sc.Repo, accounts.Full)
 	if err != nil {
 		return nil, err
 	}

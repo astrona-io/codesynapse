@@ -90,7 +90,7 @@ func TestReBACOverHTTP(t *testing.T) {
 	for _, r := range mine.Repos {
 		if r.Graph == "acme/api" {
 			assert.Equal(t, r.Via, "team")
-			assert.Equal(t, r.Role, accounts.Member)
+			assert.Equal(t, r.Role, accounts.Write)
 			assert.True(t, slices.Contains(r.Permissions, accounts.RepoMemoryWrite), "a writer holds memory:write")
 			assert.False(t, slices.Contains(r.Permissions, accounts.RepoSyncWrite), "a writer does not sync")
 		}
