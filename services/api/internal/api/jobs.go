@@ -270,6 +270,9 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 	defer cancelTimeout()
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
+	if job.durable {
+		ctx = withJobID(ctx, job.ID)
+	}
 	if job.durable && job.leases != nil {
 		stop := context.AfterFunc(job.leases, func() { cancel(errLeaseLost) })
 		defer stop()
@@ -553,7 +556,8 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 	}
 	telemetry.IngestRuns.IncContext(ctx, system, outcome)
 	telemetry.IngestDuration.ObserveContext(ctx, time.Since(started).Seconds(), system)
-	fin(job, nodes, edges, err)
+	// Follow-up work runs while the job still holds its lease, which a
+	// worker proves when it asks the API about access (jobAccessClient).
 	if err == nil && j.Ingested != nil {
 		j.Ingested(ctx, job.Repo, g, opts.Authorize)
 	}
@@ -564,6 +568,7 @@ func (j *Jobs) run(job *Job, root string, opts JobOptions, ledger *ingestreport.
 			opts.After(ctx)
 		}
 	}
+	fin(job, nodes, edges, err)
 }
 
 func (j *Jobs) finish(job *Job, nodes, edges int, err error) {

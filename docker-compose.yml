@@ -490,6 +490,9 @@ services:
       CODESYNAPSE_AUDIT_S3_SECRET_ACCESS_KEY: ""
       CODESYNAPSE_OPENFGA_URL: ""
       CODESYNAPSE_OPENFGA_TOKEN: ""
+      # Workers ask the API about access, proving each job's lease; they
+      # hold no OpenFGA key and no API token.
+      CODESYNAPSE_API_URL: http://api:8080
     volumes: &worker-volumes
       - ${SOURCES_DIR:-./sources}:/sources:ro
       - workspace:/workspace

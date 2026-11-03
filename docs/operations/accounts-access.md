@@ -128,6 +128,8 @@ Some checks still compare built-in roles and ignore custom organisation roles un
 
 Custom roles and their grants are mirrored into OpenFGA with the rest of the policy: a grant becomes the role's permissions on that repository or organisation. Changing or deleting a role marks the organisation's policy as changed, and the next sync rewrites every grant of it. An organisation whose role cannot be mirrored (a corrupt row holding a permission of the other resource) stays behind in OpenFGA and shows as drift in `codesynapse-api openfga-verify`.
 
+Workers and the MCP server ask the API about access instead of reading the policy themselves, so only the API will need OpenFGA. Set `CODESYNAPSE_API_URL` for both; compose sets `http://api:8080`. The MCP server sends the calling agent's own API key and runtime session to `POST /api/v1/internal/access`, never the installation token. A worker proves the lease of the job it runs to `POST /api/v1/internal/jobs/{id}/access` and gets an answer only for that job's user, organisation and repository, after the API rechecked the job's session, account, key and membership. Each question names one organisation and at most 50 repositories, is audited like any other request, and a failed answer refuses the action. Without `CODESYNAPSE_API_URL` both decide locally and log a warning at start-up.
+
 Endpoints: `GET`/`POST /api/v1/accounts/orgs/{org}/roles`, `PUT`/`DELETE .../roles/{id}`, `GET`/`PUT /api/v1/accounts/orgs/{org}/role-grants` (`{"user"|"team", "role"}`), `DELETE .../role-grants?subject=user:<id>|team:<id>`, and `GET /api/v1/accounts/permissions` for the catalogue. A repository grant of a custom role is `PUT .../repos/{repo}/access` with `"role": "role:<id>"`.
 
 ## Scoped API keys

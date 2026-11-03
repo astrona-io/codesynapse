@@ -326,7 +326,7 @@ func (s *Service) ResolveRepository(ctx context.Context, p Principal, orgID, gra
 	if err := s.ValidatePrincipal(ctx, p); err != nil {
 		return RepoAccess{}, err
 	}
-	a, err := s.AccessFor(ctx, p)
+	a, err := s.AccessIn(ctx, p, AccessQuery{OrgID: orgID, Graphs: []string{graph}})
 	if err != nil {
 		return RepoAccess{}, err
 	}

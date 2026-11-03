@@ -26,7 +26,13 @@ func (s *Server) jobAuthorization(ctx context.Context, repo string, least accoun
 		return "", func(context.Context) error { return accounts.ErrForbidden }
 	}
 	org := reach.OrgID
+	// Work a worker queues from inside its own job is checked against that
+	// job until it runs under its own ID (Jobs.run).
+	parentJob := jobIDFrom(ctx)
 	return org, func(ctx context.Context) error {
+		if parentJob != "" && jobIDFrom(ctx) == "" {
+			ctx = withJobID(ctx, parentJob)
+		}
 		current, err := execution.Require(ctx)
 		if err != nil || current != id {
 			return execution.ErrConflict

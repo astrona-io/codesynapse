@@ -52,6 +52,13 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (*http.Req
 		}
 		return r, true
 	}
+	// A worker's question about the job it runs carries the job's lease, not
+	// account credentials; handleJobAccess checks it and answers nothing else.
+	if jobLeaseRequest(r) && r.Header.Get("Authorization") == "" {
+		if _, err := r.Cookie(SessionCookie); err != nil {
+			return r, true
+		}
+	}
 	if strings.HasPrefix(r.URL.Path, "/v1/") {
 		return s.authenticateGateway(w, r)
 	}
