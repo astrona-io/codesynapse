@@ -54,6 +54,8 @@ func (c *jobAccessClient) AccessIn(ctx context.Context, p accounts.Principal, q 
 			return accounts.Access{}, accounts.ErrNotFound
 		case http.StatusForbidden, http.StatusUnauthorized:
 			return accounts.Access{}, accounts.ErrForbidden
+		case http.StatusServiceUnavailable:
+			return accounts.Access{}, accounts.ErrPolicyStale
 		}
 		return accounts.Access{}, fmt.Errorf("access question refused: %d", resp.StatusCode)
 	}

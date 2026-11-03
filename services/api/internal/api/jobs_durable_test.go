@@ -152,12 +152,12 @@ func TestWorkersRunWhatTheAPIRecords(t *testing.T) {
 	assert.Equal(t, rec.State, accounts.JobQueued, "nothing runs it without a worker")
 
 	// An ai-only worker leaves it alone; an ingest worker runs it.
-	_ = New(ctx, Config{Accounts: acc, SourcesRoot: sources, Workspace: t.TempDir(), JobRoles: []string{"ai"}, Worker: true}, st, logger)
+	_ = New(ctx, Config{Accounts: accounts.NewService(acc.St, true), SourcesRoot: sources, Workspace: t.TempDir(), JobRoles: []string{"ai"}, Worker: true, AccessURL: ts.URL}, st, logger)
 	time.Sleep(3 * jobPoll)
 	rec, err = acc.St.JobByID(ctx, queued.ID)
 	require.NoError(t, err)
 	assert.Equal(t, rec.State, accounts.JobQueued, "a worker claims only its roles")
-	_ = New(ctx, Config{Accounts: acc, SourcesRoot: sources, Workspace: t.TempDir(), JobRoles: []string{"ingest"}, Worker: true}, st, logger)
+	_ = New(ctx, Config{Accounts: accounts.NewService(acc.St, true), SourcesRoot: sources, Workspace: t.TempDir(), JobRoles: []string{"ingest"}, Worker: true, AccessURL: ts.URL}, st, logger)
 	deadline := time.Now().Add(30 * time.Second)
 	for rec.Active() && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)

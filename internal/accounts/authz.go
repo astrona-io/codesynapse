@@ -104,19 +104,47 @@ func (r Reach) Has(p Permission) bool { return r.Perms.Has(p) }
 
 // AccessOf evaluates a bounded snapshot of current account policy. A partial
 // membership or tuple result never authorizes access.
+//
+// With a Decider (the API with OpenFGA deciding) the Go evaluation still
+// runs first: it refuses suspended accounts, the bootstrap root, too large
+// or invalid policy, and names the memberships and usable entries the
+// Decider is asked about. The permissions are then the Decider's, asked
+// after the snapshot is released.
 func (s *Service) AccessOf(ctx context.Context, userID string) (Access, error) {
+	return s.accessScoped(ctx, userID, nil)
+}
+
+// accessScoped is AccessOf for the question q (nil: everything).
+func (s *Service) accessScoped(ctx context.Context, userID string, q *AccessQuery) (Access, error) {
 	a := Access{UserID: userID, Orgs: map[string]Role{}, OrgPerms: map[string]Perms{}, Teams: map[string]string{}}
+	snap := policySnapshot{orgs: map[string]Org{}}
 	err := s.St.ReadSnapshot(ctx, func(st Store) error {
 		scoped := *s
 		scoped.St = st
+		snap = policySnapshot{orgs: map[string]Org{}}
 		var err error
-		a, err = scoped.accessOf(ctx, userID)
+		a, err = scoped.evaluate(ctx, userID, &snap)
 		return err
 	})
-	return a, err
+	if err != nil || s.Decider == nil {
+		return a, err
+	}
+	if q == nil {
+		return s.decide(ctx, a, snap, "", nil, false)
+	}
+	return s.decide(ctx, a, snap, q.OrgID, q.Graphs, q.OrgOnly)
 }
 
+// accessOf is the Go evaluation alone. Checks under the publication policy
+// lock use it: they read the locked PostgreSQL snapshot, which OpenFGA
+// cannot see yet (the one documented exception, OPENFGA_PLAN.md phase 6).
 func (s *Service) accessOf(ctx context.Context, userID string) (Access, error) {
+	return s.evaluate(ctx, userID, &policySnapshot{orgs: map[string]Org{}})
+}
+
+// evaluate is the Go evaluation; it records in snap the organisations and
+// usable entries it read.
+func (s *Service) evaluate(ctx context.Context, userID string, snap *policySnapshot) (Access, error) {
 	a := Access{UserID: userID, Orgs: map[string]Role{}, OrgPerms: map[string]Perms{}, Teams: map[string]string{}}
 	u, err := s.St.UserByID(ctx, userID)
 	if err != nil {
@@ -269,6 +297,7 @@ func (s *Service) accessOf(ctx context.Context, userID string) (Access, error) {
 	if err != nil {
 		return a, err
 	}
+	snap.orgs = orgs
 	for _, repo := range repos {
 		orgID := repo.OrgID
 		org, ok := orgs[orgID]
@@ -278,6 +307,7 @@ func (s *Service) accessOf(ctx context.Context, userID string) (Access, error) {
 		if !repo.Usable() {
 			continue
 		}
+		snap.repos = append(snap.repos, repo)
 		key := RepoObject(orgID, repo.Graph)
 		var perms Perms
 		via, name := TypeOrganisation, ""

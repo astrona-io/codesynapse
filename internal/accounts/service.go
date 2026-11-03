@@ -42,6 +42,10 @@ type Service struct {
 	// MCP server ask the API. Membership, suspension, the bootstrap root and
 	// key checks still run here first.
 	Remote RemoteAccess
+	// Decider answers what the policy grants from OpenFGA in the API; it
+	// replaces the Go evaluation's permissions while the Go checks stay in
+	// front of it (docs/plans/OPENFGA_PLAN.md, phase 6).
+	Decider Decider
 
 	policy     bool
 	policyOrgs map[string]bool
@@ -334,6 +338,35 @@ func (s *Service) AuthenticateKey(ctx context.Context, key string) (Principal, e
 // RoleIn returns the explicitly enrolled user's role; API keys
 // only work in their own organisation.
 func (s *Service) RoleIn(ctx context.Context, p Principal, orgID string) (Role, error) {
+	r, _, err := s.orgStanding(ctx, p, orgID)
+	return r, err
+}
+
+// orgStanding is p's role and organisation permissions in orgID. The
+// PostgreSQL checks (key organisation, credentials, root, membership) run
+// first; with a Decider or Remote the decision service then answers the
+// role and permissions, owners included, so a stale or unreachable one
+// refuses. Without either, perms is only the role's bundle.
+func (s *Service) orgStanding(ctx context.Context, p Principal, orgID string) (Role, Perms, error) {
+	r, err := s.roleInPG(ctx, p, orgID)
+	if err != nil {
+		return "", 0, err
+	}
+	if s.Decider == nil && s.Remote == nil {
+		return r, r.Bundle(ResourceOrganisation), nil
+	}
+	a, err := s.AccessIn(ctx, p, AccessQuery{OrgID: orgID, OrgOnly: true})
+	if err != nil {
+		return "", 0, err
+	}
+	decided, ok := a.Orgs[orgID]
+	if !ok || decided == "" {
+		return "", 0, ErrForbidden
+	}
+	return decided, a.OrgPerms[orgID], nil
+}
+
+func (s *Service) roleInPG(ctx context.Context, p Principal, orgID string) (Role, error) {
 	if p.OrgID != "" && p.OrgID != orgID {
 		return "", ErrForbidden
 	}
@@ -386,9 +419,10 @@ func (s *Service) teamOrgRole(ctx context.Context, orgID, userID string) (Role, 
 // Require returns ErrForbidden unless p holds perm, an organisation
 // permission, in org (PermsIn: built-in and custom roles, key scope).
 func (s *Service) Require(ctx context.Context, p Principal, orgID string, perm Permission) error {
-	// The built-in role answers most checks without reading teams for
-	// custom roles, so owner control never depends on team evaluation.
-	r, err := s.RoleIn(ctx, p, orgID)
+	// Without a decision service the built-in role answers most checks
+	// without reading teams for custom roles, so owner control never
+	// depends on team evaluation. With one, it decides every check.
+	r, decided, err := s.orgStanding(ctx, p, orgID)
 	if err != nil {
 		return err
 	}
@@ -399,7 +433,14 @@ func (s *Service) Require(ctx context.Context, p Principal, orgID string, perm P
 	if !limit.Has(perm) {
 		return ErrForbidden
 	}
-	if r.Bundle(ResourceOrganisation).Has(perm) && s.Remote == nil {
+	if s.Decider != nil || s.Remote != nil {
+		// AccessIn already applied the key scope.
+		if !decided.Has(perm) {
+			return ErrForbidden
+		}
+		return nil
+	}
+	if r.Bundle(ResourceOrganisation).Has(perm) {
 		return nil
 	}
 	held, err := s.PermsIn(ctx, p, orgID)

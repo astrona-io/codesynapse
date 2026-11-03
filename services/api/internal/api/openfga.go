@@ -3,21 +3,26 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/astrona-io/codesynapse/internal/accounts"
 	"github.com/astrona-io/codesynapse/internal/authz/fga"
 	"github.com/astrona-io/codesynapse/internal/authz/fgasync"
 )
 
-// OpenFGA sync (docs/plans/OPENFGA_PLAN.md, phase 5). PostgreSQL decides
-// every access; this loop only keeps OpenFGA's tuples in step so phase 6
-// can ask it. It runs under the api-loops lease, so one process writes.
+// OpenFGA sync (docs/plans/OPENFGA_PLAN.md, phase 5). PostgreSQL stays the
+// source of truth; this loop keeps OpenFGA's tuples in step, and with
+// CODESYNAPSE_AUTHZ=openfga every API process asks OpenFGA (phase 6). It
+// runs under the api-loops lease, so one process writes.
 const (
 	// openFGAStore is the store the API creates or selects.
 	openFGAStore = "codesynapse"
-	// openFGAEvery is how often pending organisations are synced.
-	openFGAEvery = 15 * time.Second
+	// openFGAEvery is how often pending organisations are synced. An
+	// organisation is refused (stale) from a policy change until its sync,
+	// so this is short.
+	openFGAEvery = 2 * time.Second
 	// openFGARun bounds one pass; well under the lease's minute.
 	openFGARun = 40 * time.Second
 	// openFGABatch is how many organisations one pass syncs.
@@ -81,6 +86,43 @@ func setupOpenFGA(ctx context.Context, c *fga.Client) error {
 	}
 	_, err := c.EnsureModel(sctx)
 	return err
+}
+
+// openFGADecider asks OpenFGA for every decision (phase 6). It only reads:
+// the store and model are the ones the sync loop wrote, so a process that
+// does not hold the lease never creates either. Until they exist, or when
+// the records cannot be read, every decision is refused.
+func (s *Server) openFGADecider() accounts.Decider {
+	records, recErr := s.cfg.Accounts.OpenFGARecords()
+	client, clientErr := fga.New(*s.cfg.OpenFGA)
+	if err := errors.Join(recErr, clientErr); err != nil {
+		s.logger.Error("openfga decisions refused", "error", err)
+		return refuseDecider{err: err}
+	}
+	return &fgasync.Decider{Records: records, Select: func(ctx context.Context) (fgasync.Checker, error) {
+		sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		c, err := client.Select(sctx, openFGAStore)
+		if err != nil {
+			return nil, err // never a nil *fga.Client inside the interface
+		}
+		return c, nil
+	}}
+}
+
+// refuseDecider refuses every decision.
+type refuseDecider struct{ err error }
+
+func (r refuseDecider) Decide(context.Context, accounts.DecisionRequest) (accounts.Decision, error) {
+	return accounts.Decision{}, r.err
+}
+
+// refuseAccess answers no access question: a worker with accounts but no
+// API to ask (the command refuses to start that way).
+type refuseAccess struct{}
+
+func (refuseAccess) AccessIn(context.Context, accounts.Principal, accounts.AccessQuery) (accounts.Access, error) {
+	return accounts.Access{}, fmt.Errorf("%w: this worker has no API to ask about access (CODESYNAPSE_API_URL)", accounts.ErrForbidden)
 }
 
 var errOpenFGAOff = errors.New("OpenFGA is not configured")
