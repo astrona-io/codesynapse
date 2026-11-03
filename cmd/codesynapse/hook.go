@@ -142,6 +142,9 @@ type hookState struct {
 	// EditDirs are the directories the session's own agent edited files in
 	// (stop.go), so Stop knows which checkouts it worked in.
 	EditDirs []string `json:"edit_dirs,omitempty"`
+	// Timings are the hooks' own runs and the pre-brief since the last
+	// retrieval report (timings.go), at most maxHookTimings.
+	Timings []hookTiming `json:"timings,omitempty"`
 	// Bash counts the shell commands CodeSynapse answers with less output, per
 	// usage class; Hinted are the classes already hinted, BashSent what Stop
 	// has reported (bash.go).
@@ -274,6 +277,12 @@ func (o *hookOptions) Run(ctx context.Context, _ *app.Env) error {
 		noteRead(in)
 	case "edit", "edit-failed":
 		noteEdit(in, o.event == "edit-failed")
+	}
+	switch o.event {
+	case "session":
+		noteTiming(in.SessionID, timingSessionStart, time.Since(started), "")
+	case "stop":
+		noteTiming(in.SessionID, timingStop, time.Since(started), "")
 	}
 	note := recordActivity(ctx, o.event, raw, o.EC.Logger)
 	if os.Getenv("CODESYNAPSE_HOOK_TRACE") == "chat" {

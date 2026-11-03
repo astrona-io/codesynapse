@@ -276,6 +276,8 @@ type recallOptions struct {
 	// skipped is set when recall chose not to look anything up (a prompt
 	// with nothing worth recalling), so the hook says nothing.
 	skipped bool
+	// session is the chat the hook runs in, for its timing.
+	session string
 }
 
 func (o *recallOptions) SetupFlags(_ context.Context, _ *app.Env) error {
@@ -291,7 +293,15 @@ func (o *recallOptions) Validate(context.Context, *app.Env) error { return nil }
 
 func (o *recallOptions) Run(ctx context.Context, _ *app.Env) error {
 	ctx = app.Ctx(ctx, o.EC)
+	started := time.Now()
 	text, err := o.recall(ctx)
+	if o.hook && !o.skipped && !errors.Is(err, errServerOffline) {
+		feature := timingSessionStart
+		if o.event == eventPrompt {
+			feature = timingPromptRecall
+		}
+		noteTiming(o.session, feature, time.Since(started), timingOutcome(err))
+	}
 	if o.hook {
 		// A hook must never break the session: report on stderr, exit 0.
 		if err != nil {
@@ -406,6 +416,7 @@ func (o *recallOptions) recall(ctx context.Context) (string, error) {
 	if o.hook {
 		in = readHook(o.EC.Stdin)
 		primary, parent = in.SessionID, in.SessionID
+		o.session = in.SessionID
 		o.event, o.source = in.EventName, in.Source
 		if in.Cwd != "" {
 			dir = in.Cwd

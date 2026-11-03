@@ -163,6 +163,8 @@ type Server struct {
 	aiProbe     aiStatusCache
 	// offload extracts memory triples from conversation turns (local model only).
 	offload *offload.Worker
+	// timings batches the API's own feature timings (featurehealth.go).
+	timings *usage.Recorder
 	recall  *recall.Service
 	sched   *schedules
 	reclone recloner
@@ -251,6 +253,8 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	if !cfg.Worker {
 		go s.offload.Run(ctx)
 		go s.observeMemoryFacts(ctx)
+		s.timings = usage.NewRecorder(st)
+		go s.runTimings(ctx)
 	}
 	sched, err := loadSchedules(cfg.Workspace)
 	if err != nil {
@@ -405,6 +409,7 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/stats/models", governance(anyone), s.handleModelStats)
 	s.route("GET /api/v1/stats/queue", governance(anyone), s.handleQueuePeak)
 	s.route("GET /api/v1/stats/savings", visibleOnly, s.handleSavingsSeries)
+	s.route("GET /api/v1/stats/features", visibleOnly, s.handleFeatureHealth)
 	s.route("DELETE /api/v1/repos/{repo}", repoPerm(accounts.RepoEntryFull), s.handleDeleteRepo)
 	s.route("GET /api/v1/repos/{repo}/overview", repoPerm(accounts.RepoCodeRead), s.handleOverview)
 	s.route("GET /api/v1/repos/{repo}/dashboard", repoPerm(accounts.RepoCodeRead), s.handleDashboard)

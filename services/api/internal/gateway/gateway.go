@@ -84,6 +84,12 @@ type Meta struct {
 	// ShortenSkip is why the newest block offered for shortening went out
 	// as typed: one of the Skip* reasons of shorten.go, or empty.
 	ShortenSkip string
+	// ShortenAsked says this request ran the local shortening call,
+	// ShortenTook how long it waited for it and ShortenFailed that the call
+	// broke off for another reason than time.
+	ShortenAsked  bool
+	ShortenTook   time.Duration
+	ShortenFailed bool
 	// PromptSHA256 and PromptBytes describe the newest user text the agent
 	// sent; ForwardedSHA256 and ForwardedBytes the text that went to the
 	// cloud when the gateway changed it (TextChanged).
@@ -238,6 +244,7 @@ func (g *Anthropic) Handler(upstreamPath string) http.HandlerFunc {
 			var sh Shortened
 			body, sh = g.Shorten.Apply(r.Context(), body)
 			meta.Shortened, meta.Removed, meta.Saved, meta.ShortenSkip = sh.Changed, sh.Removed, sh.New, sh.Skip
+			meta.ShortenAsked, meta.ShortenTook, meta.ShortenFailed = sh.Asked, sh.Took, sh.Failed
 		}
 		meta.noteForwarded(r.Context(), sent, body)
 		status, err := g.forward(r.Context(), w, r, upstreamPath, body, &meta)

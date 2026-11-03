@@ -256,10 +256,16 @@ type MemoryStore interface {
 type UsageStore interface {
 	// AddUsage adds the buckets' counters to the stored ones (creating them).
 	AddUsage(ctx context.Context, buckets []usage.Bucket) error
-	// PruneUsage deletes buckets of days before beforeDay (YYYY-MM-DD).
+	// PruneUsage deletes the day and hourly buckets of days before beforeDay
+	// (YYYY-MM-DD).
 	PruneUsage(ctx context.Context, beforeDay string) error
-	// Usage returns buckets from sinceDay on, ordered by day, org, repo, tool, client.
+	// PruneUsageHours deletes hourly buckets (usage.Bucket.Hour set) of days
+	// before beforeDay.
+	PruneUsageHours(ctx context.Context, beforeDay string) error
+	// Usage returns day buckets from sinceDay on, in usage.Compare order.
 	Usage(ctx context.Context, sinceDay string) ([]usage.Bucket, error)
+	// UsageHours returns hourly buckets from sinceDay on, in usage.Compare order.
+	UsageHours(ctx context.Context, sinceDay string) ([]usage.Bucket, error)
 }
 
 // System names a store's database ("hugegraph", "memory") for

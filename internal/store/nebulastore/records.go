@@ -1,7 +1,6 @@
 package nebulastore
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -230,34 +229,63 @@ func dayNum(day string) (int64, error) {
 // to the stored counters on the server, so the MCP recorder and the API can
 // add to the same bucket without reading it first.
 func (s *Store) AddUsage(ctx context.Context, buckets []usage.Bucket) error {
-	const upsert = "UPSERT VERTEX ON `usage` %s SET `ukey` = $key, `day` = $day, `daynum` = $daynum, `org` = $org, `repo` = $repo, `tool` = $tool, `client` = $client," +
-		" `calls` = `calls` + $calls, `errors` = `errors` + $errors, `response_tokens` = `response_tokens` + $tokens, `duration_ms` = `duration_ms` + $ms," +
-		" `max_duration_ms` = CASE WHEN $max > `max_duration_ms` THEN $max ELSE `max_duration_ms` END," +
-		" `ranges_returned` = `ranges_returned` + $returned, `ranges_read` = `ranges_read` + $read"
 	for _, b := range buckets {
 		n, err := dayNum(b.Day)
 		if err != nil {
 			return err
 		}
-		if _, err := s.write(ctx, fmt.Sprintf(upsert, literal(vid("u", b.Key()))), map[string]any{
-			"key": b.Key(), "day": b.Day, "daynum": n, "org": b.Org, "repo": b.Repo, "tool": b.Tool, "client": b.Client,
-			"calls": int64(b.Calls), "errors": int64(b.Errors), "tokens": int64(b.ResponseTokens), "ms": int64(b.DurationMs), "max": int64(b.MaxDurationMs),
+		params := map[string]any{
+			"key": b.Key(), "day": b.Day, "daynum": n, "hour": b.Hour, "org": b.Org, "repo": b.Repo, "tool": b.Tool, "client": b.Client,
+			"calls": int64(b.Calls), "errors": int64(b.Errors), "timeouts": int64(b.Timeouts), "tokens": int64(b.ResponseTokens),
+			"ms": int64(b.DurationMs), "max": int64(b.MaxDurationMs), "min": int64(b.MinDurationMs), "timed": int64(b.Latency.Count()),
 			"returned": int64(b.RangesReturned), "read": int64(b.RangesRead),
-		}); err != nil {
+		}
+		for i, c := range b.Latency {
+			params["l"+strconv.Itoa(i)] = int64(c)
+		}
+		if _, err := s.write(ctx, fmt.Sprintf(usageUpsert, literal(vid("u", b.Key()))), params); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// PruneUsage implements store.UsageStore.
+// usageUpsert adds a bucket to the stored counters on the server. The
+// minimum comes first, so it compares with the histogram as stored before
+// this bucket; it only counts once the histogram holds a call.
+var usageUpsert = func() string {
+	lat := usage.LatencyColumns()
+	sum := make([]string, len(lat))
+	add := make([]string, len(lat))
+	for i, c := range lat {
+		sum[i] = quote(c)
+		add[i] = sum[i] + " = " + sum[i] + " + $l" + strconv.Itoa(i)
+	}
+	return "UPSERT VERTEX ON `usage` %s SET" +
+		" `min_duration_ms` = CASE WHEN $timed > 0 AND (" + strings.Join(sum, " + ") + " == 0 OR $min < `min_duration_ms`) THEN $min ELSE `min_duration_ms` END," +
+		" `ukey` = $key, `day` = $day, `daynum` = $daynum, `hour` = $hour, `org` = $org, `repo` = $repo, `tool` = $tool, `client` = $client," +
+		" `calls` = `calls` + $calls, `errors` = `errors` + $errors, `timeouts` = `timeouts` + $timeouts, `response_tokens` = `response_tokens` + $tokens," +
+		" `duration_ms` = `duration_ms` + $ms, `max_duration_ms` = CASE WHEN $max > `max_duration_ms` THEN $max ELSE `max_duration_ms` END," +
+		" `ranges_returned` = `ranges_returned` + $returned, `ranges_read` = `ranges_read` + $read, " + strings.Join(add, ", ")
+}()
+
+// PruneUsage implements store.UsageStore: day and hourly buckets before the day.
 func (s *Store) PruneUsage(ctx context.Context, beforeDay string) error {
+	return s.pruneUsage(ctx, "MATCH (v:`usage`) WHERE v.`usage`.`daynum` < $day RETURN id(v) AS id LIMIT 400", beforeDay)
+}
+
+// PruneUsageHours implements store.UsageStore: hourly buckets only.
+func (s *Store) PruneUsageHours(ctx context.Context, beforeDay string) error {
+	return s.pruneUsage(ctx, "MATCH (v:`usage`) WHERE v.`usage`.`daynum` < $day AND v.`usage`.`hour` != \"\" RETURN id(v) AS id LIMIT 400", beforeDay)
+}
+
+func (s *Store) pruneUsage(ctx context.Context, stmt, beforeDay string) error {
 	n, err := dayNum(beforeDay)
 	if err != nil {
 		return err
 	}
 	for {
-		rows, err := s.read(ctx, "MATCH (v:`usage`) WHERE v.`usage`.`daynum` < $day RETURN id(v) AS id LIMIT 400", map[string]any{"day": n})
+		rows, err := s.read(ctx, stmt, map[string]any{"day": n})
 		if err != nil || len(rows) == 0 {
 			return err
 		}
@@ -273,26 +301,39 @@ func (s *Store) PruneUsage(ctx context.Context, beforeDay string) error {
 
 // Usage implements store.UsageStore.
 func (s *Store) Usage(ctx context.Context, sinceDay string) ([]usage.Bucket, error) {
+	return s.usageSince(ctx, "MATCH (v:`usage`) WHERE v.`usage`.`daynum` >= $day AND v.`usage`.`hour` == \"\" RETURN properties(v) AS p", sinceDay)
+}
+
+// UsageHours implements store.UsageStore.
+func (s *Store) UsageHours(ctx context.Context, sinceDay string) ([]usage.Bucket, error) {
+	return s.usageSince(ctx, "MATCH (v:`usage`) WHERE v.`usage`.`daynum` >= $day AND v.`usage`.`hour` != \"\" RETURN properties(v) AS p", sinceDay)
+}
+
+func (s *Store) usageSince(ctx context.Context, stmt, sinceDay string) ([]usage.Bucket, error) {
 	n, err := dayNum(sinceDay)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.read(ctx, "MATCH (v:`usage`) WHERE v.`usage`.`daynum` >= $day RETURN properties(v) AS p", map[string]any{"day": n})
+	rows, err := s.read(ctx, stmt, map[string]any{"day": n})
 	if err != nil {
 		return nil, err
 	}
+	lat := usage.LatencyColumns()
 	out := make([]usage.Bucket, 0, len(rows))
 	for _, r := range rows {
 		p, _ := r["p"].(map[string]any)
 		str := func(k string) string { v, _ := p[k].(string); return v }
-		out = append(out, usage.Bucket{Day: str("day"), Org: str("org"), Repo: str("repo"), Tool: str("tool"), Client: str("client"),
-			Calls: nodeprops.Int(p["calls"]), Errors: nodeprops.Int(p["errors"]), ResponseTokens: nodeprops.Int(p["response_tokens"]),
-			DurationMs: nodeprops.Int(p["duration_ms"]), MaxDurationMs: nodeprops.Int(p["max_duration_ms"]),
-			RangesReturned: nodeprops.Int(p["ranges_returned"]), RangesRead: nodeprops.Int(p["ranges_read"])})
+		b := usage.Bucket{Day: str("day"), Hour: str("hour"), Org: str("org"), Repo: str("repo"), Tool: str("tool"), Client: str("client"),
+			Calls: nodeprops.Int(p["calls"]), Errors: nodeprops.Int(p["errors"]), Timeouts: nodeprops.Int(p["timeouts"]),
+			ResponseTokens: nodeprops.Int(p["response_tokens"]), DurationMs: nodeprops.Int(p["duration_ms"]),
+			MinDurationMs: nodeprops.Int(p["min_duration_ms"]), MaxDurationMs: nodeprops.Int(p["max_duration_ms"]),
+			RangesReturned: nodeprops.Int(p["ranges_returned"]), RangesRead: nodeprops.Int(p["ranges_read"])}
+		for i, c := range lat {
+			b.Latency[i] = nodeprops.Int(p[c])
+		}
+		out = append(out, b)
 	}
-	slices.SortFunc(out, func(a, b usage.Bucket) int {
-		return cmp.Or(cmp.Compare(a.Day, b.Day), cmp.Compare(a.Org, b.Org), cmp.Compare(a.Repo, b.Repo), cmp.Compare(a.Tool, b.Tool), cmp.Compare(a.Client, b.Client))
-	})
+	slices.SortFunc(out, usage.Compare)
 	return out, nil
 }
 

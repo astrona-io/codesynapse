@@ -118,8 +118,20 @@ type localUsage struct {
 	DurationMs     int    `json:"duration_ms"`
 	ResponseTokens int    `json:"response_tokens"`
 	Failed         bool   `json:"failed,omitempty"`
+	// TimedOut says a failed call ran out of time (Feature health counts it
+	// as a timeout as well as an error).
+	TimedOut bool `json:"timed_out,omitempty"`
 	// Source is fetch_source's measurement; older servers refuse it.
 	Source *sourceUsage `json:"source,omitempty"`
+}
+
+// failureOutcome names how a failed local model call ended for Feature
+// health: "timeout" when it ran out of time, else "error".
+func failureOutcome(ctx context.Context, err error) string {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "timeout"
+	}
+	return "error"
 }
 
 // mayAnswer reports whether the bridge may still answer tool itself. Once
@@ -160,11 +172,23 @@ func (b *bridge) reportLocalSource(ctx context.Context, tool string, d time.Dura
 	if tool != fetchsource.Tool { // a fetched page has nothing to do with the checkout
 		repo = b.checkoutRepo(ctx)
 	}
-	body := localUsage{Tool: tool, Client: client, Repo: repo, DurationMs: int(d.Milliseconds()), ResponseTokens: tokens, Failed: failed, Source: src}
+	body := localUsage{Tool: tool, Client: client, Repo: repo, DurationMs: int(d.Milliseconds()), ResponseTokens: tokens, Failed: failed,
+		TimedOut: failed && errors.Is(ctx.Err(), context.DeadlineExceeded), Source: src}
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	err := b.report.do(rctx, http.MethodPost, "/api/v1/usage/local", body, nil)
 	var se *statusError
+	if errors.As(err, &se) && se.Status == http.StatusBadRequest && (body.TimedOut || (src != nil && src.ExtractOutcome != "")) {
+		// A server older than Feature health refuses the outcome fields:
+		// the call is still reported, without them.
+		body.TimedOut = false
+		if src != nil {
+			plain := *src
+			plain.ExtractOutcome = ""
+			body.Source = &plain
+		}
+		err = b.report.do(rctx, http.MethodPost, "/api/v1/usage/local", body, nil)
+	}
 	if src != nil && errors.As(err, &se) && se.Status == http.StatusBadRequest {
 		b.mu.Lock()
 		b.noSourceCounts = true

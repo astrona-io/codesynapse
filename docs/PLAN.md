@@ -42,7 +42,7 @@ This page is the starting point. Each larger feature has its own plan in [`plans
 | [Agent gateway](plans/GATEWAY_PLAN.md) | Agent model traffic through CodeSynapse, local model first | See the plan |
 | [SARIF import](plans/SARIF_IMPORT_PLAN.md) | Findings of external security tools, each naming the tool that found it | Phase 1 (upload and storage) done |
 | [OpenFGA authorisation](plans/OPENFGA_PLAN.md) | Access decisions in OpenFGA, fine-grained `resource.area:level` permissions and custom roles | Proposed |
-| [Feature health](plans/FEATURE_HEALTH_PLAN.md) | Timings per feature and client, and a per-user breaker that pauses slow optional features | Proposed |
+| [Feature health](plans/FEATURE_HEALTH_PLAN.md) | Timings per feature and client, and a per-user breaker that pauses slow optional features | Phase 1 (timings and the Feature health page) done |
 
 ## Architecture
 
@@ -85,7 +85,7 @@ Every code node has the label `Node` plus its kind, and the properties `id`, `re
 | Finding | rule, severity, cwe, file, line, summary (never the secret) |
 | Module | path, version, indirect, ecosystem, dev, license (SPDX), license_source, latest, deprecated, behind (deps.dev), retracted (Go module proxy: the retraction rationale, or `retracted`), scorecard (double, OpenSSF Scorecard overall 0 to 10), scorecard_date, scorecard_checks (up to three lowest allowlisted checks as `Name:score`; deps.dev) |
 | Vulnerability | id, aliases (CVE/GHSA), severity, cwe, version, fixed_version, reachability, url |
-| McpUsage (not `:Node`) | key (`day\|repo\|tool\|client`), day, repo, tool, client, calls, errors, response_tokens, duration_ms, max_duration_ms |
+| McpUsage (not `:Node`) | key (`day\|repo\|tool\|client`, hourly copies add `\|h`+hour and are kept 8 days), day, hour, repo, tool, client, calls, errors, timeouts, response_tokens, duration_ms, min_duration_ms, max_duration_ms, lat_50 … lat_150000 and lat_over (latency histogram counts) |
 | MemoryEntity (not `:Node`) | id (`repo\|mem\|name`), repo, name, type, aliases, created_at, updated_at; joined by `:FACT` relationships with id, repo, predicate, source, confirmations, confidence, valid_from, valid_to, created_at, updated_at |
 | SessionMemoryScope | tenant_id, session_id, ns, bounded JSON snapshot, revision, fixed expiry, deletion tombstone, fact count |
 | SessionMemoryEntity (not `:Node`) | tenant_id, session_id, ns, compound entity ID, redacted entity document, expiry, optional embedding; joined only by scoped `:SESSION_FACT` |

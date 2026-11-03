@@ -1,6 +1,6 @@
 # Feature health: timings per feature and a per-user breaker
 
-Status: proposed (2026-11-02).
+Status: phase 1 done (2026-11-03); phases 2 and 3 in progress.
 
 ## Why
 
@@ -27,6 +27,7 @@ For each feature, client and window (1 h, 24 h, 7 days) the Statistics page show
 **Storage.**
 - Daily buckets gain `min_duration_ms` and a fixed latency histogram. The bucket bounds in ms are 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000 and 150000, plus overflow.
 - Percentiles are read from the histogram, so nothing is stored per call.
+- Each timed call also lands in an hourly copy of its bucket (`hour`, key suffix `|h`+hour), kept 8 days, so the 1 h and 24 h windows are exact; the 7-day window reads the hourly copies too.
 - Bucket merging stays a sum, which is why it is a histogram and not a list of samples.
 - The existing caps (`maxBuckets`, 180-day retention, cleaned client names) apply.
 - Hook and bridge timings reach the buckets through the existing `POST /api/v1/usage/local` and retrieval reports. They carry feature name, client, duration and outcome only: never paths, prompts, session IDs or URLs.

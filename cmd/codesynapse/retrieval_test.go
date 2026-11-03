@@ -87,8 +87,33 @@ func TestRetrievalCounts(t *testing.T) {
 	read("internal/svc/svc_test.go", 1, 0)
 	reportRetrieval(context.Background(), stop, logger)
 	require.Len(t, reports, 2)
-	assert.Equal(t, reports[1], `{"avoided_repeat_ranges":{},"client":"claude-code","tools":{"get_symbol_context":{"returned":0,"read":1}}}`,
+	assert.NotContains(t, reports[0], `"timings"`, "the first report has no runs to carry")
+	var second struct {
+		Tools   map[string]rangeCounts `json:"tools"`
+		Timings []hookTiming           `json:"timings"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(reports[1]), &second))
+	assert.Equal(t, second.Tools, map[string]rangeCounts{"get_symbol_context": {Returned: 0, Read: 1}},
 		"a Read from line 1 with no limit is the whole file, not a range read")
+	require.Len(t, second.Timings, 1, "the report's own earlier run rides along with the next one")
+	assert.Equal(t, second.Timings[0].Feature, timingReport)
+}
+
+// Hook runs are kept bounded between reports, and a server older than
+// Feature health still gets the counts without them.
+func TestHookTimings(t *testing.T) {
+	var s hookState
+	for range maxHookTimings + 5 {
+		s.addTiming(timingStop, time.Second, "")
+	}
+	assert.Len(t, s.Timings, maxHookTimings)
+	s.addTiming(timingPreBrief, time.Hour, "timeout")
+	last := s.Timings[len(s.Timings)-1]
+	assert.Equal(t, last.DurationMs, maxTimingMs, "clamped to what the server accepts")
+	assert.Equal(t, last.Outcome, "timeout")
+	assert.Equal(t, timingOutcome(nil), "")
+	assert.Equal(t, timingOutcome(context.DeadlineExceeded), "timeout")
+	assert.Equal(t, timingOutcome(io.EOF), "error")
 }
 
 // TestEditRecall: of the files the session changed (not those already

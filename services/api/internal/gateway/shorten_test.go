@@ -173,7 +173,9 @@ func TestShortenKeepsOriginalOnDoubt(t *testing.T) {
 			}
 			out, res := tc.s.Apply(ctx, b)
 			assert.Equal(t, string(out), string(b))
-			res.Skip = ""
+			assert.Equal(t, res.Failed, tc.name == "rewrite refused (fact check)", "only a broken call fails")
+			assert.Equal(t, res.Asked, res.Failed || tc.name == "rewrite not shorter", "only a call that ran is timed")
+			res.Skip, res.Asked, res.Took, res.Failed = "", false, 0, false
 			assert.Equal(t, res, Shortened{})
 		})
 	}

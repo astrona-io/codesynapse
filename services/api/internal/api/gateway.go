@@ -90,6 +90,7 @@ func (s *Server) auditGateway(ctx context.Context, m gateway.Meta, status int, t
 	if ok {
 		e.UserID, e.ActorEmail, e.Via, e.KeyID, e.OrgID = p.User.ID, p.User.Email, p.Via, p.KeyID, p.OrgID
 	}
+	s.timeGateway(m, e.OrgID)
 	if s.cfg.Accounts == nil || !gateway.PromptCapture(ctx) || !ok {
 		s.record(ctx, e)
 		return

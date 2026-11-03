@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -278,6 +279,9 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 		}
 	}
 	bash := s.bashReport()
+	// Timings ride along with a report that has something else to say;
+	// alone they would make every Stop report its own run.
+	timings := s.Timings
 	if len(s.Counts) == 0 && wf == nil && tokens == nil && !hasEdits && bash == nil {
 		return
 	}
@@ -339,11 +343,30 @@ func reportRetrieval(ctx context.Context, in toolHookInput, logger *slog.Logger)
 	if bash != nil {
 		body["bash"] = bash
 	}
+	if len(timings) > 0 {
+		body["timings"] = timings
+	}
+	sent := time.Now()
 	err := w.call(ctx, c, func(repo string) error {
-		return c.do(ctx, http.MethodPost, "/api/v1/repos/"+url.PathEscape(repo)+"/usage/retrieval", body, nil)
+		err := c.do(ctx, http.MethodPost, "/api/v1/repos/"+url.PathEscape(repo)+"/usage/retrieval", body, nil)
+		var se *statusError
+		if _, ok := body["timings"]; ok && errors.As(err, &se) && se.Status == http.StatusBadRequest {
+			// A server older than Feature health refuses timings: the
+			// counts still go, the timings are dropped.
+			delete(body, "timings")
+			err = c.do(ctx, http.MethodPost, "/api/v1/repos/"+url.PathEscape(repo)+"/usage/retrieval", body, nil)
+		}
+		return err
 	})
+	if err == nil {
+		s.Timings = s.Timings[len(timings):]
+	}
+	// The report's own run goes with the next one (addTiming keeps the
+	// list bounded when reports keep failing).
+	s.addTiming(timingReport, time.Since(sent), timingOutcome(err))
 	if err != nil {
 		logger.Debug("retrieval counts not reported", "error", err)
+		saveState(state, s)
 		return
 	}
 	// Everything counted so far is accounted for, sent or foreign.

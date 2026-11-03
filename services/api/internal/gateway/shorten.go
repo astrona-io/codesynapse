@@ -95,6 +95,12 @@ type Shortened struct {
 	// out as typed: one of the Skip* reasons, empty when it was shortened
 	// or no block was offered.
 	Skip string
+	// Asked says this request ran the local call (not only waited for
+	// another's), Took how long the request waited for it and Failed that it
+	// broke off for another reason than time (Feature health timings).
+	Asked  bool
+	Took   time.Duration
+	Failed bool
 }
 
 // Shortener rewrites the user's own prose on the cloud leg.
@@ -150,8 +156,10 @@ func (s *Shortener) Apply(ctx context.Context, body []byte) ([]byte, Shortened) 
 				continue
 			}
 			called = true
-			var skip string
-			e, skip = s.rewrite(ctx, id.SessionID, key, sp.text, now)
+			var call shortenCall
+			e, call = s.rewrite(ctx, id.SessionID, key, sp.text, now)
+			skip := call.skip
+			res.Asked, res.Took, res.Failed = call.asked, call.took, call.failed
 			if e == nil {
 				continue
 			}
@@ -168,14 +176,14 @@ func (s *Shortener) Apply(ctx context.Context, body []byte) ([]byte, Shortened) 
 		}
 	}
 	if len(changes) == 0 {
-		return body, Shortened{Skip: res.Skip}
+		return body, Shortened{Skip: res.Skip, Asked: res.Asked, Took: res.Took, Failed: res.Failed}
 	}
 	out := make([]byte, 0, len(body))
 	at := 0
 	for _, c := range changes {
 		lit, err := jsonString(c.short)
 		if err != nil {
-			return body, Shortened{Skip: res.Skip}
+			return body, Shortened{Skip: res.Skip, Asked: res.Asked, Took: res.Took, Failed: res.Failed}
 		}
 		out = append(out, body[at:c.span.start]...)
 		out = append(out, lit...)
@@ -196,38 +204,51 @@ func (s *Shortener) now() time.Time {
 // rewrite makes the one local call and memoizes its outcome, a refusal
 // included, so the block is sent the same way on every later turn. A request
 // that ended (the agent went away) leaves no entry. nil means keep the text.
-// skip is the Skip* reason when this call made no rewrite.
-func (s *Shortener) rewrite(ctx context.Context, session string, key [32]byte, text string, now time.Time) (*memoEntry, string) {
+// The call's skip is the Skip* reason when it made no rewrite.
+func (s *Shortener) rewrite(ctx context.Context, session string, key [32]byte, text string, now time.Time) (*memoEntry, shortenCall) {
 	e, leader := s.memo.reserve(session, key, now)
 	if !leader {
 		if !e.wait(ctx) {
-			return nil, ""
+			return nil, shortenCall{}
 		}
-		return e, ""
+		return e, shortenCall{}
 	}
 	wait := s.Timeout
 	if wait <= 0 {
 		wait = ShortenTimeout
 	}
 	cctx, cancel := context.WithTimeout(ctx, wait)
+	started := time.Now()
 	short, err := s.Rewrite(cctx, text)
+	took := time.Since(started)
 	timedOut := errors.Is(cctx.Err(), context.DeadlineExceeded)
 	cancel()
 	if ctx.Err() != nil {
 		s.memo.drop(session, e)
-		return nil, ""
+		return nil, shortenCall{}
 	}
-	skip := ""
+	call := shortenCall{asked: true, took: took}
 	switch {
 	case errors.Is(err, ErrLocalBusy):
-		skip = SkipBusy
+		// The model never ran: nothing to time.
+		call = shortenCall{skip: SkipBusy}
 	case err != nil && timedOut:
-		skip = SkipTimeout
-	case err != nil || short == "" || len(short) >= len(text):
-		skip = SkipNoRewrite
+		call.skip = SkipTimeout
+	case err != nil:
+		call.skip, call.failed = SkipNoRewrite, true
+	case short == "" || len(short) >= len(text):
+		call.skip = SkipNoRewrite
 	}
-	s.memo.finish(session, e, short, skip == "")
-	return e, skip
+	s.memo.finish(session, e, short, call.skip == "")
+	return e, call
+}
+
+// shortenCall is how a request's own local call went.
+type shortenCall struct {
+	skip   string
+	asked  bool
+	took   time.Duration
+	failed bool
 }
 
 // candidate is the gateway's cheap filter; ShortenProse checks the rest
