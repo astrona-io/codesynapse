@@ -67,7 +67,7 @@ func BashClassOf(tool string) (string, bool) {
 
 // IsWorkflow reports whether tool is one of the workflow pseudo tools.
 func IsWorkflow(tool string) bool {
-	if _, ok := BashClassOf(tool); ok || IsMemoryCounter(tool) || isRepeatCounter(tool) {
+	if _, ok := BashClassOf(tool); ok || IsMemoryCounter(tool) || isRepeatCounter(tool) || IsFeature(tool) {
 		return true
 	}
 	switch tool {
@@ -85,9 +85,12 @@ const Retention = 180 * 24 * time.Hour
 // repositories or client names cannot grow memory without limit.
 const maxBuckets = 5000
 
-// Bucket is one day of usage for a (repository, tool, client) triple.
+// Bucket is one day of usage for a (repository, tool, client) triple, or one
+// hour of it when Hour is set (timed calls only, kept HourRetention).
 type Bucket struct {
 	Day string `json:"day"` // YYYY-MM-DD, UTC
+	// Hour is "00" to "23" (UTC) for an hourly bucket, empty for a day.
+	Hour string `json:"hour,omitempty"`
 	// Org is the organisation of calls made with personal API keys ("" for
 	// the MCP token and single-tenant installs).
 	Org    string `json:"org,omitempty"`
@@ -100,6 +103,14 @@ type Bucket struct {
 	ResponseTokens int `json:"response_tokens"`
 	DurationMs     int `json:"duration_ms"`
 	MaxDurationMs  int `json:"max_duration_ms"`
+	// MinDurationMs is the fastest timed call; it means nothing while
+	// Latency counts none.
+	MinDurationMs int `json:"min_duration_ms,omitempty"`
+	// Timeouts counts the errors that were calls running out of time.
+	Timeouts int `json:"timeouts,omitempty"`
+	// Latency is the timed calls' histogram over LatencyBounds. Calls
+	// counted before it existed are not in it.
+	Latency Latency `json:"latency,omitzero"`
 	// RangesReturned counts the file line ranges the tool's answers gave the
 	// agent, and RangesRead those the agent then read (reported by the
 	// Claude Code plugin's hooks; docs/PLAN.md, agent workflow step 13).
@@ -109,11 +120,23 @@ type Bucket struct {
 
 // Key identifies a bucket.
 func (b Bucket) Key() string {
-	return b.Day + "|" + b.Org + "|" + b.Repo + "|" + b.Tool + "|" + b.Client
+	k := b.Day + "|" + b.Org + "|" + b.Repo + "|" + b.Tool + "|" + b.Client
+	if b.Hour != "" {
+		k += "|h" + b.Hour
+	}
+	return k
 }
 
-// Add merges o's counters into b.
+// Add merges o's counters into b. Everything adds up except the minimum and
+// the maximum, which is why the latency is a histogram and not samples.
 func (b *Bucket) Add(o Bucket) {
+	if o.Latency.Count() > 0 && (b.Latency.Count() == 0 || o.MinDurationMs < b.MinDurationMs) {
+		b.MinDurationMs = o.MinDurationMs
+	}
+	for i := range b.Latency {
+		b.Latency[i] += o.Latency[i]
+	}
+	b.Timeouts += o.Timeouts
 	b.Calls += o.Calls
 	b.Errors += o.Errors
 	b.ResponseTokens += o.ResponseTokens
@@ -130,6 +153,7 @@ func Day(t time.Time) string { return t.UTC().Format(time.DateOnly) }
 type Sink interface {
 	AddUsage(ctx context.Context, buckets []Bucket) error
 	PruneUsage(ctx context.Context, beforeDay string) error
+	PruneUsageHours(ctx context.Context, beforeDay string) error
 }
 
 // Recorder aggregates usage in memory and flushes it to a Sink. It is safe
@@ -149,16 +173,47 @@ func NewRecorder(sink Sink) *Recorder {
 // Record counts one call. tokens is the response size estimate; failed marks
 // tool or protocol errors.
 func (r *Recorder) Record(org, repo, tool, client string, d time.Duration, tokens int, failed bool) {
-	b := Bucket{Day: Day(r.now()), Org: clean(org, 64), Repo: clean(repo, 200), Tool: clean(tool, 64), Client: clean(client, 64), Calls: 1,
-		ResponseTokens: tokens, DurationMs: int(d.Milliseconds()), MaxDurationMs: int(d.Milliseconds())}
+	o := OK
 	if failed {
-		b.Errors = 1
+		o = Failed
 	}
+	r.RecordOutcome(org, repo, tool, client, d, tokens, o)
+}
+
+// RecordOutcome counts one call that ended with o. A tool call is also timed
+// into the latency histogram and the hour's bucket; sessions and the
+// workflow counters are not timed.
+func (r *Recorder) RecordOutcome(org, repo, tool, client string, d time.Duration, tokens int, o Outcome) {
+	now := r.now()
+	b := Bucket{Day: Day(now), Org: clean(org, 64), Repo: clean(repo, 200), Tool: clean(tool, 64), Client: clean(client, 64), ResponseTokens: tokens}
 	if b.Client == "" {
 		b.Client = "unknown"
 	}
+	ms := int(d.Milliseconds())
+	timed := Timed(b.Tool)
+	if timed {
+		b.Observe(ms, o)
+	} else {
+		b.Calls, b.DurationMs, b.MaxDurationMs, b.Errors = 1, ms, ms, btoi(o != OK)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.add(b)
+	if timed {
+		h := Hourly(b, now)
+		h.ResponseTokens = 0
+		r.add(h)
+	}
+}
+
+// Timed reports whether calls of tool are timed: tools and the pseudo
+// features, not sessions or the workflow counters.
+func Timed(tool string) bool {
+	return tool != Session && (!IsWorkflow(tool) || IsFeature(tool))
+}
+
+// add merges b into the pending buckets; r.mu is held.
+func (r *Recorder) add(b Bucket) {
 	if cur, ok := r.pending[b.Key()]; ok {
 		cur.Add(b)
 		return
@@ -194,7 +249,10 @@ func (r *Recorder) Flush(ctx context.Context) error {
 		r.mu.Unlock()
 		return err
 	}
-	return r.sink.PruneUsage(ctx, Day(r.now().Add(-Retention)))
+	if err := r.sink.PruneUsage(ctx, Day(r.now().Add(-Retention))); err != nil {
+		return err
+	}
+	return r.sink.PruneUsageHours(ctx, Day(r.now().Add(-HourRetention)))
 }
 
 // Run flushes every interval until ctx ends, then once more with a short

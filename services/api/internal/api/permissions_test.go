@@ -106,6 +106,7 @@ var roleRoutes = map[string]struct {
 	"GET /api/v1/stats/models":                                       {open, "", true},
 	"GET /api/v1/stats/queue":                                        {open, "", true},
 	"GET /api/v1/stats/savings":                                      {listed, "", false},
+	"GET /api/v1/stats/features":                                     {listed, "", false},
 	"GET /api/v1/stats/series":                                       {open, "", true},
 	"GET /api/v1/stats/series/batch":                                 {open, "", true},
 	"GET /api/v1/version":                                            {open, "", true},

@@ -13,6 +13,7 @@ import (
 type fakeSink struct {
 	got    []Bucket
 	pruned string
+	hours  string
 	fail   bool
 }
 
@@ -26,6 +27,11 @@ func (f *fakeSink) AddUsage(_ context.Context, b []Bucket) error {
 
 func (f *fakeSink) PruneUsage(_ context.Context, before string) error { f.pruned = before; return nil }
 
+func (f *fakeSink) PruneUsageHours(_ context.Context, before string) error {
+	f.hours = before
+	return nil
+}
+
 func TestRecorder(t *testing.T) {
 	sink := &fakeSink{fail: true}
 	r := NewRecorder(sink)
@@ -38,15 +44,20 @@ func TestRecorder(t *testing.T) {
 	r.Record("", "repo", "search", "claude-code", 10*time.Millisecond, 10, false)
 	sink.fail = false
 	require.NoError(t, r.Flush(context.Background()))
-	require.Len(t, sink.got, 2, "a failed flush keeps its buckets")
-	byTool := map[string]Bucket{}
+	require.Len(t, sink.got, 3, "a failed flush keeps its buckets")
+	byKey := map[string]Bucket{}
 	for _, b := range sink.got {
-		byTool[b.Tool] = b
+		byKey[b.Tool+b.Hour] = b
 	}
-	assert.Equal(t, byTool["search"], Bucket{Day: "2026-10-22", Repo: "repo", Tool: "search", Client: "claude-code", Calls: 3, Errors: 1,
-		ResponseTokens: 160, DurationMs: 80, MaxDurationMs: 50})
-	assert.Equal(t, byTool[Session].Client, "unknown")
+	want := Bucket{Day: "2026-10-22", Repo: "repo", Tool: "search", Client: "claude-code", Calls: 3, Errors: 1,
+		ResponseTokens: 160, DurationMs: 80, MinDurationMs: 10, MaxDurationMs: 50, Latency: Latency{3}}
+	assert.Equal(t, byKey["search"], want)
+	want.Hour, want.ResponseTokens = "23", 0
+	assert.Equal(t, byKey["search23"], want, "timed calls also go to the hour's bucket")
+	assert.Equal(t, byKey[Session].Client, "unknown")
+	assert.Equal(t, byKey[Session].Latency.Count(), 0, "sessions are not timed")
 	assert.Equal(t, sink.pruned, "2026-04-25", "180 days kept")
+	assert.Equal(t, sink.hours, "2026-10-14", "hours kept eight days")
 	require.NoError(t, r.Flush(context.Background()), "nothing pending is fine")
 }
 

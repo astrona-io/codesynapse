@@ -43,6 +43,9 @@ type localUsageReport struct {
 	DurationMs     int    `json:"duration_ms"`
 	ResponseTokens int    `json:"response_tokens"`
 	Failed         bool   `json:"failed"`
+	// TimedOut says the call failed by running out of time (Feature health
+	// counts it as a timeout as well as an error).
+	TimedOut bool `json:"timed_out,omitempty"`
 	// Source is fetch_source's measurement (docs/plans/TEXT_OPTIMIZATION_PLAN.md,
 	// pillar D): how the page was answered and its sizes, never its URL.
 	Source *sourceReport `json:"source,omitempty"`
@@ -60,6 +63,9 @@ type sourceReport struct {
 	ExtractedTokens int    `json:"extracted_tokens"`
 	ReduceUs        int    `json:"reduce_us"`
 	ExtractUs       int    `json:"extract_us,omitempty"`
+	// ExtractOutcome is how the extract call ended (usage.Outcomes), ok
+	// when empty; it times source-extract on Feature health.
+	ExtractOutcome string `json:"extract_outcome,omitempty"`
 }
 
 const (
@@ -82,7 +88,8 @@ func (sr *sourceReport) validate() error {
 	case sr.ExtractUs < 0 || sr.ExtractUs > maxSourceExtractUs:
 		return errors.New("source extract_us out of range")
 	}
-	return nil
+	_, err := usage.ParseOutcome(sr.ExtractOutcome)
+	return err
 }
 
 // returned reports whether a page was returned (not refused, not failed).
@@ -181,7 +188,7 @@ func (s *Server) handleLocalUsage(w http.ResponseWriter, r *http.Request) {
 	e := accounts.Event{Action: localAnswerAction, Target: cmp.Or(repo, in.Tool), Outcome: accounts.Success, Status: http.StatusNoContent,
 		MCP: &accounts.MCPRequest{Method: "tools/call", Name: in.Tool, Repo: repo, Client: in.Client,
 			DurationMS: int64(in.DurationMs), Bytes: int64(in.ResponseTokens) * 4}}
-	if in.Failed {
+	if in.Failed || in.TimedOut {
 		e.Outcome = accounts.Failure
 	}
 	if s.cfg.Accounts == nil {
@@ -235,12 +242,12 @@ func (s *Server) auditLocal(w http.ResponseWriter, r *http.Request, in localUsag
 // already in the audit log.
 func (s *Server) countLocal(r *http.Request, in localUsageReport, org, repo string) {
 	telemetry.RecordLocalAnswer(r.Context(), in.Tool, telemetry.LocalRecorded)
-	b := usage.Bucket{Day: usage.Day(time.Now()), Org: org, Repo: repo, Tool: in.Tool, Client: in.Client, Calls: 1,
-		ResponseTokens: in.ResponseTokens, DurationMs: in.DurationMs, MaxDurationMs: in.DurationMs}
-	if in.Failed {
-		b.Errors = 1
-	}
-	buckets := append([]usage.Bucket{b}, s.countSource(r, in, org)...)
+	now := time.Now()
+	b := usage.Bucket{Org: org, Repo: repo, Tool: in.Tool, Client: in.Client}
+	b.Observe(in.DurationMs, in.outcome())
+	buckets := usage.Spread(b, now)
+	buckets[0].ResponseTokens = in.ResponseTokens
+	buckets = append(buckets, s.countSource(r, in, org, now)...)
 	if err := s.st.AddUsage(r.Context(), buckets); err != nil {
 		s.logger.Warn("local call not counted", "tool", in.Tool, "error", err)
 	}
@@ -250,7 +257,7 @@ func (s *Server) countLocal(r *http.Request, in localUsageReport, org, repo stri
 // and returns its daily buckets: pages returned, cache hits, raw tokens and
 // tokens saved (raw minus returned, per page). They carry the organisation
 // and no repository.
-func (s *Server) countSource(r *http.Request, in localUsageReport, org string) []usage.Bucket {
+func (s *Server) countSource(r *http.Request, in localUsageReport, org string, now time.Time) []usage.Bucket {
 	sr := in.Source
 	if sr == nil {
 		return nil
@@ -258,15 +265,23 @@ func (s *Server) countSource(r *http.Request, in localUsageReport, org string) [
 	telemetry.RecordSourceFetch(r.Context(), in.Tool, telemetry.SourceFetch{Result: sr.Result, RawTokens: sr.RawTokens,
 		CleanedTokens: sr.CleanedTokens, ExtractedTokens: sr.ExtractedTokens,
 		Reduce: time.Duration(sr.ReduceUs) * time.Microsecond, Extract: time.Duration(sr.ExtractUs) * time.Microsecond})
-	if !sr.returned() {
-		return nil
+	var out []usage.Bucket
+	if sr.ExtractUs > 0 {
+		// The local model's extract, timed like a tool call (Feature health).
+		o, _ := usage.ParseOutcome(sr.ExtractOutcome) //nolint:errcheck // validate checked it
+		x := usage.Bucket{Org: org, Tool: usage.FeatureSourceExtract, Client: in.Client}
+		x.Observe(sr.ExtractUs/1000, o)
+		out = usage.Spread(x, now)
 	}
-	day := usage.Day(time.Now())
+	if !sr.returned() {
+		return out
+	}
+	day := usage.Day(now)
 	counter := func(tool string, n int) usage.Bucket {
 		return usage.Bucket{Day: day, Org: org, Tool: tool, Client: in.Client, Calls: n}
 	}
-	out := []usage.Bucket{counter(usage.SourceFetches, 1), counter(usage.SourceRaw, sr.RawTokens),
-		counter(usage.SourceSaved, max(0, sr.RawTokens-sr.ExtractedTokens))}
+	out = append(out, counter(usage.SourceFetches, 1), counter(usage.SourceRaw, sr.RawTokens),
+		counter(usage.SourceSaved, max(0, sr.RawTokens-sr.ExtractedTokens)))
 	if sr.Result != telemetry.SourceMiss {
 		out = append(out, counter(usage.SourceHits, 1))
 	}
@@ -279,6 +294,17 @@ const localAnswerAction = "mcp.local_answer"
 // localTools are the tools the bridge may answer on the developer's machine.
 func localTools() []string {
 	return slices.Concat(gittools.Tools, ghtools.Tools, coretools.Local, []string{asklocal.Tool, asklocal.DraftTool, asklocal.ReadTool, fetchsource.Tool})
+}
+
+// outcome is how the reported call ended.
+func (in localUsageReport) outcome() usage.Outcome {
+	switch {
+	case in.TimedOut:
+		return usage.TimedOut
+	case in.Failed:
+		return usage.Failed
+	}
+	return usage.OK
 }
 
 func (in localUsageReport) validate() error {

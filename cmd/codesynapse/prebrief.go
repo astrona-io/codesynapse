@@ -79,6 +79,13 @@ func (o *prebriefOptions) Run(ctx context.Context, _ *app.Env) error {
 	case errors.Is(err, errServerOffline) || connectFailure(err) != "":
 		noteBrief(briefOffline, took)
 	case ctx.Err() == nil && (errors.Is(err, errBriefSlow) || errors.Is(err, context.DeadlineExceeded) || bctx.Err() != nil):
+		noteTiming(in.SessionID, timingPreBrief, took, "timeout")
+	case ctx.Err() == nil:
+		noteTiming(in.SessionID, timingPreBrief, took, timingOutcome(err))
+	}
+	switch {
+	case errors.Is(err, errServerOffline) || connectFailure(err) != "":
+	case ctx.Err() == nil && (errors.Is(err, errBriefSlow) || errors.Is(err, context.DeadlineExceeded) || bctx.Err() != nil):
 		// Slow, not gone: the next prompts of this chat would wait as long.
 		skipBriefs(in.SessionID)
 		noteBrief(briefTimeout, took)

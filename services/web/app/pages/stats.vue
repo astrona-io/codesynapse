@@ -4,9 +4,9 @@ useHead({ title: 'Statistics · CodeSynapse' })
 const route = useRoute()
 if (route.path === '/stats') await navigateTo('/stats/agents', { replace: true })
 const { days, pending } = useStatistics()
-// Live activity (minutes to days) and the model queue (weeks) have windows
-// of their own.
-const showWindow = computed(() => !route.path.endsWith('/activity') && !route.path.endsWith('/queue'))
+// Live activity (minutes to days), the model queue (weeks) and feature
+// health (hours) have windows of their own.
+const showWindow = computed(() => !['/activity', '/queue', '/features'].some((p) => route.path.endsWith(p)))
 </script>
 
 <template>
@@ -21,6 +21,7 @@ const showWindow = computed(() => !route.path.endsWith('/activity') && !route.pa
       <NuxtLink to="/stats/models">Models &amp; savings</NuxtLink>
       <NuxtLink to="/stats/gateway">Gateway</NuxtLink>
       <NuxtLink to="/stats/queue">Model queue</NuxtLink>
+      <NuxtLink to="/stats/features">Feature health</NuxtLink>
       <NuxtLink to="/stats/memory">Agent memory</NuxtLink>
       <NuxtLink to="/stats/activity">Live activity</NuxtLink>
       <NuxtLink to="/stats/code">Code &amp; security</NuxtLink>

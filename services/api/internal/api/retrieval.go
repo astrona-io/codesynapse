@@ -71,7 +71,21 @@ type retrievalReport struct {
 	// ResendTokenTurns is, per tool, answer tokens still in context times
 	// the turns run since; the server turns it into avoided re-sent tokens.
 	ResendTokenTurns map[string]int `json:"resend_token_turns,omitempty"`
+	// Timings are the hooks' own runs and the pre-brief, one entry per run
+	// since the last report (usage.ReportedFeatures by short name); only
+	// the name, the duration and how it ended (Feature health).
+	Timings []hookTiming `json:"timings,omitempty"`
 }
+
+// hookTiming is one timed run a hook reports.
+type hookTiming struct {
+	Feature    string `json:"feature"`
+	DurationMs int    `json:"duration_ms"`
+	Outcome    string `json:"outcome,omitempty"`
+}
+
+// maxRetrievalTimings bounds the runs one report may carry.
+const maxRetrievalTimings = 64
 
 func (s *Server) retrievalRoutes() {
 	s.route("POST /api/v1/repos/{repo}/usage/retrieval", repoPerm(accounts.RepoCodeRead), s.handleRetrievalReport)
@@ -97,7 +111,8 @@ func (s *Server) handleRetrievalReport(w http.ResponseWriter, r *http.Request) {
 		s.accountError(w, err)
 		return
 	}
-	day := usage.Day(time.Now())
+	now := time.Now()
+	day := usage.Day(now)
 	buckets := make([]usage.Bucket, 0, len(in.Tools))
 	if in.Edits != nil {
 		for tool, n := range in.Edits.Counters() {
@@ -146,6 +161,20 @@ func (s *Server) handleRetrievalReport(w http.ResponseWriter, r *http.Request) {
 			buckets = append(buckets, usage.Bucket{Day: day, Org: org, Repo: repo, Tool: usage.BashTool(class), Client: in.Client, Calls: n})
 		}
 	}
+	timed := map[string]*usage.Bucket{}
+	for _, t := range in.Timings {
+		f, _ := usage.ReportedFeature(t.Feature)
+		o, _ := usage.ParseOutcome(t.Outcome) //nolint:errcheck // validate checked it
+		b, ok := timed[f]
+		if !ok {
+			b = &usage.Bucket{Org: org, Repo: repo, Tool: f, Client: in.Client}
+			timed[f] = b
+		}
+		b.Observe(t.DurationMs, o)
+	}
+	for _, b := range timed {
+		buckets = append(buckets, usage.Spread(*b, now)...)
+	}
 	if len(buckets) == 0 {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -171,8 +200,22 @@ func (in retrievalReport) validate() error {
 			return err
 		}
 	}
-	if len(in.Tools) > maxRetrievalTools || (len(in.Tools) == 0 && in.Workflow == nil && in.Tokens == nil && in.Edits == nil && len(in.Bash) == 0 && in.AvoidedRepeatRanges == nil) {
+	if len(in.Tools) > maxRetrievalTools || (len(in.Tools) == 0 && in.Workflow == nil && in.Tokens == nil && in.Edits == nil && len(in.Bash) == 0 && in.AvoidedRepeatRanges == nil && len(in.Timings) == 0) {
 		return fmt.Errorf("report up to %d tools, or the workflow counts", maxRetrievalTools)
+	}
+	if len(in.Timings) > maxRetrievalTimings {
+		return fmt.Errorf("report up to %d timings", maxRetrievalTimings)
+	}
+	for _, t := range in.Timings {
+		if _, ok := usage.ReportedFeature(t.Feature); !ok {
+			return fmt.Errorf("timings: unknown feature %q", t.Feature)
+		}
+		if t.DurationMs < 0 || t.DurationMs > maxLocalDurationMs {
+			return errors.New("timings: duration_ms out of range")
+		}
+		if _, err := usage.ParseOutcome(t.Outcome); err != nil {
+			return fmt.Errorf("timings: %w", err)
+		}
 	}
 	if wf := in.Workflow; wf != nil {
 		for _, n := range []int{wf.FirstCodeSynapse, wf.FirstNative, wf.ReadsTurnedBack, wf.FetchesSteered, wf.RangeReadsSingle, wf.RangeBatches, wf.RangesBatched, wf.FilesEdited, wf.FilesEditedFound} {

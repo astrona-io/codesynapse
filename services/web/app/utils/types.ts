@@ -1010,3 +1010,25 @@ export interface SavingsSeries {
   unplaced_source_saved_tokens?: number; unplaced_sources_saved_dollars?: number
   reference_price: ReferencePrice | null
 }
+
+// GET /api/v1/stats/features: how long the optional features and tools take
+// (docs/plans/FEATURE_HEALTH_PLAN.md). Percentiles come from a histogram.
+export type FeatureWindow = '1h' | '24h' | '7d'
+export interface FeatureTiming {
+  calls: number; errors: number; timeouts: number
+  min_ms: number; max_ms: number; avg_ms: number; p50_ms: number; p95_ms: number
+}
+export interface ClientTiming extends FeatureTiming { client: string }
+export interface FeatureHealth {
+  feature: string
+  kind: 'model' | 'hook' | 'tool'
+  total: FeatureTiming
+  clients: ClientTiming[]
+}
+export interface FeatureHealthStats {
+  window: FeatureWindow
+  since: string
+  generated_at: string
+  latency_bounds_ms: number[]
+  features: FeatureHealth[]
+}

@@ -76,7 +76,7 @@ func (b *bridge) fetchSource(ctx context.Context, msg []byte, c toolCall) (map[s
 	}
 	var in fetchsource.In
 	_ = json.Unmarshal(c.Params.Arguments, &in) //nolint:errcheck // Run decoded the same arguments strictly
-	extract := b.extractSource(ctx, msg, in.Question, &ans)
+	extract, outcome := b.extractSource(ctx, msg, in.Question, &ans)
 	raw, err := json.Marshal(ans)
 	if err != nil {
 		src.Result = telemetry.SourceError
@@ -91,6 +91,9 @@ func (b *bridge) fetchSource(ctx context.Context, msg []byte, c toolCall) (map[s
 	src.ExtractedTokens = min(max(ans.TextTokens, 0), maxSourceTokens)
 	src.ReduceUs = min(max(ans.Reduce.Microseconds(), 0), maxSourceUs)
 	src.ExtractUs = min(max(extract.Microseconds(), 0), maxSourceExtractUs)
+	if src.ExtractUs > 0 {
+		src.ExtractOutcome = outcome
+	}
 	return map[string]any{
 		"content":           []map[string]any{{"type": "text", "text": string(raw)}},
 		"structuredContent": json.RawMessage(raw),
@@ -122,6 +125,9 @@ type sourceUsage struct {
 	ExtractedTokens int    `json:"extracted_tokens"`
 	ReduceUs        int64  `json:"reduce_us"`
 	ExtractUs       int64  `json:"extract_us,omitempty"`
+	// ExtractOutcome is how the source-extract call ended when it failed
+	// ("error" or "timeout"; empty is ok), for Feature health.
+	ExtractOutcome string `json:"extract_outcome,omitempty"`
 }
 
 // sourceTTLs reads the per-host TTLs from the user's config folder. A file
@@ -166,19 +172,22 @@ func (b *bridge) sourceFetcher() *fetchsource.Fetcher {
 // the checkout is not indexed, the server has no local model (409) or the
 // extract is not shorter. It returns how long the local model was asked
 // for, zero when it was not asked.
-func (b *bridge) extractSource(ctx context.Context, msg []byte, question string, ans *fetchsource.Out) (took time.Duration) {
+//
+// outcome is empty when the model answered, else "error" or "timeout"
+// (usage.Outcomes), so Feature health can tell a slow model from a failing one.
+func (b *bridge) extractSource(ctx context.Context, msg []byte, question string, ans *fetchsource.Out) (took time.Duration, outcome string) {
 	question = strings.TrimSpace(question)
 	if question == "" || ans.ContentType == "application/json" || utf8.RuneCountInString(ans.Text) < fetchsource.ExtractThreshold ||
 		app.Getenv("CODESYNAPSE_SOURCE_EXTRACT", "true") == "false" {
-		return took
+		return took, ""
 	}
 	if len(ans.Text) > fetchsource.MaxExtractInput {
 		ans.ExtractNote = fmt.Sprintf("not shortened by a local model: the pruned page is over %d bytes", fetchsource.MaxExtractInput)
-		return took
+		return took, ""
 	}
 	if b.checkoutRepo(ctx) == "" {
 		ans.ExtractNote = "not shortened by a local model: this checkout is not indexed in CodeSynapse"
-		return took
+		return took, ""
 	}
 	ctx, cancel := context.WithTimeout(ctx, sourceExtractTimeout)
 	defer cancel()
@@ -189,7 +198,7 @@ func (b *bridge) extractSource(ctx context.Context, msg []byte, question string,
 	if err != nil {
 		first, _, _ := strings.Cut(err.Error(), "\n")
 		ans.ExtractNote = capNote("not shortened by a local model: " + first)
-		return took
+		return took, failureOutcome(ctx, err)
 	}
 	// The server checked and redacted the extract; it is checked again here
 	// because the bridge hands it to the agent.
@@ -197,14 +206,14 @@ func (b *bridge) extractSource(ctx context.Context, msg []byte, question string,
 	switch {
 	case !ex.Found || text == "":
 		ans.ExtractNote = "the local model found no answer to the question in the page; the pruned page is returned"
-		return took
+		return took, ""
 	case len(text) >= len(ans.Text) || utf8.RuneCountInString(text) > fetchsource.MaxExtract+2:
-		return took
+		return took, ""
 	}
 	ans.Text, ans.Extracted, ans.ExtractModel, ans.ExtractDropped = text, true, ex.Model, ex.Dropped
 	ans.TextBytes, ans.TextTokens = len(text), telemetry.EstimateTokens(len(text))
 	if len(ex.Problems) > 0 {
 		ans.ExtractNote = capNote(strings.Join(ex.Problems, "; "))
 	}
-	return took
+	return took, ""
 }

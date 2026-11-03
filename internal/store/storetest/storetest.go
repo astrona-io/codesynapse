@@ -427,6 +427,47 @@ func usageContract(ctx context.Context, t *testing.T, s store.UsageStore) {
 	assert.Equal(t, mine[0], usage.Bucket{Day: "2000-01-01", Repo: Repo, Tool: "search", Client: "claude-code", Calls: 3, Errors: 1, ResponseTokens: 400, DurationMs: 90, MaxDurationMs: 50,
 		RangesReturned: 5, RangesRead: 2})
 	assert.Equal(t, mine[1].Tool, usage.Session)
+
+	// Timed calls: the hour's bucket keeps the minimum, timeouts and the
+	// histogram, adds on the server and stays out of the day buckets.
+	hour := usage.Bucket{Day: "2000-01-01", Hour: "07", Repo: Repo, Tool: "ask_local", Client: "claude-code"}
+	first, second := hour, hour
+	first.Observe(700, usage.OK)
+	second.Observe(40, usage.TimedOut)
+	second.Observe(200000, usage.Failed)
+	require.NoError(t, s.AddUsage(ctx, []usage.Bucket{first}))
+	require.NoError(t, s.AddUsage(ctx, []usage.Bucket{second}))
+	untimed := hour
+	untimed.RangesReturned = 1
+	require.NoError(t, s.AddUsage(ctx, []usage.Bucket{untimed}), "a bucket with no timed call keeps the minimum")
+	hours, err := s.UsageHours(ctx, "2000-01-01")
+	require.NoError(t, err)
+	var timed []usage.Bucket
+	for _, g := range hours {
+		if g.Day < "2000-01-03" {
+			timed = append(timed, g)
+		}
+	}
+	require.Len(t, timed, 1)
+	want := hour
+	want.Calls, want.Errors, want.Timeouts, want.DurationMs, want.MinDurationMs, want.MaxDurationMs, want.RangesReturned = 3, 2, 1, 200740, 40, 200000, 1
+	want.Latency[0], want.Latency[4], want.Latency[usage.LatencyBuckets-1] = 1, 1, 1
+	assert.Equal(t, timed[0], want)
+	got, err = s.Usage(ctx, "2000-01-01")
+	require.NoError(t, err)
+	for _, g := range got {
+		assert.Equal(t, g.Hour, "", "day buckets only")
+	}
+	require.NoError(t, s.PruneUsageHours(ctx, "2000-01-02"))
+	hours, err = s.UsageHours(ctx, "2000-01-01")
+	require.NoError(t, err)
+	for _, g := range hours {
+		assert.True(t, g.Day >= "2000-01-02", "older hours pruned")
+	}
+	got, err = s.Usage(ctx, "2000-01-01")
+	require.NoError(t, err)
+	assert.Equal(t, got[0].Day, "2000-01-01", "pruning hours keeps the days")
+
 	require.NoError(t, s.PruneUsage(ctx, "2000-01-02"))
 	got, err = s.Usage(ctx, "2000-01-01")
 	require.NoError(t, err)

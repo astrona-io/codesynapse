@@ -156,3 +156,16 @@ Every series retains authenticated `tenant_id` and fixed `none` for MCP tool/pro
 Each accepted observation also produces an `agent.hook` span when tracing is enabled/sampled. It includes fixed client/event/category/outcome, allowlisted source/tool/failure/permission mode, measured counts, context usage, reported duration and boolean flags when present, the opaque session ID and audit activity ID. Its duration describes the observation inside the API, not the reported operation duration. Session identity is a span attribute, never a resource or metric attribute.
 
 Delivery is synchronous and best effort with an 8 MiB local hook-input limit and a ten-second budget (2.5 seconds for Codex `SessionEnd`/`Interrupt`). Network/storage failure logs a content-free warning and leaves the assistant running. There is no offline spool, automatic retry or exactly-once delivery guarantee; process death, disabled/untrusted hooks and unavailable APIs can lose observations. Metrics are live accepted observations and are not replayed from audit after restart. Existing metric stream identity/reset behavior applies. Hooks are useful observations, not a complete enforcement or billing boundary.
+
+## Feature timings
+
+Statistics → Feature health shows, per feature and client, calls, errors, timeouts, min, average, p50, p95 and max over the last hour, 24 hours or 7 days (`GET /api/v1/stats/features?window=1h|24h|7d`, filtered to the repositories the caller sees). The figures come from the usage buckets: every timed call adds to a daily bucket and an hourly copy kept 8 days, each with a fixed latency histogram (50 ms to 150 s, plus overflow), so percentiles are estimates and nothing is kept per call.
+
+Where the timings come from:
+
+- MCP tools: the server measures them; tools the bridge answers report `duration_ms` and `timed_out` through `POST /api/v1/usage/local`.
+- `fetch_source` source extracts: `extract_us` and `extract_outcome` in the same report.
+- The gateway's local route and prompt shortening: measured by the API.
+- Claude Code hooks (pre-brief, session start, prompt recall, stop, the retrieval report itself): kept in the local session state file (at most 64) and sent as `timings` with the next retrieval report; an older server that refuses them gets the report without them.
+
+A timing carries a feature name from a fixed list, the client, the duration (capped at 10 minutes) and `ok`, `error` or `timeout`; never paths, prompts, URLs or session IDs. A timeout counts as an error too.

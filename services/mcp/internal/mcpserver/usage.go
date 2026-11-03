@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -67,7 +68,14 @@ func usageMiddleware(rec *usage.Recorder) mcp.Middleware {
 						tokens = len(b) / 4
 					}
 				}
-				rec.Record(callerOrg(ctx), repo, name, sessionClient(req), time.Since(start), tokens, failed)
+				outcome := usage.OK
+				switch {
+				case errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded):
+					outcome = usage.TimedOut
+				case failed:
+					outcome = usage.Failed
+				}
+				rec.RecordOutcome(callerOrg(ctx), repo, name, sessionClient(req), time.Since(start), tokens, outcome)
 				return res, err
 			}
 			return next(ctx, method, req)

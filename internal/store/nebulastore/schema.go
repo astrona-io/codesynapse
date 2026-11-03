@@ -12,6 +12,7 @@ import (
 
 	"github.com/astrona-io/codesynapse/internal/model"
 	"github.com/astrona-io/codesynapse/internal/store"
+	"github.com/astrona-io/codesynapse/internal/usage"
 )
 
 // edgeKinds are the model edge kinds stored as edge types. Session facts
@@ -136,7 +137,10 @@ var schemaItems = func() []schemaItem {
 		schemaItem{name: "snapshot", cols: texts("sid", "repo", "at", "doc"), indexes: []index{{"snapshot_by_repo", []indexCol{{"repo", 64}}}}},
 		schemaItem{name: "curated", cols: texts("cid", "repo", "kind", "created_at", "doc"), indexes: []index{{"curated_by_repo", []indexCol{{"repo", 64}}}}},
 		schemaItem{name: "usage", cols: slices.Concat(texts("ukey", "day", "org", "repo", "tool", "client"), longs("daynum"),
-			counters("calls", "errors", "response_tokens", "duration_ms", "max_duration_ms", "ranges_returned", "ranges_read")),
+			counters("calls", "errors", "response_tokens", "duration_ms", "max_duration_ms", "ranges_returned", "ranges_read"),
+			// Feature timings (docs/plans/FEATURE_HEALTH_PLAN.md): hourly
+			// buckets carry their hour, and every bucket a histogram.
+			defaulted("string", `""`, "hour"), counters("min_duration_ms", "timeouts"), counters(usage.LatencyColumns()...)),
 			indexes: []index{{"usage_by_daynum", []indexCol{{"daynum", 0}}}}},
 	)
 	// Agent memory (memory.go): entities and facts per namespace. Every

@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"cmp"
 	"context"
 	"slices"
 
@@ -24,30 +23,48 @@ func (s *Store) AddUsage(_ context.Context, buckets []usage.Bucket) error {
 	return nil
 }
 
-// PruneUsage implements store.UsageStore.
+// PruneUsage implements store.UsageStore. Hourly buckets of those days go
+// too; they are kept for less time than day buckets anyway.
 func (s *Store) PruneUsage(_ context.Context, beforeDay string) error {
+	s.pruneUsage(beforeDay, false)
+	return nil
+}
+
+// PruneUsageHours implements store.UsageStore.
+func (s *Store) PruneUsageHours(_ context.Context, beforeDay string) error {
+	s.pruneUsage(beforeDay, true)
+	return nil
+}
+
+func (s *Store) pruneUsage(beforeDay string, hourlyOnly bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for k, b := range s.usage {
-		if b.Day < beforeDay {
+		if b.Day < beforeDay && (b.Hour != "" || !hourlyOnly) {
 			delete(s.usage, k)
 		}
 	}
-	return nil
 }
 
 // Usage implements store.UsageStore.
 func (s *Store) Usage(_ context.Context, sinceDay string) ([]usage.Bucket, error) {
+	return s.usageSince(sinceDay, false), nil
+}
+
+// UsageHours implements store.UsageStore.
+func (s *Store) UsageHours(_ context.Context, sinceDay string) ([]usage.Bucket, error) {
+	return s.usageSince(sinceDay, true), nil
+}
+
+func (s *Store) usageSince(sinceDay string, hourly bool) []usage.Bucket {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := []usage.Bucket{}
 	for _, b := range s.usage {
-		if b.Day >= sinceDay {
+		if b.Day >= sinceDay && (b.Hour != "") == hourly {
 			out = append(out, b)
 		}
 	}
-	slices.SortFunc(out, func(a, b usage.Bucket) int {
-		return cmp.Or(cmp.Compare(a.Day, b.Day), cmp.Compare(a.Org, b.Org), cmp.Compare(a.Repo, b.Repo), cmp.Compare(a.Tool, b.Tool), cmp.Compare(a.Client, b.Client))
-	})
-	return out, nil
+	slices.SortFunc(out, usage.Compare)
+	return out
 }
