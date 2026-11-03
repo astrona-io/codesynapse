@@ -36,7 +36,11 @@ func (s *Server) publishRepo(ctx context.Context, graph string, publish func(con
 	var txContext *accountTransaction
 	err = s.cfg.Accounts.St.PolicyTransaction(ctx, id.TenantID, func(st accounts.Store) error {
 		service := *s.cfg.Accounts
-		service.St, service.Sink = st, nil
+		// Checks under the lock read its snapshot: a worker asking the API
+		// here would wait on the lock it holds (memory adapters) or answer
+		// from outside the transaction. Until the cutover the Go evaluator
+		// decides both ways (OpenFGA plan, phase 6).
+		service.St, service.Sink, service.Remote = st, nil, nil
 		txContext = &accountTransaction{server: s, service: &service}
 		workCtx := context.WithValue(ctx, accountTransactionKey{}, txContext)
 		if _, err := service.ResolveExecutionSession(workCtx, id.SubjectID, id.TenantID, id.SessionID); err != nil {

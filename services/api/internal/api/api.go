@@ -64,6 +64,10 @@ type Config struct {
 	// Accounts enables users, organisations and API keys (PostgreSQL);
 	// nil keeps the single-tenant mode behind one bearer token.
 	Accounts *accounts.Service
+	// AccessURL, in a worker, is the API that answers its access questions
+	// (jobAccessClient): only the API holds the OpenFGA key. Empty keeps the
+	// Go evaluator in the worker until the cutover (OpenFGA plan, phase 6).
+	AccessURL string
 	// ServiceToken, in accounts mode, still authenticates internal callers
 	// (the web app, MCP, hooks) as a platform admin.
 	ServiceToken string
@@ -198,6 +202,12 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 	if cfg.Accounts != nil {
 		// Jobs are rows before they run and survive restarts (jobs_durable.go).
 		s.jobs.UseStore(cfg.Accounts.St, kinds)
+		switch {
+		case cfg.Worker && cfg.AccessURL != "":
+			cfg.Accounts.Remote = jobAccessHTTP(strings.TrimRight(cfg.AccessURL, "/"), s.jobs.owner)
+		case cfg.Worker:
+			logger.Warn("worker decides access itself: set CODESYNAPSE_API_URL so the API answers (it alone holds the OpenFGA key)")
+		}
 	}
 	s.jobs.licenseLookup = cfg.LicenseLookup
 	s.jobs.dataflow = cfg.Dataflow
@@ -368,6 +378,7 @@ func (s *Server) routes() {
 	s.route("GET /api/v1/repos", visibleOnly, s.handleRepos)
 	s.accountRoutes()
 	s.executionRoutes()
+	s.internalAccessRoutes()
 	s.importRoutes()
 	s.watchRoutes()
 	s.sessionMemoryRoutes()

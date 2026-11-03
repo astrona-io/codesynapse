@@ -262,6 +262,7 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		Workspace: o.workspace, AllowPrivateGit: app.Getenv("CODESYNAPSE_ALLOW_PRIVATE_GIT", "") == "true", Gateway: app.Getenv("CODESYNAPSE_GATEWAY", "true") != "false",
 		GitAuth:   gitx.Auth{Host: app.Getenv("CODESYNAPSE_GIT_TOKEN_HOST", "github.com"), Token: os.Getenv("CODESYNAPSE_GIT_TOKEN")},
 		AllowPush: pushAllowed(app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true", o.worker, roles, o.EC.Logger),
+		AccessURL: accessURL(o.worker),
 		Accounts:  acc, ServiceToken: os.Getenv(EnvToken), SecureCookies: app.Getenv("CODESYNAPSE_COOKIE_SECURE", "true") == "true",
 		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour, AuditHot: time.Duration(hotDays()) * 24 * time.Hour, AuditArchive: auditArchive, OpenFGA: openFGA,
 		Metrics: metricsQuerier(), IngestMetrics: ingestMetrics, Alerts: alerts,
@@ -552,4 +553,13 @@ func pushAllowed(wanted, worker bool, roles []string, logger *slog.Logger) bool 
 	}
 	logger.Warn("CODESYNAPSE_ALLOW_PUSH ignored: this worker has no fix role", "roles", roles)
 	return false
+}
+
+// accessURL is the API a worker asks about access (CODESYNAPSE_API_URL); the
+// API process decides itself.
+func accessURL(worker bool) string {
+	if !worker {
+		return ""
+	}
+	return os.Getenv("CODESYNAPSE_API_URL")
 }

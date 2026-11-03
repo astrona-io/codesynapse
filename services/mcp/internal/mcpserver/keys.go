@@ -69,7 +69,8 @@ func (a AccountsAccess) Reach(ctx context.Context, c *Caller) (map[string]accoun
 	if c.KeyID != "" {
 		p.Via, p.KeyID = "key", c.KeyID
 	}
-	access, err := a.Acc.AccessFor(ctx, p)
+	// One organisation: the API answers it when the server has Remote set.
+	access, err := a.Acc.AccessIn(ctx, p, accounts.AccessQuery{OrgID: c.OrgID})
 	if err != nil {
 		return nil, err
 	}

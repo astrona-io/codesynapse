@@ -194,6 +194,13 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	}
 	defer closeAccounts()
 	if acc != nil {
+		if o.apiURL != "" {
+			// Only the API holds the OpenFGA key; it answers with the
+			// caller's own key and runtime session.
+			acc.Remote = mcpserver.APIAccess{API: &mcpserver.APIClient{BaseURL: o.apiURL}}
+		} else {
+			o.EC.Logger.Warn("MCP server decides access itself: set CODESYNAPSE_API_URL so the API answers (it alone holds the OpenFGA key)")
+		}
 		access := mcpserver.AccountsAccess{Acc: acc}
 		opts.Access = access
 		if o.transport == "stdio" {

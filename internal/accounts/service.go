@@ -37,6 +37,11 @@ type Service struct {
 	Sink Sink
 	// Secrets seals organisation Git tokens; nil turns them off.
 	Secrets *Sealer
+	// Remote, when set, answers repository and organisation permissions
+	// (AccessIn) in a process that does not decide them: workers and the
+	// MCP server ask the API. Membership, suspension, the bootstrap root and
+	// key checks still run here first.
+	Remote RemoteAccess
 
 	policy     bool
 	policyOrgs map[string]bool
@@ -394,7 +399,7 @@ func (s *Service) Require(ctx context.Context, p Principal, orgID string, perm P
 	if !limit.Has(perm) {
 		return ErrForbidden
 	}
-	if r.Bundle(ResourceOrganisation).Has(perm) {
+	if r.Bundle(ResourceOrganisation).Has(perm) && s.Remote == nil {
 		return nil
 	}
 	held, err := s.PermsIn(ctx, p, orgID)

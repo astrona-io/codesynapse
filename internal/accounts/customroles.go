@@ -555,6 +555,17 @@ func (s *Service) PermsIn(ctx context.Context, p Principal, orgID string) (Perms
 	if err != nil {
 		return 0, err
 	}
+	if s.Remote != nil {
+		a, err := s.AccessIn(ctx, p, AccessQuery{OrgID: orgID, OrgOnly: true})
+		if err != nil {
+			return 0, err
+		}
+		limit, err := s.KeyLimit(ctx, p)
+		if err != nil {
+			return 0, err
+		}
+		return a.OrgPerms[orgID] & limit, nil
+	}
 	perms := r.Bundle(ResourceOrganisation)
 	teams, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeTeam, SubjectType: TypeUser, SubjectID: p.User.ID})
 	if err != nil {

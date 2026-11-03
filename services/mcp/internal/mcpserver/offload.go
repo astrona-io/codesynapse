@@ -98,6 +98,17 @@ func (r semanticRanker) Rank(ctx context.Context, task string, k int) ([]agentct
 
 // post sends body and decodes the answer, relaying the API's error detail.
 func (c *APIClient) post(ctx context.Context, path string, body any, want int, out any) error {
+	// A call made with a personal key goes to the API with that key, so the
+	// API scopes it to the key's organisation; otherwise the service token.
+	tok := callerToken(ctx)
+	if tok == "" {
+		tok = c.Token
+	}
+	return c.send(ctx, tok, path, body, want, out)
+}
+
+// send posts body with bearer token tok (none when empty).
+func (c *APIClient) send(ctx context.Context, tok, path string, body any, want int, out any) error {
 	id, err := execution.Require(ctx)
 	if err != nil {
 		return err
@@ -113,12 +124,8 @@ func (c *APIClient) post(ctx context.Context, path string, body any, want int, o
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(execution.SessionHeader, id.SessionID)
 	req.Header.Set(execution.ParentSessionHeader, id.ParentSessionID)
-	// A call made with a personal key goes to the API with that key, so the
-	// API scopes it to the key's organisation; otherwise the service token.
-	if tok := callerToken(ctx); tok != "" {
+	if tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
-	} else if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	hc := c.HTTP
 	if hc == nil {

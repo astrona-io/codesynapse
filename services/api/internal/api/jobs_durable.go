@@ -98,6 +98,19 @@ type durableJob struct {
 
 type resumeKey struct{}
 
+type jobIDKey struct{}
+
+// withJobID names the durable job ctx works for. A worker proves its lease
+// on that job when it asks the API about access (jobAccessClient).
+func withJobID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, jobIDKey{}, id)
+}
+
+func jobIDFrom(ctx context.Context) string {
+	id, _ := ctx.Value(jobIDKey{}).(string)
+	return id
+}
+
 // withResume marks ctx as starting rec again, so the job keeps its ID.
 func withResume(ctx context.Context, rec accounts.JobRecord) context.Context {
 	return context.WithValue(ctx, resumeKey{}, rec)
@@ -133,7 +146,8 @@ func (s *Server) durableIf(ctx context.Context, kind string, role accounts.Role,
 }
 
 func newOwner() string {
-	b := make([]byte, 8)
+	// The owner is also a worker's proof of its lease (handleJobAccess).
+	b := make([]byte, 16)
 	_, _ = rand.Read(b) //nolint:errcheck // crypto/rand does not fail on supported platforms
 	return hex.EncodeToString(b)
 }
@@ -290,7 +304,7 @@ func (s *Server) resumeJob(ctx context.Context, rec accounts.JobRecord) error {
 	if rec.Kind == "fix" && rec.Attempts > 0 {
 		return errors.New("fix branches are not restarted automatically; start the fix again")
 	}
-	jobCtx, err := s.jobContext(ctx, rec)
+	jobCtx, err := s.jobContext(withJobID(ctx, rec.ID), rec)
 	if err != nil {
 		return err
 	}
