@@ -1,6 +1,6 @@
 # Defaults for the in-chart victoriatraces. Override them under `victoriatraces:` in the
 # codesynapse chart's values.
-image: quay.io/victoriametrics/victoria-traces:v0.12.1
+image: quay.io/victoriametrics/victoria-traces:v0.13.0
 retention: 7d
 size: 10Gi
 storageClass: ""

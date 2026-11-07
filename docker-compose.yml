@@ -216,7 +216,7 @@ services:
   # graph store and model calls (docs/SAAS.md, 5e). Spans carry no content.
   # Search them at http://localhost:10428/select/vmui (same login as metrics).
   victoriatraces:
-    image: quay.io/victoriametrics/victoria-traces:v0.12.1
+    image: quay.io/victoriametrics/victoria-traces:v0.13.0
     command:
       - -retentionPeriod=${TRACES_RETENTION:-7d}
       - -httpAuth.username=codesynapse
