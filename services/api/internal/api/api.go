@@ -65,9 +65,13 @@ type Config struct {
 	// nil keeps the single-tenant mode behind one bearer token.
 	Accounts *accounts.Service
 	// AccessURL, in a worker, is the API that answers its access questions
-	// (jobAccessClient): only the API holds the OpenFGA key. Empty keeps the
-	// Go evaluator in the worker until the cutover (OpenFGA plan, phase 6).
+	// (jobAccessClient): only the API holds the OpenFGA key. A worker with
+	// accounts needs it; without it every access question is refused.
 	AccessURL string
+	// OpenFGADecides makes OpenFGA the decision service in the API
+	// (CODESYNAPSE_AUTHZ=openfga; needs OpenFGA). Off, the Go evaluator
+	// decides and OpenFGA only mirrors the policy.
+	OpenFGADecides bool
 	// ServiceToken, in accounts mode, still authenticates internal callers
 	// (the web app, MCP, hooks) as a platform admin.
 	ServiceToken string
@@ -208,7 +212,10 @@ func New(ctx context.Context, cfg Config, st store.Store, logger *slog.Logger) *
 		case cfg.Worker && cfg.AccessURL != "":
 			cfg.Accounts.Remote = jobAccessHTTP(strings.TrimRight(cfg.AccessURL, "/"), s.jobs.owner)
 		case cfg.Worker:
-			logger.Warn("worker decides access itself: set CODESYNAPSE_API_URL so the API answers (it alone holds the OpenFGA key)")
+			// The command refuses to start this way; refuse here too.
+			cfg.Accounts.Remote = refuseAccess{}
+		case cfg.OpenFGADecides && cfg.OpenFGA != nil:
+			cfg.Accounts.Decider = s.openFGADecider()
 		}
 	}
 	s.jobs.licenseLookup = cfg.LicenseLookup

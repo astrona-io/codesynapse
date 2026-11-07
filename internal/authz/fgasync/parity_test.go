@@ -49,6 +49,9 @@ func TestParityWithAccessOf(t *testing.T) {
 	fs, ok := accounts.Store(st).(accounts.OpenFGASyncStore)
 	require.True(t, ok)
 	s := &Syncer{Client: c, Records: fs, Policy: svc.OrgPolicy}
+	decided := accounts.NewService(st, false)
+	decided.Now = svc.Now
+	decided.Decider = &Decider{Records: fs, Select: func(context.Context) (Checker, error) { return c, nil }}
 
 	users := []string{"owner", "alice", "bob", "carol", "dave", "erin"}
 	for _, id := range users {
@@ -281,6 +284,28 @@ func TestParityWithAccessOf(t *testing.T) {
 			org, err := st.OrgByID(ctx, o)
 			require.NoError(t, err)
 			require.NoError(t, Fresh(ctx, fs, c.StoreID(), c.ModelID(), org))
+		}
+
+		// The Decider gives every user the same access as the Go evaluator.
+		for _, u := range users {
+			want, werr := svc.AccessOf(ctx, u)
+			got, gerr := decided.AccessOf(ctx, u)
+			if errors.Is(werr, accounts.ErrSuspended) {
+				assert.True(t, errors.Is(gerr, accounts.ErrSuspended), fmt.Sprintf("step %q: %s suspended", step.name, u))
+				continue
+			}
+			require.NoError(t, werr)
+			require.NoError(t, gerr)
+			assert.Equal(t, fmt.Sprint(got.Orgs), fmt.Sprint(want.Orgs), fmt.Sprintf("step %q: %s roles", step.name, u))
+			assert.Equal(t, fmt.Sprint(got.OrgPerms), fmt.Sprint(want.OrgPerms), fmt.Sprintf("step %q: %s organisation permissions", step.name, u))
+			perms := func(a accounts.Access) map[entry]string {
+				m := map[entry]string{}
+				for _, r := range a.Repos {
+					m[entry{r.OrgID, r.Graph}] = fmt.Sprint(r.Perms)
+				}
+				return m
+			}
+			assert.Equal(t, fmt.Sprint(perms(got)), fmt.Sprint(perms(want)), fmt.Sprintf("step %q: %s repository permissions", step.name, u))
 		}
 	}
 }

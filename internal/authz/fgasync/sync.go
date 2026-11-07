@@ -29,8 +29,9 @@ const (
 )
 
 // ErrStale means OpenFGA has not caught up with an organisation's policy:
-// phase 6 refuses the check rather than answer from old tuples.
-var ErrStale = errors.New("openfga: organisation policy not synced yet")
+// the decision is refused rather than answered from old tuples. It is
+// accounts.ErrPolicyStale, so the API maps it without importing this package.
+var ErrStale = accounts.ErrPolicyStale
 
 // Client is the part of fga.Client the sync uses.
 type Client interface {

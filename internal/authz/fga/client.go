@@ -377,32 +377,9 @@ func (c *Client) write(ctx context.Context, req fgaclient.ClientWriteRequest, n 
 // and returns its ID. Two stores with the name are an error: picking one
 // could split decisions between them.
 func (c *Client) EnsureStore(ctx context.Context, name string) (string, error) {
-	if name == "" {
-		return "", errors.New("openfga: empty store name")
-	}
-	var found []string
-	var token *string
-	for page := 0; ; page++ {
-		if page == maxStorePages {
-			return "", ErrTooMany
-		}
-		cctx, cancel := c.call(ctx)
-		resp, err := c.sdk.ListStores(cctx).Options(fgaclient.ClientListStoresOptions{Name: &name, ContinuationToken: token}).Execute()
-		cancel()
-		if err != nil {
-			return "", fmt.Errorf("openfga list stores: %w", err)
-		}
-		for _, s := range resp.Stores {
-			// The name filter is the server's; check it here too.
-			if s.Name == name && s.DeletedAt == nil {
-				found = append(found, s.Id)
-			}
-		}
-		if resp.ContinuationToken == "" {
-			break
-		}
-		t := resp.ContinuationToken
-		token = &t
+	found, err := c.findStores(ctx, name)
+	if err != nil {
+		return "", err
 	}
 	switch len(found) {
 	case 0:

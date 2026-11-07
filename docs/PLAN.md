@@ -41,7 +41,7 @@ This page is the starting point. Each larger feature has its own plan in [`plans
 | [Text optimisation](plans/TEXT_OPTIMIZATION_PLAN.md) | `fetch_source`, cached and reduced external pages | See the plan |
 | [Agent gateway](plans/GATEWAY_PLAN.md) | Agent model traffic through CodeSynapse, local model first | See the plan |
 | [SARIF import](plans/SARIF_IMPORT_PLAN.md) | Findings of external security tools, each naming the tool that found it | Phase 1 (upload and storage) done |
-| [OpenFGA authorisation](plans/OPENFGA_PLAN.md) | Access decisions in OpenFGA, fine-grained `resource.area:level` permissions and custom roles | Proposed |
+| [OpenFGA authorisation](plans/OPENFGA_PLAN.md) | Access decisions in OpenFGA, fine-grained `resource.area:level` permissions and custom roles | Phases 1 to 6 done (OpenFGA decides in the API); phase 7 (Helm) open |
 | [Feature health](plans/FEATURE_HEALTH_PLAN.md) | Timings per feature and client, and a per-user breaker that pauses slow optional features | Phase 1 (timings and the Feature health page) done |
 
 ## Architecture

@@ -80,7 +80,10 @@ func TestTraceFollowsTheRequestIntoTheWorker(t *testing.T) {
 	assert.Equal(t, len(traceID), 32, "the request ID is the trace ID")
 	assert.True(t, traceID != "11111111111111111111111111111111", "an untrusted traceparent is ignored")
 
-	_ = New(ctx, Config{Accounts: acc, SourcesRoot: sources, Workspace: t.TempDir(), JobRoles: []string{"ingest"}, Worker: true}, st, logger)
+	// The worker has its own accounts service, as in its own process, and asks
+	// the API about access.
+	workerAcc := accounts.NewService(acc.St, true)
+	_ = New(ctx, Config{Accounts: workerAcc, SourcesRoot: sources, Workspace: t.TempDir(), JobRoles: []string{"ingest"}, Worker: true, AccessURL: ts.URL}, st, logger)
 	deadline := time.Now().Add(30 * time.Second)
 	var job sdktrace.ReadOnlySpan
 	for job == nil && time.Now().Before(deadline) {

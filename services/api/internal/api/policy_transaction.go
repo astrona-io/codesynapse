@@ -36,11 +36,13 @@ func (s *Server) publishRepo(ctx context.Context, graph string, publish func(con
 	var txContext *accountTransaction
 	err = s.cfg.Accounts.St.PolicyTransaction(ctx, id.TenantID, func(st accounts.Store) error {
 		service := *s.cfg.Accounts
-		// Checks under the lock read its snapshot: a worker asking the API
+		// Checks under the lock read its snapshot: asking the API or OpenFGA
 		// here would wait on the lock it holds (memory adapters) or answer
-		// from outside the transaction. Until the cutover the Go evaluator
-		// decides both ways (OpenFGA plan, phase 6).
-		service.St, service.Sink, service.Remote = st, nil, nil
+		// from outside the transaction, before OpenFGA saw what it changed.
+		// This is the one place the Go evaluator still decides after the
+		// cutover (OpenFGA plan, phase 6); the snapshot is PostgreSQL's,
+		// which stays the source of truth.
+		service.St, service.Sink, service.Remote, service.Decider = st, nil, nil, nil
 		txContext = &accountTransaction{server: s, service: &service}
 		workCtx := context.WithValue(ctx, accountTransactionKey{}, txContext)
 		if _, err := service.ResolveExecutionSession(workCtx, id.SubjectID, id.TenantID, id.SessionID); err != nil {

@@ -551,20 +551,13 @@ func (s *Service) KeyLimit(ctx context.Context, p Principal) (Perms, error) {
 // (membership and teams), custom organisation roles, limited by a scoped
 // key.
 func (s *Service) PermsIn(ctx context.Context, p Principal, orgID string) (Perms, error) {
-	r, err := s.RoleIn(ctx, p, orgID)
+	r, decided, err := s.orgStanding(ctx, p, orgID)
 	if err != nil {
 		return 0, err
 	}
-	if s.Remote != nil {
-		a, err := s.AccessIn(ctx, p, AccessQuery{OrgID: orgID, OrgOnly: true})
-		if err != nil {
-			return 0, err
-		}
-		limit, err := s.KeyLimit(ctx, p)
-		if err != nil {
-			return 0, err
-		}
-		return a.OrgPerms[orgID] & limit, nil
+	if s.Decider != nil || s.Remote != nil {
+		// The decision service answered; AccessIn applied the key scope.
+		return decided, nil
 	}
 	perms := r.Bundle(ResourceOrganisation)
 	teams, err := s.St.ReadTuples(ctx, TupleFilter{ObjectType: TypeTeam, SubjectType: TypeUser, SubjectID: p.User.ID})
@@ -589,7 +582,11 @@ func (s *Service) PermsIn(ctx context.Context, p Principal, orgID string) (Perms
 // AccessFor is AccessOf limited by p's key scope: what an API key may
 // reach is the key's scope intersected with what its user holds now.
 func (s *Service) AccessFor(ctx context.Context, p Principal) (Access, error) {
-	a, err := s.AccessOf(ctx, p.User.ID)
+	return s.accessFor(ctx, p, nil)
+}
+
+func (s *Service) accessFor(ctx context.Context, p Principal, q *AccessQuery) (Access, error) {
+	a, err := s.accessScoped(ctx, p.User.ID, q)
 	if err != nil {
 		return a, err
 	}
