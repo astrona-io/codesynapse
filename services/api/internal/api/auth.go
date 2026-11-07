@@ -156,6 +156,11 @@ func (s *Server) accountError(w http.ResponseWriter, err error) {
 			"type": "about:blank", "title": http.StatusText(http.StatusServiceUnavailable), "status": http.StatusServiceUnavailable,
 			"detail": "the audit log could not record this view, so no figures are shown",
 		})
+	case errors.Is(err, accounts.ErrPolicyStale):
+		// OpenFGA has not synced the organisation's latest policy change:
+		// refused, and a retry in a moment finds it synced.
+		w.Header().Set("Retry-After", "2")
+		s.problem(w, http.StatusServiceUnavailable, err)
 	case errors.Is(err, execution.ErrInvalid), errors.Is(err, accounts.ErrInvalidInput):
 		s.problem(w, http.StatusBadRequest, err)
 	case errors.Is(err, accounts.ErrUnauthorized), errors.Is(err, accounts.ErrKeyRevoked):

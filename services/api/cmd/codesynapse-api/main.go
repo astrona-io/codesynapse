@@ -245,6 +245,15 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 			openFGA = &cfg
 		}
 	}
+	decides, err := openFGADecides(os.Getenv(EnvAuthz), acc != nil && !o.worker, openFGA)
+	if err != nil {
+		return err
+	}
+	if acc != nil && o.worker && accessURL(o.worker) == "" {
+		// Only the API holds the OpenFGA key: a worker that cannot ask it
+		// would decide access itself, so it does not start.
+		return errors.New("a worker with accounts needs CODESYNAPSE_API_URL: the API answers its access questions")
+	}
 	var alerts *telemetry.AlertsClient
 	if !o.worker {
 		if alerts, err = telemetry.NewAlertsClient(os.Getenv(app.EnvAlertsURL)); err != nil {
@@ -262,8 +271,8 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 		Workspace: o.workspace, AllowPrivateGit: app.Getenv("CODESYNAPSE_ALLOW_PRIVATE_GIT", "") == "true", Gateway: app.Getenv("CODESYNAPSE_GATEWAY", "true") != "false",
 		GitAuth:   gitx.Auth{Host: app.Getenv("CODESYNAPSE_GIT_TOKEN_HOST", "github.com"), Token: os.Getenv("CODESYNAPSE_GIT_TOKEN")},
 		AllowPush: pushAllowed(app.Getenv("CODESYNAPSE_ALLOW_PUSH", "") == "true", o.worker, roles, o.EC.Logger),
-		AccessURL: accessURL(o.worker),
-		Accounts:  acc, ServiceToken: os.Getenv(EnvToken), SecureCookies: app.Getenv("CODESYNAPSE_COOKIE_SECURE", "true") == "true",
+		AccessURL: accessURL(o.worker), OpenFGADecides: decides,
+		Accounts: acc, ServiceToken: os.Getenv(EnvToken), SecureCookies: app.Getenv("CODESYNAPSE_COOKIE_SECURE", "true") == "true",
 		AuditRetention: time.Duration(retentionDays()) * 24 * time.Hour, AuditHot: time.Duration(hotDays()) * 24 * time.Hour, AuditArchive: auditArchive, OpenFGA: openFGA,
 		Metrics: metricsQuerier(), IngestMetrics: ingestMetrics, Alerts: alerts,
 		TrustedProxies: trusted, PublicMCPURL: app.Getenv("CODESYNAPSE_PUBLIC_MCP_URL", "http://localhost:8090/mcp"),
@@ -562,4 +571,28 @@ func accessURL(worker bool) string {
 		return ""
 	}
 	return os.Getenv("CODESYNAPSE_API_URL")
+}
+
+// EnvAuthz selects the decision service: "postgres" (or unset) keeps the Go
+// evaluator, "openfga" has OpenFGA decide in the API (OPENFGA_PLAN, phase 6).
+const EnvAuthz = "CODESYNAPSE_AUTHZ"
+
+// openFGADecides reads CODESYNAPSE_AUTHZ for the API process. Workers and
+// the MCP server ask the API and ignore it. OpenFGA without its
+// configuration, or an unknown value, refuses to start rather than fall
+// back to another decision service.
+func openFGADecides(mode string, apiWithAccounts bool, cfg *fga.Config) (bool, error) {
+	switch mode {
+	case "", "postgres":
+		return false, nil
+	case "openfga":
+		if !apiWithAccounts {
+			return false, nil
+		}
+		if cfg == nil {
+			return false, fmt.Errorf("%s=openfga needs %s and %s", EnvAuthz, fga.EnvURL, fga.EnvToken)
+		}
+		return true, nil
+	}
+	return false, fmt.Errorf("%s must be postgres or openfga, not %q", EnvAuthz, mode)
 }

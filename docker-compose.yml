@@ -216,7 +216,7 @@ services:
   # graph store and model calls (docs/SAAS.md, 5e). Spans carry no content.
   # Search them at http://localhost:10428/select/vmui (same login as metrics).
   victoriatraces:
-    image: quay.io/victoriametrics/victoria-traces:v0.12.1
+    image: quay.io/victoriametrics/victoria-traces:v0.13.0
     command:
       - -retentionPeriod=${TRACES_RETENTION:-7d}
       - -httpAuth.username=codesynapse
@@ -373,9 +373,12 @@ services:
       # Accounts: users, organisations, API keys and the audit log.
       CODESYNAPSE_DATABASE_URL: postgres://codesynapse:${POSTGRES_PASSWORD}@postgres:5432/codesynapse?sslmode=disable
       # Only the API holds the OpenFGA key: it keeps OpenFGA's tuples in step
-      # with the access policy (docs/plans/OPENFGA_PLAN.md, phase 5).
+      # with the access policy and asks OpenFGA for every decision
+      # (docs/plans/OPENFGA_PLAN.md, phases 5 and 6). postgres switches the
+      # decisions back to the Go evaluator.
       CODESYNAPSE_OPENFGA_URL: http://openfga:8080
       CODESYNAPSE_OPENFGA_TOKEN: ${OPENFGA_API_KEY:?run "just init" to add OPENFGA_API_KEY to .env}
+      CODESYNAPSE_AUTHZ: ${CODESYNAPSE_AUTHZ:-openfga}
       # Anyone may create an account after the first (which becomes the platform admin).
       # Seals organisation Git tokens (private repositories for organisations).
       CODESYNAPSE_SECRET_KEY: ${SECRET_KEY:-}

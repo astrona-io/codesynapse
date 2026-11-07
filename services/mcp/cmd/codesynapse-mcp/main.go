@@ -81,6 +81,11 @@ func (o *serveOptions) Validate(_ context.Context, _ *app.Env) error {
 		// the server would start and then refuse everything.
 		return fmt.Errorf("--offline serves the graph from memory but tool calls still need accounts: set %s, give a personal API key (CODESYNAPSE_API_TOKEN) and register the session; for local use run `just up` and `codesynapse mcp install`", EnvDatabaseURL)
 	}
+	if os.Getenv(EnvDatabaseURL) != "" && o.apiURL == "" {
+		// Fail closed: only the API decides access (it alone holds the
+		// OpenFGA key), so accounts mode cannot run without it.
+		return fmt.Errorf("accounts mode (%s) needs CODESYNAPSE_API_URL (--api-url): the API answers access questions with the caller's own key", EnvDatabaseURL)
+	}
 	if o.apiURL != "" {
 		u, err := url.Parse(o.apiURL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
@@ -194,13 +199,15 @@ func (o *serveOptions) Run(ctx context.Context, _ *app.Env) error {
 	}
 	defer closeAccounts()
 	if acc != nil {
-		if o.apiURL != "" {
-			// Only the API holds the OpenFGA key; it answers with the
-			// caller's own key and runtime session.
-			acc.Remote = mcpserver.APIAccess{API: &mcpserver.APIClient{BaseURL: o.apiURL}}
-		} else {
-			o.EC.Logger.Warn("MCP server decides access itself: set CODESYNAPSE_API_URL so the API answers (it alone holds the OpenFGA key)")
+		// Only the API holds the OpenFGA key: without the API to ask about
+		// access the server would decide it itself, so it does not start.
+		// Open single-tenant mode without CODESYNAPSE_DATABASE_URL to run
+		// offline.
+		if o.apiURL == "" {
+			return fmt.Errorf("accounts mode needs CODESYNAPSE_API_URL: the API answers access questions with the caller's own key")
 		}
+		// The API answers access with the caller's own key and runtime session.
+		acc.Remote = mcpserver.APIAccess{API: &mcpserver.APIClient{BaseURL: o.apiURL}}
 		access := mcpserver.AccountsAccess{Acc: acc}
 		opts.Access = access
 		if o.transport == "stdio" {

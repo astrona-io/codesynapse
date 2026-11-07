@@ -76,7 +76,7 @@ func (s *Service) AccessIn(ctx context.Context, p Principal, q AccessQuery) (Acc
 			}
 		}
 	} else {
-		a, err = s.AccessFor(ctx, p)
+		a, err = s.accessFor(ctx, p, &q)
 	}
 	if err != nil {
 		return Access{}, err

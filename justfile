@@ -233,7 +233,7 @@ scan-image image types="os,library":
     set -eu
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
     {{engine}} save -o "$tmp/image.tar" "{{image}}"
-    {{engine}} run --rm -v "$tmp:/scan:ro" -v "$PWD/.trivyignore.yaml:/src/.trivyignore.yaml:ro" -w /src -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.76.1 \
+    {{engine}} run --rm -v "$tmp:/scan:ro" -v "$PWD/.trivyignore.yaml:/src/.trivyignore.yaml:ro" -w /src -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.76.2 \
         image --quiet --exit-code 1 --ignorefile .trivyignore.yaml --scanners vuln --pkg-types {{types}} --severity HIGH,CRITICAL --ignore-unfixed --input /scan/image.tar
 
 # Report-only scan of the store images the chart deploys, as Artifact Hub sees them. scanner: trivy (default) or grype.
@@ -502,7 +502,7 @@ secrets:
 
 # Vulnerabilities with a fix and misconfigurations, HIGH and CRITICAL (.trivyignore.yaml)
 scan:
-    {{engine}} run --rm -v "$PWD:/src:ro" -w /src -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.76.1 \
+    {{engine}} run --rm -v "$PWD:/src:ro" -w /src -v codesynapse-trivy-cache:/root/.cache ghcr.io/aquasecurity/trivy:0.76.2 \
         fs --quiet --exit-code 1 --ignorefile .trivyignore.yaml --scanners vuln,misconfig --severity HIGH,CRITICAL --ignore-unfixed \
         --skip-dirs '**/node_modules' --skip-dirs '**/testdata' --skip-dirs .claude --skip-dirs sources --skip-dirs bin .
 
