@@ -26,7 +26,7 @@ ARG X_NET=v0.62.0
 # renovate: datasource=go depName=golang.org/x/sys
 ARG X_SYS=v0.49.0
 # renovate: datasource=go depName=golang.org/x/text
-ARG X_TEXT=v0.43.0
+ARG X_TEXT=v0.44.0
 RUN apk add --no-cache git \
     && git clone --quiet https://github.com/vesoft-inc/nebula-console /console \
     && git -C /console checkout --quiet "$CONSOLE_COMMIT"
