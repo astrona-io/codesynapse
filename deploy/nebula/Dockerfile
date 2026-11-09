@@ -24,7 +24,7 @@ ARG CONSOLE_COMMIT=a103b926bda8ff6ab326df79277b6facb72a8358
 # renovate: datasource=go depName=golang.org/x/net
 ARG X_NET=v0.62.0
 # renovate: datasource=go depName=golang.org/x/sys
-ARG X_SYS=v0.49.0
+ARG X_SYS=v0.50.0
 # renovate: datasource=go depName=golang.org/x/text
 ARG X_TEXT=v0.43.0
 RUN apk add --no-cache git \
