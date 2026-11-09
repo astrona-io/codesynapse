@@ -16,7 +16,7 @@ RUN apk add --no-cache git \
 WORKDIR /src
 # gosu's go.mod pins golang.org/x/sys v0.1.0 (CVE-2026-39824).
 # renovate: datasource=go depName=golang.org/x/sys
-ARG X_SYS=v0.49.0
+ARG X_SYS=v0.50.0
 RUN go get golang.org/x/sys@"$X_SYS" \
     && go mod tidy \
     && CGO_ENABLED=0 go build -trimpath -ldflags "-d -s -w" -o /gosu . \
