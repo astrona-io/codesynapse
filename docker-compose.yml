@@ -153,7 +153,7 @@ services:
   # that api and mcp push every 15s; the Statistics page charts them by
   # minute and hour. Internal network only, password protected.
   victoriametrics:
-    image: quay.io/victoriametrics/victoria-metrics:v1.155.0
+    image: quay.io/victoriametrics/victoria-metrics:v1.156.0
     command:
       - -retentionPeriod=${METRICS_RETENTION:-90d}
       - -search.latencyOffset=5s
