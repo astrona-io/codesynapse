@@ -94,7 +94,7 @@ traces:
 # ALERTMANAGER_PASSWORD, or ALERTMANAGER_BEARER_TOKEN.
 alerting:
   enabled: false
-  image: quay.io/victoriametrics/vmalert:v1.155.0
+  image: quay.io/victoriametrics/vmalert:v1.156.0
   # A Secret with the ALERTMANAGER_* keys; empty uses global.existingSecret.
   existingSecret: ""
   evaluationInterval: 1m
