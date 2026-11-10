@@ -179,7 +179,7 @@ services:
   # alerts for the platform Statistics page when CODESYNAPSE_ALERTS_URL is
   # http://vmalert:8880 (.env).
   vmalert:
-    image: quay.io/victoriametrics/vmalert:v1.155.0
+    image: quay.io/victoriametrics/vmalert:v1.156.0
     profiles: [alerting]
     user: "65534:65534"
     command:
