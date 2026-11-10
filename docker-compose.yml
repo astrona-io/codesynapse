@@ -130,7 +130,7 @@ services:
   # Agent-memory vectors (standalone, embedded etcd, local storage).
   # Internal network only.
   milvus:
-    image: docker.io/milvusdb/milvus:v3.0.5
+    image: docker.io/milvusdb/milvus:v3.0.6
     command: ["milvus", "run", "standalone"]
     # Embedded etcd can change leaders during startup and make Milvus exit.
     restart: on-failure
